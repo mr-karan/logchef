@@ -1,0 +1,3 @@
+- [ ] Vector ingest logs
+- [ ] UI for source management
+- [ ] Logs panel

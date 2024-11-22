@@ -1,0 +1,8 @@
+.aider*
+.env
+.env
+*.log
+.idea/
+.vscode/
+bin/
+tmp/
