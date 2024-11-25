@@ -1,0 +1,1 @@
+import{i as s,f as e,o}from"./index-CcukILwC.js";const n={class:"container py-8"},c={__name:"SettingsView",setup(a){return(i,t)=>(o(),s("div",n,t[0]||(t[0]=[e("h1",{class:"text-2xl font-bold mb-8"},"Settings",-1),e("div",{class:"bg-white rounded-lg shadow p-6"},[e("p",null,"Settings interface coming soon...")],-1)])))}};export{c as default};

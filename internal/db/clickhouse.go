@@ -26,6 +26,10 @@ func (c *Clickhouse) Close() error {
 	return nil
 }
 
+func (c *Clickhouse) GetPool() *ConnectionPool {
+	return c.pool
+}
+
 func (c *Clickhouse) UpdateTableTTL(sourceID, tableName string, ttlDays int) error {
 	ctx := context.Background()
 	db, err := c.pool.GetConnection(sourceID)

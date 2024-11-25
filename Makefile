@@ -7,8 +7,14 @@ LAST_COMMIT_DATE := $(shell git show -s --format=%ci ${LAST_COMMIT})
 VERSION := $(shell git describe --tags --always)
 BUILDSTR := ${VERSION} (Commit: ${LAST_COMMIT_DATE} (${LAST_COMMIT}), Build: $(shell date +"%Y-%m-%d %H:%M:%S %z"))
 
-build:
+build: build-ui
 	CGO_ENABLED=0 go build -o ${BIN} -ldflags="-X 'main.buildString=${BUILDSTR}'" ./cmd/server
+
+.PHONY: build-ui
+build-ui:
+	cd ui && yarn install && yarn run build
+	mkdir -p internal/static/dist
+	cp -r ui/dist/* internal/static/dist/
 
 run: build
 	./${BIN}

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/db"
 	"github.com/mr-karan/logchef/internal/models"
+	"github.com/mr-karan/logchef/internal/static"
 )
 
 type Server struct {
@@ -67,7 +69,10 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	}
 
 	sourceRepo := models.NewSourceRepository(sqlite.DB())
+	logRepo := db.NewLogRepository(clickhouse.GetPool())
+
 	sourceHandler := NewSourceHandler(sourceRepo, clickhouse)
+	logHandler := NewLogHandler(logRepo, sourceRepo)
 
 	// Register routes
 	api := e.Group("/api")
@@ -77,11 +82,29 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	sources.GET("/:id", sourceHandler.Get)
 	sources.PUT("/:id", sourceHandler.Update)
 	sources.DELETE("/:id", sourceHandler.Delete)
+
+	// Log routes
+	logs := api.Group("/logs")
+	logs.GET("/:sourceId", logHandler.QueryLogs)
 	api.GET("", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, NewResponse(map[string]string{
 			"message": "Welcome to logchef API. Visit /docs to see the API documentation.",
 		}))
 	})
+
+	// Get the embedded UI files
+	distFS, err := fs.Sub(static.Static, "dist")
+	if err != nil {
+		return nil, err
+	}
+
+	// Serve static files under /ui
+	e.Group("/ui").Use(middleware.StaticWithConfig(middleware.StaticConfig{
+		Root:       "/",
+		Index:      "index.html",
+		HTML5:      true,
+		Filesystem: http.FS(distFS),
+	}))
 
 	return s, nil
 }

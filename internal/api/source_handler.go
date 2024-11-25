@@ -109,15 +109,15 @@ func (h *SourceHandler) Create(c echo.Context) error {
 		return HandleError(c, fmt.Errorf("name length invalid"), http.StatusBadRequest, "Name must be between 4 and 30 characters")
 	}
 	for _, char := range req.Name {
-		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9')) {
-			return HandleError(c, fmt.Errorf("invalid name format"), http.StatusBadRequest, "Name must contain only alphanumeric characters")
+		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_') {
+			return HandleError(c, fmt.Errorf("invalid name format"), http.StatusBadRequest, "Name must contain only alphanumeric characters and underscores")
 		}
 	}
 
 	source := &models.Source{
 		ID:         uuid.New().String(),
 		Name:       req.Name,
-		TableName:  "logs_" + req.Name,
+		TableName:  req.Name,
 		SchemaType: req.SchemaType,
 		DSN:        req.DSN,
 	}
@@ -133,6 +133,13 @@ func (h *SourceHandler) Create(c echo.Context) error {
 	// Store metadata in SQLite
 	if err := h.sourceRepo.Create(source); err != nil {
 		return HandleError(c, err, http.StatusInternalServerError, "Failed to create source")
+	}
+
+	// Initialize connection in the pool
+	if err := h.clickhouse.GetPool().AddConnection(source.ID, cfg); err != nil {
+		// Cleanup the created source if connection fails
+		_ = h.sourceRepo.Delete(source.ID)
+		return HandleError(c, fmt.Errorf("failed to initialize connection: %w", err), http.StatusInternalServerError, "Failed to initialize connection")
 	}
 
 	return c.JSON(http.StatusCreated, NewResponse(source))
@@ -192,6 +199,24 @@ func (h *SourceHandler) List(c echo.Context) error {
 	if err != nil {
 		return HandleError(c, err, http.StatusInternalServerError, "Failed to list sources")
 	}
+	
+	// Ensure we return empty array instead of null
+	if sources == nil {
+		sources = []*models.Source{}
+	}
+
+	// Initialize connections for all sources
+	for _, source := range sources {
+		cfg := parseDSN(source.DSN)
+		// Try to add connection if not exists
+		if err := h.clickhouse.GetPool().AddConnection(source.ID, cfg); err != nil {
+			slog.Error("failed to initialize connection for source",
+				"source_id", source.ID,
+				"error", err,
+			)
+		}
+	}
+	
 	return c.JSON(http.StatusOK, NewResponse(sources))
 }
 

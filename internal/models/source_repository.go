@@ -66,16 +66,16 @@ func (r *SourceRepository) Delete(id string) error {
     return err
 }
 
-func (r *SourceRepository) List() ([]Source, error) {
+func (r *SourceRepository) List() ([]*Source, error) {
     rows, err := r.db.Query("SELECT id, name, table_name, schema_type, dsn, created_at, updated_at FROM sources ORDER BY created_at DESC")
     if err != nil {
         return nil, err
     }
     defer rows.Close()
 
-    var sources []Source
+    var sources []*Source
     for rows.Next() {
-        var source Source
+        source := &Source{}
         err := rows.Scan(
             &source.ID, &source.Name, &source.TableName,
             &source.SchemaType, &source.DSN, &source.CreatedAt, &source.UpdatedAt)
