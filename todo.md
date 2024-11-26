@@ -3,7 +3,6 @@
 - [ ] Logs panel
 - [ ] echo v5 + upgrade all important deps
 - [ ] golang migrate
-- [ ] evaluate datatable components
 
 functional log viewer with:
 
@@ -24,3 +23,12 @@ Next steps would be to add:
 5. Live tail functionality
 
 Would you like me to continue with any of these features?
+
+---
+
+- [ ] gitignore cleanup
+- [ ] get rid of shadcn components.
+- [ ] dist folder in go binary path <- needs to be optimised better
+- [ ] evaluate datatable components
+   - use virtual scroll - meant for high performance stuff
+- [ ] date range component (with time)

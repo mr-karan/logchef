@@ -1,1 +1,0 @@
-import{a as o,b as e,o as t}from"./index-C0ZVm6BM.js";const a={class:"container py-8"},l={__name:"SavedQueriesView",setup(n){return(r,s)=>(t(),o("div",a,s[0]||(s[0]=[e("h1",{class:"text-2xl font-bold mb-8"},"Saved Queries",-1),e("div",{class:"bg-white rounded-lg shadow p-6"},[e("p",null,"Saved queries list coming soon...")],-1)])))}};export{l as default};

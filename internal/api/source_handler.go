@@ -199,7 +199,7 @@ func (h *SourceHandler) List(c echo.Context) error {
 	if err != nil {
 		return HandleError(c, err, http.StatusInternalServerError, "Failed to list sources")
 	}
-	
+
 	// Ensure we return empty array instead of null
 	if sources == nil {
 		sources = []*models.Source{}
@@ -216,7 +216,7 @@ func (h *SourceHandler) List(c echo.Context) error {
 			)
 		}
 	}
-	
+
 	return c.JSON(http.StatusOK, NewResponse(sources))
 }
 

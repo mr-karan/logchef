@@ -6,3 +6,4 @@
 .vscode/
 bin/
 tmp/
+logchef.db

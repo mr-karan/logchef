@@ -1,15 +1,8 @@
 <script setup>
 import { ref } from 'vue'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogDescription,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import Dialog from 'primevue/dialog'
+import Button from 'primevue/button'
+import InputText from 'primevue/inputtext'
 
 const props = defineProps({
   open: Boolean,
@@ -37,52 +30,51 @@ const handleDelete = async () => {
 </script>
 
 <template>
-  <Dialog :open="open" @update:open="$emit('update:open', $event)">
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle class="text-destructive">Delete Source</DialogTitle>
-        <DialogDescription>
-          This action cannot be undone. This will permanently delete the source
-          "{{ source?.Name }}" and remove all associated data.
-        </DialogDescription>
-      </DialogHeader>
+  <Dialog 
+    v-model:visible="open" 
+    modal 
+    header="Delete Source"
+    :style="{ width: '450px' }"
+    :closable="false"
+  >
+    <div class="flex flex-column gap-4">
+      <p class="text-red-600 font-medium">
+        This action cannot be undone. This will permanently delete the source
+        "{{ source?.Name }}" and remove all associated data.
+      </p>
       
-      <div class="py-4">
-        <div class="space-y-4">
-          <div class="space-y-2">
-            <p class="text-sm text-muted-foreground">
-              Please type <span class="font-semibold">{{ source?.Name }}</span> to confirm.
-            </p>
-            <Input
-              v-model="confirmText"
-              placeholder="Type source name to confirm"
-              :disabled="loading"
-            />
-          </div>
-          
-          <div v-if="error" class="text-red-500 text-sm">
-            {{ error }}
-          </div>
-        </div>
+      <div class="flex flex-column gap-2">
+        <p class="text-sm text-gray-600">
+          Please type <span class="font-semibold">{{ source?.Name }}</span> to confirm.
+        </p>
+        <InputText
+          v-model="confirmText"
+          placeholder="Type source name to confirm"
+          :disabled="loading"
+        />
+        
+        <small v-if="error" class="text-red-500">
+          {{ error }}
+        </small>
       </div>
+    </div>
 
-      <DialogFooter>
+    <template #footer>
+      <div class="flex gap-2 justify-end">
         <Button
-          variant="outline"
+          label="Cancel"
+          severity="secondary"
           @click="$emit('update:open', false)"
           :disabled="loading"
-        >
-          Cancel
-        </Button>
+        />
         <Button
-          variant="destructive"
+          label="Delete Source"
+          severity="danger"
           @click="handleDelete"
           :loading="loading"
           :disabled="confirmText !== source?.Name"
-        >
-          Delete Source
-        </Button>
-      </DialogFooter>
-    </DialogContent>
+        />
+      </div>
+    </template>
   </Dialog>
 </template>

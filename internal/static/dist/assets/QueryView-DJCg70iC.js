@@ -1,1 +1,0 @@
-import{a as s,b as e,o as t}from"./index-DkeamFb-.js";const r={class:"container py-8"},c={__name:"QueryView",setup(a){return(n,o)=>(t(),s("div",r,o[0]||(o[0]=[e("h1",{class:"text-2xl font-bold mb-8"},"Query Explorer",-1),e("div",{class:"bg-white rounded-lg shadow p-6"},[e("p",null,"Query interface coming soon...")],-1)])))}};export{c as default};

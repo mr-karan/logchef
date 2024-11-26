@@ -2,7 +2,16 @@ const BASE_URL = '/api'
 
 export const api = {
   async fetchLogs(sourceId, params = {}) {
-    const response = await fetch(`${BASE_URL}/logs/${sourceId}`, {
+    const queryParams = new URLSearchParams({
+      limit: params.limit?.toString() || '50',
+      offset: params.offset?.toString() || '0',
+      ...(params.startTime && { start_time: params.startTime }),
+      ...(params.endTime && { end_time: params.endTime }),
+      ...(params.searchQuery && { search: params.searchQuery }),
+      ...(params.severityText && { severity: params.severityText })
+    }).toString()
+
+    const response = await fetch(`${BASE_URL}/logs/${sourceId}?${queryParams}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json'
@@ -21,7 +30,7 @@ export const api = {
       throw new Error('Failed to fetch sources')
     }
     const responseData = await response.json()
-    return responseData.data || { logs: [] }
+    return responseData.data || []
   },
 
   async deleteSource(sourceId) {

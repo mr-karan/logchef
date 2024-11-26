@@ -5,17 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build --outDir ../internal/static/dist --emptyOutDir",
     "preview": "vite preview",
     "lint": "eslint . --fix",
     "format": "prettier --write src/"
   },
   "dependencies": {
+    "@primevue/themes": "^4.2.4",
     "@vueuse/core": "^11.3.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "lucide-vue-next": "^0.460.0",
     "pinia": "^2.2.6",
+    "primeicons": "^7.0.0",
+    "primevue": "^4.2.4",
     "radix-vue": "^1.9.10",
     "tailwind-merge": "^2.5.4",
     "tailwindcss-animate": "^1.0.7",

@@ -12,9 +12,9 @@ build: build-ui
 
 .PHONY: build-ui
 build-ui:
-	cd ui && yarn install && yarn run build
-	mkdir -p internal/static/dist
-	cp -r ui/dist/* internal/static/dist/
+	cd ui && yarn install
+	cd ui && rm -rf ../internal/static/dist/
+	cd ui && yarn run build
 
 run: build
 	./${BIN}

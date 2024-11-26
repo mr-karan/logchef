@@ -1,35 +1,112 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from '@/services/api'
-import { useToast } from '@/components/ui/toast/use-toast'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from '@/components/ui/table'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import AddSourceDialog from '@/components/dialogs/AddSourceDialog.vue'
-import UpdateTTLDialog from '@/components/dialogs/UpdateTTLDialog.vue'
-import DeleteSourceDialog from '@/components/dialogs/DeleteSourceDialog.vue'
+import { useToast } from 'primevue/usetoast'
+import { useConfirm } from "primevue/useconfirm"
+import DataTable from 'primevue/datatable'
+import Column from 'primevue/column'
+import Button from 'primevue/button'
+import Tag from 'primevue/tag'
+import ConfirmDialog from 'primevue/confirmdialog'
+import Dialog from 'primevue/dialog'
+import InputText from 'primevue/inputtext'
+import Dropdown from 'primevue/dropdown'
+import Toast from 'primevue/toast'
 
-const { toast } = useToast()
+const toast = useToast()
+const confirm = useConfirm()
 const showAddDialog = ref(false)
-const showUpdateTTLDialog = ref(false)
-const showDeleteDialog = ref(false)
+const formData = ref({
+  name: '',
+  schema_type: '',
+  dsn: '',
+  ttl_days: 90
+})
+
+const schemaTypes = [
+  { value: 'http', label: 'HTTP Logs' },
+  { value: 'application', label: 'Application Logs' }
+]
+
+const handleSubmit = async () => {
+  try {
+    const response = await fetch('/api/sources', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(formData.value)
+    })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(data.message || 'Failed to create source')
+    }
+
+    toast.add({
+      severity: 'success',
+      summary: 'Success',
+      detail: 'Source created successfully',
+      life: 3000
+    })
+
+    showAddDialog.value = false
+    await fetchSources()
+
+    // Reset form
+    formData.value = {
+      name: '',
+      schema_type: '',
+      dsn: '',
+      ttl_days: 90
+    }
+  } catch (error) {
+    toast.add({
+      severity: 'error',
+      summary: 'Error',
+      detail: error.message,
+      life: 3000
+    })
+    console.error('Error creating source:', error)
+  }
+}
+const confirmDelete = (source) => {
+  confirm.require({
+    message: `Are you sure you want to delete source "${source.Name}"?`,
+    header: 'Delete Confirmation',
+    icon: 'pi pi-exclamation-triangle',
+    accept: async () => {
+      try {
+        await api.deleteSource(source.ID)
+        toast.add({
+          severity: 'success',
+          summary: 'Success',
+          detail: 'Source deleted successfully',
+          life: 3000
+        });
+        await fetchSources();
+      } catch (err) {
+        toast.add({
+          severity: 'error',
+          summary: 'Error',
+          detail: err.message,
+          life: 3000
+        });
+      }
+    }
+  });
+};
 const selectedSource = ref(null)
 const sources = ref([])
 const loading = ref(true)
 const error = ref(null)
+const filters = ref({})
 
 const fetchSources = async () => {
   try {
     loading.value = true
-    const data = await api.fetchSources()
-    sources.value = Array.isArray(data) ? data : data.data || []
+    sources.value = await api.fetchSources()
     error.value = null
   } catch (err) {
     error.value = err.message
@@ -44,6 +121,7 @@ onMounted(() => {
   fetchSources()
 })
 
+
 const getStatusColor = (status) => {
   switch (status) {
     case 'connected':
@@ -57,13 +135,14 @@ const getStatusColor = (status) => {
 </script>
 
 <template>
-  <div class="container py-8">
+  <div class="p-8 max-w-7xl mx-auto">
     <div class="mb-8 flex items-center justify-between">
       <div>
-        <h1 class="text-3xl font-semibold tracking-tight">Sources</h1>
-        <p class="text-sm text-muted-foreground mt-1">Manage your log sources and their configurations.</p>
+        <h1 class="text-2xl font-semibold text-gray-900">Sources</h1>
+        <p class="text-sm text-gray-500 mt-1">Manage your log sources and their configurations.</p>
       </div>
-      <Button @click="showAddDialog = true" size="sm">
+      <Button @click="showAddDialog = true" severity="primary" raised>
+        <i class="pi pi-plus mr-2"></i>
         Add Source
       </Button>
     </div>
@@ -88,88 +167,137 @@ const getStatusColor = (status) => {
       </div>
     </div>
 
-    <div v-else class="rounded-md border">
-      <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead>Type</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Last Synced</TableHead>
-          <TableHead>Actions</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        <TableRow v-for="source in sources" :key="source.ID">
-          <TableCell>{{ source.Name }}</TableCell>
-          <TableCell>
-            <Badge>{{ source.SchemaType }}</Badge>
-          </TableCell>
-          <TableCell>
-            <Badge>Connected</Badge>
-          </TableCell>
-          <TableCell>{{ new Date(source.UpdatedAt).toLocaleString() }}</TableCell>
-          <TableCell class="space-x-2">
-            <Button 
-              variant="outline" 
-              size="sm"
-              @click="() => {
-                selectedSource = source;
-                showUpdateTTLDialog = true;
-              }"
-            >
-              Update TTL
-            </Button>
-            <Button 
-              variant="destructive" 
-              size="sm"
-              @click="() => {
-                selectedSource = source;
-                showDeleteDialog = true;
-              }"
-            >
-              Delete
-            </Button>
-          </TableCell>
-        </TableRow>
-      </TableBody>
-    </Table>
+    <div v-else class="bg-white rounded-lg shadow-sm border border-gray-200">
+      <DataTable
+        :value="sources"
+        :paginator="true"
+        :rows="10"
+        :rowsPerPageOptions="[10, 20, 50]"
+        tableStyle="min-width: 50rem"
+        class="p-datatable-sm"
+        responsiveLayout="scroll"
+        stripedRows
+        :pt="{
+          wrapper: 'bg-white',
+          table: 'bg-white',
+          bodyRow: 'hover:bg-gray-50',
+          headerRow: 'bg-gray-50 text-gray-700',
+          bodyCell: 'text-gray-700',
+          headerCell: 'text-gray-700 font-semibold'
+        }"
+        v-model:filters="filters"
+        filterDisplay="menu"
+        :globalFilterFields="['Name', 'SchemaType']"
+      >
+        <Column field="Name" header="Name" sortable></Column>
+        <Column field="SchemaType" header="Type" sortable>
+          <template #body="slotProps">
+            <Tag :value="slotProps.data.SchemaType" 
+                 severity="info"
+                 rounded
+            />
+          </template>
+        </Column>
+        <Column header="Status">
+          <template #body>
+            <Tag value="Connected"
+                 severity="success"
+                 rounded
+            />
+          </template>
+        </Column>
+        <Column field="UpdatedAt" header="Last Synced" sortable>
+          <template #body="slotProps">
+            {{ new Date(slotProps.data.UpdatedAt).toLocaleString() }}
+          </template>
+        </Column>
+        <Column header="Actions">
+          <template #body="slotProps">
+            <div class="flex gap-2">
+              <button 
+                @click="confirmDelete(slotProps.data)"
+                class="p-2 text-gray-500 hover:text-red-600 rounded-md hover:bg-red-50 transition-colors"
+                title="Delete Source"
+              >
+                <i class="pi pi-trash"></i>
+              </button>
+            </div>
+          </template>
+        </Column>
+      </DataTable>
     </div>
 
-    <AddSourceDialog 
-      v-model:open="showAddDialog" 
-      @source-added="fetchSources"
-    />
-    
-    <UpdateTTLDialog
-      v-if="selectedSource"
-      v-model:open="showUpdateTTLDialog"
-      :source-id="selectedSource.ID"
-      :source-name="selectedSource.Name"
-      @ttl-updated="fetchSources"
-    />
+    <Dialog
+      v-model:visible="showAddDialog"
+      modal
+      header="Add New Source"
+      :style="{ width: '500px' }"
+      class="p-fluid"
+      :modal-style="{ padding: '2rem' }"
+    >
+      <form @submit.prevent="handleSubmit" class="flex flex-col gap-4">
+        <div class="flex flex-col gap-2">
+          <label for="name">Name</label>
+          <InputText
+            id="name"
+            v-model="formData.name"
+            placeholder="my-nginx-logs"
+            required
+            :minlength="4"
+            :maxlength="30"
+          />
+        </div>
 
-    <DeleteSourceDialog
-      v-if="selectedSource"
-      v-model:open="showDeleteDialog"
-      :source="selectedSource"
-      @confirm="async () => {
-        try {
-          await api.deleteSource(selectedSource.ID)
-          toast({
-            title: 'Success',
-            description: 'Source deleted successfully'
-          });
-          showDeleteDialog = false;
-          await fetchSources();
-        } catch (err) {
-          toast({
-            title: 'Error',
-            description: err.message,
-            variant: 'destructive'
-          });
-        }
-      }"
-    />
+        <div class="flex flex-col gap-2">
+          <label for="schema-type">Schema Type</label>
+          <Dropdown
+            id="schema-type"
+            v-model="formData.schema_type"
+            :options="schemaTypes"
+            optionLabel="label"
+            optionValue="value"
+            placeholder="Select schema type"
+            required
+          />
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <label for="dsn">DSN</label>
+          <InputText
+            id="dsn"
+            v-model="formData.dsn"
+            placeholder="clickhouse://localhost:9000/logs"
+            required
+          />
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <label for="ttl">TTL (days)</label>
+          <InputText
+            id="ttl"
+            type="number"
+            v-model="formData.ttl_days"
+          />
+        </div>
+
+        <div class="flex justify-end gap-2 mt-4">
+          <Button
+            type="button"
+            label="Cancel"
+            severity="secondary"
+            text
+            @click="showAddDialog = false"
+          />
+          <Button
+            type="submit"
+            label="Create Source"
+          />
+        </div>
+      </form>
+    </Dialog>
+
+
+    <ConfirmDialog />
+    <Toast />
   </div>
 </template>
