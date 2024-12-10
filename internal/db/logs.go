@@ -28,14 +28,11 @@ func (r *LogRepository) QueryLogs(ctx context.Context, sourceID string, params m
 	var conditions []string
 	var args []interface{}
 
-	if params.StartTime != nil {
-		conditions = append(conditions, "timestamp >= ?")
-		args = append(args, params.StartTime)
-	}
-	if params.EndTime != nil {
-		conditions = append(conditions, "timestamp <= ?")
-		args = append(args, params.EndTime)
-	}
+	// Time range conditions are mandatory
+	conditions = append(conditions, "timestamp >= ?")
+	args = append(args, params.StartTime)
+	conditions = append(conditions, "timestamp <= ?")
+	args = append(args, params.EndTime)
 	if params.ServiceName != "" {
 		conditions = append(conditions, "service_name = ?")
 		args = append(args, params.ServiceName)
@@ -131,5 +128,7 @@ func (r *LogRepository) QueryLogs(ctx context.Context, sourceID string, params m
 		Logs:       logs,
 		TotalCount: totalCount,
 		HasMore:    hasMore,
+		StartTime:  *params.StartTime,
+		EndTime:    *params.EndTime,
 	}, nil
 }

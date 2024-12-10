@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
 import { useRoute } from 'vue-router'
+import PrimeVue from 'primevue/config'
+import { provide } from 'vue'
+
+// Enable unstyled mode globally
+provide('PrimeVue', {
+  unstyled: true
+})
 
 const route = useRoute()
 const navItems = [

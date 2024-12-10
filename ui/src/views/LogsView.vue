@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
+import DateRangeFilter from '@/components/DateRangeFilter.vue'
 import { useRoute } from 'vue-router'
 import { api } from '@/services/api'
 import { useToast } from 'primevue/usetoast'
@@ -16,6 +17,9 @@ const logs = ref([])
 const loading = ref(false)
 const error = ref(null)
 const totalRecords = ref(0)
+const startDate = ref(null)
+const endDate = ref(null)
+
 const virtualScrollerOptions = ref({
   itemSize: 51,
   delay: 200,
@@ -31,7 +35,9 @@ async function loadLogs(event) {
     const sourceId = route.params.id
     const response = await api.fetchLogs(sourceId, {
       offset: event.first,
-      limit: event.rows
+      limit: event.rows,
+      start_time: startDate.value,
+      end_time: endDate.value
     })
     
     if (response.logs) {
@@ -81,9 +87,16 @@ onMounted(() => {
 <template>
   <div class="container py-8">
     <Toast />
-    <div class="mb-8">
+    <div class="mb-4">
       <h1 class="text-3xl font-semibold tracking-tight">Logs</h1>
       <p class="text-sm text-muted-foreground mt-1">View and search logs from your sources.</p>
+    </div>
+
+    <div class="mb-6">
+      <DateRangeFilter
+        v-model:startDate="startDate"
+        v-model:endDate="endDate"
+      />
     </div>
 
     <div v-if="error" class="mb-4 p-4 text-red-500 bg-red-50 rounded-md">

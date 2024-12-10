@@ -37,8 +37,15 @@ func (h *LogHandler) QueryLogs(c echo.Context) error {
 		TableName: source.TableName,
 	}
 
-	// Parse time range
-	if startStr := c.QueryParam("start_time"); startStr != "" {
+	// Parse time range with defaults if not provided
+	startStr := c.QueryParam("start_time")
+	endStr := c.QueryParam("end_time")
+
+	if startStr == "" {
+		// Default to 24 hours ago if not specified
+		defaultStart := time.Now().Add(-24 * time.Hour)
+		params.StartTime = &defaultStart
+	} else {
 		startTime, err := time.Parse(time.RFC3339, startStr)
 		if err != nil {
 			return HandleError(c, err, http.StatusBadRequest, "Invalid start_time format")
@@ -46,12 +53,21 @@ func (h *LogHandler) QueryLogs(c echo.Context) error {
 		params.StartTime = &startTime
 	}
 
-	if endStr := c.QueryParam("end_time"); endStr != "" {
+	if endStr == "" {
+		// Default to current time if not specified
+		defaultEnd := time.Now()
+		params.EndTime = &defaultEnd
+	} else {
 		endTime, err := time.Parse(time.RFC3339, endStr)
 		if err != nil {
 			return HandleError(c, err, http.StatusBadRequest, "Invalid end_time format")
 		}
 		params.EndTime = &endTime
+	}
+
+	// Validate time range
+	if params.StartTime.After(*params.EndTime) {
+		return HandleError(c, fmt.Errorf("invalid time range"), http.StatusBadRequest, "Start time must be before end time")
 	}
 
 	// Parse other filters

@@ -34,7 +34,9 @@ type LogQueryParams struct {
 
 // LogResponse represents paginated log response
 type LogResponse struct {
-	Logs       []*Log `json:"logs"`
-	TotalCount uint64 `json:"total_count"`
-	HasMore    bool   `json:"has_more"`
+	Logs       []*Log    `json:"logs"`
+	TotalCount uint64    `json:"total_count"`
+	HasMore    bool      `json:"has_more"`
+	StartTime  time.Time `json:"start_time"`
+	EndTime    time.Time `json:"end_time"`
 }
