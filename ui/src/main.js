@@ -9,7 +9,7 @@ import ConfirmationService from 'primevue/confirmationservice'
 import Lara from '@primevue/themes/lara';
 
 import App from './App.vue'
-import router from './router'
+import router from './router/index.ts'
 
 const app = createApp(App)
 

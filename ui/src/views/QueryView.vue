@@ -1,42 +1,99 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import DateRangeFilter from '@/components/DateRangeFilter.vue'
 import { api } from '@/services/api'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Tag from 'primevue/tag'
+import Skeleton from 'primevue/skeleton'
 import { useToast } from 'primevue/usetoast'
 import Toast from 'primevue/toast'
 import Drawer from 'primevue/drawer'
 import type { Log, LogResponse } from '@/types/logs'
 import type { Source } from '@/types/source'
-import Dropdown from 'primevue/dropdown'
+import Select from 'primevue/select'
 import FloatLabel from 'primevue/floatlabel'
+import Button from 'primevue/button'
+import LogSchemaSidebar from '@/components/LogSchemaSidebar.vue'
+import LogFieldValue from '@/components/LogFieldValue.vue'
 
 const logs = ref<Log[]>([])
 const loading = ref(false)
 const sourcesLoading = ref(true)
 const error = ref<string | null>(null)
 const route = useRoute()
-const sourceId = ref<string | undefined>(route.params.id?.toString())
-const showSourceSelector = ref(!route.params.id)
+const router = useRouter()
+
+// Define props for initial values
+const props = defineProps<{
+  sourceId?: string
+  initialStartTime?: string
+  initialEndTime?: string
+  initialSearchQuery?: string
+  initialSeverity?: string
+}>()
+
+// Initialize refs with props or defaults
+const sourceId = ref<string | undefined>(props.sourceId)
+const startDate = ref(
+  props.initialStartTime
+    ? new Date(props.initialStartTime)
+    : new Date(Date.now() - 60 * 60 * 1000)
+)
+const endDate = ref(
+  props.initialEndTime
+    ? new Date(props.initialEndTime)
+    : new Date()
+)
+
+// Create computed property for URL parameters
+const queryParams = computed(() => ({
+  source: sourceId.value,
+  start_time: startDate.value?.toISOString(),
+  end_time: endDate.value?.toISOString()
+}))
+
+// Update URL when parameters change
+watch([sourceId, startDate, endDate], () => {
+  // Only update if values have changed from URL params
+  if (
+    sourceId.value !== props.sourceId ||
+    startDate.value.toISOString() !== props.initialStartTime ||
+    endDate.value.toISOString() !== props.initialEndTime
+  ) {
+    router.replace({
+      query: {
+        ...route.query,
+        ...queryParams.value
+      }
+    })
+  }
+})
+
 const sources = ref<Source[]>([])
 const offset = ref(0)
 const toast = useToast()
+const rowsPerPageOptions = [50, 100, 500, 1000]
 const limit = ref(50)
 const hasMore = ref(true)
-const startDate = ref(null)
-const endDate = ref(null)
+const totalRecords = ref(0)
+const lazyState = ref({
+  first: 0,
+  rows: limit.value
+})
 
-const selectedLog = ref(null)
+// Type for the selected log
+const selectedLog = ref<Log | null>(null)
 const drawerVisible = ref(false)
 
-const showLogDetails = (log) => {
-  selectedLog.value = log
+const showLogDetails = (event: { data: Log }) => {
+  selectedLog.value = event.data
   drawerVisible.value = true
 }
 
-const copyToClipboard = async (data) => {
+const copyToClipboard = async (data: Log | null) => {
+  if (!data) return
   try {
     await navigator.clipboard.writeText(JSON.stringify(data, null, 2))
     toast.add({
@@ -55,50 +112,83 @@ const copyToClipboard = async (data) => {
   }
 }
 
-async function fetchLogs(reset = false) {
+const isProgressiveLoading = ref(false)
+const progressPercentage = ref(0)
+
+const loadLogs = async (event?: any) => {
   if (!sourceId.value) {
     error.value = 'No source selected'
     return
   }
 
-  if (reset) {
-    logs.value = []
-    offset.value = 0
-    hasMore.value = true
-  }
-
-  if (loading.value || (!hasMore.value && !reset)) return
-
   try {
     loading.value = true
-    const scrollPosition = window.scrollY
+    const pageNumber = event?.page ?? 0
+    const rows = event?.rows ?? limit.value
+    const offset = pageNumber * rows
 
-    const data = await api.fetchLogs(sourceId.value, {
-      offset: offset.value,
-      limit: limit.value,
-      start_time: startDate.value,
-      end_time: endDate.value
+    if (!startDate.value || !endDate.value) {
+      throw new Error('Start and end dates are required')
+    }
+
+    const params = {
+      offset,
+      limit: rows,
+      start_time: startDate.value.toISOString(),
+      end_time: endDate.value.toISOString()
+    }
+
+    // Update URL with current parameters
+    router.replace({
+      query: {
+        ...route.query,
+        ...queryParams.value
+      }
     })
 
-    if (data) {
-      const newLogs = data.logs || []
-      logs.value = reset ? newLogs : [...logs.value, ...newLogs]
-      hasMore.value = data.has_more || false
-      if (newLogs.length > 0) {
-        offset.value += newLogs.length
-      }
+    const data = await api.fetchLogs(sourceId.value, params)
 
-      nextTick(() => {
-        window.scrollTo(0, scrollPosition)
-      })
+    if (data) {
+      logs.value = []
+      totalRecords.value = data.total_count || 0
+      hasMore.value = data.has_more
+
+      if (data.chunks && data.chunks.length > 1) {
+        isProgressiveLoading.value = true
+        progressPercentage.value = 0
+
+        for (let i = 0; i < data.chunks.length; i++) {
+          const chunk = data.chunks[i]
+          await nextTick()
+          logs.value.push(...chunk)
+          progressPercentage.value = Math.round(((i + 1) / data.chunks.length) * 100)
+        }
+
+        isProgressiveLoading.value = false
+        progressPercentage.value = 0
+      } else {
+        logs.value = data.logs || []
+      }
     }
     error.value = null
   } catch (err) {
+    console.error('Error fetching logs:', err)
     error.value = err instanceof Error ? err.message : 'Failed to fetch logs'
-    if (reset) logs.value = []
+    logs.value = []
   } finally {
     loading.value = false
   }
+}
+
+const resetLogs = async () => {
+  lazyState.value = {
+    first: 0,
+    rows: limit.value
+  }
+  await loadLogs({
+    first: 0,
+    rows: limit.value
+  })
 }
 
 // Initial fetch of sources to get the first sourceId
@@ -109,7 +199,7 @@ async function fetchSources() {
     if (sourcesData && sourcesData.length > 0) {
       sources.value = sourcesData
       sourceId.value = sourcesData[0].ID
-      await fetchLogs()
+      await resetLogs()
     } else {
       error.value = 'No sources available'
     }
@@ -130,144 +220,246 @@ const getSeverityType = (severityText) => {
   }
 }
 
-const handleScroll = () => {
-  const scrollPosition = window.scrollY + window.innerHeight
-  const scrollHeight = document.documentElement.scrollHeight
+// Modified onMounted to handle initial URL parameters
+onMounted(async () => {
+  await fetchSources()
 
-  if (!loading.value && hasMore.value && (scrollHeight - scrollPosition < 50)) {
-    fetchLogs()
+  // If we have sourceId in URL, use it and load logs
+  if (props.sourceId) {
+    sourceId.value = props.sourceId
+    await resetLogs()
+  }
+})
+
+// Add a method to get shareable URL
+const getShareableURL = () => {
+  const url = new URL(window.location.href)
+  url.search = new URLSearchParams(queryParams.value as Record<string, string>).toString()
+  return url.toString()
+}
+
+// Add copy URL button
+const copyShareableURL = async () => {
+  try {
+    await navigator.clipboard.writeText(getShareableURL())
+    toast.add({
+      severity: 'success',
+      summary: 'URL Copied',
+      detail: 'Shareable URL has been copied to clipboard',
+      life: 2000
+    })
+  } catch (err) {
+    toast.add({
+      severity: 'error',
+      summary: 'Error',
+      detail: 'Failed to copy URL',
+      life: 3000
+    })
   }
 }
 
-onMounted(() => {
-  fetchSources()
-  window.addEventListener('scroll', handleScroll)
+const visibleColumns = ref<string[]>(['timestamp', 'severity_text', 'body'])
+
+const sortedVisibleColumns = computed(() => {
+    const columns = [...visibleColumns.value]
+    // If timestamp exists but is not first, move it to front
+    const timestampIndex = columns.indexOf('timestamp')
+    if (timestampIndex > 0) {
+        columns.splice(timestampIndex, 1)
+        columns.unshift('timestamp')
+    } else if (timestampIndex === -1) {
+        // If timestamp doesn't exist, add it to front
+        columns.unshift('timestamp')
+    }
+    return columns
 })
 
-onUnmounted(() => {
-  window.removeEventListener('scroll', handleScroll)
-})
+const updateVisibleColumns = (fields: string[]) => {
+    visibleColumns.value = fields
+}
 
-watch(sourceId, () => {
-  fetchLogs(true)
-})
+const getNestedValue = (obj: any, path: string) => {
+    if (!obj) return undefined
+
+    // Special handling for nested attributes
+    if (path.startsWith('log_attributes.')) {
+        const [_, ...attributePath] = path.split('.')
+        const value = obj.log_attributes?.[attributePath.join('.')]
+        return value === undefined ? '-' : value
+    }
+
+    // For regular fields
+    const value = path.split('.').reduce((acc, part) => {
+        if (acc === undefined) return undefined
+        return acc[part]
+    }, obj)
+
+    return value === undefined ? '-' : value
+}
+
+const formatColumnHeader = (field: string) => {
+    // Remove duplicate log_attributes prefix if present
+    return field.replace('log_attributes.log_attributes.', 'log_attributes.')
+}
+
+// Add function to handle column styles
+const getColumnStyle = (field: string) => {
+    const isNested = field.includes('.')
+
+    switch (field) {
+        case 'timestamp':
+            return { width: '180px', minWidth: '180px' }
+        case 'severity_text':
+            return { width: '100px', minWidth: '100px' }
+        case 'body':
+            return { minWidth: '300px' }
+        default:
+            return isNested
+                ? { width: '150px', minWidth: '150px' }
+                : { minWidth: '120px' }
+    }
+}
+
+// Format timestamp for developer-friendly display
+const formatTimestamp = (timestamp: string) => {
+  try {
+    const date = new Date(timestamp)
+    if (isNaN(date.getTime())) {
+      throw new Error('Invalid date')
+    }
+
+    // Format: Nov 26 2024 11:30:34.000 UTC
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      fractionalSecondDigits: 3,
+      timeZone: 'UTC',
+      hour12: false
+    })
+
+    return formatter.format(date) + ' UTC'
+  } catch (err) {
+    console.error('Error formatting timestamp:', timestamp, err)
+    return timestamp
+  }
+}
 </script>
 
 <template>
-  <div class="py-4 px-6">
-    <Toast />
-    <div class="flex justify-between items-center mb-6">
-      <div>
-        <h1 class="text-lg font-semibold text-gray-900">Query Explorer</h1>
-        <p class="text-xs text-gray-500 mt-0.5">Search and analyze your logs across all sources</p>
-      </div>
-      <div class="flex items-center gap-4">
-        <FloatLabel v-if="showSourceSelector">
-          <Dropdown
-            v-model="sourceId"
-            :options="sources"
-            optionLabel="Name"
-            optionValue="ID"
-            placeholder="Type or select a source"
-            class="w-[220px]"
-            :pt="{
-              root: 'text-sm',
-              input: 'text-sm py-1.5 h-8',
-              panel: { root: 'text-sm' },
-              item: 'text-sm py-1.5',
-              filterInput: 'text-sm'
-            }"
-          />
-          <label for="sourceId" class="text-[11px]">Source</label>
-        </FloatLabel>
-        <DateRangeFilter
-          v-model:startDate="startDate"
-          v-model:endDate="endDate"
-          class="flex-shrink-0"
-        />
-      </div>
+  <!-- Root container taking full viewport height -->
+  <div class="h-screen flex">
+    <!-- Left Sidebar -->
+    <div class="w-64 border-r border-gray-200 bg-white flex-shrink-0">
+      <LogSchemaSidebar
+        :sourceId="sourceId"
+        :startTime="startDate"
+        :endTime="endDate"
+        @field-toggle="updateVisibleColumns"
+      />
     </div>
 
-    <div v-if="error" class="mb-4 p-3 bg-red-50 text-red-600 rounded-md text-sm">
-      {{ error }}
-    </div>
-
-    <!-- Sticky logs count -->
-    <div v-if="logs.length > 0" class="sticky top-0 z-10 bg-white/80 backdrop-blur-sm py-2 border-b mb-2 flex justify-between items-center px-4">
-      <span class="text-xs text-gray-500">
-        {{ logs.length }} logs displayed
-      </span>
-      <span v-if="loading" class="text-xs text-gray-500 flex items-center gap-2">
-        <i class="pi pi-spinner animate-spin"></i>
-        Loading more...
-      </span>
-    </div>
-
-    <!-- Logs table -->
-    <DataTable
-      v-if="logs.length > 0"
-      :value="logs"
-      :loading="loading"
-      class="p-datatable-sm"
-      stripedRows
-      showGridlines
-      tableStyle="min-width: 50rem"
-      size="small"
-      v-bind:pt="{
-        wrapper: 'border rounded-lg',
-        table: 'text-xs leading-tight',
-        headerCell: 'py-2 px-2 bg-gray-50 text-gray-700 font-medium',
-        bodyCell: 'py-1 px-2',
-      }"
-    >
-      <Column field="timestamp" header="Timestamp" sortable style="width: 200px">
-        <template #body="{ data }">
-          {{ new Date(data.timestamp).toLocaleString() }}
-        </template>
-      </Column>
-
-      <Column field="severity_text" header="Severity" sortable style="width: 120px">
-        <template #body="{ data }">
-          <Tag
-            :value="data.severity_text.toLowerCase()"
-            :severity="getSeverityType(data.severity_text)"
-            rounded
-            :pt="{
-              root: 'text-[10px] px-1.5 py-0.5 font-medium opacity-90',
-              value: 'text-[10px] tracking-wide uppercase'
-            }"
-          />
-        </template>
-      </Column>
-
-      <Column field="service_name" header="Service" sortable style="width: 150px" />
-      <Column field="namespace" header="Namespace" sortable style="width: 150px" />
-
-      <Column field="body" header="Message" style="min-width: 400px">
-        <template #body="{ data }">
-          <div class="relative cursor-pointer group" @click="showLogDetails(data)">
-            <!-- Message Content -->
-            <div class="flex items-center gap-2 py-1">
-              <div class="flex-1 whitespace-pre-wrap">{{ data.body }}</div>
-              <div class="flex items-center gap-1">
-                <div class="text-xs text-gray-400 px-2 py-1 rounded-md invisible group-hover:visible">
-                  <i class="pi pi-external-link text-xs"></i>
-                </div>
-              </div>
-            </div>
+    <!-- Main Content Area -->
+    <div class="flex-1 flex flex-col overflow-hidden">
+      <!-- Top Controls -->
+      <div class="flex-shrink-0 bg-white border-b border-gray-200 p-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-4">
+            <Select
+              v-model="sourceId"
+              :options="sources"
+              optionLabel="Name"
+              optionValue="ID"
+              placeholder="Select a source"
+              class="w-[200px]"
+              @change="resetLogs"
+            />
+            <DateRangeFilter
+              v-model:startDate="startDate"
+              v-model:endDate="endDate"
+              @update:dates="resetLogs"
+            />
           </div>
-        </template>
-      </Column>
-    </DataTable>
+          <Button
+            icon="pi pi-share-alt"
+            severity="secondary"
+            rounded
+            aria-label="Share Query"
+            @click="copyShareableURL"
+          />
+        </div>
 
-    <!-- Log Details Drawer -->
-    <Drawer 
+        <!-- Error and Progress Messages -->
+        <div v-if="error" class="mt-4 p-3 bg-red-50 text-red-600 rounded-md text-sm">
+          {{ error }}
+        </div>
+        <div v-if="isProgressiveLoading" class="mt-4">
+          <div class="text-sm text-gray-600 mb-2">
+            Loading large result set... {{ progressPercentage }}%
+          </div>
+          <div class="w-full bg-gray-200 rounded-full h-1.5">
+            <div
+              class="bg-blue-600 h-1.5 rounded-full transition-all duration-200"
+              :style="{ width: `${progressPercentage}%` }"
+            ></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Table Container -->
+      <div class="flex-1 overflow-hidden">
+        <DataTable
+          v-if="logs.length > 0"
+          :value="logs"
+          :loading="loading"
+          stripedRows
+          showGridlines
+          lazy
+          :totalRecords="totalRecords"
+          :rows="50"
+          :paginator="true"
+          :first="lazyState.first"
+          @page="loadLogs($event)"
+          :rows-per-page-options="rowsPerPageOptions"
+          class="h-full"
+          selectionMode="single"
+          @row-click="showLogDetails"
+          v-bind:pt="{
+            wrapper: 'h-full',
+            table: 'text-sm',
+            bodyCell: 'p-2',
+            headerCell: 'p-2 bg-gray-50',
+            row: 'cursor-pointer hover:bg-gray-50'
+          }"
+        >
+          <Column v-for="field in sortedVisibleColumns"
+                  :key="field"
+                  :field="field"
+                  :header="formatColumnHeader(field)"
+                  :style="getColumnStyle(field)"
+          >
+            <template #body="{ data }">
+              <LogFieldValue
+                  :field="field"
+                  :value="getNestedValue(data, field)"
+              />
+            </template>
+          </Column>
+        </DataTable>
+      </div>
+    </div>
+
+    <!-- Simplified Log Details Drawer -->
+    <Drawer
       v-model:visible="drawerVisible"
       position="right"
       :modal="true"
       :dismissable="true"
       :closable="true"
-      class="w-full md:w-[600px]"
+      class="w-full md:w-[800px] drawer-wide"
       :pt="{
         root: 'border-l border-gray-200',
         header: 'bg-gray-50 px-6 py-4 border-b border-gray-200',
@@ -277,64 +469,53 @@ watch(sourceId, () => {
       <template #header>
         <div class="flex justify-between items-center">
           <h3 class="text-lg font-semibold text-gray-900">Log Details</h3>
-          <button 
+          <button
             @click="copyToClipboard(selectedLog)"
             class="text-gray-400 hover:text-gray-600 p-2 rounded-md hover:bg-gray-100"
+            title="Copy to clipboard"
           >
             <i class="pi pi-copy"></i>
           </button>
         </div>
       </template>
 
-      <div v-if="selectedLog" class="space-y-6">
-        <!-- Metadata Section -->
-        <div class="space-y-4">
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-xs font-medium text-gray-500 mb-1">Timestamp</label>
-              <div class="text-sm">{{ new Date(selectedLog.timestamp).toLocaleString() }}</div>
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-gray-500 mb-1">Severity</label>
-              <Tag
-                :value="selectedLog.severity_text.toLowerCase()"
-                :severity="getSeverityType(selectedLog.severity_text)"
-                rounded
-              />
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-gray-500 mb-1">Service</label>
-              <div class="text-sm">{{ selectedLog.service_name }}</div>
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-gray-500 mb-1">Namespace</label>
-              <div class="text-sm">{{ selectedLog.namespace }}</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Message Section -->
-        <div class="space-y-2">
-          <label class="block text-xs font-medium text-gray-500">Message</label>
-          <div class="text-sm whitespace-pre-wrap p-3 bg-gray-50 rounded-md">{{ selectedLog.body }}</div>
-        </div>
-
-        <!-- Raw JSON Section -->
-        <div class="space-y-2">
-          <label class="block text-xs font-medium text-gray-500">Raw JSON</label>
-          <pre class="text-xs font-mono bg-gray-50 p-3 rounded-md overflow-x-auto">{{ JSON.stringify(selectedLog, null, 2) }}</pre>
-        </div>
-      </div>
+      <pre v-if="selectedLog" class="text-sm font-mono bg-gray-50 p-4 rounded-md overflow-x-auto whitespace-pre-wrap">{{ JSON.stringify(selectedLog, null, 2) }}</pre>
     </Drawer>
-
-    <!-- Loading more indicator -->
-    <div v-if="loading" class="text-center py-4">
-      Loading more logs...
-    </div>
-
-    <!-- No more logs message -->
-    <div v-if="!loading && !hasMore" class="text-center py-4 text-muted-foreground">
-      No more logs to load
-    </div>
   </div>
 </template>
+
+<style>
+/* Only essential styles */
+.h-screen {
+  height: 100vh;
+}
+
+/* Ensure DataTable takes full height and shows content */
+.p-datatable {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.p-datatable .p-datatable-wrapper {
+  flex: 1;
+  overflow: auto;
+}
+
+/* Ensure cell content is visible */
+.p-datatable .p-datatable-tbody > tr > td {
+  padding: 0.5rem;
+  line-height: 1.5;
+}
+
+/* Add drawer width style */
+.drawer-wide {
+  width: 800px !important;
+}
+
+/* Add monospace styling for timestamps */
+.font-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.875rem;
+}
+</style>

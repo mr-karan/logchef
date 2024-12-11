@@ -1,34 +1,45 @@
-- [ ] Vector ingest logs
-- [ ] UI for source management
-- [ ] Logs panel
-- [ ] echo v5 + upgrade all important deps
-- [ ] golang migrate
+### High Priority
+- [ ] Vector Log Ingestion
+   - [ ] Implement vector ingest logs
+   - [ ] Build proper log viewer UI with:
+     - Typed data structures
+     - LogTable component (timestamps, severity badges, message display)
+     - Loading/error states
+     - Basic fetch functionality
+   - [ ] Add logs panel
+- [ ] Timezone aware logs?
+   - [ ] Give the user an option to specify timezone for the logs
+   - [ ] Display the logs in the specified timezone
+   - [ ] Load browser default timezone in the UI
+   - [ ] In the SELECT * query, format the timestamp to be properly displayed in the UI, so no timezone conversion is needed in UI
+- [ ] Core Infrastructure
+   - [ ] Upgrade echo to v5
+   - [ ] Update critical dependencies
+   - [ ] Implement golang migrate
 
-functional log viewer with:
+### UI/UX Improvements
+- [ ] Source Management
+   - [ ] Create UI for source management
+   - [ ] Evaluate datatable components (with virtual scroll)
+   - [ ] Implement date range component with time selector
 
-1. Proper typing for log data structures
-2. A reusable LogTable component with:
-   - Timestamp formatting
-   - Severity level badges with colors
-   - Truncated message display
-   - Monospace font for log messages
-3. Loading and error states
-4. Basic fetch functionality
+- [ ] Log Viewer Enhancements
+   - [ ] Add infinite scrolling
+   - [ ] Advanced filtering
+   - [ ] Full text search
+   - [ ] Time range selection
+   - [ ] Live tail functionality
 
-Next steps would be to add:
-1. Infinite scrolling
-2. Advanced filtering
-3. Full text search
-4. Time range selection
-5. Live tail functionality
+### Technical Debt
+- [ ] Build Optimization
+   - [ ] Optimize dist folder in go binary path
+   - [ ] Clean up .gitignore
+   - [x] Remove unused shadcn components
 
-Would you like me to continue with any of these features?
+### Completed
+- [x] Make log URI shareable with query params
 
 ---
 
-- [ ] gitignore cleanup
-- [ ] get rid of shadcn components.
-- [ ] dist folder in go binary path <- needs to be optimised better
-- [ ] evaluate datatable components
-   - use virtual scroll - meant for high performance stuff
-- [ ] date range component (with time)
+- [ ] Focus on schemaless approach
+

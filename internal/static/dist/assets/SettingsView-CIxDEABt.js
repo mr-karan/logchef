@@ -1,1 +1,0 @@
-import{c as s,a as e,o}from"./index-DyFX3l8F.js";const n={class:"container py-8"},r={__name:"SettingsView",setup(a){return(c,t)=>(o(),s("div",n,t[0]||(t[0]=[e("h1",{class:"text-2xl font-bold mb-8"},"Settings",-1),e("div",{class:"bg-white rounded-lg shadow p-6"},[e("p",null,"Settings interface coming soon...")],-1)])))}};export{r as default};

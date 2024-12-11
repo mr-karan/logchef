@@ -68,9 +68,11 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		clickhouse: clickhouse,
 	}
 
+	// Initialize repositories
 	sourceRepo := models.NewSourceRepository(sqlite.DB())
-	logRepo := db.NewLogRepository(clickhouse.GetPool())
+	logRepo := db.NewLogRepository(clickhouse.GetPool(), sourceRepo)
 
+	// Initialize handlers
 	sourceHandler := NewSourceHandler(sourceRepo, clickhouse)
 	logHandler := NewLogHandler(logRepo, sourceRepo)
 
@@ -91,6 +93,9 @@ func NewServer(cfg *config.Config) (*Server, error) {
 			"message": "Welcome to logchef API. Visit /docs to see the API documentation.",
 		}))
 	})
+
+	// Schema routes
+	logs.GET("/:sourceId/schema", logHandler.GetLogSchema)
 
 	// Get the embedded UI files
 	distFS, err := fs.Sub(static.Static, "dist")

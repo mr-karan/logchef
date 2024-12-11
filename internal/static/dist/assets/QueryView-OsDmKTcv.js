@@ -1,1 +1,0 @@
-import{c as s,a as e,o as t}from"./index-DyFX3l8F.js";const a={class:"container py-8"},l={__name:"QueryView",setup(n){return(r,o)=>(t(),s("div",a,o[0]||(o[0]=[e("h1",{class:"text-2xl font-bold mb-8"},"Query",-1),e("div",{class:"bg-white rounded-lg shadow p-6"},[e("p",null,"Query interface coming soon...")],-1)])))}};export{l as default};

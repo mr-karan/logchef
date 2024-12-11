@@ -37,37 +37,21 @@ func (h *LogHandler) QueryLogs(c echo.Context) error {
 		TableName: source.TableName,
 	}
 
-	// Parse time range with defaults if not provided
-	startStr := c.QueryParam("start_time")
-	endStr := c.QueryParam("end_time")
-
-	if startStr == "" {
-		// Default to 24 hours ago if not specified
-		defaultStart := time.Now().Add(-24 * time.Hour)
-		params.StartTime = &defaultStart
-	} else {
-		startTime, err := time.Parse(time.RFC3339, startStr)
+	// Parse time range
+	if startTimeStr := c.QueryParam("start_time"); startTimeStr != "" {
+		startTime, err := time.Parse(time.RFC3339, startTimeStr)
 		if err != nil {
 			return HandleError(c, err, http.StatusBadRequest, "Invalid start_time format")
 		}
 		params.StartTime = &startTime
 	}
 
-	if endStr == "" {
-		// Default to current time if not specified
-		defaultEnd := time.Now()
-		params.EndTime = &defaultEnd
-	} else {
-		endTime, err := time.Parse(time.RFC3339, endStr)
+	if endTimeStr := c.QueryParam("end_time"); endTimeStr != "" {
+		endTime, err := time.Parse(time.RFC3339, endTimeStr)
 		if err != nil {
 			return HandleError(c, err, http.StatusBadRequest, "Invalid end_time format")
 		}
 		params.EndTime = &endTime
-	}
-
-	// Validate time range
-	if params.StartTime.After(*params.EndTime) {
-		return HandleError(c, fmt.Errorf("invalid time range"), http.StatusBadRequest, "Start time must be before end time")
 	}
 
 	// Parse other filters
@@ -93,6 +77,11 @@ func (h *LogHandler) QueryLogs(c echo.Context) error {
 		params.Offset = offset
 	}
 
+	// Set default limit if not provided
+	if params.Limit == 0 {
+		params.Limit = 100 // default limit
+	}
+
 	// Query logs
 	response, err := h.logRepo.QueryLogs(c.Request().Context(), sourceID, params)
 	if err != nil {
@@ -100,4 +89,31 @@ func (h *LogHandler) QueryLogs(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, NewResponse(response))
+}
+
+// GetLogSchema returns the schema for a given source based on recent logs
+func (h *LogHandler) GetLogSchema(c echo.Context) error {
+	sourceID := c.Param("sourceId")
+
+	// Get time range from query params or use defaults
+	startTime := time.Now().Add(-1 * time.Hour)
+	endTime := time.Now()
+
+	if startStr := c.QueryParam("start_time"); startStr != "" {
+		if t, err := time.Parse(time.RFC3339, startStr); err == nil {
+			startTime = t
+		}
+	}
+	if endStr := c.QueryParam("end_time"); endStr != "" {
+		if t, err := time.Parse(time.RFC3339, endStr); err == nil {
+			endTime = t
+		}
+	}
+
+	schema, err := h.logRepo.GetLogSchema(c.Request().Context(), sourceID, startTime, endTime)
+	if err != nil {
+		return HandleError(c, err, http.StatusInternalServerError, "Failed to get log schema")
+	}
+
+	return c.JSON(http.StatusOK, NewResponse(schema))
 }

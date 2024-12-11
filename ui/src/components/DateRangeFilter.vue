@@ -1,62 +1,81 @@
-<script setup>
+<script setup lang="ts">
 import { ref, watch } from 'vue'
-import DatePicker from 'primevue/datepicker'
-import FloatLabel from 'primevue/floatlabel'
+import Calendar from 'primevue/calendar'
+import Button from 'primevue/button'
 
 const props = defineProps({
   startDate: {
     type: Date,
-    default: null
+    required: true
   },
   endDate: {
     type: Date,
-    default: null
+    required: true
   }
 })
 
-const emit = defineEmits(['update:startDate', 'update:endDate'])
+const emit = defineEmits(['update:startDate', 'update:endDate', 'update:dates'])
 
-const startDateTime = ref(props.startDate)
-const endDateTime = ref(props.endDate)
+// Create local refs that track the props
+const localStartDate = ref(props.startDate)
+const localEndDate = ref(props.endDate)
 
-watch(startDateTime, (newValue) => {
-  emit('update:startDate', newValue)
+// Keep local refs in sync with props
+watch(() => props.startDate, (newVal) => {
+  localStartDate.value = newVal
 })
 
-watch(endDateTime, (newValue) => {
-  emit('update:endDate', newValue)
+watch(() => props.endDate, (newVal) => {
+  localEndDate.value = newVal
+})
+
+// Only emit date updates, don't trigger API calls
+watch(localStartDate, (newVal) => {
+  emit('update:startDate', newVal)
+})
+
+watch(localEndDate, (newVal) => {
+  emit('update:endDate', newVal)
 })
 </script>
 
 <template>
-  <div class="flex items-center gap-3">
-    <div class="flex items-center gap-2">
-      <FloatLabel>
-        <DatePicker
-          v-model="startDateTime"
-          inputId="start_time"
-          showTime
-          showIcon
-          iconDisplay="input"
-          :maxDate="endDateTime"
-          class="w-[180px] date-picker-custom"
-        />
-        <label for="start_time" class="text-[11px]">From</label>
-      </FloatLabel>
-      <span class="text-gray-400">-</span>
-      <FloatLabel>
-        <DatePicker
-          v-model="endDateTime"
-          inputId="end_time"
-          showTime
-          showIcon
-          iconDisplay="input"
-          :minDate="startDateTime"
-          class="w-[180px] date-picker-custom"
-        />
-        <label for="end_time" class="text-[11px]">To</label>
-      </FloatLabel>
-    </div>
+  <div class="flex items-center gap-2">
+    <Calendar
+      v-model="localStartDate"
+      :showTime="true"
+      :showSeconds="true"
+      dateFormat="yy-mm-dd"
+      :manualInput="false"
+      :maxDate="localEndDate"
+      class="w-[200px]"
+      :pt="{
+        input: 'text-sm'
+      }"
+    />
+    <span class="text-gray-400">to</span>
+    <Calendar
+      v-model="localEndDate"
+      :showTime="true"
+      :showSeconds="true"
+      dateFormat="yy-mm-dd"
+      :manualInput="false"
+      :minDate="localStartDate"
+      class="w-[200px]"
+      :pt="{
+        input: 'text-sm'
+      }"
+    />
+    <Button
+      icon="pi pi-play"
+      severity="primary"
+      aria-label="Fetch Logs"
+      @click="emit('update:dates')"
+      :pt="{
+        root: 'w-10 h-10',
+        icon: 'text-sm'
+      }"
+    />
   </div>
 </template>
 

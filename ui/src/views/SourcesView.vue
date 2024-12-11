@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from '@/services/api'
 import { useToast } from 'primevue/usetoast'
@@ -10,13 +10,13 @@ import Tag from 'primevue/tag'
 import ConfirmDialog from 'primevue/confirmdialog'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
-import Dropdown from 'primevue/dropdown'
+import Select from 'primevue/select'
 import Toast from 'primevue/toast'
 
 const toast = useToast()
 const confirm = useConfirm()
 const showAddDialog = ref(false)
-const formData = ref({
+const formData = ref<FormData>({
   name: '',
   schema_type: '',
   dsn: '',
@@ -97,10 +97,10 @@ const confirmDelete = (source) => {
     }
   });
 };
-const selectedSource = ref(null)
-const sources = ref([])
+const selectedSource = ref<Source | null>(null)
+const sources = ref<Source[]>([])
 const loading = ref(true)
-const error = ref(null)
+const error = ref<string | null>(null)
 const filters = ref({})
 
 const fetchSources = async () => {
@@ -192,7 +192,7 @@ const getStatusColor = (status) => {
         <Column field="Name" header="Name" sortable></Column>
         <Column field="SchemaType" header="Type" sortable>
           <template #body="slotProps">
-            <Tag :value="slotProps.data.SchemaType" 
+            <Tag :value="slotProps.data.SchemaType"
                  severity="info"
                  rounded
             />
@@ -214,7 +214,7 @@ const getStatusColor = (status) => {
         <Column header="Actions">
           <template #body="slotProps">
             <div class="flex gap-2">
-              <button 
+              <button
                 @click="confirmDelete(slotProps.data)"
                 class="p-2 text-gray-500 hover:text-red-600 rounded-md hover:bg-red-50 transition-colors"
                 title="Delete Source"
@@ -250,7 +250,7 @@ const getStatusColor = (status) => {
 
         <div class="flex flex-col gap-2">
           <label for="schema-type">Schema Type</label>
-          <Dropdown
+          <Select
             id="schema-type"
             v-model="formData.schema_type"
             :options="schemaTypes"
