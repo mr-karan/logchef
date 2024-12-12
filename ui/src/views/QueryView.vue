@@ -10,6 +10,7 @@ import Skeleton from 'primevue/skeleton'
 import { useToast } from 'primevue/usetoast'
 import Toast from 'primevue/toast'
 import Drawer from 'primevue/drawer'
+import Paginator from 'primevue/paginator'
 import type { Log, LogResponse } from '@/types/logs'
 import type { Source } from '@/types/source'
 import Select from 'primevue/select'
@@ -308,15 +309,30 @@ const getColumnStyle = (field: string) => {
 
     switch (field) {
         case 'timestamp':
-            return { width: '180px', minWidth: '180px' }
+            return {
+                width: '160px',
+                minWidth: '160px',
+                backgroundColor: 'white'
+            }
         case 'severity_text':
-            return { width: '100px', minWidth: '100px' }
+            return {
+                width: '90px',
+                minWidth: '90px',
+                backgroundColor: 'white'
+            }
         case 'body':
-            return { minWidth: '300px' }
+            return {
+                minWidth: '300px',
+                backgroundColor: 'white'
+            }
         default:
-            return isNested
-                ? { width: '150px', minWidth: '150px' }
-                : { minWidth: '120px' }
+            return {
+                ...(isNested
+                    ? { width: '140px', minWidth: '140px' }
+                    : { minWidth: '120px' }
+                ),
+                backgroundColor: 'white'
+            }
     }
 }
 
@@ -347,10 +363,39 @@ const formatTimestamp = (timestamp: string) => {
     return timestamp
   }
 }
+
+// Add this function to handle page changes
+const handlePageChange = async (event: any) => {
+    scrollToTop()
+    await loadLogs(event)
+}
+
+const tableRef = ref()
+
+// Update the watch to use the component instance
+watch(tableRef, (newRef) => {
+    if (newRef) {
+        setTableWrapper(newRef)
+    }
+}, { flush: 'post' }) // Add flush: 'post' to ensure DOM is updated
+
+// Add these methods for pagination
+const prevPage = () => {
+  if (lazyState.value.first > 0) {
+    lazyState.value.first -= lazyState.value.rows
+    loadLogs()
+  }
+}
+
+const nextPage = () => {
+  if (hasMore.value) {
+    lazyState.value.first += lazyState.value.rows
+    loadLogs()
+  }
+}
 </script>
 
 <template>
-  <!-- Root container taking full viewport height -->
   <div class="h-screen flex">
     <!-- Left Sidebar -->
     <div class="w-64 border-r border-gray-200 bg-white flex-shrink-0">
@@ -363,10 +408,10 @@ const formatTimestamp = (timestamp: string) => {
     </div>
 
     <!-- Main Content Area -->
-    <div class="flex-1 flex flex-col overflow-hidden">
-      <!-- Top Controls -->
+    <div class="flex-1 flex flex-col h-screen">
+      <!-- Top Controls Area -->
       <div class="flex-shrink-0 bg-white border-b border-gray-200 p-4">
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between mb-4">
           <div class="flex items-center gap-4">
             <Select
               v-model="sourceId"
@@ -392,6 +437,38 @@ const formatTimestamp = (timestamp: string) => {
           />
         </div>
 
+        <!-- Compact Paginator in Header -->
+        <div class="flex items-center justify-between">
+          <div class="text-sm text-gray-600">
+            {{ totalRecords }} logs found
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-sm text-gray-600">Show:</span>
+            <Select
+              v-model="lazyState.rows"
+              :options="rowsPerPageOptions"
+              @change="resetLogs"
+            />
+            <div class="flex items-center gap-1">
+              <Button
+                icon="pi pi-angle-left"
+                text
+                :disabled="lazyState.first === 0"
+                @click="prevPage"
+              />
+              <span class="text-sm text-gray-600">
+                {{ Math.floor(lazyState.first / lazyState.rows) + 1 }} of {{ Math.ceil(totalRecords / lazyState.rows) }}
+              </span>
+              <Button
+                icon="pi pi-angle-right"
+                text
+                :disabled="!hasMore"
+                @click="nextPage"
+              />
+            </div>
+          </div>
+        </div>
+
         <!-- Error and Progress Messages -->
         <div v-if="error" class="mt-4 p-3 bg-red-50 text-red-600 rounded-md text-sm">
           {{ error }}
@@ -409,30 +486,24 @@ const formatTimestamp = (timestamp: string) => {
         </div>
       </div>
 
-      <!-- Table Container -->
-      <div class="flex-1 overflow-hidden">
+      <!-- Main Scrollable Content -->
+      <div class="flex-1 overflow-auto">
         <DataTable
           v-if="logs.length > 0"
           :value="logs"
           :loading="loading"
-          stripedRows
-          showGridlines
-          lazy
-          :totalRecords="totalRecords"
-          :rows="50"
-          :paginator="true"
-          :first="lazyState.first"
-          @page="loadLogs($event)"
-          :rows-per-page-options="rowsPerPageOptions"
-          class="h-full"
+          :scrollable="false"
           selectionMode="single"
           @row-click="showLogDetails"
+          :resizableColumns="true"
+          columnResizeMode="fit"
+          class="logs-table"
           v-bind:pt="{
-            wrapper: 'h-full',
-            table: 'text-sm',
-            bodyCell: 'p-2',
-            headerCell: 'p-2 bg-gray-50',
-            row: 'cursor-pointer hover:bg-gray-50'
+            wrapper: { class: 'min-w-full' },
+            table: { class: 'text-sm border-t border-gray-200 min-w-full' },
+            bodyCell: { class: ['p-1.5 border-b border-gray-100'] },
+            headerCell: { class: ['p-2 bg-white border-b border-gray-200 font-medium text-gray-700 sticky top-0'] },
+            bodyRow: { class: ['hover:bg-blue-50/50 cursor-pointer transition-colors duration-100'] }
           }"
         >
           <Column v-for="field in sortedVisibleColumns"
@@ -440,6 +511,7 @@ const formatTimestamp = (timestamp: string) => {
                   :field="field"
                   :header="formatColumnHeader(field)"
                   :style="getColumnStyle(field)"
+                  :resizeable="true"
           >
             <template #body="{ data }">
               <LogFieldValue
@@ -485,37 +557,32 @@ const formatTimestamp = (timestamp: string) => {
 </template>
 
 <style>
-/* Only essential styles */
-.h-screen {
-  height: 100vh;
+.logs-table {
+  border-collapse: collapse;
+  width: 100%;
 }
 
-/* Ensure DataTable takes full height and shows content */
+/* Remove all DataTable specific scroll styles */
 .p-datatable {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
+  width: 100%;
 }
 
 .p-datatable .p-datatable-wrapper {
-  flex: 1;
-  overflow: auto;
+  overflow: visible !important;
 }
 
-/* Ensure cell content is visible */
-.p-datatable .p-datatable-tbody > tr > td {
-  padding: 0.5rem;
-  line-height: 1.5;
+/* Improve dropdown appearance */
+.p-dropdown {
+  @apply border border-gray-300 rounded-md text-sm;
 }
 
-/* Add drawer width style */
-.drawer-wide {
-  width: 800px !important;
+.p-dropdown:not(.p-disabled):hover {
+  @apply border-gray-400;
 }
 
-/* Add monospace styling for timestamps */
-.font-mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size: 0.875rem;
+/* Loading overlay */
+.p-datatable-loading-overlay {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(2px);
 }
 </style>
