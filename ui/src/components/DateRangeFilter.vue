@@ -14,7 +14,8 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:startDate', 'update:endDate', 'update:dates'])
+// Add fetch to emits declaration
+const emit = defineEmits(['update:startDate', 'update:endDate', 'fetch'])
 
 // Create local refs that track the props
 const localStartDate = ref(props.startDate)
@@ -29,13 +30,17 @@ watch(() => props.endDate, (newVal) => {
   localEndDate.value = newVal
 })
 
-// Only emit date updates, don't trigger API calls
-watch(localStartDate, (newVal) => {
-  emit('update:startDate', newVal)
+// Emit date updates
+watch(localStartDate, (newVal, oldVal) => {
+  if (newVal?.getTime() !== oldVal?.getTime()) {
+    emit('update:startDate', newVal)
+  }
 })
 
-watch(localEndDate, (newVal) => {
-  emit('update:endDate', newVal)
+watch(localEndDate, (newVal, oldVal) => {
+  if (newVal?.getTime() !== oldVal?.getTime()) {
+    emit('update:endDate', newVal)
+  }
 })
 </script>
 
@@ -70,7 +75,7 @@ watch(localEndDate, (newVal) => {
       icon="pi pi-play"
       severity="primary"
       aria-label="Fetch Logs"
-      @click="emit('update:dates')"
+      @click="emit('fetch')"
       :pt="{
         root: 'w-10 h-10',
         icon: 'text-sm'

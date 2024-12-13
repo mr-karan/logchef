@@ -19,14 +19,25 @@ import Button from 'primevue/button'
 import LogSchemaSidebar from '@/components/LogSchemaSidebar.vue'
 import LogFieldValue from '@/components/LogFieldValue.vue'
 
+// Move state declarations to the top
 const logs = ref<Log[]>([])
 const loading = ref(false)
 const sourcesLoading = ref(true)
 const error = ref<string | null>(null)
 const route = useRoute()
 const router = useRouter()
+const sources = ref<Source[]>([])
+const rowsPerPageOptions = [50, 100, 500, 1000]
+const limit = ref(50)
+const hasMore = ref(true)
+const totalRecords = ref(0)
+const lazyState = ref({
+  first: 0,
+  rows: limit.value
+})
+const schema = ref<any[]>([])
 
-// Define props for initial values
+// Props and other refs
 const props = defineProps<{
   sourceId?: string
   initialStartTime?: string
@@ -35,7 +46,6 @@ const props = defineProps<{
   initialSeverity?: string
 }>()
 
-// Initialize refs with props or defaults
 const sourceId = ref<string | undefined>(props.sourceId)
 const startDate = ref(
   props.initialStartTime
@@ -48,6 +58,51 @@ const endDate = ref(
     : new Date()
 )
 
+// Add loading state refs
+const tableLoading = ref(false)
+const initialLoad = ref(true) // Track first load to show skeleton
+
+// Now define loadLogs and resetLogs
+const loadLogs = async () => {
+  if (!sourceId.value) {
+    error.value = 'No source selected'
+    return
+  }
+
+  tableLoading.value = true
+  error.value = null
+
+  try {
+    const response = await api.getLogs(sourceId.value, {
+      start_time: startDate.value?.toISOString(),
+      end_time: endDate.value?.toISOString(),
+      offset: lazyState.value.first,
+      limit: lazyState.value.rows,
+      search_query: '',
+      severity_text: ''
+    })
+
+    logs.value = response.logs || []
+    totalRecords.value = response.total_count || 0
+    hasMore.value = response.has_more || false
+  } catch (err) {
+    console.error('Error fetching logs:', err)
+    error.value = err instanceof Error ? err.message : 'Failed to fetch logs'
+    logs.value = []
+  } finally {
+    tableLoading.value = false
+    initialLoad.value = false
+  }
+}
+
+const resetLogs = async () => {
+  lazyState.value = {
+    first: 0,
+    rows: limit.value
+  }
+  await fetchLogsAndSchema()
+}
+
 // Create computed property for URL parameters
 const queryParams = computed(() => ({
   source: sourceId.value,
@@ -57,32 +112,16 @@ const queryParams = computed(() => ({
 
 // Update URL when parameters change
 watch([sourceId, startDate, endDate], () => {
-  // Only update if values have changed from URL params
-  if (
-    sourceId.value !== props.sourceId ||
-    startDate.value.toISOString() !== props.initialStartTime ||
-    endDate.value.toISOString() !== props.initialEndTime
-  ) {
-    router.replace({
-      query: {
-        ...route.query,
-        ...queryParams.value
-      }
-    })
-  }
-})
+  router.replace({
+    query: {
+      ...route.query,
+      ...queryParams.value
+    }
+  })
+}, { deep: true })
 
-const sources = ref<Source[]>([])
 const offset = ref(0)
 const toast = useToast()
-const rowsPerPageOptions = [50, 100, 500, 1000]
-const limit = ref(50)
-const hasMore = ref(true)
-const totalRecords = ref(0)
-const lazyState = ref({
-  first: 0,
-  rows: limit.value
-})
 
 // Type for the selected log
 const selectedLog = ref<Log | null>(null)
@@ -116,82 +155,6 @@ const copyToClipboard = async (data: Log | null) => {
 const isProgressiveLoading = ref(false)
 const progressPercentage = ref(0)
 
-const loadLogs = async (event?: any) => {
-  if (!sourceId.value) {
-    error.value = 'No source selected'
-    return
-  }
-
-  try {
-    loading.value = true
-    const pageNumber = event?.page ?? 0
-    const rows = event?.rows ?? limit.value
-    const offset = pageNumber * rows
-
-    if (!startDate.value || !endDate.value) {
-      throw new Error('Start and end dates are required')
-    }
-
-    const params = {
-      offset,
-      limit: rows,
-      start_time: startDate.value.toISOString(),
-      end_time: endDate.value.toISOString()
-    }
-
-    // Update URL with current parameters
-    router.replace({
-      query: {
-        ...route.query,
-        ...queryParams.value
-      }
-    })
-
-    const data = await api.fetchLogs(sourceId.value, params)
-
-    if (data) {
-      logs.value = []
-      totalRecords.value = data.total_count || 0
-      hasMore.value = data.has_more
-
-      if (data.chunks && data.chunks.length > 1) {
-        isProgressiveLoading.value = true
-        progressPercentage.value = 0
-
-        for (let i = 0; i < data.chunks.length; i++) {
-          const chunk = data.chunks[i]
-          await nextTick()
-          logs.value.push(...chunk)
-          progressPercentage.value = Math.round(((i + 1) / data.chunks.length) * 100)
-        }
-
-        isProgressiveLoading.value = false
-        progressPercentage.value = 0
-      } else {
-        logs.value = data.logs || []
-      }
-    }
-    error.value = null
-  } catch (err) {
-    console.error('Error fetching logs:', err)
-    error.value = err instanceof Error ? err.message : 'Failed to fetch logs'
-    logs.value = []
-  } finally {
-    loading.value = false
-  }
-}
-
-const resetLogs = async () => {
-  lazyState.value = {
-    first: 0,
-    rows: limit.value
-  }
-  await loadLogs({
-    first: 0,
-    rows: limit.value
-  })
-}
-
 // Initial fetch of sources to get the first sourceId
 async function fetchSources() {
   try {
@@ -200,7 +163,6 @@ async function fetchSources() {
     if (sourcesData && sourcesData.length > 0) {
       sources.value = sourcesData
       sourceId.value = sourcesData[0].ID
-      await resetLogs()
     } else {
       error.value = 'No sources available'
     }
@@ -221,14 +183,70 @@ const getSeverityType = (severityText) => {
   }
 }
 
-// Modified onMounted to handle initial URL parameters
+// Function to fetch both logs and schema concurrently
+const fetchLogsAndSchema = async () => {
+  if (!sourceId.value) return
+
+  try {
+    loading.value = true
+    tableLoading.value = true
+    error.value = null
+
+    const controller = new AbortController()
+    const signal = controller.signal
+
+    const [logsResponse, schemaResponse] = await Promise.all([
+      api.getLogs(sourceId.value, {
+        start_time: startDate.value?.toISOString(),
+        end_time: endDate.value?.toISOString(),
+        offset: lazyState.value.first,
+        limit: lazyState.value.rows,
+        search_query: '',
+        severity_text: ''
+      }, signal),
+      api.getLogSchema(sourceId.value, {
+        start_time: startDate.value?.toISOString(),
+        end_time: endDate.value?.toISOString()
+      }, signal)
+    ])
+
+    if (!signal.aborted) {
+      logs.value = logsResponse.logs || []
+      totalRecords.value = logsResponse.total_count || 0
+      hasMore.value = logsResponse.has_more || false
+      schema.value = schemaResponse || []
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      console.error('Error fetching data:', err)
+      error.value = err instanceof Error ? err.message : 'Failed to fetch data'
+      logs.value = []
+      schema.value = []
+    }
+  } finally {
+    loading.value = false
+    tableLoading.value = false
+    initialLoad.value = false
+  }
+}
+
+// Initialize data on mount
 onMounted(async () => {
   await fetchSources()
 
-  // If we have sourceId in URL, use it and load logs
-  if (props.sourceId) {
-    sourceId.value = props.sourceId
-    await resetLogs()
+  if (!sourceId.value && sources.value.length > 0) {
+    sourceId.value = sources.value[0].ID
+  }
+
+  if (sourceId.value) {
+    startDate.value = props.initialStartTime
+      ? new Date(props.initialStartTime)
+      : new Date(Date.now() - 60 * 60 * 1000)
+    endDate.value = props.initialEndTime
+      ? new Date(props.initialEndTime)
+      : new Date()
+
+    await fetchLogsAndSchema()
   }
 })
 
@@ -364,53 +382,44 @@ const formatTimestamp = (timestamp: string) => {
   }
 }
 
-// Add this function to handle page changes
-const handlePageChange = async (event: any) => {
-    scrollToTop()
-    await loadLogs(event)
-}
-
-const tableRef = ref()
-
-// Update the watch to use the component instance
-watch(tableRef, (newRef) => {
-    if (newRef) {
-        setTableWrapper(newRef)
-    }
-}, { flush: 'post' }) // Add flush: 'post' to ensure DOM is updated
-
-// Add these methods for pagination
+// Update pagination methods
 const prevPage = () => {
   if (lazyState.value.first > 0) {
     lazyState.value.first -= lazyState.value.rows
-    loadLogs()
+    fetchLogsAndSchema()
+    const tableContainer = document.querySelector('.flex-1.overflow-y-auto')
+    tableContainer?.scrollTo({ top: 0, behavior: 'smooth' })
   }
 }
 
 const nextPage = () => {
   if (hasMore.value) {
     lazyState.value.first += lazyState.value.rows
-    loadLogs()
+    fetchLogsAndSchema()
+    const tableContainer = document.querySelector('.flex-1.overflow-y-auto')
+    tableContainer?.scrollTo({ top: 0, behavior: 'smooth' })
   }
 }
 </script>
 
 <template>
-  <div class="h-screen flex">
+  <div class="h-screen flex overflow-hidden">
     <!-- Left Sidebar -->
     <div class="w-64 border-r border-gray-200 bg-white flex-shrink-0">
       <LogSchemaSidebar
         :sourceId="sourceId"
         :startTime="startDate"
         :endTime="endDate"
+        :schema="schema"
         @field-toggle="updateVisibleColumns"
       />
     </div>
 
     <!-- Main Content Area -->
-    <div class="flex-1 flex flex-col h-screen">
-      <!-- Top Controls Area -->
-      <div class="flex-shrink-0 bg-white border-b border-gray-200 p-4">
+    <div class="flex-1 flex flex-col">
+      <!-- Fixed Header -->
+      <div class="flex-none bg-white border-b border-gray-200 p-4">
+        <!-- Controls content -->
         <div class="flex items-center justify-between mb-4">
           <div class="flex items-center gap-4">
             <Select
@@ -425,7 +434,7 @@ const nextPage = () => {
             <DateRangeFilter
               v-model:startDate="startDate"
               v-model:endDate="endDate"
-              @update:dates="resetLogs"
+              @fetch="fetchLogsAndSchema"
             />
           </div>
           <Button
@@ -437,10 +446,11 @@ const nextPage = () => {
           />
         </div>
 
-        <!-- Compact Paginator in Header -->
+        <!-- Pagination controls -->
         <div class="flex items-center justify-between">
           <div class="text-sm text-gray-600">
-            {{ totalRecords }} logs found
+            <span v-if="tableLoading">Loading...</span>
+            <span v-else>{{ totalRecords }} logs found</span>
           </div>
           <div class="flex items-center gap-2">
             <span class="text-sm text-gray-600">Show:</span>
@@ -468,50 +478,77 @@ const nextPage = () => {
             </div>
           </div>
         </div>
-
-        <!-- Error and Progress Messages -->
-        <div v-if="error" class="mt-4 p-3 bg-red-50 text-red-600 rounded-md text-sm">
-          {{ error }}
-        </div>
-        <div v-if="isProgressiveLoading" class="mt-4">
-          <div class="text-sm text-gray-600 mb-2">
-            Loading large result set... {{ progressPercentage }}%
-          </div>
-          <div class="w-full bg-gray-200 rounded-full h-1.5">
-            <div
-              class="bg-blue-600 h-1.5 rounded-full transition-all duration-200"
-              :style="{ width: `${progressPercentage}%` }"
-            ></div>
-          </div>
-        </div>
       </div>
 
-      <!-- Main Scrollable Content -->
-      <div class="flex-1 overflow-auto">
+      <!-- Scrollable Table Container -->
+      <div class="flex-1 overflow-y-auto">
+        <!-- Loading skeleton for initial load -->
+        <div v-if="initialLoad" class="p-4 space-y-4">
+          <div v-for="i in 5" :key="i" class="animate-pulse space-y-2">
+            <div class="h-10 bg-gray-100 rounded-md"></div>
+          </div>
+        </div>
+
+        <!-- Error state -->
+        <div v-else-if="error" class="p-8 text-center">
+          <div class="text-red-500 mb-2">{{ error }}</div>
+          <Button label="Retry" severity="secondary" @click="fetchLogsAndSchema" />
+        </div>
+
+        <!-- Empty state -->
+        <div v-else-if="!logs.length && !tableLoading" class="p-8 text-center">
+          <div class="text-gray-500 mb-2">No logs found for the selected time range</div>
+          <Button label="Change Filters" severity="secondary" @click="() => {}" />
+        </div>
+
+        <!-- DataTable with loading overlay -->
         <DataTable
-          v-if="logs.length > 0"
+          v-else
           :value="logs"
-          :loading="loading"
-          :scrollable="false"
+          :loading="tableLoading"
+          class="logs-table"
           selectionMode="single"
           @row-click="showLogDetails"
           :resizableColumns="true"
           columnResizeMode="fit"
-          class="logs-table"
+          :scrollable="false"
+          tableStyle="width: 100%"
           v-bind:pt="{
-            wrapper: { class: 'min-w-full' },
-            table: { class: 'text-sm border-t border-gray-200 min-w-full' },
+            root: { class: 'h-full' },
+            wrapper: { class: 'h-full' },
+            table: { class: 'text-sm border-t border-gray-200' },
             bodyCell: { class: ['p-1.5 border-b border-gray-100'] },
-            headerCell: { class: ['p-2 bg-white border-b border-gray-200 font-medium text-gray-700 sticky top-0'] },
-            bodyRow: { class: ['hover:bg-blue-50/50 cursor-pointer transition-colors duration-100'] }
+            headerCell: {
+              class: [
+                'p-2 bg-white border-b border-gray-200 font-medium text-gray-700',
+                'sticky top-0 z-20'
+              ]
+            },
+            bodyRow: {
+              class: ['hover:bg-blue-50/50 cursor-pointer transition-colors duration-100']
+            },
+            loadingOverlay: {
+              class: [
+                'absolute inset-0 bg-white/80 backdrop-blur-sm transition-opacity',
+                'flex items-center justify-center z-50'
+              ]
+            }
           }"
         >
+          <!-- Loading overlay slot -->
+          <template #loading>
+            <div class="flex flex-col items-center">
+              <i class="pi pi-spin pi-spinner text-blue-500 text-2xl mb-2"></i>
+              <span class="text-sm text-gray-600">Loading logs...</span>
+            </div>
+          </template>
+
+          <!-- Column definitions -->
           <Column v-for="field in sortedVisibleColumns"
                   :key="field"
                   :field="field"
                   :header="formatColumnHeader(field)"
                   :style="getColumnStyle(field)"
-                  :resizeable="true"
           >
             <template #body="{ data }">
               <LogFieldValue
@@ -557,32 +594,45 @@ const nextPage = () => {
 </template>
 
 <style>
+/* Clean up styles */
 .logs-table {
-  border-collapse: collapse;
-  width: 100%;
+  height: 100%;
 }
 
-/* Remove all DataTable specific scroll styles */
-.p-datatable {
-  width: 100%;
+/* Remove all wrapper scrolling */
+.logs-table .p-datatable-wrapper {
+  border: none;
+  height: 100%;
 }
 
-.p-datatable .p-datatable-wrapper {
+/* Ensure header is properly positioned */
+.logs-table .p-datatable-thead > tr > th {
+  background-color: white;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* Remove any DataTable built-in scrolling */
+.p-datatable-scrollable-body,
+.p-datatable-scrollable-header,
+.p-datatable-scrollable-footer {
   overflow: visible !important;
 }
 
-/* Improve dropdown appearance */
-.p-dropdown {
-  @apply border border-gray-300 rounded-md text-sm;
-}
-
-.p-dropdown:not(.p-disabled):hover {
-  @apply border-gray-400;
-}
-
-/* Loading overlay */
+/* Loading state */
 .p-datatable-loading-overlay {
   background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(2px);
+}
+
+/* Skeleton animation */
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 </style>

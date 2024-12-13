@@ -16,46 +16,14 @@ const props = defineProps<{
     sourceId?: string
     startTime?: Date
     endTime?: Date
+    schema: SchemaField[]
 }>()
 
 const emit = defineEmits(['field-toggle'])
 
-const schema = ref<SchemaField[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const selectedFields = ref<Set<string>>(new Set(['timestamp', 'severity_text', 'body']))
-
-const fetchSchema = () => {
-    if (!props.sourceId) return
-
-    loading.value = true
-    error.value = null
-
-    api.getLogSchema(props.sourceId, {
-        start_time: props.startTime?.toISOString(),
-        end_time: props.endTime?.toISOString()
-    })
-    .then(data => {
-        schema.value = data || []
-    })
-    .catch(err => {
-        error.value = err instanceof Error ? err.message : 'Failed to fetch schema'
-        schema.value = []
-    })
-    .finally(() => {
-        loading.value = false
-    })
-}
-
-onMounted(() => {
-    if (props.sourceId) {
-        fetchSchema()
-    }
-})
-
-watch([() => props.sourceId, () => props.startTime, () => props.endTime], () => {
-    fetchSchema()
-})
 
 const toggleField = (field: SchemaField) => {
     // For nested fields under log_attributes, construct the proper path
@@ -116,9 +84,13 @@ const getFieldTypeDisplay = (field: SchemaField) => {
             {{ error }}
         </div>
 
+        <div v-else-if="!props.schema?.length" class="p-4 text-sm text-gray-500">
+            No fields available
+        </div>
+
         <div v-else class="flex-1 overflow-y-auto">
             <div class="p-2">
-                <div v-for="field in schema"
+                <div v-for="field in props.schema"
                      :key="field.path.join('.')"
                      :class="[
                          'relative flex items-center p-2 hover:bg-gray-50 rounded-md',
@@ -148,7 +120,7 @@ const getFieldTypeDisplay = (field: SchemaField) => {
                 </div>
 
                 <!-- Render nested fields if present -->
-                <template v-for="field in schema" :key="field.path.join('.')">
+                <template v-for="field in props.schema" :key="field.path.join('.')">
                     <div v-if="field.children"
                          v-for="child in field.children"
                          :key="child.path.join('.')"

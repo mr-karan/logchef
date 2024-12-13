@@ -22,6 +22,21 @@ func NewLogHandler(logRepo *db.LogRepository, sourceRepo *models.SourceRepositor
 	}
 }
 
+// Add this helper function at the top of the file
+func validateTimeRange(start, end *time.Time) error {
+	// Ensure both times are provided
+	if start == nil || end == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Both start_time and end_time are required")
+	}
+
+	// Ensure start time is not after end time
+	if start.After(*end) {
+		return echo.NewHTTPError(http.StatusBadRequest, "start_time cannot be after end_time")
+	}
+
+	return nil
+}
+
 // QueryLogs handles log querying with filters and pagination
 func (h *LogHandler) QueryLogs(c echo.Context) error {
 	sourceID := c.Param("sourceId")
@@ -37,21 +52,22 @@ func (h *LogHandler) QueryLogs(c echo.Context) error {
 		TableName: source.TableName,
 	}
 
-	// Parse time range
-	if startTimeStr := c.QueryParam("start_time"); startTimeStr != "" {
-		startTime, err := time.Parse(time.RFC3339, startTimeStr)
-		if err != nil {
-			return HandleError(c, err, http.StatusBadRequest, "Invalid start_time format")
-		}
-		params.StartTime = &startTime
+	// Parse and validate time range
+	startTime, err := time.Parse(time.RFC3339, c.QueryParam("start_time"))
+	if err != nil {
+		return HandleError(c, err, http.StatusBadRequest, "Invalid start_time format")
 	}
+	params.StartTime = &startTime
 
-	if endTimeStr := c.QueryParam("end_time"); endTimeStr != "" {
-		endTime, err := time.Parse(time.RFC3339, endTimeStr)
-		if err != nil {
-			return HandleError(c, err, http.StatusBadRequest, "Invalid end_time format")
-		}
-		params.EndTime = &endTime
+	endTime, err := time.Parse(time.RFC3339, c.QueryParam("end_time"))
+	if err != nil {
+		return HandleError(c, err, http.StatusBadRequest, "Invalid end_time format")
+	}
+	params.EndTime = &endTime
+
+	// Validate time range
+	if err := validateTimeRange(params.StartTime, params.EndTime); err != nil {
+		return err
 	}
 
 	// Parse other filters
@@ -95,19 +111,31 @@ func (h *LogHandler) QueryLogs(c echo.Context) error {
 func (h *LogHandler) GetLogSchema(c echo.Context) error {
 	sourceID := c.Param("sourceId")
 
-	// Get time range from query params or use defaults
-	startTime := time.Now().Add(-1 * time.Hour)
-	endTime := time.Now()
+	// Parse time range from query params
+	var startTime, endTime time.Time
+	var err error
 
 	if startStr := c.QueryParam("start_time"); startStr != "" {
-		if t, err := time.Parse(time.RFC3339, startStr); err == nil {
-			startTime = t
+		startTime, err = time.Parse(time.RFC3339, startStr)
+		if err != nil {
+			return HandleError(c, err, http.StatusBadRequest, "Invalid start_time format")
 		}
+	} else {
+		startTime = time.Now().Add(-1 * time.Hour)
 	}
+
 	if endStr := c.QueryParam("end_time"); endStr != "" {
-		if t, err := time.Parse(time.RFC3339, endStr); err == nil {
-			endTime = t
+		endTime, err = time.Parse(time.RFC3339, endStr)
+		if err != nil {
+			return HandleError(c, err, http.StatusBadRequest, "Invalid end_time format")
 		}
+	} else {
+		endTime = time.Now()
+	}
+
+	// Validate time range
+	if err := validateTimeRange(&startTime, &endTime); err != nil {
+		return err
 	}
 
 	schema, err := h.logRepo.GetLogSchema(c.Request().Context(), sourceID, startTime, endTime)

@@ -22,7 +22,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
 }
 
 export const api = {
-    async fetchLogs(sourceId: string, params: LogQueryParams) {
+    async getLogs(sourceId: string, params: LogQueryParams, signal?: AbortSignal) {
         const queryParams = new URLSearchParams()
 
         // Required params
@@ -45,7 +45,8 @@ export const api = {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json'
-            }
+            },
+            signal
         })
 
         if (!response.ok) {
@@ -105,7 +106,7 @@ export const api = {
         return response.json()
     },
 
-    async getLogSchema(sourceId: string, params?: SchemaParams) {
+    async getLogSchema(sourceId: string, params?: SchemaParams, signal?: AbortSignal) {
         const queryParams = new URLSearchParams()
 
         if (params?.start_time) {
@@ -118,7 +119,8 @@ export const api = {
         const response = await fetch(`${BASE_URL}/logs/${sourceId}/schema?${queryParams.toString()}`, {
             headers: {
                 'Content-Type': 'application/json'
-            }
+            },
+            signal
         })
 
         if (!response.ok) {
