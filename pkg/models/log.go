@@ -30,6 +30,7 @@ type LogQueryParams struct {
 	SearchQuery  string     `json:"search_query"`
 	Limit        int        `json:"limit"`
 	Offset       int        `json:"offset"`
+	SQLQuery     string     `json:"sql_query"`
 }
 
 // LogResponse represents paginated log response

@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/models"
+	"github.com/mr-karan/logchef/pkg/models"
 	"github.com/segmentio/ksuid"
 )
 

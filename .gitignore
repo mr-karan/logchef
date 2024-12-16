@@ -7,3 +7,27 @@
 bin/
 tmp/
 logchef.db
+pkg/ui/dist/*
+!pkg/ui/dist/.gitkeep
+
+# Go specific
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go workspace file
+go.work
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+
+# Dependency directories
+vendor/

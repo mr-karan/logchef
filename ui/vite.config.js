@@ -37,6 +37,10 @@ export default defineConfig(({ mode }) => {
     define: {
       __APP_ENV__: JSON.stringify(env.APP_ENV)
     },
-    base: '/ui/'
+    base: '/ui/',
+    build: {
+      outDir: '../pkg/ui/dist',
+      emptyOutDir: true,
+    }
   }
 })

@@ -88,6 +88,10 @@ watch(localEndDate, (newVal, oldVal) => {
 .date-picker-custom :deep(.p-inputtext){
   font-size: 0.75rem;
 }
+
+:deep(.p-datepicker) {
+  user-select: none;
+}
 </style>
 
 

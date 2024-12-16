@@ -18,6 +18,7 @@ import FloatLabel from 'primevue/floatlabel'
 import Button from 'primevue/button'
 import LogSchemaSidebar from '@/components/LogSchemaSidebar.vue'
 import LogFieldValue from '@/components/LogFieldValue.vue'
+import MultiSelect from 'primevue/multiselect'
 
 // Move state declarations to the top
 const logs = ref<Log[]>([])
@@ -98,9 +99,9 @@ const loadLogs = async () => {
 const resetLogs = async () => {
   lazyState.value = {
     first: 0,
-    rows: limit.value
+    rows: lazyState.value.rows
   }
-  await fetchLogsAndSchema()
+  await loadLogs()
 }
 
 // Create computed property for URL parameters
@@ -277,25 +278,76 @@ const copyShareableURL = async () => {
   }
 }
 
-const visibleColumns = ref<string[]>(['timestamp', 'severity_text', 'body'])
+const columns = computed(() => {
+  const result = []
 
-const sortedVisibleColumns = computed(() => {
-    const columns = [...visibleColumns.value]
-    // If timestamp exists but is not first, move it to front
-    const timestampIndex = columns.indexOf('timestamp')
-    if (timestampIndex > 0) {
-        columns.splice(timestampIndex, 1)
-        columns.unshift('timestamp')
-    } else if (timestampIndex === -1) {
-        // If timestamp doesn't exist, add it to front
-        columns.unshift('timestamp')
+  // Add default columns first
+  result.push(
+    { field: 'timestamp', header: 'Timestamp', required: true },
+    { field: 'severity_text', header: 'Severity', required: false },
+    { field: 'body', header: 'Message', required: false }
+  )
+
+  // Process schema fields
+  schema.value?.forEach(field => {
+    if (field.parent === 'log_attributes') {
+      // For nested fields under log_attributes
+      result.push({
+        field: `log_attributes.${field.path[field.path.length - 1]}`,
+        header: field.path[field.path.length - 1],
+        required: false,
+        type: field.type
+      })
+    } else if (field.children) {
+      // For fields with children (nested structures)
+      field.children.forEach(child => {
+        result.push({
+          field: child.path.join('.'),
+          header: child.path[child.path.length - 1],
+          required: false,
+          type: child.type
+        })
+      })
+    } else if (!['timestamp', 'severity_text', 'body'].includes(field.path[0])) {
+      // For regular fields, excluding the ones we already added
+      result.push({
+        field: field.path.join('.'),
+        header: field.path[0],
+        required: false,
+        type: field.type
+      })
     }
-    return columns
+  })
+
+  return result
 })
 
-const updateVisibleColumns = (fields: string[]) => {
-    visibleColumns.value = fields
+const selectedColumns = ref([
+  { field: 'timestamp', header: 'Timestamp', required: true },
+  { field: 'severity_text', header: 'Severity', required: false },
+  { field: 'body', header: 'Message', required: false }
+])
+
+const onToggleColumns = (val) => {
+  // Always include required columns (like timestamp)
+  const requiredColumns = columns.value.filter(col => col.required)
+  selectedColumns.value = [
+    ...requiredColumns,
+    ...val.filter(col => !col.required)
+  ]
 }
+
+// Replace updateVisibleColumns with this
+const updateVisibleColumns = (fields: string[]) => {
+  selectedColumns.value = columns.value.filter(col =>
+    col.required || fields.includes(col.field)
+  )
+}
+
+// Update sortedVisibleColumns computed property
+const sortedVisibleColumns = computed(() =>
+  selectedColumns.value.map(col => col.field)
+)
 
 const getNestedValue = (obj: any, path: string) => {
     if (!obj) return undefined
@@ -386,7 +438,7 @@ const formatTimestamp = (timestamp: string) => {
 const prevPage = () => {
   if (lazyState.value.first > 0) {
     lazyState.value.first -= lazyState.value.rows
-    fetchLogsAndSchema()
+    loadLogs()
     const tableContainer = document.querySelector('.flex-1.overflow-y-auto')
     tableContainer?.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -395,68 +447,150 @@ const prevPage = () => {
 const nextPage = () => {
   if (hasMore.value) {
     lazyState.value.first += lazyState.value.rows
-    fetchLogsAndSchema()
+    loadLogs()
     const tableContainer = document.querySelector('.flex-1.overflow-y-auto')
     tableContainer?.scrollTo({ top: 0, behavior: 'smooth' })
   }
 }
+
+// Add a watcher for lazyState.rows changes
+watch(() => lazyState.value.rows, (newLimit) => {
+  // Reset to first page when limit changes
+  lazyState.value.first = 0
+  loadLogs()
+}, { immediate: false })
+
+const dt = ref()
+
+// Add export function that handles dynamic columns
+const exportLogs = () => {
+  if (!dt.value || !logs.value.length) return
+
+  // Get all selected columns
+  const columnsToExport = selectedColumns.value.map(col => ({
+    field: col.field,
+    header: formatColumnHeader(col.field)
+  }))
+
+  // Prepare CSV data
+  const csvData = logs.value.map(log => {
+    const row = {}
+    columnsToExport.forEach(col => {
+      row[col.header] = getNestedValue(log, col.field)
+    })
+    return row
+  })
+
+  // Convert to CSV
+  const headers = columnsToExport.map(col => col.header)
+  const csvContent = [
+    headers.join(','),
+    ...csvData.map(row => headers.map(header => {
+      const value = row[header]
+      // Handle values that might contain commas or quotes
+      const cellValue = String(value).replace(/"/g, '""')
+      return `"${cellValue}"`
+    }).join(','))
+  ].join('\n')
+
+  // Create and trigger download
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.setAttribute('download', `logs_export_${new Date().toISOString()}.csv`)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+}
 </script>
 
 <template>
-  <div class="h-screen flex overflow-hidden">
-    <!-- Left Sidebar -->
-    <div class="w-64 border-r border-gray-200 bg-white flex-shrink-0">
-      <LogSchemaSidebar
-        :sourceId="sourceId"
-        :startTime="startDate"
-        :endTime="endDate"
-        :schema="schema"
-        @field-toggle="updateVisibleColumns"
-      />
-    </div>
-
+  <div class="h-screen flex flex-col overflow-hidden">
     <!-- Main Content Area -->
     <div class="flex-1 flex flex-col">
       <!-- Fixed Header -->
-      <div class="flex-none bg-white border-b border-gray-200 p-4">
-        <!-- Controls content -->
-        <div class="flex items-center justify-between mb-4">
-          <div class="flex items-center gap-4">
-            <Select
-              v-model="sourceId"
-              :options="sources"
-              optionLabel="Name"
-              optionValue="ID"
-              placeholder="Select a source"
-              class="w-[200px]"
-              @change="resetLogs"
-            />
-            <DateRangeFilter
-              v-model:startDate="startDate"
-              v-model:endDate="endDate"
-              @fetch="fetchLogsAndSchema"
-            />
+      <div class="flex-none bg-white border-b border-gray-200">
+        <!-- Primary Controls -->
+        <div class="p-4 border-b border-gray-100">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-4 flex-1">
+              <!-- Left side: Source and Columns -->
+              <div class="flex items-center gap-3 flex-1">
+                <FloatLabel class="w-[250px]" variant="on">
+                  <Select
+                    v-model="sourceId"
+                    :options="sources"
+                    optionLabel="Name"
+                    optionValue="ID"
+                    class="w-full"
+                    @change="resetLogs"
+                  />
+                  <label>Choose Log Source</label>
+                </FloatLabel>
+
+                <FloatLabel class="w-[350px]" variant="on">
+                  <MultiSelect
+                    v-model="selectedColumns"
+                    :options="columns"
+                    optionLabel="header"
+                    display="chip"
+                    class="w-full"
+                    @update:modelValue="onToggleColumns"
+                    :disabled="tableLoading"
+                  />
+                  <label>Select Columns</label>
+                </FloatLabel>
+              </div>
+
+              <!-- Right side: Time Range -->
+              <div class="flex items-center gap-3">
+                <FloatLabel class="min-w-[400px]" variant="on">
+                  <DateRangeFilter
+                    v-model:startDate="startDate"
+                    v-model:endDate="endDate"
+                    @fetch="fetchLogsAndSchema"
+                    class="w-full"
+                  />
+                  <label>Time Range</label>
+                </FloatLabel>
+                <div class="h-6 w-px bg-gray-200 mx-2"></div>
+                <Button
+                  icon="pi pi-share-alt"
+                  severity="secondary"
+                  text
+                  v-tooltip.bottom="'Share Query'"
+                  @click="copyShareableURL"
+                />
+              </div>
+            </div>
           </div>
-          <Button
-            icon="pi pi-share-alt"
-            severity="secondary"
-            rounded
-            aria-label="Share Query"
-            @click="copyShareableURL"
-          />
         </div>
 
-        <!-- Pagination controls -->
-        <div class="flex items-center justify-between">
-          <div class="text-sm text-gray-600">
-            <span v-if="tableLoading">Loading...</span>
-            <span v-else>{{ totalRecords }} logs found</span>
+        <!-- Secondary Controls: Pagination and Actions -->
+        <div class="px-4 py-2 bg-gray-50/50 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="text-sm text-gray-600">
+              <span v-if="tableLoading">Loading logs...</span>
+              <span v-else>{{ totalRecords }} logs found</span>
+            </span>
+            <div class="h-4 w-px bg-gray-200"></div>
+            <Button
+              icon="pi pi-download"
+              severity="secondary"
+              text
+              @click="exportLogs"
+              v-tooltip.bottom="'Export as CSV'"
+              :disabled="!logs.length"
+            />
           </div>
-          <div class="flex items-center gap-2">
+
+          <!-- Pagination Controls -->
+          <div class="flex items-center gap-3">
             <span class="text-sm text-gray-600">Show:</span>
             <Select
               v-model="lazyState.rows"
               :options="rowsPerPageOptions"
+              class="w-[100px]"
               @change="resetLogs"
             />
             <div class="flex items-center gap-1">
@@ -466,7 +600,7 @@ const nextPage = () => {
                 :disabled="lazyState.first === 0"
                 @click="prevPage"
               />
-              <span class="text-sm text-gray-600">
+              <span class="text-sm text-gray-600 min-w-[80px] text-center">
                 {{ Math.floor(lazyState.first / lazyState.rows) + 1 }} of {{ Math.ceil(totalRecords / lazyState.rows) }}
               </span>
               <Button
@@ -480,7 +614,7 @@ const nextPage = () => {
         </div>
       </div>
 
-      <!-- Scrollable Table Container -->
+      <!-- Rest of the DataTable code remains the same -->
       <div class="flex-1 overflow-y-auto">
         <!-- Loading skeleton for initial load -->
         <div v-if="initialLoad" class="p-4 space-y-4">
@@ -504,6 +638,7 @@ const nextPage = () => {
         <!-- DataTable with loading overlay -->
         <DataTable
           v-else
+          ref="dt"
           :value="logs"
           :loading="tableLoading"
           class="logs-table"
@@ -511,8 +646,10 @@ const nextPage = () => {
           @row-click="showLogDetails"
           :resizableColumns="true"
           columnResizeMode="fit"
-          :scrollable="false"
+          scrollable
+          scrollHeight="calc(100vh - 140px)"
           tableStyle="width: 100%"
+          showGridlines
           v-bind:pt="{
             root: { class: 'h-full' },
             wrapper: { class: 'h-full' },
@@ -568,11 +705,12 @@ const nextPage = () => {
       :modal="true"
       :dismissable="true"
       :closable="true"
-      class="w-full md:w-[800px] drawer-wide"
+      :style="{ width: 'min(85vw, 960px)' }"
+      class="drawer-wide"
       :pt="{
-        root: 'border-l border-gray-200',
-        header: 'bg-gray-50 px-6 py-4 border-b border-gray-200',
-        content: 'p-6'
+        root: { class: 'border-l border-gray-200', style: { width: 'min(85vw, 960px)' } },
+        header: { class: 'bg-gray-50 px-6 py-4 border-b border-gray-200' },
+        content: { class: 'p-6 overflow-y-auto' }
       }"
     >
       <template #header>
@@ -594,6 +732,11 @@ const nextPage = () => {
 </template>
 
 <style>
+/* Update scrollHeight calculation in styles */
+.logs-table {
+  height: 100%;
+}
+
 /* Clean up styles */
 .logs-table {
   height: 100%;
@@ -602,22 +745,20 @@ const nextPage = () => {
 /* Remove all wrapper scrolling */
 .logs-table .p-datatable-wrapper {
   border: none;
-  height: 100%;
 }
 
 /* Ensure header is properly positioned */
 .logs-table .p-datatable-thead > tr > th {
-  background-color: white;
-  position: sticky;
-  top: 0;
-  z-index: 2;
+  background-color: white !important;
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 2 !important;
 }
 
-/* Remove any DataTable built-in scrolling */
-.p-datatable-scrollable-body,
-.p-datatable-scrollable-header,
-.p-datatable-scrollable-footer {
-  overflow: visible !important;
+/* Scrollable table styles */
+.logs-table .p-datatable-wrapper {
+  height: 100%;
+  border-radius: 6px;
 }
 
 /* Loading state */
@@ -634,5 +775,15 @@ const nextPage = () => {
 
 .animate-pulse {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Drawer styles */
+:deep(.p-drawer) {
+  width: min(85vw, 960px) !important;
+  max-width: none !important;
+}
+
+:deep(.p-drawer-content) {
+  width: 100% !important;
 }
 </style>

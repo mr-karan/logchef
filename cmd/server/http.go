@@ -1,4 +1,4 @@
-package api
+package main
 
 import (
 	"io/fs"
@@ -9,10 +9,12 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
-	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/db"
-	"github.com/mr-karan/logchef/internal/models"
-	"github.com/mr-karan/logchef/internal/static"
+	"github.com/mr-karan/logchef/internal/logs"
+	"github.com/mr-karan/logchef/internal/sources"
+	"github.com/mr-karan/logchef/pkg/config"
+	"github.com/mr-karan/logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/ui"
 )
 
 type Server struct {
@@ -34,7 +36,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		LogStatus:   true,
 		LogURI:      true,
 		LogError:    true,
-		HandleError: true, // forwards error to the global error handler, so it can decide appropriate status code
+		HandleError: true,
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
 			if v.Error == nil {
 				slog.Info("request",
@@ -72,12 +74,18 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	sourceRepo := models.NewSourceRepository(sqlite.DB())
 	logRepo := db.NewLogRepository(clickhouse.GetPool(), sourceRepo)
 
+	// Initialize services
+	sourceService := sources.NewService(sourceRepo, clickhouse)
+	logService := logs.NewService(logRepo, sourceRepo)
+
 	// Initialize handlers
-	sourceHandler := NewSourceHandler(sourceRepo, clickhouse)
-	logHandler := NewLogHandler(logRepo, sourceRepo)
+	sourceHandler := NewSourceHandler(sourceService)
+	logHandler := NewLogHandler(logService)
 
 	// Register routes
 	api := e.Group("/api")
+
+	// Source routes
 	sources := api.Group("/sources")
 	sources.GET("", sourceHandler.List)
 	sources.POST("", sourceHandler.Create)
@@ -88,17 +96,16 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	// Log routes
 	logs := api.Group("/logs")
 	logs.GET("/:sourceId", logHandler.QueryLogs)
+	logs.GET("/:sourceId/schema", logHandler.GetLogSchema)
+
 	api.GET("", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, NewResponse(map[string]string{
 			"message": "Welcome to logchef API. Visit /docs to see the API documentation.",
 		}))
 	})
 
-	// Schema routes
-	logs.GET("/:sourceId/schema", logHandler.GetLogSchema)
-
 	// Get the embedded UI files
-	distFS, err := fs.Sub(static.Static, "dist")
+	distFS, err := fs.Sub(ui.Static, "dist")
 	if err != nil {
 		return nil, err
 	}

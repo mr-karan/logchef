@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
-	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/pkg/config"
 )
 
 type ConnectionStatus struct {

@@ -21,13 +21,28 @@ run: build
 
 clean:
 	rm -rf bin
+	rm -rf coverage
 
 fresh: clean build run
 
 .PHONY: test
-test:
-	go test -v ./...
+test: ## Run tests with coverage
+	@echo "Running tests..."
+	@mkdir -p coverage
+	@go test -v -race -coverprofile=coverage/coverage.out ./...
+	@go tool cover -html=coverage/coverage.out -o coverage/coverage.html
+	@echo "Coverage report generated at coverage/coverage.html"
+	@go tool cover -func=coverage/coverage.out | grep total | awk '{print "Total coverage: " $$3}'
+
+.PHONY: test-short
+test-short: ## Run tests without coverage and race detection (faster)
+	@echo "Running tests (short mode)..."
+	@go test -v ./...
 
 .PHONY: lint
 lint:
 	golangci-lint run
+
+.PHONY: help
+help: ## Display this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'

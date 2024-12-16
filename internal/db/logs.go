@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
-	"github.com/mr-karan/logchef/internal/models"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // LogRepository handles log querying operations
@@ -148,15 +148,10 @@ func (r *LogRepository) QueryLogs(ctx context.Context, sourceID string, params m
 }
 
 // GetLogSchema analyzes recent logs to determine schema
-func (r *LogRepository) GetLogSchema(ctx context.Context, sourceID string, startTime, endTime time.Time) ([]models.LogSchema, error) {
-	conn, err := r.pool.GetConnection(sourceID)
+func (r *LogRepository) GetLogSchema(ctx context.Context, source *models.Source, startTime, endTime time.Time) ([]models.LogSchema, error) {
+	conn, err := r.pool.GetConnection(source.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection: %w", err)
-	}
-
-	source, err := r.sourceRepo.Get(sourceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get source: %w", err)
 	}
 
 	// Get base schema
@@ -257,4 +252,51 @@ func (r *LogRepository) getBaseSchema(ctx context.Context, conn driver.Conn, tab
 	}
 
 	return schema, nil
+}
+
+// ExecuteRawQuery executes a raw SQL query and returns the results
+func (r *LogRepository) ExecuteRawQuery(ctx context.Context, sourceID string, query string, args []interface{}) (*models.LogResponse, error) {
+	// Get connection from pool
+	conn, err := r.pool.GetConnection(sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection: %w", err)
+	}
+
+	// Execute the query
+	rows, err := conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute query: %w", err)
+	}
+	defer rows.Close()
+
+	// Parse the results
+	var logs []*models.Log
+	for rows.Next() {
+		log := &models.Log{}
+		err := rows.Scan(
+			&log.ID,
+			&log.Timestamp,
+			&log.TraceID,
+			&log.SpanID,
+			&log.TraceFlags,
+			&log.SeverityText,
+			&log.SeverityNumber,
+			&log.ServiceName,
+			&log.Namespace,
+			&log.Body,
+			&log.LogAttributes,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+		logs = append(logs, log)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	return &models.LogResponse{
+		Logs: logs,
+	}, nil
 }
