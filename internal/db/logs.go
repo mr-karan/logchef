@@ -6,297 +6,226 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/huandu/go-sqlbuilder"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // LogRepository handles log querying operations
 type LogRepository struct {
-	pool       *ConnectionPool
+	Executor   QueryExecutor
 	sourceRepo *models.SourceRepository
 }
 
-func NewLogRepository(pool *ConnectionPool, sourceRepo *models.SourceRepository) *LogRepository {
+// hasMoreResults checks if there are more results after the current offset
+func (r *LogRepository) hasMoreResults(ctx context.Context, source *models.Source, params models.LogQueryParams) (bool, error) {
+	// Build a count query for remaining records
+	sb := sqlbuilder.ClickHouse.NewSelectBuilder()
+	sb.Select("count(*) as count").
+		From("logs." + source.TableName).
+		Where(
+			sb.Between("timestamp",
+				sqlbuilder.Raw(fmt.Sprintf("toDateTime64('%s', 3)", params.StartTime.Format("2006-01-02 15:04:05.000"))),
+				sqlbuilder.Raw(fmt.Sprintf("toDateTime64('%s', 3)", params.EndTime.Format("2006-01-02 15:04:05.000"))),
+			),
+		).
+		Offset(params.Offset + params.Limit)
+
+	result, err := r.Executor.ExecuteQuery(ctx, source, sb)
+	if err != nil {
+		return false, fmt.Errorf("failed to check remaining records: %w", err)
+	}
+
+	return result.TotalCount > 0, nil
+}
+
+func NewLogRepository(executor QueryExecutor, sourceRepo *models.SourceRepository) *LogRepository {
 	return &LogRepository{
-		pool:       pool,
+		Executor:   executor,
 		sourceRepo: sourceRepo,
 	}
 }
 
 // QueryLogs fetches logs based on the provided parameters
 func (r *LogRepository) QueryLogs(ctx context.Context, sourceID string, params models.LogQueryParams) (*models.LogResponse, error) {
-	conn, err := r.pool.GetConnection(sourceID)
+	source, err := r.sourceRepo.Get(sourceID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connection: %w", err)
+		return nil, fmt.Errorf("source not found: %w", err)
 	}
 
-	// Build WHERE clause
-	var conditions []string
-	var args []interface{}
+	// Build query using sqlbuilder
+	sb := sqlbuilder.ClickHouse.NewSelectBuilder()
+	sb.Select("*").
+		From("logs." + source.TableName).
+		Where(
+			sb.Between("timestamp",
+				sqlbuilder.Raw(fmt.Sprintf("toDateTime64('%s', 3)", params.StartTime.Format("2006-01-02 15:04:05.000"))),
+				sqlbuilder.Raw(fmt.Sprintf("toDateTime64('%s', 3)", params.EndTime.Format("2006-01-02 15:04:05.000"))),
+			),
+		)
 
-	// Add default time range if not provided
-	if params.StartTime == nil {
-		defaultStartTime := time.Now().Add(-1 * time.Hour) // Default to last hour
-		params.StartTime = &defaultStartTime
-	}
-	if params.EndTime == nil {
-		defaultEndTime := time.Now()
-		params.EndTime = &defaultEndTime
-	}
-
-	// Add timestamp conditions using toDateTime64 for proper conversion
-	conditions = append(conditions, "timestamp >= toDateTime64(?, 3)")
-	args = append(args, params.StartTime.Format("2006-01-02 15:04:05.000"))
-	conditions = append(conditions, "timestamp <= toDateTime64(?, 3)")
-	args = append(args, params.EndTime.Format("2006-01-02 15:04:05.000"))
-
+	// Add filters
 	if params.ServiceName != "" {
-		conditions = append(conditions, "service_name = ?")
-		args = append(args, params.ServiceName)
+		sb.Where(sb.Equal("service_name", params.ServiceName))
 	}
 	if params.Namespace != "" {
-		conditions = append(conditions, "namespace = ?")
-		args = append(args, params.Namespace)
+		sb.Where(sb.Equal("namespace", params.Namespace))
 	}
 	if params.SeverityText != "" {
-		conditions = append(conditions, "severity_text = ?")
-		args = append(args, params.SeverityText)
+		sb.Where(sb.Equal("severity_text", params.SeverityText))
 	}
 	if params.SearchQuery != "" {
-		conditions = append(conditions, "body ILIKE ?")
-		args = append(args, "%"+params.SearchQuery+"%")
+		sb.Where(sb.Like("body", "%"+params.SearchQuery+"%"))
 	}
 
-	whereClause := "WHERE " + strings.Join(conditions, " AND ")
+	// Add pagination
+	sb.OrderBy("timestamp DESC").
+		Limit(params.Limit).
+		Offset(params.Offset)
 
-	// Count total matching rows
-	countQuery := fmt.Sprintf(`
-		SELECT count()
-		FROM %s
-		%s
-	`, params.TableName, whereClause)
-
-	var totalCount uint64
-	err = conn.QueryRow(ctx, countQuery, args...).Scan(&totalCount)
+	// Execute the query
+	result, err := r.Executor.ExecuteQuery(ctx, source, sb)
 	if err != nil {
-		return nil, fmt.Errorf("failed to count logs: %w", err)
+		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 
-	// Fetch paginated results
-	if params.Limit == 0 {
-		params.Limit = 100 // default limit
-	}
-
-	query := fmt.Sprintf(`
-		SELECT
-			id,
-			timestamp,
-			trace_id,
-			span_id,
-			trace_flags,
-			severity_text,
-			severity_number,
-			service_name,
-			namespace,
-			body,
-			log_attributes
-		FROM %s
-		%s
-		ORDER BY timestamp DESC
-		LIMIT ? OFFSET ?
-	`, params.TableName, whereClause)
-
-	args = append(args, params.Limit, params.Offset)
-
-	rows, err := conn.Query(ctx, query, args...)
+	// Check if there are more results
+	hasMore, err := r.hasMoreResults(ctx, source, params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query logs: %w", err)
-	}
-	defer rows.Close()
-
-	var logs []*models.Log
-	for rows.Next() {
-		log := &models.Log{}
-		err := rows.Scan(
-			&log.ID,
-			&log.Timestamp,
-			&log.TraceID,
-			&log.SpanID,
-			&log.TraceFlags,
-			&log.SeverityText,
-			&log.SeverityNumber,
-			&log.ServiceName,
-			&log.Namespace,
-			&log.Body,
-			&log.LogAttributes,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan log: %w", err)
-		}
-		logs = append(logs, log)
+		return nil, fmt.Errorf("failed to check for more results: %w", err)
 	}
 
-	hasMore := uint64(params.Offset+len(logs)) < totalCount
-
-	return &models.LogResponse{
-		Logs:       logs,
-		TotalCount: totalCount,
-		HasMore:    hasMore,
-		StartTime:  *params.StartTime,
-		EndTime:    *params.EndTime,
-	}, nil
+	// Update hasMore in the result
+	result.HasMore = hasMore
+	return result, nil
 }
 
-// GetLogSchema analyzes recent logs to determine schema
+// GetLogSchema analyzes recent logs to determine schema including nested JSON fields
 func (r *LogRepository) GetLogSchema(ctx context.Context, source *models.Source, startTime, endTime time.Time) ([]models.LogSchema, error) {
-	conn, err := r.pool.GetConnection(source.ID)
+	// First get the table schema from Clickhouse
+	conn, err := r.Executor.(*ClickhouseExecutor).pool.GetConnection(source.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection: %w", err)
 	}
 
-	// Get base schema
-	schema, err := r.getBaseSchema(ctx, conn, source.TableName)
+	// Get column information directly from Clickhouse
+	rows, err := conn.Query(ctx, fmt.Sprintf("DESCRIBE TABLE logs.%s", source.TableName))
 	if err != nil {
-		return nil, err
-	}
-
-	// For Map type fields, analyze recent logs to get keys
-	for i, field := range schema {
-		if strings.Contains(field.Type, "Map(") {
-			query := fmt.Sprintf(`
-				SELECT DISTINCT arrayJoin(mapKeys(%s)) as key
-				FROM %s
-				WHERE timestamp BETWEEN ? AND ?
-				LIMIT 100
-			`, field.Name, source.TableName)
-
-			rows, err := conn.Query(ctx, query, startTime, endTime)
-			if err != nil {
-				continue // Skip if analysis fails
-			}
-			defer rows.Close()
-
-			var children []models.LogSchema
-			for rows.Next() {
-				var key string
-				if err := rows.Scan(&key); err != nil {
-					continue
-				}
-
-				children = append(children, models.LogSchema{
-					Name:     fmt.Sprintf("%s.%s", field.Name, key),
-					Type:     "String", // Map values are strings in our case
-					Path:     append(field.Path, key),
-					IsNested: true,
-					Parent:   field.Name,
-					Children: nil,
-				})
-			}
-
-			schema[i].Children = children
-		}
-	}
-
-	return schema, nil
-}
-
-// Helper function to get column names from schema
-func getColumnNames(schema []models.LogSchema) []string {
-	names := make([]string, len(schema))
-	for i, field := range schema {
-		names[i] = field.Name
-	}
-	return names
-}
-
-// Add this new method
-func (r *LogRepository) getBaseSchema(ctx context.Context, conn driver.Conn, tableName string) ([]models.LogSchema, error) {
-	query := `
-		SELECT
-			name,
-			type,
-			position
-		FROM system.columns
-		WHERE table = ?
-		ORDER BY position
-	`
-	rows, err := conn.Query(ctx, query, tableName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get table schema: %w", err)
+		return nil, fmt.Errorf("failed to describe table: %w", err)
 	}
 	defer rows.Close()
 
 	var schema []models.LogSchema
 	for rows.Next() {
-		var (
-			name     string
-			dataType string
-			position uint64
-		)
-		if err := rows.Scan(&name, &dataType, &position); err != nil {
-			return nil, fmt.Errorf("failed to scan column: %w", err)
+		var name, typ, defaultType, defaultExpression, comment, codecExpression, ttlExpression string
+		if err := rows.Scan(&name, &typ, &defaultType, &defaultExpression, &comment, &codecExpression, &ttlExpression); err != nil {
+			return nil, fmt.Errorf("failed to scan column info: %w", err)
 		}
 
-		path := strings.Split(name, ".")
-		isNested := len(path) > 1 ||
-			strings.Contains(dataType, "Map") ||
-			strings.Contains(dataType, "Array") ||
-			strings.Contains(dataType, "JSON")
+		// Create base schema entry
+		schemaEntry := models.LogSchema{
+			Name: name,
+			Type: typ,
+			Path: []string{name},
+		}
 
-		schema = append(schema, models.LogSchema{
-			Name:     name,
-			Type:     dataType,
-			Path:     path,
-			IsNested: isNested,
-		})
+		// For Map types, analyze the structure
+		if strings.HasPrefix(typ, "Map(") {
+			schemaEntry.IsNested = true
+			children, err := r.analyzeMapColumn(ctx, source, name, startTime, endTime)
+			if err != nil {
+				return nil, fmt.Errorf("failed to analyze map column %s: %w", name, err)
+			}
+			schemaEntry.Children = children
+		}
+
+		schema = append(schema, schemaEntry)
 	}
 
 	return schema, nil
 }
 
-// ExecuteRawQuery executes a raw SQL query and returns the results
-func (r *LogRepository) ExecuteRawQuery(ctx context.Context, sourceID string, query string, args []interface{}) (*models.LogResponse, error) {
-	// Get connection from pool
-	conn, err := r.pool.GetConnection(sourceID)
+// analyzeMapColumn examines the contents of a Map column to discover its structure
+func (r *LogRepository) analyzeMapColumn(ctx context.Context, source *models.Source, columnName string, startTime, endTime time.Time) ([]models.LogSchema, error) {
+	// Build a query to get distinct keys from the map column
+	query := fmt.Sprintf(`
+		SELECT DISTINCT arrayJoin(mapKeys(%s)) as key,
+		toTypeName(mapValues(%s)[indexOf(mapKeys(%s), arrayJoin(mapKeys(%s)))]) as value_type
+		FROM logs.%s
+		WHERE timestamp BETWEEN ? AND ?
+		LIMIT 1000
+	`, columnName, columnName, columnName, columnName, source.TableName)
+
+	conn, err := r.Executor.(*ClickhouseExecutor).pool.GetConnection(source.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection: %w", err)
 	}
 
-	// Execute the query
-	rows, err := conn.Query(ctx, query, args...)
+	rows, err := conn.Query(ctx, query, startTime, endTime)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute query: %w", err)
+		return nil, fmt.Errorf("failed to query map keys: %w", err)
 	}
 	defer rows.Close()
 
-	// Parse the results
-	var logs []*models.Log
+	var children []models.LogSchema
 	for rows.Next() {
-		log := &models.Log{}
-		err := rows.Scan(
-			&log.ID,
-			&log.Timestamp,
-			&log.TraceID,
-			&log.SpanID,
-			&log.TraceFlags,
-			&log.SeverityText,
-			&log.SeverityNumber,
-			&log.ServiceName,
-			&log.Namespace,
-			&log.Body,
-			&log.LogAttributes,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
+		var key, valueType string
+		if err := rows.Scan(&key, &valueType); err != nil {
+			return nil, fmt.Errorf("failed to scan map key info: %w", err)
 		}
-		logs = append(logs, log)
+
+		children = append(children, models.LogSchema{
+			Name:     key,
+			Type:     valueType,
+			Path:     []string{columnName, key},
+			IsNested: false,
+		})
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", err)
+	return children, nil
+}
+
+// ExecuteRawQuery executes a raw SQL query and returns the results
+func (r *LogRepository) ExecuteRawQuery(ctx context.Context, sourceID string, query string, args []interface{}) (*models.LogResponse, error) {
+	source, err := r.sourceRepo.Get(sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("source not found: %w", err)
 	}
 
-	return &models.LogResponse{
-		Logs: logs,
-	}, nil
+	// Use the executor to run the query
+	return r.Executor.ExecuteRawQuery(ctx, source, query, args)
+}
+
+// GetTotalLogsCount returns the total number of logs for a given source and query parameters
+func (r *LogRepository) GetTotalLogsCount(ctx context.Context, source *models.Source, params models.LogQueryParams) (int, error) {
+	// Build query using sqlbuilder for better safety and readability
+	sb := sqlbuilder.ClickHouse.NewSelectBuilder()
+	sb.Select("count(*) as count").
+		From("logs." + source.TableName).
+		Where(
+			sb.Between("timestamp",
+				sqlbuilder.Raw(fmt.Sprintf("toDateTime64('%s', 3)", params.StartTime.Format("2006-01-02 15:04:05.000"))),
+				sqlbuilder.Raw(fmt.Sprintf("toDateTime64('%s', 3)", params.EndTime.Format("2006-01-02 15:04:05.000"))),
+			),
+		)
+
+	// Add filters
+	if params.ServiceName != "" {
+		sb.Where(sb.Equal("service_name", params.ServiceName))
+	}
+	if params.Namespace != "" {
+		sb.Where(sb.Equal("namespace", params.Namespace))
+	}
+	if params.SeverityText != "" {
+		sb.Where(sb.Equal("severity_text", params.SeverityText))
+	}
+	if params.SearchQuery != "" {
+		sb.Where(sb.Like("body", "%"+params.SearchQuery+"%"))
+	}
+
+	result, err := r.Executor.ExecuteQuery(ctx, source, sb)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get total count: %w", err)
+	}
+
+	return result.TotalCount, nil
 }

@@ -3,6 +3,8 @@ package logchefql
 import (
 	"fmt"
 	"strings"
+
+	"github.com/huandu/go-sqlbuilder"
 )
 
 // TimeInterval represents a parsed time interval
@@ -67,21 +69,22 @@ func NewSQLBuilder(query *Query, tableName string) *SQLBuilder {
 
 // Build generates the SQL query and arguments
 func (b *SQLBuilder) Build() (string, []interface{}, error) {
-	var conditions []string
+	sb := sqlbuilder.ClickHouse.NewSelectBuilder()
+	sb.Select("*"). // Use * for schema-less approach
+			From(b.tableName)
 
+	// Add conditions
 	for _, filter := range b.query.Filters {
 		condition, err := b.buildCondition(filter)
 		if err != nil {
 			return "", nil, err
 		}
-		conditions = append(conditions, condition)
+		// Add the condition to the builder using Raw with args
+		sb.Where(condition) // condition is already in the correct format
 	}
 
-	query := fmt.Sprintf("SELECT * FROM %s", b.tableName)
-	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
-	}
-
+	// Build the query
+	query, _ := sb.Build() // Ignore args since we're using b.args
 	return query, b.args, nil
 }
 
@@ -104,29 +107,10 @@ func (b *SQLBuilder) buildCondition(filter *Filter) (string, error) {
 	}
 }
 
-// buildJSONCondition handles JSON field access
-func (b *SQLBuilder) buildJSONCondition(filter *Filter) (string, error) {
-	jsonPath := strings.Join(filter.Field.SubFields, ".")
-
-	// Handle time intervals in JSON fields
-	if filter.Value.RelativeTime != nil {
-		b.args = append(b.args, jsonPath, filter.Value.GetValue())
-		return fmt.Sprintf("JSONExtractString(%s, ?) %s now() - INTERVAL ?",
-			filter.Field.Name,
-			filter.Operator), nil
-	}
-
-	switch filter.Operator {
-	case "~":
-		b.args = append(b.args, jsonPath, "%"+filter.Value.GetValue()+"%")
-		return fmt.Sprintf("JSONExtractString(%s, ?) ILIKE ?", filter.Field.Name), nil
-	case "!~":
-		b.args = append(b.args, jsonPath, "%"+filter.Value.GetValue()+"%")
-		return fmt.Sprintf("JSONExtractString(%s, ?) NOT ILIKE ?", filter.Field.Name), nil
-	default:
-		b.args = append(b.args, jsonPath, filter.Value.GetValue())
-		return fmt.Sprintf("JSONExtractString(%s, ?) %s ?", filter.Field.Name, filter.Operator), nil
-	}
+// buildSimpleCondition handles simple comparisons
+func (b *SQLBuilder) buildSimpleCondition(filter *Filter) (string, error) {
+	b.args = append(b.args, filter.Value.GetValue())
+	return fmt.Sprintf("%s %s ?", filter.Field.Name, filter.Operator), nil
 }
 
 // buildPatternCondition handles LIKE/NOT LIKE patterns
@@ -152,8 +136,27 @@ func (b *SQLBuilder) buildTimeCondition(filter *Filter) (string, error) {
 		interval.Function), nil
 }
 
-// buildSimpleCondition handles simple comparisons
-func (b *SQLBuilder) buildSimpleCondition(filter *Filter) (string, error) {
-	b.args = append(b.args, filter.Value.GetValue())
-	return fmt.Sprintf("%s %s ?", filter.Field.Name, filter.Operator), nil
+// buildJSONCondition handles JSON field access
+func (b *SQLBuilder) buildJSONCondition(filter *Filter) (string, error) {
+	jsonPath := strings.Join(filter.Field.SubFields, ".")
+
+	// Handle time intervals in JSON fields
+	if filter.Value.RelativeTime != nil {
+		b.args = append(b.args, jsonPath, filter.Value.GetValue())
+		return fmt.Sprintf("JSONExtractString(%s, ?) %s now() - INTERVAL ?",
+			filter.Field.Name,
+			filter.Operator), nil
+	}
+
+	switch filter.Operator {
+	case "~":
+		b.args = append(b.args, jsonPath, "%"+filter.Value.GetValue()+"%")
+		return fmt.Sprintf("JSONExtractString(%s, ?) ILIKE ?", filter.Field.Name), nil
+	case "!~":
+		b.args = append(b.args, jsonPath, "%"+filter.Value.GetValue()+"%")
+		return fmt.Sprintf("JSONExtractString(%s, ?) NOT ILIKE ?", filter.Field.Name), nil
+	default:
+		b.args = append(b.args, jsonPath, filter.Value.GetValue())
+		return fmt.Sprintf("JSONExtractString(%s, ?) %s ?", filter.Field.Name, filter.Operator), nil
+	}
 }

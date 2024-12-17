@@ -3,7 +3,6 @@ package logs
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/mr-karan/logchef/internal/db"
 	"github.com/mr-karan/logchef/internal/logchefql"
@@ -11,71 +10,73 @@ import (
 )
 
 type Service struct {
-	logRepo      *db.LogRepository
-	sourceRepo   *models.SourceRepository
-	validators   map[QueryMode]QueryValidator
-	sqlValidator *SQLValidator
+	logRepo       *db.LogRepository
+	sourceRepo    *models.SourceRepository
+	logchefqlExec *logchefql.Executor
 }
 
-func NewService(logRepo *db.LogRepository, sourceRepo *models.SourceRepository) *Service {
-	s := &Service{
-		logRepo:      logRepo,
-		sourceRepo:   sourceRepo,
-		validators:   make(map[QueryMode]QueryValidator),
-		sqlValidator: NewSQLValidator(),
+func NewService(logRepo *db.LogRepository, sourceRepo *models.SourceRepository, executor db.QueryExecutor) *Service {
+	return &Service{
+		logRepo:       logRepo,
+		sourceRepo:    sourceRepo,
+		logchefqlExec: logchefql.NewExecutor(executor),
 	}
-
-	// Register validators for each mode
-	s.validators[QueryModeSQL] = s.sqlValidator
-
-	return s
-}
-
-type TimeRange struct {
-	Start *time.Time
-	End   *time.Time
-}
-
-func (s *Service) getSource(ctx context.Context, sourceID string) (*models.Source, error) {
-	source, err := s.sourceRepo.Get(sourceID)
-	if err != nil {
-		return nil, fmt.Errorf("source not found: %w", err)
-	}
-	return source, nil
 }
 
 func (s *Service) QueryLogs(ctx context.Context, sourceID string, req QueryRequest) (*models.LogResponse, error) {
-	// Validation
-	if validator, ok := s.validators[req.Mode]; ok {
-		if err := validator.Validate(ctx, &req); err != nil {
-			return nil, err
-		}
-	}
-
-	source, err := s.getSource(ctx, sourceID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Query execution based on mode
 	switch req.Mode {
 	case QueryModeBasic:
-		return s.logRepo.QueryLogs(ctx, sourceID, req.Params)
+		// First get the logs
+		logs, err := s.logRepo.QueryLogs(ctx, sourceID, req.Params)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query logs: %w", err)
+		}
+
+		// Then get total count if we have logs
+		var totalCount int
+		if len(logs.Logs) > 0 {
+			totalCount, err = s.GetTotalLogsCount(ctx, sourceID, req.Params)
+			if err != nil {
+				// If total count fails, we can still return the logs
+				// Just use the length of logs as count
+				totalCount = len(logs.Logs)
+			}
+		}
+
+		// Calculate if there are more results
+		hasMore := logs.HasMore
+		if !hasMore && totalCount > 0 {
+			hasMore = (req.Params.Offset + req.Params.Limit) < totalCount
+		}
+
+		return &models.LogResponse{
+			Logs:       logs.Logs,
+			TotalCount: totalCount,
+			HasMore:    hasMore,
+		}, nil
 	case QueryModeLogchefQL:
-		return s.executeLogchefQLQuery(ctx, source, req)
+		source, err := s.sourceRepo.Get(sourceID)
+		if err != nil {
+			return nil, fmt.Errorf("source not found: %w", err)
+		}
+		return s.logchefqlExec.Execute(ctx, source, req.Query)
 	case QueryModeSQL:
-		return s.executeSQLQuery(ctx, source, req)
+		source, err := s.sourceRepo.Get(sourceID)
+		if err != nil {
+			return nil, fmt.Errorf("source not found: %w", err)
+		}
+		return s.logRepo.Executor.ExecuteRawQuery(ctx, source, req.Query, nil)
 	default:
 		return nil, ErrInvalidMode
 	}
 }
 
 func (s *Service) GetSchema(ctx context.Context, sourceID string, timeRange TimeRange) ([]models.LogSchema, error) {
-	if err := validateTimeRange(timeRange.Start, timeRange.End); err != nil {
+	if err := timeRange.Validate(); err != nil {
 		return nil, err
 	}
 
-	source, err := s.getSource(ctx, sourceID)
+	source, err := s.sourceRepo.Get(sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -88,24 +89,11 @@ func (s *Service) GetSchema(ctx context.Context, sourceID string, timeRange Time
 	return schema, nil
 }
 
-func (s *Service) executeLogchefQLQuery(ctx context.Context, source *models.Source, req QueryRequest) (*models.LogResponse, error) {
-	query, err := logchefql.Parse(req.Query)
+func (s *Service) GetTotalLogsCount(ctx context.Context, sourceID string, params models.LogQueryParams) (int, error) {
+	source, err := s.sourceRepo.Get(sourceID)
 	if err != nil {
-		return nil, &QueryError{
-			Code:    "SYNTAX_ERROR",
-			Message: "Invalid LogchefQL syntax",
-			Mode:    QueryModeLogchefQL,
-			Details: err.Error(),
-		}
+		return 0, fmt.Errorf("source not found: %w", err)
 	}
 
-	// Convert LogchefQL to SQL
-	sqlQuery, args := query.ToSQL(source.TableName)
-
-	// Execute the SQL query
-	return s.logRepo.ExecuteRawQuery(ctx, source.ID, sqlQuery, args)
-}
-
-func (s *Service) executeSQLQuery(ctx context.Context, source *models.Source, req QueryRequest) (*models.LogResponse, error) {
-	return s.logRepo.ExecuteRawQuery(ctx, source.ID, req.Query, nil)
+	return s.logRepo.GetTotalLogsCount(ctx, source, params)
 }

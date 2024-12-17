@@ -25,8 +25,11 @@ type Server struct {
 }
 
 func NewServer(cfg *config.Config) (*Server, error) {
-	// Initialize JSON logger
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// Initialize JSON logger with source info
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource: true,
+		Level:     slog.LevelDebug,
+	}))
 	slog.SetDefault(logger)
 
 	e := echo.New()
@@ -70,13 +73,14 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		clickhouse: clickhouse,
 	}
 
-	// Initialize repositories
+	// Initialize repositories and executors
+	clickhouseExecutor := db.NewClickhouseExecutor(clickhouse.GetPool())
 	sourceRepo := models.NewSourceRepository(sqlite.DB())
-	logRepo := db.NewLogRepository(clickhouse.GetPool(), sourceRepo)
+	logRepo := db.NewLogRepository(clickhouseExecutor, sourceRepo)
 
 	// Initialize services
 	sourceService := sources.NewService(sourceRepo, clickhouse)
-	logService := logs.NewService(logRepo, sourceRepo)
+	logService := logs.NewService(logRepo, sourceRepo, clickhouseExecutor)
 
 	// Initialize handlers
 	sourceHandler := NewSourceHandler(sourceService)
@@ -95,7 +99,8 @@ func NewServer(cfg *config.Config) (*Server, error) {
 
 	// Log routes
 	logs := api.Group("/logs")
-	logs.GET("/:sourceId", logHandler.QueryLogs)
+	logs.GET("/:sourceId", logHandler.GetLogs)
+	logs.POST("/:sourceId/query", logHandler.QueryLogs)
 	logs.GET("/:sourceId/schema", logHandler.GetLogSchema)
 
 	api.GET("", func(c echo.Context) error {

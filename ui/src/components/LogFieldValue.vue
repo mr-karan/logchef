@@ -71,6 +71,25 @@ const getFieldStyle = (field: string, value: any) => {
 }
 
 const isNestedField = computed(() => props.field.includes('.'))
+
+// Add memoization for expensive operations
+const formattedValue = computed(() => formatValue(props.value))
+
+const fieldStyle = computed(() => getFieldStyle(props.field, props.value))
+
+// Optimize JSON detection
+const isJSONValue = computed(() => {
+  if (!props.value) return false
+  return typeof props.value === 'object' && props.value !== null
+})
+
+// Add type checking for better performance
+const valueType = computed(() => {
+  if (props.field === 'timestamp') return 'timestamp'
+  if (props.field === 'severity_text') return 'severity'
+  if (isJSONValue.value) return 'json'
+  return 'text'
+})
 </script>
 
 <template>

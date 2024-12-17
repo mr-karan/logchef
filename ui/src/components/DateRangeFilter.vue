@@ -34,12 +34,14 @@ watch(() => props.endDate, (newVal) => {
 watch(localStartDate, (newVal, oldVal) => {
   if (newVal?.getTime() !== oldVal?.getTime()) {
     emit('update:startDate', newVal)
+    emit('fetch')
   }
 })
 
 watch(localEndDate, (newVal, oldVal) => {
   if (newVal?.getTime() !== oldVal?.getTime()) {
     emit('update:endDate', newVal)
+    emit('fetch')
   }
 })
 </script>

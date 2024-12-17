@@ -14,12 +14,12 @@ type Query struct {
 
 func (q *Query) ToSQL(tableName string) (string, []interface{}) {
 	builder := NewSQLBuilder(q, tableName)
-	sql, args, err := builder.Build()
+	query, args, err := builder.Build()
 	if err != nil {
-		// For now, maintain backward compatibility by returning empty on error
+		// Handle error gracefully
 		return "", nil
 	}
-	return sql, args
+	return query, args
 }
 
 // buildFieldPath constructs the JSON path for field access

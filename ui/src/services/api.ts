@@ -25,21 +25,12 @@ export const api = {
     async getLogs(sourceId: string, params: LogQueryParams, signal?: AbortSignal) {
         const queryParams = new URLSearchParams()
 
-        // Required params
-        queryParams.append('limit', params.limit.toString())
-        queryParams.append('offset', params.offset.toString())
-        queryParams.append('start_time', params.start_time)
-        queryParams.append('end_time', params.end_time)
-
-        // Optional params
-        if (params.search_query) {
-            queryParams.append('search', params.search_query)
-        }
-        if (params.severity_text) {
-            queryParams.append('severity', params.severity_text)
-        }
-
-        // console.log('API request URL:', `${BASE_URL}/logs/${sourceId}?${queryParams.toString()}`)
+        // Add all params
+        Object.entries(params).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                queryParams.append(key, value.toString())
+            }
+        })
 
         const response = await fetch(`${BASE_URL}/logs/${sourceId}?${queryParams.toString()}`, {
             method: 'GET',
@@ -56,7 +47,6 @@ export const api = {
         const responseData = await response.json()
         return {
             ...responseData.data,
-            // Add chunked property for progressive loading
             chunks: chunk(responseData.data.logs || [], 1000)
         }
     },
@@ -129,5 +119,25 @@ export const api = {
 
         const responseData = await response.json()
         return responseData.data
+    },
+
+    async queryLogs(sourceId: string, request: QueryRequest) {
+        const response = await fetch(`${BASE_URL}/logs/${sourceId}/query`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(request)
+        })
+
+        if (!response.ok) {
+            throw new Error('Failed to execute query')
+        }
+
+        const responseData = await response.json()
+        return {
+            ...responseData.data,
+            chunks: chunk(responseData.data.logs || [], 1000)
+        }
     }
 }
