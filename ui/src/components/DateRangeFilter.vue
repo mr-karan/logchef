@@ -56,6 +56,7 @@ watch(localEndDate, (newVal, oldVal) => {
       :manualInput="false"
       :maxDate="localEndDate"
       class="w-[200px]"
+      :panelStyle="{ width: '350px' }"
       :pt="{
         input: 'text-sm'
       }"
@@ -69,6 +70,7 @@ watch(localEndDate, (newVal, oldVal) => {
       :manualInput="false"
       :minDate="localStartDate"
       class="w-[200px]"
+      :panelStyle="{ width: '350px' }"
       :pt="{
         input: 'text-sm'
       }"
@@ -87,7 +89,7 @@ watch(localEndDate, (newVal, oldVal) => {
 </template>
 
 <style scoped>
-.date-picker-custom :deep(.p-inputtext){
+.date-picker-custom :deep(.p-inputtext) {
   font-size: 0.75rem;
 }
 

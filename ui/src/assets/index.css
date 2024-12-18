@@ -1,3 +1,37 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Modern Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 14px;
+    height: 14px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: rgb(51, 65, 85);
+    border-radius: 8px;
+    border: 4px solid transparent;
+    background-clip: padding-box;
+    transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(30, 41, 59);
+}
+
+/* Firefox */
+* {
+    scrollbar-width: auto;
+    scrollbar-color: rgb(51, 65, 85) transparent;
+}
+
+/* Enable smooth scrolling for the whole app */
+html {
+    scroll-behavior: smooth;
+}

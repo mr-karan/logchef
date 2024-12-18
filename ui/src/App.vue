@@ -41,7 +41,7 @@ const navItems = [
       <div class="h-14 px-6 flex items-center border-b border-gray-100">
         <span class="text-xl font-semibold text-gray-900">LogChef</span>
       </div>
-      
+
       <!-- Navigation -->
       <nav class="py-4">
         <router-link

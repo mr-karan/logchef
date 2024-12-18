@@ -11,41 +11,9 @@ const isJSON = (value: any) => {
     return typeof value === 'object' && value !== null
 }
 
-// Format timestamp for developer-friendly display
-const formatTimestamp = (timestamp: string) => {
-    try {
-        const date = new Date(timestamp)
-        if (isNaN(date.getTime())) {
-            throw new Error('Invalid date')
-        }
-
-        // Format: Nov 26 2024 11:30:34.000 UTC
-        const formatter = new Intl.DateTimeFormat('en-US', {
-            month: 'short',
-            day: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            fractionalSecondDigits: 3,
-            timeZone: 'UTC',
-            hour12: false
-        })
-
-        return formatter.format(date) + ' UTC'
-    } catch (err) {
-        console.error('Error formatting timestamp:', timestamp, err)
-        return timestamp
-    }
-}
-
 const formatValue = (value: any) => {
     if (value === undefined || value === null || value === '') {
         return '-'
-    }
-
-    if (props.field === 'timestamp') {
-        return formatTimestamp(value)
     }
 
     if (isJSON(value)) {
