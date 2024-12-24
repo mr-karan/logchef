@@ -1,8 +1,8 @@
 [sources.generate_syslog]
 type = "demo_logs"
 format = "syslog"
-count = 100000
-interval = 0.001
+count = 1000
+interval = 0.1
 
 [transforms.remap_syslog]
 inputs = ["generate_syslog"]

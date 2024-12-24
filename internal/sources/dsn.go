@@ -23,10 +23,16 @@ func parseDSN(dsn string) config.ClickhouseConfig {
 		dialTimeout = 10 * time.Second // Default timeout
 	}
 
+	// Database is specified in the path, remove leading slash
+	database := parsedURL.Path
+	if len(database) > 0 && database[0] == '/' {
+		database = database[1:]
+	}
+
 	return config.ClickhouseConfig{
 		Host:        parsedURL.Hostname(),
 		Port:        port,
-		Database:    queryParams.Get("database"),
+		Database:    database,
 		Username:    queryParams.Get("username"),
 		Password:    queryParams.Get("password"),
 		DialTimeout: dialTimeout,

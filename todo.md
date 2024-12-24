@@ -1,42 +1,47 @@
 ### High Priority
+
 - [ ] Vector Log Ingestion
-   - [ ] Implement vector ingest logs
-   - [ ] Build proper log viewer UI with:
-     - Typed data structures
-     - LogTable component (timestamps, severity badges, message display)
-     - Loading/error states
-     - Basic fetch functionality
-   - [ ] Add logs panel
+  - [ ] Implement vector ingest logs
+  - [ ] Build proper log viewer UI with:
+    - Typed data structures
+    - LogTable component (timestamps, severity badges, message display)
+    - Loading/error states
+    - Basic fetch functionality
+  - [ ] Add logs panel
 - [ ] Timezone aware logs?
-   - [ ] Give the user an option to specify timezone for the logs
-   - [ ] Display the logs in the specified timezone
-   - [ ] Load browser default timezone in the UI
-   - [ ] In the SELECT * query, format the timestamp to be properly displayed in the UI, so no timezone conversion is needed in UI
+  - [ ] Give the user an option to specify timezone for the logs
+  - [ ] Display the logs in the specified timezone
+  - [ ] Load browser default timezone in the UI
+  - [ ] In the SELECT \* query, format the timestamp to be properly displayed in the UI, so no timezone conversion is needed in UI
 - [ ] Core Infrastructure
-   - [ ] Upgrade echo to v5
-   - [ ] Update critical dependencies
-   - [ ] Implement golang migrate
+  - [ ] Upgrade echo to v5
+  - [ ] Update critical dependencies
+  - [ ] Implement golang migrate
 
 ### UI/UX Improvements
+
 - [ ] Source Management
-   - [ ] Create UI for source management
-   - [ ] Evaluate datatable components (with virtual scroll)
-   - [ ] Implement date range component with time selector
+
+  - [ ] Create UI for source management
+  - [ ] Evaluate datatable components (with virtual scroll)
+  - [ ] Implement date range component with time selector
 
 - [ ] Log Viewer Enhancements
-   - [ ] Add infinite scrolling
-   - [ ] Advanced filtering
-   - [ ] Full text search
-   - [ ] Time range selection
-   - [ ] Live tail functionality
+  - [ ] Add infinite scrolling
+  - [ ] Advanced filtering
+  - [ ] Full text search
+  - [ ] Time range selection
+  - [ ] Live tail functionality
 
 ### Technical Debt
+
 - [ ] Build Optimization
-   - [ ] Optimize dist folder in go binary path
-   - [ ] Clean up .gitignore
-   - [x] Remove unused shadcn components
+  - [ ] Optimize dist folder in go binary path
+  - [ ] Clean up .gitignore
+  - [x] Remove unused shadcn components
 
 ### Completed
+
 - [x] Make log URI shareable with query params
 
 ---
@@ -82,6 +87,7 @@ Here's a detailed improvement plan for your log analytics application's DataTabl
 # DataTable Enhancements for Log Analytics
 
 ## 1. Virtual Scrolling for Large Datasets
+
 **Why:** Essential for handling large log datasets (>1000 rows) without performance degradation
 **Docs:** [PrimeVue Virtual Scroll](https://primevue.org/datatable/#virtualscroll)
 
@@ -102,6 +108,7 @@ Here's a detailed improvement plan for your log analytics application's DataTabl
 ```
 
 ## 2. Fixed Header with Vertical Scroll
+
 **Why:** Maintains context while scrolling through logs
 **Docs:** [PrimeVue Scroll](https://primevue.org/datatable/#scroll)
 
@@ -115,6 +122,7 @@ Here's a detailed improvement plan for your log analytics application's DataTabl
 ```
 
 ## 3. Column Management
+
 **Why:** Allows users to customize visible log fields
 **Docs:** [PrimeVue Column Toggle](https://primevue.org/datatable/#column_toggle)
 
@@ -130,6 +138,7 @@ Here's a detailed improvement plan for your log analytics application's DataTabl
 ```
 
 ## 4. Export Functionality
+
 **Why:** Enables offline analysis and sharing of logs
 **Docs:** [PrimeVue Export](https://primevue.org/datatable/#export)
 
@@ -142,18 +151,12 @@ Here's a detailed improvement plan for your log analytics application's DataTabl
   />
 </template>
 
-// In component
-methods: {
-  exportLogs() {
-    this.$refs.dataTable.exportCSV({
-      selectionOnly: false,
-      customFilename: `logs-${new Date().toISOString()}`
-    });
-  }
-}
+// In component methods: { exportLogs() { this.$refs.dataTable.exportCSV({
+selectionOnly: false, customFilename: `logs-${new Date().toISOString()}` }); } }
 ```
 
 ## 5. Stateful Table
+
 **Why:** Persists user preferences and filters between sessions
 **Docs:** [PrimeVue Stateful](https://primevue.org/datatable/#stateful)
 
@@ -166,15 +169,12 @@ methods: {
 ```
 
 ## 6. Row Expansion for Details
+
 **Why:** Shows detailed log information without cluttering main view
 **Docs:** [PrimeVue Row Expansion](https://primevue.org/datatable/#row_expansion)
 
 ```vue
-<DataTable
-  :value="logs"
-  v-model:expandedRows="expandedLogs"
-  dataKey="id"
->
+<DataTable :value="logs" v-model:expandedRows="expandedLogs" dataKey="id">
   <Column :expander="true" />
   <template #expansion="slotProps">
     <LogDetailView :log="slotProps.data" />
@@ -183,6 +183,7 @@ methods: {
 ```
 
 ## 7. Resizable Columns
+
 **Why:** Allows users to adjust column widths for better readability
 **Docs:** [PrimeVue Resize](https://primevue.org/datatable/#resize_expandmode)
 
@@ -195,6 +196,7 @@ methods: {
 ```
 
 ## Implementation Priority:
+
 1. Virtual Scrolling (Critical for performance)
 2. Fixed Header (Basic UX requirement)
 3. Export Functionality (Common user request)
@@ -204,6 +206,7 @@ methods: {
 7. Resizable Columns (Nice to have)
 
 ## Additional Considerations:
+
 - Consider adding loading states for async operations
 - Implement error boundaries for failed data loads
 - Add keyboard navigation support
@@ -211,3 +214,18 @@ methods: {
 - Implement date range presets for log filtering
 
 This implementation assumes you're using Vue 3 with PrimeVue's latest version and have proper TypeScript/JavaScript data structures for your logs.
+
+---
+
+## Source Management
+
+- Database is not created automatically
+- SQLite sync is problematic
+  - Keep source of truth as same maybe
+  - Downside - everything will be in same DB unless used a config file
+- SQLite and Clickhouse can go out of sync?
+  - When someone loses clickhouse volume, but has sqlite DB - Not a major issue
+- Source creation is succesful even if Clickhouse table is not created
+  - If DB doesn't exist this happens
+  - Check for other cases and make it robust
+-
