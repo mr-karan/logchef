@@ -30,6 +30,9 @@ interface TableState {
   sortOrder?: number
 }
 
+// Add at the top with other refs, after the imports
+const intersectionObserver = ref<IntersectionObserver | null>(null)
+
 // Move state declarations to the top
 const sourcesLoading = ref(true)
 const error = ref<string | null>(null)
@@ -204,6 +207,11 @@ const fetchLogsAndSchema = async () => {
       tableState.logs = logsResponse.logs || []
       tableState.totalRecords = logsResponse.total_count
       tableState.hasMore = logsResponse.has_more || false
+
+      // Set up intersection observer after logs are loaded
+      nextTick(() => {
+        setupIntersectionObserver()
+      })
     }
 
   } catch (err) {
@@ -219,10 +227,34 @@ const fetchLogsAndSchema = async () => {
   }
 }
 
-// Add observer ref at the top level
-const intersectionObserver = ref<IntersectionObserver | null>(null)
+// Add a new function to set up the intersection observer
+const setupIntersectionObserver = () => {
+  // Disconnect existing observer if any
+  intersectionObserver.value?.disconnect()
 
-// Update onMounted
+  // Create new observer
+  intersectionObserver.value = new IntersectionObserver(
+    (entries) => {
+      const entry = entries[0]
+      if (entry.isIntersecting && !tableState.loading && tableState.hasMore) {
+        console.log('🔄 Intersection triggered, fetching more logs')
+        fetchMoreLogs()
+      }
+    },
+    { threshold: 0.1 }
+  )
+
+  // Observe the trigger element
+  const trigger = document.querySelector('#load-trigger')
+  if (trigger && intersectionObserver.value) {
+    intersectionObserver.value.observe(trigger)
+    console.log('👀 Observer set up on load-trigger')
+  } else {
+    console.warn('⚠️ Could not find load-trigger element')
+  }
+}
+
+// Update onMounted to remove the observer setup (it's now handled in fetchLogsAndSchema)
 onMounted(async () => {
   console.log('🎬 Component mounted')
 
@@ -260,28 +292,9 @@ onMounted(async () => {
         endDate: endDate.value
       })
 
-      // Fetch both schema and logs
+      // Fetch both schema and logs (this will also set up the observer)
       await fetchLogsAndSchema()
     }
-
-    // Setup intersection observer for infinite scroll
-    intersectionObserver.value = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0]
-        if (entry.isIntersecting && !tableState.loading && tableState.hasMore) {
-          fetchMoreLogs()
-        }
-      },
-      { threshold: 0.1 }
-    )
-
-    nextTick(() => {
-      const trigger = document.querySelector('#load-trigger')
-      if (trigger && intersectionObserver.value) {
-        intersectionObserver.value.observe(trigger)
-      }
-    })
-
   } catch (err) {
     console.error('Error during component initialization:', err)
     error.value = err instanceof Error ? err.message : 'Failed to initialize'
@@ -337,7 +350,7 @@ const columns = computed(() => {
     Object.keys(firstLog).forEach(key => {
       // Skip default fields we already added
       if (!['timestamp', 'severity_text', 'body'].includes(key) &&
-          !result.find(col => col.field === key)) {
+        !result.find(col => col.field === key)) {
         result.push({
           field: key,
           header: key,
@@ -395,7 +408,7 @@ const onToggleColumns = (val) => {
   }
 }
 
-// Update fetchMoreLogs to use preprocessing
+// Update fetchMoreLogs to re-setup the observer after loading more logs
 const fetchMoreLogs = async () => {
   if (tableState.loading || !tableState.hasMore) return
 
@@ -416,6 +429,11 @@ const fetchMoreLogs = async () => {
       tableState.logs = [...tableState.logs, ...processedNewLogs]
       tableState.hasMore = response.has_more || false
       tableState.totalRecords = response.total_count
+
+      // Re-setup observer after adding new logs
+      nextTick(() => {
+        setupIntersectionObserver()
+      })
     } else {
       tableState.hasMore = false
     }
@@ -464,8 +482,8 @@ const getNestedValue = (obj: any, path: string) => {
 }
 
 const formatColumnHeader = (field: string) => {
-    // Remove duplicate log_attributes prefix if present
-    return field.replace('log_attributes.log_attributes.', 'log_attributes.')
+  // Remove duplicate log_attributes prefix if present
+  return field.replace('log_attributes.log_attributes.', 'log_attributes.')
 }
 
 // Add these functions for column width persistence
@@ -779,27 +797,14 @@ const tableState = reactive<TableState>({
             <!-- Left side: Source and Columns -->
             <div class="flex items-center gap-3 flex-1">
               <FloatLabel class="w-[250px]" variant="on">
-                <Select
-                  v-model="sourceId"
-                  :options="sources"
-                  optionLabel="Name"
-                  optionValue="ID"
-                  class="w-full"
-                  @change="resetLogs"
-                />
+                <Select v-model="sourceId" :options="sources" optionLabel="Name" optionValue="ID" class="w-full"
+                  @change="resetLogs" />
                 <label>Choose Log Source</label>
               </FloatLabel>
 
               <FloatLabel class="w-[350px]" variant="on">
-                <MultiSelect
-                  v-model="selectedColumns"
-                  :options="columns"
-                  optionLabel="header"
-                  display="chip"
-                  class="w-full"
-                  @update:modelValue="onToggleColumns"
-                  :disabled="tableState.loading"
-                />
+                <MultiSelect v-model="selectedColumns" :options="columns" optionLabel="header" display="chip"
+                  class="w-full" @update:modelValue="onToggleColumns" :disabled="tableState.loading" />
                 <label>Select Columns</label>
               </FloatLabel>
             </div>
@@ -807,43 +812,23 @@ const tableState = reactive<TableState>({
             <!-- Right side: Time Range -->
             <div class="flex items-center gap-3">
               <FloatLabel class="min-w-[400px]" variant="on">
-                <DateRangeFilter
-                  v-model:startDate="startDate"
-                  v-model:endDate="endDate"
-                  @fetch="fetchLogsAndSchema"
-                />
+                <DateRangeFilter v-model:startDate="startDate" v-model:endDate="endDate" @fetch="fetchLogsAndSchema" />
                 <label>Time Range</label>
               </FloatLabel>
               <div class="h-6 w-px bg-gray-200 mx-2"></div>
 
               <!-- Replace the batch size selector -->
               <FloatLabel class="w-24" variant="on">
-                <Select
-                  v-model="tableState.rows"
-                  :options="[100, 200, 500, 1000]"
-                  class="w-full"
-                  :pt="{
-                    input: 'text-sm'
-                  }"
-                />
+                <Select v-model="tableState.rows" :options="[100, 200, 500, 1000]" class="w-full" :pt="{
+                  input: 'text-sm'
+                }" />
                 <label>Batch Size</label>
               </FloatLabel>
 
-              <Button
-                icon="pi pi-share-alt"
-                severity="secondary"
-                text
-                v-tooltip.bottom="'Share Query'"
-                @click="copyShareableURL"
-              />
-              <Button
-                icon="pi pi-download"
-                severity="secondary"
-                text
-                @click="exportLogs"
-                v-tooltip.bottom="'Export as CSV'"
-                :disabled="!tableState.logs.length"
-              />
+              <Button icon="pi pi-share-alt" severity="secondary" text v-tooltip.bottom="'Share Query'"
+                @click="copyShareableURL" />
+              <Button icon="pi pi-download" severity="secondary" text @click="exportLogs"
+                v-tooltip.bottom="'Export as CSV'" :disabled="!tableState.logs.length" />
             </div>
           </div>
         </div>
@@ -859,13 +844,13 @@ const tableState = reactive<TableState>({
           <Skeleton width="160px" height="2rem" />
           <Skeleton width="90px" height="2rem" />
           <Skeleton width="200px" height="2rem" />
-          </div>
+        </div>
 
         <!-- Rows skeleton -->
         <div v-for="i in 10" :key="i" class="flex space-x-4">
-            <Skeleton width="160px" height="2.5rem" />
-            <Skeleton width="90px" height="2.5rem" />
-            <Skeleton height="2.5rem" />
+          <Skeleton width="160px" height="2.5rem" />
+          <Skeleton width="90px" height="2.5rem" />
+          <Skeleton height="2.5rem" />
         </div>
       </div>
 
@@ -886,42 +871,28 @@ const tableState = reactive<TableState>({
         <table class="w-full border-collapse">
           <thead class="sticky top-0 bg-white shadow-sm z-10">
             <tr>
-              <th v-for="col in selectedColumns"
-                  :key="col.field"
-                  :data-field="col.field"
-                  :style="getColumnStyle(col.field)"
-                  class="text-left p-2 font-semibold text-gray-700 relative border-b border-gray-200"
-              >
+              <th v-for="col in selectedColumns" :key="col.field" :data-field="col.field"
+                :style="getColumnStyle(col.field)"
+                class="text-left p-2 font-semibold text-gray-700 relative border-b border-gray-200">
                 {{ formatColumnHeader(col.field) }}
                 <div class="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-gray-300"
-                     @mousedown="startResize($event, col.field)"
-                ></div>
+                  @mousedown="startResize($event, col.field)"></div>
               </th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="log in tableState.logs"
-                :key="log.id"
-                class="hover:bg-gray-50 cursor-pointer"
-                @click="showLogDetails({ data: log })">
-              <td v-for="col in selectedColumns"
-                  :key="col.field"
-                  :style="getColumnStyle(col.field)"
-                  class="p-2 border-b border-gray-200"
-              >
-                <LogFieldValue
-                  :field="col.field"
-                  :value="getProcessedValue(log, col.field)"
-                />
+            <tr v-for="log in tableState.logs" :key="log.id" class="hover:bg-gray-50 cursor-pointer"
+              @click="showLogDetails({ data: log })">
+              <td v-for="col in selectedColumns" :key="col.field" :style="getColumnStyle(col.field)"
+                class="p-2 border-b border-gray-200">
+                <LogFieldValue :field="col.field" :value="getProcessedValue(log, col.field)" />
               </td>
             </tr>
           </tbody>
         </table>
 
         <!-- Load More Trigger -->
-        <div id="load-trigger"
-             class="h-20 w-full flex items-center justify-center"
-             v-show="tableState.hasMore">
+        <div id="load-trigger" class="h-20 w-full flex items-center justify-center" v-show="tableState.hasMore">
           <div v-if="tableState.loading" class="text-gray-500">
             <i class="pi pi-spinner animate-spin mr-2"></i>
             Loading more logs...
@@ -932,34 +903,24 @@ const tableState = reactive<TableState>({
   </div>
 
   <!-- Simplified Log Details Drawer -->
-  <Drawer
-    v-model:visible="drawerVisible"
-    position="right"
-    :modal="true"
-    :dismissable="true"
-    :closable="true"
-    :style="{ width: 'min(85vw, 960px)' }"
-    class="drawer-wide"
-    :pt="{
+  <Drawer v-model:visible="drawerVisible" position="right" :modal="true" :dismissable="true" :closable="true"
+    :style="{ width: 'min(85vw, 960px)' }" class="drawer-wide" :pt="{
       root: { class: 'border-l border-gray-200', style: { width: 'min(85vw, 960px)' } },
       header: { class: 'bg-gray-50 px-6 py-4 border-b border-gray-200' },
       content: { class: 'p-6 overflow-y-auto' }
-    }"
-  >
+    }">
     <template #header>
       <div class="flex justify-between items-center">
         <h3 class="text-lg font-semibold text-gray-900">Log Details</h3>
-        <button
-          @click="copyToClipboard(selectedLog)"
-          class="text-gray-400 hover:text-gray-600 p-2 rounded-md hover:bg-gray-100"
-          title="Copy to clipboard"
-        >
+        <button @click="copyToClipboard(selectedLog)"
+          class="text-gray-400 hover:text-gray-600 p-2 rounded-md hover:bg-gray-100" title="Copy to clipboard">
           <i class="pi pi-copy"></i>
         </button>
       </div>
     </template>
 
-    <pre v-if="selectedLog" class="text-sm font-mono bg-gray-50 p-4 rounded-md overflow-x-auto whitespace-pre-wrap">{{ JSON.stringify(selectedLog, null, 2) }}</pre>
+    <pre v-if="selectedLog" class="text-sm font-mono bg-gray-50 p-4 rounded-md overflow-x-auto whitespace-pre-wrap">{{
+      JSON.stringify(selectedLog, null, 2) }}</pre>
   </Drawer>
 </template>
 
@@ -989,7 +950,8 @@ th .cursor-col-resize {
 }
 
 /* Ensure table cells don't wrap */
-td, th {
+td,
+th {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1030,7 +992,8 @@ tr {
 }
 
 /* Optional: Add subtle border between columns */
-td, th {
+td,
+th {
   border-right: 1px solid #f3f4f6;
 }
 </style>
