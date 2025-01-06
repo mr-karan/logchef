@@ -11,6 +11,8 @@
     "format": "prettier --write src/"
   },
   "dependencies": {
+    "@guolao/vue-monaco-editor": "^1.5.4",
+    "@monaco-editor/loader": "^1.4.0",
     "@primevue/themes": "^4.2.4",
     "@vueuse/core": "^11.3.0",
     "class-variance-authority": "^0.7.0",

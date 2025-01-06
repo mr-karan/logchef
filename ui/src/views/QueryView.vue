@@ -17,6 +17,7 @@ import LogSchemaSidebar from '@/components/LogSchemaSidebar.vue'
 import LogFieldValue from '@/components/LogFieldValue.vue'
 import MultiSelect from 'primevue/multiselect'
 import { useDebounceFn } from '@vueuse/core'
+import QueryEditor from '@/components/QueryEditor.vue'
 
 // Add proper interface for table state at the top of the file
 interface TableState {
@@ -68,7 +69,7 @@ const endDate = ref(
 const initialLoad = ref(true) // Track first load to show skeleton
 
 // Add new ref for query mode
-const queryMode = ref<'basic' | 'logchefql' | 'sql'>('basic')
+const queryMode = ref<'sql' | 'logql'>('sql')
 const queryString = ref('')
 
 // Now define loadLogs and resetLogs
@@ -784,6 +785,21 @@ const tableState = reactive<TableState>({
   sortOrder: undefined
 })
 
+const handleSearch = async () => {
+  tableState.first = 0
+  await fetchLogsPage({
+    first: 0,
+    rows: tableState.rows,
+    query: queryString.value,
+    queryMode: queryMode.value
+  })
+}
+
+const handleClear = () => {
+  queryString.value = ''
+  handleSearch()
+}
+
 </script>
 
 <template>
@@ -832,6 +848,12 @@ const tableState = reactive<TableState>({
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- Query Editor Section -->
+      <div class="p-4 border-b border-gray-100">
+        <QueryEditor v-model="queryString" v-model:mode="queryMode" :loading="tableState.loading" @search="handleSearch"
+          @clear="handleClear" />
       </div>
     </div>
 
