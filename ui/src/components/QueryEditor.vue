@@ -1,179 +1,232 @@
+<template>
+  <div class="query-container flex items-center gap-3 p-2">
+    <ToggleButton v-model="isSqlMode" onIcon="pi pi-database" offIcon="pi pi-code" onLabel="SQL" offLabel="LogchefQL"
+      class="flex-none" />
+
+    <div class="editor-wrapper flex-1">
+      <vue-monaco-editor ref="monacoEditor" :value="modelValue" :language="currentLanguage" :options="editorOptions"
+        @update:value="handleChange" @mount="handleEditorMount" />
+      <span class="placeholder" v-if="!modelValue">Type your LogchefQL query here...</span>
+    </div>
+  </div>
+</template>
+
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
-import type * as Monaco from 'monaco-editor'
-import Select from 'primevue/select'
-import Button from 'primevue/button'
-import { configureSQLLanguage, SQL_KEYWORDS } from '@/config/languages'
+import ToggleButton from 'primevue/togglebutton'
+import { configureLogchefQLLanguage } from '../config/languages/logchefql'
 
-type QueryMode = 'sql' | 'logql'
-
-interface Props {
-    modelValue?: string
-    mode?: QueryMode
-    loading?: boolean
-}
-
-const props = withDefaults(defineProps<Props>(), {
-    modelValue: '',
-    mode: 'sql',
-    loading: false
-})
-
-const emit = defineEmits<{
-    (e: 'update:modelValue', value: string): void
-    (e: 'update:mode', value: QueryMode): void
-    (e: 'search'): void
-    (e: 'clear'): void
+const props = defineProps<{
+  modelValue: string
+  loading?: boolean
 }>()
 
-const queryMode = ref<QueryMode>(props.mode)
-const editorValue = ref(props.modelValue)
+const emit = defineEmits<{
+  (e: 'update:modelValue', value: string): void
+  (e: 'search'): void
+}>()
 
-const editorOptions = ref({
-    minimap: { enabled: false },
-    lineNumbers: 'off',
-    wordWrap: 'on',
-    scrollbar: {
-        vertical: 'hidden',
-        horizontal: 'hidden'
-    },
-    lineHeight: 24,
-    padding: { top: 8, bottom: 8 },
-    overviewRulerLanes: 0,
-    overviewRulerBorder: false,
-    hideCursorInOverviewRuler: true,
-    contextmenu: true,
-    fontSize: 13,
-    renderLineHighlight: 'none',
-    folding: false,
-    glyphMargin: false,
-    lineDecorationsWidth: 0,
-    lineNumbersMinChars: 0,
-    renderWhitespace: 'none',
-    fixedOverflowWidgets: true,
-    language: props.mode === 'sql' ? 'sql' : 'plaintext',
-    onDidChangeModelLanguage: (e: any) => {
-        console.log('🔤 Language changed:', e)
-    },
-    onDidChangeModelContent: (e: any) => {
-        console.log('📝 Content changed:', e)
-    },
-    wordBasedSuggestions: true,
-    quickSuggestions: true,
-    formatOnType: true,
-    formatOnPaste: true,
-    suggestOnTriggerCharacters: true
-})
+const isSqlMode = ref(false)
+const monacoEditor = ref(null)
 
-// Watch for mode changes to update language
-watch(() => props.mode, (newMode) => {
-    console.log('🔄 Mode changed:', newMode)
-    editorOptions.value = {
-        ...editorOptions.value,
-        language: newMode === 'sql' ? 'sql' : 'plaintext'
+const currentLanguage = computed(() => isSqlMode.value ? 'sql' : 'logchefql')
+
+const editorOptions = {
+  minimap: { enabled: false },
+  lineNumbers: 'off',
+  lineDecorationsWidth: 0,
+  folding: false,
+  wordWrap: 'off',
+  scrollBeyondLastLine: false,
+  scrollbar: {
+    vertical: 'hidden',
+    horizontal: 'hidden',
+    useShadows: false,
+    alwaysConsumeMouseWheel: false
+  },
+  overviewRulerBorder: false,
+  hideCursorInOverviewRuler: true,
+  lineHeight: 32,
+  fontSize: 14,
+  padding: { top: 8, bottom: 8 },
+  fontFamily: 'Monaco, Menlo, "Ubuntu Mono", Consolas, source-code-pro, monospace',
+  renderLineHighlight: 'none',
+  contextmenu: false,
+  automaticLayout: true,
+  fixedOverflowWidgets: true,
+  renderWhitespace: 'none',
+  quickSuggestions: {
+    other: true,
+    comments: false,
+    strings: true
+  },
+  suggestOnTriggerCharacters: true,
+  parameterHints: {
+    enabled: true,
+    cycle: true
+  },
+  glyphMargin: false,
+  renderIndentGuides: false,
+  occurrencesHighlight: false,
+  selectionHighlight: false,
+  links: false,
+  cursorStyle: 'line',
+  cursorWidth: 1,
+  cursorBlinking: 'solid',
+  suggest: {
+    showWords: false,
+    preview: true,
+    showIcons: true,
+    maxVisibleSuggestions: 12,
+    insertMode: 'insert'
+  }
+}
+
+const handleEditorMount = (editor: any, monaco: any) => {
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+    emit('search')
+  })
+  editor.focus()
+
+  // Configure LogchefQL language support
+  configureLogchefQLLanguage(monaco)
+
+  // Disable multiple lines
+  editor.onKeyDown((e: any) => {
+    if (e.keyCode === monaco.KeyCode.Enter && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault()
     }
-    console.log('Updated language:', editorOptions.value.language)
-})
+  })
 
-const handleMount = (editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco) => {
-    console.log('🎨 Editor mounted')
-
-    // Set the model language directly
-    const model = editor.getModel()
-    if (model) {
-        monaco.editor.setModelLanguage(model, 'sql')
-        console.log('🔧 Set model language to SQL')
-    }
-
-    // Register completion provider
+  // Register SQL completions if in SQL mode
+  if (isSqlMode.value) {
     monaco.languages.registerCompletionItemProvider('sql', {
-        provideCompletionItems: () => {
-            const suggestions = SQL_KEYWORDS.map(keyword => ({
-                label: keyword,
-                kind: monaco.languages.CompletionItemKind.Keyword,
-                insertText: keyword
-            }))
-            console.log('💡 Providing suggestions:', suggestions)
-            return { suggestions }
-        }
+      provideCompletionItems: () => ({
+        suggestions: [
+          {
+            label: 'SELECT',
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: 'SELECT',
+            detail: 'SQL SELECT keyword'
+          },
+          {
+            label: 'FROM',
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: 'FROM',
+            detail: 'SQL FROM keyword'
+          },
+          {
+            label: 'WHERE',
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: 'WHERE',
+            detail: 'SQL WHERE clause'
+          },
+          {
+            label: 'GROUP BY',
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: 'GROUP BY',
+            detail: 'SQL GROUP BY clause'
+          },
+          {
+            label: 'ORDER BY',
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: 'ORDER BY',
+            detail: 'SQL ORDER BY clause'
+          },
+          {
+            label: 'LIMIT',
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: 'LIMIT',
+            detail: 'SQL LIMIT clause'
+          }
+        ]
+      })
     })
+  }
 }
 
-const handleValueChange = (value: string) => {
-    console.log('📊 Value changed:', value)
-    console.log('Current language:', editorOptions.value.language)
-    editorValue.value = value
-    emit('update:modelValue', value)
-}
-
-const handleModeChange = (event: { value: QueryMode }) => {
-    const newMode = event.value
-    console.log('📝 Mode change event:', newMode)
-    queryMode.value = newMode
-
-    // Update editor language immediately
-    editorOptions.value = {
-        ...editorOptions.value,
-        language: newMode === 'sql' ? 'sql' : 'plaintext'
-    }
-
-    emit('update:mode', newMode)
-}
-
-const handleClear = () => {
-    editorValue.value = ''
-    emit('clear')
+const handleChange = (value: string) => {
+  // Remove any newlines to keep it single line
+  const singleLine = value.replace(/[\r\n]+/g, ' ')
+  emit('update:modelValue', singleLine)
 }
 </script>
 
-<template>
-    <div class="flex items-center gap-4">
-        <Select v-model="queryMode" :options="[
-            { label: 'LogQL', value: 'logql' },
-            { label: 'SQL', value: 'sql' }
-        ]" optionLabel="label" optionValue="value" class="w-32" @change="handleModeChange" />
-
-        <div class="flex-1 border rounded-md bg-white overflow-hidden" style="height: 40px">
-            <VueMonacoEditor v-model:value="editorValue" :options="editorOptions" theme="vs" height="40px"
-                @mount="handleMount" @change="handleValueChange">
-                <template #default>
-                    <div class="p-2 text-gray-400">Loading editor...</div>
-                </template>
-            </VueMonacoEditor>
-        </div>
-
-        <div class="flex items-center space-x-2">
-            <Button icon="pi pi-search" label="Search" @click="$emit('search')" :loading="loading" />
-            <Button v-if="modelValue" icon="pi pi-times" text @click="handleClear" />
-        </div>
-    </div>
-</template>
-
 <style>
-.monaco-editor .inputarea {
-    border: none !important;
-    background: transparent !important;
-    padding: 0 !important;
-    outline: none !important;
-    resize: none !important;
+.query-container {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  height: 52px;
 }
 
-.monaco-editor {
-    border-radius: 4px;
-    padding: 4px 8px !important;
+.editor-wrapper {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  height: 40px;
+  transition: all 0.2s ease;
+  position: relative;
+  box-shadow: rgba(0, 0, 0, 0.05) 0px 1px 2px, rgba(0, 0, 0, 0.05) 0px 0px 0px 1px;
 }
 
-.monaco-editor .overflow-guard {
-    border-radius: 4px;
+.editor-wrapper:hover {
+  border-color: #cbd5e1;
+  box-shadow: rgba(0, 0, 0, 0.1) 0px 1px 3px, rgba(0, 0, 0, 0.06) 0px 1px 2px;
 }
 
-.monaco-editor .cursors-layer>.cursor {
-    width: 1px !important;
+.editor-wrapper:focus-within {
+  border-color: #3b82f6;
+  box-shadow: rgb(59 130 246 / 0.1) 0px 0px 0px 3px;
 }
 
-.monaco-editor .margin,
-.monaco-editor .lines-decorations {
-    display: none !important;
+.placeholder {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #94a3b8;
+  pointer-events: none;
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+:deep(.monaco-editor) {
+  border-radius: 4px;
+  height: 40px !important;
+}
+
+:deep(.monaco-editor .overflow-guard) {
+  height: 40px !important;
+}
+
+:deep(.monaco-editor .cursor) {
+  width: 1px !important;
+  height: 18px !important;
+  margin-top: 2px;
+}
+
+:deep(.monaco-editor .suggest-widget) {
+  border-radius: 6px;
+  box-shadow: rgba(0, 0, 0, 0.1) 0px 4px 6px -1px, rgba(0, 0, 0, 0.06) 0px 2px 4px -1px;
+  margin-top: 4px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff !important;
+}
+
+:deep(.monaco-editor .parameter-hints-widget) {
+  border-radius: 6px;
+  margin-top: 4px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff !important;
+}
+
+:deep(.monaco-editor .suggest-widget .monaco-list .monaco-list-row.focused) {
+  background-color: #eff6ff !important;
+}
+
+:deep(.monaco-editor .suggest-widget .monaco-list .monaco-list-row:hover) {
+  background-color: #f8fafc !important;
 }
 </style>

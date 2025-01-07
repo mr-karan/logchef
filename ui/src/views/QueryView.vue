@@ -69,7 +69,7 @@ const endDate = ref(
 const initialLoad = ref(true) // Track first load to show skeleton
 
 // Add new ref for query mode
-const queryMode = ref<'sql' | 'logql'>('sql')
+const queryMode = ref<'basic' | 'logchefql' | 'sql'>('basic')
 const queryString = ref('')
 
 // Now define loadLogs and resetLogs
@@ -787,19 +787,8 @@ const tableState = reactive<TableState>({
 
 const handleSearch = async () => {
   tableState.first = 0
-  await fetchLogsPage({
-    first: 0,
-    rows: tableState.rows,
-    query: queryString.value,
-    queryMode: queryMode.value
-  })
+  await fetchLogsPage({ first: 0, rows: tableState.rows })
 }
-
-const handleClear = () => {
-  queryString.value = ''
-  handleSearch()
-}
-
 </script>
 
 <template>
@@ -851,9 +840,8 @@ const handleClear = () => {
       </div>
 
       <!-- Query Editor Section -->
-      <div class="p-4 border-b border-gray-100">
-        <QueryEditor v-model="queryString" v-model:mode="queryMode" :loading="tableState.loading" @search="handleSearch"
-          @clear="handleClear" />
+      <div class="p-4">
+        <QueryEditor v-model="queryString" :loading="tableState.loading" @search="handleSearch" />
       </div>
     </div>
 
@@ -1017,5 +1005,20 @@ tr {
 td,
 th {
   border-right: 1px solid #f3f4f6;
+}
+
+/* Add Query Editor styles */
+.query-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  background: var(--surface-ground);
+  border-radius: 6px;
+}
+
+:deep(.query-editor-container) {
+  margin: 0;
+  box-shadow: var(--card-shadow);
 }
 </style>

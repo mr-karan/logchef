@@ -229,3 +229,8 @@ This implementation assumes you're using Vue 3 with PrimeVue's latest version an
   - If DB doesn't exist this happens
   - Check for other cases and make it robust
 -
+
+## Query Editor
+
+- Custom log fields `const LOG_FIELDS = [` in raw SQL mode
+-
