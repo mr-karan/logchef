@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 
 import { Separator } from '@/components/ui/separator'
+import { Toaster } from '@/components/ui/toast'
 import {
   Sidebar,
   SidebarContent,
@@ -156,6 +157,7 @@ const data = {
 
 <template>
   <SidebarProvider>
+    <Toaster />
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <SidebarMenu>

@@ -10,6 +10,9 @@ logchef.db
 pkg/ui/dist/*
 !pkg/ui/dist/.gitkeep
 
+cmd/server/ui/*
+!cmd/server/ui.gitkeep
+
 # Go specific
 *.exe
 *.exe~

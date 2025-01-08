@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	"github.com/mr-karan/logchef/internal/errors"
 	"github.com/mr-karan/logchef/internal/sources"
 )
 
@@ -26,6 +27,12 @@ func (h *SourceHandler) Create(c echo.Context) error {
 
 	source, err := h.service.Create(c.Request().Context(), req)
 	if err != nil {
+		if errors.IsValidationError(err) {
+			return HandleValidationError(c, err, "Invalid source configuration", nil)
+		}
+		if errors.IsConflictError(err) {
+			return HandleConflictError(c, err, "Source already exists")
+		}
 		if err == sql.ErrNoRows {
 			return HandleError(c, err, http.StatusNotFound, "Source not found")
 		}

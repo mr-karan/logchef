@@ -15,23 +15,23 @@ func NewSourceRepository(db *sql.DB) *SourceRepository {
 
 func (r *SourceRepository) Create(source *Source) error {
     query := `
-        INSERT INTO sources (id, name, table_name, schema_type, dsn, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO sources (id, name, table_name, schema_type, description, dsn, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `
     now := time.Now()
     source.CreatedAt = now
     source.UpdatedAt = now
     
     _, err := r.db.Exec(query, source.ID, source.Name, source.TableName, 
-        source.SchemaType, source.DSN, source.CreatedAt, source.UpdatedAt)
+        source.SchemaType, source.Description, source.DSN, source.CreatedAt, source.UpdatedAt)
     return err
 }
 
 func (r *SourceRepository) GetByName(name string) (*Source, error) {
     var source Source
-    err := r.db.QueryRow("SELECT id, name, table_name, schema_type, dsn, created_at, updated_at FROM sources WHERE name = ?", name).Scan(
+    err := r.db.QueryRow("SELECT id, name, table_name, schema_type, description, dsn, created_at, updated_at FROM sources WHERE name = ?", name).Scan(
         &source.ID, &source.Name, &source.TableName,
-        &source.SchemaType, &source.DSN, &source.CreatedAt, &source.UpdatedAt)
+        &source.SchemaType, &source.Description, &source.DSN, &source.CreatedAt, &source.UpdatedAt)
     if err != nil {
         return nil, err
     }
@@ -40,9 +40,9 @@ func (r *SourceRepository) GetByName(name string) (*Source, error) {
 
 func (r *SourceRepository) Get(id string) (*Source, error) {
     var source Source
-    err := r.db.QueryRow("SELECT id, name, table_name, schema_type, dsn, created_at, updated_at FROM sources WHERE id = ?", id).Scan(
+    err := r.db.QueryRow("SELECT id, name, table_name, schema_type, description, dsn, created_at, updated_at FROM sources WHERE id = ?", id).Scan(
         &source.ID, &source.Name, &source.TableName, 
-        &source.SchemaType, &source.DSN, &source.CreatedAt, &source.UpdatedAt)
+        &source.SchemaType, &source.Description, &source.DSN, &source.CreatedAt, &source.UpdatedAt)
     if err != nil {
         return nil, err
     }
@@ -67,7 +67,7 @@ func (r *SourceRepository) Delete(id string) error {
 }
 
 func (r *SourceRepository) List() ([]*Source, error) {
-    rows, err := r.db.Query("SELECT id, name, table_name, schema_type, dsn, created_at, updated_at FROM sources ORDER BY created_at DESC")
+    rows, err := r.db.Query("SELECT id, name, table_name, schema_type, description, dsn, created_at, updated_at FROM sources ORDER BY created_at DESC")
     if err != nil {
         return nil, err
     }
@@ -78,7 +78,7 @@ func (r *SourceRepository) List() ([]*Source, error) {
         source := &Source{}
         err := rows.Scan(
             &source.ID, &source.Name, &source.TableName,
-            &source.SchemaType, &source.DSN, &source.CreatedAt, &source.UpdatedAt)
+            &source.SchemaType, &source.Description, &source.DSN, &source.CreatedAt, &source.UpdatedAt)
         if err != nil {
             return nil, err
         }

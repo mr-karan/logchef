@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mr-karan/logchef/internal/db"
+	"github.com/mr-karan/logchef/internal/errors"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -24,10 +25,11 @@ func NewService(sourceRepo *models.SourceRepository, clickhouse *db.Clickhouse) 
 }
 
 type CreateSourceRequest struct {
-	Name       string `json:"name"`
-	SchemaType string `json:"schema_type"`
-	TTLDays    int    `json:"ttl_days"`
-	DSN        string `json:"dsn"`
+	Name        string `json:"name"`
+	SchemaType  string `json:"schema_type"`
+	TTLDays     int    `json:"ttl_days"`
+	DSN         string `json:"dsn"`
+	Description string `json:"description"`
 }
 
 func (s *Service) Create(ctx context.Context, req CreateSourceRequest) (*models.Source, error) {
@@ -41,15 +43,16 @@ func (s *Service) Create(ctx context.Context, req CreateSourceRequest) (*models.
 		return nil, fmt.Errorf("failed to check existing source: %w", err)
 	}
 	if existingSource != nil {
-		return nil, fmt.Errorf("source with name '%s' already exists", req.Name)
+		return nil, errors.NewConflictError(fmt.Sprintf("source with name '%s' already exists", req.Name))
 	}
 
 	source := &models.Source{
-		ID:         uuid.New().String(),
-		Name:       req.Name,
-		TableName:  req.Name,
-		SchemaType: req.SchemaType,
-		DSN:        req.DSN,
+		ID:          uuid.New().String(),
+		Name:        req.Name,
+		TableName:   req.Name,
+		SchemaType:  req.SchemaType,
+		Description: req.Description,
+		DSN:         req.DSN,
 	}
 
 	cfg := parseDSN(req.DSN)

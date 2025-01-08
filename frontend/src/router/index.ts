@@ -24,7 +24,6 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/sources',
-    name: 'Sources',
     component: () => import('@/views/Sources.vue'),
     meta: {
       title: 'Sources'
@@ -32,6 +31,7 @@ const routes: RouteRecordRaw[] = [
     children: [
       {
         path: '',
+        name: 'Sources',
         redirect: { name: 'NewSource' }
       },
       {
@@ -48,7 +48,6 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/settings',
-    name: 'Settings',
     component: () => import('@/views/Settings.vue'),
     meta: {
       title: 'Settings'
@@ -56,6 +55,7 @@ const routes: RouteRecordRaw[] = [
     children: [
       {
         path: '',
+        name: 'Settings',
         redirect: { name: 'GeneralSettings' }
       },
       {

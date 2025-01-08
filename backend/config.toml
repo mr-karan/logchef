@@ -1,0 +1,6 @@
+[server]
+port = 8125
+host = "0.0.0.0"
+
+[sqlite]
+path = "local.db"
