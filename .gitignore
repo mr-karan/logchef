@@ -10,9 +10,6 @@ logchef.db
 pkg/ui/dist/*
 !pkg/ui/dist/.gitkeep
 
-cmd/server/ui/*
-!cmd/server/ui.gitkeep
-
 # Go specific
 *.exe
 *.exe~
@@ -34,3 +31,20 @@ coverage.html
 
 # Dependency directories
 vendor/
+
+# Build artifacts
+bin/
+coverage/
+
+# Frontend build output
+frontend/dist/
+backend/cmd/server/ui/
+
+# Dependencies
+frontend/node_modules/
+
+# Local dev files
+*.db
+.env
+.env.*
+!.env.example
