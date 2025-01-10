@@ -3,6 +3,7 @@ package clickhouse
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -56,12 +57,50 @@ func NewConnection(source *models.Source) (*Connection, error) {
 
 // parseSourceOptions converts a Source into Clickhouse connection options
 func parseSourceOptions(source *models.Source) (*clickhouse.Options, error) {
+	// Parse DSN to extract host and port
+	// DSN format: tcp://[username:password@]host:port?database=dbname
+	dsn := source.DSN
+	if dsn == "" {
+		return nil, fmt.Errorf("DSN is required")
+	}
+
+	// Remove protocol prefix
+	dsn = strings.TrimPrefix(dsn, "tcp://")
+	dsn = strings.TrimPrefix(dsn, "http://")
+
+	// Extract credentials and host:port
+	var username, password string
+	hostPort := dsn
+
+	// Handle credentials if present
+	if atIndex := strings.Index(dsn, "@"); atIndex >= 0 {
+		creds := dsn[:atIndex]
+		hostPort = dsn[atIndex+1:]
+
+		if colonIndex := strings.Index(creds, ":"); colonIndex >= 0 {
+			username = creds[:colonIndex]
+			password = creds[colonIndex+1:]
+		} else {
+			username = creds
+		}
+	}
+
+	// Split off query parameters to get clean host:port
+	if idx := strings.Index(hostPort, "?"); idx >= 0 {
+		hostPort = hostPort[:idx]
+	}
+
+	// If no credentials provided, use defaults
+	if username == "" {
+		username = "default"
+	}
+
 	return &clickhouse.Options{
-		Addr: []string{source.DSN},
+		Addr: []string{hostPort},
 		Auth: clickhouse.Auth{
 			Database: source.GetDatabaseName(),
-			Username: "default", // TODO: Add these to Source model if needed
-			Password: "",
+			Username: username,
+			Password: password,
 		},
 		Settings: clickhouse.Settings{
 			"max_execution_time": defaultMaxExecutionTime,

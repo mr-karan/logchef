@@ -34,8 +34,11 @@ func New(cfg *config.Config, svc *service.Service, fs http.FileSystem) *Server {
 			if e, ok := err.(*fiber.Error); ok {
 				code = e.Code
 			}
-			return c.Status(code).JSON(fiber.Map{
-				"error": err.Error(),
+			return c.Status(code).JSON(Response{
+				Status: "error",
+				Data: fiber.Map{
+					"error": err.Error(),
+				},
 			})
 		},
 	})
@@ -75,7 +78,17 @@ func (s *Server) setupRoutes() {
 	sources.Get("/:id", s.handleGetSource)
 	sources.Delete("/:id", s.handleDeleteSource)
 
-	// Serve frontend static files
+	// Handle 404 for all API routes (including /api/sources)
+	s.app.Use("/api/*", func(c *fiber.Ctx) error {
+		return c.Status(fiber.StatusNotFound).JSON(Response{
+			Status: "error",
+			Data: fiber.Map{
+				"error": "API route not found",
+			},
+		})
+	})
+
+	// Serve frontend static files for all other routes
 	s.app.Use("/", filesystem.New(filesystem.Config{
 		Root:         s.fs,
 		Browse:       false,
@@ -93,64 +106,4 @@ func (s *Server) Start() error {
 // Shutdown gracefully shuts down the server
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.app.ShutdownWithContext(ctx)
-}
-
-// handleHealth handles the health check endpoint
-func (s *Server) handleHealth(c *fiber.Ctx) error {
-	return c.JSON(fiber.Map{
-		"status": "ok",
-		"time":   time.Now(),
-	})
-}
-
-// handleListSources handles listing all sources
-func (s *Server) handleListSources(c *fiber.Ctx) error {
-	sources, err := s.svc.ListSources(c.Context())
-	if err != nil {
-		return fmt.Errorf("error listing sources: %w", err)
-	}
-	return c.JSON(sources)
-}
-
-// handleGetSource handles getting a single source
-func (s *Server) handleGetSource(c *fiber.Ctx) error {
-	id := c.Params("id")
-	source, err := s.svc.GetSource(c.Context(), id)
-	if err != nil {
-		return fmt.Errorf("error getting source: %w", err)
-	}
-	if source == nil {
-		return fiber.NewError(fiber.StatusNotFound, "source not found")
-	}
-	return c.JSON(source)
-}
-
-// handleCreateSource handles creating a new source
-func (s *Server) handleCreateSource(c *fiber.Ctx) error {
-	var source struct {
-		Name       string `json:"name"`
-		TableName  string `json:"table_name"`
-		SchemaType string `json:"schema_type"`
-		DSN        string `json:"dsn"`
-	}
-
-	if err := c.BodyParser(&source); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
-	}
-
-	created, err := s.svc.CreateSource(c.Context(), source.Name, source.TableName, source.SchemaType, source.DSN)
-	if err != nil {
-		return fmt.Errorf("error creating source: %w", err)
-	}
-
-	return c.Status(fiber.StatusCreated).JSON(created)
-}
-
-// handleDeleteSource handles deleting a source
-func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
-	id := c.Params("id")
-	if err := s.svc.DeleteSource(c.Context(), id); err != nil {
-		return fmt.Errorf("error deleting source: %w", err)
-	}
-	return c.SendStatus(fiber.StatusNoContent)
 }

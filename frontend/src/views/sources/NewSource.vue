@@ -22,10 +22,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { TOAST_DURATION } from '@/lib/constants'
 
 import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
 import * as z from 'zod'
+import type { CreateSourcePayload } from '@/api/sources'
+import { isErrorResponse, getErrorMessage } from '@/api/types'
 
 const router = useRouter()
 const useSeparateFields = ref(true)
@@ -33,18 +36,19 @@ const isFormValid = ref(false)
 const isLoading = ref(false)
 
 const formSchema = toTypedSchema(z.object({
-  name: z.string()
-    .min(4, 'Name must be at least 4 characters')
-    .max(30, 'Name must be less than 30 characters')
-    .regex(/^[a-zA-Z0-9_]+$/, 'Name must contain only alphanumeric characters and underscores'),
+  table_name: z.string()
+    .min(4, 'Table name must be at least 4 characters')
+    .max(30, 'Table name must be less than 30 characters')
+    .regex(/^[a-zA-Z][a-zA-Z0-9_]*$/, 'Table name must start with a letter and contain only letters, numbers, and underscores'),
   description: z.string()
     .max(100, 'Description must be less than 100 characters')
     .optional(),
-  schema_type: z.enum(['ncsa', 'otel', 'custom'], {
+  schema_type: z.enum(['http', 'otel', 'custom'], {
     required_error: 'Please select a schema type',
-  }).default('ncsa'),
+  }).default('http'),
   dsn: z.string().min(1, 'DSN is required').optional(),
-  ttl_days: z.number().min(1).max(365).default(90),
+  enable_ttl: z.boolean().default(false),
+  ttl_days: z.number().min(1, 'TTL days must be at least 1').default(90),
   // Separate connection fields
   host: z.string().min(1, 'Host is required').default('localhost'),
   port: z.number().min(1).max(65535).default(9000),
@@ -58,82 +62,80 @@ const formSchema = toTypedSchema(z.object({
   return data.dsn
 }, {
   message: 'Please fill in all connection details',
+}).refine((data) => {
+  // If TTL is enabled, ttl_days must be provided and be a valid number
+  return !data.enable_ttl || (data.enable_ttl && typeof data.ttl_days === 'number' && data.ttl_days >= 1)
+}, {
+  message: 'TTL days is required when TTL is enabled',
 }))
 
 const { toast } = useToast()
 
-const { handleSubmit, values, errors, meta } = useForm({
+const formData = ref({
+  table_name: '',
+  description: '',
+  schema_type: 'http' as const,
+  dsn: '',
+  enable_ttl: false,
+  ttl_days: 90,
+  host: 'localhost',
+  port: 9000,
+  database: 'logs',
+  username: '',
+  password: '',
+})
+
+const form = useForm({
+  initialValues: formData.value,
   validationSchema: formSchema,
 })
 
 // Watch for form validity
-watch([values, errors, meta], () => {
-  const isValid = meta.value?.valid === true
+watch([form.values, form.errors, form.meta], () => {
+  const isValid = form.meta.value?.valid === true
   const hasRequiredFields = useSeparateFields.value
-    ? Boolean(values.host && values.port && values.database)
-    : Boolean(values.dsn)
+    ? Boolean(form.values.host && form.values.port && form.values.database)
+    : Boolean(form.values.dsn)
 
   isFormValid.value = isValid && hasRequiredFields
 })
 
-const onSubmit = handleSubmit(async (values) => {
+const onSubmit = form.handleSubmit(async (values) => {
   try {
     isLoading.value = true
-
-    let dsn = values.dsn
-
-    // Convert separate fields to DSN if needed
-    if (useSeparateFields.value) {
-      const credentials = values.username && values.password
-        ? `${values.username}:${values.password}@`
-        : ''
-      dsn = `clickhouse://${credentials}${values.host}:${values.port}/${values.database}`
-    }
-
-    // Ensure dsn is not undefined
-    if (!dsn) {
-      throw new Error('DSN is required')
-    }
-
-    // Prepare payload with correct types
-    const payload = {
-      name: values.name,
+    const payload: CreateSourcePayload = {
+      table_name: values.table_name,
       schema_type: values.schema_type,
-      ttl_days: values.ttl_days,
-      dsn,
-      description: values.description
+      ttl_days: values.enable_ttl ? Number(values.ttl_days) : -1,
+      dsn: useSeparateFields.value
+        ? `${values.host}:${values.port}?database=${values.database}`
+        : values.dsn || '',
+      description: values.description,
     }
 
-    await sourcesApi.createSource(payload)
-
-    toast({
-      title: 'Success',
-      description: 'Source created successfully',
-      duration: 3000,
-    })
-
-    // Redirect to sources management page
-    router.push('/sources/manage')
+    const response = await sourcesApi.createSource(payload)
+    if (isErrorResponse(response.data)) {
+      toast({
+        title: 'Error',
+        description: getErrorMessage(response.data),
+        variant: 'destructive',
+        duration: TOAST_DURATION.ERROR,
+      })
+    } else {
+      toast({
+        title: 'Success',
+        description: 'Source created successfully',
+        duration: TOAST_DURATION.SUCCESS,
+      })
+      router.push('/sources/manage')
+    }
   } catch (error) {
-    let errorMessage = 'Failed to create source'
-    let description = errorMessage
-
-    if (axios.isAxiosError(error)) {
-      const responseData = error.response?.data
-      if (responseData?.error_type === 'ValidationError' && responseData?.data) {
-        // Handle validation error with field-specific message
-        errorMessage = 'Validation Error'
-        description = `${responseData.data.field}: ${responseData.data.message}`
-      } else {
-        description = responseData?.message || errorMessage
-      }
-    }
-
+    console.error('Error creating source:', error)
     toast({
-      title: errorMessage,
-      description: description,
+      title: 'Error',
+      description: getErrorMessage(error),
       variant: 'destructive',
-      duration: 3000,
+      duration: TOAST_DURATION.ERROR,
     })
   } finally {
     isLoading.value = false
@@ -141,7 +143,7 @@ const onSubmit = handleSubmit(async (values) => {
 })
 
 const sourceTypes = [
-  { value: 'ncsa', label: 'NCSA Common Log Format' },
+  { value: 'http', label: 'HTTP Common Log Format (NCSA)' },
   { value: 'otel', label: 'OTEL Application Logs' },
   { value: 'custom', label: 'Custom Log Format' },
 ]
@@ -149,14 +151,15 @@ const sourceTypes = [
 
 <template>
   <form class="w-2/3 space-y-6" @submit="onSubmit">
-    <FormField v-slot="{ componentField }" name="name">
+    <FormField v-slot="{ componentField }" name="table_name">
       <FormItem>
-        <FormLabel>Source Name</FormLabel>
+        <FormLabel>Table Name</FormLabel>
         <FormControl>
-          <Input type="text" placeholder="Production Logs" v-bind="componentField" />
+          <Input type="text" placeholder="production_logs" v-bind="componentField" />
         </FormControl>
         <FormDescription>
-          A unique name to identify this source
+          The name of the table in Clickhouse. Must start with a letter and contain only letters, numbers, and
+          underscores.
         </FormDescription>
         <FormMessage />
       </FormItem>
@@ -196,6 +199,39 @@ const sourceTypes = [
         <FormMessage />
       </FormItem>
     </FormField>
+
+    <div class="space-y-4">
+      <div class="flex items-center justify-between rounded-lg border p-4">
+        <div class="space-y-0.5">
+          <label class="text-base font-medium">Enable TTL</label>
+          <p class="text-sm text-muted-foreground">
+            Set a time-to-live duration for log entries
+          </p>
+        </div>
+        <FormField v-slot="{ field }" name="enable_ttl">
+          <FormItem class="flex items-center space-x-2">
+            <FormControl>
+              <Switch :checked="field.value" @update:checked="field.onChange" class="data-[state=checked]:bg-primary" />
+            </FormControl>
+          </FormItem>
+        </FormField>
+      </div>
+
+      <div v-if="form.values.enable_ttl" class="space-y-2">
+        <FormField v-slot="{ componentField }" name="ttl_days">
+          <FormItem>
+            <FormLabel>TTL (days)</FormLabel>
+            <FormControl>
+              <Input type="number" :min="1" placeholder="90" v-bind="componentField" />
+            </FormControl>
+            <FormDescription>
+              Number of days to keep log entries (minimum 1 day)
+            </FormDescription>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+      </div>
+    </div>
 
     <div class="space-y-6 rounded-lg border p-6">
       <div class="flex items-center justify-between border-b pb-4">

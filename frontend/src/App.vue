@@ -163,7 +163,8 @@ const data = {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg">
-              <div class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+              <div
+                class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
                 LC
               </div>
               <div class="grid flex-1 text-left text-sm leading-tight">
@@ -179,27 +180,20 @@ const data = {
         <SidebarGroup>
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarMenu>
-            <Collapsible
-              v-for="item in data.navMain"
-              :key="item.title"
-              as-child
-              :default-open="item.isActive"
-              class="group/collapsible"
-            >
+            <Collapsible v-for="item in data.navMain" :key="item.title" as-child :default-open="item.isActive"
+              class="group/collapsible">
               <SidebarMenuItem>
                 <CollapsibleTrigger as-child>
                   <SidebarMenuButton :tooltip="item.title">
                     <component :is="item.icon" />
                     <span>{{ item.title }}</span>
-                    <ChevronRight class="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                    <ChevronRight
+                      class="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
                   </SidebarMenuButton>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <SidebarMenuSub>
-                    <SidebarMenuSubItem
-                      v-for="subItem in item.items"
-                      :key="subItem.title"
-                    >
+                    <SidebarMenuSubItem v-for="subItem in item.items" :key="subItem.title">
                       <SidebarMenuSubButton as-child>
                         <a :href="subItem.url">
                           <span>{{ subItem.title }}</span>
@@ -219,10 +213,8 @@ const data = {
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
-                <SidebarMenuButton
-                  size="lg"
-                  class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-                >
+                <SidebarMenuButton size="lg"
+                  class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground">
                   <Avatar class="h-8 w-8 rounded-lg">
                     <AvatarImage :src="data.user.avatar" :alt="data.user.name" />
                     <AvatarFallback class="rounded-lg">
@@ -236,12 +228,8 @@ const data = {
                   <ChevronsUpDown class="ml-auto size-4" />
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
-              <DropdownMenuContent 
-                class="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg" 
-                side="bottom" 
-                align="end" 
-                :side-offset="4"
-              >
+              <DropdownMenuContent class="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg" side="bottom"
+                align="end" :side-offset="4">
                 <DropdownMenuLabel class="p-0 font-normal">
                   <div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                     <Avatar class="h-8 w-8 rounded-lg">
@@ -307,7 +295,7 @@ const data = {
       </header>
 
       <main class="flex-1 overflow-y-auto">
-        <div class="container mx-auto p-6">
+        <div class="h-full px-6 py-6">
           <router-view />
         </div>
       </main>

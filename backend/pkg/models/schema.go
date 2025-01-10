@@ -27,4 +27,40 @@ const (
 	ORDER BY (namespace, service_name, timestamp)
 	TTL toDateTime(timestamp) + INTERVAL {{ttl_day}} DAY
 	SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;`
+
+	// HTTPLogsTableSchema is the schema for HTTP logs table
+	HTTPLogsTableSchema = `
+	CREATE TABLE IF NOT EXISTS {{database_name}}.{{table_name}} (
+		timestamp DateTime,
+		remote_addr String,
+		request_method String,
+		request_uri String,
+		status UInt16,
+		body_bytes_sent UInt64,
+		http_referer String,
+		http_user_agent String,
+		http_x_forwarded_for String,
+		http_host String,
+		request_time Float64,
+		upstream_response_time Float64,
+		upstream_addr String,
+		upstream_status UInt16,
+		request_id String,
+		request_length UInt64,
+		request_completion String,
+		ssl_protocol String,
+		ssl_cipher String,
+		scheme String,
+		gzip_ratio Float64,
+		http_cf_ray String,
+		http_cf_connecting_ip String,
+		http_true_client_ip String,
+		http_cf_ipcountry String,
+		http_cf_visitor String,
+		http_cdn_loop String,
+		http_cf_worker String
+	) ENGINE = MergeTree()
+	PARTITION BY toYYYYMM(timestamp)
+	ORDER BY (timestamp, request_id)
+	TTL timestamp + INTERVAL {{ttl_day}} DAY`
 )

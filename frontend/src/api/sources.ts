@@ -1,37 +1,40 @@
+import type { APIResponse } from './types'
 import { api } from './config'
 
 export interface Source {
-  ID: string
-  Name: string
-  TableName: string
-  SchemaType: string
-  DSN: string
-  Description?: string
-  CreatedAt: string
-  UpdatedAt: string
+  id: string
+  table_name: string
+  schema_type: string
+  dsn: string
+  description?: string
+  ttl_days: number
+  created_at: string
+  updated_at: string
+  is_connected: boolean
 }
 
 export interface CreateSourcePayload {
-  name: string
-  schema_type: 'ncsa' | 'otel' | 'custom'
+  table_name: string
+  schema_type: string
   dsn: string
-  ttl_days: number
   description?: string
+  ttl_days: number
 }
 
 export const sourcesApi = {
-  async createSource(payload: CreateSourcePayload) {
-    const response = await api.post('/sources', payload)
-    return response.data
+  async listSources() {
+    return api.get<APIResponse<Source[]>>('/sources')
   },
 
-  async getSources() {
-    const response = await api.get<{ status: string, data: Source[] }>('/sources')
-    return response.data
+  async getSource(id: string) {
+    return api.get<APIResponse<Source>>(`/sources/${id}`)
+  },
+
+  async createSource(payload: CreateSourcePayload) {
+    return api.post<APIResponse<Source>>('/sources', payload)
   },
 
   async deleteSource(id: string) {
-    const response = await api.delete(`/sources/${id}`)
-    return response.data
-  }
+    return api.delete<APIResponse<{ message: string }>>(`/sources/${id}`)
+  },
 }

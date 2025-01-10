@@ -70,15 +70,16 @@ func (s *Service) GetSource(ctx context.Context, id string) (*models.Source, err
 }
 
 // CreateSource creates a new source
-func (s *Service) CreateSource(ctx context.Context, name, tableName, schemaType, dsn string) (*models.Source, error) {
+func (s *Service) CreateSource(ctx context.Context, tableName, schemaType, dsn, description string, ttlDays int) (*models.Source, error) {
 	source := &models.Source{
-		ID:         uuid.New().String(),
-		Name:       name,
-		TableName:  tableName,
-		SchemaType: schemaType,
-		DSN:        dsn,
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		ID:          uuid.New().String(),
+		TableName:   tableName,
+		SchemaType:  schemaType,
+		DSN:         dsn,
+		Description: description,
+		TTLDays:     ttlDays,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 
 	// Validate source configuration
@@ -107,7 +108,7 @@ func (s *Service) CreateSource(ctx context.Context, name, tableName, schemaType,
 	}
 
 	// Create necessary tables
-	if err := conn.CreateSource(ctx, 0); err != nil {
+	if err := conn.CreateSource(ctx, source.TTLDays); err != nil {
 		// Cleanup on failure
 		if delErr := s.DeleteSource(ctx, source.ID); delErr != nil {
 			return nil, fmt.Errorf("error cleaning up after table creation failure: %w", delErr)

@@ -25,6 +25,9 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast/use-toast'
+import { TOAST_DURATION } from '@/lib/constants'
+import { isErrorResponse, getErrorMessage } from '@/api/types'
+import type { APIResponse } from '@/api/types'
 
 const router = useRouter()
 const { toast } = useToast()
@@ -35,13 +38,25 @@ const sourceToDelete = ref<Source | null>(null)
 
 const loadSources = async () => {
   try {
-    const response = await sourcesApi.getSources()
-    sources.value = response.data
+    const response = await sourcesApi.listSources()
+    const responseData = response.data
+    if (isErrorResponse(responseData)) {
+      toast({
+        title: 'Error',
+        description: getErrorMessage(responseData),
+        variant: 'destructive',
+        duration: TOAST_DURATION.ERROR,
+      })
+    } else {
+      sources.value = responseData.data as Source[]
+    }
   } catch (error) {
+    console.error('Error loading sources:', error)
     toast({
       title: 'Error',
-      description: 'Failed to fetch sources',
+      description: getErrorMessage(error),
       variant: 'destructive',
+      duration: TOAST_DURATION.ERROR,
     })
   } finally {
     isLoading.value = false
@@ -50,19 +65,32 @@ const loadSources = async () => {
 
 const confirmDelete = async () => {
   if (!sourceToDelete.value) return
-  
+
   try {
-    await sourcesApi.deleteSource(sourceToDelete.value.ID)
-    toast({
-      title: 'Success',
-      description: 'Source deleted successfully',
-    })
-    await loadSources()
+    const response = await sourcesApi.deleteSource(sourceToDelete.value.id)
+    const responseData = response.data
+    if (isErrorResponse(responseData)) {
+      toast({
+        title: 'Error',
+        description: getErrorMessage(responseData),
+        variant: 'destructive',
+        duration: TOAST_DURATION.ERROR,
+      })
+    } else {
+      toast({
+        title: 'Success',
+        description: 'Source deleted successfully',
+        duration: TOAST_DURATION.SUCCESS,
+      })
+      await loadSources()
+    }
   } catch (error) {
+    console.error('Error deleting source:', error)
     toast({
       title: 'Error',
-      description: 'Failed to delete source',
+      description: getErrorMessage(error),
       variant: 'destructive',
+      duration: TOAST_DURATION.ERROR,
     })
   } finally {
     showDeleteDialog.value = false
@@ -107,7 +135,7 @@ const formatDate = (dateString: string) => {
             <TableCaption>A list of your configured log sources</TableCaption>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
+                <TableHead>Table Name</TableHead>
                 <TableHead>Schema Type</TableHead>
                 <TableHead>DSN</TableHead>
                 <TableHead>Created At</TableHead>
@@ -115,17 +143,13 @@ const formatDate = (dateString: string) => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow v-for="source in sources" :key="source.ID">
-                <TableCell class="font-medium">{{ source.Name }}</TableCell>
-                <TableCell>{{ source.SchemaType }}</TableCell>
-                <TableCell>{{ source.DSN }}</TableCell>
-                <TableCell>{{ formatDate(source.CreatedAt) }}</TableCell>
+              <TableRow v-for="source in sources" :key="source.id">
+                <TableCell class="font-medium">{{ source.table_name }}</TableCell>
+                <TableCell>{{ source.schema_type }}</TableCell>
+                <TableCell>{{ source.dsn }}</TableCell>
+                <TableCell>{{ formatDate(source.created_at) }}</TableCell>
                 <TableCell class="text-right">
-                  <Button 
-                    variant="destructive" 
-                    size="icon"
-                    @click="handleDelete(source)"
-                  >
+                  <Button variant="destructive" size="icon" @click="handleDelete(source)">
                     <Trash2 class="h-4 w-4" />
                   </Button>
                 </TableCell>
@@ -141,16 +165,21 @@ const formatDate = (dateString: string) => {
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete Source</AlertDialogTitle>
-          <AlertDialogDescription>
-            Are you sure you want to delete source "{{ sourceToDelete?.Name }}"?
-            This action cannot be undone.
+          <AlertDialogDescription class="space-y-2">
+            <p>Are you sure you want to delete source "{{ sourceToDelete?.table_name }}"?</p>
+            <p class="font-medium text-muted-foreground">
+              Note: This will only remove the source configuration from LogChef. The actual data in Clickhouse will not
+              be deleted -
+              you'll need to manage the data cleanup in Clickhouse separately.
+            </p>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel @click="showDeleteDialog = false">
             Cancel
           </AlertDialogCancel>
-          <AlertDialogAction @click="confirmDelete" class="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+          <AlertDialogAction @click="confirmDelete"
+            class="bg-destructive text-destructive-foreground hover:bg-destructive/90">
             Delete
           </AlertDialogAction>
         </AlertDialogFooter>

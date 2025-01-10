@@ -8,11 +8,22 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/query-explorer',
-    name: 'QueryExplorer',
     component: () => import('@/views/QueryExplorer.vue'),
     meta: {
       title: 'Query Explorer'
-    }
+    },
+    children: [
+      {
+        path: '',
+        name: 'QueryExplorer',
+        redirect: { name: 'NewQuery' }
+      },
+      {
+        path: 'new',
+        name: 'NewQuery',
+        component: () => import('@/views/query-explorer/NewQuery.vue')
+      }
+    ]
   },
   {
     path: '/saved-queries',

@@ -13,8 +13,7 @@ PRAGMA cache_size        = -16000;
 -- Create the sources table if it doesn't exist
 CREATE TABLE IF NOT EXISTS sources (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    table_name TEXT NOT NULL,
+    table_name TEXT NOT NULL UNIQUE,
     schema_type TEXT NOT NULL,
     dsn TEXT NOT NULL,
     description TEXT,
@@ -25,14 +24,13 @@ CREATE TABLE IF NOT EXISTS sources (
 -- name: CreateSource
 -- Create a new source entry
 -- $1: id
--- $2: name
--- $3: table_name
--- $4: schema_type
--- $5: dsn
--- $6: description
+-- $2: table_name
+-- $3: schema_type
+-- $4: dsn
+-- $5: description
 INSERT INTO sources (
-    id, name, table_name, schema_type, dsn, description, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    id, table_name, schema_type, dsn, description, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 RETURNING *;
 
 -- name: GetSource
@@ -41,9 +39,9 @@ RETURNING *;
 SELECT * FROM sources WHERE id = ?;
 
 -- name: GetSourceByName
--- Get a single source by name
--- $1: name
-SELECT * FROM sources WHERE name = ?;
+-- Get a single source by table name
+-- $1: table_name
+SELECT * FROM sources WHERE table_name = ?;
 
 -- name: ListSources
 -- Get all sources ordered by creation date
@@ -51,15 +49,13 @@ SELECT * FROM sources ORDER BY created_at DESC;
 
 -- name: UpdateSource
 -- Update an existing source
--- $1: name
--- $2: table_name
--- $3: schema_type
--- $4: dsn
--- $5: description
--- $6: id
+-- $1: table_name
+-- $2: schema_type
+-- $3: dsn
+-- $4: description
+-- $5: id
 UPDATE sources
-SET name = ?,
-    table_name = ?,
+SET table_name = ?,
     schema_type = ?,
     dsn = ?,
     description = ?,

@@ -77,7 +77,7 @@ func main() {
 		if err != nil {
 			logger.Warn("failed to initialize source",
 				"source_id", source.ID,
-				"source_name", source.Name,
+				"table_name", source.TableName,
 				"error", err,
 			)
 			continue

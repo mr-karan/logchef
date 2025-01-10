@@ -44,7 +44,7 @@ backend/cmd/server/ui/
 frontend/node_modules/
 
 # Local dev files
-*.db
+*.db*
 .env
 .env.*
 !.env.example

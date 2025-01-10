@@ -26,14 +26,15 @@ const (
 
 // CreateSource creates the necessary tables and structures for a source
 func (c *Connection) CreateSource(ctx context.Context, ttlDays int) error {
-	if ttlDays <= 0 {
-		ttlDays = DefaultTTLDays
+	// If ttlDays is -1, don't set TTL
+	if ttlDays == -1 {
+		ttlDays = 0
 	}
 
 	// Create the database if it doesn't exist
 	dbName := c.Source.GetDatabaseName()
 	if dbName == "" {
-		return fmt.Errorf("invalid database name in table name: %s", c.Source.TableName)
+		return fmt.Errorf("invalid database name in DSN: %s", c.Source.DSN)
 	}
 
 	if err := c.DB.Exec(ctx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", dbName)); err != nil {
@@ -45,7 +46,7 @@ func (c *Connection) CreateSource(ctx context.Context, ttlDays int) error {
 	case SourceTypeOTEL:
 		return c.createOTELSource(ctx, ttlDays)
 	case SourceTypeHTTP:
-		return fmt.Errorf("HTTP source type not implemented yet")
+		return c.createHTTPSource(ctx, ttlDays)
 	case SourceTypeCustom:
 		return fmt.Errorf("custom source type not implemented yet")
 	default:
@@ -59,8 +60,39 @@ func (c *Connection) createOTELSource(ctx context.Context, ttlDays int) error {
 
 	// Replace placeholders with actual values
 	schema = strings.ReplaceAll(schema, "{{database_name}}", c.Source.GetDatabaseName())
-	schema = strings.ReplaceAll(schema, "{{table_name}}", c.Source.GetTableName())
-	schema = strings.ReplaceAll(schema, "{{ttl_day}}", strconv.Itoa(ttlDays))
+	schema = strings.ReplaceAll(schema, "{{table_name}}", c.Source.TableName)
+
+	// Only add TTL if ttlDays > 0
+	if ttlDays > 0 {
+		schema = strings.ReplaceAll(schema, "{{ttl_day}}", strconv.Itoa(ttlDays))
+	} else {
+		// Remove TTL clause if no TTL is set
+		schema = strings.ReplaceAll(schema, "TTL timestamp + INTERVAL {{ttl_day}} DAY", "")
+	}
+
+	// Create the table
+	if err := c.DB.Exec(ctx, schema); err != nil {
+		return fmt.Errorf("error creating table: %w", err)
+	}
+
+	return nil
+}
+
+// createHTTPSource creates tables for HTTP source
+func (c *Connection) createHTTPSource(ctx context.Context, ttlDays int) error {
+	schema := models.HTTPLogsTableSchema
+
+	// Replace placeholders with actual values
+	schema = strings.ReplaceAll(schema, "{{database_name}}", c.Source.GetDatabaseName())
+	schema = strings.ReplaceAll(schema, "{{table_name}}", c.Source.TableName)
+
+	// Only add TTL if ttlDays > 0
+	if ttlDays > 0 {
+		schema = strings.ReplaceAll(schema, "{{ttl_day}}", strconv.Itoa(ttlDays))
+	} else {
+		// Remove TTL clause if no TTL is set
+		schema = strings.ReplaceAll(schema, "TTL timestamp + INTERVAL {{ttl_day}} DAY", "")
+	}
 
 	// Create the table
 	if err := c.DB.Exec(ctx, schema); err != nil {
