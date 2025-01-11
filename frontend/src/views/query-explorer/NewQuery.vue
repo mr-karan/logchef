@@ -22,6 +22,15 @@ import {
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { RefreshCw } from 'lucide-vue-next'
+import { Calendar } from '@/components/ui/v-calendar'
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from '@/components/ui/popover'
+import { CalendarIcon } from '@radix-icons/vue'
+import { format } from 'date-fns'
+import { cn } from '@/lib/utils'
 
 // Configuration panel state
 const selectedSource = ref('')
@@ -30,6 +39,12 @@ const refreshRate = ref('0') // 0 means off
 const sources = ref<Source[]>([])
 const isLoadingSources = ref(true)
 const { toast } = useToast()
+
+// Date range state
+const dateRange = ref({
+    start: new Date(),
+    end: new Date(),
+})
 
 // Load sources from API
 const loadSources = async () => {
@@ -100,10 +115,40 @@ const currentRefreshRate = computed(() => parseInt(refreshRate.value, 10))
                     </SelectContent>
                 </Select>
 
-                <!-- Time Range (placeholder for now) -->
-                <div class="w-[250px] h-[40px] rounded-md border flex items-center px-3 text-muted-foreground">
-                    Time Range Coming Soon
-                </div>
+                <!-- Time Range Picker -->
+                <Popover>
+                    <PopoverTrigger as-child>
+                        <Button id="date" :variant="'outline'" :class="cn(
+                            'w-[280px] justify-start text-left font-normal',
+                            !dateRange && 'text-muted-foreground',
+                        )">
+                            <CalendarIcon class="mr-2 h-4 w-4" />
+                            <span>
+                                {{ dateRange.start ? (
+                                    dateRange.end ? `${format(dateRange.start, 'LLL dd, y HH:mm')} - ${format(dateRange.end,
+                                        'LLL dd, y HH:mm')}`
+                                        : format(dateRange.start, 'LLL dd, y HH:mm')
+                                ) : 'Pick a date range' }}
+                            </span>
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent class="w-auto p-0" align="start">
+                        <Calendar v-model.range="dateRange" mode="date" :columns="2">
+                            <template #footer>
+                                <div class="flex w-full mt-6 border-t border-accent pt-4">
+                                    <div class="w-1/2">
+                                        <strong>Entry time</strong>
+                                        <Calendar v-model="dateRange.start" mode="time" hide-time-header />
+                                    </div>
+                                    <div class="w-1/2">
+                                        <strong>Exit time</strong>
+                                        <Calendar v-model="dateRange.end" mode="time" hide-time-header />
+                                    </div>
+                                </div>
+                            </template>
+                        </Calendar>
+                    </PopoverContent>
+                </Popover>
 
                 <!-- Batch Size -->
                 <Select v-model="batchSize">
