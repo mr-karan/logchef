@@ -1,5 +1,11 @@
 package models
 
+// ColumnInfo represents information about a column in a table
+type ColumnInfo struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
 const (
 	// OTELLogsTableSchema is the schema for OpenTelemetry logs
 	OTELLogsTableSchema = `CREATE TABLE IF NOT EXISTS "{{database_name}}"."{{table_name}}"

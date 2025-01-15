@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,43 +13,44 @@ import (
 	"backend-v2/internal/server"
 	"backend-v2/internal/service"
 	"backend-v2/internal/sqlite"
+	"backend-v2/pkg/logger"
 )
 
 func main() {
 	// Parse command line flags
-	configPath := flag.String("config", "config.toml", "path to config file")
+	var (
+		configPath = flag.String("config", "config.toml", "path to config file")
+		logLevel   = flag.String("log-level", "debug", "Log level (debug, info, warn, error)")
+		jsonLogs   = flag.Bool("json-logs", true, "Output logs in JSON format")
+	)
 	flag.Parse()
 
-	// Initialize structured logger
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if a.Key == slog.TimeKey {
-				return slog.Attr{
-					Key:   a.Key,
-					Value: slog.StringValue(a.Value.Time().Format(time.RFC3339)),
-				}
-			}
-			return a
-		},
-	}))
-	slog.SetDefault(logger)
+	// Initialize logger
+	if err := logger.Initialize(logger.Config{
+		Level:      *logLevel,
+		JSONOutput: *jsonLogs,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+
+	log := logger.Default()
 
 	// Load configuration
-	logger.Info("loading configuration", "path", *configPath)
+	log.Info("loading configuration", "path", *configPath)
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		logger.Error("failed to load configuration", "error", err)
+		log.Error("failed to load configuration", "error", err)
 		os.Exit(1)
 	}
 
 	// Initialize SQLite
-	logger.Info("initializing SQLite database", "path", cfg.SQLite.Path)
+	log.Info("initializing SQLite database", "path", cfg.SQLite.Path)
 	sqliteDB, err := sqlite.New(sqlite.Options{
 		Path: cfg.SQLite.Path,
 	})
 	if err != nil {
-		logger.Error("failed to initialize SQLite", "error", err)
+		log.Error("failed to initialize SQLite", "error", err)
 		os.Exit(1)
 	}
 	defer sqliteDB.Close()
@@ -59,15 +59,15 @@ func main() {
 	svc := service.New(sqliteDB)
 
 	// Initialize Clickhouse connections
-	logger.Info("initializing Clickhouse connections")
+	log.Info("initializing Clickhouse connections")
 	sources, err := sqliteDB.ListSources(context.Background())
 	if err != nil {
-		logger.Error("failed to list sources", "error", err)
+		log.Error("failed to list sources", "error", err)
 		os.Exit(1)
 	}
 
 	if len(sources) == 0 {
-		logger.Warn("no sources configured - use the API to create a source")
+		log.Warn("no sources configured - use the API to create a source")
 	}
 
 	// Initialize each source
@@ -75,7 +75,7 @@ func main() {
 	for _, source := range sources {
 		err := svc.InitializeSource(context.Background(), source)
 		if err != nil {
-			logger.Warn("failed to initialize source",
+			log.Warn("failed to initialize source",
 				"source_id", source.ID,
 				"table_name", source.TableName,
 				"error", err,
@@ -85,7 +85,7 @@ func main() {
 		healthyCount++
 	}
 
-	logger.Info("source initialization complete",
+	log.Info("source initialization complete",
 		"total", len(sources),
 		"healthy", healthyCount,
 		"unhealthy", len(sources)-healthyCount,
@@ -95,12 +95,12 @@ func main() {
 	go func() {
 		for health := range svc.HealthUpdates() {
 			if !health.IsHealthy {
-				logger.Warn("source health check failed",
+				log.Warn("source health check failed",
 					"source_id", health.ID,
 					"error", health.Error,
 				)
 			} else {
-				logger.Debug("source health check passed",
+				log.Debug("source health check passed",
 					"source_id", health.ID,
 				)
 			}
@@ -116,16 +116,16 @@ func main() {
 
 	go func() {
 		if err := srv.Start(); err != nil {
-			logger.Error("server error", "error", err)
+			log.Error("server error", "error", err)
 			shutdown <- os.Interrupt
 		}
 	}()
 
-	logger.Info("server started", "address", fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port))
+	log.Info("server started", "address", fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port))
 
 	// Wait for shutdown signal
 	<-shutdown
-	logger.Info("shutting down server")
+	log.Info("shutting down server")
 
 	// Create shutdown context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -133,12 +133,12 @@ func main() {
 
 	// Shutdown server and cleanup
 	if err := srv.Shutdown(ctx); err != nil {
-		logger.Error("error during server shutdown", "error", err)
+		log.Error("error during server shutdown", "error", err)
 	}
 
 	if err := svc.Close(); err != nil {
-		logger.Error("error during service cleanup", "error", err)
+		log.Error("error during service cleanup", "error", err)
 	}
 
-	logger.Info("shutdown complete")
+	log.Info("shutdown complete")
 }

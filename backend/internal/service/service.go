@@ -82,9 +82,18 @@ func (s *Service) CreateSource(ctx context.Context, tableName, schemaType, dsn, 
 		UpdatedAt:   time.Now(),
 	}
 
-	// Validate source configuration
+	// Validate source configuration - this will also set the Database field from DSN
 	if err := source.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid source configuration: %w", err)
+	}
+
+	// Check if source already exists
+	existing, err := s.sqlite.GetSourceByName(ctx, source.Database, source.TableName)
+	if err != nil {
+		return nil, fmt.Errorf("error checking for existing source: %w", err)
+	}
+	if existing != nil {
+		return nil, fmt.Errorf("source with table name %s already exists in database %s", source.TableName, source.Database)
 	}
 
 	// First save to SQLite
@@ -148,4 +157,47 @@ func (s *Service) Close() error {
 	}
 
 	return lastErr
+}
+
+// ExploreSource retrieves the schema information for a source
+func (s *Service) ExploreSource(ctx context.Context, sourceID string) ([]models.ColumnInfo, error) {
+	source, err := s.sqlite.GetSource(ctx, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting source: %w", err)
+	}
+	if source == nil {
+		return nil, fmt.Errorf("source not found")
+	}
+
+	columns, err := s.clickhouse.DescribeTable(ctx, source)
+	if err != nil {
+		return nil, fmt.Errorf("error describing table: %w", err)
+	}
+
+	return columns, nil
+}
+
+// QueryLogs retrieves logs from a source with pagination
+func (s *Service) QueryLogs(ctx context.Context, sourceID string, limit, offset int) ([]map[string]interface{}, error) {
+	source, err := s.sqlite.GetSource(ctx, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting source: %w", err)
+	}
+	if source == nil {
+		return nil, fmt.Errorf("source not found")
+	}
+
+	if limit <= 0 {
+		limit = 100 // default limit
+	}
+	if limit > 1000 {
+		limit = 1000 // max limit to prevent excessive queries
+	}
+
+	logs, err := s.clickhouse.QueryLogs(ctx, source, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("error querying logs: %w", err)
+	}
+
+	return logs, nil
 }

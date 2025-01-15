@@ -3,12 +3,14 @@ package clickhouse
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 
+	"backend-v2/pkg/logger"
 	"backend-v2/pkg/models"
 )
 
@@ -17,6 +19,40 @@ type Connection struct {
 	Source     *models.Source
 	DB         driver.Conn
 	LastHealth models.SourceHealth
+	log        *slog.Logger
+}
+
+// loggingConn wraps a driver.Conn to add query logging
+type loggingConn struct {
+	driver.Conn
+	log *slog.Logger
+}
+
+func (c *loggingConn) Query(ctx context.Context, query string, args ...any) (driver.Rows, error) {
+	start := time.Now()
+	
+	// Add UUID to string conversion for all queries
+	query = strings.ReplaceAll(query, "UUID", "toString(UUID)")
+	
+	rows, err := c.Conn.Query(ctx, query, args...)
+	duration := time.Since(start)
+
+	if err != nil {
+		c.log.Error("query failed",
+			"query", query,
+			"duration_ms", duration.Milliseconds(),
+			"args_count", len(args),
+			"error", err,
+		)
+		return rows, err
+	}
+
+	c.log.Info("query executed",
+		"query", query,
+		"duration_ms", duration.Milliseconds(),
+		"args_count", len(args),
+	)
+	return rows, nil
 }
 
 // NewConnection creates a new Clickhouse connection
@@ -44,14 +80,22 @@ func NewConnection(source *models.Source) (*Connection, error) {
 		return nil, fmt.Errorf("error pinging connection: %w", err)
 	}
 
+	// Wrap connection with logging
+	log := logger.Default().With("component", "clickhouse", "source_id", source.ID)
+	loggingConn := &loggingConn{
+		Conn: conn,
+		log:  log,
+	}
+
 	return &Connection{
 		Source: source,
-		DB:     conn,
+		DB:     loggingConn,
 		LastHealth: models.SourceHealth{
 			ID:        source.ID,
 			IsHealthy: true,
 			LastCheck: time.Now(),
 		},
+		log: log,
 	}, nil
 }
 
@@ -98,7 +142,7 @@ func parseSourceOptions(source *models.Source) (*clickhouse.Options, error) {
 	return &clickhouse.Options{
 		Addr: []string{hostPort},
 		Auth: clickhouse.Auth{
-			Database: source.GetDatabaseName(),
+			Database: source.Database,
 			Username: username,
 			Password: password,
 		},
@@ -153,4 +197,36 @@ func (c *Connection) CreateOTELLogsTable(ctx context.Context, ttlDays int) error
 	// schema = strings.ReplaceAll(schema, "{{database_name}}", ...)
 
 	return c.DB.Exec(ctx, schema)
+}
+
+// QueryLogs queries logs from the source with pagination
+func (c *Connection) QueryLogs(ctx context.Context, limit, offset int) ([]map[string]interface{}, error) {
+	// Create query with limit and offset
+	query := fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", c.Source.GetFullTableName(), limit, offset)
+
+	// Execute query
+	rows, err := c.DB.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("error querying logs: %w", err)
+	}
+	defer rows.Close()
+
+	// Create type converter
+	converter := NewTypeConverter()
+
+	// Scan rows with type conversion
+	var results []map[string]interface{}
+	for rows.Next() {
+		result, err := converter.ScanRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("error scanning row: %w", err)
+		}
+		results = append(results, result)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	return results, nil
 }

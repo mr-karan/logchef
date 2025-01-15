@@ -92,9 +92,11 @@ func (d *DB) CreateSource(ctx context.Context, source *models.Source) error {
 	result, err := d.queries.CreateSource.ExecContext(ctx,
 		source.ID,
 		source.TableName,
+		source.Database,
 		source.SchemaType,
 		source.DSN,
 		source.Description,
+		source.TTLDays,
 	)
 	if err != nil {
 		return fmt.Errorf("error creating source: %w", err)
@@ -126,15 +128,15 @@ func (d *DB) GetSource(ctx context.Context, id string) (*models.Source, error) {
 	return &source, nil
 }
 
-// GetSourceByName retrieves a source by its table name
-func (d *DB) GetSourceByName(ctx context.Context, tableName string) (*models.Source, error) {
+// GetSourceByName retrieves a source by its table name and database
+func (d *DB) GetSourceByName(ctx context.Context, database, tableName string) (*models.Source, error) {
 	var source models.Source
-	err := d.queries.GetSourceByName.QueryRowxContext(ctx, tableName).StructScan(&source)
+	err := d.queries.GetSourceByName.QueryRowxContext(ctx, database, tableName).StructScan(&source)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("error getting source by table name: %w", err)
+		return nil, fmt.Errorf("error getting source: %w", err)
 	}
 
 	return &source, nil

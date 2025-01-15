@@ -10,6 +10,7 @@ import (
 type Source struct {
 	ID          string    `db:"id" json:"id"`
 	TableName   string    `db:"table_name" json:"table_name"`
+	Database    string    `db:"database" json:"database"`
 	SchemaType  string    `db:"schema_type" json:"schema_type"`
 	DSN         string    `db:"dsn" json:"dsn"`
 	Description string    `db:"description" json:"description,omitempty"`
@@ -19,9 +20,8 @@ type Source struct {
 	IsConnected bool      `db:"-" json:"is_connected"`
 }
 
-// GetDatabaseName returns the database part from DSN
-func (s *Source) GetDatabaseName() string {
-	// DSN format: tcp://[username:password@]host:port?database=dbname
+// getDatabaseFromDSN extracts the database name from DSN
+func (s *Source) getDatabaseFromDSN() string {
 	if s.DSN == "" {
 		return ""
 	}
@@ -39,6 +39,11 @@ func (s *Source) GetDatabaseName() string {
 	return ""
 }
 
+// GetFullTableName returns the fully qualified table name (database.table)
+func (s *Source) GetFullTableName() string {
+	return fmt.Sprintf("%s.%s", s.Database, s.TableName)
+}
+
 // Validate checks if the source configuration is valid
 func (s *Source) Validate() error {
 	if s.ID == "" {
@@ -46,6 +51,12 @@ func (s *Source) Validate() error {
 	}
 	if s.TableName == "" {
 		return fmt.Errorf("table name is required")
+	}
+	if s.Database == "" {
+		s.Database = s.getDatabaseFromDSN()
+		if s.Database == "" {
+			return fmt.Errorf("database is required")
+		}
 	}
 	if !isValidTableName(s.TableName) {
 		return fmt.Errorf("table name must start with a letter and contain only letters, numbers, and underscores")

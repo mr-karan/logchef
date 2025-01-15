@@ -78,6 +78,11 @@ func (s *Server) setupRoutes() {
 	sources.Get("/:id", s.handleGetSource)
 	sources.Delete("/:id", s.handleDeleteSource)
 
+	// Query
+	query := v1.Group("/query")
+	query.Get("/explore", s.handleExploreQuery)
+	query.Get("/logs", s.handleQueryLogs)
+
 	// Handle 404 for all API routes (including /api/sources)
 	s.app.Use("/api/*", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(Response{

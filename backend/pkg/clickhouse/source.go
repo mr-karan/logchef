@@ -32,12 +32,11 @@ func (c *Connection) CreateSource(ctx context.Context, ttlDays int) error {
 	}
 
 	// Create the database if it doesn't exist
-	dbName := c.Source.GetDatabaseName()
-	if dbName == "" {
-		return fmt.Errorf("invalid database name in DSN: %s", c.Source.DSN)
+	if c.Source.Database == "" {
+		return fmt.Errorf("database name is required")
 	}
 
-	if err := c.DB.Exec(ctx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", dbName)); err != nil {
+	if err := c.DB.Exec(ctx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", c.Source.Database)); err != nil {
 		return fmt.Errorf("error creating database: %w", err)
 	}
 
@@ -59,7 +58,7 @@ func (c *Connection) createOTELSource(ctx context.Context, ttlDays int) error {
 	schema := models.OTELLogsTableSchema
 
 	// Replace placeholders with actual values
-	schema = strings.ReplaceAll(schema, "{{database_name}}", c.Source.GetDatabaseName())
+	schema = strings.ReplaceAll(schema, "{{database_name}}", c.Source.Database)
 	schema = strings.ReplaceAll(schema, "{{table_name}}", c.Source.TableName)
 
 	// Only add TTL if ttlDays > 0
@@ -83,7 +82,7 @@ func (c *Connection) createHTTPSource(ctx context.Context, ttlDays int) error {
 	schema := models.HTTPLogsTableSchema
 
 	// Replace placeholders with actual values
-	schema = strings.ReplaceAll(schema, "{{database_name}}", c.Source.GetDatabaseName())
+	schema = strings.ReplaceAll(schema, "{{database_name}}", c.Source.Database)
 	schema = strings.ReplaceAll(schema, "{{table_name}}", c.Source.TableName)
 
 	// Only add TTL if ttlDays > 0

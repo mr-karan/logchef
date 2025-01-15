@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"backend-v2/pkg/models"
@@ -130,4 +131,91 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 			"message": "Source deleted successfully",
 		},
 	})
+}
+
+// handleExploreQuery handles exploring a source's schema
+func (s *Server) handleExploreQuery(c *fiber.Ctx) error {
+	sourceID := c.Query("source")
+	if sourceID == "" {
+		return c.Status(http.StatusBadRequest).JSON(Response{
+			Status: "error",
+			Data: fiber.Map{
+				"error": "source parameter is required",
+			},
+		})
+	}
+
+	columns, err := s.svc.ExploreSource(c.Context(), sourceID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(Response{
+			Status: "error",
+			Data: fiber.Map{
+				"error": fmt.Sprintf("Failed to explore source: %v", err),
+			},
+		})
+	}
+
+	return c.JSON(Response{
+		Status: "success",
+		Data:   columns,
+	})
+}
+
+// handleQueryLogs handles querying logs from a source
+func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
+	sourceID := c.Query("source")
+	if sourceID == "" {
+		return c.Status(http.StatusBadRequest).JSON(Response{
+			Status: "error",
+			Data: fiber.Map{
+				"error": "source parameter is required",
+			},
+		})
+	}
+
+	// Parse pagination parameters
+	limit := 100 // default limit
+	offset := 0  // default offset
+
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	if offsetStr := c.Query("offset"); offsetStr != "" {
+		if parsedOffset, err := strconv.Atoi(offsetStr); err == nil && parsedOffset >= 0 {
+			offset = parsedOffset
+		}
+	}
+
+	logs, err := s.svc.QueryLogs(c.Context(), sourceID, limit, offset)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(Response{
+			Status: "error",
+			Data: fiber.Map{
+				"error": fmt.Sprintf("Failed to query logs: %v", err),
+			},
+		})
+	}
+
+	return c.JSON(Response{
+		Status: "success",
+		Data:   logs,
+	})
+}
+
+// RegisterRoutes registers all routes for the server
+func (s *Server) RegisterRoutes(app *fiber.App) {
+	app.Get("/health", s.handleHealth)
+	
+	// Sources routes
+	app.Get("/sources", s.handleListSources)
+	app.Get("/sources/:id", s.handleGetSource)
+	app.Post("/sources", s.handleCreateSource)
+	app.Delete("/sources/:id", s.handleDeleteSource)
+
+	// Query routes
+	app.Get("/query/explore", s.handleExploreQuery)
+	app.Get("/query/logs", s.handleQueryLogs)
 }
