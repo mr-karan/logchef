@@ -20,6 +20,13 @@ type Source struct {
 	IsConnected bool      `db:"-" json:"is_connected"`
 }
 
+const (
+	// SchemaTypeManaged represents a managed source with OTEL schema
+	SchemaTypeManaged = "managed"
+	// SchemaTypeUnmanaged represents an unmanaged source with custom schema
+	SchemaTypeUnmanaged = "unmanaged"
+)
+
 // getDatabaseFromDSN extracts the database name from DSN
 func (s *Source) getDatabaseFromDSN() string {
 	if s.DSN == "" {
@@ -64,6 +71,9 @@ func (s *Source) Validate() error {
 	if s.SchemaType == "" {
 		return fmt.Errorf("schema type is required")
 	}
+	if s.SchemaType != SchemaTypeManaged && s.SchemaType != SchemaTypeUnmanaged {
+		return fmt.Errorf("schema type must be either '%s' or '%s'", SchemaTypeManaged, SchemaTypeUnmanaged)
+	}
 	if s.DSN == "" {
 		return fmt.Errorf("DSN is required")
 	}
@@ -97,8 +107,9 @@ func isAlphanumericOrUnderscore(r rune) bool {
 
 // SourceHealth represents the health status of a source
 type SourceHealth struct {
-	ID        string    `json:"id"`
-	IsHealthy bool      `json:"is_healthy"`
-	LastCheck time.Time `json:"last_check"`
-	Error     string    `json:"error,omitempty"`
+	ID        string        `json:"id"`
+	IsHealthy bool          `json:"is_healthy"`
+	LastCheck time.Time     `json:"last_check"`
+	Error     string        `json:"error,omitempty"`
+	Latency   time.Duration `json:"latency"`
 }

@@ -1,10 +1,17 @@
-.PHONY: build build-backend build-ui run clean test test-short lint help
+.PHONY: build build-backend build-ui run run-backend clean test test-short lint help
 
 # Build variables
 LAST_COMMIT := $(shell git rev-parse --short HEAD)
 LAST_COMMIT_DATE := $(shell git show -s --format=%ci ${LAST_COMMIT})
 VERSION := $(shell git describe --tags --always)
-BUILDSTR := ${VERSION} (Commit: ${LAST_COMMIT_DATE} (${LAST_COMMIT}), Build: $(shell date +"%Y-%m-%d %H:%M:%S %z"))
+BUILD_TIME := $(shell date +"%Y-%m-%d %H:%M:%S %z")
+BUILDSTR := ${VERSION} (Commit: ${LAST_COMMIT_DATE} (${LAST_COMMIT}), Build: ${BUILD_TIME})
+
+# Build flags
+LDFLAGS := -X 'main.version=${VERSION}' \
+           -X 'main.commit=${LAST_COMMIT}' \
+           -X 'main.buildTime=${BUILD_TIME}' \
+           -X 'main.buildString=${BUILDSTR}'
 
 # Binary output
 BIN := bin/server
@@ -17,7 +24,7 @@ build: build-ui build-backend ## Build both backend and frontend
 
 # Build only backend (depends on frontend being built)
 build-backend: ## Build only the backend
-	cd backend && CGO_ENABLED=0 go build -o ../${BIN} -ldflags="-X 'main.buildString=${BUILDSTR}'" ./cmd/server
+	cd backend && CGO_ENABLED=0 go build -o ../${BIN} -ldflags="${LDFLAGS}" ./cmd/server
 
 # Build only frontend
 build-ui: ## Build only the frontend
@@ -25,9 +32,13 @@ build-ui: ## Build only the frontend
 		[ -d "node_modules" ] || yarn install --prefer-offline --frozen-lockfile --silent && \
 		yarn build
 
-# Run the server
+# Run the server with frontend
 run: build ## Run the server with config
-	cd backend && ../${BIN} -config config.toml
+	cd backend && ../${BIN} -config ${CONFIG}
+
+# Run only the backend (useful during development)
+run-backend: build-backend ## Run only the backend server
+	cd backend && ../${BIN} -config ${CONFIG} -env development -log-level debug
 
 # Clean build artifacts
 clean: ## Clean build artifacts

@@ -4,14 +4,17 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/ClickHouse/clickhouse-go/v2"
-	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
-
 	"backend-v2/pkg/logger"
 	"backend-v2/pkg/models"
+	"backend-v2/pkg/parser"
+
+	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
 // Connection represents a single Clickhouse connection with its metadata
@@ -30,10 +33,7 @@ type loggingConn struct {
 
 func (c *loggingConn) Query(ctx context.Context, query string, args ...any) (driver.Rows, error) {
 	start := time.Now()
-	
-	// Add UUID to string conversion for all queries
-	query = strings.ReplaceAll(query, "UUID", "toString(UUID)")
-	
+
 	rows, err := c.Conn.Query(ctx, query, args...)
 	duration := time.Since(start)
 
@@ -57,6 +57,12 @@ func (c *loggingConn) Query(ctx context.Context, query string, args ...any) (dri
 
 // NewConnection creates a new Clickhouse connection
 func NewConnection(source *models.Source) (*Connection, error) {
+	log := logger.Default().With(
+		"source_id", source.ID,
+		"database", source.Database,
+		"table", source.TableName,
+	)
+
 	// Validate source configuration
 	if err := source.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid source configuration: %w", err)
@@ -66,6 +72,12 @@ func NewConnection(source *models.Source) (*Connection, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error parsing source options: %w", err)
 	}
+
+	log.Info("creating new clickhouse connection",
+		"host", options.Addr[0],
+		"database", options.Auth.Database,
+		"username", options.Auth.Username,
+	)
 
 	conn, err := clickhouse.Open(options)
 	if err != nil {
@@ -81,7 +93,6 @@ func NewConnection(source *models.Source) (*Connection, error) {
 	}
 
 	// Wrap connection with logging
-	log := logger.Default().With("component", "clickhouse", "source_id", source.ID)
 	loggingConn := &loggingConn{
 		Conn: conn,
 		log:  log,
@@ -101,46 +112,34 @@ func NewConnection(source *models.Source) (*Connection, error) {
 
 // parseSourceOptions converts a Source into Clickhouse connection options
 func parseSourceOptions(source *models.Source) (*clickhouse.Options, error) {
-	// Parse DSN to extract host and port
-	// DSN format: tcp://[username:password@]host:port?database=dbname
+	// Parse DSN
+	// DSN format: clickhouse://host:port?username=user&password=pass&database=db
 	dsn := source.DSN
 	if dsn == "" {
 		return nil, fmt.Errorf("DSN is required")
 	}
 
-	// Remove protocol prefix
-	dsn = strings.TrimPrefix(dsn, "tcp://")
-	dsn = strings.TrimPrefix(dsn, "http://")
-
-	// Extract credentials and host:port
-	var username, password string
-	hostPort := dsn
-
-	// Handle credentials if present
-	if atIndex := strings.Index(dsn, "@"); atIndex >= 0 {
-		creds := dsn[:atIndex]
-		hostPort = dsn[atIndex+1:]
-
-		if colonIndex := strings.Index(creds, ":"); colonIndex >= 0 {
-			username = creds[:colonIndex]
-			password = creds[colonIndex+1:]
-		} else {
-			username = creds
-		}
+	// Parse the URL
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("invalid DSN format: %w", err)
 	}
 
-	// Split off query parameters to get clean host:port
-	if idx := strings.Index(hostPort, "?"); idx >= 0 {
-		hostPort = hostPort[:idx]
+	// Verify scheme
+	if u.Scheme != "clickhouse" {
+		return nil, fmt.Errorf("invalid DSN scheme, expected 'clickhouse', got '%s'", u.Scheme)
 	}
 
-	// If no credentials provided, use defaults
+	// Get query parameters
+	q := u.Query()
+	username := q.Get("username")
 	if username == "" {
 		username = "default"
 	}
+	password := q.Get("password")
 
 	return &clickhouse.Options{
-		Addr: []string{hostPort},
+		Addr: []string{u.Host}, // Host:Port
 		Auth: clickhouse.Auth{
 			Database: source.Database,
 			Username: username,
@@ -149,10 +148,9 @@ func parseSourceOptions(source *models.Source) (*clickhouse.Options, error) {
 		Settings: clickhouse.Settings{
 			"max_execution_time": defaultMaxExecutionTime,
 		},
-		DialTimeout: defaultTimeout,
-		Compression: &clickhouse.Compression{
-			Method: clickhouse.CompressionLZ4,
-		},
+		DialTimeout:      defaultTimeout,
+		Compression:      &clickhouse.Compression{Method: clickhouse.CompressionLZ4},
+		Protocol:         clickhouse.Native,
 		MaxOpenConns:     defaultMaxOpenConns,
 		MaxIdleConns:     defaultMaxIdleConns,
 		ConnMaxLifetime:  defaultConnMaxLifetime,
@@ -173,60 +171,208 @@ func (c *Connection) CheckHealth(ctx context.Context) models.SourceHealth {
 		LastCheck: time.Now(),
 	}
 
+	// Create a channel to receive profile info
+	profileChan := make(chan *clickhouse.ProfileInfo, 1)
+
+	// Add profile info callback to context
+	ctx = clickhouse.Context(ctx,
+		clickhouse.WithProfileInfo(func(p *clickhouse.ProfileInfo) {
+			profileChan <- p
+		}),
+	)
+
+	// Run a simple query to check connection
+	start := time.Now()
 	if err := c.DB.Ping(ctx); err != nil {
-		health.Error = err.Error()
 		health.IsHealthy = false
+		health.Error = err.Error()
+		health.Latency = time.Since(start)
 		return health
 	}
 
-	// Additional check: try to execute a simple query
-	if err := c.DB.Exec(ctx, "SELECT 1"); err != nil {
-		health.Error = err.Error()
+	// Run a simple SELECT 1 query to get profile info
+	query := "SELECT 1"
+	if err := c.DB.QueryRow(ctx, query).Scan(new(uint8)); err != nil {
 		health.IsHealthy = false
+		health.Error = fmt.Sprintf("query failed: %v", err)
+		health.Latency = time.Since(start)
 		return health
+	}
+
+	// Get profile info from channel
+	select {
+	case profile := <-profileChan:
+		c.log.Debug("received profile info",
+			"bytes", profile.Bytes,
+			"rows", profile.Rows,
+			"blocks", profile.Blocks,
+		)
+	case <-time.After(time.Second):
+		c.log.Warn("timeout waiting for profile info")
 	}
 
 	health.IsHealthy = true
+	health.Latency = time.Since(start)
 	return health
 }
 
-// CreateOTELLogsTable creates the OTEL logs table with the given TTL
-func (c *Connection) CreateOTELLogsTable(ctx context.Context, ttlDays int) error {
-	schema := models.OTELLogsTableSchema
-	// TODO: Replace placeholders with actual values
-	// schema = strings.ReplaceAll(schema, "{{database_name}}", ...)
-
-	return c.DB.Exec(ctx, schema)
-}
-
 // QueryLogs queries logs from the source with pagination
-func (c *Connection) QueryLogs(ctx context.Context, limit, offset int) ([]map[string]interface{}, error) {
-	// Create query with limit and offset
-	query := fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", c.Source.GetFullTableName(), limit, offset)
+func (c *Connection) QueryLogs(ctx context.Context, limit, offset int) ([]map[string]string, error) {
+	// Build query that returns JSON strings
+	query := fmt.Sprintf("SELECT toJSONString(tuple(*)) as row_json FROM %s", c.Source.GetFullTableName())
+	if limit > 0 {
+		if offset > 0 {
+			query = fmt.Sprintf("%s ORDER BY timestamp DESC LIMIT %d OFFSET %d", query, limit, offset)
+		} else {
+			query = fmt.Sprintf("%s ORDER BY timestamp DESC LIMIT %d", query, limit)
+		}
+	}
+
+	c.log.Info("executing query", "query", query)
 
 	// Execute query
 	rows, err := c.DB.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("error querying logs: %w", err)
+		return nil, fmt.Errorf("error executing query: %w", err)
 	}
 	defer rows.Close()
 
-	// Create type converter
-	converter := NewTypeConverter()
-
-	// Scan rows with type conversion
-	var results []map[string]interface{}
+	// Collect JSON strings first
+	var jsonStrings []string
 	for rows.Next() {
-		result, err := converter.ScanRow(rows)
-		if err != nil {
+		var jsonStr string
+		if err := rows.Scan(&jsonStr); err != nil {
 			return nil, fmt.Errorf("error scanning row: %w", err)
 		}
-		results = append(results, result)
+		jsonStrings = append(jsonStrings, jsonStr)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
+	// Process all JSON strings in parallel
+	results, err := parser.BatchFlattenJSON(jsonStrings)
+	if err != nil {
+		return nil, fmt.Errorf("error flattening JSON: %w", err)
+	}
+
 	return results, nil
+}
+
+// CreateSource creates the necessary tables and structures for a source
+func (c *Connection) CreateSource(ctx context.Context, ttlDays int) error {
+	c.log.Info("creating source tables",
+		"schema_type", c.Source.SchemaType,
+		"ttl_days", ttlDays,
+	)
+
+	switch c.Source.SchemaType {
+	case models.SchemaTypeManaged:
+		if err := c.createManagedTables(ctx, ttlDays); err != nil {
+			return fmt.Errorf("error creating managed tables: %w", err)
+		}
+		if err := c.createAttributesView(ctx); err != nil {
+			return fmt.Errorf("error creating attributes view: %w", err)
+		}
+	case models.SchemaTypeUnmanaged:
+		// For unmanaged sources, we just verify the table exists
+		query := fmt.Sprintf("SELECT 1 FROM %s.%s LIMIT 1", c.Source.Database, c.Source.TableName)
+		if err := c.DB.Exec(ctx, query); err != nil {
+			return fmt.Errorf("error verifying table exists: %w", err)
+		}
+		c.log.Debug("verified unmanaged table exists",
+			"database", c.Source.Database,
+			"table", c.Source.TableName,
+		)
+	default:
+		return fmt.Errorf("invalid schema type: %s", c.Source.SchemaType)
+	}
+
+	return nil
+}
+
+// createManagedTables creates the tables for managed sources
+func (c *Connection) createManagedTables(ctx context.Context, ttlDays int) error {
+	c.log.Debug("creating managed tables",
+		"table", c.Source.TableName,
+		"ttl_days", ttlDays,
+	)
+
+	schema := models.OTELLogsTableSchema
+
+	// Replace placeholders with actual values
+	schema = strings.ReplaceAll(schema, "{{database_name}}", c.Source.Database)
+	schema = strings.ReplaceAll(schema, "{{table_name}}", c.Source.TableName)
+
+	// Only add TTL if ttlDays > 0
+	if ttlDays > 0 {
+		schema = strings.ReplaceAll(schema, "{{ttl_day}}", strconv.Itoa(ttlDays))
+	} else {
+		// Remove TTL clause if no TTL is set
+		schema = strings.ReplaceAll(schema, "TTL timestamp + INTERVAL {{ttl_day}} DAY", "")
+	}
+
+	// Create the table
+	if err := c.DB.Exec(ctx, schema); err != nil {
+		return fmt.Errorf("error creating table: %w", err)
+	}
+
+	return nil
+}
+
+// createAttributesView creates a materialized view for storing unique attribute keys
+func (c *Connection) createAttributesView(ctx context.Context) error {
+	viewName := fmt.Sprintf("%s_attributes", c.Source.TableName)
+	c.log.Debug("creating attributes view",
+		"view", viewName,
+		"source_table", c.Source.TableName,
+	)
+
+	// Create materialized view with built-in storage
+	query := fmt.Sprintf(`
+		CREATE MATERIALIZED VIEW IF NOT EXISTS %s.%s
+		ENGINE = ReplacingMergeTree
+		ORDER BY attribute_key
+		AS SELECT DISTINCT
+			arrayJoin(mapKeys(log_attributes)) as attribute_key
+		FROM %s.%s
+	`, c.Source.Database, viewName, c.Source.Database, c.Source.TableName)
+
+	if err := c.DB.Exec(ctx, query); err != nil {
+		return fmt.Errorf("error creating materialized view: %w", err)
+	}
+
+	return nil
+}
+
+// GetUniqueAttributes returns the unique attribute keys from log_attributes
+func (c *Connection) GetUniqueAttributes(ctx context.Context) ([]string, error) {
+	c.log.Debug("fetching unique attributes",
+		"table", c.Source.TableName,
+	)
+
+	// Query the materialized view directly
+	query := fmt.Sprintf(`
+		SELECT attribute_key
+		FROM %s.%s
+		ORDER BY attribute_key
+	`, c.Source.Database, fmt.Sprintf("%s_attributes", c.Source.TableName))
+
+	rows, err := c.DB.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("error querying unique attributes: %w", err)
+	}
+	defer rows.Close()
+
+	var result []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, fmt.Errorf("error scanning attribute key: %w", err)
+		}
+		result = append(result, key)
+	}
+
+	return result, nil
 }

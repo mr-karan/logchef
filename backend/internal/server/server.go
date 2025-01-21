@@ -80,7 +80,6 @@ func (s *Server) setupRoutes() {
 
 	// Query
 	query := v1.Group("/query")
-	query.Get("/explore", s.handleExploreQuery)
 	query.Get("/logs", s.handleQueryLogs)
 
 	// Handle 404 for all API routes (including /api/sources)

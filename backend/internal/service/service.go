@@ -96,33 +96,44 @@ func (s *Service) CreateSource(ctx context.Context, tableName, schemaType, dsn, 
 		return nil, fmt.Errorf("source with table name %s already exists in database %s", source.TableName, source.Database)
 	}
 
+	// For unmanaged sources, verify table exists in ClickHouse
+	if source.SchemaType == models.SchemaTypeUnmanaged {
+		// First add source to pool to get a connection
+		if err := s.clickhouse.AddSource(source); err != nil {
+			return nil, fmt.Errorf("error initializing ClickHouse connection: %w", err)
+		}
+		conn, err := s.clickhouse.GetConnection(source.ID)
+		if err != nil {
+			return nil, fmt.Errorf("error getting ClickHouse connection: %w", err)
+		}
+		if err := conn.DB.Exec(ctx, fmt.Sprintf("SELECT 1 FROM %s.%s LIMIT 1", source.Database, source.TableName)); err != nil {
+			return nil, fmt.Errorf("error verifying table exists: %w", err)
+		}
+	}
+
 	// First save to SQLite
 	if err := s.sqlite.CreateSource(ctx, source); err != nil {
 		return nil, fmt.Errorf("error saving to SQLite: %w", err)
 	}
 
-	// Then establish Clickhouse connection
-	if err := s.clickhouse.AddSource(source); err != nil {
-		// If Clickhouse connection fails, remove from SQLite
-		if delErr := s.sqlite.DeleteSource(ctx, source.ID); delErr != nil {
-			return nil, fmt.Errorf("error rolling back SQLite after Clickhouse failure: %w", delErr)
+	// Add to connection pool (for managed sources, this is done here)
+	if source.SchemaType == models.SchemaTypeManaged {
+		if err := s.clickhouse.AddSource(source); err != nil {
+			// Try to clean up SQLite entry on error
+			_ = s.sqlite.DeleteSource(ctx, source.ID)
+			return nil, fmt.Errorf("error initializing ClickHouse connection: %w", err)
 		}
-		return nil, fmt.Errorf("error connecting to Clickhouse: %w", err)
-	}
-
-	// Get the connection to create tables
-	conn, err := s.clickhouse.GetConnection(source.ID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting connection: %w", err)
-	}
-
-	// Create necessary tables
-	if err := conn.CreateSource(ctx, source.TTLDays); err != nil {
-		// Cleanup on failure
-		if delErr := s.DeleteSource(ctx, source.ID); delErr != nil {
-			return nil, fmt.Errorf("error cleaning up after table creation failure: %w", delErr)
+		conn, err := s.clickhouse.GetConnection(source.ID)
+		if err != nil {
+			// Try to clean up SQLite entry on error
+			_ = s.sqlite.DeleteSource(ctx, source.ID)
+			return nil, fmt.Errorf("error getting ClickHouse connection: %w", err)
 		}
-		return nil, fmt.Errorf("error creating tables: %w", err)
+		if err := conn.CreateSource(ctx, source.TTLDays); err != nil {
+			// Try to clean up SQLite entry on error
+			_ = s.sqlite.DeleteSource(ctx, source.ID)
+			return nil, fmt.Errorf("error creating ClickHouse table: %w", err)
+		}
 	}
 
 	return source, nil
@@ -160,15 +171,7 @@ func (s *Service) Close() error {
 }
 
 // ExploreSource retrieves the schema information for a source
-func (s *Service) ExploreSource(ctx context.Context, sourceID string) ([]models.ColumnInfo, error) {
-	source, err := s.sqlite.GetSource(ctx, sourceID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting source: %w", err)
-	}
-	if source == nil {
-		return nil, fmt.Errorf("source not found")
-	}
-
+func (s *Service) ExploreSource(ctx context.Context, source *models.Source) ([]models.ColumnInfo, error) {
 	columns, err := s.clickhouse.DescribeTable(ctx, source)
 	if err != nil {
 		return nil, fmt.Errorf("error describing table: %w", err)
@@ -178,7 +181,7 @@ func (s *Service) ExploreSource(ctx context.Context, sourceID string) ([]models.
 }
 
 // QueryLogs retrieves logs from a source with pagination
-func (s *Service) QueryLogs(ctx context.Context, sourceID string, limit, offset int) ([]map[string]interface{}, error) {
+func (s *Service) QueryLogs(ctx context.Context, sourceID string, limit, offset int) ([]map[string]string, error) {
 	source, err := s.sqlite.GetSource(ctx, sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("error getting source: %w", err)

@@ -1,16 +1,16 @@
 import type { APIResponse } from './types'
 import { api } from './config'
 
+// Generic log interface that can handle any fields
 export interface Log {
-  _timestamp: string
-  msg: string
-  _hostname?: string
-  group_name?: string
-  job_name?: string
-  namespace?: string
-  node_name?: string
-  task_name?: string
-  [key: string]: any
+  [key: string]: string | number | boolean | null | undefined
+}
+
+// Schema information for each log field
+export interface LogField {
+  name: string
+  type: string
+  description?: string
 }
 
 export interface QueryLogsParams {
@@ -19,7 +19,10 @@ export interface QueryLogsParams {
   offset?: number
 }
 
-export type QueryLogsResponse = APIResponse<Log[]>
+export type QueryLogsResponse = APIResponse<{
+  logs: Log[]
+  params: QueryLogsParams
+}>
 
 export const logsApi = {
   async queryLogs(params: QueryLogsParams): Promise<QueryLogsResponse> {
@@ -30,6 +33,13 @@ export const logsApi = {
         limit,
         offset
       }
+    })
+    return response.data
+  },
+
+  async exploreSource(source: string): Promise<APIResponse<LogField[]>> {
+    const response = await api.get<APIResponse<LogField[]>>('/query/explore', {
+      params: { source }
     })
     return response.data
   }

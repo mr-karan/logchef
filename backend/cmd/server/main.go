@@ -16,19 +16,29 @@ import (
 	"backend-v2/pkg/logger"
 )
 
+var (
+	// Build information, set by linker flags
+	version     = "dev"
+	commit      = "none"
+	buildTime   = "unknown"
+	buildString = "unknown"
+)
+
 func main() {
 	// Parse command line flags
 	var (
 		configPath = flag.String("config", "config.toml", "path to config file")
 		logLevel   = flag.String("log-level", "debug", "Log level (debug, info, warn, error)")
-		jsonLogs   = flag.Bool("json-logs", true, "Output logs in JSON format")
+		env        = flag.String("env", "development", "Environment (development, production)")
 	)
 	flag.Parse()
 
-	// Initialize logger
+	// Initialize logger with app metadata
 	if err := logger.Initialize(logger.Config{
-		Level:      *logLevel,
-		JSONOutput: *jsonLogs,
+		Level:   *logLevel,
+		AppName: "logchef",
+		Version: fmt.Sprintf("%s-%s", version, commit),
+		Env:     *env,
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
@@ -36,16 +46,40 @@ func main() {
 
 	log := logger.Default()
 
+	// Create base context with cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Log build information
+	log.Info("starting logchef server",
+		"version", version,
+		"commit", commit,
+		"build_time", buildTime,
+		"build_string", buildString,
+	)
+
 	// Load configuration
-	log.Info("loading configuration", "path", *configPath)
+	log.Info("loading configuration",
+		"path", *configPath,
+		"version", version,
+		"commit", commit,
+		"build_date", buildTime,
+	)
+	
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		log.Error("failed to load configuration", "error", err)
+		log.Error("failed to load configuration", 
+			"error", err,
+			"path", *configPath,
+		)
 		os.Exit(1)
 	}
 
 	// Initialize SQLite
-	log.Info("initializing SQLite database", "path", cfg.SQLite.Path)
+	log.Info("initializing SQLite database", 
+		"path", cfg.SQLite.Path,
+		"journal_mode", "WAL",
+	)
 	sqliteDB, err := sqlite.New(sqlite.Options{
 		Path: cfg.SQLite.Path,
 	})
@@ -128,7 +162,7 @@ func main() {
 	log.Info("shutting down server")
 
 	// Create shutdown context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	// Shutdown server and cleanup

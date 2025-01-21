@@ -72,9 +72,23 @@ func (s *Server) handleGetSource(c *fiber.Ctx) error {
 		})
 	}
 
+	// Get schema information
+	columns, err := s.svc.ExploreSource(c.Context(), source)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(Response{
+			Status: "error",
+			Data: fiber.Map{
+				"error": fmt.Sprintf("Failed to get schema: %v", err),
+			},
+		})
+	}
+
 	return c.JSON(Response{
 		Status: "success",
-		Data:   source,
+		Data: fiber.Map{
+			"source":  source,
+			"columns": columns,
+		},
 	})
 }
 
@@ -133,34 +147,6 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 	})
 }
 
-// handleExploreQuery handles exploring a source's schema
-func (s *Server) handleExploreQuery(c *fiber.Ctx) error {
-	sourceID := c.Query("source")
-	if sourceID == "" {
-		return c.Status(http.StatusBadRequest).JSON(Response{
-			Status: "error",
-			Data: fiber.Map{
-				"error": "source parameter is required",
-			},
-		})
-	}
-
-	columns, err := s.svc.ExploreSource(c.Context(), sourceID)
-	if err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(Response{
-			Status: "error",
-			Data: fiber.Map{
-				"error": fmt.Sprintf("Failed to explore source: %v", err),
-			},
-		})
-	}
-
-	return c.JSON(Response{
-		Status: "success",
-		Data:   columns,
-	})
-}
-
 // handleQueryLogs handles querying logs from a source
 func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 	sourceID := c.Query("source")
@@ -199,16 +185,24 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		})
 	}
 
+	params := make(map[string]string)
+	params["source"] = sourceID
+	params["limit"] = strconv.Itoa(limit)
+	params["offset"] = strconv.Itoa(offset)
+
 	return c.JSON(Response{
 		Status: "success",
-		Data:   logs,
+		Data: fiber.Map{
+			"logs":   logs,
+			"params": params,
+		},
 	})
 }
 
 // RegisterRoutes registers all routes for the server
 func (s *Server) RegisterRoutes(app *fiber.App) {
 	app.Get("/health", s.handleHealth)
-	
+
 	// Sources routes
 	app.Get("/sources", s.handleListSources)
 	app.Get("/sources/:id", s.handleGetSource)
@@ -216,6 +210,5 @@ func (s *Server) RegisterRoutes(app *fiber.App) {
 	app.Delete("/sources/:id", s.handleDeleteSource)
 
 	// Query routes
-	app.Get("/query/explore", s.handleExploreQuery)
 	app.Get("/query/logs", s.handleQueryLogs)
 }

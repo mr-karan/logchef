@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS sources (
     id TEXT PRIMARY KEY,
     table_name TEXT NOT NULL,
     database TEXT NOT NULL,
-    schema_type TEXT NOT NULL,
+    schema_type TEXT NOT NULL CHECK (schema_type IN ('managed', 'unmanaged')),
     dsn TEXT NOT NULL,
     description TEXT,
     ttl_days INTEGER NOT NULL DEFAULT 0,
