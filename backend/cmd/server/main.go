@@ -65,10 +65,10 @@ func main() {
 		"commit", commit,
 		"build_date", buildTime,
 	)
-	
+
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		log.Error("failed to load configuration", 
+		log.Error("failed to load configuration",
 			"error", err,
 			"path", *configPath,
 		)
@@ -76,7 +76,7 @@ func main() {
 	}
 
 	// Initialize SQLite
-	log.Info("initializing SQLite database", 
+	log.Info("initializing SQLite database",
 		"path", cfg.SQLite.Path,
 		"journal_mode", "WAL",
 	)
@@ -132,10 +132,6 @@ func main() {
 				log.Warn("source health check failed",
 					"source_id", health.ID,
 					"error", health.Error,
-				)
-			} else {
-				log.Debug("source health check passed",
-					"source_id", health.ID,
 				)
 			}
 		}

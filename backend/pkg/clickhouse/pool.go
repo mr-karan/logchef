@@ -150,6 +150,22 @@ func (p *Pool) DescribeTable(ctx context.Context, source *models.Source) ([]mode
 	return columns, nil
 }
 
+// GetTableSchema returns the CREATE TABLE statement for a source's table
+func (p *Pool) GetTableSchema(ctx context.Context, source *models.Source) (string, error) {
+	p.log.Debug("getting table schema",
+		"source_id", source.ID,
+		"database", source.Database,
+		"table", source.TableName,
+	)
+
+	conn, err := p.GetConnection(source.ID)
+	if err != nil {
+		return "", fmt.Errorf("error getting connection: %w", err)
+	}
+
+	return conn.GetTableSchema(ctx)
+}
+
 // Close closes all connections in the pool
 func (p *Pool) Close() error {
 	p.log.Info("closing all connections in pool")
@@ -171,14 +187,13 @@ func (p *Pool) Close() error {
 	return lastErr
 }
 
-// QueryLogs retrieves logs from a source with pagination
-func (p *Pool) QueryLogs(ctx context.Context, source *models.Source, limit, offset int) ([]map[string]string, error) {
-	conn, err := p.GetConnection(source.ID)
+// QueryLogs queries logs from a source with pagination
+func (p *Pool) QueryLogs(ctx context.Context, sourceID string, params LogQueryParams) (*LogQueryResult, error) {
+	conn, err := p.GetConnection(sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("error getting connection: %w", err)
 	}
-
-	return conn.QueryLogs(ctx, limit, offset)
+	return conn.QueryLogs(ctx, params)
 }
 
 // GetHealth returns the health status for a given source ID

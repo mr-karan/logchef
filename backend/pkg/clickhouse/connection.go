@@ -11,7 +11,6 @@ import (
 
 	"backend-v2/pkg/logger"
 	"backend-v2/pkg/models"
-	"backend-v2/pkg/parser"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -216,50 +215,6 @@ func (c *Connection) CheckHealth(ctx context.Context) models.SourceHealth {
 	return health
 }
 
-// QueryLogs queries logs from the source with pagination
-func (c *Connection) QueryLogs(ctx context.Context, limit, offset int) ([]map[string]string, error) {
-	// Build query that returns JSON strings
-	query := fmt.Sprintf("SELECT toJSONString(tuple(*)) as row_json FROM %s", c.Source.GetFullTableName())
-	if limit > 0 {
-		if offset > 0 {
-			query = fmt.Sprintf("%s ORDER BY timestamp DESC LIMIT %d OFFSET %d", query, limit, offset)
-		} else {
-			query = fmt.Sprintf("%s ORDER BY timestamp DESC LIMIT %d", query, limit)
-		}
-	}
-
-	c.log.Info("executing query", "query", query)
-
-	// Execute query
-	rows, err := c.DB.Query(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("error executing query: %w", err)
-	}
-	defer rows.Close()
-
-	// Collect JSON strings first
-	var jsonStrings []string
-	for rows.Next() {
-		var jsonStr string
-		if err := rows.Scan(&jsonStr); err != nil {
-			return nil, fmt.Errorf("error scanning row: %w", err)
-		}
-		jsonStrings = append(jsonStrings, jsonStr)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", err)
-	}
-
-	// Process all JSON strings in parallel
-	results, err := parser.BatchFlattenJSON(jsonStrings)
-	if err != nil {
-		return nil, fmt.Errorf("error flattening JSON: %w", err)
-	}
-
-	return results, nil
-}
-
 // CreateSource creates the necessary tables and structures for a source
 func (c *Connection) CreateSource(ctx context.Context, ttlDays int) error {
 	c.log.Info("creating source tables",
@@ -355,7 +310,7 @@ func (c *Connection) GetUniqueAttributes(ctx context.Context) ([]string, error) 
 	// Query the materialized view directly
 	query := fmt.Sprintf(`
 		SELECT attribute_key
-		FROM %s.%s
+		FROM %s.%s FINAL
 		ORDER BY attribute_key
 	`, c.Source.Database, fmt.Sprintf("%s_attributes", c.Source.TableName))
 
@@ -375,4 +330,22 @@ func (c *Connection) GetUniqueAttributes(ctx context.Context) ([]string, error) 
 	}
 
 	return result, nil
+}
+
+// GetTableSchema returns the CREATE TABLE statement for the source table
+func (c *Connection) GetTableSchema(ctx context.Context) (string, error) {
+	c.log.Debug("getting table schema",
+		"table", c.Source.TableName,
+	)
+
+	query := fmt.Sprintf(`
+		SHOW CREATE TABLE %s.%s
+	`, c.Source.Database, c.Source.TableName)
+
+	var schema string
+	if err := c.DB.QueryRow(ctx, query).Scan(&schema); err != nil {
+		return "", fmt.Errorf("error getting table schema: %w", err)
+	}
+
+	return schema, nil
 }

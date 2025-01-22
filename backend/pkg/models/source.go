@@ -8,16 +8,18 @@ import (
 
 // Source represents a Clickhouse data source in our system
 type Source struct {
-	ID          string    `db:"id" json:"id"`
-	TableName   string    `db:"table_name" json:"table_name"`
-	Database    string    `db:"database" json:"database"`
-	SchemaType  string    `db:"schema_type" json:"schema_type"`
-	DSN         string    `db:"dsn" json:"dsn"`
-	Description string    `db:"description" json:"description,omitempty"`
-	TTLDays     int       `db:"ttl_days" json:"ttl_days"`
-	CreatedAt   time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
-	IsConnected bool      `db:"-" json:"is_connected"`
+	ID          string       `db:"id" json:"id"`
+	TableName   string       `db:"table_name" json:"table_name"`
+	Database    string       `db:"database" json:"database"`
+	SchemaType  string       `db:"schema_type" json:"schema_type"`
+	DSN         string       `db:"dsn" json:"dsn"`
+	Description string       `db:"description" json:"description,omitempty"`
+	TTLDays     int          `db:"ttl_days" json:"ttl_days"`
+	CreatedAt   time.Time    `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time    `db:"updated_at" json:"updated_at"`
+	IsConnected bool         `db:"-" json:"is_connected"`
+	Schema      string       `db:"-" json:"schema,omitempty"`
+	Columns     []ColumnInfo `db:"-" json:"columns,omitempty"`
 }
 
 const (
