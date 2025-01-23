@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"backend-v2/internal/service"
 	"backend-v2/pkg/clickhouse"
 	"backend-v2/pkg/models"
 
@@ -32,107 +33,90 @@ func (s *Server) handleHealth(c *fiber.Ctx) error {
 func (s *Server) handleListSources(c *fiber.Ctx) error {
 	sources, err := s.svc.ListSources(c.Context())
 	if err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(Response{
-			Status: "error",
-			Data: fiber.Map{
-				"error": "Failed to list sources",
-			},
-		})
-	}
-
-	// Ensure we return an empty array instead of null
-	if sources == nil {
-		sources = make([]*models.Source, 0)
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to list sources: %v", err))
 	}
 
 	return c.JSON(Response{
 		Status: "success",
-		Data:   sources,
+		Data: fiber.Map{
+			"sources": sources,
+		},
 	})
 }
 
 // handleGetSource handles getting a single source
 func (s *Server) handleGetSource(c *fiber.Ctx) error {
 	id := c.Params("id")
+	if id == "" {
+		return fiber.NewError(http.StatusBadRequest, "source id is required")
+	}
+
 	source, err := s.svc.GetSource(c.Context(), id)
 	if err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(Response{
-			Status: "error",
-			Data: fiber.Map{
-				"error": "Failed to get source",
-			},
-		})
-	}
-	if source == nil {
-		return c.Status(http.StatusNotFound).JSON(Response{
-			Status: "error",
-			Data: fiber.Map{
-				"error": "Source not found",
-			},
-		})
+		if err == service.ErrSourceNotFound {
+			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("source %s not found", id))
+		}
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to get source: %v", err))
 	}
 
 	// Get schema information
 	if err := s.svc.ExploreSource(c.Context(), source); err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(Response{
-			Status: "error",
-			Data: fiber.Map{
-				"error": fmt.Sprintf("Failed to get schema: %v", err),
-			},
-		})
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to get schema: %v", err))
 	}
 
 	return c.JSON(Response{
 		Status: "success",
-		Data:   source,
+		Data: fiber.Map{
+			"source": source,
+		},
 	})
+}
+
+// CreateSourceRequest represents a request to create a new source
+type CreateSourceRequest struct {
+	TableName   string `json:"table_name"`
+	SchemaType  string `json:"schema_type"`
+	DSN         string `json:"dsn"`
+	Description string `json:"description"`
+	TTLDays     int    `json:"ttl_days"`
 }
 
 // handleCreateSource handles creating a new source
 func (s *Server) handleCreateSource(c *fiber.Ctx) error {
-	var source struct {
-		TableName   string `json:"table_name"`
-		SchemaType  string `json:"schema_type"`
-		DSN         string `json:"dsn"`
-		Description string `json:"description"`
-		TTLDays     int    `json:"ttl_days"`
+	var req CreateSourceRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
 	}
 
-	if err := c.BodyParser(&source); err != nil {
-		return c.Status(http.StatusBadRequest).JSON(Response{
-			Status: "error",
-			Data: fiber.Map{
-				"error": "Invalid request body",
-			},
-		})
+	if err := service.ValidateCreateSourceRequest(req.TableName, req.SchemaType, req.DSN, req.Description, req.TTLDays); err != nil {
+		return fiber.NewError(http.StatusBadRequest, err.Error())
 	}
 
-	created, err := s.svc.CreateSource(c.Context(), source.TableName, source.SchemaType, source.DSN, source.Description, source.TTLDays)
+	created, err := s.svc.CreateSource(c.Context(), req.TableName, req.SchemaType, req.DSN, req.Description, req.TTLDays)
 	if err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(Response{
-			Status: "error",
-			Data: fiber.Map{
-				"error": fmt.Sprintf("Failed to create source: %v", err),
-			},
-		})
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to create source: %v", err))
 	}
 
 	return c.Status(http.StatusCreated).JSON(Response{
 		Status: "success",
-		Data:   created,
+		Data: fiber.Map{
+			"source": created,
+		},
 	})
 }
 
 // handleDeleteSource handles deleting a source
 func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 	id := c.Params("id")
+	if id == "" {
+		return fiber.NewError(http.StatusBadRequest, "source id is required")
+	}
+
 	if err := s.svc.DeleteSource(c.Context(), id); err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(Response{
-			Status: "error",
-			Data: fiber.Map{
-				"error": "Failed to delete source",
-			},
-		})
+		if err == service.ErrSourceNotFound {
+			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("source %s not found", id))
+		}
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to delete source: %v", err))
 	}
 
 	return c.JSON(Response{
@@ -143,54 +127,68 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 	})
 }
 
-// QueryLogsRequest represents the request parameters for querying logs
-type QueryLogsRequest struct {
-	StartTimestamp int64 `json:"start_timestamp" query:"start_timestamp"`
-	EndTimestamp   int64 `json:"end_timestamp" query:"end_timestamp"`
-	Limit          int   `json:"limit" query:"limit"`
-}
-
 // handleQueryLogs handles requests to query logs from a source
 func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
-	sourceID := c.Params("id")
-	if sourceID == "" {
+	id := c.Params("id")
+	if id == "" {
 		return fiber.NewError(http.StatusBadRequest, "source id is required")
 	}
 
-	// Parse query parameters
-	var req QueryLogsRequest
-	if err := c.QueryParser(&req); err != nil {
-		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid query parameters: %v", err))
+	var req models.LogQueryRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
 	}
 
-	// Validate and set defaults
-	if req.Limit <= 0 {
-		req.Limit = 100 // default limit
-	}
-	if req.Limit > 1000 {
-		req.Limit = 1000 // max limit
+	// Set default mode to filters for backward compatibility
+	if req.Mode == "" {
+		req.Mode = models.QueryModeFilters
 	}
 
-	// Validate timestamps
-	if req.StartTimestamp > 0 && req.EndTimestamp > 0 && req.StartTimestamp > req.EndTimestamp {
+	if err := service.ValidateLogQueryRequest(&req); err != nil {
+		return fiber.NewError(http.StatusBadRequest, err.Error())
+	}
+
+	// Additional validation for timestamps
+	if req.StartTimestamp > req.EndTimestamp {
 		return fiber.NewError(http.StatusBadRequest, "start_timestamp cannot be greater than end_timestamp")
 	}
 
-	// Convert timestamps to time.Time
-	params := clickhouse.LogQueryParams{
-		Limit: req.Limit,
-	}
-	if req.StartTimestamp > 0 {
-		params.StartTime = time.UnixMilli(req.StartTimestamp).UTC()
-	}
-	if req.EndTimestamp > 0 {
-		params.EndTime = time.UnixMilli(req.EndTimestamp).UTC()
+	// Set default limit if not provided
+	if req.Limit == 0 {
+		req.Limit = 100 // default limit
 	}
 
+	// Convert to query params
+	params := clickhouse.LogQueryParams{
+		Limit:        req.Limit,
+		StartTime:    time.UnixMilli(req.StartTimestamp).UTC(),
+		EndTime:      time.UnixMilli(req.EndTimestamp).UTC(),
+		FilterGroups: req.FilterGroups,
+		Sort:         req.Sort,
+		Mode:         req.Mode,
+		RawSQL:       req.RawSQL,
+		LogChefQL:    req.LogChefQL,
+	}
+
+	// Set default sort if not provided
+	if req.Sort == nil {
+		params.Sort = &models.SortOptions{
+			Field: "timestamp",
+			Order: models.SortOrderDesc,
+		}
+	} else {
+		params.Sort = req.Sort
+	}
+
+	fmt.Println("filter groups", req.FilterGroups)
+
 	// Query logs
-	result, err := s.svc.QueryLogs(c.Context(), sourceID, params)
+	result, err := s.svc.QueryLogs(c.Context(), id, params)
 	if err != nil {
-		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("error querying logs: %v", err))
+		if err == service.ErrSourceNotFound {
+			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("source %s not found", id))
+		}
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to query logs: %v", err))
 	}
 
 	return c.JSON(Response{
@@ -199,10 +197,12 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 			"logs":  result.Data,
 			"stats": result.Stats,
 			"params": fiber.Map{
-				"source_id":       sourceID,
+				"source_id":       id,
+				"filter_groups":   req.FilterGroups,
 				"limit":           req.Limit,
 				"start_timestamp": req.StartTimestamp,
 				"end_timestamp":   req.EndTimestamp,
+				"sort":            req.Sort,
 			},
 		},
 	})

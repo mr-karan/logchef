@@ -1,19 +1,24 @@
 package clickhouse
 
 import (
+	"backend-v2/pkg/models"
+	"backend-v2/pkg/querybuilder"
 	"context"
 	"encoding/json"
 	"fmt"
 	"time"
-
-	"github.com/huandu/go-sqlbuilder"
 )
 
 // LogQueryParams represents parameters for querying logs
 type LogQueryParams struct {
-	StartTime time.Time
-	EndTime   time.Time
-	Limit     int
+	StartTime    time.Time
+	EndTime      time.Time
+	Limit        int
+	FilterGroups []models.FilterGroup
+	Sort         *models.SortOptions
+	Mode         models.QueryMode
+	RawSQL       string // Used only for raw_sql mode
+	LogChefQL    string // Used only for logchefql mode
 }
 
 // LogQueryResult represents the result of a log query
@@ -34,39 +39,53 @@ func (c *Connection) QueryLogs(ctx context.Context, params LogQueryParams) (*Log
 		"start_time", params.StartTime,
 		"end_time", params.EndTime,
 		"limit", params.Limit,
+		"filter_groups", params.FilterGroups,
+		"sort", params.Sort,
+		"mode", params.Mode,
 	)
 
-	// Use SQL builder to construct query
-	sb := sqlbuilder.NewSelectBuilder()
-	sb.Select("toJSONString(tuple(*)) as raw_json")
-	sb.From(c.Source.GetFullTableName())
-
-	// Add time range conditions
-	if !params.StartTime.IsZero() {
-		sb.Where(sb.GE("timestamp", sqlbuilder.Raw(fmt.Sprintf("toDateTime64(%f, 3)", float64(params.StartTime.UnixNano())/1e9))))
-	}
-	if !params.EndTime.IsZero() {
-		sb.Where(sb.LE("timestamp", sqlbuilder.Raw(fmt.Sprintf("toDateTime64(%f, 3)", float64(params.EndTime.UnixNano())/1e9))))
+	// Create query builder based on mode
+	var builder querybuilder.Builder
+	opts := querybuilder.Options{
+		StartTime: params.StartTime,
+		EndTime:   params.EndTime,
+		Limit:     params.Limit,
+		Sort:      params.Sort,
 	}
 
-	// Add order by timestamp desc and limit
-	sb.OrderBy("timestamp DESC")
-	if params.Limit > 0 {
-		sb.Limit(params.Limit)
+	switch params.Mode {
+	case models.QueryModeRawSQL:
+		if params.RawSQL == "" {
+			return nil, fmt.Errorf("raw SQL query cannot be empty")
+		}
+		builder = querybuilder.NewRawSQLBuilder(c.Source.GetFullTableName(), params.RawSQL)
+	case models.QueryModeLogChefQL:
+		if params.LogChefQL == "" {
+			return nil, fmt.Errorf("LogchefQL query cannot be empty")
+		}
+		builder = querybuilder.NewLogchefQLBuilder(c.Source.GetFullTableName(), opts, params.LogChefQL)
+	case models.QueryModeFilters:
+		builder = querybuilder.NewFilterBuilder(c.Source.GetFullTableName(), opts, params.FilterGroups)
+	default:
+		return nil, fmt.Errorf("unsupported query mode: %s", params.Mode)
 	}
 
 	// Build the query
-	query, args := sb.Build()
+	query, err := builder.Build()
+	if err != nil {
+		return nil, fmt.Errorf("error building query: %w", err)
+	}
+
 	c.log.Debug("executing query",
-		"query", query,
-		"args", args,
+		"query", query.SQL,
+		"args", query.Args,
 	)
 
 	// Start timing the query
 	start := time.Now()
 
 	// Execute query
-	rows, err := c.DB.Query(ctx, query, args...)
+	rows, err := c.DB.Query(ctx, query.SQL, query.Args...)
 	if err != nil {
 		return nil, fmt.Errorf("error executing query: %w", err)
 	}

@@ -4,21 +4,22 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"github.com/go-playground/validator/v10"
 )
 
 // Source represents a Clickhouse data source in our system
 type Source struct {
-	ID          string       `db:"id" json:"id"`
-	TableName   string       `db:"table_name" json:"table_name"`
-	Database    string       `db:"database" json:"database"`
-	SchemaType  string       `db:"schema_type" json:"schema_type"`
-	DSN         string       `db:"dsn" json:"dsn"`
-	Description string       `db:"description" json:"description,omitempty"`
-	TTLDays     int          `db:"ttl_days" json:"ttl_days"`
-	CreatedAt   time.Time    `db:"created_at" json:"created_at"`
-	UpdatedAt   time.Time    `db:"updated_at" json:"updated_at"`
-	IsConnected bool         `db:"-" json:"is_connected"`
-	Schema      string       `db:"-" json:"schema,omitempty"`
+	ID          string    `db:"id" json:"id" validate:"required"`
+	TableName   string    `db:"table_name" json:"table_name" validate:"required,min=1"`
+	Database    string    `db:"database" json:"database" validate:"required,min=1"`
+	SchemaType  string    `db:"schema_type" json:"schema_type" validate:"required,oneof=managed unmanaged"`
+	DSN         string    `db:"dsn" json:"dsn" validate:"required,min=1"`
+	Description string    `db:"description" json:"description,omitempty" validate:"omitempty,min=1"`
+	TTLDays     int       `db:"ttl_days" json:"ttl_days" validate:"required,min=0"`
+	CreatedAt   time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
+	IsConnected bool      `db:"-" json:"is_connected"`
+	Schema      string    `db:"-" json:"schema,omitempty"`
 	Columns     []ColumnInfo `db:"-" json:"columns,omitempty"`
 }
 
@@ -55,6 +56,11 @@ func (s *Source) GetFullTableName() string {
 
 // Validate checks if the source configuration is valid
 func (s *Source) Validate() error {
+	validate := validator.New()
+	err := validate.Struct(s)
+	if err != nil {
+		return err
+	}
 	if s.ID == "" {
 		return fmt.Errorf("source ID is required")
 	}

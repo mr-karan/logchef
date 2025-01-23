@@ -14,42 +14,42 @@ type ClickhouseType string
 
 // Clickhouse data types
 const (
-	TypeBool      ClickhouseType = "Bool"
-	TypeInt8      ClickhouseType = "Int8"
-	TypeInt16     ClickhouseType = "Int16"
-	TypeInt32     ClickhouseType = "Int32"
-	TypeInt64     ClickhouseType = "Int64"
-	TypeUInt8     ClickhouseType = "UInt8"
-	TypeUInt16    ClickhouseType = "UInt16"
-	TypeUInt32    ClickhouseType = "UInt32"
-	TypeUInt64    ClickhouseType = "UInt64"
-	TypeFloat32   ClickhouseType = "Float32"
-	TypeFloat64   ClickhouseType = "Float64"
-	TypeString    ClickhouseType = "String"
-	TypeUUID      ClickhouseType = "UUID"
-	TypeDateTime  ClickhouseType = "DateTime"
+	TypeBool       ClickhouseType = "Bool"
+	TypeInt8       ClickhouseType = "Int8"
+	TypeInt16      ClickhouseType = "Int16"
+	TypeInt32      ClickhouseType = "Int32"
+	TypeInt64      ClickhouseType = "Int64"
+	TypeUInt8      ClickhouseType = "UInt8"
+	TypeUInt16     ClickhouseType = "UInt16"
+	TypeUInt32     ClickhouseType = "UInt32"
+	TypeUInt64     ClickhouseType = "UInt64"
+	TypeFloat32    ClickhouseType = "Float32"
+	TypeFloat64    ClickhouseType = "Float64"
+	TypeString     ClickhouseType = "String"
+	TypeUUID       ClickhouseType = "UUID"
+	TypeDateTime   ClickhouseType = "DateTime"
 	TypeDateTime64 ClickhouseType = "DateTime64"
-	TypeDate      ClickhouseType = "Date"
-	TypeJSON      ClickhouseType = "JSON"
-	TypeMap       ClickhouseType = "Map"
+	TypeDate       ClickhouseType = "Date"
+	TypeJSON       ClickhouseType = "JSON"
+	TypeMap        ClickhouseType = "Map"
 )
 
 var (
 	// Common Go types used for reflection
-	boolType    = reflect.TypeOf(false)
-	int8Type    = reflect.TypeOf(int8(0))
-	int16Type   = reflect.TypeOf(int16(0))
-	int32Type   = reflect.TypeOf(int32(0))
-	int64Type   = reflect.TypeOf(int64(0))
-	uint8Type   = reflect.TypeOf(uint8(0))
-	uint16Type  = reflect.TypeOf(uint16(0))
-	uint32Type  = reflect.TypeOf(uint32(0))
-	uint64Type  = reflect.TypeOf(uint64(0))
-	float32Type = reflect.TypeOf(float32(0))
-	float64Type = reflect.TypeOf(float64(0))
-	stringType  = reflect.TypeOf("")
-	timeType    = reflect.TypeOf(time.Time{})
-	uuidType    = reflect.TypeOf(uuid.UUID{})
+	boolType            = reflect.TypeOf(false)
+	int8Type            = reflect.TypeOf(int8(0))
+	int16Type           = reflect.TypeOf(int16(0))
+	int32Type           = reflect.TypeOf(int32(0))
+	int64Type           = reflect.TypeOf(int64(0))
+	uint8Type           = reflect.TypeOf(uint8(0))
+	uint16Type          = reflect.TypeOf(uint16(0))
+	uint32Type          = reflect.TypeOf(uint32(0))
+	uint64Type          = reflect.TypeOf(uint64(0))
+	float32Type         = reflect.TypeOf(float32(0))
+	float64Type         = reflect.TypeOf(float64(0))
+	stringType          = reflect.TypeOf("")
+	timeType            = reflect.TypeOf(time.Time{})
+	uuidType            = reflect.TypeOf(uuid.UUID{})
 	mapStringStringType = reflect.TypeOf(map[string]string{})
 )
 
@@ -76,7 +76,7 @@ func ParseTypeInfo(typeStr string) (*TypeInfo, error) {
 		info.Map = true
 		mapTypes := strings.TrimPrefix(typeStr, "Map(")
 		mapTypes = strings.TrimSuffix(mapTypes, ")")
-		
+
 		// Split into key and value types
 		parts := strings.Split(mapTypes, ",")
 		if len(parts) != 2 {

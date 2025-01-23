@@ -34,12 +34,13 @@ func New(cfg *config.Config, svc *service.Service, fs http.FileSystem) *Server {
 			if e, ok := err.(*fiber.Error); ok {
 				code = e.Code
 			}
-			return c.Status(code).JSON(Response{
+			resp := Response{
 				Status: "error",
 				Data: fiber.Map{
 					"error": err.Error(),
 				},
-			})
+			}
+			return c.Status(code).JSON(resp)
 		},
 	})
 
@@ -51,7 +52,7 @@ func New(cfg *config.Config, svc *service.Service, fs http.FileSystem) *Server {
 	}))
 	app.Use(cors.New())
 
-	server := &Server{
+	s := &Server{
 		app:    app,
 		config: cfg,
 		svc:    svc,
@@ -59,9 +60,9 @@ func New(cfg *config.Config, svc *service.Service, fs http.FileSystem) *Server {
 	}
 
 	// Setup routes
-	server.setupRoutes()
+	s.setupRoutes()
 
-	return server
+	return s
 }
 
 func (s *Server) setupRoutes() {
@@ -77,7 +78,7 @@ func (s *Server) setupRoutes() {
 	sources.Post("/", s.handleCreateSource)
 	sources.Get("/:id", s.handleGetSource)
 	sources.Delete("/:id", s.handleDeleteSource)
-	sources.Get("/:id/logs", s.handleQueryLogs) // Query logs for a specific source
+	sources.Post("/:id/logs", s.handleQueryLogs) // Query logs for a specific source
 
 	// Handle 404 for all API routes
 	s.app.Use("/api/*", func(c *fiber.Ctx) error {
