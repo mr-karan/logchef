@@ -1,0 +1,15 @@
+// Import font
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+// Base styles
+html,
+body {
+  font-family:
+    'Inter',
+    -apple-system,
+    BlinkMacSystemFont,
+    system-ui,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

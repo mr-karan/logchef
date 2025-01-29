@@ -44,13 +44,9 @@ const navItems = [
 
       <!-- Navigation -->
       <nav class="py-4">
-        <router-link
-          v-for="item in navItems"
-          :key="item.route"
-          :to="item.route"
+        <router-link v-for="item in navItems" :key="item.route" :to="item.route"
           class="flex items-center px-6 py-3 text-gray-600 hover:text-gray-900 hover:bg-gray-50 transition-colors"
-          :class="{ 'text-blue-600 bg-blue-50': route.path === item.route }"
-        >
+          :class="{ 'text-blue-600 bg-blue-50': route.path === item.route }">
           <i :class="item.icon" class="mr-3 text-lg"></i>
           <span class="text-sm font-medium">{{ item.label }}</span>
         </router-link>
