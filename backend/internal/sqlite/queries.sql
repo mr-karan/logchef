@@ -13,10 +13,12 @@ PRAGMA cache_size        = -16000;
 -- Create the sources table if it doesn't exist
 CREATE TABLE IF NOT EXISTS sources (
     id TEXT PRIMARY KEY,
-    table_name TEXT NOT NULL,
-    database TEXT NOT NULL,
     schema_type TEXT NOT NULL CHECK (schema_type IN ('managed', 'unmanaged')),
-    dsn TEXT NOT NULL,
+    host TEXT NOT NULL,
+    username TEXT NOT NULL,
+    password TEXT NOT NULL,
+    database TEXT NOT NULL,
+    table_name TEXT NOT NULL,
     description TEXT,
     ttl_days INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
@@ -27,15 +29,17 @@ CREATE TABLE IF NOT EXISTS sources (
 -- name: CreateSource
 -- Create a new source entry
 -- $1: id
--- $2: table_name
--- $3: database
--- $4: schema_type
--- $5: dsn
--- $6: description
--- $7: ttl_days
+-- $2: schema_type
+-- $3: host
+-- $4: username
+-- $5: password
+-- $6: database
+-- $7: table_name
+-- $8: description
+-- $9: ttl_days
 INSERT INTO sources (
-    id, table_name, database, schema_type, dsn, description, ttl_days, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    id, schema_type, host, username, password, database, table_name, description, ttl_days, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 RETURNING *;
 
 -- name: GetSource
@@ -55,18 +59,22 @@ SELECT * FROM sources ORDER BY created_at DESC;
 
 -- name: UpdateSource
 -- Update an existing source
--- $1: table_name
--- $2: database
--- $3: schema_type
--- $4: dsn
--- $5: description
--- $6: ttl_days
--- $7: id
+-- $1: schema_type
+-- $2: host
+-- $3: username
+-- $4: password
+-- $5: database
+-- $6: table_name
+-- $7: description
+-- $8: ttl_days
+-- $9: id
 UPDATE sources
-SET table_name = ?,
+SET schema_type = ?,
+    host = ?,
+    username = ?,
+    password = ?,
     database = ?,
-    schema_type = ?,
-    dsn = ?,
+    table_name = ?,
     description = ?,
     ttl_days = ?,
     updated_at = datetime('now')

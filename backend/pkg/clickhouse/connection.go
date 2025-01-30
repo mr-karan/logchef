@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -58,14 +57,9 @@ func (c *loggingConn) Query(ctx context.Context, query string, args ...any) (dri
 func NewConnection(source *models.Source) (*Connection, error) {
 	log := logger.Default().With(
 		"source_id", source.ID,
-		"database", source.Database,
-		"table", source.TableName,
+		"database", source.Connection.Database,
+		"table", source.Connection.TableName,
 	)
-
-	// Validate source configuration
-	if err := source.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid source configuration: %w", err)
-	}
 
 	options, err := parseSourceOptions(source)
 	if err != nil {
@@ -111,38 +105,12 @@ func NewConnection(source *models.Source) (*Connection, error) {
 
 // parseSourceOptions converts a Source into Clickhouse connection options
 func parseSourceOptions(source *models.Source) (*clickhouse.Options, error) {
-	// Parse DSN
-	// DSN format: clickhouse://host:port?username=user&password=pass&database=db
-	dsn := source.DSN
-	if dsn == "" {
-		return nil, fmt.Errorf("DSN is required")
-	}
-
-	// Parse the URL
-	u, err := url.Parse(dsn)
-	if err != nil {
-		return nil, fmt.Errorf("invalid DSN format: %w", err)
-	}
-
-	// Verify scheme
-	if u.Scheme != "clickhouse" {
-		return nil, fmt.Errorf("invalid DSN scheme, expected 'clickhouse', got '%s'", u.Scheme)
-	}
-
-	// Get query parameters
-	q := u.Query()
-	username := q.Get("username")
-	if username == "" {
-		username = "default"
-	}
-	password := q.Get("password")
-
-	return &clickhouse.Options{
-		Addr: []string{u.Host}, // Host:Port
+	options := &clickhouse.Options{
+		Addr: []string{source.Connection.Host}, // Host:Port
 		Auth: clickhouse.Auth{
-			Database: source.Database,
-			Username: username,
-			Password: password,
+			Database: source.Connection.Database,
+			Username: source.Connection.Username,
+			Password: source.Connection.Password,
 		},
 		Settings: clickhouse.Settings{
 			"max_execution_time": defaultMaxExecutionTime,
@@ -155,7 +123,8 @@ func parseSourceOptions(source *models.Source) (*clickhouse.Options, error) {
 		ConnMaxLifetime:  defaultConnMaxLifetime,
 		ConnOpenStrategy: clickhouse.ConnOpenInOrder,
 		BlockBufferSize:  defaultBlockBufferSize,
-	}, nil
+	}
+	return options, nil
 }
 
 // Close closes the connection
@@ -232,13 +201,13 @@ func (c *Connection) CreateSource(ctx context.Context, ttlDays int) error {
 		}
 	case models.SchemaTypeUnmanaged:
 		// For unmanaged sources, we just verify the table exists
-		query := fmt.Sprintf("SELECT 1 FROM %s.%s LIMIT 1", c.Source.Database, c.Source.TableName)
+		query := fmt.Sprintf("SELECT 1 FROM %s.%s LIMIT 1", c.Source.Connection.Database, c.Source.Connection.TableName)
 		if err := c.DB.Exec(ctx, query); err != nil {
 			return fmt.Errorf("error verifying table exists: %w", err)
 		}
 		c.log.Debug("verified unmanaged table exists",
-			"database", c.Source.Database,
-			"table", c.Source.TableName,
+			"database", c.Source.Connection.Database,
+			"table", c.Source.Connection.TableName,
 		)
 	default:
 		return fmt.Errorf("invalid schema type: %s", c.Source.SchemaType)
@@ -250,15 +219,15 @@ func (c *Connection) CreateSource(ctx context.Context, ttlDays int) error {
 // createManagedTables creates the tables for managed sources
 func (c *Connection) createManagedTables(ctx context.Context, ttlDays int) error {
 	c.log.Debug("creating managed tables",
-		"table", c.Source.TableName,
+		"table", c.Source.Connection.TableName,
 		"ttl_days", ttlDays,
 	)
 
 	schema := models.OTELLogsTableSchema
 
 	// Replace placeholders with actual values
-	schema = strings.ReplaceAll(schema, "{{database_name}}", c.Source.Database)
-	schema = strings.ReplaceAll(schema, "{{table_name}}", c.Source.TableName)
+	schema = strings.ReplaceAll(schema, "{{database_name}}", c.Source.Connection.Database)
+	schema = strings.ReplaceAll(schema, "{{table_name}}", c.Source.Connection.TableName)
 
 	// Only add TTL if ttlDays > 0
 	if ttlDays > 0 {
@@ -278,10 +247,10 @@ func (c *Connection) createManagedTables(ctx context.Context, ttlDays int) error
 
 // createAttributesView creates a materialized view for storing unique attribute keys
 func (c *Connection) createAttributesView(ctx context.Context) error {
-	viewName := fmt.Sprintf("%s_attributes", c.Source.TableName)
+	viewName := fmt.Sprintf("%s_attributes", c.Source.Connection.TableName)
 	c.log.Debug("creating attributes view",
 		"view", viewName,
-		"source_table", c.Source.TableName,
+		"source_table", c.Source.Connection.TableName,
 	)
 
 	// Create materialized view with built-in storage
@@ -292,7 +261,7 @@ func (c *Connection) createAttributesView(ctx context.Context) error {
 		AS SELECT DISTINCT
 			arrayJoin(mapKeys(log_attributes)) as attribute_key
 		FROM %s.%s
-	`, c.Source.Database, viewName, c.Source.Database, c.Source.TableName)
+	`, c.Source.Connection.Database, viewName, c.Source.Connection.Database, c.Source.Connection.TableName)
 
 	if err := c.DB.Exec(ctx, query); err != nil {
 		return fmt.Errorf("error creating materialized view: %w", err)
@@ -304,7 +273,7 @@ func (c *Connection) createAttributesView(ctx context.Context) error {
 // GetUniqueAttributes returns the unique attribute keys from log_attributes
 func (c *Connection) GetUniqueAttributes(ctx context.Context) ([]string, error) {
 	c.log.Debug("fetching unique attributes",
-		"table", c.Source.TableName,
+		"table", c.Source.Connection.TableName,
 	)
 
 	// Query the materialized view directly
@@ -312,7 +281,7 @@ func (c *Connection) GetUniqueAttributes(ctx context.Context) ([]string, error) 
 		SELECT attribute_key
 		FROM %s.%s FINAL
 		ORDER BY attribute_key
-	`, c.Source.Database, fmt.Sprintf("%s_attributes", c.Source.TableName))
+	`, c.Source.Connection.Database, fmt.Sprintf("%s_attributes", c.Source.Connection.TableName))
 
 	rows, err := c.DB.Query(ctx, query)
 	if err != nil {
@@ -335,12 +304,12 @@ func (c *Connection) GetUniqueAttributes(ctx context.Context) ([]string, error) 
 // GetTableSchema returns the CREATE TABLE statement for the source table
 func (c *Connection) GetTableSchema(ctx context.Context) (string, error) {
 	c.log.Debug("getting table schema",
-		"table", c.Source.TableName,
+		"table", c.Source.Connection.TableName,
 	)
 
 	query := fmt.Sprintf(`
 		SHOW CREATE TABLE %s.%s
-	`, c.Source.Database, c.Source.TableName)
+	`, c.Source.Connection.Database, c.Source.Connection.TableName)
 
 	var schema string
 	if err := c.DB.QueryRow(ctx, query).Scan(&schema); err != nil {

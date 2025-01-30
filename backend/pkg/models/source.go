@@ -2,25 +2,30 @@ package models
 
 import (
 	"fmt"
-	"strings"
 	"time"
-	"github.com/go-playground/validator/v10"
 )
+
+// ConnectionInfo represents the connection details for a Clickhouse database
+type ConnectionInfo struct {
+	Host      string `json:"host"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+	Database  string `json:"database"`
+	TableName string `json:"table_name"`
+}
 
 // Source represents a Clickhouse data source in our system
 type Source struct {
-	ID          string    `db:"id" json:"id" validate:"required"`
-	TableName   string    `db:"table_name" json:"table_name" validate:"required,min=1"`
-	Database    string    `db:"database" json:"database" validate:"required,min=1"`
-	SchemaType  string    `db:"schema_type" json:"schema_type" validate:"required,oneof=managed unmanaged"`
-	DSN         string    `db:"dsn" json:"dsn" validate:"required,min=1"`
-	Description string    `db:"description" json:"description,omitempty" validate:"omitempty,min=1"`
-	TTLDays     int       `db:"ttl_days" json:"ttl_days" validate:"required,min=0"`
-	CreatedAt   time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
-	IsConnected bool      `db:"-" json:"is_connected"`
-	Schema      string    `db:"-" json:"schema,omitempty"`
-	Columns     []ColumnInfo `db:"-" json:"columns,omitempty"`
+	ID          string         `db:"id" json:"id"`
+	SchemaType  string         `db:"schema_type" json:"schema_type"`
+	Connection  ConnectionInfo `db:"connection" json:"connection"`
+	Description string         `db:"description" json:"description,omitempty"`
+	TTLDays     int            `db:"ttl_days" json:"ttl_days"`
+	CreatedAt   time.Time      `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time      `db:"updated_at" json:"updated_at"`
+	IsConnected bool           `db:"-" json:"is_connected"`
+	Schema      string         `db:"-" json:"schema,omitempty"`
+	Columns     []ColumnInfo   `db:"-" json:"columns,omitempty"`
 }
 
 const (
@@ -30,87 +35,9 @@ const (
 	SchemaTypeUnmanaged = "unmanaged"
 )
 
-// getDatabaseFromDSN extracts the database name from DSN
-func (s *Source) getDatabaseFromDSN() string {
-	if s.DSN == "" {
-		return ""
-	}
-
-	// Find the database parameter in the query string
-	if idx := strings.Index(s.DSN, "?database="); idx >= 0 {
-		dbPart := s.DSN[idx+len("?database="):]
-		// If there are other query parameters, stop at &
-		if andIdx := strings.Index(dbPart, "&"); andIdx >= 0 {
-			return dbPart[:andIdx]
-		}
-		return dbPart
-	}
-
-	return ""
-}
-
 // GetFullTableName returns the fully qualified table name (database.table)
 func (s *Source) GetFullTableName() string {
-	return fmt.Sprintf("%s.%s", s.Database, s.TableName)
-}
-
-// Validate checks if the source configuration is valid
-func (s *Source) Validate() error {
-	validate := validator.New()
-	err := validate.Struct(s)
-	if err != nil {
-		return err
-	}
-	if s.ID == "" {
-		return fmt.Errorf("source ID is required")
-	}
-	if s.TableName == "" {
-		return fmt.Errorf("table name is required")
-	}
-	if s.Database == "" {
-		s.Database = s.getDatabaseFromDSN()
-		if s.Database == "" {
-			return fmt.Errorf("database is required")
-		}
-	}
-	if !isValidTableName(s.TableName) {
-		return fmt.Errorf("table name must start with a letter and contain only letters, numbers, and underscores")
-	}
-	if s.SchemaType == "" {
-		return fmt.Errorf("schema type is required")
-	}
-	if s.SchemaType != SchemaTypeManaged && s.SchemaType != SchemaTypeUnmanaged {
-		return fmt.Errorf("schema type must be either '%s' or '%s'", SchemaTypeManaged, SchemaTypeUnmanaged)
-	}
-	if s.DSN == "" {
-		return fmt.Errorf("DSN is required")
-	}
-	if s.TTLDays < -1 {
-		return fmt.Errorf("TTL days must be -1 (no TTL) or a positive number")
-	}
-	return nil
-}
-
-// isValidTableName checks if the name is valid for use as a table name
-func isValidTableName(name string) bool {
-	// Only allow alphanumeric and underscore, must start with a letter
-	if len(name) == 0 || !isLetter(rune(name[0])) {
-		return false
-	}
-	for _, r := range name {
-		if !isAlphanumericOrUnderscore(r) {
-			return false
-		}
-	}
-	return true
-}
-
-func isLetter(r rune) bool {
-	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
-}
-
-func isAlphanumericOrUnderscore(r rune) bool {
-	return isLetter(r) || (r >= '0' && r <= '9') || r == '_'
+	return fmt.Sprintf("%s.%s", s.Connection.Database, s.Connection.TableName)
 }
 
 // SourceHealth represents the health status of a source

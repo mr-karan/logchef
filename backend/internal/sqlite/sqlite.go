@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
+	"time"
 
 	"backend-v2/pkg/models"
 
@@ -91,10 +92,12 @@ func (d *DB) initialize() error {
 func (d *DB) CreateSource(ctx context.Context, source *models.Source) error {
 	result, err := d.queries.CreateSource.ExecContext(ctx,
 		source.ID,
-		source.TableName,
-		source.Database,
 		source.SchemaType,
-		source.DSN,
+		source.Connection.Host,
+		source.Connection.Username,
+		source.Connection.Password,
+		source.Connection.Database,
+		source.Connection.TableName,
 		source.Description,
 		source.TTLDays,
 	)
@@ -104,11 +107,10 @@ func (d *DB) CreateSource(ctx context.Context, source *models.Source) error {
 
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("error getting affected rows: %w", err)
+		return fmt.Errorf("error getting rows affected: %w", err)
 	}
-
 	if rows != 1 {
-		return fmt.Errorf("expected to affect 1 row, affected %d", rows)
+		return fmt.Errorf("expected 1 row to be affected, got %d", rows)
 	}
 
 	return nil
@@ -116,8 +118,8 @@ func (d *DB) CreateSource(ctx context.Context, source *models.Source) error {
 
 // GetSource retrieves a source by its ID
 func (d *DB) GetSource(ctx context.Context, id string) (*models.Source, error) {
-	var source models.Source
-	err := d.queries.GetSource.QueryRowxContext(ctx, id).StructScan(&source)
+	var row SourceRow
+	err := d.queries.GetSource.QueryRowxContext(ctx, id).StructScan(&row)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -125,13 +127,25 @@ func (d *DB) GetSource(ctx context.Context, id string) (*models.Source, error) {
 		return nil, fmt.Errorf("error getting source: %w", err)
 	}
 
-	return &source, nil
+	return &models.Source{
+		ID:         row.ID,
+		SchemaType: row.SchemaType,
+		Connection: models.ConnectionInfo{
+			Host:      row.Host,
+			Database:  row.Database,
+			TableName: row.TableName,
+		},
+		Description: row.Description,
+		TTLDays:     row.TTLDays,
+		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
+	}, nil
 }
 
 // GetSourceByName retrieves a source by its table name and database
 func (d *DB) GetSourceByName(ctx context.Context, database, tableName string) (*models.Source, error) {
-	var source models.Source
-	err := d.queries.GetSourceByName.QueryRowxContext(ctx, database, tableName).StructScan(&source)
+	var row SourceRow
+	err := d.queries.GetSourceByName.QueryRowxContext(ctx, database, tableName).StructScan(&row)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -139,12 +153,39 @@ func (d *DB) GetSourceByName(ctx context.Context, database, tableName string) (*
 		return nil, fmt.Errorf("error getting source: %w", err)
 	}
 
-	return &source, nil
+	return &models.Source{
+		ID:         row.ID,
+		SchemaType: row.SchemaType,
+		Connection: models.ConnectionInfo{
+			Host:      row.Host,
+			Database:  row.Database,
+			TableName: row.TableName,
+		},
+		Description: row.Description,
+		TTLDays:     row.TTLDays,
+		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
+	}, nil
+}
+
+// SourceRow represents a row in the sources table
+type SourceRow struct {
+	ID          string    `db:"id"`
+	SchemaType  string    `db:"schema_type"`
+	Host        string    `db:"host"`
+	Username    string    `db:"username"`
+	Password    string    `db:"password"`
+	Database    string    `db:"database"`
+	TableName   string    `db:"table_name"`
+	Description string    `db:"description"`
+	TTLDays     int       `db:"ttl_days"`
+	CreatedAt   time.Time `db:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at"`
 }
 
 // ListSources returns all sources ordered by creation date
 func (d *DB) ListSources(ctx context.Context) ([]*models.Source, error) {
-	var sources []*models.Source
+	var sourceRows []*SourceRow
 	rows, err := d.queries.ListSources.QueryxContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error listing sources: %w", err)
@@ -152,15 +193,33 @@ func (d *DB) ListSources(ctx context.Context) ([]*models.Source, error) {
 	defer rows.Close()
 
 	for rows.Next() {
-		var source models.Source
-		if err := rows.StructScan(&source); err != nil {
+		var row SourceRow
+		if err := rows.StructScan(&row); err != nil {
 			return nil, fmt.Errorf("error scanning source: %w", err)
 		}
-		sources = append(sources, &source)
+		sourceRows = append(sourceRows, &row)
 	}
 
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating sources: %w", err)
+	}
+
+	// Convert to models.Source
+	sources := make([]*models.Source, len(sourceRows))
+	for i, row := range sourceRows {
+		sources[i] = &models.Source{
+			ID:         row.ID,
+			SchemaType: row.SchemaType,
+			Connection: models.ConnectionInfo{
+				Host:      row.Host,
+				Database:  row.Database,
+				TableName: row.TableName,
+			},
+			Description: row.Description,
+			TTLDays:     row.TTLDays,
+			CreatedAt:   row.CreatedAt,
+			UpdatedAt:   row.UpdatedAt,
+		}
 	}
 
 	return sources, nil
@@ -169,10 +228,14 @@ func (d *DB) ListSources(ctx context.Context) ([]*models.Source, error) {
 // UpdateSource updates an existing source
 func (d *DB) UpdateSource(ctx context.Context, source *models.Source) error {
 	result, err := d.queries.UpdateSource.ExecContext(ctx,
-		source.TableName,
 		source.SchemaType,
-		source.DSN,
+		source.Connection.Host,
+		source.Connection.Username,
+		source.Connection.Password,
+		source.Connection.Database,
+		source.Connection.TableName,
 		source.Description,
+		source.TTLDays,
 		source.ID,
 	)
 	if err != nil {
@@ -181,11 +244,10 @@ func (d *DB) UpdateSource(ctx context.Context, source *models.Source) error {
 
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("error getting affected rows: %w", err)
+		return fmt.Errorf("error getting rows affected: %w", err)
 	}
-
 	if rows != 1 {
-		return fmt.Errorf("expected to affect 1 row, affected %d", rows)
+		return fmt.Errorf("expected 1 row to be affected, got %d", rows)
 	}
 
 	return nil
@@ -200,11 +262,10 @@ func (d *DB) DeleteSource(ctx context.Context, id string) error {
 
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("error getting affected rows: %w", err)
+		return fmt.Errorf("error getting rows affected: %w", err)
 	}
-
 	if rows != 1 {
-		return fmt.Errorf("expected to affect 1 row, affected %d", rows)
+		return fmt.Errorf("expected 1 row to be affected, got %d", rows)
 	}
 
 	return nil

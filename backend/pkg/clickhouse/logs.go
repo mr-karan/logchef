@@ -35,7 +35,7 @@ type QueryStats struct {
 // QueryLogs queries logs from the source with pagination and time range
 func (c *Connection) QueryLogs(ctx context.Context, params LogQueryParams) (*LogQueryResult, error) {
 	c.log.Debug("querying logs",
-		"table", c.Source.TableName,
+		"table", c.Source.Connection.TableName,
 		"start_time", params.StartTime,
 		"end_time", params.EndTime,
 		"limit", params.Limit,

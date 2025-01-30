@@ -74,13 +74,7 @@ func ValidateLogQueryRequest(req *models.LogQueryRequest) error {
 	// Validate based on mode
 	switch req.Mode {
 	case models.QueryModeFilters:
-		if len(req.FilterGroups) == 0 {
-			return &ValidationError{
-				Field:   "FilterGroups",
-				Message: "must have at least one filter group in filters mode",
-			}
-		}
-		// Validate filter groups
+		// Filter groups are optional now
 		for i, group := range req.FilterGroups {
 			if group.Operator != models.GroupOperatorAnd && group.Operator != models.GroupOperatorOr {
 				return &ValidationError{
@@ -166,18 +160,18 @@ func ValidateLogQueryRequest(req *models.LogQueryRequest) error {
 }
 
 // ValidateCreateSourceRequest validates a create source request
-func ValidateCreateSourceRequest(tableName, schemaType, dsn, description string, ttlDays int) error {
-	if tableName == "" {
+func ValidateCreateSourceRequest(schemaType string, conn models.ConnectionInfo, description string, ttlDays int) error {
+	if conn.TableName == "" {
 		return &ValidationError{
 			Field:   "TableName",
 			Message: "table name is required",
 		}
 	}
 
-	if len(tableName) < 3 {
+	if !isValidTableName(conn.TableName) {
 		return &ValidationError{
 			Field:   "TableName",
-			Message: "table name must be at least 3 characters long",
+			Message: "table name must start with a letter and contain only letters, numbers, and underscores",
 		}
 	}
 
@@ -188,40 +182,71 @@ func ValidateCreateSourceRequest(tableName, schemaType, dsn, description string,
 		}
 	}
 
-	if schemaType != "managed" && schemaType != "unmanaged" {
+	if schemaType != models.SchemaTypeManaged && schemaType != models.SchemaTypeUnmanaged {
 		return &ValidationError{
 			Field:   "SchemaType",
-			Message: "schema type must be either 'managed' or 'unmanaged'",
+			Message: fmt.Sprintf("schema type must be either '%s' or '%s'", models.SchemaTypeManaged, models.SchemaTypeUnmanaged),
 		}
 	}
 
-	if dsn == "" {
+	if conn.Host == "" {
 		return &ValidationError{
-			Field:   "DSN",
-			Message: "dsn is required",
+			Field:   "Host",
+			Message: "host is required",
 		}
 	}
 
-	if description == "" {
+	// Username and Password are optional for Clickhouse, but if username is provided
+	// then password must also be provided
+	if conn.Username != "" && conn.Password == "" {
+		return &ValidationError{
+			Field:   "Password",
+			Message: "password is required when username is provided",
+		}
+	}
+
+	if conn.Database == "" {
+		return &ValidationError{
+			Field:   "Database",
+			Message: "database is required",
+		}
+	}
+
+	if len(description) > 50 {
 		return &ValidationError{
 			Field:   "Description",
-			Message: "description is required",
+			Message: "description must not exceed 50 characters",
 		}
 	}
 
-	if len(description) < 10 {
-		return &ValidationError{
-			Field:   "Description",
-			Message: "description must be at least 10 characters long",
-		}
-	}
-
-	if ttlDays <= 0 {
+	if ttlDays < -1 {
 		return &ValidationError{
 			Field:   "TTLDays",
-			Message: "ttl days must be greater than 0",
+			Message: "TTL days must be -1 (no TTL) or a non-negative number",
 		}
 	}
 
 	return nil
+}
+
+// isValidTableName checks if the name is valid for use as a table name
+func isValidTableName(name string) bool {
+	// Only allow alphanumeric and underscore, must start with a letter
+	if len(name) == 0 || !isLetter(rune(name[0])) {
+		return false
+	}
+	for _, r := range name {
+		if !isAlphanumericOrUnderscore(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func isLetter(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+}
+
+func isAlphanumericOrUnderscore(r rune) bool {
+	return isLetter(r) || (r >= '0' && r <= '9') || r == '_'
 }

@@ -1,10 +1,16 @@
 <template>
   <v-row>
     <v-col cols="12">
-      <h1 class="text-h4 mb-4">Dashboard</h1>
+      <h1 class="text-h4 mb-4">
+        Dashboard
+      </h1>
     </v-col>
 
-    <v-col cols="12" md="6" lg="3">
+    <v-col
+      cols="12"
+      md="6"
+      lg="3"
+    >
       <v-card>
         <v-card-item>
           <v-card-title>Total Logs</v-card-title>
@@ -15,7 +21,11 @@
       </v-card>
     </v-col>
 
-    <v-col cols="12" md="6" lg="3">
+    <v-col
+      cols="12"
+      md="6"
+      lg="3"
+    >
       <v-card>
         <v-card-item>
           <v-card-title>Error Rate</v-card-title>
@@ -26,7 +36,11 @@
       </v-card>
     </v-col>
 
-    <v-col cols="12" md="6" lg="3">
+    <v-col
+      cols="12"
+      md="6"
+      lg="3"
+    >
       <v-card>
         <v-card-item>
           <v-card-title>Avg Response Time</v-card-title>
@@ -37,7 +51,11 @@
       </v-card>
     </v-col>
 
-    <v-col cols="12" md="6" lg="3">
+    <v-col
+      cols="12"
+      md="6"
+      lg="3"
+    >
       <v-card>
         <v-card-item>
           <v-card-title>Active Sources</v-card-title>
@@ -48,9 +66,14 @@
       </v-card>
     </v-col>
 
-    <v-col cols="12" lg="8">
+    <v-col
+      cols="12"
+      lg="8"
+    >
       <v-card>
-        <v-card-title class="px-4 pt-4">Log Activity</v-card-title>
+        <v-card-title class="px-4 pt-4">
+          Log Activity
+        </v-card-title>
         <v-card-text>
           <div class="text-center py-12 text-medium-emphasis">
             Log activity chart will be displayed here
@@ -59,16 +82,21 @@
       </v-card>
     </v-col>
 
-    <v-col cols="12" lg="4">
+    <v-col
+      cols="12"
+      lg="4"
+    >
       <v-card>
-        <v-card-title class="px-4 pt-4">Recent Errors</v-card-title>
+        <v-card-title class="px-4 pt-4">
+          Recent Errors
+        </v-card-title>
         <v-card-text>
           <v-list lines="two">
             <v-list-item
               prepend-icon="mdi-alert-circle"
               title="No errors found"
               subtitle="Your logs are looking good!"
-            ></v-list-item>
+            />
           </v-list>
         </v-card-text>
       </v-card>

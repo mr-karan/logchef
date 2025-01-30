@@ -59,6 +59,10 @@ func (s *Server) handleGetSource(c *fiber.Ctx) error {
 		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to get source: %v", err))
 	}
 
+	if source == nil {
+		return fiber.NewError(http.StatusNotFound, fmt.Sprintf("source %s not found", id))
+	}
+
 	// Get schema information
 	if err := s.svc.ExploreSource(c.Context(), source); err != nil {
 		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to get schema: %v", err))
@@ -74,11 +78,10 @@ func (s *Server) handleGetSource(c *fiber.Ctx) error {
 
 // CreateSourceRequest represents a request to create a new source
 type CreateSourceRequest struct {
-	TableName   string `json:"table_name"`
-	SchemaType  string `json:"schema_type"`
-	DSN         string `json:"dsn"`
-	Description string `json:"description"`
-	TTLDays     int    `json:"ttl_days"`
+	SchemaType  string                `json:"schema_type"`
+	Connection  models.ConnectionInfo `json:"connection"`
+	Description string                `json:"description"`
+	TTLDays     int                   `json:"ttl_days"`
 }
 
 // handleCreateSource handles creating a new source
@@ -88,11 +91,11 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
 	}
 
-	if err := service.ValidateCreateSourceRequest(req.TableName, req.SchemaType, req.DSN, req.Description, req.TTLDays); err != nil {
+	if err := service.ValidateCreateSourceRequest(req.SchemaType, req.Connection, req.Description, req.TTLDays); err != nil {
 		return fiber.NewError(http.StatusBadRequest, err.Error())
 	}
 
-	created, err := s.svc.CreateSource(c.Context(), req.TableName, req.SchemaType, req.DSN, req.Description, req.TTLDays)
+	created, err := s.svc.CreateSource(c.Context(), req.SchemaType, req.Connection, req.Description, req.TTLDays)
 	if err != nil {
 		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to create source: %v", err))
 	}

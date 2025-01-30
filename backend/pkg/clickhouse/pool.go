@@ -31,8 +31,8 @@ func NewPool() *Pool {
 func (p *Pool) AddSource(source *models.Source) error {
 	p.log.Info("adding source to pool",
 		"source_id", source.ID,
-		"database", source.Database,
-		"table", source.TableName,
+		"database", source.Connection.Database,
+		"table", source.Connection.TableName,
 		"schema_type", source.SchemaType,
 	)
 
@@ -99,8 +99,8 @@ func (p *Pool) GetConnection(sourceID string) (*Connection, error) {
 func (p *Pool) DescribeTable(ctx context.Context, source *models.Source) ([]models.ColumnInfo, error) {
 	p.log.Debug("describing table",
 		"source_id", source.ID,
-		"database", source.Database,
-		"table", source.TableName,
+		"database", source.Connection.Database,
+		"table", source.Connection.TableName,
 		"schema_type", source.SchemaType,
 	)
 
@@ -111,7 +111,7 @@ func (p *Pool) DescribeTable(ctx context.Context, source *models.Source) ([]mode
 
 	// Get root columns from system.columns
 	query := fmt.Sprintf("SELECT name, type FROM system.columns WHERE database = '%s' AND table = '%s'",
-		source.Database, source.TableName)
+		source.Connection.Database, source.Connection.TableName)
 	rows, err := conn.DB.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("error describing table: %w", err)
@@ -154,8 +154,8 @@ func (p *Pool) DescribeTable(ctx context.Context, source *models.Source) ([]mode
 func (p *Pool) GetTableSchema(ctx context.Context, source *models.Source) (string, error) {
 	p.log.Debug("getting table schema",
 		"source_id", source.ID,
-		"database", source.Database,
-		"table", source.TableName,
+		"database", source.Connection.Database,
+		"table", source.Connection.TableName,
 	)
 
 	conn, err := p.GetConnection(source.ID)

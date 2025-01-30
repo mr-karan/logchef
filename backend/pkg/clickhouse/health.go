@@ -37,8 +37,8 @@ func (h *HealthChecker) AddConnection(conn *Connection) {
 	h.connections[conn.Source.ID] = conn
 	h.log.Info("added connection for health monitoring",
 		"source_id", conn.Source.ID,
-		"database", conn.Source.Database,
-		"table", conn.Source.TableName,
+		"database", conn.Source.Connection.Database,
+		"table", conn.Source.Connection.TableName,
 	)
 	go h.runHealthCheck(conn.Source.ID)
 }

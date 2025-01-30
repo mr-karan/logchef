@@ -53,30 +53,24 @@ func (s *Service) GetSource(ctx context.Context, id string) (*models.Source, err
 }
 
 // CreateSource creates a new source
-func (s *Service) CreateSource(ctx context.Context, tableName, schemaType, dsn, description string, ttlDays int) (*models.Source, error) {
+func (s *Service) CreateSource(ctx context.Context, schemaType string, conn models.ConnectionInfo, description string, ttlDays int) (*models.Source, error) {
 	source := &models.Source{
 		ID:          uuid.New().String(),
-		TableName:   tableName,
 		SchemaType:  schemaType,
-		DSN:         dsn,
+		Connection:  conn,
 		Description: description,
 		TTLDays:     ttlDays,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
 
-	// Validate source configuration - this will also set the Database field from DSN
-	if err := source.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid source configuration: %w", err)
-	}
-
 	// Check if source already exists
-	existing, err := s.sqlite.GetSourceByName(ctx, source.Database, source.TableName)
+	existing, err := s.sqlite.GetSourceByName(ctx, source.Connection.Database, source.Connection.TableName)
 	if err != nil {
 		return nil, fmt.Errorf("error checking for existing source: %w", err)
 	}
 	if existing != nil {
-		return nil, fmt.Errorf("source with table name %s already exists in database %s", source.TableName, source.Database)
+		return nil, fmt.Errorf("source with table name %s already exists in database %s", source.Connection.TableName, source.Connection.Database)
 	}
 
 	// For unmanaged sources, verify table exists in ClickHouse
@@ -89,7 +83,7 @@ func (s *Service) CreateSource(ctx context.Context, tableName, schemaType, dsn, 
 		if err != nil {
 			return nil, fmt.Errorf("error getting ClickHouse connection: %w", err)
 		}
-		if err := conn.DB.Exec(ctx, fmt.Sprintf("SELECT 1 FROM %s.%s LIMIT 1", source.Database, source.TableName)); err != nil {
+		if err := conn.DB.Exec(ctx, fmt.Sprintf("SELECT 1 FROM %s.%s LIMIT 1", source.Connection.Database, source.Connection.TableName)); err != nil {
 			return nil, fmt.Errorf("error verifying table exists: %w", err)
 		}
 	}
