@@ -1,17 +1,16 @@
 <template>
-    <n-space vertical>
-        <n-date-picker
-            v-model:value="timeRange"
-            type="datetimerange"
-            :shortcuts="rangeShortcuts"
-            clearable
-            style="width: 100%"
-        />
-    </n-space>
+  <n-date-picker
+    v-model:value="timeRange"
+    type="datetimerange"
+    :shortcuts="rangeShortcuts"
+    clearable
+    style="width: 100%"
+  />
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
+import type { DatePickerShortcut } from 'naive-ui'
 
 const props = defineProps<{
   modelValue: [number, number] | null
@@ -19,58 +18,88 @@ const props = defineProps<{
 
 const emit = defineEmits(['update:modelValue'])
 
-// Default to last 3 hours
 const timeRange = computed({
   get: () => props.modelValue,
   set: (value) => emit('update:modelValue', value)
 })
 
-// Time ranges similar to Grafana
-const rangeShortcuts = {
-    'Last 5 minutes': () => {
-        const now = new Date().getTime()
-        return [now - 5 * 60 * 1000, now]
-    },
-    'Last 15 minutes': () => {
-        const now = new Date().getTime()
-        return [now - 15 * 60 * 1000, now]
-    },
-    'Last 30 minutes': () => {
-        const now = new Date().getTime()
-        return [now - 30 * 60 * 1000, now]
-    },
-    'Last 1 hour': () => {
-        const now = new Date().getTime()
-        return [now - 60 * 60 * 1000, now]
-    },
-    'Last 3 hours': () => {
-        const now = new Date().getTime()
-        return [now - 3 * 60 * 60 * 1000, now]
-    },
-    'Last 6 hours': () => {
-        const now = new Date().getTime()
-        return [now - 6 * 60 * 60 * 1000, now]
-    },
-    'Last 12 hours': () => {
-        const now = new Date().getTime()
-        return [now - 12 * 60 * 60 * 1000, now]
-    },
-    'Last 24 hours': () => {
-        const now = new Date().getTime()
-        return [now - 24 * 60 * 60 * 1000, now]
-    },
-    'Last 2 days': () => {
-        const now = new Date().getTime()
-        return [now - 2 * 24 * 60 * 60 * 1000, now]
-    },
-    'Last 7 days': () => {
-        const now = new Date().getTime()
-        return [now - 7 * 24 * 60 * 60 * 1000, now]
-    },
-    'Last 30 days': () => {
-        const now = new Date().getTime()
-        return [now - 30 * 24 * 60 * 60 * 1000, now]
+const rangeShortcuts: DatePickerShortcut[] = [
+  {
+    label: 'Last 5 minutes',
+    value: () => {
+      const now = Date.now()
+      return [now - 5 * 60 * 1000, now]
     }
-}
-
+  },
+  {
+    label: 'Last 15 minutes',
+    value: () => {
+      const now = Date.now()
+      return [now - 15 * 60 * 1000, now]
+    }
+  },
+  {
+    label: 'Last 30 minutes',
+    value: () => {
+      const now = Date.now()
+      return [now - 30 * 60 * 1000, now]
+    }
+  },
+  {
+    label: 'Last 1 hour',
+    value: () => {
+      const now = Date.now()
+      return [now - 60 * 60 * 1000, now]
+    }
+  },
+  {
+    label: 'Last 3 hours',
+    value: () => {
+      const now = Date.now()
+      return [now - 3 * 60 * 60 * 1000, now]
+    }
+  },
+  {
+    label: 'Last 6 hours',
+    value: () => {
+      const now = Date.now()
+      return [now - 6 * 60 * 60 * 1000, now]
+    }
+  },
+  {
+    label: 'Last 12 hours',
+    value: () => {
+      const now = Date.now()
+      return [now - 12 * 60 * 60 * 1000, now]
+    }
+  },
+  {
+    label: 'Last 24 hours',
+    value: () => {
+      const now = Date.now()
+      return [now - 24 * 60 * 60 * 1000, now]
+    }
+  },
+  {
+    label: 'Last 2 days',
+    value: () => {
+      const now = Date.now()
+      return [now - 2 * 24 * 60 * 60 * 1000, now]
+    }
+  },
+  {
+    label: 'Last 7 days',
+    value: () => {
+      const now = Date.now()
+      return [now - 7 * 24 * 60 * 60 * 1000, now]
+    }
+  },
+  {
+    label: 'Last 30 days',
+    value: () => {
+      const now = Date.now()
+      return [now - 30 * 24 * 60 * 60 * 1000, now]
+    }
+  }
+]
 </script>

@@ -1,41 +1,45 @@
 <template>
   <n-config-provider :theme-overrides="themeOverrides">
-    <n-dialog-provider>
-    <n-notification-provider>
-      <n-global-style />
-    <n-layout has-sider class="layout-container">
-      <!-- Sidebar -->
-      <n-layout-sider bordered collapse-mode="width" :collapsed-width="64" :width="240" class="sidebar">
-        <div class="logo">
-          <n-h3>LogAnalytics</n-h3>
-        </div>
-        <n-menu :options="menuOptions" :value="activeKey" @update:value="handleMenuUpdate" />
-      </n-layout-sider>
+    <n-message-provider>
+      <n-dialog-provider>
+        <n-notification-provider>
+          <n-loading-bar-provider>
+            <n-global-style />
+            <n-layout has-sider class="layout-container">
+              <!-- Sidebar -->
+              <n-layout-sider bordered collapse-mode="width" :collapsed-width="64" :width="240" class="sidebar">
+                <div class="logo">
+                  <n-h3>LogAnalytics</n-h3>
+                </div>
+                <n-menu :options="menuOptions" :value="activeKey" @update:value="handleMenuUpdate" />
+              </n-layout-sider>
 
-      <!-- Main Content -->
-      <n-layout>
-        <n-layout-header bordered class="header">
-          <n-space align="center">
-            <n-h4>Log Analytics Dashboard</n-h4>
-          </n-space>
-        </n-layout-header>
-        <n-layout-content class="content">
-          <router-view v-slot="{ Component }">
-            <transition name="fade" mode="out-in">
-              <component :is="Component" />
-            </transition>
-          </router-view>
-        </n-layout-content>
-      </n-layout>
-    </n-layout>
-    </n-notification-provider>
-    </n-dialog-provider>
+              <!-- Main Content -->
+              <n-layout>
+                <n-layout-header bordered class="header">
+                  <n-space align="center">
+                    <n-h4>Log Analytics Dashboard</n-h4>
+                  </n-space>
+                </n-layout-header>
+                <n-layout-content class="content">
+                  <router-view v-slot="{ Component }">
+                    <transition name="fade" mode="out-in">
+                      <component :is="Component" />
+                    </transition>
+                  </router-view>
+                </n-layout-content>
+              </n-layout>
+            </n-layout>
+          </n-loading-bar-provider>
+        </n-notification-provider>
+      </n-dialog-provider>
+    </n-message-provider>
   </n-config-provider>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { h, ref } from 'vue'
-import { NIcon, NGlobalStyle, NTag } from 'naive-ui'
+import { NIcon, NGlobalStyle, NTag, NMessageProvider, NDialogProvider, NNotificationProvider, NLoadingBarProvider } from 'naive-ui'
 import { useRouter, useRoute } from 'vue-router'
 import {
   DesktopOutline as DashboardIcon,
