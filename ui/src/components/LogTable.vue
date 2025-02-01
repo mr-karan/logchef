@@ -92,8 +92,9 @@ const emit = defineEmits<Emits>()
 // Refs
 const tableWrapper = ref<HTMLElement | null>(null)
 const table = ref<HTMLElement | null>(null)
-const columnWidths = ref<Record<string, number>>({})
+const columnWidths = ref<Record<string, string>>({})
 const resizing = ref<{ key: string; startX: number; startWidth: number } | null>(null)
+const resizeCleanup = ref<(() => void) | null>(null)
 const localVisibleColumns = ref<string[]>([])
 
 // Watch for prop changes
@@ -108,10 +109,38 @@ const visibleColumns = computed(() =>
 
 // Methods
 function getColumnStyle(column: Column) {
-  const width = columnWidths.value[column.key] || column.width || 150
-  return {
-    width: `${width}px`,
-    minWidth: `${getMinColumnWidth(column.type)}px`
+  // Try to get saved width first
+  const savedWidth = columnWidths.value[column.key]
+  if (savedWidth) {
+    return {
+      width: savedWidth,
+      minWidth: savedWidth
+    }
+  }
+
+  // Default widths based on column type
+  switch (column.key.toLowerCase()) {
+    case 'timestamp':
+      return {
+        width: '200px',
+        minWidth: '200px'
+      }
+    case 'severity_text':
+      return {
+        width: '100px',
+        minWidth: '100px'
+      }
+    case 'body':
+    case 'message':
+      return {
+        width: '400px',
+        minWidth: '300px'
+      }
+    default:
+      return {
+        width: '150px',
+        minWidth: '150px'
+      }
   }
 }
 
@@ -139,16 +168,40 @@ function formatCellValue(value: any, column: Column) {
 }
 
 function startResize(event: MouseEvent, columnKey: string) {
-  const columnWidth = columnWidths.value[columnKey] || 150
+  const th = (event.target as HTMLElement).closest('th')
+  if (!th) return
 
-  resizing.value = {
-    key: columnKey,
-    startX: event.pageX,
-    startWidth: columnWidth
+  const startX = event.pageX
+  const startWidth = th.offsetWidth
+
+  // Clean up any existing handlers
+  resizeCleanup.value?.()
+
+  const handleMouseMove = (e: MouseEvent) => {
+    const width = startWidth + (e.pageX - startX)
+    th.style.width = `${width}px`
   }
 
-  document.addEventListener('mousemove', handleResize)
-  document.addEventListener('mouseup', stopResize)
+  const handleMouseUp = () => {
+    document.removeEventListener('mousemove', handleMouseMove)
+    document.removeEventListener('mouseup', handleMouseUp)
+    
+    // Save the final width
+    columnWidths.value[columnKey] = th.style.width
+    saveColumnWidths()
+    
+    resizeCleanup.value = null
+  }
+
+  document.addEventListener('mousemove', handleMouseMove)
+  document.addEventListener('mouseup', handleMouseUp)
+
+  resizeCleanup.value = () => {
+    document.removeEventListener('mousemove', handleMouseMove)
+    document.removeEventListener('mouseup', handleMouseUp)
+  }
+
+  event.preventDefault()
 }
 
 function handleResize(event: MouseEvent) {
@@ -156,24 +209,32 @@ function handleResize(event: MouseEvent) {
 
   const { key, startX, startWidth } = resizing.value
   const diff = event.pageX - startX
+  const newWidth = Math.max(60, startWidth + diff)
 
-  const column = props.columns.find(col => col.key === key)
-  const minWidth = getMinColumnWidth(column?.type)
-
-  const newWidth = Math.max(minWidth, startWidth + diff)
-  columnWidths.value[key] = newWidth
+  requestAnimationFrame(() => {
+    columnWidths.value[key] = newWidth
+  })
+  
+  event.preventDefault()
 }
 
-function getMinColumnWidth(type?: string): number {
-  if (!type) return 60
-
-  const columnType = type.toLowerCase()
-  if (columnType.includes('timestamp')) return 120
-  if (columnType.includes('bool')) return 60
-  if (columnType.includes('int') || columnType.includes('float')) return 60
-  if (columnType.includes('text') || columnType.includes('varchar')) return 80
-
-  return 60
+function getDefaultColumnWidth(column: Column): number {
+  if (column.width) return column.width
+  
+  const tableWidth = tableWrapper.value?.clientWidth || window.innerWidth
+  const totalColumns = props.columns.length
+  const avgColumnWidth = Math.floor(tableWidth / totalColumns)
+  
+  // Cap minimum width at 120px and maximum at 400px
+  const baseWidth = Math.max(120, Math.min(400, avgColumnWidth))
+  
+  // Give slightly less width to timestamp columns
+  if (column.key.toLowerCase().includes('time') || 
+      column.key.toLowerCase().includes('date')) {
+    return Math.min(200, baseWidth)
+  }
+  
+  return baseWidth
 }
 
 function stopResize() {
@@ -191,15 +252,21 @@ function updateVisibleColumns(keys: string[]) {
 watch(
   () => props.columns,
   (newColumns) => {
-    // Initialize column widths for new columns
+    const newWidths: Record<string, number> = {}
     newColumns.forEach(col => {
-      if (!columnWidths.value[col.key]) {
-        columnWidths.value[col.key] = col.width || 150
-      }
+      // Always use the latest width from props or default calculation
+      newWidths[col.key] = col.width || getDefaultColumnWidth(col)
     })
+    columnWidths.value = newWidths
+    console.log('Column widths initialized:', newWidths)
   },
-  { immediate: true }
+  { immediate: true, deep: true }
 )
+
+// Add debugging on mount
+onMounted(() => {
+  console.log('Initial column widths:', columnWidths.value)
+})
 </script>
 
 <style scoped>
@@ -233,6 +300,7 @@ watch(
 
 .log-table {
   width: 100%;
+  min-width: auto;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -253,21 +321,73 @@ watch(
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding-right: 12px;
+}
+
+.resize-handle {
+  position: absolute;
+  right: -6px;
+  top: 0;
+  width: 16px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 2;
+}
+
+.resize-handle:hover::after {
+  content: '';
+  position: absolute;
+  right: 6px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #409eff;
+}
+
+/* Column resizing styles */
+.log-table :deep(th),
+.log-table :deep(td) {
+  position: relative;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.log-table :deep(th) {
+  position: relative;
+  background: white;
+  user-select: none;
+}
+
+.log-table :deep(th)::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #e5e7eb;
 }
 
 .resize-handle {
   position: absolute;
   right: -4px;
   top: 0;
+  bottom: 0;
   width: 8px;
-  height: 100%;
   cursor: col-resize;
-  background: transparent;
-  transition: background 0.2s;
+  z-index: 1;
 }
 
-.resize-handle:hover {
-  background: rgba(64, 158, 255, 0.1);
+.resize-handle:hover::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #409eff;
 }
 
 .cell-content {

@@ -162,6 +162,8 @@ import { format } from 'date-fns'
 const loading = ref(false)
 const logsLoading = ref(false)
 const isLoadingLogs = ref(false)
+const lastLoadTime = ref(0) // Track last successful load time
+const minLoadInterval = 2000 // Minimum time between loads in ms
 const sources = ref<Source[]>([])
 const selectedSource = ref<string | null>(null)
 const sourceDetails = ref<Source | null>(null)
@@ -327,12 +329,18 @@ async function loadSourceDetails(id: string) {
 }
 
 async function loadLogs() {
-  if (isLoadingLogs.value) return // Prevent overlapping calls
   if (!selectedSource.value || !timeRange.value) return
+  
+  // Prevent too frequent refreshes
+  const now = Date.now()
+  if (isLoadingLogs.value || (now - lastLoadTime.value) < minLoadInterval) {
+    return
+  }
 
   try {
     isLoadingLogs.value = true
     logsLoading.value = true
+    
     const response = await logsApi.getLogs(selectedSource.value, {
       start_timestamp: Math.floor(timeRange.value[0]),
       end_timestamp: Math.floor(timeRange.value[1]),
@@ -342,6 +350,7 @@ async function loadLogs() {
     logs.value = response.data.logs || []
     queryTime.value = Number(response.data.stats.execution_time_ms.toFixed(2))
     currentPage.value = 1
+    lastLoadTime.value = Date.now()
   } catch (error) {
     console.error('Failed to load logs:', error)
     logs.value = []
@@ -381,31 +390,35 @@ function handlePageSizeChange(size: number) {
 }
 
 function handleAutoRefreshSelect(key: number) {
+  stopAutoRefresh() // Always stop existing interval first
+  
   if (key === 0) {
-    stopAutoRefresh()
+    autoRefreshEnabled.value = false
     return
   }
 
-  // Set the time window size and start auto-refresh
-  timeWindowSize.value = key
-  autoRefreshInterval.value = key // Set polling interval to the user's selected interval
+  timeWindowSize.value = key // Set window size to match interval
+  autoRefreshInterval.value = key // Set polling interval
   autoRefreshEnabled.value = true
   startAutoRefresh()
 }
 
 function startAutoRefresh() {
-  // Clear any existing interval
+  // Clear any existing interval first
   stopAutoRefresh()
 
   // Initial update and fetch
   updateTimeWindow()
   loadLogs()
 
-  // Set up new interval
+  // Set up new interval with the selected interval duration
+  // Ensure interval is at least as long as minLoadInterval
+  const interval = Math.max(autoRefreshInterval.value, minLoadInterval)
+  
   refreshInterval.value = setInterval(() => {
     updateTimeWindow()
     loadLogs()
-  }, autoRefreshInterval.value)
+  }, interval)
 }
 
 function stopAutoRefresh() {
@@ -455,16 +468,21 @@ function formatTimestamp(timestamp: string | undefined): string {
 
 // Update the getColumnWidth function to be simpler
 function getColumnWidth(columnName: string): number {
-  const column = sourceDetails.value?.columns?.find(col => col.name === columnName)
-  const type = column?.type?.toLowerCase() || ''
-
-  // Simple width rules based on data type
-  if (type.includes('bool')) return 80
-  if (type.includes('int') || type.includes('float')) return 100
-  if (type.includes('timestamp')) return 160
-  if (type.includes('text') || type.includes('varchar')) return 200
-
-  return 120 // Default width for unknown types
+  // Use explicit pixel values for known columns
+  const explicitWidths: Record<string, number> = {
+    timestamp: 160,
+    body: 400,
+    severity_text: 100,
+    level: 80,
+    service: 120,
+    host: 120,
+    pod: 140,
+    container: 120,
+    namespace: 100,
+    message: 400
+  }
+  
+  return explicitWidths[columnName.toLowerCase()] || 120
 }
 
 // Update the dropdown button display
