@@ -17,20 +17,25 @@ export interface LogQueryParams {
   start_timestamp: number
   end_timestamp: number
   limit: number
+  filter_groups?: any
+  sort?: any
 }
 
 export interface LogResponse {
-  logs: Log[]
-  params: {
-    end_timestamp: number
-    filter_groups: null
-    limit: number
-    sort: null
-    source_id: string
-    start_timestamp: number
-  }
-  stats: {
-    execution_time_ms: number
+  status: string
+  data: {
+    logs: Log[]
+    params: {
+      end_timestamp: number
+      filter_groups: null
+      limit: number
+      sort: null
+      source_id: string
+      start_timestamp: number
+    }
+    stats: {
+      execution_time_ms: number
+    }
   }
 }
 

@@ -33,7 +33,7 @@
           <tr>
             <th v-for="col in visibleColumns" :key="col.key" :style="getColumnStyle(col)" class="table-header">
               <div class="header-content">
-                {{ col.title }}
+                {{ col.key }}
                 <div class="resize-handle" @mousedown="startResize($event, col.key)"></div>
               </div>
             </th>
@@ -123,7 +123,8 @@ function getColumnStyle(column: Column) {
     case 'timestamp':
       return {
         width: '200px',
-        minWidth: '200px'
+        minWidth: '200px',
+        maxWidth: '200px' // Force timestamp to stay at 200px
       }
     case 'severity_text':
       return {
@@ -137,8 +138,12 @@ function getColumnStyle(column: Column) {
         minWidth: '300px'
       }
     default:
+      // Calculate default width based on available space
+      const tableWidth = tableWrapper.value?.clientWidth || window.innerWidth
+      const totalColumns = props.columns.length
+      const avgWidth = Math.max(150, Math.floor((tableWidth - 200 - 100) / (totalColumns - 2))) // Subtract timestamp and severity widths
       return {
-        width: '150px',
+        width: `${avgWidth}px`,
         minWidth: '150px'
       }
   }
@@ -204,19 +209,27 @@ function startResize(event: MouseEvent, columnKey: string) {
   event.preventDefault()
 }
 
-function handleResize(event: MouseEvent) {
-  if (!resizing.value) return
-
-  const { key, startX, startWidth } = resizing.value
-  const diff = event.pageX - startX
-  const newWidth = Math.max(60, startWidth + diff)
-
-  requestAnimationFrame(() => {
-    columnWidths.value[key] = newWidth
-  })
-  
-  event.preventDefault()
+// Add these functions for column width persistence
+function getColumnWidthKey() {
+  return 'logchef-column-widths'
 }
+
+function saveColumnWidths() {
+  localStorage.setItem(getColumnWidthKey(), JSON.stringify(columnWidths.value))
+}
+
+// Load saved widths on component mount
+onMounted(() => {
+  const savedWidths = localStorage.getItem(getColumnWidthKey())
+  if (savedWidths) {
+    columnWidths.value = JSON.parse(savedWidths)
+  }
+})
+
+// Clean up resize handlers on unmount
+onUnmounted(() => {
+  resizeCleanup.value?.()
+})
 
 function getDefaultColumnWidth(column: Column): number {
   if (column.width) return column.width

@@ -225,7 +225,7 @@ const availableColumns = computed(() => {
     const col = sourceDetails.value!.columns.find(c => c.name === colName)
     return {
       key: colName,
-      title: colName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      title: colName,
       width: getColumnWidth(colName),
       required: true,
       type: col?.type
@@ -255,7 +255,7 @@ const tableColumns = computed(() => {
       const col = sourceDetails.value!.columns.find(c => c.name === colName)
       return {
         key: colName,
-        title: col?.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) || colName,
+        title: col?.name || colName,
         width: getColumnWidth(colName),
         required: true
       }
@@ -466,23 +466,9 @@ function formatTimestamp(timestamp: string | undefined): string {
   return format(new Date(timestamp), 'MMM d, yyyy HH:mm:ss.SSS')
 }
 
-// Update the getColumnWidth function to be simpler
-function getColumnWidth(columnName: string): number {
-  // Use explicit pixel values for known columns
-  const explicitWidths: Record<string, number> = {
-    timestamp: 160,
-    body: 400,
-    severity_text: 100,
-    level: 80,
-    service: 120,
-    host: 120,
-    pod: 140,
-    container: 120,
-    namespace: 100,
-    message: 400
-  }
-  
-  return explicitWidths[columnName.toLowerCase()] || 120
+// Let LogTable handle column widths
+function getColumnWidth(columnName: string): number | undefined {
+  return undefined // Return undefined to let LogTable control widths
 }
 
 // Update the dropdown button display
