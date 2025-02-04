@@ -130,7 +130,24 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 	})
 }
 
-// handleQueryLogs handles requests to query logs from a source
+// LogQueryResponse represents the response structure for log queries
+type LogQueryResponse struct {
+	Logs   interface{}            `json:"logs"`
+	Stats  interface{}            `json:"stats"`
+	Params LogQueryResponseParams `json:"params"`
+}
+
+// LogQueryResponseParams represents the query parameters used in the response
+type LogQueryResponseParams struct {
+	SourceID       string               `json:"source_id"`
+	FilterGroups   []models.FilterGroup `json:"filter_groups"`
+	Limit          int                  `json:"limit"`
+	StartTimestamp int64                `json:"start_timestamp"`
+	EndTimestamp   int64                `json:"end_timestamp"`
+	Sort           *models.SortOptions  `json:"sort"`
+}
+
+// handleQueryLogs handles POST requests to search/query logs from a source
 func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 	id := c.Params("id")
 	if id == "" {
@@ -194,19 +211,21 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to query logs: %v", err))
 	}
 
+	response := LogQueryResponse{
+		Logs:  result.Data,
+		Stats: result.Stats,
+		Params: LogQueryResponseParams{
+			SourceID:       id,
+			FilterGroups:   req.FilterGroups,
+			Limit:          req.Limit,
+			StartTimestamp: req.StartTimestamp,
+			EndTimestamp:   req.EndTimestamp,
+			Sort:           req.Sort,
+		},
+	}
+
 	return c.JSON(Response{
 		Status: "success",
-		Data: fiber.Map{
-			"logs":  result.Data,
-			"stats": result.Stats,
-			"params": fiber.Map{
-				"source_id":       id,
-				"filter_groups":   req.FilterGroups,
-				"limit":           req.Limit,
-				"start_timestamp": req.StartTimestamp,
-				"end_timestamp":   req.EndTimestamp,
-				"sort":            req.Sort,
-			},
-		},
+		Data:   response,
 	})
 }

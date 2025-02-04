@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"backend-v2/pkg/models"
@@ -189,10 +190,11 @@ func ValidateCreateSourceRequest(schemaType string, conn models.ConnectionInfo, 
 		}
 	}
 
-	if conn.Host == "" {
+	// Ensure the host includes a port
+	if _, _, err := net.SplitHostPort(conn.Host); err != nil {
 		return &ValidationError{
 			Field:   "Host",
-			Message: "host is required",
+			Message: "host must include a port (e.g., 'localhost:9000')",
 		}
 	}
 
