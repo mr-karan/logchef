@@ -8,6 +8,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { computed } from 'vue'
 
 interface Column {
   name: string
@@ -28,6 +29,14 @@ const toggleColumn = (columnName: string) => {
     : [...props.modelValue, columnName]
   emit('update:modelValue', newSelectedColumns)
 }
+
+const toggleAll = () => {
+  const allColumnNames = props.columns.map(col => col.name)
+  const newSelectedColumns = props.modelValue.length === props.columns.length ? [] : allColumnNames
+  emit('update:modelValue', newSelectedColumns)
+}
+
+const isAllSelected = computed(() => props.modelValue.length === props.columns.length)
 </script>
 
 <template>
@@ -50,6 +59,18 @@ const toggleColumn = (columnName: string) => {
         </div>
         <ScrollArea class="h-[300px] pr-4">
           <div class="grid gap-2">
+            <!-- Select All option -->
+            <div class="flex items-center space-x-2 py-1 border-b border-border mb-2">
+              <Checkbox
+                id="select-all"
+                :checked="isAllSelected"
+                @update:checked="toggleAll"
+              />
+              <Label for="select-all" class="flex-1 cursor-pointer font-medium">
+                Select All
+              </Label>
+            </div>
+
             <div
               v-for="column in columns"
               :key="column.name"

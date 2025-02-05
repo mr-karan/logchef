@@ -76,6 +76,12 @@
     @apply bg-background text-foreground;
   }
 }
+
+.sidebar {
+  background-color: hsl(var(--sidebar-background));
+  color: hsl(var(--sidebar-foreground));
+}
+
 @layer base {
   :root {
     --sidebar-background: 0 0% 98%;

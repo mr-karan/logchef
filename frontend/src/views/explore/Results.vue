@@ -11,12 +11,6 @@ import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import ColumnSelector from './ColumnSelector.vue'
 import { ref, watch } from 'vue'
 import type { QueryStats } from '@/api/explore'
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger
-} from '@/components/ui/accordion'
 import { ChevronUp, Copy, Check } from 'lucide-vue-next'
 
 interface Props {
@@ -55,12 +49,12 @@ watch(
   () => props.columns,
   (newColumns) => {
     if (!newColumns?.length) return
-    
+
     // Check if timestamp exists in the schema
     const hasTimestamp = newColumns.some(col => col.name === 'timestamp')
-    
+
     // Initialize with timestamp if available, otherwise use first column
-    selectedColumns.value = hasTimestamp 
+    selectedColumns.value = hasTimestamp
       ? ['timestamp']
       : [newColumns[0].name]
   },
@@ -75,7 +69,13 @@ const formatCellValue = (value: any): string => {
 
 const formatTimestamp = (timestamp: string): string => {
   try {
-    return new Date(timestamp).toLocaleString()
+    const date = new Date(timestamp)
+    // Check if the date is valid
+    if (isNaN(date.getTime())) {
+      return timestamp
+    }
+    // Format as RFC3339 / ISO8601 with milliseconds
+    return date.toISOString()
   } catch (e) {
     return timestamp
   }
@@ -83,7 +83,7 @@ const formatTimestamp = (timestamp: string): string => {
 </script>
 
 <template>
-  <div class="h-full flex flex-col">
+  <div class="h-full flex flex-col min-w-0">
     <!-- Stats Bar -->
     <div class="flex items-center justify-between border-b pb-2">
       <ColumnSelector v-model="selectedColumns" :columns="columns" />
@@ -100,32 +100,24 @@ const formatTimestamp = (timestamp: string): string => {
     </div>
 
     <!-- Table Container with Fixed Height -->
-    <div class="relative flex-1 min-h-0">
-      <ScrollArea class="h-full rounded-md border">
-        <div class="min-w-full">
-          <Table>
+    <div class="relative flex-1 min-h-0 min-w-0">
+      <ScrollArea class="w-full h-full overflow-x-auto">
+        <div>
+          <Table class="table-auto min-w-max">
             <TableHeader>
               <TableRow class="border-b border-b-muted-foreground/20">
-                <TableHead 
-                  v-for="colName in selectedColumns" 
-                  :key="colName"
-                  class="h-8 whitespace-nowrap p-0 pl-2 pr-4 text-xs font-medium sticky top-0 bg-background"
-                >
+                <TableHead v-for="colName in selectedColumns" :key="colName"
+                  class="px-2 py-1 whitespace-nowrap text-xs font-medium sticky top-0 bg-background min-w-[200px]">
                   {{ colName }}
                 </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               <template v-for="(row, idx) in logs" :key="row.id || idx">
-                <TableRow 
-                  @click="toggleRow(idx)"
-                  class="border-b border-b-muted-foreground/10 hover:bg-muted/50 cursor-pointer relative group"
-                >
-                  <TableCell 
-                    v-for="colName in selectedColumns" 
-                    :key="colName"
-                    class="p-0 pl-2 pr-4 py-1 font-mono text-xs"
-                  >
+                <TableRow @click="toggleRow(idx)"
+                  class="border-b border-b-muted-foreground/10 hover:bg-muted/50 cursor-pointer relative group">
+                  <TableCell v-for="colName in selectedColumns" :key="colName"
+                    class="px-2 py-1 font-mono text-xs whitespace-nowrap min-w-[200px]">
                     <template v-if="colName === 'timestamp'">
                       {{ formatTimestamp(row[colName]) }}
                     </template>
@@ -139,13 +131,12 @@ const formatTimestamp = (timestamp: string): string => {
                 </TableRow>
                 <TableRow v-if="expandedRow === `item-${idx}`">
                   <TableCell :colspan="selectedColumns.length" class="p-0">
-                    <div class="px-2 pb-2">
-                      <div class="rounded bg-muted/50 p-2 font-mono text-xs whitespace-pre overflow-x-auto relative group">
-                        <button 
-                          @click.stop="copyToClipboard(formatCellValue(row), idx)"
-                          class="absolute right-2 top-2 p-1 rounded hover:bg-background/80 transition-colors"
-                          :title="copyState[idx] ? 'Copied!' : 'Copy to clipboard'"
-                        >
+                    <div class="px-2 pb-2 overflow-x-hidden">
+                      <div
+                        class="rounded bg-muted/50 p-4 pl-8 font-mono text-xs whitespace-pre-wrap break-words break-all overflow-hidden relative">
+                        <button @click.stop="copyToClipboard(formatCellValue(row), idx)"
+                          class="absolute top-2 left-2 p-1 rounded hover:bg-background/80 transition-colors"
+                          :title="copyState[idx] ? 'Copied!' : 'Copy to clipboard'">
                           <Check v-if="copyState[idx]" class="h-3 w-3 text-green-500" />
                           <Copy v-else class="h-3 w-3 text-muted-foreground" />
                         </button>

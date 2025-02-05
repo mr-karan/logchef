@@ -137,9 +137,10 @@ const data = {
 </script>
 
 <template>
+  <div class="h-screen w-screen flex overflow-hidden">
   <SidebarProvider>
     <Toaster />
-    <Sidebar collapsible="icon">
+    <Sidebar collapsible="icon" class="flex-none w-64 z-50 bg-[hsl(var(--sidebar-background))] text-[hsl(var(--sidebar-foreground))]">
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
@@ -256,42 +257,23 @@ const data = {
       <SidebarRail />
     </Sidebar>
 
-    <SidebarInset>
+    <SidebarInset class="flex flex-col flex-1 min-w-0">
       <header class="flex h-16 shrink-0 items-center gap-2 border-b px-4">
         <SidebarTrigger class="-ml-1" />
-        <Separator orientation="vertical" class="mr-2 h-4" />
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbLink href="/">
-                LogChef
-              </BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage>{{ route.meta.title || 'Dashboard' }}</BreadcrumbPage>
+              <BreadcrumbPage>{{ route.name }}</BreadcrumbPage>
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
       </header>
-
-      <main class="flex-1 overflow-y-auto">
-        <div class="h-full px-6 py-6">
+      <main class="flex-1 overflow-y-auto overflow-x-auto min-w-0">
+        <div class="h-full px-6 py-6 min-w-0">
           <router-view />
         </div>
       </main>
     </SidebarInset>
   </SidebarProvider>
+  </div>
 </template>
-
-<style>
-body {
-  margin: 0;
-  min-height: 100vh;
-}
-
-#app {
-  min-height: 100vh;
-  display: flex;
-}
-</style>
