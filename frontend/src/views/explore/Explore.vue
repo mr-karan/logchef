@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -26,7 +27,6 @@ import { useToast } from '@/components/ui/toast'
 import { sourcesApi } from '@/api/sources'
 import { exploreApi } from '@/api/explore'
 import type { Source } from '@/api/sources'
-import type { Log } from '@/api/explore'
 import type { QueryStats } from '@/api/explore'
 import { isErrorResponse, getErrorMessage } from '@/api/types'
 import { TOAST_DURATION } from '@/lib/constants'
@@ -36,32 +36,35 @@ import { getLocalTimeZone, now } from '@internationalized/date'
 import { cn } from '@/lib/utils'
 import { Search, RefreshCcw, X, CalendarIcon, Play, ChevronsUpDown, LogOut } from 'lucide-vue-next'
 import { Badge } from '@/components/ui/badge'
-import Results from './Results.vue'
+import { createColumns } from './table/columns'
+import DataTable from './table/data-table.vue'
 import EmptyState from './EmptyState.vue'
+import type { ColumnDef } from '@tanstack/vue-table'
+import type { QuerySuccessResponse, QueryErrorResponse } from '@/api/explore'
+import type { APIResponse } from '@/api/types'
+import { Switch } from '@/components/ui/switch'
+import { QUERY_MODE } from '@/lib/constants'
+import DataTableFilters from './table/data-table-filters.vue'
+import type { FilterGroup, FiltersQueryParams, RawSqlQueryParams } from '@/api/explore'
+import type { FilterCondition } from '@/api/explore'
 
 const { toast } = useToast()
+const route = useRoute()
+const router = useRouter()
 
 const sources = ref<Source[]>([])
 const selectedSource = ref<string>('')
 const sourceDetails = ref<Source | null>(null)
 const isLoading = ref(false)
 const queryInput = ref('')
-const queryLimit = ref(1000)
+const queryLimit = ref(100)
 const logs = ref<Record<string, any>[]>([])
 const queryStats = ref<QueryStats>({
   execution_time_ms: 0
 })
 
-const df = new Intl.DateTimeFormat('en-US', {
-  dateStyle: 'medium',
-})
-
-const timeFormatter = new Intl.DateTimeFormat('en-US', {
-  hour: 'numeric',
-  minute: 'numeric',
-  second: 'numeric',
-  hour12: false,
-})
+// Flag to prevent unnecessary URL updates on initial load
+const isInitialLoad = ref(true)
 
 const currentTime = now(getLocalTimeZone())
 const dateRange = ref<DateRange>({
@@ -69,9 +72,119 @@ const dateRange = ref<DateRange>({
   end: currentTime,
 })
 
-// Load sources on mount
+// Function to get timestamps from dateRange
+const getTimestamps = () => {
+  if (!dateRange.value.start || !dateRange.value.end) {
+    return {
+      start: 0,
+      end: 0
+    }
+  }
+
+  const startDate = dateRange.value.start.toDate(getLocalTimeZone())
+  const endDate = dateRange.value.end.toDate(getLocalTimeZone())
+
+  return {
+    start: startDate.getTime(),
+    end: endDate.getTime()
+  }
+}
+
+// Initialize state from URL parameters
+function initializeFromURL() {
+  const { source, limit, start_time, end_time, query } = route.query
+
+  // Parse source ID
+  if (source && typeof source === 'string') {
+    selectedSource.value = source
+  }
+
+  // Parse limit
+  if (limit) {
+    const parsedLimit = parseInt(limit as string)
+    if (!isNaN(parsedLimit) && parsedLimit > 0 && parsedLimit <= 10000) {
+      queryLimit.value = parsedLimit
+    }
+  }
+
+  // Parse timestamps
+  if (start_time && end_time) {
+    try {
+      const startTs = parseInt(start_time as string)
+      const endTs = parseInt(end_time as string)
+      if (!isNaN(startTs) && !isNaN(endTs)) {
+        // Create JavaScript Date objects first
+        const startDate = new Date(startTs)
+        const endDate = new Date(endTs)
+
+        // Only update if dates are valid
+        if (startDate.getTime() > 0 && endDate.getTime() > 0) {
+          dateRange.value = {
+            start: now(getLocalTimeZone()).set({
+              year: startDate.getFullYear(),
+              month: startDate.getMonth() + 1,
+              day: startDate.getDate(),
+              hour: startDate.getHours(),
+              minute: startDate.getMinutes(),
+              second: startDate.getSeconds()
+            }),
+            end: now(getLocalTimeZone()).set({
+              year: endDate.getFullYear(),
+              month: endDate.getMonth() + 1,
+              day: endDate.getDate(),
+              hour: endDate.getHours(),
+              minute: endDate.getMinutes(),
+              second: endDate.getSeconds()
+            })
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error parsing timestamps:', e)
+      // On error, set to last 30 days
+      const currentTime = now(getLocalTimeZone())
+      dateRange.value = {
+        start: currentTime.subtract({ days: 30 }),
+        end: currentTime
+      }
+    }
+  }
+
+  // Parse query
+  if (query && typeof query === 'string') {
+    queryInput.value = decodeURIComponent(query)
+  }
+}
+
+// Update URL with current state
+function updateURL() {
+  if (isInitialLoad.value) {
+    isInitialLoad.value = false
+    return
+  }
+
+  const timestamps = getTimestamps()
+  const query: Record<string, string> = {
+    source: selectedSource.value,
+    limit: queryLimit.value.toString(),
+    start_time: timestamps.start.toString(),
+    end_time: timestamps.end.toString()
+  }
+
+  if (queryInput.value.trim()) {
+    query.query = encodeURIComponent(queryInput.value.trim())
+  }
+
+  router.replace({ query })
+}
+
+// Update onMounted
 onMounted(async () => {
   try {
+    // First initialize from URL
+    initializeFromURL()
+
+    // Then load sources
     const response = await sourcesApi.listSources()
     if (isErrorResponse(response)) {
       toast({
@@ -82,14 +195,34 @@ onMounted(async () => {
       })
       return
     }
-    sources.value = response.data.sources
-    // If we have sources, select the first one
-    if (sources.value.length > 0) {
+
+    // Type assertion since we know it's not an error response
+    const { sources: sourcesData } = response.data as { sources: Source[] }
+    sources.value = sourcesData
+
+    // If source wasn't set from URL and we have sources, select the first one
+    if (!selectedSource.value && sources.value.length > 0) {
       selectedSource.value = sources.value[0].id
-      // Load source details and execute query
+    }
+
+    // Validate selected source exists
+    if (selectedSource.value && !sources.value.find(s => s.id === selectedSource.value)) {
+      toast({
+        title: 'Warning',
+        description: 'Selected source not found',
+        variant: 'destructive',
+        duration: TOAST_DURATION.ERROR,
+      })
+      selectedSource.value = sources.value[0]?.id || ''
+    }
+
+    // Load source details and execute query if we have a valid source
+    if (selectedSource.value) {
       const sourceResponse = await sourcesApi.getSource(selectedSource.value)
       if (!isErrorResponse(sourceResponse)) {
-        sourceDetails.value = sourceResponse.data.source
+        // Type assertion since we know it's not an error response
+        const { source } = sourceResponse.data as { source: Source }
+        sourceDetails.value = source
         await executeQuery()
       }
     }
@@ -105,50 +238,61 @@ onMounted(async () => {
   }
 })
 
-// Watch for changes in source or date range to reload logs
-watch([selectedSource, dateRange], async ([newSourceId]) => {
-  if (newSourceId && sources.value.length > 0) {
-    try {
-      // First fetch source details to get schema
-      const sourceResponse = await sourcesApi.getSource(newSourceId)
-      if (isErrorResponse(sourceResponse)) {
-        toast({
-          title: 'Error',
-          description: sourceResponse.data.error,
-          variant: 'destructive',
-          duration: TOAST_DURATION.ERROR,
-        })
-        return
-      }
-      sourceDetails.value = sourceResponse.data.source
-      // Then execute the query
-      await executeQuery()
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: getErrorMessage(error),
-        variant: 'destructive',
-        duration: TOAST_DURATION.ERROR,
-      })
-    }
-  }
-})
+// Query state
+const queryMode = ref<'filters' | 'raw_sql'>('filters')
+const sqlQuery = ref('')
+const filterConditions = ref<FilterCondition[]>([])
 
 async function executeQuery() {
   if (!selectedSource.value) return
 
   isLoading.value = true
+  logs.value = []
+  queryStats.value = {
+    execution_time_ms: 0
+  }
+
   try {
-    const response = await exploreApi.getLogs(selectedSource.value, {
-      query: queryInput.value.trim(),
+    const timestamps = getTimestamps()
+    const baseParams = {
       limit: queryLimit.value,
-      start_timestamp: dateRange.value.start.toDate(getLocalTimeZone()).getTime(),
-      end_timestamp: dateRange.value.end.toDate(getLocalTimeZone()).getTime(),
-    })
-    if (response?.data) {
-      logs.value = response.data.logs ?? []
-      queryStats.value = response.data.stats
+      start_timestamp: timestamps.start,
+      end_timestamp: timestamps.end,
     }
+
+    // Type-safe params based on mode
+    const params = queryMode.value === 'filters'
+      ? {
+        ...baseParams,
+        mode: 'filters' as const,
+        conditions: filterConditions.value
+      }
+      : {
+        ...baseParams,
+        mode: 'raw_sql' as const,
+        raw_sql: sqlQuery.value
+      }
+
+    const response = await exploreApi.getLogs(selectedSource.value, params)
+
+    if ('error' in response.data) {
+      toast({
+        title: 'Error',
+        description: response.data.error,
+        variant: 'destructive',
+        duration: TOAST_DURATION.ERROR,
+      })
+      return
+    }
+
+    logs.value = response.data.logs
+    queryStats.value = response.data.stats
+
+    // Update URL only after successful search
+    if (!isInitialLoad.value) {
+      updateURL()
+    }
+    isInitialLoad.value = false
   } catch (error) {
     toast({
       title: 'Error',
@@ -161,6 +305,7 @@ async function executeQuery() {
   }
 }
 
+// Update loadSourceDetails
 async function loadSourceDetails(sourceId: string) {
   try {
     const response = await sourcesApi.getSource(sourceId)
@@ -173,7 +318,9 @@ async function loadSourceDetails(sourceId: string) {
       })
       return
     }
-    sourceDetails.value = response.data.source
+    // Type assertion since we know it's not an error response
+    const { source } = response.data as { source: Source }
+    sourceDetails.value = source
   } catch (error) {
     console.error('Error loading source details:', error)
     toast({
@@ -182,6 +329,35 @@ async function loadSourceDetails(sourceId: string) {
       variant: 'destructive',
       duration: TOAST_DURATION.ERROR,
     })
+  }
+}
+
+const tableColumns = ref<ColumnDef<Record<string, any>>[]>([])
+
+// Update the columns when sourceDetails changes
+watch(
+  () => sourceDetails.value?.columns,
+  (newColumns) => {
+    if (newColumns) {
+      tableColumns.value = createColumns(newColumns)
+    }
+  },
+  { immediate: true }
+)
+
+// Handle filter updates
+const handleFiltersUpdate = (filters: FilterCondition[]) => {
+  filterConditions.value = filters
+}
+
+// Toggle query mode
+const toggleQueryMode = (checked: boolean) => {
+  queryMode.value = checked ? 'raw_sql' : 'filters'
+  // Clear the other mode's input when switching
+  if (checked) {
+    filterConditions.value = []
+  } else {
+    sqlQuery.value = ''
   }
 }
 </script>
@@ -211,18 +387,21 @@ async function loadSourceDetails(sourceId: string) {
         <!-- Date Range Picker -->
         <DateTimePicker v-model="dateRange" />
 
-        <!-- Spacer -->
-        <div></div>
+        <!-- Query Mode Switch -->
+        <div class="flex items-center gap-2">
+          <Switch :checked="queryMode === 'raw_sql'" @update:checked="toggleQueryMode" />
+          <Label>SQL Mode</Label>
+        </div>
 
         <!-- Right Group -->
         <div class="flex items-center gap-2 ml-auto">
-          <NumberField v-model="queryLimit" :min="100" :max="10000" :step="100"
+          <NumberField v-model="queryLimit" :min="10" :max="10000" :step="10"
             class="w-[100px] [&_input[type='number']::-webkit-inner-spin-button]:appearance-none [&_input[type='number']::-webkit-outer-spin-button]:appearance-none">
             <NumberFieldContent>
               <div class="flex items-center">
-                <NumberFieldInput placeholder="Limit" class="text-sm" :step="100" />
-                <NumberFieldDecrement :step="100" />
-                <NumberFieldIncrement :step="100" />
+                <NumberFieldInput placeholder="Limit" class="text-sm" :step="10" />
+                <NumberFieldDecrement :step="10" />
+                <NumberFieldIncrement :step="10" />
               </div>
             </NumberFieldContent>
           </NumberField>
@@ -236,7 +415,12 @@ async function loadSourceDetails(sourceId: string) {
 
       <!-- Query Input Row -->
       <div class="w-full">
-        <Input v-model="queryInput" placeholder="Type your query here..." class="w-full font-mono text-sm h-10" />
+        <template v-if="queryMode === 'raw_sql'">
+          <Input v-model="sqlQuery" placeholder="Enter SQL query..." class="w-full font-mono text-sm h-10" />
+        </template>
+        <template v-else>
+          <DataTableFilters :columns="sourceDetails?.columns || []" @update:filters="handleFiltersUpdate" />
+        </template>
       </div>
     </div>
 
@@ -262,12 +446,9 @@ async function loadSourceDetails(sourceId: string) {
         </div>
       </div>
       <!-- Show Results when data is loaded -->
-      <Results 
-        v-else-if="logs.length > 0" 
-        :logs="logs" 
-        :columns="sourceDetails?.columns || []" 
-        :stats="queryStats" 
-      />
+      <div v-else-if="logs?.length > 0">
+        <DataTable :data="logs" :columns="tableColumns" :stats="queryStats" />
+      </div>
       <EmptyState v-else />
     </div>
   </div>

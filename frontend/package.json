@@ -9,11 +9,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tanstack/vue-table": "^8.20.5",
+    "@types/lodash": "^4.17.15",
     "@vee-validate/zod": "^4.15.0",
     "@vueuse/core": "^12.5.0",
     "axios": "^1.7.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "lodash": "^4.17.21",
     "lucide-vue-next": "^0.474.0",
     "radix-vue": "^1.9.13",
     "tailwind-merge": "^3.0.1",

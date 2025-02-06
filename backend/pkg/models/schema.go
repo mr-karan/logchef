@@ -10,7 +10,6 @@ const (
 	// OTELLogsTableSchema is the schema for OpenTelemetry logs
 	OTELLogsTableSchema = `CREATE TABLE IF NOT EXISTS "{{database_name}}"."{{table_name}}"
 	(
-		id UUID DEFAULT generateUUIDv4() CODEC(ZSTD(1)),
 		timestamp DateTime64(3) CODEC(DoubleDelta, LZ4),
 		trace_id String CODEC(ZSTD(1)),
 		span_id String CODEC(ZSTD(1)),

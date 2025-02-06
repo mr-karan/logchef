@@ -11,7 +11,7 @@ source = '''
   structured = parse_syslog!(.message)
 
   # Timestamp handling
-  .timestamp = format_timestamp!(structured.timestamp, format: "%Y-%m-%d %H:%M:%S")
+  .timestamp = format_timestamp!(structured.timestamp, format: "%Y-%m-%d %H:%M:%S.%f")
 
   # Required fields from schema
   .trace_id = uuid_v4()
