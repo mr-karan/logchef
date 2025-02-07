@@ -64,9 +64,9 @@ func (s *Server) handleGetSource(c *fiber.Ctx) error {
 	}
 
 	// Get schema information
-	if err := s.svc.ExploreSource(c.Context(), source); err != nil {
-		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to get schema: %v", err))
-	}
+	// if err := s.svc.ExploreSource(c.Context(), source); err != nil {
+	// 	return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to get schema: %v", err))
+	// }
 
 	return c.JSON(Response{
 		Status: "success",
@@ -132,19 +132,20 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 
 // LogQueryResponse represents the response structure for log queries
 type LogQueryResponse struct {
-	Logs   interface{}            `json:"logs"`
-	Stats  interface{}            `json:"stats"`
-	Params LogQueryResponseParams `json:"params"`
+	Logs    interface{}            `json:"logs"`
+	Stats   interface{}            `json:"stats"`
+	Params  LogQueryResponseParams `json:"params"`
+	Columns []models.ColumnInfo    `json:"columns"`
 }
 
 // LogQueryResponseParams represents the query parameters used in the response
 type LogQueryResponseParams struct {
-	SourceID       string               `json:"source_id"`
-	FilterGroups   []models.FilterGroup `json:"filter_groups"`
-	Limit          int                  `json:"limit"`
-	StartTimestamp int64                `json:"start_timestamp"`
-	EndTimestamp   int64                `json:"end_timestamp"`
-	Sort           *models.SortOptions  `json:"sort"`
+	SourceID       string                   `json:"source_id"`
+	Conditions     []models.FilterCondition `json:"conditions"`
+	Limit          int                      `json:"limit"`
+	StartTimestamp int64                    `json:"start_timestamp"`
+	EndTimestamp   int64                    `json:"end_timestamp"`
+	Sort           *models.SortOptions      `json:"sort"`
 }
 
 // handleQueryLogs handles POST requests to search/query logs from a source
@@ -180,14 +181,14 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 
 	// Convert to query params
 	params := clickhouse.LogQueryParams{
-		Limit:        req.Limit,
-		StartTime:    time.UnixMilli(req.StartTimestamp).UTC(),
-		EndTime:      time.UnixMilli(req.EndTimestamp).UTC(),
-		FilterGroups: req.FilterGroups,
-		Sort:         req.Sort,
-		Mode:         req.Mode,
-		RawSQL:       req.RawSQL,
-		LogChefQL:    req.LogChefQL,
+		Limit:      req.Limit,
+		StartTime:  time.UnixMilli(req.StartTimestamp).UTC(),
+		EndTime:    time.UnixMilli(req.EndTimestamp).UTC(),
+		Conditions: req.Conditions,
+		Sort:       req.Sort,
+		Mode:       req.Mode,
+		RawSQL:     req.RawSQL,
+		LogChefQL:  req.LogChefQL,
 	}
 
 	// Set default sort if not provided
@@ -200,7 +201,13 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		params.Sort = req.Sort
 	}
 
-	fmt.Println("filter groups", req.FilterGroups)
+	s.log.Debug("querying logs",
+		"source_id", id,
+		"mode", params.Mode,
+		"start_time", params.StartTime,
+		"end_time", params.EndTime,
+		"limit", params.Limit,
+	)
 
 	// Query logs
 	result, err := s.svc.QueryLogs(c.Context(), id, params)
@@ -208,15 +215,26 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		if err == service.ErrSourceNotFound {
 			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("source %s not found", id))
 		}
+		s.log.Error("failed to query logs",
+			"source_id", id,
+			"error", err,
+		)
 		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to query logs: %v", err))
 	}
 
+	s.log.Debug("query complete",
+		"source_id", id,
+		"rows", len(result.Data),
+		"execution_time_ms", result.Stats.ExecutionTimeMs,
+	)
+
 	response := LogQueryResponse{
-		Logs:  result.Data,
-		Stats: result.Stats,
+		Logs:    result.Data,
+		Stats:   result.Stats,
+		Columns: result.Columns,
 		Params: LogQueryResponseParams{
 			SourceID:       id,
-			FilterGroups:   req.FilterGroups,
+			Conditions:     req.Conditions,
 			Limit:          req.Limit,
 			StartTimestamp: req.StartTimestamp,
 			EndTimestamp:   req.EndTimestamp,

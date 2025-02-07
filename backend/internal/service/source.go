@@ -4,6 +4,8 @@ import (
 	"backend-v2/pkg/models"
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,7 +27,7 @@ func (s *Service) ListSources(ctx context.Context) ([]*models.Source, error) {
 	for _, source := range sources {
 		health, err := s.clickhouse.GetHealth(source.ID)
 		if err == nil {
-			source.IsConnected = health.IsHealthy
+			source.IsConnected = health.Status == models.HealthStatusHealthy
 		}
 	}
 
@@ -46,7 +48,7 @@ func (s *Service) GetSource(ctx context.Context, id string) (*models.Source, err
 	// Get health status
 	health, err := s.clickhouse.GetHealth(id)
 	if err == nil {
-		source.IsConnected = health.IsHealthy
+		source.IsConnected = health.Status == models.HealthStatusHealthy
 	}
 
 	return source, nil
@@ -79,11 +81,12 @@ func (s *Service) CreateSource(ctx context.Context, schemaType string, conn mode
 		if err := s.clickhouse.AddSource(source); err != nil {
 			return nil, fmt.Errorf("error initializing ClickHouse connection: %w", err)
 		}
-		conn, err := s.clickhouse.GetConnection(source.ID)
+		client, err := s.clickhouse.GetClient(source.ID)
 		if err != nil {
-			return nil, fmt.Errorf("error getting ClickHouse connection: %w", err)
+			return nil, fmt.Errorf("error getting ClickHouse client: %w", err)
 		}
-		if err := conn.DB.Exec(ctx, fmt.Sprintf("SELECT 1 FROM %s.%s LIMIT 1", source.Connection.Database, source.Connection.TableName)); err != nil {
+		query := fmt.Sprintf("SELECT 1 FROM %s.%s LIMIT 1", source.Connection.Database, source.Connection.TableName)
+		if _, err := client.Query(ctx, query, nil); err != nil {
 			return nil, fmt.Errorf("error verifying table exists: %w", err)
 		}
 	}
@@ -100,13 +103,26 @@ func (s *Service) CreateSource(ctx context.Context, schemaType string, conn mode
 			_ = s.sqlite.DeleteSource(ctx, source.ID)
 			return nil, fmt.Errorf("error initializing ClickHouse connection: %w", err)
 		}
-		conn, err := s.clickhouse.GetConnection(source.ID)
+
+		// Create the table
+		client, err := s.clickhouse.GetClient(source.ID)
 		if err != nil {
 			// Try to clean up SQLite entry on error
 			_ = s.sqlite.DeleteSource(ctx, source.ID)
-			return nil, fmt.Errorf("error getting ClickHouse connection: %w", err)
+			return nil, fmt.Errorf("error getting ClickHouse client: %w", err)
 		}
-		if err := conn.CreateSource(ctx, source.TTLDays); err != nil {
+
+		// Create table using the schema
+		schema := models.OTELLogsTableSchema
+		schema = strings.ReplaceAll(schema, "{{database_name}}", source.Connection.Database)
+		schema = strings.ReplaceAll(schema, "{{table_name}}", source.Connection.TableName)
+		if source.TTLDays > 0 {
+			schema = strings.ReplaceAll(schema, "{{ttl_day}}", strconv.Itoa(source.TTLDays))
+		} else {
+			schema = strings.ReplaceAll(schema, "TTL toDateTime(timestamp) + INTERVAL {{ttl_day}} DAY", "")
+		}
+
+		if _, err := client.Query(ctx, schema, nil); err != nil {
 			// Try to clean up SQLite entry on error
 			_ = s.sqlite.DeleteSource(ctx, source.ID)
 			return nil, fmt.Errorf("error creating ClickHouse table: %w", err)
@@ -131,11 +147,6 @@ func (s *Service) DeleteSource(ctx context.Context, id string) error {
 	return nil
 }
 
-// HealthUpdates returns a channel that receives source health updates
-func (s *Service) HealthUpdates() <-chan models.SourceHealth {
-	return s.clickhouse.HealthUpdates()
-}
-
 // Close closes all connections
 func (s *Service) Close() error {
 	var lastErr error
@@ -147,21 +158,33 @@ func (s *Service) Close() error {
 	return lastErr
 }
 
-// ExploreSource retrieves the schema information for a source
-func (s *Service) ExploreSource(ctx context.Context, source *models.Source) error {
-	// Get columns
-	columns, err := s.clickhouse.DescribeTable(ctx, source)
-	if err != nil {
-		return fmt.Errorf("error describing table: %w", err)
-	}
-	source.Columns = columns
+// // ExploreSource retrieves the schema information for a source
+// func (s *Service) ExploreSource(ctx context.Context, source *models.Source) error {
+// 	client, err := s.clickhouse.GetClient(source.ID)
+// 	if err != nil {
+// 		return fmt.Errorf("error getting ClickHouse client: %w", err)
+// 	}
 
-	// Get CREATE TABLE statement
-	schema, err := s.clickhouse.GetTableSchema(ctx, source)
-	if err != nil {
-		return fmt.Errorf("error getting table schema: %w", err)
-	}
-	source.Schema = schema
+// 	// Get columns
+// 	query := fmt.Sprintf("SELECT name, type FROM system.columns WHERE database = '%s' AND table = '%s'",
+// 		source.Connection.Database, source.Connection.TableName)
+// 	resp, err := client.Query(ctx, query, nil)
+// 	if err != nil {
+// 		return fmt.Errorf("error describing table: %w", err)
+// 	}
+// 	source.Columns = clickhouse.GetColumns(resp)
 
-	return nil
-}
+// 	// Get CREATE TABLE statement
+// 	query = fmt.Sprintf("SHOW CREATE TABLE %s.%s", source.Connection.Database, source.Connection.TableName)
+// 	resp, err = client.Query(ctx, query, nil)
+// 	if err != nil {
+// 		return fmt.Errorf("error getting table schema: %w", err)
+// 	}
+// 	if len(resp.Data) > 0 && len(resp.Data[0]) > 0 {
+// 		if schema, ok := resp.Data[0][0].(string); ok {
+// 			source.Schema = schema
+// 		}
+// 	}
+
+// 	return nil
+// }

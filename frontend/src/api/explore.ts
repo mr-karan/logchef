@@ -8,13 +8,15 @@ export interface FilterCondition {
     | "="
     | "!="
     | "contains"
-    | "startsWith"
-    | "endsWith"
-    | ">"
-    | "<"
-    | ">="
-    | "<=";
-  value: string;
+    | "not_contains"
+    | "icontains"
+    | "startswith"
+    | "endswith"
+    | "in"
+    | "not_in"
+    | "is_null"
+    | "is_not_null";
+  value: string | string[];
 }
 
 export interface FilterGroup {

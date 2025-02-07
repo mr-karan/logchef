@@ -47,6 +47,7 @@ import { QUERY_MODE } from '@/lib/constants'
 import DataTableFilters from './table/data-table-filters.vue'
 import type { FilterGroup, FiltersQueryParams, RawSqlQueryParams } from '@/api/explore'
 import type { FilterCondition } from '@/api/explore'
+import SQLEditor from '@/components/sql-editor/SQLEditor.vue'
 
 const { toast } = useToast()
 const route = useRoute()
@@ -416,7 +417,9 @@ const toggleQueryMode = (checked: boolean) => {
       <!-- Query Input Row -->
       <div class="w-full">
         <template v-if="queryMode === 'raw_sql'">
-          <Input v-model="sqlQuery" placeholder="Enter SQL query..." class="w-full font-mono text-sm h-10" />
+          <SQLEditor v-model="sqlQuery" :source-database="sourceDetails?.connection?.database"
+            :source-table="sourceDetails?.connection?.table_name" :start-timestamp="getTimestamps().start"
+            :end-timestamp="getTimestamps().end" @execute="executeQuery" />
         </template>
         <template v-else>
           <DataTableFilters :columns="sourceDetails?.columns || []" @update:filters="handleFiltersUpdate" />

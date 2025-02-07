@@ -5,24 +5,23 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"backend-v2/pkg/logger"
 	"backend-v2/pkg/models"
 )
 
-// Pool manages a pool of Clickhouse connections
+// Pool manages a pool of ClickHouse HTTP clients
 type Pool struct {
 	mu      sync.RWMutex
-	health  *HealthChecker
-	connMap map[string]*Connection
+	clients map[string]*HTTPClient
 	log     *slog.Logger
 }
 
 // NewPool creates a new connection pool
 func NewPool() *Pool {
 	return &Pool{
-		health:  NewHealthChecker(),
-		connMap: make(map[string]*Connection),
+		clients: make(map[string]*HTTPClient),
 		log:     logger.Default().With("component", "clickhouse_pool"),
 	}
 }
@@ -33,29 +32,27 @@ func (p *Pool) AddSource(source *models.Source) error {
 		"source_id", source.ID,
 		"database", source.Connection.Database,
 		"table", source.Connection.TableName,
-		"schema_type", source.SchemaType,
 	)
 
-	// Create new connection using the existing NewConnection function
-	conn, err := NewConnection(source)
-	if err != nil {
-		return fmt.Errorf("error creating connection: %w", err)
-	}
+	// Create new HTTP client
+	client := NewHTTPClient(
+		source.Connection.Host,
+		DefaultHTTPSettings(),
+		p.log.With("source_id", source.ID),
+	)
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Close existing connection if it exists
-	if oldConn, exists := p.connMap[source.ID]; exists {
-		p.log.Info("closing existing connection",
+	// Close existing client if it exists
+	if oldClient, exists := p.clients[source.ID]; exists {
+		p.log.Info("closing existing client",
 			"source_id", source.ID,
 		)
-		_ = oldConn.Close()
+		_ = oldClient.Close()
 	}
 
-	p.connMap[source.ID] = conn
-	p.health.AddConnection(conn)
-
+	p.clients[source.ID] = client
 	return nil
 }
 
@@ -68,115 +65,148 @@ func (p *Pool) RemoveSource(sourceID string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if conn, exists := p.connMap[sourceID]; exists {
-		if err := conn.Close(); err != nil {
-			p.log.Error("error closing connection",
+	if client, exists := p.clients[sourceID]; exists {
+		if err := client.Close(); err != nil {
+			p.log.Error("error closing client",
 				"source_id", sourceID,
 				"error", err,
 			)
 		}
-		delete(p.connMap, sourceID)
-		p.health.RemoveConnection(sourceID)
+		delete(p.clients, sourceID)
 	}
 
 	return nil
 }
 
-// GetConnection returns a connection for a given source ID
-func (p *Pool) GetConnection(sourceID string) (*Connection, error) {
+// GetClient returns a client for a given source ID
+func (p *Pool) GetClient(sourceID string) (*HTTPClient, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	conn, exists := p.connMap[sourceID]
+	client, exists := p.clients[sourceID]
 	if !exists {
-		return nil, fmt.Errorf("no connection found for source %s", sourceID)
+		return nil, fmt.Errorf("no client found for source %s", sourceID)
 	}
 
-	return conn, nil
+	return client, nil
 }
 
-// DescribeTable retrieves the schema information for a source's table
-func (p *Pool) DescribeTable(ctx context.Context, source *models.Source) ([]models.ColumnInfo, error) {
-	p.log.Debug("describing table",
-		"source_id", source.ID,
-		"database", source.Connection.Database,
-		"table", source.Connection.TableName,
-		"schema_type", source.SchemaType,
-	)
-
-	conn, err := p.GetConnection(source.ID)
+// QueryLogs queries logs from a source
+func (p *Pool) QueryLogs(ctx context.Context, sourceID string, params LogQueryParams) (*LogQueryResult, error) {
+	// Get source from the database
+	source, err := p.getSource(sourceID)
 	if err != nil {
-		return nil, fmt.Errorf("error getting connection: %w", err)
+		return nil, fmt.Errorf("error getting source: %w", err)
 	}
 
-	// Get root columns from system.columns
-	query := fmt.Sprintf("SELECT name, type FROM system.columns WHERE database = '%s' AND table = '%s'",
-		source.Connection.Database, source.Connection.TableName)
-	rows, err := conn.DB.Query(ctx, query)
+	// Get client
+	client, err := p.GetClient(sourceID)
 	if err != nil {
-		return nil, fmt.Errorf("error describing table: %w", err)
+		return nil, fmt.Errorf("error getting client: %w", err)
 	}
-	defer rows.Close()
 
-	var columns []models.ColumnInfo
-	for rows.Next() {
-		var col models.ColumnInfo
-		if err := rows.Scan(&col.Name, &col.Type); err != nil {
-			return nil, fmt.Errorf("error scanning row: %w", err)
+	// Build query based on mode
+	var query string
+	var extraParams map[string]string
+
+	switch params.Mode {
+	case models.QueryModeRawSQL:
+		if params.RawSQL == "" {
+			return nil, fmt.Errorf("raw SQL query cannot be empty")
 		}
-		columns = append(columns, col)
-	}
-
-	// For managed sources, also get unique attributes from the materialized view
-	if source.SchemaType == models.SchemaTypeManaged {
-		attrs, err := conn.GetUniqueAttributes(ctx)
-		if err != nil {
-			// Don't fail if we can't get attributes, just log the error
-			p.log.Error("error getting unique attributes",
-				"source_id", source.ID,
-				"error", err,
-			)
-		} else {
-			// Add each attribute as a column with type String
-			for _, attr := range attrs {
-				columns = append(columns, models.ColumnInfo{
-					Name: fmt.Sprintf("log_attributes['%s']", attr),
-					Type: "String",
-				})
-			}
+		query = params.RawSQL
+	case models.QueryModeLogChefQL:
+		if params.LogChefQL == "" {
+			return nil, fmt.Errorf("LogchefQL query cannot be empty")
 		}
+		// TODO: Implement LogChefQL parsing
+		return nil, fmt.Errorf("LogChefQL mode not implemented")
+	case models.QueryModeFilters:
+		// Build filter query
+		query = buildFilterQuery(params, source.GetFullTableName())
+	default:
+		return nil, fmt.Errorf("unsupported query mode: %s", params.Mode)
 	}
 
-	return columns, nil
-}
-
-// GetTableSchema returns the CREATE TABLE statement for a source's table
-func (p *Pool) GetTableSchema(ctx context.Context, source *models.Source) (string, error) {
-	p.log.Debug("getting table schema",
-		"source_id", source.ID,
-		"database", source.Connection.Database,
-		"table", source.Connection.TableName,
-	)
-
-	conn, err := p.GetConnection(source.ID)
+	// Execute query
+	resp, err := client.Query(ctx, query, extraParams)
 	if err != nil {
-		return "", fmt.Errorf("error getting connection: %w", err)
+		return nil, fmt.Errorf("error executing query: %w", err)
 	}
 
-	return conn.GetTableSchema(ctx)
+	// Convert response to LogQueryResult
+	return &LogQueryResult{
+		Data:    ConvertToMap(resp),
+		Stats:   GetQueryStats(resp),
+		Columns: GetColumns(resp),
+	}, nil
 }
 
-// Close closes all connections in the pool
+// getSource gets a source from the database
+func (p *Pool) getSource(sourceID string) (*models.Source, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	// Get source from the pool's clients map
+	_, exists := p.clients[sourceID]
+	if !exists {
+		return nil, fmt.Errorf("no client found for source %s", sourceID)
+	}
+
+	// Get source from the database
+	// TODO: Implement getting source from database
+	// For now, return a source with the correct table name
+	return &models.Source{
+		ID: sourceID,
+		Connection: models.ConnectionInfo{
+			Database:  "logs",
+			TableName: "vector_logs",
+		},
+	}, nil
+}
+
+// GetHealth returns the health status for a given source ID
+func (p *Pool) GetHealth(sourceID string) (models.SourceHealth, error) {
+	client, err := p.GetClient(sourceID)
+	if err != nil {
+		return models.SourceHealth{
+			SourceID: sourceID,
+			Status:   models.HealthStatusUnhealthy,
+			Error:    err.Error(),
+		}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), healthCheckTimeout)
+	defer cancel()
+
+	err = client.CheckHealth(ctx)
+	if err != nil {
+		return models.SourceHealth{
+			SourceID:    sourceID,
+			Status:      models.HealthStatusUnhealthy,
+			Error:       err.Error(),
+			LastChecked: time.Now(),
+		}, nil
+	}
+
+	return models.SourceHealth{
+		SourceID:    sourceID,
+		Status:      models.HealthStatusHealthy,
+		LastChecked: time.Now(),
+	}, nil
+}
+
+// Close closes all clients in the pool
 func (p *Pool) Close() error {
-	p.log.Info("closing all connections in pool")
+	p.log.Info("closing all clients in pool")
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	var lastErr error
-	for id, conn := range p.connMap {
-		if err := conn.Close(); err != nil {
-			p.log.Error("error closing connection",
+	for id, client := range p.clients {
+		if err := client.Close(); err != nil {
+			p.log.Error("error closing client",
 				"source_id", id,
 				"error", err,
 			)
@@ -185,23 +215,4 @@ func (p *Pool) Close() error {
 	}
 
 	return lastErr
-}
-
-// QueryLogs queries logs from a source with pagination
-func (p *Pool) QueryLogs(ctx context.Context, sourceID string, params LogQueryParams) (*LogQueryResult, error) {
-	conn, err := p.GetConnection(sourceID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting connection: %w", err)
-	}
-	return conn.QueryLogs(ctx, params)
-}
-
-// GetHealth returns the health status for a given source ID
-func (p *Pool) GetHealth(sourceID string) (models.SourceHealth, error) {
-	return p.health.GetHealth(sourceID)
-}
-
-// HealthUpdates returns a channel that receives health updates
-func (p *Pool) HealthUpdates() <-chan models.SourceHealth {
-	return p.health.HealthUpdates()
 }

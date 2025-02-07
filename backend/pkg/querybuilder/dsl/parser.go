@@ -14,7 +14,7 @@ var queryLexer = lexer.MustSimple([]lexer.SimpleRule{
 	{Name: "whitespace", Pattern: `\s+`},
 	{Name: "String", Pattern: `"(?:[^"\\]|\\.)*"`},
 	{Name: "Number", Pattern: `[-+]?\d*\.?\d+`},
-	{Name: "Operator", Pattern: `(?:AND|OR|IN|=~|=|!=|>=|<=|>|<)`},
+	{Name: "Operator", Pattern: `(?:AND|OR|IN|NOT_IN|=~|!~|=|!=|is_null|is_not_null)`},
 	{Name: "Ident", Pattern: `[a-zA-Z][a-zA-Z0-9_]*`},
 	{Name: "Punct", Pattern: `[(),\[\]]`},
 })
@@ -46,26 +46,21 @@ var parser = participle.MustBuild[Query](
 	participle.Elide("whitespace"),
 )
 
-// ParseQuery parses a query string into filter groups
-func ParseQuery(queryStr string) ([]models.FilterGroup, error) {
+// ParseQuery parses a LogchefQL query string into a list of filter conditions
+func ParseQuery(queryStr string) ([]models.FilterCondition, error) {
 	query, err := parser.ParseString("", queryStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse query: %w", err)
 	}
 
-	return convertToFilterGroups(query.Groups), nil
+	return convertToConditions(query.Groups), nil
 }
 
-// convertToFilterGroups converts AST groups to models.FilterGroup
-func convertToFilterGroups(groups []*FilterGroup) []models.FilterGroup {
-	var result []models.FilterGroup
+// convertToConditions converts AST groups to a flat list of filter conditions
+func convertToConditions(groups []*FilterGroup) []models.FilterCondition {
+	var result []models.FilterCondition
 
 	for _, g := range groups {
-		group := models.FilterGroup{
-			Operator:   models.GroupOperatorAnd,
-			Conditions: make([]models.FilterCondition, 0),
-		}
-
 		// Convert conditions
 		for _, c := range g.Conditions {
 			condition := models.FilterCondition{
@@ -73,15 +68,13 @@ func convertToFilterGroups(groups []*FilterGroup) []models.FilterGroup {
 				Operator: convertOperator(c.Operator),
 				Value:    convertValue(c.Value),
 			}
-			group.Conditions = append(group.Conditions, condition)
+			result = append(result, condition)
 		}
-
-		result = append(result, group)
 
 		// Handle OR groups recursively
 		if g.Or != nil {
-			orGroups := convertToFilterGroups([]*FilterGroup{g.Or})
-			result = append(result, orGroups...)
+			orConditions := convertToConditions([]*FilterGroup{g.Or})
+			result = append(result, orConditions...)
 		}
 	}
 
@@ -95,16 +88,18 @@ func convertOperator(op string) models.FilterOperator {
 		return models.FilterOperatorEquals
 	case "!=":
 		return models.FilterOperatorNotEquals
-	case ">":
-		return models.FilterOperatorGreaterThan
-	case "<":
-		return models.FilterOperatorLessThan
-	case ">=":
-		return models.FilterOperatorGreaterEquals
-	case "<=":
-		return models.FilterOperatorLessEquals
 	case "=~":
 		return models.FilterOperatorContains
+	case "!~":
+		return models.FilterOperatorNotContains
+	case "IN":
+		return models.FilterOperatorIn
+	case "NOT_IN":
+		return models.FilterOperatorNotIn
+	case "is_null":
+		return models.FilterOperatorIsNull
+	case "is_not_null":
+		return models.FilterOperatorIsNotNull
 	default:
 		return models.FilterOperatorEquals
 	}

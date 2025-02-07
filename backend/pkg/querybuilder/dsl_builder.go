@@ -5,31 +5,31 @@ import (
 	"fmt"
 )
 
-// LogchefQLBuilder builds queries from LogChef query language
-type LogchefQLBuilder struct {
+// LogChefQLBuilder builds queries from LogChef query language
+type LogChefQLBuilder struct {
 	TableName string
 	Options   Options
 	Query     string
 }
 
-// NewLogchefQLBuilder creates a new LogchefQLBuilder instance
-func NewLogchefQLBuilder(tableName string, opts Options, query string) *LogchefQLBuilder {
-	return &LogchefQLBuilder{
-		TableName: tableName,
+// NewLogChefQLBuilder creates a new LogChefQLBuilder instance
+func NewLogChefQLBuilder(tableRef string, opts Options, query string) *LogChefQLBuilder {
+	return &LogChefQLBuilder{
+		TableName: tableRef,
 		Options:   opts,
 		Query:     query,
 	}
 }
 
-// Build implements the Builder interface for LogchefQLBuilder
-func (b *LogchefQLBuilder) Build() (*Query, error) {
-	// Parse LogchefQL query into filter groups
-	filterGroups, err := dsl.ParseQuery(b.Query)
+// Build implements the Builder interface for LogChefQLBuilder
+func (b *LogChefQLBuilder) Build() (*Query, error) {
+	// Parse the LogChefQL query
+	conditions, err := dsl.ParseQuery(b.Query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse LogchefQL query: %w", err)
+		return nil, fmt.Errorf("failed to parse LogChefQL query: %w", err)
 	}
 
-	// Use FilterBuilder to build the actual query
-	fb := NewFilterBuilder(b.TableName, b.Options, filterGroups)
+	// Create a filter builder with the parsed conditions
+	fb := NewFilterBuilder(b.TableName, b.Options, conditions)
 	return fb.Build()
 }

@@ -1,0 +1,4 @@
+- Need to ask AI to build a small HTTP wrapper for clickhouse and experiment
+- Experiment with nested JSON paths
+- Get underlying types (added benefit)
+- Get stats

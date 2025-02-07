@@ -33,42 +33,25 @@ func main() {
 	)
 	flag.Parse()
 
-	// Initialize logger with app metadata
-	if err := logger.Initialize(logger.Config{
-		Level:   *logLevel,
-		AppName: "logchef",
-		Version: fmt.Sprintf("%s-%s", version, commit),
-		Env:     *env,
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
-		os.Exit(1)
-	}
-
+	// Initialize logger
+	logger.Initialize(*logLevel)
 	log := logger.Default()
 
 	// Create base context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Log build information
-	log.Info("starting logchef server",
+	// Log startup information
+	log.Info("starting server",
 		"version", version,
 		"commit", commit,
-		"build_time", buildTime,
-		"build_string", buildString,
+		"env", *env,
 	)
 
 	// Load configuration
-	log.Info("loading configuration",
-		"path", *configPath,
-		"version", version,
-		"commit", commit,
-		"build_date", buildTime,
-	)
-
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		log.Error("failed to load configuration",
+		log.Error("failed to load config",
 			"error", err,
 			"path", *configPath,
 		)
@@ -76,15 +59,14 @@ func main() {
 	}
 
 	// Initialize SQLite
-	log.Info("initializing SQLite database",
+	log.Info("initializing sqlite",
 		"path", cfg.SQLite.Path,
-		"journal_mode", "WAL",
 	)
 	sqliteDB, err := sqlite.New(sqlite.Options{
 		Path: cfg.SQLite.Path,
 	})
 	if err != nil {
-		log.Error("failed to initialize SQLite", "error", err)
+		log.Error("failed to initialize sqlite", "error", err)
 		os.Exit(1)
 	}
 	defer sqliteDB.Close()
@@ -93,7 +75,7 @@ func main() {
 	svc := service.New(sqliteDB)
 
 	// Initialize Clickhouse connections
-	log.Info("initializing Clickhouse connections")
+	log.Info("initializing clickhouse connections")
 	sources, err := sqliteDB.ListSources(context.Background())
 	if err != nil {
 		log.Error("failed to list sources", "error", err)
@@ -101,7 +83,7 @@ func main() {
 	}
 
 	if len(sources) == 0 {
-		log.Warn("no sources configured - use the API to create a source")
+		log.Warn("no sources configured")
 	}
 
 	// Initialize each source
@@ -111,7 +93,6 @@ func main() {
 		if err != nil {
 			log.Warn("failed to initialize source",
 				"source_id", source.ID,
-				"table_name", source.Connection.TableName,
 				"error", err,
 			)
 			continue
@@ -122,20 +103,7 @@ func main() {
 	log.Info("source initialization complete",
 		"total", len(sources),
 		"healthy", healthyCount,
-		"unhealthy", len(sources)-healthyCount,
 	)
-
-	// Monitor source health
-	go func() {
-		for health := range svc.HealthUpdates() {
-			if !health.IsHealthy {
-				log.Warn("source health check failed",
-					"source_id", health.ID,
-					"error", health.Error,
-				)
-			}
-		}
-	}()
 
 	// Create and start HTTP server
 	srv := server.New(cfg, svc, getWebFS())

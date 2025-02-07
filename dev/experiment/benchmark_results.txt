@@ -1,0 +1,46 @@
+goos: linux
+goarch: amd64
+pkg: github.com/mr-karan/logchef/dev/experiment
+cpu: 13th Gen Intel(R) Core(TM) i7-1370P
+BenchmarkClickHouse/HTTP_JSONCompact           	       5	 239261450 ns/op	 239255432 avg_latency_ns	   3433608 bytes/op	         0 errors	 283896669 max_latency_ns	 197211316 min_latency_ns	31484385 B/op	  356688 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact           	       5	 233005501 ns/op	 232986882 avg_latency_ns	   3433608 bytes/op	         0 errors	 293606825 max_latency_ns	 166729279 min_latency_ns	31480124 B/op	  356668 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact           	       5	 236117983 ns/op	 236114115 avg_latency_ns	   3433608 bytes/op	         0 errors	 313615245 max_latency_ns	 161592696 min_latency_ns	31510499 B/op	  356760 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact           	       5	 191775502 ns/op	 191771217 avg_latency_ns	   3433608 bytes/op	         0 errors	 237200581 max_latency_ns	 144586699 min_latency_ns	31486025 B/op	  356679 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact           	       5	 184637690 ns/op	 184022315 avg_latency_ns	   3433608 bytes/op	         0 errors	 211078222 max_latency_ns	 146316942 min_latency_ns	31482531 B/op	  356675 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact-2         	       5	 116775538 ns/op	 190185008 avg_latency_ns	   3433608 bytes/op	         0 errors	 226175876 max_latency_ns	 175340583 min_latency_ns	31489097 B/op	  356705 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact-2         	       5	 114535495 ns/op	 191451537 avg_latency_ns	   3433608 bytes/op	         0 errors	 197042779 max_latency_ns	 186134156 min_latency_ns	31445468 B/op	  356562 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact-2         	       5	 139100997 ns/op	 232800346 avg_latency_ns	   3433608 bytes/op	         0 errors	 276044008 max_latency_ns	 192101154 min_latency_ns	31448952 B/op	  356565 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact-2         	       5	 142960592 ns/op	 229198232 avg_latency_ns	   3433608 bytes/op	         0 errors	 286171395 max_latency_ns	 205978142 min_latency_ns	31451256 B/op	  356564 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact-2         	       5	 136088271 ns/op	 228466543 avg_latency_ns	   3433608 bytes/op	         0 errors	 242991685 max_latency_ns	 212383880 min_latency_ns	31445400 B/op	  356561 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact-4         	       5	 113753868 ns/op	 309841199 avg_latency_ns	   3433608 bytes/op	         0 errors	 331725315 max_latency_ns	 257663338 min_latency_ns	31495932 B/op	  356735 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact-4         	       5	  89920845 ns/op	 291370727 avg_latency_ns	   3433608 bytes/op	         0 errors	 339600591 max_latency_ns	 147167385 min_latency_ns	31505459 B/op	  356773 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact-4         	       5	  73078863 ns/op	 216913876 avg_latency_ns	   3433608 bytes/op	         0 errors	 249357360 max_latency_ns	 138525296 min_latency_ns	31450766 B/op	  356591 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact-4         	       5	  68278006 ns/op	 200923378 avg_latency_ns	   3433608 bytes/op	         0 errors	 223499158 max_latency_ns	 144443446 min_latency_ns	31499448 B/op	  356743 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact-4         	       5	  96931247 ns/op	 259852910 avg_latency_ns	   3433608 bytes/op	         0 errors	 283687471 max_latency_ns	 240852145 min_latency_ns	31452011 B/op	  356594 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact-8         	       5	  50518841 ns/op	 239844660 avg_latency_ns	   3433608 bytes/op	         0 errors	 252557158 max_latency_ns	 227579999 min_latency_ns	31454456 B/op	  356612 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact-8         	       5	  48696443 ns/op	 234676605 avg_latency_ns	   3433608 bytes/op	         0 errors	 243289596 max_latency_ns	 222196483 min_latency_ns	31454992 B/op	  356612 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact-8         	       5	  48339870 ns/op	 234621509 avg_latency_ns	   3433608 bytes/op	         0 errors	 241670703 max_latency_ns	 220722436 min_latency_ns	31512153 B/op	  356806 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact-8         	       5	  48452279 ns/op	 234591629 avg_latency_ns	   3433608 bytes/op	         0 errors	 242079771 max_latency_ns	 227872576 min_latency_ns	31462664 B/op	  356610 allocs/op
+BenchmarkClickHouse/HTTP_JSONCompact-8         	       5	  72735468 ns/op	 355812418 avg_latency_ns	   3433608 bytes/op	         0 errors	 363619075 max_latency_ns	 337958151 min_latency_ns	31518667 B/op	  356818 allocs/op
+BenchmarkClickHouse/Native_WithDescribe        	       5	 420382421 ns/op	 420334954 avg_latency_ns	         0 bytes/op	         0 errors	 445532595 max_latency_ns	 406060663 min_latency_ns	59957545 B/op	  658245 allocs/op
+BenchmarkClickHouse/Native_WithDescribe        	       5	 299355960 ns/op	 299331016 avg_latency_ns	         0 bytes/op	         0 errors	 424599380 max_latency_ns	 201420424 min_latency_ns	59948796 B/op	  658167 allocs/op
+BenchmarkClickHouse/Native_WithDescribe        	       5	 277706661 ns/op	 277691523 avg_latency_ns	         0 bytes/op	         0 errors	 346381779 max_latency_ns	 206609845 min_latency_ns	59942451 B/op	  658115 allocs/op
+BenchmarkClickHouse/Native_WithDescribe        	       5	 337765822 ns/op	 337725220 avg_latency_ns	         0 bytes/op	         0 errors	 402882531 max_latency_ns	 218006532 min_latency_ns	59909281 B/op	  658044 allocs/op
+BenchmarkClickHouse/Native_WithDescribe        	       5	 419390352 ns/op	 419070776 avg_latency_ns	         0 bytes/op	         0 errors	 475175694 max_latency_ns	 346469807 min_latency_ns	59943305 B/op	  658183 allocs/op
+BenchmarkClickHouse/Native_WithDescribe-2      	       5	 227731583 ns/op	 384449917 avg_latency_ns	         0 bytes/op	         0 errors	 456973151 max_latency_ns	 318251385 min_latency_ns	59959748 B/op	  658085 allocs/op
+BenchmarkClickHouse/Native_WithDescribe-2      	       5	 277257135 ns/op	 483620186 avg_latency_ns	         0 bytes/op	         0 errors	 529154742 max_latency_ns	 365676424 min_latency_ns	59970915 B/op	  658147 allocs/op
+BenchmarkClickHouse/Native_WithDescribe-2      	       5	 239749011 ns/op	 407688112 avg_latency_ns	         0 bytes/op	         0 errors	 427522970 max_latency_ns	 363416879 min_latency_ns	60020918 B/op	  658242 allocs/op
+BenchmarkClickHouse/Native_WithDescribe-2      	       5	 209686340 ns/op	 359448291 avg_latency_ns	         0 bytes/op	         0 errors	 449785939 max_latency_ns	 287299733 min_latency_ns	59963796 B/op	  658110 allocs/op
+BenchmarkClickHouse/Native_WithDescribe-2      	       5	 184708849 ns/op	 323139540 avg_latency_ns	         0 bytes/op	         0 errors	 378462781 max_latency_ns	 232611418 min_latency_ns	59955721 B/op	  658058 allocs/op
+BenchmarkClickHouse/Native_WithDescribe-4      	       5	 101235216 ns/op	 279267185 avg_latency_ns	         0 bytes/op	         0 errors	 299010511 max_latency_ns	 211375136 min_latency_ns	60013700 B/op	  657881 allocs/op
+BenchmarkClickHouse/Native_WithDescribe-4      	       5	  91505599 ns/op	 255985650 avg_latency_ns	         0 bytes/op	         0 errors	 277559470 max_latency_ns	 192241699 min_latency_ns	60082361 B/op	  658127 allocs/op
+BenchmarkClickHouse/Native_WithDescribe-4      	       5	 116311988 ns/op	 291143717 avg_latency_ns	         0 bytes/op	         0 errors	 294074326 max_latency_ns	 287403725 min_latency_ns	60080028 B/op	  658109 allocs/op
+BenchmarkClickHouse/Native_WithDescribe-4      	       5	  99748702 ns/op	 275111901 avg_latency_ns	         0 bytes/op	         0 errors	 294309167 max_latency_ns	 208264685 min_latency_ns	60019724 B/op	  657896 allocs/op
+BenchmarkClickHouse/Native_WithDescribe-4      	       5	  91539099 ns/op	 257180803 avg_latency_ns	         0 bytes/op	         0 errors	 278817901 max_latency_ns	 186165000 min_latency_ns	60012345 B/op	  657881 allocs/op
+BenchmarkClickHouse/Native_WithDescribe-8      	       5	  85204921 ns/op	 418015487 avg_latency_ns	         0 bytes/op	         0 errors	 425872216 max_latency_ns	 410327243 min_latency_ns	60146291 B/op	  658181 allocs/op
+BenchmarkClickHouse/Native_WithDescribe-8      	       5	  74828887 ns/op	 371969123 avg_latency_ns	         0 bytes/op	         0 errors	 374041585 max_latency_ns	 368568812 min_latency_ns	60070622 B/op	  657909 allocs/op
+BenchmarkClickHouse/Native_WithDescribe-8      	       5	  95029788 ns/op	 470316119 avg_latency_ns	         0 bytes/op	         0 errors	 474822285 max_latency_ns	 463598868 min_latency_ns	60080369 B/op	  658021 allocs/op
+BenchmarkClickHouse/Native_WithDescribe-8      	       5	 102556644 ns/op	 498201308 avg_latency_ns	         0 bytes/op	         0 errors	 512406300 max_latency_ns	 481801327 min_latency_ns	60140267 B/op	  658240 allocs/op
+BenchmarkClickHouse/Native_WithDescribe-8      	       5	  82372075 ns/op	 406253172 avg_latency_ns	         0 bytes/op	         0 errors	 411657037 max_latency_ns	 400109352 min_latency_ns	60146803 B/op	  658260 allocs/op
+PASS
+ok  	github.com/mr-karan/logchef/dev/experiment	42.125s

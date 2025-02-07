@@ -40,11 +40,18 @@ func (s *Source) GetFullTableName() string {
 	return fmt.Sprintf("%s.%s", s.Connection.Database, s.Connection.TableName)
 }
 
+// HealthStatus represents the health status of a source
+type HealthStatus string
+
+const (
+	HealthStatusHealthy   HealthStatus = "healthy"
+	HealthStatusUnhealthy HealthStatus = "unhealthy"
+)
+
 // SourceHealth represents the health status of a source
 type SourceHealth struct {
-	ID        string        `json:"id"`
-	IsHealthy bool          `json:"is_healthy"`
-	LastCheck time.Time     `json:"last_check"`
-	Error     string        `json:"error,omitempty"`
-	Latency   time.Duration `json:"latency"`
+	SourceID    string       `json:"source_id"`
+	Status      HealthStatus `json:"status"`
+	Error       string       `json:"error,omitempty"`
+	LastChecked time.Time    `json:"last_checked"`
 }

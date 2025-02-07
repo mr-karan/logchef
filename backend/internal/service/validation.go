@@ -75,54 +75,40 @@ func ValidateLogQueryRequest(req *models.LogQueryRequest) error {
 	// Validate based on mode
 	switch req.Mode {
 	case models.QueryModeFilters:
-		// Filter groups are optional now
-		for i, group := range req.FilterGroups {
-			if group.Operator != models.GroupOperatorAnd && group.Operator != models.GroupOperatorOr {
+		// Validate conditions
+		for i, condition := range req.Conditions {
+			if condition.Field == "" {
 				return &ValidationError{
-					Field:   fmt.Sprintf("FilterGroups[%d].Operator", i),
-					Message: "must be either 'AND' or 'OR'",
+					Field:   fmt.Sprintf("Conditions[%d].Field", i),
+					Message: "field is required",
 				}
 			}
 
-			if len(group.Conditions) == 0 {
+			if condition.Operator == "" {
 				return &ValidationError{
-					Field:   fmt.Sprintf("FilterGroups[%d].Conditions", i),
-					Message: "must have at least one condition",
+					Field:   fmt.Sprintf("Conditions[%d].Operator", i),
+					Message: "operator is required",
 				}
 			}
 
-			// Validate conditions within the group
-			for j, condition := range group.Conditions {
-				if condition.Field == "" {
-					return &ValidationError{
-						Field:   fmt.Sprintf("FilterGroups[%d].Conditions[%d].Field", i, j),
-						Message: "field is required",
-					}
-				}
+			validOps := map[models.FilterOperator]bool{
+				models.FilterOperatorEquals:      true,
+				models.FilterOperatorNotEquals:   true,
+				models.FilterOperatorContains:    true,
+				models.FilterOperatorNotContains: true,
+				models.FilterOperatorIContains:   true,
+				models.FilterOperatorStartsWith:  true,
+				models.FilterOperatorEndsWith:    true,
+				models.FilterOperatorIn:          true,
+				models.FilterOperatorNotIn:       true,
+				models.FilterOperatorIsNull:      true,
+				models.FilterOperatorIsNotNull:   true,
+			}
 
-				if condition.Operator == "" {
-					return &ValidationError{
-						Field:   fmt.Sprintf("FilterGroups[%d].Conditions[%d].Operator", i, j),
-						Message: "operator is required",
-					}
-				}
-
-				validOps := map[models.FilterOperator]bool{
-					models.FilterOperatorEquals:        true,
-					models.FilterOperatorNotEquals:     true,
-					models.FilterOperatorContains:      true,
-					models.FilterOperatorNotContains:   true,
-					models.FilterOperatorGreaterThan:   true,
-					models.FilterOperatorLessThan:      true,
-					models.FilterOperatorGreaterEquals: true,
-					models.FilterOperatorLessEquals:    true,
-				}
-
-				if !validOps[condition.Operator] {
-					return &ValidationError{
-						Field:   fmt.Sprintf("FilterGroups[%d].Conditions[%d].Operator", i, j),
-						Message: "invalid operator",
-					}
+			if !validOps[condition.Operator] {
+				return &ValidationError{
+					Field:   fmt.Sprintf("Conditions[%d].Operator", i),
+					Message: "invalid operator",
 				}
 			}
 		}

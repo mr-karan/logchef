@@ -3,16 +3,16 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
-	"time"
 
 	"backend-v2/internal/config"
 	"backend-v2/internal/service"
+	pkglogger "backend-v2/pkg/logger"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
-	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 )
 
@@ -22,6 +22,7 @@ type Server struct {
 	config *config.Config
 	svc    *service.Service
 	fs     http.FileSystem
+	log    *slog.Logger
 }
 
 // New creates a new HTTP server
@@ -46,10 +47,6 @@ func New(cfg *config.Config, svc *service.Service, fs http.FileSystem) *Server {
 
 	// Add middleware
 	app.Use(recover.New())
-	app.Use(logger.New(logger.Config{
-		Format:     "${time} | ${status} | ${latency} | ${method} ${path}\n",
-		TimeFormat: time.RFC3339,
-	}))
 	app.Use(cors.New())
 
 	s := &Server{
@@ -57,6 +54,7 @@ func New(cfg *config.Config, svc *service.Service, fs http.FileSystem) *Server {
 		config: cfg,
 		svc:    svc,
 		fs:     fs,
+		log:    pkglogger.Default().With("component", "server"),
 	}
 
 	// Setup routes
@@ -102,10 +100,12 @@ func (s *Server) setupRoutes() {
 // Start starts the HTTP server
 func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Server.Port)
+	s.log.Info("starting http server", "address", addr)
 	return s.app.Listen(addr)
 }
 
 // Shutdown gracefully shuts down the server
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.log.Info("shutting down http server")
 	return s.app.ShutdownWithContext(ctx)
 }
