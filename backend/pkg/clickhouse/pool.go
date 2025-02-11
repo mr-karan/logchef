@@ -7,22 +7,33 @@ import (
 	"sync"
 	"time"
 
+	"backend-v2/internal/sqlite"
 	"backend-v2/pkg/logger"
 	"backend-v2/pkg/models"
+	"backend-v2/pkg/querybuilder"
 )
 
-// Pool manages a pool of ClickHouse HTTP clients
+const (
+	// Health check constants
+	healthCheckInterval = 30 * time.Second
+	healthCheckTimeout  = 10 * time.Second
+	healthCheckQuery    = "SELECT 1"
+)
+
+// Pool manages a pool of ClickHouse clients
 type Pool struct {
 	mu      sync.RWMutex
-	clients map[string]*HTTPClient
+	clients map[string]*Client
 	log     *slog.Logger
+	sqlite  *sqlite.DB
 }
 
 // NewPool creates a new connection pool
-func NewPool() *Pool {
+func NewPool(sqliteDB *sqlite.DB) *Pool {
 	return &Pool{
-		clients: make(map[string]*HTTPClient),
+		clients: make(map[string]*Client),
 		log:     logger.Default().With("component", "clickhouse_pool"),
+		sqlite:  sqliteDB,
 	}
 }
 
@@ -34,12 +45,16 @@ func (p *Pool) AddSource(source *models.Source) error {
 		"table", source.Connection.TableName,
 	)
 
-	// Create new HTTP client
-	client := NewHTTPClient(
-		source.Connection.Host,
-		DefaultHTTPSettings(),
-		p.log.With("source_id", source.ID),
-	)
+	// Create new client
+	client, err := NewClient(ClientOptions{
+		Host:     source.Connection.Host,
+		Database: source.Connection.Database,
+		Username: source.Connection.Username,
+		Password: source.Connection.Password,
+	}, p.log.With("source_id", source.ID))
+	if err != nil {
+		return fmt.Errorf("failed to create client: %w", err)
+	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -79,7 +94,7 @@ func (p *Pool) RemoveSource(sourceID string) error {
 }
 
 // GetClient returns a client for a given source ID
-func (p *Pool) GetClient(sourceID string) (*HTTPClient, error) {
+func (p *Pool) GetClient(sourceID string) (*Client, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -92,7 +107,7 @@ func (p *Pool) GetClient(sourceID string) (*HTTPClient, error) {
 }
 
 // QueryLogs queries logs from a source
-func (p *Pool) QueryLogs(ctx context.Context, sourceID string, params LogQueryParams) (*LogQueryResult, error) {
+func (p *Pool) QueryLogs(ctx context.Context, sourceID string, params LogQueryParams) (*models.QueryResult, error) {
 	// Get source from the database
 	source, err := p.getSource(sourceID)
 	if err != nil {
@@ -107,14 +122,18 @@ func (p *Pool) QueryLogs(ctx context.Context, sourceID string, params LogQueryPa
 
 	// Build query based on mode
 	var query string
-	var extraParams map[string]string
-
 	switch params.Mode {
 	case models.QueryModeRawSQL:
 		if params.RawSQL == "" {
 			return nil, fmt.Errorf("raw SQL query cannot be empty")
 		}
-		query = params.RawSQL
+		// Use the query builder to handle the raw SQL
+		builder := querybuilder.NewRawSQLBuilder(source.GetFullTableName(), params.RawSQL, params.Limit)
+		builtQuery, err := builder.Build()
+		if err != nil {
+			return nil, fmt.Errorf("error building raw SQL query: %w", err)
+		}
+		query = builtQuery.SQL
 	case models.QueryModeLogChefQL:
 		if params.LogChefQL == "" {
 			return nil, fmt.Errorf("LogchefQL query cannot be empty")
@@ -129,17 +148,7 @@ func (p *Pool) QueryLogs(ctx context.Context, sourceID string, params LogQueryPa
 	}
 
 	// Execute query
-	resp, err := client.Query(ctx, query, extraParams)
-	if err != nil {
-		return nil, fmt.Errorf("error executing query: %w", err)
-	}
-
-	// Convert response to LogQueryResult
-	return &LogQueryResult{
-		Data:    ConvertToMap(resp),
-		Stats:   GetQueryStats(resp),
-		Columns: GetColumns(resp),
-	}, nil
+	return client.Query(ctx, query)
 }
 
 // getSource gets a source from the database
@@ -154,15 +163,15 @@ func (p *Pool) getSource(sourceID string) (*models.Source, error) {
 	}
 
 	// Get source from the database
-	// TODO: Implement getting source from database
-	// For now, return a source with the correct table name
-	return &models.Source{
-		ID: sourceID,
-		Connection: models.ConnectionInfo{
-			Database:  "logs",
-			TableName: "vector_logs",
-		},
-	}, nil
+	source, err := p.sqlite.GetSource(context.Background(), sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting source from database: %w", err)
+	}
+	if source == nil {
+		return nil, fmt.Errorf("source %s not found in database", sourceID)
+	}
+
+	return source, nil
 }
 
 // GetHealth returns the health status for a given source ID

@@ -65,7 +65,6 @@ type ColumnInfo struct {
 type QueryStats struct {
 	ExecutionTimeMs float64 `json:"execution_time_ms"`
 	RowsRead        int     `json:"rows_read"`
-	BytesRead       int     `json:"bytes_read"`
 }
 
 // LogQueryRequest represents the request for querying logs
@@ -90,6 +89,13 @@ type LogQueryResponse struct {
 // TableSchema represents a table's schema information
 type TableSchema struct {
 	Columns []ColumnInfo `json:"columns"`
+}
+
+// QueryResult represents the result of a query
+type QueryResult struct {
+	Data    []map[string]interface{} `json:"data"`
+	Stats   QueryStats               `json:"stats"`
+	Columns []ColumnInfo             `json:"columns"`
 }
 
 const (

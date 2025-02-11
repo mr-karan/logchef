@@ -77,6 +77,7 @@ func (s *Server) setupRoutes() {
 	sources.Get("/:id", s.handleGetSource)
 	sources.Delete("/:id", s.handleDeleteSource)
 	sources.Post("/:id/logs/search", s.handleQueryLogs)
+	sources.Get("/:id/logs/timeseries", s.handleGetTimeSeries)
 
 	// Handle 404 for all API routes
 	s.app.Use("/api/*", func(c *fiber.Ctx) error {

@@ -19,6 +19,11 @@ export interface FilterCondition {
   value: string | string[];
 }
 
+export interface ColumnInfo {
+  name: string;
+  type: string;
+}
+
 export interface FilterGroup {
   operator: "OR";
   conditions: FilterCondition[];
@@ -28,6 +33,10 @@ export interface BaseQueryParams {
   limit: number;
   start_timestamp: number;
   end_timestamp: number;
+  sort?: {
+    field: string;
+    order: "ASC" | "DESC";
+  };
 }
 
 export interface FiltersQueryParams extends BaseQueryParams {
@@ -44,6 +53,8 @@ export type QueryParams = FiltersQueryParams | RawSqlQueryParams;
 
 export interface QueryStats {
   execution_time_ms: number;
+  rows_read: number;
+  bytes_read: number;
 }
 
 export interface QuerySuccessResponse {
@@ -52,6 +63,7 @@ export interface QuerySuccessResponse {
   params: QueryParams & {
     source_id: string;
   };
+  columns: ColumnInfo[];
 }
 
 export interface QueryErrorResponse {

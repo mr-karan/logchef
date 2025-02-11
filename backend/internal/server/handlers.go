@@ -247,3 +247,73 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		Data:   response,
 	})
 }
+
+// TimeSeriesRequest represents the request parameters for time series data
+type TimeSeriesRequest struct {
+	StartTimestamp int64                 `query:"start_timestamp"`
+	EndTimestamp   int64                 `query:"end_timestamp"`
+	Window         clickhouse.TimeWindow `query:"window"`
+}
+
+// handleGetTimeSeries handles getting time series data for log counts
+func (s *Server) handleGetTimeSeries(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return fiber.NewError(http.StatusBadRequest, "source id is required")
+	}
+
+	var req TimeSeriesRequest
+	if err := c.QueryParser(&req); err != nil {
+		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid query parameters: %v", err))
+	}
+
+	// Validate time range
+	if req.StartTimestamp > req.EndTimestamp {
+		return fiber.NewError(http.StatusBadRequest, "start_timestamp cannot be greater than end_timestamp")
+	}
+
+	// Convert timestamps to time.Time
+	params := clickhouse.TimeSeriesParams{
+		StartTime: time.UnixMilli(req.StartTimestamp).UTC(),
+		EndTime:   time.UnixMilli(req.EndTimestamp).UTC(),
+		Window:    req.Window,
+	}
+
+	// If window is not specified, auto-select based on time range
+	if params.Window == "" {
+		duration := params.EndTime.Sub(params.StartTime)
+		switch {
+		case duration <= time.Hour:
+			params.Window = clickhouse.TimeWindow1m
+		case duration <= 6*time.Hour:
+			params.Window = clickhouse.TimeWindow5m
+		case duration <= 12*time.Hour:
+			params.Window = clickhouse.TimeWindow15m
+		case duration <= 24*time.Hour:
+			params.Window = clickhouse.TimeWindow1h
+		case duration <= 7*24*time.Hour:
+			params.Window = clickhouse.TimeWindow6h
+		default:
+			params.Window = clickhouse.TimeWindow24h
+		}
+	}
+
+	result, err := s.svc.GetTimeSeries(c.Context(), id, params)
+	if err != nil {
+		if err == service.ErrSourceNotFound {
+			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("source %s not found", id))
+		}
+		s.log.Error("failed to get time series data",
+			"source_id", id,
+			"error", err,
+		)
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to get time series data: %v", err))
+	}
+
+	return c.JSON(Response{
+		Status: "success",
+		Data: fiber.Map{
+			"buckets": result.Buckets,
+		},
+	})
+}

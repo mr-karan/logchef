@@ -1,55 +1,57 @@
-import { api } from './config'
-import type { APIResponse } from './types'
+import { api } from "./config";
+import type { APIResponse } from "./types";
 
 interface ConnectionInfo {
-  host: string
-  username: string
-  password: string
-  database: string
-  table_name: string
+  host: string;
+  username: string;
+  password: string;
+  database: string;
+  table_name: string;
 }
 
 export interface Source {
-  id: string
-  schema_type: string
-  connection: ConnectionInfo
-  description: string
-  ttl_days: number
-  created_at: string
-  updated_at: string
-  is_connected: boolean
-  schema?: string
-  columns?: Array<{
-    name: string
-    type: string
-  }>
+  id: string;
+  schema_type: string;
+  connection: ConnectionInfo;
+  description: string;
+  ttl_days: number;
+  created_at: string;
+  updated_at: string;
+  is_connected: boolean;
 }
 
 export interface CreateSourcePayload {
-  schema_type: string
-  connection: ConnectionInfo
-  description?: string
-  ttl_days: number
+  schema_type: string;
+  connection: ConnectionInfo;
+  description?: string;
+  ttl_days: number;
 }
 
 export const sourcesApi = {
   async listSources() {
-    const response = await api.get<APIResponse<{ sources: Source[] }>>('/sources')
-    return response.data
+    const response = await api.get<APIResponse<{ sources: Source[] }>>(
+      "/sources"
+    );
+    return response.data;
   },
 
   async getSource(id: string) {
-    const response = await api.get<APIResponse<{ source: Source }>>(`/sources/${id}`)
-    return response.data
+    const response = await api.get<APIResponse<{ source: Source }>>(
+      `/sources/${id}`
+    );
+    return response.data;
   },
 
   async createSource(payload: CreateSourcePayload) {
-    const response = await api.post<APIResponse<{ source: Source }>>('/sources', payload)
-    return response.data
+    const response = await api.post<APIResponse<{ source: Source }>>(
+      "/sources",
+      payload
+    );
+    return response.data;
   },
 
   async deleteSource(id: string) {
-    const response = await api.delete<APIResponse<void>>(`/sources/${id}`)
-    return response.data
+    const response = await api.delete<APIResponse<void>>(`/sources/${id}`);
+    return response.data;
   },
-}
+};

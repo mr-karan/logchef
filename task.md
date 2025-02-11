@@ -1,4 +1,5 @@
-- Need to ask AI to build a small HTTP wrapper for clickhouse and experiment
-- Experiment with nested JSON paths
-- Get underlying types (added benefit)
-- Get stats
+- Managed/unmanaged thing - should be clearly scoped
+- Time window charts
+- Saved queries
+- OIDC
+- Import prod data

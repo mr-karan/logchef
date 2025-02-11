@@ -11,13 +11,15 @@ import (
 type RawSQLBuilder struct {
 	tableName string
 	rawSQL    string
+	limit     int
 }
 
-// NewRawSQLBuilder creates a new raw SQL builder
-func NewRawSQLBuilder(tableName, rawSQL string) *RawSQLBuilder {
+// NewRawSQLBuilder creates a new RawSQLBuilder
+func NewRawSQLBuilder(tableName string, rawSQL string, limit int) *RawSQLBuilder {
 	return &RawSQLBuilder{
 		tableName: tableName,
 		rawSQL:    rawSQL,
+		limit:     limit,
 	}
 }
 
@@ -29,6 +31,13 @@ func (b *RawSQLBuilder) Build() (*Query, error) {
 	// Validate the query
 	if err := b.validateQuery(query); err != nil {
 		return nil, err
+	}
+
+	// Check if query already has a LIMIT clause
+	hasLimit := strings.Contains(strings.ToUpper(query), "LIMIT")
+	if !hasLimit {
+		// Append LIMIT clause
+		query = fmt.Sprintf("%s\nLIMIT %d", query, b.limit)
 	}
 
 	return &Query{

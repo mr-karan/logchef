@@ -43,39 +43,64 @@ const getSqlTemplates = computed(() => {
 
     return [
         {
-            label: 'Basic Query',
-            sql: `SELECT * FROM ${fullTableName.value}
-            WHERE timestamp BETWEEN toDateTime64(${startTime}, 3) AND toDateTime64(${endTime}, 3)
+            label: 'Last 3 Days',
+            sql: `SELECT *
+            FROM ${fullTableName.value}
+            WHERE timestamp >= today() - INTERVAL 3 DAY
             ORDER BY timestamp DESC`
         },
         {
-            label: 'Group By Severity',
+            label: 'Today Only',
+            sql: `SELECT *
+            FROM ${fullTableName.value}
+            WHERE timestamp >= today()
+            ORDER BY timestamp DESC`
+        },
+        {
+            label: 'Last Hour',
+            sql: `SELECT *
+            FROM ${fullTableName.value}
+            WHERE timestamp >= now() - INTERVAL 1 HOUR
+            ORDER BY timestamp DESC`
+        },
+        {
+            label: 'Severity Distribution (Last 24h)',
             sql: `SELECT
               severity_text,
-              count(*) as count
+              count(*) as count,
+              min(timestamp) as first_seen,
+              max(timestamp) as last_seen
             FROM ${fullTableName.value}
-            WHERE timestamp BETWEEN toDateTime64(${startTime}, 3) AND toDateTime64(${endTime}, 3)
+            WHERE timestamp >= now() - INTERVAL 24 HOUR
             GROUP BY severity_text
             ORDER BY count DESC`
         },
         {
-            label: 'Error Logs',
-            sql: `SELECT * FROM ${fullTableName.value}
-            WHERE timestamp BETWEEN toDateTime64(${startTime}, 3) AND toDateTime64(${endTime}, 3)
+            label: 'Recent Errors',
+            sql: `SELECT *
+            FROM ${fullTableName.value}
+            WHERE timestamp >= now() - INTERVAL 6 HOUR
               AND (severity_text = 'ERROR' OR severity_text = 'FATAL')
             ORDER BY timestamp DESC`
         },
         {
-            label: 'Service Distribution',
+            label: 'Service Distribution (This Week)',
             sql: `SELECT
               service_name,
               count(*) as count,
               min(timestamp) as first_seen,
               max(timestamp) as last_seen
             FROM ${fullTableName.value}
-            WHERE timestamp BETWEEN toDateTime64(${startTime}, 3) AND toDateTime64(${endTime}, 3)
+            WHERE timestamp >= toStartOfWeek(now())
             GROUP BY service_name
             ORDER BY count DESC`
+        },
+        {
+            label: 'Custom Time Range',
+            sql: `SELECT *
+            FROM ${fullTableName.value}
+            WHERE timestamp BETWEEN toDateTime64(${startTime}, 3) AND toDateTime64(${endTime}, 3)
+            ORDER BY timestamp DESC`
         }
     ]
 })

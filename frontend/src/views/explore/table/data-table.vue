@@ -21,14 +21,20 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table'
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Check, Copy, Search } from 'lucide-vue-next'
-import { valueUpdater } from '@/lib/utils'
+import { valueUpdater, cn, getSeverityClasses } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import DataTableToolbar from './data-table-toolbar.vue'
 import DataTableColumnSelector from './data-table-column-selector.vue'
 import DataTablePagination from './data-table-pagination.vue'
+import DataTableDropdown from './data-table-dropdown.vue'
+import hljs from 'highlight.js/lib/core'
+import json from 'highlight.js/lib/languages/json'
+import 'highlight.js/styles/stackoverflow-light.css'
+import { useToast } from '@/components/ui/toast'
+import { TOAST_DURATION } from '@/lib/constants'
 import type { QueryStats } from '@/api/explore'
 
 interface Props {
@@ -49,6 +55,8 @@ const pagination = ref<PaginationState>({
 })
 const globalFilter = ref('')
 const copyState = ref<Record<string, boolean>>({})
+
+const { toast } = useToast()
 
 // Initialize table
 const table = useVueTable({
@@ -89,19 +97,33 @@ const table = useVueTable({
     globalFilterFn: 'includesString',
 })
 
+// Initialize highlight.js with JSON language
+hljs.registerLanguage('json', json)
+
+// Format JSON with indentation and highlighting
+function formatJSON(data: any): string {
+    const jsonString = JSON.stringify(data, null, 2)
+    return hljs.highlight(jsonString, { language: 'json' }).value
+}
+
 // Handle row click for expansion
 const handleRowClick = (e: MouseEvent, row: any) => {
+    // Don't expand if clicking on the dropdown
+    if ((e.target as HTMLElement).closest('.actions-dropdown')) {
+        return
+    }
     row.toggleExpanded()
 }
 
-// Handle copy to clipboard
+// Handle copy to clipboard with toast notification
 const copyToClipboard = (data: any, id: string) => {
     const text = JSON.stringify(data, null, 2)
     navigator.clipboard.writeText(text)
-    copyState.value[id] = true
-    setTimeout(() => {
-        copyState.value[id] = false
-    }, 2000)
+    toast({
+        title: 'Copied',
+        description: 'Log data copied to clipboard',
+        duration: TOAST_DURATION.SUCCESS,
+    })
 }
 </script>
 
@@ -127,52 +149,79 @@ const copyToClipboard = (data: any, id: string) => {
 
         <!-- Table Section -->
         <div class="rounded-md border">
-            <Table>
-                <TableHeader>
-                    <TableRow class="border-b border-b-muted-foreground/20">
-                        <TableHead v-for="header in table.getHeaderGroups()[0]?.headers || []" :key="header.id"
-                            class="h-8 px-2 text-xs font-medium whitespace-nowrap min-w-[150px] max-w-[300px]">
-                            <FlexRender v-if="!header.isPlaceholder" :render="header.column.columnDef.header"
-                                :props="header.getContext()" />
-                        </TableHead>
-                    </TableRow>
-                </TableHeader>
-                <TableBody>
-                    <template v-if="table.getRowModel().rows?.length">
-                        <template v-for="row in table.getRowModel().rows" :key="row.id">
-                            <TableRow :data-state="row.getIsSelected() ? 'selected' : undefined"
-                                @click="(e) => handleRowClick(e, row)"
-                                class="cursor-pointer hover:bg-muted/50 border-b border-b-muted-foreground/10">
-                                <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id"
-                                    class="h-7 px-2 py-1 min-w-[150px] max-w-[300px] truncate">
-                                    <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
-                                </TableCell>
-                            </TableRow>
-                            <TableRow v-if="row.getIsExpanded()">
-                                <TableCell :colspan="row.getVisibleCells().length" class="p-0">
-                                    <div class="p-3 bg-muted/50 relative">
-                                        <Button variant="ghost" size="icon" class="absolute left-3 top-3"
-                                            @click.stop="copyToClipboard(row.original, row.id)"
-                                            :title="copyState[row.id] ? 'Copied!' : 'Copy to clipboard'">
-                                            <Check v-if="copyState[row.id]" class="h-3.5 w-3.5 text-green-500" />
-                                            <Copy v-else class="h-3.5 w-3.5" />
-                                        </Button>
-                                        <pre
-                                            class="text-xs font-mono whitespace-pre-wrap pl-10">{{ JSON.stringify(row.original, null, 2) }}</pre>
-                                    </div>
-                                </TableCell>
-                            </TableRow>
+            <div class="overflow-auto max-h-[calc(100vh-300px)]">
+                <table class="w-full caption-bottom text-sm">
+                    <thead class="sticky top-0 z-10 bg-background border-b">
+                        <tr class="border-b border-b-muted-foreground/20">
+                            <th v-for="header in table.getHeaderGroups()[0]?.headers || []" :key="header.id"
+                                class="h-8 px-2 text-xs font-medium min-w-[150px] text-left align-middle">
+                                <FlexRender v-if="!header.isPlaceholder" :render="header.column.columnDef.header"
+                                    :props="header.getContext()" />
+                            </th>
+                            <!-- Actions column -->
+                            <th class="w-10 px-2"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="[&_tr:last-child]:border-0">
+                        <template v-if="table.getRowModel().rows?.length">
+                            <template v-for="row in table.getRowModel().rows" :key="row.id">
+                                <tr :data-state="row.getIsSelected() ? 'selected' : undefined"
+                                    @click="(e) => handleRowClick(e, row)"
+                                    class="cursor-pointer hover:bg-muted/50 border-b border-b-muted-foreground/10">
+                                    <td v-for="cell in row.getVisibleCells()" :key="cell.id"
+                                        class="h-auto px-2 py-1 min-w-[150px] whitespace-normal break-all align-middle">
+                                        <div class="max-w-none">
+                                            <span v-if="getSeverityClasses(cell.getValue(), cell.column.id)"
+                                                :class="getSeverityClasses(cell.getValue(), cell.column.id)">
+                                                {{ cell.getValue() }}
+                                            </span>
+                                            <template v-else>
+                                                <FlexRender :render="cell.column.columnDef.cell"
+                                                    :props="cell.getContext()" />
+                                            </template>
+                                        </div>
+                                    </td>
+                                    <!-- Actions dropdown -->
+                                    <td class="w-10 px-2">
+                                        <DataTableDropdown :log="row.original" @expand="row.toggleExpanded()"
+                                            @copy="copyToClipboard(row.original, row.id)" />
+                                    </td>
+                                </tr>
+                                <tr v-if="row.getIsExpanded()">
+                                    <td :colspan="row.getVisibleCells().length + 1" class="p-0">
+                                        <div class="p-3 bg-muted/50 relative">
+                                            <!-- Copy button -->
+                                            <Button variant="ghost" size="icon" class="absolute right-3 top-3"
+                                                @click.stop="copyToClipboard(row.original, row.id)"
+                                                :title="'Copy to clipboard'">
+                                                <Copy class="h-4 w-4" />
+                                            </Button>
+                                            <!-- Highlighted JSON -->
+                                            <pre
+                                                class="text-sm font-mono overflow-auto"><code v-html="formatJSON(row.original)" /></pre>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
                         </template>
-                    </template>
-                    <template v-else>
-                        <TableRow>
-                            <TableCell :colspan="props.columns.length" class="h-24 text-center text-sm">
-                                No results.
-                            </TableCell>
-                        </TableRow>
-                    </template>
-                </TableBody>
-            </Table>
+                        <template v-else>
+                            <tr>
+                                <td :colspan="props.columns.length + 1" class="h-24 text-center text-sm">
+                                    No results.
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </template>
+
+<style>
+/* Just remove padding and background since we're in a pre tag already */
+pre code.hljs {
+    background: transparent;
+    padding: 0;
+}
+</style>

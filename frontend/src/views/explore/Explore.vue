@@ -40,14 +40,14 @@ import { createColumns } from './table/columns'
 import DataTable from './table/data-table.vue'
 import EmptyState from './EmptyState.vue'
 import type { ColumnDef } from '@tanstack/vue-table'
-import type { QuerySuccessResponse, QueryErrorResponse } from '@/api/explore'
+import type { QuerySuccessResponse, QueryErrorResponse, ColumnInfo } from '@/api/explore'
 import type { APIResponse } from '@/api/types'
 import { Switch } from '@/components/ui/switch'
 import { QUERY_MODE } from '@/lib/constants'
 import DataTableFilters from './table/data-table-filters.vue'
-import type { FilterGroup, FiltersQueryParams, RawSqlQueryParams } from '@/api/explore'
 import type { FilterCondition } from '@/api/explore'
 import SQLEditor from '@/components/sql-editor/SQLEditor.vue'
+import { ZonedDateTime } from '@internationalized/date'
 
 const { toast } = useToast()
 const route = useRoute()
@@ -55,13 +55,15 @@ const router = useRouter()
 
 const sources = ref<Source[]>([])
 const selectedSource = ref<string>('')
-const sourceDetails = ref<Source | null>(null)
 const isLoading = ref(false)
 const queryInput = ref('')
 const queryLimit = ref(100)
 const logs = ref<Record<string, any>[]>([])
+const columns = ref<ColumnInfo[]>([])
 const queryStats = ref<QueryStats>({
-  execution_time_ms: 0
+  execution_time_ms: 0,
+  rows_read: 0,
+  bytes_read: 0
 })
 
 // Flag to prevent unnecessary URL updates on initial load
@@ -82,8 +84,8 @@ const getTimestamps = () => {
     }
   }
 
-  const startDate = dateRange.value.start.toDate(getLocalTimeZone())
-  const endDate = dateRange.value.end.toDate(getLocalTimeZone())
+  const startDate = new Date(dateRange.value.start.toDate(getLocalTimeZone()))
+  const endDate = new Date(dateRange.value.end.toDate(getLocalTimeZone()))
 
   return {
     start: startDate.getTime(),
@@ -217,15 +219,9 @@ onMounted(async () => {
       selectedSource.value = sources.value[0]?.id || ''
     }
 
-    // Load source details and execute query if we have a valid source
+    // Execute initial query if we have a valid source
     if (selectedSource.value) {
-      const sourceResponse = await sourcesApi.getSource(selectedSource.value)
-      if (!isErrorResponse(sourceResponse)) {
-        // Type assertion since we know it's not an error response
-        const { source } = sourceResponse.data as { source: Source }
-        sourceDetails.value = source
-        await executeQuery()
-      }
+      await executeQuery()
     }
   } catch (error) {
     toast({
@@ -250,7 +246,9 @@ async function executeQuery() {
   isLoading.value = true
   logs.value = []
   queryStats.value = {
-    execution_time_ms: 0
+    execution_time_ms: 0,
+    rows_read: 0,
+    bytes_read: 0
   }
 
   try {
@@ -288,6 +286,7 @@ async function executeQuery() {
 
     logs.value = response.data.logs
     queryStats.value = response.data.stats
+    columns.value = response.data.columns
 
     // Update URL only after successful search
     if (!isInitialLoad.value) {
@@ -306,38 +305,10 @@ async function executeQuery() {
   }
 }
 
-// Update loadSourceDetails
-async function loadSourceDetails(sourceId: string) {
-  try {
-    const response = await sourcesApi.getSource(sourceId)
-    if (isErrorResponse(response)) {
-      toast({
-        title: 'Error',
-        description: response.data.error,
-        variant: 'destructive',
-        duration: TOAST_DURATION.ERROR,
-      })
-      return
-    }
-    // Type assertion since we know it's not an error response
-    const { source } = response.data as { source: Source }
-    sourceDetails.value = source
-  } catch (error) {
-    console.error('Error loading source details:', error)
-    toast({
-      title: 'Error',
-      description: getErrorMessage(error),
-      variant: 'destructive',
-      duration: TOAST_DURATION.ERROR,
-    })
-  }
-}
-
 const tableColumns = ref<ColumnDef<Record<string, any>>[]>([])
 
-// Update the columns when sourceDetails changes
 watch(
-  () => sourceDetails.value?.columns,
+  () => columns.value,
   (newColumns) => {
     if (newColumns) {
       tableColumns.value = createColumns(newColumns)
@@ -366,64 +337,84 @@ const toggleQueryMode = (checked: boolean) => {
 <template>
   <div class="flex flex-col h-full min-w-0">
     <!-- Query Controls -->
-    <div class="mb-6 space-y-4">
+    <div class="mb-6 space-y-6">
       <!-- Top Controls Row -->
-      <div class="grid grid-cols-[200px,400px,1fr,220px] gap-4 h-10">
+      <div class="grid grid-cols-[200px,400px,1fr,220px] gap-6">
         <!-- Source Selector -->
-        <Select v-model="selectedSource">
-          <SelectTrigger>
-            <SelectValue placeholder="Select a source">
-              {{ sources.find(s => s.id === selectedSource)?.connection?.database || 'Select a source' }}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectItem v-for="source in sources" :key="source.id" :value="source.id">
-                {{ source.connection?.database || source.id }}
-              </SelectItem>
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+        <div class="flex flex-col gap-1.5">
+          <Label class="text-sm font-medium">Source</Label>
+          <Select v-model="selectedSource">
+            <SelectTrigger>
+              <SelectValue placeholder="Select a source">
+                {{ sources.find(s => s.id === selectedSource)?.connection?.database || 'Select a source' }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem v-for="source in sources" :key="source.id" :value="source.id">
+                  {{ source.connection?.database || source.id }}
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
 
         <!-- Date Range Picker -->
-        <DateTimePicker v-model="dateRange" />
+        <div class="flex flex-col gap-1.5">
+          <Label class="text-sm font-medium">Time Range</Label>
+          <DateTimePicker v-model="dateRange" />
+        </div>
 
         <!-- Query Mode Switch -->
-        <div class="flex items-center gap-2">
-          <Switch :checked="queryMode === 'raw_sql'" @update:checked="toggleQueryMode" />
-          <Label>SQL Mode</Label>
+        <div class="flex flex-col gap-1.5">
+          <Label class="text-sm font-medium">Query Mode</Label>
+          <div class="flex items-center gap-2 h-10">
+            <div class="flex items-center gap-2">
+              <Switch :checked="queryMode === 'raw_sql'" @update:checked="toggleQueryMode" />
+              <Label class="text-sm">{{ queryMode === 'raw_sql' ? 'SQL Query' : 'Filter Builder' }}</Label>
+            </div>
+          </div>
         </div>
 
         <!-- Right Group -->
-        <div class="flex items-center gap-2 ml-auto">
-          <NumberField v-model="queryLimit" :min="10" :max="10000" :step="10"
-            class="w-[100px] [&_input[type='number']::-webkit-inner-spin-button]:appearance-none [&_input[type='number']::-webkit-outer-spin-button]:appearance-none">
-            <NumberFieldContent>
-              <div class="flex items-center">
-                <NumberFieldInput placeholder="Limit" class="text-sm" :step="10" />
-                <NumberFieldDecrement :step="10" />
-                <NumberFieldIncrement :step="10" />
-              </div>
-            </NumberFieldContent>
-          </NumberField>
+        <div class="flex flex-col gap-1.5">
+          <Label class="text-sm font-medium">Results Limit</Label>
+          <div class="flex items-center gap-2">
+            <NumberField v-model="queryLimit" :min="10" :max="10000" :step="10"
+              class="w-[100px] [&_input[type='number']::-webkit-inner-spin-button]:appearance-none [&_input[type='number']::-webkit-outer-spin-button]:appearance-none">
+              <NumberFieldContent>
+                <div class="flex items-center">
+                  <NumberFieldInput placeholder="Limit" class="text-sm" :step="10" />
+                  <NumberFieldDecrement :step="10" />
+                  <NumberFieldIncrement :step="10" />
+                </div>
+              </NumberFieldContent>
+            </NumberField>
 
-          <Button @click="executeQuery" :disabled="isLoading" class="w-[100px] h-10">
-            <Search class="mr-2 h-4 w-4" />
-            Search
-          </Button>
+            <Button @click="executeQuery" :disabled="isLoading" class="w-[100px] h-10">
+              <Search class="mr-2 h-4 w-4" />
+              Search
+            </Button>
+          </div>
         </div>
       </div>
 
       <!-- Query Input Row -->
       <div class="w-full">
-        <template v-if="queryMode === 'raw_sql'">
-          <SQLEditor v-model="sqlQuery" :source-database="sourceDetails?.connection?.database"
-            :source-table="sourceDetails?.connection?.table_name" :start-timestamp="getTimestamps().start"
-            :end-timestamp="getTimestamps().end" @execute="executeQuery" />
-        </template>
-        <template v-else>
-          <DataTableFilters :columns="sourceDetails?.columns || []" @update:filters="handleFiltersUpdate" />
-        </template>
+        <div class="flex flex-col gap-1.5">
+          <Label class="text-sm font-medium">{{ queryMode === 'raw_sql' ? 'SQL Query' : 'Filter Conditions' }}</Label>
+          <div class="bg-muted/30 rounded-lg p-4">
+            <template v-if="queryMode === 'raw_sql'">
+              <SQLEditor v-model="sqlQuery"
+                :source-database="sources.find(s => s.id === selectedSource)?.connection?.database"
+                :source-table="sources.find(s => s.id === selectedSource)?.connection?.table_name"
+                :start-timestamp="getTimestamps().start" :end-timestamp="getTimestamps().end" @execute="executeQuery" />
+            </template>
+            <template v-else>
+              <DataTableFilters :columns="columns" @update:filters="handleFiltersUpdate" />
+            </template>
+          </div>
+        </div>
       </div>
     </div>
 

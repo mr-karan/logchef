@@ -41,10 +41,10 @@ func ValidateLogQueryRequest(req *models.LogQueryRequest) error {
 		}
 	}
 
-	if req.Limit <= 0 || req.Limit > 1000 {
+	if req.Limit <= 0 || req.Limit > 100000 {
 		return &ValidationError{
 			Field:   "Limit",
-			Message: "must be between 1 and 1000",
+			Message: "must be between 1 and 100000	",
 		}
 	}
 
