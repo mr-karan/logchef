@@ -1,12 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Label } from '@/components/ui/label'
-import { Separator } from '@/components/ui/separator'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup } from '@/components/ui/select'
 import {
   NumberField,
@@ -15,14 +12,6 @@ import {
   NumberFieldIncrement,
   NumberFieldInput,
 } from '@/components/ui/number-field'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { sourcesApi } from '@/api/sources'
 import { exploreApi } from '@/api/explore'
@@ -33,21 +22,16 @@ import { TOAST_DURATION } from '@/lib/constants'
 import { DateTimePicker } from '@/components/date-time-picker'
 import type { DateRange } from 'radix-vue'
 import { getLocalTimeZone, now } from '@internationalized/date'
-import { cn } from '@/lib/utils'
-import { Search, RefreshCcw, X, CalendarIcon, Play, ChevronsUpDown, LogOut } from 'lucide-vue-next'
-import { Badge } from '@/components/ui/badge'
+import { Search } from 'lucide-vue-next'
 import { createColumns } from './table/columns'
 import DataTable from './table/data-table.vue'
 import EmptyState from './EmptyState.vue'
 import type { ColumnDef } from '@tanstack/vue-table'
-import type { QuerySuccessResponse, QueryErrorResponse, ColumnInfo } from '@/api/explore'
-import type { APIResponse } from '@/api/types'
+import type { ColumnInfo } from '@/api/explore'
 import { Switch } from '@/components/ui/switch'
-import { QUERY_MODE } from '@/lib/constants'
 import DataTableFilters from './table/data-table-filters.vue'
 import type { FilterCondition } from '@/api/explore'
 import SQLEditor from '@/components/sql-editor/SQLEditor.vue'
-import { ZonedDateTime } from '@internationalized/date'
 
 const { toast } = useToast()
 const route = useRoute()

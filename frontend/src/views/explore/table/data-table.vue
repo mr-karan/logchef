@@ -13,23 +13,14 @@ import {
     type VisibilityState,
     type PaginationState,
 } from '@tanstack/vue-table'
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from '@/components/ui/table'
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Check, Copy, Search } from 'lucide-vue-next'
-import { valueUpdater, cn, getSeverityClasses } from '@/lib/utils'
+import { Copy, Search } from 'lucide-vue-next'
+import { valueUpdater, getSeverityClasses } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import DataTableToolbar from './data-table-toolbar.vue'
 import DataTableColumnSelector from './data-table-column-selector.vue'
 import DataTablePagination from './data-table-pagination.vue'
-import DataTableDropdown from './data-table-dropdown.vue'
 import hljs from 'highlight.js/lib/core'
 import json from 'highlight.js/lib/languages/json'
 import 'highlight.js/styles/stackoverflow-light.css'
@@ -54,7 +45,6 @@ const pagination = ref<PaginationState>({
     pageSize: 50,
 })
 const globalFilter = ref('')
-const copyState = ref<Record<string, boolean>>({})
 
 const { toast } = useToast()
 
@@ -116,12 +106,23 @@ const handleRowClick = (e: MouseEvent, row: any) => {
 }
 
 // Handle copy to clipboard with toast notification
-const copyToClipboard = (data: any, id: string) => {
+const copyToClipboard = (data: any) => {
     const text = JSON.stringify(data, null, 2)
     navigator.clipboard.writeText(text)
     toast({
         title: 'Copied',
         description: 'Log data copied to clipboard',
+        duration: TOAST_DURATION.SUCCESS,
+    })
+}
+
+// Add new copy function for individual cell values
+const copyCell = (value: any) => {
+    const text = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)
+    navigator.clipboard.writeText(text)
+    toast({
+        title: 'Copied',
+        description: 'Value copied to clipboard',
         duration: TOAST_DURATION.SUCCESS,
     })
 }
@@ -158,8 +159,6 @@ const copyToClipboard = (data: any, id: string) => {
                                 <FlexRender v-if="!header.isPlaceholder" :render="header.column.columnDef.header"
                                     :props="header.getContext()" />
                             </th>
-                            <!-- Actions column -->
-                            <th class="w-10 px-2"></th>
                         </tr>
                     </thead>
                     <tbody class="[&_tr:last-child]:border-0">
@@ -169,8 +168,8 @@ const copyToClipboard = (data: any, id: string) => {
                                     @click="(e) => handleRowClick(e, row)"
                                     class="cursor-pointer hover:bg-muted/50 border-b border-b-muted-foreground/10">
                                     <td v-for="cell in row.getVisibleCells()" :key="cell.id"
-                                        class="h-auto px-2 py-1 min-w-[150px] whitespace-normal break-all align-middle">
-                                        <div class="max-w-none">
+                                        class="h-auto px-2 py-1 min-w-[150px] whitespace-normal break-all align-middle group">
+                                        <div class="max-w-none flex items-center gap-1">
                                             <span v-if="getSeverityClasses(cell.getValue(), cell.column.id)"
                                                 :class="getSeverityClasses(cell.getValue(), cell.column.id)">
                                                 {{ cell.getValue() }}
@@ -179,26 +178,26 @@ const copyToClipboard = (data: any, id: string) => {
                                                 <FlexRender :render="cell.column.columnDef.cell"
                                                     :props="cell.getContext()" />
                                             </template>
+                                            <Button variant="ghost" size="icon"
+                                                class="h-4 w-4 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                @click.stop="copyCell(cell.getValue())" title="Copy value">
+                                                <Copy class="h-3 w-3" />
+                                            </Button>
                                         </div>
-                                    </td>
-                                    <!-- Actions dropdown -->
-                                    <td class="w-10 px-2">
-                                        <DataTableDropdown :log="row.original" @expand="row.toggleExpanded()"
-                                            @copy="copyToClipboard(row.original, row.id)" />
                                     </td>
                                 </tr>
                                 <tr v-if="row.getIsExpanded()">
-                                    <td :colspan="row.getVisibleCells().length + 1" class="p-0">
+                                    <td :colspan="row.getVisibleCells().length" class="p-0">
                                         <div class="p-3 bg-muted/50 relative">
-                                            <!-- Copy button -->
-                                            <Button variant="ghost" size="icon" class="absolute right-3 top-3"
-                                                @click.stop="copyToClipboard(row.original, row.id)"
-                                                :title="'Copy to clipboard'">
-                                                <Copy class="h-4 w-4" />
+                                            <!-- Small floating copy button -->
+                                            <Button variant="ghost" size="icon"
+                                                class="absolute left-3 top-3 h-6 w-6 bg-background/50 hover:bg-background/80 backdrop-blur-sm"
+                                                @click.stop="copyToClipboard(row.original)" title="Copy JSON">
+                                                <Copy class="h-3 w-3" />
                                             </Button>
                                             <!-- Highlighted JSON -->
                                             <pre
-                                                class="text-sm font-mono overflow-auto"><code v-html="formatJSON(row.original)" /></pre>
+                                                class="text-sm font-mono overflow-auto mt-2"><code v-html="formatJSON(row.original)" /></pre>
                                         </div>
                                     </td>
                                 </tr>

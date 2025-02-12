@@ -1,6 +1,5 @@
 import { api } from "./config";
 import type { APIResponse } from "./types";
-import type { QueryMode } from "@/lib/constants";
 
 export interface FilterCondition {
   field: string;
@@ -16,7 +15,7 @@ export interface FilterCondition {
     | "not_in"
     | "is_null"
     | "is_not_null";
-  value: string | string[];
+  value: string;
 }
 
 export interface ColumnInfo {

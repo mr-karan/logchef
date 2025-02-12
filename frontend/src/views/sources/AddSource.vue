@@ -30,10 +30,10 @@ import type { CreateSourcePayload } from '@/api/sources'
 import { isErrorResponse, getErrorMessage } from '@/api/types'
 
 const router = useRouter()
-const isFormValid = ref(false)
 const isLoading = ref(false)
 const enableTTL = ref(true)
 const enableAuth = ref(false)
+const isFormValid = ref(false)
 
 const formSchema = toTypedSchema(z.object({
     table_name: z.string()

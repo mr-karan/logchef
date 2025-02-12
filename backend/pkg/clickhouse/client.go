@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"backend-v2/pkg/logger"
 	"backend-v2/pkg/models"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -31,6 +32,9 @@ type ClientOptions struct {
 
 // NewClient creates a new ClickHouse client
 func NewClient(opts ClientOptions, log *slog.Logger) (*Client, error) {
+	// Initialize logger with component tag
+	log = logger.Default().With("component", "clickhouse")
+
 	// Ensure host has port for native protocol
 	host := opts.Host
 	if !strings.Contains(host, ":") {

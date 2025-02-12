@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"backend-v2/internal/auth"
 	"backend-v2/internal/config"
 	"backend-v2/internal/server"
 	"backend-v2/internal/service"
@@ -71,6 +72,16 @@ func main() {
 	}
 	defer sqliteDB.Close()
 
+	// Initialize auth service
+	log.Info("initializing auth service",
+		"provider", cfg.OIDC.ProviderURL,
+	)
+	authService, err := auth.NewService(cfg, sqliteDB)
+	if err != nil {
+		log.Error("failed to initialize auth service", "error", err)
+		os.Exit(1)
+	}
+
 	// Create service
 	svc := service.New(sqliteDB)
 
@@ -106,7 +117,7 @@ func main() {
 	)
 
 	// Create and start HTTP server
-	srv := server.New(cfg, svc, getWebFS())
+	srv := server.New(cfg, svc, authService, getWebFS())
 
 	// Handle graceful shutdown
 	shutdown := make(chan os.Signal, 1)

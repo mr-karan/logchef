@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"backend-v2/internal/auth"
 	"backend-v2/internal/config"
 	"backend-v2/internal/service"
 	pkglogger "backend-v2/pkg/logger"
@@ -21,12 +22,13 @@ type Server struct {
 	app    *fiber.App
 	config *config.Config
 	svc    *service.Service
+	auth   auth.Service
 	fs     http.FileSystem
 	log    *slog.Logger
 }
 
 // New creates a new HTTP server
-func New(cfg *config.Config, svc *service.Service, fs http.FileSystem) *Server {
+func New(cfg *config.Config, svc *service.Service, auth auth.Service, fs http.FileSystem) *Server {
 	app := fiber.New(fiber.Config{
 		AppName:               "LogChef API v1",
 		DisableStartupMessage: true,
@@ -53,6 +55,7 @@ func New(cfg *config.Config, svc *service.Service, fs http.FileSystem) *Server {
 		app:    app,
 		config: cfg,
 		svc:    svc,
+		auth:   auth,
 		fs:     fs,
 		log:    pkglogger.Default().With("component", "server"),
 	}
@@ -64,22 +67,45 @@ func New(cfg *config.Config, svc *service.Service, fs http.FileSystem) *Server {
 }
 
 func (s *Server) setupRoutes() {
-	// API v1 routes
-	v1 := s.app.Group("/api/v1")
-
 	// Health check
-	v1.Get("/health", s.handleHealth)
+	s.app.Get("/api/v1/health", s.handleHealth)
 
-	// Sources
-	sources := v1.Group("/sources")
-	sources.Get("/", s.handleListSources)
-	sources.Post("/", s.handleCreateSource)
-	sources.Get("/:id", s.handleGetSource)
-	sources.Delete("/:id", s.handleDeleteSource)
-	sources.Post("/:id/logs/search", s.handleQueryLogs)
-	sources.Get("/:id/logs/timeseries", s.handleGetTimeSeries)
+	// Auth routes (public)
+	s.app.Get("/api/v1/auth/login", s.handleLogin)
+	s.app.Get("/api/v1/auth/callback", s.handleCallback)
+	s.app.Post("/api/v1/auth/logout", s.handleLogout)
+	s.app.Get("/api/v1/auth/session", s.handleGetSession)
 
-	// Handle 404 for all API routes
+	// All routes below require authentication
+	// Source routes
+	s.app.Get("/api/v1/sources", s.requireAuth, s.handleListSources)
+	s.app.Post("/api/v1/sources", s.requireAuth, s.handleCreateSource)
+	s.app.Get("/api/v1/sources/:id", s.requireAuth, s.handleGetSource)
+	s.app.Delete("/api/v1/sources/:id", s.requireAuth, s.handleDeleteSource)
+	s.app.Post("/api/v1/sources/:id/logs/search", s.requireAuth, s.handleQueryLogs)
+	s.app.Get("/api/v1/sources/:id/logs/timeseries", s.requireAuth, s.handleGetTimeSeries)
+
+	// Team routes
+	s.app.Get("/api/v1/teams", s.requireAuth, s.handleListTeams)
+	s.app.Post("/api/v1/teams", s.requireAuth, s.handleCreateTeam)
+	s.app.Get("/api/v1/teams/:id", s.requireAuth, s.handleGetTeam)
+	s.app.Put("/api/v1/teams/:id", s.requireAuth, s.handleUpdateTeam)
+	s.app.Delete("/api/v1/teams/:id", s.requireAuth, s.handleDeleteTeam)
+	s.app.Get("/api/v1/teams/:id/members", s.requireAuth, s.handleListTeamMembers)
+	s.app.Post("/api/v1/teams/:id/members", s.requireAuth, s.handleAddTeamMember)
+	s.app.Delete("/api/v1/teams/:id/members/:userId", s.requireAuth, s.handleRemoveTeamMember)
+
+	// Space routes
+	s.app.Get("/api/v1/spaces", s.requireAuth, s.handleListSpaces)
+	s.app.Post("/api/v1/spaces", s.requireAuth, s.handleCreateSpace)
+	s.app.Get("/api/v1/spaces/:id", s.requireAuth, s.handleGetSpace)
+	s.app.Put("/api/v1/spaces/:id", s.requireAuth, s.handleUpdateSpace)
+	s.app.Delete("/api/v1/spaces/:id", s.requireAuth, s.handleDeleteSpace)
+	s.app.Get("/api/v1/spaces/:id/teams", s.requireAuth, s.handleListSpaceTeams)
+	s.app.Put("/api/v1/spaces/:id/teams/:teamId", s.requireAuth, s.handleUpdateSpaceTeamAccess)
+	s.app.Delete("/api/v1/spaces/:id/teams/:teamId", s.requireAuth, s.handleRevokeSpaceTeamAccess)
+
+	// Handle 404 for API routes
 	s.app.Use("/api/*", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(Response{
 			Status: "error",
@@ -89,7 +115,7 @@ func (s *Server) setupRoutes() {
 		})
 	})
 
-	// Serve frontend static files for all other routes
+	// Serve frontend static files
 	s.app.Use("/", filesystem.New(filesystem.Config{
 		Root:         s.fs,
 		Browse:       false,

@@ -1,7 +1,9 @@
 package config
 
 import (
+	"fmt"
 	"log"
+	"time"
 
 	"github.com/knadh/koanf/parsers/toml"
 	"github.com/knadh/koanf/providers/file"
@@ -12,6 +14,8 @@ type Config struct {
 	Server     ServerConfig       `koanf:"server"`
 	SQLite     SQLiteConfig       `koanf:"sqlite"`
 	Clickhouse []ClickhouseConfig `koanf:"clickhouse"`
+	OIDC       OIDCConfig        `koanf:"oidc"`
+	Auth       AuthConfig        `koanf:"auth"`
 }
 
 type ServerConfig struct {
@@ -31,6 +35,20 @@ type ClickhouseConfig struct {
 	Password string `koanf:"password"`
 }
 
+type OIDCConfig struct {
+	ProviderURL  string   `koanf:"provider_url"`
+	ClientID     string   `koanf:"client_id"`
+	ClientSecret string   `koanf:"client_secret"`
+	RedirectURI  string   `koanf:"redirect_uri"`
+	Scopes       []string `koanf:"scopes"`
+}
+
+type AuthConfig struct {
+	AdminEmails           []string      `koanf:"admin_emails"`
+	SessionDuration      time.Duration `koanf:"session_duration"`
+	MaxConcurrentSessions int           `koanf:"max_concurrent_sessions"`
+}
+
 func Load(path string) (*Config, error) {
 	k := koanf.New(".")
 
@@ -43,6 +61,11 @@ func Load(path string) (*Config, error) {
 	if err := k.Unmarshal("", &cfg); err != nil {
 		log.Printf("error unmarshaling config: %v", err)
 		return nil, err
+	}
+
+	// Validate required configurations
+	if len(cfg.Auth.AdminEmails) == 0 {
+		return nil, fmt.Errorf("admin_emails is required in auth configuration")
 	}
 
 	return &cfg, nil

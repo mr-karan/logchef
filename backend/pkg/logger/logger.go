@@ -26,7 +26,8 @@ func Initialize(level string) {
 
 	// Create handler with pretty output for development
 	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: logLevel,
+		Level:     logLevel,
+		AddSource: true,
 	})
 
 	// Set default logger

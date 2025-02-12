@@ -4,3 +4,15 @@ host = "0.0.0.0"
 
 [sqlite]
 path = "local.db"
+
+[oidc]
+provider_url = "http://localhost:5556/dex"  # Local Dex instance
+client_id = "logchef"  # Matches Dex staticClients.id
+client_secret = "logchef-secret"  # Matches Dex staticClients.secret
+redirect_uri = "http://localhost:8125/api/v1/auth/callback"
+scopes = ["openid", "email", "profile"]
+
+[auth]
+admin_emails = ["admin@example.com"]  # Matches the admin email in Dex config
+session_duration = "8h"
+max_concurrent_sessions = 1

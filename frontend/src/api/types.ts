@@ -5,7 +5,7 @@ export interface APIResponse<T = any> {
   data: T | { error: string }
 }
 
-export function isErrorResponse<T>(response: APIResponse<T>): response is APIResponse<{ error: string }> {
+export function isErrorResponse<T>(response: APIResponse<T>): response is APIResponse<{ error: string }> & { status: 'error' } {
   return response.status === 'error'
 }
 
@@ -20,7 +20,7 @@ export function getErrorMessage(error: unknown): string {
 
   // If it's an Axios error
   if (error && typeof error === 'object' && 'isAxiosError' in error) {
-    const axiosError = error as AxiosError<APIErrorResponse>;
+    const axiosError = error as AxiosError<APIResponse<{ error: string }>>;
 
     // Network error (no response received)
     if (!axiosError.response) {

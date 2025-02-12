@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Plus, X, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { Plus, X } from 'lucide-vue-next'
 import {
   Card,
   CardContent,
@@ -70,10 +70,6 @@ const getColumnLabel = (field: string) => {
   return columns.value.find(col => col.id === field)?.label || field
 }
 
-// Format filter for display
-const formatFilter = (filter: FilterCondition) => {
-  return `${getColumnLabel(filter.field)} ${getOperatorLabel(filter.operator)} "${filter.value}"`
-}
 
 // Add a new filter
 const addFilter = () => {
@@ -126,13 +122,13 @@ watch(filters, () => {
     <!-- Filters Row -->
     <div class="flex flex-wrap items-center gap-2">
       <!-- Existing Filters -->
-      <template v-for="(filter, index) in filters" :key="index">
+      <template v-for="(filter, idx) in filters" :key="filter.field">
         <!-- Collapsed View -->
         <Badge
-          v-if="editingFilter !== index"
+          v-if="editingFilter !== idx"
           variant="secondary"
           class="h-8 pl-3 pr-2 flex items-center gap-1 bg-gray-100 hover:bg-gray-100 text-gray-900"
-          @click="startEditing(index)"
+          @click="startEditing(idx)"
         >
           <span class="flex items-center gap-1">
             <span class="font-normal">{{ getColumnLabel(filter.field) }}</span>
@@ -142,7 +138,7 @@ watch(filters, () => {
           <Button
             variant="ghost"
             size="sm"
-            @click.stop="removeFilter(index)"
+            @click.stop="removeFilter(idx)"
             class="h-4 w-4 p-0 hover:bg-transparent"
           >
             <X class="h-3 w-3" />
@@ -186,7 +182,7 @@ watch(filters, () => {
               <Button variant="ghost" size="sm" @click="cancelEditing">
                 Cancel
               </Button>
-              <Button variant="default" size="sm" @click="updateFilter(index)">
+              <Button variant="default" size="sm" @click="updateFilter(idx)">
                 Update
               </Button>
             </div>

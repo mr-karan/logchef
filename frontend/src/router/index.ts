@@ -1,18 +1,43 @@
-import { createRouter, createWebHistory } from 'vue-router'
-import type { RouteRecordRaw } from 'vue-router'
+import { createRouter, createWebHistory } from "vue-router";
+import type { RouteRecordRaw } from "vue-router";
+import { useAuthStore } from "@/stores/auth";
 
 const routes: RouteRecordRaw[] = [
   {
-    path: '/',
-    redirect: '/explore'
+    path: "/",
+    name: "Login",
+    component: () => import("@/views/auth/Login.vue"),
+    meta: {
+      title: "Login",
+      public: true,
+    },
   },
   {
-    path: '/explore',
-    name: 'Explore',
-    component: () => import('@/views/explore/Explore.vue'),
+    path: "/logout",
+    name: "Logout",
+    component: () => import("@/views/auth/Logout.vue"),
     meta: {
-      title: 'Explore'
-    }
+      title: "Logging out...",
+      public: true,
+    },
+  },
+  {
+    path: "/dashboard",
+    name: "Dashboard",
+    component: () => import("@/views/Dashboard.vue"),
+    meta: {
+      title: "Dashboard",
+      requiresAuth: true,
+    },
+  },
+  {
+    path: "/explore",
+    name: "Explore",
+    component: () => import("@/views/explore/Explore.vue"),
+    meta: {
+      title: "Explore",
+      requiresAuth: true,
+    },
   },
   // {
   //   path: '/query-explorer',
@@ -42,28 +67,29 @@ const routes: RouteRecordRaw[] = [
   //   }
   // },
   {
-    path: '/sources',
-    component: () => import('@/views/Sources.vue'),
+    path: "/sources",
+    component: () => import("@/views/Sources.vue"),
     meta: {
-      title: 'Sources'
+      title: "Sources",
+      requiresAuth: true,
     },
     children: [
       {
-        path: '',
-        name: 'Sources',
-        redirect: { name: 'NewSource' }
+        path: "",
+        name: "Sources",
+        redirect: { name: "NewSource" },
       },
       {
-        path: 'new',
-        name: 'NewSource',
-        component: () => import('@/views/sources/AddSource.vue')
+        path: "new",
+        name: "NewSource",
+        component: () => import("@/views/sources/AddSource.vue"),
       },
       {
-        path: 'manage',
-        name: 'ManageSources',
-        component: () => import('@/views/sources/ManageSources.vue')
-      }
-    ]
+        path: "manage",
+        name: "ManageSources",
+        component: () => import("@/views/sources/ManageSources.vue"),
+      },
+    ],
   },
   // {
   //   path: '/settings',
@@ -95,22 +121,47 @@ const routes: RouteRecordRaw[] = [
   //   ]
   // },
   {
-    path: '/:pathMatch(.*)*',
-    name: 'NotFound',
-    component: () => import('@/views/NotFound.vue')
-  }
-]
+    path: "/:pathMatch(.*)*",
+    name: "NotFound",
+    component: () => import("@/views/NotFound.vue"),
+    meta: {
+      title: "Not Found",
+      public: true,
+    },
+  },
+];
 
 const router = createRouter({
   // Apply the base URL from Vite's environment variables
   history: createWebHistory(import.meta.env.BASE_URL),
-  routes
-})
+  routes,
+});
 
-// Global navigation guard to update the document title dynamically
-router.beforeEach((to, from, next) => {
-  document.title = `${to.meta.title ? to.meta.title + ' - ' : ''}LogChef`
-  next()
-})
+// Global navigation guard to handle auth and update document title
+router.beforeEach(async (to, _from, next) => {
+  const authStore = useAuthStore();
 
-export default router
+  // Update document title
+  document.title = `${to.meta.title ? to.meta.title + " - " : ""}LogChef`;
+
+  // Check if route requires auth
+  if (to.matched.some((record) => record.meta.requiresAuth)) {
+    // Check if user is authenticated
+    if (!authStore.isAuthenticated) {
+      // If not authenticated, redirect to login
+      return next({
+        path: "/",
+        query: { redirect: to.fullPath },
+      });
+    }
+  }
+
+  // If route is login and user is already authenticated, redirect to dashboard
+  if (to.name === "Login" && authStore.isAuthenticated) {
+    return next({ name: "Dashboard" });
+  }
+
+  next();
+});
+
+export default router;

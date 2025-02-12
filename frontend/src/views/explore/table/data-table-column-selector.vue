@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { computed } from 'vue'
-import { Table } from '@tanstack/vue-table'
+import type { Table } from '@tanstack/vue-table'
 
 interface Props {
   table: Table<Record<string, any>>

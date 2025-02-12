@@ -21,7 +21,13 @@ services:
         cap_add:
             - SYS_NICE
             - IPC_LOCK
-
+    dex:
+        image: dexidp/dex:v2.35.3
+        ports:
+        - "5556:5556"
+        volumes:
+        - ./dex/config.yaml:/etc/dex/config.yaml
+        command: [ "dex", "serve", "/etc/dex/config.yaml" ]
 
 volumes:
     clickhouse-data:

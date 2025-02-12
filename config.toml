@@ -1,6 +1,0 @@
-[server]
-host = "localhost"
-port = 8125
-
-[sqlite]
-path = "logchef.db"

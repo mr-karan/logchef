@@ -26,7 +26,6 @@ import {
 import { useToast } from '@/components/ui/toast/use-toast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { isErrorResponse, getErrorMessage } from '@/api/types'
-import type { APIResponse } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 
 const router = useRouter()
@@ -48,7 +47,9 @@ const loadSources = async () => {
             })
             return
         }
-        sources.value = response.data.sources
+        if ('sources' in response.data) {
+            sources.value = response.data.sources
+        }
     } catch (error) {
         console.error('Error loading sources:', error)
         toast({
