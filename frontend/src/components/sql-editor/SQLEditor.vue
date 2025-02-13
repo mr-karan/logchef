@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { Code, X } from 'lucide-vue-next'
+import { X } from 'lucide-vue-next'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
 
@@ -145,15 +145,6 @@ const executeQuery = () => {
 const recentQueries = ref<Array<{ sql: string; timestamp: number }>>([])
 
 // Save query to history after execution
-const saveToHistory = (query: string) => {
-    const trimmed = query.trim()
-    if (trimmed) {
-        recentQueries.value = [
-            { sql: trimmed, timestamp: Date.now() },
-            ...recentQueries.value.slice(0, 4)
-        ]
-    }
-}
 </script>
 
 <template>

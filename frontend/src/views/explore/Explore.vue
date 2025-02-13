@@ -20,8 +20,8 @@ import type { QueryStats } from '@/api/explore'
 import { isErrorResponse, getErrorMessage } from '@/api/types'
 import { TOAST_DURATION } from '@/lib/constants'
 import { DateTimePicker } from '@/components/date-time-picker'
+import { getLocalTimeZone, now, type ZonedDateTime } from '@internationalized/date'
 import type { DateRange } from 'radix-vue'
-import { getLocalTimeZone, now } from '@internationalized/date'
 import { Search } from 'lucide-vue-next'
 import { createColumns } from './table/columns'
 import DataTable from './table/data-table.vue'
@@ -53,23 +53,24 @@ const queryStats = ref<QueryStats>({
 // Flag to prevent unnecessary URL updates on initial load
 const isInitialLoad = ref(true)
 
+// Date state
 const currentTime = now(getLocalTimeZone())
-const dateRange = ref<DateRange>({
-  start: currentTime.subtract({ hours: 3 }),
-  end: currentTime,
+const dateRange = ref<DateRange | null>({
+  start: toZoned(currentTime.subtract({ hours: 3 }), getLocalTimeZone()),
+  end: toZoned(currentTime, getLocalTimeZone())
 })
 
 // Function to get timestamps from dateRange
 const getTimestamps = () => {
-  if (!dateRange.value.start || !dateRange.value.end) {
+  if (!dateRange.value?.start || !dateRange.value?.end) {
     return {
       start: 0,
       end: 0
     }
   }
 
-  const startDate = new Date(dateRange.value.start.toDate(getLocalTimeZone()))
-  const endDate = new Date(dateRange.value.end.toDate(getLocalTimeZone()))
+  const startDate = new Date((dateRange.value.start as ZonedDateTime).toDate())
+  const endDate = new Date((dateRange.value.end as ZonedDateTime).toDate())
 
   return {
     start: startDate.getTime(),

@@ -8,6 +8,7 @@ import { RangeCalendar } from '@/components/ui/range-calendar'
 import { CalendarIcon, Search } from 'lucide-vue-next'
 import type { DateRange } from 'radix-vue'
 import { getLocalTimeZone, now, ZonedDateTime, toZoned, CalendarDateTime } from '@internationalized/date'
+import type { DateValue } from '@internationalized/date'
 
 interface Props {
     modelValue?: DateRange | null
@@ -20,6 +21,18 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
     (e: 'update:modelValue', value: DateRange): void
 }>()
+
+// Convert between DateValue and ZonedDateTime
+function toZonedDateTime(date: DateValue): ZonedDateTime {
+    if (date instanceof ZonedDateTime) {
+        return date
+    }
+    return toZoned(date, getLocalTimeZone())
+}
+
+function toDateValue(date: ZonedDateTime): DateValue {
+    return date as unknown as DateValue
+}
 
 // UI state
 const showDatePicker = ref(false)
@@ -45,9 +58,12 @@ const draftTimeState = ref({
 // Date state
 const currentTime = now(getLocalTimeZone())
 const dateRange = ref<DateRange>({
-    start: currentTime.subtract({ hours: 1 }),
-    end: currentTime
+    start: currentTime.subtract({ hours: 1 }) as unknown as DateValue,
+    end: currentTime as unknown as DateValue
 })
+
+// Computed DateRange for v-model binding
+const calendarDateRange = computed<DateRange>(() => dateRange.value)
 
 // Initialize time state from current dateRange
 draftTimeState.value.start = {
@@ -72,26 +88,29 @@ const draftRange = ref<{
 
 // Initialize modelValue if not provided
 if (!props.modelValue?.start || !props.modelValue?.end) {
-    emit('update:modelValue', dateRange.value)
+    emit('update:modelValue', calendarDateRange.value)
 }
 
 // Sync internal state with external value
 watch(() => props.modelValue, (newValue) => {
     if (newValue?.start && newValue?.end) {
-        dateRange.value = newValue
+        const start = toZonedDateTime(newValue.start)
+        const end = toZonedDateTime(newValue.end)
+        
+        dateRange.value = { start, end }
         draftRange.value = {
-            start: formatDateTime(newValue.start),
-            end: formatDateTime(newValue.end)
+            start: formatDateTime(start),
+            end: formatDateTime(end)
         }
         draftTimeState.value.start = {
-            hour: newValue.start.hour,
-            minute: newValue.start.minute,
-            second: newValue.start.second
+            hour: start.hour,
+            minute: start.minute,
+            second: start.second
         }
         draftTimeState.value.end = {
-            hour: newValue.end.hour,
-            minute: newValue.end.minute,
-            second: newValue.end.second
+            hour: end.hour,
+            minute: end.minute,
+            second: end.second
         }
     }
 }, { immediate: true })
@@ -143,7 +162,7 @@ const filteredRanges = computed(() => {
     )
 })
 
-function formatDateTime(date: ZonedDateTime | null | undefined): string {
+function formatDateTime(date: DateValue | null | undefined): string {
     if (!date) return ''
 
     try {
@@ -202,7 +221,7 @@ function parseDateTime(value: string): ZonedDateTime | null {
 }
 
 function handleCalendarUpdate(range: DateRange | null) {
-    if (!range) return
+    if (!range?.start || !range?.end) return
 
     if (range.start) {
         // Set time to 00:00:00 when clicking a date
@@ -329,7 +348,7 @@ function handleKeyDown(e: KeyboardEvent) {
 
 function emitUpdate() {
     if (dateRange.value?.start && dateRange.value?.end) {
-        emit('update:modelValue', dateRange.value)
+        emit('update:modelValue', calendarDateRange.value)
     }
 }
 
@@ -384,7 +403,7 @@ const selectedRangeText = computed(() => {
                                     </PopoverTrigger>
                                     <PopoverContent class="w-auto p-3" :side="'right'" :align="'start'"
                                         :side-offset="10">
-                                        <RangeCalendar v-model="dateRange" class="rounded-md border"
+                                        <RangeCalendar v-model="calendarDateRange" class="rounded-md border"
                                             :weekday-format="'short'" @update:model-value="handleCalendarUpdate" />
                                     </PopoverContent>
                                 </Popover>
@@ -406,7 +425,7 @@ const selectedRangeText = computed(() => {
                                     </PopoverTrigger>
                                     <PopoverContent class="w-auto p-3" :side="'right'" :align="'start'"
                                         :side-offset="10">
-                                        <RangeCalendar v-model="dateRange" class="rounded-md border"
+                                        <RangeCalendar v-model="calendarDateRange" class="rounded-md border"
                                             :weekday-format="'short'" @update:model-value="handleCalendarUpdate" />
                                     </PopoverContent>
                                 </Popover>
@@ -437,7 +456,7 @@ const selectedRangeText = computed(() => {
                             </div>
                         </div>
                         <div class="space-y-0.5 max-h-[400px] overflow-y-auto pr-2">
-                            <Button v-for="(range, label) in filteredRanges" :key="label" variant="ghost"
+                            <Button v-for="(_, label) in filteredRanges" :key="label" variant="ghost"
                                 class="justify-start w-full h-9 px-2 text-sm hover:bg-accent"
                                 @click="applyQuickRange(label)">
                                 {{ label }}

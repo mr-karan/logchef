@@ -86,7 +86,7 @@ watch([form.values, form.errors, form.meta, enableAuth], () => {
     const isValid = form.meta.value?.valid === true
     const hasRequiredFields = Boolean(form.values.host && form.values.database && form.values.table_name)
     const hasAuthFields = !enableAuth.value || (enableAuth.value && form.values.username && form.values.password)
-    isFormValid.value = isValid && hasRequiredFields && hasAuthFields
+    isFormValid.value = Boolean(isValid && hasRequiredFields && hasAuthFields)
 })
 
 const onSubmit = form.handleSubmit(async (values) => {
