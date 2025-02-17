@@ -12,16 +12,17 @@ const delegatedProps = computed(() => {
 })
 
 const forwardedProps = useForwardProps(delegatedProps)
+
+interface SlotProps {
+  headingValue: string
+}
 </script>
 
 <template>
-  <CalendarHeading
-    v-slot="{ headingValue }: { headingValue: string }"
-    :class="cn('text-sm font-medium', props.class)"
-    v-bind="forwardedProps"
-  >
-    <slot :heading-value>
-      {{ headingValue }}
+  <CalendarHeading v-slot="slotProps: SlotProps" :class="cn('text-sm font-medium', props.class)"
+    v-bind="forwardedProps">
+    <slot :heading-value="slotProps.headingValue">
+      {{ slotProps.headingValue }}
     </slot>
   </CalendarHeading>
 </template>

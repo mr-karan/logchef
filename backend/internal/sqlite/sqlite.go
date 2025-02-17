@@ -43,11 +43,13 @@ type Queries struct {
 	DeleteSource    *sqlx.Stmt `query:"DeleteSource"`
 
 	// User queries
-	CreateUser     *sqlx.Stmt `query:"CreateUser"`
-	GetUser        *sqlx.Stmt `query:"GetUser"`
-	GetUserByEmail *sqlx.Stmt `query:"GetUserByEmail"`
-	UpdateUser     *sqlx.Stmt `query:"UpdateUser"`
-	ListUsers      *sqlx.Stmt `query:"ListUsers"`
+	CreateUser      *sqlx.Stmt `query:"CreateUser"`
+	GetUser         *sqlx.Stmt `query:"GetUser"`
+	GetUserByEmail  *sqlx.Stmt `query:"GetUserByEmail"`
+	UpdateUser      *sqlx.Stmt `query:"UpdateUser"`
+	ListUsers       *sqlx.Stmt `query:"ListUsers"`
+	CountAdminUsers *sqlx.Stmt `query:"CountAdminUsers"`
+	DeleteUser      *sqlx.Stmt `query:"DeleteUser"`
 
 	// Session queries
 	CreateSession      *sqlx.Stmt `query:"CreateSession"`

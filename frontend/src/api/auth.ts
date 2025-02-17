@@ -14,9 +14,11 @@ export const authApi = {
    */
   async getSession(): Promise<APIResponse<SessionResponse>> {
     try {
+      console.log("Making session request...");
       const response = await api.get<APIResponse<SessionResponse>>(
         "/auth/session"
       );
+      console.log("Session response received:", response.data);
       return response.data;
     } catch (error) {
       console.error("Error getting session:", error);
@@ -28,11 +30,19 @@ export const authApi = {
    * Get login URL for OIDC authentication
    * Backend will handle state parameter for CSRF protection
    */
-  getLoginUrl(): string {
-    const redirectUri = encodeURIComponent(window.location.origin);
-    return `${
-      import.meta.env.VITE_API_URL
-    }/api/v1/auth/login?redirect_uri=${redirectUri}`;
+  getLoginUrl(redirectPath?: string): string {
+    // Use relative URL for login endpoint
+    const loginUrl = "/api/v1/auth/login";
+    const params = new URLSearchParams();
+
+    // Add frontend redirect path if provided
+    if (redirectPath) {
+      params.append("redirect", redirectPath);
+    }
+
+    // Add params if any exist
+    const queryString = params.toString();
+    return queryString ? `${loginUrl}?${queryString}` : loginUrl;
   },
 
   /**

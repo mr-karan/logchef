@@ -52,6 +52,7 @@ import {
     ChevronRight,
     ChevronsUpDown,
     LogOut,
+    Users,
 } from 'lucide-vue-next'
 
 import { useRoute } from 'vue-router'
@@ -87,6 +88,20 @@ const navMain = [
             {
                 title: 'Manage Sources',
                 url: '/sources/manage',
+            },
+        ],
+    },
+    {
+        title: 'Users',
+        icon: Users,
+        items: [
+            {
+                title: 'Add User',
+                url: '/users/new',
+            },
+            {
+                title: 'Manage Users',
+                url: '/users/manage',
             },
         ],
     },

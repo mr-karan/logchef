@@ -91,6 +91,32 @@ const routes: RouteRecordRaw[] = [
       },
     ],
   },
+  {
+    path: "/users",
+    component: () => import("@/views/Users.vue"),
+    meta: {
+      title: "Users",
+      requiresAuth: true,
+      requiresAdmin: true,
+    },
+    children: [
+      {
+        path: "",
+        name: "Users",
+        redirect: { name: "ManageUsers" },
+      },
+      {
+        path: "new",
+        name: "NewUser",
+        component: () => import("@/views/users/AddUser.vue"),
+      },
+      {
+        path: "manage",
+        name: "ManageUsers",
+        component: () => import("@/views/users/ManageUsers.vue"),
+      },
+    ],
+  },
   // {
   //   path: '/settings',
   //   component: () => import('@/views/Settings.vue'),
@@ -121,6 +147,15 @@ const routes: RouteRecordRaw[] = [
   //   ]
   // },
   {
+    path: "/forbidden",
+    name: "Forbidden",
+    component: () => import("@/views/Forbidden.vue"),
+    meta: {
+      title: "Access Denied",
+      public: true,
+    },
+  },
+  {
     path: "/:pathMatch(.*)*",
     name: "NotFound",
     component: () => import("@/views/NotFound.vue"),
@@ -144,21 +179,40 @@ router.beforeEach(async (to, _from, next) => {
   // Update document title
   document.title = `${to.meta.title ? to.meta.title + " - " : ""}LogChef`;
 
+  // Wait for auth to be initialized
+  if (!authStore.isInitialized) {
+    await authStore.initialize();
+  }
+
+  // If route is public, allow access
+  if (to.meta.public) {
+    // If route is login and user is already authenticated, redirect to explore
+    if (to.name === "Login" && authStore.isAuthenticated) {
+      // If there's a redirect query param, use that, otherwise go to explore
+      const redirectPath = to.query.redirect as string;
+      return next(redirectPath || { name: "Explore" });
+    }
+    return next();
+  }
+
   // Check if route requires auth
   if (to.matched.some((record) => record.meta.requiresAuth)) {
     // Check if user is authenticated
     if (!authStore.isAuthenticated) {
-      // If not authenticated, redirect to login
+      // If not authenticated, redirect to login with the current path as redirect
       return next({
         path: "/",
         query: { redirect: to.fullPath },
       });
     }
-  }
 
-  // If route is login and user is already authenticated, redirect to dashboard
-  if (to.name === "Login" && authStore.isAuthenticated) {
-    return next({ name: "Dashboard" });
+    // Check if route requires admin role
+    if (to.matched.some((record) => record.meta.requiresAdmin)) {
+      if (authStore.user?.role !== "admin") {
+        // If not admin, redirect to forbidden page
+        return next({ name: "Forbidden" });
+      }
+    }
   }
 
   next();

@@ -240,12 +240,7 @@ func (s *service) ListTeams(ctx context.Context) ([]*models.Team, error) {
 
 // AddTeamMember adds a user to a team with the specified role
 func (s *service) AddTeamMember(ctx context.Context, teamID, userID, role string) error {
-	member := &models.TeamMember{
-		TeamID: teamID,
-		UserID: userID,
-		Role:   role,
-	}
-	return s.store.AddTeamMember(ctx, member)
+	return s.store.AddTeamMember(ctx, teamID, userID, role)
 }
 
 // RemoveTeamMember removes a user from a team

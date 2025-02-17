@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed, type WritableComputedRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -20,7 +20,7 @@ import type { QueryStats } from '@/api/explore'
 import { isErrorResponse, getErrorMessage } from '@/api/types'
 import { TOAST_DURATION } from '@/lib/constants'
 import { DateTimePicker } from '@/components/date-time-picker'
-import { getLocalTimeZone, now, type ZonedDateTime } from '@internationalized/date'
+import { getLocalTimeZone, now, CalendarDateTime, type DateValue } from '@internationalized/date'
 import type { DateRange } from 'radix-vue'
 import { Search } from 'lucide-vue-next'
 import { createColumns } from './table/columns'
@@ -55,22 +55,53 @@ const isInitialLoad = ref(true)
 
 // Date state
 const currentTime = now(getLocalTimeZone())
-const dateRange = ref<DateRange | null>({
-  start: toZoned(currentTime.subtract({ hours: 3 }), getLocalTimeZone()),
-  end: toZoned(currentTime, getLocalTimeZone())
+const internalDateRange = ref<{ start: DateValue; end: DateValue }>({
+  start: currentTime.subtract({ hours: 3 }),
+  end: currentTime
 })
+
+// Computed DateRange for v-model binding
+const dateRange = computed({
+  get: () => ({
+    start: internalDateRange.value.start,
+    end: internalDateRange.value.end
+  }),
+  set: (newValue: DateRange | null) => {
+    if (newValue?.start && newValue?.end) {
+      internalDateRange.value = {
+        start: newValue.start as DateValue,
+        end: newValue.end as DateValue
+      }
+    }
+  }
+}) as unknown as WritableComputedRef<DateRange>
 
 // Function to get timestamps from dateRange
 const getTimestamps = () => {
-  if (!dateRange.value?.start || !dateRange.value?.end) {
+  if (!internalDateRange.value?.start || !internalDateRange.value?.end) {
     return {
       start: 0,
       end: 0
     }
   }
 
-  const startDate = new Date((dateRange.value.start as ZonedDateTime).toDate())
-  const endDate = new Date((dateRange.value.end as ZonedDateTime).toDate())
+  const startDate = new Date(
+    (internalDateRange.value.start as DateValue).year,
+    (internalDateRange.value.start as DateValue).month - 1,
+    (internalDateRange.value.start as DateValue).day,
+    'hour' in internalDateRange.value.start ? internalDateRange.value.start.hour : 0,
+    'minute' in internalDateRange.value.start ? internalDateRange.value.start.minute : 0,
+    'second' in internalDateRange.value.start ? internalDateRange.value.start.second : 0
+  )
+
+  const endDate = new Date(
+    (internalDateRange.value.end as DateValue).year,
+    (internalDateRange.value.end as DateValue).month - 1,
+    (internalDateRange.value.end as DateValue).day,
+    'hour' in internalDateRange.value.end ? internalDateRange.value.end.hour : 0,
+    'minute' in internalDateRange.value.end ? internalDateRange.value.end.minute : 0,
+    'second' in internalDateRange.value.end ? internalDateRange.value.end.second : 0
+  )
 
   return {
     start: startDate.getTime(),
@@ -107,33 +138,35 @@ function initializeFromURL() {
 
         // Only update if dates are valid
         if (startDate.getTime() > 0 && endDate.getTime() > 0) {
-          dateRange.value = {
-            start: now(getLocalTimeZone()).set({
-              year: startDate.getFullYear(),
-              month: startDate.getMonth() + 1,
-              day: startDate.getDate(),
-              hour: startDate.getHours(),
-              minute: startDate.getMinutes(),
-              second: startDate.getSeconds()
-            }),
-            end: now(getLocalTimeZone()).set({
-              year: endDate.getFullYear(),
-              month: endDate.getMonth() + 1,
-              day: endDate.getDate(),
-              hour: endDate.getHours(),
-              minute: endDate.getMinutes(),
-              second: endDate.getSeconds()
-            })
+          const start = new CalendarDateTime(
+            startDate.getFullYear(),
+            startDate.getMonth() + 1,
+            startDate.getDate(),
+            startDate.getHours(),
+            startDate.getMinutes(),
+            startDate.getSeconds()
+          )
+          const end = new CalendarDateTime(
+            endDate.getFullYear(),
+            endDate.getMonth() + 1,
+            endDate.getDate(),
+            endDate.getHours(),
+            endDate.getMinutes(),
+            endDate.getSeconds()
+          )
+          internalDateRange.value = {
+            start: start as DateValue,
+            end: end as DateValue
           }
         }
       }
     } catch (e) {
       console.error('Error parsing timestamps:', e)
-      // On error, set to last 30 days
-      const currentTime = now(getLocalTimeZone())
-      dateRange.value = {
-        start: currentTime.subtract({ days: 30 }),
-        end: currentTime
+      // On error, set to last 3 hours
+      const newCurrentTime = now(getLocalTimeZone())
+      internalDateRange.value = {
+        start: newCurrentTime.subtract({ hours: 3 }),
+        end: newCurrentTime
       }
     }
   }

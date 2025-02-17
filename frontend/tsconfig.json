@@ -1,34 +1,14 @@
 {
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ],
   "compilerOptions": {
-    "target": "ESNext",
-    "useDefineForClassFields": true,
-    "module": "ESNext",
-    "moduleResolution": "Node",
-    "strict": true,
-    "jsx": "preserve",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "esModuleInterop": true,
-    "lib": ["ESNext", "DOM"],
-    "skipLibCheck": true,
-    "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
-    },
-    "noImplicitAny": false,
-    "allowJs": true
+      "@/*": ["./src/*"]
+    }
   },
-  "include": [
-    "src/**/*.ts",
-    "src/**/*.d.ts",
-    "src/**/*.tsx",
-    "src/**/*.vue"
-  ],
-  "references": [{ "path": "./tsconfig.node.json" }],
-  // Temporarily excluding UI components due to third-party component type inference issues
-  "exclude": [
-    "node_modules",
-    "src/components/ui/**/*"
-  ]
+  "exclude": ["node_modules"]
 }

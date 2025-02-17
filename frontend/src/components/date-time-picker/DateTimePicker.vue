@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, type WritableComputedRef } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
@@ -7,8 +7,7 @@ import { Label } from '@/components/ui/label'
 import { RangeCalendar } from '@/components/ui/range-calendar'
 import { CalendarIcon, Search } from 'lucide-vue-next'
 import type { DateRange } from 'radix-vue'
-import { getLocalTimeZone, now, ZonedDateTime, toZoned, CalendarDateTime } from '@internationalized/date'
-import type { DateValue } from '@internationalized/date'
+import { getLocalTimeZone, now, ZonedDateTime, toZoned, CalendarDateTime, type DateValue } from '@internationalized/date'
 
 interface Props {
     modelValue?: DateRange | null
@@ -22,18 +21,6 @@ const emit = defineEmits<{
     (e: 'update:modelValue', value: DateRange): void
 }>()
 
-// Convert between DateValue and ZonedDateTime
-function toZonedDateTime(date: DateValue): ZonedDateTime {
-    if (date instanceof ZonedDateTime) {
-        return date
-    }
-    return toZoned(date, getLocalTimeZone())
-}
-
-function toDateValue(date: ZonedDateTime): DateValue {
-    return date as unknown as DateValue
-}
-
 // UI state
 const showDatePicker = ref(false)
 const showFromCalendar = ref(false)
@@ -41,49 +28,53 @@ const showToCalendar = ref(false)
 const searchQuery = ref('')
 const errorMessage = ref('')
 
-// Separate date and time state
-const draftTimeState = ref({
-    start: {
-        hour: 0,
-        minute: 0,
-        second: 0
-    },
-    end: {
-        hour: 23,
-        minute: 59,
-        second: 59
-    }
-})
-
 // Date state
 const currentTime = now(getLocalTimeZone())
-const dateRange = ref<DateRange>({
-    start: currentTime.subtract({ hours: 1 }) as unknown as DateValue,
-    end: currentTime as unknown as DateValue
+const dateRange = ref<{ start: DateValue; end: DateValue }>({
+    start: currentTime.subtract({ hours: 1 }),
+    end: currentTime
 })
 
 // Computed DateRange for v-model binding
-const calendarDateRange = computed<DateRange>(() => dateRange.value)
+const calendarDateRange = computed({
+    get: () => ({
+        start: dateRange.value.start,
+        end: dateRange.value.end
+    }),
+    set: (newValue: DateRange | null) => {
+        if (newValue?.start && newValue?.end) {
+            dateRange.value = {
+                start: newValue.start as DateValue,
+                end: newValue.end as DateValue
+            }
+        }
+    }
+}) as unknown as WritableComputedRef<DateRange>
 
 // Initialize time state from current dateRange
-draftTimeState.value.start = {
-    hour: dateRange.value.start.hour,
-    minute: dateRange.value.start.minute,
-    second: dateRange.value.start.second
-}
-draftTimeState.value.end = {
-    hour: dateRange.value.end.hour,
-    minute: dateRange.value.end.minute,
-    second: dateRange.value.end.second
-}
+const startZoned = toZoned(dateRange.value.start as CalendarDateTime, getLocalTimeZone())
+const endZoned = toZoned(dateRange.value.end as CalendarDateTime, getLocalTimeZone())
+
+const draftTimeState = ref({
+    start: {
+        hour: startZoned.hour,
+        minute: startZoned.minute,
+        second: startZoned.second
+    },
+    end: {
+        hour: endZoned.hour,
+        minute: endZoned.minute,
+        second: endZoned.second
+    }
+})
 
 // Draft state for editing
 const draftRange = ref<{
     start: string;
     end: string;
 }>({
-    start: formatDateTime(dateRange.value.start),
-    end: formatDateTime(dateRange.value.end)
+    start: formatDateTime(startZoned),
+    end: formatDateTime(endZoned)
 })
 
 // Initialize modelValue if not provided
@@ -94,23 +85,25 @@ if (!props.modelValue?.start || !props.modelValue?.end) {
 // Sync internal state with external value
 watch(() => props.modelValue, (newValue) => {
     if (newValue?.start && newValue?.end) {
-        const start = toZonedDateTime(newValue.start)
-        const end = toZonedDateTime(newValue.end)
-        
-        dateRange.value = { start, end }
+        const start = toZoned(newValue.start as CalendarDateTime, getLocalTimeZone())
+        const end = toZoned(newValue.end as CalendarDateTime, getLocalTimeZone())
+
+        dateRange.value = { start: newValue.start, end: newValue.end }
         draftRange.value = {
             start: formatDateTime(start),
             end: formatDateTime(end)
         }
-        draftTimeState.value.start = {
-            hour: start.hour,
-            minute: start.minute,
-            second: start.second
-        }
-        draftTimeState.value.end = {
-            hour: end.hour,
-            minute: end.minute,
-            second: end.second
+        draftTimeState.value = {
+            start: {
+                hour: start.hour,
+                minute: start.minute,
+                second: start.second
+            },
+            end: {
+                hour: end.hour,
+                minute: end.minute,
+                second: end.second
+            }
         }
     }
 }, { immediate: true })
@@ -162,12 +155,11 @@ const filteredRanges = computed(() => {
     )
 })
 
-function formatDateTime(date: DateValue | null | undefined): string {
+function formatDateTime(date: ZonedDateTime | null | undefined): string {
     if (!date) return ''
 
     try {
-        const zonedDate = toZoned(date, getLocalTimeZone())
-        const isoString = zonedDate.toString()
+        const isoString = date.toString()
         const [datePart, timePart] = isoString.split('T')
         const time = timePart.slice(0, 8) // Get HH:MM:SS
         return `${datePart} ${time}`
@@ -225,7 +217,8 @@ function handleCalendarUpdate(range: DateRange | null) {
 
     if (range.start) {
         // Set time to 00:00:00 when clicking a date
-        const newDate = range.start.set({
+        const zonedStart = toZoned(range.start, getLocalTimeZone())
+        const newDate = zonedStart.set({
             hour: 0,
             minute: 0,
             second: 0
@@ -241,7 +234,8 @@ function handleCalendarUpdate(range: DateRange | null) {
 
     if (range.end) {
         // Set time to 00:00:00 when clicking a date
-        const newDate = range.end.set({
+        const zonedEnd = toZoned(range.end, getLocalTimeZone())
+        const newDate = zonedEnd.set({
             hour: 0,
             minute: 0,
             second: 0
@@ -254,11 +248,12 @@ function handleCalendarUpdate(range: DateRange | null) {
             second: 0
         }
     }
+}
 
-    if (range.start && range.end) {
-        showFromCalendar.value = false
-        showToCalendar.value = false
-    }
+function formatDisplayText() {
+    const start = toZoned(dateRange.value.start as CalendarDateTime, getLocalTimeZone())
+    const end = toZoned(dateRange.value.end as CalendarDateTime, getLocalTimeZone())
+    return `${formatDateTime(start)} - ${formatDateTime(end)}`
 }
 
 function handleApply() {
@@ -331,9 +326,11 @@ function handleCancel() {
     errorMessage.value = ''
 
     // Reset draft values to current values
+    const start = toZoned(dateRange.value.start as CalendarDateTime, getLocalTimeZone())
+    const end = toZoned(dateRange.value.end as CalendarDateTime, getLocalTimeZone())
     draftRange.value = {
-        start: formatDateTime(dateRange.value.start),
-        end: formatDateTime(dateRange.value.end)
+        start: formatDateTime(start),
+        end: formatDateTime(end)
     }
     showDatePicker.value = false
 }
@@ -364,7 +361,7 @@ const selectedRangeText = computed(() => {
     }
 
     // Otherwise show the full date range
-    return `${formatDateTime(dateRange.value.start)} - ${formatDateTime(dateRange.value.end)}`
+    return formatDisplayText()
 })
 </script>
 

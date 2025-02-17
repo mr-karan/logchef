@@ -66,9 +66,12 @@ DELETE FROM sources WHERE id = ?;
 -- $2: email
 -- $3: full_name
 -- $4: role
--- $5: created_at
-INSERT INTO users (id, email, full_name, role, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?);
+-- $5: status
+-- $6: last_login_at
+-- $7: created_at
+-- $8: updated_at
+INSERT INTO users (id, email, full_name, role, status, last_login_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetUser
 -- Get a user by ID
@@ -85,14 +88,16 @@ SELECT * FROM users WHERE email = ?;
 -- $1: email
 -- $2: full_name
 -- $3: role
--- $4: last_login_at
--- $5: last_active_at
--- $6: updated_at
--- $7: id
+-- $4: status
+-- $5: last_login_at
+-- $6: last_active_at
+-- $7: updated_at
+-- $8: id
 UPDATE users
 SET email = ?,
     full_name = ?,
     role = ?,
+    status = ?,
     last_login_at = ?,
     last_active_at = ?,
     updated_at = ?
@@ -101,6 +106,12 @@ WHERE id = ?;
 -- name: ListUsers
 -- List all users
 SELECT * FROM users ORDER BY created_at DESC;
+
+-- name: CountAdminUsers
+-- Count active admin users
+-- $1: role
+-- $2: status
+SELECT COUNT(*) FROM users WHERE role = ? AND status = ?;
 
 -- Sessions
 
@@ -387,3 +398,8 @@ SELECT id, space_id, name, description, query_content, created_by, created_at, u
 FROM queries
 WHERE space_id = ?
 ORDER BY name;
+
+-- name: DeleteUser
+-- Delete a user by ID
+-- $1: id
+DELETE FROM users WHERE id = ?;

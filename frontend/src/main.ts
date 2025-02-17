@@ -3,6 +3,7 @@ import { createPinia } from "pinia";
 import "./assets/index.css";
 import App from "./App.vue";
 import router from "./router";
+import { useAuthStore } from "@/stores/auth";
 
 // Create app instance
 const app = createApp(App);

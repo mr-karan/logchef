@@ -4,14 +4,41 @@ import "time"
 
 // User represents a user in the system
 type User struct {
-	ID           string     `db:"id" json:"id"`
-	Email        string     `db:"email" json:"email"`
-	FullName     string     `db:"full_name" json:"full_name"`
-	Role         string     `db:"role" json:"role"`
-	LastLoginAt  *time.Time `db:"last_login_at" json:"last_login_at,omitempty"`
-	LastActiveAt *time.Time `db:"last_active_at" json:"last_active_at,omitempty"`
-	CreatedAt    time.Time  `db:"created_at" json:"created_at"`
-	UpdatedAt    time.Time  `db:"updated_at" json:"updated_at"`
+	ID           string     `json:"id" db:"id"`
+	Email        string     `json:"email" db:"email"`
+	FullName     string     `json:"full_name" db:"full_name"`
+	Role         string     `json:"role" db:"role"`
+	Status       string     `json:"status" db:"status"`
+	LastLoginAt  *time.Time `json:"last_login_at,omitempty" db:"last_login_at"`
+	LastActiveAt *time.Time `json:"last_active_at,omitempty" db:"last_active_at"`
+	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+// UserStatus represents the possible user statuses
+const (
+	UserStatusActive   = "active"
+	UserStatusInactive = "inactive"
+)
+
+// UserRole represents the possible user roles
+const (
+	UserRoleAdmin  = "admin"
+	UserRoleMember = "member"
+)
+
+// CreateUserRequest represents a request to create a new user
+type CreateUserRequest struct {
+	Email    string `json:"email" validate:"required,email"`
+	FullName string `json:"full_name" validate:"required"`
+	Role     string `json:"role" validate:"required,oneof=admin member"`
+}
+
+// UpdateUserRequest represents a request to update a user
+type UpdateUserRequest struct {
+	FullName string `json:"full_name,omitempty" validate:"omitempty"`
+	Role     string `json:"role,omitempty" validate:"omitempty,oneof=admin member"`
+	Status   string `json:"status,omitempty" validate:"omitempty,oneof=active inactive"`
 }
 
 // Session represents a user session

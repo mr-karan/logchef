@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -10,92 +11,114 @@ import (
 
 // User methods
 
-// CreateUser creates a new user in the database
-func (d *DB) CreateUser(ctx context.Context, user *models.User) error {
+// CreateUser creates a new user
+func (db *DB) CreateUser(ctx context.Context, user *models.User) error {
 	now := time.Now()
-	result, err := d.queries.CreateUser.ExecContext(ctx,
-		user.ID,
-		user.Email,
-		user.FullName,
-		user.Role,
-		now, // created_at
-		now, // updated_at
+	user.CreatedAt = now
+	user.UpdatedAt = now
+	if user.Status == "" {
+		user.Status = models.UserStatusActive
+	}
+
+	result, err := db.queries.CreateUser.ExecContext(ctx,
+		user.ID, user.Email, user.FullName, user.Role, user.Status,
+		user.LastLoginAt, user.CreatedAt, user.UpdatedAt,
 	)
 	if err != nil {
-		if isUniqueConstraintError(err, "users", "email") {
-			return fmt.Errorf("user with email %s already exists", user.Email)
-		}
-		return fmt.Errorf("error creating user: %w", err)
+		return fmt.Errorf("failed to create user: %w", err)
 	}
 
-	rowsAffected, err := result.RowsAffected()
+	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("error getting rows affected: %w", err)
+		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
-
-	if rowsAffected != 1 {
-		return fmt.Errorf("expected 1 row to be affected, got %d", rowsAffected)
+	if rows != 1 {
+		return fmt.Errorf("expected 1 row to be affected, got %d", rows)
 	}
 
 	return nil
 }
 
-// GetUser retrieves a user by ID
-func (d *DB) GetUser(ctx context.Context, userID string) (*models.User, error) {
+// GetUser gets a user by ID
+func (db *DB) GetUser(ctx context.Context, id string) (*models.User, error) {
 	var user models.User
-	err := d.queries.GetUser.GetContext(ctx, &user, userID)
+	err := db.queries.GetUser.GetContext(ctx, &user, id)
 	if err != nil {
-		return nil, fmt.Errorf("error getting user: %w", err)
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
 	return &user, nil
 }
 
-// GetUserByEmail retrieves a user by email
-func (d *DB) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
+// GetUserByEmail gets a user by email
+func (db *DB) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	var user models.User
-	err := d.queries.GetUserByEmail.GetContext(ctx, &user, email)
+	err := db.queries.GetUserByEmail.GetContext(ctx, &user, email)
 	if err != nil {
-		return nil, fmt.Errorf("error getting user by email: %w", err)
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get user by email: %w", err)
 	}
 	return &user, nil
 }
 
-// UpdateUser updates an existing user
-func (d *DB) UpdateUser(ctx context.Context, user *models.User) error {
-	result, err := d.queries.UpdateUser.ExecContext(ctx,
-		user.Email,
-		user.FullName,
-		user.Role,
-		user.LastLoginAt,
-		user.LastActiveAt,
-		time.Now(),
-		user.ID,
+// UpdateUser updates a user
+func (db *DB) UpdateUser(ctx context.Context, user *models.User) error {
+	user.UpdatedAt = time.Now()
+	result, err := db.queries.UpdateUser.ExecContext(ctx,
+		user.Email, user.FullName, user.Role, user.Status,
+		user.LastLoginAt, user.LastActiveAt, user.UpdatedAt, user.ID,
 	)
 	if err != nil {
-		if isUniqueConstraintError(err, "users", "email") {
-			return fmt.Errorf("user with email %s already exists", user.Email)
-		}
-		return fmt.Errorf("error updating user: %w", err)
+		return fmt.Errorf("failed to update user: %w", err)
 	}
-
-	rowsAffected, err := result.RowsAffected()
+	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("error getting rows affected: %w", err)
+		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
-
-	if rowsAffected != 1 {
-		return fmt.Errorf("expected 1 row to be affected, got %d", rowsAffected)
+	if rows == 0 {
+		return fmt.Errorf("user not found")
 	}
-
 	return nil
 }
 
-// ListUsers returns all users
-func (d *DB) ListUsers(ctx context.Context) ([]*models.User, error) {
+// ListUsers lists all users
+func (db *DB) ListUsers(ctx context.Context) ([]*models.User, error) {
 	var users []*models.User
-	err := d.queries.ListUsers.SelectContext(ctx, &users)
+	err := db.queries.ListUsers.SelectContext(ctx, &users)
 	if err != nil {
-		return nil, fmt.Errorf("error listing users: %w", err)
+		return nil, fmt.Errorf("failed to list users: %w", err)
 	}
 	return users, nil
+}
+
+// CountAdminUsers counts the number of admin users
+func (db *DB) CountAdminUsers(ctx context.Context) (int, error) {
+	var count int
+	err := db.queries.CountAdminUsers.GetContext(ctx, &count, models.UserRoleAdmin, models.UserStatusActive)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count admin users: %w", err)
+	}
+	return count, nil
+}
+
+// DeleteUser deletes a user by ID
+func (db *DB) DeleteUser(ctx context.Context, id string) error {
+	result, err := db.queries.DeleteUser.ExecContext(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rows != 1 {
+		return fmt.Errorf("expected 1 row to be affected, got %d", rows)
+	}
+
+	return nil
 }

@@ -481,8 +481,24 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 		Path:     "/",
 	})
 
-	// Redirect to frontend home
-	return c.Redirect("/", fiber.StatusTemporaryRedirect)
+	// Get frontend redirect path from query param, default to /explore if not provided
+	redirectPath := c.Query("redirect", "/explore")
+	if !strings.HasPrefix(redirectPath, "/") {
+		redirectPath = "/" + redirectPath
+	}
+
+	// Use configured frontend URL if set, otherwise use relative path
+	redirectURL := redirectPath
+	if s.config.Server.FrontendURL != "" {
+		redirectURL = s.config.Server.FrontendURL + redirectPath
+		s.log.Debug("using configured frontend redirect",
+			"frontend_url", s.config.Server.FrontendURL,
+			"redirect_path", redirectPath,
+		)
+	}
+
+	// Redirect to frontend
+	return c.Redirect(redirectURL, fiber.StatusTemporaryRedirect)
 }
 
 // handleLogout logs out the user
@@ -906,5 +922,149 @@ func (s *Server) handleRevokeSpaceTeamAccess(c *fiber.Ctx) error {
 	return c.JSON(Response{
 		Status: "success",
 		Data:   nil,
+	})
+}
+
+// User handlers
+
+// handleListUsers handles listing all users
+func (s *Server) handleListUsers(c *fiber.Ctx) error {
+	users, err := s.svc.ListUsers(c.Context())
+	if err != nil {
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to list users: %v", err))
+	}
+
+	return c.JSON(Response{
+		Status: "success",
+		Data: fiber.Map{
+			"users": users,
+		},
+	})
+}
+
+// handleGetUser handles getting a single user
+func (s *Server) handleGetUser(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return fiber.NewError(http.StatusBadRequest, "user id is required")
+	}
+
+	user, err := s.svc.GetUser(c.Context(), id)
+	if err != nil {
+		if err == service.ErrUserNotFound {
+			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("user %s not found", id))
+		}
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to get user: %v", err))
+	}
+
+	return c.JSON(Response{
+		Status: "success",
+		Data: fiber.Map{
+			"user": user,
+		},
+	})
+}
+
+// handleCreateUser handles creating a new user
+func (s *Server) handleCreateUser(c *fiber.Ctx) error {
+	var req models.CreateUserRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+	}
+
+	user := &models.User{
+		Email:    req.Email,
+		FullName: req.FullName,
+		Role:     req.Role,
+		Status:   models.UserStatusActive, // New users are active by default
+	}
+
+	if err := s.svc.CreateUser(c.Context(), user); err != nil {
+		var validationErr *service.ValidationError
+		if errors.As(err, &validationErr) {
+			return fiber.NewError(http.StatusBadRequest, validationErr.Error())
+		}
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to create user: %v", err))
+	}
+
+	return c.Status(http.StatusCreated).JSON(Response{
+		Status: "success",
+		Data: fiber.Map{
+			"user": user,
+		},
+	})
+}
+
+// handleUpdateUser handles updating a user
+func (s *Server) handleUpdateUser(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return fiber.NewError(http.StatusBadRequest, "user id is required")
+	}
+
+	var req models.UpdateUserRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+	}
+
+	// Get existing user
+	user, err := s.svc.GetUser(c.Context(), id)
+	if err != nil {
+		if err == service.ErrUserNotFound {
+			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("user %s not found", id))
+		}
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to get user: %v", err))
+	}
+
+	// Update fields if provided
+	if req.FullName != "" {
+		user.FullName = req.FullName
+	}
+	if req.Role != "" {
+		user.Role = req.Role
+	}
+	if req.Status != "" {
+		user.Status = req.Status
+	}
+
+	if err := s.svc.UpdateUser(c.Context(), user); err != nil {
+		var validationErr *service.ValidationError
+		if errors.As(err, &validationErr) {
+			return fiber.NewError(http.StatusBadRequest, validationErr.Error())
+		}
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to update user: %v", err))
+	}
+
+	return c.JSON(Response{
+		Status: "success",
+		Data: fiber.Map{
+			"user": user,
+		},
+	})
+}
+
+// handleDeleteUser handles deleting a user
+func (s *Server) handleDeleteUser(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return fiber.NewError(http.StatusBadRequest, "user id is required")
+	}
+
+	if err := s.svc.DeleteUser(c.Context(), id); err != nil {
+		if err == service.ErrUserNotFound {
+			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("user %s not found", id))
+		}
+		var validationErr *service.ValidationError
+		if errors.As(err, &validationErr) {
+			return fiber.NewError(http.StatusBadRequest, validationErr.Error())
+		}
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to delete user: %v", err))
+	}
+
+	return c.JSON(Response{
+		Status: "success",
+		Data: fiber.Map{
+			"message": "User deleted successfully",
+		},
 	})
 }

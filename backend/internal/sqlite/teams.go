@@ -108,29 +108,29 @@ func (d *DB) ListTeams(ctx context.Context) ([]*models.Team, error) {
 // Team member methods
 
 // AddTeamMember adds a member to a team
-func (d *DB) AddTeamMember(ctx context.Context, member *models.TeamMember) error {
+func (d *DB) AddTeamMember(ctx context.Context, teamID, userID, role string) error {
 	// First check if the team exists
-	_, err := d.GetTeam(ctx, member.TeamID)
+	_, err := d.GetTeam(ctx, teamID)
 	if err != nil {
 		return fmt.Errorf("error checking team existence: %w", err)
 	}
 
 	// Then check if the user exists
-	_, err = d.GetUser(ctx, member.UserID)
+	_, err = d.GetUser(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("error checking user existence: %w", err)
 	}
 
 	// Finally add the team member
 	result, err := d.queries.AddTeamMember.ExecContext(ctx,
-		member.TeamID,
-		member.UserID,
-		member.Role,
+		teamID,
+		userID,
+		role,
 		time.Now(),
 	)
 	if err != nil {
 		if isUniqueConstraintError(err, "team_members", "team_id") {
-			return fmt.Errorf("user %s is already a member of team %s", member.UserID, member.TeamID)
+			return fmt.Errorf("user %s is already a member of team %s", userID, teamID)
 		}
 		return fmt.Errorf("error adding team member: %w", err)
 	}

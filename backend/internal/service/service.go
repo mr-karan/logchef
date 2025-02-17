@@ -266,3 +266,133 @@ func (s *Service) GetTimeSeries(ctx context.Context, sourceID string, params cli
 	// Get time series data
 	return client.GetTimeSeries(ctx, params)
 }
+
+// User management methods
+
+// ListUsers returns all users
+func (s *Service) ListUsers(ctx context.Context) ([]*models.User, error) {
+	return s.sqlite.ListUsers(ctx)
+}
+
+// GetUser retrieves a user by ID
+func (s *Service) GetUser(ctx context.Context, id string) (*models.User, error) {
+	return s.sqlite.GetUser(ctx, id)
+}
+
+// CreateUser creates a new user
+func (s *Service) CreateUser(ctx context.Context, user *models.User) error {
+	// Validate user role
+	if user.Role != models.UserRoleAdmin && user.Role != models.UserRoleMember {
+		return &ValidationError{
+			Field:   "Role",
+			Message: "invalid role",
+		}
+	}
+
+	// Validate user status
+	if user.Status != models.UserStatusActive && user.Status != models.UserStatusInactive {
+		return &ValidationError{
+			Field:   "Status",
+			Message: "invalid status",
+		}
+	}
+
+	// Check if email already exists
+	existing, err := s.sqlite.GetUserByEmail(ctx, user.Email)
+	if err != nil {
+		return fmt.Errorf("error checking existing user: %w", err)
+	}
+	if existing != nil {
+		return &ValidationError{
+			Field:   "Email",
+			Message: "email already exists",
+		}
+	}
+
+	// Generate UUID if not provided
+	if user.ID == "" {
+		user.ID = uuid.New().String()
+	}
+
+	// Set timestamps
+	now := time.Now()
+	user.CreatedAt = now
+	user.UpdatedAt = now
+
+	return s.sqlite.CreateUser(ctx, user)
+}
+
+// UpdateUser updates a user's information
+func (s *Service) UpdateUser(ctx context.Context, user *models.User) error {
+	// Validate user exists
+	existing, err := s.sqlite.GetUser(ctx, user.ID)
+	if err != nil {
+		return fmt.Errorf("error checking existing user: %w", err)
+	}
+	if existing == nil {
+		return ErrUserNotFound
+	}
+
+	// Validate role if changing
+	if user.Role != "" && user.Role != models.UserRoleAdmin && user.Role != models.UserRoleMember {
+		return &ValidationError{
+			Field:   "Role",
+			Message: "invalid role",
+		}
+	}
+
+	// Validate status if changing
+	if user.Status != "" && user.Status != models.UserStatusActive && user.Status != models.UserStatusInactive {
+		return &ValidationError{
+			Field:   "Status",
+			Message: "invalid status",
+		}
+	}
+
+	// If changing to inactive and user is admin, ensure there's at least one other active admin
+	if user.Status == models.UserStatusInactive && existing.Role == models.UserRoleAdmin {
+		count, err := s.sqlite.CountAdminUsers(ctx)
+		if err != nil {
+			return fmt.Errorf("error counting admin users: %w", err)
+		}
+		if count <= 1 {
+			return &ValidationError{
+				Field:   "Status",
+				Message: "cannot deactivate last admin user",
+			}
+		}
+	}
+
+	// Update timestamp
+	user.UpdatedAt = time.Now()
+
+	return s.sqlite.UpdateUser(ctx, user)
+}
+
+// DeleteUser deletes a user
+func (s *Service) DeleteUser(ctx context.Context, id string) error {
+	// Validate user exists
+	existing, err := s.sqlite.GetUser(ctx, id)
+	if err != nil {
+		return fmt.Errorf("error checking existing user: %w", err)
+	}
+	if existing == nil {
+		return ErrUserNotFound
+	}
+
+	// If user is admin, ensure there's at least one other active admin
+	if existing.Role == models.UserRoleAdmin {
+		count, err := s.sqlite.CountAdminUsers(ctx)
+		if err != nil {
+			return fmt.Errorf("error counting admin users: %w", err)
+		}
+		if count <= 1 {
+			return &ValidationError{
+				Field:   "ID",
+				Message: "cannot delete last admin user",
+			}
+		}
+	}
+
+	return s.sqlite.DeleteUser(ctx, id)
+}

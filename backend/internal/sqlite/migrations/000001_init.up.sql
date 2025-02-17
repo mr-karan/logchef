@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE NOT NULL,
     full_name TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('admin', 'member')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     last_login_at DATETIME,
     last_active_at DATETIME,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),

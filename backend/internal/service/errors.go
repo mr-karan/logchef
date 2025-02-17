@@ -5,6 +5,8 @@ import "errors"
 var (
 	// ErrSourceNotFound is returned when a source is not found
 	ErrSourceNotFound = errors.New("source not found")
+	// ErrUserNotFound is returned when a user is not found
+	ErrUserNotFound = errors.New("user not found")
 	// ErrInvalidRequest is returned when the request is invalid
 	ErrInvalidRequest = errors.New("invalid request")
 	// ErrInvalidSourceConfig is returned when the source configuration is invalid

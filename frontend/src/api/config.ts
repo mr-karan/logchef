@@ -1,12 +1,14 @@
 import axios from "axios";
+import { useAuthStore } from "@/stores/auth";
+import router from "@/router";
 
 // Create base axios instance with common configuration
 export const api = axios.create({
-  baseURL: `${import.meta.env.VITE_API_URL}/api/v1`,
+  baseURL: `/api/v1`,
   headers: {
     "Content-Type": "application/json",
   },
-  withCredentials: true, // Required for cookies
+  withCredentials: false, // Explicitly disable CORS credentials since we're same-origin
   xsrfCookieName: "csrf_token", // Name of the cookie sent by the server
   xsrfHeaderName: "X-CSRF-Token", // Header that contains the token
   timeout: 10000, // 10 second timeout
@@ -33,13 +35,32 @@ api.interceptors.response.use(
   async (error) => {
     // Handle session expiration
     if (error.response?.status === 401) {
-      // Clear local auth state
-      window.location.href = "/";
+      // Clear auth state using the store
+      const authStore = useAuthStore();
+      await authStore.logout();
+
+      // Redirect to login with the current path as redirect
+      const currentPath = router.currentRoute.value.fullPath;
+      await router.push({
+        path: "/",
+        query: currentPath !== "/" ? { redirect: currentPath } : undefined,
+      });
+
+      return Promise.reject(error);
+    }
+
+    // Handle forbidden errors
+    if (error.response?.status === 403) {
+      // Redirect to forbidden page
+      await router.push({ name: "Forbidden" });
       return Promise.reject(error);
     }
 
     // Handle CSRF token errors
-    if (error.response?.status === 403) {
+    if (
+      error.response?.status === 403 &&
+      error.response?.data?.code === "CSRF_TOKEN_MISMATCH"
+    ) {
       // Could be CSRF token mismatch
       console.error("Security error:", error);
       return Promise.reject(new Error("Security verification failed"));

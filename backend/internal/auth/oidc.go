@@ -58,7 +58,7 @@ func NewOIDCProvider(cfg *config.Config, store Store) (*OIDCProvider, error) {
 	oauthConf := &oauth2.Config{
 		ClientID:     cfg.OIDC.ClientID,
 		ClientSecret: cfg.OIDC.ClientSecret,
-		RedirectURL:  cfg.OIDC.RedirectURI,
+		RedirectURL:  cfg.OIDC.RedirectURL,
 		Endpoint:     provider.Endpoint(),
 		Scopes:       cfg.OIDC.Scopes,
 	}
@@ -138,7 +138,15 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, code, state string) (
 	// Check if user exists
 	user, err := p.store.GetUserByEmail(ctx, claims.Email)
 	if err != nil {
-		// If user doesn't exist, create new user
+		p.log.Error("failed to lookup user by email",
+			"error", err,
+			"email", claims.Email,
+		)
+		return nil, nil, fmt.Errorf("failed to lookup user: %w", err)
+	}
+
+	if user == nil {
+		// User doesn't exist, create new user
 		isAdmin := false
 		for _, adminEmail := range p.cfg.Auth.AdminEmails {
 			if strings.EqualFold(claims.Email, adminEmail) {
@@ -152,6 +160,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, code, state string) (
 			Email:    claims.Email,
 			FullName: claims.Name,
 			Role:     "member",
+			Status:   models.UserStatusActive, // Set status to active for new users
 		}
 		if isAdmin {
 			user.Role = "admin"
@@ -169,7 +178,19 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, code, state string) (
 			"user_id", user.ID,
 			"email", user.Email,
 			"role", user.Role,
+			"status", user.Status,
 		)
+	} else {
+		// Check if user is active
+		if user.Status == models.UserStatusInactive {
+			p.log.Error("inactive user attempted login",
+				"user_id", user.ID,
+				"email", user.Email,
+			)
+			return nil, nil, errors.NewAuthError(errors.ErrUserInactive, "User account is inactive", map[string]interface{}{
+				"email": user.Email,
+			})
+		}
 	}
 
 	// Update user's last login

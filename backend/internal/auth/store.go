@@ -10,27 +10,28 @@ import (
 type Store interface {
 	// User operations
 	CreateUser(ctx context.Context, user *models.User) error
-	GetUser(ctx context.Context, userID string) (*models.User, error)
+	GetUser(ctx context.Context, id string) (*models.User, error)
 	GetUserByEmail(ctx context.Context, email string) (*models.User, error)
 	UpdateUser(ctx context.Context, user *models.User) error
 	ListUsers(ctx context.Context) ([]*models.User, error)
+	CountAdminUsers(ctx context.Context) (int, error)
 
 	// Session operations
 	CreateSession(ctx context.Context, session *models.Session) error
-	GetSession(ctx context.Context, sessionID string) (*models.Session, error)
-	DeleteSession(ctx context.Context, sessionID string) error
+	GetSession(ctx context.Context, id string) (*models.Session, error)
+	DeleteSession(ctx context.Context, id string) error
 	DeleteUserSessions(ctx context.Context, userID string) error
 	CountUserSessions(ctx context.Context, userID string) (int, error)
 
 	// Team operations
 	CreateTeam(ctx context.Context, team *models.Team) error
-	GetTeam(ctx context.Context, teamID string) (*models.Team, error)
+	GetTeam(ctx context.Context, id string) (*models.Team, error)
 	UpdateTeam(ctx context.Context, team *models.Team) error
-	DeleteTeam(ctx context.Context, teamID string) error
+	DeleteTeam(ctx context.Context, id string) error
 	ListTeams(ctx context.Context) ([]*models.Team, error)
 
 	// Team member operations
-	AddTeamMember(ctx context.Context, member *models.TeamMember) error
+	AddTeamMember(ctx context.Context, teamID, userID, role string) error
 	RemoveTeamMember(ctx context.Context, teamID, userID string) error
 	ListTeamMembers(ctx context.Context, teamID string) ([]*models.TeamMember, error)
 	GetUserTeams(ctx context.Context, userID string) ([]*models.Team, error)

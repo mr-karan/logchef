@@ -95,8 +95,10 @@ const startEditing = (index: number) => {
 
 // Update an existing filter
 const updateFilter = (index: number) => {
-  editingFilter.value = null
-  applyFilters()
+  if (editingFilter.value === index) {
+    editingFilter.value = null
+    applyFilters()
+  }
 }
 
 // Cancel editing
@@ -124,23 +126,15 @@ watch(filters, () => {
       <!-- Existing Filters -->
       <template v-for="(filter, idx) in filters" :key="filter.field">
         <!-- Collapsed View -->
-        <Badge
-          v-if="editingFilter !== idx"
-          variant="secondary"
+        <Badge v-if="editingFilter !== idx" variant="secondary"
           class="h-8 pl-3 pr-2 flex items-center gap-1 bg-gray-100 hover:bg-gray-100 text-gray-900"
-          @click="startEditing(idx)"
-        >
+          @click="startEditing(idx)">
           <span class="flex items-center gap-1">
             <span class="font-normal">{{ getColumnLabel(filter.field) }}</span>
             <span class="text-gray-500">{{ getOperatorLabel(filter.operator) }}</span>
             <span class="font-medium">"{{ filter.value }}"</span>
           </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            @click.stop="removeFilter(idx)"
-            class="h-4 w-4 p-0 hover:bg-transparent"
-          >
+          <Button variant="ghost" size="sm" @click.stop="removeFilter(idx)" class="h-4 w-4 p-0 hover:bg-transparent">
             <X class="h-3 w-3" />
           </Button>
         </Badge>
@@ -191,13 +185,7 @@ watch(filters, () => {
       </template>
 
       <!-- Add Filter Button -->
-      <Button
-        variant="outline"
-        size="sm"
-        @click="showAddFilter = true"
-        class="gap-2 h-8"
-        v-if="!showAddFilter"
-      >
+      <Button variant="outline" size="sm" @click="showAddFilter = true" class="gap-2 h-8" v-if="!showAddFilter">
         <Plus class="h-4 w-4" />
         Add Filter
       </Button>
@@ -240,12 +228,8 @@ watch(filters, () => {
           <Button variant="ghost" size="sm" @click="showAddFilter = false">
             Cancel
           </Button>
-          <Button
-            variant="default"
-            size="sm"
-            @click="addFilter"
-            :disabled="!newFilter.field || !newFilter.operator || !newFilter.value"
-          >
+          <Button variant="default" size="sm" @click="addFilter"
+            :disabled="!newFilter.field || !newFilter.operator || !newFilter.value">
             Add
           </Button>
         </div>

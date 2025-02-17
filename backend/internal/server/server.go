@@ -12,7 +12,6 @@ import (
 	pkglogger "backend-v2/pkg/logger"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 )
@@ -49,7 +48,6 @@ func New(cfg *config.Config, svc *service.Service, auth auth.Service, fs http.Fi
 
 	// Add middleware
 	app.Use(recover.New())
-	app.Use(cors.New())
 
 	s := &Server{
 		app:    app,
@@ -84,6 +82,13 @@ func (s *Server) setupRoutes() {
 	s.app.Delete("/api/v1/sources/:id", s.requireAuth, s.handleDeleteSource)
 	s.app.Post("/api/v1/sources/:id/logs/search", s.requireAuth, s.handleQueryLogs)
 	s.app.Get("/api/v1/sources/:id/logs/timeseries", s.requireAuth, s.handleGetTimeSeries)
+
+	// User routes (admin only)
+	s.app.Get("/api/v1/users", s.requireAuth, s.requireAdmin, s.handleListUsers)
+	s.app.Post("/api/v1/users", s.requireAuth, s.requireAdmin, s.handleCreateUser)
+	s.app.Get("/api/v1/users/:id", s.requireAuth, s.requireAdmin, s.handleGetUser)
+	s.app.Put("/api/v1/users/:id", s.requireAuth, s.requireAdmin, s.handleUpdateUser)
+	s.app.Delete("/api/v1/users/:id", s.requireAuth, s.requireAdmin, s.handleDeleteUser)
 
 	// Team routes
 	s.app.Get("/api/v1/teams", s.requireAuth, s.handleListTeams)

@@ -4,33 +4,78 @@ import { useRouter } from "vue-router";
 import type { Session, User } from "@/types";
 import { authApi } from "@/api/auth";
 
+interface SessionResponse {
+  status: "success";
+  data: {
+    user: User;
+    session: Session;
+  };
+}
+
+interface ErrorResponse {
+  status: "error";
+  data: {
+    error: string;
+  };
+}
+
+type ApiResponse = SessionResponse | ErrorResponse;
+
 export const useAuthStore = defineStore("auth", () => {
   const router = useRouter();
   const user = ref<User | null>(null);
   const session = ref<Session | null>(null);
   const isAuthenticated = ref(false);
+  const isInitialized = ref(false);
+  const isInitializing = ref(false);
 
   // Initialize auth state from session cookie
   async function initialize() {
+    if (isInitialized.value || isInitializing.value) {
+      return;
+    }
+
+    console.log("Initializing auth store...");
+    isInitializing.value = true;
+
     try {
-      const response = await authApi.getSession();
+      console.log("Fetching session...");
+      const response = (await authApi.getSession()) as ApiResponse;
+      console.log("Session response:", response);
+
       if (response.status === "success") {
         user.value = response.data.user;
         session.value = response.data.session;
         isAuthenticated.value = true;
-        return true;
+        console.log("Auth initialized successfully:", {
+          user: user.value,
+          isAuthenticated: isAuthenticated.value,
+        });
+      } else {
+        // Handle session not found gracefully
+        user.value = null;
+        session.value = null;
+        isAuthenticated.value = false;
+        console.log("No active session found");
       }
-      return false;
     } catch (error) {
       console.error("Failed to initialize auth:", error);
-      return false;
+      user.value = null;
+      session.value = null;
+      isAuthenticated.value = false;
+    } finally {
+      isInitialized.value = true;
+      isInitializing.value = false;
     }
   }
 
   // Login user
   async function login() {
-    // Redirect to backend login endpoint
-    window.location.href = authApi.getLoginUrl();
+    // Get current route's redirect query param
+    const redirectPath = router.currentRoute.value.query.redirect as string;
+
+    // Redirect to backend login endpoint with redirect_uri
+    window.location.href = authApi.getLoginUrl(redirectPath);
   }
 
   // Logout user
@@ -38,20 +83,14 @@ export const useAuthStore = defineStore("auth", () => {
     try {
       // Call backend logout endpoint
       await authApi.logout();
-
-      // Clear state
-      user.value = null;
-      session.value = null;
-      isAuthenticated.value = false;
-
-      // Redirect to login page
-      await router.push("/");
     } catch (error) {
       console.error("Failed to logout:", error);
-      // Even if backend logout fails, clear state and redirect
+    } finally {
+      // Always clear state
       user.value = null;
       session.value = null;
       isAuthenticated.value = false;
+      // Redirect to login page
       await router.push("/");
     }
   }
@@ -60,6 +99,7 @@ export const useAuthStore = defineStore("auth", () => {
     user,
     session,
     isAuthenticated,
+    isInitialized,
     initialize,
     login,
     logout,
