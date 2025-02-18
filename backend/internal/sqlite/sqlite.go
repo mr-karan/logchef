@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"backend-v2/internal/auth"
 	"backend-v2/pkg/logger"
@@ -71,27 +70,18 @@ type Queries struct {
 	ListTeamMembers      *sqlx.Stmt `query:"ListTeamMembers"`
 	ListUserTeams        *sqlx.Stmt `query:"ListUserTeams"`
 
-	// Space queries
-	CreateSpace           *sqlx.Stmt `query:"CreateSpace"`
-	GetSpace              *sqlx.Stmt `query:"GetSpace"`
-	UpdateSpace           *sqlx.Stmt `query:"UpdateSpace"`
-	DeleteSpace           *sqlx.Stmt `query:"DeleteSpace"`
-	ListSpaces            *sqlx.Stmt `query:"ListSpaces"`
-	AddSpaceDataSource    *sqlx.Stmt `query:"AddSpaceDataSource"`
-	RemoveSpaceDataSource *sqlx.Stmt `query:"RemoveSpaceDataSource"`
-	ListSpaceDataSources  *sqlx.Stmt `query:"ListSpaceDataSources"`
-	SetSpaceTeamAccess    *sqlx.Stmt `query:"SetSpaceTeamAccess"`
-	UpdateSpaceTeamAccess *sqlx.Stmt `query:"UpdateSpaceTeamAccess"`
-	RemoveSpaceTeamAccess *sqlx.Stmt `query:"RemoveSpaceTeamAccess"`
-	GetSpaceTeamAccess    *sqlx.Stmt `query:"GetSpaceTeamAccess"`
-	ListSpaceTeamAccess   *sqlx.Stmt `query:"ListSpaceTeamAccess"`
+	// Team source queries
+	AddTeamSource    *sqlx.Stmt `query:"AddTeamSource"`
+	RemoveTeamSource *sqlx.Stmt `query:"RemoveTeamSource"`
+	ListTeamSources  *sqlx.Stmt `query:"ListTeamSources"`
+	ListSourceTeams  *sqlx.Stmt `query:"ListSourceTeams"`
 
-	// Query queries
-	CreateQuery *sqlx.Stmt `query:"CreateQuery"`
-	GetQuery    *sqlx.Stmt `query:"GetQuery"`
-	UpdateQuery *sqlx.Stmt `query:"UpdateQuery"`
-	DeleteQuery *sqlx.Stmt `query:"DeleteQuery"`
-	ListQueries *sqlx.Stmt `query:"ListQueries"`
+	// Team query queries
+	CreateTeamQuery *sqlx.Stmt `query:"CreateTeamQuery"`
+	GetTeamQuery    *sqlx.Stmt `query:"GetTeamQuery"`
+	UpdateTeamQuery *sqlx.Stmt `query:"UpdateTeamQuery"`
+	DeleteTeamQuery *sqlx.Stmt `query:"DeleteTeamQuery"`
+	ListTeamQueries *sqlx.Stmt `query:"ListTeamQueries"`
 }
 
 type Options struct {
@@ -256,16 +246,6 @@ func isUniqueConstraintError(err error, table, column string) bool {
 // Ensure DB implements auth.Store
 var _ auth.Store = (*DB)(nil)
 
-// GetTeamSpaceAccess gets a team's access to a space
-func (d *DB) GetTeamSpaceAccess(ctx context.Context, teamID, spaceID string) (*models.SpaceTeamAccess, error) {
-	var access models.SpaceTeamAccess
-	err := d.queries.GetSpaceTeamAccess.GetContext(ctx, &access, spaceID, teamID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting team space access: %w", err)
-	}
-	return &access, nil
-}
-
 // GetUserTeams gets all teams a user is a member of
 func (d *DB) GetUserTeams(ctx context.Context, userID string) ([]*models.Team, error) {
 	var teams []*models.Team
@@ -274,59 +254,4 @@ func (d *DB) GetUserTeams(ctx context.Context, userID string) ([]*models.Team, e
 		return nil, fmt.Errorf("error getting user teams: %w", err)
 	}
 	return teams, nil
-}
-
-// GrantTeamAccess grants a team access to a space
-func (d *DB) GrantTeamAccess(ctx context.Context, access *models.SpaceTeamAccess) error {
-	now := time.Now()
-	result, err := d.queries.SetSpaceTeamAccess.ExecContext(ctx,
-		access.SpaceID,
-		access.TeamID,
-		access.Permission,
-		now,
-		now,
-	)
-	if err != nil {
-		return fmt.Errorf("error granting team access: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("error getting rows affected: %w", err)
-	}
-
-	if rowsAffected != 1 {
-		return fmt.Errorf("expected 1 row to be affected, got %d", rowsAffected)
-	}
-
-	return nil
-}
-
-// RevokeTeamAccess revokes a team's access to a space
-func (d *DB) RevokeTeamAccess(ctx context.Context, spaceID, teamID string) error {
-	result, err := d.queries.RemoveSpaceTeamAccess.ExecContext(ctx, spaceID, teamID)
-	if err != nil {
-		return fmt.Errorf("error revoking team access: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("error getting rows affected: %w", err)
-	}
-
-	if rowsAffected != 1 {
-		return fmt.Errorf("expected 1 row to be affected, got %d", rowsAffected)
-	}
-
-	return nil
-}
-
-// ListSpaceAccess lists all team access records for a space
-func (d *DB) ListSpaceAccess(ctx context.Context, spaceID string) ([]*models.SpaceTeamAccess, error) {
-	var access []*models.SpaceTeamAccess
-	err := d.queries.ListSpaceTeamAccess.SelectContext(ctx, &access, spaceID)
-	if err != nil {
-		return nil, fmt.Errorf("error listing space access: %w", err)
-	}
-	return access, nil
 }

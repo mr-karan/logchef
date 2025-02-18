@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -38,22 +37,20 @@ type Service interface {
 	AddTeamMember(ctx context.Context, teamID, userID, role string) error
 	RemoveTeamMember(ctx context.Context, teamID, userID string) error
 	ListTeamMembers(ctx context.Context, teamID string) ([]*models.TeamMember, error)
+	GetUserTeams(ctx context.Context, userID string) ([]*models.Team, error)
 
-	// Space operations
-	CreateSpace(ctx context.Context, space *models.Space) error
-	GetSpace(ctx context.Context, spaceID string) (*models.Space, error)
-	UpdateSpace(ctx context.Context, space *models.Space) error
-	DeleteSpace(ctx context.Context, spaceID string) error
-	ListSpaces(ctx context.Context) ([]*models.Space, error)
+	// Team source operations
+	AddTeamSource(ctx context.Context, teamID, sourceID string) error
+	RemoveTeamSource(ctx context.Context, teamID, sourceID string) error
+	ListTeamSources(ctx context.Context, teamID string) ([]*models.Source, error)
+	ListSourceTeams(ctx context.Context, sourceID string) ([]*models.Team, error)
 
-	// Space access operations
-	GrantTeamAccess(ctx context.Context, spaceID, teamID, permission string) error
-	RevokeTeamAccess(ctx context.Context, spaceID, teamID string) error
-	ListSpaceAccess(ctx context.Context, spaceID string) ([]*models.SpaceTeamAccess, error)
-
-	// Permission checking
-	CanAccessSpace(ctx context.Context, userID, spaceID, requiredPermission string) (bool, error)
-	GetUserSpaces(ctx context.Context, userID string) ([]*models.Space, error)
+	// Team query operations
+	CreateTeamQuery(ctx context.Context, query *models.TeamQuery) error
+	GetTeamQuery(ctx context.Context, queryID string) (*models.TeamQuery, error)
+	UpdateTeamQuery(ctx context.Context, query *models.TeamQuery) error
+	DeleteTeamQuery(ctx context.Context, queryID string) error
+	ListTeamQueries(ctx context.Context, teamID string) ([]*models.TeamQuery, error)
 }
 
 // service implements the Service interface
@@ -143,76 +140,6 @@ func (s *service) ListUsers(ctx context.Context) ([]*models.User, error) {
 	return s.store.ListUsers(ctx)
 }
 
-// CanAccessSpace checks if a user has the required permission for a space
-func (s *service) CanAccessSpace(ctx context.Context, userID, spaceID, requiredPermission string) (bool, error) {
-	// Get user's teams
-	teams, err := s.store.GetUserTeams(ctx, userID)
-	if err != nil {
-		return false, fmt.Errorf("failed to get user teams: %w", err)
-	}
-
-	// Check each team's access to the space
-	for _, team := range teams {
-		access, err := s.store.GetTeamSpaceAccess(ctx, team.ID, spaceID)
-		if err != nil {
-			continue // Skip if team doesn't have access
-		}
-
-		// Check if team's permission is sufficient
-		switch requiredPermission {
-		case "read":
-			// Any permission level is sufficient for read
-			return true, nil
-		case "write":
-			// Write or admin permission is sufficient
-			if access.Permission == "write" || access.Permission == "admin" {
-				return true, nil
-			}
-		case "admin":
-			// Only admin permission is sufficient
-			if access.Permission == "admin" {
-				return true, nil
-			}
-		}
-	}
-
-	return false, nil
-}
-
-// GetUserSpaces returns all spaces a user has access to
-func (s *service) GetUserSpaces(ctx context.Context, userID string) ([]*models.Space, error) {
-	// Get user's teams
-	teams, err := s.store.GetUserTeams(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user teams: %w", err)
-	}
-
-	// Get all spaces and filter by team access
-	spaces := make(map[string]*models.Space)
-	for _, team := range teams {
-		accesses, err := s.store.ListSpaceAccess(ctx, team.ID)
-		if err != nil {
-			continue
-		}
-
-		for _, access := range accesses {
-			space, err := s.store.GetSpace(ctx, access.SpaceID)
-			if err != nil {
-				continue
-			}
-			spaces[space.ID] = space
-		}
-	}
-
-	// Convert map to slice
-	result := make([]*models.Space, 0, len(spaces))
-	for _, space := range spaces {
-		result = append(result, space)
-	}
-
-	return result, nil
-}
-
 // CreateTeam creates a new team
 func (s *service) CreateTeam(ctx context.Context, team *models.Team) error {
 	return s.store.CreateTeam(ctx, team)
@@ -253,49 +180,54 @@ func (s *service) ListTeamMembers(ctx context.Context, teamID string) ([]*models
 	return s.store.ListTeamMembers(ctx, teamID)
 }
 
-// CreateSpace creates a new space
-func (s *service) CreateSpace(ctx context.Context, space *models.Space) error {
-	return s.store.CreateSpace(ctx, space)
+// GetUserTeams returns all teams a user is a member of
+func (s *service) GetUserTeams(ctx context.Context, userID string) ([]*models.Team, error) {
+	return s.store.GetUserTeams(ctx, userID)
 }
 
-// GetSpace retrieves a space by ID
-func (s *service) GetSpace(ctx context.Context, spaceID string) (*models.Space, error) {
-	return s.store.GetSpace(ctx, spaceID)
+// AddTeamSource adds a source to a team
+func (s *service) AddTeamSource(ctx context.Context, teamID, sourceID string) error {
+	return s.store.AddTeamSource(ctx, teamID, sourceID)
 }
 
-// UpdateSpace updates a space's information
-func (s *service) UpdateSpace(ctx context.Context, space *models.Space) error {
-	return s.store.UpdateSpace(ctx, space)
+// RemoveTeamSource removes a source from a team
+func (s *service) RemoveTeamSource(ctx context.Context, teamID, sourceID string) error {
+	return s.store.RemoveTeamSource(ctx, teamID, sourceID)
 }
 
-// DeleteSpace deletes a space
-func (s *service) DeleteSpace(ctx context.Context, spaceID string) error {
-	return s.store.DeleteSpace(ctx, spaceID)
+// ListTeamSources returns all sources for a team
+func (s *service) ListTeamSources(ctx context.Context, teamID string) ([]*models.Source, error) {
+	return s.store.ListTeamSources(ctx, teamID)
 }
 
-// ListSpaces returns all spaces
-func (s *service) ListSpaces(ctx context.Context) ([]*models.Space, error) {
-	return s.store.ListSpaces(ctx)
+// ListSourceTeams returns all teams that are members of a source
+func (s *service) ListSourceTeams(ctx context.Context, sourceID string) ([]*models.Team, error) {
+	return s.store.ListSourceTeams(ctx, sourceID)
 }
 
-// GrantTeamAccess grants a team access to a space with the specified permission
-func (s *service) GrantTeamAccess(ctx context.Context, spaceID, teamID, permission string) error {
-	access := &models.SpaceTeamAccess{
-		SpaceID:    spaceID,
-		TeamID:     teamID,
-		Permission: permission,
-	}
-	return s.store.GrantTeamAccess(ctx, access)
+// CreateTeamQuery creates a new team query
+func (s *service) CreateTeamQuery(ctx context.Context, query *models.TeamQuery) error {
+	return s.store.CreateTeamQuery(ctx, query)
 }
 
-// RevokeTeamAccess revokes a team's access to a space
-func (s *service) RevokeTeamAccess(ctx context.Context, spaceID, teamID string) error {
-	return s.store.RevokeTeamAccess(ctx, spaceID, teamID)
+// GetTeamQuery retrieves a team query by ID
+func (s *service) GetTeamQuery(ctx context.Context, queryID string) (*models.TeamQuery, error) {
+	return s.store.GetTeamQuery(ctx, queryID)
 }
 
-// ListSpaceAccess returns all team access records for a space
-func (s *service) ListSpaceAccess(ctx context.Context, spaceID string) ([]*models.SpaceTeamAccess, error) {
-	return s.store.ListSpaceAccess(ctx, spaceID)
+// UpdateTeamQuery updates a team query
+func (s *service) UpdateTeamQuery(ctx context.Context, query *models.TeamQuery) error {
+	return s.store.UpdateTeamQuery(ctx, query)
+}
+
+// DeleteTeamQuery deletes a team query
+func (s *service) DeleteTeamQuery(ctx context.Context, queryID string) error {
+	return s.store.DeleteTeamQuery(ctx, queryID)
+}
+
+// ListTeamQueries returns all team queries for a team
+func (s *service) ListTeamQueries(ctx context.Context, teamID string) ([]*models.TeamQuery, error) {
+	return s.store.ListTeamQueries(ctx, teamID)
 }
 
 // More method implementations will follow...

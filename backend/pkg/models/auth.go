@@ -54,7 +54,6 @@ type Team struct {
 	ID          string    `db:"id" json:"id"`
 	Name        string    `db:"name" json:"name"`
 	Description string    `db:"description" json:"description"`
-	CreatedBy   string    `db:"created_by" json:"created_by"`
 	CreatedAt   time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
 }
@@ -67,40 +66,13 @@ type TeamMember struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
-// Space represents a workspace in the system
-type Space struct {
-	ID          string    `db:"id" json:"id"`
-	Name        string    `db:"name" json:"name"`
-	Description string    `db:"description" json:"description"`
-	CreatedBy   string    `db:"created_by" json:"created_by"`
-	CreatedAt   time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
-}
-
-// SpaceDataSource represents a data source linked to a space
-type SpaceDataSource struct {
-	SpaceID      string    `db:"space_id" json:"space_id"`
-	DataSourceID string    `db:"data_source_id" json:"data_source_id"`
-	CreatedAt    time.Time `db:"created_at" json:"created_at"`
-}
-
-// SpaceTeamAccess represents a team's access level to a space
-type SpaceTeamAccess struct {
-	SpaceID    string    `db:"space_id" json:"space_id"`
-	TeamID     string    `db:"team_id" json:"team_id"`
-	Permission string    `db:"permission" json:"permission"`
-	CreatedAt  time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt  time.Time `db:"updated_at" json:"updated_at"`
-}
-
-// Query represents a saved query in a space
-type Query struct {
-	ID           string    `db:"id" json:"id"`
-	SpaceID      string    `db:"space_id" json:"space_id"`
-	Name         string    `db:"name" json:"name"`
-	Description  string    `db:"description" json:"description"`
-	QueryContent string    `db:"query_content" json:"query_content"`
-	CreatedBy    string    `db:"created_by" json:"created_by"`
-	CreatedAt    time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
+// TeamQuery represents a saved query in a team
+type TeamQuery struct {
+	ID           string    `json:"id" db:"id"`
+	TeamID       string    `json:"team_id" db:"team_id"`
+	Name         string    `json:"name" db:"name"`
+	Description  string    `json:"description" db:"description"`
+	QueryContent string    `json:"query_content" db:"query_content"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
 }

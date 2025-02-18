@@ -1,155 +1,137 @@
-import { createRouter, createWebHistory } from "vue-router";
-import type { RouteRecordRaw } from "vue-router";
+import {
+  createRouter,
+  createWebHistory,
+  type RouteRecordRaw,
+} from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 
 const routes: RouteRecordRaw[] = [
   {
     path: "/",
-    name: "Login",
-    component: () => import("@/views/auth/Login.vue"),
-    meta: {
-      title: "Login",
-      public: true,
-    },
+    redirect: "/logs/explore",
   },
+  // Logs Section
   {
-    path: "/logout",
-    name: "Logout",
-    component: () => import("@/views/auth/Logout.vue"),
+    path: "/logs",
+    component: () => import("@/views/logs/LogsLayout.vue"),
     meta: {
-      title: "Logging out...",
-      public: true,
-    },
-  },
-  {
-    path: "/dashboard",
-    name: "Dashboard",
-    component: () => import("@/views/Dashboard.vue"),
-    meta: {
-      title: "Dashboard",
-      requiresAuth: true,
-    },
-  },
-  {
-    path: "/explore",
-    name: "Explore",
-    component: () => import("@/views/explore/Explore.vue"),
-    meta: {
-      title: "Explore",
-      requiresAuth: true,
-    },
-  },
-  // {
-  //   path: '/query-explorer',
-  //   component: () => import('@/views/QueryExplorer.vue'),
-  //   meta: {
-  //     title: 'Query Explorer'
-  //   },
-  //   children: [
-  //     {
-  //       path: '',
-  //       name: 'QueryExplorer',
-  //       redirect: { name: 'NewQuery' }
-  //     },
-  //     {
-  //       path: 'new',
-  //       name: 'NewQuery',
-  //       component: () => import('@/views/query-explorer/NewQuery.vue')
-  //     }
-  //   ]
-  // },
-  // {
-  //   path: '/saved-queries',
-  //   name: 'SavedQueries',
-  //   component: () => import('@/views/SavedQueries.vue'),
-  //   meta: {
-  //     title: 'Saved Queries'
-  //   }
-  // },
-  {
-    path: "/sources",
-    component: () => import("@/views/Sources.vue"),
-    meta: {
-      title: "Sources",
       requiresAuth: true,
     },
     children: [
       {
         path: "",
+        redirect: "explore",
+      },
+      {
+        path: "explore",
+        name: "LogExplorer",
+        component: () => import("@/views/logs/LogExplorer.vue"),
+        meta: { title: "Log Explorer" },
+      },
+      // {
+      //   path: "history",
+      //   name: "QueryHistory",
+      //   component: () => import("@/views/logs/QueryHistory.vue"),
+      //   meta: { title: "Query History" },
+      // },
+    ],
+  },
+  // Sources Section
+  {
+    path: "/sources",
+    component: () => import("@/views/sources/SourcesLayout.vue"),
+    meta: {
+      requiresAuth: true,
+    },
+    children: [
+      {
+        path: "",
+        redirect: "list",
+      },
+      {
+        path: "list",
         name: "Sources",
-        redirect: { name: "NewSource" },
+        component: () => import("@/views/sources/ManageSources.vue"),
+        meta: { title: "Sources" },
       },
       {
         path: "new",
         name: "NewSource",
         component: () => import("@/views/sources/AddSource.vue"),
-      },
-      {
-        path: "manage",
-        name: "ManageSources",
-        component: () => import("@/views/sources/ManageSources.vue"),
+        meta: { title: "New Source" },
       },
     ],
   },
+  // Access Section (Admin only)
   {
-    path: "/users",
-    component: () => import("@/views/Users.vue"),
+    path: "/access",
+    component: () => import("@/views/access/AccessLayout.vue"),
     meta: {
-      title: "Users",
       requiresAuth: true,
       requiresAdmin: true,
     },
     children: [
       {
         path: "",
+        redirect: "users",
+      },
+      {
+        path: "users",
         name: "Users",
-        redirect: { name: "ManageUsers" },
+        component: () => import("@/views/access/users/UsersList.vue"),
+        meta: { title: "Users" },
       },
       {
-        path: "new",
+        path: "users/new",
         name: "NewUser",
-        component: () => import("@/views/users/AddUser.vue"),
+        component: () => import("@/views/access/users/AddUser.vue"),
+        meta: { title: "New User" },
       },
       {
-        path: "manage",
-        name: "ManageUsers",
-        component: () => import("@/views/users/ManageUsers.vue"),
+        path: "teams",
+        name: "Teams",
+        component: () => import("@/views/access/teams/TeamsList.vue"),
+        meta: { title: "Teams" },
+      },
+      {
+        path: "teams/new",
+        name: "NewTeam",
+        component: () => import("@/views/access/teams/AddTeam.vue"),
+        meta: { title: "New Team" },
+      },
+      {
+        path: "teams/:id",
+        name: "TeamSettings",
+        component: () => import("@/views/access/teams/TeamSettings.vue"),
+        meta: { title: "Team Settings" },
       },
     ],
   },
-  // {
-  //   path: '/settings',
-  //   component: () => import('@/views/Settings.vue'),
-  //   meta: {
-  //     title: 'Settings'
-  //   },
-  //   children: [
-  //     {
-  //       path: '',
-  //       name: 'Settings',
-  //       redirect: { name: 'GeneralSettings' }
-  //     },
-  //     {
-  //       path: 'general',
-  //       name: 'GeneralSettings',
-  //       component: () => import('@/views/settings/GeneralSettings.vue')
-  //     },
-  //     {
-  //       path: 'team',
-  //       name: 'TeamSettings',
-  //       component: () => import('@/views/settings/TeamSettings.vue')
-  //     },
-  //     {
-  //       path: 'api-keys',
-  //       name: 'ApiKeys',
-  //       component: () => import('@/views/settings/ApiKeys.vue')
-  //     }
-  //   ]
-  // },
+  // Settings Section
+  {
+    path: "/settings",
+    component: () => import("@/views/settings/SettingsLayout.vue"),
+    meta: {
+      requiresAuth: true,
+    },
+    children: [
+      {
+        path: "",
+        redirect: "profile",
+      },
+      {
+        path: "profile",
+        name: "Profile",
+        component: () => import("@/views/settings/UserProfile.vue"),
+        meta: { title: "Profile Settings" },
+      },
+    ],
+  },
+  // Error Pages
   {
     path: "/forbidden",
     name: "Forbidden",
-    component: () => import("@/views/Forbidden.vue"),
+    component: () => import("@/views/error/Forbidden.vue"),
     meta: {
       title: "Access Denied",
       public: true,
@@ -158,7 +140,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: "/:pathMatch(.*)*",
     name: "NotFound",
-    component: () => import("@/views/NotFound.vue"),
+    component: () => import("@/views/error/NotFound.vue"),
     meta: {
       title: "Not Found",
       public: true,
@@ -167,55 +149,29 @@ const routes: RouteRecordRaw[] = [
 ];
 
 const router = createRouter({
-  // Apply the base URL from Vite's environment variables
-  history: createWebHistory(import.meta.env.BASE_URL),
+  history: createWebHistory(),
   routes,
 });
 
-// Global navigation guard to handle auth and update document title
-router.beforeEach(async (to, _from, next) => {
+router.beforeEach((to, from, next) => {
   const authStore = useAuthStore();
+  const isAuthenticated = authStore.isAuthenticated;
+  const requiresAuth = to.matched.some((record) => record.meta.requiresAuth);
+  const requiresAdmin = to.matched.some((record) => record.meta.requiresAdmin);
+  const isPublic = to.matched.some((record) => record.meta.public);
 
   // Update document title
   document.title = `${to.meta.title ? to.meta.title + " - " : ""}LogChef`;
 
-  // Wait for auth to be initialized
-  if (!authStore.isInitialized) {
-    await authStore.initialize();
+  if (requiresAuth && !isAuthenticated) {
+    next("/login");
+  } else if (requiresAdmin && !authStore.isAdmin) {
+    next("/forbidden");
+  } else if (to.path === "/login" && isAuthenticated) {
+    next("/");
+  } else {
+    next();
   }
-
-  // If route is public, allow access
-  if (to.meta.public) {
-    // If route is login and user is already authenticated, redirect to explore
-    if (to.name === "Login" && authStore.isAuthenticated) {
-      // If there's a redirect query param, use that, otherwise go to explore
-      const redirectPath = to.query.redirect as string;
-      return next(redirectPath || { name: "Explore" });
-    }
-    return next();
-  }
-
-  // Check if route requires auth
-  if (to.matched.some((record) => record.meta.requiresAuth)) {
-    // Check if user is authenticated
-    if (!authStore.isAuthenticated) {
-      // If not authenticated, redirect to login with the current path as redirect
-      return next({
-        path: "/",
-        query: { redirect: to.fullPath },
-      });
-    }
-
-    // Check if route requires admin role
-    if (to.matched.some((record) => record.meta.requiresAdmin)) {
-      if (authStore.user?.role !== "admin") {
-        // If not admin, redirect to forbidden page
-        return next({ name: "Forbidden" });
-      }
-    }
-  }
-
-  next();
 });
 
 export default router;

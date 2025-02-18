@@ -36,21 +36,16 @@ type Store interface {
 	ListTeamMembers(ctx context.Context, teamID string) ([]*models.TeamMember, error)
 	GetUserTeams(ctx context.Context, userID string) ([]*models.Team, error)
 
-	// Space operations
-	CreateSpace(ctx context.Context, space *models.Space) error
-	GetSpace(ctx context.Context, spaceID string) (*models.Space, error)
-	UpdateSpace(ctx context.Context, space *models.Space) error
-	DeleteSpace(ctx context.Context, spaceID string) error
-	ListSpaces(ctx context.Context) ([]*models.Space, error)
+	// Team source operations
+	AddTeamSource(ctx context.Context, teamID, sourceID string) error
+	RemoveTeamSource(ctx context.Context, teamID, sourceID string) error
+	ListTeamSources(ctx context.Context, teamID string) ([]*models.Source, error)
+	ListSourceTeams(ctx context.Context, sourceID string) ([]*models.Team, error)
 
-	// Space access operations
-	GrantTeamAccess(ctx context.Context, access *models.SpaceTeamAccess) error
-	RevokeTeamAccess(ctx context.Context, spaceID, teamID string) error
-	ListSpaceAccess(ctx context.Context, spaceID string) ([]*models.SpaceTeamAccess, error)
-	GetTeamSpaceAccess(ctx context.Context, teamID, spaceID string) (*models.SpaceTeamAccess, error)
-
-	// Space data source operations
-	AddSpaceDataSource(ctx context.Context, spaceDS *models.SpaceDataSource) error
-	RemoveSpaceDataSource(ctx context.Context, spaceID, dataSourceID string) error
-	ListSpaceDataSources(ctx context.Context, spaceID string) ([]*models.SpaceDataSource, error)
+	// Team query operations
+	CreateTeamQuery(ctx context.Context, query *models.TeamQuery) error
+	GetTeamQuery(ctx context.Context, queryID string) (*models.TeamQuery, error)
+	UpdateTeamQuery(ctx context.Context, query *models.TeamQuery) error
+	DeleteTeamQuery(ctx context.Context, queryID string) error
+	ListTeamQueries(ctx context.Context, teamID string) ([]*models.TeamQuery, error)
 }

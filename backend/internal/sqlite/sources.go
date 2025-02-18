@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -74,6 +75,9 @@ func (d *DB) GetSourceByName(ctx context.Context, database, tableName string) (*
 	var row SourceRow
 	err := d.queries.GetSourceByName.GetContext(ctx, &row, database, tableName)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // Return nil, nil when no source is found
+		}
 		return nil, fmt.Errorf("error getting source: %w", err)
 	}
 

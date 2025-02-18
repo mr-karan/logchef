@@ -1,8 +1,8 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { useRouter } from "vue-router";
 import type { Session, User } from "@/types";
 import { authApi } from "@/api/auth";
+import { navigationService } from "@/services/navigation";
 
 interface SessionResponse {
   status: "success";
@@ -22,7 +22,6 @@ interface ErrorResponse {
 type ApiResponse = SessionResponse | ErrorResponse;
 
 export const useAuthStore = defineStore("auth", () => {
-  const router = useRouter();
   const user = ref<User | null>(null);
   const session = ref<Session | null>(null);
   const isAuthenticated = ref(false);
@@ -53,27 +52,27 @@ export const useAuthStore = defineStore("auth", () => {
         });
       } else {
         // Handle session not found gracefully
-        user.value = null;
-        session.value = null;
-        isAuthenticated.value = false;
+        await clearState();
         console.log("No active session found");
       }
     } catch (error) {
       console.error("Failed to initialize auth:", error);
-      user.value = null;
-      session.value = null;
-      isAuthenticated.value = false;
+      await clearState();
     } finally {
       isInitialized.value = true;
       isInitializing.value = false;
     }
   }
 
-  // Login user
-  async function login() {
-    // Get current route's redirect query param
-    const redirectPath = router.currentRoute.value.query.redirect as string;
+  // Clear auth state
+  async function clearState() {
+    user.value = null;
+    session.value = null;
+    isAuthenticated.value = false;
+  }
 
+  // Login user
+  async function login(redirectPath?: string) {
     // Redirect to backend login endpoint with redirect_uri
     window.location.href = authApi.getLoginUrl(redirectPath);
   }
@@ -87,11 +86,9 @@ export const useAuthStore = defineStore("auth", () => {
       console.error("Failed to logout:", error);
     } finally {
       // Always clear state
-      user.value = null;
-      session.value = null;
-      isAuthenticated.value = false;
+      await clearState();
       // Redirect to login page
-      await router.push("/");
+      await navigationService.goToLogin();
     }
   }
 
@@ -103,5 +100,6 @@ export const useAuthStore = defineStore("auth", () => {
     initialize,
     login,
     logout,
+    clearState,
   };
 });

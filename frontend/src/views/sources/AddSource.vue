@@ -1,111 +1,60 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { sourcesApi } from '@/api/sources'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import {
-    FormControl,
-    FormDescription,
-    FormField,
-    FormItem,
-    FormLabel,
-    FormMessage,
-} from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import { useToast } from '@/components/ui/toast/use-toast'
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
-
-import { toTypedSchema } from '@vee-validate/zod'
-import { useForm } from 'vee-validate'
-import * as z from 'zod'
-import type { CreateSourcePayload } from '@/api/sources'
-import { isErrorResponse, getErrorMessage } from '@/api/types'
+import { sourcesApi } from '@/api/sources'
+import { isErrorResponse } from '@/api/types'
 
 const router = useRouter()
-const isLoading = ref(false)
-const enableTTL = ref(true)
-const enableAuth = ref(false)
-const isFormValid = ref(false)
-
-const formSchema = toTypedSchema(z.object({
-    table_name: z.string()
-        .min(4, 'Table name must be at least 4 characters')
-        .max(30, 'Table name must be less than 30 characters')
-        .regex(/^[a-zA-Z][a-zA-Z0-9_]*$/, 'Table name must start with a letter and contain only letters, numbers, and underscores'),
-    description: z.string()
-        .max(100, 'Description must be less than 100 characters')
-        .optional(),
-    schema_type: z.enum(['managed', 'unmanaged'], {
-        required_error: 'Please select a source type',
-    }).default('managed'),
-    host: z.string().min(1, 'Host is required').default('localhost'),
-    port: z.number().min(1).max(65535).default(9000),
-    database: z.string().min(1, 'Database is required').default('logs'),
-    username: z.string().optional(),
-    password: z.string().optional(),
-    ttl_days: z.number().min(1, 'TTL days must be at least 1').default(90),
-}).refine((data) => {
-    // If auth is enabled, both username and password must be provided
-    if (enableAuth.value) {
-        return data.username && data.password
-    }
-    return true
-}, {
-    message: 'Username and password are required when authentication is enabled'
-}))
-
 const { toast } = useToast()
 
-const formData = ref({
-    table_name: '',
-    description: '',
-    schema_type: 'managed' as const,
-    host: 'localhost',
-    port: 9000,
-    database: 'logs',
-    username: '',
-    password: '',
-    ttl_days: 90,
-})
+const schemaType = ref('managed')
+const host = ref('')
+const username = ref('')
+const password = ref('')
+const database = ref('')
+const tableName = ref('')
+const description = ref('')
+const ttlDays = ref(0)
+const isSubmitting = ref(false)
 
-const form = useForm({
-    initialValues: formData.value,
-    validationSchema: formSchema,
-})
+const handleSubmit = async () => {
+    if (isSubmitting.value) return
 
-// Watch for form validity
-watch([form.values, form.errors, form.meta, enableAuth], () => {
-    const isValid = form.meta.value?.valid === true
-    const hasRequiredFields = Boolean(form.values.host && form.values.database && form.values.table_name)
-    const hasAuthFields = !enableAuth.value || (enableAuth.value && form.values.username && form.values.password)
-    isFormValid.value = Boolean(isValid && hasRequiredFields && hasAuthFields)
-})
+    // Basic validation
+    if (!host.value || !database.value || !tableName.value) {
+        toast({
+            title: 'Error',
+            description: 'Please fill in all required fields',
+            variant: 'destructive',
+            duration: TOAST_DURATION.ERROR,
+        })
+        return
+    }
 
-const onSubmit = form.handleSubmit(async (values) => {
+    isSubmitting.value = true
+
     try {
-        isLoading.value = true
-        const payload: CreateSourcePayload = {
-            schema_type: values.schema_type,
+        const response = await sourcesApi.createSource({
+            schema_type: schemaType.value,
             connection: {
-                host: values.host,
-                username: enableAuth.value ? values.username || '' : '',
-                password: enableAuth.value ? values.password || '' : '',
-                database: values.database,
-                table_name: values.table_name,
+                host: host.value,
+                username: username.value,
+                password: password.value,
+                database: database.value,
+                table_name: tableName.value,
             },
-            description: values.description,
-            ttl_days: enableTTL.value ? Number(values.ttl_days) : -1,
-        }
+            description: description.value,
+            ttl_days: ttlDays.value,
+        })
 
-        const response = await sourcesApi.createSource(payload)
         if (isErrorResponse(response)) {
             toast({
                 title: 'Error',
@@ -121,170 +70,105 @@ const onSubmit = form.handleSubmit(async (values) => {
             description: 'Source created successfully',
             duration: TOAST_DURATION.SUCCESS,
         })
-        router.push('/sources/manage')
+
+        // Redirect to sources list
+        router.push({ name: 'Sources' })
     } catch (error) {
         console.error('Error creating source:', error)
         toast({
             title: 'Error',
-            description: getErrorMessage(error),
+            description: 'Failed to create source. Please try again.',
             variant: 'destructive',
             duration: TOAST_DURATION.ERROR,
         })
     } finally {
-        isLoading.value = false
+        isSubmitting.value = false
     }
-})
-
-const sourceTypes = [
-    { value: 'managed', label: 'Managed' },
-    { value: 'unmanaged', label: 'Unmanaged' },
-]
+}
 </script>
 
 <template>
-    <form class="w-2/3 space-y-6" @submit="onSubmit">
-        <FormField v-slot="{ componentField }" name="table_name">
-            <FormItem>
-                <FormLabel>Table Name</FormLabel>
-                <FormControl>
-                    <Input type="text" placeholder="production_logs" v-bind="componentField" />
-                </FormControl>
-                <FormDescription>
-                    The name of the table in Clickhouse. Must start with a letter and contain only letters, numbers, and
-                    underscores.
-                </FormDescription>
-                <FormMessage />
-            </FormItem>
-        </FormField>
-
-        <FormField v-slot="{ componentField }" name="description">
-            <FormItem>
-                <FormLabel>Description</FormLabel>
-                <FormControl>
-                    <Input type="text" placeholder="Optional description of this source" v-bind="componentField" />
-                </FormControl>
-                <FormDescription>
-                    A brief description of what this source is used for (optional)
-                </FormDescription>
-                <FormMessage />
-            </FormItem>
-        </FormField>
-
-        <FormField v-slot="{ componentField }" name="schema_type">
-            <FormItem>
-                <FormLabel>Source Type</FormLabel>
-                <Select v-bind="componentField">
-                    <FormControl>
-                        <SelectTrigger>
-                            <SelectValue placeholder="Select a source type" />
-                        </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                        <SelectItem v-for="type in sourceTypes" :key="type.value" :value="type.value">
-                            {{ type.label }}
-                        </SelectItem>
-                    </SelectContent>
-                </Select>
-                <FormDescription>
-                    Choose between managed or unmanaged source type
-                </FormDescription>
-                <FormMessage />
-            </FormItem>
-        </FormField>
-
-        <div class="space-y-6 rounded-lg border p-6">
-            <div class="flex items-center justify-between border-b pb-4">
-                <div>
-                    <h3 class="text-lg font-medium">Connection Configuration</h3>
-                    <p class="text-sm text-muted-foreground">Configure how to connect to your Clickhouse instance</p>
-                </div>
-            </div>
-
-            <div class="space-y-4">
-                <FormField v-slot="{ componentField }" name="host">
-                    <FormItem>
-                        <FormLabel>Host Address (including port)</FormLabel>
-                        <FormControl>
-                            <Input type="text" placeholder="localhost:9000" v-bind="componentField" />
-                        </FormControl>
-                        <FormDescription>
-                            The Clickhouse server address including port (e.g., localhost:9000 or example.com:9000).
-                        </FormDescription>
-                        <FormMessage />
-                    </FormItem>
-                </FormField>
-
-                <FormField v-slot="{ componentField }" name="database">
-                    <FormItem>
-                        <FormLabel>Database</FormLabel>
-                        <FormControl>
-                            <Input type="text" placeholder="logs" v-bind="componentField" />
-                        </FormControl>
-                        <FormMessage />
-                    </FormItem>
-                </FormField>
-
-                <div class="flex items-center justify-between rounded-lg border p-4">
-                    <div class="space-y-0.5">
-                        <label class="text-base font-medium">Enable Authentication</label>
+    <Card>
+        <CardHeader>
+            <CardTitle>Add Source</CardTitle>
+            <CardDescription>
+                Connect to a ClickHouse database and configure log ingestion
+            </CardDescription>
+        </CardHeader>
+        <CardContent>
+            <form @submit.prevent="handleSubmit" class="space-y-6">
+                <div class="space-y-4">
+                    <div class="grid gap-2">
+                        <Label for="schema_type">Schema Type</Label>
+                        <Select v-model="schemaType">
+                            <SelectTrigger>
+                                <SelectValue placeholder="Select schema type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="managed">Managed</SelectItem>
+                                <SelectItem value="unmanaged">Unmanaged</SelectItem>
+                            </SelectContent>
+                        </Select>
                         <p class="text-sm text-muted-foreground">
-                            Enable if your Clickhouse instance requires authentication
+                            {{ schemaType === 'managed'
+                                ? 'LogChef will create and manage the table schema'
+                                : 'Use an existing table with custom schema'
+                            }}
                         </p>
                     </div>
-                    <Switch :checked="enableAuth" @update:checked="enableAuth = $event"
-                        class="data-[state=checked]:bg-primary" />
-                </div>
 
-                <template v-if="enableAuth">
-                    <FormField v-slot="{ componentField }" name="username">
-                        <FormItem>
-                            <FormLabel>Username</FormLabel>
-                            <FormControl>
-                                <Input type="text" v-bind="componentField" />
-                            </FormControl>
-                            <FormMessage />
-                        </FormItem>
-                    </FormField>
+                    <div class="grid gap-2">
+                        <Label for="host">Host</Label>
+                        <Input id="host" v-model="host" placeholder="localhost:9000" required />
+                    </div>
 
-                    <FormField v-slot="{ componentField }" name="password">
-                        <FormItem>
-                            <FormLabel>Password</FormLabel>
-                            <FormControl>
-                                <Input type="password" v-bind="componentField" />
-                            </FormControl>
-                            <FormMessage />
-                        </FormItem>
-                    </FormField>
-                </template>
+                    <div class="grid gap-4 md:grid-cols-2">
+                        <div class="grid gap-2">
+                            <Label for="username">Username</Label>
+                            <Input id="username" v-model="username" placeholder="default" />
+                        </div>
 
-                <div class="flex items-center justify-between rounded-lg border p-4">
-                    <div class="space-y-0.5">
-                        <label class="text-base font-medium">Enable TTL</label>
+                        <div class="grid gap-2">
+                            <Label for="password">Password</Label>
+                            <Input id="password" v-model="password" type="password" />
+                        </div>
+                    </div>
+
+                    <div class="grid gap-4 md:grid-cols-2">
+                        <div class="grid gap-2">
+                            <Label for="database">Database</Label>
+                            <Input id="database" v-model="database" placeholder="logs" required />
+                        </div>
+
+                        <div class="grid gap-2">
+                            <Label for="table_name">Table Name</Label>
+                            <Input id="table_name" v-model="tableName" placeholder="app_logs" required />
+                        </div>
+                    </div>
+
+                    <div class="grid gap-2">
+                        <Label for="description">Description</Label>
+                        <Textarea id="description" v-model="description" placeholder="Optional description" rows="2" />
+                    </div>
+
+                    <div class="grid gap-2">
+                        <Label for="ttl_days">TTL Days</Label>
+                        <Input id="ttl_days" v-model="ttlDays" type="number" min="0" placeholder="0" />
                         <p class="text-sm text-muted-foreground">
-                            Set a time-to-live duration for log entries
+                            Number of days to keep logs. Set to 0 for no TTL.
                         </p>
                     </div>
-                    <Switch :checked="enableTTL" @update:checked="enableTTL = $event"
-                        class="data-[state=checked]:bg-primary" />
                 </div>
 
-                <FormField v-if="enableTTL" v-slot="{ componentField }" name="ttl_days">
-                    <FormItem>
-                        <FormLabel>TTL Days</FormLabel>
-                        <FormControl>
-                            <Input type="number" placeholder="90" v-bind="componentField" />
-                        </FormControl>
-                        <FormDescription>
-                            Number of days after which logs will be automatically deleted
-                        </FormDescription>
-                        <FormMessage />
-                    </FormItem>
-                </FormField>
-            </div>
-        </div>
-
-        <Button type="submit" :disabled="!isFormValid || isLoading" :loading="isLoading">
-            Create Source
-        </Button>
-    </form>
+                <div class="flex justify-end space-x-4">
+                    <Button type="button" variant="outline" @click="router.push({ name: 'Sources' })">
+                        Cancel
+                    </Button>
+                    <Button type="submit" :disabled="isSubmitting">
+                        {{ isSubmitting ? 'Creating...' : 'Create Source' }}
+                    </Button>
+                </div>
+            </form>
+        </CardContent>
+    </Card>
 </template>

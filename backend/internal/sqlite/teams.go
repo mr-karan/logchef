@@ -16,9 +16,6 @@ func (d *DB) CreateTeam(ctx context.Context, team *models.Team) error {
 		team.ID,
 		team.Name,
 		team.Description,
-		team.CreatedBy,
-		time.Now(),
-		time.Now(),
 	)
 	if err != nil {
 		if isUniqueConstraintError(err, "teams", "name") {
@@ -54,7 +51,7 @@ func (d *DB) UpdateTeam(ctx context.Context, team *models.Team) error {
 	result, err := d.queries.UpdateTeam.ExecContext(ctx,
 		team.Name,
 		team.Description,
-		time.Now(),
+		team.UpdatedAt,
 		team.ID,
 	)
 	if err != nil {

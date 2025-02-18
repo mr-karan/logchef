@@ -5,34 +5,27 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
-import { usersApi } from '@/api/users'
-import { getErrorMessage } from '@/api/types'
+import { teamsApi } from '@/api/users'
+import { isErrorResponse, getErrorMessage } from '@/api/types'
 
 const router = useRouter()
 const { toast } = useToast()
 
-const email = ref('')
-const fullName = ref('')
-const role = ref('member')
+const name = ref('')
+const description = ref('')
 const isSubmitting = ref(false)
 
 const handleSubmit = async () => {
     if (isSubmitting.value) return
 
     // Basic validation
-    if (!email.value || !fullName.value) {
+    if (!name.value) {
         toast({
             title: 'Error',
-            description: 'Please fill in all required fields',
+            description: 'Please enter a team name',
             variant: 'destructive',
             duration: TOAST_DURATION.ERROR,
         })
@@ -42,13 +35,12 @@ const handleSubmit = async () => {
     isSubmitting.value = true
 
     try {
-        const response = await usersApi.createUser({
-            email: email.value,
-            full_name: fullName.value,
-            role: role.value as 'admin' | 'member',
+        const response = await teamsApi.createTeam({
+            name: name.value,
+            description: description.value,
         })
 
-        if ('error' in response.data) {
+        if (isErrorResponse(response)) {
             toast({
                 title: 'Error',
                 description: response.data.error,
@@ -60,14 +52,14 @@ const handleSubmit = async () => {
 
         toast({
             title: 'Success',
-            description: 'User created successfully',
+            description: 'Team created successfully',
             duration: TOAST_DURATION.SUCCESS,
         })
 
-        // Redirect to manage users
-        router.push({ name: 'ManageUsers' })
+        // Redirect to manage teams
+        router.push({ name: 'ManageTeams' })
     } catch (error) {
-        console.error('Error creating user:', error)
+        console.error('Error creating team:', error)
         toast({
             title: 'Error',
             description: getErrorMessage(error),
@@ -83,44 +75,31 @@ const handleSubmit = async () => {
 <template>
     <Card>
         <CardHeader>
-            <CardTitle>Add User</CardTitle>
+            <CardTitle>Add Team</CardTitle>
             <CardDescription>
-                Create a new user account
+                Create a new team for your organization
             </CardDescription>
         </CardHeader>
         <CardContent>
             <form @submit.prevent="handleSubmit" class="space-y-6">
                 <div class="space-y-4">
                     <div class="grid gap-2">
-                        <Label for="email">Email</Label>
-                        <Input id="email" v-model="email" type="email" placeholder="user@example.com" required />
+                        <Label for="name">Team Name</Label>
+                        <Input id="name" v-model="name" placeholder="Engineering Team" required />
                     </div>
 
                     <div class="grid gap-2">
-                        <Label for="fullName">Full Name</Label>
-                        <Input id="fullName" v-model="fullName" placeholder="John Doe" required />
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label for="role">Role</Label>
-                        <Select v-model="role">
-                            <SelectTrigger id="role">
-                                <SelectValue placeholder="Select a role" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="member">Member</SelectItem>
-                                <SelectItem value="admin">Admin</SelectItem>
-                            </SelectContent>
-                        </Select>
+                        <Label for="description">Description</Label>
+                        <Textarea id="description" v-model="description" placeholder="Team description" rows="3" />
                     </div>
                 </div>
 
                 <div class="flex justify-end space-x-4">
-                    <Button type="button" variant="outline" @click="router.push({ name: 'ManageUsers' })">
+                    <Button type="button" variant="outline" @click="router.push({ name: 'ManageTeams' })">
                         Cancel
                     </Button>
                     <Button type="submit" :disabled="isSubmitting">
-                        {{ isSubmitting ? 'Creating...' : 'Create User' }}
+                        {{ isSubmitting ? 'Creating...' : 'Create Team' }}
                     </Button>
                 </div>
             </form>

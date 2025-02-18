@@ -1,6 +1,6 @@
 import axios from "axios";
 import { useAuthStore } from "@/stores/auth";
-import router from "@/router";
+import { navigationService } from "@/services/navigation";
 
 // Create base axios instance with common configuration
 export const api = axios.create({
@@ -37,22 +37,17 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       // Clear auth state using the store
       const authStore = useAuthStore();
-      await authStore.logout();
+      await authStore.clearState();
 
-      // Redirect to login with the current path as redirect
-      const currentPath = router.currentRoute.value.fullPath;
-      await router.push({
-        path: "/",
-        query: currentPath !== "/" ? { redirect: currentPath } : undefined,
-      });
-
+      // Get current path for redirect
+      const currentPath = window.location.pathname + window.location.search;
+      await navigationService.goToLogin(currentPath);
       return Promise.reject(error);
     }
 
     // Handle forbidden errors
     if (error.response?.status === 403) {
-      // Redirect to forbidden page
-      await router.push({ name: "Forbidden" });
+      await navigationService.goToForbidden();
       return Promise.reject(error);
     }
 

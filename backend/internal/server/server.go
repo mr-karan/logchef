@@ -100,15 +100,10 @@ func (s *Server) setupRoutes() {
 	s.app.Post("/api/v1/teams/:id/members", s.requireAuth, s.handleAddTeamMember)
 	s.app.Delete("/api/v1/teams/:id/members/:userId", s.requireAuth, s.handleRemoveTeamMember)
 
-	// Space routes
-	s.app.Get("/api/v1/spaces", s.requireAuth, s.handleListSpaces)
-	s.app.Post("/api/v1/spaces", s.requireAuth, s.handleCreateSpace)
-	s.app.Get("/api/v1/spaces/:id", s.requireAuth, s.handleGetSpace)
-	s.app.Put("/api/v1/spaces/:id", s.requireAuth, s.handleUpdateSpace)
-	s.app.Delete("/api/v1/spaces/:id", s.requireAuth, s.handleDeleteSpace)
-	s.app.Get("/api/v1/spaces/:id/teams", s.requireAuth, s.handleListSpaceTeams)
-	s.app.Put("/api/v1/spaces/:id/teams/:teamId", s.requireAuth, s.handleUpdateSpaceTeamAccess)
-	s.app.Delete("/api/v1/spaces/:id/teams/:teamId", s.requireAuth, s.handleRevokeSpaceTeamAccess)
+	// Team source routes
+	s.app.Get("/api/v1/teams/:id/sources", s.requireAuth, s.handleListTeamSources)
+	s.app.Post("/api/v1/teams/:id/sources", s.requireAuth, s.handleAddTeamSource)
+	s.app.Delete("/api/v1/teams/:id/sources/:sourceId", s.requireAuth, s.handleRemoveTeamSource)
 
 	// Handle 404 for API routes
 	s.app.Use("/api/*", func(c *fiber.Ctx) error {

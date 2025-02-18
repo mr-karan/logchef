@@ -53,10 +53,14 @@ import {
     ChevronsUpDown,
     LogOut,
     Users,
+    Home,
 } from 'lucide-vue-next'
 
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { computed } from 'vue'
+import type { FunctionalComponent } from 'vue'
+import type { LucideProps } from 'lucide-vue-next'
 
 const route = useRoute()
 const authStore = useAuthStore()
@@ -73,77 +77,85 @@ function getUserInitials(name: string | undefined): string {
 
 const navMain = [
     {
-        title: 'Data',
+        title: 'Logs',
         icon: Database,
-        isActive: true,
         items: [
             {
-                title: 'Explore',
-                url: '/explore',
+                title: 'Explorer',
+                url: '/logs/explore',
             },
             {
-                title: 'Add Source',
-                url: '/sources/new',
-            },
-            {
-                title: 'Manage Sources',
-                url: '/sources/manage',
+                title: 'History',
+                url: '/logs/history',
             },
         ],
     },
     {
-        title: 'Users',
+        title: 'Sources',
+        icon: Database,
+        items: [
+            {
+                title: 'All Sources',
+                url: '/sources/list',
+            },
+        ],
+    },
+    {
+        title: 'Access',
         icon: Users,
+        adminOnly: true,
         items: [
             {
-                title: 'Add User',
-                url: '/users/new',
+                title: 'Users',
+                url: '/access/users',
             },
             {
-                title: 'Manage Users',
-                url: '/users/manage',
+                title: 'Teams',
+                url: '/access/teams',
             },
         ],
     },
     {
-        title: 'Saved Queries',
-        url: '/saved-queries',
-        icon: Save,
-        items: [
-            {
-                title: 'All Queries',
-                url: '/saved-queries',
-            },
-            {
-                title: 'Shared',
-                url: '/saved-queries/shared',
-            },
-            {
-                title: 'Favorites',
-                url: '/saved-queries/favorites',
-            },
-        ],
-    },
-    {
-        title: 'Settings',
-        url: '/settings',
+        title: 'Profile',
         icon: Settings2,
         items: [
             {
-                title: 'General',
-                url: '/settings/general',
-            },
-            {
-                title: 'Team',
-                url: '/settings/team',
-            },
-            {
-                title: 'API Keys',
-                url: '/settings/api-keys',
+                title: 'Settings',
+                url: '/settings/profile',
             },
         ],
     },
 ]
+
+interface BreadcrumbItem {
+    name: string;
+    to: string;
+}
+
+// Compute breadcrumb items based on current route
+const breadcrumbs = computed<BreadcrumbItem[]>(() => {
+    const paths = route.path.split('/').filter(Boolean)
+    const items: BreadcrumbItem[] = [
+        {
+            name: 'Home',
+            to: '/logs/explore'
+        }
+    ]
+
+    let currentPath = ''
+    paths.forEach(path => {
+        currentPath += `/${path}`
+        const matchedRoute = route.matched.find(r => r.path === currentPath)
+        if (matchedRoute?.meta?.title) {
+            items.push({
+                name: matchedRoute.meta.title as string,
+                to: currentPath
+            })
+        }
+    })
+
+    return items
+})
 </script>
 
 <template>
@@ -172,30 +184,33 @@ const navMain = [
                     <SidebarGroup>
                         <SidebarGroupLabel>Navigation</SidebarGroupLabel>
                         <SidebarMenu>
-                            <Collapsible v-for="item in navMain" :key="item.title" as-child
-                                :default-open="item.isActive" class="group/collapsible">
-                                <SidebarMenuItem>
-                                    <CollapsibleTrigger as-child>
-                                        <SidebarMenuButton :tooltip="item.title">
-                                            <component :is="item.icon" />
-                                            <span>{{ item.title }}</span>
-                                            <ChevronRight
-                                                class="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-                                        </SidebarMenuButton>
-                                    </CollapsibleTrigger>
-                                    <CollapsibleContent>
-                                        <SidebarMenuSub>
-                                            <SidebarMenuSubItem v-for="subItem in item.items" :key="subItem.title">
-                                                <SidebarMenuSubButton as-child>
-                                                    <router-link :to="subItem.url">
-                                                        <span>{{ subItem.title }}</span>
-                                                    </router-link>
-                                                </SidebarMenuSubButton>
-                                            </SidebarMenuSubItem>
-                                        </SidebarMenuSub>
-                                    </CollapsibleContent>
-                                </SidebarMenuItem>
-                            </Collapsible>
+                            <template v-for="item in navMain" :key="item.title">
+                                <Collapsible
+                                    v-if="!item.adminOnly || (item.adminOnly && authStore.user?.role === 'admin')"
+                                    as-child class="group/collapsible">
+                                    <SidebarMenuItem>
+                                        <CollapsibleTrigger as-child>
+                                            <SidebarMenuButton :tooltip="item.title">
+                                                <component :is="item.icon" />
+                                                <span>{{ item.title }}</span>
+                                                <ChevronRight
+                                                    class="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                                            </SidebarMenuButton>
+                                        </CollapsibleTrigger>
+                                        <CollapsibleContent>
+                                            <SidebarMenuSub>
+                                                <SidebarMenuSubItem v-for="subItem in item.items" :key="subItem.title">
+                                                    <SidebarMenuSubButton as-child>
+                                                        <router-link :to="subItem.url">
+                                                            <span>{{ subItem.title }}</span>
+                                                        </router-link>
+                                                    </SidebarMenuSubButton>
+                                                </SidebarMenuSubItem>
+                                            </SidebarMenuSub>
+                                        </CollapsibleContent>
+                                    </SidebarMenuItem>
+                                </Collapsible>
+                            </template>
                         </SidebarMenu>
                     </SidebarGroup>
                 </SidebarContent>
@@ -253,9 +268,20 @@ const navMain = [
                     <SidebarTrigger class="-ml-1" />
                     <Breadcrumb>
                         <BreadcrumbList>
-                            <BreadcrumbItem>
-                                <BreadcrumbPage>{{ route.name }}</BreadcrumbPage>
-                            </BreadcrumbItem>
+                            <template v-for="(item, index) in breadcrumbs" :key="index">
+                                <BreadcrumbItem>
+                                    <router-link v-if="index < breadcrumbs.length - 1" :to="item.to"
+                                        class="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
+                                        <component v-if="item.icon" :is="item.icon" class="h-4 w-4" />
+                                        {{ item.name }}
+                                    </router-link>
+                                    <BreadcrumbPage v-else class="inline-flex items-center gap-1">
+                                        <component v-if="item.icon" :is="item.icon" class="h-4 w-4" />
+                                        {{ item.name }}
+                                    </BreadcrumbPage>
+                                </BreadcrumbItem>
+                                <span v-if="index < breadcrumbs.length - 1" class="mx-2 text-muted-foreground">/</span>
+                            </template>
                         </BreadcrumbList>
                     </Breadcrumb>
                 </header>

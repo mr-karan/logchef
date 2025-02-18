@@ -17,6 +17,7 @@ import (
 	"backend-v2/pkg/models"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 // Response represents a standard API response
@@ -529,26 +530,52 @@ func (s *Server) handleLogout(c *fiber.Ctx) error {
 }
 
 // handleGetSession returns the current session info
-func (s *Server) handleGetSession(c *fiber.Ctx) error {
+func (s *Server) handleGetSession(ctx *fiber.Ctx) error {
 	// Get session ID from cookie
-	sessionID := c.Cookies("session_id")
+	sessionID := ctx.Cookies("session_id")
 	if sessionID == "" {
-		return autherrors.NewAuthError(autherrors.ErrSessionNotFound, "No session found", nil)
+		return ctx.Status(fiber.StatusUnauthorized).JSON(Response{
+			Status: "error",
+			Data: fiber.Map{
+				"error": "No session found",
+				"code":  autherrors.ErrSessionNotFound,
+			},
+		})
 	}
 
 	// Validate session
-	session, err := s.auth.ValidateSession(c.Context(), sessionID)
+	session, err := s.auth.ValidateSession(ctx.Context(), sessionID)
 	if err != nil {
-		return err
+		var authErr *autherrors.AuthError
+		if errors.As(err, &authErr) {
+			return ctx.Status(fiber.StatusUnauthorized).JSON(Response{
+				Status: "error",
+				Data: fiber.Map{
+					"error": authErr.Message,
+					"code":  authErr.Code,
+				},
+			})
+		}
+		return ctx.Status(fiber.StatusInternalServerError).JSON(Response{
+			Status: "error",
+			Data: fiber.Map{
+				"error": "Internal server error",
+			},
+		})
 	}
 
 	// Get user info
-	user, err := s.auth.GetUser(c.Context(), session.UserID)
+	user, err := s.auth.GetUser(ctx.Context(), session.UserID)
 	if err != nil {
-		return err
+		return ctx.Status(fiber.StatusInternalServerError).JSON(Response{
+			Status: "error",
+			Data: fiber.Map{
+				"error": "Failed to get user information",
+			},
+		})
 	}
 
-	return c.JSON(Response{
+	return ctx.JSON(Response{
 		Status: "success",
 		Data: fiber.Map{
 			"user":    user,
@@ -613,315 +640,259 @@ func (s *Server) requireAdmin(c *fiber.Ctx) error {
 
 // Team handlers
 
+// CreateTeamRequest represents a request to create a new team
+type CreateTeamRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// handleListTeams handles listing all teams
 func (s *Server) handleListTeams(c *fiber.Ctx) error {
-	teams, err := s.auth.ListTeams(c.Context())
+	teams, err := s.svc.ListTeams(c.Context())
 	if err != nil {
-		return err
+		s.log.Error("failed to list teams",
+			"error", err,
+		)
+		return fiber.NewError(http.StatusInternalServerError, "Failed to retrieve teams. Please try again later.")
 	}
 
 	return c.JSON(Response{
 		Status: "success",
-		Data:   teams,
+		Data: fiber.Map{
+			"teams": teams,
+		},
 	})
 }
 
-func (s *Server) handleCreateTeam(c *fiber.Ctx) error {
-	var team models.Team
-	if err := c.BodyParser(&team); err != nil {
-		return err
-	}
-
-	// Set created by
-	user := c.Locals("user").(*models.User)
-	team.CreatedBy = user.ID
-
-	if err := s.auth.CreateTeam(c.Context(), &team); err != nil {
-		return err
-	}
-
-	return c.JSON(Response{
-		Status: "success",
-		Data:   team,
-	})
-}
-
+// handleGetTeam handles getting a single team
 func (s *Server) handleGetTeam(c *fiber.Ctx) error {
-	teamID := c.Params("id")
-	team, err := s.auth.GetTeam(c.Context(), teamID)
+	id := c.Params("id")
+	if id == "" {
+		return fiber.NewError(http.StatusBadRequest, "team id is required")
+	}
+
+	team, err := s.svc.GetTeam(c.Context(), id)
 	if err != nil {
-		return err
+		if err == service.ErrTeamNotFound {
+			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("team %s not found", id))
+		}
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to get team: %v", err))
 	}
 
 	return c.JSON(Response{
 		Status: "success",
-		Data:   team,
+		Data: fiber.Map{
+			"team": team,
+		},
 	})
 }
 
+// handleCreateTeam handles creating a new team
+func (s *Server) handleCreateTeam(c *fiber.Ctx) error {
+	var req CreateTeamRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+	}
+
+	team := &models.Team{
+		ID:          uuid.New().String(),
+		Name:        req.Name,
+		Description: req.Description,
+	}
+
+	// Validate team
+	if err := service.ValidateCreateTeamRequest(team); err != nil {
+		var validationErr *service.ValidationError
+		if errors.As(err, &validationErr) {
+			return fiber.NewError(http.StatusBadRequest, validationErr.Error())
+		}
+		return err
+	}
+
+	if err := s.svc.CreateTeam(c.Context(), team); err != nil {
+		var validationErr *service.ValidationError
+		if errors.As(err, &validationErr) {
+			return fiber.NewError(http.StatusBadRequest, validationErr.Error())
+		}
+		return fiber.NewError(http.StatusInternalServerError, "Failed to create team. Please try again later.")
+	}
+
+	return c.Status(http.StatusCreated).JSON(Response{
+		Status: "success",
+		Data: fiber.Map{
+			"team": team,
+		},
+	})
+}
+
+// handleUpdateTeam handles updating a team
 func (s *Server) handleUpdateTeam(c *fiber.Ctx) error {
-	teamID := c.Params("id")
-	var team models.Team
-	if err := c.BodyParser(&team); err != nil {
-		return err
+	id := c.Params("id")
+	if id == "" {
+		return fiber.NewError(http.StatusBadRequest, "team id is required")
 	}
 
-	team.ID = teamID
-	if err := s.auth.UpdateTeam(c.Context(), &team); err != nil {
-		return err
+	var req CreateTeamRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+	}
+
+	// Get existing team
+	team, err := s.svc.GetTeam(c.Context(), id)
+	if err != nil {
+		if err == service.ErrTeamNotFound {
+			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("team %s not found", id))
+		}
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to get team: %v", err))
+	}
+
+	// Update fields
+	team.Name = req.Name
+	team.Description = req.Description
+
+	if err := s.svc.UpdateTeam(c.Context(), team); err != nil {
+		var validationErr *service.ValidationError
+		if errors.As(err, &validationErr) {
+			return fiber.NewError(http.StatusBadRequest, validationErr.Error())
+		}
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to update team: %v", err))
 	}
 
 	return c.JSON(Response{
 		Status: "success",
-		Data:   team,
+		Data: fiber.Map{
+			"team": team,
+		},
 	})
 }
 
+// handleDeleteTeam handles deleting a team
 func (s *Server) handleDeleteTeam(c *fiber.Ctx) error {
-	teamID := c.Params("id")
-	if err := s.auth.DeleteTeam(c.Context(), teamID); err != nil {
-		return err
+	id := c.Params("id")
+	if id == "" {
+		return fiber.NewError(http.StatusBadRequest, "team id is required")
+	}
+
+	if err := s.svc.DeleteTeam(c.Context(), id); err != nil {
+		if err == service.ErrTeamNotFound {
+			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("team %s not found", id))
+		}
+		var validationErr *service.ValidationError
+		if errors.As(err, &validationErr) {
+			return fiber.NewError(http.StatusBadRequest, validationErr.Error())
+		}
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to delete team: %v", err))
 	}
 
 	return c.JSON(Response{
 		Status: "success",
-		Data:   nil,
+		Data: fiber.Map{
+			"message": "Team deleted successfully",
+		},
 	})
 }
 
+// Team member handlers
+
+// AddTeamMemberRequest represents a request to add a member to a team
+type AddTeamMemberRequest struct {
+	UserID string `json:"user_id"`
+	Role   string `json:"role"`
+}
+
+// handleListTeamMembers handles listing all members of a team
 func (s *Server) handleListTeamMembers(c *fiber.Ctx) error {
 	teamID := c.Params("id")
-	members, err := s.auth.ListTeamMembers(c.Context(), teamID)
+	if teamID == "" {
+		return fiber.NewError(http.StatusBadRequest, "team id is required")
+	}
+
+	members, err := s.svc.ListTeamMembers(c.Context(), teamID)
 	if err != nil {
-		return err
+		if err == service.ErrTeamNotFound {
+			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("team %s not found", teamID))
+		}
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to list team members: %v", err))
 	}
 
 	return c.JSON(Response{
 		Status: "success",
-		Data:   members,
+		Data: fiber.Map{
+			"members": members,
+		},
 	})
 }
 
+// handleAddTeamMember handles adding a member to a team
 func (s *Server) handleAddTeamMember(c *fiber.Ctx) error {
 	teamID := c.Params("id")
-	var req struct {
-		UserID string `json:"user_id"`
-		Role   string `json:"role"`
+	if teamID == "" {
+		return fiber.NewError(http.StatusBadRequest, "team id is required")
 	}
+
+	var req AddTeamMemberRequest
 	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+	}
+
+	// Validate request
+	if err := service.ValidateTeamMemberRequest(teamID, req.UserID, req.Role); err != nil {
+		var validationErr *service.ValidationError
+		if errors.As(err, &validationErr) {
+			return fiber.NewError(http.StatusBadRequest, validationErr.Error())
+		}
 		return err
 	}
 
-	if err := s.auth.AddTeamMember(c.Context(), teamID, req.UserID, req.Role); err != nil {
-		return err
+	if err := s.svc.AddTeamMember(c.Context(), teamID, req.UserID, req.Role); err != nil {
+		var validationErr *service.ValidationError
+		if errors.As(err, &validationErr) {
+			return fiber.NewError(http.StatusBadRequest, validationErr.Error())
+		}
+		if err == service.ErrTeamNotFound {
+			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("team %s not found", teamID))
+		}
+		if err == service.ErrUserNotFound {
+			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("user %s not found", req.UserID))
+		}
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to add team member: %v", err))
 	}
 
 	return c.JSON(Response{
 		Status: "success",
-		Data:   nil,
+		Data: fiber.Map{
+			"message": "Team member added successfully",
+		},
 	})
 }
 
+// handleRemoveTeamMember handles removing a member from a team
 func (s *Server) handleRemoveTeamMember(c *fiber.Ctx) error {
 	teamID := c.Params("id")
 	userID := c.Params("userId")
 
-	if err := s.auth.RemoveTeamMember(c.Context(), teamID, userID); err != nil {
-		return err
+	if teamID == "" {
+		return fiber.NewError(http.StatusBadRequest, "team id is required")
+	}
+	if userID == "" {
+		return fiber.NewError(http.StatusBadRequest, "user id is required")
+	}
+
+	if err := s.svc.RemoveTeamMember(c.Context(), teamID, userID); err != nil {
+		if err == service.ErrTeamNotFound {
+			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("team %s not found", teamID))
+		}
+		if err == service.ErrUserNotFound {
+			return fiber.NewError(http.StatusNotFound, fmt.Sprintf("user %s not found", userID))
+		}
+		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to remove team member: %v", err))
 	}
 
 	return c.JSON(Response{
 		Status: "success",
-		Data:   nil,
-	})
-}
-
-// Space handlers
-
-func (s *Server) handleListSpaces(c *fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
-	spaces, err := s.auth.GetUserSpaces(c.Context(), user.ID)
-	if err != nil {
-		return err
-	}
-
-	return c.JSON(Response{
-		Status: "success",
-		Data:   spaces,
-	})
-}
-
-func (s *Server) handleCreateSpace(c *fiber.Ctx) error {
-	var space models.Space
-	if err := c.BodyParser(&space); err != nil {
-		return err
-	}
-
-	// Set created by
-	user := c.Locals("user").(*models.User)
-	space.CreatedBy = user.ID
-
-	if err := s.auth.CreateSpace(c.Context(), &space); err != nil {
-		return err
-	}
-
-	return c.JSON(Response{
-		Status: "success",
-		Data:   space,
-	})
-}
-
-func (s *Server) handleGetSpace(c *fiber.Ctx) error {
-	spaceID := c.Params("id")
-	user := c.Locals("user").(*models.User)
-
-	// Check access
-	hasAccess, err := s.auth.CanAccessSpace(c.Context(), user.ID, spaceID, "read")
-	if err != nil {
-		return err
-	}
-	if !hasAccess {
-		return autherrors.NewAuthError(autherrors.ErrSpaceAccessDenied, "Access denied", nil)
-	}
-
-	space, err := s.auth.GetSpace(c.Context(), spaceID)
-	if err != nil {
-		return err
-	}
-
-	return c.JSON(Response{
-		Status: "success",
-		Data:   space,
-	})
-}
-
-func (s *Server) handleUpdateSpace(c *fiber.Ctx) error {
-	spaceID := c.Params("id")
-	user := c.Locals("user").(*models.User)
-
-	// Check access
-	hasAccess, err := s.auth.CanAccessSpace(c.Context(), user.ID, spaceID, "write")
-	if err != nil {
-		return err
-	}
-	if !hasAccess {
-		return autherrors.NewAuthError(autherrors.ErrSpaceAccessDenied, "Access denied", nil)
-	}
-
-	var space models.Space
-	if err := c.BodyParser(&space); err != nil {
-		return err
-	}
-
-	space.ID = spaceID
-	if err := s.auth.UpdateSpace(c.Context(), &space); err != nil {
-		return err
-	}
-
-	return c.JSON(Response{
-		Status: "success",
-		Data:   space,
-	})
-}
-
-func (s *Server) handleDeleteSpace(c *fiber.Ctx) error {
-	spaceID := c.Params("id")
-	user := c.Locals("user").(*models.User)
-
-	// Check access
-	hasAccess, err := s.auth.CanAccessSpace(c.Context(), user.ID, spaceID, "admin")
-	if err != nil {
-		return err
-	}
-	if !hasAccess {
-		return autherrors.NewAuthError(autherrors.ErrSpaceAccessDenied, "Access denied", nil)
-	}
-
-	if err := s.auth.DeleteSpace(c.Context(), spaceID); err != nil {
-		return err
-	}
-
-	return c.JSON(Response{
-		Status: "success",
-		Data:   nil,
-	})
-}
-
-func (s *Server) handleListSpaceTeams(c *fiber.Ctx) error {
-	spaceID := c.Params("id")
-	user := c.Locals("user").(*models.User)
-
-	// Check access
-	hasAccess, err := s.auth.CanAccessSpace(c.Context(), user.ID, spaceID, "read")
-	if err != nil {
-		return err
-	}
-	if !hasAccess {
-		return autherrors.NewAuthError(autherrors.ErrSpaceAccessDenied, "Access denied", nil)
-	}
-
-	teams, err := s.auth.ListSpaceAccess(c.Context(), spaceID)
-	if err != nil {
-		return err
-	}
-
-	return c.JSON(Response{
-		Status: "success",
-		Data:   teams,
-	})
-}
-
-func (s *Server) handleUpdateSpaceTeamAccess(c *fiber.Ctx) error {
-	spaceID := c.Params("id")
-	teamID := c.Params("teamId")
-	user := c.Locals("user").(*models.User)
-
-	// Check access
-	hasAccess, err := s.auth.CanAccessSpace(c.Context(), user.ID, spaceID, "admin")
-	if err != nil {
-		return err
-	}
-	if !hasAccess {
-		return autherrors.NewAuthError(autherrors.ErrSpaceAccessDenied, "Access denied", nil)
-	}
-
-	var req struct {
-		Permission string `json:"permission"`
-	}
-	if err := c.BodyParser(&req); err != nil {
-		return err
-	}
-
-	if err := s.auth.GrantTeamAccess(c.Context(), spaceID, teamID, req.Permission); err != nil {
-		return err
-	}
-
-	return c.JSON(Response{
-		Status: "success",
-		Data:   nil,
-	})
-}
-
-func (s *Server) handleRevokeSpaceTeamAccess(c *fiber.Ctx) error {
-	spaceID := c.Params("id")
-	teamID := c.Params("teamId")
-	user := c.Locals("user").(*models.User)
-
-	// Check access
-	hasAccess, err := s.auth.CanAccessSpace(c.Context(), user.ID, spaceID, "admin")
-	if err != nil {
-		return err
-	}
-	if !hasAccess {
-		return autherrors.NewAuthError(autherrors.ErrSpaceAccessDenied, "Access denied", nil)
-	}
-
-	if err := s.auth.RevokeTeamAccess(c.Context(), spaceID, teamID); err != nil {
-		return err
-	}
-
-	return c.JSON(Response{
-		Status: "success",
-		Data:   nil,
+		Data: fiber.Map{
+			"message": "Team member removed successfully",
+		},
 	})
 }
 
@@ -929,7 +900,7 @@ func (s *Server) handleRevokeSpaceTeamAccess(c *fiber.Ctx) error {
 
 // handleListUsers handles listing all users
 func (s *Server) handleListUsers(c *fiber.Ctx) error {
-	users, err := s.svc.ListUsers(c.Context())
+	users, err := s.auth.ListUsers(c.Context())
 	if err != nil {
 		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to list users: %v", err))
 	}
@@ -972,6 +943,15 @@ func (s *Server) handleCreateUser(c *fiber.Ctx) error {
 		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
 	}
 
+	// Validate request
+	if err := service.ValidateCreateUserRequest(&req); err != nil {
+		var validationErr *service.ValidationError
+		if errors.As(err, &validationErr) {
+			return fiber.NewError(http.StatusBadRequest, validationErr.Error())
+		}
+		return err
+	}
+
 	user := &models.User{
 		Email:    req.Email,
 		FullName: req.FullName,
@@ -1005,6 +985,15 @@ func (s *Server) handleUpdateUser(c *fiber.Ctx) error {
 	var req models.UpdateUserRequest
 	if err := c.BodyParser(&req); err != nil {
 		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+	}
+
+	// Validate request
+	if err := service.ValidateUpdateUserRequest(&req); err != nil {
+		var validationErr *service.ValidationError
+		if errors.As(err, &validationErr) {
+			return fiber.NewError(http.StatusBadRequest, validationErr.Error())
+		}
+		return err
 	}
 
 	// Get existing user
@@ -1065,6 +1054,117 @@ func (s *Server) handleDeleteUser(c *fiber.Ctx) error {
 		Status: "success",
 		Data: fiber.Map{
 			"message": "User deleted successfully",
+		},
+	})
+}
+
+// Team source handlers
+
+// AddTeamSourceRequest represents a request to add a source to a team
+type AddTeamSourceRequest struct {
+	SourceID string `json:"source_id"`
+}
+
+// handleListTeamSources handles listing all sources in a team
+func (s *Server) handleListTeamSources(c *fiber.Ctx) error {
+	teamID := c.Params("id")
+	if teamID == "" {
+		return fiber.NewError(http.StatusBadRequest, "team id is required")
+	}
+
+	sources, err := s.svc.ListTeamSources(c.Context(), teamID)
+	if err != nil {
+		if err == service.ErrTeamNotFound {
+			return fiber.NewError(http.StatusNotFound, "Team not found")
+		}
+		s.log.Error("failed to list team sources",
+			"error", err,
+			"team_id", teamID,
+		)
+		return fiber.NewError(http.StatusInternalServerError, "Failed to retrieve team sources. Please try again later.")
+	}
+
+	return c.JSON(Response{
+		Status: "success",
+		Data: fiber.Map{
+			"sources": sources,
+		},
+	})
+}
+
+// handleAddTeamSource handles adding a source to a team
+func (s *Server) handleAddTeamSource(c *fiber.Ctx) error {
+	teamID := c.Params("id")
+	if teamID == "" {
+		return fiber.NewError(http.StatusBadRequest, "team id is required")
+	}
+
+	var req AddTeamSourceRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(http.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.SourceID == "" {
+		return fiber.NewError(http.StatusBadRequest, "source_id is required")
+	}
+
+	if err := s.svc.AddTeamSource(c.Context(), teamID, req.SourceID); err != nil {
+		if err == service.ErrTeamNotFound {
+			return fiber.NewError(http.StatusNotFound, "Team not found")
+		}
+		if err == service.ErrSourceNotFound {
+			return fiber.NewError(http.StatusNotFound, "Source not found")
+		}
+		if strings.Contains(err.Error(), "already exists") {
+			return fiber.NewError(http.StatusBadRequest, "Source is already added to this team")
+		}
+		s.log.Error("failed to add team source",
+			"error", err,
+			"team_id", teamID,
+			"source_id", req.SourceID,
+		)
+		return fiber.NewError(http.StatusInternalServerError, "Failed to add source to team. Please try again later.")
+	}
+
+	return c.JSON(Response{
+		Status: "success",
+		Data: fiber.Map{
+			"message": "Source added to team successfully",
+		},
+	})
+}
+
+// handleRemoveTeamSource handles removing a source from a team
+func (s *Server) handleRemoveTeamSource(c *fiber.Ctx) error {
+	teamID := c.Params("id")
+	sourceID := c.Params("sourceId")
+
+	if teamID == "" {
+		return fiber.NewError(http.StatusBadRequest, "team id is required")
+	}
+	if sourceID == "" {
+		return fiber.NewError(http.StatusBadRequest, "source id is required")
+	}
+
+	if err := s.svc.RemoveTeamSource(c.Context(), teamID, sourceID); err != nil {
+		if err == service.ErrTeamNotFound {
+			return fiber.NewError(http.StatusNotFound, "Team not found")
+		}
+		if err == service.ErrSourceNotFound {
+			return fiber.NewError(http.StatusNotFound, "Source not found")
+		}
+		s.log.Error("failed to remove team source",
+			"error", err,
+			"team_id", teamID,
+			"source_id", sourceID,
+		)
+		return fiber.NewError(http.StatusInternalServerError, "Failed to remove source from team. Please try again later.")
+	}
+
+	return c.JSON(Response{
+		Status: "success",
+		Data: fiber.Map{
+			"message": "Source removed from team successfully",
 		},
 	})
 }

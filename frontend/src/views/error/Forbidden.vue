@@ -21,7 +21,7 @@ const router = useRouter()
             <Button variant="outline" @click="router.back()">
                 Go Back
             </Button>
-            <Button @click="router.push('/explore')">
+            <Button @click="router.push('/logs/explore')">
                 Go to Explore
             </Button>
         </div>

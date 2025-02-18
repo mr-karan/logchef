@@ -41,10 +41,8 @@ CREATE TABLE IF NOT EXISTS teams (
     id TEXT PRIMARY KEY,
     name TEXT UNIQUE NOT NULL,
     description TEXT,
-    created_by TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Create team members table
@@ -58,51 +56,26 @@ CREATE TABLE IF NOT EXISTS team_members (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- Create spaces table
-CREATE TABLE IF NOT EXISTS spaces (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT,
-    created_by TEXT NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
-);
-
--- Create space data sources table
-CREATE TABLE IF NOT EXISTS space_data_sources (
-    space_id TEXT NOT NULL,
-    data_source_id TEXT NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (space_id, data_source_id),
-    FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE,
-    FOREIGN KEY (data_source_id) REFERENCES sources(id) ON DELETE CASCADE
-);
-
--- Create space team access table
-CREATE TABLE IF NOT EXISTS space_team_access (
-    space_id TEXT NOT NULL,
+-- Create team sources table (many-to-many relationship)
+CREATE TABLE IF NOT EXISTS team_sources (
     team_id TEXT NOT NULL,
-    permission TEXT NOT NULL CHECK (permission IN ('read', 'write', 'admin')),
+    source_id TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (space_id, team_id),
-    FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE,
-    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
+    PRIMARY KEY (team_id, source_id),
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
 );
 
--- Create queries table
-CREATE TABLE IF NOT EXISTS queries (
+-- Create team queries table
+CREATE TABLE IF NOT EXISTS team_queries (
     id TEXT PRIMARY KEY,
-    space_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
     name TEXT NOT NULL,
     description TEXT,
     query_content TEXT NOT NULL,
-    created_by TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE,
-    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
 );
 
 -- Create indexes
@@ -117,22 +90,13 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_teams_name ON teams(name);
 CREATE INDEX IF NOT EXISTS idx_teams_created_at ON teams(created_at);
-CREATE INDEX IF NOT EXISTS idx_teams_created_by ON teams(created_by);
 
 CREATE INDEX IF NOT EXISTS idx_team_members_user_id ON team_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_team_members_team_id ON team_members(team_id);
 
-CREATE INDEX IF NOT EXISTS idx_spaces_name ON spaces(name);
-CREATE INDEX IF NOT EXISTS idx_spaces_created_at ON spaces(created_at);
-CREATE INDEX IF NOT EXISTS idx_spaces_created_by ON spaces(created_by);
+CREATE INDEX IF NOT EXISTS idx_team_sources_team_id ON team_sources(team_id);
+CREATE INDEX IF NOT EXISTS idx_team_sources_source_id ON team_sources(source_id);
 
-CREATE INDEX IF NOT EXISTS idx_space_data_sources_space_id ON space_data_sources(space_id);
-CREATE INDEX IF NOT EXISTS idx_space_data_sources_data_source_id ON space_data_sources(data_source_id);
-
-CREATE INDEX IF NOT EXISTS idx_space_team_access_space_id ON space_team_access(space_id);
-CREATE INDEX IF NOT EXISTS idx_space_team_access_team_id ON space_team_access(team_id);
-
-CREATE INDEX IF NOT EXISTS idx_queries_space_id ON queries(space_id);
-CREATE INDEX IF NOT EXISTS idx_queries_name ON queries(name);
-CREATE INDEX IF NOT EXISTS idx_queries_created_by ON queries(created_by);
-CREATE INDEX IF NOT EXISTS idx_queries_created_at ON queries(created_at);
+CREATE INDEX IF NOT EXISTS idx_team_queries_team_id ON team_queries(team_id);
+CREATE INDEX IF NOT EXISTS idx_team_queries_name ON team_queries(name);
+CREATE INDEX IF NOT EXISTS idx_team_queries_created_at ON team_queries(created_at);
