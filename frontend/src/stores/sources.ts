@@ -1,39 +1,68 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
-import { sourcesApi, type Source } from "@/api/sources";
-import { isErrorResponse } from "@/api/types";
+import {
+  sourcesApi,
+  type Source,
+  type CreateSourcePayload,
+} from "@/api/sources";
+import { useBaseStore, handleApiCall } from "./base";
 
 export const useSourcesStore = defineStore("sources", () => {
-  const sources = ref<Source[]>([]);
-  const isLoading = ref(false);
-  const error = ref<string | null>(null);
+  const {
+    data: sources,
+    isLoading,
+    error,
+    withLoading,
+  } = useBaseStore<Source[]>([]);
 
   async function loadSources() {
-    if (isLoading.value) return;
+    return withLoading(async () => {
+      const { success, data } = await handleApiCall({
+        apiCall: () => sourcesApi.listSources(),
+        successMessage: undefined, // Don't show toast for loading
+      });
 
-    try {
-      isLoading.value = true;
-      error.value = null;
-
-      const response = await sourcesApi.listSources();
-
-      if (isErrorResponse(response)) {
-        error.value = response.data.error;
-        return;
+      if (success && data) {
+        // Initialize with empty array if sources is null
+        sources.value = data.sources || [];
       }
+    });
+  }
 
-      sources.value = response.data.sources;
-    } catch (err) {
-      error.value = "Failed to load sources";
-      console.error("Error loading sources:", err);
-    } finally {
-      isLoading.value = false;
-    }
+  async function createSource(payload: CreateSourcePayload) {
+    const { success, data } = await handleApiCall({
+      apiCall: () => sourcesApi.createSource(payload),
+      successMessage: "Source created successfully",
+      onSuccess: (data) => {
+        // Add to sources list if we have it loaded
+        if (sources.value) {
+          sources.value.push(data.source);
+        }
+      },
+    });
+
+    return success;
+  }
+
+  async function deleteSource(id: string) {
+    const { success } = await handleApiCall({
+      apiCall: () => sourcesApi.deleteSource(id),
+      successMessage: "Source deleted successfully",
+      onSuccess: () => {
+        // Remove from sources list if we have it loaded
+        if (sources.value) {
+          sources.value = sources.value.filter((s) => s.id !== id);
+        }
+      },
+    });
+
+    return success;
   }
 
   // Get sources not in a specific team
   function getSourcesNotInTeam(teamSourceIds: string[]) {
-    return sources.value.filter((source) => !teamSourceIds.includes(source.id));
+    return sources.value
+      ? sources.value.filter((source) => !teamSourceIds.includes(source.id))
+      : [];
   }
 
   return {
@@ -41,6 +70,8 @@ export const useSourcesStore = defineStore("sources", () => {
     isLoading,
     error,
     loadSources,
+    createSource,
+    deleteSource,
     getSourcesNotInTeam,
   };
 });

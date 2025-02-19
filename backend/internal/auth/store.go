@@ -34,7 +34,7 @@ type Store interface {
 	AddTeamMember(ctx context.Context, teamID, userID, role string) error
 	RemoveTeamMember(ctx context.Context, teamID, userID string) error
 	ListTeamMembers(ctx context.Context, teamID string) ([]*models.TeamMember, error)
-	GetUserTeams(ctx context.Context, userID string) ([]*models.Team, error)
+	ListUserTeams(ctx context.Context, userID string) ([]*models.Team, error)
 
 	// Team source operations
 	AddTeamSource(ctx context.Context, teamID, sourceID string) error

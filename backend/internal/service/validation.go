@@ -148,7 +148,7 @@ func ValidateLogQueryRequest(req *models.LogQueryRequest) error {
 }
 
 // ValidateCreateSourceRequest validates a create source request
-func ValidateCreateSourceRequest(schemaType string, conn models.ConnectionInfo, description string, ttlDays int) error {
+func ValidateCreateSourceRequest(autoCreateTable bool, conn models.ConnectionInfo, description string, ttlDays int, metaTSField string) error {
 	if conn.TableName == "" {
 		return &ValidationError{
 			Field:   "TableName",
@@ -160,20 +160,6 @@ func ValidateCreateSourceRequest(schemaType string, conn models.ConnectionInfo, 
 		return &ValidationError{
 			Field:   "TableName",
 			Message: "table name must start with a letter and contain only letters, numbers, and underscores",
-		}
-	}
-
-	if schemaType == "" {
-		return &ValidationError{
-			Field:   "SchemaType",
-			Message: "schema type is required",
-		}
-	}
-
-	if schemaType != models.SchemaTypeManaged && schemaType != models.SchemaTypeUnmanaged {
-		return &ValidationError{
-			Field:   "SchemaType",
-			Message: fmt.Sprintf("schema type must be either '%s' or '%s'", models.SchemaTypeManaged, models.SchemaTypeUnmanaged),
 		}
 	}
 
@@ -215,6 +201,20 @@ func ValidateCreateSourceRequest(schemaType string, conn models.ConnectionInfo, 
 		}
 	}
 
+	if metaTSField == "" {
+		return &ValidationError{
+			Field:   "MetaTSField",
+			Message: "meta timestamp field is required",
+		}
+	}
+
+	if !isValidColumnName(metaTSField) {
+		return &ValidationError{
+			Field:   "MetaTSField",
+			Message: "meta timestamp field must start with a letter or underscore and contain only letters, numbers, and underscores",
+		}
+	}
+
 	return nil
 }
 
@@ -238,6 +238,24 @@ func isLetter(r rune) bool {
 
 func isAlphanumericOrUnderscore(r rune) bool {
 	return isLetter(r) || (r >= '0' && r <= '9') || r == '_'
+}
+
+// isValidColumnName checks if the name is valid for use as a column name
+func isValidColumnName(name string) bool {
+	if len(name) == 0 {
+		return false
+	}
+	// Must start with a letter or underscore
+	if !isLetter(rune(name[0])) && name[0] != '_' {
+		return false
+	}
+	// Rest can be alphanumeric or underscore
+	for _, r := range name[1:] {
+		if !isAlphanumericOrUnderscore(r) {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidateCreateUserRequest validates a create user request

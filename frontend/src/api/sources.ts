@@ -11,7 +11,8 @@ interface ConnectionInfo {
 
 export interface Source {
   id: string;
-  schema_type: string;
+  _meta_is_auto_created: number;
+  _meta_ts_field: string;
   connection: ConnectionInfo;
   description: string;
   ttl_days: number;
@@ -21,7 +22,8 @@ export interface Source {
 }
 
 export interface CreateSourcePayload {
-  schema_type: string;
+  meta_is_auto_created: boolean;
+  meta_ts_field?: string;
   connection: ConnectionInfo;
   description?: string;
   ttl_days: number;

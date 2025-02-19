@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"backend-v2/internal/config"
@@ -146,51 +145,33 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, code, state string) (
 	}
 
 	if user == nil {
-		// User doesn't exist, create new user
-		isAdmin := false
-		for _, adminEmail := range p.cfg.Auth.AdminEmails {
-			if strings.EqualFold(claims.Email, adminEmail) {
-				isAdmin = true
-				break
-			}
-		}
+		// User doesn't exist - log attempt and return error
+		p.log.Warn("unauthorized user attempted login",
+			"email", claims.Email,
+			"name", claims.Name,
+		)
+		return nil, nil, errors.NewAuthError(
+			errors.ErrUnauthorizedUser,
+			"Access denied. Please contact your administrator to request access.",
+			map[string]interface{}{
+				"email": claims.Email,
+			},
+		)
+	}
 
-		user = &models.User{
-			ID:       uuid.New().String(),
-			Email:    claims.Email,
-			FullName: claims.Name,
-			Role:     "member",
-			Status:   models.UserStatusActive, // Set status to active for new users
-		}
-		if isAdmin {
-			user.Role = "admin"
-		}
-
-		if err := p.store.CreateUser(ctx, user); err != nil {
-			p.log.Error("failed to create user",
-				"error", err,
-				"email", claims.Email,
-			)
-			return nil, nil, fmt.Errorf("failed to create user: %w", err)
-		}
-
-		p.log.Info("created new user",
+	// Check if user is active
+	if user.Status == models.UserStatusInactive {
+		p.log.Error("inactive user attempted login",
 			"user_id", user.ID,
 			"email", user.Email,
-			"role", user.Role,
-			"status", user.Status,
 		)
-	} else {
-		// Check if user is active
-		if user.Status == models.UserStatusInactive {
-			p.log.Error("inactive user attempted login",
-				"user_id", user.ID,
-				"email", user.Email,
-			)
-			return nil, nil, errors.NewAuthError(errors.ErrUserInactive, "User account is inactive", map[string]interface{}{
+		return nil, nil, errors.NewAuthError(
+			errors.ErrUserInactive,
+			"User account is inactive",
+			map[string]interface{}{
 				"email": user.Email,
-			})
-		}
+			},
+		)
 	}
 
 	// Update user's last login

@@ -16,24 +16,18 @@ type ConnectionInfo struct {
 
 // Source represents a Clickhouse data source in our system
 type Source struct {
-	ID          string         `db:"id" json:"id"`
-	SchemaType  string         `db:"schema_type" json:"schema_type"`
-	Connection  ConnectionInfo `db:"connection" json:"connection"`
-	Description string         `db:"description" json:"description,omitempty"`
-	TTLDays     int            `db:"ttl_days" json:"ttl_days"`
-	CreatedAt   time.Time      `db:"created_at" json:"created_at"`
-	UpdatedAt   time.Time      `db:"updated_at" json:"updated_at"`
-	IsConnected bool           `db:"-" json:"is_connected"`
-	Schema      string         `db:"-" json:"schema,omitempty"`
-	Columns     []ColumnInfo   `db:"-" json:"columns,omitempty"`
+	ID                string         `db:"id" json:"id"`
+	MetaIsAutoCreated int            `db:"_meta_is_auto_created" json:"_meta_is_auto_created"`
+	MetaTSField       string         `db:"_meta_ts_field" json:"_meta_ts_field"`
+	Connection        ConnectionInfo `db:"connection" json:"connection"`
+	Description       string         `db:"description" json:"description,omitempty"`
+	TTLDays           int            `db:"ttl_days" json:"ttl_days"`
+	CreatedAt         time.Time      `db:"created_at" json:"created_at"`
+	UpdatedAt         time.Time      `db:"updated_at" json:"updated_at"`
+	IsConnected       bool           `db:"-" json:"is_connected"`
+	Schema            string         `db:"-" json:"schema,omitempty"`
+	Columns           []ColumnInfo   `db:"-" json:"columns,omitempty"`
 }
-
-const (
-	// SchemaTypeManaged represents a managed source with OTEL schema
-	SchemaTypeManaged = "managed"
-	// SchemaTypeUnmanaged represents an unmanaged source with custom schema
-	SchemaTypeUnmanaged = "unmanaged"
-)
 
 // GetFullTableName returns the fully qualified table name (database.table)
 func (s *Source) GetFullTableName() string {

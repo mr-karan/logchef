@@ -85,6 +85,15 @@ func main() {
 	// Create service
 	svc := service.New(sqliteDB)
 
+	// Initialize admin users
+	log.Info("initializing admin users",
+		"emails", cfg.Auth.AdminEmails,
+	)
+	if err := svc.InitAdminUsers(context.Background(), cfg.Auth.AdminEmails); err != nil {
+		log.Error("failed to initialize admin users", "error", err)
+		os.Exit(1)
+	}
+
 	// Initialize Clickhouse connections
 	log.Info("initializing clickhouse connections")
 	sources, err := sqliteDB.ListSources(context.Background())

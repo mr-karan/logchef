@@ -1,35 +1,64 @@
 <script setup lang="ts">
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { AlertCircle } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
+import { useRoute } from 'vue-router'
+import { computed } from 'vue'
 
+const route = useRoute()
 const authStore = useAuthStore()
 
+// Error message mapping
+const errorMessages: Record<string, string> = {
+  'UNAUTHORIZED_USER': 'Access denied. Please contact your administrator to request access.',
+  'USER_INACTIVE': 'Your account is inactive. Please contact your administrator.',
+  'invalid_state': 'Authentication session expired. Please try again.',
+  'invalid_request': 'Invalid authentication request. Please try again.',
+  'authentication_failed': 'Authentication failed. Please try again.',
+}
+
+// Get error message if present
+const errorMessage = computed(() => {
+  const code = route.query.error as string
+  return code ? (errorMessages[code] || 'An unexpected error occurred') : null
+})
+
 function handleLogin() {
-  authStore.login()
+  // Get redirect path from query if available
+  const redirectPath = route.query.redirect as string | undefined
+  authStore.startLogin(redirectPath)
 }
 </script>
 
 <template>
-  <div class="flex min-h-full flex-col justify-center">
-    <div class="sm:mx-auto sm:w-full sm:max-w-md">
-      <h2 class="mt-6 text-center text-2xl font-bold leading-9 tracking-tight">
-        Welcome to LogChef
-      </h2>
-      <p class="mt-2 text-center text-sm text-muted-foreground">
-        Your centralized log analytics platform
-      </p>
-    </div>
-
-    <div class="mt-10 sm:mx-auto sm:w-full sm:max-w-[480px]">
-      <div class="bg-card px-6 py-12 shadow sm:rounded-lg sm:px-12">
-        <div class="space-y-6">
-          <div class="text-center">
-            <Button @click="handleLogin" size="lg">
-              Sign in with SSO
-            </Button>
+  <div class="min-h-screen flex items-center justify-center bg-background p-4">
+    <Card class="mx-auto w-full max-w-sm">
+      <CardHeader>
+        <CardTitle class="text-2xl text-center">
+          Welcome to LogChef
+        </CardTitle>
+        <CardDescription class="text-center">
+          Your centralized log analytics platform
+        </CardDescription>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        <!-- Show error message if present -->
+        <Alert v-if="errorMessage" variant="destructive">
+          <AlertCircle class="h-4 w-4 mr-2" />
+          <div>
+            <AlertTitle>Authentication Error</AlertTitle>
+            <AlertDescription>
+              {{ errorMessage }}
+            </AlertDescription>
           </div>
-        </div>
-      </div>
-    </div>
+        </Alert>
+
+        <Button @click="handleLogin" class="w-full">
+          Sign in with SSO
+        </Button>
+      </CardContent>
+    </Card>
   </div>
 </template>

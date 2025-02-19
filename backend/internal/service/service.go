@@ -144,15 +144,16 @@ func (s *Service) GetSource(ctx context.Context, id string) (*models.Source, err
 }
 
 // CreateSource creates a new source
-func (s *Service) CreateSource(ctx context.Context, schemaType string, conn models.ConnectionInfo, description string, ttlDays int) (*models.Source, error) {
+func (s *Service) CreateSource(ctx context.Context, autoCreateTable bool, conn models.ConnectionInfo, description string, ttlDays int, metaTSField string) (*models.Source, error) {
 	source := &models.Source{
-		ID:          uuid.New().String(),
-		SchemaType:  schemaType,
-		Connection:  conn,
-		Description: description,
-		TTLDays:     ttlDays,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:                uuid.New().String(),
+		MetaIsAutoCreated: boolToInt(autoCreateTable),
+		MetaTSField:       metaTSField,
+		Connection:        conn,
+		Description:       description,
+		TTLDays:           ttlDays,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
 	}
 
 	// Check if source already exists
@@ -175,30 +176,33 @@ func (s *Service) CreateSource(ctx context.Context, schemaType string, conn mode
 		}
 	}
 
-	// For unmanaged sources, verify table exists in ClickHouse
-	if source.SchemaType == models.SchemaTypeUnmanaged {
-		// First add source to pool to get a connection
-		if err := s.pool.AddSource(source); err != nil {
-			s.log.Error("failed to initialize connection",
-				"error", err,
-				"source_id", source.ID,
-			)
-			return nil, &ValidationError{
-				Field:   "connection",
-				Message: "Failed to connect to the database. Please check your connection details.",
-			}
+	// First add source to pool to get a connection for health check
+	if err := s.pool.AddSource(source); err != nil {
+		s.log.Error("failed to initialize connection",
+			"error", err,
+			"source_id", source.ID,
+		)
+		return nil, &ValidationError{
+			Field:   "connection",
+			Message: "Failed to connect to the database. Please check your connection details.",
 		}
-		client, err := s.pool.GetClient(source.ID)
-		if err != nil {
-			s.log.Error("failed to get client",
-				"error", err,
-				"source_id", source.ID,
-			)
-			return nil, &ValidationError{
-				Field:   "connection",
-				Message: "Failed to establish database connection. Please verify your credentials.",
-			}
+	}
+
+	// Get client for health check
+	client, err := s.pool.GetClient(source.ID)
+	if err != nil {
+		s.log.Error("failed to get client",
+			"error", err,
+			"source_id", source.ID,
+		)
+		return nil, &ValidationError{
+			Field:   "connection",
+			Message: "Failed to establish database connection. Please verify your credentials.",
 		}
+	}
+
+	// If not auto-creating table, verify it exists
+	if !autoCreateTable {
 		query := fmt.Sprintf("SELECT 1 FROM %s.%s LIMIT 1", source.Connection.Database, source.Connection.TableName)
 		if _, err := client.Query(ctx, query); err != nil {
 			s.log.Error("failed to verify table exists",
@@ -226,36 +230,8 @@ func (s *Service) CreateSource(ctx context.Context, schemaType string, conn mode
 		}
 	}
 
-	// Add to connection pool (for managed sources)
-	if source.SchemaType == models.SchemaTypeManaged {
-		if err := s.pool.AddSource(source); err != nil {
-			// Try to clean up SQLite entry on error
-			_ = s.sqlite.DeleteSource(ctx, source.ID)
-			s.log.Error("failed to initialize connection",
-				"error", err,
-				"source_id", source.ID,
-			)
-			return nil, &ValidationError{
-				Field:   "connection",
-				Message: "Failed to connect to the database. Please check your connection details.",
-			}
-		}
-
-		// Create the table
-		client, err := s.pool.GetClient(source.ID)
-		if err != nil {
-			// Try to clean up SQLite entry on error
-			_ = s.sqlite.DeleteSource(ctx, source.ID)
-			s.log.Error("failed to get client",
-				"error", err,
-				"source_id", source.ID,
-			)
-			return nil, &ValidationError{
-				Field:   "connection",
-				Message: "Failed to establish database connection. Please verify your credentials.",
-			}
-		}
-
+	// Create table if needed
+	if autoCreateTable {
 		// Create table using the schema
 		schema := models.OTELLogsTableSchema
 		schema = strings.ReplaceAll(schema, "{{database_name}}", source.Connection.Database)
@@ -281,6 +257,14 @@ func (s *Service) CreateSource(ctx context.Context, schemaType string, conn mode
 	}
 
 	return source, nil
+}
+
+// Helper function to convert bool to int
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // DeleteSource deletes a source
@@ -788,4 +772,42 @@ func (s *Service) ListSourceTeams(ctx context.Context, sourceID string) ([]*mode
 	}
 
 	return s.sqlite.ListSourceTeams(ctx, sourceID)
+}
+
+// InitAdminUsers initializes admin users from the provided email list
+func (s *Service) InitAdminUsers(ctx context.Context, adminEmails []string) error {
+	for _, email := range adminEmails {
+		// Check if user already exists
+		existing, err := s.sqlite.GetUserByEmail(ctx, email)
+		if err != nil {
+			return fmt.Errorf("error checking existing user: %w", err)
+		}
+		if existing != nil {
+			// If user exists but is not admin, promote them
+			if existing.Role != models.UserRoleAdmin {
+				existing.Role = models.UserRoleAdmin
+				if err := s.sqlite.UpdateUser(ctx, existing); err != nil {
+					return fmt.Errorf("error promoting user to admin: %w", err)
+				}
+				s.log.Info("promoted existing user to admin", "email", email)
+			}
+			continue
+		}
+
+		// Create new admin user
+		user := &models.User{
+			ID:       uuid.New().String(),
+			Email:    email,
+			FullName: "Admin User", // This will be updated on first login via OIDC
+			Role:     models.UserRoleAdmin,
+			Status:   models.UserStatusActive,
+		}
+
+		if err := s.sqlite.CreateUser(ctx, user); err != nil {
+			return fmt.Errorf("error creating admin user: %w", err)
+		}
+		s.log.Info("created new admin user", "email", email)
+	}
+
+	return nil
 }

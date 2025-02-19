@@ -54,6 +54,7 @@ import {
     LogOut,
     Users,
     Home,
+    ScrollText,
 } from 'lucide-vue-next'
 
 import { useRoute } from 'vue-router'
@@ -78,7 +79,7 @@ function getUserInitials(name: string | undefined): string {
 const navMain = [
     {
         title: 'Logs',
-        icon: Database,
+        icon: ScrollText,
         items: [
             {
                 title: 'Explorer',

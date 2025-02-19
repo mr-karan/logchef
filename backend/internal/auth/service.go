@@ -37,7 +37,7 @@ type Service interface {
 	AddTeamMember(ctx context.Context, teamID, userID, role string) error
 	RemoveTeamMember(ctx context.Context, teamID, userID string) error
 	ListTeamMembers(ctx context.Context, teamID string) ([]*models.TeamMember, error)
-	GetUserTeams(ctx context.Context, userID string) ([]*models.Team, error)
+	ListUserTeams(ctx context.Context, userID string) ([]*models.Team, error)
 
 	// Team source operations
 	AddTeamSource(ctx context.Context, teamID, sourceID string) error
@@ -181,8 +181,8 @@ func (s *service) ListTeamMembers(ctx context.Context, teamID string) ([]*models
 }
 
 // GetUserTeams returns all teams a user is a member of
-func (s *service) GetUserTeams(ctx context.Context, userID string) ([]*models.Team, error) {
-	return s.store.GetUserTeams(ctx, userID)
+func (s *service) ListUserTeams(ctx context.Context, userID string) ([]*models.Team, error) {
+	return s.store.ListUserTeams(ctx, userID)
 }
 
 // AddTeamSource adds a source to a team

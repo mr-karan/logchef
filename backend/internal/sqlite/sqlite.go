@@ -1,7 +1,6 @@
 package sqlite
 
 import (
-	"context"
 	"database/sql"
 	_ "embed"
 	"fmt"
@@ -10,7 +9,6 @@ import (
 
 	"backend-v2/internal/auth"
 	"backend-v2/pkg/logger"
-	"backend-v2/pkg/models"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/sqlite3"
@@ -245,13 +243,3 @@ func isUniqueConstraintError(err error, table, column string) bool {
 
 // Ensure DB implements auth.Store
 var _ auth.Store = (*DB)(nil)
-
-// GetUserTeams gets all teams a user is a member of
-func (d *DB) GetUserTeams(ctx context.Context, userID string) ([]*models.Team, error) {
-	var teams []*models.Team
-	err := d.queries.ListUserTeams.SelectContext(ctx, &teams, userID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting user teams: %w", err)
-	}
-	return teams, nil
-}

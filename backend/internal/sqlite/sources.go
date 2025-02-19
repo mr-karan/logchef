@@ -15,7 +15,8 @@ import (
 func (d *DB) CreateSource(ctx context.Context, source *models.Source) error {
 	result, err := d.queries.CreateSource.ExecContext(ctx,
 		source.ID,
-		source.SchemaType,
+		source.MetaIsAutoCreated,
+		source.MetaTSField,
 		source.Connection.Host,
 		source.Connection.Username,
 		source.Connection.Password,
@@ -46,16 +47,19 @@ func (d *DB) CreateSource(ctx context.Context, source *models.Source) error {
 // GetSource retrieves a source by its ID
 func (d *DB) GetSource(ctx context.Context, id string) (*models.Source, error) {
 	var row SourceRow
-	err := d.queries.GetSource.GetContext(ctx, &row, id)
-	if err != nil {
+	if err := d.queries.GetSource.QueryRowxContext(ctx, id).StructScan(&row); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("error getting source: %w", err)
 	}
 
 	source := &models.Source{
-		ID:          row.ID,
-		SchemaType:  row.SchemaType,
-		Description: row.Description,
-		TTLDays:     row.TTLDays,
+		ID:                row.ID,
+		MetaIsAutoCreated: row.MetaIsAutoCreated,
+		MetaTSField:       row.MetaTSField,
+		Description:       row.Description,
+		TTLDays:           row.TTLDays,
 		Connection: models.ConnectionInfo{
 			Host:      row.Host,
 			Username:  row.Username,
@@ -73,19 +77,19 @@ func (d *DB) GetSource(ctx context.Context, id string) (*models.Source, error) {
 // GetSourceByName retrieves a source by its table name and database
 func (d *DB) GetSourceByName(ctx context.Context, database, tableName string) (*models.Source, error) {
 	var row SourceRow
-	err := d.queries.GetSourceByName.GetContext(ctx, &row, database, tableName)
-	if err != nil {
+	if err := d.queries.GetSourceByName.QueryRowxContext(ctx, database, tableName).StructScan(&row); err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil // Return nil, nil when no source is found
+			return nil, nil
 		}
 		return nil, fmt.Errorf("error getting source: %w", err)
 	}
 
 	source := &models.Source{
-		ID:          row.ID,
-		SchemaType:  row.SchemaType,
-		Description: row.Description,
-		TTLDays:     row.TTLDays,
+		ID:                row.ID,
+		MetaIsAutoCreated: row.MetaIsAutoCreated,
+		MetaTSField:       row.MetaTSField,
+		Description:       row.Description,
+		TTLDays:           row.TTLDays,
 		Connection: models.ConnectionInfo{
 			Host:      row.Host,
 			Username:  row.Username,
@@ -102,19 +106,25 @@ func (d *DB) GetSourceByName(ctx context.Context, database, tableName string) (*
 
 // ListSources returns all sources ordered by creation date
 func (d *DB) ListSources(ctx context.Context) ([]*models.Source, error) {
-	var rows []SourceRow
-	err := d.queries.ListSources.SelectContext(ctx, &rows)
+	rows, err := d.queries.ListSources.QueryxContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error listing sources: %w", err)
 	}
+	defer rows.Close()
 
-	sources := make([]*models.Source, len(rows))
-	for i, row := range rows {
-		sources[i] = &models.Source{
-			ID:          row.ID,
-			SchemaType:  row.SchemaType,
-			Description: row.Description,
-			TTLDays:     row.TTLDays,
+	var sources []*models.Source
+	for rows.Next() {
+		var row SourceRow
+		if err := rows.StructScan(&row); err != nil {
+			return nil, fmt.Errorf("error scanning row: %w", err)
+		}
+
+		sources = append(sources, &models.Source{
+			ID:                row.ID,
+			MetaIsAutoCreated: row.MetaIsAutoCreated,
+			MetaTSField:       row.MetaTSField,
+			Description:       row.Description,
+			TTLDays:           row.TTLDays,
 			Connection: models.ConnectionInfo{
 				Host:      row.Host,
 				Username:  row.Username,
@@ -124,7 +134,11 @@ func (d *DB) ListSources(ctx context.Context) ([]*models.Source, error) {
 			},
 			CreatedAt: row.CreatedAt,
 			UpdatedAt: row.UpdatedAt,
-		}
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	return sources, nil
@@ -133,7 +147,8 @@ func (d *DB) ListSources(ctx context.Context) ([]*models.Source, error) {
 // UpdateSource updates an existing source
 func (d *DB) UpdateSource(ctx context.Context, source *models.Source) error {
 	result, err := d.queries.UpdateSource.ExecContext(ctx,
-		source.SchemaType,
+		source.MetaIsAutoCreated,
+		source.MetaTSField,
 		source.Connection.Host,
 		source.Connection.Username,
 		source.Connection.Password,
@@ -180,15 +195,24 @@ func (d *DB) DeleteSource(ctx context.Context, id string) error {
 
 // SourceRow represents a row in the sources table
 type SourceRow struct {
-	ID          string    `db:"id"`
-	SchemaType  string    `db:"schema_type"`
-	Host        string    `db:"host"`
-	Username    string    `db:"username"`
-	Password    string    `db:"password"`
-	Database    string    `db:"database"`
-	TableName   string    `db:"table_name"`
-	Description string    `db:"description"`
-	TTLDays     int       `db:"ttl_days"`
-	CreatedAt   time.Time `db:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at"`
+	ID                string    `db:"id"`
+	MetaIsAutoCreated int       `db:"_meta_is_auto_created"`
+	MetaTSField       string    `db:"_meta_ts_field"`
+	Host              string    `db:"host"`
+	Username          string    `db:"username"`
+	Password          string    `db:"password"`
+	Database          string    `db:"database"`
+	TableName         string    `db:"table_name"`
+	Description       string    `db:"description"`
+	TTLDays           int       `db:"ttl_days"`
+	CreatedAt         time.Time `db:"created_at"`
+	UpdatedAt         time.Time `db:"updated_at"`
+}
+
+// Helper functions for bool/int conversion
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

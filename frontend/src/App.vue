@@ -1,22 +1,21 @@
 <script setup lang="ts">
-import { useAuthStore } from '@/stores/auth'
 import { Toaster } from '@/components/ui/toast'
 import OuterApp from '@/layouts/OuterApp.vue'
 import InnerApp from '@/layouts/InnerApp.vue'
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 
-const authStore = useAuthStore()
+const route = useRoute()
+
+// Determine layout based on route meta
+const layout = computed(() => {
+  return route.meta.layout === 'outer' ? OuterApp : InnerApp
+})
 </script>
 
 <template>
   <Toaster />
-
-  <!-- Show login page if not authenticated -->
-  <template v-if="!authStore.isAuthenticated">
-    <OuterApp />
-  </template>
-
-  <!-- Show main app layout if authenticated -->
-  <template v-else>
-    <InnerApp />
-  </template>
+  <component :is="layout">
+    <router-view />
+  </component>
 </template>

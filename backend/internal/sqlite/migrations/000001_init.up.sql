@@ -1,7 +1,8 @@
 -- Create the sources table
 CREATE TABLE IF NOT EXISTS sources (
     id TEXT PRIMARY KEY,
-    schema_type TEXT NOT NULL CHECK (schema_type IN ('managed', 'unmanaged')),
+    _meta_is_auto_created INTEGER NOT NULL CHECK (_meta_is_auto_created IN (0, 1)),
+    _meta_ts_field TEXT NOT NULL DEFAULT '_timestamp',
     host TEXT NOT NULL,
     username TEXT NOT NULL,
     password TEXT NOT NULL,

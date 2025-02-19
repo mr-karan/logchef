@@ -4,16 +4,33 @@ import {
   type RouteRecordRaw,
 } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { authApi } from "@/api/auth";
 
 const routes: RouteRecordRaw[] = [
   {
     path: "/",
     redirect: "/logs/explore",
   },
+  // Auth Section
+  {
+    path: "/auth",
+    children: [
+      {
+        path: "login",
+        name: "Login",
+        component: () => import("@/views/auth/Login.vue"),
+        meta: {
+          title: "Login",
+          public: true,
+          layout: "outer",
+        },
+      },
+    ],
+  },
   // Logs Section
   {
     path: "/logs",
-    component: () => import("@/views/logs/LogsLayout.vue"),
+    component: () => import("@/views/explore/LogsLayout.vue"),
     meta: {
       requiresAuth: true,
     },
@@ -25,13 +42,13 @@ const routes: RouteRecordRaw[] = [
       {
         path: "explore",
         name: "LogExplorer",
-        component: () => import("@/views/logs/LogExplorer.vue"),
+        component: () => import("@/views/explore/LogExplorer.vue"),
         meta: { title: "Log Explorer" },
       },
       // {
       //   path: "history",
       //   name: "QueryHistory",
-      //   component: () => import("@/views/logs/QueryHistory.vue"),
+      //   component: () => import("@/views/explore/QueryHistory.vue"),
       //   meta: { title: "Query History" },
       // },
     ],
@@ -77,7 +94,7 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: "users",
-        name: "Users",
+        name: "ManageUsers",
         component: () => import("@/views/access/users/UsersList.vue"),
         meta: { title: "Users" },
       },
@@ -153,25 +170,44 @@ const router = createRouter({
   routes,
 });
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore();
   const isAuthenticated = authStore.isAuthenticated;
+  const isAdmin = authStore.user?.role === "admin";
   const requiresAuth = to.matched.some((record) => record.meta.requiresAuth);
   const requiresAdmin = to.matched.some((record) => record.meta.requiresAdmin);
   const isPublic = to.matched.some((record) => record.meta.public);
+  const skipAuthCheck = to.matched.some((record) => record.meta.skipAuthCheck);
 
   // Update document title
   document.title = `${to.meta.title ? to.meta.title + " - " : ""}LogChef`;
 
-  if (requiresAuth && !isAuthenticated) {
-    next("/login");
-  } else if (requiresAdmin && !authStore.isAdmin) {
-    next("/forbidden");
-  } else if (to.path === "/login" && isAuthenticated) {
-    next("/");
-  } else {
-    next();
+  // Skip auth check for error pages
+  if (skipAuthCheck) {
+    return next();
   }
+
+  // Handle authentication
+  if (!isAuthenticated && !isPublic) {
+    // Save the intended path for redirect after login
+    return next({
+      name: "Login",
+      query: { redirect: to.fullPath },
+    });
+  }
+
+  // Prevent authenticated users from accessing login page
+  if (isAuthenticated && to.name === "Login") {
+    return next({ path: "/" });
+  }
+
+  // Check admin access
+  if (requiresAdmin && !isAdmin) {
+    return next({ name: "Forbidden" });
+  }
+
+  // Proceed with navigation
+  return next();
 });
 
 export default router;

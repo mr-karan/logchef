@@ -10,6 +10,7 @@ const (
 	ErrOIDCInvalidState          AuthErrorCode = "OIDC_INVALID_STATE"
 	ErrOIDCInvalidToken          AuthErrorCode = "OIDC_INVALID_TOKEN"
 	ErrOIDCEmailNotVerified      AuthErrorCode = "OIDC_EMAIL_NOT_VERIFIED"
+	ErrUnauthorizedUser          AuthErrorCode = "UNAUTHORIZED_USER"
 
 	// Session Errors
 	ErrSessionNotFound AuthErrorCode = "SESSION_NOT_FOUND"

@@ -147,10 +147,11 @@ func (s *Server) handleGetSource(c *fiber.Ctx) error {
 
 // CreateSourceRequest represents a request to create a new source
 type CreateSourceRequest struct {
-	SchemaType  string                `json:"schema_type"`
-	Connection  models.ConnectionInfo `json:"connection"`
-	Description string                `json:"description"`
-	TTLDays     int                   `json:"ttl_days"`
+	MetaIsAutoCreated bool                  `json:"meta_is_auto_created"`
+	MetaTSField       string                `json:"meta_ts_field,omitempty"`
+	Connection        models.ConnectionInfo `json:"connection"`
+	Description       string                `json:"description"`
+	TTLDays           int                   `json:"ttl_days"`
 }
 
 // handleCreateSource handles creating a new source
@@ -160,12 +161,20 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
 	}
 
-	if err := service.ValidateCreateSourceRequest(req.SchemaType, req.Connection, req.Description, req.TTLDays); err != nil {
+	// Default meta timestamp field if not provided
+	if req.MetaTSField == "" {
+		req.MetaTSField = "_timestamp"
+	}
+
+	if err := service.ValidateCreateSourceRequest(req.MetaIsAutoCreated, req.Connection, req.Description, req.TTLDays, req.MetaTSField); err != nil {
 		return fiber.NewError(http.StatusBadRequest, err.Error())
 	}
 
-	created, err := s.svc.CreateSource(c.Context(), req.SchemaType, req.Connection, req.Description, req.TTLDays)
+	created, err := s.svc.CreateSource(c.Context(), req.MetaIsAutoCreated, req.Connection, req.Description, req.TTLDays, req.MetaTSField)
 	if err != nil {
+		if validationErr, ok := err.(*service.ValidationError); ok {
+			return fiber.NewError(http.StatusBadRequest, validationErr.Error())
+		}
 		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to create source: %v", err))
 	}
 
@@ -387,36 +396,33 @@ func (s *Server) handleGetTimeSeries(c *fiber.Ctx) error {
 	})
 }
 
-// handleLogin initiates the OIDC login flow
-func (s *Server) handleLogin(c *fiber.Ctx) error {
-	// Generate secure state parameter
-	state, err := generateState()
+// redirectToFrontend redirects to the frontend URL with optional error message
+func (s *Server) redirectToFrontend(c *fiber.Ctx, path string, err *autherrors.AuthError) error {
+	// Build URL with query params if error exists
 	if err != nil {
-		s.log.Error("failed to generate state",
-			"error", err,
+		path = fmt.Sprintf("/auth/login?error=%s", err.Code)
+		s.log.Warn("redirecting to frontend login page with error",
+			"error_code", err.Code,
+			"error_message", err.Message,
+			"path", path,
 		)
-		return c.Redirect("/auth/error?error=state_generation_failed", fiber.StatusTemporaryRedirect)
 	}
 
-	// Store state in secure cookie
-	cookie := &fiber.Cookie{
-		Name:     "auth_state",
-		Value:    state,
-		Expires:  time.Now().Add(5 * time.Minute),
-		HTTPOnly: true,
-		Secure:   true,
-		SameSite: "lax",
-		Path:     "/",
+	// Ensure path starts with /
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
 	}
-	c.Cookie(cookie)
 
-	s.log.Debug("initiating OIDC login",
-		"state_length", len(state),
-	)
+	// Use configured frontend URL if set
+	if s.config.Server.FrontendURL != "" {
+		s.log.Debug("redirecting to frontend",
+			"frontend_url", s.config.Server.FrontendURL,
+			"path", path,
+		)
+		return c.Redirect(s.config.Server.FrontendURL+path, fiber.StatusTemporaryRedirect)
+	}
 
-	// Get auth URL and redirect to OIDC provider
-	authURL := s.auth.GetAuthURL(state)
-	return c.Redirect(authURL, fiber.StatusTemporaryRedirect)
+	return c.Redirect(path, fiber.StatusTemporaryRedirect)
 }
 
 // handleCallback handles the OIDC callback
@@ -427,7 +433,10 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 
 	if code == "" {
 		s.log.Warn("missing code parameter in callback")
-		return c.Redirect("/auth/error?message=invalid_request", fiber.StatusTemporaryRedirect)
+		return s.redirectToFrontend(c, "", &autherrors.AuthError{
+			Code:    autherrors.ErrOIDCInvalidToken,
+			Message: "Invalid request: missing code parameter",
+		})
 	}
 
 	// Get stored state from cookie
@@ -440,7 +449,10 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 			"state_length", len(state),
 			"stored_state_length", len(storedState),
 		)
-		return c.Redirect("/auth/error?message=invalid_state", fiber.StatusTemporaryRedirect)
+		return s.redirectToFrontend(c, "", &autherrors.AuthError{
+			Code:    autherrors.ErrOIDCInvalidState,
+			Message: "Invalid state: " + err.Error(),
+		})
 	}
 
 	// Delete state cookie immediately
@@ -463,12 +475,16 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 				"error", err,
 				"code", authErr.Code,
 			)
+			return s.redirectToFrontend(c, "", authErr)
 		} else {
 			s.log.Error("failed to handle auth callback",
 				"error", err,
 			)
+			return s.redirectToFrontend(c, "", &autherrors.AuthError{
+				Code:    autherrors.ErrOIDCInvalidToken,
+				Message: "Authentication failed: " + err.Error(),
+			})
 		}
-		return c.Redirect("/auth/error?message=authentication_failed", fiber.StatusTemporaryRedirect)
 	}
 
 	// Set session cookie
@@ -482,24 +498,46 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 		Path:     "/",
 	})
 
-	// Get frontend redirect path from query param, default to /explore if not provided
-	redirectPath := c.Query("redirect", "/explore")
-	if !strings.HasPrefix(redirectPath, "/") {
-		redirectPath = "/" + redirectPath
-	}
+	// Get frontend redirect path from query param, default to /logs/explore if not provided
+	redirectPath := c.Query("redirect", "/logs/explore")
 
-	// Use configured frontend URL if set, otherwise use relative path
-	redirectURL := redirectPath
-	if s.config.Server.FrontendURL != "" {
-		redirectURL = s.config.Server.FrontendURL + redirectPath
-		s.log.Debug("using configured frontend redirect",
-			"frontend_url", s.config.Server.FrontendURL,
-			"redirect_path", redirectPath,
+	// Redirect to frontend on success
+	return s.redirectToFrontend(c, redirectPath, nil)
+}
+
+// handleLogin initiates the OIDC login flow
+func (s *Server) handleLogin(c *fiber.Ctx) error {
+	// Generate secure state parameter
+	state, err := generateState()
+	if err != nil {
+		s.log.Error("failed to generate state",
+			"error", err,
 		)
+		return s.redirectToFrontend(c, "", &autherrors.AuthError{
+			Code:    autherrors.ErrOIDCInvalidState,
+			Message: "Failed to generate state: " + err.Error(),
+		})
 	}
 
-	// Redirect to frontend
-	return c.Redirect(redirectURL, fiber.StatusTemporaryRedirect)
+	// Store state in secure cookie
+	cookie := &fiber.Cookie{
+		Name:     "auth_state",
+		Value:    state,
+		Expires:  time.Now().Add(5 * time.Minute),
+		HTTPOnly: true,
+		Secure:   true,
+		SameSite: "lax",
+		Path:     "/",
+	}
+	c.Cookie(cookie)
+
+	s.log.Debug("initiating OIDC login",
+		"state_length", len(state),
+	)
+
+	// Get auth URL and redirect to OIDC provider
+	authURL := s.auth.GetAuthURL(state)
+	return c.Redirect(authURL, fiber.StatusTemporaryRedirect)
 }
 
 // handleLogout logs out the user

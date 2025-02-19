@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Plus, Trash2 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
-import { sourcesApi, type Source } from '@/api/sources'
+import { type Source } from '@/api/sources'
 import {
     Table,
     TableBody,
@@ -23,87 +23,32 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table'
-import { useToast } from '@/components/ui/toast/use-toast'
-import { TOAST_DURATION } from '@/lib/constants'
-import { isErrorResponse, getErrorMessage } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
+import { useSourcesStore } from '@/stores/sources'
 
 const router = useRouter()
-const { toast } = useToast()
-const sources = ref<Source[]>([])
-const isLoading = ref(true)
+const sourcesStore = useSourcesStore()
 const showDeleteDialog = ref(false)
 const sourceToDelete = ref<Source | null>(null)
-
-const loadSources = async () => {
-    try {
-        const response = await sourcesApi.listSources()
-        if (isErrorResponse(response)) {
-            toast({
-                title: 'Error',
-                description: response.data.error,
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
-            })
-            return
-        }
-        if ('sources' in response.data) {
-            sources.value = response.data.sources
-        }
-    } catch (error) {
-        console.error('Error loading sources:', error)
-        toast({
-            title: 'Error',
-            description: getErrorMessage(error),
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
-    } finally {
-        isLoading.value = false
-    }
-}
-
-const confirmDelete = async () => {
-    if (!sourceToDelete.value) return
-
-    try {
-        const response = await sourcesApi.deleteSource(sourceToDelete.value.id)
-        if (isErrorResponse(response)) {
-            toast({
-                title: 'Error',
-                description: response.data.error,
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
-            })
-            return
-        }
-
-        toast({
-            title: 'Success',
-            description: 'Source deleted successfully',
-            duration: TOAST_DURATION.SUCCESS,
-        })
-        await loadSources()
-    } catch (error) {
-        console.error('Error deleting source:', error)
-        toast({
-            title: 'Error',
-            description: getErrorMessage(error),
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
-    } finally {
-        showDeleteDialog.value = false
-        sourceToDelete.value = null
-    }
-}
 
 const handleDelete = (source: Source) => {
     sourceToDelete.value = source
     showDeleteDialog.value = true
 }
 
-onMounted(loadSources)
+const confirmDelete = async () => {
+    if (!sourceToDelete.value) return
+
+    const success = await sourcesStore.deleteSource(sourceToDelete.value.id)
+    if (success) {
+        showDeleteDialog.value = false
+        sourceToDelete.value = null
+    }
+}
+
+onMounted(() => {
+    sourcesStore.loadSources()
+})
 
 const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString()
@@ -128,10 +73,10 @@ const formatDate = (dateString: string) => {
                 </div>
             </CardHeader>
             <CardContent>
-                <div v-if="isLoading" class="text-center py-4">
+                <div v-if="sourcesStore.isLoading" class="text-center py-4">
                     Loading sources...
                 </div>
-                <div v-else-if="sources.length === 0" class="rounded-lg border p-4 text-center">
+                <div v-else-if="sourcesStore.sources.length === 0" class="rounded-lg border p-4 text-center">
                     <p class="text-muted-foreground mb-4">No sources configured yet</p>
                     <Button @click="router.push({ name: 'NewSource' })">
                         <Plus class="mr-2 h-4 w-4" />
@@ -143,7 +88,8 @@ const formatDate = (dateString: string) => {
                         <TableHeader>
                             <TableRow>
                                 <TableHead class="w-[200px]">Table Name</TableHead>
-                                <TableHead class="w-[100px]">Type</TableHead>
+                                <TableHead class="w-[150px]">Table Auto Created</TableHead>
+                                <TableHead class="w-[150px]">Timestamp Column</TableHead>
                                 <TableHead class="w-[300px]">Connection</TableHead>
                                 <TableHead class="w-[100px]">Status</TableHead>
                                 <TableHead class="w-[100px]">TTL</TableHead>
@@ -152,7 +98,7 @@ const formatDate = (dateString: string) => {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            <TableRow v-for="source in sources" :key="source.id">
+                            <TableRow v-for="source in sourcesStore.sources" :key="source.id">
                                 <TableCell class="font-medium">
                                     {{ source.connection.table_name }}
                                     <div v-if="source.description" class="text-sm text-muted-foreground">
@@ -160,9 +106,14 @@ const formatDate = (dateString: string) => {
                                     </div>
                                 </TableCell>
                                 <TableCell>
-                                    <Badge variant="secondary" class="capitalize">
-                                        {{ source.schema_type }}
+                                    <Badge :variant="source._meta_is_auto_created === 1 ? 'default' : 'secondary'"
+                                        class="whitespace-nowrap">
+                                        {{ source._meta_is_auto_created === 1 ? 'Yes' : 'No' }}
                                     </Badge>
+                                </TableCell>
+                                <TableCell>
+                                    <code
+                                        class="font-mono text-xs bg-muted px-2 py-1 rounded">{{ source._meta_ts_field }}</code>
                                 </TableCell>
                                 <TableCell>
                                     <div class="text-sm space-y-1">

@@ -1,8 +1,9 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import type { Session, User } from "@/types";
 import { authApi } from "@/api/auth";
-import { navigationService } from "@/services/navigation";
+import router from "@/router";
+import type { AxiosError } from "axios";
 
 interface SessionResponse {
   status: "success";
@@ -24,7 +25,7 @@ type ApiResponse = SessionResponse | ErrorResponse;
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<User | null>(null);
   const session = ref<Session | null>(null);
-  const isAuthenticated = ref(false);
+  const isAuthenticated = computed(() => !!user.value);
   const isInitialized = ref(false);
   const isInitializing = ref(false);
 
@@ -45,7 +46,6 @@ export const useAuthStore = defineStore("auth", () => {
       if (response.status === "success") {
         user.value = response.data.user;
         session.value = response.data.session;
-        isAuthenticated.value = true;
         console.log("Auth initialized successfully:", {
           user: user.value,
           isAuthenticated: isAuthenticated.value,
@@ -56,7 +56,11 @@ export const useAuthStore = defineStore("auth", () => {
         console.log("No active session found");
       }
     } catch (error) {
-      console.error("Failed to initialize auth:", error);
+      // Only log error if not a 401 (unauthorized)
+      const axiosError = error as AxiosError;
+      if (axiosError.response?.status !== 401) {
+        console.error("Failed to initialize auth:", error);
+      }
       await clearState();
     } finally {
       isInitialized.value = true;
@@ -68,12 +72,10 @@ export const useAuthStore = defineStore("auth", () => {
   async function clearState() {
     user.value = null;
     session.value = null;
-    isAuthenticated.value = false;
   }
 
-  // Login user
-  async function login(redirectPath?: string) {
-    // Redirect to backend login endpoint with redirect_uri
+  // Start OIDC login flow
+  async function startLogin(redirectPath?: string) {
     window.location.href = authApi.getLoginUrl(redirectPath);
   }
 
@@ -85,10 +87,9 @@ export const useAuthStore = defineStore("auth", () => {
     } catch (error) {
       console.error("Failed to logout:", error);
     } finally {
-      // Always clear state
+      // Always clear state and redirect to login
       await clearState();
-      // Redirect to login page
-      await navigationService.goToLogin();
+      router.push({ name: "Login" });
     }
   }
 
@@ -98,7 +99,7 @@ export const useAuthStore = defineStore("auth", () => {
     isAuthenticated,
     isInitialized,
     initialize,
-    login,
+    startLogin,
     logout,
     clearState,
   };
