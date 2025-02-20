@@ -4,7 +4,6 @@ import {
   type RouteRecordRaw,
 } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
-import { authApi } from "@/api/auth";
 
 const routes: RouteRecordRaw[] = [
   {
@@ -170,44 +169,32 @@ const router = createRouter({
   routes,
 });
 
-router.beforeEach(async (to, from, next) => {
+router.beforeEach(async (to) => {
   const authStore = useAuthStore();
   const isAuthenticated = authStore.isAuthenticated;
   const isAdmin = authStore.user?.role === "admin";
-  const requiresAuth = to.matched.some((record) => record.meta.requiresAuth);
-  const requiresAdmin = to.matched.some((record) => record.meta.requiresAdmin);
   const isPublic = to.matched.some((record) => record.meta.public);
-  const skipAuthCheck = to.matched.some((record) => record.meta.skipAuthCheck);
 
   // Update document title
   document.title = `${to.meta.title ? to.meta.title + " - " : ""}LogChef`;
 
-  // Skip auth check for error pages
-  if (skipAuthCheck) {
-    return next();
-  }
-
   // Handle authentication
   if (!isAuthenticated && !isPublic) {
-    // Save the intended path for redirect after login
-    return next({
+    return {
       name: "Login",
       query: { redirect: to.fullPath },
-    });
+    };
   }
 
   // Prevent authenticated users from accessing login page
   if (isAuthenticated && to.name === "Login") {
-    return next({ path: "/" });
+    return { path: "/" };
   }
 
-  // Check admin access
-  if (requiresAdmin && !isAdmin) {
-    return next({ name: "Forbidden" });
+  // Handle admin routes
+  if (to.matched.some((record) => record.meta.requiresAdmin) && !isAdmin) {
+    return { name: "Forbidden" };
   }
-
-  // Proceed with navigation
-  return next();
 });
 
 export default router;
