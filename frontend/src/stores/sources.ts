@@ -29,7 +29,7 @@ export const useSourcesStore = defineStore("sources", () => {
   }
 
   async function createSource(payload: CreateSourcePayload) {
-    const { success, data } = await handleApiCall({
+    const { success } = await handleApiCall({
       apiCall: () => sourcesApi.createSource(payload),
       successMessage: "Source created successfully",
       onSuccess: (data) => {

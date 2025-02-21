@@ -41,5 +41,5 @@ export function formatSourceNameWithSchema(
   includeSchema = true
 ): string {
   const baseName = formatSourceName(source);
-  return includeSchema ? `${baseName} (${source.schema_type})` : baseName;
+  return includeSchema && source.connection.table_name ? `${baseName} (${source.connection.table_name})` : baseName;
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -43,7 +43,6 @@ import { useSourcesStore } from "@/stores/sources"
 import { formatDate, formatSourceName } from '@/utils/format'
 
 const route = useRoute()
-const router = useRouter()
 const { toast } = useToast()
 
 const team = ref<Team | null>(null)

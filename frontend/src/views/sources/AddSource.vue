@@ -7,12 +7,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { useSourcesStore } from '@/stores/sources'
-import { Code, ChevronRight, ChevronsUpDown, Info, Plus, Database } from 'lucide-vue-next'
+import { Code, ChevronsUpDown, Plus, Database } from 'lucide-vue-next'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Separator } from '@/components/ui/separator'
 
@@ -34,12 +33,6 @@ const ttlDays = ref(90)
 const isSubmitting = ref(false)
 const showSchema = ref(false)
 const metaTSField = ref('_timestamp')
-
-// Table creation messages
-const createTableMessage = computed(() => createTable.value
-    ? 'Let LogChef create the table with optimized schema for OTLP compatible fields and efficient compression'
-    : 'Connect to an existing table (must be compatible with LogChef schema requirements)'
-)
 
 // Schema preview
 const tableSchema = `CREATE TABLE IF NOT EXISTS "{database}"."{table_name}"
@@ -87,10 +80,6 @@ const isValid = computed(() => {
 // Event handlers
 const handleAuthToggle = (checked: boolean) => {
     enableAuth.value = checked
-}
-
-const handleTableModeChange = (value: string) => {
-    tableMode.value = value
 }
 
 const handleSubmit = async () => {

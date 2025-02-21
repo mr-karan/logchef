@@ -8,7 +8,6 @@ import {
     Breadcrumb,
     BreadcrumbItem,
     BreadcrumbList,
-    BreadcrumbPage,
 } from '@/components/ui/breadcrumb'
 
 import {
@@ -47,13 +46,11 @@ import {
 
 import {
     Settings2,
-    Save,
     Database,
     ChevronRight,
     ChevronsUpDown,
     LogOut,
     Users,
-    Home,
     ScrollText,
 } from 'lucide-vue-next'
 
@@ -62,6 +59,7 @@ import { useAuthStore } from '@/stores/auth'
 import { computed } from 'vue'
 import type { FunctionalComponent } from 'vue'
 import type { LucideProps } from 'lucide-vue-next'
+import type { RouteLocationRaw } from 'vue-router'
 
 const route = useRoute()
 const authStore = useAuthStore()
@@ -129,8 +127,9 @@ const navMain = [
 ]
 
 interface BreadcrumbItem {
-    name: string;
-    to: string;
+    label: string;
+    to?: RouteLocationRaw;
+    icon?: FunctionalComponent<LucideProps>;
 }
 
 // Compute breadcrumb items based on current route
@@ -138,7 +137,7 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
     const paths = route.path.split('/').filter(Boolean)
     const items: BreadcrumbItem[] = [
         {
-            name: 'Home',
+            label: 'Home',
             to: '/logs/explore'
         }
     ]
@@ -149,7 +148,7 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
         const matchedRoute = route.matched.find(r => r.path === currentPath)
         if (matchedRoute?.meta?.title) {
             items.push({
-                name: matchedRoute.meta.title as string,
+                label: matchedRoute.meta.title as string,
                 to: currentPath
             })
         }
@@ -246,7 +245,7 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
                                             </Avatar>
                                             <div class="grid flex-1 text-left text-sm leading-tight">
                                                 <span class="truncate font-semibold">{{ authStore.user?.full_name
-                                                    }}</span>
+                                                }}</span>
                                                 <span class="truncate text-xs">{{ authStore.user?.email }}</span>
                                             </div>
                                         </div>
@@ -271,15 +270,13 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
                         <BreadcrumbList>
                             <template v-for="(item, index) in breadcrumbs" :key="index">
                                 <BreadcrumbItem>
-                                    <router-link v-if="index < breadcrumbs.length - 1" :to="item.to"
-                                        class="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
-                                        <component v-if="item.icon" :is="item.icon" class="h-4 w-4" />
-                                        {{ item.name }}
+                                    <router-link v-if="index < breadcrumbs.length - 1" :to="item.to || ''"
+                                        class="text-muted-foreground hover:text-foreground">
+                                        {{ item.label }}
                                     </router-link>
-                                    <BreadcrumbPage v-else class="inline-flex items-center gap-1">
-                                        <component v-if="item.icon" :is="item.icon" class="h-4 w-4" />
-                                        {{ item.name }}
-                                    </BreadcrumbPage>
+                                    <span v-else>
+                                        {{ item.label }}
+                                    </span>
                                 </BreadcrumbItem>
                                 <span v-if="index < breadcrumbs.length - 1" class="mx-2 text-muted-foreground">/</span>
                             </template>

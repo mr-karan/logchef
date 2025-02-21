@@ -120,18 +120,17 @@ watch(filters, () => {
 </script>
 
 <template>
-  <div class="space-y-4">
+  <div class="space-y-2">
     <!-- Filters Row -->
     <div class="flex flex-wrap items-center gap-2">
       <!-- Existing Filters -->
       <template v-for="(filter, idx) in filters" :key="filter.field">
         <!-- Collapsed View -->
         <Badge v-if="editingFilter !== idx" variant="secondary"
-          class="h-8 pl-3 pr-2 flex items-center gap-1 bg-gray-100 hover:bg-gray-100 text-gray-900"
-          @click="startEditing(idx)">
-          <span class="flex items-center gap-1">
+          class="h-7 pl-2 pr-1.5 flex items-center gap-1 hover:bg-muted/50" @click="startEditing(idx)">
+          <span class="flex items-center gap-1 text-xs">
             <span class="font-normal">{{ getColumnLabel(filter.field) }}</span>
-            <span class="text-gray-500">{{ getOperatorLabel(filter.operator) }}</span>
+            <span class="text-muted-foreground">{{ getOperatorLabel(filter.operator) }}</span>
             <span class="font-medium">"{{ filter.value }}"</span>
           </span>
           <Button variant="ghost" size="sm" @click.stop="removeFilter(idx)" class="h-4 w-4 p-0 hover:bg-transparent">
@@ -140,64 +139,10 @@ watch(filters, () => {
         </Badge>
 
         <!-- Expanded Edit View -->
-        <Card v-else class="shadow-sm border mb-2 w-full">
-          <CardContent class="p-4 space-y-4">
-            <div class="grid grid-cols-[1fr,1fr,2fr] gap-4">
-              <!-- Field Selector -->
-              <Select v-model="filter.field">
-                <SelectTrigger>
-                  <SelectValue placeholder="Select field" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="column in columns" :key="column.id" :value="column.id">
-                    {{ column.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-
-              <!-- Operator Selector -->
-              <Select v-model="filter.operator">
-                <SelectTrigger>
-                  <SelectValue placeholder="Select operator" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="op in operators" :key="op.value" :value="op.value">
-                    {{ op.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-
-              <!-- Value Input -->
-              <Input v-model="filter.value" placeholder="Enter value" />
-            </div>
-
-            <!-- Action Buttons -->
-            <div class="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" @click="cancelEditing">
-                Cancel
-              </Button>
-              <Button variant="default" size="sm" @click="updateFilter(idx)">
-                Update
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </template>
-
-      <!-- Add Filter Button -->
-      <Button variant="outline" size="sm" @click="showAddFilter = true" class="gap-2 h-8" v-if="!showAddFilter">
-        <Plus class="h-4 w-4" />
-        Add Filter
-      </Button>
-    </div>
-
-    <!-- Add Filter Form -->
-    <Card v-if="showAddFilter" class="shadow-sm border">
-      <CardContent class="p-4 space-y-4">
-        <div class="grid grid-cols-[1fr,1fr,2fr] gap-4">
+        <div v-else class="flex items-center gap-2 w-full">
           <!-- Field Selector -->
-          <Select v-model="newFilter.field">
-            <SelectTrigger>
+          <Select v-model="filter.field" class="w-[180px]">
+            <SelectTrigger class="h-8">
               <SelectValue placeholder="Select field" />
             </SelectTrigger>
             <SelectContent>
@@ -208,8 +153,8 @@ watch(filters, () => {
           </Select>
 
           <!-- Operator Selector -->
-          <Select v-model="newFilter.operator">
-            <SelectTrigger>
+          <Select v-model="filter.operator" class="w-[140px]">
+            <SelectTrigger class="h-8">
               <SelectValue placeholder="Select operator" />
             </SelectTrigger>
             <SelectContent>
@@ -220,20 +165,66 @@ watch(filters, () => {
           </Select>
 
           <!-- Value Input -->
-          <Input v-model="newFilter.value" placeholder="Enter value" />
-        </div>
+          <Input v-model="filter.value" placeholder="Enter value" class="h-8 flex-1" />
 
-        <!-- Action Buttons -->
-        <div class="flex justify-end gap-2">
-          <Button variant="ghost" size="sm" @click="showAddFilter = false">
-            Cancel
-          </Button>
-          <Button variant="default" size="sm" @click="addFilter"
-            :disabled="!newFilter.field || !newFilter.operator || !newFilter.value">
-            Add
-          </Button>
+          <!-- Action Buttons -->
+          <div class="flex gap-1">
+            <Button variant="ghost" size="sm" @click="cancelEditing" class="h-8 px-2">
+              Cancel
+            </Button>
+            <Button variant="default" size="sm" @click="updateFilter(idx)" class="h-8 px-2">
+              Update
+            </Button>
+          </div>
         </div>
-      </CardContent>
-    </Card>
+      </template>
+
+      <!-- Add Filter Button -->
+      <Button variant="outline" size="sm" @click="showAddFilter = true" class="gap-1.5 h-7" v-if="!showAddFilter">
+        <Plus class="h-3.5 w-3.5" />
+        Add Filter
+      </Button>
+    </div>
+
+    <!-- Add Filter Form -->
+    <div v-if="showAddFilter" class="flex items-center gap-2 w-full border rounded-md bg-muted/20 p-2">
+      <!-- Field Selector -->
+      <Select v-model="newFilter.field" class="w-[180px]">
+        <SelectTrigger class="h-8">
+          <SelectValue placeholder="Select field" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem v-for="column in columns" :key="column.id" :value="column.id">
+            {{ column.label }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+
+      <!-- Operator Selector -->
+      <Select v-model="newFilter.operator" class="w-[140px]">
+        <SelectTrigger class="h-8">
+          <SelectValue placeholder="Select operator" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem v-for="op in operators" :key="op.value" :value="op.value">
+            {{ op.label }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+
+      <!-- Value Input -->
+      <Input v-model="newFilter.value" placeholder="Enter value" class="h-8 flex-1" />
+
+      <!-- Action Buttons -->
+      <div class="flex gap-1">
+        <Button variant="ghost" size="sm" @click="showAddFilter = false" class="h-8 px-2">
+          Cancel
+        </Button>
+        <Button variant="default" size="sm" @click="addFilter" class="h-8 px-2"
+          :disabled="!newFilter.field || !newFilter.operator || !newFilter.value">
+          Add
+        </Button>
+      </div>
+    </div>
   </div>
 </template>

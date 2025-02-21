@@ -12,7 +12,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Plus, Trash2, Settings, Users } from 'lucide-vue-next'
+import { Plus, Trash2, Settings } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { TOAST_DURATION } from '@/lib/constants'
@@ -25,57 +25,19 @@ import {
     TableRow,
 } from '@/components/ui/table'
 import { format } from 'date-fns'
-import { teamsApi, type Team, type TeamMember } from '@/api/users'
-import { isErrorResponse, isSuccessResponse, getErrorMessage, type APIResponse } from '@/api/types'
+import { type Team } from '@/api/users'
+import { isErrorResponse, getErrorMessage } from '@/api/types'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import AddTeam from './AddTeam.vue'
+import { useTeamsStore } from '@/stores/teams'
+import { storeToRefs } from 'pinia'
 
 const router = useRouter()
 const { toast } = useToast()
-const teams = ref<(Team & { memberCount: number })[]>([])
-const isLoading = ref(true)
+const teamsStore = useTeamsStore()
+const { teams, isLoading } = storeToRefs(teamsStore)
 const showDeleteDialog = ref(false)
 const teamToDelete = ref<Team | null>(null)
-
-const loadTeams = async () => {
-    try {
-        isLoading.value = true
-        const response = await teamsApi.listTeams()
-
-        if (isErrorResponse(response)) {
-            toast({
-                title: 'Error',
-                description: response.data.error,
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
-            })
-            teams.value = []
-            return
-        }
-
-        // Get member counts for each team
-        const teamsWithMembers = await Promise.all(
-            response.data.teams.map(async (team) => {
-                const membersResponse = await teamsApi.listTeamMembers(team.id)
-                const memberCount = isErrorResponse(membersResponse) ? 0 : membersResponse.data.members.length
-                return { ...team, memberCount }
-            })
-        )
-
-        teams.value = teamsWithMembers
-        console.log('Loaded teams:', teams.value)
-    } catch (error) {
-        console.error('Error loading teams:', error)
-        teams.value = []
-        toast({
-            title: 'Error',
-            description: getErrorMessage(error),
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
-    } finally {
-        isLoading.value = false
-    }
-}
 
 const handleDelete = (team: Team) => {
     teamToDelete.value = team
@@ -84,46 +46,16 @@ const handleDelete = (team: Team) => {
 
 const confirmDelete = async () => {
     if (!teamToDelete.value) return
-
-    try {
-        // Log the team being deleted to verify the ID
-        console.log('Deleting team:', teamToDelete.value)
-
-        const response = await teamsApi.deleteTeam(teamToDelete.value.id)
-
-        if (isErrorResponse(response)) {
-            toast({
-                title: 'Error',
-                description: response.data.error,
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
-            })
-            return
-        }
-
-        if (isSuccessResponse(response)) {
-            toast({
-                title: 'Success',
-                description: response.data.message,
-                duration: TOAST_DURATION.SUCCESS,
-            })
-            await loadTeams()
-        }
-    } catch (error) {
-        console.error('Error deleting team:', error)
-        toast({
-            title: 'Error',
-            description: getErrorMessage(error),
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
-    } finally {
+    const success = await teamsStore.deleteTeam(teamToDelete.value.id)
+    if (success) {
         showDeleteDialog.value = false
         teamToDelete.value = null
     }
 }
 
-onMounted(loadTeams)
+onMounted(() => {
+    teamsStore.loadTeams()
+})
 
 const formatDate = (dateString: string) => {
     try {
@@ -147,10 +79,7 @@ const formatDate = (dateString: string) => {
                             Groups of users that have common dashboard and permission needs
                         </CardDescription>
                     </div>
-                    <Button @click="router.push({ name: 'NewTeam' })">
-                        <Plus class="mr-2 h-4 w-4" />
-                        Add Team
-                    </Button>
+                    <AddTeam @team-created="teamsStore.loadTeams" />
                 </div>
             </CardHeader>
             <CardContent>
@@ -166,10 +95,12 @@ const formatDate = (dateString: string) => {
                     </div>
                     <div v-else-if="teams.length === 0" class="rounded-lg border p-4 text-center">
                         <p class="text-muted-foreground mb-4">No teams found</p>
-                        <Button @click="router.push({ name: 'NewTeam' })">
-                            <Plus class="mr-2 h-4 w-4" />
-                            Create Your First Team
-                        </Button>
+                        <AddTeam @team-created="teamsStore.loadTeams">
+                            <Button>
+                                <Plus class="mr-2 h-4 w-4" />
+                                Create Your First Team
+                            </Button>
+                        </AddTeam>
                     </div>
                     <div v-else>
                         <Table>

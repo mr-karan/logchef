@@ -11,9 +11,9 @@ import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { useAuthStore } from '@/stores/auth'
 import { usersApi } from '@/api/users'
-import { isErrorResponse } from '@/api/types'
 import { Loader2 } from 'lucide-vue-next'
 import { formatDate } from '@/utils/format'
+import { handleApiCall } from '@/stores/base'
 
 const { toast } = useToast()
 const authStore = useAuthStore()
@@ -36,53 +36,27 @@ onMounted(() => {
     }
 })
 
-const handleUpdateProfile = async () => {
-    if (!authStore.user || isSubmitting.value) return
-
-    // Basic validation
-    if (!fullName.value) {
-        toast({
-            title: 'Error',
-            description: 'Please enter your full name',
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
-        return
-    }
+const handleSubmit = async () => {
+    if (isSubmitting.value) return
 
     isSubmitting.value = true
 
     try {
-        const response = await usersApi.updateUser(authStore.user.id, {
-            full_name: fullName.value,
+        const response = await handleApiCall({
+            apiCall: () => usersApi.updateUser(authStore.user?.id || '', {
+                full_name: fullName.value,
+            }),
+            successMessage: 'Profile updated successfully',
         })
 
-        if (isErrorResponse(response)) {
-            toast({
-                title: 'Error',
-                description: response.data.error,
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
+        if (response.success && response.data?.user) {
+            // Update the local user state
+            authStore.$patch((state) => {
+                if (state.user) {
+                    state.user.full_name = response.data?.user?.full_name || state.user.full_name
+                }
             })
-            return
         }
-
-        // Update auth store
-        authStore.setUser(response.data.user)
-
-        toast({
-            title: 'Success',
-            description: 'Profile updated successfully',
-            duration: TOAST_DURATION.SUCCESS,
-        })
-    } catch (error) {
-        console.error('Error updating profile:', error)
-        toast({
-            title: 'Error',
-            description: 'Failed to update profile. Please try again.',
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
     } finally {
         isSubmitting.value = false
     }
@@ -161,7 +135,7 @@ const handleUpdatePreferences = () => {
                             </CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <form @submit.prevent="handleUpdateProfile" class="space-y-6">
+                            <form @submit.prevent="handleSubmit" class="space-y-6">
                                 <div class="space-y-4">
                                     <div class="grid gap-2">
                                         <Label for="full_name">Full Name</Label>
