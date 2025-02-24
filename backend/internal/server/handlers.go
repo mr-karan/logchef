@@ -218,12 +218,12 @@ type LogQueryResponse struct {
 
 // LogQueryResponseParams represents the query parameters used in the response
 type LogQueryResponseParams struct {
-	SourceID       string                   `json:"source_id"`
-	Conditions     []models.FilterCondition `json:"conditions"`
-	Limit          int                      `json:"limit"`
-	StartTimestamp int64                    `json:"start_timestamp"`
-	EndTimestamp   int64                    `json:"end_timestamp"`
-	Sort           *models.SortOptions      `json:"sort"`
+	SourceID       string              `json:"source_id"`
+	RawSQL         string              `json:"raw_sql"`
+	Limit          int                 `json:"limit"`
+	StartTimestamp int64               `json:"start_timestamp"`
+	EndTimestamp   int64               `json:"end_timestamp"`
+	Sort           *models.SortOptions `json:"sort,omitempty"`
 }
 
 // handleQueryLogs handles POST requests to search/query logs from a source
@@ -236,11 +236,6 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 	var req models.LogQueryRequest
 	if err := c.BodyParser(&req); err != nil {
 		return fiber.NewError(http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
-	}
-
-	// Set default mode to filters for backward compatibility
-	if req.Mode == "" {
-		req.Mode = models.QueryModeFilters
 	}
 
 	if err := service.ValidateLogQueryRequest(&req); err != nil {
@@ -259,29 +254,14 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 
 	// Convert to query params
 	params := clickhouse.LogQueryParams{
-		Limit:      req.Limit,
-		StartTime:  time.UnixMilli(req.StartTimestamp).UTC(),
-		EndTime:    time.UnixMilli(req.EndTimestamp).UTC(),
-		Conditions: req.Conditions,
-		Sort:       req.Sort,
-		Mode:       req.Mode,
-		RawSQL:     req.RawSQL,
-		LogChefQL:  req.LogChefQL,
-	}
-
-	// Set default sort if not provided
-	if req.Sort == nil {
-		params.Sort = &models.SortOptions{
-			Field: "timestamp",
-			Order: models.SortOrderDesc,
-		}
-	} else {
-		params.Sort = req.Sort
+		Limit:     req.Limit,
+		StartTime: time.UnixMilli(req.StartTimestamp).UTC(),
+		EndTime:   time.UnixMilli(req.EndTimestamp).UTC(),
+		RawSQL:    req.RawSQL,
 	}
 
 	s.log.Debug("querying logs",
 		"source_id", id,
-		"mode", params.Mode,
 		"start_time", params.StartTime,
 		"end_time", params.EndTime,
 		"limit", params.Limit,
@@ -297,6 +277,10 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 			"source_id", id,
 			"error", err,
 		)
+		// Pass through ClickHouse errors
+		if strings.Contains(err.Error(), "ClickHouse") {
+			return fiber.NewError(http.StatusBadRequest, err.Error())
+		}
 		return fiber.NewError(http.StatusInternalServerError, fmt.Sprintf("failed to query logs: %v", err))
 	}
 
@@ -312,11 +296,10 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		Columns: result.Columns,
 		Params: LogQueryResponseParams{
 			SourceID:       id,
-			Conditions:     req.Conditions,
+			RawSQL:         req.RawSQL,
 			Limit:          req.Limit,
 			StartTimestamp: req.StartTimestamp,
 			EndTimestamp:   req.EndTimestamp,
-			Sort:           req.Sort,
 		},
 	}
 

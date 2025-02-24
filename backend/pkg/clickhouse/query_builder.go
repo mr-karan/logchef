@@ -4,21 +4,19 @@ import (
 	"backend-v2/pkg/querybuilder"
 )
 
-// buildFilterQuery builds a query from filter parameters
-func buildFilterQuery(params LogQueryParams, tableName string) string {
-	// Create query builder based on mode
+// buildQuery builds and validates a raw SQL query
+func buildQuery(params LogQueryParams, tableName string) (string, error) {
 	opts := querybuilder.Options{
-		StartTime: params.StartTime,
-		EndTime:   params.EndTime,
+		TableName: tableName,
+		RawSQL:    params.RawSQL,
 		Limit:     params.Limit,
-		Sort:      params.Sort,
 	}
 
-	builder := querybuilder.NewFilterBuilder(tableName, opts, params.Conditions)
+	builder := querybuilder.NewRawSQLBuilder(opts)
 	query, err := builder.Build()
 	if err != nil {
-		return ""
+		return "", err
 	}
 
-	return query.SQL
+	return query.SQL, nil
 }

@@ -7,110 +7,99 @@ import (
 	"github.com/xwb1989/sqlparser"
 )
 
-// RawSQLBuilder builds raw SQL queries
+// RawSQLBuilder handles raw SQL query building and validation
 type RawSQLBuilder struct {
-	tableName string
-	rawSQL    string
-	limit     int
+	options Options
 }
 
-// NewRawSQLBuilder creates a new RawSQLBuilder
-func NewRawSQLBuilder(tableName string, rawSQL string, limit int) *RawSQLBuilder {
+// NewRawSQLBuilder creates a new RawSQLBuilder instance
+func NewRawSQLBuilder(opts Options) *RawSQLBuilder {
 	return &RawSQLBuilder{
-		tableName: tableName,
-		rawSQL:    rawSQL,
-		limit:     limit,
+		options: opts,
 	}
 }
 
-// Build builds the query
+// Build validates and builds the final SQL query
 func (b *RawSQLBuilder) Build() (*Query, error) {
-	// Replace table name placeholder if present
-	query := strings.ReplaceAll(b.rawSQL, "{{table}}", b.tableName)
-
-	// Validate the query
-	if err := b.validateQuery(query); err != nil {
+	if err := b.validateSelectQuery(); err != nil {
 		return nil, err
 	}
 
-	// Check if query already has a LIMIT clause
-	hasLimit := strings.Contains(strings.ToUpper(query), "LIMIT")
-	if !hasLimit {
-		// Append LIMIT clause
-		query = fmt.Sprintf("%s\nLIMIT %d", query, b.limit)
+	// Parse the query to manipulate it
+	stmt, err := sqlparser.Parse(b.options.RawSQL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid SQL syntax: %v", err)
 	}
 
+	// Type assert to Select statement
+	selectStmt, ok := stmt.(*sqlparser.Select)
+	if !ok {
+		return nil, fmt.Errorf("only SELECT queries are allowed")
+	}
+
+	// Add LIMIT clause if not present
+	if b.options.Limit > 0 && selectStmt.Limit == nil {
+		selectStmt.Limit = &sqlparser.Limit{
+			Rowcount: sqlparser.NewIntVal([]byte(fmt.Sprintf("%d", b.options.Limit))),
+		}
+	}
+
+	// Convert back to SQL string
+	finalSQL := sqlparser.String(selectStmt)
+
 	return &Query{
-		SQL:  query,
-		Args: nil,
+		SQL: finalSQL,
 	}, nil
 }
 
-// validateQuery validates the raw SQL query
-func (b *RawSQLBuilder) validateQuery(query string) error {
-	// Basic validation - ensure it's a SELECT query
-	trimmedQuery := strings.TrimSpace(strings.ToUpper(query))
-	if !strings.HasPrefix(trimmedQuery, "SELECT") {
+// validateSelectQuery performs thorough validation of the SQL query
+func (b *RawSQLBuilder) validateSelectQuery() error {
+	// Parse the query
+	stmt, err := sqlparser.Parse(b.options.RawSQL)
+	if err != nil {
+		return fmt.Errorf("invalid SQL syntax: %v", err)
+	}
+
+	// Ensure it's a SELECT statement
+	selectStmt, ok := stmt.(*sqlparser.Select)
+	if !ok {
 		return fmt.Errorf("only SELECT queries are allowed")
 	}
 
-	// Check for dangerous operations
-	dangerousKeywords := []string{
-		"DROP", "DELETE", "TRUNCATE", "ALTER", "CREATE",
-		"INSERT", "UPDATE", "RENAME", "REPLACE",
+	// Validate table reference
+	if err := b.validateTableReference(selectStmt.From); err != nil {
+		return err
 	}
 
-	for _, keyword := range dangerousKeywords {
-		if strings.Contains(trimmedQuery, keyword) {
-			return fmt.Errorf("dangerous operation detected: %s", keyword)
+	// Validate WHERE clause for dangerous operations
+	if selectStmt.Where != nil {
+		whereStr := sqlparser.String(selectStmt.Where)
+		if containsDangerousOperations(whereStr) {
+			return fmt.Errorf("dangerous operations detected in WHERE clause")
 		}
 	}
 
 	return nil
 }
 
-// validateSelectQuery checks if the query is a valid SELECT query
-func (b *RawSQLBuilder) validateSelectQuery() error {
-	stmt, err := sqlparser.Parse(b.rawSQL)
-	if err != nil {
-		return fmt.Errorf("invalid SQL syntax: %w", err)
-	}
-
-	selectStmt, ok := stmt.(*sqlparser.Select)
-	if !ok {
-		return fmt.Errorf("only SELECT queries are allowed")
-	}
-
-	// Check for dangerous operations in WHERE clause
-	if selectStmt.Where != nil {
-		if containsDangerousOperations(sqlparser.String(selectStmt.Where)) {
-			return fmt.Errorf("dangerous operations detected")
-		}
-	}
-
-	// Validate table names
-	for _, tableExpr := range selectStmt.From {
-		aliasTableExpr, ok := tableExpr.(*sqlparser.AliasedTableExpr)
-		if !ok {
-			continue
-		}
-
-		tableName, ok := aliasTableExpr.Expr.(sqlparser.TableName)
-		if !ok {
-			continue
-		}
-
-		// Check if the table being queried matches our table reference
-		if b.tableName != "" {
-			tableRef := sqlparser.String(tableName)
-			// Remove backticks from table reference for comparison
-			tableRef = strings.ReplaceAll(tableRef, "`", "")
-			if !strings.EqualFold(tableRef, b.tableName) {
-				return fmt.Errorf("invalid table reference: %s, expected: %s", tableRef, b.tableName)
+// validateTableReference ensures the table reference is valid
+func (b *RawSQLBuilder) validateTableReference(tableExprs sqlparser.TableExprs) error {
+	for _, tableExpr := range tableExprs {
+		switch expr := tableExpr.(type) {
+		case *sqlparser.AliasedTableExpr:
+			switch tableExpr := expr.Expr.(type) {
+			case sqlparser.TableName:
+				tableName := fmt.Sprintf("%s.%s", tableExpr.Qualifier.String(), tableExpr.Name.String())
+				if tableName != b.options.TableName {
+					return fmt.Errorf("invalid table reference: %s", tableName)
+				}
+			case *sqlparser.Subquery:
+				return fmt.Errorf("subqueries are not allowed")
 			}
+		case *sqlparser.JoinTableExpr:
+			return fmt.Errorf("joins are not allowed")
 		}
 	}
-
 	return nil
 }
 
@@ -118,8 +107,8 @@ func (b *RawSQLBuilder) validateSelectQuery() error {
 func containsDangerousOperations(sql string) bool {
 	sql = strings.ToUpper(sql)
 	dangerousKeywords := []string{
-		"DROP", "DELETE", "TRUNCATE", "ALTER", "UPDATE", "INSERT",
-		"SYSTEM", "SETTINGS", "GRANT", "REVOKE",
+		"DROP", "DELETE", "TRUNCATE", "ALTER", "SYSTEM",
+		"SETTINGS", "CREATE", "INSERT", "UPDATE",
 	}
 
 	for _, keyword := range dangerousKeywords {

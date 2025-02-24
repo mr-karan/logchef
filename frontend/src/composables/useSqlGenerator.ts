@@ -1,13 +1,20 @@
 import { ref, computed } from "vue";
 import { useDebounceFn } from "@vueuse/core";
-import type { FilterCondition, BaseQueryParams } from "@/api/explore";
+import type { FilterCondition } from "@/api/explore";
 
-interface SqlGeneratorOptions extends BaseQueryParams {
+export interface SqlGeneratorOptions {
   database: string;
   table: string;
+  start_timestamp: number;
+  end_timestamp: number;
+  limit: number;
+  sort?: {
+    field: string;
+    order: "ASC" | "DESC";
+  };
 }
 
-interface SqlGeneratorState {
+export interface SqlGeneratorState {
   sql: string;
   isValid: boolean;
   error: string | null;

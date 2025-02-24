@@ -6,7 +6,6 @@ toolchain go1.24.0
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.30.0
-	github.com/alecthomas/participle/v2 v2.1.1
 	github.com/coreos/go-oidc/v3 v3.12.0
 	github.com/gofiber/fiber/v2 v2.52.6
 	github.com/golang-migrate/migrate/v4 v4.18.2

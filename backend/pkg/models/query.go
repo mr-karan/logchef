@@ -46,15 +46,6 @@ type SortOptions struct {
 	Order SortOrder `json:"order"`
 }
 
-// QueryMode represents different query modes
-type QueryMode string
-
-const (
-	QueryModeFilters   QueryMode = "filters"
-	QueryModeRawSQL    QueryMode = "raw_sql"
-	QueryModeLogChefQL QueryMode = "logchefql"
-)
-
 // ColumnInfo represents column metadata from ClickHouse
 type ColumnInfo struct {
 	Name string `json:"name"`
@@ -69,14 +60,11 @@ type QueryStats struct {
 
 // LogQueryRequest represents the request for querying logs
 type LogQueryRequest struct {
-	StartTimestamp int64             `json:"start_timestamp"`
-	EndTimestamp   int64             `json:"end_timestamp"`
-	Limit          int               `json:"limit"`
-	Conditions     []FilterCondition `json:"conditions,omitempty"`
-	Sort           *SortOptions      `json:"sort,omitempty"`
-	Mode           QueryMode         `json:"mode,omitempty"`
-	RawSQL         string            `json:"raw_sql,omitempty"`
-	LogChefQL      string            `json:"logchefql,omitempty"`
+	StartTimestamp int64        `json:"start_timestamp"`
+	EndTimestamp   int64        `json:"end_timestamp"`
+	Limit          int          `json:"limit"`
+	RawSQL         string       `json:"raw_sql"`
+	Sort           *SortOptions `json:"sort,omitempty"`
 }
 
 // LogQueryResponse represents the response for querying logs

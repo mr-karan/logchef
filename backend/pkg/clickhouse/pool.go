@@ -120,35 +120,26 @@ func (p *Pool) QueryLogs(ctx context.Context, sourceID string, params LogQueryPa
 		return nil, fmt.Errorf("error getting client: %w", err)
 	}
 
-	// Build query based on mode
-	var query string
-	switch params.Mode {
-	case models.QueryModeRawSQL:
-		if params.RawSQL == "" {
-			return nil, fmt.Errorf("raw SQL query cannot be empty")
-		}
-		// Use the query builder to handle the raw SQL
-		builder := querybuilder.NewRawSQLBuilder(source.GetFullTableName(), params.RawSQL, params.Limit)
-		builtQuery, err := builder.Build()
-		if err != nil {
-			return nil, fmt.Errorf("error building raw SQL query: %w", err)
-		}
-		query = builtQuery.SQL
-	case models.QueryModeLogChefQL:
-		if params.LogChefQL == "" {
-			return nil, fmt.Errorf("LogchefQL query cannot be empty")
-		}
-		// TODO: Implement LogChefQL parsing
-		return nil, fmt.Errorf("LogChefQL mode not implemented")
-	case models.QueryModeFilters:
-		// Build filter query
-		query = buildFilterQuery(params, source.GetFullTableName())
-	default:
-		return nil, fmt.Errorf("unsupported query mode: %s", params.Mode)
+	// Build query
+	if params.RawSQL == "" {
+		return nil, fmt.Errorf("raw SQL query cannot be empty")
+	}
+
+	// Use the query builder to handle the raw SQL
+	opts := querybuilder.Options{
+		TableName: source.GetFullTableName(),
+		RawSQL:    params.RawSQL,
+		Limit:     params.Limit,
+	}
+
+	builder := querybuilder.NewRawSQLBuilder(opts)
+	builtQuery, err := builder.Build()
+	if err != nil {
+		return nil, fmt.Errorf("error building raw SQL query: %w", err)
 	}
 
 	// Execute query
-	return client.Query(ctx, query)
+	return client.Query(ctx, builtQuery.SQL)
 }
 
 // getSource gets a source from the database

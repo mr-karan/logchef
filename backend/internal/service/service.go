@@ -33,25 +33,6 @@ func New(sqliteDB *sqlite.DB) *Service {
 	}
 }
 
-// buildFilterQuery builds a query from filter parameters
-func buildFilterQuery(params clickhouse.LogQueryParams, tableName string) string {
-	// Create query builder based on mode
-	opts := querybuilder.Options{
-		StartTime: params.StartTime,
-		EndTime:   params.EndTime,
-		Limit:     params.Limit,
-		Sort:      params.Sort,
-	}
-
-	builder := querybuilder.NewFilterBuilder(tableName, opts, params.Conditions)
-	query, err := builder.Build()
-	if err != nil {
-		return ""
-	}
-
-	return query.SQL
-}
-
 // QueryLogs retrieves logs from a source with pagination and time range
 func (s *Service) QueryLogs(ctx context.Context, sourceID string, params clickhouse.LogQueryParams) (*models.QueryResult, error) {
 	// Get source from SQLite
@@ -69,35 +50,21 @@ func (s *Service) QueryLogs(ctx context.Context, sourceID string, params clickho
 		return nil, fmt.Errorf("error getting client: %w", err)
 	}
 
-	// Build query based on mode
-	var query string
-	switch params.Mode {
-	case models.QueryModeRawSQL:
-		if params.RawSQL == "" {
-			return nil, fmt.Errorf("raw SQL query cannot be empty")
-		}
-		// Use the query builder to handle the raw SQL
-		builder := querybuilder.NewRawSQLBuilder(source.GetFullTableName(), params.RawSQL, params.Limit)
-		builtQuery, err := builder.Build()
-		if err != nil {
-			return nil, fmt.Errorf("error building raw SQL query: %w", err)
-		}
-		query = builtQuery.SQL
-	case models.QueryModeLogChefQL:
-		if params.LogChefQL == "" {
-			return nil, fmt.Errorf("LogchefQL query cannot be empty")
-		}
-		// TODO: Implement LogChefQL parsing
-		return nil, fmt.Errorf("LogChefQL mode not implemented")
-	case models.QueryModeFilters:
-		// Build filter query
-		query = buildFilterQuery(params, source.GetFullTableName())
-	default:
-		return nil, fmt.Errorf("unsupported query mode: %s", params.Mode)
+	// Use the query builder to handle the raw SQL
+	opts := querybuilder.Options{
+		TableName: source.GetFullTableName(),
+		RawSQL:    params.RawSQL,
+		Limit:     params.Limit,
+	}
+
+	builder := querybuilder.NewRawSQLBuilder(opts)
+	builtQuery, err := builder.Build()
+	if err != nil {
+		return nil, fmt.Errorf("error building raw SQL query: %w", err)
 	}
 
 	// Execute query
-	return client.Query(ctx, query)
+	return client.Query(ctx, builtQuery.SQL)
 }
 
 // InitializeSource initializes a Clickhouse connection for a source

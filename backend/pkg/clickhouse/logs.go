@@ -7,14 +7,10 @@ import (
 
 // LogQueryParams represents parameters for querying logs
 type LogQueryParams struct {
-	StartTime  time.Time
-	EndTime    time.Time
-	Limit      int
-	Conditions []models.FilterCondition
-	Sort       *models.SortOptions
-	Mode       models.QueryMode
-	RawSQL     string // Used only for raw_sql mode
-	LogChefQL  string // Used only for logchefql mode
+	StartTime time.Time
+	EndTime   time.Time
+	Limit     int
+	RawSQL    string
 }
 
 // LogQueryResult represents the result of a log query

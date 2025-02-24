@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed, type WritableComputedRef } from 'vue'
+import { ref, onMounted, watch, computed, type WritableComputedRef, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/number-field'
 import { useToast } from '@/components/ui/toast'
 import { exploreApi } from '@/api/explore'
-import type { QueryStats } from '@/api/explore'
+import type { QueryStats, FilterCondition, ColumnInfo } from '@/api/explore'
 import { getErrorMessage } from '@/api/types'
 import { TOAST_DURATION } from '@/lib/constants'
 import { DateTimePicker } from '@/components/date-time-picker'
@@ -25,14 +25,14 @@ import { createColumns } from './table/columns'
 import DataTable from './table/data-table.vue'
 import EmptyState from './EmptyState.vue'
 import type { ColumnDef } from '@tanstack/vue-table'
-import type { ColumnInfo } from '@/api/explore'
 import { Switch } from '@/components/ui/switch'
 import DataTableFilters from './table/data-table-filters.vue'
-import type { FilterCondition } from '@/api/explore'
 import SQLEditor from '@/components/sql-editor/SQLEditor.vue'
 import { formatSourceName } from '@/utils/format'
 import { useSourcesStore } from '@/stores/sources'
+import { useExploreStore } from '@/stores/explore'
 import { useSqlGenerator } from '@/composables/useSqlGenerator'
+import type { SqlGeneratorState } from '@/composables/useSqlGenerator'
 import SqlPreview from '@/components/sql-preview/SqlPreview.vue'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible'
@@ -40,46 +40,38 @@ import { ChevronRight } from 'lucide-vue-next'
 
 const router = useRouter()
 const sourcesStore = useSourcesStore()
+const exploreStore = useExploreStore()
 const { toast } = useToast()
 const route = useRoute()
 
-const selectedSource = ref<string>('')
-const isLoading = ref(false)
-const queryInput = ref('')
-const queryLimit = ref(100)
-const logs = ref<Record<string, any>[]>([])
-const columns = ref<ColumnInfo[]>([])
-const queryStats = ref<QueryStats>({
-  execution_time_ms: 0,
-  rows_read: 0,
-  bytes_read: 0
-})
+// Local UI state
+const isLoading = computed(() => exploreStore.isLoading)
+const previewOpen = ref(true)
 
 // Flag to prevent unnecessary URL updates on initial load
 const isInitialLoad = ref(true)
 
 // Date state
 const currentTime = now(getLocalTimeZone())
-const internalDateRange = ref<{ start: DateValue; end: DateValue }>({
-  start: currentTime.subtract({ hours: 3 }),
-  end: currentTime
-})
 
 // Computed DateRange for v-model binding
 const dateRange = computed({
   get: () => ({
-    start: internalDateRange.value.start,
-    end: internalDateRange.value.end
+    start: exploreStore.data.timeRange?.start || currentTime.subtract({ hours: 3 }),
+    end: exploreStore.data.timeRange?.end || currentTime
   }),
   set: (newValue: DateRange | null) => {
     if (newValue?.start && newValue?.end) {
-      internalDateRange.value = {
-        start: newValue.start as DateValue,
-        end: newValue.end as DateValue
+      const range = {
+        start: newValue.start as unknown as DateValue,
+        end: newValue.end as unknown as DateValue
       }
+      exploreStore.setTimeRange(range)
+      // Update SQL generator when time range changes
+      updateSqlGenerator()
     }
   }
-}) as unknown as WritableComputedRef<DateRange>
+})
 
 // Add loading state handling
 const showLoadingState = computed(() => {
@@ -94,14 +86,14 @@ const showEmptyState = computed(() => {
 // Fix the selected source name computed to handle null sources
 const selectedSourceName = computed(() => {
   if (!sourcesStore.sources) return 'Loading...'
-  const source = sourcesStore.sources.find(s => s.id === selectedSource.value)
+  const source = sourcesStore.sources.find(s => s.id === exploreStore.data.sourceId)
   return source ? formatSourceName(source) : 'Select a source'
 })
 
 // Fix the selected source details computed to handle null sources
 const selectedSourceDetails = computed(() => {
   if (!sourcesStore.sources) return { database: '', table: '' }
-  const source = sourcesStore.sources.find(s => s.id === selectedSource.value)
+  const source = sourcesStore.sources.find(s => s.id === exploreStore.data.sourceId)
   return source ? {
     database: source.connection.database,
     table: source.connection.table_name
@@ -111,14 +103,10 @@ const selectedSourceDetails = computed(() => {
   }
 })
 
-// Add a computed for source validity
-const isValidSource = computed(() => {
-  return selectedSourceDetails.value.database && selectedSourceDetails.value.table
-})
-
-// Function to get timestamps from dateRange
+// Function to get timestamps from store's time range
 const getTimestamps = () => {
-  if (!internalDateRange.value?.start || !internalDateRange.value?.end) {
+  const timeRange = exploreStore.data.timeRange
+  if (!timeRange?.start || !timeRange?.end) {
     return {
       start: 0,
       end: 0
@@ -126,21 +114,21 @@ const getTimestamps = () => {
   }
 
   const startDate = new Date(
-    (internalDateRange.value.start as DateValue).year,
-    (internalDateRange.value.start as DateValue).month - 1,
-    (internalDateRange.value.start as DateValue).day,
-    'hour' in internalDateRange.value.start ? internalDateRange.value.start.hour : 0,
-    'minute' in internalDateRange.value.start ? internalDateRange.value.start.minute : 0,
-    'second' in internalDateRange.value.start ? internalDateRange.value.start.second : 0
+    timeRange.start.year,
+    timeRange.start.month - 1,
+    timeRange.start.day,
+    'hour' in timeRange.start ? timeRange.start.hour : 0,
+    'minute' in timeRange.start ? timeRange.start.minute : 0,
+    'second' in timeRange.start ? timeRange.start.second : 0
   )
 
   const endDate = new Date(
-    (internalDateRange.value.end as DateValue).year,
-    (internalDateRange.value.end as DateValue).month - 1,
-    (internalDateRange.value.end as DateValue).day,
-    'hour' in internalDateRange.value.end ? internalDateRange.value.end.hour : 0,
-    'minute' in internalDateRange.value.end ? internalDateRange.value.end.minute : 0,
-    'second' in internalDateRange.value.end ? internalDateRange.value.end.second : 0
+    timeRange.end.year,
+    timeRange.end.month - 1,
+    timeRange.end.day,
+    'hour' in timeRange.end ? timeRange.end.hour : 0,
+    'minute' in timeRange.end ? timeRange.end.minute : 0,
+    'second' in timeRange.end ? timeRange.end.second : 0
   )
 
   return {
@@ -149,20 +137,61 @@ const getTimestamps = () => {
   }
 }
 
+// Initialize SQL generator with options
+const sqlGenerator = ref(useSqlGenerator({
+  database: selectedSourceDetails.value.database,
+  table: selectedSourceDetails.value.table,
+  start_timestamp: getTimestamps().start,
+  end_timestamp: getTimestamps().end,
+  limit: exploreStore.data.limit,
+}))
+
+// Add computed for SQL preview state
+const sqlPreviewState = computed(() => {
+  if (!sqlGenerator.value?.previewSql) {
+    return {
+      sql: '',
+      isValid: true,
+      error: undefined
+    }
+  }
+  const state = sqlGenerator.value.previewSql
+  return {
+    sql: state.sql ?? '',
+    isValid: state.isValid ?? true,
+    error: state.error
+  }
+})
+
+// Function to initialize or update SQL generator
+function updateSqlGenerator() {
+  const timestamps = getTimestamps()
+  sqlGenerator.value?.updateOptions({
+    database: selectedSourceDetails.value.database,
+    table: selectedSourceDetails.value.table,
+    start_timestamp: timestamps.start,
+    end_timestamp: timestamps.end,
+    limit: exploreStore.data.limit,
+  })
+
+  // Always regenerate SQL preview to ensure it's visible
+  sqlGenerator.value?.generatePreviewSql(exploreStore.data.filterConditions)
+}
+
 // Initialize state from URL parameters
 function initializeFromURL() {
   const { source, limit, start_time, end_time, query } = route.query
 
   // Parse source ID
   if (source && typeof source === 'string') {
-    selectedSource.value = source
+    exploreStore.setSource(source)
   }
 
   // Parse limit
   if (limit) {
     const parsedLimit = parseInt(limit as string)
     if (!isNaN(parsedLimit) && parsedLimit > 0 && parsedLimit <= 10000) {
-      queryLimit.value = parsedLimit
+      exploreStore.setLimit(parsedLimit)
     }
   }
 
@@ -194,26 +223,26 @@ function initializeFromURL() {
             endDate.getMinutes(),
             endDate.getSeconds()
           )
-          internalDateRange.value = {
-            start: start as DateValue,
-            end: end as DateValue
-          }
+          exploreStore.setTimeRange({
+            start,
+            end
+          })
         }
       }
     } catch (e) {
       console.error('Error parsing timestamps:', e)
       // On error, set to last 3 hours
       const newCurrentTime = now(getLocalTimeZone())
-      internalDateRange.value = {
+      exploreStore.setTimeRange({
         start: newCurrentTime.subtract({ hours: 3 }),
         end: newCurrentTime
-      }
+      })
     }
   }
 
   // Parse query
   if (query && typeof query === 'string') {
-    queryInput.value = decodeURIComponent(query)
+    exploreStore.setRawSql(decodeURIComponent(query))
   }
 }
 
@@ -226,68 +255,21 @@ function updateURL() {
 
   const timestamps = getTimestamps()
   const query: Record<string, string> = {
-    source: selectedSource.value,
-    limit: queryLimit.value.toString(),
+    source: exploreStore.data.sourceId,
+    limit: exploreStore.data.limit.toString(),
     start_time: timestamps.start.toString(),
     end_time: timestamps.end.toString()
   }
 
-  if (queryInput.value.trim()) {
-    query.query = encodeURIComponent(queryInput.value.trim())
+  if (exploreStore.data.rawSql.trim()) {
+    query.query = encodeURIComponent(exploreStore.data.rawSql.trim())
   }
 
   router.replace({ query })
 }
 
-// Query state
-const queryMode = ref<'filters' | 'raw_sql'>('filters')
-const sqlQuery = ref('')
-const filterConditions = ref<FilterCondition[]>([])
-const previewOpen = ref(false)
-
-// Initialize SQL generator
-const sqlGenerator = ref(useSqlGenerator({
-  database: '',
-  table: '',
-  limit: queryLimit.value,
-  start_timestamp: getTimestamps().start,
-  end_timestamp: getTimestamps().end,
-}))
-
-// Function to initialize or update SQL generator
-function updateSqlGenerator() {
-  const timestamps = getTimestamps()
-  sqlGenerator.value.updateOptions({
-    database: selectedSourceDetails.value.database,
-    table: selectedSourceDetails.value.table,
-    limit: queryLimit.value,
-    start_timestamp: timestamps.start,
-    end_timestamp: timestamps.end,
-  })
-
-  // Regenerate SQL preview if in filter mode
-  if (queryMode.value === 'filters') {
-    sqlGenerator.value.generatePreviewSql(filterConditions.value)
-  }
-}
-
-// Watch for source changes
-watch(
-  [selectedSourceDetails, queryLimit, internalDateRange],
-  () => {
-    if (isValidSource.value) {
-      updateSqlGenerator()
-    }
-  },
-  { deep: true }
-)
-
-// Watch filter conditions
-watch(filterConditions, (newFilters) => {
-  if (queryMode.value === 'filters' && isValidSource.value) {
-    sqlGenerator.value.generatePreviewSql(newFilters)
-  }
-}, { deep: true })
+// Add activeTab ref for tab management
+const activeTab = ref('filters')
 
 // Update onMounted
 onMounted(async () => {
@@ -299,28 +281,37 @@ onMounted(async () => {
     await sourcesStore.loadSources()
 
     // If source wasn't set from URL and we have sources, select the first one
-    if (!selectedSource.value && sourcesStore.sources.length > 0) {
-      selectedSource.value = sourcesStore.sources[0].id
+    if (!exploreStore.data.sourceId && sourcesStore.sources.length > 0) {
+      exploreStore.setSource(sourcesStore.sources[0].id)
     }
 
     // Validate selected source exists
-    if (selectedSource.value && !sourcesStore.sources.find(s => s.id === selectedSource.value)) {
+    if (exploreStore.data.sourceId && !sourcesStore.sources.find(s => s.id === exploreStore.data.sourceId)) {
       toast({
         title: 'Warning',
         description: 'Selected source not found',
         variant: 'destructive',
         duration: TOAST_DURATION.ERROR,
       })
-      selectedSource.value = sourcesStore.sources[0]?.id || ''
+      exploreStore.setSource(sourcesStore.sources[0]?.id || '')
+    }
+
+    // Set default time range if not set from URL
+    if (!exploreStore.data.timeRange) {
+      const newCurrentTime = now(getLocalTimeZone())
+      exploreStore.setTimeRange({
+        start: newCurrentTime.subtract({ hours: 3 }),
+        end: newCurrentTime
+      })
     }
 
     // Initialize SQL generator if we have a valid source
-    if (isValidSource.value) {
+    if (selectedSourceDetails.value.database && selectedSourceDetails.value.table) {
       updateSqlGenerator()
     }
 
-    // Only execute initial query if we have a valid source
-    if (selectedSource.value && isValidSource.value) {
+    // Only execute initial query if we have both a valid source and time range
+    if (exploreStore.canExecuteQuery) {
       await executeQuery()
     }
   } catch (error) {
@@ -330,14 +321,28 @@ onMounted(async () => {
       variant: 'destructive',
       duration: TOAST_DURATION.ERROR,
     })
-  } finally {
-    isLoading.value = false
   }
 })
 
-// Update the executeQuery function to handle empty SQL case
+// Watch for changes that should trigger SQL updates
+watch(
+  () => ({
+    sourceDetails: selectedSourceDetails.value,
+    filterConditions: exploreStore.data.filterConditions,
+    timeRange: exploreStore.data.timeRange,
+    limit: exploreStore.data.limit
+  }),
+  () => {
+    if (selectedSourceDetails.value.database && selectedSourceDetails.value.table) {
+      updateSqlGenerator()
+    }
+  },
+  { deep: true }
+)
+
+// Update query execution to always use SQL
 async function executeQuery() {
-  if (!selectedSource.value || !isValidSource.value) {
+  if (!exploreStore.data.sourceId || !selectedSourceDetails.value.database || !selectedSourceDetails.value.table) {
     toast({
       title: 'Error',
       description: 'Please select a valid source before executing query',
@@ -347,59 +352,22 @@ async function executeQuery() {
     return
   }
 
-  isLoading.value = true
-  logs.value = []
-  queryStats.value = {
-    execution_time_ms: 0,
-    rows_read: 0,
-    bytes_read: 0
-  }
-
   try {
-    const timestamps = getTimestamps()
     let rawSql: string
-
-    if (queryMode.value === 'filters') {
-      // Use immediate SQL generation for actual query
-      const queryState = sqlGenerator.value.generateQuerySql(filterConditions.value)
-      if (!queryState.isValid) {
-        throw new Error(queryState.error || 'Invalid SQL query')
+    if (activeTab.value === 'filters') {
+      // Generate SQL from filters
+      const queryState = sqlGenerator.value?.generateQuerySql(exploreStore.data.filterConditions)
+      if (!queryState?.isValid) {
+        throw new Error(queryState?.error || 'Invalid SQL query')
       }
       rawSql = queryState.sql
     } else {
-      // For raw SQL mode, ensure we have a valid query with timestamp conditions
-      const baseQuery = sqlQuery.value || `SELECT * FROM ${selectedSourceDetails.value.database}.${selectedSourceDetails.value.table}`
-      rawSql = buildBaseQuery(baseQuery)
+      // Use raw SQL directly
+      rawSql = exploreStore.data.rawSql
     }
 
-    // Ensure we have a valid query with timestamps
-    if (!rawSql) {
-      rawSql = buildBaseQuery(`SELECT * FROM ${selectedSourceDetails.value.database}.${selectedSourceDetails.value.table}`)
-    }
-
-    const params = {
-      limit: queryLimit.value,
-      start_timestamp: timestamps.start,
-      end_timestamp: timestamps.end,
-      mode: 'raw_sql' as const,
-      raw_sql: rawSql
-    }
-
-    const response = await exploreApi.getLogs(selectedSource.value, params)
-
-    if ('error' in response.data) {
-      toast({
-        title: 'Error',
-        description: response.data.error,
-        variant: 'destructive',
-        duration: TOAST_DURATION.ERROR,
-      })
-      return
-    }
-
-    logs.value = response.data.logs
-    queryStats.value = response.data.stats
-    columns.value = response.data.columns
+    // Execute query through store
+    await exploreStore.executeQuery(rawSql)
 
     // Update URL only after successful search
     if (!isInitialLoad.value) {
@@ -413,15 +381,13 @@ async function executeQuery() {
       variant: 'destructive',
       duration: TOAST_DURATION.ERROR,
     })
-  } finally {
-    isLoading.value = false
   }
 }
 
 const tableColumns = ref<ColumnDef<Record<string, any>>[]>([])
 
 watch(
-  () => columns.value,
+  () => exploreStore.data.columns,
   (newColumns) => {
     if (newColumns) {
       tableColumns.value = createColumns(newColumns)
@@ -432,18 +398,12 @@ watch(
 
 // Handle filter updates
 const handleFiltersUpdate = (filters: FilterCondition[]) => {
-  filterConditions.value = filters
+  exploreStore.setFilterConditions(filters)
 }
 
 // Toggle query mode
 const toggleQueryMode = (checked: boolean) => {
-  queryMode.value = checked ? 'raw_sql' : 'filters'
-  // Clear the other mode's input when switching
-  if (checked) {
-    filterConditions.value = []
-  } else {
-    sqlQuery.value = ''
-  }
+  activeTab.value = checked ? 'raw_sql' : 'filters'
 }
 
 // Helper function to build base query with timestamps
@@ -497,7 +457,7 @@ function buildBaseQuery(baseQuery: string): string {
         <div class="flex gap-3 flex-1">
           <div class="w-[180px]">
             <Label class="text-xs text-muted-foreground">Source</Label>
-            <Select v-model="selectedSource">
+            <Select v-model="exploreStore.data.sourceId">
               <SelectTrigger class="h-9">
                 <SelectValue placeholder="Select a source">
                   {{ selectedSourceName }}
@@ -521,7 +481,7 @@ function buildBaseQuery(baseQuery: string): string {
 
         <!-- Execution Controls Group -->
         <div class="flex items-end gap-2">
-          <NumberField v-model="queryLimit" :min="10" :max="10000" :step="10"
+          <NumberField v-model="exploreStore.data.limit" :min="10" :max="10000" :step="10"
             class="w-[90px] [&_input[type='number']::-webkit-inner-spin-button]:appearance-none [&_input[type='number']::-webkit-outer-spin-button]:appearance-none">
             <NumberFieldContent>
               <div class="flex items-center h-9">
@@ -532,7 +492,9 @@ function buildBaseQuery(baseQuery: string): string {
             </NumberFieldContent>
           </NumberField>
 
-          <Button @click="executeQuery" :disabled="isLoading || !isValidSource" class="w-[90px] h-9">
+          <Button @click="executeQuery"
+            :disabled="isLoading || !selectedSourceDetails.database || !selectedSourceDetails.table"
+            class="w-[90px] h-9">
             <Search class="mr-2 h-3.5 w-3.5" />
             Search
           </Button>
@@ -541,7 +503,7 @@ function buildBaseQuery(baseQuery: string): string {
 
       <!-- Query Builder Tabs -->
       <div class="rounded-md border bg-card">
-        <Tabs v-model="queryMode" class="w-full" default-value="filters">
+        <Tabs v-model="activeTab" class="w-full" default-value="filters">
           <TabsList class="w-full h-9 bg-muted/30">
             <TabsTrigger value="filters" class="flex-1 text-sm">Filter Builder</TabsTrigger>
             <TabsTrigger value="raw_sql" class="flex-1 text-sm">SQL Query</TabsTrigger>
@@ -549,11 +511,11 @@ function buildBaseQuery(baseQuery: string): string {
 
           <div class="p-3">
             <TabsContent value="filters" class="mt-0 space-y-3">
-              <DataTableFilters :columns="columns" @update:filters="handleFiltersUpdate"
-                class="border rounded-md bg-muted/20 p-2" />
+              <DataTableFilters :columns="exploreStore.data.columns" :filters="exploreStore.data.filterConditions"
+                @update:filters="handleFiltersUpdate" class="border rounded-md bg-muted/20 p-2" />
 
-              <!-- Collapsible SQL Preview -->
-              <Collapsible>
+              <!-- SQL Preview -->
+              <Collapsible v-model:open="previewOpen">
                 <CollapsibleTrigger
                   class="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
                   <ChevronRight class="h-3.5 w-3.5" :class="{ 'rotate-90': previewOpen }" />
@@ -561,9 +523,8 @@ function buildBaseQuery(baseQuery: string): string {
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <div class="mt-2 border rounded-md bg-muted/20 p-2">
-                    <SqlPreview :sql="sqlGenerator.value.previewSql.value.sql"
-                      :is-valid="sqlGenerator.value.previewSql.value.isValid"
-                      :error="sqlGenerator.value.previewSql.value.error || undefined" />
+                    <SqlPreview :sql="sqlPreviewState.sql" :is-valid="sqlPreviewState.isValid"
+                      :error="sqlPreviewState.error || undefined" />
                   </div>
                 </CollapsibleContent>
               </Collapsible>
@@ -571,7 +532,7 @@ function buildBaseQuery(baseQuery: string): string {
 
             <TabsContent value="raw_sql" class="mt-0">
               <div class="border rounded-md bg-muted/20 p-2">
-                <SQLEditor v-model="sqlQuery" :source-database="selectedSourceDetails.database"
+                <SQLEditor v-model="exploreStore.data.rawSql" :source-database="selectedSourceDetails.database"
                   :source-table="selectedSourceDetails.table" :start-timestamp="getTimestamps().start"
                   :end-timestamp="getTimestamps().end" @execute="executeQuery" />
               </div>
@@ -603,8 +564,8 @@ function buildBaseQuery(baseQuery: string): string {
         </div>
       </div>
       <!-- Show Results when data is loaded -->
-      <div v-else-if="logs?.length > 0" class="border rounded-md bg-card">
-        <DataTable :data="logs" :columns="tableColumns" :stats="queryStats" />
+      <div v-else-if="exploreStore.data.logs?.length > 0" class="border rounded-md bg-card">
+        <DataTable :data="exploreStore.data.logs" :columns="tableColumns" :stats="exploreStore.data.queryStats" />
       </div>
       <EmptyState v-else class="border rounded-md bg-card" />
     </div>

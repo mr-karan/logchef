@@ -1,6 +1,7 @@
 import { api } from "./config";
 import type { APIResponse } from "./types";
 
+// Keep these for the UI filter builder
 export interface FilterCondition {
   field: string;
   operator:
@@ -23,12 +24,9 @@ export interface ColumnInfo {
   type: string;
 }
 
-export interface FilterGroup {
-  operator: "OR";
-  conditions: FilterCondition[];
-}
-
-export interface BaseQueryParams {
+// Simplified query parameters - only raw SQL
+export interface QueryParams {
+  raw_sql: string;
   limit: number;
   start_timestamp: number;
   end_timestamp: number;
@@ -37,18 +35,6 @@ export interface BaseQueryParams {
     order: "ASC" | "DESC";
   };
 }
-
-export interface FiltersQueryParams extends BaseQueryParams {
-  mode: "filters";
-  conditions: FilterCondition[]; // All conditions are implicitly AND
-}
-
-export interface RawSqlQueryParams extends BaseQueryParams {
-  mode: "raw_sql";
-  raw_sql: string;
-}
-
-export type QueryParams = FiltersQueryParams | RawSqlQueryParams;
 
 export interface QueryStats {
   execution_time_ms: number;
@@ -67,6 +53,7 @@ export interface QuerySuccessResponse {
 
 export interface QueryErrorResponse {
   error: string;
+  details?: string; // For exposing ClickHouse errors
 }
 
 export type QueryResponse = QuerySuccessResponse | QueryErrorResponse;

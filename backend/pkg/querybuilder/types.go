@@ -1,10 +1,5 @@
 package querybuilder
 
-import (
-	"backend-v2/pkg/models"
-	"time"
-)
-
 // Query represents a SQL query with its parameters
 type Query struct {
 	SQL  string
@@ -16,10 +11,9 @@ type Builder interface {
 	Build() (*Query, error)
 }
 
-// Options represents common query options
+// Options represents raw SQL query options
 type Options struct {
-	StartTime time.Time
-	EndTime   time.Time
+	TableName string
+	RawSQL    string
 	Limit     int
-	Sort      *models.SortOptions
 }

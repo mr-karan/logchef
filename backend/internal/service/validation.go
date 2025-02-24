@@ -45,7 +45,22 @@ func ValidateLogQueryRequest(req *models.LogQueryRequest) error {
 	if req.Limit <= 0 || req.Limit > 100000 {
 		return &ValidationError{
 			Field:   "Limit",
-			Message: "must be between 1 and 100000	",
+			Message: "must be between 1 and 100000",
+		}
+	}
+
+	if req.RawSQL == "" {
+		return &ValidationError{
+			Field:   "RawSQL",
+			Message: "raw SQL query is required",
+		}
+	}
+
+	// Basic SQL injection prevention - only allow SELECT queries
+	if !strings.HasPrefix(strings.TrimSpace(strings.ToUpper(req.RawSQL)), "SELECT") {
+		return &ValidationError{
+			Field:   "RawSQL",
+			Message: "only SELECT queries are allowed",
 		}
 	}
 
@@ -62,85 +77,6 @@ func ValidateLogQueryRequest(req *models.LogQueryRequest) error {
 				Field:   "Sort.Order",
 				Message: "must be either 'ASC' or 'DESC'",
 			}
-		}
-	}
-
-	// Mode is mandatory
-	if req.Mode == "" {
-		return &ValidationError{
-			Field:   "Mode",
-			Message: "query mode is required",
-		}
-	}
-
-	// Validate based on mode
-	switch req.Mode {
-	case models.QueryModeFilters:
-		// Validate conditions
-		for i, condition := range req.Conditions {
-			if condition.Field == "" {
-				return &ValidationError{
-					Field:   fmt.Sprintf("Conditions[%d].Field", i),
-					Message: "field is required",
-				}
-			}
-
-			if condition.Operator == "" {
-				return &ValidationError{
-					Field:   fmt.Sprintf("Conditions[%d].Operator", i),
-					Message: "operator is required",
-				}
-			}
-
-			validOps := map[models.FilterOperator]bool{
-				models.FilterOperatorEquals:      true,
-				models.FilterOperatorNotEquals:   true,
-				models.FilterOperatorContains:    true,
-				models.FilterOperatorNotContains: true,
-				models.FilterOperatorIContains:   true,
-				models.FilterOperatorStartsWith:  true,
-				models.FilterOperatorEndsWith:    true,
-				models.FilterOperatorIn:          true,
-				models.FilterOperatorNotIn:       true,
-				models.FilterOperatorIsNull:      true,
-				models.FilterOperatorIsNotNull:   true,
-			}
-
-			if !validOps[condition.Operator] {
-				return &ValidationError{
-					Field:   fmt.Sprintf("Conditions[%d].Operator", i),
-					Message: "invalid operator",
-				}
-			}
-		}
-
-	case models.QueryModeRawSQL:
-		if req.RawSQL == "" {
-			return &ValidationError{
-				Field:   "RawSQL",
-				Message: "raw SQL query is required in raw_sql mode",
-			}
-		}
-		// Basic SQL injection prevention - only allow SELECT queries
-		if !strings.HasPrefix(strings.TrimSpace(strings.ToUpper(req.RawSQL)), "SELECT") {
-			return &ValidationError{
-				Field:   "RawSQL",
-				Message: "only SELECT queries are allowed",
-			}
-		}
-
-	case models.QueryModeLogChefQL:
-		if req.LogChefQL == "" {
-			return &ValidationError{
-				Field:   "LogChefQL",
-				Message: "LogChefQL query is required in logchefql mode",
-			}
-		}
-
-	default:
-		return &ValidationError{
-			Field:   "Mode",
-			Message: "invalid query mode",
 		}
 	}
 
