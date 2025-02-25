@@ -7,6 +7,8 @@ import type {
   FilterCondition,
   QueryResponse,
   QueryParams,
+  LogContextRequest,
+  LogContextResponse,
 } from "@/api/explore";
 import type { DateValue } from "@internationalized/date";
 import { computed } from "vue";
@@ -157,6 +159,20 @@ export const useExploreStore = defineStore("explore", () => {
     });
   }
 
+  // Get log context
+  async function getLogContext(sourceId: string, params: LogContextRequest) {
+    return await state.withLoading(async () => {
+      const result = await handleApiCall<LogContextResponse>({
+        apiCall: () => exploreApi.getLogContext(sourceId, params),
+        onError: (error) => {
+          // Just handle the error in the component
+        },
+      });
+
+      return result;
+    });
+  }
+
   return {
     ...state,
     // Getters
@@ -170,6 +186,7 @@ export const useExploreStore = defineStore("explore", () => {
     setFilterConditions,
     setRawSql,
     executeQuery,
+    getLogContext,
     resetState,
   };
 });

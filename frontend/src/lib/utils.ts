@@ -1,21 +1,20 @@
-import { type ClassValue, clsx } from "clsx";
-import { twMerge } from "tailwind-merge";
 import type { Updater } from "@tanstack/vue-table";
 import type { Ref } from "vue";
+import { type ClassValue, clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function debounce<T extends (...args: any[]) => any>(
-  fn: T,
-  delay: number
+export function valueUpdater<T extends Updater<any>>(
+  updaterOrValue: T,
+  ref: Ref
 ) {
-  let timeoutId: ReturnType<typeof setTimeout>;
-  return function (this: any, ...args: Parameters<T>) {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => fn.apply(this, args), delay);
-  };
+  ref.value =
+    typeof updaterOrValue === "function"
+      ? updaterOrValue(ref.value)
+      : updaterOrValue;
 }
 
 export function formatTimestamp(timestamp: string): string {
@@ -30,16 +29,6 @@ export function formatTimestamp(timestamp: string): string {
   } catch (e) {
     return timestamp;
   }
-}
-
-export function valueUpdater<T extends Updater<any>>(
-  updaterOrValue: T,
-  ref: Ref
-) {
-  ref.value =
-    typeof updaterOrValue === "function"
-      ? updaterOrValue(ref.value)
-      : updaterOrValue;
 }
 
 // Common badge styles

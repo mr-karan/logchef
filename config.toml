@@ -1,0 +1,56 @@
+# Server configuration
+[server]
+# HTTP server port
+port = 8125
+# HTTP server host address
+host = "0.0.0.0"
+# URL of the frontend application
+frontend_url = "http://localhost:5173"  # Development frontend URL, empty in production
+
+# SQLite database configuration
+[sqlite]
+# Path to the SQLite database file
+path = "local.db"
+# Maximum number of open connections
+max_open_conns = 25
+# Maximum number of idle connections
+max_idle_conns = 5
+# Maximum connection lifetime in minutes
+conn_max_lifetime = 60
+# Maximum connection idle time in minutes
+conn_max_idle_time = 30
+# Busy timeout in milliseconds
+busy_timeout = 5000
+
+# OpenID Connect configuration
+[oidc]
+# URL of the OIDC provider
+provider_url = "http://localhost:5556/dex"
+# Client ID for OIDC authentication
+client_id = "logchef"
+# Client secret for OIDC authentication
+client_secret = "logchef-secret"
+# Callback URL for OIDC authentication
+redirect_url = "http://localhost:8125/api/v1/auth/callback"
+# OIDC scopes to request
+scopes = ["openid", "email", "profile"]
+
+# Authentication configuration
+[auth]
+# Email addresses of admin users
+admin_emails = ["admin@example.com"]
+# Duration of user sessions
+session_duration = "8h"
+# Maximum number of concurrent sessions per user
+max_concurrent_sessions = 1
+
+# Logging configuration
+[logging]
+# Log level (debug, info, warn, error)
+level = "debug"
+# Log format (text, json)
+format = "text"
+# Add source code information to logs
+add_source = true
+# Environment (development, production)
+environment = "development"

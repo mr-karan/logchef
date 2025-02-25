@@ -4,6 +4,7 @@ import { h } from "vue";
 import get from "lodash/get";
 import { Button } from "@/components/ui/button";
 import { ArrowUpDown } from "lucide-vue-next";
+import type { ColumnInfo } from "@/api/explore";
 
 // This type represents a column in our source schema
 interface ColumnSchema {
@@ -13,7 +14,7 @@ interface ColumnSchema {
 
 // Function to generate column definitions based on source schema
 export function createColumns(
-  columns: ColumnSchema[]
+  columns: ColumnInfo[]
 ): ColumnDef<Record<string, any>>[] {
   return columns.map((col) => ({
     id: col.name,
@@ -95,7 +96,7 @@ export function createColumns(
 }
 
 // Helper function to get initial visible columns (timestamp + first column if exists)
-export function getInitialVisibleColumns(columns: ColumnSchema[]): string[] {
+export function getInitialVisibleColumns(columns: ColumnInfo[]): string[] {
   const hasTimestamp = columns.some((col) => col.name === "timestamp");
   if (hasTimestamp) {
     return columns.length > 1

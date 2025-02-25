@@ -21,17 +21,18 @@ import { Input } from '@/components/ui/input'
 import DataTableToolbar from './data-table-toolbar.vue'
 import DataTableColumnSelector from './data-table-column-selector.vue'
 import DataTablePagination from './data-table-pagination.vue'
-import hljs from 'highlight.js/lib/core'
-import json from 'highlight.js/lib/languages/json'
-import 'highlight.js/styles/stackoverflow-light.css'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
 import type { QueryStats } from '@/api/explore'
+import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
+import { useExploreStore } from '@/stores/explore'
+import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 
 interface Props {
     columns: ColumnDef<Record<string, any>>[]
     data: Record<string, any>[]
     stats: QueryStats
+    sourceId: string
 }
 
 const props = defineProps<Props>()
@@ -47,6 +48,10 @@ const pagination = ref<PaginationState>({
 const globalFilter = ref('')
 
 const { toast } = useToast()
+
+const exploreStore = useExploreStore()
+const contextModalOpen = ref(false)
+const selectedLog = ref<Record<string, any> | null>(null)
 
 // Initialize table
 const table = useVueTable({
@@ -87,15 +92,6 @@ const table = useVueTable({
     globalFilterFn: 'includesString',
 })
 
-// Initialize highlight.js with JSON language
-hljs.registerLanguage('json', json)
-
-// Format JSON with indentation and highlighting
-function formatJSON(data: any): string {
-    const jsonString = JSON.stringify(data, null, 2)
-    return hljs.highlight(jsonString, { language: 'json' }).value
-}
-
 // Handle row click for expansion
 const handleRowClick = (e: MouseEvent, row: any) => {
     // Don't expand if clicking on the dropdown
@@ -105,18 +101,7 @@ const handleRowClick = (e: MouseEvent, row: any) => {
     row.toggleExpanded()
 }
 
-// Handle copy to clipboard with toast notification
-const copyToClipboard = (data: any) => {
-    const text = JSON.stringify(data, null, 2)
-    navigator.clipboard.writeText(text)
-    toast({
-        title: 'Copied',
-        description: 'Log data copied to clipboard',
-        duration: TOAST_DURATION.SUCCESS,
-    })
-}
-
-// Add new copy function for individual cell values
+// Add back the copyCell function since it's still needed for individual cells
 const copyCell = (value: any) => {
     const text = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)
     navigator.clipboard.writeText(text)
@@ -125,6 +110,13 @@ const copyCell = (value: any) => {
         description: 'Value copied to clipboard',
         duration: TOAST_DURATION.SUCCESS,
     })
+}
+
+// Update showContext function
+function showContext(log: Record<string, any>) {
+    console.log('Opening context modal with:', { sourceId: props.sourceId, log })
+    selectedLog.value = log
+    contextModalOpen.value = true
 }
 </script>
 
@@ -164,12 +156,14 @@ const copyCell = (value: any) => {
                     <tbody class="[&_tr:last-child]:border-0">
                         <template v-if="table.getRowModel().rows?.length">
                             <template v-for="row in table.getRowModel().rows" :key="row.id">
+                                <!-- Main Row -->
                                 <tr :data-state="row.getIsSelected() ? 'selected' : undefined"
                                     @click="(e) => handleRowClick(e, row)"
                                     class="cursor-pointer hover:bg-muted/50 border-b border-b-muted-foreground/10">
                                     <td v-for="cell in row.getVisibleCells()" :key="cell.id"
                                         class="h-auto px-2 py-1 min-w-[150px] whitespace-normal break-all align-middle group">
                                         <div class="max-w-none flex items-center gap-1">
+                                            <!-- Cell Content -->
                                             <span v-if="getSeverityClasses(cell.getValue(), cell.column.id)"
                                                 :class="getSeverityClasses(cell.getValue(), cell.column.id)">
                                                 {{ cell.getValue() }}
@@ -178,6 +172,8 @@ const copyCell = (value: any) => {
                                                 <FlexRender :render="cell.column.columnDef.cell"
                                                     :props="cell.getContext()" />
                                             </template>
+
+                                            <!-- Copy Value Button -->
                                             <Button variant="ghost" size="icon"
                                                 class="h-4 w-4 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
                                                 @click.stop="copyCell(cell.getValue())" title="Copy value">
@@ -186,18 +182,13 @@ const copyCell = (value: any) => {
                                         </div>
                                     </td>
                                 </tr>
+
+                                <!-- Expanded Row -->
                                 <tr v-if="row.getIsExpanded()">
                                     <td :colspan="row.getVisibleCells().length" class="p-0">
-                                        <div class="p-3 bg-muted/50 relative">
-                                            <!-- Small floating copy button -->
-                                            <Button variant="ghost" size="icon"
-                                                class="absolute left-3 top-3 h-6 w-6 bg-background/50 hover:bg-background/80 backdrop-blur-sm"
-                                                @click.stop="copyToClipboard(row.original)" title="Copy JSON">
-                                                <Copy class="h-3 w-3" />
-                                            </Button>
-                                            <!-- Highlighted JSON -->
-                                            <pre
-                                                class="text-sm font-mono overflow-auto mt-2"><code v-html="formatJSON(row.original)" /></pre>
+                                        <div class="p-3 bg-muted/50">
+                                            <JsonViewer :value="row.original" :expanded="false"
+                                                :show-context-button="true" @show-context="showContext(row.original)" />
                                         </div>
                                     </td>
                                 </tr>
@@ -214,13 +205,13 @@ const copyCell = (value: any) => {
                 </table>
             </div>
         </div>
+
+        <!-- Context Modal -->
+        <LogTimelineModal v-if="selectedLog" v-model:isOpen="contextModalOpen" :source-id="props.sourceId"
+            :log="selectedLog" />
     </div>
 </template>
 
 <style>
-/* Just remove padding and background since we're in a pre tag already */
-pre code.hljs {
-    background: transparent;
-    padding: 0;
-}
+/* Remove hljs styles since they're now in JsonViewer */
 </style>

@@ -58,6 +58,21 @@ export interface QueryErrorResponse {
 
 export type QueryResponse = QuerySuccessResponse | QueryErrorResponse;
 
+// Log context types
+export interface LogContextRequest {
+  timestamp: number;
+  before_limit: number;
+  after_limit: number;
+}
+
+export interface LogContextResponse {
+  target_timestamp: number;
+  before_logs: Record<string, any>[];
+  target_logs: Record<string, any>[];
+  after_logs: Record<string, any>[];
+  stats: QueryStats;
+}
+
 export const exploreApi = {
   async getLogs(sourceId: string, params: QueryParams) {
     try {
@@ -68,6 +83,19 @@ export const exploreApi = {
       return response.data;
     } catch (error) {
       console.error("Error fetching logs:", error);
+      throw error;
+    }
+  },
+
+  async getLogContext(sourceId: string, params: LogContextRequest) {
+    try {
+      const response = await api.post<APIResponse<LogContextResponse>>(
+        `/sources/${sourceId}/logs/context`,
+        params
+      );
+      return response.data;
+    } catch (error) {
+      console.error("Error fetching log context:", error);
       throw error;
     }
   },

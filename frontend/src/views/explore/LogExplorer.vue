@@ -565,7 +565,8 @@ function buildBaseQuery(baseQuery: string): string {
       </div>
       <!-- Show Results when data is loaded -->
       <div v-else-if="exploreStore.data.logs?.length > 0" class="border rounded-md bg-card">
-        <DataTable :data="exploreStore.data.logs" :columns="tableColumns" :stats="exploreStore.data.queryStats" />
+        <DataTable :columns="tableColumns" :data="exploreStore.data.logs" :stats="exploreStore.data.queryStats"
+          :source-id="exploreStore.data.sourceId" />
       </div>
       <EmptyState v-else class="border rounded-md bg-card" />
     </div>

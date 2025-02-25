@@ -5,13 +5,10 @@ LAST_COMMIT := $(shell git rev-parse --short HEAD)
 LAST_COMMIT_DATE := $(shell git show -s --format=%ci ${LAST_COMMIT})
 VERSION := $(shell git describe --tags --always)
 BUILD_TIME := $(shell date +"%Y-%m-%d %H:%M:%S %z")
-BUILDSTR := ${VERSION} (Commit: ${LAST_COMMIT_DATE} (${LAST_COMMIT}), Build: ${BUILD_TIME})
+BUILD_INFO := ${VERSION} (Commit: ${LAST_COMMIT_DATE} (${LAST_COMMIT}), Build: ${BUILD_TIME})
 
 # Build flags
-LDFLAGS := -X 'main.version=${VERSION}' \
-           -X 'main.commit=${LAST_COMMIT}' \
-           -X 'main.buildTime=${BUILD_TIME}' \
-           -X 'main.buildString=${BUILDSTR}'
+LDFLAGS := -X 'main.buildString=${BUILD_INFO}'
 
 # Binary output
 BIN := bin/server
@@ -24,7 +21,7 @@ build: build-ui build-backend ## Build both backend and frontend
 
 # Build only backend (depends on frontend being built)
 build-backend: ## Build only the backend
-	cd backend && CGO_ENABLED=0 go build -o ../${BIN} -ldflags="${LDFLAGS}" ./cmd/server
+	CGO_ENABLED=0 go build -o ../${BIN} -ldflags="${LDFLAGS}" ./cmd/server
 
 # Build only frontend
 build-ui: ## Build only the frontend
@@ -34,11 +31,11 @@ build-ui: ## Build only the frontend
 
 # Run the server with frontend
 run: build ## Run the server with config
-	cd backend && ../${BIN} -config ${CONFIG}
+	../${BIN} -config ${CONFIG}
 
 # Run only the backend (useful during development)
 run-backend: build-backend ## Run only the backend server
-	cd backend && ../${BIN} -config ${CONFIG} -env development -log-level debug
+	../${BIN} -config ${CONFIG} -env development -log-level debug
 
 # Clean build artifacts
 clean: ## Clean build artifacts
@@ -54,32 +51,32 @@ fresh: clean build run ## Clean and rebuild everything
 test: ## Run tests with coverage
 	@echo "Running tests..."
 	@mkdir -p coverage
-	cd backend && \
+	\
 		go test -v -race -coverprofile=../coverage/coverage.out ./... && \
 		go tool cover -html=../coverage/coverage.out -o ../coverage/coverage.html
 	@echo "Coverage report generated at coverage/coverage.html"
-	@cd backend && go tool cover -func=../coverage/coverage.out | grep total | awk '{print "Total coverage: " $$3}'
+	@go tool cover -func=../coverage/coverage.out | grep total | awk '{print "Total coverage: " $$3}'
 
 # Run tests without coverage (faster)
 test-short: ## Run tests without coverage and race detection (faster)
 	@echo "Running tests (short mode)..."
-	cd backend && go test -v ./...
+	go test -v ./...
 
 # Run linter
 lint: ## Run linter
-	cd backend && golangci-lint run
+	golangci-lint run
 
 # Format code
 fmt: ## Format Go code
-	cd backend && go fmt ./...
+	go fmt ./...
 
 # Run go vet
 vet: ## Run go vet
-	cd backend && go vet ./...
+	go vet ./...
 
 # Tidy go modules
 tidy: ## Tidy go modules
-	cd backend && go mod tidy
+	go mod tidy
 
 # Check all (fmt, vet, lint, test)
 check: fmt vet lint test ## Run all checks
