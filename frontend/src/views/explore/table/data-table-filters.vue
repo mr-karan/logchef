@@ -3,10 +3,6 @@ import { ref, computed, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Plus, X } from 'lucide-vue-next'
 import {
-  Card,
-  CardContent,
-} from '@/components/ui/card'
-import {
   Select,
   SelectContent,
   SelectItem,

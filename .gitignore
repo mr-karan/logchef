@@ -1,50 +1,36 @@
-.aider*
-.env
-.env
-*.log
-.idea/
-.vscode/
-bin/
-tmp/
-logchef.db
-pkg/ui/dist/*
-!pkg/ui/dist/.gitkeep
-
-# Go specific
+# If you prefer the allow list template instead of the deny list, see community template:
+# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
+#
+# Binaries for programs and plugins
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-*.test
-*.out
-
-# Go workspace file
-go.work
 
 # Test binary, built with `go test -c`
 *.test
 
-# Output of the go coverage tool
+# Output of the go coverage tool, specifically when used with LiteIDE
 *.out
-coverage.html
 
-# Dependency directories
-vendor/
+# Dependency directories (remove the comment below to include it)
+# vendor/
 
-# Build artifacts
-bin/
-coverage/
+# Go workspace file
+go.work
+go.work.sum
 
-# Frontend build output
-frontend/dist/
-backend/cmd/server/ui/
+# env file
+.env
 
-# Dependencies
-frontend/node_modules/
+# LLMs
+.aider*
+# Cursor rules
+.cursorrules
 
 # Local dev files
 *.db*
-.env
-.env.*
-!.env.example
+.vscode/
+bin/
+cmd/server/ui/

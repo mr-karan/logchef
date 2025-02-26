@@ -1,7 +1,7 @@
 package server
 
 import (
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/gofiber/fiber/v2"
 )

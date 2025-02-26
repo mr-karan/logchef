@@ -25,7 +25,6 @@ import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
 import type { QueryStats } from '@/api/explore'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
-import { useExploreStore } from '@/stores/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 
 interface Props {
@@ -49,7 +48,6 @@ const globalFilter = ref('')
 
 const { toast } = useToast()
 
-const exploreStore = useExploreStore()
 const contextModalOpen = ref(false)
 const selectedLog = ref<Record<string, any> | null>(null)
 

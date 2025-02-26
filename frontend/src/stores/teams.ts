@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { teamsApi, type Team, type CreateTeamRequest } from "@/api/users";
+import { teamsApi, type Team, type CreateTeamRequest } from "@/api/teams";
 import { isErrorResponse } from "@/api/types";
 import { useToast } from "@/components/ui/toast/use-toast";
 import { TOAST_DURATION } from "@/lib/constants";
@@ -36,16 +36,16 @@ export const useTeamsStore = defineStore("teams", () => {
       }
 
       // Initialize with empty array if teams is null
-      const teamsData = response.data.teams || [];
+      const teamsData = response.data || [];
 
       // Get member counts for each team
       const teamsWithMembers = await Promise.all(
         teamsData.map(async (team) => {
           const membersResponse = await teamsApi.listTeamMembers(team.id);
           const memberCount =
-            isErrorResponse(membersResponse) || !membersResponse.data.members
+            isErrorResponse(membersResponse) || !membersResponse.data
               ? 0
-              : membersResponse.data.members.length;
+              : membersResponse.data.length;
           return { ...team, memberCount };
         })
       );

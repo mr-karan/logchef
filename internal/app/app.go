@@ -7,14 +7,14 @@ import (
 	"net/http"
 	"time"
 
-	"logchef/internal/auth"
-	"logchef/internal/clickhouse"
-	"logchef/internal/config"
-	"logchef/internal/identity"
-	"logchef/internal/logs"
-	"logchef/internal/server"
-	"logchef/internal/source"
-	"logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/auth"
+	"github.com/mr-karan/logchef/internal/clickhouse"
+	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/identity"
+	"github.com/mr-karan/logchef/internal/logs"
+	"github.com/mr-karan/logchef/internal/server"
+	"github.com/mr-karan/logchef/internal/source"
+	"github.com/mr-karan/logchef/internal/sqlite"
 )
 
 // App represents the application and its components

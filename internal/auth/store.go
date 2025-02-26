@@ -3,7 +3,7 @@ package auth
 import (
 	"context"
 
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // Store defines the interface for auth-related storage operations
@@ -31,7 +31,7 @@ type Store interface {
 	ListTeams(ctx context.Context) ([]*models.Team, error)
 
 	// Team member operations
-	AddTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID, role string) error
+	AddTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) error
 	RemoveTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) error
 	ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error)
 	ListUserTeams(ctx context.Context, userID models.UserID) ([]*models.Team, error)

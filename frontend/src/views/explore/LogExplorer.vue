@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed, type WritableComputedRef, type Ref } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -13,8 +13,7 @@ import {
   NumberFieldInput,
 } from '@/components/ui/number-field'
 import { useToast } from '@/components/ui/toast'
-import { exploreApi } from '@/api/explore'
-import type { QueryStats, FilterCondition, ColumnInfo } from '@/api/explore'
+import type { FilterCondition } from '@/api/explore'
 import { getErrorMessage } from '@/api/types'
 import { TOAST_DURATION } from '@/lib/constants'
 import { DateTimePicker } from '@/components/date-time-picker'
@@ -25,18 +24,17 @@ import { createColumns } from './table/columns'
 import DataTable from './table/data-table.vue'
 import EmptyState from './EmptyState.vue'
 import type { ColumnDef } from '@tanstack/vue-table'
-import { Switch } from '@/components/ui/switch'
 import DataTableFilters from './table/data-table-filters.vue'
 import SQLEditor from '@/components/sql-editor/SQLEditor.vue'
 import { formatSourceName } from '@/utils/format'
 import { useSourcesStore } from '@/stores/sources'
 import { useExploreStore } from '@/stores/explore'
 import { useSqlGenerator } from '@/composables/useSqlGenerator'
-import type { SqlGeneratorState } from '@/composables/useSqlGenerator'
 import SqlPreview from '@/components/sql-preview/SqlPreview.vue'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible'
 import { ChevronRight } from 'lucide-vue-next'
+import SmartFilterBar from '@/components/smart-filter/SmartFilterBar.vue'
 
 const router = useRouter()
 const sourcesStore = useSourcesStore()
@@ -46,7 +44,7 @@ const route = useRoute()
 
 // Local UI state
 const isLoading = computed(() => exploreStore.isLoading)
-const previewOpen = ref(true)
+const previewOpen = ref(false)
 
 // Flag to prevent unnecessary URL updates on initial load
 const isInitialLoad = ref(true)
@@ -400,25 +398,6 @@ watch(
 const handleFiltersUpdate = (filters: FilterCondition[]) => {
   exploreStore.setFilterConditions(filters)
 }
-
-// Toggle query mode
-const toggleQueryMode = (checked: boolean) => {
-  activeTab.value = checked ? 'raw_sql' : 'filters'
-}
-
-// Helper function to build base query with timestamps
-function buildBaseQuery(baseQuery: string): string {
-  const timestamps = getTimestamps()
-  const timeConditions = `timestamp >= fromUnixTimestamp64Milli(${timestamps.start}) AND timestamp <= fromUnixTimestamp64Milli(${timestamps.end})`
-
-  // If query already has WHERE clause, append with AND
-  if (baseQuery.toUpperCase().includes('WHERE')) {
-    return baseQuery.replace(/WHERE/i, `WHERE ${timeConditions} AND`)
-  }
-
-  // If no WHERE clause, add one with time conditions
-  return `${baseQuery} WHERE ${timeConditions}`
-}
 </script>
 
 <template>
@@ -449,97 +428,105 @@ function buildBaseQuery(baseQuery: string): string {
 
   <!-- Main explorer UI when sources are available -->
   <div v-else class="flex flex-col h-full min-w-0 gap-3">
-    <!-- Query Controls -->
-    <div class="space-y-3">
-      <!-- Core Query Controls Group -->
-      <div class="flex gap-3 items-start bg-muted/20 rounded-md p-2">
-        <!-- Source + Time Range Group -->
-        <div class="flex gap-3 flex-1">
-          <div class="w-[180px]">
-            <Label class="text-xs text-muted-foreground">Source</Label>
-            <Select v-model="exploreStore.data.sourceId">
-              <SelectTrigger class="h-9">
-                <SelectValue placeholder="Select a source">
-                  {{ selectedSourceName }}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem v-for="source in sourcesStore.sources" :key="source.id" :value="source.id">
-                    {{ formatSourceName(source) }}
-                  </SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div class="w-[380px]">
-            <Label class="text-xs text-muted-foreground">Time Range</Label>
-            <DateTimePicker v-model="dateRange" class="h-9" />
-          </div>
-        </div>
-
-        <!-- Execution Controls Group -->
-        <div class="flex items-end gap-2">
-          <NumberField v-model="exploreStore.data.limit" :min="10" :max="10000" :step="10"
-            class="w-[90px] [&_input[type='number']::-webkit-inner-spin-button]:appearance-none [&_input[type='number']::-webkit-outer-spin-button]:appearance-none">
-            <NumberFieldContent>
-              <div class="flex items-center h-9">
-                <NumberFieldInput placeholder="Limit" class="text-sm" :step="10" />
-                <NumberFieldDecrement :step="10" />
-                <NumberFieldIncrement :step="10" />
-              </div>
-            </NumberFieldContent>
-          </NumberField>
-
-          <Button @click="executeQuery"
-            :disabled="isLoading || !selectedSourceDetails.database || !selectedSourceDetails.table"
-            class="w-[90px] h-9">
-            <Search class="mr-2 h-3.5 w-3.5" />
-            Search
-          </Button>
-        </div>
+    <!-- Ultra-Compact Control Bar - Removed container styling -->
+    <div class="flex items-center gap-2 h-9 mb-1">
+      <!-- Source Selector -->
+      <div class="w-[180px]">
+        <Select v-model="exploreStore.data.sourceId" class="h-7">
+          <SelectTrigger class="h-7 py-0 text-xs">
+            <SelectValue placeholder="Select a source">
+              {{ selectedSourceName }}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem v-for="source in sourcesStore.sources" :key="source.id" :value="source.id">
+                {{ formatSourceName(source) }}
+              </SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
       </div>
 
-      <!-- Query Builder Tabs -->
-      <div class="rounded-md border bg-card">
-        <Tabs v-model="activeTab" class="w-full" default-value="filters">
-          <TabsList class="w-full h-9 bg-muted/30">
-            <TabsTrigger value="filters" class="flex-1 text-sm">Filter Builder</TabsTrigger>
-            <TabsTrigger value="raw_sql" class="flex-1 text-sm">SQL Query</TabsTrigger>
-          </TabsList>
+      <!-- Divider -->
+      <div class="h-5 w-px bg-border self-center"></div>
 
-          <div class="p-3">
-            <TabsContent value="filters" class="mt-0 space-y-3">
-              <DataTableFilters :columns="exploreStore.data.columns" :filters="exploreStore.data.filterConditions"
-                @update:filters="handleFiltersUpdate" class="border rounded-md bg-muted/20 p-2" />
-
-              <!-- SQL Preview -->
-              <Collapsible v-model:open="previewOpen">
-                <CollapsibleTrigger
-                  class="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-                  <ChevronRight class="h-3.5 w-3.5" :class="{ 'rotate-90': previewOpen }" />
-                  Preview SQL
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div class="mt-2 border rounded-md bg-muted/20 p-2">
-                    <SqlPreview :sql="sqlPreviewState.sql" :is-valid="sqlPreviewState.isValid"
-                      :error="sqlPreviewState.error || undefined" />
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-            </TabsContent>
-
-            <TabsContent value="raw_sql" class="mt-0">
-              <div class="border rounded-md bg-muted/20 p-2">
-                <SQLEditor v-model="exploreStore.data.rawSql" :source-database="selectedSourceDetails.database"
-                  :source-table="selectedSourceDetails.table" :start-timestamp="getTimestamps().start"
-                  :end-timestamp="getTimestamps().end" @execute="executeQuery" />
-              </div>
-            </TabsContent>
-          </div>
-        </Tabs>
+      <!-- Time Range Picker - Increased width -->
+      <div class="w-[340px]">
+        <DateTimePicker v-model="dateRange" class="h-7" buttonClass="py-0 h-7 text-xs" />
       </div>
+
+      <!-- Spacer -->
+      <div class="flex-1"></div>
+
+      <!-- Limit Control - Changed to dropdown -->
+      <div class="flex items-center gap-1 mr-2">
+        <span class="text-xs text-muted-foreground whitespace-nowrap">Limit:</span>
+        <Select :model-value="exploreStore.data.limit.toString()"
+          @update:model-value="val => exploreStore.setLimit(parseInt(val))" class="w-[80px]">
+          <SelectTrigger class="h-7 py-0 text-xs">
+            <SelectValue placeholder="Limit" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="100">100</SelectItem>
+            <SelectItem value="500">500</SelectItem>
+            <SelectItem value="1000">1,000</SelectItem>
+            <SelectItem value="5000">5,000</SelectItem>
+            <SelectItem value="10000">10,000</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <!-- Search Button -->
+      <Button @click="executeQuery"
+        :disabled="isLoading || !selectedSourceDetails.database || !selectedSourceDetails.table"
+        class="h-7 px-3 py-0 text-xs">
+        <Search class="mr-2 h-3 w-3" />
+        Search
+      </Button>
+    </div>
+
+    <!-- Query Builder Tabs -->
+    <div class="rounded-md border bg-card">
+      <Tabs v-model="activeTab" class="w-full" default-value="filters">
+        <TabsList class="grid w-full grid-cols-2">
+          <TabsTrigger value="filters">
+            Filter Builder
+          </TabsTrigger>
+          <TabsTrigger value="raw_sql">
+            SQL Query
+          </TabsTrigger>
+        </TabsList>
+
+        <div class="p-3">
+          <TabsContent value="filters" class="mt-0 space-y-3">
+            <SmartFilterBar v-model="exploreStore.data.filterConditions" :columns="exploreStore.data.columns"
+              @search="executeQuery" class="border rounded-md bg-muted/20 p-2" />
+
+            <!-- SQL Preview -->
+            <Collapsible v-model:open="previewOpen">
+              <CollapsibleTrigger class="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+                <ChevronRight class="h-3.5 w-3.5" :class="{ 'rotate-90': previewOpen }" />
+                Preview SQL
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div class="mt-2 border rounded-md bg-muted/20 p-2">
+                  <SqlPreview :sql="sqlPreviewState.sql" :is-valid="sqlPreviewState.isValid"
+                    :error="sqlPreviewState.error || undefined" />
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          </TabsContent>
+
+          <TabsContent value="raw_sql" class="mt-0">
+            <div class="border rounded-md bg-muted/20 p-2">
+              <SQLEditor v-model="exploreStore.data.rawSql" :source-database="selectedSourceDetails.database"
+                :source-table="selectedSourceDetails.table" :start-timestamp="getTimestamps().start"
+                :end-timestamp="getTimestamps().end" @execute="executeQuery" />
+            </div>
+          </TabsContent>
+        </div>
+      </Tabs>
     </div>
 
     <!-- Results Area -->

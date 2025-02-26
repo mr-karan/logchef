@@ -6,12 +6,6 @@ import { Button } from "@/components/ui/button";
 import { ArrowUpDown } from "lucide-vue-next";
 import type { ColumnInfo } from "@/api/explore";
 
-// This type represents a column in our source schema
-interface ColumnSchema {
-  name: string;
-  type: string;
-}
-
 // Function to generate column definitions based on source schema
 export function createColumns(
   columns: ColumnInfo[]

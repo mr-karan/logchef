@@ -6,9 +6,10 @@ import (
 	"log/slog"
 	"time"
 
-	"logchef/internal/clickhouse"
-	"logchef/internal/sqlite"
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
+
+	"github.com/mr-karan/logchef/internal/clickhouse"
+	"github.com/mr-karan/logchef/internal/sqlite"
 )
 
 // ErrSourceNotFound is returned when a source is not found
@@ -33,7 +34,7 @@ func New(db *sqlite.DB, manager *clickhouse.Manager, log *slog.Logger) *Service 
 }
 
 // QueryLogs retrieves logs from a source with pagination and time range
-func (s *Service) QueryLogs(ctx context.Context, sourceID string, params clickhouse.LogQueryParams) (*models.QueryResult, error) {
+func (s *Service) QueryLogs(ctx context.Context, sourceID models.SourceID, params clickhouse.LogQueryParams) (*models.QueryResult, error) {
 	// Get source from SQLite
 	source, err := s.db.GetSource(ctx, sourceID)
 	if err != nil {
@@ -62,7 +63,7 @@ func (s *Service) QueryLogs(ctx context.Context, sourceID string, params clickho
 }
 
 // GetTimeSeries retrieves time series data for log counts
-func (s *Service) GetTimeSeries(ctx context.Context, sourceID string, params clickhouse.TimeSeriesParams) (*clickhouse.TimeSeriesResult, error) {
+func (s *Service) GetTimeSeries(ctx context.Context, sourceID models.SourceID, params clickhouse.TimeSeriesParams) (*clickhouse.TimeSeriesResult, error) {
 	// Get source from SQLite
 	source, err := s.db.GetSource(ctx, sourceID)
 	if err != nil {

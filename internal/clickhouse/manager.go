@@ -2,14 +2,13 @@ package clickhouse
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
-	"logchef/pkg/logger"
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/logger"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // Default values
@@ -20,9 +19,11 @@ const (
 
 // Manager manages multiple ClickHouse connections
 type Manager struct {
-	clients    map[string]*Client
+	clients    map[models.SourceID]*Client
 	clientsMux sync.RWMutex
 	logger     *slog.Logger
+	health     map[models.SourceID]models.SourceHealth
+	mu         sync.RWMutex
 }
 
 // NewManager creates a new connection manager
@@ -32,16 +33,16 @@ func NewManager(log *slog.Logger) *Manager {
 	}
 
 	return &Manager{
-		clients: make(map[string]*Client),
+		clients: make(map[models.SourceID]*Client),
 		logger:  log.With("component", "clickhouse_manager"),
+		health:  make(map[models.SourceID]models.SourceHealth),
 	}
 }
 
 // AddSource creates and stores a new connection
 func (m *Manager) AddSource(source *models.Source) error {
-	if source == nil {
-		return errors.New("source cannot be nil")
-	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	m.logger.Info("adding source to manager",
 		"source_id", source.ID,
@@ -58,7 +59,14 @@ func (m *Manager) AddSource(source *models.Source) error {
 	}, m.logger.With("source_id", source.ID))
 
 	if err != nil {
-		return fmt.Errorf("creating client for source %s: %w", source.ID, err)
+		m.logger.Error("failed to create client", "error", err, "source_id", source.ID)
+		m.health[source.ID] = models.SourceHealth{
+			SourceID:    source.ID,
+			Status:      models.HealthStatusUnhealthy,
+			Error:       err.Error(),
+			LastChecked: time.Now(),
+		}
+		return fmt.Errorf("error creating client: %w", err)
 	}
 
 	m.clientsMux.Lock()
@@ -71,11 +79,17 @@ func (m *Manager) AddSource(source *models.Source) error {
 	}
 
 	m.clients[source.ID] = client
+	m.health[source.ID] = models.SourceHealth{
+		SourceID:    source.ID,
+		Status:      models.HealthStatusHealthy,
+		LastChecked: time.Now(),
+	}
+
 	return nil
 }
 
 // RemoveSource removes a source connection
-func (m *Manager) RemoveSource(sourceID string) error {
+func (m *Manager) RemoveSource(sourceID models.SourceID) error {
 	m.logger.Info("removing source from manager", "source_id", sourceID)
 
 	m.clientsMux.Lock()
@@ -95,7 +109,7 @@ func (m *Manager) RemoveSource(sourceID string) error {
 }
 
 // GetConnection returns a connection for immediate use
-func (m *Manager) GetConnection(sourceID string) (*Client, error) {
+func (m *Manager) GetConnection(sourceID models.SourceID) (*Client, error) {
 	m.clientsMux.RLock()
 	defer m.clientsMux.RUnlock()
 
@@ -108,12 +122,12 @@ func (m *Manager) GetConnection(sourceID string) (*Client, error) {
 }
 
 // GetClient returns a client for a given source ID (alias for GetConnection for backward compatibility)
-func (m *Manager) GetClient(sourceID string) (*Client, error) {
+func (m *Manager) GetClient(sourceID models.SourceID) (*Client, error) {
 	return m.GetConnection(sourceID)
 }
 
 // QueryLogs executes a log query against a specific source
-func (m *Manager) QueryLogs(ctx context.Context, sourceID string, source *models.Source, params LogQueryParams) (*models.QueryResult, error) {
+func (m *Manager) QueryLogs(ctx context.Context, sourceID models.SourceID, source *models.Source, params LogQueryParams) (*models.QueryResult, error) {
 	// Get client
 	client, err := m.GetClient(sourceID)
 	if err != nil {
@@ -144,7 +158,7 @@ func (m *Manager) QueryLogs(ctx context.Context, sourceID string, source *models
 }
 
 // GetHealth returns the health status for a given source
-func (m *Manager) GetHealth(sourceID string) models.SourceHealth {
+func (m *Manager) GetHealth(sourceID models.SourceID) models.SourceHealth {
 	health := models.SourceHealth{
 		SourceID:    sourceID,
 		LastChecked: time.Now(),

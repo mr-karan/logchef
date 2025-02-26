@@ -6,9 +6,10 @@ import (
 	"log/slog"
 	"time"
 
-	"logchef/internal/config"
-	"logchef/pkg/logger"
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/logger"
+	"github.com/mr-karan/logchef/pkg/models"
+
+	"github.com/mr-karan/logchef/internal/config"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/google/uuid"

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // LogQueryParams represents parameters for querying logs
@@ -69,7 +69,7 @@ type LogContextResult struct {
 }
 
 // GetTimeSeries retrieves time series data for log counts
-func (m *Manager) GetTimeSeries(ctx context.Context, sourceID string, source *models.Source, params TimeSeriesParams) (*TimeSeriesResult, error) {
+func (m *Manager) GetTimeSeries(ctx context.Context, sourceID models.SourceID, source *models.Source, params TimeSeriesParams) (*TimeSeriesResult, error) {
 	// Get client for the source
 	client, err := m.GetConnection(sourceID)
 	if err != nil {
@@ -84,7 +84,7 @@ func (m *Manager) GetTimeSeries(ctx context.Context, sourceID string, source *mo
 }
 
 // GetLogContext retrieves logs before and after a specific timestamp
-func (m *Manager) GetLogContext(ctx context.Context, sourceID string, source *models.Source, params LogContextParams) (*LogContextResult, error) {
+func (m *Manager) GetLogContext(ctx context.Context, sourceID models.SourceID, source *models.Source, params LogContextParams) (*LogContextResult, error) {
 	// Get client for the source
 	client, err := m.GetConnection(sourceID)
 	if err != nil {

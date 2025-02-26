@@ -106,9 +106,9 @@ const formatDate = (dateString: string) => {
                                     </div>
                                 </TableCell>
                                 <TableCell>
-                                    <Badge :variant="source._meta_is_auto_created === 1 ? 'default' : 'secondary'"
+                                    <Badge :variant="source._meta_is_auto_created ? 'default' : 'secondary'"
                                         class="whitespace-nowrap">
-                                        {{ source._meta_is_auto_created === 1 ? 'Yes' : 'No' }}
+                                        {{ source._meta_is_auto_created ? 'Yes' : 'No' }}
                                     </Badge>
                                 </TableCell>
                                 <TableCell>

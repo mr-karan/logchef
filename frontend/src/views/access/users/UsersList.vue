@@ -50,7 +50,7 @@ const loadUsers = async () => {
             })
             return
         }
-        users.value = response.data.users
+        users.value = response.data
     } catch (error) {
         console.error('Error loading users:', error)
         toast({

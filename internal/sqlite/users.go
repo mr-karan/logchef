@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // User methods
@@ -42,7 +42,7 @@ func (db *DB) CreateUser(ctx context.Context, user *models.User) error {
 }
 
 // GetUser gets a user by ID
-func (db *DB) GetUser(ctx context.Context, id string) (*models.User, error) {
+func (db *DB) GetUser(ctx context.Context, id models.UserID) (*models.User, error) {
 	db.log.Debug("getting user", "user_id", id)
 
 	var user models.User
@@ -126,7 +126,7 @@ func (db *DB) CountAdminUsers(ctx context.Context) (int, error) {
 }
 
 // DeleteUser deletes a user by ID
-func (db *DB) DeleteUser(ctx context.Context, id string) error {
+func (db *DB) DeleteUser(ctx context.Context, id models.UserID) error {
 	db.log.Debug("deleting user", "user_id", id)
 
 	result, err := db.queries.DeleteUser.ExecContext(ctx, id)

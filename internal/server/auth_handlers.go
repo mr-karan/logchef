@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"logchef/internal/auth"
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
+
+	"github.com/mr-karan/logchef/internal/auth"
 
 	"github.com/gofiber/fiber/v2"
 )

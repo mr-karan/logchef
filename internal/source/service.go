@@ -8,9 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"logchef/internal/clickhouse"
-	"logchef/internal/sqlite"
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
+
+	"github.com/mr-karan/logchef/internal/clickhouse"
+	"github.com/mr-karan/logchef/internal/sqlite"
 
 	"github.com/google/uuid"
 )
@@ -52,9 +53,9 @@ func (s *Service) ListSources(ctx context.Context) ([]*models.Source, error) {
 	return sources, nil
 }
 
-// GetSource retrieves a source by ID with its connection status
+// GetSource retrieves a source by ID
 func (s *Service) GetSource(ctx context.Context, id string) (*models.Source, error) {
-	source, err := s.db.GetSource(ctx, id)
+	source, err := s.db.GetSource(ctx, models.SourceID(id))
 	if err != nil {
 		return nil, fmt.Errorf("error getting source: %w", err)
 	}
@@ -64,7 +65,7 @@ func (s *Service) GetSource(ctx context.Context, id string) (*models.Source, err
 	}
 
 	// Get health status
-	health := s.chDB.GetHealth(id)
+	health := s.chDB.GetHealth(source.ID)
 	source.IsConnected = health.Status == models.HealthStatusHealthy
 
 	return source, nil
@@ -78,14 +79,16 @@ func (s *Service) CreateSource(ctx context.Context, autoCreateTable bool, conn m
 	}
 
 	source := &models.Source{
-		ID:                uuid.New().String(),
-		MetaIsAutoCreated: boolToInt(autoCreateTable),
+		ID:                models.SourceID(uuid.New().String()),
+		MetaIsAutoCreated: autoCreateTable,
 		MetaTSField:       metaTSField,
 		Connection:        conn,
 		Description:       description,
 		TTLDays:           ttlDays,
-		CreatedAt:         time.Now(),
-		UpdatedAt:         time.Now(),
+		Timestamps: models.Timestamps{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 
 	// Check if source already exists
@@ -127,9 +130,11 @@ func (s *Service) CreateSource(ctx context.Context, autoCreateTable bool, conn m
 			"error", err,
 			"source_id", source.ID,
 		)
+		// Clean up the source from the manager
+		_ = s.chDB.RemoveSource(source.ID)
 		return nil, &ValidationError{
 			Field:   "connection",
-			Message: "Failed to establish database connection. Please verify your credentials.",
+			Message: "Failed to connect to the database. Please check your connection details.",
 		}
 	}
 
@@ -199,7 +204,7 @@ func (s *Service) UpdateSource(ctx context.Context, id string, description strin
 	}
 
 	// Get existing source
-	source, err := s.db.GetSource(ctx, id)
+	source, err := s.db.GetSource(ctx, models.SourceID(id))
 	if err != nil {
 		return nil, fmt.Errorf("error getting source: %w", err)
 	}
@@ -228,7 +233,7 @@ func (s *Service) UpdateSource(ctx context.Context, id string, description strin
 // DeleteSource deletes a source
 func (s *Service) DeleteSource(ctx context.Context, id string) error {
 	// Validate source exists
-	source, err := s.db.GetSource(ctx, id)
+	source, err := s.db.GetSource(ctx, models.SourceID(id))
 	if err != nil {
 		return fmt.Errorf("error getting source: %w", err)
 	}
@@ -238,12 +243,12 @@ func (s *Service) DeleteSource(ctx context.Context, id string) error {
 	}
 
 	// First remove from ClickHouse manager to prevent any new operations
-	if err := s.chDB.RemoveSource(id); err != nil {
+	if err := s.chDB.RemoveSource(source.ID); err != nil {
 		return fmt.Errorf("error removing Clickhouse connection: %w", err)
 	}
 
 	// Then remove from database
-	if err := s.db.DeleteSource(ctx, id); err != nil {
+	if err := s.db.DeleteSource(ctx, source.ID); err != nil {
 		return fmt.Errorf("error removing from database: %w", err)
 	}
 
@@ -253,7 +258,7 @@ func (s *Service) DeleteSource(ctx context.Context, id string) error {
 // GetSourceHealth retrieves the health status of a source
 func (s *Service) GetSourceHealth(ctx context.Context, id string) (models.SourceHealth, error) {
 	// Check if source exists
-	source, err := s.db.GetSource(ctx, id)
+	source, err := s.db.GetSource(ctx, models.SourceID(id))
 	if err != nil {
 		return models.SourceHealth{}, fmt.Errorf("error getting source: %w", err)
 	}
@@ -263,7 +268,7 @@ func (s *Service) GetSourceHealth(ctx context.Context, id string) (models.Source
 	}
 
 	// Get health from ClickHouse manager and return it
-	health := s.chDB.GetHealth(id)
+	health := s.chDB.GetHealth(source.ID)
 	return health, nil
 }
 

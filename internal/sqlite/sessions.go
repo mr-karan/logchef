@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // Session methods
@@ -41,7 +41,7 @@ func (db *DB) CreateSession(ctx context.Context, session *models.Session) error 
 }
 
 // GetSession retrieves a session by ID
-func (db *DB) GetSession(ctx context.Context, sessionID string) (*models.Session, error) {
+func (db *DB) GetSession(ctx context.Context, sessionID models.SessionID) (*models.Session, error) {
 	db.log.Debug("getting session", "session_id", sessionID)
 
 	var session models.Session
@@ -57,7 +57,7 @@ func (db *DB) GetSession(ctx context.Context, sessionID string) (*models.Session
 }
 
 // DeleteSession deletes a session by ID
-func (db *DB) DeleteSession(ctx context.Context, sessionID string) error {
+func (db *DB) DeleteSession(ctx context.Context, sessionID models.SessionID) error {
 	db.log.Debug("deleting session", "session_id", sessionID)
 
 	result, err := db.queries.DeleteSession.ExecContext(ctx, sessionID)
@@ -81,7 +81,7 @@ func (db *DB) DeleteSession(ctx context.Context, sessionID string) error {
 }
 
 // DeleteUserSessions deletes all sessions for a user
-func (db *DB) DeleteUserSessions(ctx context.Context, userID string) error {
+func (db *DB) DeleteUserSessions(ctx context.Context, userID models.UserID) error {
 	db.log.Debug("deleting user sessions", "user_id", userID)
 
 	_, err := db.queries.DeleteUserSessions.ExecContext(ctx, userID)
@@ -96,7 +96,7 @@ func (db *DB) DeleteUserSessions(ctx context.Context, userID string) error {
 }
 
 // CountUserSessions returns the number of active sessions for a user
-func (db *DB) CountUserSessions(ctx context.Context, userID string) (int, error) {
+func (db *DB) CountUserSessions(ctx context.Context, userID models.UserID) (int, error) {
 	db.log.Debug("counting user sessions", "user_id", userID)
 
 	var count int

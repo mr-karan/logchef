@@ -1,4 +1,4 @@
-module logchef
+module github.com/mr-karan/logchef
 
 go 1.22.0
 

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // Source methods
@@ -42,8 +42,8 @@ func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
 	return nil
 }
 
-// GetSource retrieves a source by its ID
-func (db *DB) GetSource(ctx context.Context, id string) (*models.Source, error) {
+// GetSource retrieves a source by ID
+func (db *DB) GetSource(ctx context.Context, id models.SourceID) (*models.Source, error) {
 	db.log.Debug("getting source", "source_id", id)
 
 	var row SourceRow
@@ -130,8 +130,8 @@ func (db *DB) UpdateSource(ctx context.Context, source *models.Source) error {
 	return nil
 }
 
-// DeleteSource deletes a source by its ID
-func (db *DB) DeleteSource(ctx context.Context, id string) error {
+// DeleteSource deletes a source by ID
+func (db *DB) DeleteSource(ctx context.Context, id models.SourceID) error {
 	db.log.Debug("deleting source", "source_id", id)
 
 	result, err := db.queries.DeleteSource.ExecContext(ctx, id)
@@ -164,11 +164,11 @@ type SourceRow struct {
 	UpdatedAt         time.Time `db:"updated_at"`
 }
 
-// Helper function to map a SourceRow to a models.Source
+// mapSourceRowToModel maps a SourceRow to a models.Source
 func mapSourceRowToModel(row *SourceRow) *models.Source {
 	return &models.Source{
-		ID:                row.ID,
-		MetaIsAutoCreated: row.MetaIsAutoCreated,
+		ID:                models.SourceID(row.ID),
+		MetaIsAutoCreated: row.MetaIsAutoCreated == 1,
 		MetaTSField:       row.MetaTSField,
 		Description:       row.Description,
 		TTLDays:           row.TTLDays,
@@ -179,7 +179,9 @@ func mapSourceRowToModel(row *SourceRow) *models.Source {
 			Database:  row.Database,
 			TableName: row.TableName,
 		},
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
+		Timestamps: models.Timestamps{
+			CreatedAt: row.CreatedAt,
+			UpdatedAt: row.UpdatedAt,
+		},
 	}
 }

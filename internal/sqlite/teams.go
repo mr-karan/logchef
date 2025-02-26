@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // Team methods
@@ -36,7 +36,7 @@ func (db *DB) CreateTeam(ctx context.Context, team *models.Team) error {
 }
 
 // GetTeam retrieves a team by ID
-func (db *DB) GetTeam(ctx context.Context, teamID string) (*models.Team, error) {
+func (db *DB) GetTeam(ctx context.Context, teamID models.TeamID) (*models.Team, error) {
 	db.log.Debug("getting team", "team_id", teamID)
 
 	var team models.Team
@@ -74,7 +74,7 @@ func (db *DB) UpdateTeam(ctx context.Context, team *models.Team) error {
 }
 
 // DeleteTeam deletes a team by ID
-func (db *DB) DeleteTeam(ctx context.Context, teamID string) error {
+func (db *DB) DeleteTeam(ctx context.Context, teamID models.TeamID) error {
 	db.log.Debug("deleting team", "team_id", teamID)
 
 	result, err := db.queries.DeleteTeam.ExecContext(ctx, teamID)
@@ -109,7 +109,7 @@ func (db *DB) ListTeams(ctx context.Context) ([]*models.Team, error) {
 // Team member methods
 
 // AddTeamMember adds a member to a team
-func (db *DB) AddTeamMember(ctx context.Context, teamID, userID, role string) error {
+func (db *DB) AddTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) error {
 	db.log.Debug("adding team member", "team_id", teamID, "user_id", userID, "role", role)
 
 	// First check if the team exists
@@ -148,7 +148,7 @@ func (db *DB) AddTeamMember(ctx context.Context, teamID, userID, role string) er
 }
 
 // GetTeamMember gets a team member
-func (db *DB) GetTeamMember(ctx context.Context, teamID, userID string) (*models.TeamMember, error) {
+func (db *DB) GetTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) (*models.TeamMember, error) {
 	db.log.Debug("getting team member", "team_id", teamID, "user_id", userID)
 
 	var member models.TeamMember
@@ -160,7 +160,7 @@ func (db *DB) GetTeamMember(ctx context.Context, teamID, userID string) (*models
 }
 
 // UpdateTeamMemberRole updates a team member's role
-func (db *DB) UpdateTeamMemberRole(ctx context.Context, teamID, userID, role string) error {
+func (db *DB) UpdateTeamMemberRole(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) error {
 	db.log.Debug("updating team member role", "team_id", teamID, "user_id", userID, "role", role)
 
 	// First check if the team member exists
@@ -184,7 +184,7 @@ func (db *DB) UpdateTeamMemberRole(ctx context.Context, teamID, userID, role str
 }
 
 // RemoveTeamMember removes a member from a team
-func (db *DB) RemoveTeamMember(ctx context.Context, teamID, userID string) error {
+func (db *DB) RemoveTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) error {
 	db.log.Debug("removing team member", "team_id", teamID, "user_id", userID)
 
 	result, err := db.queries.RemoveTeamMember.ExecContext(ctx, teamID, userID)
@@ -202,7 +202,7 @@ func (db *DB) RemoveTeamMember(ctx context.Context, teamID, userID string) error
 }
 
 // ListTeamMembers lists all members of a team
-func (db *DB) ListTeamMembers(ctx context.Context, teamID string) ([]*models.TeamMember, error) {
+func (db *DB) ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error) {
 	db.log.Debug("listing team members", "team_id", teamID)
 
 	var members []*models.TeamMember
@@ -217,7 +217,7 @@ func (db *DB) ListTeamMembers(ctx context.Context, teamID string) ([]*models.Tea
 }
 
 // ListUserTeams lists all teams a user is a member of
-func (db *DB) ListUserTeams(ctx context.Context, userID string) ([]*models.Team, error) {
+func (db *DB) ListUserTeams(ctx context.Context, userID models.UserID) ([]*models.Team, error) {
 	db.log.Debug("listing user teams", "user_id", userID)
 
 	var teams []*models.Team
@@ -233,18 +233,25 @@ func (db *DB) ListUserTeams(ctx context.Context, userID string) ([]*models.Team,
 
 // Team source methods
 
-// AddTeamSource adds a source to a team
-func (db *DB) AddTeamSource(ctx context.Context, teamID, sourceID string) error {
+// AddTeamSource associates a source with a team
+func (db *DB) AddTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error {
 	db.log.Debug("adding team source", "team_id", teamID, "source_id", sourceID)
 
-	result, err := db.queries.AddTeamSource.ExecContext(ctx,
-		teamID,
-		sourceID,
-		time.Now(),
-	)
+	// Verify source exists
+	source, err := db.GetSource(ctx, sourceID)
+	if err != nil {
+		db.log.Error("failed to verify source exists", "error", err, "source_id", sourceID)
+		return fmt.Errorf("error verifying source: %w", err)
+	}
+	if source == nil {
+		return fmt.Errorf("source not found")
+	}
+
+	// Add source to team
+	result, err := db.queries.AddTeamSource.ExecContext(ctx, teamID, sourceID, time.Now())
 	if err != nil {
 		if isUniqueConstraintError(err, "team_sources", "team_id") {
-			return fmt.Errorf("source %s is already in team %s", sourceID, teamID)
+			return nil // Already exists, not an error
 		}
 		db.log.Error("failed to add team source", "error", err, "team_id", teamID, "source_id", sourceID)
 		return fmt.Errorf("error adding team source: %w", err)
@@ -259,7 +266,7 @@ func (db *DB) AddTeamSource(ctx context.Context, teamID, sourceID string) error 
 }
 
 // RemoveTeamSource removes a source from a team
-func (db *DB) RemoveTeamSource(ctx context.Context, teamID, sourceID string) error {
+func (db *DB) RemoveTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error {
 	db.log.Debug("removing team source", "team_id", teamID, "source_id", sourceID)
 
 	result, err := db.queries.RemoveTeamSource.ExecContext(ctx, teamID, sourceID)
@@ -277,7 +284,7 @@ func (db *DB) RemoveTeamSource(ctx context.Context, teamID, sourceID string) err
 }
 
 // ListTeamSources lists all sources for a team
-func (db *DB) ListTeamSources(ctx context.Context, teamID string) ([]*models.Source, error) {
+func (db *DB) ListTeamSources(ctx context.Context, teamID models.TeamID) ([]*models.Source, error) {
 	db.log.Debug("listing team sources", "team_id", teamID)
 
 	var rows []struct {
@@ -296,13 +303,15 @@ func (db *DB) ListTeamSources(ctx context.Context, teamID string) ([]*models.Sou
 	sources := make([]*models.Source, len(rows))
 	for i, row := range rows {
 		sources[i] = &models.Source{
-			ID:          row.ID,
+			ID:          models.SourceID(row.ID),
 			Description: row.Description,
 			Connection: models.ConnectionInfo{
 				Database:  row.Database,
 				TableName: row.TableName,
 			},
-			CreatedAt: row.CreatedAt,
+			Timestamps: models.Timestamps{
+				CreatedAt: row.CreatedAt,
+			},
 		}
 	}
 
@@ -311,7 +320,7 @@ func (db *DB) ListTeamSources(ctx context.Context, teamID string) ([]*models.Sou
 }
 
 // ListSourceTeams returns all teams that have access to a source
-func (db *DB) ListSourceTeams(ctx context.Context, sourceID string) ([]*models.Team, error) {
+func (db *DB) ListSourceTeams(ctx context.Context, sourceID models.SourceID) ([]*models.Team, error) {
 	db.log.Debug("listing source teams", "source_id", sourceID)
 
 	var teams []*models.Team
@@ -414,7 +423,7 @@ func (db *DB) DeleteTeamQuery(ctx context.Context, queryID string) error {
 }
 
 // ListTeamQueries lists all queries for a team
-func (db *DB) ListTeamQueries(ctx context.Context, teamID string) ([]*models.TeamQuery, error) {
+func (db *DB) ListTeamQueries(ctx context.Context, teamID models.TeamID) ([]*models.TeamQuery, error) {
 	db.log.Debug("listing team queries", "team_id", teamID)
 
 	var queries []*models.TeamQuery

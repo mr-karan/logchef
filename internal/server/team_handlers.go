@@ -2,10 +2,10 @@ package server
 
 import (
 	"errors"
-	"fmt"
 
-	"logchef/internal/identity"
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
+
+	"github.com/mr-karan/logchef/internal/identity"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -14,7 +14,7 @@ import (
 func (s *Server) handleListTeams(c *fiber.Ctx) error {
 	teams, err := s.identityService.ListTeams(c.Context())
 	if err != nil {
-		return fmt.Errorf("error listing teams: %w", err)
+		return SendError(c, fiber.StatusInternalServerError, "error listing teams: "+err.Error())
 	}
 
 	return SendSuccess(c, fiber.StatusOK, teams)
@@ -32,7 +32,7 @@ func (s *Server) handleGetTeam(c *fiber.Ctx) error {
 		if errors.Is(err, identity.ErrTeamNotFound) {
 			return SendError(c, fiber.StatusNotFound, "team not found")
 		}
-		return fmt.Errorf("error getting team: %w", err)
+		return SendError(c, fiber.StatusInternalServerError, "error getting team: "+err.Error())
 	}
 
 	return SendSuccess(c, fiber.StatusOK, team)
@@ -53,8 +53,8 @@ func (s *Server) handleCreateTeam(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "name is required")
 	}
 
-	// Get user ID from context
-	userID := c.Locals("userID").(string)
+	// Get user from context
+	user := c.Locals("user").(*models.User)
 
 	// Create team
 	team := &models.Team{
@@ -63,12 +63,12 @@ func (s *Server) handleCreateTeam(c *fiber.Ctx) error {
 	}
 
 	if err := s.identityService.CreateTeam(c.Context(), team); err != nil {
-		return fmt.Errorf("error creating team: %w", err)
+		return SendError(c, fiber.StatusInternalServerError, "error creating team: "+err.Error())
 	}
 
 	// Add creator as admin
-	if err := s.identityService.AddTeamMember(c.Context(), team.ID, userID, "admin"); err != nil {
-		return fmt.Errorf("error adding team member: %w", err)
+	if err := s.identityService.AddTeamMember(c.Context(), team.ID, user.ID, "admin"); err != nil {
+		return SendError(c, fiber.StatusInternalServerError, "error adding team member: "+err.Error())
 	}
 
 	return SendSuccess(c, fiber.StatusCreated, team)
@@ -89,8 +89,9 @@ func (s *Server) handleUpdateTeam(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "invalid request body")
 	}
 
-	// Get user ID from context
-	userID := c.Locals("userID").(string)
+	// Get user from context
+	user := c.Locals("user").(*models.User)
+	userID := user.ID
 
 	// Get existing team
 	team, err := s.identityService.GetTeam(c.Context(), id)
@@ -98,18 +99,18 @@ func (s *Server) handleUpdateTeam(c *fiber.Ctx) error {
 		if errors.Is(err, identity.ErrTeamNotFound) {
 			return SendError(c, fiber.StatusNotFound, "team not found")
 		}
-		return fmt.Errorf("error getting team: %w", err)
+		return SendError(c, fiber.StatusInternalServerError, "error getting team: "+err.Error())
 	}
 
 	// Check if user is team admin
-	members, err := s.identityService.ListTeamMembers(c.Context(), id)
+	members, err := s.identityService.ListTeamMembers(c.Context(), models.TeamID(id))
 	if err != nil {
-		return fmt.Errorf("error listing team members: %w", err)
+		return SendError(c, fiber.StatusInternalServerError, "error listing team members: "+err.Error())
 	}
 
 	isAdmin := false
 	for _, member := range members {
-		if member.UserID == userID && member.Role == "admin" {
+		if member.UserID == userID && member.Role == models.TeamRoleAdmin {
 			isAdmin = true
 			break
 		}
@@ -128,7 +129,7 @@ func (s *Server) handleUpdateTeam(c *fiber.Ctx) error {
 	}
 
 	if err := s.identityService.UpdateTeam(c.Context(), team); err != nil {
-		return fmt.Errorf("error updating team: %w", err)
+		return SendError(c, fiber.StatusInternalServerError, "error updating team: "+err.Error())
 	}
 
 	return SendSuccess(c, fiber.StatusOK, team)
@@ -141,21 +142,21 @@ func (s *Server) handleDeleteTeam(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "team ID is required")
 	}
 
-	// Get user ID from context
-	userID := c.Locals("userID").(string)
+	// Get user from context
+	user := c.Locals("user").(*models.User)
 
 	// Check if user is team admin
-	members, err := s.identityService.ListTeamMembers(c.Context(), id)
+	members, err := s.identityService.ListTeamMembers(c.Context(), models.TeamID(id))
 	if err != nil {
 		if errors.Is(err, identity.ErrTeamNotFound) {
 			return SendError(c, fiber.StatusNotFound, "team not found")
 		}
-		return fmt.Errorf("error listing team members: %w", err)
+		return SendError(c, fiber.StatusInternalServerError, "error listing team members: "+err.Error())
 	}
 
 	isAdmin := false
 	for _, member := range members {
-		if member.UserID == userID && member.Role == "admin" {
+		if member.UserID == user.ID && member.Role == models.TeamRoleAdmin {
 			isAdmin = true
 			break
 		}
@@ -169,7 +170,7 @@ func (s *Server) handleDeleteTeam(c *fiber.Ctx) error {
 		if errors.Is(err, identity.ErrTeamNotFound) {
 			return SendError(c, fiber.StatusNotFound, "team not found")
 		}
-		return fmt.Errorf("error deleting team: %w", err)
+		return SendError(c, fiber.StatusInternalServerError, "error deleting team: "+err.Error())
 	}
 
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team deleted successfully"})
@@ -182,21 +183,21 @@ func (s *Server) handleListTeamMembers(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "team ID is required")
 	}
 
-	// Get user ID from context
-	userID := c.Locals("userID").(string)
+	// Get user from context
+	user := c.Locals("user").(*models.User)
 
 	// Check if user is team member
-	members, err := s.identityService.ListTeamMembers(c.Context(), id)
+	members, err := s.identityService.ListTeamMembers(c.Context(), models.TeamID(id))
 	if err != nil {
 		if errors.Is(err, identity.ErrTeamNotFound) {
 			return SendError(c, fiber.StatusNotFound, "team not found")
 		}
-		return fmt.Errorf("error listing team members: %w", err)
+		return SendError(c, fiber.StatusInternalServerError, "error listing team members: "+err.Error())
 	}
 
 	isMember := false
 	for _, member := range members {
-		if member.UserID == userID {
+		if member.UserID == user.ID {
 			isMember = true
 			break
 		}
@@ -217,8 +218,8 @@ func (s *Server) handleAddTeamMember(c *fiber.Ctx) error {
 	}
 
 	var req struct {
-		UserID string `json:"user_id"`
-		Role   string `json:"role"`
+		UserID models.UserID   `json:"user_id"`
+		Role   models.TeamRole `json:"role"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return SendError(c, fiber.StatusBadRequest, "invalid request body")
@@ -229,24 +230,25 @@ func (s *Server) handleAddTeamMember(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "user ID is required")
 	}
 	if req.Role == "" {
-		req.Role = "member" // Default role
+		req.Role = models.TeamRoleMember // Default role
 	}
 
-	// Get user ID from context
-	userID := c.Locals("userID").(string)
+	// Get user from context
+	user := c.Locals("user").(*models.User)
+	userID := user.ID
 
 	// Check if user is team admin
-	members, err := s.identityService.ListTeamMembers(c.Context(), id)
+	members, err := s.identityService.ListTeamMembers(c.Context(), models.TeamID(id))
 	if err != nil {
 		if errors.Is(err, identity.ErrTeamNotFound) {
 			return SendError(c, fiber.StatusNotFound, "team not found")
 		}
-		return fmt.Errorf("error listing team members: %w", err)
+		return SendError(c, fiber.StatusInternalServerError, "error listing team members: "+err.Error())
 	}
 
 	isAdmin := false
 	for _, member := range members {
-		if member.UserID == userID && member.Role == "admin" {
+		if member.UserID == userID && member.Role == models.TeamRoleAdmin {
 			isAdmin = true
 			break
 		}
@@ -256,8 +258,8 @@ func (s *Server) handleAddTeamMember(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusForbidden, "you are not an admin of this team")
 	}
 
-	if err := s.identityService.AddTeamMember(c.Context(), id, req.UserID, req.Role); err != nil {
-		return fmt.Errorf("error adding team member: %w", err)
+	if err := s.identityService.AddTeamMember(c.Context(), models.TeamID(id), req.UserID, req.Role); err != nil {
+		return SendError(c, fiber.StatusInternalServerError, "error adding team member: "+err.Error())
 	}
 
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Member added successfully"})
@@ -275,21 +277,22 @@ func (s *Server) handleRemoveTeamMember(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "member ID is required")
 	}
 
-	// Get user ID from context
-	userID := c.Locals("userID").(string)
+	// Get user from context
+	user := c.Locals("user").(*models.User)
+	userID := user.ID
 
 	// Check if user is team admin
-	members, err := s.identityService.ListTeamMembers(c.Context(), id)
+	members, err := s.identityService.ListTeamMembers(c.Context(), models.TeamID(id))
 	if err != nil {
 		if errors.Is(err, identity.ErrTeamNotFound) {
 			return SendError(c, fiber.StatusNotFound, "team not found")
 		}
-		return fmt.Errorf("error listing team members: %w", err)
+		return SendError(c, fiber.StatusInternalServerError, "error listing team members: "+err.Error())
 	}
 
 	isAdmin := false
 	for _, member := range members {
-		if member.UserID == userID && member.Role == "admin" {
+		if member.UserID == userID && member.Role == models.TeamRoleAdmin {
 			isAdmin = true
 			break
 		}
@@ -299,8 +302,8 @@ func (s *Server) handleRemoveTeamMember(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusForbidden, "you are not an admin of this team")
 	}
 
-	if err := s.identityService.RemoveTeamMember(c.Context(), id, memberID); err != nil {
-		return fmt.Errorf("error removing team member: %w", err)
+	if err := s.identityService.RemoveTeamMember(c.Context(), models.TeamID(id), models.UserID(memberID)); err != nil {
+		return SendError(c, fiber.StatusInternalServerError, "error removing team member: "+err.Error())
 	}
 
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Member removed successfully"})
@@ -313,21 +316,21 @@ func (s *Server) handleListTeamSources(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "team ID is required")
 	}
 
-	// Get user ID from context
-	userID := c.Locals("userID").(string)
+	// Get user from context
+	user := c.Locals("user").(*models.User)
 
 	// Check if user is team member
-	members, err := s.identityService.ListTeamMembers(c.Context(), id)
+	members, err := s.identityService.ListTeamMembers(c.Context(), models.TeamID(id))
 	if err != nil {
 		if errors.Is(err, identity.ErrTeamNotFound) {
 			return SendError(c, fiber.StatusNotFound, "team not found")
 		}
-		return fmt.Errorf("error listing team members: %w", err)
+		return SendError(c, fiber.StatusInternalServerError, "error listing team members: "+err.Error())
 	}
 
 	isMember := false
 	for _, member := range members {
-		if member.UserID == userID {
+		if member.UserID == user.ID {
 			isMember = true
 			break
 		}
@@ -337,12 +340,12 @@ func (s *Server) handleListTeamSources(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusForbidden, "you are not a member of this team")
 	}
 
-	sources, err := s.identityService.ListTeamSources(c.Context(), id)
+	sources, err := s.identityService.ListTeamSources(c.Context(), models.TeamID(id))
 	if err != nil {
 		if errors.Is(err, identity.ErrTeamNotFound) {
 			return SendError(c, fiber.StatusNotFound, "team not found")
 		}
-		return fmt.Errorf("error listing team sources: %w", err)
+		return SendError(c, fiber.StatusInternalServerError, "error listing team sources: "+err.Error())
 	}
 
 	return SendSuccess(c, fiber.StatusOK, sources)
@@ -356,7 +359,7 @@ func (s *Server) handleAddTeamSource(c *fiber.Ctx) error {
 	}
 
 	var req struct {
-		SourceID string `json:"source_id"`
+		SourceID models.SourceID `json:"source_id"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return SendError(c, fiber.StatusBadRequest, "invalid request body")
@@ -367,21 +370,21 @@ func (s *Server) handleAddTeamSource(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "source ID is required")
 	}
 
-	// Get user ID from context
-	userID := c.Locals("userID").(string)
+	// Get user from context
+	user := c.Locals("user").(*models.User)
 
 	// Check if user is team admin
-	members, err := s.identityService.ListTeamMembers(c.Context(), id)
+	members, err := s.identityService.ListTeamMembers(c.Context(), models.TeamID(id))
 	if err != nil {
 		if errors.Is(err, identity.ErrTeamNotFound) {
 			return SendError(c, fiber.StatusNotFound, "team not found")
 		}
-		return fmt.Errorf("error listing team members: %w", err)
+		return SendError(c, fiber.StatusInternalServerError, "error listing team members: "+err.Error())
 	}
 
 	isAdmin := false
 	for _, member := range members {
-		if member.UserID == userID && member.Role == "admin" {
+		if member.UserID == user.ID && member.Role == models.TeamRoleAdmin {
 			isAdmin = true
 			break
 		}
@@ -391,8 +394,8 @@ func (s *Server) handleAddTeamSource(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusForbidden, "you are not an admin of this team")
 	}
 
-	if err := s.identityService.AddTeamSource(c.Context(), id, req.SourceID); err != nil {
-		return fmt.Errorf("error adding team source: %w", err)
+	if err := s.identityService.AddTeamSource(c.Context(), models.TeamID(id), req.SourceID); err != nil {
+		return SendError(c, fiber.StatusInternalServerError, "error adding team source: "+err.Error())
 	}
 
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Source added successfully"})
@@ -410,21 +413,21 @@ func (s *Server) handleRemoveTeamSource(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "source ID is required")
 	}
 
-	// Get user ID from context
-	userID := c.Locals("userID").(string)
+	// Get user from context
+	user := c.Locals("user").(*models.User)
 
 	// Check if user is team admin
-	members, err := s.identityService.ListTeamMembers(c.Context(), id)
+	members, err := s.identityService.ListTeamMembers(c.Context(), models.TeamID(id))
 	if err != nil {
 		if errors.Is(err, identity.ErrTeamNotFound) {
 			return SendError(c, fiber.StatusNotFound, "team not found")
 		}
-		return fmt.Errorf("error listing team members: %w", err)
+		return SendError(c, fiber.StatusInternalServerError, "error listing team members: "+err.Error())
 	}
 
 	isAdmin := false
 	for _, member := range members {
-		if member.UserID == userID && member.Role == "admin" {
+		if member.UserID == user.ID && member.Role == models.TeamRoleAdmin {
 			isAdmin = true
 			break
 		}
@@ -434,8 +437,8 @@ func (s *Server) handleRemoveTeamSource(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusForbidden, "you are not an admin of this team")
 	}
 
-	if err := s.identityService.RemoveTeamSource(c.Context(), id, sourceID); err != nil {
-		return fmt.Errorf("error removing team source: %w", err)
+	if err := s.identityService.RemoveTeamSource(c.Context(), models.TeamID(id), models.SourceID(sourceID)); err != nil {
+		return SendError(c, fiber.StatusInternalServerError, "error removing team source: "+err.Error())
 	}
 
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Source removed successfully"})

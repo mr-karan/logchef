@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -122,11 +122,10 @@ func (c *Client) Query(ctx context.Context, query string) (*models.QueryResult, 
 	// Process rows
 	var result []map[string]interface{}
 	for rows.Next() {
-		// Create a slice of interface{} to hold the values
-		values := make([]interface{}, len(columns))
+		// Create properly typed scan targets based on column types
+		values := make([]interface{}, len(columnTypes))
 		for i := range values {
-			var v interface{}
-			values[i] = &v
+			values[i] = reflect.New(columnTypes[i].ScanType()).Interface()
 		}
 
 		// Scan the row into the values
@@ -137,7 +136,7 @@ func (c *Client) Query(ctx context.Context, query string) (*models.QueryResult, 
 		// Create a map for this row
 		row := make(map[string]interface{})
 		for i, col := range columns {
-			// Get the value from the interface{} pointer
+			// Get the value from the typed pointer
 			val := reflect.ValueOf(values[i]).Elem().Interface()
 			row[col.Name] = val
 		}
@@ -152,7 +151,7 @@ func (c *Client) Query(ctx context.Context, query string) (*models.QueryResult, 
 
 	// Create query result
 	queryResult := &models.QueryResult{
-		Data:    result,
+		Logs:    result,
 		Columns: columns,
 		Stats: models.QueryStats{
 			RowsRead:        len(result),
@@ -173,7 +172,7 @@ func (c *Client) execDDL(ctx context.Context, query string) (*models.QueryResult
 
 	// Return empty result for DDL
 	return &models.QueryResult{
-		Data:    []map[string]interface{}{},
+		Logs:    []map[string]interface{}{},
 		Columns: []models.ColumnInfo{},
 		Stats: models.QueryStats{
 			RowsRead:        0,
@@ -299,17 +298,17 @@ func (c *Client) GetLogContext(ctx context.Context, params LogContextParams, tab
 	}
 
 	// Reverse the before logs to get chronological order
-	beforeLogs := beforeResult.Data
+	beforeLogs := beforeResult.Logs
 	for i, j := 0, len(beforeLogs)-1; i < j; i, j = i+1, j-1 {
 		beforeLogs[i], beforeLogs[j] = beforeLogs[j], beforeLogs[i]
 	}
 
 	return &LogContextResult{
 		BeforeLogs: beforeLogs,
-		TargetLogs: targetResult.Data,
-		AfterLogs:  afterResult.Data,
+		TargetLogs: targetResult.Logs,
+		AfterLogs:  afterResult.Logs,
 		Stats: models.QueryStats{
-			RowsRead:        len(beforeLogs) + len(targetResult.Data) + len(afterResult.Data),
+			RowsRead:        len(beforeLogs) + len(targetResult.Logs) + len(afterResult.Logs),
 			ExecutionTimeMs: float64(time.Since(start).Milliseconds()),
 		},
 	}, nil

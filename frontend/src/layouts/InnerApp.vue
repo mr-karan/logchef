@@ -4,17 +4,6 @@ import {
     AvatarFallback,
 } from '@/components/ui/avatar'
 
-import {
-    Breadcrumb,
-    BreadcrumbItem,
-    BreadcrumbList,
-} from '@/components/ui/breadcrumb'
-
-import {
-    Collapsible,
-    CollapsibleContent,
-    CollapsibleTrigger,
-} from '@/components/ui/collapsible'
 
 import {
     DropdownMenu,
@@ -31,38 +20,54 @@ import {
     SidebarFooter,
     SidebarGroup,
     SidebarGroupLabel,
+    SidebarGroupAction,
+    SidebarGroupContent,
     SidebarHeader,
     SidebarInset,
     SidebarMenu,
     SidebarMenuItem,
     SidebarMenuButton,
-    SidebarMenuSub,
-    SidebarMenuSubButton,
-    SidebarMenuSubItem,
     SidebarProvider,
     SidebarRail,
     SidebarTrigger,
 } from '@/components/ui/sidebar'
 
 import {
-    Settings2,
-    Database,
-    ChevronRight,
-    ChevronsUpDown,
+    Settings,
     LogOut,
     Users,
-    ScrollText,
+    Search,
+    History,
+    Database,
+    UserCog,
+    UserPlus,
+    PanelLeftClose,
+    PanelLeftOpen,
+    LayoutDashboard,
+    ClipboardList,
+    UserCircle2,
+    UsersRound,
+    ChevronsUpDown,
 } from 'lucide-vue-next'
 
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { FunctionalComponent } from 'vue'
 import type { LucideProps } from 'lucide-vue-next'
 import type { RouteLocationRaw } from 'vue-router'
+import {
+    Breadcrumb,
+    BreadcrumbItem,
+    BreadcrumbLink,
+    BreadcrumbList,
+    BreadcrumbPage,
+    BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb'
 
 const route = useRoute()
 const authStore = useAuthStore()
+const sidebarOpen = ref(true)
 
 // Helper function to get user initials
 function getUserInitials(name: string | undefined): string {
@@ -74,55 +79,38 @@ function getUserInitials(name: string | undefined): string {
         .slice(0, 2)
 }
 
-const navMain = [
+const navItems = [
     {
-        title: 'Logs',
-        icon: ScrollText,
-        items: [
-            {
-                title: 'Explorer',
-                url: '/logs/explore',
-            },
-            {
-                title: 'History',
-                url: '/logs/history',
-            },
-        ],
+        title: 'Explorer',
+        icon: Search,
+        url: '/logs/explore',
+    },
+    {
+        title: 'History',
+        icon: ClipboardList,
+        url: '/logs/history',
     },
     {
         title: 'Sources',
         icon: Database,
-        items: [
-            {
-                title: 'All Sources',
-                url: '/sources/list',
-            },
-        ],
+        url: '/sources/list',
     },
     {
-        title: 'Access',
-        icon: Users,
+        title: 'Users',
+        icon: UsersRound,
+        url: '/access/users',
         adminOnly: true,
-        items: [
-            {
-                title: 'Users',
-                url: '/access/users',
-            },
-            {
-                title: 'Teams',
-                url: '/access/teams',
-            },
-        ],
     },
     {
-        title: 'Profile',
-        icon: Settings2,
-        items: [
-            {
-                title: 'Settings',
-                url: '/settings/profile',
-            },
-        ],
+        title: 'Teams',
+        icon: Users,
+        url: '/access/teams',
+        adminOnly: true,
+    },
+    {
+        title: 'Settings',
+        icon: Settings,
+        url: '/settings/profile',
     },
 ]
 
@@ -160,7 +148,7 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
 
 <template>
     <div class="h-screen w-screen flex overflow-hidden">
-        <SidebarProvider>
+        <SidebarProvider v-model:open="sidebarOpen">
             <Sidebar collapsible="icon"
                 class="flex-none w-64 z-50 bg-[hsl(var(--sidebar-background))] text-[hsl(var(--sidebar-foreground))]">
                 <SidebarHeader>
@@ -182,36 +170,21 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
 
                 <SidebarContent>
                     <SidebarGroup>
-                        <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-                        <SidebarMenu>
-                            <template v-for="item in navMain" :key="item.title">
-                                <Collapsible
-                                    v-if="!item.adminOnly || (item.adminOnly && authStore.user?.role === 'admin')"
-                                    as-child class="group/collapsible">
-                                    <SidebarMenuItem>
-                                        <CollapsibleTrigger as-child>
+                        <SidebarGroupContent>
+                            <SidebarMenu>
+                                <template v-for="item in navItems" :key="item.title">
+                                    <SidebarMenuItem
+                                        v-if="!item.adminOnly || (item.adminOnly && authStore.user?.role === 'admin')">
+                                        <router-link :to="item.url">
                                             <SidebarMenuButton :tooltip="item.title">
                                                 <component :is="item.icon" />
                                                 <span>{{ item.title }}</span>
-                                                <ChevronRight
-                                                    class="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
                                             </SidebarMenuButton>
-                                        </CollapsibleTrigger>
-                                        <CollapsibleContent>
-                                            <SidebarMenuSub>
-                                                <SidebarMenuSubItem v-for="subItem in item.items" :key="subItem.title">
-                                                    <SidebarMenuSubButton as-child>
-                                                        <router-link :to="subItem.url">
-                                                            <span>{{ subItem.title }}</span>
-                                                        </router-link>
-                                                    </SidebarMenuSubButton>
-                                                </SidebarMenuSubItem>
-                                            </SidebarMenuSub>
-                                        </CollapsibleContent>
+                                        </router-link>
                                     </SidebarMenuItem>
-                                </Collapsible>
-                            </template>
-                        </SidebarMenu>
+                                </template>
+                            </SidebarMenu>
+                        </SidebarGroupContent>
                     </SidebarGroup>
                 </SidebarContent>
 
@@ -264,27 +237,8 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
             </Sidebar>
 
             <SidebarInset class="flex flex-col flex-1 min-w-0">
-                <header class="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-                    <SidebarTrigger class="-ml-1" />
-                    <Breadcrumb>
-                        <BreadcrumbList>
-                            <template v-for="(item, index) in breadcrumbs" :key="index">
-                                <BreadcrumbItem>
-                                    <router-link v-if="index < breadcrumbs.length - 1" :to="item.to || ''"
-                                        class="text-muted-foreground hover:text-foreground">
-                                        {{ item.label }}
-                                    </router-link>
-                                    <span v-else>
-                                        {{ item.label }}
-                                    </span>
-                                </BreadcrumbItem>
-                                <span v-if="index < breadcrumbs.length - 1" class="mx-2 text-muted-foreground">/</span>
-                            </template>
-                        </BreadcrumbList>
-                    </Breadcrumb>
-                </header>
                 <main class="flex-1 overflow-y-auto overflow-x-auto min-w-0">
-                    <div class="h-full px-6 py-6 min-w-0">
+                    <div class="h-full px-3 py-3 min-w-0">
                         <router-view />
                     </div>
                 </main>

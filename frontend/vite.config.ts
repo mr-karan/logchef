@@ -36,6 +36,18 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: resolve(__dirname, "../backend/cmd/server/ui"),
       emptyOutDir: true,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            // Create a separate chunk for Monaco Editor
+            // This helps with lazy loading and reduces the initial bundle size
+            "monaco-editor": ["monaco-editor"],
+          },
+        },
+      },
+    },
+    optimizeDeps: {
+      include: ["monaco-editor"],
     },
   };
 });

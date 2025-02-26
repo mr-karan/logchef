@@ -6,9 +6,10 @@ import (
 	"log/slog"
 	"time"
 
-	"logchef/internal/config"
-	"logchef/pkg/logger"
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/logger"
+	"github.com/mr-karan/logchef/pkg/models"
+
+	"github.com/mr-karan/logchef/internal/config"
 )
 
 // Define standard errors at package level
@@ -168,16 +169,16 @@ func (s *Service) ListTeams(ctx context.Context) ([]*models.Team, error) {
 }
 
 // AddTeamMember adds a user to a team with the specified role
-func (s *Service) AddTeamMember(ctx context.Context, teamID, userID, role string) error {
+func (s *Service) AddTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) error {
 	if teamID == "" || userID == "" {
 		return fmt.Errorf("team ID and user ID cannot be empty")
 	}
 
-	return s.store.AddTeamMember(ctx, models.TeamID(teamID), models.UserID(userID), role)
+	return s.store.AddTeamMember(ctx, teamID, userID, role)
 }
 
 // RemoveTeamMember removes a user from a team
-func (s *Service) RemoveTeamMember(ctx context.Context, teamID, userID string) error {
+func (s *Service) RemoveTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) error {
 	if teamID == "" || userID == "" {
 		return fmt.Errorf("team ID and user ID cannot be empty")
 	}
@@ -186,7 +187,7 @@ func (s *Service) RemoveTeamMember(ctx context.Context, teamID, userID string) e
 }
 
 // ListTeamMembers returns all members of a team
-func (s *Service) ListTeamMembers(ctx context.Context, teamID string) ([]*models.TeamMember, error) {
+func (s *Service) ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error) {
 	if teamID == "" {
 		return nil, fmt.Errorf("team ID cannot be empty")
 	}
@@ -200,7 +201,7 @@ func (s *Service) ListTeamMembers(ctx context.Context, teamID string) ([]*models
 }
 
 // ListUserTeams returns all teams a user is a member of
-func (s *Service) ListUserTeams(ctx context.Context, userID string) ([]*models.Team, error) {
+func (s *Service) ListUserTeams(ctx context.Context, userID models.UserID) ([]*models.Team, error) {
 	if userID == "" {
 		return nil, fmt.Errorf("user ID cannot be empty")
 	}
@@ -214,7 +215,7 @@ func (s *Service) ListUserTeams(ctx context.Context, userID string) ([]*models.T
 }
 
 // AddTeamSource adds a source to a team
-func (s *Service) AddTeamSource(ctx context.Context, teamID, sourceID string) error {
+func (s *Service) AddTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error {
 	if teamID == "" || sourceID == "" {
 		return fmt.Errorf("team ID and source ID cannot be empty")
 	}
@@ -223,7 +224,7 @@ func (s *Service) AddTeamSource(ctx context.Context, teamID, sourceID string) er
 }
 
 // RemoveTeamSource removes a source from a team
-func (s *Service) RemoveTeamSource(ctx context.Context, teamID, sourceID string) error {
+func (s *Service) RemoveTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error {
 	if teamID == "" || sourceID == "" {
 		return fmt.Errorf("team ID and source ID cannot be empty")
 	}
@@ -232,7 +233,7 @@ func (s *Service) RemoveTeamSource(ctx context.Context, teamID, sourceID string)
 }
 
 // ListTeamSources returns all sources for a team
-func (s *Service) ListTeamSources(ctx context.Context, teamID string) ([]*models.Source, error) {
+func (s *Service) ListTeamSources(ctx context.Context, teamID models.TeamID) ([]*models.Source, error) {
 	if teamID == "" {
 		return nil, fmt.Errorf("team ID cannot be empty")
 	}
@@ -246,7 +247,7 @@ func (s *Service) ListTeamSources(ctx context.Context, teamID string) ([]*models
 }
 
 // ListSourceTeams returns all teams that are members of a source
-func (s *Service) ListSourceTeams(ctx context.Context, sourceID string) ([]*models.Team, error) {
+func (s *Service) ListSourceTeams(ctx context.Context, sourceID models.SourceID) ([]*models.Team, error) {
 	if sourceID == "" {
 		return nil, fmt.Errorf("source ID cannot be empty")
 	}
@@ -301,7 +302,7 @@ func (s *Service) DeleteTeamQuery(ctx context.Context, queryID string) error {
 }
 
 // ListTeamQueries returns all team queries for a team
-func (s *Service) ListTeamQueries(ctx context.Context, teamID string) ([]*models.TeamQuery, error) {
+func (s *Service) ListTeamQueries(ctx context.Context, teamID models.TeamID) ([]*models.TeamQuery, error) {
 	if teamID == "" {
 		return nil, fmt.Errorf("team ID cannot be empty")
 	}
@@ -313,5 +314,3 @@ func (s *Service) ListTeamQueries(ctx context.Context, teamID string) ([]*models
 
 	return queries, nil
 }
-
-// More method implementations will follow...

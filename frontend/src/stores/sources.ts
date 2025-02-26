@@ -22,20 +22,20 @@ export const useSourcesStore = defineStore("sources", () => {
       });
 
       if (success && data) {
-        // Initialize with empty array if sources is null
-        sources.value = data.sources || [];
+        // Data is now directly an array of sources
+        sources.value = data || [];
       }
     });
   }
 
   async function createSource(payload: CreateSourcePayload) {
-    const { success } = await handleApiCall({
+    const { success, data } = await handleApiCall({
       apiCall: () => sourcesApi.createSource(payload),
       successMessage: "Source created successfully",
-      onSuccess: (data) => {
+      onSuccess: (sourceData) => {
         // Add to sources list if we have it loaded
-        if (sources.value) {
-          sources.value.push(data.source);
+        if (sources.value && sourceData) {
+          sources.value.push(sourceData);
         }
       },
     });

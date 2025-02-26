@@ -44,6 +44,12 @@
     --chart-4: 43 74% 66%;
 
     --chart-5: 27 87% 67%;
+
+    /* Tab specific variables */
+    --tab-background: 0 0% 96.1%;
+    --tab-active-background: 0 0% 9%;
+    --tab-active-background-alpha: 0 0% 9% / 0.1;
+    --tab-active-border: 0 0% 9%;
   }
 
   .dark {
@@ -85,6 +91,12 @@
     --chart-4: 280 65% 60%;
 
     --chart-5: 340 75% 55%;
+
+    /* Tab specific variables for dark mode */
+    --tab-background: 0 0% 14.9%;
+    --tab-active-background: 0 0% 98%;
+    --tab-active-background-alpha: 0 0% 98% / 0.1;
+    --tab-active-border: 0 0% 98%;
   }
 }
 
@@ -94,6 +106,26 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Custom component styles */
+@layer components {
+  /* Tab styling */
+  .tabs-trigger {
+    @apply transition-all relative;
+  }
+
+  .tabs-trigger[data-state="active"] {
+    @apply text-primary border-b-2 border-primary bg-primary/10 font-medium;
+  }
+
+  .tabs-trigger[data-state="inactive"] {
+    @apply text-muted-foreground hover:text-foreground hover:bg-muted/50;
+  }
+
+  .tabs-list {
+    @apply bg-muted/30 rounded-t-md border-b;
   }
 }
 

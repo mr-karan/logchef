@@ -14,8 +14,6 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Plus, Trash2, Settings } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
-import { useToast } from '@/components/ui/toast/use-toast'
-import { TOAST_DURATION } from '@/lib/constants'
 import {
     Table,
     TableBody,
@@ -25,15 +23,13 @@ import {
     TableRow,
 } from '@/components/ui/table'
 import { format } from 'date-fns'
-import { type Team } from '@/api/users'
-import { isErrorResponse, getErrorMessage } from '@/api/types'
+import { type Team } from '@/api/teams'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import AddTeam from './AddTeam.vue'
 import { useTeamsStore } from '@/stores/teams'
 import { storeToRefs } from 'pinia'
 
 const router = useRouter()
-const { toast } = useToast()
 const teamsStore = useTeamsStore()
 const { teams, isLoading } = storeToRefs(teamsStore)
 const showDeleteDialog = ref(false)

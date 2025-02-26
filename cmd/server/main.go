@@ -4,8 +4,9 @@ import (
 	"flag"
 	"os"
 
-	"logchef/internal/app"
-	"logchef/pkg/logger"
+	"github.com/mr-karan/logchef/pkg/logger"
+
+	"github.com/mr-karan/logchef/internal/app"
 )
 
 var (

@@ -7,9 +7,10 @@ import (
 	"io/fs"
 	"log/slog"
 
-	"logchef/internal/auth"
-	"logchef/internal/config"
-	"logchef/pkg/logger"
+	"github.com/mr-karan/logchef/pkg/logger"
+
+	"github.com/mr-karan/logchef/internal/auth"
+	"github.com/mr-karan/logchef/internal/config"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/sqlite3"

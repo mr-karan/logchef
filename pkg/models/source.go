@@ -16,7 +16,7 @@ type ConnectionInfo struct {
 
 // Source represents a ClickHouse data source in our system
 type Source struct {
-	ID                string         `db:"id" json:"id"`
+	ID                SourceID       `db:"id" json:"id"`
 	MetaIsAutoCreated bool           `db:"_meta_is_auto_created" json:"_meta_is_auto_created"`
 	MetaTSField       string         `db:"_meta_ts_field" json:"_meta_ts_field"`
 	Connection        ConnectionInfo `db:"connection" json:"connection"`
@@ -28,6 +28,49 @@ type Source struct {
 	Columns     []ColumnInfo `db:"-" json:"columns,omitempty"`
 }
 
+// ConnectionInfoResponse represents the connection details for API responses, omitting sensitive fields
+type ConnectionInfoResponse struct {
+	Host      string `json:"host"`
+	Database  string `json:"database"`
+	TableName string `json:"table_name"`
+}
+
+// SourceResponse represents a Source for API responses, with sensitive information removed
+type SourceResponse struct {
+	ID                SourceID               `json:"id"`
+	MetaIsAutoCreated bool                   `json:"_meta_is_auto_created"`
+	MetaTSField       string                 `json:"_meta_ts_field"`
+	Connection        ConnectionInfoResponse `json:"connection"`
+	Description       string                 `json:"description,omitempty"`
+	TTLDays           int                    `json:"ttl_days"`
+	CreatedAt         time.Time              `json:"created_at"`
+	UpdatedAt         time.Time              `json:"updated_at"`
+	IsConnected       bool                   `json:"is_connected"`
+	Schema            string                 `json:"schema,omitempty"`
+	Columns           []ColumnInfo           `json:"columns,omitempty"`
+}
+
+// ToResponse converts a Source to a SourceResponse, removing sensitive information
+func (s *Source) ToResponse() *SourceResponse {
+	return &SourceResponse{
+		ID:                s.ID,
+		MetaIsAutoCreated: s.MetaIsAutoCreated,
+		MetaTSField:       s.MetaTSField,
+		Connection: ConnectionInfoResponse{
+			Host:      s.Connection.Host,
+			Database:  s.Connection.Database,
+			TableName: s.Connection.TableName,
+		},
+		Description: s.Description,
+		TTLDays:     s.TTLDays,
+		CreatedAt:   s.CreatedAt,
+		UpdatedAt:   s.UpdatedAt,
+		IsConnected: s.IsConnected,
+		Schema:      s.Schema,
+		Columns:     s.Columns,
+	}
+}
+
 // GetFullTableName returns the fully qualified table name (database.table)
 func (s *Source) GetFullTableName() string {
 	return fmt.Sprintf("%s.%s", s.Connection.Database, s.Connection.TableName)
@@ -35,7 +78,7 @@ func (s *Source) GetFullTableName() string {
 
 // SourceHealth represents the health status of a source
 type SourceHealth struct {
-	SourceID    string       `json:"source_id"`
+	SourceID    SourceID     `json:"source_id"`
 	Status      HealthStatus `json:"status"`
 	Error       string       `json:"error,omitempty"`
 	LastChecked time.Time    `json:"last_checked"`

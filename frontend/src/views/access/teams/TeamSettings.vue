@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
-import { teamsApi, type Team, type TeamMember } from '@/api/users'
+import { teamsApi, type Team, type TeamMember } from '@/api/teams'
 import { type Source } from '@/api/sources'
 import { isErrorResponse, getErrorMessage } from '@/api/types'
 import { format } from 'date-fns'
@@ -112,7 +112,7 @@ const loadTeam = async () => {
             return
         }
 
-        team.value = response.data.team
+        team.value = response.data
         name.value = team.value.name
         description.value = team.value.description || ''
 
@@ -145,7 +145,7 @@ const loadTeamMembers = async () => {
             return
         }
 
-        members.value = response.data.members
+        members.value = response.data
     } catch (error) {
         console.error('Error loading team members:', error)
         toast({
@@ -171,7 +171,7 @@ const loadTeamSources = async () => {
             return
         }
 
-        teamSources.value = response.data.sources
+        teamSources.value = response.data
     } catch (error) {
         console.error('Error loading team sources:', error)
         toast({

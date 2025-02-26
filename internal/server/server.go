@@ -6,12 +6,13 @@ import (
 	"log/slog"
 	"net/http"
 
-	"logchef/internal/auth"
-	"logchef/internal/config"
-	"logchef/internal/identity"
-	"logchef/internal/logs"
-	"logchef/internal/source"
-	pkglogger "logchef/pkg/logger"
+	pkglogger "github.com/mr-karan/logchef/pkg/logger"
+
+	"github.com/mr-karan/logchef/internal/auth"
+	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/identity"
+	"github.com/mr-karan/logchef/internal/logs"
+	"github.com/mr-karan/logchef/internal/source"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
@@ -46,11 +47,20 @@ func New(cfg *config.Config, sourceService *source.Service, logsService *logs.Se
 		AppName:               "LogChef API v1",
 		DisableStartupMessage: true,
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
+			// Default 500 status code
 			code := fiber.StatusInternalServerError
+
+			// Check if it's a Fiber error
 			if e, ok := err.(*fiber.Error); ok {
 				code = e.Code
 			}
-			return SendError(c, code, err)
+
+			// Log the error
+			logger := pkglogger.Default().With("component", "error_handler")
+			logger.Error("request error", "path", c.Path(), "method", c.Method(), "error", err.Error())
+
+			// Return JSON error response
+			return SendError(c, code, err.Error())
 		},
 	})
 

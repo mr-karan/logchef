@@ -6,9 +6,10 @@ import (
 	"strconv"
 	"time"
 
-	"logchef/internal/clickhouse"
-	"logchef/internal/logs"
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
+
+	"github.com/mr-karan/logchef/internal/clickhouse"
+	"github.com/mr-karan/logchef/internal/logs"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -26,6 +27,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 	if id == "" {
 		return SendError(c, fiber.StatusBadRequest, "source ID is required")
 	}
+	sourceID := models.SourceID(id)
 
 	var req models.LogQueryRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -52,7 +54,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 	}
 
 	// Execute query
-	result, err := s.logsService.QueryLogs(c.Context(), id, params)
+	result, err := s.logsService.QueryLogs(c.Context(), sourceID, params)
 	if err != nil {
 		if errors.Is(err, logs.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "source not found")
@@ -69,6 +71,7 @@ func (s *Server) handleGetTimeSeries(c *fiber.Ctx) error {
 	if id == "" {
 		return SendError(c, fiber.StatusBadRequest, "source ID is required")
 	}
+	sourceID := models.SourceID(id)
 
 	// Parse query parameters
 	startTimeStr := c.Query("start_time")
@@ -114,7 +117,7 @@ func (s *Server) handleGetTimeSeries(c *fiber.Ctx) error {
 		Window:    timeWindow,
 	}
 
-	result, err := s.logsService.GetTimeSeries(c.Context(), id, params)
+	result, err := s.logsService.GetTimeSeries(c.Context(), sourceID, params)
 	if err != nil {
 		if errors.Is(err, logs.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "source not found")
@@ -138,7 +141,7 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 	}
 
 	// Set source ID from path
-	req.SourceID = id
+	req.SourceID = models.SourceID(id)
 
 	// Set defaults
 	if req.BeforeLimit <= 0 {

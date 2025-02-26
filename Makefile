@@ -35,7 +35,7 @@ run: build ## Run the server with config
 
 # Run only the backend (useful during development)
 run-backend: build-backend ## Run only the backend server
-	../${BIN} -config ${CONFIG} -env development -log-level debug
+	../${BIN} -config ${CONFIG}
 
 # Clean build artifacts
 clean: ## Clean build artifacts

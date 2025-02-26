@@ -23,7 +23,7 @@ export const useUsersStore = defineStore("users", () => {
         return;
       }
 
-      users.value = response.data.users;
+      users.value = response.data;
     } catch (err) {
       error.value = "Failed to load users";
       console.error("Error loading users:", err);

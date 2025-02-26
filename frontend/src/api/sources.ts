@@ -3,6 +3,12 @@ import type { APIResponse } from "./types";
 
 interface ConnectionInfo {
   host: string;
+  database: string;
+  table_name: string;
+}
+
+interface ConnectionRequestInfo {
+  host: string;
   username: string;
   password: string;
   database: string;
@@ -11,10 +17,10 @@ interface ConnectionInfo {
 
 export interface Source {
   id: string;
-  _meta_is_auto_created: number;
+  _meta_is_auto_created: boolean;
   _meta_ts_field: string;
   connection: ConnectionInfo;
-  description: string;
+  description?: string;
   ttl_days: number;
   created_at: string;
   updated_at: string;
@@ -24,31 +30,24 @@ export interface Source {
 export interface CreateSourcePayload {
   meta_is_auto_created: boolean;
   meta_ts_field?: string;
-  connection: ConnectionInfo;
+  connection: ConnectionRequestInfo;
   description?: string;
   ttl_days: number;
 }
 
 export const sourcesApi = {
   async listSources() {
-    const response = await api.get<APIResponse<{ sources: Source[] }>>(
-      "/sources"
-    );
+    const response = await api.get<APIResponse<Source[]>>("/sources");
     return response.data;
   },
 
   async getSource(id: string) {
-    const response = await api.get<APIResponse<{ source: Source }>>(
-      `/sources/${id}`
-    );
+    const response = await api.get<APIResponse<Source>>(`/sources/${id}`);
     return response.data;
   },
 
   async createSource(payload: CreateSourcePayload) {
-    const response = await api.post<APIResponse<{ source: Source }>>(
-      "/sources",
-      payload
-    );
+    const response = await api.post<APIResponse<Source>>("/sources", payload);
     return response.data;
   },
 

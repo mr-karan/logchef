@@ -7,8 +7,9 @@ import (
 	"log/slog"
 	"time"
 
-	"logchef/internal/sqlite"
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
+
+	"github.com/mr-karan/logchef/internal/sqlite"
 
 	"github.com/google/uuid"
 )
@@ -45,7 +46,7 @@ func (s *Service) ListUsers(ctx context.Context) ([]*models.User, error) {
 }
 
 // GetUser retrieves a user by ID
-func (s *Service) GetUser(ctx context.Context, id string) (*models.User, error) {
+func (s *Service) GetUser(ctx context.Context, id models.UserID) (*models.User, error) {
 	return s.db.GetUser(ctx, id)
 }
 
@@ -83,13 +84,15 @@ func (s *Service) CreateUser(ctx context.Context, user *models.User) error {
 
 	// Set ID if not provided
 	if user.ID == "" {
-		user.ID = uuid.New().String()
+		user.ID = models.UserID(uuid.New().String())
 	}
 
 	// Set timestamps
 	now := time.Now()
-	user.CreatedAt = now
-	user.UpdatedAt = now
+	user.Timestamps = models.Timestamps{
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
 
 	return s.db.CreateUser(ctx, user)
 }
@@ -146,7 +149,7 @@ func (s *Service) UpdateUser(ctx context.Context, user *models.User) error {
 }
 
 // DeleteUser deletes a user
-func (s *Service) DeleteUser(ctx context.Context, id string) error {
+func (s *Service) DeleteUser(ctx context.Context, id models.UserID) error {
 	// Validate user exists
 	existing, err := s.db.GetUser(ctx, id)
 	if err != nil {
@@ -174,7 +177,7 @@ func (s *Service) DeleteUser(ctx context.Context, id string) error {
 		}
 	}
 
-	return s.db.DeleteUser(ctx, id)
+	return s.db.DeleteUser(ctx, existing.ID)
 }
 
 // InitAdminUsers ensures that admin users exist in the system
@@ -197,7 +200,7 @@ func (s *Service) InitAdminUsers(ctx context.Context, adminEmails []string) erro
 			if existing.Role != models.UserRoleAdmin || existing.Status != models.UserStatusActive {
 				existing.Role = models.UserRoleAdmin
 				existing.Status = models.UserStatusActive
-				existing.UpdatedAt = time.Now()
+				existing.Timestamps.UpdatedAt = time.Now()
 
 				if err := s.db.UpdateUser(ctx, existing); err != nil {
 					s.log.Error("failed to update admin user", "email", email, "error", err)
@@ -209,14 +212,17 @@ func (s *Service) InitAdminUsers(ctx context.Context, adminEmails []string) erro
 		}
 
 		// Create new admin user
+		now := time.Now()
 		user := &models.User{
-			ID:        uuid.New().String(),
-			Email:     email,
-			FullName:  "Admin User",
-			Role:      models.UserRoleAdmin,
-			Status:    models.UserStatusActive,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+			ID:       models.UserID(uuid.New().String()),
+			Email:    email,
+			FullName: "Admin User",
+			Role:     models.UserRoleAdmin,
+			Status:   models.UserStatusActive,
+			Timestamps: models.Timestamps{
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
 		}
 
 		if err := s.db.CreateUser(ctx, user); err != nil {
@@ -243,7 +249,7 @@ func (s *Service) ListTeams(ctx context.Context) ([]*models.Team, error) {
 
 // GetTeam retrieves a team by ID
 func (s *Service) GetTeam(ctx context.Context, id string) (*models.Team, error) {
-	team, err := s.db.GetTeam(ctx, id)
+	team, err := s.db.GetTeam(ctx, models.TeamID(id))
 	if err != nil {
 		return nil, fmt.Errorf("error getting team: %w", err)
 	}
@@ -262,13 +268,15 @@ func (s *Service) CreateTeam(ctx context.Context, team *models.Team) error {
 
 	// Set ID if not provided
 	if team.ID == "" {
-		team.ID = uuid.New().String()
+		team.ID = models.TeamID(uuid.New().String())
 	}
 
 	// Set timestamps
 	now := time.Now()
-	team.CreatedAt = now
-	team.UpdatedAt = now
+	team.Timestamps = models.Timestamps{
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
 
 	// Create team
 	if err := s.db.CreateTeam(ctx, team); err != nil {
@@ -310,7 +318,7 @@ func (s *Service) UpdateTeam(ctx context.Context, team *models.Team) error {
 // DeleteTeam deletes a team
 func (s *Service) DeleteTeam(ctx context.Context, id string) error {
 	// Validate team exists
-	existing, err := s.db.GetTeam(ctx, id)
+	existing, err := s.db.GetTeam(ctx, models.TeamID(id))
 	if err != nil {
 		return fmt.Errorf("error getting team: %w", err)
 	}
@@ -319,7 +327,7 @@ func (s *Service) DeleteTeam(ctx context.Context, id string) error {
 	}
 
 	// Delete team
-	if err := s.db.DeleteTeam(ctx, id); err != nil {
+	if err := s.db.DeleteTeam(ctx, models.TeamID(id)); err != nil {
 		s.log.Error("failed to delete team", "error", err)
 		return fmt.Errorf("error deleting team: %w", err)
 	}
@@ -330,7 +338,7 @@ func (s *Service) DeleteTeam(ctx context.Context, id string) error {
 // Team Members
 
 // ListTeamMembers returns all members of a team
-func (s *Service) ListTeamMembers(ctx context.Context, teamID string) ([]*models.TeamMember, error) {
+func (s *Service) ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error) {
 	// Validate team exists
 	team, err := s.db.GetTeam(ctx, teamID)
 	if err != nil {
@@ -351,14 +359,14 @@ func (s *Service) ListTeamMembers(ctx context.Context, teamID string) ([]*models
 }
 
 // AddTeamMember adds a user to a team
-func (s *Service) AddTeamMember(ctx context.Context, teamID, userID, role string) error {
+func (s *Service) AddTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) error {
 	// Validate parameters
 	if err := s.validator.ValidateTeamMember(teamID, userID, role); err != nil {
 		return err
 	}
 
 	// Validate team exists
-	team, err := s.db.GetTeam(ctx, teamID)
+	team, err := s.db.GetTeam(ctx, models.TeamID(teamID))
 	if err != nil {
 		return fmt.Errorf("error getting team: %w", err)
 	}
@@ -403,7 +411,7 @@ func (s *Service) AddTeamMember(ctx context.Context, teamID, userID, role string
 }
 
 // RemoveTeamMember removes a user from a team
-func (s *Service) RemoveTeamMember(ctx context.Context, teamID, userID string) error {
+func (s *Service) RemoveTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) error {
 	// Validate team exists
 	team, err := s.db.GetTeam(ctx, teamID)
 	if err != nil {
@@ -446,7 +454,7 @@ func (s *Service) RemoveTeamMember(ctx context.Context, teamID, userID string) e
 // Team Sources
 
 // ListTeamSources returns all sources associated with a team
-func (s *Service) ListTeamSources(ctx context.Context, teamID string) ([]*models.Source, error) {
+func (s *Service) ListTeamSources(ctx context.Context, teamID models.TeamID) ([]*models.Source, error) {
 	// Validate team exists
 	team, err := s.db.GetTeam(ctx, teamID)
 	if err != nil {
@@ -467,7 +475,7 @@ func (s *Service) ListTeamSources(ctx context.Context, teamID string) ([]*models
 }
 
 // AddTeamSource associates a source with a team
-func (s *Service) AddTeamSource(ctx context.Context, teamID, sourceID string) error {
+func (s *Service) AddTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error {
 	// Validate team exists
 	team, err := s.db.GetTeam(ctx, teamID)
 	if err != nil {
@@ -496,7 +504,7 @@ func (s *Service) AddTeamSource(ctx context.Context, teamID, sourceID string) er
 }
 
 // RemoveTeamSource removes a source association from a team
-func (s *Service) RemoveTeamSource(ctx context.Context, teamID, sourceID string) error {
+func (s *Service) RemoveTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error {
 	// Validate team exists
 	team, err := s.db.GetTeam(ctx, teamID)
 	if err != nil {

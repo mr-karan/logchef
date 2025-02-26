@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // ValidationError represents a validation error

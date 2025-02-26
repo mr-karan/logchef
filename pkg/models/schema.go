@@ -7,7 +7,7 @@ type TableSchema struct {
 
 // QueryResult represents the result of a query
 type QueryResult struct {
-	Data    []map[string]interface{} `json:"data"`
+	Logs    []map[string]interface{} `json:"logs"`
 	Stats   QueryStats               `json:"stats"`
 	Columns []ColumnInfo             `json:"columns"`
 }

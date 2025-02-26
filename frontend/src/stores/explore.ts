@@ -150,7 +150,7 @@ export const useExploreStore = defineStore("explore", () => {
           state.data.value.columns = response.columns;
           state.data.value.queryStats = response.stats;
         },
-        onError: (error) => {
+        onError: () => {
           resetState();
         },
       });
@@ -164,7 +164,7 @@ export const useExploreStore = defineStore("explore", () => {
     return await state.withLoading(async () => {
       const result = await handleApiCall<LogContextResponse>({
         apiCall: () => exploreApi.getLogContext(sourceId, params),
-        onError: (error) => {
+        onError: () => {
           // Just handle the error in the component
         },
       });

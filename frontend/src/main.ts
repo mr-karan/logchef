@@ -4,6 +4,10 @@ import "./assets/index.css";
 import App from "./App.vue";
 import router from "./router";
 import { useAuthStore } from "@/stores/auth";
+import { initMonacoSetup } from "@/utils/monaco";
+
+// Initialize Monaco Editor setup
+initMonacoSetup();
 
 async function initializeApp() {
   // Create app instance

@@ -1,4 +1,4 @@
-import { ref, computed } from "vue";
+import { ref } from "vue";
 import { useDebounceFn } from "@vueuse/core";
 import type { FilterCondition } from "@/api/explore";
 

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"logchef/pkg/models"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // ValidationError represents a validation error
@@ -154,7 +154,7 @@ func (v *Validator) ValidateCreateTeam(team *models.Team) error {
 }
 
 // ValidateTeamMember validates a team member request
-func (v *Validator) ValidateTeamMember(teamID, userID, role string) error {
+func (v *Validator) ValidateTeamMember(teamID models.TeamID, userID models.UserID, role models.TeamRole) error {
 	if teamID == "" {
 		return &ValidationError{
 			Field:   "TeamID",
@@ -169,7 +169,7 @@ func (v *Validator) ValidateTeamMember(teamID, userID, role string) error {
 		}
 	}
 
-	if role != "admin" && role != "member" {
+	if role != models.TeamRoleAdmin && role != models.TeamRoleMember {
 		return &ValidationError{
 			Field:   "Role",
 			Message: "role must be either 'admin' or 'member'",
