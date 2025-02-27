@@ -6,29 +6,35 @@ import router from "./router";
 import { useAuthStore } from "@/stores/auth";
 import { initMonacoSetup } from "@/utils/monaco";
 
-// Initialize Monaco Editor setup
-initMonacoSetup();
+// Initialize Monaco Editor setup - wrapped in try/catch for safety
+try {
+  initMonacoSetup();
+} catch (error) {
+  console.error("Failed to initialize Monaco:", error);
+}
 
 async function initializeApp() {
-  // Create app instance
-  const app = createApp(App);
+  try {
+    // Create app instance
+    const app = createApp(App);
 
-  // Create and use Pinia before router
-  const pinia = createPinia();
-  app.use(pinia);
+    // Create and use Pinia before router
+    const pinia = createPinia();
+    app.use(pinia);
 
-  // Initialize auth store before router
-  const authStore = useAuthStore(pinia);
-  await authStore.initialize();
+    // Initialize auth store before router
+    const authStore = useAuthStore(pinia);
+    await authStore.initialize();
 
-  // Use router after auth is initialized
-  app.use(router);
+    // Use router after auth is initialized
+    app.use(router);
 
-  // Mount app only after auth is initialized
-  app.mount("#app");
+    // Mount app only after auth is initialized
+    app.mount("#app");
+  } catch (error) {
+    console.error("Failed to initialize app:", error);
+  }
 }
 
 // Start the app
-initializeApp().catch((error) => {
-  console.error("Failed to initialize app:", error);
-});
+initializeApp();

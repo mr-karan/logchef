@@ -32,30 +32,55 @@ export function useSqlGenerator(initialOptions: SqlGeneratorOptions) {
   function buildCondition(cond: FilterCondition): string {
     const { field, operator, value } = cond;
 
+    // Helper function to determine if a value should be quoted
+    const formatValue = (val: string | number): string => {
+      if (val === null || val === undefined) {
+        return 'NULL';
+      }
+      
+      // If it's a number, don't quote it
+      if (!isNaN(Number(val)) && val !== '') {
+        return String(val);
+      }
+      
+      // Otherwise, it's a string and should be quoted
+      return `'${val.toString().replace(/'/g, "''")}'`; // Escape single quotes
+    };
+
     switch (operator) {
       case "=":
-        return `${field} = '${value}'`;
+        return `${field} = ${formatValue(value)}`;
       case "!=":
-        return `${field} != '${value}'`;
+        return `${field} != ${formatValue(value)}`;
+      case ">":
+        return `${field} > ${formatValue(value)}`;
+      case "<":
+        return `${field} < ${formatValue(value)}`;
+      case ">=":
+        return `${field} >= ${formatValue(value)}`;
+      case "<=":
+        return `${field} <= ${formatValue(value)}`;
       case "contains":
-        return `position(${field}, '${value}') > 0`;
+      case "~":
+        return `position(${field}, ${formatValue(value)}) > 0`;
       case "not_contains":
-        return `position(${field}, '${value}') = 0`;
+      case "!~":
+        return `position(${field}, ${formatValue(value)}) = 0`;
       case "icontains":
-        return `position(lower(${field}), lower('${value}')) > 0`;
+        return `position(lower(${field}), lower(${formatValue(value)})) > 0`;
       case "startswith":
-        return `startsWith(${field}, '${value}')`;
+        return `startsWith(${field}, ${formatValue(value)})`;
       case "endswith":
-        return `endsWith(${field}, '${value}')`;
+        return `endsWith(${field}, ${formatValue(value)})`;
       case "in":
         if (Array.isArray(value)) {
-          const quotedValues = value.map((v) => `'${v}'`).join(", ");
+          const quotedValues = value.map((v) => formatValue(v)).join(", ");
           return `${field} IN (${quotedValues})`;
         }
         throw new Error("Invalid value for IN operator");
       case "not_in":
         if (Array.isArray(value)) {
-          const quotedValues = value.map((v) => `'${v}'`).join(", ");
+          const quotedValues = value.map((v) => formatValue(v)).join(", ");
           return `${field} NOT IN (${quotedValues})`;
         }
         throw new Error("Invalid value for NOT IN operator");

@@ -12,7 +12,6 @@ export enum TokenType {
   Keyword = "keyword",
   Delimiter = "delimiter",
   Comment = "comment",
-  FieldTrigger = "fieldTrigger",
 }
 
 /**
@@ -43,47 +42,57 @@ export const OPERATOR_MAPPINGS: Record<string, string> = {
   [OPERATORS.NOT_CONTAINS]: "notcontains",
 };
 
+// Track if language has been registered to avoid duplicate registration
+let isLanguageRegistered = false;
+
 /**
  * Register the LogFilter language with Monaco
  */
 export function registerLogFilterLanguage() {
+  // Prevent duplicate registration which can cause issues
+  if (isLanguageRegistered) return;
+  isLanguageRegistered = true;
+
   // Register language
   monaco.languages.register({ id: "logfilter" });
 
-  // Define syntax highlighting
+  // Define syntax highlighting (improved for better PromQL/LogQL-like experience)
   monaco.languages.setMonarchTokensProvider("logfilter", {
     tokenizer: {
       root: [
         // Comments
         [/#.*$/, TokenType.Comment],
-        
-        // Field trigger (@)
-        [/@/, TokenType.FieldTrigger],
 
-        // Field names (more precise pattern for PromQL/LogQL style)
-        [/([a-zA-Z_][a-zA-Z0-9_]*)(?=(!?~|!=|=|>=|<=|>|<))/, TokenType.Field],
+        // Magic @ character - highlight specially to make it stand out
+        [/@/, "magic-symbol"],
 
-        // Field names at start of input or after delimiter
-        [/^([a-zA-Z_][a-zA-Z0-9_]*)$/, TokenType.Field],
-        [/;\s*([a-zA-Z_][a-zA-Z0-9_]*)$/, TokenType.Field],
+        // Field names - highlight both standalone and in expressions
+        [/[a-zA-Z_][a-zA-Z0-9_]*(?=\s*[=!<>~])/, TokenType.Field],
+        [/\b[a-zA-Z_][a-zA-Z0-9_]*\b/, "identifier"],
 
-        // Operators
-        [/(!?~|!=|=|>=|<=|>|<)/, TokenType.Operator],
+        // Operators with improved highlighting
+        [/(?:!=|=|>=|<=|>|<|~|!~)/, TokenType.Operator],
 
-        // Quoted strings
-        [/"([^"\\]|\\.)*"/, TokenType.String],
-        [/'([^'\\]|\\.)*'/, TokenType.String],
+        // Keywords with case insensitivity
+        [/\b(?:AND|OR)\b/i, TokenType.Keyword],
 
-        // Numbers
-        [/\b\d+(\.\d+)?\b/, TokenType.Number],
+        // Quoted strings with proper escaping support
+        [/"(?:\\.|[^"\\])*"/, TokenType.String],
+        [/'(?:\\.|[^'\\])*'/, TokenType.String],
 
-        // Semicolons (delimiters)
+        // Numbers with support for scientific notation
+        [/\b\d+(\.\d+)?([eE][-+]?\d+)?\b/, TokenType.Number],
+
+        // Parentheses for potential future expression grouping
+        [/[()]/, "parenthesis"],
+
+        // Delimiters with special highlighting 
         [/;/, TokenType.Delimiter],
       ],
     },
   });
 
-  // Define language configuration
+  // Define language configuration (simplified for better stability)
   monaco.languages.setLanguageConfiguration("logfilter", {
     autoClosingPairs: [
       { open: "(", close: ")" },
@@ -94,338 +103,353 @@ export function registerLogFilterLanguage() {
     comments: {
       lineComment: "#",
     },
-    wordPattern:
-      /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
   });
 }
+
+// Keep track of the current completion provider
+let currentCompletionProvider: monaco.IDisposable | null = null;
 
 /**
  * Register completion provider for LogFilter language
- * @param columns Available columns for autocompletion
  */
 export function registerCompletionProvider(columns: ColumnInfo[] = []) {
-  return monaco.languages.registerCompletionItemProvider("logfilter", {
-    triggerCharacters: ["@", "=", "!", "~", ">", "<", ";"],
-    provideCompletionItems: (model, position) => {
-      const textUntilPosition = model.getValueInRange({
-        startLineNumber: position.lineNumber,
-        startColumn: 1,
-        endLineNumber: position.lineNumber,
-        endColumn: position.column,
-      });
+  // Clean up previous provider
+  if (currentCompletionProvider) {
+    currentCompletionProvider.dispose();
+    currentCompletionProvider = null;
+  }
 
-      const word = model.getWordUntilPosition(position);
-      const range = {
-        startLineNumber: position.lineNumber,
-        endLineNumber: position.lineNumber,
-        startColumn: word.startColumn,
-        endColumn: word.endColumn,
-      };
+  // Create simple and reliable completion provider
+  currentCompletionProvider = monaco.languages.registerCompletionItemProvider(
+    "logfilter",
+    {
+      // Trigger characters for showing completions
+      triggerCharacters: [" ", ";", "=", "!", ">", "<", "~"],
 
-      // Check if we just typed @ to trigger field suggestions
-      if (textUntilPosition.endsWith("@")) {
-        return {
-          suggestions: columns.map((column) => ({
-            label: column.name,
-            kind: monaco.languages.CompletionItemKind.Field,
-            insertText: column.name,
-            range: {
-              startLineNumber: position.lineNumber,
-              endLineNumber: position.lineNumber,
-              startColumn: position.column,
-              endColumn: position.column,
-            },
-            detail: column.type,
-            sortText: "0" + column.name, // Prioritize these suggestions
-          })),
-        };
-      }
+      provideCompletionItems: (model, position) => {
+        try {
+          // Get current line content
+          const lineContent = model.getLineContent(position.lineNumber);
+          const beforeCursor = lineContent.substring(0, position.column - 1);
+          const lastChar = beforeCursor.charAt(beforeCursor.length - 1);
 
-      // Determine context for suggestions
-      const context = determineCompletionContext(textUntilPosition);
+          // Get current word for better suggestions
+          const wordInfo = model.getWordUntilPosition(position);
+          const wordRange = {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: wordInfo.startColumn,
+            endColumn: wordInfo.endColumn,
+          };
 
-      switch (context.type) {
-        case "field":
-          return provideFieldSuggestions(columns, range, context.prefix);
-        case "operator":
-          return provideOperatorSuggestions(range);
-        case "value":
-          return provideValueSuggestions(context.field, columns, range);
-        default:
+          // Handle @ character trigger - insert field pattern
+          if (lastChar === "@") {
+            return {
+              suggestions: columns.map((column) => ({
+                label: column.name,
+                kind: monaco.languages.CompletionItemKind.Field,
+                insertText: `${column.name} `,
+                range: {
+                  startLineNumber: position.lineNumber,
+                  endLineNumber: position.lineNumber,
+                  startColumn: position.column - 1,
+                  endColumn: position.column,
+                },
+                // Add documentation for better UX
+                documentation: {
+                  value: `**Field:** ${column.name}\n\n**Type:** ${column.type}\n\nThis field can be used with operators like =, !=, >, <, etc.`,
+                  isTrusted: true,
+                  supportHtml: true
+                },
+                detail: column.type,
+                // Chain command to trigger operator suggestions after field insertion
+                command: {
+                  title: "Trigger Suggest",
+                  id: "editor.action.triggerSuggest",
+                  arguments: [],
+                },
+              })),
+            };
+          }
+
+          // Handle field name partial typing (after space, semicolon, or at start)
+          // This helps with suggestions when typing 'n' for 'namespace'
+          const currentWord = wordInfo.word;
+          if (
+            /\b(AND|OR)\s+$/i.test(beforeCursor) ||
+            /;\s*$/.test(beforeCursor) ||
+            beforeCursor.trim() === "" ||
+            (currentWord.length > 0 && !/[=<>!~]/.test(beforeCursor))
+          ) {
+            // Filter columns that match the current partial word
+            const matchingColumns = columns.filter((column) =>
+              column.name.toLowerCase().startsWith(currentWord.toLowerCase())
+            );
+
+            if (matchingColumns.length > 0) {
+              return {
+                suggestions: matchingColumns.map((column) => ({
+                  label: column.name,
+                  kind: monaco.languages.CompletionItemKind.Field,
+                  insertText: column.name,
+                  range: wordRange,
+                  detail: column.type,
+                })),
+              };
+            }
+          }
+
+          // Simple text-based context detection for other scenarios
+          if (
+            /\b(AND|OR)\s*$/i.test(beforeCursor) ||
+            /;\s*$/.test(beforeCursor) ||
+            beforeCursor.trim() === ""
+          ) {
+            // Suggest fields
+            return {
+              suggestions: columns.map((column) => ({
+                label: column.name,
+                kind: monaco.languages.CompletionItemKind.Field,
+                insertText: column.name,
+                range: wordRange,
+                detail: column.type,
+              })),
+            };
+          }
+
+          // After field name, suggest operators
+          if (
+            /[a-zA-Z0-9_]\s*$/.test(beforeCursor) &&
+            !beforeCursor.includes("=") &&
+            !beforeCursor.includes(">") &&
+            !beforeCursor.includes("<") &&
+            !beforeCursor.includes("~")
+          ) {
+            return {
+              suggestions: [
+                {
+                  label: "=",
+                  kind: monaco.languages.CompletionItemKind.Operator,
+                  insertText: "= ",
+                  insertTextRules:
+                    monaco.languages.CompletionItemInsertTextRule
+                      .InsertAsSnippet,
+                  range: wordRange,
+                },
+                {
+                  label: "!=",
+                  kind: monaco.languages.CompletionItemKind.Operator,
+                  insertText: " != ",
+                  range: wordRange,
+                },
+                {
+                  label: ">",
+                  kind: monaco.languages.CompletionItemKind.Operator,
+                  insertText: " > ",
+                  range: wordRange,
+                },
+                {
+                  label: "<",
+                  kind: monaco.languages.CompletionItemKind.Operator,
+                  insertText: " < ",
+                  range: wordRange,
+                },
+                {
+                  label: ">=",
+                  kind: monaco.languages.CompletionItemKind.Operator,
+                  insertText: " >= ",
+                  range: wordRange,
+                },
+                {
+                  label: "<=",
+                  kind: monaco.languages.CompletionItemKind.Operator,
+                  insertText: " <= ",
+                  range: wordRange,
+                },
+                {
+                  label: "~",
+                  kind: monaco.languages.CompletionItemKind.Operator,
+                  insertText: " ~ ",
+                  range: wordRange,
+                },
+                {
+                  label: "!~",
+                  kind: monaco.languages.CompletionItemKind.Operator,
+                  insertText: " !~ ",
+                  range: wordRange,
+                },
+              ],
+            };
+          }
+
+          // After a value, suggest logical operators
+          if (
+            /[a-zA-Z0-9_"']\s*$/.test(beforeCursor) &&
+            (beforeCursor.includes("=") ||
+              beforeCursor.includes(">") ||
+              beforeCursor.includes("<") ||
+              beforeCursor.includes("~"))
+          ) {
+            return {
+              suggestions: [
+                {
+                  label: "AND",
+                  kind: monaco.languages.CompletionItemKind.Keyword,
+                  insertText: " AND ",
+                  range: wordRange,
+                },
+                {
+                  label: "OR",
+                  kind: monaco.languages.CompletionItemKind.Keyword,
+                  insertText: " OR ",
+                  range: wordRange,
+                },
+                {
+                  label: ";",
+                  kind: monaco.languages.CompletionItemKind.Operator,
+                  insertText: "; ",
+                  range: wordRange,
+                },
+              ],
+            };
+          }
+
           return { suggestions: [] };
-      }
-    },
-  });
+        } catch (error) {
+          console.error("Error providing completions:", error);
+          return { suggestions: [] };
+        }
+      },
+    }
+  );
+
+  return currentCompletionProvider;
 }
 
 /**
- * Determine the context for completion suggestions
+ * Show field suggestions - ultra-simplified to prevent crashes
+ * This version just delegates to the standard suggestion mechanism
  */
-function determineCompletionContext(text: string): {
-  type: "field" | "operator" | "value" | "none";
-  field?: string;
-  prefix?: string;
-} {
-  // Check if we're after a semicolon or at the start - suggest field
-  if (text === "" || text.trim() === "" || /;\s*$/.test(text)) {
-    return { type: "field", prefix: "" };
-  }
+export function showFieldSuggestions(
+  editor: monaco.editor.IStandaloneCodeEditor,
+  columns: ColumnInfo[] = []
+) {
+  if (!editor) return;
 
-  // Check if we're typing a field name (after semicolon or at start)
-  const fieldStartMatch = /(?:^|;\s*)([a-zA-Z_][a-zA-Z0-9_]*)$/.exec(text);
-  if (fieldStartMatch) {
-    return { type: "field", prefix: fieldStartMatch[1] };
-  }
-
-  // Check if we're after a field name - suggest operator
-  // No spaces required between field and operator (PromQL/LogQL style)
-  const afterFieldMatch = /([a-zA-Z_][a-zA-Z0-9_]*)$/.exec(text);
-  if (
-    afterFieldMatch &&
-    !/[=!~<>]/.test(text.slice(text.lastIndexOf(afterFieldMatch[1])))
-  ) {
-    return { type: "operator" };
-  }
-
-  // Check if we're after an operator - suggest value
-  // No spaces required between operator and value (PromQL/LogQL style)
-  const operatorMatch = /([a-zA-Z_][a-zA-Z0-9_]*)(!?~|!=|=|>=|<=|>|<)$/.exec(text);
-  if (operatorMatch) {
-    return { type: "value", field: operatorMatch[1] };
-  }
-
-  return { type: "none" };
-}
-
-/**
- * Provide field name suggestions
- */
-function provideFieldSuggestions(
-  columns: ColumnInfo[],
-  range: monaco.IRange,
-  prefix: string = ""
-): monaco.languages.CompletionList {
-  // Filter columns based on prefix for better matching
-  const filteredColumns = prefix
-    ? columns.filter((col) =>
-        col.name.toLowerCase().includes(prefix.toLowerCase())
-      )
-    : columns;
-
-  return {
-    suggestions: filteredColumns.map((column) => ({
-      label: column.name,
-      kind: monaco.languages.CompletionItemKind.Field,
-      insertText: column.name,
-      range,
-      detail: column.type,
-      sortText:
-        prefix && column.name.toLowerCase().startsWith(prefix.toLowerCase())
-          ? "0" + column.name // Prioritize exact prefix matches
-          : "1" + column.name,
-    })),
-  };
-}
-
-/**
- * Provide operator suggestions
- */
-function provideOperatorSuggestions(
-  range: monaco.IRange
-): monaco.languages.CompletionList {
-  return {
-    suggestions: [
-      {
-        label: OPERATORS.EQUALS,
-        kind: monaco.languages.CompletionItemKind.Operator,
-        insertText: OPERATORS.EQUALS,
-        range,
-        detail: "Equals",
-        documentation: "Field exactly matches value",
-      },
-      {
-        label: OPERATORS.NOT_EQUALS,
-        kind: monaco.languages.CompletionItemKind.Operator,
-        insertText: OPERATORS.NOT_EQUALS,
-        range,
-        detail: "Not equals",
-        documentation: "Field does not match value",
-      },
-      {
-        label: OPERATORS.GREATER_THAN,
-        kind: monaco.languages.CompletionItemKind.Operator,
-        insertText: OPERATORS.GREATER_THAN,
-        range,
-        detail: "Greater than",
-        documentation: "Field is greater than value",
-      },
-      {
-        label: OPERATORS.LESS_THAN,
-        kind: monaco.languages.CompletionItemKind.Operator,
-        insertText: OPERATORS.LESS_THAN,
-        range,
-        detail: "Less than",
-        documentation: "Field is less than value",
-      },
-      {
-        label: OPERATORS.GREATER_EQUAL,
-        kind: monaco.languages.CompletionItemKind.Operator,
-        insertText: OPERATORS.GREATER_EQUAL,
-        range,
-        detail: "Greater than or equal",
-        documentation: "Field is greater than or equal to value",
-      },
-      {
-        label: OPERATORS.LESS_EQUAL,
-        kind: monaco.languages.CompletionItemKind.Operator,
-        insertText: OPERATORS.LESS_EQUAL,
-        range,
-        detail: "Less than or equal",
-        documentation: "Field is less than or equal to value",
-      },
-      {
-        label: OPERATORS.CONTAINS,
-        kind: monaco.languages.CompletionItemKind.Operator,
-        insertText: OPERATORS.CONTAINS,
-        range,
-        detail: "Contains",
-        documentation: "Field contains value",
-      },
-      {
-        label: OPERATORS.NOT_CONTAINS,
-        kind: monaco.languages.CompletionItemKind.Operator,
-        insertText: OPERATORS.NOT_CONTAINS,
-        range,
-        detail: "Not contains",
-        documentation: "Field does not contain value",
-      },
-    ],
-  };
-}
-
-/**
- * Provide value suggestions based on field type
- */
-function provideValueSuggestions(
-  field: string | undefined,
-  columns: ColumnInfo[],
-  range: monaco.IRange
-): monaco.languages.CompletionList {
-  if (!field) return { suggestions: [] };
-
-  // Find the column to get its type
-  const column = columns.find((col) => col.name === field);
-  if (!column) return { suggestions: [] };
-
-  // Provide suggestions based on column type
-  switch (column.type.toLowerCase()) {
-    case "string":
-      return { suggestions: [] }; // Free-form text, no suggestions
-
-    case "boolean":
-      return {
-        suggestions: [
-          {
-            label: "true",
-            kind: monaco.languages.CompletionItemKind.Value,
-            insertText: "true",
-            range,
-          },
-          {
-            label: "false",
-            kind: monaco.languages.CompletionItemKind.Value,
-            insertText: "false",
-            range,
-          },
-        ],
-      };
-
-    // Add more type-specific suggestions as needed
-
-    default:
-      return { suggestions: [] };
+  try {
+    // Focus the editor first
+    editor.focus();
+    
+    // Use monaco's built-in trigger which is more stable
+    monaco.editor.trigger('keyboard', 'editor.action.triggerSuggest', {});
+  } catch (error) {
+    console.error("Error showing field suggestions:", error);
   }
 }
 
 /**
- * Parse a filter expression string into FilterCondition objects
+ * Parse a filter expression to structured filter conditions
  */
-export function parseFilterExpression(expression: string) {
-  const filters = [];
-  const trimmedExpression = expression.trim();
-
-  if (!trimmedExpression) {
+export function parseFilterExpression(expression: string): any[] {
+  if (!expression || !expression.trim()) {
     return [];
   }
 
-  // Split by semicolons to get individual filter sets
-  const filterSets = trimmedExpression
-    .split(";")
-    .map((set) => set.trim())
-    .filter(Boolean);
+  const result: any[] = [];
+  const conditions = expression.split(';').map(c => c.trim()).filter(Boolean);
 
-  for (const filterSet of filterSets) {
-    // Updated regex for operator format: field=value, field!=value, field~value, field!~value
-    // No spaces required between field, operator, and value (PromQL/LogQL style)
-    const filterRegex =
-      /([a-zA-Z_][a-zA-Z0-9_]*)(!?~|!=|=|>=|<=|>|<)([^;\s]+|"[^"]*"|'[^']*')/g;
+  for (const condition of conditions) {
+    // Check for various operator patterns, from longest to shortest
+    const operatorPatterns = [
+      { regex: /(>=|<=|!=|!~|~)/, op: (match: string) => match },
+      { regex: /(=|>|<)/, op: (match: string) => match }
+    ];
 
-    let match;
-    while ((match = filterRegex.exec(filterSet)) !== null) {
-      const field = match[1];
-      const rawOperator = match[2];
-      let value = match[3];
+    let parsed = false;
 
-      // Remove quotes if present
-      if (
-        (value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))
-      ) {
-        value = value.substring(1, value.length - 1);
+    for (const pattern of operatorPatterns) {
+      const match = condition.match(new RegExp(`^([\\w_]+)\\s*${pattern.regex.source}\\s*(.+)$`));
+      
+      if (match) {
+        const [, field, operator, value] = match;
+        
+        // Map UI operators to API operators
+        let apiOperator = operator;
+        if (operator === '~') apiOperator = 'contains';
+        if (operator === '!~') apiOperator = 'not_contains';
+        
+        // Parse value - handle quoted strings and numbers
+        let parsedValue = value.trim();
+        if ((parsedValue.startsWith('"') && parsedValue.endsWith('"')) || 
+            (parsedValue.startsWith("'") && parsedValue.endsWith("'"))) {
+          parsedValue = parsedValue.substring(1, parsedValue.length - 1);
+        } else if (!isNaN(Number(parsedValue))) {
+          parsedValue = Number(parsedValue);
+        }
+
+        result.push({
+          field: field.trim(),
+          operator: apiOperator,
+          value: parsedValue
+        });
+        
+        parsed = true;
+        break;
       }
+    }
 
-      // Convert the display operator to the internal operator
-      const mappedOperator = OPERATOR_MAPPINGS[rawOperator] || "=";
-
-      filters.push({
-        field,
-        operator: mappedOperator,
-        value,
+    // If we couldn't parse the condition with an operator, treat it as a simple text search
+    if (!parsed && condition.trim()) {
+      result.push({
+        field: "_raw",
+        operator: "contains",
+        value: condition.trim()
       });
     }
   }
 
-  return filters;
+  return result;
 }
 
 /**
- * Convert filter conditions to expression string
+ * Convert filter conditions to an expression string
  */
-export function filterConditionsToExpression(
-  conditions: Array<{ field: string; operator: string; value: string }>
-) {
-  if (!conditions || conditions.length === 0) {
+export function filterConditionsToExpression(conditions: any[]): string {
+  if (!conditions || !conditions.length) {
     return "";
   }
 
-  // Build expressions for each condition
+  // Simple implementation that just returns the value from raw text searches
+  if (
+    conditions.length === 1 &&
+    conditions[0]?.field === "_raw" &&
+    conditions[0]?.op === "contains"
+  ) {
+    return conditions[0].value || "";
+  }
+
+  // Basic implementation for other conditions
   return conditions
     .map((condition) => {
-      // Find the display operator from our mapping
-      const displayOperator =
-        Object.entries(OPERATOR_MAPPINGS).find(
-          ([, internalOp]) => internalOp === condition.operator
-        )?.[0] || "=";
-
-      // Check if value needs to be quoted
-      const needsQuotes =
-        !/^[0-9]+(\.[0-9]+)?$/.test(condition.value) &&
-        condition.value.includes(" ");
-      const quotedValue = needsQuotes
-        ? `"${condition.value}"`
-        : condition.value;
-
-      return `${condition.field}${displayOperator}${quotedValue}`;
+      const { field, op, value } = condition;
+      switch (op) {
+        case "=":
+        case "!=":
+        case ">":
+        case "<":
+        case ">=":
+        case "<=":
+          return `${field} ${op} ${
+            typeof value === "string" ? `"${value}"` : value
+          }`;
+        case "contains":
+          return `${field} ~ "${value}"`;
+        case "not_contains":
+          return `${field} !~ "${value}"`;
+        default:
+          return "";
+      }
     })
-    .join("; ");
+    .filter(Boolean)
+    .join(" AND ");
 }

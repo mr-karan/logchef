@@ -7,6 +7,8 @@ export interface FilterCondition {
   operator:
     | "="
     | "!="
+    | "~"
+    | "!~"
     | "contains"
     | "not_contains"
     | "icontains"
