@@ -340,8 +340,8 @@ export function showFieldSuggestions(
     // Focus the editor first
     editor.focus();
     
-    // Use monaco's built-in trigger which is more stable
-    monaco.editor.trigger('keyboard', 'editor.action.triggerSuggest', {});
+    // Use the editor instance to trigger suggestions instead of monaco.editor
+    editor.trigger('keyboard', 'editor.action.triggerSuggest', {});
   } catch (error) {
     console.error("Error showing field suggestions:", error);
   }
@@ -356,7 +356,41 @@ export function parseFilterExpression(expression: string): any[] {
   }
 
   const result: any[] = [];
-  const conditions = expression.split(';').map(c => c.trim()).filter(Boolean);
+  // Split by semicolons, but not if they're inside quotes
+  const conditions: string[] = [];
+  let currentCondition = '';
+  let insideQuotes = false;
+  let quoteChar = '';
+
+  // Parse character by character to handle quotes and semicolons correctly
+  for (let i = 0; i < expression.length; i++) {
+    const char = expression[i];
+    
+    // Handle quotes
+    if ((char === '"' || char === "'") && (i === 0 || expression[i-1] !== '\\')) {
+      if (!insideQuotes) {
+        insideQuotes = true;
+        quoteChar = char;
+      } else if (char === quoteChar) {
+        insideQuotes = false;
+      }
+    }
+    
+    // Handle semicolons - only split if not in quotes
+    if (char === ';' && !insideQuotes) {
+      if (currentCondition.trim()) {
+        conditions.push(currentCondition.trim());
+      }
+      currentCondition = '';
+    } else {
+      currentCondition += char;
+    }
+  }
+  
+  // Add the last condition if any
+  if (currentCondition.trim()) {
+    conditions.push(currentCondition.trim());
+  }
 
   for (const condition of conditions) {
     // Check for various operator patterns, from longest to shortest
@@ -398,12 +432,15 @@ export function parseFilterExpression(expression: string): any[] {
       }
     }
 
-    // If we couldn't parse the condition with an operator, treat it as a simple text search
-    if (!parsed && condition.trim()) {
+    // If we couldn't parse the condition with an operator, we'll only treat it as a text search
+    // if it appears to be a complete search term (contains space or is longer than 3 chars)
+    // This prevents partial typing from generating preview SQL
+    const trimmedCondition = condition.trim();
+    if (!parsed && trimmedCondition && (trimmedCondition.includes(" ") || trimmedCondition.length > 3)) {
       result.push({
         field: "_raw",
         operator: "contains",
-        value: condition.trim()
+        value: trimmedCondition
       });
     }
   }

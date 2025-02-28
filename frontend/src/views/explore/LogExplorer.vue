@@ -172,8 +172,32 @@ function updateSqlGenerator() {
     limit: exploreStore.data.limit,
   })
 
-  // Always regenerate SQL preview to ensure it's visible
-  sqlGenerator.value?.generatePreviewSql(exploreStore.data.filterConditions)
+  // Only generate SQL if we have filter conditions
+  // (prevents stale conditions from showing in preview)
+  if (exploreStore.data.filterConditions && exploreStore.data.filterConditions.length > 0) {
+    sqlGenerator.value?.generatePreviewSql(exploreStore.data.filterConditions);
+  } else {
+    // Reset the preview when there are no filters
+    if (sqlGenerator.value) {
+      // Force update of the previewSql ref with a clean SQL query
+      sqlGenerator.value.generatePreviewSql([]);
+
+      // Immediately after, forcibly set the SQL to what we want (bypassing the debounce)
+      setTimeout(() => {
+        if (sqlGenerator.value?.previewSql) {
+          sqlGenerator.value.previewSql.value = {
+            sql: `SELECT *
+FROM ${selectedSourceDetails.value.database}.${selectedSourceDetails.value.table}
+WHERE timestamp >= fromUnixTimestamp64Milli(${timestamps.start}) AND timestamp <= fromUnixTimestamp64Milli(${timestamps.end})
+ORDER BY timestamp DESC
+LIMIT ${exploreStore.data.limit}`,
+            isValid: true,
+            error: null
+          };
+        }
+      }, 0);
+    }
+  }
 }
 
 // Initialize state from URL parameters
@@ -324,15 +348,28 @@ onMounted(async () => {
 
 // Watch for changes that should trigger SQL updates
 watch(
+  () => exploreStore.data.filterConditions,
+  (newFilters, oldFilters) => {
+    // Only update if we have a valid source
+    if (selectedSourceDetails.value.database && selectedSourceDetails.value.table) {
+      updateSqlGenerator();
+    }
+  },
+  { deep: true, immediate: true }
+)
+
+// Watch for other changes that should trigger SQL updates
+watch(
   () => ({
+    sourceId: exploreStore.data.sourceId,
     sourceDetails: selectedSourceDetails.value,
-    filterConditions: exploreStore.data.filterConditions,
     timeRange: exploreStore.data.timeRange,
     limit: exploreStore.data.limit
   }),
   () => {
+    // Only update if we have a valid source
     if (selectedSourceDetails.value.database && selectedSourceDetails.value.table) {
-      updateSqlGenerator()
+      updateSqlGenerator();
     }
   },
   { deep: true }

@@ -2,10 +2,36 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import * as monaco from 'monaco-editor'
 import { Button } from '@/components/ui/button'
+
+// Apply custom styling with CSS
+const customCss = `
+.monaco-editor,
+.monaco-editor .monaco-editor-background {
+  background-color: transparent !important;
+}
+.monaco-editor .margin,
+.monaco-editor .inputarea.ime-input {
+  background-color: transparent !important;
+}
+/* Remove borders that disrupt cohesive look */
+.monaco-editor .overflow-guard {
+  border: none !important;
+}
+/* Improve visual consistency with app theme */
+.monaco-editor .view-line {
+  align-items: center !important;
+  min-height: 22px !important;
+}
+/* Hide scrollbars but allow horizontal scrolling functionality */
+.monaco-editor .scrollbar.horizontal .slider {
+  height: 3px !important;
+  opacity: 0.6 !important;
+}
+`
 import { Search, X, HelpCircle } from 'lucide-vue-next'
 import type { FilterCondition } from '@/api/explore'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
-import { useDark } from '@vueuse/core'
+import { useColorMode } from '@vueuse/core'
 import { getSingleLineMonacoOptions } from '@/utils/monaco'
 import {
   registerCompletionProvider,
@@ -39,9 +65,9 @@ const emit = defineEmits<{
   (e: 'search'): void
 }>()
 
-// Dark mode detection
-const isDark = useDark()
-const theme = computed(() => isDark.value ? 'logchef-dark' : 'logchef-light')
+// Get theme from app-wide color mode
+const colorMode = useColorMode()
+const theme = computed(() => colorMode.value === 'dark' ? 'logchef-dark' : 'logchef-light')
 
 // Editor state
 const code = ref('')
@@ -70,7 +96,13 @@ const editorOptions = computed((): monaco.editor.IStandaloneEditorConstructionOp
   },
   find: {
     seedSearchStringFromSelection: 'never'
-  }
+  },
+  // Improved styling for cohesive look
+  minimap: { enabled: false },
+  padding: { top: 4, bottom: 4 },
+  glyphMargin: false,
+  lineDecorationsWidth: 0,
+  lineNumbersMinChars: 0
 }))
 
 // Handle editor mount
@@ -96,7 +128,7 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
       return null;
     }
   });
-  
+
   // Add a simpler keyboard shortcut for field suggestions (Alt+Space)
   // This version avoids custom providers which can create infinite loops
   editor.addAction({
@@ -109,7 +141,7 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
       try {
         // Focus first in case it's not focused
         editor.focus();
-        
+
         // Simply show the suggestion widget
         monaco.editor.trigger('keyboard', 'editor.action.triggerSuggest', {});
       } catch (error) {
@@ -137,6 +169,21 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
     updatePlaceholder(editor);
   });
 
+  // Listen for model content changes directly
+  // This will catch ALL changes including Ctrl+A followed by cut/delete
+  editor.onDidChangeModelContent(() => {
+    // Get the raw value directly from the editor model
+    const currentValue = editor.getValue().trim();
+
+    // If the editor is now empty, force update
+    if (!currentValue) {
+      // First set our code to empty
+      code.value = '';
+      // Then force empty filters
+      emit('update:modelValue', []);
+    }
+  });
+
   // Simple placeholder setup
   updatePlaceholder(editor);
 
@@ -161,10 +208,18 @@ const updatePlaceholder = (editor: monaco.editor.IStandaloneCodeEditor) => {
 // Handle content changes
 const onChange = () => {
   try {
-    // Get filters from the expression
-    const filters = parseFilterExpression(code.value);
-    // Update model value with the array of filter conditions
-    emit('update:modelValue', filters);
+    // Handle content changes from editor
+
+    // First check if the editor is actually empty
+    if (!code.value || code.value.trim() === '') {
+      // Clear filter conditions completely
+      emit('update:modelValue', []);
+    } else {
+      // Get filters from the expression
+      const filters = parseFilterExpression(code.value);
+      // Update model value with the array of filter conditions
+      emit('update:modelValue', filters);
+    }
 
     // Update placeholder if needed
     if (editorInstance.value) {
@@ -174,6 +229,9 @@ const onChange = () => {
     console.error("Error in onChange handler:", error);
   }
 }
+
+// Remove the special keyboard handler that's causing freezes
+// We'll rely on the onChange handler which should catch all editor content changes
 
 // Track last operation time to prevent race conditions
 let lastOperationTime = 0;
@@ -213,6 +271,11 @@ onMounted(() => {
     if (props.modelValue.length > 0) {
       code.value = filterConditionsToExpression(props.modelValue);
     }
+    
+    // Add style element
+    const styleEl = document.createElement('style')
+    styleEl.textContent = customCss
+    document.head.appendChild(styleEl)
   } catch (error) {
     console.error("Error in onMounted:", error);
   }
@@ -235,7 +298,8 @@ const insertFieldTrigger = () => {
     if (editorInstance.value) {
       // Just focus and show standard suggestions
       editorInstance.value.focus();
-      monaco.editor.trigger('keyboard', 'editor.action.triggerSuggest', {});
+      // Use the function from logfilter-language.ts instead of directly calling monaco
+      showFieldSuggestions(editorInstance.value);
     }
   } catch (error) {
     console.error("Error showing field suggestions:", error);
@@ -254,29 +318,29 @@ const insertField = (fieldName: string) => {
   try {
     // Get current value (safest approach)
     const currentContent = code.value;
-    
+
     // Calculate new content by simply appending field (most stable approach)
-    const needSpace = currentContent.length > 0 && 
-                     !currentContent.endsWith(' ') && 
-                     !currentContent.endsWith(';');
-    
+    const needSpace = currentContent.length > 0 &&
+      !currentContent.endsWith(' ') &&
+      !currentContent.endsWith(';');
+
     // Update value with minimal operations
     const newContent = currentContent + (needSpace ? ' ' : '') + fieldName + ' ';
-    
-    // Use separate step for focusing vs modifying content 
+
+    // Use separate step for focusing vs modifying content
     // to avoid race conditions
-    
+
     // First set content
     code.value = newContent;
-    
+
     // Then focus after UI has time to update
     window.setTimeout(() => {
       if (editorInstance.value) {
         // Basic focus only
         editorInstance.value.focus();
       }
-    }, 50); 
-    
+    }, 50);
+
   } catch (error) {
     console.error("Error in failsafe field insertion:", error);
   }
@@ -301,9 +365,8 @@ const applyExample = (expression: string) => {
   });
 }
 
-// Help tooltip content with keyboard shortcuts - updated since button was removed
+// Help tooltip content with keyboard shortcuts
 const tooltipItems = [
-  'Click on field chips above to quickly insert common fields',
   'Use Alt+Space to show field suggestions',
   'Use = for equality, != for inequality',
   'Use > < >= <= for numeric comparisons',
@@ -332,66 +395,47 @@ const tooltipItems = [
   <div class="w-full space-y-2">
     <!-- Filter Bar with improved UX -->
     <div class="relative flex flex-col gap-1 w-full">
-      <!-- Top bar with field buttons and examples -->
-      <div class="flex items-center gap-1.5 text-xs px-1">
-        <!-- Fields button in pill style -->
-        <button @click.stop="insertFieldTrigger"
-          class="bg-muted text-muted-foreground hover:text-foreground px-2 py-0.5 rounded-full transition-colors flex items-center gap-1 hover:bg-accent/50"
-          title="Show field suggestions (Alt+Space)">
-          <span class="font-mono font-medium tracking-tight">Fields</span>
-        </button>
-        
-        <!-- Quick field chips for common fields -->
-        <div v-if="props.columns.length > 0" class="flex-wrap flex gap-1 overflow-x-auto py-0.5">
-          <!-- Field chips with explicit stopPropagation to prevent editor bugs -->
-          <button
-            v-for="column in props.columns.slice(0, 5)"
-            :key="column.name"
-            @click="(event) => { event.stopPropagation(); insertField(column.name); }"
-            class="bg-muted/50 hover:bg-accent/40 text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded text-[10px] font-mono whitespace-nowrap"
-            :title="`Insert ${column.name} (${column.type})`"
-          >
-            {{ column.name }}
-          </button>
-          <button v-if="props.columns.length > 5" @click.stop="insertFieldTrigger"
-            class="bg-muted/50 hover:bg-accent/40 text-muted-foreground px-1.5 py-0.5 rounded text-[10px]"
-            title="Show all fields">
-            +{{ props.columns.length - 5 }} more
-          </button>
-        </div>
-      </div>
-      
       <!-- Main query bar with help on left side -->
       <div class="relative flex items-center rounded-md shadow-sm border-0 bg-background ring-1 ring-inset ring-input"
         :class="{ 'ring-primary': editorFocused }" @click="focusEditor">
-        
-        <!-- Left side help icon -->
-        <div class="flex items-center pl-1">
-          <TooltipProvider :delay-duration="0">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  class="text-muted-foreground hover:text-foreground flex items-center h-7 w-7 justify-center rounded-md hover:bg-accent">
-                  <HelpCircle class="h-4 w-4" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" align="start" class="max-w-sm p-4">
-                <h3 class="font-medium mb-2">Filter Query Usage Tips</h3>
-                <ul class="text-sm space-y-1">
-                  <li v-for="(item, index) in tooltipItems" :key="index" class="flex items-start">
-                    <span class="mr-2">•</span>
-                    <span>{{ item }}</span>
-                  </li>
-                </ul>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+
+        <!-- Left side controls - redesigned for a more integrated, sleek look -->
+        <div class="flex items-center pl-2">
+          <div class="flex h-7 rounded-lg border border-border bg-muted/30 divide-x divide-border overflow-hidden">
+            <!-- Help button in unified design -->
+            <TooltipProvider :delay-duration="0">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    class="text-muted-foreground hover:text-foreground flex items-center px-2 h-full justify-center hover:bg-accent/40 transition-colors">
+                    <HelpCircle class="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" align="start" class="max-w-sm p-4">
+                  <h3 class="font-medium mb-2">Filter Query Usage Tips</h3>
+                  <ul class="text-sm space-y-1">
+                    <li v-for="(item, index) in tooltipItems" :key="index" class="flex items-start">
+                      <span class="mr-2">•</span>
+                      <span>{{ item }}</span>
+                    </li>
+                  </ul>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
+            <!-- Fields button in integrated design -->
+            <button @click.stop="insertFieldTrigger"
+              class="text-muted-foreground hover:text-foreground flex items-center px-3 h-full text-xs font-mono justify-center hover:bg-accent/40 transition-colors"
+              title="Show field suggestions (Alt+Space)">
+              Fields
+            </button>
+          </div>
         </div>
 
-        <!-- Editor Container - with proper spacing -->
-        <div ref="editorContainer" class="flex-1 h-9 min-h-[36px] overflow-hidden cursor-text px-2">
+        <!-- Editor Container - with improved spacing and styling -->
+        <div ref="editorContainer" class="flex-1 h-9 min-h-[36px] overflow-hidden cursor-text px-2 py-1 flex items-center">
           <VueMonacoEditor v-model:value="code" :theme="theme" language="logfilter" :options="editorOptions"
-            @mount="handleMount" @change="onChange" />
+            @mount="handleMount" @change="onChange" class="w-full h-full" />
         </div>
 
         <!-- Search button on right -->

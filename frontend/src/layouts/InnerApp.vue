@@ -4,6 +4,7 @@ import {
     AvatarFallback,
 } from '@/components/ui/avatar'
 
+import { Button } from '@/components/ui/button'
 
 import {
     DropdownMenu,
@@ -48,11 +49,15 @@ import {
     UserCircle2,
     UsersRound,
     ChevronsUpDown,
+    Sun,
+    Moon,
+    Monitor,
 } from 'lucide-vue-next'
 
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { computed, ref } from 'vue'
+import { useColorMode } from '@vueuse/core'
 import type { FunctionalComponent } from 'vue'
 import type { LucideProps } from 'lucide-vue-next'
 import type { RouteLocationRaw } from 'vue-router'
@@ -64,6 +69,11 @@ import {
     BreadcrumbPage,
     BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
+
+// Initialize color mode
+const colorMode = useColorMode()
+// Track the selected option, separate from actual mode
+const selectedMode = ref(colorMode.value)
 
 const route = useRoute()
 const authStore = useAuthStore()
@@ -218,16 +228,62 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
                                             </Avatar>
                                             <div class="grid flex-1 text-left text-sm leading-tight">
                                                 <span class="truncate font-semibold">{{ authStore.user?.full_name
-                                                }}</span>
+                                                    }}</span>
                                                 <span class="truncate text-xs">{{ authStore.user?.email }}</span>
                                             </div>
                                         </div>
                                     </DropdownMenuLabel>
                                     <DropdownMenuSeparator />
-                                    <DropdownMenuItem @click="authStore.logout">
-                                        <LogOut class="mr-2" />
-                                        Log out
-                                    </DropdownMenuItem>
+                                    <DropdownMenuLabel>Theme</DropdownMenuLabel>
+                                    <div class="px-2 py-1.5">
+                                        <div class="flex items-center justify-between space-x-2">
+                                            <Button 
+                                                variant="outline" 
+                                                size="icon" 
+                                                class="w-9 px-0 flex-1 rounded-md"
+                                                :class="{ 'bg-primary text-primary-foreground': selectedMode === 'light' }"
+                                                @click="colorMode = 'light'; selectedMode = 'light'">
+                                                <Sun class="h-5 w-5" />
+                                            </Button>
+                                            <Button 
+                                                variant="outline" 
+                                                size="icon" 
+                                                class="w-9 px-0 flex-1 rounded-md"
+                                                :class="{ 'bg-primary text-primary-foreground': selectedMode === 'dark' }"
+                                                @click="colorMode = 'dark'; selectedMode = 'dark'">
+                                                <Moon class="h-5 w-5" />
+                                            </Button>
+                                            <Button 
+                                                variant="outline" 
+                                                size="icon" 
+                                                class="w-9 px-0 flex-1 rounded-md"
+                                                :class="{ 'bg-primary text-primary-foreground': selectedMode === 'auto' }"
+                                                @click="colorMode = 'auto'; selectedMode = 'auto'">
+                                                <Monitor class="h-5 w-5" />
+                                            </Button>
+                                        </div>
+                                    </div>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuLabel>Account</DropdownMenuLabel>
+                                    <div class="px-2 py-1.5">
+                                        <Button 
+                                            variant="outline"
+                                            class="w-full justify-start mb-1.5"
+                                            as-child>
+                                            <router-link to="/settings/profile" class="flex items-center">
+                                                <UserCircle2 class="mr-2 h-4 w-4" />
+                                                Profile Settings
+                                            </router-link>
+                                        </Button>
+                                        
+                                        <Button 
+                                            variant="destructive"
+                                            class="w-full justify-start"
+                                            @click="authStore.logout">
+                                            <LogOut class="mr-2 h-4 w-4" />
+                                            Log out
+                                        </Button>
+                                    </div>
                                 </DropdownMenuContent>
                             </DropdownMenu>
                         </SidebarMenuItem>

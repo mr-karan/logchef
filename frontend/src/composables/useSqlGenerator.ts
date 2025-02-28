@@ -148,7 +148,12 @@ export function useSqlGenerator(initialOptions: SqlGeneratorOptions) {
     conditions: FilterCondition[]
   ): SqlGeneratorState {
     try {
-      const whereClause = buildWhereClause(conditions || []);
+      // Only include non-empty conditions
+      const filteredConditions = conditions?.filter(condition => 
+        condition && condition.field && condition.operator && condition.value !== undefined
+      ) || [];
+
+      const whereClause = buildWhereClause(filteredConditions);
       const orderClause = buildOrderClause();
       const limitClause = buildLimitClause();
 
@@ -173,8 +178,21 @@ ${limitClause}`.trim();
 
   // Debounced preview generation (for UI updates only)
   const generatePreviewSql = useDebounceFn((conditions: FilterCondition[]) => {
-    previewSql.value = generateSqlInternal(conditions);
-  }, 300); // Reduced debounce time for better UI responsiveness
+    // For empty condition arrays, always generate a clean simple query
+    if (!conditions || conditions.length === 0) {
+      previewSql.value = {
+        sql: `SELECT *
+FROM ${options.value.database}.${options.value.table}
+WHERE timestamp >= fromUnixTimestamp64Milli(${options.value.start_timestamp}) AND timestamp <= fromUnixTimestamp64Milli(${options.value.end_timestamp})
+ORDER BY timestamp DESC
+LIMIT ${options.value.limit}`,
+        isValid: true,
+        error: null
+      };
+    } else {
+      previewSql.value = generateSqlInternal(conditions);
+    }
+  }, 100); // Reduced debounce time for better responsiveness
 
   // Immediate SQL generation (for actual queries)
   function generateQuerySql(conditions: FilterCondition[]): SqlGeneratorState {

@@ -103,7 +103,17 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function setFilterConditions(filters: FilterCondition[]) {
-    state.data.value.filterConditions = filters;
+    // Check for the special _force_clear marker
+    const isForceClearing = filters.length === 1 && '_force_clear' in filters[0];
+    
+    if (isForceClearing) {
+      console.log("Explore store: force-clearing filter conditions");
+      // This is our special signal to clear conditions
+      state.data.value.filterConditions = [];
+    } else {
+      console.log("Explore store: setting filter conditions:", filters.length);
+      state.data.value.filterConditions = filters;
+    }
   }
 
   function setRawSql(sql: string) {
