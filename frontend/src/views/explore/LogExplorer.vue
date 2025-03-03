@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, watch, computed, nextTick } from 'vue'
+import type { WritableComputedRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -29,21 +30,34 @@ import SQLEditor from '@/components/sql-editor/SQLEditor.vue'
 import { formatSourceName } from '@/utils/format'
 import { useSourcesStore } from '@/stores/sources'
 import { useExploreStore } from '@/stores/explore'
+import { useTeamsStore } from '@/stores/teams'
 import { useSqlGenerator } from '@/composables/useSqlGenerator'
 import SqlPreview from '@/components/sql-preview/SqlPreview.vue'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible'
 import { ChevronRight } from 'lucide-vue-next'
 import SmartFilterBar from '@/components/smart-filter/SmartFilterBar.vue'
+import SavedQueriesDropdown from '@/components/saved-queries/SavedQueriesDropdown.vue'
+import SaveQueryModal from '@/components/saved-queries/SaveQueryModal.vue'
+import { useSavedQueriesStore } from '@/stores/savedQueries'
+import { serializeQueryState, deserializeQueryContent } from '@/utils/querySerializer'
+import type { SavedTeamQuery } from '@/api/types'
+import type { CreateTeamQueryRequest } from '@/api/sources'
 
 const router = useRouter()
 const sourcesStore = useSourcesStore()
 const exploreStore = useExploreStore()
+const savedQueriesStore = useSavedQueriesStore()
+const teamsStore = useTeamsStore()
 const { toast } = useToast()
 const route = useRoute()
 
+// Saved queries state
+const showSaveQueryModal = ref(false)
+const queryToSave = ref('')
+
 // Local UI state
-const isLoading = computed(() => exploreStore.isLoading)
+const isLoading = computed(() => exploreStore.isLoading || sourcesStore.isLoading || teamsStore.isLoading)
 const previewOpen = ref(false)
 
 // Flag to prevent unnecessary URL updates on initial load
@@ -60,16 +74,17 @@ const dateRange = computed({
   }),
   set: (newValue: DateRange | null) => {
     if (newValue?.start && newValue?.end) {
-      const range = {
-        start: newValue.start as unknown as DateValue,
-        end: newValue.end as unknown as DateValue
+      // Create a properly typed range object
+      const range: { start: DateValue; end: DateValue } = {
+        start: newValue.start as DateValue,
+        end: newValue.end as DateValue
       }
       exploreStore.setTimeRange(range)
       // Update SQL generator when time range changes
       updateSqlGenerator()
     }
   }
-})
+}) as unknown as WritableComputedRef<DateRange>
 
 // Add loading state handling
 const showLoadingState = computed(() => {
@@ -78,28 +93,42 @@ const showLoadingState = computed(() => {
 
 // Fix the empty state computed to handle null sources from API
 const showEmptyState = computed(() => {
-  return !sourcesStore.isLoading && (!sourcesStore.sources || sourcesStore.sources.length === 0)
+  return !sourcesStore.isLoading &&
+    (!sourcesStore.deduplicatedSources || sourcesStore.deduplicatedSources.length === 0)
+})
+
+// Get the teams for the selected source
+const sourceTeams = computed(() => {
+  if (!exploreStore.data.sourceId) return []
+  return sourcesStore.getTeamsForSource(exploreStore.data.sourceId)
 })
 
 // Fix the selected source name computed to handle null sources
 const selectedSourceName = computed(() => {
-  if (!sourcesStore.sources) return 'Loading...'
-  const source = sourcesStore.sources.find(s => s.id === exploreStore.data.sourceId)
+  const source = sourcesStore.sourcesWithTeams.find(s => s.id === exploreStore.data.sourceId)
   return source ? formatSourceName(source) : 'Select a source'
 })
 
 // Fix the selected source details computed to handle null sources
 const selectedSourceDetails = computed(() => {
-  if (!sourcesStore.sources) return { database: '', table: '' }
-  const source = sourcesStore.sources.find(s => s.id === exploreStore.data.sourceId)
-  return source ? {
+  const source = sourcesStore.sourcesWithTeams.find(s => s.id === exploreStore.data.sourceId)
+  if (!source) return { database: '', table: '' }
+
+  return {
     database: source.connection.database,
     table: source.connection.table_name
-  } : {
-    database: '',
-    table: ''
   }
 })
+
+// Add team selection name computed
+const selectedTeamName = computed(() => {
+  return teamsStore.currentTeam?.name || 'Select a team'
+})
+
+// Add a computed property for the selected team ID that handles undefined correctly
+const selectedTeamIdForDropdown = computed(() => {
+  return teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : undefined;
+});
 
 // Function to get timestamps from store's time range
 const getTimestamps = () => {
@@ -163,108 +192,88 @@ const sqlPreviewState = computed(() => {
 
 // Function to initialize or update SQL generator
 function updateSqlGenerator() {
-  const timestamps = getTimestamps()
-  sqlGenerator.value?.updateOptions({
-    database: selectedSourceDetails.value.database,
-    table: selectedSourceDetails.value.table,
-    start_timestamp: timestamps.start,
-    end_timestamp: timestamps.end,
-    limit: exploreStore.data.limit,
-  })
+  // Only update if we have a valid source with database and table
+  if (selectedSourceDetails.value.database && selectedSourceDetails.value.table) {
+    const timestamps = getTimestamps()
 
-  // Only generate SQL if we have filter conditions
-  // (prevents stale conditions from showing in preview)
-  if (exploreStore.data.filterConditions && exploreStore.data.filterConditions.length > 0) {
-    sqlGenerator.value?.generatePreviewSql(exploreStore.data.filterConditions);
-  } else {
-    // Reset the preview when there are no filters
-    if (sqlGenerator.value) {
-      // Force update of the previewSql ref with a clean SQL query
-      sqlGenerator.value.generatePreviewSql([]);
+    sqlGenerator.value = useSqlGenerator({
+      database: selectedSourceDetails.value.database,
+      table: selectedSourceDetails.value.table,
+      start_timestamp: timestamps.start,
+      end_timestamp: timestamps.end,
+      limit: exploreStore.data.limit
+    })
 
-      // Immediately after, forcibly set the SQL to what we want (bypassing the debounce)
-      setTimeout(() => {
-        if (sqlGenerator.value?.previewSql) {
-          sqlGenerator.value.previewSql.value = {
-            sql: `SELECT *
-FROM ${selectedSourceDetails.value.database}.${selectedSourceDetails.value.table}
-WHERE timestamp >= fromUnixTimestamp64Milli(${timestamps.start}) AND timestamp <= fromUnixTimestamp64Milli(${timestamps.end})
-ORDER BY timestamp DESC
-LIMIT ${exploreStore.data.limit}`,
-            isValid: true,
-            error: null
-          };
-        }
-      }, 0);
+    // Only generate SQL if we have filters
+    const queryState = sqlGenerator.value.generateQuerySql(exploreStore.data.filterConditions)
+    // Update rawSQL only if valid
+    if (queryState.isValid) {
+      exploreStore.setRawSql(queryState.sql)
     }
   }
 }
 
 // Initialize state from URL parameters
 function initializeFromURL() {
-  const { source, limit, start_time, end_time, query } = route.query
-
-  // Parse source ID
-  if (source && typeof source === 'string') {
-    exploreStore.setSource(source)
+  // Set team from URL
+  if (route.query.team && typeof route.query.team === 'string') {
+    teamsStore.setCurrentTeam(parseInt(route.query.team));
   }
 
-  // Parse limit
-  if (limit) {
-    const parsedLimit = parseInt(limit as string)
-    if (!isNaN(parsedLimit) && parsedLimit > 0 && parsedLimit <= 10000) {
-      exploreStore.setLimit(parsedLimit)
-    }
+  // Set source from URL
+  if (route.query.source && typeof route.query.source === 'string') {
+    exploreStore.setSource(parseInt(route.query.source));
   }
 
-  // Parse timestamps
-  if (start_time && end_time) {
+  // Set limit from URL
+  if (route.query.limit && typeof route.query.limit === 'string') {
+    exploreStore.setLimit(parseInt(route.query.limit))
+  }
+
+  // Set time range from URL
+  if (
+    route.query.start_time &&
+    route.query.end_time &&
+    typeof route.query.start_time === 'string' &&
+    typeof route.query.end_time === 'string'
+  ) {
     try {
-      const startTs = parseInt(start_time as string)
-      const endTs = parseInt(end_time as string)
-      if (!isNaN(startTs) && !isNaN(endTs)) {
-        // Create JavaScript Date objects first
-        const startDate = new Date(startTs)
-        const endDate = new Date(endTs)
+      const startValue = parseInt(route.query.start_time)
+      const endValue = parseInt(route.query.end_time)
 
-        // Only update if dates are valid
-        if (startDate.getTime() > 0 && endDate.getTime() > 0) {
-          const start = new CalendarDateTime(
-            startDate.getFullYear(),
-            startDate.getMonth() + 1,
-            startDate.getDate(),
-            startDate.getHours(),
-            startDate.getMinutes(),
-            startDate.getSeconds()
-          )
-          const end = new CalendarDateTime(
-            endDate.getFullYear(),
-            endDate.getMonth() + 1,
-            endDate.getDate(),
-            endDate.getHours(),
-            endDate.getMinutes(),
-            endDate.getSeconds()
-          )
-          exploreStore.setTimeRange({
-            start,
-            end
-          })
-        }
-      }
-    } catch (e) {
-      console.error('Error parsing timestamps:', e)
-      // On error, set to last 3 hours
-      const newCurrentTime = now(getLocalTimeZone())
+      const startDate = new Date(startValue)
+      const endDate = new Date(endValue)
+
+      const start = new CalendarDateTime(
+        startDate.getFullYear(),
+        startDate.getMonth() + 1,
+        startDate.getDate(),
+        startDate.getHours(),
+        startDate.getMinutes(),
+        startDate.getSeconds()
+      )
+
+      const end = new CalendarDateTime(
+        endDate.getFullYear(),
+        endDate.getMonth() + 1,
+        endDate.getDate(),
+        endDate.getHours(),
+        endDate.getMinutes(),
+        endDate.getSeconds()
+      )
+
       exploreStore.setTimeRange({
-        start: newCurrentTime.subtract({ hours: 3 }),
-        end: newCurrentTime
+        start,
+        end
       })
+    } catch (e) {
+      console.error('Failed to parse time range from URL', e)
     }
   }
 
-  // Parse query
-  if (query && typeof query === 'string') {
-    exploreStore.setRawSql(decodeURIComponent(query))
+  // Set raw SQL from URL
+  if (route.query.query && typeof route.query.query === 'string') {
+    exploreStore.setRawSql(decodeURIComponent(route.query.query))
   }
 }
 
@@ -277,7 +286,8 @@ function updateURL() {
 
   const timestamps = getTimestamps()
   const query: Record<string, string> = {
-    source: exploreStore.data.sourceId,
+    team: teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : '',
+    source: exploreStore.data.sourceId ? exploreStore.data.sourceId.toString() : '',
     limit: exploreStore.data.limit.toString(),
     start_time: timestamps.start.toString(),
     end_time: timestamps.end.toString()
@@ -291,7 +301,7 @@ function updateURL() {
 }
 
 // Add activeTab ref for tab management
-const activeTab = ref('filters')
+const activeTab = ref<string | number>('filters')
 
 // Update onMounted
 onMounted(async () => {
@@ -299,44 +309,72 @@ onMounted(async () => {
     // First initialize from URL
     initializeFromURL()
 
-    // Then load sources
-    await sourcesStore.loadSources()
+    // Load teams first in the team-first approach
+    await teamsStore.loadTeams()
 
-    // If source wasn't set from URL and we have sources, select the first one
-    if (!exploreStore.data.sourceId && sourcesStore.sources.length > 0) {
-      exploreStore.setSource(sourcesStore.sources[0].id)
+    // Auto-select first team if none is selected
+    if (!teamsStore.currentTeamId && teamsStore.teams.length > 0) {
+      teamsStore.currentTeamId = teamsStore.teams[0].id
+      await nextTick()
     }
 
-    // Validate selected source exists
-    if (exploreStore.data.sourceId && !sourcesStore.sources.find(s => s.id === exploreStore.data.sourceId)) {
-      toast({
-        title: 'Warning',
-        description: 'Selected source not found',
-        variant: 'destructive',
-        duration: TOAST_DURATION.ERROR,
-      })
-      exploreStore.setSource(sourcesStore.sources[0]?.id || '')
+    // If team is set from URL, use that
+    if (route.query.team && typeof route.query.team === "string") {
+      teamsStore.currentTeamId = parseInt(route.query.team);
+      await nextTick();
     }
 
-    // Set default time range if not set from URL
-    if (!exploreStore.data.timeRange) {
-      const newCurrentTime = now(getLocalTimeZone())
-      exploreStore.setTimeRange({
-        start: newCurrentTime.subtract({ hours: 3 }),
-        end: newCurrentTime
-      })
+    // Then load sources with team information
+    if (teamsStore.currentTeamId) {
+      await sourcesStore.loadUserSources()
+
+      // Auto-select first source if none is selected and we have sources
+      if (!exploreStore.data.sourceId && sourcesStore.teamSources.length > 0) {
+        exploreStore.setSource(sourcesStore.teamSources[0].id)
+        await nextTick()
+      }
+
+      // If source is set from URL, use that
+      if (route.query.source && typeof route.query.source === "string") {
+        exploreStore.setSource(parseInt(route.query.source));
+        await nextTick();
+      }
+
+      // If we have a source selected, load its saved queries for the current team
+      if (exploreStore.data.sourceId && teamsStore.currentTeamId) {
+        await savedQueriesStore.fetchSourceQueries(
+          exploreStore.data.sourceId,
+          teamsStore.currentTeamId
+        )
+      }
     }
 
-    // Initialize SQL generator if we have a valid source
-    if (selectedSourceDetails.value.database && selectedSourceDetails.value.table) {
-      updateSqlGenerator()
+    // Check if we have a query_id in the URL
+    if (route.query.query_id && typeof route.query.query_id === "string") {
+      // Try to fetch user teams first to establish team context
+      if (!teamsStore.currentTeamId) {
+        await savedQueriesStore.fetchUserTeams()
+      }
+
+      if (teamsStore.currentTeamId || savedQueriesStore.data.selectedTeamId) {
+        // Then try to load the saved query
+        await loadSavedQuery(route.query.query_id)
+      } else {
+        toast({
+          title: 'Warning',
+          description: 'Could not load saved query: No team context available',
+          variant: 'destructive',
+          duration: TOAST_DURATION.ERROR,
+        })
+      }
     }
 
-    // Only execute initial query if we have both a valid source and time range
-    if (exploreStore.canExecuteQuery) {
+    // If we have all the necessary parameters, execute the query
+    if (exploreStore.canExecuteQuery && !isInitialLoad.value) {
       await executeQuery()
     }
   } catch (error) {
+    console.error('Error initializing LogExplorer:', error)
     toast({
       title: 'Error',
       description: getErrorMessage(error),
@@ -435,6 +473,217 @@ watch(
 const handleFiltersUpdate = (filters: FilterCondition[]) => {
   exploreStore.setFilterConditions(filters)
 }
+
+// Handle loading saved query
+async function loadSavedQuery(queryId: string) {
+  try {
+    // First get team context
+    const teamId = savedQueriesStore.data.selectedTeamId
+    if (!teamId) {
+      // Try to load teams first
+      await savedQueriesStore.fetchUserTeams()
+      if (!savedQueriesStore.data.selectedTeamId) {
+        toast({
+          title: 'Error',
+          description: 'No team context available',
+          variant: 'destructive',
+          duration: TOAST_DURATION.ERROR,
+        })
+        return
+      }
+    }
+
+    // Fetch the query
+    const queryResponse = await savedQueriesStore.fetchQuery(
+      savedQueriesStore.data.selectedTeamId || 0,
+      queryId
+    )
+
+    if (queryResponse.success && queryResponse.data) {
+      try {
+        const query = queryResponse.data
+        // Parse the query content
+        const content = JSON.parse(query.query_content)
+
+        // Load the query state into the store
+        if (content.sourceId) exploreStore.setSource(content.sourceId)
+
+        // Load time range
+        if (content.timeRange) {
+          const startDate = new Date(content.timeRange.absolute.start)
+          const endDate = new Date(content.timeRange.absolute.end)
+
+          const start = new CalendarDateTime(
+            startDate.getFullYear(),
+            startDate.getMonth() + 1,
+            startDate.getDate(),
+            startDate.getHours(),
+            startDate.getMinutes(),
+            startDate.getSeconds()
+          )
+
+          const end = new CalendarDateTime(
+            endDate.getFullYear(),
+            endDate.getMonth() + 1,
+            endDate.getDate(),
+            endDate.getHours(),
+            endDate.getMinutes(),
+            endDate.getSeconds()
+          )
+
+          exploreStore.setTimeRange({
+            start,
+            end
+          })
+        }
+
+        // Load limit
+        if (content.limit) exploreStore.setLimit(content.limit)
+
+        // Load raw SQL
+        if (content.rawSql) exploreStore.setRawSql(content.rawSql)
+
+        // Set active tab
+        activeTab.value = content.activeTab || 'filters'
+
+        // Update URL
+        updateURL()
+
+        // Execute the query
+        await executeQuery()
+
+        toast({
+          title: 'Success',
+          description: `Loaded query "${query.name}"`,
+          duration: TOAST_DURATION.SUCCESS,
+        })
+      } catch (parseError) {
+        toast({
+          title: 'Error',
+          description: `Failed to parse query content: ${getErrorMessage(parseError)}`,
+          variant: 'destructive',
+          duration: TOAST_DURATION.ERROR,
+        })
+      }
+    }
+  } catch (error) {
+    toast({
+      title: 'Error',
+      description: `Failed to load saved query: ${getErrorMessage(error)}`,
+      variant: 'destructive',
+      duration: TOAST_DURATION.ERROR,
+    })
+  }
+}
+
+// Handle showing save query modal
+function showSaveQueryForm() {
+  try {
+    // Serialize the current query state
+    const serialized = serializeQueryState(exploreStore.data)
+    queryToSave.value = JSON.stringify(serialized)
+    showSaveQueryModal.value = true
+  } catch (error) {
+    toast({
+      title: 'Error',
+      description: `Failed to prepare query for saving: ${getErrorMessage(error)}`,
+      variant: 'destructive',
+      duration: TOAST_DURATION.ERROR,
+    })
+  }
+}
+
+// Handle team selection change
+async function handleTeamChange(teamId: string) {
+  try {
+    // Set the current team directly
+    teamsStore.currentTeamId = parseInt(teamId);
+
+    // Wait for reactivity to update teamSources
+    await nextTick();
+
+    // Check if sources are available for this team
+    if (sourcesStore.teamSources && sourcesStore.teamSources.length > 0) {
+      // Reset source selection if current source doesn't belong to new team
+      const sourceExists = sourcesStore.teamSources.some(s => s.id === exploreStore.data.sourceId);
+      if (!sourceExists) {
+        // Auto-select first source if current source not in team
+        exploreStore.setSource(sourcesStore.teamSources[0].id);
+      }
+    } else {
+      // No sources for this team
+      exploreStore.setSource(0);
+      console.log(`No sources available for team ${teamId}`);
+    }
+
+    // Update URL
+    updateURL();
+  } catch (error) {
+    console.error('Error changing team:', error);
+    toast({
+      title: 'Error',
+      description: `Failed to change team: ${getErrorMessage(error)}`,
+      variant: 'destructive',
+      duration: TOAST_DURATION.ERROR,
+    });
+  }
+}
+
+// Handle save query submission with specific typing
+async function handleSaveQuery(formData: any) {
+  try {
+    // Convert to the expected type
+    const queryRequest: CreateTeamQueryRequest = {
+      team_id: formData.team_id ? parseInt(formData.team_id) : (teamsStore.currentTeamId || 0),
+      name: formData.name,
+      description: formData.description,
+      query_content: formData.query_content
+    };
+
+    // Use the source-centric API to create the query
+    const result = await sourcesStore.createSourceQuery(
+      exploreStore.data.sourceId.toString(),
+      queryRequest
+    );
+
+    if (result.success && result.data) {
+      toast({
+        title: 'Success',
+        description: 'Query saved successfully',
+        duration: TOAST_DURATION.SUCCESS,
+      });
+
+      // Update URL with query_id
+      const timestamps = getTimestamps();
+      const params = new URLSearchParams(route.query as Record<string, string>);
+
+      // Safely access id from data
+      params.set('query_id', result.data.id.toString());
+      params.set('team', teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : '');
+      params.set('source', exploreStore.data.sourceId.toString());
+      params.set('limit', exploreStore.data.limit.toString());
+      params.set('start_time', timestamps.start.toString());
+      params.set('end_time', timestamps.end.toString());
+
+      if (exploreStore.data.rawSql) {
+        params.set('query', encodeURIComponent(exploreStore.data.rawSql.trim()));
+      } else {
+        params.delete('query');
+      }
+
+      router.replace({ query: Object.fromEntries(params.entries()) });
+    }
+
+    showSaveQueryModal.value = false;
+  } catch (error) {
+    toast({
+      title: 'Error',
+      description: `Failed to save query: ${getErrorMessage(error)}`,
+      variant: 'destructive',
+      duration: TOAST_DURATION.ERROR,
+    });
+  }
+}
 </script>
 
 <template>
@@ -465,22 +714,39 @@ const handleFiltersUpdate = (filters: FilterCondition[]) => {
 
   <!-- Main explorer UI when sources are available -->
   <div v-else class="flex flex-col h-full min-w-0 gap-3">
-    <!-- Ultra-Compact Control Bar - Removed container styling -->
+    <!-- Updated Control Bar - Team First -->
     <div class="flex items-center gap-2 h-9 mb-1">
-      <!-- Source Selector -->
-      <div class="w-[180px]">
-        <Select v-model="exploreStore.data.sourceId" class="h-7">
+      <!-- Team Selector -->
+      <div class="w-[220px]">
+        <Select :model-value="teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : ''"
+          @update:model-value="handleTeamChange" class="h-7">
+          <SelectTrigger class="h-7 py-0 text-xs">
+            <SelectValue placeholder="Select a team">
+              {{ selectedTeamName }}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id.toString()">
+              {{ team.name }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <!-- Source Selector (filtered by team) -->
+      <div class="w-[220px]">
+        <Select :model-value="exploreStore.data.sourceId ? exploreStore.data.sourceId.toString() : ''"
+          @update:model-value="(val) => exploreStore.setSource(parseInt(val))" class="h-7"
+          :disabled="!teamsStore.currentTeamId || (sourcesStore.teamSources || []).length === 0">
           <SelectTrigger class="h-7 py-0 text-xs">
             <SelectValue placeholder="Select a source">
               {{ selectedSourceName }}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectGroup>
-              <SelectItem v-for="source in sourcesStore.sources" :key="source.id" :value="source.id">
-                {{ formatSourceName(source) }}
-              </SelectItem>
-            </SelectGroup>
+            <SelectItem v-for="source in sourcesStore.teamSources || []" :key="source.id" :value="source.id.toString()">
+              {{ formatSourceName(source) }}
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -496,11 +762,17 @@ const handleFiltersUpdate = (filters: FilterCondition[]) => {
       <!-- Spacer -->
       <div class="flex-1"></div>
 
+      <!-- Saved Queries Dropdown (now with team context) -->
+      <div class="w-[180px]">
+        <SavedQueriesDropdown :selected-team-id="teamsStore.currentTeamId || undefined" @select="loadSavedQuery"
+          @save="showSaveQueryForm" />
+      </div>
+
       <!-- Limit Control - Changed to dropdown -->
       <div class="flex items-center gap-1 mr-2">
         <span class="text-xs text-muted-foreground whitespace-nowrap">Limit:</span>
         <Select :model-value="exploreStore.data.limit.toString()"
-          @update:model-value="val => exploreStore.setLimit(parseInt(val))" class="w-[80px]">
+          @update:model-value="(val: string) => exploreStore.setLimit(parseInt(val))" class="w-[80px]">
           <SelectTrigger class="h-7 py-0 text-xs">
             <SelectValue placeholder="Limit" />
           </SelectTrigger>
@@ -569,7 +841,16 @@ const handleFiltersUpdate = (filters: FilterCondition[]) => {
     <!-- Results Area -->
     <div class="flex-1 min-h-0">
       <!-- Show Skeleton when loading -->
-      <div v-if="isLoading" class="border rounded-md bg-card p-3 space-y-3">
+      <div v-if="isLoading && !sourcesStore.sourcesWithTeams.length" class="flex-1 flex justify-center items-center">
+        <div class="flex flex-col items-center gap-4 text-center">
+          <Skeleton class="h-12 w-12 rounded-full" />
+          <div class="space-y-2">
+            <Skeleton class="h-4 w-[250px]" />
+            <Skeleton class="h-4 w-[200px]" />
+          </div>
+        </div>
+      </div>
+      <div v-else-if="isLoading" class="border rounded-md bg-card p-3 space-y-3">
         <!-- Simulate Table Header Skeleton -->
         <div class="flex gap-3">
           <Skeleton class="h-4 w-1/4" />
@@ -590,10 +871,14 @@ const handleFiltersUpdate = (filters: FilterCondition[]) => {
       <!-- Show Results when data is loaded -->
       <div v-else-if="exploreStore.data.logs?.length > 0" class="border rounded-md bg-card">
         <DataTable :columns="tableColumns" :data="exploreStore.data.logs" :stats="exploreStore.data.queryStats"
-          :source-id="exploreStore.data.sourceId" />
+          :source-id="exploreStore.data.sourceId.toString()" />
       </div>
       <EmptyState v-else class="border rounded-md bg-card" />
     </div>
+
+    <!-- Save Query Modal (now with team context) -->
+    <SaveQueryModal v-if="showSaveQueryModal" :is-open="showSaveQueryModal" :query-content="queryToSave"
+      @close="showSaveQueryModal = false" @save="handleSaveQuery" />
   </div>
 </template>
 

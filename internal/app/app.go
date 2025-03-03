@@ -15,6 +15,7 @@ import (
 	"github.com/mr-karan/logchef/internal/server"
 	"github.com/mr-karan/logchef/internal/source"
 	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/pkg/logger"
 )
 
 // App represents the application and its components
@@ -25,10 +26,11 @@ type App struct {
 	sqliteDB *sqlite.DB
 
 	// Domain services
-	authService     *auth.Service
-	sourceService   *source.Service
-	logsService     *logs.Service
-	identityService *identity.Service
+	authService      *auth.Service
+	sourceService    *source.Service
+	logsService      *logs.Service
+	identityService  *identity.Service
+	teamQueryService *logs.TeamQueryService
 
 	// HTTP server
 	server *server.Server
@@ -63,6 +65,15 @@ func New(opts Options) (*App, error) {
 	if log == nil {
 		// This should not happen if logger is properly initialized in main.go
 		log = slog.Default().With("component", "app")
+	}
+
+	// Reconfigure global logger with config settings
+	if cfg.Logging.Level != "" {
+		// Reconfigure logger with the level from config
+		logger.Initialize(cfg.Logging.Level)
+
+		// Update the app logger to use the reconfigured global logger
+		log = logger.NewLogger("app")
 	}
 
 	// Create app instance
@@ -104,6 +115,10 @@ func (a *App) Initialize(ctx context.Context) error {
 	a.sourceService = source.New(a.sqliteDB, clickhouseManager, a.log)
 	a.logsService = logs.New(a.sqliteDB, clickhouseManager, a.log)
 	a.identityService = identity.New(a.sqliteDB, a.log)
+
+	// Initialize team query service
+	a.log.Info("initializing team query service")
+	a.teamQueryService = logs.NewTeamQueryService(a.sqliteDB, a.log)
 
 	// Ensure admin user exists
 	a.log.Info("ensuring admin users")
@@ -147,6 +162,7 @@ func (a *App) Initialize(ctx context.Context) error {
 		a.authService,
 		a.webFS,
 		a.buildInfo,
+		a.teamQueryService,
 	)
 
 	return nil

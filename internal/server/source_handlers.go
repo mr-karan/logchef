@@ -57,7 +57,12 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 		req.MetaTSField = "timestamp" // Default timestamp field
 	}
 
-	created, err := s.sourceService.CreateSource(c.Context(), req.MetaIsAutoCreated, req.Connection, req.Description, req.TTLDays, req.MetaTSField)
+	// Set default severity field if not provided
+	if req.MetaSeverityField == "" {
+		req.MetaSeverityField = "severity_text" // Default severity field
+	}
+
+	created, err := s.sourceService.CreateSource(c.Context(), req.MetaIsAutoCreated, req.Connection, req.Description, req.TTLDays, req.MetaTSField, req.MetaSeverityField)
 	if err != nil {
 		var validationErr *source.ValidationError
 		if errors.As(err, &validationErr) {
@@ -84,4 +89,59 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 	}
 
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Source deleted successfully"})
+}
+
+// handleValidateSourceConnection handles POST /api/v1/sources/validate
+func (s *Server) handleValidateSourceConnection(c *fiber.Ctx) error {
+	var req models.ValidateConnectionRequest
+	if err := c.BodyParser(&req); err != nil {
+		s.log.Error("invalid request body", "error", err)
+		return SendError(c, fiber.StatusBadRequest, "invalid request body")
+	}
+
+	s.log.Debug("validating connection",
+		"host", req.Host,
+		"database", req.Database,
+		"table", req.TableName,
+		"timestamp_field", req.TimestampField,
+		"severity_field", req.SeverityField,
+	)
+
+	// Validate the connection
+	var result *models.ConnectionValidationResult
+	var err error
+
+	// If timestamp field is provided, validate column types as well
+	if req.TimestampField != "" {
+		result, err = s.sourceService.ValidateConnectionWithColumns(c.Context(), req.ConnectionInfo, req.TimestampField, req.SeverityField)
+	} else {
+		result, err = s.sourceService.ValidateConnection(c.Context(), req.ConnectionInfo)
+	}
+
+	if err != nil {
+		var validationErr *source.ValidationError
+		if errors.As(err, &validationErr) {
+			s.log.Error("validation error",
+				"field", validationErr.Field,
+				"message", validationErr.Message,
+				"host", req.Host,
+				"database", req.Database,
+			)
+			return SendError(c, fiber.StatusBadRequest, validationErr.Error())
+		}
+		s.log.Error("error validating connection",
+			"error", err,
+			"host", req.Host,
+			"database", req.Database,
+		)
+		return SendError(c, fiber.StatusInternalServerError, "error validating connection: "+err.Error())
+	}
+
+	s.log.Debug("validation result",
+		"success", result.Success,
+		"message", result.Message,
+		"host", req.Host,
+		"database", req.Database,
+	)
+	return SendSuccess(c, fiber.StatusOK, result)
 }

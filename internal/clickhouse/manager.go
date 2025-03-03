@@ -115,7 +115,7 @@ func (m *Manager) GetConnection(sourceID models.SourceID) (*Client, error) {
 
 	client, ok := m.clients[sourceID]
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrSourceNotConnected, sourceID)
+		return nil, fmt.Errorf("%w: %d", ErrSourceNotConnected, sourceID)
 	}
 
 	return client, nil
@@ -131,7 +131,7 @@ func (m *Manager) QueryLogs(ctx context.Context, sourceID models.SourceID, sourc
 	// Get client
 	client, err := m.GetClient(sourceID)
 	if err != nil {
-		return nil, fmt.Errorf("error getting client: %w", err)
+		return nil, fmt.Errorf("error getting client for source %d: %w", sourceID, err)
 	}
 
 	// Validate query parameters
@@ -204,4 +204,28 @@ func (m *Manager) Close() error {
 	}
 
 	return lastErr
+}
+
+// CreateTemporaryClient creates a temporary client for connection validation
+// This client is not stored in the manager and should be closed by the caller
+func (m *Manager) CreateTemporaryClient(source *models.Source) (*Client, error) {
+	m.logger.Info("creating temporary client for validation",
+		"host", source.Connection.Host,
+		"database", source.Connection.Database,
+	)
+
+	// Create new client
+	client, err := NewClient(ClientOptions{
+		Host:     source.Connection.Host,
+		Database: source.Connection.Database,
+		Username: source.Connection.Username,
+		Password: source.Connection.Password,
+	}, m.logger.With("validation", true))
+
+	if err != nil {
+		m.logger.Error("failed to create temporary client", "error", err)
+		return nil, fmt.Errorf("error creating client: %w", err)
+	}
+
+	return client, nil
 }

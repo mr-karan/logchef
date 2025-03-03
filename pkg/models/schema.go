@@ -15,7 +15,7 @@ type QueryResult struct {
 // Schema Constants
 const (
 	// OTELLogsTableSchema is the schema for OpenTelemetry logs
-	OTELLogsTableSchema = `CREATE TABLE IF NOT EXISTS "{{database_name}}"."{{table_name}}"
+	OTELLogsTableSchema = `CREATE TABLE "{{database_name}}"."{{table_name}}"
 	(
 		timestamp DateTime64(3) CODEC(DoubleDelta, LZ4),
 		trace_id String CODEC(ZSTD(1)),
@@ -42,7 +42,7 @@ const (
 
 	// HTTPLogsTableSchema is the schema for HTTP logs table
 	HTTPLogsTableSchema = `
-	CREATE TABLE IF NOT EXISTS {{database_name}}.{{table_name}} (
+	CREATE TABLE {{database_name}}.{{table_name}} (
 		timestamp DateTime,
 		remote_addr String,
 		request_method String,

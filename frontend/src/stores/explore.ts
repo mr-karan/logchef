@@ -18,7 +18,7 @@ export interface ExploreState {
   columns: ColumnInfo[];
   queryStats: QueryStats;
   // Core query state
-  sourceId: string;
+  sourceId: number;
   limit: number;
   timeRange: {
     start: DateValue;
@@ -42,7 +42,7 @@ export const useExploreStore = defineStore("explore", () => {
     logs: [],
     columns: [],
     queryStats: DEFAULT_QUERY_STATS,
-    sourceId: "",
+    sourceId: 0,
     limit: 100,
     timeRange: null,
     filterConditions: [],
@@ -88,7 +88,7 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   // Actions
-  function setSource(sourceId: string) {
+  function setSource(sourceId: number) {
     state.data.value.sourceId = sourceId;
   }
 
@@ -104,8 +104,9 @@ export const useExploreStore = defineStore("explore", () => {
 
   function setFilterConditions(filters: FilterCondition[]) {
     // Check for the special _force_clear marker
-    const isForceClearing = filters.length === 1 && '_force_clear' in filters[0];
-    
+    const isForceClearing =
+      filters.length === 1 && "_force_clear" in filters[0];
+
     if (isForceClearing) {
       console.log("Explore store: force-clearing filter conditions");
       // This is our special signal to clear conditions
@@ -170,7 +171,7 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   // Get log context
-  async function getLogContext(sourceId: string, params: LogContextRequest) {
+  async function getLogContext(sourceId: number, params: LogContextRequest) {
     return await state.withLoading(async () => {
       const result = await handleApiCall<LogContextResponse>({
         apiCall: () => exploreApi.getLogContext(sourceId, params),

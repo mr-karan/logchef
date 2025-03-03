@@ -12,12 +12,13 @@ import (
 
 // CreateSource creates a new source in the database
 func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
-	db.log.Debug("creating source", "source_id", source.ID, "database", source.Connection.Database, "table", source.Connection.TableName)
+	db.log.Debug("creating source", "database", source.Connection.Database, "table", source.Connection.TableName)
 
-	result, err := db.queries.CreateSource.ExecContext(ctx,
-		source.ID,
+	var id int64
+	err := db.queries.CreateSource.QueryRowContext(ctx,
 		source.MetaIsAutoCreated,
 		source.MetaTSField,
+		source.MetaSeverityField,
 		source.Connection.Host,
 		source.Connection.Username,
 		source.Connection.Password,
@@ -25,20 +26,20 @@ func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
 		source.Connection.TableName,
 		source.Description,
 		source.TTLDays,
-	)
+	).Scan(&id)
+
 	if err != nil {
 		if isUniqueConstraintError(err, "sources", "database") {
 			return fmt.Errorf("source with database %s and table %s already exists", source.Connection.Database, source.Connection.TableName)
 		}
-		db.log.Error("failed to create source", "error", err, "source_id", source.ID)
+		db.log.Error("failed to create source", "error", err)
 		return fmt.Errorf("error creating source: %w", err)
 	}
 
-	if err := checkRowsAffected(result, "create source"); err != nil {
-		db.log.Error("unexpected rows affected", "error", err, "source_id", source.ID)
-		return err
-	}
+	// Set the auto-generated ID
+	source.ID = models.SourceID(id)
 
+	db.log.Debug("source created", "source_id", source.ID)
 	return nil
 }
 
@@ -108,6 +109,7 @@ func (db *DB) UpdateSource(ctx context.Context, source *models.Source) error {
 	result, err := db.queries.UpdateSource.ExecContext(ctx,
 		source.MetaIsAutoCreated,
 		source.MetaTSField,
+		source.MetaSeverityField,
 		source.Connection.Host,
 		source.Connection.Username,
 		source.Connection.Password,
@@ -150,9 +152,10 @@ func (db *DB) DeleteSource(ctx context.Context, id models.SourceID) error {
 
 // SourceRow represents a row in the sources table
 type SourceRow struct {
-	ID                string    `db:"id"`
+	ID                int       `db:"id"`
 	MetaIsAutoCreated int       `db:"_meta_is_auto_created"`
 	MetaTSField       string    `db:"_meta_ts_field"`
+	MetaSeverityField string    `db:"_meta_severity_field"`
 	Host              string    `db:"host"`
 	Username          string    `db:"username"`
 	Password          string    `db:"password"`
@@ -170,6 +173,7 @@ func mapSourceRowToModel(row *SourceRow) *models.Source {
 		ID:                models.SourceID(row.ID),
 		MetaIsAutoCreated: row.MetaIsAutoCreated == 1,
 		MetaTSField:       row.MetaTSField,
+		MetaSeverityField: row.MetaSeverityField,
 		Description:       row.Description,
 		TTLDays:           row.TTLDays,
 		Connection: models.ConnectionInfo{

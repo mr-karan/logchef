@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"strconv"
 
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -28,12 +29,19 @@ func (s *Server) handleGetUser(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "user ID is required")
 	}
 
-	user, err := s.identityService.GetUser(c.Context(), models.UserID(id))
+	// Convert string to int for UserID
+	idInt, err := strconv.Atoi(id)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "invalid user ID: "+err.Error())
+	}
+	userID := models.UserID(idInt)
+
+	user, err := s.identityService.GetUser(c.Context(), userID)
 	if err != nil {
 		if errors.Is(err, identity.ErrUserNotFound) {
 			return SendError(c, fiber.StatusNotFound, "user not found")
 		}
-		s.log.Error("Failed to get user", "error", err, "userID", id)
+		s.log.Error("Failed to get user", "error", err, "userID", userID)
 		return SendError(c, fiber.StatusInternalServerError, "failed to get user")
 	}
 
@@ -57,14 +65,8 @@ func (s *Server) handleCreateUser(c *fiber.Ctx) error {
 	}
 
 	// Create new user
-	newUser := &models.User{
-		Email:    req.Email,
-		FullName: req.FullName,
-		Role:     req.Role,
-		Status:   models.UserStatusActive,
-	}
-
-	if err := s.identityService.CreateUser(c.Context(), newUser); err != nil {
+	user, err := s.identityService.CreateUser(c.Context(), req.Email, req.FullName, req.Role)
+	if err != nil {
 		var validationErr *identity.ValidationError
 		if errors.As(err, &validationErr) {
 			return SendError(c, fiber.StatusBadRequest, validationErr.Error())
@@ -73,7 +75,7 @@ func (s *Server) handleCreateUser(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "failed to create user")
 	}
 
-	return SendSuccess(c, fiber.StatusCreated, newUser)
+	return SendSuccess(c, fiber.StatusCreated, user)
 }
 
 // handleUpdateUser handles PUT /api/v1/users/:id
@@ -82,6 +84,13 @@ func (s *Server) handleUpdateUser(c *fiber.Ctx) error {
 	if id == "" {
 		return SendError(c, fiber.StatusBadRequest, "user ID is required")
 	}
+
+	// Convert string to int for UserID
+	idInt, err := strconv.Atoi(id)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "invalid user ID: "+err.Error())
+	}
+	userID := models.UserID(idInt)
 
 	var req models.UpdateUserRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -98,17 +107,17 @@ func (s *Server) handleUpdateUser(c *fiber.Ctx) error {
 	}
 
 	// Users can only update their own profile unless they're an admin
-	if models.UserID(id) != currentUser.ID && currentUser.Role != models.UserRoleAdmin {
+	if userID != currentUser.ID && currentUser.Role != models.UserRoleAdmin {
 		return SendError(c, fiber.StatusForbidden, "you can only update your own profile")
 	}
 
 	// Get existing user
-	existingUser, err := s.identityService.GetUser(c.Context(), models.UserID(id))
+	existingUser, err := s.identityService.GetUser(c.Context(), userID)
 	if err != nil {
 		if errors.Is(err, identity.ErrUserNotFound) {
 			return SendError(c, fiber.StatusNotFound, "user not found")
 		}
-		s.log.Error("Failed to get user", "error", err, "userID", id)
+		s.log.Error("Failed to get user", "error", err, "userID", userID)
 		return SendError(c, fiber.StatusInternalServerError, "failed to get user")
 	}
 
@@ -131,7 +140,7 @@ func (s *Server) handleUpdateUser(c *fiber.Ctx) error {
 		if errors.Is(err, identity.ErrUserNotFound) {
 			return SendError(c, fiber.StatusNotFound, "user not found")
 		}
-		s.log.Error("Failed to update user", "error", err, "userID", id)
+		s.log.Error("Failed to update user", "error", err, "userID", userID)
 		return SendError(c, fiber.StatusInternalServerError, "failed to update user")
 	}
 
@@ -145,19 +154,26 @@ func (s *Server) handleDeleteUser(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "user ID is required")
 	}
 
+	// Convert string to int for UserID
+	idInt, err := strconv.Atoi(id)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "invalid user ID: "+err.Error())
+	}
+	userID := models.UserID(idInt)
+
 	// Get current user from context (set by middleware)
 	currentUser := c.Locals("user").(*models.User)
 
 	// Prevent deleting yourself
-	if models.UserID(id) == currentUser.ID {
+	if userID == currentUser.ID {
 		return SendError(c, fiber.StatusBadRequest, "you cannot delete your own account")
 	}
 
-	if err := s.identityService.DeleteUser(c.Context(), models.UserID(id)); err != nil {
+	if err := s.identityService.DeleteUser(c.Context(), userID); err != nil {
 		if errors.Is(err, identity.ErrUserNotFound) {
 			return SendError(c, fiber.StatusNotFound, "user not found")
 		}
-		s.log.Error("Failed to delete user", "error", err, "userID", id)
+		s.log.Error("Failed to delete user", "error", err, "userID", userID)
 		return SendError(c, fiber.StatusInternalServerError, "failed to delete user")
 	}
 

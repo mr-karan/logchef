@@ -184,8 +184,9 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, code, state string) (
 	}
 
 	// Create new session
+	sessionID := uuid.New().String()
 	session := &models.Session{
-		ID:        models.SessionID(uuid.New().String()),
+		ID:        models.SessionID(sessionID),
 		UserID:    user.ID,
 		ExpiresAt: time.Now().Add(p.cfg.Auth.SessionDuration),
 	}

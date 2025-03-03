@@ -48,7 +48,7 @@ export interface QuerySuccessResponse {
   logs: Record<string, any>[];
   stats: QueryStats;
   params?: QueryParams & {
-    source_id: string;
+    source_id: number;
   };
   columns: ColumnInfo[];
 }
@@ -76,7 +76,7 @@ export interface LogContextResponse {
 }
 
 export const exploreApi = {
-  async getLogs(sourceId: string, params: QueryParams) {
+  async getLogs(sourceId: number, params: QueryParams) {
     try {
       const response = await api.post<APIResponse<QueryResponse>>(
         `/sources/${sourceId}/logs/search`,
@@ -89,7 +89,7 @@ export const exploreApi = {
     }
   },
 
-  async getLogContext(sourceId: string, params: LogContextRequest) {
+  async getLogContext(sourceId: number, params: LogContextRequest) {
     try {
       const response = await api.post<APIResponse<LogContextResponse>>(
         `/sources/${sourceId}/logs/context`,

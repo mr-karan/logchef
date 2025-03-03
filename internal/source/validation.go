@@ -1,10 +1,13 @@
 package source
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 
+	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -27,7 +30,7 @@ func NewValidator() *Validator {
 }
 
 // ValidateSourceCreation validates source creation parameters
-func (v *Validator) ValidateSourceCreation(conn models.ConnectionInfo, description string, ttlDays int, metaTSField string, autoCreateTable bool) error {
+func (v *Validator) ValidateSourceCreation(conn models.ConnectionInfo, description string, ttlDays int, metaTSField string, metaSeverityField string, autoCreateTable bool) error {
 	// Validate table name
 	if conn.TableName == "" {
 		return &ValidationError{
@@ -105,6 +108,14 @@ func (v *Validator) ValidateSourceCreation(conn models.ConnectionInfo, descripti
 		}
 	}
 
+	// Severity field is optional, but if provided, it must be valid
+	if metaSeverityField != "" && !isValidColumnName(metaSeverityField) {
+		return &ValidationError{
+			Field:   "MetaSeverityField",
+			Message: "meta severity field must start with a letter or underscore and contain only letters, numbers, and underscores",
+		}
+	}
+
 	return nil
 }
 
@@ -128,6 +139,161 @@ func (v *Validator) ValidateSourceUpdate(description string, ttlDays int) error 
 		return &ValidationError{
 			Field:   "TTLDays",
 			Message: "TTL days must be -1 (no TTL) or a non-negative number",
+		}
+	}
+
+	return nil
+}
+
+// ValidateConnection validates connection parameters for a connection test
+func (v *Validator) ValidateConnection(conn models.ConnectionInfo) error {
+	// Validate host
+	if conn.Host == "" {
+		return &ValidationError{
+			Field:   "Host",
+			Message: "host is required",
+		}
+	}
+
+	// Parse host and port
+	_, portStr, err := net.SplitHostPort(conn.Host)
+	if err != nil {
+		return &ValidationError{
+			Field:   "Host",
+			Message: "host must include a port (e.g., 'localhost:9000')",
+		}
+	}
+
+	// Validate port is a number
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 || port > 65535 {
+		return &ValidationError{
+			Field:   "Host",
+			Message: "port must be between 1 and 65535",
+		}
+	}
+
+	// Username and Password are optional for Clickhouse, but if username is provided
+	// then password must also be provided
+	if conn.Username != "" && conn.Password == "" {
+		return &ValidationError{
+			Field:   "Password",
+			Message: "password is required when username is provided",
+		}
+	}
+
+	// Validate database name
+	if conn.Database == "" {
+		return &ValidationError{
+			Field:   "Database",
+			Message: "database is required",
+		}
+	}
+
+	// Validate database name contains only valid characters
+	if !isValidTableName(conn.Database) {
+		return &ValidationError{
+			Field:   "Database",
+			Message: "database name contains invalid characters",
+		}
+	}
+
+	// Validate table name if provided
+	if conn.TableName != "" && !isValidTableName(conn.TableName) {
+		return &ValidationError{
+			Field:   "TableName",
+			Message: "table name contains invalid characters",
+		}
+	}
+
+	return nil
+}
+
+// ValidateColumnTypes validates that the timestamp and severity columns have the correct types
+// This is only used when connecting to an existing table
+func (v *Validator) ValidateColumnTypes(ctx context.Context, client *clickhouse.Client, database, tableName, tsField, severityField string) error {
+	// Ensure we have a valid client
+	if client == nil {
+		return &ValidationError{
+			Field:   "connection",
+			Message: "Invalid database client",
+		}
+	}
+
+	// First check if the timestamp field exists and has the correct type
+	tsQuery := fmt.Sprintf(`
+		SELECT type
+		FROM system.columns
+		WHERE database = '%s' AND table = '%s' AND name = '%s'
+	`, database, tableName, tsField)
+
+	tsResult, err := client.Query(ctx, tsQuery)
+	if err != nil {
+		return &ValidationError{
+			Field:   "connection",
+			Message: fmt.Sprintf("Failed to query timestamp column type: %s", err.Error()),
+		}
+	}
+
+	if len(tsResult.Logs) == 0 {
+		return &ValidationError{
+			Field:   "MetaTSField",
+			Message: fmt.Sprintf("Timestamp field '%s' not found in table", tsField),
+		}
+	}
+
+	// Check if timestamp column is DateTime or DateTime64
+	if tsType, ok := tsResult.Logs[0]["type"].(string); ok {
+		if !strings.HasPrefix(tsType, "DateTime") {
+			return &ValidationError{
+				Field:   "MetaTSField",
+				Message: fmt.Sprintf("Timestamp field '%s' must be of type DateTime or DateTime64, found %s", tsField, tsType),
+			}
+		}
+	} else {
+		return &ValidationError{
+			Field:   "MetaTSField",
+			Message: fmt.Sprintf("Failed to determine type of timestamp field '%s'", tsField),
+		}
+	}
+
+	// If severity field is provided, check its type
+	if severityField != "" {
+		sevQuery := fmt.Sprintf(`
+			SELECT type
+			FROM system.columns
+			WHERE database = '%s' AND table = '%s' AND name = '%s'
+		`, database, tableName, severityField)
+
+		sevResult, err := client.Query(ctx, sevQuery)
+		if err != nil {
+			return &ValidationError{
+				Field:   "connection",
+				Message: fmt.Sprintf("Failed to query severity column type: %s", err.Error()),
+			}
+		}
+
+		if len(sevResult.Logs) == 0 {
+			// Severity field not found, but it's optional so return a validation error with a clear message
+			return &ValidationError{
+				Field:   "MetaSeverityField",
+				Message: fmt.Sprintf("Severity field '%s' not found in table. Please check the field name or leave it empty if not needed.", severityField),
+			}
+		}
+
+		// Check if severity column is String or LowCardinality(String)
+		if sevType, ok := sevResult.Logs[0]["type"].(string); ok {
+			if sevType != "String" && !strings.Contains(sevType, "LowCardinality(String)") {
+				return &ValidationError{
+					Field:   "MetaSeverityField",
+					Message: fmt.Sprintf("Severity field '%s' must be of type String or LowCardinality(String), found %s", severityField, sevType),
+				}
+			}
+		} else {
+			return &ValidationError{
+				Field:   "MetaSeverityField",
+				Message: fmt.Sprintf("Failed to determine type of severity field '%s'", severityField),
+			}
 		}
 	}
 

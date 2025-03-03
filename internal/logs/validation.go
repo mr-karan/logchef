@@ -91,7 +91,7 @@ func (v *Validator) ValidateLogQueryRequest(req *models.LogQueryRequest) error {
 
 // ValidateLogContextRequest validates a log context request
 func (v *Validator) ValidateLogContextRequest(req *models.LogContextRequest) error {
-	if req.SourceID == "" {
+	if req.SourceID <= 0 {
 		return &ValidationError{
 			Field:   "source_id",
 			Message: "source ID is required",

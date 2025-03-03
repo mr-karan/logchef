@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -12,8 +13,6 @@ import (
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/sqlite"
-
-	"github.com/google/uuid"
 )
 
 // ErrSourceNotFound is returned when a source is not found
@@ -55,7 +54,13 @@ func (s *Service) ListSources(ctx context.Context) ([]*models.Source, error) {
 
 // GetSource retrieves a source by ID
 func (s *Service) GetSource(ctx context.Context, id string) (*models.Source, error) {
-	source, err := s.db.GetSource(ctx, models.SourceID(id))
+	// Convert string ID to int
+	idInt, err := strconv.Atoi(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid source ID: %w", err)
+	}
+
+	source, err := s.db.GetSource(ctx, models.SourceID(idInt))
 	if err != nil {
 		return nil, fmt.Errorf("error getting source: %w", err)
 	}
@@ -72,16 +77,16 @@ func (s *Service) GetSource(ctx context.Context, id string) (*models.Source, err
 }
 
 // CreateSource creates a new source
-func (s *Service) CreateSource(ctx context.Context, autoCreateTable bool, conn models.ConnectionInfo, description string, ttlDays int, metaTSField string) (*models.Source, error) {
+func (s *Service) CreateSource(ctx context.Context, autoCreateTable bool, conn models.ConnectionInfo, description string, ttlDays int, metaTSField string, metaSeverityField string) (*models.Source, error) {
 	// Validate input
-	if err := s.validator.ValidateSourceCreation(conn, description, ttlDays, metaTSField, autoCreateTable); err != nil {
+	if err := s.validator.ValidateSourceCreation(conn, description, ttlDays, metaTSField, metaSeverityField, autoCreateTable); err != nil {
 		return nil, err
 	}
 
 	source := &models.Source{
-		ID:                models.SourceID(uuid.New().String()),
 		MetaIsAutoCreated: autoCreateTable,
 		MetaTSField:       metaTSField,
+		MetaSeverityField: metaSeverityField,
 		Connection:        conn,
 		Description:       description,
 		TTLDays:           ttlDays,
@@ -101,7 +106,7 @@ func (s *Service) CreateSource(ctx context.Context, autoCreateTable bool, conn m
 		)
 		return nil, &ValidationError{
 			Field:   "source",
-			Message: "Failed to validate source configuration. Please try again.",
+			Message: "Failed to validate source configuration: " + err.Error(),
 		}
 	}
 	if existing != nil {
@@ -111,40 +116,28 @@ func (s *Service) CreateSource(ctx context.Context, autoCreateTable bool, conn m
 		}
 	}
 
-	// First add source to ClickHouse manager to get a connection for health check
-	if err := s.chDB.AddSource(source); err != nil {
+	// First create a temporary client to validate the connection
+	tempClient, err := s.chDB.CreateTemporaryClient(source)
+	if err != nil {
 		s.log.Error("failed to initialize connection",
 			"error", err,
-			"source_id", source.ID,
+			"host", source.Connection.Host,
+			"database", source.Connection.Database,
 		)
 		return nil, &ValidationError{
 			Field:   "connection",
 			Message: "Failed to connect to the database. Please check your connection details.",
 		}
 	}
+	defer tempClient.Close()
 
-	// Get client for health check
-	client, err := s.chDB.GetClient(source.ID)
-	if err != nil {
-		s.log.Error("failed to get client",
-			"error", err,
-			"source_id", source.ID,
-		)
-		// Clean up the source from the manager
-		_ = s.chDB.RemoveSource(source.ID)
-		return nil, &ValidationError{
-			Field:   "connection",
-			Message: "Failed to connect to the database. Please check your connection details.",
-		}
-	}
-
-	// If not auto-creating table, verify it exists
+	// If not auto-creating table, verify it exists and validate column types
 	if !autoCreateTable {
+		// First check if the table exists
 		query := fmt.Sprintf("SELECT 1 FROM %s.%s LIMIT 1", source.Connection.Database, source.Connection.TableName)
-		if _, err := client.Query(ctx, query); err != nil {
+		if _, err := tempClient.Query(ctx, query); err != nil {
 			s.log.Error("failed to verify table exists",
 				"error", err,
-				"source_id", source.ID,
 				"database", source.Connection.Database,
 				"table", source.Connection.TableName,
 			)
@@ -153,17 +146,15 @@ func (s *Service) CreateSource(ctx context.Context, autoCreateTable bool, conn m
 				Message: fmt.Sprintf("Table %s not found in database %s", source.Connection.TableName, source.Connection.Database),
 			}
 		}
-	}
 
-	// Save to database
-	if err := s.db.CreateSource(ctx, source); err != nil {
-		s.log.Error("failed to save source",
-			"error", err,
-			"source_id", source.ID,
-		)
-		return nil, &ValidationError{
-			Field:   "source",
-			Message: "Failed to create source. Please try again.",
+		// Then validate column types
+		if err := s.validator.ValidateColumnTypes(ctx, tempClient, source.Connection.Database, source.Connection.TableName, source.MetaTSField, source.MetaSeverityField); err != nil {
+			s.log.Error("failed to validate column types",
+				"error", err,
+				"database", source.Connection.Database,
+				"table", source.Connection.TableName,
+			)
+			return nil, err
 		}
 	}
 
@@ -179,17 +170,34 @@ func (s *Service) CreateSource(ctx context.Context, autoCreateTable bool, conn m
 			schema = strings.ReplaceAll(schema, "TTL toDateTime(timestamp) + INTERVAL {{ttl_day}} DAY", "")
 		}
 
-		if _, err := client.Query(ctx, schema); err != nil {
-			// Try to clean up database entry on error
-			_ = s.db.DeleteSource(ctx, source.ID)
+		if _, err := tempClient.Query(ctx, schema); err != nil {
 			s.log.Error("failed to create table",
 				"error", err,
 				"source_id", source.ID,
 			)
 			return nil, &ValidationError{
 				Field:   "table_name",
-				Message: "Failed to create table. Please try again.",
+				Message: "Failed to create table: " + err.Error(),
 			}
+		}
+	}
+
+	// Now create the source in the database
+	if err := s.db.CreateSource(ctx, source); err != nil {
+		return nil, err
+	}
+
+	// Finally add source to ClickHouse manager
+	if err := s.chDB.AddSource(source); err != nil {
+		// If we fail to add to the connection pool, delete the source from the database
+		_ = s.db.DeleteSource(ctx, source.ID)
+		s.log.Error("failed to add source to connection pool",
+			"error", err,
+			"source_id", source.ID,
+		)
+		return nil, &ValidationError{
+			Field:   "connection",
+			Message: "Failed to add source to connection pool: " + err.Error(),
 		}
 	}
 
@@ -203,8 +211,14 @@ func (s *Service) UpdateSource(ctx context.Context, id string, description strin
 		return nil, err
 	}
 
+	// Convert string ID to int
+	idInt, err := strconv.Atoi(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid source ID: %w", err)
+	}
+
 	// Get existing source
-	source, err := s.db.GetSource(ctx, models.SourceID(id))
+	source, err := s.db.GetSource(ctx, models.SourceID(idInt))
 	if err != nil {
 		return nil, fmt.Errorf("error getting source: %w", err)
 	}
@@ -232,8 +246,14 @@ func (s *Service) UpdateSource(ctx context.Context, id string, description strin
 
 // DeleteSource deletes a source
 func (s *Service) DeleteSource(ctx context.Context, id string) error {
+	// Convert string ID to int
+	idInt, err := strconv.Atoi(id)
+	if err != nil {
+		return fmt.Errorf("invalid source ID: %w", err)
+	}
+
 	// Validate source exists
-	source, err := s.db.GetSource(ctx, models.SourceID(id))
+	source, err := s.db.GetSource(ctx, models.SourceID(idInt))
 	if err != nil {
 		return fmt.Errorf("error getting source: %w", err)
 	}
@@ -257,8 +277,14 @@ func (s *Service) DeleteSource(ctx context.Context, id string) error {
 
 // GetSourceHealth retrieves the health status of a source
 func (s *Service) GetSourceHealth(ctx context.Context, id string) (models.SourceHealth, error) {
+	// Convert string ID to int
+	idInt, err := strconv.Atoi(id)
+	if err != nil {
+		return models.SourceHealth{}, fmt.Errorf("invalid source ID: %w", err)
+	}
+
 	// Check if source exists
-	source, err := s.db.GetSource(ctx, models.SourceID(id))
+	source, err := s.db.GetSource(ctx, models.SourceID(idInt))
 	if err != nil {
 		return models.SourceHealth{}, fmt.Errorf("error getting source: %w", err)
 	}
@@ -277,10 +303,131 @@ func (s *Service) InitializeSource(ctx context.Context, source *models.Source) e
 	return s.chDB.AddSource(source)
 }
 
-// Helper function to convert bool to int
-func boolToInt(b bool) int {
-	if b {
-		return 1
+// ValidateConnection validates a connection to a ClickHouse database
+func (s *Service) ValidateConnection(ctx context.Context, conn models.ConnectionInfo) (*models.ConnectionValidationResult, error) {
+	s.log.Debug("validating connection",
+		"host", conn.Host,
+		"database", conn.Database,
+		"table", conn.TableName,
+	)
+
+	// Validate input
+	if err := s.validator.ValidateConnection(conn); err != nil {
+		s.log.Error("connection validation failed",
+			"error", err,
+			"host", conn.Host,
+			"database", conn.Database,
+		)
+		return nil, err
 	}
-	return 0
+
+	// Create a temporary source for validation
+	tempSource := &models.Source{
+		ID:         models.SourceID(-1), // Temporary ID
+		Connection: conn,
+	}
+
+	// Try to connect to the database
+	client, err := s.chDB.CreateTemporaryClient(tempSource)
+	if err != nil {
+		s.log.Error("failed to connect to database",
+			"error", err,
+			"host", conn.Host,
+			"database", conn.Database,
+		)
+		return &models.ConnectionValidationResult{
+			Success: false,
+			Message: "Failed to connect to the database: " + err.Error(),
+		}, nil
+	}
+	defer client.Close()
+
+	// Check if the table exists
+	if conn.TableName != "" {
+		query := fmt.Sprintf("SELECT 1 FROM %s.%s LIMIT 1", conn.Database, conn.TableName)
+		_, err := client.Query(ctx, query)
+		if err != nil {
+			s.log.Error("table not found or not accessible",
+				"error", err,
+				"host", conn.Host,
+				"database", conn.Database,
+				"table", conn.TableName,
+			)
+			return &models.ConnectionValidationResult{
+				Success: false,
+				Message: fmt.Sprintf("Connection successful, but table '%s' not found or not accessible: %s", conn.TableName, err.Error()),
+			}, nil
+		}
+	}
+
+	s.log.Debug("connection validation successful",
+		"host", conn.Host,
+		"database", conn.Database,
+		"table", conn.TableName,
+	)
+
+	return &models.ConnectionValidationResult{
+		Success: true,
+		Message: "Connection successful",
+	}, nil
+}
+
+// ValidateConnectionWithColumns validates a connection and checks column types
+func (s *Service) ValidateConnectionWithColumns(ctx context.Context, conn models.ConnectionInfo, tsField, severityField string) (*models.ConnectionValidationResult, error) {
+	s.log.Debug("validating connection with columns",
+		"host", conn.Host,
+		"database", conn.Database,
+		"table", conn.TableName,
+		"ts_field", tsField,
+		"severity_field", severityField,
+	)
+
+	// First validate the basic connection
+	result, err := s.ValidateConnection(ctx, conn)
+	if err != nil {
+		return nil, err
+	}
+
+	if !result.Success {
+		return result, nil
+	}
+
+	// If the connection is successful and we're validating an existing table, check column types
+	if conn.TableName != "" && tsField != "" {
+		// Create a temporary source for validation
+		tempSource := &models.Source{
+			ID:         models.SourceID(-1), // Temporary ID
+			Connection: conn,
+		}
+
+		// Try to connect to the database
+		client, err := s.chDB.CreateTemporaryClient(tempSource)
+		if err != nil {
+			return &models.ConnectionValidationResult{
+				Success: false,
+				Message: "Failed to connect to the database: " + err.Error(),
+			}, nil
+		}
+		defer client.Close()
+
+		// Validate column types
+		if err := s.validator.ValidateColumnTypes(ctx, client, conn.Database, conn.TableName, tsField, severityField); err != nil {
+			var validationErr *ValidationError
+			if errors.As(err, &validationErr) {
+				return &models.ConnectionValidationResult{
+					Success: false,
+					Message: validationErr.Message,
+				}, nil
+			}
+			return &models.ConnectionValidationResult{
+				Success: false,
+				Message: "Failed to validate column types: " + err.Error(),
+			}, nil
+		}
+	}
+
+	return &models.ConnectionValidationResult{
+		Success: true,
+		Message: "Connection and column types validated successfully",
+	}, nil
 }

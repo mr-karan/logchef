@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { teamsApi, type Team, type CreateTeamRequest } from "@/api/teams";
 import { isErrorResponse } from "@/api/types";
 import { useToast } from "@/components/ui/toast/use-toast";
@@ -13,7 +13,15 @@ export const useTeamsStore = defineStore("teams", () => {
   const teams = ref<TeamWithMemberCount[]>([]);
   const isLoading = ref(false);
   const error = ref<string | null>(null);
+  const currentTeamId = ref<number | null>(null);
   const { toast } = useToast();
+
+  // Computed property for the current team
+  const currentTeam = computed(() =>
+    currentTeamId.value
+      ? teams.value.find((t) => t.id === currentTeamId.value)
+      : null
+  );
 
   async function loadTeams() {
     if (isLoading.value) return;
@@ -51,6 +59,11 @@ export const useTeamsStore = defineStore("teams", () => {
       );
 
       teams.value = teamsWithMembers;
+
+      // Set current team if none is selected and we have teams
+      if (!currentTeamId.value && teams.value.length > 0) {
+        setCurrentTeam(teams.value[0].id);
+      }
     } catch (err) {
       error.value = "Failed to load teams";
       console.error("Error loading teams:", err);
@@ -64,6 +77,11 @@ export const useTeamsStore = defineStore("teams", () => {
     } finally {
       isLoading.value = false;
     }
+  }
+
+  // Set the current team
+  function setCurrentTeam(teamId: number) {
+    currentTeamId.value = teamId;
   }
 
   async function createTeam(data: CreateTeamRequest) {
@@ -101,11 +119,16 @@ export const useTeamsStore = defineStore("teams", () => {
     }
   }
 
-  async function deleteTeam(teamId: string) {
+  async function deleteTeam(teamId: number) {
+    if (isLoading.value) return false;
+
     try {
+      isLoading.value = true;
+      error.value = null;
       const response = await teamsApi.deleteTeam(teamId);
 
       if (isErrorResponse(response)) {
+        error.value = response.data.error;
         toast({
           title: "Error",
           description: response.data.error,
@@ -115,24 +138,49 @@ export const useTeamsStore = defineStore("teams", () => {
         return false;
       }
 
+      // Remove from local state
+      teams.value = teams.value.filter((t) => t.id !== teamId);
+
+      // If this was the current team, reset current team
+      if (currentTeamId.value === teamId) {
+        currentTeamId.value = teams.value.length > 0 ? teams.value[0].id : null;
+      }
+
       toast({
         title: "Success",
         description: "Team deleted successfully",
         duration: TOAST_DURATION.SUCCESS,
       });
 
-      // Reload teams to get fresh data
-      await loadTeams();
       return true;
     } catch (error) {
       console.error("Error deleting team:", error);
-      toast({
-        title: "Error",
-        description: "Failed to delete team",
-        variant: "destructive",
-        duration: TOAST_DURATION.ERROR,
-      });
       return false;
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  // Get team source IDs - helper method for filtering
+  async function getTeamSourceIds(teamId: number) {
+    if (isLoading.value) return [];
+
+    try {
+      isLoading.value = true;
+      error.value = null;
+      const response = await teamsApi.listTeamSources(teamId);
+
+      if (isErrorResponse(response)) {
+        error.value = response.data.error;
+        return [];
+      }
+
+      return (response.data || []).map((source) => source.id);
+    } catch (error) {
+      console.error("Error getting team sources:", error);
+      return [];
+    } finally {
+      isLoading.value = false;
     }
   }
 
@@ -140,8 +188,12 @@ export const useTeamsStore = defineStore("teams", () => {
     teams,
     isLoading,
     error,
+    currentTeamId,
+    currentTeam,
     loadTeams,
     createTeam,
     deleteTeam,
+    setCurrentTeam,
+    getTeamSourceIds,
   };
 });

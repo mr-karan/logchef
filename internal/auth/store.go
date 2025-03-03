@@ -44,8 +44,8 @@ type Store interface {
 
 	// Team query operations
 	CreateTeamQuery(ctx context.Context, query *models.TeamQuery) error
-	GetTeamQuery(ctx context.Context, queryID string) (*models.TeamQuery, error)
+	GetTeamQuery(ctx context.Context, queryID int) (*models.TeamQuery, error)
 	UpdateTeamQuery(ctx context.Context, query *models.TeamQuery) error
-	DeleteTeamQuery(ctx context.Context, queryID string) error
+	DeleteTeamQuery(ctx context.Context, queryID int) error
 	ListTeamQueries(ctx context.Context, teamID models.TeamID) ([]*models.TeamQuery, error)
 }

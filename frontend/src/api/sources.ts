@@ -1,5 +1,5 @@
 import { api } from "./config";
-import type { APIResponse } from "./types";
+import type { APIResponse, SavedTeamQuery, Team } from "./types";
 
 interface ConnectionInfo {
   host: string;
@@ -16,7 +16,7 @@ interface ConnectionRequestInfo {
 }
 
 export interface Source {
-  id: string;
+  id: number;
   _meta_is_auto_created: boolean;
   _meta_ts_field: string;
   connection: ConnectionInfo;
@@ -27,6 +27,21 @@ export interface Source {
   is_connected: boolean;
 }
 
+export interface SourceWithTeamsResponse {
+  source: Source;
+  teams: Team[];
+}
+
+export interface SourceWithTeams extends Source {
+  teams: Team[];
+}
+
+export interface TeamGroupedQuery {
+  team_id: number;
+  team_name: string;
+  queries: SavedTeamQuery[];
+}
+
 export interface CreateSourcePayload {
   meta_is_auto_created: boolean;
   meta_ts_field?: string;
@@ -35,13 +50,27 @@ export interface CreateSourcePayload {
   ttl_days: number;
 }
 
+export interface CreateTeamQueryRequest {
+  team_id: number;
+  name: string;
+  description?: string;
+  query_content: string;
+}
+
 export const sourcesApi = {
   async listSources() {
     const response = await api.get<APIResponse<Source[]>>("/sources");
     return response.data;
   },
 
-  async getSource(id: string) {
+  async listUserSources() {
+    const response = await api.get<APIResponse<SourceWithTeamsResponse[]>>(
+      "/user/sources"
+    );
+    return response.data;
+  },
+
+  async getSource(id: number) {
     const response = await api.get<APIResponse<Source>>(`/sources/${id}`);
     return response.data;
   },
@@ -51,8 +80,23 @@ export const sourcesApi = {
     return response.data;
   },
 
-  async deleteSource(id: string) {
+  async deleteSource(id: number) {
     const response = await api.delete<APIResponse<void>>(`/sources/${id}`);
+    return response.data;
+  },
+
+  async listSourceQueries(sourceId: number, groupByTeam: boolean = true) {
+    const response = await api.get<APIResponse<TeamGroupedQuery[]>>(
+      `/sources/${sourceId}/queries?groupByTeam=${groupByTeam}`
+    );
+    return response.data;
+  },
+
+  async createSourceQuery(sourceId: number, payload: CreateTeamQueryRequest) {
+    const response = await api.post<APIResponse<SavedTeamQuery>>(
+      `/sources/${sourceId}/queries`,
+      payload
+    );
     return response.data;
   },
 };

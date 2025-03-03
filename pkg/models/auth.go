@@ -90,10 +90,11 @@ type TeamMember struct {
 
 // TeamQuery represents a saved query in a team
 type TeamQuery struct {
-	ID           string `json:"id" db:"id"`
-	TeamID       TeamID `json:"team_id" db:"team_id"`
-	Name         string `json:"name" db:"name"`
-	Description  string `json:"description" db:"description"`
-	QueryContent string `json:"query_content" db:"query_content"`
+	ID           int      `json:"id" db:"id"`
+	TeamID       TeamID   `json:"team_id" db:"team_id"`
+	SourceID     SourceID `json:"source_id" db:"source_id"`
+	Name         string   `json:"name" db:"name"`
+	Description  string   `json:"description" db:"description"`
+	QueryContent string   `json:"query_content" db:"query_content"`
 	Timestamps
 }

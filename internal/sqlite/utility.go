@@ -26,10 +26,15 @@ func isUniqueConstraintError(err error, table, column string) bool {
 	return err != nil && strings.Contains(err.Error(), constraintErr)
 }
 
-// handleNotFoundError checks if an error is sql.ErrNoRows and returns nil instead
+// handleNotFoundError checks if an error is sql.ErrNoRows and returns an appropriate error
 // to standardize handling of "not found" cases
 func handleNotFoundError(err error, message string) error {
 	if err == sql.ErrNoRows {
+		// For session-related queries, return a specific error
+		if strings.Contains(message, "session") {
+			return fmt.Errorf("session not found")
+		}
+		// For other entities, return nil to indicate "not found"
 		return nil
 	}
 	if err != nil {

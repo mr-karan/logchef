@@ -3,7 +3,7 @@ import type { APIResponse } from "./types";
 import type { Source } from "./sources";
 
 export interface Team {
-  id: string;
+  id: number;
   name: string;
   description: string;
   created_by: string;
@@ -12,8 +12,8 @@ export interface Team {
 }
 
 export interface TeamMember {
-  team_id: string;
-  user_id: string;
+  team_id: number;
+  user_id: number;
   role: "admin" | "member";
   created_at: string;
 }
@@ -29,7 +29,7 @@ export interface UpdateTeamRequest {
 }
 
 export interface AddTeamMemberRequest {
-  user_id: string;
+  user_id: number;
   role: "admin" | "member";
 }
 
@@ -45,7 +45,7 @@ export const teamsApi = {
   /**
    * Get a team by ID
    */
-  async getTeam(id: string): Promise<APIResponse<Team>> {
+  async getTeam(id: number): Promise<APIResponse<Team>> {
     const response = await api.get<APIResponse<Team>>(`/teams/${id}`);
     return response.data;
   },
@@ -62,7 +62,7 @@ export const teamsApi = {
    * Update a team
    */
   async updateTeam(
-    id: string,
+    id: number,
     data: UpdateTeamRequest
   ): Promise<APIResponse<Team>> {
     const response = await api.put<APIResponse<Team>>(`/teams/${id}`, data);
@@ -72,10 +72,7 @@ export const teamsApi = {
   /**
    * Delete a team
    */
-  async deleteTeam(id: string): Promise<APIResponse<{ message: string }>> {
-    if (!id) {
-      throw new Error("Team ID is required for deletion");
-    }
+  async deleteTeam(id: number): Promise<APIResponse<{ message: string }>> {
     const response = await api.delete<APIResponse<{ message: string }>>(
       `/teams/${id}`
     );
@@ -85,7 +82,7 @@ export const teamsApi = {
   /**
    * List team members
    */
-  async listTeamMembers(teamId: string): Promise<APIResponse<TeamMember[]>> {
+  async listTeamMembers(teamId: number): Promise<APIResponse<TeamMember[]>> {
     const response = await api.get<APIResponse<TeamMember[]>>(
       `/teams/${teamId}/members`
     );
@@ -93,10 +90,10 @@ export const teamsApi = {
   },
 
   /**
-   * Add team member
+   * Add a member to a team
    */
   async addTeamMember(
-    teamId: string,
+    teamId: number,
     data: AddTeamMemberRequest
   ): Promise<APIResponse<{ message: string }>> {
     const response = await api.post<APIResponse<{ message: string }>>(
@@ -107,11 +104,11 @@ export const teamsApi = {
   },
 
   /**
-   * Remove team member
+   * Remove a member from a team
    */
   async removeTeamMember(
-    teamId: string,
-    userId: string
+    teamId: number,
+    userId: number
   ): Promise<APIResponse<{ message: string }>> {
     const response = await api.delete<APIResponse<{ message: string }>>(
       `/teams/${teamId}/members/${userId}`
@@ -122,7 +119,7 @@ export const teamsApi = {
   /**
    * List team sources
    */
-  async listTeamSources(teamId: string): Promise<APIResponse<Source[]>> {
+  async listTeamSources(teamId: number): Promise<APIResponse<Source[]>> {
     const response = await api.get<APIResponse<Source[]>>(
       `/teams/${teamId}/sources`
     );
@@ -130,11 +127,11 @@ export const teamsApi = {
   },
 
   /**
-   * Add source to team
+   * Add a source to a team
    */
   async addTeamSource(
-    teamId: string,
-    sourceId: string
+    teamId: number,
+    sourceId: number
   ): Promise<APIResponse<{ message: string }>> {
     const response = await api.post<APIResponse<{ message: string }>>(
       `/teams/${teamId}/sources`,
@@ -144,11 +141,11 @@ export const teamsApi = {
   },
 
   /**
-   * Remove source from team
+   * Remove a source from a team
    */
   async removeTeamSource(
-    teamId: string,
-    sourceId: string
+    teamId: number,
+    sourceId: number
   ): Promise<APIResponse<{ message: string }>> {
     const response = await api.delete<APIResponse<{ message: string }>>(
       `/teams/${teamId}/sources/${sourceId}`

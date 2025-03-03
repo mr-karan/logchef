@@ -48,9 +48,3 @@ max_concurrent_sessions = 1
 [logging]
 # Log level (debug, info, warn, error)
 level = "debug"
-# Log format (text, json)
-format = "text"
-# Add source code information to logs
-add_source = true
-# Environment (development, production)
-environment = "development"
