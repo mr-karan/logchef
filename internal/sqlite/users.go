@@ -14,16 +14,13 @@ import (
 func (db *DB) CreateUser(ctx context.Context, user *models.User) error {
 	db.log.Debug("creating user", "user_id", user.ID, "email", user.Email)
 
-	now := time.Now()
-	user.CreatedAt = now
-	user.UpdatedAt = now
+	// Set default status if not provided
 	if user.Status == "" {
 		user.Status = models.UserStatusActive
 	}
 
 	result, err := db.queries.CreateUser.ExecContext(ctx,
-		user.ID, user.Email, user.FullName, user.Role, user.Status,
-		user.LastLoginAt, user.CreatedAt, user.UpdatedAt,
+		user.Email, user.FullName, user.Role, user.Status, user.LastLoginAt,
 	)
 	if err != nil {
 		if isUniqueConstraintError(err, "users", "email") {

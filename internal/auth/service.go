@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/pkg/logger"
@@ -73,6 +74,17 @@ func (s *Service) ValidateSession(ctx context.Context, sessionID models.SessionI
 			"error", err,
 			"session_id", sessionID,
 		)
+		// Check if the error message contains "session not found"
+		if strings.Contains(err.Error(), "session not found") {
+			return nil, ErrSessionNotFound
+		}
+		return nil, fmt.Errorf("error validating session: %w", err)
+	}
+
+	if session == nil {
+		s.log.Warn("session is nil",
+			"session_id", sessionID,
+		)
 		return nil, ErrSessionNotFound
 	}
 
@@ -132,7 +144,7 @@ func (s *Service) CreateTeam(ctx context.Context, team *models.Team) error {
 }
 
 // GetTeam retrieves a team by ID
-func (s *Service) GetTeam(ctx context.Context, teamID string) (*models.Team, error) {
+func (s *Service) GetTeam(ctx context.Context, teamID int) (*models.Team, error) {
 	team, err := s.store.GetTeam(ctx, models.TeamID(teamID))
 	if err != nil {
 		return nil, fmt.Errorf("error getting team: %w", err)
@@ -155,9 +167,9 @@ func (s *Service) UpdateTeam(ctx context.Context, team *models.Team) error {
 }
 
 // DeleteTeam deletes a team
-func (s *Service) DeleteTeam(ctx context.Context, teamID string) error {
-	if teamID == "" {
-		return fmt.Errorf("team ID cannot be empty")
+func (s *Service) DeleteTeam(ctx context.Context, teamID int) error {
+	if teamID <= 0 {
+		return fmt.Errorf("team ID must be positive")
 	}
 
 	return s.store.DeleteTeam(ctx, models.TeamID(teamID))
@@ -170,8 +182,8 @@ func (s *Service) ListTeams(ctx context.Context) ([]*models.Team, error) {
 
 // AddTeamMember adds a user to a team with the specified role
 func (s *Service) AddTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) error {
-	if teamID == "" || userID == "" {
-		return fmt.Errorf("team ID and user ID cannot be empty")
+	if teamID <= 0 || userID <= 0 {
+		return fmt.Errorf("team ID and user ID must be positive")
 	}
 
 	return s.store.AddTeamMember(ctx, teamID, userID, role)
@@ -179,8 +191,8 @@ func (s *Service) AddTeamMember(ctx context.Context, teamID models.TeamID, userI
 
 // RemoveTeamMember removes a user from a team
 func (s *Service) RemoveTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) error {
-	if teamID == "" || userID == "" {
-		return fmt.Errorf("team ID and user ID cannot be empty")
+	if teamID <= 0 || userID <= 0 {
+		return fmt.Errorf("team ID and user ID must be positive")
 	}
 
 	return s.store.RemoveTeamMember(ctx, teamID, userID)
@@ -188,36 +200,26 @@ func (s *Service) RemoveTeamMember(ctx context.Context, teamID models.TeamID, us
 
 // ListTeamMembers returns all members of a team
 func (s *Service) ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error) {
-	if teamID == "" {
-		return nil, fmt.Errorf("team ID cannot be empty")
+	if teamID <= 0 {
+		return nil, fmt.Errorf("team ID must be positive")
 	}
 
-	members, err := s.store.ListTeamMembers(ctx, teamID)
-	if err != nil {
-		return nil, fmt.Errorf("error listing team members: %w", err)
-	}
-
-	return members, nil
+	return s.store.ListTeamMembers(ctx, teamID)
 }
 
 // ListUserTeams returns all teams a user is a member of
 func (s *Service) ListUserTeams(ctx context.Context, userID models.UserID) ([]*models.Team, error) {
-	if userID == "" {
-		return nil, fmt.Errorf("user ID cannot be empty")
+	if userID <= 0 {
+		return nil, fmt.Errorf("user ID must be positive")
 	}
 
-	teams, err := s.store.ListUserTeams(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("error listing user teams: %w", err)
-	}
-
-	return teams, nil
+	return s.store.ListUserTeams(ctx, userID)
 }
 
 // AddTeamSource adds a source to a team
 func (s *Service) AddTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error {
-	if teamID == "" || sourceID == "" {
-		return fmt.Errorf("team ID and source ID cannot be empty")
+	if teamID <= 0 || sourceID <= 0 {
+		return fmt.Errorf("team ID and source ID must be positive")
 	}
 
 	return s.store.AddTeamSource(ctx, teamID, sourceID)
@@ -225,39 +227,29 @@ func (s *Service) AddTeamSource(ctx context.Context, teamID models.TeamID, sourc
 
 // RemoveTeamSource removes a source from a team
 func (s *Service) RemoveTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error {
-	if teamID == "" || sourceID == "" {
-		return fmt.Errorf("team ID and source ID cannot be empty")
+	if teamID <= 0 || sourceID <= 0 {
+		return fmt.Errorf("team ID and source ID must be positive")
 	}
 
 	return s.store.RemoveTeamSource(ctx, teamID, sourceID)
 }
 
-// ListTeamSources returns all sources for a team
+// ListTeamSources returns all sources associated with a team
 func (s *Service) ListTeamSources(ctx context.Context, teamID models.TeamID) ([]*models.Source, error) {
-	if teamID == "" {
-		return nil, fmt.Errorf("team ID cannot be empty")
+	if teamID <= 0 {
+		return nil, fmt.Errorf("team ID must be positive")
 	}
 
-	sources, err := s.store.ListTeamSources(ctx, teamID)
-	if err != nil {
-		return nil, fmt.Errorf("error listing team sources: %w", err)
-	}
-
-	return sources, nil
+	return s.store.ListTeamSources(ctx, teamID)
 }
 
-// ListSourceTeams returns all teams that are members of a source
+// ListSourceTeams returns all teams that have access to a source
 func (s *Service) ListSourceTeams(ctx context.Context, sourceID models.SourceID) ([]*models.Team, error) {
-	if sourceID == "" {
-		return nil, fmt.Errorf("source ID cannot be empty")
+	if sourceID <= 0 {
+		return nil, fmt.Errorf("source ID must be positive")
 	}
 
-	teams, err := s.store.ListSourceTeams(ctx, sourceID)
-	if err != nil {
-		return nil, fmt.Errorf("error listing source teams: %w", err)
-	}
-
-	return teams, nil
+	return s.store.ListSourceTeams(ctx, sourceID)
 }
 
 // CreateTeamQuery creates a new team query
@@ -270,9 +262,9 @@ func (s *Service) CreateTeamQuery(ctx context.Context, query *models.TeamQuery) 
 }
 
 // GetTeamQuery retrieves a team query by ID
-func (s *Service) GetTeamQuery(ctx context.Context, queryID string) (*models.TeamQuery, error) {
-	if queryID == "" {
-		return nil, fmt.Errorf("query ID cannot be empty")
+func (s *Service) GetTeamQuery(ctx context.Context, queryID int) (*models.TeamQuery, error) {
+	if queryID <= 0 {
+		return nil, fmt.Errorf("query ID must be positive")
 	}
 
 	query, err := s.store.GetTeamQuery(ctx, queryID)
@@ -293,24 +285,19 @@ func (s *Service) UpdateTeamQuery(ctx context.Context, query *models.TeamQuery) 
 }
 
 // DeleteTeamQuery deletes a team query
-func (s *Service) DeleteTeamQuery(ctx context.Context, queryID string) error {
-	if queryID == "" {
-		return fmt.Errorf("query ID cannot be empty")
+func (s *Service) DeleteTeamQuery(ctx context.Context, queryID int) error {
+	if queryID <= 0 {
+		return fmt.Errorf("query ID must be positive")
 	}
 
 	return s.store.DeleteTeamQuery(ctx, queryID)
 }
 
-// ListTeamQueries returns all team queries for a team
+// ListTeamQueries returns all queries for a team
 func (s *Service) ListTeamQueries(ctx context.Context, teamID models.TeamID) ([]*models.TeamQuery, error) {
-	if teamID == "" {
-		return nil, fmt.Errorf("team ID cannot be empty")
+	if teamID <= 0 {
+		return nil, fmt.Errorf("team ID must be positive")
 	}
 
-	queries, err := s.store.ListTeamQueries(ctx, teamID)
-	if err != nil {
-		return nil, fmt.Errorf("error listing team queries: %w", err)
-	}
-
-	return queries, nil
+	return s.store.ListTeamQueries(ctx, teamID)
 }

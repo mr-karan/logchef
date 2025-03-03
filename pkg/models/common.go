@@ -8,13 +8,13 @@ import "time"
 // ID types for improved type safety
 type (
 	// UserID represents a unique user identifier
-	UserID string
+	UserID int
 
 	// TeamID represents a unique team identifier
-	TeamID string
+	TeamID int
 
 	// SourceID represents a unique data source identifier
-	SourceID string
+	SourceID int
 
 	// SessionID represents a unique session identifier
 	SessionID string

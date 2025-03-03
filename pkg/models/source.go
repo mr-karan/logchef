@@ -19,6 +19,7 @@ type Source struct {
 	ID                SourceID       `db:"id" json:"id"`
 	MetaIsAutoCreated bool           `db:"_meta_is_auto_created" json:"_meta_is_auto_created"`
 	MetaTSField       string         `db:"_meta_ts_field" json:"_meta_ts_field"`
+	MetaSeverityField string         `db:"_meta_severity_field" json:"_meta_severity_field"`
 	Connection        ConnectionInfo `db:"connection" json:"connection"`
 	Description       string         `db:"description" json:"description,omitempty"`
 	TTLDays           int            `db:"ttl_days" json:"ttl_days"`
@@ -40,6 +41,7 @@ type SourceResponse struct {
 	ID                SourceID               `json:"id"`
 	MetaIsAutoCreated bool                   `json:"_meta_is_auto_created"`
 	MetaTSField       string                 `json:"_meta_ts_field"`
+	MetaSeverityField string                 `json:"_meta_severity_field"`
 	Connection        ConnectionInfoResponse `json:"connection"`
 	Description       string                 `json:"description,omitempty"`
 	TTLDays           int                    `json:"ttl_days"`
@@ -56,6 +58,7 @@ func (s *Source) ToResponse() *SourceResponse {
 		ID:                s.ID,
 		MetaIsAutoCreated: s.MetaIsAutoCreated,
 		MetaTSField:       s.MetaTSField,
+		MetaSeverityField: s.MetaSeverityField,
 		Connection: ConnectionInfoResponse{
 			Host:      s.Connection.Host,
 			Database:  s.Connection.Database,
@@ -88,7 +91,34 @@ type SourceHealth struct {
 type CreateSourceRequest struct {
 	MetaIsAutoCreated bool           `json:"meta_is_auto_created"`
 	MetaTSField       string         `json:"meta_ts_field"`
+	MetaSeverityField string         `json:"meta_severity_field"`
 	Connection        ConnectionInfo `json:"connection"`
 	Description       string         `json:"description"`
 	TTLDays           int            `json:"ttl_days"`
+}
+
+// ValidateConnectionRequest represents a request to validate a connection
+type ValidateConnectionRequest struct {
+	ConnectionInfo
+	TimestampField string `json:"timestamp_field"`
+	SeverityField  string `json:"severity_field"`
+}
+
+// SourceWithTeams represents a source along with the teams that have access to it
+type SourceWithTeams struct {
+	Source *SourceResponse `json:"source"`
+	Teams  []*Team         `json:"teams"`
+}
+
+// TeamGroupedQuery represents a query grouped by team
+type TeamGroupedQuery struct {
+	TeamID   TeamID            `json:"team_id"`
+	TeamName string            `json:"team_name"`
+	Queries  []*SavedTeamQuery `json:"queries"`
+}
+
+// ConnectionValidationResult represents the result of a connection validation
+type ConnectionValidationResult struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
 }

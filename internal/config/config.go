@@ -64,10 +64,8 @@ type AuthConfig struct {
 
 // LoggingConfig contains logging settings
 type LoggingConfig struct {
-	Level       string `koanf:"level"`
-	Format      string `koanf:"format"`
-	AddSource   bool   `koanf:"add_source"`
-	Environment string `koanf:"environment"`
+	// Level sets the minimum log level (debug, info, warn, error)
+	Level string `koanf:"level"`
 }
 
 // Load loads the configuration from a file

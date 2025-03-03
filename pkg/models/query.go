@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 // FilterOperator represents a filter operation
 type FilterOperator string
 
@@ -104,4 +106,61 @@ type LogContextResponse struct {
 	TargetLogs      []map[string]interface{} `json:"target_logs"` // Multiple logs might have the same timestamp
 	AfterLogs       []map[string]interface{} `json:"after_logs"`
 	Stats           QueryStats               `json:"stats"`
+}
+
+// SavedQueryTab represents the active tab in the explorer
+type SavedQueryTab string
+
+const (
+	// SavedQueryTabFilters represents the filters tab
+	SavedQueryTabFilters SavedQueryTab = "filters"
+
+	// SavedQueryTabRawSQL represents the raw SQL tab
+	SavedQueryTabRawSQL SavedQueryTab = "raw_sql"
+)
+
+// SavedQueryTimeRange represents a time range for a saved query
+type SavedQueryTimeRange struct {
+	Absolute struct {
+		Start int64 `json:"start"` // Unix timestamp in milliseconds
+		End   int64 `json:"end"`   // Unix timestamp in milliseconds
+	} `json:"absolute"`
+}
+
+// SavedQueryContent represents the content of a saved query
+type SavedQueryContent struct {
+	Version   int                 `json:"version"`
+	ActiveTab SavedQueryTab       `json:"activeTab"`
+	SourceID  SourceID            `json:"sourceId"`
+	TimeRange SavedQueryTimeRange `json:"timeRange"`
+	Limit     int                 `json:"limit"`
+	RawSQL    string              `json:"rawSql"`
+}
+
+// SavedTeamQuery represents a saved query associated with a team
+type SavedTeamQuery struct {
+	ID           int       `json:"id" db:"id"`
+	TeamID       TeamID    `json:"team_id" db:"team_id"`
+	SourceID     SourceID  `json:"source_id" db:"source_id"`
+	Name         string    `json:"name" db:"name"`
+	Description  string    `json:"description" db:"description"`
+	QueryContent string    `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// CreateTeamQueryRequest represents a request to create a team query
+type CreateTeamQueryRequest struct {
+	Name         string   `json:"name" validate:"required"`
+	Description  string   `json:"description"`
+	SourceID     SourceID `json:"source_id" validate:"required"`
+	QueryContent string   `json:"query_content" validate:"required"`
+}
+
+// UpdateTeamQueryRequest represents a request to update a team query
+type UpdateTeamQueryRequest struct {
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	SourceID     SourceID `json:"source_id"`
+	QueryContent string   `json:"query_content"`
 }

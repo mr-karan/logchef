@@ -12,6 +12,46 @@ export interface APIErrorResponse {
 
 export type APIResponse<T = any> = APISuccessResponse<T> | APIErrorResponse;
 
+/**
+ * Saved team query representation
+ */
+export interface SavedTeamQuery {
+  id: number;
+  team_id: number;
+  source_id: number;
+  name: string;
+  description: string;
+  query_content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Team information
+ */
+export interface Team {
+  id: number;
+  name: string;
+  description?: string;
+}
+
+/**
+ * Query content structure
+ */
+export interface SavedQueryContent {
+  version: number;
+  activeTab: "filters" | "raw_sql";
+  sourceId: number;
+  timeRange: {
+    absolute: {
+      start: number;
+      end: number;
+    };
+  };
+  limit: number;
+  rawSql: string;
+}
+
 export function isErrorResponse<T>(
   response: APIResponse<T>
 ): response is APIErrorResponse {

@@ -155,14 +155,14 @@ func (v *Validator) ValidateCreateTeam(team *models.Team) error {
 
 // ValidateTeamMember validates a team member request
 func (v *Validator) ValidateTeamMember(teamID models.TeamID, userID models.UserID, role models.TeamRole) error {
-	if teamID == "" {
+	if teamID <= 0 {
 		return &ValidationError{
 			Field:   "TeamID",
 			Message: "team ID is required",
 		}
 	}
 
-	if userID == "" {
+	if userID <= 0 {
 		return &ValidationError{
 			Field:   "UserID",
 			Message: "user ID is required",

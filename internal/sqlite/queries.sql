@@ -2,9 +2,9 @@
 
 -- name: CreateSource
 -- Create a new source entry
--- $1: id
--- $2: _meta_is_auto_created
--- $3: _meta_ts_field
+-- $1: _meta_is_auto_created
+-- $2: _meta_ts_field
+-- $3: _meta_severity_field
 -- $4: host
 -- $5: username
 -- $6: password
@@ -13,8 +13,8 @@
 -- $9: description
 -- $10: ttl_days
 INSERT INTO sources (
-    id, _meta_is_auto_created, _meta_ts_field, host, username, password, database, table_name, description, ttl_days, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'));
+    _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')) RETURNING id;
 
 -- name: GetSource
 -- Get a single source by ID
@@ -35,17 +35,19 @@ SELECT * FROM sources ORDER BY created_at DESC;
 -- Update an existing source
 -- $1: _meta_is_auto_created
 -- $2: _meta_ts_field
--- $3: host
--- $4: username
--- $5: password
--- $6: database
--- $7: table_name
--- $8: description
--- $9: ttl_days
--- $10: id
+-- $3: _meta_severity_field
+-- $4: host
+-- $5: username
+-- $6: password
+-- $7: database
+-- $8: table_name
+-- $9: description
+-- $10: ttl_days
+-- $11: id
 UPDATE sources
 SET _meta_is_auto_created = ?,
     _meta_ts_field = ?,
+    _meta_severity_field = ?,
     host = ?,
     username = ?,
     password = ?,
@@ -65,16 +67,13 @@ DELETE FROM sources WHERE id = ?;
 
 -- name: CreateUser
 -- Create a new user
--- $1: id
--- $2: email
--- $3: full_name
--- $4: role
--- $5: status
--- $6: last_login_at
--- $7: created_at
--- $8: updated_at
-INSERT INTO users (id, email, full_name, role, status, last_login_at, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+-- $1: email
+-- $2: full_name
+-- $3: role
+-- $4: status
+-- $5: last_login_at
+INSERT INTO users (email, full_name, role, status, last_login_at)
+VALUES (?, ?, ?, ?, ?) RETURNING id;
 
 -- name: GetUser
 -- Get a user by ID
@@ -120,12 +119,11 @@ SELECT COUNT(*) FROM users WHERE role = ? AND status = ?;
 
 -- name: CreateSession
 -- Create a new session
--- $1: id
--- $2: user_id
--- $3: expires_at
--- $4: created_at
+-- $1: user_id
+-- $2: expires_at
+-- $3: created_at
 INSERT INTO sessions (id, user_id, expires_at, created_at)
-VALUES (?, ?, ?, ?);
+VALUES (?, ?, ?, ?) RETURNING id;
 
 -- name: GetSession
 -- Get a session by ID
@@ -152,13 +150,10 @@ SELECT COUNT(*) FROM sessions WHERE user_id = ? AND expires_at > ?;
 
 -- name: CreateTeam
 -- Create a new team
--- $1: id
--- $2: name
--- $3: description
--- $4: created_at
--- $5: updated_at
-INSERT INTO teams (id, name, description, created_at, updated_at)
-VALUES (?, ?, ?, datetime('now'), datetime('now'));
+-- $1: name
+-- $2: description
+INSERT INTO teams (name, description)
+VALUES (?, ?) RETURNING id;
 
 -- name: GetTeam
 -- Get a team by ID
@@ -193,9 +188,8 @@ SELECT * FROM teams ORDER BY created_at DESC;
 -- $1: team_id
 -- $2: user_id
 -- $3: role
--- $4: created_at
-INSERT INTO team_members (team_id, user_id, role, created_at)
-VALUES (?, ?, ?, ?);
+INSERT INTO team_members (team_id, user_id, role)
+VALUES (?, ?, ?);
 
 -- name: GetTeamMember
 -- Get a team member
@@ -242,9 +236,8 @@ ORDER BY t.name;
 -- Add a data source to a team
 -- $1: team_id
 -- $2: source_id
--- $3: created_at
-INSERT INTO team_sources (team_id, source_id, created_at)
-VALUES (?, ?, ?);
+INSERT INTO team_sources (team_id, source_id)
+VALUES (?, ?);
 
 -- name: RemoveTeamSource
 -- Remove a data source from a team
@@ -274,15 +267,13 @@ ORDER BY t.name;
 
 -- name: CreateTeamQuery
 -- Create a new query for a team
--- $1: id
--- $2: team_id
+-- $1: team_id
+-- $2: source_id
 -- $3: name
 -- $4: description
 -- $5: query_content
--- $6: created_at
--- $7: updated_at
-INSERT INTO team_queries (id, team_id, name, description, query_content, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT INTO team_queries (team_id, source_id, name, description, query_content)
+VALUES (?, ?, ?, ?, ?) RETURNING id;
 
 -- name: GetTeamQuery
 -- Get a query by ID
@@ -293,14 +284,15 @@ SELECT * FROM team_queries WHERE id = ?;
 -- Update a query for a team
 -- $1: name
 -- $2: description
--- $3: query_content
--- $4: updated_at
+-- $3: source_id
+-- $4: query_content
 -- $5: id
 UPDATE team_queries
 SET name = ?,
     description = ?,
+    source_id = ?,
     query_content = ?,
-    updated_at = ?
+    updated_at = datetime('now')
 WHERE id = ?;
 
 -- name: DeleteTeamQuery
@@ -313,7 +305,52 @@ DELETE FROM team_queries WHERE id = ?;
 -- $1: team_id
 SELECT * FROM team_queries WHERE team_id = ? ORDER BY created_at DESC;
 
+-- name: ListQueriesBySource
+-- List all queries for a specific source
+-- $1: source_id
+SELECT * FROM team_queries WHERE source_id = ? ORDER BY created_at DESC;
+
+-- name: ListQueriesByTeamAndSource
+-- List all queries for a specific team and source
+-- $1: team_id
+-- $2: source_id
+SELECT * FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY created_at DESC;
+
 -- name: DeleteUser
 -- Delete a user by ID
 -- $1: id
 DELETE FROM users WHERE id = ?;
+
+-- name: GetTeamQueryWithAccess
+-- Get a team query by ID and check if the user has access to it
+-- $1: id
+-- $2: user_id
+SELECT tq.* FROM team_queries tq
+JOIN team_members tm ON tq.team_id = tm.team_id
+WHERE tq.id = ? AND tm.user_id = ?;
+
+-- name: ListQueriesForUserAndTeam
+-- List all queries for a specific team that a user has access to
+-- $1: team_id
+-- $2: user_id
+SELECT tq.* FROM team_queries tq
+JOIN team_members tm ON tq.team_id = tm.team_id
+WHERE tq.team_id = ? AND tm.user_id = ?
+ORDER BY tq.created_at DESC;
+
+-- name: ListQueriesForUser
+-- List all queries that a user has access to across all their teams
+-- $1: user_id
+SELECT tq.* FROM team_queries tq
+JOIN team_members tm ON tq.team_id = tm.team_id
+WHERE tm.user_id = ?
+ORDER BY tq.created_at DESC;
+
+-- name: ListQueriesForUserBySource
+-- List all queries for a specific source that a user has access to
+-- $1: user_id
+-- $2: source_id
+SELECT tq.* FROM team_queries tq
+JOIN team_members tm ON tq.team_id = tm.team_id
+WHERE tm.user_id = ? AND tq.source_id = ?
+ORDER BY tq.created_at DESC;

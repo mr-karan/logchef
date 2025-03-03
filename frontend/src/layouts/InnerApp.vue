@@ -70,10 +70,10 @@ import {
     BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
 
-// Initialize color mode
+// Use the theme store instead of initializing directly
+import { useThemeStore } from '@/stores/theme'
+const themeStore = useThemeStore()
 const colorMode = useColorMode()
-// Track the selected option, separate from actual mode
-const selectedMode = ref(colorMode.value)
 
 const route = useRoute()
 const authStore = useAuthStore()
@@ -241,24 +241,24 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
                                                 variant="outline" 
                                                 size="icon" 
                                                 class="w-9 px-0 flex-1 rounded-md"
-                                                :class="{ 'bg-primary text-primary-foreground': selectedMode === 'light' }"
-                                                @click="colorMode = 'light'; selectedMode = 'light'">
+                                                :class="{ 'bg-primary text-primary-foreground': themeStore.preference === 'light' }"
+                                                @click="themeStore.setTheme('light')">
                                                 <Sun class="h-5 w-5" />
                                             </Button>
                                             <Button 
                                                 variant="outline" 
                                                 size="icon" 
                                                 class="w-9 px-0 flex-1 rounded-md"
-                                                :class="{ 'bg-primary text-primary-foreground': selectedMode === 'dark' }"
-                                                @click="colorMode = 'dark'; selectedMode = 'dark'">
+                                                :class="{ 'bg-primary text-primary-foreground': themeStore.preference === 'dark' }"
+                                                @click="themeStore.setTheme('dark')">
                                                 <Moon class="h-5 w-5" />
                                             </Button>
                                             <Button 
                                                 variant="outline" 
                                                 size="icon" 
                                                 class="w-9 px-0 flex-1 rounded-md"
-                                                :class="{ 'bg-primary text-primary-foreground': selectedMode === 'auto' }"
-                                                @click="colorMode = 'auto'; selectedMode = 'auto'">
+                                                :class="{ 'bg-primary text-primary-foreground': themeStore.preference === 'auto' }"
+                                                @click="themeStore.setTheme('auto')">
                                                 <Monitor class="h-5 w-5" />
                                             </Button>
                                         </div>

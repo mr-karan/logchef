@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,8 +11,6 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/mr-karan/logchef/internal/sqlite"
-
-	"github.com/google/uuid"
 )
 
 // Error definitions
@@ -51,50 +50,37 @@ func (s *Service) GetUser(ctx context.Context, id models.UserID) (*models.User, 
 }
 
 // CreateUser creates a new user
-func (s *Service) CreateUser(ctx context.Context, user *models.User) error {
-	// Validate user role
-	if user.Role != models.UserRoleAdmin && user.Role != models.UserRoleMember {
-		return &ValidationError{
-			Field:   "Role",
-			Message: "role must be either 'admin' or 'member'",
-		}
+func (s *Service) CreateUser(ctx context.Context, email, fullName string, role models.UserRole) (*models.User, error) {
+	// Check if user already exists
+	existingUser, err := s.db.GetUserByEmail(ctx, email)
+	if err != nil && err != sql.ErrNoRows {
+		s.log.Error("error checking if user exists", "error", err)
+		return nil, fmt.Errorf("error checking if user exists: %w", err)
 	}
 
-	// Validate user status
-	if user.Status != models.UserStatusActive && user.Status != models.UserStatusInactive {
-		return &ValidationError{
-			Field:   "Status",
-			Message: "status must be either 'active' or 'inactive'",
-		}
+	if existingUser != nil {
+		return nil, fmt.Errorf("user with email %s already exists", email)
 	}
 
-	// Check if user with email already exists
-	existing, err := s.db.GetUserByEmail(ctx, user.Email)
-	if err != nil {
-		s.log.Error("failed to check existing user", "error", err)
-		return fmt.Errorf("error checking existing user: %w", err)
+	// Create new user
+	user := &models.User{
+		Email:    email,
+		FullName: fullName,
+		Role:     role,
+		Status:   models.UserStatusActive,
+		Timestamps: models.Timestamps{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 
-	if existing != nil {
-		return &ValidationError{
-			Field:   "Email",
-			Message: "a user with this email already exists",
-		}
+	// Save to database
+	if err := s.db.CreateUser(ctx, user); err != nil {
+		s.log.Error("error creating user", "error", err)
+		return nil, fmt.Errorf("error creating user: %w", err)
 	}
 
-	// Set ID if not provided
-	if user.ID == "" {
-		user.ID = models.UserID(uuid.New().String())
-	}
-
-	// Set timestamps
-	now := time.Now()
-	user.Timestamps = models.Timestamps{
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-
-	return s.db.CreateUser(ctx, user)
+	return user, nil
 }
 
 // UpdateUser updates a user's information
@@ -214,7 +200,6 @@ func (s *Service) InitAdminUsers(ctx context.Context, adminEmails []string) erro
 		// Create new admin user
 		now := time.Now()
 		user := &models.User{
-			ID:       models.UserID(uuid.New().String()),
 			Email:    email,
 			FullName: "Admin User",
 			Role:     models.UserRoleAdmin,
@@ -248,8 +233,8 @@ func (s *Service) ListTeams(ctx context.Context) ([]*models.Team, error) {
 }
 
 // GetTeam retrieves a team by ID
-func (s *Service) GetTeam(ctx context.Context, id string) (*models.Team, error) {
-	team, err := s.db.GetTeam(ctx, models.TeamID(id))
+func (s *Service) GetTeam(ctx context.Context, id models.TeamID) (*models.Team, error) {
+	team, err := s.db.GetTeam(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("error getting team: %w", err)
 	}
@@ -260,31 +245,35 @@ func (s *Service) GetTeam(ctx context.Context, id string) (*models.Team, error) 
 }
 
 // CreateTeam creates a new team
-func (s *Service) CreateTeam(ctx context.Context, team *models.Team) error {
-	// Validate team
-	if err := s.validator.ValidateCreateTeam(team); err != nil {
-		return err
+func (s *Service) CreateTeam(ctx context.Context, name, description string) (*models.Team, error) {
+	// Check if team already exists
+	existingTeam, err := s.db.GetTeamByName(ctx, name)
+	if err != nil && err != sql.ErrNoRows {
+		s.log.Error("error checking if team exists", "error", err)
+		return nil, fmt.Errorf("error checking if team exists: %w", err)
 	}
 
-	// Set ID if not provided
-	if team.ID == "" {
-		team.ID = models.TeamID(uuid.New().String())
+	if existingTeam != nil {
+		return nil, fmt.Errorf("team with name %s already exists", name)
 	}
 
-	// Set timestamps
-	now := time.Now()
-	team.Timestamps = models.Timestamps{
-		CreatedAt: now,
-		UpdatedAt: now,
+	// Create new team
+	team := &models.Team{
+		Name:        name,
+		Description: description,
+		Timestamps: models.Timestamps{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 
-	// Create team
+	// Save to database
 	if err := s.db.CreateTeam(ctx, team); err != nil {
-		s.log.Error("failed to create team", "error", err)
-		return fmt.Errorf("error creating team: %w", err)
+		s.log.Error("error creating team", "error", err)
+		return nil, fmt.Errorf("error creating team: %w", err)
 	}
 
-	return nil
+	return team, nil
 }
 
 // UpdateTeam updates a team
@@ -316,9 +305,9 @@ func (s *Service) UpdateTeam(ctx context.Context, team *models.Team) error {
 }
 
 // DeleteTeam deletes a team
-func (s *Service) DeleteTeam(ctx context.Context, id string) error {
+func (s *Service) DeleteTeam(ctx context.Context, teamID models.TeamID) error {
 	// Validate team exists
-	existing, err := s.db.GetTeam(ctx, models.TeamID(id))
+	existing, err := s.db.GetTeam(ctx, teamID)
 	if err != nil {
 		return fmt.Errorf("error getting team: %w", err)
 	}
@@ -327,7 +316,7 @@ func (s *Service) DeleteTeam(ctx context.Context, id string) error {
 	}
 
 	// Delete team
-	if err := s.db.DeleteTeam(ctx, models.TeamID(id)); err != nil {
+	if err := s.db.DeleteTeam(ctx, teamID); err != nil {
 		s.log.Error("failed to delete team", "error", err)
 		return fmt.Errorf("error deleting team: %w", err)
 	}
@@ -356,6 +345,27 @@ func (s *Service) ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]
 	}
 
 	return members, nil
+}
+
+// GetTeamMember gets a specific team member
+func (s *Service) GetTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) (*models.TeamMember, error) {
+	// Validate team exists
+	team, err := s.db.GetTeam(ctx, teamID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting team: %w", err)
+	}
+	if team == nil {
+		return nil, ErrTeamNotFound
+	}
+
+	// Get team member
+	member, err := s.db.GetTeamMember(ctx, teamID, userID)
+	if err != nil {
+		s.log.Debug("user is not a member of the team", "team_id", teamID, "user_id", userID)
+		return nil, nil // Return nil instead of error for "not found" case
+	}
+
+	return member, nil
 }
 
 // AddTeamMember adds a user to a team
@@ -530,4 +540,40 @@ func (s *Service) RemoveTeamSource(ctx context.Context, teamID models.TeamID, so
 	}
 
 	return nil
+}
+
+// ListSourcesForUser returns all unique sources a user has access to across all teams
+func (s *Service) ListSourcesForUser(ctx context.Context, userID models.UserID) ([]*models.Source, error) {
+	// Validate user exists
+	user, err := s.db.GetUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting user: %w", err)
+	}
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+
+	// Get sources accessible to the user
+	sources, err := s.db.ListSourcesForUser(ctx, userID)
+	if err != nil {
+		s.log.Error("failed to list sources for user", "user_id", userID, "error", err)
+		return nil, fmt.Errorf("error listing sources for user: %w", err)
+	}
+
+	return sources, nil
+}
+
+// ListSourceTeams returns all teams that have access to a source
+func (s *Service) ListSourceTeams(ctx context.Context, sourceID models.SourceID) ([]*models.Team, error) {
+	// Validate source exists (we're using source service for this normally, but to avoid circular deps)
+	// Just validate through the source access attempt
+
+	// Get teams that have access to the source
+	teams, err := s.db.ListSourceTeams(ctx, sourceID)
+	if err != nil {
+		s.log.Error("failed to list teams for source", "source_id", sourceID, "error", err)
+		return nil, fmt.Errorf("error listing teams for source: %w", err)
+	}
+
+	return teams, nil
 }

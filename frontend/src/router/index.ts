@@ -44,6 +44,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import("@/views/explore/LogExplorer.vue"),
         meta: { title: "Log Explorer" },
       },
+      {
+        path: "queries",
+        name: "SavedQueries",
+        component: () => import("@/views/SavedQueriesView.vue"),
+        meta: { title: "Saved Queries" },
+      },
       // {
       //   path: "history",
       //   name: "QueryHistory",
@@ -51,6 +57,16 @@ const routes: RouteRecordRaw[] = [
       //   meta: { title: "Query History" },
       // },
     ],
+  },
+  // Team specific saved queries
+  {
+    path: "/teams/:teamId/queries",
+    name: "TeamQueries",
+    component: () => import("@/views/SavedQueriesView.vue"),
+    meta: { 
+      title: "Team Queries",
+      requiresAuth: true
+    },
   },
   // Sources Section
   {

@@ -19,20 +19,54 @@ const router = useRouter()
 const { toast } = useToast()
 const sourcesStore = useSourcesStore()
 
+// Define types for our API requests and responses
+interface ConnectionInfo {
+    host: string;
+    username: string;
+    password: string;
+    database: string;
+    table_name: string;
+}
+
+interface ValidateConnectionRequest extends ConnectionInfo {
+    timestamp_field?: string;
+    severity_field?: string;
+}
+
+interface ConnectionValidationResult {
+    success: boolean;
+    message: string;
+}
+
+interface CreateSourcePayload {
+    meta_is_auto_created: boolean;
+    meta_ts_field: string;
+    meta_severity_field: string;
+    connection: ConnectionInfo;
+    description: string;
+    ttl_days: number;
+}
+
 // Form state
-const tableMode = ref('create') // 'create' or 'connect'
+const tableMode = ref<'create' | 'connect'>('create') // 'create' or 'connect'
 const createTable = computed(() => tableMode.value === 'create')
-const host = ref('')
-const enableAuth = ref(false)
-const username = ref('')
-const password = ref('')
-const database = ref('')
-const tableName = ref('')
-const description = ref('')
-const ttlDays = ref(90)
-const isSubmitting = ref(false)
-const showSchema = ref(false)
-const metaTSField = ref('_timestamp')
+const host = ref<string | number>('')
+const enableAuth = ref<boolean>(false)
+const username = ref<string | number>('')
+const password = ref<string | number>('')
+const database = ref<string | number>('')
+const tableName = ref<string | number>('')
+const description = ref<string | number>('')
+const ttlDays = ref<string | number>(90)
+const isSubmitting = ref<boolean>(false)
+const showSchema = ref<boolean>(false)
+const metaTSField = ref<string | number>('timestamp')
+const metaSeverityField = ref<string | number>('severity_text')
+
+// Validation state
+const isValidating = ref(false)
+const validationResult = ref<ConnectionValidationResult | null>(null)
+const isValidated = ref(false) // Track if validation was successful
 
 // Schema preview
 const tableSchema = `CREATE TABLE IF NOT EXISTS "{database}"."{table_name}"
@@ -62,12 +96,12 @@ SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;`
 
 // Computed schema with actual values
 const actualSchema = computed(() => {
-    const db = database.value || 'your_database'
-    const table = tableName.value || 'your_table'
+    const db = database.value ? String(database.value) : 'your_database'
+    const table = tableName.value ? String(tableName.value) : 'your_table'
     return tableSchema
         .replace(/{database}/g, db)
         .replace(/{table_name}/g, table)
-        .replace(/{ttl_days}/g, ttlDays.value.toString())
+        .replace(/{ttl_days}/g, String(ttlDays.value))
 })
 
 // Form validation
@@ -80,6 +114,118 @@ const isValid = computed(() => {
 // Event handlers
 const handleAuthToggle = (checked: boolean) => {
     enableAuth.value = checked
+}
+
+// Computed properties
+const validateButtonText = computed(() => {
+    if (isValidating.value) return 'Validating...'
+    return tableMode.value === 'connect' ? 'Validate Connection & Columns' : 'Validate Connection'
+})
+
+const submitButtonText = computed(() => {
+    if (isSubmitting.value) return 'Creating...'
+    if (createTable.value) return 'Create Source'
+
+    // For "Connect Existing Table" mode
+    if (isValidated.value) return 'Import Source'
+    return 'Validate & Import'
+})
+
+// Validate connection
+const validateConnection = async () => {
+    if (isValidating.value) return
+    if (!host.value || !database.value) {
+        toast({
+            title: 'Error',
+            description: 'Please fill in host and database fields',
+            variant: 'destructive',
+            duration: TOAST_DURATION.ERROR,
+        })
+        return
+    }
+
+    isValidating.value = true
+    validationResult.value = null
+    isValidated.value = false
+
+    try {
+        // Prepare request payload
+        const payload: ValidateConnectionRequest = {
+            host: String(host.value),
+            username: enableAuth.value ? String(username.value) : '',
+            password: enableAuth.value ? String(password.value) : '',
+            database: String(database.value),
+            table_name: String(tableName.value),
+        }
+
+        // Add timestamp and severity fields if connecting to existing table
+        if (tableMode.value === 'connect' && tableName.value) {
+            payload.timestamp_field = String(metaTSField.value)
+            // Only add severity field if it's not empty
+            if (metaSeverityField.value) {
+                payload.severity_field = String(metaSeverityField.value)
+            }
+        }
+
+        console.log('Validation payload:', payload)
+
+        const response = await fetch('/api/v1/sources/validate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        })
+
+        const data = await response.json()
+
+        if (response.ok) {
+            validationResult.value = data.data
+
+            if (data.data.success) {
+                isValidated.value = true
+                toast({
+                    title: 'Success',
+                    description: data.data.message,
+                    variant: 'default',
+                    duration: TOAST_DURATION.SUCCESS,
+                })
+            } else {
+                toast({
+                    title: 'Connection Error',
+                    description: data.data.message,
+                    variant: 'destructive',
+                    duration: TOAST_DURATION.ERROR,
+                })
+            }
+        } else {
+            console.error('Validation error:', data)
+            validationResult.value = {
+                success: false,
+                message: data.error || 'Failed to validate connection'
+            }
+            toast({
+                title: 'Error',
+                description: data.error || 'Failed to validate connection',
+                variant: 'destructive',
+                duration: TOAST_DURATION.ERROR,
+            })
+        }
+    } catch (error) {
+        console.error('Validation exception:', error)
+        validationResult.value = {
+            success: false,
+            message: 'An unexpected error occurred during validation'
+        }
+        toast({
+            title: 'Error',
+            description: 'Failed to validate connection',
+            variant: 'destructive',
+            duration: TOAST_DURATION.ERROR,
+        })
+    } finally {
+        isValidating.value = false
+    }
 }
 
 const handleSubmit = async () => {
@@ -95,22 +241,30 @@ const handleSubmit = async () => {
         return
     }
 
+    // For "Connect Existing Table" mode, validate first if not already validated
+    if (!createTable.value && !isValidated.value) {
+        await validateConnection()
+        // If validation failed, don't proceed
+        if (!isValidated.value) return
+    }
+
     isSubmitting.value = true
 
     try {
         const success = await sourcesStore.createSource({
             meta_is_auto_created: createTable.value,
-            meta_ts_field: metaTSField.value,
+            meta_ts_field: String(metaTSField.value),
+            meta_severity_field: metaSeverityField.value ? String(metaSeverityField.value) : "",
             connection: {
-                host: host.value,
-                username: enableAuth.value ? username.value : '',
-                password: enableAuth.value ? password.value : '',
-                database: database.value,
-                table_name: tableName.value,
+                host: String(host.value),
+                username: enableAuth.value ? String(username.value) : '',
+                password: enableAuth.value ? String(password.value) : '',
+                database: String(database.value),
+                table_name: String(tableName.value),
             },
-            description: description.value,
-            ttl_days: ttlDays.value,
-        })
+            description: String(description.value),
+            ttl_days: Number(ttlDays.value),
+        } as CreateSourcePayload)
 
         if (success) {
             // Redirect to sources list
@@ -133,6 +287,25 @@ const handleSubmit = async () => {
         <CardContent>
             <form @submit.prevent="handleSubmit" class="space-y-6">
                 <div class="space-y-6">
+                    <!-- Basic Info -->
+                    <div class="space-y-4">
+                        <h3 class="text-lg font-medium">Basic Information</h3>
+
+                        <div class="grid gap-2">
+                            <Label for="table_name" class="required">Source Name</Label>
+                            <Input id="table_name" v-model="tableName" placeholder="app_logs" required />
+                            <p class="text-sm text-muted-foreground">
+                                This will be used as the table name in ClickHouse
+                            </p>
+                        </div>
+
+                        <div class="grid gap-2">
+                            <Label for="description">Description</Label>
+                            <Textarea id="description" v-model="description" placeholder="Optional description"
+                                rows="2" />
+                        </div>
+                    </div>
+
                     <!-- Connection Details -->
                     <div class="space-y-4">
                         <h3 class="text-lg font-medium">Connection Details</h3>
@@ -145,16 +318,9 @@ const handleSubmit = async () => {
                             </p>
                         </div>
 
-                        <div class="grid gap-4 md:grid-cols-2">
-                            <div class="grid gap-2">
-                                <Label for="database" class="required">Database</Label>
-                                <Input id="database" v-model="database" placeholder="logs" required />
-                            </div>
-
-                            <div class="grid gap-2">
-                                <Label for="table_name" class="required">Table Name</Label>
-                                <Input id="table_name" v-model="tableName" placeholder="app_logs" required />
-                            </div>
+                        <div class="grid gap-2">
+                            <Label for="database" class="required">Database</Label>
+                            <Input id="database" v-model="database" placeholder="logs" required />
                         </div>
 
                         <!-- Auth Toggle -->
@@ -190,10 +356,12 @@ const handleSubmit = async () => {
                     <div class="space-y-4">
                         <h3 class="text-lg font-medium">Table Configuration</h3>
 
-                        <RadioGroup v-model="tableMode" class="grid grid-cols-[1fr_auto_1fr] items-start gap-4">
+                        <RadioGroup :model-value="tableMode"
+                            @update:model-value="(val) => tableMode = val as 'create' | 'connect'"
+                            class="grid grid-cols-[1fr_auto_1fr] items-start gap-4">
                             <!-- Create Table Card -->
                             <Card :class="{ 'border-primary': tableMode === 'create' }" class="cursor-pointer"
-                                @click="tableMode = 'create'">
+                                @click="tableMode = 'create' as const">
                                 <CardHeader>
                                     <div class="flex items-center gap-2">
                                         <RadioGroupItem value="create" id="create" />
@@ -208,6 +376,15 @@ const handleSubmit = async () => {
                                             <p class="text-sm text-muted-foreground">Optimized schema with
                                                 OTLP-compatible fields and efficient compression</p>
                                         </div>
+                                    </div>
+
+                                    <!-- TTL Days for Create Table -->
+                                    <div class="grid gap-2 mt-4 border-t pt-4">
+                                        <Label for="ttl_days">TTL Days</Label>
+                                        <Input id="ttl_days" v-model="ttlDays" type="number" min="1" />
+                                        <p class="text-sm text-muted-foreground">
+                                            Number of days to keep logs before automatic deletion
+                                        </p>
                                     </div>
 
                                     <!-- Schema Preview -->
@@ -247,7 +424,7 @@ const handleSubmit = async () => {
 
                             <!-- Connect Table Card -->
                             <Card :class="{ 'border-primary': tableMode === 'connect' }" class="cursor-pointer"
-                                @click="tableMode = 'connect'">
+                                @click="tableMode = 'connect' as const">
                                 <CardHeader>
                                     <div class="flex items-center gap-2">
                                         <RadioGroupItem value="connect" id="connect" />
@@ -260,42 +437,53 @@ const handleSubmit = async () => {
                                         <div class="space-y-1">
                                             <p class="text-sm font-medium">Use an existing table</p>
                                             <p class="text-sm text-muted-foreground">Connect to an existing ClickHouse
-                                                table where your logs are already being ingested. You'll just need to
-                                                specify which field contains the timestamp.</p>
+                                                table where your logs are already being ingested. You'll need to
+                                                specify which fields contain the timestamp and severity.</p>
                                         </div>
                                     </div>
 
-                                    <!-- Timestamp Field Input -->
-                                    <div v-if="tableMode === 'connect'" class="mt-4 border-t pt-4">
-                                        <Label for="meta_ts_field" class="required">Timestamp Field Name</Label>
-                                        <Input id="meta_ts_field" v-model="metaTSField" placeholder="_timestamp"
-                                            required />
-                                        <p class="text-sm text-muted-foreground mt-1">
-                                            Specify the field name that contains the timestamp in your table. Must be of
-                                            type DateTime or DateTime64.
-                                        </p>
+                                    <!-- Timestamp and Severity Fields Input -->
+                                    <div v-if="tableMode === 'connect'" class="mt-4 border-t pt-4 space-y-4">
+                                        <div class="grid gap-2">
+                                            <Label for="meta_ts_field" class="required">Timestamp Field Name</Label>
+                                            <Input id="meta_ts_field" v-model="metaTSField" placeholder="timestamp"
+                                                required />
+                                            <p class="text-sm text-muted-foreground mt-1">
+                                                Specify the field name that contains the timestamp in your table. Must
+                                                be of
+                                                type DateTime or DateTime64.
+                                            </p>
+                                        </div>
+
+                                        <div class="grid gap-2">
+                                            <Label for="meta_severity_field">Severity Field
+                                                Name (Optional)</Label>
+                                            <Input id="meta_severity_field" v-model="metaSeverityField"
+                                                placeholder="severity_text" />
+                                            <p class="text-sm text-muted-foreground mt-1">
+                                                Optionally specify the field name that contains the severity level in
+                                                your table. Leave empty if not needed.
+                                            </p>
+                                        </div>
                                     </div>
                                 </CardContent>
                             </Card>
                         </RadioGroup>
+                    </div>
 
-                        <!-- Additional Settings -->
-                        <div class="space-y-4">
-                            <h3 class="text-lg font-medium">Additional Settings</h3>
+                    <!-- Validation Section -->
+                    <div v-if="!createTable" class="space-y-4">
+                        <div class="flex justify-end">
+                            <Button type="button" variant="outline" @click="validateConnection"
+                                :disabled="isValidating || isValidated">
+                                {{ isValidated ? 'Validated ✓' : validateButtonText }}
+                            </Button>
+                        </div>
 
-                            <div class="grid gap-2">
-                                <Label for="description">Description</Label>
-                                <Textarea id="description" v-model="description" placeholder="Optional description"
-                                    rows="2" />
-                            </div>
-
-                            <div class="grid gap-2">
-                                <Label for="ttl_days">TTL Days</Label>
-                                <Input id="ttl_days" v-model="ttlDays" type="number" min="1" />
-                                <p class="text-sm text-muted-foreground">
-                                    Number of days to keep logs before automatic deletion
-                                </p>
-                            </div>
+                        <!-- Validation Result -->
+                        <div v-if="validationResult" class="p-3 rounded-md text-sm"
+                            :class="validationResult.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'">
+                            {{ validationResult.message }}
                         </div>
                     </div>
                 </div>
@@ -304,8 +492,8 @@ const handleSubmit = async () => {
                     <Button type="button" variant="outline" @click="router.push({ name: 'Sources' })">
                         Cancel
                     </Button>
-                    <Button type="submit" :disabled="isSubmitting || !isValid">
-                        {{ isSubmitting ? 'Creating...' : (!createTable ? 'Import Source' : 'Create Source') }}
+                    <Button type="submit" :disabled="isSubmitting || !isValid || (!createTable && !isValidated)">
+                        {{ submitButtonText }}
                     </Button>
                 </div>
             </form>

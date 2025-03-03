@@ -80,11 +80,17 @@ type Queries struct {
 	ListSourceTeams  *sqlx.Stmt `query:"ListSourceTeams"`
 
 	// Team query queries
-	CreateTeamQuery *sqlx.Stmt `query:"CreateTeamQuery"`
-	GetTeamQuery    *sqlx.Stmt `query:"GetTeamQuery"`
-	UpdateTeamQuery *sqlx.Stmt `query:"UpdateTeamQuery"`
-	DeleteTeamQuery *sqlx.Stmt `query:"DeleteTeamQuery"`
-	ListTeamQueries *sqlx.Stmt `query:"ListTeamQueries"`
+	CreateTeamQuery            *sqlx.Stmt `query:"CreateTeamQuery"`
+	GetTeamQuery               *sqlx.Stmt `query:"GetTeamQuery"`
+	GetTeamQueryWithAccess     *sqlx.Stmt `query:"GetTeamQueryWithAccess"`
+	UpdateTeamQuery            *sqlx.Stmt `query:"UpdateTeamQuery"`
+	DeleteTeamQuery            *sqlx.Stmt `query:"DeleteTeamQuery"`
+	ListTeamQueries            *sqlx.Stmt `query:"ListTeamQueries"`
+	ListQueriesForUserAndTeam  *sqlx.Stmt `query:"ListQueriesForUserAndTeam"`
+	ListQueriesForUser         *sqlx.Stmt `query:"ListQueriesForUser"`
+	ListQueriesBySource        *sqlx.Stmt `query:"ListQueriesBySource"`
+	ListQueriesByTeamAndSource *sqlx.Stmt `query:"ListQueriesByTeamAndSource"`
+	ListQueriesForUserBySource *sqlx.Stmt `query:"ListQueriesForUserBySource"`
 }
 
 type Options struct {

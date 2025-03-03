@@ -73,7 +73,7 @@ func (m *Manager) GetTimeSeries(ctx context.Context, sourceID models.SourceID, s
 	// Get client for the source
 	client, err := m.GetConnection(sourceID)
 	if err != nil {
-		return nil, fmt.Errorf("getting connection for source %s: %w", sourceID, err)
+		return nil, fmt.Errorf("getting connection for source %d: %w", sourceID, err)
 	}
 
 	// Get table name from source
@@ -88,7 +88,7 @@ func (m *Manager) GetLogContext(ctx context.Context, sourceID models.SourceID, s
 	// Get client for the source
 	client, err := m.GetConnection(sourceID)
 	if err != nil {
-		return nil, fmt.Errorf("getting connection for source %s: %w", sourceID, err)
+		return nil, fmt.Errorf("getting connection for source %d: %w", sourceID, err)
 	}
 
 	// Get table name from source

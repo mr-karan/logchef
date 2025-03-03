@@ -27,7 +27,13 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 	if id == "" {
 		return SendError(c, fiber.StatusBadRequest, "source ID is required")
 	}
-	sourceID := models.SourceID(id)
+
+	// Convert string to int for SourceID
+	idInt, err := strconv.Atoi(id)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
+	}
+	sourceID := models.SourceID(idInt)
 
 	var req models.LogQueryRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -71,7 +77,13 @@ func (s *Server) handleGetTimeSeries(c *fiber.Ctx) error {
 	if id == "" {
 		return SendError(c, fiber.StatusBadRequest, "source ID is required")
 	}
-	sourceID := models.SourceID(id)
+
+	// Convert string to int for SourceID
+	idInt, err := strconv.Atoi(id)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
+	}
+	sourceID := models.SourceID(idInt)
 
 	// Parse query parameters
 	startTimeStr := c.Query("start_time")
@@ -135,13 +147,20 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "source ID is required")
 	}
 
+	// Convert string to int for SourceID
+	idInt, err := strconv.Atoi(id)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
+	}
+	sourceID := models.SourceID(idInt)
+
 	var req models.LogContextRequest
 	if err := c.BodyParser(&req); err != nil {
 		return SendError(c, fiber.StatusBadRequest, "invalid request body")
 	}
 
 	// Set source ID from path
-	req.SourceID = models.SourceID(id)
+	req.SourceID = sourceID
 
 	// Set defaults
 	if req.BeforeLimit <= 0 {

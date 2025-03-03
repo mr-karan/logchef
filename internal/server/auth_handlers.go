@@ -200,7 +200,7 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 	// Set session cookie
 	c.Cookie(&fiber.Cookie{
 		Name:     "session_id",
-		Value:    string(session.ID), // Convert SessionID to string
+		Value:    string(session.ID), // Use UUID string directly
 		Expires:  session.ExpiresAt,
 		HTTPOnly: true,
 		Secure:   true,
@@ -262,6 +262,17 @@ func (s *Server) handleGetSession(c *fiber.Ctx) error {
 		if errors.Is(err, auth.ErrSessionNotFound) || errors.Is(err, auth.ErrSessionExpired) {
 			statusCode = fiber.StatusUnauthorized
 			errorCode = "session_invalid"
+
+			// Clear the invalid session cookie
+			c.Cookie(&fiber.Cookie{
+				Name:     "session_id",
+				Value:    "",
+				Expires:  time.Now().Add(-24 * time.Hour),
+				HTTPOnly: true,
+				Secure:   true,
+				SameSite: "lax",
+				Path:     "/",
+			})
 		} else {
 			statusCode = fiber.StatusInternalServerError
 			errorCode = "internal_error"

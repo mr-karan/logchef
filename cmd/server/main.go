@@ -20,8 +20,8 @@ func main() {
 	flag.Parse()
 
 	// Initialize global logger with default configuration
-	// This will be reconfigured once the app loads its config
-	logger.Setup(logger.Config{}) // Use defaults
+	// This will be reconfigured with the proper level once the app loads its config
+	logger.Initialize("info") // Use info level by default
 	log := logger.NewLogger("main")
 
 	// Log startup information

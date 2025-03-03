@@ -25,9 +25,10 @@ type Server struct {
 	config *config.Config
 
 	// Domain-specific services
-	sourceService   *source.Service
-	logsService     *logs.Service
-	identityService *identity.Service
+	sourceService    *source.Service
+	logsService      *logs.Service
+	identityService  *identity.Service
+	teamQueryService *logs.TeamQueryService
 
 	auth *auth.Service
 	fs   http.FileSystem
@@ -40,7 +41,7 @@ type Server struct {
 // New creates a new HTTP server
 func New(cfg *config.Config, sourceService *source.Service, logsService *logs.Service,
 	identityService *identity.Service, auth *auth.Service, fs http.FileSystem,
-	buildInfo string) *Server {
+	buildInfo string, teamQueryService *logs.TeamQueryService) *Server {
 
 	// Initialize Fiber app with configuration
 	app := fiber.New(fiber.Config{
@@ -69,15 +70,16 @@ func New(cfg *config.Config, sourceService *source.Service, logsService *logs.Se
 
 	// Create server instance
 	s := &Server{
-		app:             app,
-		config:          cfg,
-		sourceService:   sourceService,
-		logsService:     logsService,
-		identityService: identityService,
-		auth:            auth,
-		fs:              fs,
-		log:             pkglogger.Default().With("component", "server"),
-		buildInfo:       buildInfo,
+		app:              app,
+		config:           cfg,
+		sourceService:    sourceService,
+		logsService:      logsService,
+		identityService:  identityService,
+		teamQueryService: teamQueryService,
+		auth:             auth,
+		fs:               fs,
+		log:              pkglogger.Default().With("component", "server"),
+		buildInfo:        buildInfo,
 	}
 
 	// Setup routes
@@ -103,6 +105,7 @@ func (s *Server) setupRoutes() {
 	s.app.Post("/api/v1/sources", s.requireAuth, s.handleCreateSource)
 	s.app.Get("/api/v1/sources/:id", s.requireAuth, s.handleGetSource)
 	s.app.Delete("/api/v1/sources/:id", s.requireAuth, s.handleDeleteSource)
+	s.app.Post("/api/v1/sources/validate", s.requireAuth, s.handleValidateSourceConnection)
 	s.app.Post("/api/v1/sources/:id/logs/search", s.requireAuth, s.handleQueryLogs)
 	s.app.Get("/api/v1/sources/:id/logs/timeseries", s.requireAuth, s.handleGetTimeSeries)
 	s.app.Post("/api/v1/sources/:id/logs/context", s.requireAuth, s.handleGetLogContext)
@@ -128,6 +131,21 @@ func (s *Server) setupRoutes() {
 	s.app.Get("/api/v1/teams/:id/sources", s.requireAuth, s.handleListTeamSources)
 	s.app.Post("/api/v1/teams/:id/sources", s.requireAuth, s.handleAddTeamSource)
 	s.app.Delete("/api/v1/teams/:id/sources/:sourceId", s.requireAuth, s.handleRemoveTeamSource)
+
+	// Team query routes
+	s.app.Get("/api/v1/teams/:teamId/queries", s.requireAuth, s.handleListTeamQueries)
+	s.app.Post("/api/v1/teams/:teamId/queries", s.requireAuth, s.handleCreateTeamQuery)
+	s.app.Get("/api/v1/teams/:teamId/queries/:queryId", s.requireAuth, s.handleGetTeamQuery)
+	s.app.Put("/api/v1/teams/:teamId/queries/:queryId", s.requireAuth, s.handleUpdateTeamQuery)
+	s.app.Delete("/api/v1/teams/:teamId/queries/:queryId", s.requireAuth, s.handleDeleteTeamQuery)
+
+	// Source query routes
+	s.app.Get("/api/v1/sources/:sourceId/queries", s.requireAuth, s.handleListSourceQueries)
+	s.app.Post("/api/v1/sources/:sourceId/queries", s.requireAuth, s.handleCreateSourceQuery)
+
+	// User-centric routes
+	s.app.Get("/api/v1/user/sources", s.requireAuth, s.handleListUserSources)
+	s.app.Get("/api/v1/user/queries", s.requireAuth, s.handleListUserQueries)
 
 	// Handle 404 for API routes
 	s.app.Use("/api/*", s.notFoundHandler)

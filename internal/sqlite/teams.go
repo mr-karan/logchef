@@ -12,26 +12,26 @@ import (
 
 // CreateTeam creates a new team
 func (db *DB) CreateTeam(ctx context.Context, team *models.Team) error {
-	db.log.Debug("creating team", "team_id", team.ID, "name", team.Name)
+	db.log.Debug("creating team", "name", team.Name)
 
-	result, err := db.queries.CreateTeam.ExecContext(ctx,
-		team.ID,
+	var id int64
+	err := db.queries.CreateTeam.QueryRowContext(ctx,
 		team.Name,
 		team.Description,
-	)
+	).Scan(&id)
+
 	if err != nil {
 		if isUniqueConstraintError(err, "teams", "name") {
 			return fmt.Errorf("team with name %s already exists", team.Name)
 		}
-		db.log.Error("failed to create team", "error", err, "team_id", team.ID)
+		db.log.Error("failed to create team", "error", err)
 		return fmt.Errorf("error creating team: %w", err)
 	}
 
-	if err := checkRowsAffected(result, "create team"); err != nil {
-		db.log.Error("unexpected rows affected", "error", err, "team_id", team.ID)
-		return err
-	}
+	// Set the auto-generated ID
+	team.ID = models.TeamID(id)
 
+	db.log.Debug("team created", "team_id", team.ID)
 	return nil
 }
 
@@ -129,11 +129,10 @@ func (db *DB) AddTeamMember(ctx context.Context, teamID models.TeamID, userID mo
 		teamID,
 		userID,
 		role,
-		time.Now(),
 	)
 	if err != nil {
 		if isUniqueConstraintError(err, "team_members", "team_id") {
-			return fmt.Errorf("user %s is already a member of team %s", userID, teamID)
+			return fmt.Errorf("user %d is already a member of team %d", userID, teamID)
 		}
 		db.log.Error("failed to add team member", "error", err, "team_id", teamID, "user_id", userID)
 		return fmt.Errorf("error adding team member: %w", err)
@@ -248,7 +247,7 @@ func (db *DB) AddTeamSource(ctx context.Context, teamID models.TeamID, sourceID 
 	}
 
 	// Add source to team
-	result, err := db.queries.AddTeamSource.ExecContext(ctx, teamID, sourceID, time.Now())
+	result, err := db.queries.AddTeamSource.ExecContext(ctx, teamID, sourceID)
 	if err != nil {
 		if isUniqueConstraintError(err, "team_sources", "team_id") {
 			return nil // Already exists, not an error
@@ -288,7 +287,7 @@ func (db *DB) ListTeamSources(ctx context.Context, teamID models.TeamID) ([]*mod
 	db.log.Debug("listing team sources", "team_id", teamID)
 
 	var rows []struct {
-		ID          string    `db:"id"`
+		ID          int       `db:"id"`
 		Database    string    `db:"database"`
 		TableName   string    `db:"table_name"`
 		Description string    `db:"description"`
@@ -334,105 +333,78 @@ func (db *DB) ListSourceTeams(ctx context.Context, sourceID models.SourceID) ([]
 	return teams, nil
 }
 
-// Team query methods
+// ListSourcesForUser lists all unique sources a user has access to across all their teams
+func (db *DB) ListSourcesForUser(ctx context.Context, userID models.UserID) ([]*models.Source, error) {
+	db.log.Debug("listing sources for user", "user_id", userID)
 
-// CreateTeamQuery creates a new team query
-func (db *DB) CreateTeamQuery(ctx context.Context, query *models.TeamQuery) error {
-	db.log.Debug("creating team query", "team_id", query.TeamID, "query_id", query.ID, "name", query.Name)
+	// We need to get full source information for each source
+	var rows []struct {
+		ID                int       `db:"id"`
+		MetaIsAutoCreated int       `db:"_meta_is_auto_created"`
+		MetaTSField       string    `db:"_meta_ts_field"`
+		MetaSeverityField string    `db:"_meta_severity_field"`
+		Host              string    `db:"host"`
+		Username          string    `db:"username"`
+		Password          string    `db:"password"`
+		Database          string    `db:"database"`
+		TableName         string    `db:"table_name"`
+		Description       string    `db:"description"`
+		TTLDays           int       `db:"ttl_days"`
+		CreatedAt         time.Time `db:"created_at"`
+		UpdatedAt         time.Time `db:"updated_at"`
+	}
 
-	now := time.Now()
-	query.CreatedAt = now
-	query.UpdatedAt = now
+	err := db.conn.SelectContext(ctx, &rows, `
+		SELECT DISTINCT s.* FROM sources s
+		JOIN team_sources ts ON s.id = ts.source_id
+		JOIN team_members tm ON ts.team_id = tm.team_id
+		WHERE tm.user_id = ?
+		ORDER BY s.created_at DESC
+	`, userID)
 
-	result, err := db.queries.CreateTeamQuery.ExecContext(ctx,
-		query.ID,
-		query.TeamID,
-		query.Name,
-		query.Description,
-		query.QueryContent,
-		query.CreatedAt,
-		query.UpdatedAt,
-	)
 	if err != nil {
-		db.log.Error("failed to create team query", "error", err, "team_id", query.TeamID, "query_id", query.ID)
-		return fmt.Errorf("error creating team query: %w", err)
+		db.log.Error("failed to list sources for user", "error", err, "user_id", userID)
+		return nil, fmt.Errorf("error listing sources for user: %w", err)
 	}
 
-	if err := checkRowsAffected(result, "create team query"); err != nil {
-		db.log.Error("unexpected rows affected", "error", err, "team_id", query.TeamID, "query_id", query.ID)
-		return err
+	sources := make([]*models.Source, len(rows))
+	for i, row := range rows {
+		sources[i] = &models.Source{
+			ID:                models.SourceID(row.ID),
+			MetaIsAutoCreated: row.MetaIsAutoCreated == 1,
+			MetaTSField:       row.MetaTSField,
+			MetaSeverityField: row.MetaSeverityField,
+			Description:       row.Description,
+			TTLDays:           row.TTLDays,
+			Connection: models.ConnectionInfo{
+				Host:      row.Host,
+				Username:  row.Username,
+				Password:  row.Password,
+				Database:  row.Database,
+				TableName: row.TableName,
+			},
+			Timestamps: models.Timestamps{
+				CreatedAt: row.CreatedAt,
+				UpdatedAt: row.UpdatedAt,
+			},
+		}
 	}
 
-	return nil
+	db.log.Debug("sources listed for user", "user_id", userID, "count", len(sources))
+	return sources, nil
 }
 
-// GetTeamQuery gets a team query by ID
-func (db *DB) GetTeamQuery(ctx context.Context, queryID string) (*models.TeamQuery, error) {
-	db.log.Debug("getting team query", "query_id", queryID)
+// Team query methods are implemented in team_queries.go
 
-	var query models.TeamQuery
-	err := db.queries.GetTeamQuery.GetContext(ctx, &query, queryID)
+// GetTeamByName retrieves a team by its name
+func (db *DB) GetTeamByName(ctx context.Context, name string) (*models.Team, error) {
+	db.log.Debug("getting team by name", "name", name)
+
+	var team models.Team
+	err := db.conn.GetContext(ctx, &team, "SELECT * FROM teams WHERE name = ?", name)
 	if err != nil {
-		return nil, handleNotFoundError(err, "error getting team query")
-	}
-	return &query, nil
-}
-
-// UpdateTeamQuery updates a team query
-func (db *DB) UpdateTeamQuery(ctx context.Context, query *models.TeamQuery) error {
-	db.log.Debug("updating team query", "query_id", query.ID, "team_id", query.TeamID, "name", query.Name)
-
-	query.UpdatedAt = time.Now()
-
-	result, err := db.queries.UpdateTeamQuery.ExecContext(ctx,
-		query.Name,
-		query.Description,
-		query.QueryContent,
-		query.UpdatedAt,
-		query.ID,
-	)
-	if err != nil {
-		db.log.Error("failed to update team query", "error", err, "query_id", query.ID, "team_id", query.TeamID)
-		return fmt.Errorf("error updating team query: %w", err)
+		return nil, handleNotFoundError(err, "error getting team by name")
 	}
 
-	if err := checkRowsAffected(result, "update team query"); err != nil {
-		db.log.Error("unexpected rows affected", "error", err, "query_id", query.ID, "team_id", query.TeamID)
-		return err
-	}
-
-	return nil
-}
-
-// DeleteTeamQuery deletes a team query
-func (db *DB) DeleteTeamQuery(ctx context.Context, queryID string) error {
-	db.log.Debug("deleting team query", "query_id", queryID)
-
-	result, err := db.queries.DeleteTeamQuery.ExecContext(ctx, queryID)
-	if err != nil {
-		db.log.Error("failed to delete team query", "error", err, "query_id", queryID)
-		return fmt.Errorf("error deleting team query: %w", err)
-	}
-
-	if err := checkRowsAffected(result, "delete team query"); err != nil {
-		db.log.Error("unexpected rows affected", "error", err, "query_id", queryID)
-		return err
-	}
-
-	return nil
-}
-
-// ListTeamQueries lists all queries for a team
-func (db *DB) ListTeamQueries(ctx context.Context, teamID models.TeamID) ([]*models.TeamQuery, error) {
-	db.log.Debug("listing team queries", "team_id", teamID)
-
-	var queries []*models.TeamQuery
-	err := db.queries.ListTeamQueries.SelectContext(ctx, &queries, teamID)
-	if err != nil {
-		db.log.Error("failed to list team queries", "error", err, "team_id", teamID)
-		return nil, fmt.Errorf("error listing team queries: %w", err)
-	}
-
-	db.log.Debug("team queries listed", "team_id", teamID, "count", len(queries))
-	return queries, nil
+	return &team, nil
 }
