@@ -109,6 +109,7 @@ func (s *Server) setupRoutes() {
 	s.app.Post("/api/v1/sources/:id/logs/search", s.requireAuth, s.handleQueryLogs)
 	s.app.Get("/api/v1/sources/:id/logs/timeseries", s.requireAuth, s.handleGetTimeSeries)
 	s.app.Post("/api/v1/sources/:id/logs/context", s.requireAuth, s.handleGetLogContext)
+	s.app.Get("/api/v1/sources/:id/stats", s.requireAuth, s.handleGetSourceStats)
 
 	// User routes (admin only)
 	s.app.Get("/api/v1/users", s.requireAuth, s.requireAdmin, s.handleListUsers)

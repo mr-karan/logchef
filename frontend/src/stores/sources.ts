@@ -212,6 +212,29 @@ export const useSourcesStore = defineStore("sources", () => {
     return source ? source.teams : [];
   }
 
+  // Source stats
+  const sourceStatsLoading = ref(false);
+  const sourceStatsError = ref<string | null>(null);
+
+  async function getSourceStats(sourceId: number) {
+    sourceStatsLoading.value = true;
+    sourceStatsError.value = null;
+    
+    try {
+      const { success, data } = await handleApiCall({
+        apiCall: () => sourcesApi.getSourceStats(sourceId),
+        successMessage: undefined, // Don't show toast for loading
+      });
+
+      sourceStatsLoading.value = false;
+      return success ? data : null;
+    } catch (error: any) {
+      sourceStatsLoading.value = false;
+      sourceStatsError.value = error.message || "Failed to fetch source statistics";
+      return null;
+    }
+  }
+
   return {
     sources,
     isLoading,
@@ -219,6 +242,8 @@ export const useSourcesStore = defineStore("sources", () => {
     sourcesWithTeams,
     sourceQueriesMap,
     sourceQueriesLoading,
+    sourceStatsLoading,
+    sourceStatsError,
     deduplicatedSources,
     teamSources,
     loadSources,
@@ -227,6 +252,7 @@ export const useSourcesStore = defineStore("sources", () => {
     createSource,
     deleteSource,
     createSourceQuery,
+    getSourceStats,
     getSourcesNotInTeam,
     getTeamsForSource,
   };

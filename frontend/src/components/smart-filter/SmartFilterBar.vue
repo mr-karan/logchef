@@ -438,12 +438,9 @@ const tooltipItems = [
             @mount="handleMount" @change="onChange" class="w-full h-full" />
         </div>
 
-        <!-- Search button on right -->
+        <!-- We don't need a search button here - it's now only in the main explorer page -->
         <div class="flex items-center pr-1">
-          <Button variant="default" size="sm" @click.stop="$emit('search')" class="h-7 px-3">
-            <Search class="h-4 w-4 mr-1" />
-            Search
-          </Button>
+          <!-- Search button removed -->
         </div>
       </div>
     </div>

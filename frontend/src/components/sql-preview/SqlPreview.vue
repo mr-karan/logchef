@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted } from 'vue';
-import hljs from 'highlight.js/lib/core';
-import sql from 'highlight.js/lib/languages/sql';
-import 'highlight.js/styles/stackoverflow-light.css';
+import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { Copy, Check } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { TOAST_DURATION } from '@/lib/constants';
+import * as monaco from 'monaco-editor';
+import { VueMonacoEditor } from '@guolao/vue-monaco-editor';
+import { useColorMode } from '@vueuse/core';
+import { initMonacoSetup } from '@/utils/monaco';
 
 const props = defineProps<{
     sql: string;
@@ -17,7 +18,11 @@ const props = defineProps<{
 
 // Force our own internal SQL content to prevent stale data
 const internalSql = ref('');
+const monacoInstance = ref<monaco.editor.IStandaloneCodeEditor | null>(null);
+
 onMounted(() => {
+    console.log("SqlPreview component mounting", { id: Date.now().toString() });
+    // Monaco is already initialized in main.ts
     internalSql.value = props.sql;
 });
 
@@ -28,21 +33,84 @@ const previousFilterData = ref({
     hasRaw: false
 });
 
-// Completely remove any filtering or modifying logic
-// Just let the SQL pass through directly as provided
-function checkForStaleConditions(sql) {
-    // Do nothing - just return false to never modify the SQL
-    return false;
-}
-
-// Watch for changes in the SQL
+// Watch for changes in the SQL and update immediately
 watch(() => props.sql, (newSql) => {
-    // Update our internal SQL directly - no manipulation
+    // Update our internal SQL directly without debounce - for live updates
     internalSql.value = newSql;
+    
+    // Force refresh Monaco editor if mounted
+    if (monacoInstance.value) {
+        // Use nextTick to ensure Vue has updated the DOM
+        nextTick(() => {
+            monacoInstance.value?.layout();
+        });
+    }
 }, { immediate: true });
 
-// Initialize highlight.js with SQL language
-hljs.registerLanguage('sql', sql);
+// Get theme from app-wide color mode
+const colorMode = useColorMode();
+const theme = computed(() => colorMode.value === 'dark' ? 'logchef-dark' : 'logchef-light');
+
+// Monaco editor options - read-only configuration with minimal features
+// to prevent performance issues
+const editorOptions = computed(() => {
+    return {
+        readOnly: true,
+        minimap: { enabled: false },
+        lineNumbers: "off",
+        glyphMargin: false,
+        folding: false,
+        lineDecorationsWidth: 0,
+        lineNumbersMinChars: 0, 
+        scrollBeyondLastLine: false,
+        renderLineHighlight: "none",
+        hideCursorInOverviewRuler: true,
+        overviewRulerBorder: false,
+        overviewRulerLanes: 0,
+        wordWrap: "on",
+        renderWhitespace: "none",
+        renderControlCharacters: false,
+        renderIndentGuides: false,
+        
+        // Disable features we don't need for read-only preview
+        quickSuggestions: false,
+        quickSuggestionsDelay: 1000000, // Effectively disable
+        parameterHints: { enabled: false },
+        suggestOnTriggerCharacters: false,
+        acceptSuggestionOnEnter: "off",
+        tabCompletion: "off",
+        wordBasedSuggestions: "off",
+        selectionHighlight: false,
+        occurrencesHighlight: false,
+        
+        // Scrollbar config for better performance
+        scrollbar: {
+            vertical: "auto",
+            horizontal: "auto",
+            verticalScrollbarSize: 6,
+            horizontalScrollbarSize: 6,
+            alwaysConsumeMouseWheel: false
+        },
+        
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+        fontSize: 13,
+        lineHeight: 18,
+        automaticLayout: true,
+        
+        // Disable interactive features
+        contextmenu: false,
+        links: false,
+        hover: false, // Disable hover widgets
+        colorDecorators: false, // Disable color decorators
+        
+        // Disable editor services we don't need
+        find: {
+            addExtraSpaceOnTop: false,
+            autoFindInSelection: "never",
+            seedSearchStringFromSelection: "never"
+        }
+    };
+});
 
 // Better SQL formatter with nested WHERE conditions
 const displaySql = computed(() => {
@@ -75,9 +143,30 @@ const displaySql = computed(() => {
     return cleanSql;
 });
 
-// Apply syntax highlighting
-const highlightedSql = computed(() => {
-    return hljs.highlight(displaySql.value, { language: 'sql' }).value;
+// Mount handler - just store the reference
+const handleEditorMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
+    // Only log in development
+    if (process.env.NODE_ENV !== 'production') {
+        console.log("SqlPreview editor mounted with ID:", editor.getId());
+    }
+    
+    // Store the editor reference
+    monacoInstance.value = editor;
+}
+
+// Minimal cleanup - just release references
+onBeforeUnmount(() => {
+    // Only log in development
+    if (process.env.NODE_ENV !== 'production') {
+        console.log("SqlPreview component unmounting");
+    }
+    
+    // Clear content reference
+    internalSql.value = '';
+    
+    // Clear editor reference - but DO NOT try to dispose it
+    // Monaco will handle the cleanup itself when needed
+    monacoInstance.value = null;
 });
 
 // Copy functionality
@@ -124,19 +213,50 @@ async function copyToClipboard() {
             </Button>
         </div>
         
-        <!-- SQL with syntax highlighting -->
-        <div class="text-sm font-mono p-3 pr-[85px] pt-10 bg-muted rounded-md mt-2 overflow-auto max-h-[300px] relative">
+        <!-- SQL with Monaco syntax highlighting -->
+        <div class="text-sm p-3 pr-[85px] pt-10 bg-muted rounded-md mt-2 overflow-hidden max-h-[300px] relative">
             <div class="absolute left-3 top-2 text-[10px] uppercase font-sans text-muted-foreground tracking-wider">Generated Query</div>
-            <pre class="whitespace-pre"><code v-html="highlightedSql" /></pre>
+            <!-- Monaco editor in read-only mode for consistent syntax highlighting -->
+            <div class="h-[250px] w-full">
+                <VueMonacoEditor
+                    v-model:value="displaySql"
+                    :theme="theme"
+                    language="clickhouse-sql"
+                    :options="editorOptions"
+                    @mount="handleEditorMount"
+                    class="w-full h-full"
+                />
+            </div>
         </div>
     </div>
 </template>
 
 <style>
-/* Just remove padding and background since we're in a pre tag already */
-pre code.hljs {
-    background: transparent;
-    padding: 0;
+/* Monaco editor customizations for the preview - scoped to this component */
+:deep(.vue-monaco-editor) {
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+/* Hide cursor in read-only mode */
+:deep(.monaco-editor .cursor) {
+    display: none !important;
+}
+
+/* Customize Monaco's appearance to better match our UI */
+:deep(.monaco-editor),
+:deep(.monaco-editor .monaco-editor-background) {
+    background-color: transparent !important;
+}
+
+:deep(.monaco-editor .margin),
+:deep(.monaco-editor .inputarea.ime-input) {
+    background-color: transparent !important;
+}
+
+/* Remove borders that disrupt cohesive look */
+:deep(.monaco-editor .overflow-guard) {
+    border: none !important;
 }
 
 /* Animations for the copy button */

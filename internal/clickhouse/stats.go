@@ -3,6 +3,7 @@ package clickhouse
 import (
 	"context"
 	"fmt"
+	"math"
 )
 
 // TableColumnStat represents statistics for a single column in a ClickHouse table
@@ -13,7 +14,7 @@ type TableColumnStat struct {
 	Compressed    string  `json:"compressed"`
 	Uncompressed  string  `json:"uncompressed"`
 	ComprRatio    float64 `json:"compr_ratio"`
-	RowsCount     int64   `json:"rows_count"`
+	RowsCount     uint64  `json:"rows_count"`
 	AvgRowSize    float64 `json:"avg_row_size"`
 }
 
@@ -24,8 +25,8 @@ type TableStat struct {
 	Compressed   string  `json:"compressed"`
 	Uncompressed string  `json:"uncompressed"`
 	ComprRate    float64 `json:"compr_rate"`
-	Rows         int64   `json:"rows"`
-	PartCount    int     `json:"part_count"`
+	Rows         uint64  `json:"rows"`
+	PartCount    uint64  `json:"part_count"`
 }
 
 // GetTableColumnStats retrieves column statistics for a specific table
@@ -49,10 +50,41 @@ func (c *Client) GetTableColumnStats(ctx context.Context, database, table string
 		ORDER BY size DESC
 	`, database, table)
 
-	var stats []TableColumnStat
-	err := c.db.Select(ctx, &stats, query)
+	rows, err := c.conn.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("error getting table column stats: %w", err)
+		return nil, fmt.Errorf("error executing column stats query: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []TableColumnStat
+	for rows.Next() {
+		var stat TableColumnStat
+		if err := rows.Scan(
+			&stat.Database,
+			&stat.Table,
+			&stat.Column,
+			&stat.Compressed,
+			&stat.Uncompressed,
+			&stat.ComprRatio,
+			&stat.RowsCount,
+			&stat.AvgRowSize,
+		); err != nil {
+			return nil, fmt.Errorf("error scanning column stats row: %w", err)
+		}
+		
+		// Check for NaN values and replace them with 0
+		if math.IsNaN(stat.ComprRatio) {
+			stat.ComprRatio = 0
+		}
+		if math.IsNaN(stat.AvgRowSize) {
+			stat.AvgRowSize = 0
+		}
+		
+		stats = append(stats, stat)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating column stats rows: %w", err)
 	}
 
 	return stats, nil
@@ -77,10 +109,37 @@ func (c *Client) GetTableStats(ctx context.Context, database, table string) (*Ta
 		ORDER BY size DESC
 	`, database, table)
 
-	var stats []TableStat
-	err := c.db.Select(ctx, &stats, query)
+	rows, err := c.conn.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("error getting table stats: %w", err)
+		return nil, fmt.Errorf("error executing table stats query: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []TableStat
+	for rows.Next() {
+		var stat TableStat
+		if err := rows.Scan(
+			&stat.Database,
+			&stat.Table,
+			&stat.Compressed,
+			&stat.Uncompressed,
+			&stat.ComprRate,
+			&stat.Rows,
+			&stat.PartCount,
+		); err != nil {
+			return nil, fmt.Errorf("error scanning table stats row: %w", err)
+		}
+		
+		// Check for NaN values and replace them with 0
+		if math.IsNaN(stat.ComprRate) {
+			stat.ComprRate = 0
+		}
+		
+		stats = append(stats, stat)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating table stats rows: %w", err)
 	}
 
 	if len(stats) == 0 {
