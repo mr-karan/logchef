@@ -4,14 +4,22 @@ import "./assets/index.css";
 import App from "./App.vue";
 import router from "./router";
 import { useAuthStore } from "@/stores/auth";
-import { initMonacoSetup } from "@/utils/monaco";
+import { initMonacoSetup, logMonacoInstanceCounts } from '@/utils/monaco';
 
-// Initialize Monaco Editor setup - wrapped in try/catch for safety
-try {
-  initMonacoSetup();
-} catch (error) {
-  console.error("Failed to initialize Monaco:", error);
-}
+// FUNDAMENTAL CHANGE: Initialize Monaco ONCE globally at app startup
+// Monaco is a global singleton by design, trying to reinitialize causes issues
+console.log("Initializing Monaco at app startup");
+initMonacoSetup();
+
+// Clean simple navigation logging
+router.beforeEach((to, from, next) => {
+  // Only log navigation between routes for debugging
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`Navigation from ${from.path} to ${to.path}`);
+  }
+  
+  next();
+});
 
 async function initializeApp() {
   try {
@@ -29,7 +37,7 @@ async function initializeApp() {
     // Use router after auth is initialized
     app.use(router);
 
-    // Mount app only after auth is initialized
+    // Mount app
     app.mount("#app");
   } catch (error) {
     console.error("Failed to initialize app:", error);

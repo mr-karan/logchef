@@ -57,6 +57,28 @@ export interface CreateTeamQueryRequest {
   query_content: string;
 }
 
+export interface SourceStats {
+  table_stats: {
+    database: string;
+    table: string;
+    compressed: string;
+    uncompressed: string;
+    compr_rate: number;
+    rows: number; // This will be treated as a number in JavaScript even though it's uint64 in Go
+    part_count: number; // This will be treated as a number in JavaScript even though it's uint64 in Go
+  };
+  column_stats: {
+    database: string;
+    table: string;
+    column: string;
+    compressed: string;
+    uncompressed: string;
+    compr_ratio: number;
+    rows_count: number; // This will be treated as a number in JavaScript even though it's uint64 in Go
+    avg_row_size: number;
+  }[];
+}
+
 export const sourcesApi = {
   async listSources() {
     const response = await api.get<APIResponse<Source[]>>("/sources");
@@ -82,6 +104,11 @@ export const sourcesApi = {
 
   async deleteSource(id: number) {
     const response = await api.delete<APIResponse<void>>(`/sources/${id}`);
+    return response.data;
+  },
+
+  async getSourceStats(sourceId: number) {
+    const response = await api.get<APIResponse<SourceStats>>(`/sources/${sourceId}/stats`);
     return response.data;
   },
 

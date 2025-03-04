@@ -92,13 +92,25 @@ const severityColumnNames = new Set([
   "loglevel",
 ]);
 
+// Keep track of dynamically added fields from source metadata
+const dynamicSeverityFields = new Set<string>();
+
+// Function to register a custom severity field from source metadata
+export function registerSeverityField(fieldName: string): void {
+  if (fieldName && typeof fieldName === 'string') {
+    dynamicSeverityFields.add(fieldName.toLowerCase());
+  }
+}
+
 // Function to get severity badge classes
 export function getSeverityClasses(
   value: unknown,
   columnName: string
 ): string | null {
+  // Check if column is in standard list or dynamically registered
   if (
-    !severityColumnNames.has(columnName.toLowerCase()) ||
+    (!severityColumnNames.has(columnName.toLowerCase()) && 
+     !dynamicSeverityFields.has(columnName.toLowerCase())) ||
     typeof value !== "string"
   ) {
     return null;

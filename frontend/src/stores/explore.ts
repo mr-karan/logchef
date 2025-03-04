@@ -12,6 +12,7 @@ import type {
 } from "@/api/explore";
 import type { DateValue } from "@internationalized/date";
 import { computed } from "vue";
+import { useSourcesStore } from "./sources";
 
 export interface ExploreState {
   logs: Record<string, any>[];
@@ -141,8 +142,17 @@ export const useExploreStore = defineStore("explore", () => {
       throw new Error("Cannot execute query: Invalid source or time range");
     }
 
+    const sourcesStore = useSourcesStore();
+    const currentSource = sourcesStore.sourcesWithTeams.find(s => s.id === state.data.value.sourceId);
+
+    if (!currentSource) {
+      throw new Error("Source not found. Please select a valid source.");
+    }
+
     return await state.withLoading(async () => {
       const timestamps = getTimestamps();
+      
+      // Use the raw SQL mode exclusively
       const params: QueryParams = {
         raw_sql: rawSql || state.data.value.rawSql,
         limit: state.data.value.limit,
@@ -162,7 +172,10 @@ export const useExploreStore = defineStore("explore", () => {
           state.data.value.queryStats = response.stats;
         },
         onError: () => {
-          resetState();
+          // Don't reset everything on error - just clear logs and stats
+          state.data.value.logs = [];
+          state.data.value.columns = [];
+          state.data.value.queryStats = DEFAULT_QUERY_STATS;
         },
       });
 

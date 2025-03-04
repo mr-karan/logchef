@@ -145,3 +145,28 @@ func (s *Server) handleValidateSourceConnection(c *fiber.Ctx) error {
 	)
 	return SendSuccess(c, fiber.StatusOK, result)
 }
+
+// handleGetSourceStats handles GET /api/v1/sources/:id/stats
+func (s *Server) handleGetSourceStats(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return SendError(c, fiber.StatusBadRequest, "source ID is required")
+	}
+
+	// Get the source to retrieve connection information
+	src, err := s.sourceService.GetSource(c.Context(), id)
+	if err != nil {
+		if errors.Is(err, source.ErrSourceNotFound) {
+			return SendError(c, fiber.StatusNotFound, "source not found")
+		}
+		return SendError(c, fiber.StatusInternalServerError, "error getting source: "+err.Error())
+	}
+
+	// Get the source stats
+	stats, err := s.sourceService.GetSourceStats(c.Context(), src)
+	if err != nil {
+		return SendError(c, fiber.StatusInternalServerError, "error getting source stats: "+err.Error())
+	}
+
+	return SendSuccess(c, fiber.StatusOK, stats)
+}

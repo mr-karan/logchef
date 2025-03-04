@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
 import type { WritableComputedRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
@@ -14,13 +14,14 @@ import {
   NumberFieldInput,
 } from '@/components/ui/number-field'
 import { useToast } from '@/components/ui/toast'
+import { useDebounceFn } from '@vueuse/core'
 import type { FilterCondition } from '@/api/explore'
 import { getErrorMessage } from '@/api/types'
 import { TOAST_DURATION } from '@/lib/constants'
 import { DateTimePicker } from '@/components/date-time-picker'
 import { getLocalTimeZone, now, CalendarDateTime, type DateValue } from '@internationalized/date'
 import type { DateRange } from 'radix-vue'
-import { Search, Plus } from 'lucide-vue-next'
+import { Search, Plus, ChevronRight } from 'lucide-vue-next'
 import { createColumns } from './table/columns'
 import DataTable from './table/data-table.vue'
 import EmptyState from './EmptyState.vue'
@@ -32,10 +33,10 @@ import { useSourcesStore } from '@/stores/sources'
 import { useExploreStore } from '@/stores/explore'
 import { useTeamsStore } from '@/stores/teams'
 import { useSqlGenerator } from '@/composables/useSqlGenerator'
+import { registerSeverityField } from '@/lib/utils'
 import SqlPreview from '@/components/sql-preview/SqlPreview.vue'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible'
-import { ChevronRight } from 'lucide-vue-next'
 import SmartFilterBar from '@/components/smart-filter/SmartFilterBar.vue'
 import SavedQueriesDropdown from '@/components/saved-queries/SavedQueriesDropdown.vue'
 import SaveQueryModal from '@/components/saved-queries/SaveQueryModal.vue'
@@ -59,6 +60,8 @@ const queryToSave = ref('')
 // Local UI state
 const isLoading = computed(() => exploreStore.isLoading || sourcesStore.isLoading || teamsStore.isLoading)
 const previewOpen = ref(false)
+const activeTab = ref('filters')
+const showSqlTab = ref(false)
 
 // Flag to prevent unnecessary URL updates on initial load
 const isInitialLoad = ref(true)
@@ -80,8 +83,8 @@ const dateRange = computed({
         end: newValue.end as DateValue
       }
       exploreStore.setTimeRange(range)
-      // Update SQL generator when time range changes
-      updateSqlGenerator()
+      // Update SQL when time range changes
+      updateSql()
     }
   }
 }) as unknown as WritableComputedRef<DateRange>
@@ -109,15 +112,31 @@ const selectedSourceName = computed(() => {
   return source ? formatSourceName(source) : 'Select a source'
 })
 
-// Fix the selected source details computed to handle null sources
+// Fix the selected source details computed to handle null sources with thorough null-checking
 const selectedSourceDetails = computed(() => {
-  const source = sourcesStore.sourcesWithTeams.find(s => s.id === exploreStore.data.sourceId)
-  if (!source) return { database: '', table: '' }
-
-  return {
-    database: source.connection.database,
-    table: source.connection.table_name
+  // First ensure sources are loaded
+  if (!sourcesStore.sourcesWithTeams || !Array.isArray(sourcesStore.sourcesWithTeams)) {
+    return { database: '', table: '' };
   }
+
+  // Check if we have a valid source ID
+  if (!exploreStore.data || !exploreStore.data.sourceId) {
+    return { database: '', table: '' };
+  }
+
+  // Find the source with the matching ID
+  const source = sourcesStore.sourcesWithTeams.find(s => s?.id === exploreStore.data.sourceId);
+
+  // If no source found or it doesn't have valid connection info
+  if (!source || !source.connection) {
+    return { database: '', table: '' };
+  }
+
+  // Return connection details with extra safety
+  return {
+    database: source.connection.database || '',
+    table: source.connection.table_name || ''
+  };
 })
 
 // Add team selection name computed
@@ -130,86 +149,169 @@ const selectedTeamIdForDropdown = computed(() => {
   return teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : undefined;
 });
 
-// Function to get timestamps from store's time range
+// Function to get timestamps from store's time range with robust error handling
 const getTimestamps = () => {
-  const timeRange = exploreStore.data.timeRange
-  if (!timeRange?.start || !timeRange?.end) {
-    return {
-      start: 0,
-      end: 0
+  try {
+    // Check if store data is initialized
+    if (!exploreStore.data) {
+      console.log("getTimestamps: exploreStore.data is not initialized");
+      return {
+        start: Date.now() - 3 * 60 * 60 * 1000, // 3 hours ago
+        end: Date.now()
+      };
     }
-  }
 
-  const startDate = new Date(
-    timeRange.start.year,
-    timeRange.start.month - 1,
-    timeRange.start.day,
-    'hour' in timeRange.start ? timeRange.start.hour : 0,
-    'minute' in timeRange.start ? timeRange.start.minute : 0,
-    'second' in timeRange.start ? timeRange.start.second : 0
-  )
+    const timeRange = exploreStore.data.timeRange;
 
-  const endDate = new Date(
-    timeRange.end.year,
-    timeRange.end.month - 1,
-    timeRange.end.day,
-    'hour' in timeRange.end ? timeRange.end.hour : 0,
-    'minute' in timeRange.end ? timeRange.end.minute : 0,
-    'second' in timeRange.end ? timeRange.end.second : 0
-  )
+    // Check if timeRange exists and has valid start/end properties
+    if (!timeRange || !timeRange.start || !timeRange.end) {
+      console.log("getTimestamps: timeRange is missing or incomplete");
+      return {
+        start: Date.now() - 3 * 60 * 60 * 1000, // 3 hours ago
+        end: Date.now()
+      };
+    }
 
-  return {
-    start: startDate.getTime(),
-    end: endDate.getTime()
+    // Validate that required properties exist
+    if (typeof timeRange.start.year !== 'number' ||
+      typeof timeRange.start.month !== 'number' ||
+      typeof timeRange.start.day !== 'number' ||
+      typeof timeRange.end.year !== 'number' ||
+      typeof timeRange.end.month !== 'number' ||
+      typeof timeRange.end.day !== 'number') {
+      console.log("getTimestamps: timeRange properties are invalid");
+      return {
+        start: Date.now() - 3 * 60 * 60 * 1000, // 3 hours ago
+        end: Date.now()
+      };
+    }
+
+    // Create start date with fallback values for time components
+    let startDate;
+    try {
+      startDate = new Date(
+        timeRange.start.year,
+        timeRange.start.month - 1,
+        timeRange.start.day,
+        'hour' in timeRange.start ? timeRange.start.hour : 0,
+        'minute' in timeRange.start ? timeRange.start.minute : 0,
+        'second' in timeRange.start ? timeRange.start.second : 0
+      );
+
+      // Validate that the date is valid
+      if (isNaN(startDate.getTime())) {
+        throw new Error("Invalid start date");
+      }
+    } catch (error) {
+      console.error("Error creating start date:", error);
+      startDate = new Date(Date.now() - 3 * 60 * 60 * 1000); // 3 hours ago
+    }
+
+    // Create end date with fallback values for time components
+    let endDate;
+    try {
+      endDate = new Date(
+        timeRange.end.year,
+        timeRange.end.month - 1,
+        timeRange.end.day,
+        'hour' in timeRange.end ? timeRange.end.hour : 0,
+        'minute' in timeRange.end ? timeRange.end.minute : 0,
+        'second' in timeRange.end ? timeRange.end.second : 0
+      );
+
+      // Validate that the date is valid
+      if (isNaN(endDate.getTime())) {
+        throw new Error("Invalid end date");
+      }
+    } catch (error) {
+      console.error("Error creating end date:", error);
+      endDate = new Date(); // Current time
+    }
+
+    return {
+      start: startDate.getTime(),
+      end: endDate.getTime()
+    };
+  } catch (error) {
+    console.error("Critical error in getTimestamps:", error);
+    // Return a safe fallback (last 3 hours)
+    return {
+      start: Date.now() - 3 * 60 * 60 * 1000,
+      end: Date.now()
+    };
   }
 }
 
-// Initialize SQL generator with options
-const sqlGenerator = ref(useSqlGenerator({
-  database: selectedSourceDetails.value.database,
-  table: selectedSourceDetails.value.table,
-  start_timestamp: getTimestamps().start,
-  end_timestamp: getTimestamps().end,
-  limit: exploreStore.data.limit,
-}))
-
-// Add computed for SQL preview state
+// Reactive SQL preview that properly updates when filters change
 const sqlPreviewState = computed(() => {
-  if (!sqlGenerator.value?.previewSql) {
-    return {
-      sql: '',
-      isValid: true,
-      error: undefined
-    }
-  }
-  const state = sqlGenerator.value.previewSql
-  return {
-    sql: state.sql ?? '',
-    isValid: state.isValid ?? true,
-    error: state.error
-  }
-})
+  const defaultState = { sql: '', isValid: true, error: undefined as string | undefined };
 
-// Function to initialize or update SQL generator
-function updateSqlGenerator() {
-  // Only update if we have a valid source with database and table
-  if (selectedSourceDetails.value.database && selectedSourceDetails.value.table) {
-    const timestamps = getTimestamps()
+  // Basic validations
+  if (!exploreStore?.data?.sourceId ||
+    !selectedSourceDetails?.value?.database ||
+    !selectedSourceDetails?.value?.table) {
+    return defaultState;
+  }
 
-    sqlGenerator.value = useSqlGenerator({
-      database: selectedSourceDetails.value.database,
-      table: selectedSourceDetails.value.table,
+  try {
+    // The key fix: reference filterConditions in the computed dependency chain
+    // This ensures the computed value recalculates when filterConditions change
+    const filterConditions = exploreStore.data.filterConditions || [];
+    
+    // One-time SQL generation for preview
+    const timestamps = getTimestamps();
+    const generator = useSqlGenerator({
+      database: selectedSourceDetails.value.database || '',
+      table: selectedSourceDetails.value.table || '',
       start_timestamp: timestamps.start,
       end_timestamp: timestamps.end,
-      limit: exploreStore.data.limit
-    })
+      limit: exploreStore.data.limit || 100,
+      timestamp_field: 'timestamp'
+    });
 
-    // Only generate SQL if we have filters
-    const queryState = sqlGenerator.value.generateQuerySql(exploreStore.data.filterConditions)
-    // Update rawSQL only if valid
-    if (queryState.isValid) {
-      exploreStore.setRawSql(queryState.sql)
+    if (!generator) return defaultState;
+
+    // Generate SQL with the current filter conditions
+    generator.generatePreviewSql(filterConditions);
+
+    return {
+      sql: generator.previewSql?.sql || '',
+      isValid: generator.previewSql?.isValid ?? true,
+      error: generator.previewSql?.error
+    };
+  } catch (error) {
+    console.error("SQL preview error:", error);
+    return defaultState;
+  }
+});
+
+// Ultra-simplified: Generate SQL directly
+function generateSql() {
+  try {
+    // Basic validation
+    if (!selectedSourceDetails?.value?.database ||
+      !exploreStore?.data?.sourceId) {
+      return;
     }
+
+    // Create a simple generator just for this operation
+    const timestamps = getTimestamps();
+    const generator = useSqlGenerator({
+      database: selectedSourceDetails.value.database || '',
+      table: selectedSourceDetails.value.table || '',
+      start_timestamp: timestamps.start,
+      end_timestamp: timestamps.end,
+      limit: exploreStore.data.limit || 100,
+      timestamp_field: 'timestamp'
+    });
+
+    // Generate SQL and update store
+    const sql = generator.generateQuerySql(exploreStore.data.filterConditions || []);
+    if (sql.isValid) {
+      exploreStore.setRawSql(sql.sql);
+    }
+  } catch (error) {
+    console.error("SQL generation error:", error);
   }
 }
 
@@ -225,12 +327,18 @@ function initializeFromURL() {
     exploreStore.setSource(parseInt(route.query.source));
   }
 
-  // Set limit from URL
+  // Set limit from URL or use default
   if (route.query.limit && typeof route.query.limit === 'string') {
     exploreStore.setLimit(parseInt(route.query.limit))
+  } else {
+    exploreStore.setLimit(100) // Default limit
   }
 
-  // Set time range from URL
+  // Set time range from URL or use default (now - 3h)
+  const currentTime = now(getLocalTimeZone())
+  const defaultStart = currentTime.subtract({ hours: 3 })
+  const defaultEnd = currentTime
+
   if (
     route.query.start_time &&
     route.query.end_time &&
@@ -268,7 +376,18 @@ function initializeFromURL() {
       })
     } catch (e) {
       console.error('Failed to parse time range from URL', e)
+      // Fall back to default time range
+      exploreStore.setTimeRange({
+        start: defaultStart,
+        end: defaultEnd
+      })
     }
+  } else {
+    // No time range in URL, set default
+    exploreStore.setTimeRange({
+      start: defaultStart,
+      end: defaultEnd
+    })
   }
 
   // Set raw SQL from URL
@@ -300,17 +419,39 @@ function updateURL() {
   router.replace({ query })
 }
 
-// Add activeTab ref for tab management
-const activeTab = ref<string | number>('filters')
+// lifecycle handler with improvements
+onMounted(() => {
+  console.log("LogExplorer mounted");
+});
 
-// Update onMounted
+// Simple cleanup - let child components handle their own editor cleanup
+onBeforeUnmount(() => {
+  // Only log in development
+  if (process.env.NODE_ENV !== 'production') {
+    console.log("LogExplorer unmounted");
+  }
+
+  try {
+    // Just reset state variables - no Monaco cleanup as that's handled by child components
+    showSqlTab.value = false;
+    previewOpen.value = false;
+  } catch (error) {
+    console.error("Error during LogExplorer cleanup:", error);
+  }
+});
+
 onMounted(async () => {
   try {
-    // First initialize from URL
-    initializeFromURL()
+    console.log("LogExplorer component mounting");
 
-    // Load teams first in the team-first approach
+    // Load teams first
     await teamsStore.loadTeams()
+
+    // Load sources with team information next
+    await sourcesStore.loadUserSources()
+
+    // Now initialize from URL after data is loaded
+    initializeFromURL()
 
     // Auto-select first team if none is selected
     if (!teamsStore.currentTeamId && teamsStore.teams.length > 0) {
@@ -318,34 +459,25 @@ onMounted(async () => {
       await nextTick()
     }
 
-    // If team is set from URL, use that
-    if (route.query.team && typeof route.query.team === "string") {
-      teamsStore.currentTeamId = parseInt(route.query.team);
-      await nextTick();
+    // Auto-select first source if none is selected and we have sources
+    if (!exploreStore.data.sourceId && sourcesStore.teamSources.length > 0) {
+      exploreStore.setSource(sourcesStore.teamSources[0].id)
+      await nextTick()
     }
 
-    // Then load sources with team information
-    if (teamsStore.currentTeamId) {
-      await sourcesStore.loadUserSources()
+    // If we have a source selected, load its saved queries for the current team
+    if (exploreStore.data.sourceId && teamsStore.currentTeamId) {
+      await savedQueriesStore.fetchSourceQueries(
+        exploreStore.data.sourceId,
+        teamsStore.currentTeamId
+      )
 
-      // Auto-select first source if none is selected and we have sources
-      if (!exploreStore.data.sourceId && sourcesStore.teamSources.length > 0) {
-        exploreStore.setSource(sourcesStore.teamSources[0].id)
-        await nextTick()
-      }
-
-      // If source is set from URL, use that
-      if (route.query.source && typeof route.query.source === "string") {
-        exploreStore.setSource(parseInt(route.query.source));
-        await nextTick();
-      }
-
-      // If we have a source selected, load its saved queries for the current team
-      if (exploreStore.data.sourceId && teamsStore.currentTeamId) {
-        await savedQueriesStore.fetchSourceQueries(
-          exploreStore.data.sourceId,
-          teamsStore.currentTeamId
-        )
+      // Register the source's severity field for coloring
+      const currentSource = sourcesStore.sourcesWithTeams.find(s => s.id === exploreStore.data.sourceId)
+      if (currentSource && 'MetaSeverityField' in currentSource) {
+        registerSeverityField(currentSource.MetaSeverityField as string)
+      } else if (currentSource && '_meta_severity_field' in currentSource) {
+        registerSeverityField((currentSource as any)._meta_severity_field as string)
       }
     }
 
@@ -367,11 +499,14 @@ onMounted(async () => {
           duration: TOAST_DURATION.ERROR,
         })
       }
-    }
+    } else {
+      // Update the URL to ensure it's set correctly
+      updateURL()
 
-    // If we have all the necessary parameters, execute the query
-    if (exploreStore.canExecuteQuery && !isInitialLoad.value) {
-      await executeQuery()
+      // If we have all the necessary parameters, execute the query
+      if (exploreStore.canExecuteQuery) {
+        await executeQuery()
+      }
     }
   } catch (error) {
     console.error('Error initializing LogExplorer:', error)
@@ -382,40 +517,69 @@ onMounted(async () => {
       duration: TOAST_DURATION.ERROR,
     })
   }
+
+  // Mark initial load as complete
+  isInitialLoad.value = false
 })
 
-// Watch for changes that should trigger SQL updates
+// Create debounced versions of update functions to prevent rapid firing
+
+// One simple debounced function to generate SQL
+const updateSql = useDebounceFn(() => {
+  try {
+    generateSql();
+  } catch (error) {
+    console.error("Error updating SQL:", error);
+  }
+}, 250);
+
+// Simple watch for filter conditions
 watch(
-  () => exploreStore.data.filterConditions,
-  (newFilters, oldFilters) => {
-    // Only update if we have a valid source
-    if (selectedSourceDetails.value.database && selectedSourceDetails.value.table) {
-      updateSqlGenerator();
+  () => exploreStore.data?.filterConditions,
+  () => updateSql(),
+  { deep: true, immediate: false }
+);
+
+// Simple watch for source changes to update SQL and register severity field
+watch(
+  () => exploreStore.data?.sourceId,
+  (newVal) => {
+    if (newVal) {
+      updateSql();
+
+      // Register severity field if available
+      try {
+        const currentSource = sourcesStore.sourcesWithTeams?.find(s => s?.id === newVal);
+        if (currentSource && 'MetaSeverityField' in currentSource) {
+          registerSeverityField(currentSource.MetaSeverityField as string);
+        } else if (currentSource && '_meta_severity_field' in currentSource) {
+          registerSeverityField((currentSource as any)._meta_severity_field as string);
+        }
+      } catch (error) {
+        console.error("Error registering severity field:", error);
+      }
     }
   },
-  { deep: true, immediate: true }
-)
+  { immediate: false }
+);
 
-// Watch for other changes that should trigger SQL updates
+// Simple watch for time range changes
 watch(
-  () => ({
-    sourceId: exploreStore.data.sourceId,
-    sourceDetails: selectedSourceDetails.value,
-    timeRange: exploreStore.data.timeRange,
-    limit: exploreStore.data.limit
-  }),
-  () => {
-    // Only update if we have a valid source
-    if (selectedSourceDetails.value.database && selectedSourceDetails.value.table) {
-      updateSqlGenerator();
-    }
-  },
-  { deep: true }
-)
+  () => exploreStore.data?.timeRange,
+  () => updateSql(),
+  { deep: true, immediate: false }
+);
 
-// Update query execution to always use SQL
+// Simple watch for limit changes
+watch(
+  () => exploreStore.data?.limit,
+  () => updateSql(),
+  { immediate: false }
+);
+
+// Simple query execution function
 async function executeQuery() {
-  if (!exploreStore.data.sourceId || !selectedSourceDetails.value.database || !selectedSourceDetails.value.table) {
+  if (!exploreStore.data?.sourceId || !selectedSourceDetails?.value?.database) {
     toast({
       title: 'Error',
       description: 'Please select a valid source before executing query',
@@ -427,26 +591,41 @@ async function executeQuery() {
 
   try {
     let rawSql: string
-    if (activeTab.value === 'filters') {
-      // Generate SQL from filters
-      const queryState = sqlGenerator.value?.generateQuerySql(exploreStore.data.filterConditions)
-      if (!queryState?.isValid) {
-        throw new Error(queryState?.error || 'Invalid SQL query')
+
+    // Either use the filters to generate SQL or use the raw SQL
+    if (!showSqlTab.value) {
+      // Create a temporary generator to get SQL from filters
+      const timestamps = getTimestamps();
+      const generator = useSqlGenerator({
+        database: selectedSourceDetails.value.database || '',
+        table: selectedSourceDetails.value.table || '',
+        start_timestamp: timestamps.start,
+        end_timestamp: timestamps.end,
+        limit: exploreStore.data.limit || 100,
+        timestamp_field: 'timestamp'
+      });
+
+      // Generate SQL
+      const queryState = generator.generateQuerySql(exploreStore.data.filterConditions || []);
+
+      if (!queryState.isValid) {
+        throw new Error(queryState.error || 'Invalid SQL query');
       }
-      rawSql = queryState.sql
+
+      rawSql = queryState.sql;
     } else {
       // Use raw SQL directly
-      rawSql = exploreStore.data.rawSql
+      rawSql = exploreStore.data.rawSql;
     }
 
-    // Execute query through store
-    await exploreStore.executeQuery(rawSql)
+    // Execute query
+    await exploreStore.executeQuery(rawSql);
 
-    // Update URL only after successful search
+    // Update URL after search
     if (!isInitialLoad.value) {
-      updateURL()
+      updateURL();
     }
-    isInitialLoad.value = false
+    isInitialLoad.value = false;
   } catch (error) {
     toast({
       title: 'Error',
@@ -795,47 +974,113 @@ async function handleSaveQuery(formData: any) {
       </Button>
     </div>
 
-    <!-- Query Builder Tabs -->
+    <!-- Modern Query Builder with Streamlined UI -->
     <div class="rounded-md border bg-card">
-      <Tabs v-model="activeTab" class="w-full" default-value="filters">
-        <TabsList class="grid w-full grid-cols-2">
-          <TabsTrigger value="filters">
-            Filter Builder
-          </TabsTrigger>
-          <TabsTrigger value="raw_sql">
-            SQL Query
-          </TabsTrigger>
-        </TabsList>
+      <div class="flex flex-col">
+        <!-- Sleek Toggle Switch Header -->
+        <div class="flex items-center px-4 py-2 border-b">
+          <div class="flex-1">
+            <h3 class="text-sm font-medium flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
+                class="w-4 h-4 text-primary">
+                <path d="M14 6H6v8h8V6z" />
+                <path fill-rule="evenodd"
+                  d="M9.25 3V1.75a.75.75 0 011.5 0V3h1.5v-.25a.75.75 0 011.5 0V3h.5A2.75 2.75 0 0117 5.75v.5h1.25a.75.75 0 010 1.5H17v1.5h.25a.75.75 0 010 1.5H17v1.5h.25a.75.75 0 010 1.5H17v.5A2.75 2.75 0 0114.25 17h-.5v1.25a.75.75 0 01-1.5 0V17h-1.5v.25a.75.75 0 01-1.5 0V17h-1.5v.25a.75.75 0 01-1.5 0V17h-.5A2.75 2.75 0 013 14.25v-.5H1.75a.75.75 0 010-1.5H3v-1.5h-.25a.75.75 0 010-1.5H3v-1.5h-.25a.75.75 0 010-1.5H3v-.5A2.75 2.75 0 015.75 3h.5V1.75a.75.75 0 011.5 0V3h1.5zM4.5 5.75c0-.69.56-1.25 1.25-1.25h8.5c.69 0 1.25.56 1.25 1.25v8.5c0 .69-.56 1.25-1.25 1.25h-8.5c-.69 0-1.25-.56-1.25-1.25v-8.5z"
+                  clip-rule="evenodd" />
+              </svg>
+              Query Editor
+            </h3>
+          </div>
+          <div class="relative rounded-full bg-muted p-0.5 flex shadow-sm">
+            <button @click="showSqlTab = false"
+              class="relative flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full transition-colors duration-200 focus:outline-none"
+              :class="!showSqlTab
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'">
+              <span class="relative z-10 flex items-center gap-1.5">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                  <path fill-rule="evenodd"
+                    d="M2.628 1.601C5.028 1.206 7.49 1 10 1s4.973.206 7.372.601a.75.75 0 01.628.74v2.288a2.25 2.25 0 01-.659 1.59l-4.682 4.683a2.25 2.25 0 00-.659 1.59v3.037c0 .684-.31 1.33-.844 1.757l-1.937 1.55A.75.75 0 018 18.25v-5.757a2.25 2.25 0 00-.659-1.591L2.659 6.22A2.25 2.25 0 012 4.629V2.34a.75.75 0 01.628-.74z"
+                    clip-rule="evenodd" />
+                </svg>
+                Visual Filter
+              </span>
+            </button>
+            <button @click="showSqlTab = true"
+              class="relative flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full transition-colors duration-200 focus:outline-none"
+              :class="showSqlTab
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'">
+              <span class="relative z-10 flex items-center gap-1.5">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                  <path fill-rule="evenodd"
+                    d="M4.25 2A2.25 2.25 0 002 4.25v11.5A2.25 2.25 0 004.25 18h11.5A2.25 2.25 0 0018 15.75V4.25A2.25 2.25 0 0015.75 2H4.25zm4.03 6.28a.75.75 0 00-1.06-1.06L4.97 9.47a.75.75 0 000 1.06l2.25 2.25a.75.75 0 001.06-1.06L6.56 10l1.72-1.72zm4.5-1.06a.75.75 0 10-1.06 1.06L13.44 10l-1.72 1.72a.75.75 0 101.06 1.06l2.25-2.25a.75.75 0 000-1.06l-2.25-2.25z"
+                    clip-rule="evenodd" />
+                </svg>
+                SQL Query
+              </span>
+            </button>
+          </div>
+        </div>
 
-        <div class="p-3">
-          <TabsContent value="filters" class="mt-0 space-y-3">
+        <!-- Content Area -->
+        <div class="p-4">
+          <!-- Basic tab content - Visual Filter or SQL Editor -->
+          <div v-if="!showSqlTab" class="space-y-3">
+            <!-- Visual Filter Builder -->
             <SmartFilterBar v-model="exploreStore.data.filterConditions" :columns="exploreStore.data.columns"
-              @search="executeQuery" class="border rounded-md bg-muted/20 p-2" />
+              class="border rounded-md bg-card shadow-inner p-2" />
 
             <!-- SQL Preview -->
-            <Collapsible v-model:open="previewOpen">
-              <CollapsibleTrigger class="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-                <ChevronRight class="h-3.5 w-3.5" :class="{ 'rotate-90': previewOpen }" />
-                Preview SQL
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <div class="mt-2 border rounded-md bg-muted/20 p-2">
-                  <SqlPreview :sql="sqlPreviewState.sql" :is-valid="sqlPreviewState.isValid"
-                    :error="sqlPreviewState.error || undefined" />
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-          </TabsContent>
+            <div class="mt-4">
+              <button @click="previewOpen = !previewOpen"
+                class="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
+                  class="w-4 h-4 transition-transform duration-200" :class="{ 'rotate-90': previewOpen }">
+                  <path fill-rule="evenodd"
+                    d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
+                    clip-rule="evenodd" />
+                </svg>
+                Preview Generated SQL
+              </button>
 
-          <TabsContent value="raw_sql" class="mt-0">
-            <div class="border rounded-md bg-muted/20 p-2">
-              <SQLEditor v-model="exploreStore.data.rawSql" :source-database="selectedSourceDetails.database"
-                :source-table="selectedSourceDetails.table" :start-timestamp="getTimestamps().start"
-                :end-timestamp="getTimestamps().end" @execute="executeQuery" />
+              <transition name="fade">
+                <div v-show="previewOpen" class="mt-2">
+                  <div class="border rounded-md bg-muted/20 p-3 overflow-hidden">
+                    <SqlPreview :sql="(sqlPreviewState as any).sql || ''" :is-valid="!!(sqlPreviewState as any).isValid"
+                      :error="(sqlPreviewState as any).error" />
+                  </div>
+                </div>
+              </transition>
             </div>
-          </TabsContent>
+          </div>
+
+          <!-- SQL Query Editor - Simple version -->
+          <div v-else class="border rounded-md bg-card shadow-inner">
+            <Suspense>
+              <template #default>
+                <SQLEditor v-model="exploreStore.data.rawSql" :source-database="selectedSourceDetails?.database || ''"
+                  :source-table="selectedSourceDetails?.table || ''" :start-timestamp="getTimestamps().start"
+                  :end-timestamp="getTimestamps().end" :source-columns="exploreStore.data.columns || []"
+                  @execute="executeQuery" />
+              </template>
+              <template #fallback>
+                <div class="p-4 flex items-center justify-center h-48">
+                  <div class="animate-pulse flex space-x-4">
+                    <div class="flex-1 space-y-4 py-1">
+                      <div class="h-4 bg-muted/50 rounded w-3/4"></div>
+                      <div class="space-y-2">
+                        <div class="h-4 bg-muted/50 rounded"></div>
+                        <div class="h-4 bg-muted/50 rounded w-5/6"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </Suspense>
+          </div>
         </div>
-      </Tabs>
+      </div>
     </div>
 
     <!-- Results Area -->
@@ -886,5 +1131,16 @@ async function handleSaveQuery(formData: any) {
 .required::after {
   content: " *";
   color: hsl(var(--destructive));
+}
+
+/* Add fade transition for the SQL preview */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease-in-out;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

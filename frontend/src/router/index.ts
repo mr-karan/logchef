@@ -92,6 +92,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import("@/views/sources/AddSource.vue"),
         meta: { title: "New Source" },
       },
+      {
+        path: "stats",
+        name: "SourceStats",
+        component: () => import("@/views/sources/SourceStats.vue"),
+        meta: { title: "Source Stats" },
+      },
     ],
   },
   // Access Section (Admin only)

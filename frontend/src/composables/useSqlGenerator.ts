@@ -8,6 +8,7 @@ export interface SqlGeneratorOptions {
   start_timestamp: number;
   end_timestamp: number;
   limit: number;
+  timestamp_field?: string; // Add support for custom timestamp field from source metadata
   sort?: {
     field: string;
     order: "ASC" | "DESC";
@@ -96,16 +97,21 @@ export function useSqlGenerator(initialOptions: SqlGeneratorOptions) {
   // Build WHERE clause including timestamp conditions
   function buildWhereClause(conditions: FilterCondition[]): string {
     const clauses: string[] = [];
+    
+    // Use the custom timestamp field from source metadata or default to 'timestamp'
+    const timestampField = options.value.timestamp_field || 'timestamp';
 
-    // Convert Unix millisecond timestamps to DateTime64
+    // Convert Unix millisecond timestamps to human-readable DateTime64 format
     if (options.value.start_timestamp) {
+      const startDate = new Date(options.value.start_timestamp);
       clauses.push(
-        `timestamp >= fromUnixTimestamp64Milli(${options.value.start_timestamp})`
+        `${timestampField} >= toDateTime64('${startDate.toISOString().replace('T', ' ').replace('Z', '')}', 3)`
       );
     }
     if (options.value.end_timestamp) {
+      const endDate = new Date(options.value.end_timestamp);
       clauses.push(
-        `timestamp <= fromUnixTimestamp64Milli(${options.value.end_timestamp})`
+        `${timestampField} <= toDateTime64('${endDate.toISOString().replace('T', ' ').replace('Z', '')}', 3)`
       );
     }
 
@@ -124,10 +130,13 @@ export function useSqlGenerator(initialOptions: SqlGeneratorOptions) {
 
   // Build ORDER BY clause
   function buildOrderClause(): string {
+    // Use the custom timestamp field from source metadata or default to 'timestamp'
+    const timestampField = options.value.timestamp_field || 'timestamp';
+    
     if (options.value.sort?.field && options.value.sort?.order) {
       return `ORDER BY ${options.value.sort.field} ${options.value.sort.order}`;
     }
-    return "ORDER BY timestamp DESC";
+    return `ORDER BY ${timestampField} DESC`;
   }
 
   // Build LIMIT clause
@@ -176,15 +185,23 @@ ${limitClause}`.trim();
     }
   }
 
-  // Debounced preview generation (for UI updates only)
-  const generatePreviewSql = useDebounceFn((conditions: FilterCondition[]) => {
+  // Immediate preview generation (for real-time updates without debounce)
+  const generatePreviewSql = (conditions: FilterCondition[]) => {
     // For empty condition arrays, always generate a clean simple query
     if (!conditions || conditions.length === 0) {
+      // Use the custom timestamp field from source metadata or default to 'timestamp'
+      const timestampField = options.value.timestamp_field || 'timestamp';
+      
+      // Format timestamps as human-readable DateTime64
+      const startDate = new Date(options.value.start_timestamp);
+      const endDate = new Date(options.value.end_timestamp);
+      
       previewSql.value = {
         sql: `SELECT *
 FROM ${options.value.database}.${options.value.table}
-WHERE timestamp >= fromUnixTimestamp64Milli(${options.value.start_timestamp}) AND timestamp <= fromUnixTimestamp64Milli(${options.value.end_timestamp})
-ORDER BY timestamp DESC
+WHERE ${timestampField} >= toDateTime64('${startDate.toISOString().replace('T', ' ').replace('Z', '')}', 3) 
+  AND ${timestampField} <= toDateTime64('${endDate.toISOString().replace('T', ' ').replace('Z', '')}', 3)
+ORDER BY ${timestampField} DESC
 LIMIT ${options.value.limit}`,
         isValid: true,
         error: null
@@ -192,7 +209,7 @@ LIMIT ${options.value.limit}`,
     } else {
       previewSql.value = generateSqlInternal(conditions);
     }
-  }, 100); // Reduced debounce time for better responsiveness
+  };
 
   // Immediate SQL generation (for actual queries)
   function generateQuerySql(conditions: FilterCondition[]): SqlGeneratorState {

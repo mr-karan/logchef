@@ -2,16 +2,63 @@ import * as monaco from "monaco-editor";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import { loader } from "@guolao/vue-monaco-editor";
 import { registerLogFilterLanguage } from "./logfilter-language";
+import { registerSqlLanguage } from "./sql-language";
 
-// Setup Monaco Editor workers
-self.MonacoEnvironment = {
-  getWorker(_, label) {
-    return new EditorWorker();
-  },
-};
+// FUNDAMENTAL CHANGE: Initialize Monaco once, globally, and never reset it
+// Monaco is a global singleton by design, and trying to reinitialize it causes issues
+let monacoInitialized = false;
 
-// Track if Monaco has been initialized
-let isMonacoInitialized = false;
+// Define a debug log function to track Monaco lifecycle
+const DEBUG = true;
+function debugLog(...args) {
+  if (DEBUG) {
+    console.log(`[Monaco Debug]`, ...args);
+  }
+}
+
+// We will set up Monaco environment ONLY when explicitly requested
+// This prevents cross-tab memory issues and ensures clean initialization
+const setupMonacoEnvironment = () => {
+  if (typeof window !== 'undefined' && typeof self !== 'undefined' && !self.MonacoEnvironment) {
+    try {
+      debugLog("Setting up Monaco environment");
+      self.MonacoEnvironment = {
+        getWorker(_, label) {
+          debugLog("Creating Monaco worker", label);
+          return new EditorWorker();
+        },
+      };
+      debugLog("Monaco environment setup completed successfully");
+      return true;
+    } catch (error) {
+      console.error("Failed to setup Monaco environment:", error);
+      return false;
+    }
+  }
+  return true; // Return true if already set up
+}
+
+/**
+ * Count and log all current Monaco editors and models
+ * This is useful for debugging memory leaks
+ */
+export function logMonacoInstanceCounts() {
+  if (typeof window !== 'undefined' && window.monaco && window.monaco.editor) {
+    try {
+      const editors = window.monaco.editor.getEditors();
+      const models = window.monaco.editor.getModels();
+      debugLog(
+        `Monaco instance counts - Editors: ${editors.length}, Models: ${models.length}`, 
+        { editors, models }
+      );
+      return { editors, models };
+    } catch (error) {
+      console.error("Error counting Monaco instances:", error);
+      return { editors: [], models: [] };
+    }
+  }
+  return { editors: [], models: [] };
+}
 
 /**
  * Get default Monaco Editor options for compact input fields
@@ -57,7 +104,7 @@ export function getDefaultMonacoOptions() {
     tabCompletion: "on",
     suggest: {
       showIcons: true,
-      maxVisibleSuggestions: 12,
+      maxVisibleSuggestions: 25,
       filterGraceful: true,
       snippetsPreventQuickSuggestions: false,
       showMethods: true,
@@ -126,7 +173,7 @@ export function getSingleLineMonacoOptions() {
     acceptSuggestionOnEnter: "smart",
     suggest: {
       showIcons: true,
-      maxVisibleSuggestions: 12,
+      maxVisibleSuggestions: 25,
       filterGraceful: true,
       showMethods: false, // Cleaner suggestion UI
       showFunctions: false,
@@ -160,14 +207,58 @@ export function getSingleLineMonacoOptions() {
 }
 
 /**
+ * Check if Monaco is initialized
+ */
+export function isMonacoInitialized() {
+  return monacoInitialized;
+}
+
+/**
+ * Dispose specific Monaco editor instance safely
+ * This should be called by components when they are unmounted
+ */
+export function disposeMonacoEditorInstance(editor) {
+  if (!editor) return;
+  
+  try {
+    debugLog("Disposing editor instance", editor.getId());
+    
+    // Get the model associated with this editor
+    const model = editor.getModel();
+    
+    // Dispose the editor
+    editor.dispose();
+    
+    // Log current instances after disposal
+    logMonacoInstanceCounts();
+    
+    return true;
+  } catch (error) {
+    console.error("Error disposing Monaco editor instance:", error);
+    return false;
+  }
+}
+
+/**
  * Initialize Monaco Editor with custom themes and language definitions
+ * This is now called ONCE at application startup
  */
 export function initMonacoSetup() {
-  // Prevent multiple initializations
-  if (isMonacoInitialized) return;
-  isMonacoInitialized = true;
-
+  // Check if already initialized
+  if (monacoInitialized) {
+    debugLog("Monaco already initialized, skipping");
+    return;
+  }
+  
+  // Setup Monaco environment first
+  if (!setupMonacoEnvironment()) {
+    console.error("Failed to set up Monaco environment");
+    return;
+  }
+  
   try {
+    debugLog("Initializing Monaco editor");
+    
     // Configure the loader with monaco instance
     loader.config({ monaco });
 
@@ -185,35 +276,27 @@ export function initMonacoSetup() {
         "editorSuggestWidget.border": "#e0e0e0",
         "editorSuggestWidget.selectedBackground": "#0078d4",
         "editorSuggestWidget.selectedForeground": "#ffffff",
-        "editorSuggestWidget.highlightForeground": "#0078d4",
-        // Enhanced indication of active suggestion
-        "editorSuggestWidget.focusHighlightForeground": "#0078d4",
+        "editorSuggestWidget.highlightForeground": "#00c853",
         "editorSuggestWidget.selectedIconForeground": "#ffffff",
-        // Better hover and tooltip styling
         "editorHoverWidget.background": "#f8f8f8",
         "editorHoverWidget.border": "#e0e0e0",
       },
       rules: [
-        // Field tokens with distinct styling
         { token: "field", foreground: "0451a5", fontStyle: "bold" },
-        // Magic symbol with distinctive color
         { token: "magic-symbol", foreground: "d32f2f", fontStyle: "bold" },
-        // Regular identifiers
         { token: "identifier", foreground: "333333" },
-        // Operators with prominent styling
         { token: "operator", foreground: "0089ab", fontStyle: "bold" },
-        // Parentheses for future grouping support
         { token: "parenthesis", foreground: "333333" },
-        // String values
         { token: "string", foreground: "a31515" },
-        // Numeric values
         { token: "number", foreground: "098658" },
-        // Keywords (AND, OR)
         { token: "keyword", foreground: "7A3E9D", fontStyle: "bold" },
-        // Delimiters (semicolons)
         { token: "delimiter", foreground: "666666", fontStyle: "bold" },
-        // Comments
         { token: "comment", foreground: "008000", fontStyle: "italic" },
+        { token: "function", foreground: "795E26" },
+        { token: "table", foreground: "0070C1" },
+        { token: "column", foreground: "0451a5", fontStyle: "bold" },
+        { token: "type", foreground: "267f99" },
+        { token: "variable", foreground: "001080" },
       ],
     });
 
@@ -230,40 +313,59 @@ export function initMonacoSetup() {
         "editorSuggestWidget.border": "#454545",
         "editorSuggestWidget.selectedBackground": "#0078d4",
         "editorSuggestWidget.selectedForeground": "#ffffff",
-        "editorSuggestWidget.highlightForeground": "#18a3ff",
-        // Enhanced indication of active suggestion
-        "editorSuggestWidget.focusHighlightForeground": "#18a3ff",
+        "editorSuggestWidget.highlightForeground": "#00c853",
         "editorSuggestWidget.selectedIconForeground": "#ffffff",
-        // Better hover and tooltip styling
         "editorHoverWidget.background": "#252526",
         "editorHoverWidget.border": "#454545",
       },
       rules: [
-        // Field tokens with distinct styling similar to Grafana's LogQL
         { token: "field", foreground: "6e9fff", fontStyle: "bold" },
-        // Magic symbol with distinctive color
         { token: "magic-symbol", foreground: "ff5252", fontStyle: "bold" },
-        // Regular identifiers
         { token: "identifier", foreground: "d4d4d4" },
-        // Operators with prominent styling
         { token: "operator", foreground: "0089ab", fontStyle: "bold" },
-        // Parentheses for future grouping support
         { token: "parenthesis", foreground: "d4d4d4" },
-        // String values
         { token: "string", foreground: "ce9178" },
-        // Numeric values
         { token: "number", foreground: "b5cea8" },
-        // Keywords (AND, OR)
         { token: "keyword", foreground: "c586c0", fontStyle: "bold" },
-        // Delimiters (semicolons)
         { token: "delimiter", foreground: "cccccc", fontStyle: "bold" },
-        // Comments
         { token: "comment", foreground: "6a9955", fontStyle: "italic" },
+        { token: "function", foreground: "dcdcaa" },
+        { token: "table", foreground: "4ec9b0" },
+        { token: "column", foreground: "9cdcfe", fontStyle: "bold" },
+        { token: "type", foreground: "4ec9b0" },
+        { token: "variable", foreground: "9cdcfe" },
       ],
     });
 
-    // Register logfilter language
-    registerLogFilterLanguage();
+    // Register language definitions if needed
+    try {
+      debugLog("Registering custom language definitions");
+      
+      if (!monaco.languages.getLanguages().some(lang => lang.id === "logfilter")) {
+        debugLog("Registering logfilter language");
+        registerLogFilterLanguage();
+      }
+      
+      if (!monaco.languages.getLanguages().some(lang => lang.id === "clickhouse-sql")) {
+        debugLog("Registering clickhouse-sql language");
+        registerSqlLanguage();
+      }
+    } catch (langError) {
+      console.error("Error registering languages:", langError);
+    }
+    
+    // Set up safeguards
+    if (typeof window !== 'undefined') {
+      // Log editor instances on navigation
+      window.addEventListener('beforeunload', () => {
+        debugLog("Page unloading - current Monaco instances:");
+        logMonacoInstanceCounts();
+      });
+    }
+    
+    // Mark as initialized
+    monacoInitialized = true;
+    debugLog("Monaco successfully initialized");
   } catch (error) {
     console.error("Error initializing Monaco:", error);
   }

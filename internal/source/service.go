@@ -431,3 +431,55 @@ func (s *Service) ValidateConnectionWithColumns(ctx context.Context, conn models
 		Message: "Connection and column types validated successfully",
 	}, nil
 }
+
+// SourceStats represents the combined statistics for a ClickHouse table
+type SourceStats struct {
+	TableStats       *clickhouse.TableStat        `json:"table_stats"`
+	ColumnStats      []clickhouse.TableColumnStat `json:"column_stats"`
+}
+
+// GetSourceStats retrieves statistics for a specific source (ClickHouse table)
+func (s *Service) GetSourceStats(ctx context.Context, source *models.Source) (*SourceStats, error) {
+	s.log.Debug("retrieving source stats",
+		"source_id", source.ID,
+		"database", source.Connection.Database,
+		"table", source.Connection.TableName,
+	)
+
+	// Get client for the source
+	client, err := s.chDB.GetClient(source.ID)
+	if err != nil {
+		s.log.Error("failed to get client for source",
+			"error", err,
+			"source_id", source.ID,
+		)
+		return nil, fmt.Errorf("failed to get client for source: %w", err)
+	}
+
+	// Get table stats
+	tableStats, err := client.GetTableStats(ctx, source.Connection.Database, source.Connection.TableName)
+	if err != nil {
+		s.log.Error("failed to get table stats",
+			"error", err,
+			"source_id", source.ID,
+		)
+		return nil, fmt.Errorf("failed to get table stats: %w", err)
+	}
+
+	// Get column stats
+	columnStats, err := client.GetTableColumnStats(ctx, source.Connection.Database, source.Connection.TableName)
+	if err != nil {
+		s.log.Error("failed to get column stats",
+			"error", err,
+			"source_id", source.ID,
+		)
+		return nil, fmt.Errorf("failed to get column stats: %w", err)
+	}
+
+	stats := &SourceStats{
+		TableStats:  tableStats,
+		ColumnStats: columnStats,
+	}
+
+	return stats, nil
+}
