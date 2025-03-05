@@ -2,15 +2,13 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import * as monaco from 'monaco-editor'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { X, HelpCircle } from 'lucide-vue-next'
+import { HelpCircle } from 'lucide-vue-next'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
 import { useColorMode } from '@vueuse/core'
 import { getSqlMonacoOptions } from '@/utils/sql-language'
-import { registerSqlCompletionProvider, showSqlSuggestions } from '@/utils/sql-language'
-import { initMonacoSetup } from '@/utils/monaco'
+import { registerSqlCompletionProvider } from '@/utils/sql-language'
 import {
   Tooltip,
   TooltipContent,
@@ -159,7 +157,7 @@ const commonColumns = ref([
   { name: 'severity_text', type: 'String' },
   { name: 'service_name', type: 'String' },
   { name: 'message', type: 'String' },
-  
+
   // System metadata
   { name: 'host', type: 'String' },
   { name: 'hostname', type: 'String' },
@@ -171,13 +169,13 @@ const commonColumns = ref([
   { name: 'environment', type: 'String' },
   { name: 'region', type: 'String' },
   { name: 'zone', type: 'String' },
-  
+
   // Tracing fields
   { name: 'trace_id', type: 'String' },
   { name: 'span_id', type: 'String' },
   { name: 'parent_span_id', type: 'String' },
   { name: 'trace_flags', type: 'UInt8' },
-  
+
   // HTTP/API request fields
   { name: 'body', type: 'String' },
   { name: 'method', type: 'String' },
@@ -193,13 +191,13 @@ const commonColumns = ref([
   { name: 'request_id', type: 'String' },
   { name: 'request_size', type: 'UInt32' },
   { name: 'response_size', type: 'UInt32' },
-  
+
   // Performance metrics
   { name: 'duration_ms', type: 'Float64' },
   { name: 'duration', type: 'Float64' },
   { name: 'latency_ms', type: 'Float64' },
   { name: 'latency', type: 'Float64' },
-  
+
   // User/authentication fields
   { name: 'user_id', type: 'String' },
   { name: 'user_email', type: 'String' },
@@ -207,14 +205,14 @@ const commonColumns = ref([
   { name: 'tenant_id', type: 'String' },
   { name: 'organization_id', type: 'String' },
   { name: 'auth_method', type: 'String' },
-  
+
   // Error-specific fields
   { name: 'error', type: 'String' },
   { name: 'error_message', type: 'String' },
   { name: 'error_type', type: 'String' },
   { name: 'error_stack', type: 'String' },
   { name: 'error_code', type: 'String' },
-  
+
   // Application-specific fields
   { name: 'version', type: 'String' },
   { name: 'build_id', type: 'String' },
@@ -224,7 +222,7 @@ const commonColumns = ref([
   { name: 'function', type: 'String' },
   { name: 'file', type: 'String' },
   { name: 'line', type: 'UInt32' },
-  
+
   // Generic fields
   { name: '_raw', type: 'String' },
   { name: 'raw_message', type: 'String' },
@@ -252,17 +250,17 @@ const sourceColumns = computed(() => {
 // Combined columns for autocompletion (both common ones and source-specific)
 const allColumns = computed(() => {
   const uniqueColumns = new Map()
-  
+
   // Add common columns first (lower priority)
   commonColumns.value.forEach(col => {
     uniqueColumns.set(col.name, col)
   })
-  
+
   // Add source columns (higher priority - will overwrite common ones if same name)
   sourceColumns.value.forEach(col => {
     uniqueColumns.set(col.name, col)
   })
-  
+
   return Array.from(uniqueColumns.values())
 })
 
@@ -292,7 +290,7 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
         return;
       }
       lastProviderUpdate = now;
-      
+
       // Make sure we use current table info
       tables.value = [
         { name: props.sourceTable || 'logs', database: props.sourceDatabase || 'default' }
@@ -307,7 +305,7 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
           console.error("Error disposing completion provider:", disposeError);
         }
       }
-      
+
       // Create new provider
       completionProvider.value = registerSqlCompletionProvider(allColumns.value, tables.value);
     } catch (error) {
@@ -427,7 +425,7 @@ watch(() => [props.sourceTable, props.sourceDatabase], () => {
           console.error("Error disposing completion provider:", disposeError);
         }
       }
-      
+
       // Register new provider after a short delay to ensure everything is settled
       setTimeout(() => {
         try {
@@ -449,10 +447,10 @@ onMounted(() => {
     if (process.env.NODE_ENV !== 'production') {
       console.log("SQLEditor component mounting");
     }
-    
+
     // Set initial code value
     code.value = props.modelValue || '';
-    
+
     // Add style element for Monaco editor - with unique ID to prevent duplication
     const styleId = 'sql-editor-custom-styles';
     if (!document.getElementById(styleId)) {
@@ -473,14 +471,14 @@ onBeforeUnmount(() => {
     if (process.env.NODE_ENV !== 'production') {
       console.log("SQLEditor component unmounting");
     }
-    
+
     // Remove style element if it exists and no other SQLEditor components are active
     const styleId = 'sql-editor-custom-styles';
     const styleEl = document.getElementById(styleId);
     if (styleEl && window.monaco?.editor?.getEditors().length <= 1) {
       styleEl.remove();
     }
-    
+
     // Clear references
     code.value = '';
     completionProvider.value = null;
@@ -501,7 +499,7 @@ const clearSql = () => {
 // Insert template
 const insertTemplate = (sql: string) => {
   code.value = sql;
-  
+
   // Focus the editor after applying the template
   nextTick(() => {
     if (editorInstance.value) {
@@ -542,7 +540,7 @@ const executeQuery = () => {
 
   // Save to recent queries
   saveToRecentQueries(code.value);
-  
+
   // Emit execute event
   emit('execute');
 }
@@ -557,19 +555,19 @@ const MAX_RECENT_QUERIES = 5;
 const saveToRecentQueries = (sql: string) => {
   // Skip empty or very short queries
   if (!sql || sql.trim().length < 10) return;
-  
+
   // Avoid duplicates - remove existing entry with the same SQL
   const existingIndex = recentQueries.value.findIndex(q => q.sql === sql);
   if (existingIndex !== -1) {
     recentQueries.value.splice(existingIndex, 1);
   }
-  
+
   // Add to the beginning of the array
   recentQueries.value.unshift({
     sql,
     timestamp: Date.now()
   });
-  
+
   // Trim to maximum size
   if (recentQueries.value.length > MAX_RECENT_QUERIES) {
     recentQueries.value = recentQueries.value.slice(0, MAX_RECENT_QUERIES);
@@ -590,101 +588,76 @@ const tooltipItems = [
 
 <template>
   <div class="w-full">
-    <div class="flex flex-col p-2 gap-3">
-      <!-- Slimmer Header Area -->
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <!-- Quick templates label -->
-          <div class="flex items-center">
-            <Label class="text-xs text-muted-foreground">Templates:</Label>
-          </div>
-          
-          <!-- Help tooltip moved inline -->
-          <TooltipProvider :delay-duration="0">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" class="h-5 w-5 -mt-0.5">
-                  <HelpCircle class="h-3.5 w-3.5 text-muted-foreground" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" align="start" class="max-w-sm p-4">
-                <h3 class="font-medium mb-2">SQL Editor Usage Tips</h3>
-                <ul class="text-sm space-y-1">
-                  <li v-for="(item, index) in tooltipItems" :key="index" class="flex items-start">
-                    <span class="mr-2">•</span>
-                    <span>{{ item }}</span>
-                  </li>
-                </ul>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+    <!-- Simplified and more consistent with the filter editor - no clear button -->
+    <div class="flex flex-col gap-2">
+
+      <!-- Templates row - with improved tab-like styling -->
+      <div v-if="getSqlTemplates.length > 0" class="flex flex-wrap gap-1.5 px-3 py-1.5 border-b border-border/30">
+        <span class="text-[10px] font-medium text-muted-foreground mr-1">Templates:</span>
+        <div class="flex flex-wrap gap-1.5">
+          <button v-for="template in getSqlTemplates" :key="template.label" @click="insertTemplate(template.sql)"
+            class="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] bg-muted/50 hover:bg-muted text-foreground/80 hover:text-foreground transition-colors border border-border/30">
+            {{ template.label }}
+          </button>
         </div>
-        
-        <div class="flex items-center gap-2">
-          <Button variant="outline" size="sm" @click="clearSql" class="h-6 px-2 text-xs">
-            <X class="w-3 h-3 mr-1" />
-            Clear
-          </Button>
-          <!-- Run button removed as we use main component's Search button -->
-        </div>
-      </div>
-      
-      <!-- Template Pills - More compact design -->
-      <div v-if="getSqlTemplates.length > 0" class="flex flex-wrap gap-1.5">
-        <button
-          v-for="template in getSqlTemplates"
-          :key="template.label"
-          @click="insertTemplate(template.sql)"
-          class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-muted hover:bg-muted/80 transition-colors border border-muted"
-        >
-          {{ template.label }}
-        </button>
-      </div>
-      
-      <!-- Monaco Editor with sleek look -->
-      <div 
-        ref="editorContainer" 
-        class="relative h-48 rounded-md bg-card shadow-inner"
-        style="overflow: visible"
-        @click="focusEditor"
-      >
-        <VueMonacoEditor 
-          v-model:value="code" 
-          :theme="theme" 
-          language="clickhouse-sql" 
-          :options="editorOptions"
-          @mount="handleMount" 
-          @change="onChange" 
-          class="w-full h-full" 
-        />
       </div>
 
-      <!-- Streamlined Footer -->
-      <div class="flex items-center justify-between text-[10px] text-muted-foreground">
+      <!-- Monaco Editor with compact styling -->
+      <div ref="editorContainer" class="relative px-3 pt-1 pb-2" style="height: 80px;" @click="focusEditor">
+        <!-- Help tooltip -->
+        <TooltipProvider :delay-duration="300">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div class="absolute right-2 top-2 z-10">
+                <Button size="icon" class="h-6 w-6 rounded-full" variant="ghost">
+                  <HelpCircle class="h-3.5 w-3.5 text-muted-foreground/50" />
+                </Button>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="left" align="center" class="max-w-sm p-3 text-xs">
+              <h3 class="font-medium mb-1.5 text-sm">SQL Editor Help</h3>
+              <ul class="space-y-1">
+                <li v-for="(item, index) in tooltipItems" :key="index" class="flex items-start">
+                  <span class="mr-1.5">•</span>
+                  <span>{{ item }}</span>
+                </li>
+              </ul>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
+        <VueMonacoEditor v-model:value="code" :theme="theme" language="clickhouse-sql" :options="editorOptions"
+          @mount="handleMount" @change="onChange" class="w-full h-full" />
+      </div>
+
+      <!-- Simple footer area -->
+      <div class="flex items-center justify-between px-3 pb-1">
         <div class="flex items-center">
-          <span><kbd class="px-1 py-0.5 bg-muted rounded border border-border/50 font-mono text-[10px]">Ctrl+Enter</kbd> to run</span>
+          <span class="text-[10px] text-muted-foreground/70">
+            <kbd
+              class="px-1 py-0.5 bg-background/80 rounded border border-border/50 font-mono text-[10px]">Ctrl+Enter</kbd>
+            to run
+          </span>
         </div>
-        
-        <!-- Compact Recent Queries Dropdown -->
+
+        <!-- Compact Recent Queries button -->
         <div v-if="recentQueries.length > 0" class="relative group">
-          <button 
-            class="flex items-center gap-0.5 text-[10px] text-primary hover:text-primary/80 font-medium"
-          >
+          <button class="flex items-center gap-0.5 text-[10px] text-primary/80 hover:text-primary font-medium">
             Recent
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3 h-3">
-              <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+              <path fill-rule="evenodd"
+                d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                clip-rule="evenodd" />
             </svg>
           </button>
-          
+
           <!-- Dropdown Panel -->
-          <div class="absolute right-0 z-10 w-72 mt-1 hidden group-hover:block bg-popover rounded-md shadow-lg border border-border overflow-hidden">
+          <div
+            class="absolute right-0 z-10 w-72 mt-1 hidden group-hover:block bg-popover rounded-md shadow-lg border border-border overflow-hidden">
             <div class="p-1 max-h-40 overflow-y-auto">
-              <button 
-                v-for="query in recentQueries" 
-                :key="query.timestamp" 
+              <button v-for="query in recentQueries" :key="query.timestamp"
                 class="w-full px-2 py-1.5 text-left text-xs font-mono hover:bg-muted/50 rounded-sm transition-colors truncate"
-                @click="insertTemplate(query.sql)"
-              >
+                @click="insertTemplate(query.sql)">
                 {{ query.sql.length > 60 ? query.sql.substring(0, 60) + '...' : query.sql }}
               </button>
             </div>

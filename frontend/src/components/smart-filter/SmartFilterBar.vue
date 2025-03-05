@@ -2,43 +2,19 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import * as monaco from 'monaco-editor'
 import { Button } from '@/components/ui/button'
-
-// Apply custom styling with CSS
-const customCss = `
-.monaco-editor,
-.monaco-editor .monaco-editor-background {
-  background-color: transparent !important;
-}
-.monaco-editor .margin,
-.monaco-editor .inputarea.ime-input {
-  background-color: transparent !important;
-}
-/* Remove borders that disrupt cohesive look */
-.monaco-editor .overflow-guard {
-  border: none !important;
-}
-/* Improve visual consistency with app theme */
-.monaco-editor .view-line {
-  align-items: center !important;
-  min-height: 22px !important;
-}
-/* Hide scrollbars but allow horizontal scrolling functionality */
-.monaco-editor .scrollbar.horizontal .slider {
-  height: 3px !important;
-  opacity: 0.6 !important;
-}
-`
 import { Search, X, HelpCircle } from 'lucide-vue-next'
 import type { FilterCondition } from '@/api/explore'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
 import { useColorMode } from '@vueuse/core'
 import { getSingleLineMonacoOptions } from '@/utils/monaco'
 import {
-  registerCompletionProvider,
   parseFilterExpression,
-  filterConditionsToExpression,
-  showFieldSuggestions
+  filterConditionsToExpression
 } from '@/utils/logfilter-language'
+import {
+  registerCompletionProvider,
+  showFieldSuggestions
+} from '@/utils/monaco-logchefql'
 import {
   Tooltip,
   TooltipContent,
@@ -76,33 +52,77 @@ const editorInstance = ref<monaco.editor.IStandaloneCodeEditor | null>(null)
 const completionProvider = ref<monaco.IDisposable | null>(null)
 const editorContainer = ref<HTMLElement | null>(null)
 
-// Editor options - optimized for better UX
+// Editor options - optimized for compact single-line editor appearance
 const editorOptions = computed((): monaco.editor.IStandaloneEditorConstructionOptions => ({
   ...getSingleLineMonacoOptions(),
-  cursorBlinking: 'blink',
-  cursorSmoothCaretAnimation: 'off',
-  fontSize: 14,
-  lineHeight: 22,
+  cursorBlinking: 'smooth',
+  cursorSmoothCaretAnimation: 'on',
+  fontSize: 13,
+  lineHeight: 20,
+  // Force single-line mode
   wordWrap: 'off',
   lineNumbers: 'off',
   folding: false,
   wrappingIndent: 'none',
   scrollBeyondLastLine: false,
   renderWhitespace: 'none',
+  // Fixed height to prevent expansion
+  fixedOverflowWidgets: true,
+  // Improved scrollbar styling
   scrollbar: {
     vertical: 'hidden',
     horizontal: 'auto',
-    handleMouseWheel: true
+    handleMouseWheel: true,
+    horizontalScrollbarSize: 4,
+    useShadows: false
   },
+  // Improved find experience
   find: {
-    seedSearchStringFromSelection: 'never'
+    seedSearchStringFromSelection: 'selection',
+    addExtraSpaceOnTop: false
   },
   // Improved styling for cohesive look
   minimap: { enabled: false },
-  padding: { top: 4, bottom: 4 },
+  padding: { top: 2, bottom: 2 },
   glyphMargin: false,
   lineDecorationsWidth: 0,
-  lineNumbersMinChars: 0
+  lineNumbersMinChars: 0,
+
+  // Better rendering for single line
+  renderLineHighlight: 'none',
+  roundedSelection: true,
+
+  // Disable multi-line features
+  guides: { bracketPairs: false, indentation: false },
+  renderIndicators: false,
+  // Still keep auto-closing for convenience
+  matchBrackets: 'always',
+  autoClosingBrackets: 'always',
+  autoClosingQuotes: 'always',
+
+  // Autocomplete settings - improve suggestions experience
+  quickSuggestions: {
+    other: true,
+    comments: false,
+    strings: true // Enable in strings for value suggestions
+  },
+  quickSuggestionsDelay: 0, // Show suggestions immediately
+  suggestOnTriggerCharacters: true, // Always show suggestions on trigger chars
+  acceptSuggestionOnEnter: "on",
+  tabCompletion: "on", // Tab to accept suggestions
+  wordBasedSuggestions: false, // Don't use words in document for suggestions
+  snippetSuggestions: "inline", // Show snippet suggestions inline
+  suggest: {
+    localityBonus: true, // Prioritize nearby matches
+    shareSuggestSelections: true, // Remember selected suggestions
+    showIcons: true,
+    maxVisibleSuggestions: 15,
+    filterGraceful: true,
+    showMethods: false,
+    showFunctions: false,
+    showVariables: true,
+    preview: true, // Show preview of what will be inserted
+  }
 }))
 
 // Handle editor mount
@@ -115,6 +135,9 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
   } catch (error) {
     console.error("Failed to register completion provider:", error);
   }
+
+  // Add key listeners to detect typing
+  addKeyListeners(editor);
 
   // Handle keyboard shortcuts
   editor.addAction({
@@ -160,6 +183,8 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
 
   editor.onDidBlurEditorWidget(() => {
     editorFocused.value = false;
+    // When editor loses focus, consider typing done
+    userIsTyping = false;
     updatePlaceholder(editor);
   });
 
@@ -171,7 +196,10 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
 
   // Listen for model content changes directly
   // This will catch ALL changes including Ctrl+A followed by cut/delete
-  editor.onDidChangeModelContent(() => {
+  editor.onDidChangeModelContent((e) => {
+    // Mark as typing when content changes
+    setUserTyping();
+
     // Get the raw value directly from the editor model
     const currentValue = editor.getValue().trim();
 
@@ -184,6 +212,12 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
     }
   });
 
+  // For auto-completion
+  editor.onDidChangeCursorSelection(() => {
+    // Set typing flag when cursor changes (could be from autocomplete)
+    setUserTyping();
+  });
+
   // Simple placeholder setup
   updatePlaceholder(editor);
 
@@ -193,23 +227,14 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
   }, 50);
 }
 
-// Update placeholder visibility
+// Update placeholder visibility - removing it entirely as requested
 const updatePlaceholder = (editor: monaco.editor.IStandaloneCodeEditor) => {
-  const container = editorContainer.value;
-  if (!container) return;
-
-  if (!code.value && !editorFocused.value) {
-    container.setAttribute('data-placeholder', props.placeholder);
-  } else {
-    container.removeAttribute('data-placeholder');
-  }
+  // Placeholder functionality removed as requested
 }
 
-// Handle content changes
+// Simple change handler for better Monaco integration
 const onChange = () => {
   try {
-    // Handle content changes from editor
-
     // First check if the editor is actually empty
     if (!code.value || code.value.trim() === '') {
       // Clear filter conditions completely
@@ -217,13 +242,25 @@ const onChange = () => {
     } else {
       // Get filters from the expression
       const filters = parseFilterExpression(code.value);
-      // Update model value with the array of filter conditions
+
+      // Always emit filter changes to keep the preview SQL updated
       emit('update:modelValue', filters);
     }
 
     // Update placeholder if needed
     if (editorInstance.value) {
       updatePlaceholder(editorInstance.value);
+
+      // Force refresh completion providers to ensure they're working
+      if (editorInstance.value.hasTextFocus()) {
+        setTimeout(() => {
+          try {
+            monaco.editor.trigger('keyboard', 'editor.action.triggerSuggest', {});
+          } catch (e) {
+            // Ignore errors in suggestion triggering
+          }
+        }, 100);
+      }
     }
   } catch (error) {
     console.error("Error in onChange handler:", error);
@@ -233,15 +270,60 @@ const onChange = () => {
 // Remove the special keyboard handler that's causing freezes
 // We'll rely on the onChange handler which should catch all editor content changes
 
-// Track last operation time to prevent race conditions
-let lastOperationTime = 0;
+// Preserve user typing - don't update the filter while user is actively typing
+let userIsTyping = false;
+let typingTimer: any = null;
 
-// Watch for external changes to modelValue
+const setUserTyping = () => {
+  userIsTyping = true;
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(() => {
+    userIsTyping = false;
+  }, 1000); // Consider user done typing after 1 second of inactivity
+};
+
+// Handle editor keydown to detect user typing
+const handleKeyDown = () => {
+  setUserTyping();
+};
+
+// Add keydown handler when editor is mounted
+const addKeyListeners = (editor: monaco.editor.IStandaloneCodeEditor) => {
+  try {
+    editor.onKeyDown(() => {
+      setUserTyping();
+    });
+  } catch (error) {
+    console.error("Error adding key listeners:", error);
+  }
+};
+
+// Watch for external changes to modelValue - with typing protection
 watch(() => props.modelValue, (newVal) => {
   try {
-    const newExpression = filterConditionsToExpression(newVal);
-    if (newExpression !== code.value) {
-      code.value = newExpression;
+    // Skip updates while user is actively typing
+    if (userIsTyping) {
+      return;
+    }
+
+    const currentExpression = code.value.trim();
+
+    // Special case: user is in the middle of typing an expression with an equals sign
+    if (currentExpression && /[a-zA-Z0-9_]+\s*=\s*['"]?$/.test(currentExpression)) {
+      return;
+    }
+
+    // Only update if we have a modelValue to convert and we're not actively typing
+    if (newVal && newVal.length > 0) {
+      const newExpression = filterConditionsToExpression(newVal);
+      // Only update the code if it's different to avoid cursor jumping
+      if (newExpression !== currentExpression) {
+        code.value = newExpression;
+      }
+    } else if (currentExpression !== '' && !currentExpression.includes('=')) {
+      // Don't clear incomplete expressions that are being typed
+    } else if (newVal?.length === 0 && currentExpression === '') {
+      // Both are empty, no change needed
     }
   } catch (error) {
     console.error("Error in modelValue watcher:", error);
@@ -271,7 +353,7 @@ onMounted(() => {
     if (props.modelValue.length > 0) {
       code.value = filterConditionsToExpression(props.modelValue);
     }
-    
+
     // Add style element
     const styleEl = document.createElement('style')
     styleEl.textContent = customCss
@@ -346,11 +428,12 @@ const insertField = (fieldName: string) => {
   }
 }
 
-// Quick examples
+// Quick examples using LogChefQL syntax
 const examples = [
-  { label: 'Errors', expression: 'severity_text = "ERROR"' },
-  { label: 'Warnings', expression: 'severity_text = "WARN" OR severity_text = "WARNING"' },
-  { label: 'Recent 5xx', expression: 'status_code >= 500 AND status_code < 600' },
+  { label: 'Errors', expression: "severity_text='ERROR'" },
+  { label: 'Warnings', expression: "severity_text='WARN' OR severity_text='WARNING'" },
+  { label: 'Recent 5xx', expression: "status_code>=500 AND status_code<600" },
+  { label: 'Complex', expression: "(method='GET' OR method='POST') AND status_code>=400" },
 ];
 
 const applyExample = (expression: string) => {
@@ -365,15 +448,15 @@ const applyExample = (expression: string) => {
   });
 }
 
-// Help tooltip content with keyboard shortcuts
+// Help tooltip content with keyboard shortcuts and LogChefQL syntax
 const tooltipItems = [
   'Use Alt+Space to show field suggestions',
   'Use = for equality, != for inequality',
   'Use > < >= <= for numeric comparisons',
   'Use ~ for contains, !~ for not contains',
-  'Combine conditions with AND/OR',
-  'Use semicolon (;) to separate multiple conditions',
-  'Use quotes for text values: field = "value"',
+  'Combine conditions with AND/OR (case insensitive)',
+  'Group expressions with parentheses: (expr1 OR expr2) AND expr3',
+  'Use quotes for text values: field = "value" or field = \'value\'',
   'Use Ctrl+Enter to execute search'
 ];
 
@@ -392,58 +475,45 @@ const tooltipItems = [
 </script>
 
 <template>
-  <div class="w-full space-y-2">
-    <!-- Filter Bar with improved UX -->
-    <div class="relative flex flex-col gap-1 w-full">
-      <!-- Main query bar with help on left side -->
-      <div class="relative flex items-center rounded-md shadow-sm border-0 bg-background ring-1 ring-inset ring-input"
-        :class="{ 'ring-primary': editorFocused }" @click="focusEditor">
+  <div class="w-full">
+    <!-- Enhanced Filter Bar with validation indicators -->
+    <div class="relative flex flex-col w-full">
+      <!-- Editor with improved styling and syntax highlighting -->
+      <div ref="editorContainer" class="smartfilter-monaco-container px-3 py-2 overflow-hidden cursor-text w-full"
+        :class="{ 'focused': editorFocused }" @click="focusEditor" style="height: 40px;">
 
-        <!-- Left side controls - redesigned for a more integrated, sleek look -->
-        <div class="flex items-center pl-2">
-          <div class="flex h-7 rounded-lg border border-border bg-muted/30 divide-x divide-border overflow-hidden">
-            <!-- Help button in unified design -->
-            <TooltipProvider :delay-duration="0">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    class="text-muted-foreground hover:text-foreground flex items-center px-2 h-full justify-center hover:bg-accent/40 transition-colors">
-                    <HelpCircle class="h-3.5 w-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" align="start" class="max-w-sm p-4">
-                  <h3 class="font-medium mb-2">Filter Query Usage Tips</h3>
-                  <ul class="text-sm space-y-1">
-                    <li v-for="(item, index) in tooltipItems" :key="index" class="flex items-start">
-                      <span class="mr-2">•</span>
-                      <span>{{ item }}</span>
-                    </li>
-                  </ul>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+        <!-- Help tooltip with improved content -->
+        <TooltipProvider :delay-duration="300">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div class="absolute right-2 top-1 z-10">
+                <Button size="icon" class="h-5 w-5 rounded-full" variant="ghost">
+                  <HelpCircle class="h-3 w-3 text-muted-foreground/50" />
+                </Button>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="left" align="center" class="max-w-sm p-3 text-xs">
+              <h3 class="font-medium mb-1.5 text-sm">Filter Query Syntax</h3>
+              <div class="mb-2">
+                <div class="text-primary text-[11px] font-medium mb-1">Common Patterns:</div>
+                <code class="text-[10px] bg-muted/50 p-1 rounded block mb-1">field = 'value'</code>
+                <code class="text-[10px] bg-muted/50 p-1 rounded block mb-1">field > 100 AND field < 200</code>
+                <code class="text-[10px] bg-muted/50 p-1 rounded block">message ~ 'error' OR severity = 'ERROR'</code>
+              </div>
+              <ul class="space-y-1">
+                <li v-for="(item, index) in tooltipItems" :key="index" class="flex items-start">
+                  <span class="mr-1.5 text-primary">•</span>
+                  <span>{{ item }}</span>
+                </li>
+              </ul>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
 
-            <!-- Fields button in integrated design -->
-            <button @click.stop="insertFieldTrigger"
-              class="text-muted-foreground hover:text-foreground flex items-center px-3 h-full text-xs font-mono justify-center hover:bg-accent/40 transition-colors"
-              title="Show field suggestions (Alt+Space)">
-              Fields
-            </button>
-          </div>
-        </div>
-
-        <!-- Editor Container - with improved spacing and styling -->
-        <div ref="editorContainer" class="flex-1 h-9 min-h-[36px] overflow-hidden cursor-text px-2 py-1 flex items-center">
-          <VueMonacoEditor v-model:value="code" :theme="theme" language="logfilter" :options="editorOptions"
-            @mount="handleMount" @change="onChange" class="w-full h-full" />
-        </div>
-
-        <!-- We don't need a search button here - it's now only in the main explorer page -->
-        <div class="flex items-center pr-1">
-          <!-- Search button removed -->
-        </div>
+        <!-- Monaco editor with enhanced styling -->
+        <VueMonacoEditor v-model:value="code" :theme="theme" language="logchefql" :options="editorOptions"
+          @mount="handleMount" @change="onChange" class="w-full h-full" />
       </div>
     </div>
-
   </div>
 </template>
