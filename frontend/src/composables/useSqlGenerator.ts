@@ -1,6 +1,7 @@
 import { ref } from "vue";
 import { useDebounceFn } from "@vueuse/core";
 import type { FilterCondition } from "@/api/explore";
+import { debug, error, warn } from "@/utils/debug";
 
 export interface SqlGeneratorOptions {
   database: string;
@@ -31,16 +32,23 @@ export function useSqlGenerator(initialOptions: SqlGeneratorOptions) {
 
   // Build a single filter condition
   function buildCondition(cond: FilterCondition): string {
-    const { field, operator, value } = cond;
+    // Normalize operator property - handle both 'operator' and 'op' fields
+    const field = cond.field;
+    const operator = cond.operator || cond.op;
+    const value = cond.value;
+
+    if (!field || !operator) {
+      throw new Error("Invalid condition: missing field or operator");
+    }
 
     // Helper function to determine if a value should be quoted
-    const formatValue = (val: string | number): string => {
+    const formatValue = (val: any): string => {
       if (val === null || val === undefined) {
         return 'NULL';
       }
       
       // If it's a number, don't quote it
-      if (!isNaN(Number(val)) && val !== '') {
+      if (typeof val === 'number' || (!isNaN(Number(val)) && val !== '')) {
         return String(val);
       }
       
@@ -48,6 +56,7 @@ export function useSqlGenerator(initialOptions: SqlGeneratorOptions) {
       return `'${val.toString().replace(/'/g, "''")}'`; // Escape single quotes
     };
 
+    // Process based on operator type
     switch (operator) {
       case "=":
         return `${field} = ${formatValue(value)}`;
@@ -78,19 +87,20 @@ export function useSqlGenerator(initialOptions: SqlGeneratorOptions) {
           const quotedValues = value.map((v) => formatValue(v)).join(", ");
           return `${field} IN (${quotedValues})`;
         }
-        throw new Error("Invalid value for IN operator");
+        return `${field} IN (${formatValue(value)})`;
       case "not_in":
         if (Array.isArray(value)) {
           const quotedValues = value.map((v) => formatValue(v)).join(", ");
           return `${field} NOT IN (${quotedValues})`;
         }
-        throw new Error("Invalid value for NOT IN operator");
+        return `${field} NOT IN (${formatValue(value)})`;
       case "is_null":
         return `${field} IS NULL`;
       case "is_not_null":
         return `${field} IS NOT NULL`;
       default:
-        throw new Error(`Unsupported operator: ${operator}`);
+        warn("SQL Generator", `Unsupported operator: ${operator}, using equals instead`);
+        return `${field} = ${formatValue(value)}`;
     }
   }
 
@@ -101,7 +111,7 @@ export function useSqlGenerator(initialOptions: SqlGeneratorOptions) {
     // Use the custom timestamp field from source metadata or default to 'timestamp'
     const timestampField = options.value.timestamp_field || 'timestamp';
 
-    // Convert Unix millisecond timestamps to human-readable DateTime64 format
+    // Always include timestamp range conditions for consistency
     if (options.value.start_timestamp) {
       const startDate = new Date(options.value.start_timestamp);
       clauses.push(
@@ -115,15 +125,19 @@ export function useSqlGenerator(initialOptions: SqlGeneratorOptions) {
       );
     }
 
-    // Add filter conditions
-    conditions.forEach((condition) => {
-      try {
-        clauses.push(buildCondition(condition));
-      } catch (error) {
-        console.error("Error building condition:", error);
-        throw error;
+    // Add filter conditions - make sure to handle condition errors gracefully
+    if (Array.isArray(conditions)) {
+      for (const condition of conditions) {
+        try {
+          if (condition && (condition.operator || condition.op) && condition.field) {
+            clauses.push(buildCondition(condition));
+          }
+        } catch (error) {
+          error("SQL Generator", "Error building condition:", error, "Condition:", condition);
+          // Continue processing other conditions instead of throwing
+        }
       }
-    });
+    }
 
     return clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
   }
@@ -157,11 +171,29 @@ export function useSqlGenerator(initialOptions: SqlGeneratorOptions) {
     conditions: FilterCondition[]
   ): SqlGeneratorState {
     try {
-      // Only include non-empty conditions
-      const filteredConditions = conditions?.filter(condition => 
-        condition && condition.field && condition.operator && condition.value !== undefined
-      ) || [];
+      // Ensure we're working with an array
+      if (!Array.isArray(conditions)) {
+        conditions = [];
+      }
+      
+      // Only include valid, complete conditions
+      const filteredConditions = conditions.filter(condition => 
+        condition && 
+        condition.field && 
+        (condition.operator || condition.op) && 
+        (condition.value !== undefined || 
+         condition.operator === 'is_null' || 
+         condition.operator === 'is_not_null' ||
+         condition.op === 'is_null' || 
+         condition.op === 'is_not_null')
+      );
+      
+      // Log the filtered conditions for debugging (but limit to first 300 chars)
+      const logOutput = JSON.stringify(filteredConditions);
+      debug("SQL Generator", "Processing conditions after filtering:", 
+            logOutput.length > 300 ? logOutput.substring(0, 300) + '...' : logOutput);
 
+      // Generate clauses
       const whereClause = buildWhereClause(filteredConditions);
       const orderClause = buildOrderClause();
       const limitClause = buildLimitClause();
@@ -172,11 +204,15 @@ ${whereClause}
 ${orderClause}
 ${limitClause}`.trim();
 
+      // Validate and return the SQL
       if (validateSql(sql)) {
         return { sql, isValid: true, error: null };
       }
+      
+      error("SQL Generator", "SQL validation failed for:", sql);
       return { sql: "", isValid: false, error: "Invalid SQL syntax" };
     } catch (error) {
+      error("SQL Generator", "Error generating SQL:", error);
       return {
         sql: "",
         isValid: false,
@@ -187,8 +223,13 @@ ${limitClause}`.trim();
 
   // Immediate preview generation (for real-time updates without debounce)
   const generatePreviewSql = (conditions: FilterCondition[]) => {
+    debug("SQL Generator", `Generating preview SQL for ${conditions?.length || 0} conditions`);
+    
     // For empty condition arrays, always generate a clean simple query
     if (!conditions || conditions.length === 0) {
+      debug("SQL Generator", "Empty conditions received, generating default SQL:", 
+            JSON.stringify(conditions));
+                 
       // Use the custom timestamp field from source metadata or default to 'timestamp'
       const timestampField = options.value.timestamp_field || 'timestamp';
       
@@ -196,18 +237,26 @@ ${limitClause}`.trim();
       const startDate = new Date(options.value.start_timestamp);
       const endDate = new Date(options.value.end_timestamp);
       
-      previewSql.value = {
-        sql: `SELECT *
+      const simpleSql = `SELECT *
 FROM ${options.value.database}.${options.value.table}
 WHERE ${timestampField} >= toDateTime64('${startDate.toISOString().replace('T', ' ').replace('Z', '')}', 3) 
   AND ${timestampField} <= toDateTime64('${endDate.toISOString().replace('T', ' ').replace('Z', '')}', 3)
 ORDER BY ${timestampField} DESC
-LIMIT ${options.value.limit}`,
+LIMIT ${options.value.limit}`;
+
+      previewSql.value = {
+        sql: simpleSql,
         isValid: true,
         error: null
       };
+      
+      debug("SQL Generator", "Generated default SQL (no conditions)");
     } else {
+      // Generate SQL with conditions
       previewSql.value = generateSqlInternal(conditions);
+      debug("SQL Generator", "Generated SQL with conditions:", 
+            previewSql.value.isValid ? 'valid' : 'invalid', 
+            previewSql.value.error || '');
     }
   };
 
@@ -225,9 +274,16 @@ LIMIT ${options.value.limit}`,
   generatePreviewSql([]);
 
   return {
-    generatePreviewSql, // Debounced, for UI preview only
-    generateQuerySql, // Immediate, for actual queries
+    generatePreviewSql, // For UI preview only
+    generateQuerySql, // For actual queries
     previewSql, // Reactive preview state
     updateOptions,
+    // Add direct access to internal functions for testing
+    __internal: {
+      buildWhereClause,
+      buildOrderClause,
+      buildLimitClause,
+      validateSql
+    }
   };
 }

@@ -23,7 +23,12 @@ const monacoInstance = ref<monaco.editor.IStandaloneCodeEditor | null>(null);
 onMounted(() => {
     console.log("SqlPreview component mounting", { id: Date.now().toString() });
     // Monaco is already initialized in main.ts
-    internalSql.value = props.sql;
+    internalSql.value = props.sql || '';
+    
+    // Log when no SQL is passed to help with debugging
+    if (!props.sql) {
+        console.warn("SqlPreview mounted with empty SQL content");
+    }
 });
 
 // Track the filters that were used to generate the current SQL
@@ -114,6 +119,11 @@ const editorOptions = computed(() => {
 
 // Better SQL formatter with nested WHERE conditions
 const displaySql = computed(() => {
+    // Handle empty SQL case
+    if (!internalSql.value?.trim()) {
+        return '';
+    }
+    
     // First clean up extra whitespace
     let cleanSql = internalSql.value.trim().replace(/\s+/g, ' ');
     
