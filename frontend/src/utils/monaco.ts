@@ -135,90 +135,102 @@ export function getDefaultMonacoOptions() {
 }
 
 /**
- * Get single-line Monaco Editor options
- * Enhanced for better query experience similar to Grafana's LogQL
+ * Get flexible Monaco Editor options for the filter editor
+ * Supports multiline editing while maintaining a clean appearance
  */
 export function getSingleLineMonacoOptions() {
   return {
     ...getDefaultMonacoOptions(),
+    fontSize: 13,
+    lineHeight: 20,
     lineNumbers: "off",
-    folding: false,
-    wordWrap: "off",
-    wrappingIndent: "none",
+    folding: true,
+    wordWrap: "on",
+    wrappingIndent: "same",
     lineDecorationsWidth: 0,
     lineNumbersMinChars: 0,
     overviewRulerBorder: false,
     scrollBeyondLastLine: false,
     renderLineHighlight: "none",
+    automaticLayout: true,
+    
+    // Improved scrollbars - allow vertical scrolling
     scrollbar: {
       horizontal: "auto",
-      vertical: "hidden",
-      horizontalScrollbarSize: 4,
+      vertical: "auto",
+      horizontalScrollbarSize: 6,
+      verticalScrollbarSize: 6,
+      alwaysConsumeMouseWheel: false,
     },
+    
+    // Better find experience
     find: {
       addExtraSpaceOnTop: false,
       autoFindInSelection: "never",
-      seedSearchStringFromSelection: "never",
+      seedSearchStringFromSelection: "always",
     },
-    // Ensure cursor is visible
+    
+    // Disable line highlight - clean appearance
+    renderLineHighlight: "none",
+    
+    // Ensure cursor and highlights are visible
     hideCursorInOverviewRuler: false,
-    occurrencesHighlight: true, // Enable highlighting other occurrences of the same field
-    renderWhitespace: "boundary", // Show whitespace at word boundaries to help with spacing
-    selectionHighlight: true, // Highlight the same selection elsewhere in the document
-
+    occurrencesHighlight: true,
+    renderWhitespace: "selection",
+    selectionHighlight: true, 
+    
     // Error reporting improvements
-    onDidChangeCursorPosition: true,
     lightbulb: {
-      enabled: true, // Show lightbulb for code actions / error fixes
+      enabled: true,
     },
 
-    // Enhanced autocomplete behavior for better UX
+    // Enhanced autocomplete behavior
     quickSuggestions: {
       other: true,
       comments: false,
-      strings: true, // Enable in strings for better filter value suggestions
+      strings: true,
     },
-    quickSuggestionsDelay: 0, // Immediate suggestions
+    quickSuggestionsDelay: 0,
     snippetSuggestions: "inline",
     suggestSelection: "first",
     acceptSuggestionOnEnter: "smart",
     suggest: {
       showIcons: true,
-      maxVisibleSuggestions: 12, // Reduced for cleaner interface
+      maxVisibleSuggestions: 12,
       filterGraceful: true,
-      showMethods: false, // Cleaner suggestion UI
+      showMethods: false,
       showFunctions: false,
       showVariables: true,
-      preview: true, // Show preview of what will be inserted
+      preview: true,
       snippetsPreventQuickSuggestions: false,
-      localityBonus: true, // Prioritize suggestions based on proximity
-      insertMode: "replace", // Replace existing word rather than insert
-      showStatusBar: true, // Show status bar at bottom of suggestions
-      previewMode: "prefix", // Show better preview of completion
-      shareSuggestSelections: true, // Remember chosen suggestions
+      localityBonus: true,
+      insertMode: "replace",
+      showStatusBar: true,
+      previewMode: "prefix",
+      shareSuggestSelections: true,
     },
     tabCompletion: "on",
-    wordBasedSuggestions: "off", // Disable word-based to avoid noise in our custom language
+    wordBasedSuggestions: "off",
 
-    // Highlight matching brackets for better query writing
+    // Highlight matching brackets
     matchBrackets: "always",
     autoClosingBrackets: "always",
     autoClosingQuotes: "always",
-    autoSurround: "languageDefined",
+    autoSurround: "quotes",
 
     // Cursor improvements
     cursorBlinking: "smooth",
     cursorSmoothCaretAnimation: "on",
-    cursorSurroundingLines: 0, // Don't scroll surrounding lines (not needed in single line)
+    cursorSurroundingLines: 3,
     cursorSurroundingLinesStyle: "default",
-    cursorWidth: 2, // Slightly wider cursor for visibility
+    cursorWidth: 2,
 
     // Better accessibility
     accessibilitySupport: "auto",
 
-    // Improved error highlighting and features
+    // Improved features and hints
     colorDecorators: true,
-    columnSelection: false, // No need for column selection in queries
+    columnSelection: true,
     comments: {
       insertSpace: true,
     },
@@ -229,8 +241,8 @@ export function getSingleLineMonacoOptions() {
     },
     guides: {
       bracketPairs: true,
-      highlightActiveIndentation: false,
-      indentation: false,
+      highlightActiveIndentation: true,
+      indentation: true,
     },
 
     // Better hover behavior
@@ -252,21 +264,47 @@ export function isMonacoInitialized() {
   return monacoInitialized;
 }
 
+// Track editor instances for better memory management
+const editorInstances = new Set();
+
 /**
  * Dispose specific Monaco editor instance safely
  * This should be called by components when they are unmounted
  */
 export function disposeMonacoEditorInstance(editor) {
-  if (!editor) return;
+  if (!editor) return false;
 
   try {
-    debugLog("Disposing editor instance", editor.getId());
+    debugLog("Disposing editor instance", editor.getId ? editor.getId() : "unknown");
 
-    // Get the model associated with this editor
-    const model = editor.getModel();
+    // Get the model associated with this editor before disposal
+    let model = null;
+    try {
+      model = editor.getModel();
+    } catch (e) {
+      console.error("Error getting model during disposal:", e);
+    }
 
-    // Dispose the editor
-    editor.dispose();
+    // Remove from tracked instances
+    editorInstances.delete(editor);
+
+    // Dispose the editor first
+    try {
+      if (editor && !editor.isDisposed?.()) {
+        editor.dispose();
+      }
+    } catch (e) {
+      console.error("Error disposing editor:", e);
+    }
+
+    // Then dispose the model if it exists and isn't already disposed
+    try {
+      if (model && !model.isDisposed?.()) {
+        model.dispose();
+      }
+    } catch (e) {
+      console.error("Error disposing model:", e);
+    }
 
     // Log current instances after disposal
     logMonacoInstanceCounts();
@@ -275,6 +313,17 @@ export function disposeMonacoEditorInstance(editor) {
   } catch (error) {
     console.error("Error disposing Monaco editor instance:", error);
     return false;
+  }
+}
+
+/**
+ * Register an editor instance for tracking
+ * This helps ensure all editors are properly disposed
+ */
+export function registerEditorInstance(editor) {
+  if (editor) {
+    editorInstances.add(editor);
+    debugLog(`Registered editor instance. Total tracked: ${editorInstances.size}`);
   }
 }
 
@@ -293,6 +342,15 @@ export function initMonacoSetup() {
   if (!setupMonacoEnvironment()) {
     console.error("Failed to set up Monaco environment");
     return;
+  }
+  
+  // Expose utility functions to monaco global for component access
+  if (typeof window !== 'undefined' && window.monaco && window.monaco.editor) {
+    window.monaco.editor._logchef_utils = {
+      registerEditorInstance,
+      disposeMonacoEditorInstance,
+      logMonacoInstanceCounts
+    };
   }
 
   try {

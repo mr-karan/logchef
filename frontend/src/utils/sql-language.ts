@@ -495,7 +495,7 @@ export function getSqlMonacoOptions() {
     folding: true,
     lineDecorationsWidth: 0,
     lineNumbersMinChars: 3,
-    scrollBeyondLastLine: true,
+    scrollBeyondLastLine: false,
     automaticLayout: true,
     wordWrap: "on",
     padding: { top: 8, bottom: 8 },
@@ -542,10 +542,10 @@ export function getSqlMonacoOptions() {
     scrollbar: {
       vertical: "auto",
       horizontal: "auto",
-      verticalScrollbarSize: 10,
-      horizontalScrollbarSize: 10,
-      verticalSliderSize: 10,
-      horizontalSliderSize: 10,
+      verticalScrollbarSize: 8,
+      horizontalScrollbarSize: 8,
+      verticalSliderSize: 8,
+      horizontalSliderSize: 8,
       alwaysConsumeMouseWheel: false,
     },
   };

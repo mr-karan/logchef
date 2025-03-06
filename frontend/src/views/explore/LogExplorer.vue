@@ -575,29 +575,60 @@ watch(
   }
 );
 
+// Enhanced debounced SQL generation with error handling and state validation
 const updateSql = useDebounceFn(() => {
   try {
+    // Check if we're in a valid state before generating SQL
+    if (!exploreStore.data?.sourceId || 
+        !selectedSourceDetails?.value?.database || 
+        !selectedSourceDetails?.value?.table) {
+      console.log("Skipping SQL generation - missing source details");
+      return;
+    }
+    
+    // Generate SQL with proper error handling
     generateSql();
   } catch (error) {
     console.error("Error updating SQL:", error);
   }
-}, 250);
+}, 300); // Increased debounce time for better stability
 
-// Watch for filter changes with debouncing to prevent excessive SQL generation
+// Watch for filter changes with improved debouncing and deep comparison
 watch(
   () => exploreStore.data?.filterConditions,
   (newFilters, oldFilters) => {
+    // Skip processing if both are null/undefined
+    if (!newFilters && !oldFilters) return;
+    
     const newLen = newFilters?.length || 0;
     const oldLen = oldFilters?.length || 0;
-
-    // Only log changes when actual filters change (not just references)
-    if (newLen !== oldLen || JSON.stringify(newFilters) !== JSON.stringify(oldFilters)) {
+    
+    // Deep comparison to prevent unnecessary updates - with safety measures
+    try {
+      // Only log changes when actual filters change
       console.log(`[LogExplorer] Filter conditions changed: ${newLen} filters`);
-    }
-
-    // Only update SQL if we have actual filters to use
-    if (newLen > 0 || (oldLen > 0 && newLen === 0)) {
-      updateSql();
+      
+      // CRITICAL FIX: Check if any filter has an incomplete/empty value 
+      // which could cause infinite parsing loops
+      const hasIncompleteFilter = newFilters?.some(filter => 
+        filter?.value === undefined || 
+        filter?.value === '' ||
+        (typeof filter?.value === 'string' && filter?.value.trim() === '')
+      );
+      
+      // Skip SQL generation if we have incomplete filters
+      if (hasIncompleteFilter) {
+        console.log(`[LogExplorer] Skipping SQL generation for incomplete filters`);
+        return;
+      }
+    
+      // Only update SQL if we have actual filters to use or filters were removed
+      if (newLen > 0 || (oldLen > 0 && newLen === 0)) {
+        // Use debounced update to prevent rapid successive updates
+        updateSql();
+      }
+    } catch (error) {
+      console.error("[LogExplorer] Error processing filter changes:", error);
     }
   },
   { deep: true, immediate: false }
@@ -640,69 +671,64 @@ watch(
   { immediate: false }
 );
 
-// Function to trigger field suggestions in the SmartFilterBar - simplified approach
+// Function to trigger field suggestions in the SmartFilterBar - improved version
 const insertFieldTrigger = () => {
   // Only trigger in filter mode
   if (activeQueryTab.value === 'filter') {
-    // Find all editor instances
-    const editors = document.querySelectorAll('.monaco-editor');
-    if (editors && editors.length > 0) {
-      // Focus the editor first (this will work for SmartFilterBar editor)
-      const editor = editors[0];
-      editor.click();
+    // Find the SmartFilterBar component by the class we added
+    const filterBarComponent = document.querySelector('.smart-filter-bar-component');
 
-      // Instead of trying to trigger Alt+Space, we'll insert an '@' character
-      // which is the trigger character for field suggestions in the editor
-      setTimeout(() => {
-        // Use the execCommand API which works reliably for inserting text
-        document.execCommand('insertText', false, '@');
-      }, 100);
+    if (filterBarComponent) {
+      try {
+        // First try to access Vue component's insertFieldTrigger if available
+        const vueInstance = filterBarComponent.__vueParentComponent?.ctx;
+
+        if (vueInstance && typeof vueInstance.insertFieldTrigger === 'function') {
+          vueInstance.insertFieldTrigger();
+          return;
+        }
+      } catch (e) {
+        console.error('Error accessing Vue component methods:', e);
+      }
+
+      // Fallback - Focus the component
+      filterBarComponent.dispatchEvent(new Event('click'));
+
+      // Find the Monaco editor instance within the component
+      const editor = filterBarComponent.querySelector('.monaco-editor');
+      if (editor) {
+        editor.click();
+
+        // Then try to trigger field suggestions
+        setTimeout(() => {
+          try {
+            // Trigger Alt+Space if supported
+            const event = new KeyboardEvent('keydown', {
+              key: ' ',
+              code: 'Space',
+              altKey: true,
+              bubbles: true
+            });
+            editor.dispatchEvent(event);
+          } catch (e) {
+            // Fallback to inserting @ which might trigger suggestions
+            document.execCommand('insertText', false, '@');
+          }
+        }, 100);
+      }
     }
   }
 };
 
-// Insert a specific field name into the editor
+// Simple field insertion that switches to filter mode and focuses editor
 const insertField = (fieldName: string) => {
-  // Only allow inserting in filter mode
-  if (activeQueryTab.value !== 'filter') {
-    // Switch to filter mode if we're not already there
-    activeQueryTab.value = 'filter';
-    // Wait for the tab switch to complete
-    setTimeout(() => {
-      attemptFieldInsertion(fieldName);
-    }, 100);
-  } else {
-    attemptFieldInsertion(fieldName);
-  }
-};
-
-// Helper function to insert fields
-const attemptFieldInsertion = (fieldName: string) => {
-  // Find the SmartFilterBar component
-  const filterBarComponent = document.querySelector('.smartfilter-monaco-container');
-  if (filterBarComponent) {
-    // Focus the editor
-    filterBarComponent.dispatchEvent(new Event('click'));
-
-    // Get the current value in the editor
-    const currentContent = exploreStore.data.rawSql || '';
-
-    // Calculate the best insertion - insert the field with appropriate operator
-    setTimeout(() => {
-      // Find the most recent text that would likely need a field
-      const lastPart = currentContent.trim();
-
-      // If empty or ends with operator, just insert field name
-      if (!lastPart || lastPart.endsWith('AND') || lastPart.endsWith('OR') ||
-        lastPart.endsWith('(') || lastPart.endsWith('=')) {
-        // Just insert the field name with space after it
-        document.execCommand('insertText', false, `${fieldName} `);
-      } else {
-        // Insert with equals operator as default
-        document.execCommand('insertText', false, `${fieldName}=`);
-      }
-    }, 50);
-  }
+  activeQueryTab.value = 'filter';
+  nextTick(() => {
+    const filterBar = document.querySelector('.smart-filter-bar-component');
+    if (filterBar) {
+      filterBar.querySelector('textarea')?.focus();
+    }
+  });
 };
 
 // Clear the current query based on active tab
@@ -716,75 +742,7 @@ const clearCurrentQuery = () => {
   }
 };
 
-// Function to apply example filter queries
-const applyExample = (filterExpression: string) => {
-  // Make sure we're in filter mode
-  activeQueryTab.value = 'filter';
-
-  try {
-    // Create a simple filter condition from the expression
-    // This is a simplified approach - in a real app, you might want to parse the expression
-    // more carefully and create proper structured filter conditions
-
-    // First ensure we are in filter mode
-    nextTick(() => {
-      // For now, we'll take the simple approach of inserting the text into the filter input
-      // Find the editor element
-      const filterBarComponent = document.querySelector('.smartfilter-monaco-container');
-
-      if (filterBarComponent) {
-        // Focus the editor
-        filterBarComponent.dispatchEvent(new Event('click'));
-
-        // Clear existing content first
-        exploreStore.setFilterConditions([]);
-
-        // Insert the filter expression
-        setTimeout(() => {
-          document.execCommand('insertText', false, filterExpression);
-
-          // Optional: Auto-execute query after a delay
-          setTimeout(() => {
-            executeQuery();
-          }, 300);
-        }, 100);
-      } else {
-        console.warn('Filter editor not found for inserting example');
-
-        // Fallback: Set a raw SQL query based on the filter expression
-        const timestamps = getTimestamps();
-        const database = selectedSourceDetails.value?.database || 'logs';
-        const table = selectedSourceDetails.value?.table || 'logs';
-
-        // Simple SQL generation
-        const sql = `SELECT *
-FROM ${database}.${table}
-WHERE ${filterExpression}
-  AND timestamp >= toDateTime64('${new Date(timestamps.start).toISOString().replace('T', ' ').replace('Z', '')}', 3)
-  AND timestamp <= toDateTime64('${new Date(timestamps.end).toISOString().replace('T', ' ').replace('Z', '')}', 3)
-ORDER BY timestamp DESC
-LIMIT ${exploreStore.data.limit || 100}`;
-
-        exploreStore.setRawSql(sql);
-      }
-    });
-
-    // Show toast indicating example applied
-    toast({
-      title: 'Example Applied',
-      description: `Filter expression "${filterExpression}" applied`,
-      duration: TOAST_DURATION.SUCCESS,
-    });
-  } catch (error) {
-    console.error('Error applying example filter:', error);
-    toast({
-      title: 'Error',
-      description: `Failed to apply example: ${getErrorMessage(error)}`,
-      variant: 'destructive',
-      duration: TOAST_DURATION.ERROR,
-    });
-  }
-};
+// No longer needed - removed since example functionality is now in the SmartFilterBar component
 
 // Simple query execution function
 async function executeQuery() {
@@ -1101,8 +1059,8 @@ async function handleSaveQuery(formData: any) {
     </Button>
   </div>
 
-  <!-- Main explorer UI when sources are available -->
-  <div v-else class="flex flex-col h-full min-w-0 gap-2">
+  <!-- Main content when not loading -->
+  <div v-else class="flex flex-col gap-4">
     <!-- Updated Control Bar - Team First -->
     <div class="flex items-center gap-2 h-9 mb-1">
       <!-- Team Selector -->
@@ -1185,345 +1143,213 @@ async function handleSaveQuery(formData: any) {
     </div>
 
     <!-- Collapsible Query Editor with Sidebar & Split Layout -->
-    <Collapsible v-model:open="isQueryEditorOpen" class="rounded-md border bg-card">
-      <div class="flex flex-col">
-        <!-- Page section indicator with better context - also acts as collapsible trigger -->
-        <CollapsibleTrigger asChild>
-          <div
-            class="flex items-center justify-between px-4 py-2 border-b border-border/50 bg-muted/30 cursor-pointer hover:bg-muted/40 transition-colors">
-            <div class="flex items-center gap-1.5">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
-                class="w-3.5 h-3.5 text-primary">
-                <path
-                  d="M5 4a1 1 0 00-2 0v7.268a2 2 0 000 3.464V16a1 1 0 102 0v-1.268a2 2 0 000-3.464V4zM11 4a1 1 0 10-2 0v1.268a2 2 0 000 3.464V16a1 1 0 102 0V8.732a2 2 0 000-3.464V4zM16 3a1 1 0 011 1v7.268a2 2 0 010 3.464V16a1 1 0 11-2 0v-1.268a2 2 0 010-3.464V4a1 1 0 011-1z" />
-              </svg>
-              <span class="text-sm font-medium">Query Editor</span>
+    <div class="rounded-md border bg-card">
+      <!-- Header that doesn't get unmounted -->
+      <div
+        class="flex items-center justify-between px-4 py-2 border-b border-border/50 bg-muted/30 cursor-pointer hover:bg-muted/40 transition-colors"
+        @click="isQueryEditorOpen = !isQueryEditorOpen">
+        <div class="flex items-center gap-1.5">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
+            class="w-3.5 h-3.5 text-primary">
+            <path
+              d="M5 4a1 1 0 00-2 0v7.268a2 2 0 000 3.464V16a1 1 0 102 0v-1.268a2 2 0 000-3.464V4zM11 4a1 1 0 10-2 0v1.268a2 2 0 000 3.464V16a1 1 0 102 0V8.732a2 2 0 000-3.464V4zM16 3a1 1 0 011 1v7.268a2 2 0 010 3.464V16a1 1 0 11-2 0v-1.268a2 2 0 010-3.464V4a1 1 0 011-1z" />
+          </svg>
+          <span class="text-sm font-medium">Query Editor</span>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <!-- Status indicator for query performance -->
+          <div v-if="exploreStore.data.queryStats" class="flex items-center gap-3 text-xs text-muted-foreground">
+            <div class="flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full bg-green-500"></span>
+              <span>{{ exploreStore.data.queryStats.execution_time_ms }}ms</span>
             </div>
-
-            <div class="flex items-center gap-2">
-              <!-- Status indicator for query performance -->
-              <div v-if="exploreStore.data.queryStats" class="flex items-center gap-3 text-xs text-muted-foreground">
-                <div class="flex items-center gap-1">
-                  <span class="w-2 h-2 rounded-full bg-green-500"></span>
-                  <span>{{ exploreStore.data.queryStats.execution_time_ms }}ms</span>
-                </div>
-                <div class="flex items-center gap-1">
-                  <span class="w-2 h-2 rounded-full bg-blue-500"></span>
-                  <span>{{ exploreStore.data.queryStats.rows_read?.toLocaleString() || 0 }} rows scanned</span>
-                </div>
-              </div>
-
-              <!-- Toggle icon for collapsible -->
-              <ChevronsUpDown class="h-4 w-4 text-muted-foreground transition-transform duration-200"
-                :class="{ 'transform rotate-180': isQueryEditorOpen }" />
+            <div class="flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+              <span>{{ exploreStore.data.queryStats.rows_read?.toLocaleString() || 0 }} rows scanned</span>
             </div>
           </div>
-        </CollapsibleTrigger>
 
-        <!-- Collapsible content with split-view editor -->
-        <CollapsibleContent>
-          <!-- Split-view advanced query editor with sidebar -->
-          <div class="flex">
-            <!-- Left sidebar for fields and metadata -->
-            <div class="w-56 border-r border-border/40 max-h-[350px] overflow-auto">
-              <div class="p-2">
-                <!-- Tabs for sidebar sections -->
-                <Tabs defaultValue="fields" class="w-full">
-                  <TabsList class="w-full h-7 grid grid-cols-3">
-                    <TabsTrigger value="fields" class="text-xs">Fields</TabsTrigger>
-                    <TabsTrigger value="examples" class="text-xs">Examples</TabsTrigger>
-                    <TabsTrigger value="history" class="text-xs">Recent</TabsTrigger>
-                  </TabsList>
+          <!-- Toggle icon for collapsible -->
+          <ChevronsUpDown class="h-4 w-4 text-muted-foreground transition-transform duration-200"
+            :class="{ 'transform rotate-180': isQueryEditorOpen }" />
+        </div>
+      </div>
 
-                  <!-- Fields Tab Content - Closed by default, opens on demand -->
-                  <TabsContent value="fields" class="mt-1.5 max-h-[290px] overflow-y-auto">
-                    <div class="space-y-1">
-                      <div class="text-xs text-muted-foreground mb-1.5 px-0.5">Click to insert field:</div>
-                      <div v-if="!exploreStore.data.columns || exploreStore.data.columns.length === 0"
-                        class="text-xs text-muted-foreground p-2 italic text-center">
-                        No fields available yet.<br>Run a query to see fields.
-                      </div>
-                      <div v-else class="space-y-0.5">
-                        <button v-for="col in exploreStore.data.columns" :key="col.name" @click="insertField(col.name)"
-                          class="flex items-center justify-between w-full p-1.5 rounded-sm text-left text-xs hover:bg-muted transition-colors">
-                          <div class="flex items-center gap-1 truncate">
-                            <!-- Icon based on field type -->
-                            <svg v-if="col.type.includes('Int') || col.type.includes('Float')"
-                              xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
-                              class="w-3 h-3 text-amber-500">
-                              <path fill-rule="evenodd" d="M9.5 2a7.5 7.5 0 107.5 7.5A7.5 7.5 0 009.5 2z" />
-                            </svg>
-                            <svg v-else-if="col.type.includes('String')" xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 20 20" fill="currentColor" class="w-3 h-3 text-green-500">
-                              <path
-                                d="M10 2a.75.75 0 01.75.75v5.59l1.95-2.1a.75.75 0 111.1 1.02l-3.25 3.5a.75.75 0 01-1.1 0L6.2 7.26a.75.75 0 111.1-1.02l1.95 2.1V2.75A.75.75 0 0110 2z" />
-                            </svg>
-                            <svg v-else-if="col.type.includes('DateTime')" xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 20 20" fill="currentColor" class="w-3 h-3 text-blue-500">
-                              <path fill-rule="evenodd"
-                                d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" />
-                            </svg>
-                            <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
-                              class="w-3 h-3 text-purple-500">
-                              <path d="M14 6H6v8h8V6z" />
-                            </svg>
-                            <span class="truncate font-medium">{{ col.name }}</span>
-                          </div>
-                          <span class="text-[9px] text-muted-foreground opacity-70">{{ col.type.split('(')[0] }}</span>
-                        </button>
-                      </div>
-                    </div>
-                  </TabsContent>
+      <!-- Collapsible content -->
+      <div v-show="isQueryEditorOpen" class="flex flex-col">
+        <div class="flex-1 flex flex-col">
+          <!-- Main editor area -->
+          <div class="flex-1">
+            <!-- Integrated header with fixed filter/SQL tabs -->
+            <div class="flex items-center justify-between px-3 py-1.5 border-b border-border/50 bg-muted/30">
+              <!-- Left side - Improved mode switcher -->
+              <div class="bg-muted inline-flex h-8 items-center justify-center rounded-md p-1">
+                <button @click="activeQueryTab = 'filter'"
+                  class="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                  :class="activeQueryTab === 'filter' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:bg-muted/60'">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
+                    class="w-3.5 h-3.5 mr-1.5">
+                    <path fill-rule="evenodd"
+                      d="M2.628 1.601C5.028 1.206 7.49 1 10 1s4.973.206 7.372.601a.75.75 0 01.628.74v2.288a2.25 2.25 0 01-.659 1.59l-4.682 4.683a2.25 2.25 0 00-.659 1.59v3.037c0 .684-.31 1.33-.844 1.757l-1.937 1.55A.75.75 0 018 18.25v-5.757a2.25 2.25 0 00-.659-1.591L2.659 6.22A2.25 2.25 0 012 4.629V2.34a.75.75 0 01.628-.74z" />
+                  </svg>
+                  Filter Mode
+                </button>
+                <button @click="activeQueryTab = 'sql'"
+                  class="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                  :class="activeQueryTab === 'sql' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:bg-muted/60'">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
+                    class="w-3.5 h-3.5 mr-1.5">
+                    <path fill-rule="evenodd"
+                      d="M4.25 2A2.25 2.25 0 002 4.25v11.5A2.25 2.25 0 004.25 18h11.5A2.25 2.25 0 0018 15.75V4.25A2.25 2.25 0 0015.75 2H4.25zm4.03 6.28a.75.75 0 00-1.06-1.06L4.97 9.47a.75.75 0 000 1.06l2.25 2.25a.75.75 0 001.06-1.06L6.56 10l1.72-1.72zm4.5-1.06a.75.75 0 10-1.06 1.06L13.44 10l-1.72 1.72a.75.75 0 101.06 1.06l2.25-2.25a.75.75 0 000-1.06l-2.25-2.25z" />
+                  </svg>
+                  SQL Mode
+                </button>
+              </div>
 
-                  <!-- Examples Tab Content -->
-                  <TabsContent value="examples" class="mt-1.5 max-h-[290px] overflow-y-auto">
-                    <div class="space-y-1">
-                      <div class="text-xs text-muted-foreground mb-1.5 px-0.5">Example queries:</div>
-                      <div class="space-y-1.5">
-                        <button @click="applyExample('severity_text=\'ERROR\'')"
-                          class="flex items-center w-full p-2 rounded-sm text-left text-xs hover:bg-muted transition-colors">
-                          <div class="w-2 h-2 rounded-full bg-red-500 mr-2"></div>
-                          <span>All errors</span>
-                        </button>
-                        <button @click="applyExample('severity_text=\'WARN\' OR severity_text=\'WARNING\'')"
-                          class="flex items-center w-full p-2 rounded-sm text-left text-xs hover:bg-muted transition-colors">
-                          <div class="w-2 h-2 rounded-full bg-amber-500 mr-2"></div>
-                          <span>All warnings</span>
-                        </button>
-                        <button @click="applyExample('status_code>=500 AND status_code<600')"
-                          class="flex items-center w-full p-2 rounded-sm text-left text-xs hover:bg-muted transition-colors">
-                          <div class="w-2 h-2 rounded-full bg-red-500 mr-2"></div>
-                          <span>Server errors (5xx)</span>
-                        </button>
-                        <button @click="applyExample('status_code>=400 AND status_code<500')"
-                          class="flex items-center w-full p-2 rounded-sm text-left text-xs hover:bg-muted transition-colors">
-                          <div class="w-2 h-2 rounded-full bg-amber-500 mr-2"></div>
-                          <span>Client errors (4xx)</span>
-                        </button>
-                        <button @click="applyExample('(method=\'GET\' OR method=\'POST\') AND status_code>=400')"
-                          class="flex items-center w-full p-2 rounded-sm text-left text-xs hover:bg-muted transition-colors">
-                          <div class="w-2 h-2 rounded-full bg-blue-500 mr-2"></div>
-                          <span>GET/POST with errors</span>
-                        </button>
-                        <button
-                          @click="applyExample('message ~ \'exception\' OR message ~ \'error\' OR message ~ \'failed\'')"
-                          class="flex items-center w-full p-2 rounded-sm text-left text-xs hover:bg-muted transition-colors">
-                          <div class="w-2 h-2 rounded-full bg-purple-500 mr-2"></div>
-                          <span>Exception messages</span>
-                        </button>
-                      </div>
-                    </div>
-                  </TabsContent>
+              <!-- Right side - action buttons -->
+              <div class="flex items-center gap-2">
 
-                  <!-- History Tab Content -->
-                  <TabsContent value="history" class="mt-1.5 max-h-[290px] overflow-y-auto">
-                    <div class="text-xs text-muted-foreground p-2 italic text-center"
-                      v-if="!savedQueriesStore.recentQueries?.length">
-                      No recent queries.<br>Save a query to see it here.
-                    </div>
-                    <div v-else class="space-y-1.5">
-                      <div class="text-xs text-muted-foreground mb-1.5 px-0.5">Recently used:</div>
-                      <button v-for="(query, index) in savedQueriesStore.recentQueries?.slice(0, 5)" :key="index"
-                        @click="loadSavedQuery(query.id)"
-                        class="flex items-center w-full p-2 rounded-sm text-left text-xs hover:bg-muted transition-colors">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
-                          class="w-3.5 h-3.5 text-primary/70 mr-1.5">
-                          <path fill-rule="evenodd"
-                            d="M10 2c-1.716 0-3.408.106-5.07.31C3.806 2.45 3 3.414 3 4.517V17.25a.75.75 0 001.075.676L10 15.082l5.925 2.844A.75.75 0 0017 17.25V4.517c0-1.103-.806-2.068-1.93-2.207A41.403 41.403 0 0010 2z" />
-                        </svg>
-                        <span class="truncate">{{ query.name }}</span>
-                      </button>
-                    </div>
-                  </TabsContent>
-                </Tabs>
+                <!-- Clear button (clears current tab content) -->
+                <Button v-if="(activeQueryTab === 'filter' && exploreStore.data.filterConditions?.length > 0) ||
+                  (activeQueryTab === 'sql' && exploreStore.data.rawSql?.trim())" @click="clearCurrentQuery" size="sm"
+                  variant="ghost" class="h-7 px-2.5 text-xs rounded-md flex items-center gap-1.5">
+                  <X class="w-3.5 h-3.5" />
+                  Clear
+                </Button>
+
+                <!-- Execute button - always visible -->
+                <Button @click="executeQuery" size="sm" variant="secondary"
+                  :disabled="isLoading || !selectedSourceDetails.database || !selectedSourceDetails.table"
+                  class="h-7 px-2.5 text-xs rounded-md flex items-center gap-1.5">
+                  <Search class="w-3.5 h-3.5" />
+                  Run Query
+                </Button>
               </div>
             </div>
 
-            <!-- Right side - Main query editor and validation -->
-            <div class="flex-1 flex flex-col">
-              <!-- Main editor area -->
-              <div class="flex-1">
-                <!-- Integrated header with fixed filter/SQL tabs -->
-                <div class="flex items-center justify-between px-3 py-1.5 border-b border-border/50 bg-muted/30">
-                  <!-- Left side - Improved mode switcher -->
-                  <div class="bg-muted inline-flex h-8 items-center justify-center rounded-md p-1">
-                    <button @click="activeQueryTab = 'filter'"
-                      class="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-                      :class="activeQueryTab === 'filter' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:bg-muted/60'">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
-                        class="w-3.5 h-3.5 mr-1.5">
-                        <path fill-rule="evenodd"
-                          d="M2.628 1.601C5.028 1.206 7.49 1 10 1s4.973.206 7.372.601a.75.75 0 01.628.74v2.288a2.25 2.25 0 01-.659 1.59l-4.682 4.683a2.25 2.25 0 00-.659 1.59v3.037c0 .684-.31 1.33-.844 1.757l-1.937 1.55A.75.75 0 018 18.25v-5.757a2.25 2.25 0 00-.659-1.591L2.659 6.22A2.25 2.25 0 012 4.629V2.34a.75.75 0 01.628-.74z" />
-                      </svg>
-                      Filter Mode
-                    </button>
-                    <button @click="activeQueryTab = 'sql'"
-                      class="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-                      :class="activeQueryTab === 'sql' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:bg-muted/60'">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
-                        class="w-3.5 h-3.5 mr-1.5">
-                        <path fill-rule="evenodd"
-                          d="M4.25 2A2.25 2.25 0 002 4.25v11.5A2.25 2.25 0 004.25 18h11.5A2.25 2.25 0 0018 15.75V4.25A2.25 2.25 0 0015.75 2H4.25zm4.03 6.28a.75.75 0 00-1.06-1.06L4.97 9.47a.75.75 0 000 1.06l2.25 2.25a.75.75 0 001.06-1.06L6.56 10l1.72-1.72zm4.5-1.06a.75.75 0 10-1.06 1.06L13.44 10l-1.72 1.72a.75.75 0 101.06 1.06l2.25-2.25a.75.75 0 000-1.06l-2.25-2.25z" />
-                      </svg>
-                      SQL Mode
-                    </button>
-                  </div>
+            <!-- Content area with editors (using v-show for persistence) -->
+            <div>
+              <!-- Visual Filter Mode -->
+              <div v-show="activeQueryTab === 'filter'" class="animate-in fade-in-50 duration-100"
+                style="height: 16rem;">
+                <SmartFilterBar v-model="exploreStore.data.filterConditions" :columns="exploreStore.data.columns"
+                  class="h-full" :compact-mode="true" />
+              </div>
 
-                  <!-- Right side - action buttons -->
-                  <div class="flex items-center gap-2">
-                    <!-- Fields button - only shows in filter mode -->
-                    <Button v-show="activeQueryTab === 'filter'" @click="insertFieldTrigger" size="sm" variant="outline"
-                      class="h-7 px-2.5 text-xs rounded-md flex items-center gap-1.5">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
-                        class="w-3.5 h-3.5 text-primary">
-                        <path
-                          d="M10 3.75a2 2 0 10-4 0 2 2 0 004 0zM17.25 4.5a.75.75 0 000-1.5h-5.5a.75.75 0 000 1.5h5.5zM5 3.75a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5a.75.75 0 01.75.75zM4.25 17a.75.75 0 000-1.5h-1.5a.75.75 0 000 1.5h1.5zM17.25 17a.75.75 0 000-1.5h-5.5a.75.75 0 000 1.5h5.5zM9 10a.75.75 0 01-.75.75h-5.5a.75.75 0 010-1.5h5.5A.75.75 0 019 10zM17.25 10.75a.75.75 0 000-1.5h-1.5a.75.75 0 000 1.5h1.5zM14 10a2 2 0 10-4 0 2 2 0 004 0zM10 16.25a2 2 0 10-4 0 2 2 0 004 0z" />
-                      </svg>
-                      Fields
-                    </Button>
-
-                    <!-- Clear button (clears current tab content) -->
-                    <Button v-if="(activeQueryTab === 'filter' && exploreStore.data.filterConditions?.length > 0) ||
-                      (activeQueryTab === 'sql' && exploreStore.data.rawSql?.trim())" @click="clearCurrentQuery"
-                      size="sm" variant="ghost" class="h-7 px-2.5 text-xs rounded-md flex items-center gap-1.5">
-                      <X class="w-3.5 h-3.5" />
-                      Clear
-                    </Button>
-
-                    <!-- Execute button - always visible -->
-                    <Button @click="executeQuery" size="sm" variant="secondary"
-                      :disabled="isLoading || !selectedSourceDetails.database || !selectedSourceDetails.table"
-                      class="h-7 px-2.5 text-xs rounded-md flex items-center gap-1.5">
-                      <Search class="w-3.5 h-3.5" />
-                      Run Query
-                    </Button>
-                  </div>
-                </div>
-
-                <!-- Content area with editors -->
-                <div>
-                  <!-- Visual Filter Mode -->
-                  <div v-if="activeQueryTab === 'filter'" class="animate-in fade-in-50 duration-100">
-                    <SmartFilterBar v-model="exploreStore.data.filterConditions" :columns="exploreStore.data.columns"
-                      class="rounded-sm" compact-mode="true" />
-                  </div>
-
-                  <!-- SQL Editor Mode -->
-                  <div v-else-if="activeQueryTab === 'sql'" class="animate-in fade-in-50 duration-100">
-                    <Suspense>
-                      <template #default>
-                        <SQLEditor v-model="exploreStore.data.rawSql"
-                          :source-database="selectedSourceDetails?.database || ''"
-                          :source-table="selectedSourceDetails?.table || ''" :start-timestamp="getTimestamps().start"
-                          :end-timestamp="getTimestamps().end" :source-columns="exploreStore.data.columns || []"
-                          @execute="executeQuery" compact-mode="true" />
-                      </template>
-                      <template #fallback>
-                        <div class="flex items-center justify-center h-28">
-                          <div class="animate-pulse flex space-x-2">
-                            <div class="flex-1 space-y-1.5 py-1">
-                              <div class="h-2.5 bg-muted/50 rounded w-3/4"></div>
-                              <div class="space-y-1">
-                                <div class="h-2 bg-muted/50 rounded"></div>
-                                <div class="h-2 bg-muted/50 rounded w-5/6"></div>
-                              </div>
-                            </div>
+              <!-- SQL Editor Mode -->
+              <div v-show="activeQueryTab === 'sql'" class="animate-in fade-in-50 duration-100" style="height: 16rem;">
+                <Suspense>
+                  <template #default>
+                    <SQLEditor v-model="exploreStore.data.rawSql"
+                      :source-database="selectedSourceDetails?.database || ''"
+                      :source-table="selectedSourceDetails?.table || ''" :start-timestamp="getTimestamps().start"
+                      :end-timestamp="getTimestamps().end" :source-columns="exploreStore.data.columns || []"
+                      @execute="executeQuery" :compact-mode="true" />
+                  </template>
+                  <template #fallback>
+                    <div class="flex items-center justify-center h-full">
+                      <div class="animate-pulse flex space-x-2">
+                        <div class="flex-1 space-y-1.5 py-1">
+                          <div class="h-2.5 bg-muted/50 rounded w-3/4"></div>
+                          <div class="space-y-1">
+                            <div class="h-2 bg-muted/50 rounded"></div>
+                            <div class="h-2 bg-muted/50 rounded w-5/6"></div>
                           </div>
                         </div>
-                      </template>
-                    </Suspense>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Enhanced footer with keyboard shortcuts and validation -->
-              <div class="px-3 py-1.5 border-t border-border/50 bg-muted/20 flex justify-between items-center">
-                <div class="flex items-center gap-3 text-xs text-muted-foreground">
-                  <span class="flex items-center gap-1">
-                    <kbd
-                      class="px-1 py-0.5 bg-background/80 rounded border border-border/50 text-[10px] font-mono">Alt+Space</kbd>
-                    <span>for suggestions</span>
-                  </span>
-                  <span class="flex items-center gap-1">
-                    <kbd
-                      class="px-1 py-0.5 bg-background/80 rounded border border-border/50 text-[10px] font-mono">Ctrl+Enter</kbd>
-                    <span>to run query</span>
-                  </span>
-                </div>
-
-                <!-- Status/validation area (shows errors or OK status) -->
-                <div v-if="exploreStore.data.validationErrors?.length"
-                  class="flex items-center gap-1 text-xs text-red-500">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
-                    <path fill-rule="evenodd"
-                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" />
-                  </svg>
-                  <span>{{ exploreStore.data.validationErrors[0] }}</span>
-                </div>
-                <div v-else-if="activeQueryTab === 'filter' && exploreStore.data.filterConditions?.length > 0"
-                  class="text-xs text-green-600 flex items-center gap-1">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
-                    <path fill-rule="evenodd"
-                      d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" />
-                  </svg>
-                  <span>Query valid</span>
-                </div>
+                      </div>
+                    </div>
+                  </template>
+                </Suspense>
               </div>
             </div>
           </div>
-        </CollapsibleContent>
-      </div>
-    </Collapsible>
 
-    <!-- Live preview of generated SQL (when in filter mode) -->
-    <div v-if="activeQueryTab === 'filter' && exploreStore.data.filterConditions?.length > 0"
-      class="mt-2 rounded-md border border-border/50 bg-muted/30 p-3 text-xs font-mono overflow-x-auto max-h-28">
-      <div class="text-muted-foreground mb-1">Generated SQL:</div>
-      <pre class="text-[11px] whitespace-pre-wrap">{{ exploreStore.data.rawSql }}</pre>
-    </div>
+          <!-- Enhanced footer with keyboard shortcuts and validation -->
+          <div class="px-3 py-1.5 border-t border-border/50 bg-muted/20 flex justify-between items-center">
+            <div class="flex items-center gap-3 text-xs text-muted-foreground">
+              <span class="flex items-center gap-1">
+                <kbd
+                  class="px-1 py-0.5 bg-background/80 rounded border border-border/50 text-[10px] font-mono">Alt+Space</kbd>
+                <span>for suggestions</span>
+              </span>
+              <span class="flex items-center gap-1">
+                <kbd
+                  class="px-1 py-0.5 bg-background/80 rounded border border-border/50 text-[10px] font-mono">Ctrl+Enter</kbd>
+                <span>to run query</span>
+              </span>
+            </div>
 
-    <!-- Results Area -->
-    <div class="flex-1 min-h-0">
-      <!-- Show Skeleton when loading -->
-      <div v-if="isLoading && !sourcesStore.sourcesWithTeams.length" class="flex-1 flex justify-center items-center">
-        <div class="flex flex-col items-center gap-4 text-center">
-          <Skeleton class="h-12 w-12 rounded-full" />
-          <div class="space-y-2">
-            <Skeleton class="h-4 w-[250px]" />
-            <Skeleton class="h-4 w-[200px]" />
+            <!-- Status/validation area (shows errors or OK status) -->
+            <div v-if="exploreStore.data.validationErrors?.length" class="flex items-center gap-1 text-xs text-red-500">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                <path fill-rule="evenodd"
+                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" />
+              </svg>
+              <span>{{ exploreStore.data.validationErrors[0] }}</span>
+            </div>
+            <div v-else-if="activeQueryTab === 'filter' && exploreStore.data.filterConditions?.length > 0"
+              class="text-xs text-green-600 flex items-center gap-1">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+                <path fill-rule="evenodd"
+                  d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" />
+              </svg>
+              <span>Query valid</span>
+            </div>
           </div>
         </div>
       </div>
-      <div v-else-if="isLoading" class="border rounded-md bg-card p-3 space-y-3">
-        <!-- Simulate Table Header Skeleton -->
-        <div class="flex gap-3">
-          <Skeleton class="h-4 w-1/4" />
-          <Skeleton class="h-4 w-1/4" />
-          <Skeleton class="h-4 w-1/4" />
-          <Skeleton class="h-4 w-1/4" />
-        </div>
-        <!-- Simulate Table Rows Skeleton -->
-        <div class="space-y-2">
-          <div v-for="n in 5" :key="n" class="flex gap-3">
-            <Skeleton class="h-4 w-1/4" />
-            <Skeleton class="h-4 w-1/4" />
-            <Skeleton class="h-4 w-1/4" />
-            <Skeleton class="h-4 w-1/4" />
-          </div>
-        </div>
-      </div>
-      <!-- Show Results when data is loaded -->
-      <div v-else-if="exploreStore.data.logs?.length > 0" class="border rounded-md bg-card">
-        <DataTable :columns="tableColumns" :data="exploreStore.data.logs" :stats="exploreStore.data.queryStats"
-          :source-id="exploreStore.data.sourceId.toString()" />
-      </div>
-      <EmptyState v-else class="border rounded-md bg-card" />
     </div>
-
-    <!-- Save Query Modal (now with team context) -->
-    <SaveQueryModal v-if="showSaveQueryModal" :is-open="showSaveQueryModal" :query-content="queryToSave"
-      @close="showSaveQueryModal = false" @save="handleSaveQuery" />
   </div>
+
+  <!-- Live preview of generated SQL (when in filter mode and query editor is open) -->
+  <div v-if="activeQueryTab === 'filter' && exploreStore.data.filterConditions?.length > 0 && isQueryEditorOpen"
+    class="mt-2 rounded-md border border-border/50 bg-muted/30 p-3 text-xs font-mono overflow-x-auto max-h-28">
+    <div class="text-muted-foreground mb-1">Generated SQL:</div>
+    <pre class="text-[11px] whitespace-pre-wrap">{{ exploreStore.data.rawSql }}</pre>
+  </div>
+
+  <!-- Results Area -->
+  <div class="flex-1 min-h-0">
+    <!-- Show Skeleton when loading -->
+    <div v-if="isLoading && !sourcesStore.sourcesWithTeams.length" class="flex-1 flex justify-center items-center">
+      <div class="flex flex-col items-center gap-4 text-center">
+        <Skeleton class="h-12 w-12 rounded-full" />
+        <div class="space-y-2">
+          <Skeleton class="h-4 w-[250px]" />
+          <Skeleton class="h-4 w-[200px]" />
+        </div>
+      </div>
+    </div>
+    <div v-else-if="isLoading" class="border rounded-md bg-card p-3 space-y-3">
+      <!-- Simulate Table Header Skeleton -->
+      <div class="flex gap-3">
+        <Skeleton class="h-4 w-1/4" />
+        <Skeleton class="h-4 w-1/4" />
+        <Skeleton class="h-4 w-1/4" />
+        <Skeleton class="h-4 w-1/4" />
+      </div>
+      <!-- Simulate Table Rows Skeleton -->
+      <div class="space-y-2">
+        <div v-for="n in 5" :key="n" class="flex gap-3">
+          <Skeleton class="h-4 w-1/4" />
+          <Skeleton class="h-4 w-1/4" />
+          <Skeleton class="h-4 w-1/4" />
+          <Skeleton class="h-4 w-1/4" />
+        </div>
+      </div>
+    </div>
+    <!-- Show Results when data is loaded -->
+    <div v-else-if="exploreStore.data.logs?.length > 0" class="border rounded-md bg-card">
+      <DataTable :columns="tableColumns" :data="exploreStore.data.logs" :stats="exploreStore.data.queryStats"
+        :source-id="exploreStore.data.sourceId.toString()" />
+    </div>
+    <EmptyState v-else class="border rounded-md bg-card" />
+  </div>
+
+  <!-- Save Query Modal (now with team context) -->
+  <SaveQueryModal v-if="showSaveQueryModal" :is-open="showSaveQueryModal" :query-content="queryToSave"
+    @close="showSaveQueryModal = false" @save="handleSaveQuery" />
 </template>
 
 <style scoped>
