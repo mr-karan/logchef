@@ -33,8 +33,12 @@ export const useUsersStore = defineStore("users", () => {
   }
 
   // Get users not in a specific team
-  function getUsersNotInTeam(teamMemberIds: string[]) {
-    return users.value.filter((user) => !teamMemberIds.includes(user.id));
+  function getUsersNotInTeam(teamMemberIds: (string | number)[]) {
+    return users.value.filter(
+      (user) =>
+        !teamMemberIds.includes(user.id) &&
+        !teamMemberIds.includes(Number(user.id))
+    );
   }
 
   return {

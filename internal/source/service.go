@@ -73,6 +73,51 @@ func (s *Service) GetSource(ctx context.Context, id string) (*models.Source, err
 	health := s.chDB.GetHealth(source.ID)
 	source.IsConnected = health.Status == models.HealthStatusHealthy
 
+	// Fetch the table schema if the source is connected
+	if source.IsConnected {
+		client, err := s.chDB.GetClient(source.ID)
+		if err != nil {
+			s.log.Warn("failed to get client for schema retrieval",
+				"error", err,
+				"source_id", source.ID,
+			)
+		} else {
+			// Get the table schema (column information)
+			columns, err := client.GetTableSchema(ctx, source.Connection.Database, source.Connection.TableName)
+			if err != nil {
+				s.log.Warn("failed to get table schema",
+					"error", err,
+					"source_id", source.ID,
+					"database", source.Connection.Database,
+					"table", source.Connection.TableName,
+				)
+			} else {
+				source.Columns = columns
+				s.log.Debug("retrieved table schema",
+					"source_id", source.ID,
+					"column_count", len(columns),
+				)
+			}
+
+			// Get the CREATE TABLE statement
+			createStatement, err := client.GetTableCreateStatement(ctx, source.Connection.Database, source.Connection.TableName)
+			if err != nil {
+				s.log.Warn("failed to get CREATE TABLE statement",
+					"error", err,
+					"source_id", source.ID,
+					"database", source.Connection.Database,
+					"table", source.Connection.TableName,
+				)
+			} else {
+				source.Schema = createStatement
+				s.log.Debug("retrieved CREATE TABLE statement",
+					"source_id", source.ID,
+					"schema_length", len(createStatement),
+				)
+			}
+		}
+	}
+
 	return source, nil
 }
 
@@ -434,8 +479,8 @@ func (s *Service) ValidateConnectionWithColumns(ctx context.Context, conn models
 
 // SourceStats represents the combined statistics for a ClickHouse table
 type SourceStats struct {
-	TableStats       *clickhouse.TableStat        `json:"table_stats"`
-	ColumnStats      []clickhouse.TableColumnStat `json:"column_stats"`
+	TableStats  *clickhouse.TableStat        `json:"table_stats"`
+	ColumnStats []clickhouse.TableColumnStat `json:"column_stats"`
 }
 
 // GetSourceStats retrieves statistics for a specific source (ClickHouse table)

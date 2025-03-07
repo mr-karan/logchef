@@ -313,3 +313,171 @@ func (c *Client) GetLogContext(ctx context.Context, params LogContextParams, tab
 		},
 	}, nil
 }
+
+// GetTableSchema retrieves the schema (column names and types) for a ClickHouse table
+func (c *Client) GetTableSchema(ctx context.Context, database, table string) ([]models.ColumnInfo, error) {
+	start := time.Now()
+	defer func() {
+		c.logger.Debug("schema query completed",
+			"duration_ms", time.Since(start).Milliseconds(),
+		)
+	}()
+
+	c.logger.Debug("retrieving table schema",
+		"database", database,
+		"table", table,
+	)
+
+	// First try using DESCRIBE TABLE
+	columns, err := c.getTableSchemaUsingDescribe(ctx, database, table)
+	if err != nil {
+		c.logger.Warn("failed to get schema using DESCRIBE TABLE, trying fallback method",
+			"error", err,
+			"database", database,
+			"table", table,
+		)
+
+		// If DESCRIBE TABLE fails, try using system.columns
+		columns, err = c.getTableSchemaUsingSystemColumns(ctx, database, table)
+		if err != nil {
+			c.logger.Error("failed to get schema using system.columns",
+				"error", err,
+				"database", database,
+				"table", table,
+			)
+			return nil, err
+		}
+	}
+
+	c.logger.Debug("retrieved table schema",
+		"database", database,
+		"table", table,
+		"column_count", len(columns),
+	)
+
+	return columns, nil
+}
+
+// getTableSchemaUsingDescribe retrieves schema using DESCRIBE TABLE
+func (c *Client) getTableSchemaUsingDescribe(ctx context.Context, database, table string) ([]models.ColumnInfo, error) {
+	// Use DESCRIBE TABLE to get column information
+	query := fmt.Sprintf("DESCRIBE TABLE `%s`.`%s`", database, table)
+
+	// Execute the query
+	rows, err := c.conn.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("executing schema query: %w", err)
+	}
+	defer rows.Close()
+
+	// Get column information from the result set
+	columnTypes := rows.ColumnTypes()
+	c.logger.Debug("describe table column types",
+		"count", len(columnTypes),
+		"names", fmt.Sprintf("%v", columnTypes),
+	)
+
+	// Process results
+	var columns []models.ColumnInfo
+	for rows.Next() {
+		// Create scan targets based on the number of columns
+		scanTargets := make([]interface{}, len(columnTypes))
+		for i := range scanTargets {
+			scanTargets[i] = new(string)
+		}
+
+		if err := rows.Scan(scanTargets...); err != nil {
+			return nil, fmt.Errorf("scanning schema row: %w", err)
+		}
+
+		// Extract name and type (first two columns)
+		if len(scanTargets) < 2 {
+			return nil, fmt.Errorf("unexpected column count in DESCRIBE TABLE result: %d", len(scanTargets))
+		}
+
+		name := *(scanTargets[0].(*string))
+		dataType := *(scanTargets[1].(*string))
+
+		columns = append(columns, models.ColumnInfo{
+			Name: name,
+			Type: dataType,
+		})
+	}
+
+	// Check for errors after iteration
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating schema rows: %w", err)
+	}
+
+	return columns, nil
+}
+
+// getTableSchemaUsingSystemColumns retrieves schema using system.columns table
+func (c *Client) getTableSchemaUsingSystemColumns(ctx context.Context, database, table string) ([]models.ColumnInfo, error) {
+	// Query system.columns to get column information
+	query := fmt.Sprintf("SELECT name, type FROM system.columns WHERE database = '%s' AND table = '%s' ORDER BY position", database, table)
+
+	// Execute the query
+	rows, err := c.conn.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("executing system.columns query: %w", err)
+	}
+	defer rows.Close()
+
+	// Process results
+	var columns []models.ColumnInfo
+	for rows.Next() {
+		var name, dataType string
+
+		if err := rows.Scan(&name, &dataType); err != nil {
+			return nil, fmt.Errorf("scanning system.columns row: %w", err)
+		}
+
+		columns = append(columns, models.ColumnInfo{
+			Name: name,
+			Type: dataType,
+		})
+	}
+
+	// Check for errors after iteration
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating system.columns rows: %w", err)
+	}
+
+	return columns, nil
+}
+
+// GetTableCreateStatement retrieves the CREATE TABLE statement for a ClickHouse table
+func (c *Client) GetTableCreateStatement(ctx context.Context, database, table string) (string, error) {
+	start := time.Now()
+	defer func() {
+		c.logger.Debug("create table query completed",
+			"duration_ms", time.Since(start).Milliseconds(),
+		)
+	}()
+
+	// Use SHOW CREATE TABLE to get the create statement
+	query := fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", database, table)
+
+	// Execute the query
+	rows, err := c.conn.Query(ctx, query)
+	if err != nil {
+		return "", fmt.Errorf("executing create table query: %w", err)
+	}
+	defer rows.Close()
+
+	// SHOW CREATE TABLE returns a single row with a single column
+	var createStatement string
+	if rows.Next() {
+		if err := rows.Scan(&createStatement); err != nil {
+			return "", fmt.Errorf("scanning create table result: %w", err)
+		}
+	}
+
+	// Check for errors after iteration
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("iterating create table result: %w", err)
+	}
+
+	return createStatement, nil
+}

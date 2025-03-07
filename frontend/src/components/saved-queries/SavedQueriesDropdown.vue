@@ -100,8 +100,8 @@ function formatTime(dateStr: string): string {
 }
 
 // Handle query selection
-function selectQuery(queryId: string) {
-  emit('select', queryId);
+function selectQuery(queryId: number) {
+  emit('select', String(queryId));
   isOpen.value = false;
 }
 

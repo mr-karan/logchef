@@ -1,8 +1,7 @@
 import { defineStore } from "pinia";
 import { useBaseStore, handleApiCall } from "./base";
 import { savedQueriesApi } from "@/api/savedQueries";
-import type { SavedTeamQuery, Team, APIResponse } from "@/api/types";
-import { isErrorResponse } from "@/api/types";
+import type { SavedTeamQuery, Team } from "@/api/types";
 import { computed } from "vue";
 
 export interface SavedQueriesState {
@@ -120,12 +119,15 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         apiCall: () => savedQueriesApi.updateQuery(teamId, queryId, query),
         onSuccess: (response) => {
           const index = state.data.value.queries.findIndex(
-            (q) => q.id === queryId
+            (q) => String(q.id) === queryId
           );
           if (index >= 0) {
             state.data.value.queries[index] = response;
           }
-          if (state.data.value.selectedQuery?.id === queryId) {
+          if (
+            state.data.value.selectedQuery?.id &&
+            String(state.data.value.selectedQuery.id) === queryId
+          ) {
             state.data.value.selectedQuery = response;
           }
         },
@@ -140,9 +142,12 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         apiCall: () => savedQueriesApi.deleteQuery(teamId, queryId),
         onSuccess: () => {
           state.data.value.queries = state.data.value.queries.filter(
-            (q) => q.id !== queryId
+            (q) => String(q.id) !== queryId
           );
-          if (state.data.value.selectedQuery?.id === queryId) {
+          if (
+            state.data.value.selectedQuery?.id &&
+            String(state.data.value.selectedQuery.id) === queryId
+          ) {
             state.data.value.selectedQuery = null;
           }
         },

@@ -1,0 +1,1 @@
+import{d as o,k as t,p as n,o as r}from"./index-DhD1Jy6j.js";import"./monaco-editor-2qzqsP3x.js";const m=o({__name:"SettingsLayout",setup(s){return(a,p)=>{const e=n("router-view");return r(),t(e)}}});export{m as default};

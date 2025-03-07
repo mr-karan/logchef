@@ -24,7 +24,6 @@ import DataTablePagination from './data-table-pagination.vue'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
 import type { QueryStats } from '@/api/explore'
-import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 
 interface Props {
@@ -47,9 +46,6 @@ const pagination = ref<PaginationState>({
 const globalFilter = ref('')
 
 const { toast } = useToast()
-
-const contextModalOpen = ref(false)
-const selectedLog = ref<Record<string, any> | null>(null)
 
 // Initialize table
 const table = useVueTable({
@@ -108,13 +104,6 @@ const copyCell = (value: any) => {
         description: 'Value copied to clipboard',
         duration: TOAST_DURATION.SUCCESS,
     })
-}
-
-// Update showContext function
-function showContext(log: Record<string, any>) {
-    console.log('Opening context modal with:', { sourceId: props.sourceId, log })
-    selectedLog.value = log
-    contextModalOpen.value = true
 }
 </script>
 
@@ -185,8 +174,7 @@ function showContext(log: Record<string, any>) {
                                 <tr v-if="row.getIsExpanded()">
                                     <td :colspan="row.getVisibleCells().length" class="p-0">
                                         <div class="p-3 bg-muted/50">
-                                            <JsonViewer :value="row.original" :expanded="false"
-                                                :show-context-button="true" @show-context="showContext(row.original)" />
+                                            <JsonViewer :value="row.original" :expanded="false" />
                                         </div>
                                     </td>
                                 </tr>
@@ -203,10 +191,6 @@ function showContext(log: Record<string, any>) {
                 </table>
             </div>
         </div>
-
-        <!-- Context Modal -->
-        <LogTimelineModal v-if="selectedLog" v-model:isOpen="contextModalOpen" :source-id="props.sourceId"
-            :log="selectedLog" />
     </div>
 </template>
 

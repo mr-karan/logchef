@@ -1,610 +1,140 @@
 import * as monaco from "monaco-editor";
-import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import { loader } from "@guolao/vue-monaco-editor";
-import { registerLogFilterLanguage } from "./logfilter-language";
-import { registerSqlLanguage } from "./sql-language";
-import { registerLogChefQLLanguage } from "./monaco-logchefql";
 
-// FUNDAMENTAL CHANGE: Initialize Monaco once, globally, and never reset it
-// Monaco is a global singleton by design, and trying to reinitialize it causes issues
-let monacoInitialized = false;
+import {
+  Parser as LogchefqlParser,
+  tokenTypes as logchefqlTokenTypes,
+} from "@/utils/logchefql";
 
-// Define a debug log function to track Monaco lifecycle
-const DEBUG = true;
-function debugLog(...args) {
-  if (DEBUG) {
-    console.log(`[Monaco Debug]`, ...args);
-  }
-}
-
-// We will set up Monaco environment ONLY when explicitly requested
-// This prevents cross-tab memory issues and ensures clean initialization
-const setupMonacoEnvironment = () => {
-  if (
-    typeof window !== "undefined" &&
-    typeof self !== "undefined" &&
-    !self.MonacoEnvironment
-  ) {
-    try {
-      debugLog("Setting up Monaco environment");
-      self.MonacoEnvironment = {
-        getWorker(_, label) {
-          debugLog("Creating Monaco worker", label);
-          return new EditorWorker();
-        },
-      };
-      debugLog("Monaco environment setup completed successfully");
-      return true;
-    } catch (error) {
-      console.error("Failed to setup Monaco environment:", error);
-      return false;
-    }
-  }
-  return true; // Return true if already set up
-};
-
-/**
- * Count and log all current Monaco editors and models
- * This is useful for debugging memory leaks
- */
-export function logMonacoInstanceCounts() {
-  if (typeof window !== "undefined" && window.monaco && window.monaco.editor) {
-    try {
-      const editors = window.monaco.editor.getEditors();
-      const models = window.monaco.editor.getModels();
-      debugLog(
-        `Monaco instance counts - Editors: ${editors.length}, Models: ${models.length}`,
-        { editors, models }
-      );
-      return { editors, models };
-    } catch (error) {
-      console.error("Error counting Monaco instances:", error);
-      return { editors: [], models: [] };
-    }
-  }
-  return { editors: [], models: [] };
-}
-
-/**
- * Get default Monaco Editor options for compact input fields
- */
-export function getDefaultMonacoOptions() {
+function getDefaultMonacoOptions() {
   return {
+    readOnly: false,
     fontSize: 13,
-    minimap: { enabled: false },
-    lineNumbers: "off",
-    glyphMargin: false,
-    folding: false,
-    lineDecorationsWidth: 0,
-    lineNumbersMinChars: 0,
-    scrollBeyondLastLine: false,
-    automaticLayout: true,
-    wordWrap: "on",
-    padding: { top: 8, bottom: 8 },
-    scrollbar: {
-      horizontal: "auto",
-      vertical: "hidden",
-      useShadows: false,
-      horizontalScrollbarSize: 4,
+    padding: {
+      top: 6,
+      bottom: 6,
     },
-    overviewRulerBorder: false,
-    overviewRulerLanes: 0,
-    hideCursorInOverviewRuler: true,
-    renderLineHighlight: "none",
-    fixedOverflowWidgets: true,
     contextmenu: false,
-    links: false,
-    // Enable quick suggestions for better UX
-    quickSuggestions: {
-      other: true,
-      comments: false,
-      strings: false,
-    },
-    quickSuggestionsDelay: 50,
-    parameterHints: {
-      enabled: true,
-    },
-    suggestOnTriggerCharacters: true,
-    acceptSuggestionOnEnter: "on",
     tabCompletion: "on",
-    suggest: {
-      showIcons: true,
-      maxVisibleSuggestions: 25,
-      filterGraceful: true,
-      snippetsPreventQuickSuggestions: false,
-      showMethods: true,
-      showFunctions: true,
-      showVariables: true,
-    },
-    // Improve cursor behavior
-    cursorBlinking: "phase",
-    cursorSmoothCaretAnimation: "on",
-    cursorStyle: "line",
-    cursorWidth: 2,
-    // Font settings
-    fontFamily:
-      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-    fontLigatures: true,
-    // Selection behavior
-    selectionHighlight: true,
-    // Performance optimizations
-    renderWhitespace: "none",
-    renderControlCharacters: false,
-    renderIndentGuides: false,
-  };
-}
-
-/**
- * Get flexible Monaco Editor options for the filter editor
- * Supports multiline editing while maintaining a clean appearance
- */
-export function getSingleLineMonacoOptions() {
-  return {
-    ...getDefaultMonacoOptions(),
-    fontSize: 13,
-    lineHeight: 20,
-    lineNumbers: "off",
-    folding: true,
-    wordWrap: "on",
-    wrappingIndent: "same",
-    lineDecorationsWidth: 0,
+    overviewRulerLanes: 0,
     lineNumbersMinChars: 0,
-    overviewRulerBorder: false,
     scrollBeyondLastLine: false,
-    renderLineHighlight: "none",
-    automaticLayout: true,
-    
-    // Improved scrollbars - allow vertical scrolling
+    scrollbarVisibility: 'hidden',
     scrollbar: {
-      horizontal: "auto",
-      vertical: "auto",
-      horizontalScrollbarSize: 6,
-      verticalScrollbarSize: 6,
+      horizontal: 'hidden',
+      vertical: 'hidden',
       alwaysConsumeMouseWheel: false,
+      useShadows: false,
     },
-    
-    // Better find experience
+    occurrencesHighlight: false,
     find: {
       addExtraSpaceOnTop: false,
-      autoFindInSelection: "never",
-      seedSearchStringFromSelection: "always",
+      autoFindInSelection: 'never',
+      seedSearchStringFromSelection: false,
     },
-    
-    // Disable line highlight - clean appearance
-    renderLineHighlight: "none",
-    
-    // Ensure cursor and highlights are visible
-    hideCursorInOverviewRuler: false,
-    occurrencesHighlight: true,
-    renderWhitespace: "selection",
-    selectionHighlight: true, 
-    
-    // Error reporting improvements
-    lightbulb: {
-      enabled: true,
-    },
-
-    // Enhanced autocomplete behavior
-    quickSuggestions: {
-      other: true,
-      comments: false,
-      strings: true,
-    },
-    quickSuggestionsDelay: 0,
-    snippetSuggestions: "inline",
-    suggestSelection: "first",
-    acceptSuggestionOnEnter: "smart",
-    suggest: {
-      showIcons: true,
-      maxVisibleSuggestions: 12,
-      filterGraceful: true,
-      showMethods: false,
-      showFunctions: false,
-      showVariables: true,
-      preview: true,
-      snippetsPreventQuickSuggestions: false,
-      localityBonus: true,
-      insertMode: "replace",
-      showStatusBar: true,
-      previewMode: "prefix",
-      shareSuggestSelections: true,
-    },
-    tabCompletion: "on",
     wordBasedSuggestions: "off",
-
-    // Highlight matching brackets
-    matchBrackets: "always",
-    autoClosingBrackets: "always",
-    autoClosingQuotes: "always",
-    autoSurround: "quotes",
-
-    // Cursor improvements
+    lineDecorationsWidth: 0,
+    hideCursorInOverviewRuler: true,
+    glyphMargin: false,
+    scrollBeyondLastColumn: 0,
+    automaticLayout: true,
+    minimap: {
+      enabled: false,
+    },
+    folding: false,
+    lineNumbers: false,
+    renderLineHighlight: 'none',
+    matchBrackets: 'always',
+    'semanticHighlighting.enabled': true,
+    fixedOverflowWidgets: true,
+    wordWrap: "on",
+    links: false,
     cursorBlinking: "smooth",
-    cursorSmoothCaretAnimation: "on",
-    cursorSurroundingLines: 3,
-    cursorSurroundingLinesStyle: "default",
-    cursorWidth: 2,
-
-    // Better accessibility
-    accessibilitySupport: "auto",
-
-    // Improved features and hints
-    colorDecorators: true,
-    columnSelection: true,
-    comments: {
-      insertSpace: true,
-    },
-
-    // Modern code editing features
-    bracketPairColorization: {
-      enabled: true,
-    },
-    guides: {
-      bracketPairs: true,
-      highlightActiveIndentation: true,
-      indentation: true,
-    },
-
-    // Better hover behavior
-    hover: {
-      enabled: true,
-      delay: 300,
-      sticky: true,
-    },
-
-    // Multiple cursor support for power users
+    cursorStyle: "line",
     multiCursorModifier: "alt",
-  };
-}
-
-/**
- * Check if Monaco is initialized
- */
-export function isMonacoInitialized() {
-  return monacoInitialized;
-}
-
-// Track editor instances for better memory management
-const editorInstances = new Set();
-
-/**
- * Dispose specific Monaco editor instance safely
- * This should be called by components when they are unmounted
- */
-export function disposeMonacoEditorInstance(editor) {
-  if (!editor) return false;
-
-  try {
-    debugLog("Disposing editor instance", editor.getId ? editor.getId() : "unknown");
-
-    // Get the model associated with this editor before disposal
-    let model = null;
-    try {
-      model = editor.getModel();
-    } catch (e) {
-      console.error("Error getting model during disposal:", e);
-    }
-
-    // Remove from tracked instances
-    editorInstances.delete(editor);
-
-    // Dispose the editor first
-    try {
-      if (editor && !editor.isDisposed?.()) {
-        editor.dispose();
-      }
-    } catch (e) {
-      console.error("Error disposing editor:", e);
-    }
-
-    // Then dispose the model if it exists and isn't already disposed
-    try {
-      if (model && !model.isDisposed?.()) {
-        model.dispose();
-      }
-    } catch (e) {
-      console.error("Error disposing model:", e);
-    }
-
-    // Log current instances after disposal
-    logMonacoInstanceCounts();
-
-    return true;
-  } catch (error) {
-    console.error("Error disposing Monaco editor instance:", error);
-    return false;
+    lineHeight: 20,
+    renderWhitespace: "none",
+    selectOnLineNumbers: false,
+    dragAndDrop: false,
   }
 }
 
-/**
- * Register an editor instance for tracking
- * This helps ensure all editors are properly disposed
- */
-export function registerEditorInstance(editor) {
-  if (editor) {
-    editorInstances.add(editor);
-    debugLog(`Registered editor instance. Total tracked: ${editorInstances.size}`);
-  }
+function initMonacoSetup() {
+  loader.config({ monaco });
+  monaco.editor.defineTheme("logchef", {
+    base: "vs",
+    inherit: true,
+    colors: {},
+    rules: [
+      { token: "field", foreground: "0451a5" },
+      { token: "alias", foreground: "0451a5", fontStyle: "bold" },
+      { token: "operator", foreground: "0089ab" },
+      { token: "argument", foreground: "0451a5" },
+      { token: "modifier", foreground: "0089ab" },
+      { token: "error", foreground: "ff0000" },
+      { token: "logchefqlKey", foreground: "0451a5" },
+      { token: "logchefqlOperator", foreground: "0089ab" },
+      { token: "logchefqlValue", foreground: "8b0000" },
+      { token: "number", foreground: "098658" },
+      { token: "string", foreground: "a31515" },
+    ],
+  });
+  monaco.editor.defineTheme("logchef-dark", {
+    base: "vs-dark",
+    inherit: true,
+    colors: {},
+    rules: [
+      { token: "field", foreground: "6e9fff" },
+      { token: "alias", foreground: "6e9fff", fontStyle: "bold" },
+      { token: "operator", foreground: "0089ab" },
+      { token: "argument", foreground: "ffffff" },
+      { token: "modifier", foreground: "fa83f8" },
+      { token: "error", foreground: "ff0000" },
+      { token: "logchefqlKey", foreground: "6e9fff" },
+      { token: "logchefqlOperator", foreground: "0089ab" },
+      { token: "logchefqlValue", foreground: "ce9178" },
+      { token: "number", foreground: "b5cea8" },
+      { token: "string", foreground: "ce9178" },
+    ],
+  });
+
+  // Register logchefql language
+  monaco.languages.register({ id: "logchefql" });
+  monaco.languages.setLanguageConfiguration("logchefql", {
+    autoClosingPairs: [
+      { open: "(", close: ")" },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+    ],
+  });
+
+  // Register semantic tokens provider
+  monaco.languages.registerDocumentSemanticTokensProvider("logchefql", {
+    getLegend: () => ({
+      tokenTypes: logchefqlTokenTypes,
+      tokenModifiers: []
+    }),
+    provideDocumentSemanticTokens: (model) => {
+      try {
+        const parser = new LogchefqlParser();
+        parser.parse(model.getValue(), false);
+
+        const data = parser.generateMonacoTokens();
+
+        return {
+          data: new Uint32Array(data),
+          resultId: null,
+        };
+      } catch (e) {
+        console.error("Error parsing LogchefQL:", e);
+        return {
+          data: new Uint32Array([]),
+          resultId: null,
+        };
+      }
+    },
+    releaseDocumentSemanticTokens: () => { }
+  });
 }
 
-/**
- * Initialize Monaco Editor with custom themes and language definitions
- * This is now called ONCE at application startup
- */
-export function initMonacoSetup() {
-  // Check if already initialized
-  if (monacoInitialized) {
-    debugLog("Monaco already initialized, skipping");
-    return;
-  }
-
-  // Setup Monaco environment first
-  if (!setupMonacoEnvironment()) {
-    console.error("Failed to set up Monaco environment");
-    return;
-  }
-  
-  // Expose utility functions to monaco global for component access
-  if (typeof window !== 'undefined' && window.monaco && window.monaco.editor) {
-    window.monaco.editor._logchef_utils = {
-      registerEditorInstance,
-      disposeMonacoEditorInstance,
-      logMonacoInstanceCounts
-    };
-  }
-
-  try {
-    debugLog("Initializing Monaco editor");
-
-    // Configure the loader with monaco instance
-    loader.config({ monaco });
-
-    // Define enhanced themes for light and dark modes with improved syntax highlighting
-    monaco.editor.defineTheme("logchef-light", {
-      base: "vs",
-      inherit: true,
-      colors: {
-        // Editor appearance
-        "editor.background": "#00000000", // Transparent background
-        "editor.foreground": "#333333",
-        
-        // Cursor and selection
-        "editorCursor.foreground": "#2563eb", // Primary blue
-        "editor.selectionBackground": "#bfdbfe", // Light blue selection
-        "editor.inactiveSelectionBackground": "#bfdbfeaa", // Semi-transparent selection when not focused
-        "editor.selectionHighlightBackground": "#dbeafeaa", // Lighter blue for selection highlights
-        "editor.lineHighlightBackground": "#f8fafc", // Very subtle line highlight
-        "editor.lineHighlightBorder": "#e2e8f070", // Near invisible border for line highlight
-        
-        // Suggestion widget enhancements - akin to modern IDEs
-        "editorSuggestWidget.background": "#ffffff",
-        "editorSuggestWidget.border": "#e2e8f0",
-        "editorSuggestWidget.selectedBackground": "#2563eb",
-        "editorSuggestWidget.selectedForeground": "#ffffff",
-        "editorSuggestWidget.highlightForeground": "#2563eb",
-        "editorSuggestWidget.selectedIconForeground": "#ffffff",
-        "editorSuggestWidget.focusHighlightForeground": "#2563eb",
-        "editorSuggestWidget.focusBorder": "#2563eb",
-        
-        // Hover widget - cleaner, more defined style
-        "editorHoverWidget.background": "#f8fafc",
-        "editorHoverWidget.border": "#e2e8f0", 
-        "editorHoverWidget.foreground": "#333333",
-        "editorHoverWidget.statusBarBackground": "#f1f5f9",
-        
-        // Widget borders for better visibility
-        "editorWidget.border": "#e2e8f0",
-        "editorWidget.background": "#ffffff",
-        
-        // Find match highlighting
-        "editor.findMatchBackground": "#fef9c3", // Light yellow for find matches
-        "editor.findMatchHighlightBackground": "#fef9c3aa", // Transparent yellow for other matches
-        "editor.findMatchBorder": "#eab308", // Yellow border for current match
-        "editor.findRangeHighlightBackground": "#f8fafc", // Subtle highlight for find range
-        
-        // Scrollbar styling
-        "scrollbarSlider.background": "#64748b30", // Light scrollbar
-        "scrollbarSlider.hoverBackground": "#64748b50", // Darker on hover
-        "scrollbarSlider.activeBackground": "#64748b70", // Darkest when active
-        
-        // Bracket match highlighting
-        "editorBracketMatch.background": "#dbeafe80", // Light blue with transparency
-        "editorBracketMatch.border": "#2563eb", // Blue border for matching brackets
-        
-        // Error/warning indicators
-        "editorError.foreground": "#ef4444", // Red for errors
-        "editorWarning.foreground": "#f59e0b", // Amber for warnings
-        "editorInfo.foreground": "#3b82f6", // Blue for info
-        
-        // Guide lines
-        "editorIndentGuide.background": "#e2e8f050", // Very subtle indent guides
-        "editorIndentGuide.activeBackground": "#cbd5e1", // More visible active indent guide
-      },
-      rules: [
-        // Field and identifiers
-        { token: "field", foreground: "2563eb", fontStyle: "bold" }, // Primary blue
-        { token: "identifier", foreground: "333333" },
-        { token: "column", foreground: "2563eb", fontStyle: "bold" }, // Primary blue
-        { token: "variable", foreground: "1e40af" }, // Dark blue
-        
-        // Operators and symbols
-        { token: "operator", foreground: "0369a1", fontStyle: "bold" }, // Cyan
-        { token: "magic-symbol", foreground: "dc2626", fontStyle: "bold" }, // Red
-        { token: "delimiter", foreground: "475569", fontStyle: "bold" }, // Slate
-        
-        // Structure
-        { token: "parenthesis", foreground: "475569" }, // Slate
-        { token: "bracket", foreground: "475569" }, // Slate
-        { token: "punctuation", foreground: "475569" }, // Slate
-        
-        // Constants and values
-        { token: "string", foreground: "166534" }, // Green
-        { token: "number", foreground: "c2410c" }, // Orange
-        { token: "boolean", foreground: "7c3aed" }, // Purple
-        { token: "regexp", foreground: "c2410c" }, // Orange
-        
-        // Keywords and constructs
-        { token: "keyword", foreground: "7c3aed", fontStyle: "bold" }, // Purple
-        { token: "type", foreground: "0891b2" }, // Light cyan
-        { token: "function", foreground: "9333ea" }, // Violet
-        { token: "predefined", foreground: "9333ea" }, // Violet
-        
-        // Misc
-        { token: "comment", foreground: "65a30d", fontStyle: "italic" }, // Lime
-        { token: "table", foreground: "0284c7" }, // Light blue
-        
-        // LogQL specific
-        { token: "label", foreground: "2563eb", fontStyle: "bold" }, // Primary blue
-        { token: "attribute", foreground: "0891b2" }, // Light cyan
-        { token: "comparison-operator", foreground: "0369a1", fontStyle: "bold" }, // Cyan
-        { token: "logical-operator", foreground: "7c3aed", fontStyle: "bold" }, // Purple
-      ],
-    });
-
-    monaco.editor.defineTheme("logchef-dark", {
-      base: "vs-dark",
-      inherit: true,
-      colors: {
-        // Editor appearance
-        "editor.background": "#00000000", // Transparent background
-        "editor.foreground": "#e2e8f0", // Slate 200
-        
-        // Cursor and selection
-        "editorCursor.foreground": "#60a5fa", // Blue 400
-        "editor.selectionBackground": "#3b82f640", // More visible selection
-        "editor.inactiveSelectionBackground": "#3b82f630", // Semi-transparent when not focused
-        "editor.selectionHighlightBackground": "#3b82f620", // Lighter for selection highlights
-        "editor.lineHighlightBackground": "#1e293b90", // Subtle line highlight
-        "editor.lineHighlightBorder": "#334155", // Subtle border
-        
-        // Suggestion widget
-        "editorSuggestWidget.background": "#1e293b", // Slate 800
-        "editorSuggestWidget.border": "#334155", // Slate 700
-        "editorSuggestWidget.selectedBackground": "#3b82f6", // Blue 500
-        "editorSuggestWidget.selectedForeground": "#ffffff",
-        "editorSuggestWidget.highlightForeground": "#38bdf8", // Sky 400
-        "editorSuggestWidget.selectedIconForeground": "#ffffff",
-        "editorSuggestWidget.focusHighlightForeground": "#38bdf8", // Sky 400
-        "editorSuggestWidget.focusBorder": "#3b82f6", // Blue 500
-        
-        // Hover widget
-        "editorHoverWidget.background": "#1e293b", // Slate 800
-        "editorHoverWidget.border": "#334155", // Slate 700
-        "editorHoverWidget.foreground": "#e2e8f0", // Slate 200
-        "editorHoverWidget.statusBarBackground": "#0f172a", // Slate 900
-        
-        // Widget styling
-        "editorWidget.border": "#334155", // Slate 700
-        "editorWidget.background": "#1e293b", // Slate 800
-        
-        // Find match highlighting
-        "editor.findMatchBackground": "#fbbf2450", // Semi-transparent amber
-        "editor.findMatchHighlightBackground": "#fbbf2430", // More transparent amber
-        "editor.findMatchBorder": "#fbbf24", // Amber border
-        "editor.findRangeHighlightBackground": "#1e293b", // Subtle background
-        
-        // Scrollbar styling
-        "scrollbarSlider.background": "#64748b40", // Semi-transparent scrollbar
-        "scrollbarSlider.hoverBackground": "#64748b60", // More visible on hover
-        "scrollbarSlider.activeBackground": "#64748b80", // Most visible when active
-        
-        // Bracket match highlighting
-        "editorBracketMatch.background": "#3b82f620", // Blue with transparency
-        "editorBracketMatch.border": "#60a5fa", // Blue 400 border
-        
-        // Error/warning indicators
-        "editorError.foreground": "#f87171", // Red 400
-        "editorWarning.foreground": "#fbbf24", // Amber 400
-        "editorInfo.foreground": "#60a5fa", // Blue 400
-        
-        // Guide lines
-        "editorIndentGuide.background": "#334155", // Slate 700
-        "editorIndentGuide.activeBackground": "#475569", // Slate 600
-      },
-      rules: [
-        // Fields and identifiers
-        { token: "field", foreground: "60a5fa", fontStyle: "bold" }, // Blue 400
-        { token: "identifier", foreground: "e2e8f0" }, // Slate 200
-        { token: "column", foreground: "60a5fa", fontStyle: "bold" }, // Blue 400
-        { token: "variable", foreground: "93c5fd" }, // Blue 300
-        
-        // Operators and symbols
-        { token: "operator", foreground: "22d3ee", fontStyle: "bold" }, // Cyan 400
-        { token: "magic-symbol", foreground: "f87171", fontStyle: "bold" }, // Red 400
-        { token: "delimiter", foreground: "cbd5e1", fontStyle: "bold" }, // Slate 300
-        
-        // Structure
-        { token: "parenthesis", foreground: "cbd5e1" }, // Slate 300
-        { token: "bracket", foreground: "cbd5e1" }, // Slate 300
-        { token: "punctuation", foreground: "cbd5e1" }, // Slate 300
-        
-        // Constants and values
-        { token: "string", foreground: "4ade80" }, // Green 400
-        { token: "number", foreground: "fb923c" }, // Orange 400
-        { token: "boolean", foreground: "a78bfa" }, // Violet 400
-        { token: "regexp", foreground: "fb923c" }, // Orange 400
-        
-        // Keywords and constructs
-        { token: "keyword", foreground: "a78bfa", fontStyle: "bold" }, // Violet 400
-        { token: "type", foreground: "22d3ee" }, // Cyan 400
-        { token: "function", foreground: "c084fc" }, // Fuchsia 400
-        { token: "predefined", foreground: "c084fc" }, // Fuchsia 400
-        
-        // Misc
-        { token: "comment", foreground: "86efac", fontStyle: "italic" }, // Green 300
-        { token: "table", foreground: "38bdf8" }, // Sky 400
-        
-        // LogQL specific
-        { token: "label", foreground: "60a5fa", fontStyle: "bold" }, // Blue 400
-        { token: "attribute", foreground: "22d3ee" }, // Cyan 400
-        { token: "comparison-operator", foreground: "22d3ee", fontStyle: "bold" }, // Cyan 400
-        { token: "logical-operator", foreground: "a78bfa", fontStyle: "bold" }, // Violet 400
-      ],
-    });
-
-    // Register language definitions if needed
-    try {
-      debugLog("Registering custom language definitions");
-
-      if (
-        !monaco.languages.getLanguages().some((lang) => lang.id === "logfilter")
-      ) {
-        debugLog("Registering logfilter language");
-        registerLogFilterLanguage();
-      }
-
-      if (
-        !monaco.languages
-          .getLanguages()
-          .some((lang) => lang.id === "clickhouse-sql")
-      ) {
-        debugLog("Registering clickhouse-sql language");
-        registerSqlLanguage();
-      }
-
-      if (
-        !monaco.languages.getLanguages().some((lang) => lang.id === "logchefql")
-      ) {
-        debugLog("Registering logchefql language");
-        registerLogChefQLLanguage();
-      }
-    } catch (langError) {
-      console.error("Error registering languages:", langError);
-    }
-
-    // Set up safeguards
-    if (typeof window !== "undefined") {
-      // Log editor instances on navigation
-      window.addEventListener("beforeunload", () => {
-        debugLog("Page unloading - current Monaco instances:");
-        logMonacoInstanceCounts();
-      });
-    }
-
-    // Mark as initialized
-    monacoInitialized = true;
-    debugLog("Monaco successfully initialized");
-  } catch (error) {
-    console.error("Error initializing Monaco:", error);
-  }
-}
+export { initMonacoSetup, getDefaultMonacoOptions };

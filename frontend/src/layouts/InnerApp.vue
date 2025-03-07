@@ -44,26 +44,13 @@ import {
     Monitor,
 } from 'lucide-vue-next'
 
-import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { computed, ref } from 'vue'
-import type { FunctionalComponent } from 'vue'
-import type { LucideProps } from 'lucide-vue-next'
-import type { RouteLocationRaw } from 'vue-router'
-import {
-    Breadcrumb,
-    BreadcrumbItem,
-    BreadcrumbLink,
-    BreadcrumbList,
-    BreadcrumbPage,
-    BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb'
+import { ref } from 'vue'
 
 // Use the theme store instead of initializing directly
 import { useThemeStore } from '@/stores/theme'
 const themeStore = useThemeStore()
 
-const route = useRoute()
 const authStore = useAuthStore()
 const sidebarOpen = ref(true)
 
@@ -111,37 +98,6 @@ const navItems = [
         url: '/settings/profile',
     },
 ]
-
-interface BreadcrumbItem {
-    label: string;
-    to?: RouteLocationRaw;
-    icon?: FunctionalComponent<LucideProps>;
-}
-
-// Compute breadcrumb items based on current route
-const breadcrumbs = computed<BreadcrumbItem[]>(() => {
-    const paths = route.path.split('/').filter(Boolean)
-    const items: BreadcrumbItem[] = [
-        {
-            label: 'Home',
-            to: '/logs/explore'
-        }
-    ]
-
-    let currentPath = ''
-    paths.forEach(path => {
-        currentPath += `/${path}`
-        const matchedRoute = route.matched.find(r => r.path === currentPath)
-        if (matchedRoute?.meta?.title) {
-            items.push({
-                label: matchedRoute.meta.title as string,
-                to: currentPath
-            })
-        }
-    })
-
-    return items
-})
 </script>
 
 <template>
@@ -216,7 +172,7 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
                                             </Avatar>
                                             <div class="grid flex-1 text-left text-sm leading-tight">
                                                 <span class="truncate font-semibold">{{ authStore.user?.full_name
-                                                    }}</span>
+                                                }}</span>
                                                 <span class="truncate text-xs">{{ authStore.user?.email }}</span>
                                             </div>
                                         </div>
