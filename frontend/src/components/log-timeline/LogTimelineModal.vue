@@ -49,7 +49,7 @@ watch(() => props.isOpen, async (open) => {
         isLoading.value = true
         try {
             const timestamp = new Date(props.log.timestamp).getTime()
-            const result = await exploreApi.getLogContext(props.sourceId, {
+            const result = await exploreApi.getLogContext(parseInt(props.sourceId), {
                 timestamp,
                 before_limit: 5,
                 after_limit: 5
@@ -90,7 +90,7 @@ async function loadMore(direction: 'before' | 'after') {
             ? new Date(contextLogs.value.before_logs[0]?.timestamp).getTime()
             : new Date(contextLogs.value.after_logs[contextLogs.value.after_logs.length - 1]?.timestamp).getTime()
 
-        const result = await exploreApi.getLogContext(props.sourceId, {
+        const result = await exploreApi.getLogContext(parseInt(props.sourceId), {
             timestamp,
             before_limit: direction === 'before' ? 5 : 0,
             after_limit: direction === 'after' ? 5 : 0

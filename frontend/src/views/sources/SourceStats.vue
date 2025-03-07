@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive } from 'vue'
 import { useToast } from '@/components/ui/toast'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { useSourcesStore } from '@/stores/sources'
-import { type SourceStats } from '@/api/sources' 
+import { type SourceStats } from '@/api/sources'
 
 const sourcesStore = useSourcesStore()
 const { toast } = useToast()
-const selectedSourceId = ref<number | null>(null)
+const selectedSourceId = ref<string>('')
 const stats = reactive<{
   tableStats: SourceStats['table_stats'] | null
   columnStats: SourceStats['column_stats'] | null
@@ -37,8 +37,8 @@ const fetchSourceStats = async () => {
     return
   }
 
-  const result = await sourcesStore.getSourceStats(selectedSourceId.value)
-  
+  const result = await sourcesStore.getSourceStats(parseInt(selectedSourceId.value))
+
   if (result) {
     stats.tableStats = result.table_stats
     stats.columnStats = result.column_stats
@@ -70,7 +70,7 @@ const fetchSourceStats = async () => {
                 <SelectValue placeholder="Select a source" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem v-for="source in sourcesStore.sources" :key="source.id" :value="source.id">
+                <SelectItem v-for="source in sourcesStore.sources" :key="source.id" :value="String(source.id)">
                   {{ source.connection.database }}.{{ source.connection.table_name }}
                 </SelectItem>
               </SelectContent>
@@ -150,7 +150,8 @@ const fetchSourceStats = async () => {
           </CardContent>
         </Card>
 
-        <div v-if="!stats.tableStats && !sourcesStore.sourceStatsLoading" class="text-center py-6 text-muted-foreground">
+        <div v-if="!stats.tableStats && !sourcesStore.sourceStatsLoading"
+          class="text-center py-6 text-muted-foreground">
           Select a source and click "Get Stats" to view statistics
         </div>
       </CardContent>

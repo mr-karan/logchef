@@ -19,12 +19,20 @@ export interface Source {
   id: number;
   _meta_is_auto_created: boolean;
   _meta_ts_field: string;
+  _meta_severity_field?: string;
   connection: ConnectionInfo;
   description?: string;
   ttl_days: number;
   created_at: string;
   updated_at: string;
   is_connected: boolean;
+  schema?: string;
+  columns?: ColumnInfo[];
+}
+
+export interface ColumnInfo {
+  name: string;
+  type: string;
 }
 
 export interface SourceWithTeamsResponse {
@@ -108,7 +116,9 @@ export const sourcesApi = {
   },
 
   async getSourceStats(sourceId: number) {
-    const response = await api.get<APIResponse<SourceStats>>(`/sources/${sourceId}/stats`);
+    const response = await api.get<APIResponse<SourceStats>>(
+      `/sources/${sourceId}/stats`
+    );
     return response.data;
   },
 

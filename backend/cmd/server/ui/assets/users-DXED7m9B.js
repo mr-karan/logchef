@@ -1,0 +1,1 @@
+import{as as e}from"./index-DhD1Jy6j.js";const n={async listUsers(){return(await e.get("/users")).data},async getUser(s){return(await e.get(`/users/${s}`)).data},async createUser(s){return(await e.post("/users",s)).data},async updateUser(s,r){return(await e.put(`/users/${s}`,r)).data},async deleteUser(s){return(await e.delete(`/users/${s}`)).data}};export{n as u};

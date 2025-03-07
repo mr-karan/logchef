@@ -11,11 +11,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
-import { useConfirm } from '@/composables/useConfirm';
 import {
   Table,
   TableBody,
-  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
@@ -23,38 +21,35 @@ import {
 } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useSavedQueriesStore } from '@/stores/savedQueries';
-import { generateQueryURL } from '@/utils/querySerializer';
 import { TOAST_DURATION } from '@/lib/constants';
 import SaveQueryModal from '@/components/saved-queries/SaveQueryModal.vue';
 import { getErrorMessage } from '@/api/types';
 import { useSourcesStore } from '@/stores/sources';
 import { formatSourceName } from '@/utils/format';
-import { TeamGroupedQuery } from '@/api/sources';
-import { SavedTeamQuery } from '@/shared/types';
+import type { TeamGroupedQuery } from '@/api/sources';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
 const router = useRouter();
 const { toast } = useToast();
-const { confirm } = useConfirm();
 const savedQueriesStore = useSavedQueriesStore();
 const sourcesStore = useSourcesStore();
 
 // Local UI state
 const isLoading = computed(() => sourcesStore.isLoading || savedQueriesStore.isLoading);
 const showSaveQueryModal = ref(false);
-const editingQuery = ref<SavedTeamQuery | null>(null);
+const editingQuery = ref<any>(null);
 const selectedSourceId = ref<string>('');
 const expandedTeams = ref<Record<string, boolean>>({});
 
 // Keep track of which teams should be expanded by default
 const teamExpansionState = computed(() => {
   const sourceQueries = sourcesStore.sourceQueriesMap[selectedSourceId.value] || [];
-  
+
   // If there's only one team, expand it by default
   if (sourceQueries.length === 1) {
     return { [sourceQueries[0].team_id]: true };
   }
-  
+
   // Otherwise, use the current state
   return expandedTeams.value;
 });
@@ -64,10 +59,10 @@ onMounted(async () => {
   try {
     // Load sources with team info
     await sourcesStore.loadUserSources();
-    
+
     // Get the first source if available
     if (sourcesStore.deduplicatedSources.length > 0) {
-      selectedSourceId.value = sourcesStore.deduplicatedSources[0].id;
+      selectedSourceId.value = String(sourcesStore.deduplicatedSources[0].id);
       // Load queries for the first source
       await loadSourceQueries(selectedSourceId.value);
     }
@@ -105,10 +100,11 @@ async function loadSourceQueries(sourceId: string) {
 }
 
 // Toggle team expansion
-function toggleTeamExpansion(teamId: string) {
+function toggleTeamExpansion(teamId: number | string) {
+  const teamIdStr = String(teamId);
   expandedTeams.value = {
     ...expandedTeams.value,
-    [teamId]: !expandedTeams.value[teamId]
+    [teamIdStr]: !expandedTeams.value[teamIdStr]
   };
 }
 
@@ -122,16 +118,10 @@ function formatTime(dateStr: string): string {
 }
 
 // Generate URL for a saved query
-function getQueryUrl(query: SavedTeamQuery): string {
+function getQueryUrl(query: any): string {
   try {
-    const content = JSON.parse(query.query_content);
-    return generateQueryURL(
-      query.id,
-      content.sourceId,
-      content.limit,
-      content.timeRange.absolute.start,
-      content.timeRange.absolute.end
-    );
+    JSON.parse(query.query_content); // Parse but don't use the content
+    return `/logs/explore?query_id=${query.id}`;
   } catch (error) {
     console.error('Error generating query URL:', error);
     return `/logs/explore?query_id=${query.id}`;
@@ -139,35 +129,28 @@ function getQueryUrl(query: SavedTeamQuery): string {
 }
 
 // Handle opening query in explorer
-function openQuery(query: SavedTeamQuery) {
+function openQuery(query: any) {
   const url = getQueryUrl(query);
   window.open(url, '_blank');
 }
 
 // Handle edit query
-function editQuery(query: SavedTeamQuery) {
+function editQuery(query: any) {
   editingQuery.value = query;
   showSaveQueryModal.value = true;
 }
 
 // Handle delete query
-async function deleteQuery(query: SavedTeamQuery) {
-  const confirmed = await confirm({
-    title: 'Delete Query',
-    description: `Are you sure you want to delete "${query.name}"? This action cannot be undone.`,
-    confirmText: 'Delete',
-    cancelText: 'Cancel',
-  });
-
-  if (confirmed) {
+async function deleteQuery(query: any) {
+  if (window.confirm(`Are you sure you want to delete "${query.name}"? This action cannot be undone.`)) {
     try {
       await savedQueriesStore.deleteQuery(query.team_id, query.id);
-      
+
       // Also refresh the source queries to update the UI
       if (selectedSourceId.value) {
         await loadSourceQueries(selectedSourceId.value);
       }
-      
+
       toast({
         title: 'Success',
         description: 'Query deleted successfully',
@@ -192,12 +175,12 @@ async function handleSaveQuery(formData: any) {
         name: formData.name,
         description: formData.description,
       });
-      
+
       // Refresh the source queries to update the UI
       if (selectedSourceId.value) {
         await loadSourceQueries(selectedSourceId.value);
       }
-      
+
       toast({
         title: 'Success',
         description: 'Query updated successfully',
@@ -237,28 +220,14 @@ const hasQueries = computed((): boolean => {
     <!-- Source selector -->
     <div class="flex items-center space-x-4">
       <span class="font-medium">Source:</span>
-      <Select
-        v-model="selectedSourceId"
-        :disabled="isLoading || !sourcesStore.deduplicatedSources.length"
-        class="w-[300px]"
-      >
+      <Select v-model="selectedSourceId" :disabled="isLoading || !sourcesStore.deduplicatedSources.length"
+        class="w-[300px]">
         <SelectTrigger>
           <SelectValue placeholder="Select a source" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem 
-            v-for="source in sourcesStore.deduplicatedSources" 
-            :key="source.id" 
-            :value="source.id"
-          >
-            <div class="flex flex-col">
-              <div>{{ formatSourceName(source) }}</div>
-              <div class="text-xs text-muted-foreground">
-                {{ source.teams.length === 1 
-                  ? `Team: ${source.teams[0].name}` 
-                  : `${source.teams.length} teams` }}
-              </div>
-            </div>
+          <SelectItem v-for="source in sourcesStore.deduplicatedSources" :key="source.id" :value="String(source.id)">
+            {{ formatSourceName(source) }}
           </SelectItem>
         </SelectContent>
       </Select>
@@ -270,10 +239,7 @@ const hasQueries = computed((): boolean => {
     </div>
 
     <!-- Empty state - no source selected -->
-    <div
-      v-else-if="!selectedSourceId"
-      class="flex flex-col justify-center items-center py-12 space-y-4"
-    >
+    <div v-else-if="!selectedSourceId" class="flex flex-col justify-center items-center py-12 space-y-4">
       <p class="text-xl text-muted-foreground">No source selected</p>
       <p class="text-muted-foreground">
         Please select a source to view its saved queries.
@@ -281,10 +247,7 @@ const hasQueries = computed((): boolean => {
     </div>
 
     <!-- Empty state - no queries for source -->
-    <div
-      v-else-if="!hasQueries"
-      class="flex flex-col justify-center items-center py-12 space-y-4"
-    >
+    <div v-else-if="!hasQueries" class="flex flex-col justify-center items-center py-12 space-y-4">
       <p class="text-xl text-muted-foreground">No saved queries found</p>
       <p class="text-muted-foreground">
         Create a query in the Explorer and save it to access it here.
@@ -295,26 +258,20 @@ const hasQueries = computed((): boolean => {
     <!-- Queries grouped by team -->
     <div v-else class="space-y-6">
       <div v-for="teamGroup in sourceQueries" :key="teamGroup.team_id" class="border rounded-md shadow-sm">
-        <Collapsible 
-          :open="teamExpansionState[teamGroup.team_id]" 
-          @update:open="val => expandedTeams[teamGroup.team_id] = val"
-        >
-          <CollapsibleTrigger 
-            class="flex justify-between items-center w-full p-4 cursor-pointer hover:bg-muted/50"
-            @click="toggleTeamExpansion(teamGroup.team_id)"
-          >
+        <Collapsible :open="teamExpansionState[teamGroup.team_id]"
+          @update:open="val => expandedTeams[teamGroup.team_id] = val">
+          <CollapsibleTrigger class="flex justify-between items-center w-full p-4 cursor-pointer hover:bg-muted/50"
+            @click="toggleTeamExpansion(teamGroup.team_id)">
             <div class="flex items-center">
-              <ChevronRight 
-                class="h-5 w-5 mr-2 transition-transform duration-200"
-                :class="{ 'rotate-90': teamExpansionState[teamGroup.team_id] }"
-              />
+              <ChevronRight class="h-5 w-5 mr-2 transition-transform duration-200"
+                :class="{ 'rotate-90': teamExpansionState[teamGroup.team_id] }" />
               <h3 class="text-lg font-medium">{{ teamGroup.team_name }}</h3>
               <div class="ml-2 text-sm text-muted-foreground">
                 ({{ teamGroup.queries.length }} {{ teamGroup.queries.length === 1 ? 'query' : 'queries' }})
               </div>
             </div>
           </CollapsibleTrigger>
-          
+
           <CollapsibleContent>
             <Table>
               <TableHeader>
@@ -329,11 +286,8 @@ const hasQueries = computed((): boolean => {
               <TableBody>
                 <TableRow v-for="query in teamGroup.queries" :key="query.id">
                   <TableCell class="font-medium">
-                    <a
-                      @click.prevent="openQuery(query)"
-                      :href="getQueryUrl(query)"
-                      class="text-primary hover:underline cursor-pointer"
-                    >
+                    <a @click.prevent="openQuery(query)" :href="getQueryUrl(query)"
+                      class="text-primary hover:underline cursor-pointer">
                       {{ query.name }}
                     </a>
                   </TableCell>
@@ -372,13 +326,7 @@ const hasQueries = computed((): boolean => {
     </div>
 
     <!-- Edit query modal -->
-    <SaveQueryModal
-      v-if="showSaveQueryModal && editingQuery"
-      :is-open="showSaveQueryModal"
-      :initial-data="editingQuery"
-      :is-edit-mode="true"
-      @close="showSaveQueryModal = false"
-      @save="handleSaveQuery"
-    />
+    <SaveQueryModal v-if="showSaveQueryModal && editingQuery" :is-open="showSaveQueryModal" :initial-data="editingQuery"
+      :is-edit-mode="true" @close="showSaveQueryModal = false" @save="handleSaveQuery" />
   </div>
 </template>

@@ -68,7 +68,7 @@ const selectedSourceId = ref('')
 
 // Compute available users (users not in team)
 const availableUsers = computed(() => {
-    const teamMemberIds = members.value?.map(m => m.user_id) || []
+    const teamMemberIds = members.value?.map(m => String(m.user_id)) || []
     return usersStore.getUsersNotInTeam(teamMemberIds)
 })
 
@@ -93,14 +93,14 @@ watch(showAddSourceDialog, async (isOpen) => {
 })
 
 // Add this computed function after other computed properties
-const getMemberUser = (userId: string) => {
-    return usersStore.users.find(user => user.id === userId)
+const getMemberUser = (userId: string | number) => {
+    return usersStore.users.find(user => user.id === String(userId))
 }
 
 const loadTeam = async () => {
     try {
         isLoading.value = true
-        const response = await teamsApi.getTeam(route.params.id as string)
+        const response = await teamsApi.getTeam(Number(route.params.id))
 
         if (isErrorResponse(response)) {
             toast({
@@ -133,7 +133,7 @@ const loadTeam = async () => {
 
 const loadTeamMembers = async () => {
     try {
-        const response = await teamsApi.listTeamMembers(route.params.id as string)
+        const response = await teamsApi.listTeamMembers(Number(route.params.id))
 
         if (isErrorResponse(response)) {
             toast({
@@ -159,7 +159,7 @@ const loadTeamMembers = async () => {
 
 const loadTeamSources = async () => {
     try {
-        const response = await teamsApi.listTeamSources(route.params.id as string)
+        const response = await teamsApi.listTeamSources(Number(route.params.id))
 
         if (isErrorResponse(response)) {
             toast({
@@ -242,7 +242,7 @@ const handleAddMember = async () => {
     try {
         isSaving.value = true
         const response = await teamsApi.addTeamMember(team.value.id, {
-            user_id: selectedUserId.value,
+            user_id: Number(selectedUserId.value),
             role: newMemberRole.value as 'admin' | 'member',
         })
 
@@ -282,12 +282,12 @@ const handleAddMember = async () => {
     }
 }
 
-const handleRemoveMember = async (userId: string) => {
+const handleRemoveMember = async (userId: string | number) => {
     if (!team.value) return
 
     try {
         isSaving.value = true
-        const response = await teamsApi.removeTeamMember(team.value.id, userId)
+        const response = await teamsApi.removeTeamMember(team.value.id, Number(userId))
 
         if (isErrorResponse(response)) {
             toast({
@@ -325,7 +325,7 @@ const handleAddSource = async () => {
 
     try {
         isSaving.value = true
-        const response = await teamsApi.addTeamSource(team.value.id, selectedSourceId.value)
+        const response = await teamsApi.addTeamSource(team.value.id, Number(selectedSourceId.value))
 
         if (isErrorResponse(response)) {
             toast({
@@ -362,12 +362,12 @@ const handleAddSource = async () => {
     }
 }
 
-const handleRemoveSource = async (sourceId: string) => {
+const handleRemoveSource = async (sourceId: string | number) => {
     if (!team.value) return
 
     try {
         isSaving.value = true
-        const response = await teamsApi.removeTeamSource(team.value.id, sourceId)
+        const response = await teamsApi.removeTeamSource(team.value.id, Number(sourceId))
 
         if (isErrorResponse(response)) {
             toast({
@@ -570,7 +570,7 @@ onMounted(async () => {
                                                     </SelectTrigger>
                                                     <SelectContent>
                                                         <SelectItem v-for="source in availableSources" :key="source.id"
-                                                            :value="source.id">
+                                                            :value="String(source.id)">
                                                             {{ formatSourceName(source) }}
                                                         </SelectItem>
                                                     </SelectContent>

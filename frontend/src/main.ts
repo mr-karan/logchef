@@ -4,25 +4,13 @@ import "./assets/index.css";
 import App from "./App.vue";
 import router from "./router";
 import { useAuthStore } from "@/stores/auth";
-import { initMonacoSetup, logMonacoInstanceCounts } from '@/utils/monaco';
-
-// FUNDAMENTAL CHANGE: Initialize Monaco ONCE globally at app startup
-// Monaco is a global singleton by design, trying to reinitialize causes issues
-console.log("Initializing Monaco at app startup");
-initMonacoSetup();
-
-// Clean simple navigation logging
-router.beforeEach((to, from, next) => {
-  // Only log navigation between routes for debugging
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`Navigation from ${from.path} to ${to.path}`);
-  }
-  
-  next();
-});
+import { initMonacoSetup } from "@/utils/monaco";
 
 async function initializeApp() {
   try {
+    // Initialize Monaco editor setup
+    initMonacoSetup();
+
     // Create app instance
     const app = createApp(App);
 

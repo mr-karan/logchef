@@ -54,7 +54,7 @@ const currentSourceId = computed(() => {
   if (exploreStore.data.sourceId) {
     return exploreStore.data.sourceId;
   }
-  
+
   // If we have initial data, try to parse it
   if (props.initialData?.query_content) {
     try {
@@ -66,7 +66,7 @@ const currentSourceId = computed(() => {
       console.error("Failed to parse query content", e);
     }
   }
-  
+
   // If query content is provided, try to parse it
   if (props.queryContent) {
     try {
@@ -78,7 +78,7 @@ const currentSourceId = computed(() => {
       console.error("Failed to parse query content", e);
     }
   }
-  
+
   return '';
 });
 
@@ -87,7 +87,7 @@ const eligibleTeams = computed(() => {
   if (!currentSourceId.value) {
     return teamsStore.teams || [];
   }
-  
+
   // Get the teams that have access to this source
   return sourcesStore.getTeamsForSource(currentSourceId.value);
 });
@@ -97,18 +97,18 @@ const defaultTeamId = computed(() => {
   if (props.initialData?.team_id) {
     return props.initialData.team_id;
   }
-  
+
   // If no teams are eligible, return empty
   if (eligibleTeams.value.length === 0) {
     return '';
   }
-  
+
   // If the current team in teamsStore is eligible, use it
-  if (teamsStore.currentTeam?.id && 
-      eligibleTeams.value.some(t => t.id === teamsStore.currentTeam?.id)) {
+  if (teamsStore.currentTeam?.id &&
+    eligibleTeams.value.some(t => t.id === teamsStore.currentTeam?.id)) {
     return teamsStore.currentTeam.id;
   }
-  
+
   // Otherwise, use the first eligible team
   return eligibleTeams.value[0]?.id || '';
 });
@@ -155,7 +155,7 @@ const teams = computed(() => {
     }
     return [];
   }
-  
+
   // Otherwise, return eligible teams
   return eligibleTeams.value;
 });
@@ -163,10 +163,10 @@ const teams = computed(() => {
 // Format source name for display
 const sourceName = computed(() => {
   if (!currentSourceId.value) return 'Unknown Source';
-  
+
   const source = sourcesStore.deduplicatedSources.find(s => s.id === currentSourceId.value);
   if (!source) return 'Unknown Source';
-  
+
   const { database, table_name } = source.connection;
   return `${database}.${table_name}`;
 });
@@ -175,15 +175,15 @@ const sourceName = computed(() => {
 onMounted(async () => {
   // Run in parallel for better performance
   const promises = [];
-  
+
   if (teams.value.length === 0) {
     promises.push(savedQueriesStore.fetchUserTeams());
   }
-  
+
   if (currentSourceId.value && !sourcesStore.deduplicatedSources.length) {
     promises.push(sourcesStore.loadUserSources());
   }
-  
+
   if (promises.length > 0) {
     await Promise.all(promises);
   }
@@ -203,6 +203,10 @@ async function onSubmit(values: any) {
 function handleClose() {
   emit('close');
 }
+
+// Add computed properties for the descriptions
+const editDescription = 'Update details for this saved query.'
+const saveDescription = 'Save your current query configuration for future use.'
 </script>
 
 <template>
@@ -210,11 +214,9 @@ function handleClose() {
     <DialogContent class="sm:max-w-[475px]">
       <DialogHeader>
         <DialogTitle>{{ isEditMode ? 'Edit Saved Query' : 'Save Query' }}</DialogTitle>
-        <DialogDescription>
-          {{ isEditMode ? 'Update details for this saved query.' : 'Save your current query configuration for future use.' }}
-        </DialogDescription>
+        <DialogDescription>{{ isEditMode ? editDescription : saveDescription }}</DialogDescription>
       </DialogHeader>
-      
+
       <Form :form="form" class="space-y-4" @submit="onSubmit">
         <!-- Source Information (non-editable) -->
         <div class="border rounded-md p-3 bg-muted/20">
@@ -228,26 +230,19 @@ function handleClose() {
             </div>
           </div>
         </div>
-        
+
         <!-- Team Selection -->
         <FormField v-slot="{ field }" name="team_id">
           <FormItem>
             <FormLabel>Team</FormLabel>
             <FormControl>
-              <Select 
-                :disabled="isEditMode || teams.length <= 1" 
-                :model-value="field.value" 
-                @update:model-value="field.handleChange"
-              >
+              <Select :disabled="isEditMode || teams.length <= 1" :model-value="field.value"
+                @update:model-value="(value) => field.onChange(value)">
                 <SelectTrigger>
                   <SelectValue placeholder="Select a team" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem 
-                    v-for="team in teams" 
-                    :key="team.id" 
-                    :value="team.id"
-                  >
+                  <SelectItem v-for="team in teams" :key="team.id" :value="String(team.id)">
                     {{ team.name }}
                   </SelectItem>
                 </SelectContent>
@@ -259,7 +254,7 @@ function handleClose() {
             <FormMessage />
           </FormItem>
         </FormField>
-        
+
         <!-- Query Name -->
         <FormField v-slot="{ field }" name="name">
           <FormItem>
@@ -270,17 +265,13 @@ function handleClose() {
             <FormMessage />
           </FormItem>
         </FormField>
-        
+
         <!-- Description -->
         <FormField v-slot="{ field }" name="description">
           <FormItem>
             <FormLabel>Description (Optional)</FormLabel>
             <FormControl>
-              <Textarea 
-                v-bind="field" 
-                placeholder="Provide details about this query"
-                rows="3" 
-              />
+              <Textarea v-bind="field" placeholder="Provide details about this query" rows="3" />
             </FormControl>
             <FormDescription>
               Briefly describe the purpose of this query.
@@ -289,7 +280,7 @@ function handleClose() {
           </FormItem>
         </FormField>
       </Form>
-      
+
       <DialogFooter>
         <Button type="button" variant="outline" @click="handleClose">Cancel</Button>
         <Button type="submit" :disabled="isSubmitting" @click="form.handleSubmit(onSubmit)">
