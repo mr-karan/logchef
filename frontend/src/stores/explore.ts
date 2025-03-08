@@ -13,6 +13,15 @@ import type {
 import type { DateValue } from "@internationalized/date";
 import { computed } from "vue";
 import { useSourcesStore } from "./sources";
+import { addTimeRangeToSQL } from "@/utils/clickhouse-sql/parser";
+
+// Helper function to get formatted table name
+export function getFormattedTableName(source: any): string {
+  if (source?.connection?.database && source?.connection?.table_name) {
+    return `${source.connection.database}.${source.connection.table_name}`;
+  }
+  return 'logs.vector_logs'; // Default fallback
+}
 
 export interface ExploreState {
   logs: Record<string, any>[];
@@ -82,9 +91,19 @@ export const useExploreStore = defineStore("explore", () => {
       "second" in timeRange.end ? timeRange.end.second : 0
     );
 
+    const start = startDate.getTime();
+    const end = endDate.getTime();
+
+    console.log("Time range:", {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      startMs: start,
+      endMs: end
+    });
+
     return {
-      start: startDate.getTime(),
-      end: endDate.getTime(),
+      start,
+      end,
     };
   }
 
@@ -151,10 +170,55 @@ export const useExploreStore = defineStore("explore", () => {
 
     return await state.withLoading(async () => {
       const timestamps = getTimestamps();
+      const sqlQuery = rawSql || state.data.value.rawSql;
       
-      // Use the raw SQL mode exclusively
+      // Get time field from source metadata, default to 'timestamp'
+      const timeField = currentSource._meta_ts_field || 'timestamp';
+      
+      // Format the table name correctly
+      const formattedTableName = getFormattedTableName(currentSource);
+      
+      // Use our SQL parser to add time conditions and limit to the query
+      let finalSql = sqlQuery;
+      
+      // Replace any generic 'logs' table placeholder with the proper formatted table name
+      if (finalSql.includes(' FROM logs ')) {
+        finalSql = finalSql.replace(' FROM logs ', ` FROM ${formattedTableName} `);
+      }
+      
+      // If the query doesn't have a FROM clause, add one with the correct table
+      if (!finalSql.toUpperCase().includes('FROM')) {
+        finalSql = `SELECT * FROM ${formattedTableName} WHERE ${finalSql}`;
+      }
+      
+      console.log("SQL after table name formatting:", finalSql);
+      
+      // Add time range and limit
+      const sqlWithTimeRange = addTimeRangeToSQL(
+        finalSql,
+        timeField,
+        timestamps.start / 1000, // Convert to seconds for ClickHouse DateTime
+        timestamps.end / 1000,   // Convert to seconds for ClickHouse DateTime
+        state.data.value.limit
+      );
+      
+      // Log the SQL for debugging
+      console.log("Original SQL:", sqlQuery);
+      console.log("SQL with time range and limit:", sqlWithTimeRange);
+      console.log("Timestamps:", {
+        startMs: timestamps.start,
+        endMs: timestamps.end,
+        startSeconds: timestamps.start / 1000,
+        endSeconds: timestamps.end / 1000,
+        startFormatted: new Date(timestamps.start).toISOString(),
+        endFormatted: new Date(timestamps.end).toISOString(),
+        startClickhouse: new Date(timestamps.start).toISOString().replace('T', ' ').replace('Z', ''),
+        endClickhouse: new Date(timestamps.end).toISOString().replace('T', ' ').replace('Z', '')
+      });
+      
+      // Use the modified SQL
       const params: QueryParams = {
-        raw_sql: rawSql || state.data.value.rawSql,
+        raw_sql: sqlWithTimeRange,
         limit: state.data.value.limit,
         start_timestamp: timestamps.start,
         end_timestamp: timestamps.end,
@@ -167,7 +231,7 @@ export const useExploreStore = defineStore("explore", () => {
             throw new Error(response.error);
           }
 
-          state.data.value.logs = response.logs;
+          state.data.value.logs = response.logs || [];
           state.data.value.columns = response.columns;
           state.data.value.queryStats = response.stats;
         },

@@ -24,8 +24,8 @@ import DataTable from './table/data-table.vue'
 import { formatSourceName } from '@/utils/format'
 import SavedQueriesDropdown from '@/components/saved-queries/SavedQueriesDropdown.vue'
 import SaveQueryModal from '@/components/saved-queries/SaveQueryModal.vue'
-import LogchefQLEditor from '@/components/editor/LogchefQLEditor.vue'
-import { parseLogchefQL } from '@/utils/logchefql/api'
+import QueryEditor from '@/components/editor/QueryEditor.vue'
+import { parseLogchefQL, translateLogchefQLToSQL } from '@/utils/logchefql/api'
 import type { ColumnDef } from '@tanstack/vue-table'
 import type { SavedQueryContent } from '@/api/types'
 import type { Source } from '@/api/sources'
@@ -51,7 +51,9 @@ const { toast } = useToast()
 const showSaveQueryModal = ref(false)
 const tableColumns = ref<ColumnDef<Record<string, any>>[]>([])
 const logchefQuery = ref('')
+const sqlQuery = ref('')
 const queryError = ref('')
+const queryMode = ref('dsl') // 'dsl' or 'sql'
 const generatedSQL = ref('')
 const sqlParams = ref<Array<string | number>>([])
 const isExecutingQuery = ref(false)
@@ -425,18 +427,83 @@ watch(
   { immediate: true }
 )
 
-// Handle query changes from LogchefQL editor
+// Handle query changes from editor
 const handleQueryChange = (query: string) => {
-  logchefQuery.value = query;
-  
+  // If in DSL mode, update the LogchefQL query
+  if (queryMode.value === 'dsl') {
+    logchefQuery.value = query;
+  } else {
+    // In SQL mode, update the SQL query
+    sqlQuery.value = query;
+    console.log('SQL query updated:', sqlQuery.value);
+  }
+
   // Always clear any error messages when the user is typing
-  // Errors should only show when the user explicitly tries to run the query
   if (queryError.value) {
     queryError.value = '';
   }
 }
 
-// Execute the query
+// Handle mode changes between LogchefQL and SQL
+const handleModeChange = (mode: string) => {
+  queryMode.value = mode;
+
+  // Simple test for LogchefQL -> SQL conversion
+  if (mode === 'sql' && logchefQuery.value.trim() !== '') {
+    try {
+      console.log('Testing LogchefQL -> SQL conversion:');
+      console.log('LogchefQL:', logchefQuery.value);
+
+      // This should convert the LogchefQL to SQL without time range for display
+      const result = translateLogchefQLToSQL(logchefQuery.value, {
+        table: activeSourceName.value,
+        includeTimeRange: false
+      });
+
+      console.log('Converted SQL for display:', result);
+    } catch (error) {
+      console.error('Error in test conversion:', error);
+    }
+  }
+
+  // Clear any previous errors when switching modes
+  queryError.value = '';
+}
+
+// Get the active source
+const activeSource = computed(() => {
+  if (!exploreStore.data.sourceId) return null;
+  return sourcesStore.teamSources?.find(s => s.id === exploreStore.data.sourceId) || null;
+});
+
+// Get the active source table name (formatted as database.table_name)
+const activeSourceTableName = computed(() => {
+  if (sourceDetails.value?.connection) {
+    return `${sourceDetails.value.connection.database}.${sourceDetails.value.connection.table_name}`;
+  }
+  return 'unknown.unknown'; // Default fallback
+});
+
+// Active source name for display, used for query templates
+const activeSourceName = computed(() => {
+  return activeSourceTableName.value;
+});
+
+// Handle query submission from either mode
+const handleQuerySubmit = async (mode: string) => {
+  // Use the current mode if not explicitly provided
+  const currentMode = mode || queryMode.value;
+
+  if (currentMode === 'dsl') {
+    // Execute LogchefQL query
+    await executeQuery();
+  } else {
+    // Execute SQL query directly
+    await executeSQLQuery();
+  }
+};
+
+// Execute the LogchefQL query
 const executeQuery = async () => {
   if (!exploreStore.canExecuteQuery) {
     queryError.value = 'Please select a source and time range before executing the query';
@@ -455,21 +522,66 @@ const executeQuery = async () => {
     }
 
     try {
-      // Parse the query directly here without showing errors until Run is clicked
-      const { sql, params } = parseLogchefQL(logchefQuery.value);
-      
-      // Set the SQL query
-      generatedSQL.value = sql;
-      sqlParams.value = params;
+      // Parse the LogchefQL and convert to SQL with correct source table name
+      // For query execution, use includeTimeRange=true to include time conditions
+      const basicSql = translateLogchefQLToSQL(logchefQuery.value, {
+        table: activeSourceTableName.value,
+        includeTimeRange: true,
+        startTime: timeRange.value.start,
+        endTime: timeRange.value.end,
+        limit: queryLimit.value
+      });
+
+      // Store for reference
+      generatedSQL.value = basicSql;
+
+      // Pass this SQL to the explore store which will add time conditions and limit
+      exploreStore.setRawSql(basicSql);
+
+      // Execute the query (time range and limit will be added in the store)
+      const result = await exploreStore.executeQuery();
+
+      if (result && 'error' in result) {
+        queryError.value = result.error as string;
+      }
     } catch (error) {
       // Only show an error if the user explicitly tries to run an invalid query
       queryError.value = 'Error parsing query. Please check your syntax and try again.';
       isExecutingQuery.value = false;
       return;
     }
+  } catch (error) {
+    queryError.value = error instanceof Error ? error.message : 'An error occurred while executing the query';
+  } finally {
+    isExecutingQuery.value = false;
+  }
+};
 
-    // Set the raw SQL in the store
-    exploreStore.setRawSql(generatedSQL.value);
+// Execute a raw SQL query
+const executeSQLQuery = async () => {
+  if (!exploreStore.canExecuteQuery) {
+    queryError.value = 'Please select a source and time range before executing the query';
+    return;
+  }
+
+  try {
+    isExecutingQuery.value = true;
+    queryError.value = '';
+
+    console.log('Executing SQL query:', sqlQuery.value);
+    
+    // Check for SQL query - if empty, use the default SQL query
+    if (!sqlQuery.value.trim()) {
+      // Use a default query if none provided
+      sqlQuery.value = `SELECT * FROM ${activeSourceTableName.value}`;
+      console.log('Using default SQL query:', sqlQuery.value);
+    }
+
+    // Store the SQL for reference
+    generatedSQL.value = sqlQuery.value;
+
+    // Pass the SQL to the store which will add time conditions and limit
+    exploreStore.setRawSql(sqlQuery.value);
 
     // Execute the query
     const result = await exploreStore.executeQuery();
@@ -478,7 +590,7 @@ const executeQuery = async () => {
       queryError.value = result.error as string;
     }
   } catch (error) {
-    queryError.value = error instanceof Error ? error.message : 'An error occurred while executing the query';
+    queryError.value = error instanceof Error ? error.message : 'An error occurred while executing the SQL query';
   } finally {
     isExecutingQuery.value = false;
   }
@@ -615,39 +727,32 @@ onBeforeUnmount(() => {
     <!-- LogchefQL Query Editor -->
     <div class="mb-3">
       <div class="flex items-center mb-1">
-        <h3 class="text-sm font-medium">LogchefQL Query</h3>
+        <h3 class="text-sm font-medium">{{ queryMode === 'dsl' ? 'LogchefQL Query' : 'SQL Query' }}</h3>
+        <div v-if="queryMode === 'dsl'" class="ml-2 text-xs text-muted-foreground italic">
+          Write filter conditions only (WHERE clause)
+        </div>
+        <div v-if="queryMode === 'sql'" class="ml-2 text-xs text-muted-foreground italic">
+          Time filter and LIMIT will be applied automatically
+        </div>
         <div class="flex-1"></div>
         <Button size="sm" variant="default" class="h-7 px-3 flex items-center gap-1"
-          :disabled="isExecutingQuery || !exploreStore.canExecuteQuery" @click="executeQuery">
+          :disabled="isExecutingQuery || !exploreStore.canExecuteQuery" @click="handleQuerySubmit(queryMode)">
           <Play class="h-3.5 w-3.5" />
           <span>{{ isExecutingQuery ? 'Running...' : 'Run Query' }}</span>
         </Button>
       </div>
 
       <div class="relative">
-        <LogchefQLEditor 
-          v-model="logchefQuery" 
-          :available-fields="availableFields"
+        <QueryEditor v-model="logchefQuery" :available-fields="availableFields"
           :placeholder="'Enter LogchefQL query (e.g. service_name=\'api\' and severity_text=\'error\')'"
-          :error="queryError" 
-          height="40" 
-          @change="handleQueryChange" 
-          @submit="executeQuery" 
-        />
-      </div>
-
-      <!-- SQL Preview (collapsible) -->
-      <div v-if="generatedSQL" class="mt-1 p-2 text-xs bg-muted/30 rounded border">
-        <div class="flex items-center mb-1">
-          <span class="text-xs font-medium text-muted-foreground">Generated SQL:</span>
-        </div>
-        <pre class="text-xs overflow-x-auto whitespace-pre-wrap break-all">{{ generatedSQL }}</pre>
+          :error="queryError" :table-name="activeSourceTableName" height="40" @change="handleQueryChange"
+          @submit="handleQuerySubmit" @mode-change="handleModeChange" />
       </div>
     </div>
 
     <!-- Results Table -->
     <div class="flex-1">
-      <DataTable :columns="tableColumns" :data="exploreStore.data.logs" :stats="exploreStore.data.queryStats"
+      <DataTable :columns="tableColumns" :data="exploreStore.data.logs || []" :stats="exploreStore.data.queryStats"
         :source-id="exploreStore.data.sourceId?.toString() || ''" />
     </div>
 
@@ -656,6 +761,8 @@ onBeforeUnmount(() => {
       filter_conditions: exploreStore.data.filterConditions,
       raw_sql: exploreStore.data.rawSql,
       logchefql_query: logchefQuery,
+      sql_query: sqlQuery,
+      query_mode: queryMode,
       generated_sql: generatedSQL,
       time_range: exploreStore.data.timeRange,
       limit: exploreStore.data.limit
