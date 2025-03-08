@@ -45,7 +45,7 @@ export interface QueryStats {
 }
 
 export interface QuerySuccessResponse {
-  logs: Record<string, any>[];
+  logs: Record<string, any>[] | null;
   stats: QueryStats;
   params?: QueryParams & {
     source_id: number;
