@@ -53,14 +53,8 @@ func (s *Service) ListSources(ctx context.Context) ([]*models.Source, error) {
 }
 
 // GetSource retrieves a source by ID
-func (s *Service) GetSource(ctx context.Context, id string) (*models.Source, error) {
-	// Convert string ID to int
-	idInt, err := strconv.Atoi(id)
-	if err != nil {
-		return nil, fmt.Errorf("invalid source ID: %w", err)
-	}
-
-	source, err := s.db.GetSource(ctx, models.SourceID(idInt))
+func (s *Service) GetSource(ctx context.Context, id models.SourceID) (*models.Source, error) {
+	source, err := s.db.GetSource(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("error getting source: %w", err)
 	}
@@ -250,20 +244,14 @@ func (s *Service) CreateSource(ctx context.Context, autoCreateTable bool, conn m
 }
 
 // UpdateSource updates an existing source
-func (s *Service) UpdateSource(ctx context.Context, id string, description string, ttlDays int) (*models.Source, error) {
+func (s *Service) UpdateSource(ctx context.Context, id models.SourceID, description string, ttlDays int) (*models.Source, error) {
 	// Validate input
 	if err := s.validator.ValidateSourceUpdate(description, ttlDays); err != nil {
 		return nil, err
 	}
 
-	// Convert string ID to int
-	idInt, err := strconv.Atoi(id)
-	if err != nil {
-		return nil, fmt.Errorf("invalid source ID: %w", err)
-	}
-
 	// Get existing source
-	source, err := s.db.GetSource(ctx, models.SourceID(idInt))
+	source, err := s.db.GetSource(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("error getting source: %w", err)
 	}
@@ -290,15 +278,9 @@ func (s *Service) UpdateSource(ctx context.Context, id string, description strin
 }
 
 // DeleteSource deletes a source
-func (s *Service) DeleteSource(ctx context.Context, id string) error {
-	// Convert string ID to int
-	idInt, err := strconv.Atoi(id)
-	if err != nil {
-		return fmt.Errorf("invalid source ID: %w", err)
-	}
-
+func (s *Service) DeleteSource(ctx context.Context, id models.SourceID) error {
 	// Validate source exists
-	source, err := s.db.GetSource(ctx, models.SourceID(idInt))
+	source, err := s.db.GetSource(ctx, id)
 	if err != nil {
 		return fmt.Errorf("error getting source: %w", err)
 	}
@@ -321,15 +303,9 @@ func (s *Service) DeleteSource(ctx context.Context, id string) error {
 }
 
 // GetSourceHealth retrieves the health status of a source
-func (s *Service) GetSourceHealth(ctx context.Context, id string) (models.SourceHealth, error) {
-	// Convert string ID to int
-	idInt, err := strconv.Atoi(id)
-	if err != nil {
-		return models.SourceHealth{}, fmt.Errorf("invalid source ID: %w", err)
-	}
-
+func (s *Service) GetSourceHealth(ctx context.Context, id models.SourceID) (models.SourceHealth, error) {
 	// Check if source exists
-	source, err := s.db.GetSource(ctx, models.SourceID(idInt))
+	source, err := s.db.GetSource(ctx, id)
 	if err != nil {
 		return models.SourceHealth{}, fmt.Errorf("error getting source: %w", err)
 	}

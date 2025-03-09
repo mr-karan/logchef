@@ -78,6 +78,11 @@ export function buildSQLFromLogchefQL(
       const result = parseLogchefQL(logchefQL);
       logchefCondition = result.sql;
       logchefParams = result.params;
+      
+      // If the parser returned empty SQL but we have a query, try fallback
+      if (!logchefCondition && logchefQL.trim()) {
+        throw new Error('Parser returned empty SQL');
+      }
     } catch (error) {
       console.error('Error parsing with main parser:', error);
       
@@ -98,9 +103,23 @@ export function buildSQLFromLogchefQL(
         }
       }
       
-      // If we still couldn't parse, continue without conditions
+      // If we still couldn't parse, try a more aggressive approach for simple expressions
       if (!logchefCondition) {
-        console.warn('Failed to parse LogchefQL with fallbacks, continuing without conditions.');
+        // Try to extract key=value pattern with minimal validation
+        const simpleMatch = logchefQL.trim().match(/^([a-zA-Z0-9_.]+)\s*=\s*(.+)$/);
+        if (simpleMatch) {
+          const [_, key, rawValue] = simpleMatch;
+          // Clean up the value - remove quotes if present
+          let value = rawValue.trim();
+          if ((value.startsWith('"') && value.endsWith('"')) || 
+              (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.substring(1, value.length - 1);
+          }
+          logchefCondition = `WHERE ${key} = ?`;
+          logchefParams = [value];
+        } else {
+          console.warn('Failed to parse LogchefQL with all fallbacks, continuing without conditions.');
+        }
       }
     }
   }
@@ -139,6 +158,37 @@ export function buildSQLFromLogchefQL(
  * @param options Additional options for query building
  * @returns A formatted SQL query string
  */
+/**
+ * Test function to debug LogchefQL parsing
+ * This function is for development/debugging only
+ */
+export function testLogchefQLParser(query: string): void {
+  console.log('Testing LogchefQL parser with:', query);
+  
+  try {
+    const parser = new Parser();
+    parser.parse(query);
+    
+    console.log('Parser state:', {
+      state: parser.state,
+      key: parser.key,
+      keyValueOperator: parser.keyValueOperator,
+      value: parser.value,
+      boolOperator: parser.boolOperator,
+    });
+    
+    console.log('AST root:', parser.root);
+    
+    const { sql, params } = parser.toSQL();
+    console.log('Generated SQL:', sql);
+    console.log('Parameters:', params);
+    
+    return;
+  } catch (error) {
+    console.error('Parser error:', error);
+  }
+}
+
 export function translateLogchefQLToSQL(
   logchefQL: string,
   options: {

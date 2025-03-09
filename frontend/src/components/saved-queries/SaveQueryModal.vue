@@ -22,6 +22,9 @@ import { useSavedQueriesStore } from '@/stores/savedQueries';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
 import { useExploreStore } from '@/stores/explore';
+import { useToast } from '@/components/ui/toast';
+import { TOAST_DURATION } from '@/lib/constants';
+import { formatSourceName } from '@/utils/format';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -39,6 +42,7 @@ const savedQueriesStore = useSavedQueriesStore();
 const teamsStore = useTeamsStore();
 const sourcesStore = useSourcesStore();
 const exploreStore = useExploreStore();
+const { toast } = useToast();
 
 // Form schema
 const formSchema = z.object({
@@ -173,15 +177,22 @@ const sourceName = computed(() => {
 
 // Load teams and sources on mount if needed
 onMounted(async () => {
-  // Run in parallel for better performance
   const promises = [];
 
-  if (teams.value.length === 0) {
+  if (!savedQueriesStore.data.teams.length) {
     promises.push(savedQueriesStore.fetchUserTeams());
   }
 
-  if (currentSourceId.value && !sourcesStore.deduplicatedSources.length) {
-    promises.push(sourcesStore.loadUserSources());
+  if (currentSourceId.value && !sourcesStore.teamSources.length) {
+    // Load teams first if needed
+    if (!teamsStore.teams.length) {
+      promises.push(teamsStore.loadTeams());
+    }
+
+    // Then load sources for the current team
+    if (teamsStore.currentTeamId) {
+      promises.push(sourcesStore.loadTeamSources(teamsStore.currentTeamId));
+    }
   }
 
   if (promises.length > 0) {

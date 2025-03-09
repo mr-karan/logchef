@@ -215,6 +215,21 @@ func (db *DB) ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]*mod
 	return members, nil
 }
 
+// ListTeamMembersWithDetails lists all members of a team with user details
+func (db *DB) ListTeamMembersWithDetails(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error) {
+	db.log.Debug("listing team members with details", "team_id", teamID)
+
+	var members []*models.TeamMember
+	err := db.queries.ListTeamMembersWithDetails.SelectContext(ctx, &members, teamID)
+	if err != nil {
+		db.log.Error("failed to list team members with details", "error", err, "team_id", teamID)
+		return nil, fmt.Errorf("error listing team members with details: %w", err)
+	}
+
+	db.log.Debug("team members with details listed", "team_id", teamID, "count", len(members))
+	return members, nil
+}
+
 // ListUserTeams lists all teams a user is a member of
 func (db *DB) ListUserTeams(ctx context.Context, userID models.UserID) ([]*models.Team, error) {
 	db.log.Debug("listing user teams", "user_id", userID)
@@ -401,10 +416,53 @@ func (db *DB) GetTeamByName(ctx context.Context, name string) (*models.Team, err
 	db.log.Debug("getting team by name", "name", name)
 
 	var team models.Team
-	err := db.conn.GetContext(ctx, &team, "SELECT * FROM teams WHERE name = ?", name)
+	err := db.queries.GetTeamByName.GetContext(ctx, &team, name)
 	if err != nil {
 		return nil, handleNotFoundError(err, "error getting team by name")
 	}
 
 	return &team, nil
+}
+
+// TeamHasSource checks if a team has access to a source
+func (db *DB) TeamHasSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) (bool, error) {
+	db.log.Debug("checking if team has source access", "team_id", teamID, "source_id", sourceID)
+
+	var count int
+	err := db.queries.TeamHasSource.GetContext(ctx, &count, teamID, sourceID)
+	if err != nil {
+		db.log.Error("failed to check team source access", "error", err, "team_id", teamID, "source_id", sourceID)
+		return false, fmt.Errorf("error checking team source access: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+// UserHasSourceAccess checks if a user has access to a source through any team
+func (db *DB) UserHasSourceAccess(ctx context.Context, userID models.UserID, sourceID models.SourceID) (bool, error) {
+	db.log.Debug("checking if user has source access", "user_id", userID, "source_id", sourceID)
+
+	var count int
+	err := db.queries.UserHasSourceAccess.GetContext(ctx, &count, userID, sourceID)
+	if err != nil {
+		db.log.Error("failed to check user source access", "error", err, "user_id", userID, "source_id", sourceID)
+		return false, fmt.Errorf("error checking user source access: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+// ListTeamsForUser returns all teams a user is a member of
+func (db *DB) ListTeamsForUser(ctx context.Context, userID models.UserID) ([]*models.Team, error) {
+	db.log.Debug("listing teams for user", "user_id", userID)
+
+	var teams []*models.Team
+	err := db.queries.ListUserTeams.SelectContext(ctx, &teams, userID)
+	if err != nil {
+		db.log.Error("failed to list teams for user", "error", err, "user_id", userID)
+		return nil, fmt.Errorf("error listing teams for user: %w", err)
+	}
+
+	db.log.Debug("listed teams for user", "user_id", userID, "count", len(teams))
+	return teams, nil
 }

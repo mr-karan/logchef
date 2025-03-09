@@ -16,6 +16,8 @@ export interface TeamMember {
   user_id: number;
   role: "admin" | "member";
   created_at: string;
+  email: string;
+  full_name: string;
 }
 
 export interface CreateTeamRequest {
@@ -33,12 +35,19 @@ export interface AddTeamMemberRequest {
   role: "admin" | "member";
 }
 
+export interface TeamWithMemberCount extends Team {
+  member_count: number;
+}
+
 export const teamsApi = {
+
   /**
-   * List all teams
+   * List teams for the current user
    */
-  async listTeams(): Promise<APIResponse<Team[]>> {
-    const response = await api.get<APIResponse<Team[]>>("/teams");
+  async listUserTeams(): Promise<APIResponse<TeamWithMemberCount[]>> {
+    const response = await api.get<APIResponse<TeamWithMemberCount[]>>(
+      "/users/me/teams"
+    );
     return response.data;
   },
 
@@ -66,6 +75,17 @@ export const teamsApi = {
     data: UpdateTeamRequest
   ): Promise<APIResponse<Team>> {
     const response = await api.put<APIResponse<Team>>(`/teams/${id}`, data);
+    return response.data;
+  },
+
+  /**
+   * Update a team (admin endpoint)
+   */
+  async updateTeamAdmin(
+    id: number,
+    data: UpdateTeamRequest
+  ): Promise<APIResponse<Team>> {
+    const response = await api.put<APIResponse<Team>>(`/admin/teams/${id}`, data);
     return response.data;
   },
 

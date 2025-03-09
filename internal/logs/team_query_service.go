@@ -171,3 +171,22 @@ func (s *TeamQueryService) ListQueriesForUserBySourceAndTeam(ctx context.Context
 	// Then get queries for the team and source
 	return s.db.ListQueriesByTeamAndSource(ctx, teamID, sourceID)
 }
+
+// ListQueriesForTeamAndSource is an alias for ListQueriesByTeamAndSource to maintain compatibility
+func (s *TeamQueryService) ListQueriesForTeamAndSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) ([]*models.SavedTeamQuery, error) {
+	return s.ListQueriesByTeamAndSource(ctx, teamID, sourceID)
+}
+
+// CreateTeamSourceQuery creates a new query for a team and source
+func (s *TeamQueryService) CreateTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, name, description, queryContent string, createdBy models.UserID) (*models.SavedTeamQuery, error) {
+	// Create a request to use the existing functionality
+	req := models.CreateTeamQueryRequest{
+		Name:         name,
+		Description:  description,
+		SourceID:     sourceID,
+		QueryContent: queryContent,
+	}
+	
+	// Create the query using the team query service
+	return s.CreateTeamQuery(ctx, teamID, req)
+}

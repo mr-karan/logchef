@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"strconv"
 
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -10,7 +11,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// handleListSources handles GET /api/v1/sources
+// handleListSources handles GET /api/v1/admin/sources
 func (s *Server) handleListSources(c *fiber.Ctx) error {
 	sources, err := s.sourceService.ListSources(c.Context())
 	if err != nil {
@@ -26,14 +27,20 @@ func (s *Server) handleListSources(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, sourceResponses)
 }
 
-// handleGetSource handles GET /api/v1/sources/:id
+// handleGetSource handles GET /api/v1/admin/sources/:sourceID
 func (s *Server) handleGetSource(c *fiber.Ctx) error {
-	id := c.Params("id")
-	if id == "" {
+	sourceIDStr := c.Params("sourceID")
+	if sourceIDStr == "" {
 		return SendError(c, fiber.StatusBadRequest, "source ID is required")
 	}
+	
+	// Convert string ID to int
+	sourceID, err := strconv.Atoi(sourceIDStr)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "invalid source ID")
+	}
 
-	src, err := s.sourceService.GetSource(c.Context(), id)
+	src, err := s.sourceService.GetSource(c.Context(), models.SourceID(sourceID))
 	if err != nil {
 		if errors.Is(err, source.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "source not found")
@@ -45,7 +52,7 @@ func (s *Server) handleGetSource(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, src.ToResponse())
 }
 
-// handleCreateSource handles POST /api/v1/sources
+// handleCreateSource handles POST /api/v1/admin/sources
 func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 	var req models.CreateSourceRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -74,14 +81,20 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusCreated, created.ToResponse())
 }
 
-// handleDeleteSource handles DELETE /api/v1/sources/:id
+// handleDeleteSource handles DELETE /api/v1/admin/sources/:sourceID
 func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
-	id := c.Params("id")
-	if id == "" {
+	sourceIDStr := c.Params("sourceID")
+	if sourceIDStr == "" {
 		return SendError(c, fiber.StatusBadRequest, "source ID is required")
 	}
+	
+	// Convert string ID to int
+	sourceID, err := strconv.Atoi(sourceIDStr)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "invalid source ID")
+	}
 
-	if err := s.sourceService.DeleteSource(c.Context(), id); err != nil {
+	if err := s.sourceService.DeleteSource(c.Context(), models.SourceID(sourceID)); err != nil {
 		if errors.Is(err, source.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "source not found")
 		}
@@ -91,7 +104,7 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Source deleted successfully"})
 }
 
-// handleValidateSourceConnection handles POST /api/v1/sources/validate
+// handleValidateSourceConnection handles POST /api/v1/admin/sources/validate
 func (s *Server) handleValidateSourceConnection(c *fiber.Ctx) error {
 	var req models.ValidateConnectionRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -146,15 +159,21 @@ func (s *Server) handleValidateSourceConnection(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, result)
 }
 
-// handleGetSourceStats handles GET /api/v1/sources/:id/stats
+// handleGetSourceStats handles GET /api/v1/admin/sources/:sourceID/stats
 func (s *Server) handleGetSourceStats(c *fiber.Ctx) error {
-	id := c.Params("id")
-	if id == "" {
+	sourceIDStr := c.Params("sourceID")
+	if sourceIDStr == "" {
 		return SendError(c, fiber.StatusBadRequest, "source ID is required")
+	}
+	
+	// Convert string ID to int
+	sourceID, err := strconv.Atoi(sourceIDStr)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "invalid source ID")
 	}
 
 	// Get the source to retrieve connection information
-	src, err := s.sourceService.GetSource(c.Context(), id)
+	src, err := s.sourceService.GetSource(c.Context(), models.SourceID(sourceID))
 	if err != nil {
 		if errors.Is(err, source.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "source not found")

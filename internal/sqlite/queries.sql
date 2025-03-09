@@ -14,7 +14,8 @@
 -- $10: ttl_days
 INSERT INTO sources (
     _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')) RETURNING id;
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'));
+SELECT last_insert_rowid();
 
 -- name: GetSource
 -- Get a single source by ID
@@ -73,7 +74,8 @@ DELETE FROM sources WHERE id = ?;
 -- $4: status
 -- $5: last_login_at
 INSERT INTO users (email, full_name, role, status, last_login_at)
-VALUES (?, ?, ?, ?, ?) RETURNING id;
+VALUES (?, ?, ?, ?, ?);
+SELECT last_insert_rowid();
 
 -- name: GetUser
 -- Get a user by ID
@@ -123,7 +125,8 @@ SELECT COUNT(*) FROM users WHERE role = ? AND status = ?;
 -- $2: expires_at
 -- $3: created_at
 INSERT INTO sessions (id, user_id, expires_at, created_at)
-VALUES (?, ?, ?, ?) RETURNING id;
+VALUES (?, ?, ?, ?);
+SELECT id FROM sessions WHERE rowid = last_insert_rowid();
 
 -- name: GetSession
 -- Get a session by ID
@@ -153,7 +156,8 @@ SELECT COUNT(*) FROM sessions WHERE user_id = ? AND expires_at > ?;
 -- $1: name
 -- $2: description
 INSERT INTO teams (name, description)
-VALUES (?, ?) RETURNING id;
+VALUES (?, ?);
+SELECT last_insert_rowid();
 
 -- name: GetTeam
 -- Get a team by ID
@@ -221,6 +225,15 @@ FROM team_members tm
 WHERE tm.team_id = ?
 ORDER BY tm.created_at;
 
+-- name: ListTeamMembersWithDetails
+-- List all members of a team with user details
+-- $1: team_id
+SELECT tm.team_id, tm.user_id, tm.role, tm.created_at, u.email, u.full_name
+FROM team_members tm
+JOIN users u ON tm.user_id = u.id
+WHERE tm.team_id = ?
+ORDER BY tm.created_at ASC;
+
 -- name: ListUserTeams
 -- List all teams a user is a member of
 -- $1: user_id
@@ -273,7 +286,8 @@ ORDER BY t.name;
 -- $4: description
 -- $5: query_content
 INSERT INTO team_queries (team_id, source_id, name, description, query_content)
-VALUES (?, ?, ?, ?, ?) RETURNING id;
+VALUES (?, ?, ?, ?, ?);
+SELECT last_insert_rowid();
 
 -- name: GetTeamQuery
 -- Get a query by ID
@@ -354,3 +368,33 @@ SELECT tq.* FROM team_queries tq
 JOIN team_members tm ON tq.team_id = tm.team_id
 WHERE tm.user_id = ? AND tq.source_id = ?
 ORDER BY tq.created_at DESC;
+
+-- Additional queries for user-source and team-source access
+
+-- name: TeamHasSource
+-- Check if a team has access to a source
+-- $1: team_id
+-- $2: source_id
+SELECT COUNT(*) FROM team_sources 
+WHERE team_id = ? AND source_id = ?;
+
+-- name: UserHasSourceAccess
+-- Check if a user has access to a source through any team
+-- $1: user_id
+-- $2: source_id
+SELECT COUNT(*) FROM team_members tm
+JOIN team_sources ts ON tm.team_id = ts.team_id
+WHERE tm.user_id = ? AND ts.source_id = ?;
+
+-- name: ListTeamsForUser
+-- List all teams a user is a member of
+-- $1: user_id
+SELECT t.* FROM teams t
+JOIN team_members tm ON t.id = tm.team_id
+WHERE tm.user_id = ?
+ORDER BY t.created_at DESC;
+
+-- name: GetTeamByName
+-- Get a team by its name
+-- $1: name
+SELECT * FROM teams WHERE name = ?;

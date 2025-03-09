@@ -86,6 +86,8 @@ type TeamMember struct {
 	UserID    UserID    `db:"user_id" json:"user_id"`
 	Role      TeamRole  `db:"role" json:"role"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	Email     string    `db:"email" json:"email,omitempty"`
+	FullName  string    `db:"full_name" json:"full_name,omitempty"`
 }
 
 // TeamQuery represents a saved query in a team

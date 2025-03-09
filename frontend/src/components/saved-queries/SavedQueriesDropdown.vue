@@ -42,9 +42,10 @@ const hasQueries = computed(() => savedQueriesStore.data.queries?.length > 0);
 // Load saved queries when the dropdown is opened
 async function onDropdownOpen() {
   if (!currentTeamId.value) {
-    // Try to load user teams first
-    await loadUserTeams();
-    if (!currentTeamId.value) {
+    // Use the current team from teamsStore instead of fetching teams
+    if (teamsStore.currentTeamId) {
+      savedQueriesStore.setSelectedTeam(teamsStore.currentTeamId);
+    } else {
       toast({
         title: 'Error',
         description: 'No team selected. Please select a team first.',
@@ -57,20 +58,6 @@ async function onDropdownOpen() {
 
   if (!savedQueriesStore.data.queries || savedQueriesStore.data.queries.length === 0) {
     await loadTeamQueries();
-  }
-}
-
-// Load user teams (if needed)
-async function loadUserTeams() {
-  try {
-    await savedQueriesStore.fetchUserTeams();
-  } catch (error) {
-    toast({
-      title: 'Error',
-      description: getErrorMessage(error),
-      variant: 'destructive',
-      duration: TOAST_DURATION.ERROR,
-    });
   }
 }
 
@@ -123,8 +110,9 @@ function goToQueries() {
 
 // Load teams on component mount if needed
 onMounted(async () => {
-  if (!savedQueriesStore.data.teams || savedQueriesStore.data.teams.length === 0) {
-    await loadUserTeams();
+  // Use the teams from teamsStore instead of making a separate API call
+  if (teamsStore.teams.length > 0) {
+    savedQueriesStore.data.teams = teamsStore.teams;
   }
 });
 </script>

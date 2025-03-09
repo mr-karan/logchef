@@ -101,54 +101,7 @@ func (s *Server) handleListSourceQueries(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, teamGroups)
 }
 
-// handleListUserSources handles GET /api/v1/user/sources
-func (s *Server) handleListUserSources(c *fiber.Ctx) error {
-	// Get user from context
-	user := c.Locals("user").(*models.User)
-	userID := user.ID
-
-	// Get all unique sources the user has access to across all teams
-	sources, err := s.identityService.ListSourcesForUser(c.Context(), userID)
-	if err != nil {
-		return SendError(c, fiber.StatusInternalServerError, "error listing user sources: "+err.Error())
-	}
-
-	// For each source, get the teams that provide access
-	sourcesWithTeams := make([]*models.SourceWithTeams, 0, len(sources))
-	for _, source := range sources {
-		// Convert source to response object to hide sensitive data
-		sourceResponse := source.ToResponse()
-
-		// Get teams that have access to this source
-		teams, err := s.identityService.ListSourceTeams(c.Context(), source.ID)
-		if err != nil {
-			s.log.Error("error getting teams for source",
-				"source_id", source.ID,
-				"error", err)
-			// Continue to next source rather than failing the entire request
-			continue
-		}
-
-		// Filter to only include teams the user is a member of
-		userTeams := make([]*models.Team, 0)
-		for _, team := range teams {
-			// Check if user is a member of this team
-			member, err := s.identityService.GetTeamMember(c.Context(), team.ID, userID)
-			if err == nil && member != nil {
-				userTeams = append(userTeams, team)
-			}
-		}
-
-		sourcesWithTeams = append(sourcesWithTeams, &models.SourceWithTeams{
-			Source: sourceResponse,
-			Teams:  userTeams,
-		})
-	}
-
-	return SendSuccess(c, fiber.StatusOK, sourcesWithTeams)
-}
-
-// handleListUserQueries handles GET /api/v1/user/queries
+// handleListUserQueries handles GET /api/v1/users/me/queries
 func (s *Server) handleListUserQueries(c *fiber.Ctx) error {
 	// Get user from context
 	user := c.Locals("user").(*models.User)

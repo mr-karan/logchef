@@ -22,27 +22,24 @@ func (s *Server) handleListUsers(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, users)
 }
 
-// handleGetUser handles GET /api/v1/users/:id
+// handleGetUser handles GET /api/v1/admin/users/:userID
 func (s *Server) handleGetUser(c *fiber.Ctx) error {
-	id := c.Params("id")
+	// Get user ID from params
+	id := c.Params("userID")
 	if id == "" {
-		return SendError(c, fiber.StatusBadRequest, "user ID is required")
+		return SendError(c, fiber.StatusBadRequest, "User ID is required")
 	}
 
-	// Convert string to int for UserID
-	idInt, err := strconv.Atoi(id)
+	// Convert to integer
+	userID, err := strconv.Atoi(id)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid user ID: "+err.Error())
+		return SendError(c, fiber.StatusBadRequest, "Invalid user ID")
 	}
-	userID := models.UserID(idInt)
 
-	user, err := s.identityService.GetUser(c.Context(), userID)
+	// Get user from database
+	user, err := s.identityService.GetUser(c.Context(), models.UserID(userID))
 	if err != nil {
-		if errors.Is(err, identity.ErrUserNotFound) {
-			return SendError(c, fiber.StatusNotFound, "user not found")
-		}
-		s.log.Error("Failed to get user", "error", err, "userID", userID)
-		return SendError(c, fiber.StatusInternalServerError, "failed to get user")
+		return SendError(c, fiber.StatusNotFound, "User not found")
 	}
 
 	return SendSuccess(c, fiber.StatusOK, user)
@@ -78,104 +75,152 @@ func (s *Server) handleCreateUser(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusCreated, user)
 }
 
-// handleUpdateUser handles PUT /api/v1/users/:id
+// handleUpdateUser handles PUT /api/v1/admin/users/:userID
 func (s *Server) handleUpdateUser(c *fiber.Ctx) error {
-	id := c.Params("id")
+	// Get user ID from params
+	id := c.Params("userID")
 	if id == "" {
-		return SendError(c, fiber.StatusBadRequest, "user ID is required")
+		return SendError(c, fiber.StatusBadRequest, "User ID is required")
 	}
 
-	// Convert string to int for UserID
-	idInt, err := strconv.Atoi(id)
+	// Convert to integer
+	userID, err := strconv.Atoi(id)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid user ID: "+err.Error())
+		return SendError(c, fiber.StatusBadRequest, "Invalid user ID")
 	}
-	userID := models.UserID(idInt)
 
-	var req models.UpdateUserRequest
+	// Parse request body
+	var req struct {
+		FullName *string `json:"full_name"`
+		Role     *string `json:"role"`
+		Status   *string `json:"status"`
+	}
+
 	if err := c.BodyParser(&req); err != nil {
-		s.log.Error("Failed to parse request body", "error", err, "path", c.Path())
-		return SendError(c, fiber.StatusBadRequest, "invalid request body")
+		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	// Get current user from context (set by middleware)
-	currentUser := c.Locals("user").(*models.User)
-
-	// Only admins can update role status
-	if req.Role != "" && currentUser.Role != models.UserRoleAdmin {
-		return SendError(c, fiber.StatusForbidden, "only admins can update role status")
-	}
-
-	// Users can only update their own profile unless they're an admin
-	if userID != currentUser.ID && currentUser.Role != models.UserRoleAdmin {
-		return SendError(c, fiber.StatusForbidden, "you can only update your own profile")
-	}
-
-	// Get existing user
-	existingUser, err := s.identityService.GetUser(c.Context(), userID)
+	// Get user from database
+	user, err := s.identityService.GetUser(c.Context(), models.UserID(userID))
 	if err != nil {
-		if errors.Is(err, identity.ErrUserNotFound) {
-			return SendError(c, fiber.StatusNotFound, "user not found")
-		}
-		s.log.Error("Failed to get user", "error", err, "userID", userID)
-		return SendError(c, fiber.StatusInternalServerError, "failed to get user")
+		return SendError(c, fiber.StatusNotFound, "User not found")
 	}
 
-	// Update user fields
-	if req.FullName != "" {
-		existingUser.FullName = req.FullName
-	}
-	if req.Status != "" {
-		existingUser.Status = req.Status
-	}
-	if req.Role != "" {
-		existingUser.Role = req.Role
+	// Update user fields if provided
+	if req.FullName != nil {
+		user.FullName = *req.FullName
 	}
 
-	if err := s.identityService.UpdateUser(c.Context(), existingUser); err != nil {
-		var validationErr *identity.ValidationError
-		if errors.As(err, &validationErr) {
-			return SendError(c, fiber.StatusBadRequest, validationErr.Error())
+	if req.Role != nil {
+		role := models.UserRole(*req.Role)
+		// Validate role
+		if role != models.UserRoleAdmin && role != models.UserRoleMember {
+			return SendError(c, fiber.StatusBadRequest, "Invalid role")
 		}
-		if errors.Is(err, identity.ErrUserNotFound) {
-			return SendError(c, fiber.StatusNotFound, "user not found")
-		}
-		s.log.Error("Failed to update user", "error", err, "userID", userID)
-		return SendError(c, fiber.StatusInternalServerError, "failed to update user")
+		user.Role = role
 	}
 
-	return SendSuccess(c, fiber.StatusOK, existingUser)
+	if req.Status != nil {
+		status := models.UserStatus(*req.Status)
+		// Validate status
+		if status != models.UserStatusActive && status != models.UserStatusInactive {
+			return SendError(c, fiber.StatusBadRequest, "Invalid status")
+		}
+		user.Status = status
+	}
+
+	// Update user in database
+	if err := s.identityService.UpdateUser(c.Context(), user); err != nil {
+		return SendError(c, fiber.StatusInternalServerError, "Failed to update user")
+	}
+
+	return SendSuccess(c, fiber.StatusOK, user)
 }
 
-// handleDeleteUser handles DELETE /api/v1/users/:id
+// handleDeleteUser handles DELETE /api/v1/admin/users/:userID
 func (s *Server) handleDeleteUser(c *fiber.Ctx) error {
-	id := c.Params("id")
+	// Get user ID from params
+	id := c.Params("userID")
 	if id == "" {
-		return SendError(c, fiber.StatusBadRequest, "user ID is required")
+		return SendError(c, fiber.StatusBadRequest, "User ID is required")
 	}
 
-	// Convert string to int for UserID
-	idInt, err := strconv.Atoi(id)
+	// Convert to integer
+	userID, err := strconv.Atoi(id)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid user ID: "+err.Error())
-	}
-	userID := models.UserID(idInt)
-
-	// Get current user from context (set by middleware)
-	currentUser := c.Locals("user").(*models.User)
-
-	// Prevent deleting yourself
-	if userID == currentUser.ID {
-		return SendError(c, fiber.StatusBadRequest, "you cannot delete your own account")
+		return SendError(c, fiber.StatusBadRequest, "Invalid user ID")
 	}
 
-	if err := s.identityService.DeleteUser(c.Context(), userID); err != nil {
-		if errors.Is(err, identity.ErrUserNotFound) {
-			return SendError(c, fiber.StatusNotFound, "user not found")
+	// Delete user from database
+	if err := s.identityService.DeleteUser(c.Context(), models.UserID(userID)); err != nil {
+		return SendError(c, fiber.StatusInternalServerError, "Failed to delete user")
+	}
+
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{
+		"message": "User deleted successfully",
+	})
+}
+
+// handleListUserTeams handles GET /api/v1/users/me/teams
+func (s *Server) handleListUserTeams(c *fiber.Ctx) error {
+	// Get user from context
+	user := c.Locals("user").(*models.User)
+
+	// Get teams for user
+	teams, err := s.identityService.ListTeamsForUser(c.Context(), user.ID)
+	if err != nil {
+		return SendError(c, fiber.StatusInternalServerError, "Failed to list teams")
+	}
+
+	// For each team, get additional information like member count
+	type TeamResponse struct {
+		*models.Team
+		MemberCount int  `json:"member_count"`
+		IsAdmin     bool `json:"is_admin"`
+	}
+
+	teamResponses := make([]TeamResponse, 0, len(teams))
+	for _, team := range teams {
+		// Get team members to count them
+		members, err := s.identityService.ListTeamMembers(c.Context(), team.ID)
+		if err != nil {
+			s.log.Error("Failed to get team members", "team_id", team.ID, "error", err)
+			continue
 		}
-		s.log.Error("Failed to delete user", "error", err, "userID", userID)
-		return SendError(c, fiber.StatusInternalServerError, "failed to delete user")
+
+		// Check if user is admin of this team
+		isAdmin := false
+		for _, member := range members {
+			if member.UserID == user.ID && member.Role == models.TeamRoleAdmin {
+				isAdmin = true
+				break
+			}
+		}
+
+		teamResponses = append(teamResponses, TeamResponse{
+			Team:        team,
+			MemberCount: len(members),
+			IsAdmin:     isAdmin,
+		})
 	}
 
-	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "User deleted successfully"})
+	return SendSuccess(c, fiber.StatusOK, teamResponses)
+}
+
+// handleGetTeamSource handles GET /api/v1/teams/:teamID/sources/:sourceID
+func (s *Server) handleGetTeamSource(c *fiber.Ctx) error {
+	// Get team ID and source ID from params
+	teamID := c.Params("teamID")
+	sourceID := c.Params("sourceID")
+	if teamID == "" || sourceID == "" {
+		return SendError(c, fiber.StatusBadRequest, "Team ID and Source ID are required")
+	}
+
+	// Get source (middleware already checked team membership and source access)
+	source, err := s.sourceService.GetSource(c.Context(), sourceID)
+	if err != nil {
+		return SendError(c, fiber.StatusNotFound, "Source not found")
+	}
+
+	return SendSuccess(c, fiber.StatusOK, source)
 }

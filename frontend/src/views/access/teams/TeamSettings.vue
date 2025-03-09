@@ -92,11 +92,6 @@ watch(showAddSourceDialog, async (isOpen) => {
     }
 })
 
-// Add this computed function after other computed properties
-const getMemberUser = (userId: string | number) => {
-    return usersStore.users.find(user => user.id === String(userId))
-}
-
 const loadTeam = async () => {
     try {
         isLoading.value = true
@@ -200,7 +195,7 @@ const handleSubmit = async () => {
     isSaving.value = true
 
     try {
-        const response = await teamsApi.updateTeam(team.value.id, {
+        const response = await teamsApi.updateTeamAdmin(team.value.id, {
             name: name.value,
             description: description.value,
         })
@@ -468,8 +463,8 @@ onMounted(async () => {
                                                     </SelectTrigger>
                                                     <SelectContent>
                                                         <SelectItem v-for="user in availableUsers" :key="user.id"
-                                                            :value="user.id">
-                                                            {{ user.email }} ({{ user.full_name }})
+                                                            :value="String(user.id)">
+                                                            {{ user.email }}
                                                         </SelectItem>
                                                     </SelectContent>
                                                 </Select>
@@ -515,9 +510,9 @@ onMounted(async () => {
                                     <TableRow v-for="member in members" :key="member.user_id">
                                         <TableCell>
                                             <div class="flex flex-col">
-                                                <span>{{ getMemberUser(member.user_id)?.email }}</span>
-                                                <span class="text-sm text-muted-foreground">{{
-                                                    getMemberUser(member.user_id)?.full_name }}</span>
+                                                <span>{{ member.email }}</span>
+                                                <span class="text-sm text-muted-foreground">{{ member.full_name
+                                                }}</span>
                                             </div>
                                         </TableCell>
                                         <TableCell class="capitalize">{{ member.role }}</TableCell>

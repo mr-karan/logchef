@@ -164,3 +164,16 @@ type UpdateTeamQueryRequest struct {
 	SourceID     SourceID `json:"source_id"`
 	QueryContent string   `json:"query_content"`
 }
+
+// SavedQuery represents a generic saved query
+type SavedQuery struct {
+	ID          int       `json:"id" db:"id"`
+	TeamID      string    `json:"team_id" db:"team_id"`
+	SourceID    string    `json:"source_id" db:"source_id"`
+	Name        string    `json:"name" db:"name"`
+	Description string    `json:"description" db:"description"`
+	QuerySQL    string    `json:"query_sql" db:"query_sql"`
+	CreatedBy   UserID    `json:"created_by" db:"created_by"`
+	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+}

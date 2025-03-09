@@ -28,11 +28,13 @@ import { useSourcesStore } from '@/stores/sources';
 import { formatSourceName } from '@/utils/format';
 import type { TeamGroupedQuery } from '@/api/sources';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { useTeamsStore } from '@/stores/teams';
 
 const router = useRouter();
 const { toast } = useToast();
 const savedQueriesStore = useSavedQueriesStore();
 const sourcesStore = useSourcesStore();
+const teamsStore = useTeamsStore();
 
 // Local UI state
 const isLoading = computed(() => sourcesStore.isLoading || savedQueriesStore.isLoading);
@@ -57,12 +59,24 @@ const teamExpansionState = computed(() => {
 // Load sources and queries on mount
 onMounted(async () => {
   try {
-    // Load sources with team info
-    await sourcesStore.loadUserSources();
+    // Load teams first
+    await teamsStore.loadTeams();
+
+    // Set default team if none selected
+    if (!teamsStore.currentTeamId && teamsStore.teams.length > 0) {
+      teamsStore.setCurrentTeam(teamsStore.teams[0].id);
+    }
+
+    // Load sources for the current team
+    if (teamsStore.currentTeamId) {
+      await sourcesStore.loadTeamSources(teamsStore.currentTeamId);
+    } else {
+      console.warn("No team selected, cannot load sources");
+    }
 
     // Get the first source if available
-    if (sourcesStore.deduplicatedSources.length > 0) {
-      selectedSourceId.value = String(sourcesStore.deduplicatedSources[0].id);
+    if (sourcesStore.teamSources.length > 0) {
+      selectedSourceId.value = String(sourcesStore.teamSources[0].id);
       // Load queries for the first source
       await loadSourceQueries(selectedSourceId.value);
     }
@@ -220,13 +234,12 @@ const hasQueries = computed((): boolean => {
     <!-- Source selector -->
     <div class="flex items-center space-x-4">
       <span class="font-medium">Source:</span>
-      <Select v-model="selectedSourceId" :disabled="isLoading || !sourcesStore.deduplicatedSources.length"
-        class="w-[300px]">
+      <Select v-model="selectedSourceId" :disabled="isLoading || !sourcesStore.teamSources.length" class="w-[300px]">
         <SelectTrigger>
           <SelectValue placeholder="Select a source" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem v-for="source in sourcesStore.deduplicatedSources" :key="source.id" :value="String(source.id)">
+          <SelectItem v-for="source in sourcesStore.teamSources" :key="source.id" :value="String(source.id)">
             {{ formatSourceName(source) }}
           </SelectItem>
         </SelectContent>
