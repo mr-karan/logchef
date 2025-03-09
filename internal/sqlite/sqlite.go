@@ -61,23 +61,27 @@ type Queries struct {
 	CountUserSessions  *sqlx.Stmt `query:"CountUserSessions"`
 
 	// Team queries
-	CreateTeam           *sqlx.Stmt `query:"CreateTeam"`
-	GetTeam              *sqlx.Stmt `query:"GetTeam"`
-	UpdateTeam           *sqlx.Stmt `query:"UpdateTeam"`
-	DeleteTeam           *sqlx.Stmt `query:"DeleteTeam"`
-	ListTeams            *sqlx.Stmt `query:"ListTeams"`
-	AddTeamMember        *sqlx.Stmt `query:"AddTeamMember"`
-	GetTeamMember        *sqlx.Stmt `query:"GetTeamMember"`
-	UpdateTeamMemberRole *sqlx.Stmt `query:"UpdateTeamMemberRole"`
-	RemoveTeamMember     *sqlx.Stmt `query:"RemoveTeamMember"`
-	ListTeamMembers      *sqlx.Stmt `query:"ListTeamMembers"`
-	ListUserTeams        *sqlx.Stmt `query:"ListUserTeams"`
+	CreateTeam                *sqlx.Stmt `query:"CreateTeam"`
+	GetTeam                   *sqlx.Stmt `query:"GetTeam"`
+	UpdateTeam                *sqlx.Stmt `query:"UpdateTeam"`
+	DeleteTeam                *sqlx.Stmt `query:"DeleteTeam"`
+	ListTeams                 *sqlx.Stmt `query:"ListTeams"`
+	AddTeamMember             *sqlx.Stmt `query:"AddTeamMember"`
+	GetTeamMember             *sqlx.Stmt `query:"GetTeamMember"`
+	UpdateTeamMemberRole      *sqlx.Stmt `query:"UpdateTeamMemberRole"`
+	RemoveTeamMember          *sqlx.Stmt `query:"RemoveTeamMember"`
+	ListTeamMembers           *sqlx.Stmt `query:"ListTeamMembers"`
+	ListTeamMembersWithDetails *sqlx.Stmt `query:"ListTeamMembersWithDetails"`
+	ListUserTeams             *sqlx.Stmt `query:"ListUserTeams"`
 
 	// Team source queries
-	AddTeamSource    *sqlx.Stmt `query:"AddTeamSource"`
-	RemoveTeamSource *sqlx.Stmt `query:"RemoveTeamSource"`
-	ListTeamSources  *sqlx.Stmt `query:"ListTeamSources"`
-	ListSourceTeams  *sqlx.Stmt `query:"ListSourceTeams"`
+	AddTeamSource      *sqlx.Stmt `query:"AddTeamSource"`
+	RemoveTeamSource   *sqlx.Stmt `query:"RemoveTeamSource"`
+	ListTeamSources    *sqlx.Stmt `query:"ListTeamSources"`
+	ListSourceTeams    *sqlx.Stmt `query:"ListSourceTeams"`
+	TeamHasSource      *sqlx.Stmt `query:"TeamHasSource"`
+	UserHasSourceAccess *sqlx.Stmt `query:"UserHasSourceAccess"`
+	GetTeamByName      *sqlx.Stmt `query:"GetTeamByName"`
 
 	// Team query queries
 	CreateTeamQuery            *sqlx.Stmt `query:"CreateTeamQuery"`
@@ -102,8 +106,8 @@ func New(opts Options) (*DB, error) {
 	// Initialize logger with component tag
 	log := logger.NewLogger("sqlite")
 
-	// Connect to SQLite
-	db, err := sqlx.Connect("sqlite", opts.Config.Path)
+	// Connect to SQLite with multi-statement support
+	db, err := sqlx.Connect("sqlite", opts.Config.Path+"?_multi_stmt=1")
 	if err != nil {
 		log.Error("failed to open database",
 			"error", err,

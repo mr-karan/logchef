@@ -1,28 +1,33 @@
 <template>
   <div>
-    <!-- Language toggle -->
-    <div class="flex justify-end mb-2">
-      <div class="flex items-center space-x-2 p-0.5 rounded-md bg-muted dark:bg-muted text-sm">
-        <button class="px-2 py-1 rounded-md transition-colors"
-          :class="{ 'bg-background dark:bg-background shadow-sm': activeMode === 'dsl' }" @click="setMode('dsl')">
-          LogchefQL
-        </button>
-        <button class="px-2 py-1 rounded-md transition-colors"
-          :class="{ 'bg-background dark:bg-background shadow-sm': activeMode === 'sql' }" @click="setMode('sql')">
-          SQL
-        </button>
-      </div>
-    </div>
+    <!-- Tabbed language toggle with icons -->
+    <Tabs v-model="activeMode" class="w-full mb-2">
+      <TabsList class="grid w-64 grid-cols-2 ml-auto shadow-sm">
+        <TabsTrigger value="dsl" class="h-7 px-2 text-xs">
+          <Terminal class="inline-block h-3.5 w-3.5 align-text-bottom mr-1" />LogchefQL
+        </TabsTrigger>
+        <TabsTrigger value="sql" class="h-7 px-2 text-xs">
+          <Database class="inline-block h-3.5 w-3.5 align-text-bottom mr-1" />SQL
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
 
-    <!-- Editor container -->
-    <div :style="{ height: `${editorHeight}px` }" class="editor"
-      :class="{ 'border-sky-800 dark:border-sky-700': editorFocused, 'border-destructive dark:border-destructive': error }">
+    <!-- Editor container with minimal styling -->
+    <div :style="{ height: `${editorHeight}px` }" class="rounded-md">
       <vue-monaco-editor v-model:value="currentCode" :theme="currentTheme" :language="currentLanguage"
         :options="editorOptions" @mount="handleMount" @change="onChange" />
     </div>
 
     <!-- Error display -->
-    <div v-if="error" class="text-destructive text-xs mt-1">{{ error }}</div>
+    <div v-if="error" class="text-destructive text-xs mt-1 flex items-center">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 mr-1">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12" y2="16" />
+      </svg>
+      {{ error }}
+    </div>
   </div>
 </template>
 
@@ -34,6 +39,9 @@ import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
 import { getDefaultMonacoOptions } from '@/utils/monaco'
 import { translateLogchefQLToSQL, parseLogchefQL } from '@/utils/logchefql/api'
 import { isNumeric } from "@/utils/utils"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Switch } from '@/components/ui/switch'
+import { Terminal, Database } from 'lucide-vue-next'
 import {
   Parser as LogchefqlParser,
   tokenTypes as logchefqlTokenTypes,
@@ -55,7 +63,7 @@ const props = defineProps({
   },
   placeholder: {
     type: String,
-    default: 'Enter LogchefQL query (e.g. service_name=\'api\' and severity_text=\'error\')'
+    default: 'service_name=\'api\' and severity_level=\'error\''
   },
   availableFields: {
     type: Array,
@@ -87,12 +95,19 @@ const sqlCode = ref('')
 const activeMode = ref('dsl')
 const editorRef = shallowRef()
 
-// Calculate editor options
+// Calculate editor options using Monaco's defaults where possible
 const editorOptions = computed(() => {
   const options = getDefaultMonacoOptions()
   return {
     ...options,
-    readOnly: false,
+    // Use consistent lineHeight of 20 (matches default in monaco.ts)
+    lineHeight: 20,
+    // Use consistent top/bottom padding (these match monaco.ts defaults)
+    padding: {
+      top: 6,
+      bottom: 6
+    },
+    fontSize: 13,
     placeholder: activeMode.value === 'dsl'
       ? props.placeholder
       : 'SQL query will be generated when switching to SQL mode'
@@ -126,11 +141,14 @@ const currentCode = computed({
   }
 })
 
-// Compute editor height based on content
+// Height calculation aligned with the consistent lineHeight
 const editorHeight = computed(() => {
   const content = activeMode.value === 'dsl' ? dslCode.value : sqlCode.value
   const lines = (content.match(/\n/g) || []).length + 1
-  return Math.max(40, 14 + (lines * 20)) // Minimum height of 40px
+
+  // Use consistent lineHeight of 20 (matches monaco.ts and our options)
+  // Monaco adds 12px padding (6px top + 6px bottom), so we don't need to add it again
+  return Math.max(32, lines * 20)
 })
 
 /**
@@ -141,34 +159,34 @@ function getDefaultSQLQuery(tableName = 'logs.vector_logs') {
   return `SELECT * FROM ${tableName}`;
 }
 
-// Switch between DSL and SQL modes
-function setMode(mode) {
-  if (mode === activeMode.value) return
+// Watch for changes to activeMode and handle mode switching
+watch(activeMode, (newMode, oldMode) => {
+  if (newMode === oldMode) return
 
-  if (mode === 'sql') {
+  if (newMode === 'sql') {
     // When switching to SQL mode, generate SQL from DSL
     try {
       if (dslCode.value.trim()) {
         console.log('Translating LogchefQL to SQL:', dslCode.value);
-        
+
         try {
           // Try to parse using the LogchefQL parser directly to better diagnose issues
           const { sql, params } = parseLogchefQL(dslCode.value);
           console.log('Raw parsed SQL components:', { sql, params });
-          
+
           // Convert params to strings for logging
           const paramsStr = params.map(p => typeof p === 'string' ? `'${p}'` : p).join(', ');
           console.log(`SQL with params: ${sql.replace(/\?/g, () => `{param}`)}, params: [${paramsStr}]`);
         } catch (e) {
           console.error('Direct parse error:', e);
         }
-        
+
         // For display, just show the WHERE conditions without time range and limits
         sqlCode.value = translateLogchefQLToSQL(dslCode.value, {
           table: props.tableName,
           includeTimeRange: false // Don't include time range for display
         });
-        
+
         console.log('Translated SQL for display:', sqlCode.value);
       } else {
         sqlCode.value = getDefaultSQLQuery(props.tableName);
@@ -179,20 +197,53 @@ function setMode(mode) {
     }
   }
 
-  activeMode.value = mode
-  emit('modeChange', mode)
-  
-  // Emit change event with the current code after mode change
+  emit('modeChange', newMode)
+
+  // Ensure both languages are registered
+  if (!monaco.languages.getLanguages().some(lang => lang.id === 'logchefql')) {
+    registerLogchefql();
+  }
+  if (!monaco.languages.getLanguages().some(lang => lang.id === 'clickhouse-sql')) {
+    registerClickhouseSQL();
+  }
+
+  // Handle language switching in the editor
   nextTick(() => {
     // Emit the current code based on the new mode
-    emit('change', activeMode.value === 'dsl' ? dslCode.value : sqlCode.value)
-    
-    // Focus editor after mode change
+    emit('change', newMode === 'dsl' ? dslCode.value : sqlCode.value)
+
+    // Explicitly set the language on the model when the mode changes
     if (editorRef.value) {
-      editorRef.value.focus()
+      const model = editorRef.value.getModel();
+      if (model) {
+        const newLanguage = newMode === 'dsl' ? 'logchefql' : 'clickhouse-sql';
+        monaco.editor.setModelLanguage(model, newLanguage);
+        console.log(`Switched language to: ${newLanguage}`);
+
+        // Force a refresh of the editor to ensure the language change takes effect
+        const value = model.getValue();
+        model.setValue('');
+        nextTick(() => {
+          model.setValue(value);
+          editorRef.value.focus();
+        });
+      }
     }
   })
-}
+})
+
+// Watch for changes to currentLanguage and update the editor model
+watch(currentLanguage, (newLanguage) => {
+  nextTick(() => {
+    if (editorRef.value) {
+      const model = editorRef.value.getModel();
+      if (model && model.getLanguageId() !== newLanguage) {
+        monaco.editor.setModelLanguage(model, newLanguage);
+        console.log(`Language watcher updated to: ${newLanguage}`);
+      }
+    }
+  });
+})
 
 // Helper to get suggestions from a list
 const getSuggestionsFromList = (params) => {
@@ -483,21 +534,21 @@ const getSuggestions = async (word, position, textBeforeCursor) => {
 const getSQLSuggestions = (word, position, textBeforeCursor, range) => {
   // Check if we're after a FROM or JOIN keyword to suggest table names
   const isAfterFromOrJoin = /\b(FROM|JOIN)\s+\w*$/.test(textBeforeCursor)
-  
+
   // Check if we're after a table name and dot to suggest column names
   const isAfterTableDot = /\b(\w+)\.\w*$/.test(textBeforeCursor)
-  
+
   // Check if we're in a SELECT clause to suggest column names
   const isInSelectClause = /\bSELECT\b(?!.*\bFROM\b).*$/.test(textBeforeCursor)
-  
+
   // Check if we're in a WHERE clause to suggest column names
   const isInWhereClause = /\bWHERE\b(?!.*\b(GROUP|ORDER|LIMIT)\b).*$/.test(textBeforeCursor)
-  
+
   // Check if we're in a GROUP BY, ORDER BY, or HAVING clause
   const isInGroupByClause = /\bGROUP\s+BY\b(?!.*\b(ORDER|LIMIT)\b).*$/.test(textBeforeCursor)
   const isInOrderByClause = /\bORDER\s+BY\b(?!.*\bLIMIT\b).*$/.test(textBeforeCursor)
   const isInHavingClause = /\bHAVING\b(?!.*\b(ORDER|LIMIT)\b).*$/.test(textBeforeCursor)
-  
+
   // Common SQL keywords and ClickHouse functions
   let suggestions = [
     ...SQL_KEYWORDS.map(keyword => ({
@@ -519,7 +570,7 @@ const getSQLSuggestions = (word, position, textBeforeCursor, range) => {
       range: range,
     })),
   ]
-  
+
   // Add table name suggestion if after FROM or JOIN
   if (isAfterFromOrJoin) {
     // Replace all suggestions with table suggestions when after FROM/JOIN
@@ -544,11 +595,11 @@ const getSQLSuggestions = (word, position, textBeforeCursor, range) => {
       }
     ]
   }
-  
+
   // Add column name suggestions for various clauses that need column names
-  if (isAfterTableDot || isInSelectClause || isInWhereClause || 
-      isInGroupByClause || isInOrderByClause || isInHavingClause) {
-    
+  if (isAfterTableDot || isInSelectClause || isInWhereClause ||
+    isInGroupByClause || isInOrderByClause || isInHavingClause) {
+
     // Extract table alias if present (for table.column syntax)
     let tableAlias = null
     if (isAfterTableDot) {
@@ -557,9 +608,9 @@ const getSQLSuggestions = (word, position, textBeforeCursor, range) => {
         tableAlias = tableMatch[1]
       }
     }
-    
+
     const columnSuggestions = []
-    
+
     props.availableFields.forEach(field => {
       // Basic field suggestion
       columnSuggestions.push({
@@ -568,13 +619,13 @@ const getSQLSuggestions = (word, position, textBeforeCursor, range) => {
         insertText: field.name,
         range: range,
         detail: field.type,
-        documentation: field.isTimestamp ? 'Timestamp field' : 
-                      field.isSeverity ? 'Severity field' : 
-                      `Type: ${field.type}`,
-        sortText: field.isTimestamp ? '0' : 
-                  field.isSeverity ? '1' : '2', // Sort special fields to top
+        documentation: field.isTimestamp ? 'Timestamp field' :
+          field.isSeverity ? 'Severity field' :
+            `Type: ${field.type}`,
+        sortText: field.isTimestamp ? '0' :
+          field.isSeverity ? '1' : '2', // Sort special fields to top
       })
-      
+
       // For SELECT clause, also add common aggregations and functions for numeric fields
       if (isInSelectClause && ['int', 'float', 'number'].includes(field.type?.toLowerCase())) {
         columnSuggestions.push({
@@ -586,7 +637,7 @@ const getSQLSuggestions = (word, position, textBeforeCursor, range) => {
           documentation: `Count occurrences of ${field.name}`,
           sortText: '3',
         })
-        
+
         columnSuggestions.push({
           label: `avg(${field.name})`,
           kind: monaco.languages.CompletionItemKind.Function,
@@ -596,7 +647,7 @@ const getSQLSuggestions = (word, position, textBeforeCursor, range) => {
           documentation: `Calculate average of ${field.name}`,
           sortText: '3',
         })
-        
+
         columnSuggestions.push({
           label: `sum(${field.name})`,
           kind: monaco.languages.CompletionItemKind.Function,
@@ -607,7 +658,7 @@ const getSQLSuggestions = (word, position, textBeforeCursor, range) => {
           sortText: '3',
         })
       }
-      
+
       // For timestamp fields, add date/time functions
       if (field.isTimestamp || field.name.includes('time') || field.name.includes('date')) {
         columnSuggestions.push({
@@ -619,7 +670,7 @@ const getSQLSuggestions = (word, position, textBeforeCursor, range) => {
           documentation: 'Round timestamp to start of hour',
           sortText: '3',
         })
-        
+
         columnSuggestions.push({
           label: `toStartOfDay(${field.name})`,
           kind: monaco.languages.CompletionItemKind.Function,
@@ -631,18 +682,18 @@ const getSQLSuggestions = (word, position, textBeforeCursor, range) => {
         })
       }
     })
-    
+
     // If we're in a clause that needs column names, add column suggestions
-    if (isInSelectClause || isInWhereClause || isInGroupByClause || 
-        isInOrderByClause || isInHavingClause) {
+    if (isInSelectClause || isInWhereClause || isInGroupByClause ||
+      isInOrderByClause || isInHavingClause) {
       suggestions = [...columnSuggestions, ...suggestions]
-    } 
+    }
     // If we're after a table dot, only show column suggestions
     else if (isAfterTableDot) {
       suggestions = columnSuggestions
     }
   }
-  
+
   return suggestions
 }
 
@@ -770,7 +821,7 @@ function registerClickhouseSQL() {
       },
       releaseDocumentSemanticTokens: () => { }
     });
-    
+
     // Register completion provider for SQL
     monaco.languages.registerCompletionItemProvider('clickhouse-sql', {
       provideCompletionItems: async (model, position) => {
@@ -888,50 +939,26 @@ watch(() => props.modelValue, (newValue) => {
 </script>
 
 <style scoped>
-.editor {
-  border: 1px solid #e2e8f0;
-  border-radius: 0.375rem;
-  overflow: hidden;
-}
-
-:deep(.monaco-editor) {
-  background-color: transparent !important;
-}
-
-:deep(.monaco-editor .overflow-guard) {
-  background-color: transparent !important;
-}
-
-:deep(.monaco-editor-background) {
-  background-color: transparent !important;
-}
-
-:deep(.monaco-editor .lines-content) {
-  background-color: transparent !important;
-}
-
-:deep(.monaco-editor .view-line) {
-  background-color: transparent !important;
-}
-
-/* Hide scrollbars */
-:deep(.monaco-scrollable-element) {
-  overflow: hidden !important;
-}
+/* Clean, minimal editor styling */
 
 /* Hide line numbers */
 :deep(.margin) {
   display: none !important;
 }
 
-/* Fix for cursor positioning */
-:deep(.cursor) {
-  height: 20px !important;
+/* Placeholder text styling */
+:deep(.monaco-editor .placeholder) {
+  color: hsl(var(--muted-foreground)) !important;
 }
 
-/* Fix for content padding */
-:deep(.monaco-editor .lines-content) {
-  padding-top: 2px !important;
-  padding-bottom: 2px !important;
+/* Ensure editor has the right background */
+:deep(.monaco-editor-background) {
+  background-color: transparent !important;
+}
+
+/* Make sure other Monaco elements are transparent too */
+:deep(.monaco-editor) .margin,
+:deep(.monaco-editor) .overflow-guard {
+  background-color: transparent !important;
 }
 </style>

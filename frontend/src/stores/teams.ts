@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { teamsApi, type Team, type CreateTeamRequest } from "@/api/teams";
-import { isErrorResponse } from "@/api/types";
+import { isErrorResponse, getErrorMessage } from "@/api/types";
 import { useToast } from "@/components/ui/toast/use-toast";
 import { TOAST_DURATION } from "@/lib/constants";
 
@@ -29,47 +29,37 @@ export const useTeamsStore = defineStore("teams", () => {
     try {
       isLoading.value = true;
       error.value = null;
-      const response = await teamsApi.listTeams();
+      // Only call the API if we don't already have teams loaded
+      if (teams.value.length === 0) {
+        const response = await teamsApi.listUserTeams();
 
-      if (isErrorResponse(response)) {
-        error.value = response.data.error;
-        toast({
-          title: "Error",
-          description: response.data.error,
-          variant: "destructive",
-          duration: TOAST_DURATION.ERROR,
-        });
-        teams.value = [];
-        return;
+        if (isErrorResponse(response)) {
+          error.value = response.data.error;
+          toast({
+            title: "Error",
+            description: response.data.error,
+            variant: "destructive",
+            duration: TOAST_DURATION.ERROR,
+          });
+          teams.value = [];
+          return;
+        }
+
+        teams.value = response.data.map((team) => ({
+          ...team,
+          memberCount: team.member_count,
+        }));
       }
-
-      // Initialize with empty array if teams is null
-      const teamsData = response.data || [];
-
-      // Get member counts for each team
-      const teamsWithMembers = await Promise.all(
-        teamsData.map(async (team) => {
-          const membersResponse = await teamsApi.listTeamMembers(team.id);
-          const memberCount =
-            isErrorResponse(membersResponse) || !membersResponse.data
-              ? 0
-              : membersResponse.data.length;
-          return { ...team, memberCount };
-        })
-      );
-
-      teams.value = teamsWithMembers;
 
       // Set current team if none is selected and we have teams
       if (!currentTeamId.value && teams.value.length > 0) {
         setCurrentTeam(teams.value[0].id);
       }
     } catch (err) {
-      error.value = "Failed to load teams";
-      console.error("Error loading teams:", err);
+      error.value = getErrorMessage(err);
       toast({
         title: "Error",
-        description: "Failed to load teams",
+        description: getErrorMessage(err),
         variant: "destructive",
         duration: TOAST_DURATION.ERROR,
       });

@@ -46,8 +46,9 @@ const confirmDelete = async () => {
     }
 }
 
-onMounted(() => {
-    sourcesStore.loadSources()
+onMounted(async () => {
+    // Load all sources (admin view)
+    await sourcesStore.loadSources()
 })
 
 const formatDate = (dateString: string) => {

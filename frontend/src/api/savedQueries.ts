@@ -6,16 +6,6 @@ import type { APIResponse, SavedTeamQuery } from "./types";
  */
 export const savedQueriesApi = {
   /**
-   * Get user teams
-   */
-  getUserTeams: async () => {
-    const response = await api.get<
-      APIResponse<Array<{ id: number; name: string; description?: string }>>
-    >("/teams");
-    return response.data;
-  },
-
-  /**
    * List queries for a team
    */
   listQueries: async (teamId: number) => {

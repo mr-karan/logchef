@@ -110,3 +110,45 @@ func (s *Service) GetLogContext(ctx context.Context, req *models.LogContextReque
 		Stats:           result.Stats,
 	}, nil
 }
+
+// GetSourceStats retrieves statistics for a specific source
+func (s *Service) GetSourceStats(ctx context.Context, sourceID models.SourceID) (map[string]interface{}, error) {
+	// Get source from SQLite
+	source, err := s.db.GetSource(ctx, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting source: %w", err)
+	}
+	if source == nil {
+		return nil, ErrSourceNotFound
+	}
+
+	// For now, return some basic stats
+	// This should be replaced with actual stats from ClickHouse in the future
+	return map[string]interface{}{
+		"source_id":   source.ID,
+		"database":    source.Connection.Database,
+		"table":       source.Connection.TableName,
+		"description": source.Description,
+		"status":      "active",
+	}, nil
+}
+
+// GetSourceSchema retrieves the schema (column information) for a specific source
+func (s *Service) GetSourceSchema(ctx context.Context, sourceID models.SourceID) ([]models.ColumnInfo, error) {
+	// Get source from SQLite
+	source, err := s.db.GetSource(ctx, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting source: %w", err)
+	}
+	if source == nil {
+		return nil, ErrSourceNotFound
+	}
+
+	// For now, return some basic schema info
+	// This should be replaced with actual schema from ClickHouse in the future
+	return []models.ColumnInfo{
+		{Name: "timestamp", Type: "DateTime"},
+		{Name: "level", Type: "String"},
+		{Name: "message", Type: "String"},
+	}, nil
+}

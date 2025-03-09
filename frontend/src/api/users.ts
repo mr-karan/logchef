@@ -19,7 +19,7 @@ export const usersApi = {
    * List all users
    */
   async listUsers(): Promise<APIResponse<User[]>> {
-    const response = await api.get<APIResponse<User[]>>("/users");
+    const response = await api.get<APIResponse<User[]>>("/admin/users");
     return response.data;
   },
 
@@ -27,7 +27,7 @@ export const usersApi = {
    * Get a user by ID
    */
   async getUser(id: string): Promise<APIResponse<{ user: User }>> {
-    const response = await api.get<APIResponse<{ user: User }>>(`/users/${id}`);
+    const response = await api.get<APIResponse<{ user: User }>>(`/admin/users/${id}`);
     return response.data;
   },
 
@@ -38,7 +38,7 @@ export const usersApi = {
     data: CreateUserRequest
   ): Promise<APIResponse<{ user: User }>> {
     const response = await api.post<APIResponse<{ user: User }>>(
-      "/users",
+      "/admin/users",
       data
     );
     return response.data;
@@ -52,7 +52,7 @@ export const usersApi = {
     data: UpdateUserRequest
   ): Promise<APIResponse<{ user: User }>> {
     const response = await api.put<APIResponse<{ user: User }>>(
-      `/users/${id}`,
+      `/admin/users/${id}`,
       data
     );
     return response.data;
@@ -63,7 +63,7 @@ export const usersApi = {
    */
   async deleteUser(id: string): Promise<APIResponse<{ message: string }>> {
     const response = await api.delete<APIResponse<{ message: string }>>(
-      `/users/${id}`
+      `/admin/users/${id}`
     );
     return response.data;
   },

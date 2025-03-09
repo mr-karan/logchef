@@ -18,17 +18,17 @@ function getDefaultMonacoOptions() {
     overviewRulerLanes: 0,
     lineNumbersMinChars: 0,
     scrollBeyondLastLine: false,
-    scrollbarVisibility: 'hidden',
+    scrollbarVisibility: "hidden",
     scrollbar: {
-      horizontal: 'hidden',
-      vertical: 'hidden',
+      horizontal: "hidden",
+      vertical: "hidden",
       alwaysConsumeMouseWheel: false,
       useShadows: false,
     },
     occurrencesHighlight: false,
     find: {
       addExtraSpaceOnTop: false,
-      autoFindInSelection: 'never',
+      autoFindInSelection: "never",
       seedSearchStringFromSelection: false,
     },
     wordBasedSuggestions: "off",
@@ -42,9 +42,9 @@ function getDefaultMonacoOptions() {
     },
     folding: false,
     lineNumbers: false,
-    renderLineHighlight: 'none',
-    matchBrackets: 'always',
-    'semanticHighlighting.enabled': true,
+    renderLineHighlight: "none",
+    matchBrackets: "always",
+    "semanticHighlighting.enabled": true,
     fixedOverflowWidgets: true,
     wordWrap: "on",
     links: false,
@@ -55,7 +55,7 @@ function getDefaultMonacoOptions() {
     renderWhitespace: "none",
     selectOnLineNumbers: false,
     dragAndDrop: false,
-  }
+  };
 }
 
 /**
@@ -128,13 +128,12 @@ function defineMonacoThemes() {
 function initMonacoSetup() {
   // Configure Monaco worker setup
   window.MonacoEnvironment = {
-    getWorker: () => new EditorWorker()
+    getWorker: () => new EditorWorker(),
   };
 
   // Load Monaco configuration
   loader.config({
     monaco,
-    features: ['*'],
   });
 
   // Define themes
@@ -144,15 +143,18 @@ function initMonacoSetup() {
 /**
  * Get the default SQL query to use when no query is provided
  */
-function getDefaultSQLQuery(tableName = 'logs') {
+function getDefaultSQLQuery(tableName = "logs") {
   const threeDaysAgo = new Date();
   threeDaysAgo.setHours(threeDaysAgo.getHours() - 3);
 
   const now = new Date();
 
   // Format dates for ClickHouse
-  const startTimeFormatted = threeDaysAgo.toISOString().replace('T', ' ').replace('Z', '');
-  const endTimeFormatted = now.toISOString().replace('T', ' ').replace('Z', '');
+  const startTimeFormatted = threeDaysAgo
+    .toISOString()
+    .replace("T", " ")
+    .replace("Z", "");
+  const endTimeFormatted = now.toISOString().replace("T", " ").replace("Z", "");
 
   return `SELECT *
 FROM ${tableName}
@@ -161,8 +163,4 @@ WHERE timestamp >= '${startTimeFormatted}'
 LIMIT 100`;
 }
 
-export {
-  initMonacoSetup,
-  getDefaultMonacoOptions,
-  getDefaultSQLQuery
-};
+export { initMonacoSetup, getDefaultMonacoOptions, getDefaultSQLQuery };

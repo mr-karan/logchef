@@ -13,6 +13,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { DateTimePicker } from '@/components/date-time-picker'
 import { useExploreStore } from '@/stores/explore'
 import { useTeamsStore } from '@/stores/teams'
@@ -58,15 +66,15 @@ const generatedSQL = ref('')
 const sqlParams = ref<Array<string | number>>([])
 const isExecutingQuery = ref(false)
 const sourceDetails = ref<Source | null>(null)
-// No longer need editor ref
+const queryEditorRef = ref()
 
 // Loading and empty states
 const showLoadingState = computed(() => {
-  return !sourcesStore.sourcesWithTeams || sourcesStore.isLoading
+  return sourcesStore.isLoading
 })
 
 const showEmptyState = computed(() => {
-  return !showLoadingState.value && (!sourcesStore.sourcesWithTeams || sourcesStore.sourcesWithTeams.length === 0)
+  return !showLoadingState.value && (!sourcesStore.teamSources || sourcesStore.teamSources.length === 0)
 })
 
 // Selected team name
@@ -164,51 +172,47 @@ function initializeFromURL() {
 
 // Handle team change
 async function handleTeamChange(teamId: string) {
-  teamsStore.setCurrentTeam(parseInt(teamId))
-  await nextTick()
+  const parsedTeamId = parseInt(teamId)
+  teamsStore.setCurrentTeam(parsedTeamId)
+
+  // Load sources for the selected team
+  await sourcesStore.loadTeamSources(parsedTeamId)
+
+  // Set a default source if sources are available
+  if (sourcesStore.teamSources.length > 0) {
+    // Check if current source is in the new team
+    const currentSourceExists = sourcesStore.teamSources.some(
+      source => source.id === exploreStore.data.sourceId
+    )
+    
+    if (!currentSourceExists) {
+      // Select the first source if current one isn't available
+      exploreStore.setSource(sourcesStore.teamSources[0].id)
+      await fetchSourceDetails(sourcesStore.teamSources[0].id)
+    }
+  } else {
+    // No sources in this team
+    exploreStore.setSource(0)
+    sourceDetails.value = null
+  }
 }
 
 // Fetch source details
 async function fetchSourceDetails(sourceId: number) {
-  if (!sourceId) {
+  if (!sourceId || !teamsStore.currentTeamId) {
     sourceDetails.value = null
-    console.log('No source ID provided, clearing source details')
     return
   }
 
-  console.log(`Fetching source details for source ID: ${sourceId}`)
-
   try {
     const source = await sourcesStore.getSource(sourceId)
+    sourceDetails.value = source
+    
+    // Log basic info for debugging
     if (source) {
-      sourceDetails.value = source
-      console.log('Source details loaded:', source)
-
-      // Log special fields for debugging
-      if (source._meta_ts_field) {
-        console.log(`Timestamp field: ${source._meta_ts_field}`)
-      }
-
-      if (source._meta_severity_field) {
-        console.log(`Severity field: ${source._meta_severity_field}`)
-      }
-
-      // Log columns for debugging
-      if (source.columns) {
-        console.log(`Columns received from API: ${source.columns.length}`, source.columns)
-      } else {
-        console.warn('No columns received from API')
-      }
-
-      // Log schema for debugging
-      if (source.schema) {
-        console.log('Schema received from API (length):', source.schema.length)
-      } else {
-        console.warn('No schema received from API')
-      }
+      console.log(`Source details loaded for ID ${sourceId}`)
     } else {
       console.warn(`No source details returned for source ID: ${sourceId}`)
-      sourceDetails.value = null
     }
   } catch (error) {
     console.error('Error fetching source details:', error)
@@ -218,52 +222,33 @@ async function fetchSourceDetails(sourceId: number) {
 
 // Handle source change
 async function handleSourceChange(sourceId: string) {
-  try {
-    console.log(`Source changed to: ${sourceId}`)
-
-    if (!sourceId) {
-      console.log('No source ID provided, clearing source details')
-      sourceDetails.value = null
-      return
-    }
-
-    const id = parseInt(sourceId)
-
-    // Update the source in the explore store
-    exploreStore.setSource(id)
-
-    // Fetch source details
-    await fetchSourceDetails(id)
-
-    // Wait for the next tick to ensure the UI updates
-    await nextTick()
-
-    // Log the available fields after source change
-    console.log('Available fields after source change:', availableFields.value)
-  } catch (error) {
-    console.error('Error handling source change:', error)
+  if (!sourceId) {
+    sourceDetails.value = null
+    return
   }
+
+  const id = parseInt(sourceId)
+  exploreStore.setSource(id)
+  await fetchSourceDetails(id)
 }
 
 // Handle loading saved query
 async function loadSavedQuery(queryId: string) {
   try {
-    const teamId = savedQueriesStore.data.selectedTeamId
+    // Use the current team ID from teamsStore instead of fetching teams
+    const teamId = teamsStore.currentTeamId
     if (!teamId) {
-      await savedQueriesStore.fetchUserTeams()
-      if (!savedQueriesStore.data.selectedTeamId) {
-        toast({
-          title: 'Error',
-          description: 'No team context available',
-          variant: 'destructive',
-          duration: TOAST_DURATION.ERROR,
-        })
-        return
-      }
+      toast({
+        title: 'Error',
+        description: 'No team selected. Please select a team first.',
+        variant: 'destructive',
+        duration: TOAST_DURATION.ERROR,
+      })
+      return
     }
 
     const queryResponse = await savedQueriesStore.fetchQuery(
-      savedQueriesStore.data.selectedTeamId || 0,
+      teamId,
       queryId
     )
 
@@ -328,38 +313,29 @@ async function loadSavedQuery(queryId: string) {
 
 // Get available fields for auto-completion
 const availableFields = computed((): FieldInfo[] => {
-  // Start with columns from the source details if available
+  // Use columns from source details or query results
   let fields: FieldInfo[] = [];
-
-  // First, try to use columns from the source details
-  if (sourceDetails.value?.columns && sourceDetails.value.columns.length > 0) {
-    console.log('Using columns from source details:', sourceDetails.value.columns);
+  
+  if (sourceDetails.value?.columns?.length > 0) {
     fields = sourceDetails.value.columns.map(column => ({
       name: column.name,
       type: column.type
     }));
-  }
-  // If no columns in source details, fall back to columns from query results
-  else if (exploreStore.data.columns && exploreStore.data.columns.length > 0) {
-    console.log('Using columns from query results:', exploreStore.data.columns);
+  } else if (exploreStore.data.columns?.length > 0) {
     fields = exploreStore.data.columns.map(column => ({
       name: column.name,
       type: column.type
     }));
   }
 
-  // Add special metadata fields if we have source details
+  // Add special metadata fields if available
   if (sourceDetails.value) {
-    // Mark timestamp field as special
+    // Add timestamp field if not already in the list
     if (sourceDetails.value._meta_ts_field) {
-      const tsFieldIndex = fields.findIndex(f => f.name === sourceDetails.value?._meta_ts_field);
-      if (tsFieldIndex >= 0) {
-        fields[tsFieldIndex] = {
-          ...fields[tsFieldIndex],
-          isTimestamp: true
-        };
+      const tsField = fields.find(f => f.name === sourceDetails.value?._meta_ts_field);
+      if (tsField) {
+        tsField.isTimestamp = true;
       } else {
-        // Add the timestamp field if it's not already in the list
         fields.push({
           name: sourceDetails.value._meta_ts_field,
           type: 'timestamp',
@@ -368,16 +344,12 @@ const availableFields = computed((): FieldInfo[] => {
       }
     }
 
-    // Mark severity field as special if it exists
+    // Add severity field if not already in the list
     if (sourceDetails.value._meta_severity_field) {
-      const severityFieldIndex = fields.findIndex(f => f.name === sourceDetails.value?._meta_severity_field);
-      if (severityFieldIndex >= 0) {
-        fields[severityFieldIndex] = {
-          ...fields[severityFieldIndex],
-          isSeverity: true
-        };
+      const severityField = fields.find(f => f.name === sourceDetails.value?._meta_severity_field);
+      if (severityField) {
+        severityField.isSeverity = true;
       } else {
-        // Add the severity field if it's not already in the list
         fields.push({
           name: sourceDetails.value._meta_severity_field,
           type: 'string',
@@ -386,9 +358,6 @@ const availableFields = computed((): FieldInfo[] => {
       }
     }
   }
-
-  // Log all available fields for debugging
-  console.log('All available fields:', fields);
 
   return fields;
 });
@@ -569,7 +538,7 @@ const executeSQLQuery = async () => {
     queryError.value = '';
 
     console.log('Executing SQL query:', sqlQuery.value);
-    
+
     // Check for SQL query - if empty, use the default SQL query
     if (!sqlQuery.value.trim()) {
       // Use a default query if none provided
@@ -601,30 +570,28 @@ onMounted(async () => {
   try {
     console.log("LogExplorer component mounting")
 
-    await teamsStore.loadTeams()
-    await sourcesStore.loadUserSources()
+    // Initialize from URL parameters first
     initializeFromURL()
 
+    // Load teams
+    await teamsStore.loadTeams()
+
+    // Set default team if none selected
     if (!teamsStore.currentTeamId && teamsStore.teams.length > 0) {
-      teamsStore.currentTeamId = teamsStore.teams[0].id
-      await nextTick()
+      teamsStore.setCurrentTeam(teamsStore.teams[0].id)
     }
 
-    if (!exploreStore.data.sourceId && sourcesStore.teamSources.length > 0) {
-      exploreStore.setSource(sourcesStore.teamSources[0].id)
-      await nextTick()
-    }
-
-    // Fetch source details for the selected source
-    if (exploreStore.data.sourceId) {
-      await fetchSourceDetails(exploreStore.data.sourceId)
-    }
-
-    if (exploreStore.data.sourceId && teamsStore.currentTeamId) {
-      await savedQueriesStore.fetchSourceQueries(
-        exploreStore.data.sourceId,
-        teamsStore.currentTeamId
-      )
+    // Load sources for the current team
+    if (teamsStore.currentTeamId) {
+      await sourcesStore.loadTeamSources(teamsStore.currentTeamId)
+      
+      // Set default source if none selected
+      if (!exploreStore.data.sourceId && sourcesStore.teamSources.length > 0) {
+        exploreStore.setSource(sourcesStore.teamSources[0].id)
+        await fetchSourceDetails(sourcesStore.teamSources[0].id)
+      } else if (exploreStore.data.sourceId) {
+        await fetchSourceDetails(exploreStore.data.sourceId)
+      }
     }
   } catch (error) {
     console.error("Error during LogExplorer mount:", error)
@@ -665,93 +632,127 @@ onBeforeUnmount(() => {
   </div>
 
   <!-- Main content when not loading -->
-  <div v-else class="flex flex-col gap-4">
-    <!-- Updated Control Bar - Team First -->
-    <div class="flex items-center gap-2 h-9 mb-1">
-      <!-- Team Selector -->
-      <div class="w-[220px]">
-        <Select :model-value="teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : ''"
-          @update:model-value="handleTeamChange" class="h-7">
-          <SelectTrigger class="h-7 py-0 text-xs">
-            <SelectValue placeholder="Select a team">
-              {{ selectedTeamName }}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id.toString()">
-              {{ team.name }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
+  <div v-else class="flex flex-col gap-5">
+    <!-- Navigation and Controls Section with improved design -->
+    <div class="border-b pb-3 mb-2">
+      <div class="flex items-center justify-between">
+        <!-- Left: Source Navigation (breadcrumb style) -->
+        <div class="flex items-center space-x-2 text-sm">
+          <Select :model-value="teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : ''"
+            @update:model-value="handleTeamChange" class="h-8 min-w-[160px]">
+            <SelectTrigger>
+              <SelectValue placeholder="Select a team">{{ selectedTeamName }}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id.toString()">
+                {{ team.name }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+
+          <span class="text-muted-foreground">→</span>
+
+          <Select :model-value="exploreStore.data.sourceId ? exploreStore.data.sourceId.toString() : ''"
+            @update:model-value="handleSourceChange"
+            :disabled="!teamsStore.currentTeamId || (sourcesStore.teamSources || []).length === 0"
+            class="h-8 min-w-[200px]">
+            <SelectTrigger>
+              <SelectValue placeholder="Select a source">{{ selectedSourceName }}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="source in sourcesStore.teamSources || []" :key="source.id"
+                :value="source.id.toString()">
+                {{ formatSourceName(source) }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <!-- Right: Time Range and Action Buttons -->
+        <div class="flex items-center">
+          <!-- Date Time Picker with enough width for full timestamps -->
+          <DateTimePicker v-model="dateRange" class="h-8 min-w-[380px] max-w-[400px] truncate" />
+
+          <!-- Vertical separator -->
+          <div class="h-6 w-px bg-border mx-2.5"></div>
+
+          <!-- Limit Dropdown -->
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" class="h-8 min-w-[100px]">
+                Limit: {{ exploreStore.data.limit.toLocaleString() }}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Results Limit</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem @click="exploreStore.setLimit(100)" :disabled="exploreStore.data.limit === 100">
+                100 rows
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="exploreStore.setLimit(500)" :disabled="exploreStore.data.limit === 500">
+                500 rows
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="exploreStore.setLimit(1000)" :disabled="exploreStore.data.limit === 1000">
+                1,000 rows
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="exploreStore.setLimit(2000)" :disabled="exploreStore.data.limit === 2000">
+                2,000 rows
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="exploreStore.setLimit(5000)" :disabled="exploreStore.data.limit === 5000">
+                5,000 rows
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="exploreStore.setLimit(10000)" :disabled="exploreStore.data.limit === 10000">
+                10,000 rows
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <!-- Vertical separator -->
+          <div class="h-6 w-px bg-border mx-2.5"></div>
+
+          <div class="flex items-center gap-2">
+            <SavedQueriesDropdown :source-id="exploreStore.data.sourceId" :team-id="teamsStore.currentTeamId"
+              :use-current-team="true" @load-query="loadSavedQuery" />
+
+            <Button size="sm" variant="outline" class="h-8" @click="showSaveQueryModal = true">
+              Save
+            </Button>
+
+            <Button variant="default" size="sm" class="h-8 px-3 flex items-center gap-1"
+              :disabled="isExecutingQuery || !exploreStore.canExecuteQuery" @click="handleQuerySubmit(queryMode)">
+              <Play class="h-3.5 w-3.5" />
+              <span>{{ isExecutingQuery ? 'Running...' : 'Run' }}</span>
+            </Button>
+          </div>
+        </div>
       </div>
-
-      <!-- Source Selector (filtered by team) -->
-      <div class="w-[220px]">
-        <Select :model-value="exploreStore.data.sourceId ? exploreStore.data.sourceId.toString() : ''"
-          @update:model-value="handleSourceChange" class="h-7"
-          :disabled="!teamsStore.currentTeamId || (sourcesStore.teamSources || []).length === 0">
-          <SelectTrigger class="h-7 py-0 text-xs">
-            <SelectValue placeholder="Select a source">
-              {{ selectedSourceName }}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem v-for="source in sourcesStore.teamSources || []" :key="source.id" :value="source.id.toString()">
-              {{ formatSourceName(source) }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <!-- Divider -->
-      <div class="h-5 w-px bg-border self-center"></div>
-
-      <!-- Time Range Picker - Increased width -->
-      <div class="w-[340px]">
-        <DateTimePicker v-model="dateRange" class="h-7" buttonClass="py-0 h-7 text-xs" />
-      </div>
-
-      <!-- Spacer -->
-      <div class="flex-1"></div>
-
-      <!-- Saved Queries Dropdown -->
-      <SavedQueriesDropdown :source-id="exploreStore.data.sourceId" :team-id="teamsStore.currentTeamId"
-        @load-query="loadSavedQuery" />
-
-      <!-- Save Query Button -->
-      <Button size="sm" variant="outline" class="h-7 px-2.5 text-xs" @click="showSaveQueryModal = true">
-        Save Query
-      </Button>
     </div>
 
-    <!-- LogchefQL Query Editor -->
-    <div class="mb-3">
-      <div class="flex items-center mb-1">
-        <h3 class="text-sm font-medium">{{ queryMode === 'dsl' ? 'LogchefQL Query' : 'SQL Query' }}</h3>
-        <div v-if="queryMode === 'dsl'" class="ml-2 text-xs text-muted-foreground italic">
-          Write filter conditions only (WHERE clause)
+    <!-- Condensed Query Builder -->
+    <div class="rounded-md border bg-card shadow-sm mb-4">
+      <div class="flex items-start">
+        <div class="flex-1">
+          <QueryEditor ref="queryEditorRef" v-model="logchefQuery" :available-fields="availableFields"
+            :placeholder="'Enter LogchefQL query (e.g. service_name=\'api\' and severity_text=\'error\')'"
+            :error="queryError" :table-name="activeSourceTableName" height="32" @change="handleQueryChange"
+            @submit="handleQuerySubmit" @mode-change="handleModeChange" />
         </div>
-        <div v-if="queryMode === 'sql'" class="ml-2 text-xs text-muted-foreground italic">
-          Time filter and LIMIT will be applied automatically
-        </div>
-        <div class="flex-1"></div>
-        <Button size="sm" variant="default" class="h-7 px-3 flex items-center gap-1"
-          :disabled="isExecutingQuery || !exploreStore.canExecuteQuery" @click="handleQuerySubmit(queryMode)">
-          <Play class="h-3.5 w-3.5" />
-          <span>{{ isExecutingQuery ? 'Running...' : 'Run Query' }}</span>
-        </Button>
       </div>
 
-      <div class="relative">
-        <QueryEditor v-model="logchefQuery" :available-fields="availableFields"
-          :placeholder="'Enter LogchefQL query (e.g. service_name=\'api\' and severity_text=\'error\')'"
-          :error="queryError" :table-name="activeSourceTableName" height="40" @change="handleQueryChange"
-          @submit="handleQuerySubmit" @mode-change="handleModeChange" />
+      <!-- Helptext below editor with better padding -->
+      <div class="pl-0 pr-4 py-2 text-xs text-muted-foreground bg-muted/20 border-t">
+        <span v-if="queryMode === 'dsl'" class="italic">
+          Filter conditions only, e.g. service_name='api' and severity_level='error'. Time filter and LIMIT are applied
+          automatically.
+        </span>
+        <span v-if="queryMode === 'sql'" class="italic">
+          Write a complete SQL query. Time filter and LIMIT will be applied automatically to your query.
+        </span>
       </div>
     </div>
 
-    <!-- Results Table -->
-    <div class="flex-1">
+    <!-- Results Section -->
+    <div class="flex-1 border rounded-md shadow-sm bg-card overflow-hidden">
       <DataTable :columns="tableColumns" :data="exploreStore.data.logs || []" :stats="exploreStore.data.queryStats"
         :source-id="exploreStore.data.sourceId?.toString() || ''" />
     </div>

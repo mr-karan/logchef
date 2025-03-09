@@ -34,7 +34,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
-      outDir: resolve(__dirname, "../backend/cmd/server/ui"),
+      outDir: resolve(__dirname, "../cmd/server/ui"),
       emptyOutDir: true,
       rollupOptions: {
         output: {

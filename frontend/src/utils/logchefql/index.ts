@@ -311,6 +311,11 @@ export class Node {
 
       return { sql, params };
     }
+    
+    // Handle the case where we only have a left node (single expression)
+    if (this.left && !this.right) {
+      return this.left.toSQL();
+    }
 
     return { sql: "", params: [] };
   }
@@ -531,9 +536,6 @@ export class Parser {
 
   inStateInitial() {
     if (!this.char) return;
-
-    this.resetData();
-    this.setCurrentNode(this.newNode(this.boolOperator, null, null, null));
 
     if (this.char.isGroupOpen()) {
       this.extendNodesStack();
@@ -808,6 +810,14 @@ export class Parser {
       this.setErrorState("Unmatched parenthesis", 28);
       return;
     }
+    
+    // Handle the case of a single expression without boolean operators
+    if (this.currentNode && !this.currentNode.left && !this.currentNode.right && !this.currentNode.expression) {
+      // If we have a key and value but no expression set yet, create it
+      if (this.key && this.keyValueOperator && this.value) {
+        this.currentNode.setExpression(this.newExpression());
+      }
+    }
   }
 
   generateMonacoTokens() {
@@ -869,6 +879,10 @@ export class Parser {
 
   parse(text: string, raiseError: boolean = true, ignoreLastChar: boolean = false) {
     this.setText(text);
+    
+    // Initialize with a new node
+    this.resetData();
+    this.setCurrentNode(this.newNode(this.boolOperator, null, null, null));
 
     for (let i = 0; i < text.length; i++) {
       if (this.state === State.ERROR) {
@@ -926,6 +940,13 @@ export class Parser {
       } else {
         return;
       }
+    }
+
+    // Handle the case of a single key=value expression
+    if (this.key && this.keyValueOperator && this.value && 
+        this.currentNode && !this.currentNode.expression && 
+        !this.currentNode.left && !this.currentNode.right) {
+      this.currentNode.setExpression(this.newExpression());
     }
 
     this.root = this.currentNode;

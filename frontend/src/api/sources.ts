@@ -89,50 +89,105 @@ export interface SourceStats {
 
 export const sourcesApi = {
   async listSources() {
-    const response = await api.get<APIResponse<Source[]>>("/sources");
+    // Admin endpoint for listing all sources
+    const response = await api.get<APIResponse<Source[]>>("/admin/sources");
     return response.data;
   },
 
-  async listUserSources() {
-    const response = await api.get<APIResponse<SourceWithTeamsResponse[]>>(
-      "/user/sources"
+
+  async listTeamSources(teamId: number) {
+    const response = await api.get<APIResponse<Source[]>>(
+      `/teams/${teamId}/sources`
     );
     return response.data;
   },
 
-  async getSource(id: number) {
-    const response = await api.get<APIResponse<Source>>(`/sources/${id}`);
+
+  async getTeamSource(teamId: number, sourceId: number) {
+    const response = await api.get<APIResponse<Source>>(
+      `/teams/${teamId}/sources/${sourceId}`
+    );
     return response.data;
   },
 
   async createSource(payload: CreateSourcePayload) {
-    const response = await api.post<APIResponse<Source>>("/sources", payload);
+    const response = await api.post<APIResponse<Source>>("/admin/sources", payload);
     return response.data;
   },
 
   async deleteSource(id: number) {
-    const response = await api.delete<APIResponse<void>>(`/sources/${id}`);
+    const response = await api.delete<APIResponse<{ message: string }>>(
+      `/admin/sources/${id}`
+    );
     return response.data;
   },
 
   async getSourceStats(sourceId: number) {
     const response = await api.get<APIResponse<SourceStats>>(
-      `/sources/${sourceId}/stats`
+      `/admin/sources/${sourceId}/stats`
+    );
+    return response.data;
+  },
+
+  async getTeamSourceStats(teamId: number, sourceId: number) {
+    const response = await api.get<APIResponse<SourceStats>>(
+      `/teams/${teamId}/sources/${sourceId}/stats`
+    );
+    return response.data;
+  },
+
+  async getTeamSourceSchema(teamId: number, sourceId: number) {
+    const response = await api.get<APIResponse<string>>(
+      `/teams/${teamId}/sources/${sourceId}/schema`
     );
     return response.data;
   },
 
   async listSourceQueries(sourceId: number, groupByTeam: boolean = true) {
-    const response = await api.get<APIResponse<TeamGroupedQuery[]>>(
-      `/sources/${sourceId}/queries?groupByTeam=${groupByTeam}`
+    const response = await api.get<
+      APIResponse<TeamGroupedQuery[] | SavedTeamQuery[]>
+    >(
+      `/admin/sources/${sourceId}/queries${groupByTeam ? "?group_by_team=true" : ""}`
+    );
+    return response.data;
+  },
+
+  async listTeamSourceQueries(teamId: number, sourceId: number) {
+    const response = await api.get<APIResponse<SavedTeamQuery[]>>(
+      `/teams/${teamId}/sources/${sourceId}/queries`
     );
     return response.data;
   },
 
   async createSourceQuery(sourceId: number, payload: CreateTeamQueryRequest) {
     const response = await api.post<APIResponse<SavedTeamQuery>>(
-      `/sources/${sourceId}/queries`,
+      `/admin/sources/${sourceId}/queries`,
       payload
+    );
+    return response.data;
+  },
+
+  async createTeamSourceQuery(
+    teamId: number,
+    sourceId: number,
+    payload: Omit<CreateTeamQueryRequest, "team_id">
+  ) {
+    const fullPayload: CreateTeamQueryRequest = {
+      ...payload,
+      team_id: teamId,
+    };
+
+    const response = await api.post<APIResponse<SavedTeamQuery>>(
+      `/teams/${teamId}/sources/${sourceId}/queries`,
+      fullPayload
+    );
+    return response.data;
+  },
+
+  async validateSourceConnection(connectionInfo: ConnectionRequestInfo) {
+    const response = await api.post<APIResponse<{ success: boolean; message: string }>>(
+      "/admin/sources/validate",
+      connectionInfo
     );
     return response.data;
   },

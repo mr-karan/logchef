@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/mr-karan/logchef/pkg/models"
@@ -347,6 +348,27 @@ func (s *Service) ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]
 	return members, nil
 }
 
+// ListTeamMembersWithDetails returns all members of a team with user details
+func (s *Service) ListTeamMembersWithDetails(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error) {
+	// Validate team exists
+	team, err := s.db.GetTeam(ctx, teamID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting team: %w", err)
+	}
+	if team == nil {
+		return nil, ErrTeamNotFound
+	}
+
+	// Get team members with user details
+	members, err := s.db.ListTeamMembersWithDetails(ctx, teamID)
+	if err != nil {
+		s.log.Error("failed to list team members with details", "team_id", teamID, "error", err)
+		return nil, fmt.Errorf("error listing team members with details: %w", err)
+	}
+
+	return members, nil
+}
+
 // GetTeamMember gets a specific team member
 func (s *Service) GetTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) (*models.TeamMember, error) {
 	// Validate team exists
@@ -576,4 +598,138 @@ func (s *Service) ListSourceTeams(ctx context.Context, sourceID models.SourceID)
 	}
 
 	return teams, nil
+}
+
+// IsTeamMember checks if a user is a member of a team
+func (s *Service) IsTeamMember(ctx context.Context, teamIDStr string, userID models.UserID) (bool, error) {
+	// Convert teamID to integer
+	teamIDInt, err := strconv.Atoi(teamIDStr)
+	if err != nil {
+		return false, fmt.Errorf("invalid team ID: %w", err)
+	}
+	teamID := models.TeamID(teamIDInt)
+
+	// Check if user is a member of this team
+	member, err := s.db.GetTeamMember(ctx, teamID, userID)
+	if err != nil {
+		// Don't log as error since this is often just checking membership
+		s.log.Debug("failed to get team member", "team_id", teamID, "user_id", userID, "error", err)
+		return false, nil
+	}
+
+	return member != nil, nil
+}
+
+// IsTeamAdmin checks if a user is an admin of a team
+func (s *Service) IsTeamAdmin(ctx context.Context, teamIDStr string, userID models.UserID) (bool, error) {
+	// Convert teamID to integer
+	teamIDInt, err := strconv.Atoi(teamIDStr)
+	if err != nil {
+		return false, fmt.Errorf("invalid team ID: %w", err)
+	}
+	teamID := models.TeamID(teamIDInt)
+
+	// Check if user is an admin of this team
+	member, err := s.db.GetTeamMember(ctx, teamID, userID)
+	if err != nil {
+		// Don't log as error since this is often just checking membership
+		s.log.Debug("failed to get team member", "team_id", teamID, "user_id", userID, "error", err)
+		return false, nil
+	}
+
+	return member != nil && member.Role == models.TeamRoleAdmin, nil
+}
+
+// TeamHasSourceAccess checks if a team has access to a source
+func (s *Service) TeamHasSourceAccess(ctx context.Context, teamIDStr string, sourceIDStr string) (bool, error) {
+	// Convert IDs to integers
+	teamIDInt, err := strconv.Atoi(teamIDStr)
+	if err != nil {
+		return false, fmt.Errorf("invalid team ID: %w", err)
+	}
+	teamID := models.TeamID(teamIDInt)
+
+	sourceIDInt, err := strconv.Atoi(sourceIDStr)
+	if err != nil {
+		return false, fmt.Errorf("invalid source ID: %w", err)
+	}
+	sourceID := models.SourceID(sourceIDInt)
+
+	// Check if team has source
+	return s.db.TeamHasSource(ctx, teamID, sourceID)
+}
+
+// UserHasSourceAccess checks if a user has access to a source via any team
+func (s *Service) UserHasSourceAccess(ctx context.Context, userID models.UserID, sourceIDStr string) (bool, error) {
+	// Convert sourceID to integer
+	sourceIDInt, err := strconv.Atoi(sourceIDStr)
+	if err != nil {
+		return false, fmt.Errorf("invalid source ID: %w", err)
+	}
+	sourceID := models.SourceID(sourceIDInt)
+
+	// Check if user has source access through any team
+	hasAccess, err := s.db.UserHasSourceAccess(ctx, userID, sourceID)
+	if err != nil {
+		s.log.Error("failed to check user source access", "user_id", userID, "source_id", sourceID, "error", err)
+		return false, err
+	}
+
+	return hasAccess, nil
+}
+
+// ListTeamsForUser returns all teams a user is a member of
+func (s *Service) ListTeamsForUser(ctx context.Context, userID models.UserID) ([]*models.Team, error) {
+	// Validate user exists
+	user, err := s.db.GetUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting user: %w", err)
+	}
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+
+	// Get teams for user
+	teams, err := s.db.ListTeamsForUser(ctx, userID)
+	if err != nil {
+		s.log.Error("failed to list teams for user", "user_id", userID, "error", err)
+		return nil, fmt.Errorf("error listing teams for user: %w", err)
+	}
+
+	return teams, nil
+}
+
+// ListTeamsWithAccessToSource returns all teams that have access to a source for a specific user
+func (s *Service) ListTeamsWithAccessToSource(ctx context.Context, sourceIDStr string, userID models.UserID) ([]*models.Team, error) {
+	// Convert sourceID to integer
+	sourceIDInt, err := strconv.Atoi(sourceIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid source ID: %w", err)
+	}
+	sourceID := models.SourceID(sourceIDInt)
+
+	// Get all teams for the source
+	sourceTeams, err := s.db.ListSourceTeams(ctx, sourceID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get all teams for the user
+	userTeams, err := s.db.ListTeamsForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Find intersection of sourceTeams and userTeams
+	var accessibleTeams []*models.Team
+	for _, sourceTeam := range sourceTeams {
+		for _, userTeam := range userTeams {
+			if sourceTeam.ID == userTeam.ID {
+				accessibleTeams = append(accessibleTeams, sourceTeam)
+				break
+			}
+		}
+	}
+
+	return accessibleTeams, nil
 }

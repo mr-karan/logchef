@@ -1,1 +1,0 @@
-import{d as e,k as t,p as r,o as n}from"./index-DhD1Jy6j.js";import"./monaco-editor-2qzqsP3x.js";const m=e({__name:"LogsLayout",setup(s){return(a,p)=>{const o=r("router-view");return n(),t(o)}}});export{m as default};
