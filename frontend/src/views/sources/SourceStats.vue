@@ -18,10 +18,13 @@ const stats = reactive<{
   tableStats: null,
   columnStats: null,
 })
+const isLoadingStats = ref(false)
+const statsError = ref<string | null>(null)
 
 // Fetch all sources on component mount
 onMounted(async () => {
   if (sourcesStore.sources.length === 0) {
+    // The base store will handle showing toast for errors
     await sourcesStore.loadSources()
   }
 })
@@ -29,6 +32,7 @@ onMounted(async () => {
 // Fetch source stats
 const fetchSourceStats = async () => {
   if (!selectedSourceId.value) {
+    // Keep this toast as it's a validation error, not an API error
     toast({
       title: 'Error',
       description: 'Please select a source first',
@@ -37,17 +41,24 @@ const fetchSourceStats = async () => {
     return
   }
 
-  const result = await sourcesStore.getSourceStats(parseInt(selectedSourceId.value))
+  isLoadingStats.value = true
+  statsError.value = null
 
-  if (result) {
-    stats.tableStats = result.table_stats
-    stats.columnStats = result.column_stats
-  } else if (sourcesStore.sourceStatsError) {
-    toast({
-      title: 'Error',
-      description: sourcesStore.sourceStatsError,
-      variant: 'destructive',
-    })
+  try {
+    const result = await sourcesStore.getSourceStats(parseInt(selectedSourceId.value), true)
+
+    if (result.success && result.data) {
+      stats.tableStats = result.data.table_stats
+      stats.columnStats = result.data.column_stats
+    } else if (result.error) {
+      // Just store the error for UI display, no need for toast
+      statsError.value = result.error
+    }
+  } catch (error) {
+    // Handle unexpected errors not caught by the store
+    statsError.value = error instanceof Error ? error.message : 'Unknown error occurred'
+  } finally {
+    isLoadingStats.value = false
   }
 }
 </script>
@@ -77,8 +88,8 @@ const fetchSourceStats = async () => {
             </Select>
           </div>
           <div class="flex items-end">
-            <Button @click="fetchSourceStats" :disabled="sourcesStore.sourceStatsLoading">
-              <span v-if="sourcesStore.sourceStatsLoading">Loading...</span>
+            <Button @click="fetchSourceStats" :disabled="isLoadingStats">
+              <span v-if="isLoadingStats">Loading...</span>
               <span v-else>Get Stats</span>
             </Button>
           </div>
@@ -150,8 +161,15 @@ const fetchSourceStats = async () => {
           </CardContent>
         </Card>
 
-        <div v-if="!stats.tableStats && !sourcesStore.sourceStatsLoading"
-          class="text-center py-6 text-muted-foreground">
+        <div v-if="statsError" class="rounded-lg border border-destructive p-4 text-center text-destructive mb-6">
+          <p class="mb-2">Failed to load statistics</p>
+          <p class="text-sm">{{ statsError }}</p>
+          <Button variant="outline" class="mt-4" @click="fetchSourceStats">
+            Retry
+          </Button>
+        </div>
+
+        <div v-if="!stats.tableStats && !isLoadingStats && !statsError" class="text-center py-6 text-muted-foreground">
           Select a source and click "Get Stats" to view statistics
         </div>
       </CardContent>

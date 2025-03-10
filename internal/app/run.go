@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,16 +15,9 @@ func Run(opts Options) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Get logger from options or use default
-	log := opts.Logger
-	if log == nil {
-		log = slog.Default().With("component", "app_runner")
-	}
-
 	// Create application
 	app, err := New(opts)
 	if err != nil {
-		log.Error("failed to create application", "error", err)
 		return err
 	}
 
@@ -42,7 +34,7 @@ func Run(opts Options) error {
 	// Start the application in a goroutine
 	go func() {
 		if err := app.Start(); err != nil {
-			app.log.Error("application error", "error", err)
+			app.log.Error("failed to start application", "error", err)
 			shutdown <- os.Interrupt
 		}
 	}()
@@ -51,15 +43,18 @@ func Run(opts Options) error {
 
 	// Wait for shutdown signal
 	<-shutdown
-	app.log.Info("shutdown signal received")
+	app.log.Info("received shutdown signal")
 
 	// Create shutdown context with timeout
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownTimeout := 10 * time.Second
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
+
+	app.log.Info("shutting down application", "timeout", shutdownTimeout.String())
 
 	// Shutdown application
 	if err := app.Shutdown(shutdownCtx); err != nil {
-		app.log.Error("error during application shutdown", "error", err)
+		app.log.Error("failed to shutdown application", "error", err)
 		return err
 	}
 

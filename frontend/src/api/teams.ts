@@ -9,6 +9,7 @@ export interface Team {
   created_by: string;
   created_at: string;
   updated_at: string;
+  member_count?: number;
 }
 
 export interface TeamMember {
@@ -40,7 +41,6 @@ export interface TeamWithMemberCount extends Team {
 }
 
 export const teamsApi = {
-
   /**
    * List teams for the current user
    */
@@ -63,7 +63,7 @@ export const teamsApi = {
    * Create a new team
    */
   async createTeam(data: CreateTeamRequest): Promise<APIResponse<Team>> {
-    const response = await api.post<APIResponse<Team>>("/teams", data);
+    const response = await api.post<APIResponse<Team>>("/admin/teams", data);
     return response.data;
   },
 
@@ -74,18 +74,10 @@ export const teamsApi = {
     id: number,
     data: UpdateTeamRequest
   ): Promise<APIResponse<Team>> {
-    const response = await api.put<APIResponse<Team>>(`/teams/${id}`, data);
-    return response.data;
-  },
-
-  /**
-   * Update a team (admin endpoint)
-   */
-  async updateTeamAdmin(
-    id: number,
-    data: UpdateTeamRequest
-  ): Promise<APIResponse<Team>> {
-    const response = await api.put<APIResponse<Team>>(`/admin/teams/${id}`, data);
+    const response = await api.put<APIResponse<Team>>(
+      `/admin/teams/${id}`,
+      data
+    );
     return response.data;
   },
 
@@ -94,7 +86,7 @@ export const teamsApi = {
    */
   async deleteTeam(id: number): Promise<APIResponse<{ message: string }>> {
     const response = await api.delete<APIResponse<{ message: string }>>(
-      `/teams/${id}`
+      `/admin/teams/${id}`
     );
     return response.data;
   },

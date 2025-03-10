@@ -62,7 +62,7 @@ import { Plus } from 'lucide-vue-next'
 import { useTeamsStore } from '@/stores/teams'
 
 const emit = defineEmits<{
-    (e: 'team-created'): void
+    (e: 'team-created', teamId?: number): void
 }>()
 
 const teamsStore = useTeamsStore()
@@ -75,21 +75,36 @@ const handleSubmit = async () => {
     if (isLoading.value) return
 
     isLoading.value = true
-    const success = await teamsStore.createTeam({
-        name: teamName.value,
-        description: description.value
-    })
+    try {
+        const result = await teamsStore.createTeam({
+            name: teamName.value,
+            description: description.value
+        })
 
-    if (success) {
-        // Reset form
-        teamName.value = ''
-        description.value = ''
-        showDialog.value = false
-        // Emit event to refresh teams list
-        emit('team-created')
+        if (result.success && result.data) {
+            // Reset form
+            teamName.value = ''
+            description.value = ''
+            showDialog.value = false
+
+            // Force reload teams to ensure we have the latest data
+            await teamsStore.loadTeams(true)
+
+            // Get the newly created team ID from the store - it should be the last one
+            const newTeamId = teamsStore.teams.length > 0
+                ? teamsStore.teams[teamsStore.teams.length - 1].id
+                : undefined
+
+            // Emit event to refresh teams list with the new team ID
+            emit('team-created', newTeamId)
+        }
+        // No need for else block - errors are handled by the store's callApi function
+    } catch (error) {
+        // This catch block handles unexpected errors not caught by the store
+        console.error('Unexpected error creating team:', error)
+    } finally {
+        isLoading.value = false
     }
-
-    isLoading.value = false
 }
 </script>
 

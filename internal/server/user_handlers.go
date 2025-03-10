@@ -16,7 +16,7 @@ func (s *Server) handleListUsers(c *fiber.Ctx) error {
 	users, err := s.identityService.ListUsers(c.Context())
 	if err != nil {
 		s.log.Error("Failed to list users", "error", err)
-		return SendError(c, fiber.StatusInternalServerError, "failed to list users")
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list users", models.DatabaseErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, users)
@@ -27,19 +27,19 @@ func (s *Server) handleGetUser(c *fiber.Ctx) error {
 	// Get user ID from params
 	id := c.Params("userID")
 	if id == "" {
-		return SendError(c, fiber.StatusBadRequest, "User ID is required")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "User ID is required", models.ValidationErrorType)
 	}
 
 	// Convert to integer
 	userID, err := strconv.Atoi(id)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid user ID")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid user ID", models.ValidationErrorType)
 	}
 
 	// Get user from database
 	user, err := s.identityService.GetUser(c.Context(), models.UserID(userID))
 	if err != nil {
-		return SendError(c, fiber.StatusNotFound, "User not found")
+		return SendErrorWithType(c, fiber.StatusNotFound, "User not found", models.NotFoundErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, user)
@@ -50,15 +50,15 @@ func (s *Server) handleCreateUser(c *fiber.Ctx) error {
 	var req models.CreateUserRequest
 	if err := c.BodyParser(&req); err != nil {
 		s.log.Error("Failed to parse request body", "error", err)
-		return SendError(c, fiber.StatusBadRequest, "invalid request body")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
 	// Validate request
 	if req.Email == "" {
-		return SendError(c, fiber.StatusBadRequest, "email is required")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Email is required", models.ValidationErrorType)
 	}
 	if req.FullName == "" {
-		return SendError(c, fiber.StatusBadRequest, "name is required")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Name is required", models.ValidationErrorType)
 	}
 
 	// Create new user
@@ -66,10 +66,10 @@ func (s *Server) handleCreateUser(c *fiber.Ctx) error {
 	if err != nil {
 		var validationErr *identity.ValidationError
 		if errors.As(err, &validationErr) {
-			return SendError(c, fiber.StatusBadRequest, validationErr.Error())
+			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
 		}
 		s.log.Error("Failed to create user", "error", err, "email", req.Email)
-		return SendError(c, fiber.StatusInternalServerError, "failed to create user")
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create user", models.DatabaseErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusCreated, user)
@@ -211,13 +211,19 @@ func (s *Server) handleListUserTeams(c *fiber.Ctx) error {
 func (s *Server) handleGetTeamSource(c *fiber.Ctx) error {
 	// Get team ID and source ID from params
 	teamID := c.Params("teamID")
-	sourceID := c.Params("sourceID")
-	if teamID == "" || sourceID == "" {
+	sourceIDStr := c.Params("sourceID")
+	if teamID == "" || sourceIDStr == "" {
 		return SendError(c, fiber.StatusBadRequest, "Team ID and Source ID are required")
 	}
 
+	// Convert source ID to integer
+	sourceID, err := strconv.Atoi(sourceIDStr)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid source ID")
+	}
+
 	// Get source (middleware already checked team membership and source access)
-	source, err := s.sourceService.GetSource(c.Context(), sourceID)
+	source, err := s.sourceService.GetSource(c.Context(), models.SourceID(sourceID))
 	if err != nil {
 		return SendError(c, fiber.StatusNotFound, "Source not found")
 	}

@@ -1,5 +1,4 @@
-// Package logger provides a simple, elegant logging solution using Go's slog package.
-// It offers a minimal API with sensible defaults for application-wide logging.
+// Package logger provides a simple wrapper around slog for structured logging
 package logger
 
 import (
@@ -7,55 +6,19 @@ import (
 	"os"
 )
 
-// Global logger instance
-var globalLogger *slog.Logger
-
-// Initialize sets up the global logger with the specified log level.
-// Source code information is always included for better debugging.
-// The logger uses text format for better readability during development.
-func Initialize(level string) {
-	// Set log level
-	var logLevel slog.Level
-	switch level {
-	case "debug":
+// New creates a new logger with the specified level
+// If component is provided, it will be added as a "component" attribute
+func New(debug bool) *slog.Logger {
+	logLevel := slog.LevelInfo
+	if debug {
 		logLevel = slog.LevelDebug
-	case "info":
-		logLevel = slog.LevelInfo
-	case "warn":
-		logLevel = slog.LevelWarn
-	case "error":
-		logLevel = slog.LevelError
-	default:
-		logLevel = slog.LevelInfo
 	}
 
-	// Create handler with source information enabled
+	// Create handler with appropriate level
 	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level:     logLevel,
 		AddSource: true,
 	})
 
-	// Set global logger
-	globalLogger = slog.New(handler)
-	slog.SetDefault(globalLogger)
-}
-
-// Default returns the global logger instance, initializing it with
-// sensible defaults if not already initialized.
-func Default() *slog.Logger {
-	if globalLogger == nil {
-		// Initialize with info level if not already initialized
-		Initialize("info")
-	}
-	return globalLogger
-}
-
-// NewLogger creates a new logger with the given component name
-func NewLogger(name string) *slog.Logger {
-	return Default().With("component", name)
-}
-
-// With creates a new logger with the given attributes
-func With(attrs ...any) *slog.Logger {
-	return Default().With(attrs...)
+	return slog.New(handler)
 }

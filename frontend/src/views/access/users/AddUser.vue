@@ -13,8 +13,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select'
-import { usersApi } from '@/api/users'
 import type { CreateUserRequest } from '@/api/users'
+import { useUsersStore } from '@/stores/users'
 
 interface FormData extends CreateUserRequest {
     status: 'active' | 'inactive'
@@ -22,6 +22,7 @@ interface FormData extends CreateUserRequest {
 
 const router = useRouter()
 const { toast } = useToast()
+const usersStore = useUsersStore()
 
 const formData = ref<FormData>({
     email: '',
@@ -35,28 +36,18 @@ const isLoading = ref(false)
 async function handleSubmit() {
     if (isLoading.value) return
 
-    try {
-        isLoading.value = true
-        await usersApi.createUser({
-            email: formData.value.email,
-            full_name: formData.value.full_name,
-            role: formData.value.role,
-        })
+    isLoading.value = true
 
-        toast({
-            title: 'Success',
-            description: 'User created successfully',
-        })
+    const result = await usersStore.createUser({
+        email: formData.value.email,
+        full_name: formData.value.full_name,
+        role: formData.value.role,
+    })
 
+    isLoading.value = false
+
+    if (result.success) {
         router.push({ name: 'ManageUsers' })
-    } catch (error: any) {
-        toast({
-            title: 'Error',
-            description: error.message || 'Failed to create user',
-            variant: 'destructive',
-        })
-    } finally {
-        isLoading.value = false
     }
 }
 </script>

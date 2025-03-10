@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { useBaseStore, handleApiCall } from "./base";
+import { useBaseStore } from "./base";
 import { exploreApi } from "@/api/explore";
 import type {
   ColumnInfo,
@@ -20,7 +20,7 @@ export function getFormattedTableName(source: any): string {
   if (source?.connection?.database && source?.connection?.table_name) {
     return `${source.connection.database}.${source.connection.table_name}`;
   }
-  return 'logs.vector_logs'; // Default fallback
+  return "logs.vector_logs"; // Default fallback
 }
 
 export interface ExploreState {
@@ -98,7 +98,7 @@ export const useExploreStore = defineStore("explore", () => {
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString(),
       startMs: start,
-      endMs: end
+      endMs: end,
     });
 
     return {
@@ -162,46 +162,53 @@ export const useExploreStore = defineStore("explore", () => {
     }
 
     const sourcesStore = useSourcesStore();
-    const currentSource = sourcesStore.sourcesWithTeams.find(s => s.id === state.data.value.sourceId);
+    const currentSource = sourcesStore.sources.find(
+      (s) => s.id === state.data.value.sourceId
+    );
 
     if (!currentSource) {
       throw new Error("Source not found. Please select a valid source.");
     }
 
-    return await state.withLoading(async () => {
+    state.isLoading.value = true;
+
+    try {
       const timestamps = getTimestamps();
       const sqlQuery = rawSql || state.data.value.rawSql;
-      
+
       // Get time field from source metadata, default to 'timestamp'
-      const timeField = currentSource._meta_ts_field || 'timestamp';
-      
+      const timeField = currentSource._meta_ts_field || "timestamp";
+
       // Format the table name correctly
       const formattedTableName = getFormattedTableName(currentSource);
-      
+
       // Use our SQL parser to add time conditions and limit to the query
       let finalSql = sqlQuery;
-      
+
       // Replace any generic 'logs' table placeholder with the proper formatted table name
-      if (finalSql.includes(' FROM logs ')) {
-        finalSql = finalSql.replace(' FROM logs ', ` FROM ${formattedTableName} `);
+      if (finalSql.includes(" FROM logs ")) {
+        finalSql = finalSql.replace(
+          " FROM logs ",
+          ` FROM ${formattedTableName} `
+        );
       }
-      
+
       // If the query doesn't have a FROM clause, add one with the correct table
-      if (!finalSql.toUpperCase().includes('FROM')) {
+      if (!finalSql.toUpperCase().includes("FROM")) {
         finalSql = `SELECT * FROM ${formattedTableName} WHERE ${finalSql}`;
       }
-      
+
       console.log("SQL after table name formatting:", finalSql);
-      
+
       // Add time range and limit
       const sqlWithTimeRange = addTimeRangeToSQL(
         finalSql,
         timeField,
         timestamps.start / 1000, // Convert to seconds for ClickHouse DateTime
-        timestamps.end / 1000,   // Convert to seconds for ClickHouse DateTime
+        timestamps.end / 1000, // Convert to seconds for ClickHouse DateTime
         state.data.value.limit
       );
-      
+
       // Log the SQL for debugging
       console.log("Original SQL:", sqlQuery);
       console.log("SQL with time range and limit:", sqlWithTimeRange);
@@ -212,10 +219,16 @@ export const useExploreStore = defineStore("explore", () => {
         endSeconds: timestamps.end / 1000,
         startFormatted: new Date(timestamps.start).toISOString(),
         endFormatted: new Date(timestamps.end).toISOString(),
-        startClickhouse: new Date(timestamps.start).toISOString().replace('T', ' ').replace('Z', ''),
-        endClickhouse: new Date(timestamps.end).toISOString().replace('T', ' ').replace('Z', '')
+        startClickhouse: new Date(timestamps.start)
+          .toISOString()
+          .replace("T", " ")
+          .replace("Z", ""),
+        endClickhouse: new Date(timestamps.end)
+          .toISOString()
+          .replace("T", " ")
+          .replace("Z", ""),
       });
-      
+
       // Use the modified SQL
       const params: QueryParams = {
         raw_sql: sqlWithTimeRange,
@@ -224,7 +237,7 @@ export const useExploreStore = defineStore("explore", () => {
         end_timestamp: timestamps.end,
       };
 
-      const result = await handleApiCall<QueryResponse>({
+      const result = await state.callApi<QueryResponse>({
         apiCall: () => exploreApi.getLogs(state.data.value.sourceId, params),
         onSuccess: (response) => {
           if ("error" in response) {
@@ -241,40 +254,51 @@ export const useExploreStore = defineStore("explore", () => {
           state.data.value.columns = [];
           state.data.value.queryStats = DEFAULT_QUERY_STATS;
         },
+        showToast: true,
       });
 
       return result;
-    });
+    } finally {
+      state.isLoading.value = false;
+    }
   }
 
   // Get log context
   async function getLogContext(sourceId: number, params: LogContextRequest) {
-    return await state.withLoading(async () => {
-      const result = await handleApiCall<LogContextResponse>({
-        apiCall: () => exploreApi.getLogContext(sourceId, params),
-        onError: () => {
-          // Just handle the error in the component
-        },
-      });
-
-      return result;
+    return await state.callApi<LogContextResponse>({
+      apiCall: () => exploreApi.getLogContext(sourceId, params),
+      showToast: true,
     });
   }
 
   return {
-    ...state,
-    // Getters
+    // State
+    logs: computed(() => state.data.value.logs),
+    columns: computed(() => state.data.value.columns),
+    queryStats: computed(() => state.data.value.queryStats),
+    sourceId: computed(() => state.data.value.sourceId),
+    limit: computed(() => state.data.value.limit),
+    timeRange: computed(() => state.data.value.timeRange),
+    filterConditions: computed(() => state.data.value.filterConditions),
+    rawSql: computed(() => state.data.value.rawSql),
+
+    // Loading state
+    isLoading: computed(() => state.isLoading.value),
+    error: computed(() => state.error.value),
+
+    // Computed
     hasValidSource,
     hasValidTimeRange,
     canExecuteQuery,
+
     // Actions
     setSource,
     setTimeRange,
     setLimit,
     setFilterConditions,
     setRawSql,
+    resetState,
     executeQuery,
     getLogContext,
-    resetState,
   };
 });

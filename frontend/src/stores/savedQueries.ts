@@ -48,6 +48,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
             state.data.value.selectedTeamId = response[0].id;
           }
         },
+        errorMessage: "Failed to load teams",
       });
       return result;
     });
@@ -64,6 +65,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         onSuccess: (response) => {
           state.data.value.queries = response || [];
         },
+        errorMessage: `Failed to load queries for team ${teamId}`,
       });
       return result;
     });
@@ -76,6 +78,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         onSuccess: (response) => {
           state.data.value.queries = response || [];
         },
+        errorMessage: `Failed to load queries for source ${sourceId}`,
       });
       return result;
     });
@@ -88,6 +91,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         onSuccess: (response) => {
           state.data.value.selectedQuery = response || null;
         },
+        errorMessage: `Failed to load query ${queryId}`,
       });
       return result;
     });
@@ -104,6 +108,8 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
           state.data.value.queries.unshift(response);
           state.data.value.selectedQuery = response;
         },
+        successMessage: "Query created successfully",
+        errorMessage: "Failed to create query",
       });
       return result;
     });
@@ -131,6 +137,8 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
             state.data.value.selectedQuery = response;
           }
         },
+        successMessage: "Query updated successfully",
+        errorMessage: "Failed to update query",
       });
       return result;
     });
@@ -151,6 +159,8 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
             state.data.value.selectedQuery = null;
           }
         },
+        successMessage: "Query deleted successfully",
+        errorMessage: "Failed to delete query",
       });
       return result;
     });

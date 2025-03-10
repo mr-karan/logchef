@@ -21,20 +21,16 @@ func main() {
 
 	// Initialize global logger with default configuration
 	// This will be reconfigured with the proper level once the app loads its config
-	logger.Initialize("info") // Use info level by default
-	log := logger.NewLogger("main")
+	log := logger.New(false)
 
 	// Log startup information
-	log.Info("starting logchef server",
-		"buildInfo", buildString,
-	)
+	log.Info("starting logchef", "buildInfo", buildString)
 
 	// Run the application with the initialized logger
 	if err := app.Run(app.Options{
 		ConfigPath: *configPath,
 		WebFS:      getWebFS(),
 		BuildInfo:  buildString,
-		Logger:     log,
 	}); err != nil {
 		log.Error("application error", "error", err)
 		os.Exit(1)

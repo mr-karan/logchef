@@ -7,8 +7,6 @@ import (
 	"io/fs"
 	"log/slog"
 
-	"github.com/mr-karan/logchef/pkg/logger"
-
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/config"
 
@@ -61,27 +59,27 @@ type Queries struct {
 	CountUserSessions  *sqlx.Stmt `query:"CountUserSessions"`
 
 	// Team queries
-	CreateTeam                *sqlx.Stmt `query:"CreateTeam"`
-	GetTeam                   *sqlx.Stmt `query:"GetTeam"`
-	UpdateTeam                *sqlx.Stmt `query:"UpdateTeam"`
-	DeleteTeam                *sqlx.Stmt `query:"DeleteTeam"`
-	ListTeams                 *sqlx.Stmt `query:"ListTeams"`
-	AddTeamMember             *sqlx.Stmt `query:"AddTeamMember"`
-	GetTeamMember             *sqlx.Stmt `query:"GetTeamMember"`
-	UpdateTeamMemberRole      *sqlx.Stmt `query:"UpdateTeamMemberRole"`
-	RemoveTeamMember          *sqlx.Stmt `query:"RemoveTeamMember"`
-	ListTeamMembers           *sqlx.Stmt `query:"ListTeamMembers"`
+	CreateTeam                 *sqlx.Stmt `query:"CreateTeam"`
+	GetTeam                    *sqlx.Stmt `query:"GetTeam"`
+	UpdateTeam                 *sqlx.Stmt `query:"UpdateTeam"`
+	DeleteTeam                 *sqlx.Stmt `query:"DeleteTeam"`
+	ListTeams                  *sqlx.Stmt `query:"ListTeams"`
+	AddTeamMember              *sqlx.Stmt `query:"AddTeamMember"`
+	GetTeamMember              *sqlx.Stmt `query:"GetTeamMember"`
+	UpdateTeamMemberRole       *sqlx.Stmt `query:"UpdateTeamMemberRole"`
+	RemoveTeamMember           *sqlx.Stmt `query:"RemoveTeamMember"`
+	ListTeamMembers            *sqlx.Stmt `query:"ListTeamMembers"`
 	ListTeamMembersWithDetails *sqlx.Stmt `query:"ListTeamMembersWithDetails"`
-	ListUserTeams             *sqlx.Stmt `query:"ListUserTeams"`
+	ListUserTeams              *sqlx.Stmt `query:"ListUserTeams"`
 
 	// Team source queries
-	AddTeamSource      *sqlx.Stmt `query:"AddTeamSource"`
-	RemoveTeamSource   *sqlx.Stmt `query:"RemoveTeamSource"`
-	ListTeamSources    *sqlx.Stmt `query:"ListTeamSources"`
-	ListSourceTeams    *sqlx.Stmt `query:"ListSourceTeams"`
-	TeamHasSource      *sqlx.Stmt `query:"TeamHasSource"`
+	AddTeamSource       *sqlx.Stmt `query:"AddTeamSource"`
+	RemoveTeamSource    *sqlx.Stmt `query:"RemoveTeamSource"`
+	ListTeamSources     *sqlx.Stmt `query:"ListTeamSources"`
+	ListSourceTeams     *sqlx.Stmt `query:"ListSourceTeams"`
+	TeamHasSource       *sqlx.Stmt `query:"TeamHasSource"`
 	UserHasSourceAccess *sqlx.Stmt `query:"UserHasSourceAccess"`
-	GetTeamByName      *sqlx.Stmt `query:"GetTeamByName"`
+	GetTeamByName       *sqlx.Stmt `query:"GetTeamByName"`
 
 	// Team query queries
 	CreateTeamQuery            *sqlx.Stmt `query:"CreateTeamQuery"`
@@ -98,13 +96,14 @@ type Queries struct {
 }
 
 type Options struct {
+	Logger *slog.Logger
 	Config config.SQLiteConfig
 }
 
 // New creates a new SQLite database connection and initializes the schema
 func New(opts Options) (*DB, error) {
 	// Initialize logger with component tag
-	log := logger.NewLogger("sqlite")
+	log := opts.Logger.With("component", "sqlite")
 
 	// Connect to SQLite with multi-statement support
 	db, err := sqlx.Connect("sqlite", opts.Config.Path+"?_multi_stmt=1")

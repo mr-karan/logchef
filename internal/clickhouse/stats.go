@@ -8,14 +8,14 @@ import (
 
 // TableColumnStat represents statistics for a single column in a ClickHouse table
 type TableColumnStat struct {
-	Database      string  `json:"database"`
-	Table         string  `json:"table"`
-	Column        string  `json:"column"`
-	Compressed    string  `json:"compressed"`
-	Uncompressed  string  `json:"uncompressed"`
-	ComprRatio    float64 `json:"compr_ratio"`
-	RowsCount     uint64  `json:"rows_count"`
-	AvgRowSize    float64 `json:"avg_row_size"`
+	Database     string  `json:"database"`
+	Table        string  `json:"table"`
+	Column       string  `json:"column"`
+	Compressed   string  `json:"compressed"`
+	Uncompressed string  `json:"uncompressed"`
+	ComprRatio   float64 `json:"compr_ratio"`
+	RowsCount    uint64  `json:"rows_count"`
+	AvgRowSize   float64 `json:"avg_row_size"`
 }
 
 // TableStat represents statistics for a ClickHouse table
@@ -71,7 +71,7 @@ func (c *Client) GetTableColumnStats(ctx context.Context, database, table string
 		); err != nil {
 			return nil, fmt.Errorf("error scanning column stats row: %w", err)
 		}
-		
+
 		// Check for NaN values and replace them with 0
 		if math.IsNaN(stat.ComprRatio) {
 			stat.ComprRatio = 0
@@ -79,7 +79,7 @@ func (c *Client) GetTableColumnStats(ctx context.Context, database, table string
 		if math.IsNaN(stat.AvgRowSize) {
 			stat.AvgRowSize = 0
 		}
-		
+
 		stats = append(stats, stat)
 	}
 
@@ -129,12 +129,12 @@ func (c *Client) GetTableStats(ctx context.Context, database, table string) (*Ta
 		); err != nil {
 			return nil, fmt.Errorf("error scanning table stats row: %w", err)
 		}
-		
+
 		// Check for NaN values and replace them with 0
 		if math.IsNaN(stat.ComprRate) {
 			stat.ComprRate = 0
 		}
-		
+
 		stats = append(stats, stat)
 	}
 

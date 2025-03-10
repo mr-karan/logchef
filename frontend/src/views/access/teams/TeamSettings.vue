@@ -9,10 +9,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
-import { teamsApi, type Team, type TeamMember } from '@/api/teams'
+import { type Team, type TeamMember } from '@/api/teams'
 import { type Source } from '@/api/sources'
-import { isErrorResponse, getErrorMessage } from '@/api/types'
-import { format } from 'date-fns'
 import { Loader2, Plus, Trash2, UserPlus, Database } from 'lucide-vue-next'
 import {
     Table,
@@ -40,6 +38,7 @@ import {
 } from '@/components/ui/select'
 import { useUsersStore } from "@/stores/users"
 import { useSourcesStore } from "@/stores/sources"
+import { useTeamsStore } from "@/stores/teams"
 import { formatDate, formatSourceName } from '@/utils/format'
 
 const route = useRoute()
@@ -62,6 +61,7 @@ const usersStore = useUsersStore()
 
 // Add sources store
 const sourcesStore = useSourcesStore()
+const teamsStore = useTeamsStore()
 const teamSources = ref<Source[]>([])
 const showAddSourceDialog = ref(false)
 const selectedSourceId = ref('')
@@ -93,88 +93,39 @@ watch(showAddSourceDialog, async (isOpen) => {
 })
 
 const loadTeam = async () => {
-    try {
-        isLoading.value = true
-        const response = await teamsApi.getTeam(Number(route.params.id))
+    isLoading.value = true
 
-        if (isErrorResponse(response)) {
-            toast({
-                title: 'Error',
-                description: response.data.error,
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
-            })
-            return
-        }
+    const result = await teamsStore.getTeam(Number(route.params.id))
 
-        team.value = response.data
+    if (result.success && result.data) {
+        team.value = result.data
         name.value = team.value.name
         description.value = team.value.description || ''
 
         // Load team members
         await loadTeamMembers()
-    } catch (error) {
-        console.error('Error loading team:', error)
-        toast({
-            title: 'Error',
-            description: getErrorMessage(error),
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
-    } finally {
-        isLoading.value = false
     }
+
+    isLoading.value = false
 }
 
 const loadTeamMembers = async () => {
-    try {
-        const response = await teamsApi.listTeamMembers(Number(route.params.id))
+    if (!team.value) return
 
-        if (isErrorResponse(response)) {
-            toast({
-                title: 'Error',
-                description: response.data.error,
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
-            })
-            return
-        }
+    const result = await teamsStore.listTeamMembers(team.value.id)
 
-        members.value = response.data
-    } catch (error) {
-        console.error('Error loading team members:', error)
-        toast({
-            title: 'Error',
-            description: getErrorMessage(error),
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
+    if (result.success && result.data) {
+        members.value = result.data
     }
 }
 
 const loadTeamSources = async () => {
-    try {
-        const response = await teamsApi.listTeamSources(Number(route.params.id))
+    if (!team.value) return
 
-        if (isErrorResponse(response)) {
-            toast({
-                title: 'Error',
-                description: response.data.error,
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
-            })
-            return
-        }
+    const result = await teamsStore.listTeamSources(team.value.id)
 
-        teamSources.value = response.data
-    } catch (error) {
-        console.error('Error loading team sources:', error)
-        toast({
-            title: 'Error',
-            description: getErrorMessage(error),
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
+    if (result.success && result.data) {
+        teamSources.value = result.data
     }
 }
 
@@ -194,69 +145,30 @@ const handleSubmit = async () => {
 
     isSaving.value = true
 
-    try {
-        const response = await teamsApi.updateTeamAdmin(team.value.id, {
-            name: name.value,
-            description: description.value,
-        })
+    const result = await teamsStore.updateTeam(team.value.id, {
+        name: name.value,
+        description: description.value || '',
+    })
 
-        if (isErrorResponse(response)) {
-            toast({
-                title: 'Error',
-                description: response.data.error,
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
-            })
-            return
-        }
-
-        toast({
-            title: 'Success',
-            description: 'Team updated successfully',
-            duration: TOAST_DURATION.SUCCESS,
-        })
-
+    if (result.success) {
         // Reload team data
         await loadTeam()
-    } catch (error) {
-        console.error('Error updating team:', error)
-        toast({
-            title: 'Error',
-            description: 'Failed to update team. Please try again.',
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
-    } finally {
-        isSaving.value = false
     }
+
+    isSaving.value = false
 }
 
 const handleAddMember = async () => {
     if (!team.value || !selectedUserId.value) return
 
-    try {
-        isSaving.value = true
-        const response = await teamsApi.addTeamMember(team.value.id, {
-            user_id: Number(selectedUserId.value),
-            role: newMemberRole.value as 'admin' | 'member',
-        })
+    isSaving.value = true
 
-        if (isErrorResponse(response)) {
-            toast({
-                title: 'Error',
-                description: response.data.error,
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
-            })
-            return
-        }
+    const result = await teamsStore.addTeamMember(team.value.id, {
+        user_id: Number(selectedUserId.value),
+        role: newMemberRole.value as 'admin' | 'member',
+    })
 
-        toast({
-            title: 'Success',
-            description: 'Member added successfully',
-            duration: TOAST_DURATION.SUCCESS,
-        })
-
+    if (result.success) {
         // Reset form
         selectedUserId.value = ''
         newMemberRole.value = 'member'
@@ -264,135 +176,58 @@ const handleAddMember = async () => {
 
         // Reload members
         await loadTeamMembers()
-    } catch (error) {
-        console.error('Error adding team member:', error)
-        toast({
-            title: 'Error',
-            description: getErrorMessage(error),
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
-    } finally {
-        isSaving.value = false
     }
+
+    isSaving.value = false
 }
 
 const handleRemoveMember = async (userId: string | number) => {
     if (!team.value) return
 
-    try {
-        isSaving.value = true
-        const response = await teamsApi.removeTeamMember(team.value.id, Number(userId))
+    isSaving.value = true
 
-        if (isErrorResponse(response)) {
-            toast({
-                title: 'Error',
-                description: response.data.error,
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
-            })
-            return
-        }
+    const result = await teamsStore.removeTeamMember(team.value.id, Number(userId))
 
-        toast({
-            title: 'Success',
-            description: 'Member removed successfully',
-            duration: TOAST_DURATION.SUCCESS,
-        })
-
+    if (result.success) {
         // Reload members
         await loadTeamMembers()
-    } catch (error) {
-        console.error('Error removing team member:', error)
-        toast({
-            title: 'Error',
-            description: getErrorMessage(error),
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
-    } finally {
-        isSaving.value = false
     }
+
+    isSaving.value = false
 }
 
 const handleAddSource = async () => {
     if (!team.value || !selectedSourceId.value) return
 
-    try {
-        isSaving.value = true
-        const response = await teamsApi.addTeamSource(team.value.id, Number(selectedSourceId.value))
+    isSaving.value = true
 
-        if (isErrorResponse(response)) {
-            toast({
-                title: 'Error',
-                description: response.data.error,
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
-            })
-            return
-        }
+    const result = await teamsStore.addTeamSource(team.value.id, Number(selectedSourceId.value))
 
-        toast({
-            title: 'Success',
-            description: 'Source added successfully',
-            duration: TOAST_DURATION.SUCCESS,
-        })
-
+    if (result.success) {
         // Reset form
         selectedSourceId.value = ''
         showAddSourceDialog.value = false
 
         // Reload sources
         await loadTeamSources()
-    } catch (error) {
-        console.error('Error adding team source:', error)
-        toast({
-            title: 'Error',
-            description: getErrorMessage(error),
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
-    } finally {
-        isSaving.value = false
     }
+
+    isSaving.value = false
 }
 
 const handleRemoveSource = async (sourceId: string | number) => {
     if (!team.value) return
 
-    try {
-        isSaving.value = true
-        const response = await teamsApi.removeTeamSource(team.value.id, Number(sourceId))
+    isSaving.value = true
 
-        if (isErrorResponse(response)) {
-            toast({
-                title: 'Error',
-                description: response.data.error,
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
-            })
-            return
-        }
+    const result = await teamsStore.removeTeamSource(team.value.id, Number(sourceId))
 
-        toast({
-            title: 'Success',
-            description: 'Source removed successfully',
-            duration: TOAST_DURATION.SUCCESS,
-        })
-
+    if (result.success) {
         // Reload sources
         await loadTeamSources()
-    } catch (error) {
-        console.error('Error removing team source:', error)
-        toast({
-            title: 'Error',
-            description: getErrorMessage(error),
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
-    } finally {
-        isSaving.value = false
     }
+
+    isSaving.value = false
 }
 
 onMounted(async () => {
@@ -512,11 +347,11 @@ onMounted(async () => {
                                             <div class="flex flex-col">
                                                 <span>{{ member.email }}</span>
                                                 <span class="text-sm text-muted-foreground">{{ member.full_name
-                                                }}</span>
+                                                    }}</span>
                                             </div>
                                         </TableCell>
                                         <TableCell class="capitalize">{{ member.role }}</TableCell>
-                                        <TableCell>{{ format(new Date(member.created_at), 'PPp') }}</TableCell>
+                                        <TableCell>{{ formatDate(member.created_at) }}</TableCell>
                                         <TableCell class="text-right">
                                             <Button variant="destructive" size="icon" :disabled="isSaving"
                                                 @click="handleRemoveMember(member.user_id)">

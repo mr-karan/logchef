@@ -22,19 +22,19 @@ func (s *Server) handleListTeams(c *fiber.Ctx) error {
 func (s *Server) handleGetTeam(c *fiber.Ctx) error {
 	idStr := c.Params("teamID")
 	if idStr == "" {
-		return SendError(c, fiber.StatusBadRequest, "Team ID is required")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Team ID is required", models.ValidationErrorType)
 	}
 
 	// Convert to integer
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid team ID")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID", models.ValidationErrorType)
 	}
 
 	// Get team from database
 	team, err := s.identityService.GetTeam(c.Context(), models.TeamID(id))
 	if err != nil {
-		return SendError(c, fiber.StatusNotFound, "Team not found")
+		return SendErrorWithType(c, fiber.StatusNotFound, "Team not found", models.NotFoundErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, team)
@@ -47,12 +47,12 @@ func (s *Server) handleCreateTeam(c *fiber.Ctx) error {
 		Description string `json:"description"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid request body")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
 	// Validate request
 	if req.Name == "" {
-		return SendError(c, fiber.StatusBadRequest, "name is required")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Name is required", models.ValidationErrorType)
 	}
 
 	// Get user from context

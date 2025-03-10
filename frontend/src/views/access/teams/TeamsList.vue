@@ -40,6 +40,11 @@ const handleDelete = (team: Team) => {
     showDeleteDialog.value = true
 }
 
+// Function to refresh teams list
+const refreshTeams = async () => {
+    await teamsStore.loadTeams(true) // Force reload
+}
+
 const confirmDelete = async () => {
     if (!teamToDelete.value) return
     const success = await teamsStore.deleteTeam(teamToDelete.value.id)
@@ -75,7 +80,7 @@ const formatDate = (dateString: string) => {
                             Groups of users that have common dashboard and permission needs
                         </CardDescription>
                     </div>
-                    <AddTeam @team-created="teamsStore.loadTeams" />
+                    <AddTeam @team-created="refreshTeams" />
                 </div>
             </CardHeader>
             <CardContent>
@@ -91,7 +96,7 @@ const formatDate = (dateString: string) => {
                     </div>
                     <div v-else-if="teams.length === 0" class="rounded-lg border p-4 text-center">
                         <p class="text-muted-foreground mb-4">No teams found</p>
-                        <AddTeam @team-created="teamsStore.loadTeams">
+                        <AddTeam @team-created="refreshTeams">
                             <Button>
                                 <Plus class="mr-2 h-4 w-4" />
                                 Create Your First Team

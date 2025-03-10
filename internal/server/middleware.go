@@ -11,29 +11,20 @@ func (s *Server) requireAuth(c *fiber.Ctx) error {
 	// Get session ID from cookie
 	sessionIDStr := c.Cookies("session_id")
 	if sessionIDStr == "" {
-		return SendError(c, fiber.StatusForbidden, fiber.Map{
-			"error": "Authentication required",
-			"code":  "session_not_found",
-		})
+		return SendErrorWithType(c, fiber.StatusForbidden, "Authentication required", models.AuthenticationErrorType)
 	}
 
 	// Validate session
 	sessionID := models.SessionID(sessionIDStr)
 	session, err := s.auth.ValidateSession(c.Context(), sessionID)
 	if err != nil {
-		return SendError(c, fiber.StatusForbidden, fiber.Map{
-			"error": err.Error(),
-			"code":  "session_expired",
-		})
+		return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthenticationErrorType)
 	}
 
 	// Get user info
 	user, err := s.auth.GetUser(c.Context(), session.UserID)
 	if err != nil {
-		return SendError(c, fiber.StatusForbidden, fiber.Map{
-			"error": "User not found",
-			"code":  "user_not_found",
-		})
+		return SendErrorWithType(c, fiber.StatusForbidden, "User not found", models.NotFoundErrorType)
 	}
 
 	// Store user and session in context
@@ -52,10 +43,7 @@ func (s *Server) requireAdmin(c *fiber.Ctx) error {
 
 	if user.Role != models.UserRoleAdmin {
 		s.log.Debug("Admin access denied", "user_id", user.ID)
-		return SendError(c, fiber.StatusForbidden, fiber.Map{
-			"error": "Admin access required",
-			"code":  "insufficient_permissions",
-		})
+		return SendErrorWithType(c, fiber.StatusForbidden, "Admin access required", models.AuthorizationErrorType)
 	}
 
 	return c.Next()
@@ -90,10 +78,7 @@ func (s *Server) requireTeamMember(c *fiber.Ctx) error {
 
 	if !isMember {
 		s.log.Debug("Team membership denied", "user_id", user.ID, "team_id", teamID)
-		return SendError(c, fiber.StatusForbidden, fiber.Map{
-			"error": "Team membership required",
-			"code":  "insufficient_permissions",
-		})
+		return SendErrorWithType(c, fiber.StatusForbidden, "Team membership required", models.AuthorizationErrorType)
 	}
 
 	return c.Next()
@@ -112,10 +97,7 @@ func (s *Server) requireTeamSourceAccess(c *fiber.Ctx) error {
 	}
 
 	if !hasAccess {
-		return SendError(c, fiber.StatusForbidden, fiber.Map{
-			"error": "Team does not have access to this source",
-			"code":  "insufficient_permissions",
-		})
+		return SendErrorWithType(c, fiber.StatusForbidden, "Team does not have access to this source", models.AuthorizationErrorType)
 	}
 
 	return c.Next()
@@ -144,10 +126,7 @@ func (s *Server) requireTeamAdmin(c *fiber.Ctx) error {
 
 	if !isAdmin {
 		s.log.Debug("Team admin access denied", "user_id", user.ID, "team_id", teamID)
-		return SendError(c, fiber.StatusForbidden, fiber.Map{
-			"error": "Team admin access required",
-			"code":  "insufficient_permissions",
-		})
+		return SendErrorWithType(c, fiber.StatusForbidden, "Team admin access required", models.AuthorizationErrorType)
 	}
 
 	return c.Next()
@@ -194,5 +173,5 @@ func (s *Server) requireTeamAdminOrGlobalAdmin(c *fiber.Ctx) error {
 
 // notFoundHandler handles 404 for API routes
 func (s *Server) notFoundHandler(c *fiber.Ctx) error {
-	return SendError(c, fiber.StatusNotFound, "API route not found")
+	return SendErrorWithType(c, fiber.StatusNotFound, "API route not found", models.NotFoundErrorType)
 }
