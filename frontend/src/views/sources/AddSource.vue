@@ -251,7 +251,7 @@ const handleSubmit = async () => {
     isSubmitting.value = true
 
     try {
-        const success = await sourcesStore.createSource({
+        const result = await sourcesStore.createSource({
             meta_is_auto_created: createTable.value,
             meta_ts_field: String(metaTSField.value),
             meta_severity_field: metaSeverityField.value ? String(metaSeverityField.value) : "",
@@ -266,7 +266,7 @@ const handleSubmit = async () => {
             ttl_days: Number(ttlDays.value),
         } as CreateSourcePayload)
 
-        if (success) {
+        if (result.success) {
             // Redirect to sources list
             router.push({ name: 'Sources' })
         }

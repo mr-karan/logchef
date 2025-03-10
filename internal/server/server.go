@@ -57,8 +57,7 @@ func New(cfg *config.Config, sourceService *source.Service, logsService *logs.Se
 			}
 
 			// Log the error
-			logger := lgr.Default().With("component", "error_handler")
-			logger.Error("request error", "path", c.Path(), "method", c.Method(), "error", err.Error())
+			app.Logger.Error("request error", "path", c.Path(), "method", c.Method(), "error", err.Error())
 
 			// Return JSON error response
 			return SendError(c, code, err.Error())
@@ -120,9 +119,12 @@ func (s *Server) setupRoutes() {
 		admin.Delete("/teams/:teamID", s.handleDeleteTeam)
 
 		// Source management
+		admin.Get("/sources", s.handleListSources)
+		admin.Get("/sources/:sourceID", s.handleGetSource)
 		admin.Post("/sources", s.handleCreateSource)
 		admin.Post("/sources/validate", s.handleValidateSourceConnection)
 		admin.Delete("/sources/:sourceID", s.handleDeleteSource)
+		admin.Get("/sources/:sourceID/stats", s.handleGetSourceStats)
 	}
 
 	// Personal routes (authenticated user)
@@ -155,7 +157,6 @@ func (s *Server) setupRoutes() {
 			// Team source queries
 			teamSources.Get("/:sourceID", s.requireTeamSourceAccess, s.handleGetTeamSource)
 			teamSources.Post("/:sourceID/logs/query", s.requireTeamSourceAccess, s.handleQueryTeamSourceLogs)
-			teamSources.Get("/:sourceID/stats", s.requireTeamSourceAccess, s.handleGetTeamSourceStats)
 			teamSources.Get("/:sourceID/schema", s.requireTeamSourceAccess, s.handleGetTeamSourceSchema)
 			teamSources.Get("/:sourceID/queries", s.requireTeamSourceAccess, s.handleListTeamSourceQueries)
 			teamSources.Post("/:sourceID/queries", s.requireTeamSourceAccess, s.handleCreateTeamSourceQuery)

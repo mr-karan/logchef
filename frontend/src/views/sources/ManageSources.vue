@@ -30,17 +30,27 @@ const router = useRouter()
 const sourcesStore = useSourcesStore()
 const showDeleteDialog = ref(false)
 const sourceToDelete = ref<Source | null>(null)
+const loadingError = ref<string | null>(null)
 
 const handleDelete = (source: Source) => {
     sourceToDelete.value = source
     showDeleteDialog.value = true
 }
 
+const retryLoading = async () => {
+    loadingError.value = null
+    const result = await sourcesStore.loadSources(true)
+    if (!result.success && result.error) {
+        loadingError.value = result.error
+        console.error("Failed to load sources:", result.error)
+    }
+}
+
 const confirmDelete = async () => {
     if (!sourceToDelete.value) return
 
-    const success = await sourcesStore.deleteSource(sourceToDelete.value.id)
-    if (success) {
+    const result = await sourcesStore.deleteSource(sourceToDelete.value.id)
+    if (result.success) {
         showDeleteDialog.value = false
         sourceToDelete.value = null
     }
@@ -48,7 +58,7 @@ const confirmDelete = async () => {
 
 onMounted(async () => {
     // Load all sources (admin view)
-    await sourcesStore.loadSources()
+    await retryLoading()
 })
 
 const formatDate = (dateString: string) => {
@@ -76,6 +86,14 @@ const formatDate = (dateString: string) => {
             <CardContent>
                 <div v-if="sourcesStore.isLoading" class="text-center py-4">
                     Loading sources...
+                </div>
+                <div v-else-if="loadingError"
+                    class="rounded-lg border border-destructive p-4 text-center text-destructive">
+                    <p class="mb-2">Failed to load sources</p>
+                    <p class="text-sm">{{ loadingError }}</p>
+                    <Button variant="outline" class="mt-4" @click="retryLoading">
+                        Retry
+                    </Button>
                 </div>
                 <div v-else-if="sourcesStore.sources.length === 0" class="rounded-lg border p-4 text-center">
                     <p class="text-muted-foreground mb-4">No sources configured yet</p>

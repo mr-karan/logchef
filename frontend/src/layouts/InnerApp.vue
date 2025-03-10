@@ -173,7 +173,7 @@ const navItems = [
                                             </Avatar>
                                             <div class="grid flex-1 text-left text-sm leading-tight">
                                                 <span class="truncate font-semibold">{{ authStore.user?.full_name
-                                                    }}</span>
+                                                }}</span>
                                                 <span class="truncate text-xs">{{ authStore.user?.email }}</span>
                                             </div>
                                         </div>

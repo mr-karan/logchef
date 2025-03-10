@@ -31,21 +31,21 @@ func (s *Server) handleListSources(c *fiber.Ctx) error {
 func (s *Server) handleGetSource(c *fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	if sourceIDStr == "" {
-		return SendError(c, fiber.StatusBadRequest, "source ID is required")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Source ID is required", models.ValidationErrorType)
 	}
-	
+
 	// Convert string ID to int
 	sourceID, err := strconv.Atoi(sourceIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid source ID")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
 	}
 
 	src, err := s.sourceService.GetSource(c.Context(), models.SourceID(sourceID))
 	if err != nil {
 		if errors.Is(err, source.ErrSourceNotFound) {
-			return SendError(c, fiber.StatusNotFound, "source not found")
+			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
-		return SendError(c, fiber.StatusInternalServerError, "error getting source: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error getting source: "+err.Error(), models.DatabaseErrorType)
 	}
 
 	// Convert to response object to avoid exposing sensitive information
@@ -56,7 +56,7 @@ func (s *Server) handleGetSource(c *fiber.Ctx) error {
 func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 	var req models.CreateSourceRequest
 	if err := c.BodyParser(&req); err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid request body")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
 	// Set default timestamp field if not provided
@@ -73,9 +73,9 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 	if err != nil {
 		var validationErr *source.ValidationError
 		if errors.As(err, &validationErr) {
-			return SendError(c, fiber.StatusBadRequest, validationErr.Error())
+			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
 		}
-		return SendError(c, fiber.StatusInternalServerError, "error creating source: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error creating source: "+err.Error(), models.DatabaseErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusCreated, created.ToResponse())
@@ -87,7 +87,7 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 	if sourceIDStr == "" {
 		return SendError(c, fiber.StatusBadRequest, "source ID is required")
 	}
-	
+
 	// Convert string ID to int
 	sourceID, err := strconv.Atoi(sourceIDStr)
 	if err != nil {
@@ -165,7 +165,7 @@ func (s *Server) handleGetSourceStats(c *fiber.Ctx) error {
 	if sourceIDStr == "" {
 		return SendError(c, fiber.StatusBadRequest, "source ID is required")
 	}
-	
+
 	// Convert string ID to int
 	sourceID, err := strconv.Atoi(sourceIDStr)
 	if err != nil {

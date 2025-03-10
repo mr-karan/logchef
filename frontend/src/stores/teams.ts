@@ -1,189 +1,213 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import { teamsApi, type Team, type CreateTeamRequest } from "@/api/teams";
-import { isErrorResponse, getErrorMessage } from "@/api/types";
-import { useToast } from "@/components/ui/toast/use-toast";
-import { TOAST_DURATION } from "@/lib/constants";
+import { useBaseStore } from "./base";
+import {
+  teamsApi,
+  type Team,
+  type CreateTeamRequest,
+  type TeamMember,
+  type UpdateTeamRequest,
+} from "@/api/teams";
+import type { Source } from "@/api/sources";
 
 export interface TeamWithMemberCount extends Team {
   memberCount: number;
 }
 
-export const useTeamsStore = defineStore("teams", () => {
-  const teams = ref<TeamWithMemberCount[]>([]);
-  const isLoading = ref(false);
-  const error = ref<string | null>(null);
-  const currentTeamId = ref<number | null>(null);
-  const { toast } = useToast();
+interface TeamsState {
+  teams: TeamWithMemberCount[];
+  currentTeamId: number | null;
+}
 
-  // Computed property for the current team
+export const useTeamsStore = defineStore("teams", () => {
+  const state = useBaseStore<TeamsState>({
+    teams: [],
+    currentTeamId: null,
+  });
+
+  // Computed properties
+  const teams = computed(() => state.data.value.teams);
+  const currentTeamId = computed(() => state.data.value.currentTeamId);
   const currentTeam = computed(() =>
     currentTeamId.value
       ? teams.value.find((t) => t.id === currentTeamId.value)
       : null
   );
 
-  async function loadTeams() {
-    if (isLoading.value) return;
-
-    try {
-      isLoading.value = true;
-      error.value = null;
-      // Only call the API if we don't already have teams loaded
-      if (teams.value.length === 0) {
-        const response = await teamsApi.listUserTeams();
-
-        if (isErrorResponse(response)) {
-          error.value = response.data.error;
-          toast({
-            title: "Error",
-            description: response.data.error,
-            variant: "destructive",
-            duration: TOAST_DURATION.ERROR,
-          });
-          teams.value = [];
-          return;
-        }
-
-        teams.value = response.data.map((team) => ({
-          ...team,
-          memberCount: team.member_count,
-        }));
-      }
-
-      // Set current team if none is selected and we have teams
-      if (!currentTeamId.value && teams.value.length > 0) {
-        setCurrentTeam(teams.value[0].id);
-      }
-    } catch (err) {
-      error.value = getErrorMessage(err);
-      toast({
-        title: "Error",
-        description: getErrorMessage(err),
-        variant: "destructive",
-        duration: TOAST_DURATION.ERROR,
-      });
-      teams.value = [];
-    } finally {
-      isLoading.value = false;
+  async function loadTeams(forceReload = false) {
+    // Skip if we already have teams and no force reload
+    if (teams.value.length > 0 && !forceReload) {
+      return { success: true, data: teams.value };
     }
+
+    return await state.callApi<TeamWithMemberCount[]>({
+      apiCall: () => teamsApi.listUserTeams(),
+      onSuccess: (response) => {
+        state.data.value.teams = response.map((team) => ({
+          ...team,
+          memberCount: team.member_count ?? 0,
+        }));
+
+        // Set current team if none is selected and we have teams
+        if (
+          !state.data.value.currentTeamId &&
+          state.data.value.teams.length > 0
+        ) {
+          state.data.value.currentTeamId = state.data.value.teams[0].id;
+        }
+      },
+      showToast: true,
+    });
   }
 
   // Set the current team
   function setCurrentTeam(teamId: number) {
-    currentTeamId.value = teamId;
+    state.data.value.currentTeamId = teamId;
   }
 
   async function createTeam(data: CreateTeamRequest) {
-    try {
-      const response = await teamsApi.createTeam(data);
+    const result = await state.callApi<Team>({
+      apiCall: () => teamsApi.createTeam(data),
+      successMessage: "Team created successfully",
+    });
 
-      if (isErrorResponse(response)) {
-        toast({
-          title: "Error",
-          description: response.data.error,
-          variant: "destructive",
-          duration: TOAST_DURATION.ERROR,
-        });
-        return false;
-      }
-
-      toast({
-        title: "Success",
-        description: "Team created successfully",
-        duration: TOAST_DURATION.SUCCESS,
-      });
-
+    if (result.success && result.data) {
       // Reload teams to get fresh data with member counts
-      await loadTeams();
-      return true;
-    } catch (error) {
-      console.error("Error creating team:", error);
-      toast({
-        title: "Error",
-        description: "Failed to create team",
-        variant: "destructive",
-        duration: TOAST_DURATION.ERROR,
-      });
-      return false;
+      await loadTeams(true);
+
+      // If we have teams and no current team is selected, select the newly created one
+      if (
+        state.data.value.teams.length > 0 &&
+        !state.data.value.currentTeamId
+      ) {
+        const createdTeam = state.data.value.teams.find(
+          (t) => t.id === result.data?.id
+        );
+        if (createdTeam) {
+          setCurrentTeam(createdTeam.id);
+        }
+      }
     }
+
+    return result;
+  }
+
+  async function getTeam(teamId: number) {
+    return await state.callApi<Team>({
+      apiCall: () => teamsApi.getTeam(teamId),
+      showToast: true,
+    });
+  }
+
+  async function updateTeam(teamId: number, data: UpdateTeamRequest) {
+    return await state.callApi<Team>({
+      apiCall: () => teamsApi.updateTeam(teamId, data),
+      successMessage: "Team updated successfully",
+      onSuccess: async () => {
+        // Reload teams to get fresh data
+        await loadTeams(true);
+      },
+    });
   }
 
   async function deleteTeam(teamId: number) {
-    if (isLoading.value) return false;
+    return await state.callApi<{ message: string }>({
+      apiCall: () => teamsApi.deleteTeam(teamId),
+      successMessage: "Team deleted successfully",
+      onSuccess: () => {
+        // Remove from local state
+        state.data.value.teams = state.data.value.teams.filter(
+          (t) => t.id !== teamId
+        );
 
-    try {
-      isLoading.value = true;
-      error.value = null;
-      const response = await teamsApi.deleteTeam(teamId);
+        // If this was the current team, reset current team
+        if (state.data.value.currentTeamId === teamId) {
+          state.data.value.currentTeamId =
+            state.data.value.teams.length > 0
+              ? state.data.value.teams[0].id
+              : null;
+        }
+      },
+    });
+  }
 
-      if (isErrorResponse(response)) {
-        error.value = response.data.error;
-        toast({
-          title: "Error",
-          description: response.data.error,
-          variant: "destructive",
-          duration: TOAST_DURATION.ERROR,
-        });
-        return false;
-      }
+  async function listTeamMembers(teamId: number) {
+    return await state.callApi<TeamMember[]>({
+      apiCall: () => teamsApi.listTeamMembers(teamId),
+      showToast: true,
+    });
+  }
 
-      // Remove from local state
-      teams.value = teams.value.filter((t) => t.id !== teamId);
+  async function addTeamMember(
+    teamId: number,
+    data: { user_id: number; role: "admin" | "member" }
+  ) {
+    return await state.callApi<TeamMember>({
+      apiCall: () => teamsApi.addTeamMember(teamId, data),
+      successMessage: "Member added successfully",
+    });
+  }
 
-      // If this was the current team, reset current team
-      if (currentTeamId.value === teamId) {
-        currentTeamId.value = teams.value.length > 0 ? teams.value[0].id : null;
-      }
+  async function removeTeamMember(teamId: number, userId: number) {
+    return await state.callApi<{ message: string }>({
+      apiCall: () => teamsApi.removeTeamMember(teamId, userId),
+      successMessage: "Member removed successfully",
+    });
+  }
 
-      toast({
-        title: "Success",
-        description: "Team deleted successfully",
-        duration: TOAST_DURATION.SUCCESS,
-      });
+  async function listTeamSources(teamId: number) {
+    return await state.callApi<Source[]>({
+      apiCall: () => teamsApi.listTeamSources(teamId),
+      showToast: true,
+    });
+  }
 
-      return true;
-    } catch (error) {
-      console.error("Error deleting team:", error);
-      return false;
-    } finally {
-      isLoading.value = false;
-    }
+  async function addTeamSource(teamId: number, sourceId: number) {
+    return await state.callApi<Source>({
+      apiCall: () => teamsApi.addTeamSource(teamId, sourceId),
+      successMessage: "Source added successfully",
+    });
+  }
+
+  async function removeTeamSource(teamId: number, sourceId: number) {
+    return await state.callApi<{ message: string }>({
+      apiCall: () => teamsApi.removeTeamSource(teamId, sourceId),
+      successMessage: "Source removed successfully",
+    });
   }
 
   // Get team source IDs - helper method for filtering
   async function getTeamSourceIds(teamId: number) {
-    if (isLoading.value) return [];
+    const result = await state.callApi<Source[]>({
+      apiCall: () => teamsApi.listTeamSources(teamId),
+      showToast: false,
+    });
 
-    try {
-      isLoading.value = true;
-      error.value = null;
-      const response = await teamsApi.listTeamSources(teamId);
-
-      if (isErrorResponse(response)) {
-        error.value = response.data.error;
-        return [];
-      }
-
-      return (response.data || []).map((source) => source.id);
-    } catch (error) {
-      console.error("Error getting team sources:", error);
-      return [];
-    } finally {
-      isLoading.value = false;
+    if (result.success && result.data) {
+      return result.data.map((source) => source.id);
     }
+
+    return [];
   }
 
   return {
     teams,
-    isLoading,
-    error,
+    isLoading: state.isLoading,
+    error: state.error,
     currentTeamId,
     currentTeam,
     loadTeams,
     createTeam,
+    getTeam,
+    updateTeam,
     deleteTeam,
     setCurrentTeam,
+    listTeamMembers,
+    addTeamMember,
+    removeTeamMember,
+    listTeamSources,
+    addTeamSource,
+    removeTeamSource,
     getTeamSourceIds,
   };
 });

@@ -175,6 +175,14 @@ async function handleTeamChange(teamId: string) {
   const parsedTeamId = parseInt(teamId)
   teamsStore.setCurrentTeam(parsedTeamId)
 
+  // Update URL to reflect team change
+  router.replace({
+    query: {
+      ...route.query,
+      team: parsedTeamId.toString()
+    }
+  })
+
   // Load sources for the selected team
   await sourcesStore.loadTeamSources(parsedTeamId)
 
@@ -189,6 +197,14 @@ async function handleTeamChange(teamId: string) {
       // Select the first source if current one isn't available
       exploreStore.setSource(sourcesStore.teamSources[0].id)
       await fetchSourceDetails(sourcesStore.teamSources[0].id)
+      
+      // Update URL with new source
+      router.replace({
+        query: {
+          ...route.query,
+          source: sourcesStore.teamSources[0].id.toString()
+        }
+      })
     }
   } else {
     // No sources in this team
@@ -620,15 +636,44 @@ onBeforeUnmount(() => {
   </div>
 
   <!-- Show empty state when no sources are available -->
-  <div v-else-if="showEmptyState" class="flex flex-col items-center justify-center h-[calc(100vh-12rem)] gap-4">
-    <div class="text-center space-y-2">
-      <h2 class="text-2xl font-semibold tracking-tight">No Sources Found</h2>
-      <p class="text-muted-foreground">You need to configure a log source before you can explore logs.</p>
+  <div v-else-if="showEmptyState" class="flex flex-col h-[calc(100vh-12rem)]">
+    <!-- Team selector bar -->
+    <div class="border-b pb-3 mb-2">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-2 text-sm">
+          <Select :model-value="teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : ''"
+            @update:model-value="handleTeamChange" class="h-8 min-w-[160px]">
+            <SelectTrigger>
+              <SelectValue placeholder="Select a team">{{ selectedTeamName }}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id.toString()">
+                {{ team.name }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
     </div>
-    <Button @click="router.push({ name: 'NewSource' })">
-      <Plus class="mr-2 h-4 w-4" />
-      Add Your First Source
-    </Button>
+    
+    <!-- Empty state content -->
+    <div class="flex flex-col items-center justify-center flex-1 gap-4">
+      <div class="text-center space-y-2">
+        <h2 class="text-2xl font-semibold tracking-tight">No Sources Found in {{ selectedTeamName }}</h2>
+        <p class="text-muted-foreground">
+          This team doesn't have any log sources configured. You can add a source or switch to another team.
+        </p>
+      </div>
+      <div class="flex gap-3">
+        <Button @click="router.push({ name: 'NewSource' })">
+          <Plus class="mr-2 h-4 w-4" />
+          Add Source
+        </Button>
+        <Button variant="outline" v-if="teamsStore.teams.length > 1">
+          Try switching teams using the selector above
+        </Button>
+      </div>
+    </div>
   </div>
 
   <!-- Main content when not loading -->

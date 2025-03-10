@@ -94,14 +94,12 @@ export const sourcesApi = {
     return response.data;
   },
 
-
   async listTeamSources(teamId: number) {
     const response = await api.get<APIResponse<Source[]>>(
       `/teams/${teamId}/sources`
     );
     return response.data;
   },
-
 
   async getTeamSource(teamId: number, sourceId: number) {
     const response = await api.get<APIResponse<Source>>(
@@ -111,7 +109,10 @@ export const sourcesApi = {
   },
 
   async createSource(payload: CreateSourcePayload) {
-    const response = await api.post<APIResponse<Source>>("/admin/sources", payload);
+    const response = await api.post<APIResponse<Source>>(
+      "/admin/sources",
+      payload
+    );
     return response.data;
   },
 
@@ -147,7 +148,9 @@ export const sourcesApi = {
     const response = await api.get<
       APIResponse<TeamGroupedQuery[] | SavedTeamQuery[]>
     >(
-      `/admin/sources/${sourceId}/queries${groupByTeam ? "?group_by_team=true" : ""}`
+      `/admin/sources/${sourceId}/queries${
+        groupByTeam ? "?group_by_team=true" : ""
+      }`
     );
     return response.data;
   },
@@ -185,10 +188,9 @@ export const sourcesApi = {
   },
 
   async validateSourceConnection(connectionInfo: ConnectionRequestInfo) {
-    const response = await api.post<APIResponse<{ success: boolean; message: string }>>(
-      "/admin/sources/validate",
-      connectionInfo
-    );
+    const response = await api.post<
+      APIResponse<{ success: boolean; message: string }>
+    >("/admin/sources/validate", connectionInfo);
     return response.data;
   },
 };

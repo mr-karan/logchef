@@ -186,7 +186,7 @@ func (s *TeamQueryService) CreateTeamSourceQuery(ctx context.Context, teamID mod
 		SourceID:     sourceID,
 		QueryContent: queryContent,
 	}
-	
+
 	// Create the query using the team query service
 	return s.CreateTeamQuery(ctx, teamID, req)
 }

@@ -10,13 +10,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { useAuthStore } from '@/stores/auth'
-import { usersApi } from '@/api/users'
+import { useUsersStore } from '@/stores/users'
 import { Loader2 } from 'lucide-vue-next'
 import { formatDate } from '@/utils/format'
-import { handleApiCall } from '@/stores/base'
 
 const { toast } = useToast()
 const authStore = useAuthStore()
+const usersStore = useUsersStore()
 
 // Form state
 const fullName = ref('')
@@ -37,29 +37,27 @@ onMounted(() => {
 })
 
 const handleSubmit = async () => {
-    if (isSubmitting.value) return
+    if (isSubmitting.value || !authStore.user) return
 
     isSubmitting.value = true
 
-    try {
-        const response = await handleApiCall({
-            apiCall: () => usersApi.updateUser(authStore.user?.id || '', {
-                full_name: fullName.value,
-            }),
-            successMessage: 'Profile updated successfully',
-        })
+    const result = await usersStore.updateUser(authStore.user.id, {
+        full_name: fullName.value,
+    })
 
-        if (response.success && response.data?.user) {
-            // Update the local user state
-            authStore.$patch((state) => {
-                if (state.user) {
-                    state.user.full_name = response.data?.user?.full_name || state.user.full_name
+    if (result.success && result.data?.user) {
+        // Update the local user state in auth store
+        if (authStore.user) {
+            authStore.$patch({
+                user: {
+                    ...authStore.user,
+                    full_name: result.data.user.full_name
                 }
-            })
+            });
         }
-    } finally {
-        isSubmitting.value = false
     }
+
+    isSubmitting.value = false
 }
 
 const handleUpdatePreferences = () => {

@@ -13,17 +13,10 @@ export const authApi = {
    * Called on app initialization and after page refresh
    */
   async getSession(): Promise<APIResponse<SessionResponse>> {
-    try {
-      console.log("Making session request...");
-      const response = await api.get<APIResponse<SessionResponse>>(
-        "/auth/session"
-      );
-      console.log("Session response received:", response.data);
-      return response.data;
-    } catch (error) {
-      console.error("Error getting session:", error);
-      throw error;
-    }
+    const response = await api.get<APIResponse<SessionResponse>>(
+      "/auth/session"
+    );
+    return response.data;
   },
 
   /**
@@ -50,17 +43,10 @@ export const authApi = {
    * Calls backend to invalidate session and clear cookies
    */
   async logout(): Promise<APIResponse<void>> {
-    try {
-      const response = await api.post<APIResponse<void>>("/auth/logout");
-      // Clear any local storage
-      sessionStorage.clear();
-      localStorage.clear();
-      return response.data;
-    } catch (error) {
-      // Even if backend call fails, clear local data
-      sessionStorage.clear();
-      localStorage.clear();
-      throw error;
-    }
+    const response = await api.post<APIResponse<void>>("/auth/logout");
+    // Clear any local storage
+    sessionStorage.clear();
+    localStorage.clear();
+    return response.data;
   },
 };

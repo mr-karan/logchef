@@ -1,33 +1,31 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import type { Session, User } from "@/types";
-import { authApi } from "@/api/auth";
+import { authApi, type SessionResponse } from "@/api/auth";
 import router from "@/router";
-import type { AxiosError } from "axios";
+import { useBaseStore } from "./base";
 
-interface SessionResponse {
-  status: "success";
-  data: {
-    user: User;
-    session: Session;
-  };
+interface AuthState {
+  user: User | null;
+  session: Session | null;
+  isInitialized: boolean;
+  isInitializing: boolean;
 }
-
-interface ErrorResponse {
-  status: "error";
-  data: {
-    error: string;
-  };
-}
-
-type ApiResponse = SessionResponse | ErrorResponse;
 
 export const useAuthStore = defineStore("auth", () => {
-  const user = ref<User | null>(null);
-  const session = ref<Session | null>(null);
+  const state = useBaseStore<AuthState>({
+    user: null,
+    session: null,
+    isInitialized: false,
+    isInitializing: false,
+  });
+
+  // Computed properties
+  const user = computed(() => state.data.value.user);
+  const session = computed(() => state.data.value.session);
   const isAuthenticated = computed(() => !!user.value);
-  const isInitialized = ref(false);
-  const isInitializing = ref(false);
+  const isInitialized = computed(() => state.data.value.isInitialized);
+  const isInitializing = computed(() => state.data.value.isInitializing);
 
   // Initialize auth state from session cookie
   async function initialize() {
@@ -36,61 +34,55 @@ export const useAuthStore = defineStore("auth", () => {
     }
 
     console.log("Initializing auth store...");
-    isInitializing.value = true;
+    state.data.value.isInitializing = true;
 
-    try {
-      console.log("Fetching session...");
-      const response = (await authApi.getSession()) as ApiResponse;
-      console.log("Session response:", response);
-
-      if (response.status === "success") {
-        user.value = response.data.user;
-        session.value = response.data.session;
+    const result = await state.callApi<SessionResponse>({
+      apiCall: () => authApi.getSession(),
+      showToast: false,
+      onSuccess: (response) => {
+        state.data.value.user = response.user;
+        state.data.value.session = response.session;
         console.log("Auth initialized successfully:", {
           user: user.value,
           isAuthenticated: isAuthenticated.value,
         });
-      } else {
+      },
+      onError: () => {
         // Handle session not found gracefully
-        await clearState();
+        clearState();
         console.log("No active session found");
-      }
-    } catch (error) {
-      // Only log error if not a 401 (unauthorized)
-      const axiosError = error as AxiosError;
-      if (axiosError.response?.status !== 401) {
-        console.error("Failed to initialize auth:", error);
-      }
-      await clearState();
-    } finally {
-      isInitialized.value = true;
-      isInitializing.value = false;
-    }
+      },
+    });
+
+    state.data.value.isInitialized = true;
+    state.data.value.isInitializing = false;
+
+    return result;
   }
 
   // Clear auth state
-  async function clearState() {
-    user.value = null;
-    session.value = null;
+  function clearState() {
+    state.data.value.user = null;
+    state.data.value.session = null;
   }
 
   // Start OIDC login flow
-  async function startLogin(redirectPath?: string) {
+  function startLogin(redirectPath?: string) {
     window.location.href = authApi.getLoginUrl(redirectPath);
   }
 
   // Logout user
   async function logout() {
-    try {
-      // Call backend logout endpoint
-      await authApi.logout();
-    } catch (error) {
-      console.error("Failed to logout:", error);
-    } finally {
-      // Always clear state and redirect to login
-      await clearState();
-      router.push({ name: "Login" });
-    }
+    const result = await state.callApi({
+      apiCall: () => authApi.logout(),
+      showToast: false,
+    });
+
+    // Always clear state and redirect to login, regardless of API result
+    clearState();
+    router.push({ name: "Login" });
+
+    return result;
   }
 
   return {
@@ -98,6 +90,7 @@ export const useAuthStore = defineStore("auth", () => {
     session,
     isAuthenticated,
     isInitialized,
+    isInitializing,
     initialize,
     startLogin,
     logout,

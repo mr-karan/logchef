@@ -246,22 +246,19 @@ func (s *Server) handleGetSession(c *fiber.Ctx) error {
 	// Get session ID from cookie
 	sessionIDStr := c.Cookies("session_id")
 	if sessionIDStr == "" {
-		return SendError(c, fiber.StatusUnauthorized, fiber.Map{
-			"error": "No session found",
-			"code":  "session_not_found",
-		})
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "No session found", models.AuthenticationErrorType)
 	}
 
 	// Validate session
 	sessionID := models.SessionID(sessionIDStr)
 	session, err := s.auth.ValidateSession(c.Context(), sessionID)
 	if err != nil {
+		var errorType models.ErrorType
 		var statusCode int
-		var errorCode string
 
 		if errors.Is(err, auth.ErrSessionNotFound) || errors.Is(err, auth.ErrSessionExpired) {
 			statusCode = fiber.StatusUnauthorized
-			errorCode = "session_invalid"
+			errorType = models.AuthenticationErrorType
 
 			// Clear the invalid session cookie
 			c.Cookie(&fiber.Cookie{
@@ -275,19 +272,16 @@ func (s *Server) handleGetSession(c *fiber.Ctx) error {
 			})
 		} else {
 			statusCode = fiber.StatusInternalServerError
-			errorCode = "internal_error"
+			errorType = models.GeneralErrorType
 		}
 
-		return SendError(c, statusCode, fiber.Map{
-			"error": err.Error(),
-			"code":  errorCode,
-		})
+		return SendErrorWithType(c, statusCode, err.Error(), errorType)
 	}
 
 	// Get user info
 	user, err := s.auth.GetUser(c.Context(), session.UserID)
 	if err != nil {
-		return SendError(c, fiber.StatusInternalServerError, "Failed to get user information")
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get user information", models.DatabaseErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{

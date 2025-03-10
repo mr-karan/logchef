@@ -122,33 +122,6 @@ func (s *Server) handleQueryTeamSourceLogs(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, result)
 }
 
-// handleGetTeamSourceStats handles GET /api/v1/teams/:teamId/sources/:sourceId/stats
-func (s *Server) handleGetTeamSourceStats(c *fiber.Ctx) error {
-	teamID := c.Params("teamId")
-	sourceIDStr := c.Params("sourceId")
-	if teamID == "" || sourceIDStr == "" {
-		return SendError(c, fiber.StatusBadRequest, "team ID and source ID are required")
-	}
-
-	// Convert string to int for SourceID
-	sourceIDInt, err := strconv.Atoi(sourceIDStr)
-	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
-	}
-	sourceID := models.SourceID(sourceIDInt)
-
-	// Get source stats - authorization already checked by middleware
-	stats, err := s.logsService.GetSourceStats(c.Context(), sourceID)
-	if err != nil {
-		if errors.Is(err, logs.ErrSourceNotFound) {
-			return SendError(c, fiber.StatusNotFound, "source not found")
-		}
-		return fmt.Errorf("error getting source stats: %w", err)
-	}
-
-	return SendSuccess(c, fiber.StatusOK, stats)
-}
-
 // handleGetTeamSourceSchema handles GET /api/v1/teams/:teamId/sources/:sourceId/schema
 func (s *Server) handleGetTeamSourceSchema(c *fiber.Ctx) error {
 	teamID := c.Params("teamId")

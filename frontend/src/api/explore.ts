@@ -76,29 +76,25 @@ export interface LogContextResponse {
 }
 
 export const exploreApi = {
-  async getLogs(sourceId: number, params: QueryParams) {
-    try {
-      const response = await api.post<APIResponse<QueryResponse>>(
-        `/sources/${sourceId}/logs/search`,
-        params
-      );
-      return response.data;
-    } catch (error) {
-      console.error("Error fetching logs:", error);
-      throw error;
-    }
+  async getLogs(
+    sourceId: number,
+    params: QueryParams
+  ): Promise<APIResponse<QueryResponse>> {
+    const response = await api.post<APIResponse<QueryResponse>>(
+      `/sources/${sourceId}/logs/search`,
+      params
+    );
+    return response.data;
   },
 
-  async getLogContext(sourceId: number, params: LogContextRequest) {
-    try {
-      const response = await api.post<APIResponse<LogContextResponse>>(
-        `/sources/${sourceId}/logs/context`,
-        params
-      );
-      return response.data;
-    } catch (error) {
-      console.error("Error fetching log context:", error);
-      throw error;
-    }
+  async getLogContext(
+    sourceId: number,
+    params: LogContextRequest
+  ): Promise<APIResponse<LogContextResponse>> {
+    const response = await api.post<APIResponse<LogContextResponse>>(
+      `/sources/${sourceId}/logs/context`,
+      params
+    );
+    return response.data;
   },
 };

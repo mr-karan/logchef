@@ -48,8 +48,6 @@ type Options struct {
 	WebFS http.FileSystem
 	// Build information
 	BuildInfo string
-	// Logger to use (optional, will create one if nil)
-	Logger *slog.Logger
 }
 
 // New creates a new App instance
@@ -60,21 +58,7 @@ func New(opts Options) (*App, error) {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Use provided logger or create a new one
-	log := opts.Logger
-	if log == nil {
-		// This should not happen if logger is properly initialized in main.go
-		log = slog.Default().With("component", "app")
-	}
-
-	// Reconfigure global logger with config settings
-	if cfg.Logging.Level != "" {
-		// Reconfigure logger with the level from config
-		logger.Initialize(cfg.Logging.Level)
-
-		// Update the app logger to use the reconfigured global logger
-		log = logger.NewLogger("app")
-	}
+	log := logger.New(cfg.Logging.Level == "debug")
 
 	// Create app instance
 	app := &App{

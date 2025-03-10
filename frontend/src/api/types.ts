@@ -7,7 +7,9 @@ export interface APISuccessResponse<T> {
 
 export interface APIErrorResponse {
   status: "error";
-  data: { error: string };
+  message: string;
+  error_type: string;
+  data?: any;
 }
 
 export type APIResponse<T = any> = APISuccessResponse<T> | APIErrorResponse;
@@ -64,37 +66,9 @@ export function isSuccessResponse<T>(
   return response.status === "success";
 }
 
+// Import from our new error handler utility
+import { formatErrorMessage } from "@/api/error-handler";
+
 export function getErrorMessage(error: unknown): string {
-  // If it's an API response object
-  if (error && typeof error === "object" && "status" in error) {
-    const response = error as APIResponse<unknown>;
-    if (isErrorResponse(response)) {
-      return response.data.error;
-    }
-  }
-
-  // If it's an Axios error
-  if (error && typeof error === "object" && "isAxiosError" in error) {
-    const axiosError = error as AxiosError<APIResponse<unknown>>;
-
-    // Network error (no response received)
-    if (!axiosError.response) {
-      return "Network error: Unable to connect to the server";
-    }
-
-    // Server responded with error
-    if (axiosError.response.data && isErrorResponse(axiosError.response.data)) {
-      return axiosError.response.data.data.error;
-    }
-
-    // Fallback to status text
-    return `Server error: ${axiosError.response.statusText || "Unknown error"}`;
-  }
-
-  // For any other type of error
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "An unexpected error occurred";
+  return formatErrorMessage(error);
 }
