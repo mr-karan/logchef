@@ -189,12 +189,18 @@ watch(activeMode, (newMode, oldMode) => {
 
         console.log('Translated SQL for display:', sqlCode.value);
       } else {
+        // Use default SQL query for empty DSL
         sqlCode.value = getDefaultSQLQuery(props.tableName);
+        console.log('Using default SQL query for empty DSL:', sqlCode.value);
       }
     } catch (error) {
       console.error('Error translating to SQL:', error);
       sqlCode.value = getDefaultSQLQuery(props.tableName);
     }
+  } else if (newMode === 'dsl' && sqlCode.value.trim()) {
+    // When switching from SQL to DSL, we could try to convert SQL to DSL
+    // but for now, we'll just keep the DSL code as is
+    console.log('Switching from SQL to DSL, keeping existing DSL code');
   }
 
   emit('modeChange', newMode)
@@ -316,7 +322,26 @@ const getBooleanOperatorSuggestions = (range) => {
 
 // Get field suggestions
 const getFieldSuggestions = (range) => {
-  const availableFieldNames = props.availableFields.map(field => field.name)
+  console.log('Getting field suggestions, available fields:', props.availableFields)
+  
+  if (!props.availableFields || props.availableFields.length === 0) {
+    console.warn('No available fields for suggestions')
+    return []
+  }
+  
+  const availableFieldNames = props.availableFields.map(field => {
+    // Create more detailed field suggestions with documentation
+    return {
+      label: field.name,
+      sortText: field.isTimestamp ? '0' + field.name : 
+                field.isSeverity ? '1' + field.name : '2' + field.name,
+      insertText: field.name,
+      detail: field.type || 'unknown',
+      documentation: field.isTimestamp ? 'Timestamp field' : 
+                     field.isSeverity ? 'Severity field' : 
+                     `Field type: ${field.type || 'unknown'}`
+    }
+  })
 
   return getSuggestionsFromList({
     range: range,
@@ -501,6 +526,9 @@ const getSuggestions = async (word, position, textBeforeCursor) => {
       // Analyze query to determine context for LogchefQL
       const analysis = analyzeQueryForCompletions(textBeforeCursor, position.column - 1)
 
+      console.log('LogchefQL completion context:', analysis)
+      console.log('Available fields for suggestions:', props.availableFields)
+
       // Provide appropriate suggestions based on context
       if (analysis.needsOperator) {
         suggestions = getOperatorSuggestions(analysis.fieldName, position)
@@ -524,6 +552,7 @@ const getSuggestions = async (word, position, textBeforeCursor) => {
     }
   }
 
+  console.log('Returning suggestions:', suggestions.length)
   return {
     suggestions: suggestions,
     incomplete: incomplete,
@@ -703,6 +732,7 @@ const getSQLSuggestions = (word, position, textBeforeCursor, range) => {
 function registerLogchefql() {
   // Only register if it doesn't already exist
   if (!monaco.languages.getLanguages().some(lang => lang.id === 'logchefql')) {
+    console.log('Registering LogchefQL language')
     monaco.languages.register({ id: "logchefql" });
 
     monaco.languages.setLanguageConfiguration("logchefql", {
@@ -711,6 +741,7 @@ function registerLogchefql() {
         { open: '"', close: '"' },
         { open: "'", close: "'" },
       ],
+      wordPattern: /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
     });
 
     // Register semantic tokens provider
@@ -740,23 +771,25 @@ function registerLogchefql() {
       },
       releaseDocumentSemanticTokens: () => { }
     });
-
-    // Register completion provider for LogchefQL
-    monaco.languages.registerCompletionItemProvider('logchefql', {
-      provideCompletionItems: async (model, position) => {
-        let word = model.getWordUntilPosition(position)
-        const textBeforeCursorRange = {
-          startLineNumber: 1,
-          endLineNumber: position.lineNumber,
-          startColumn: 1,
-          endColumn: position.column,
-        }
-        const textBeforeCursor = model.getValueInRange(textBeforeCursorRange)
-        return await getSuggestions(word, position, textBeforeCursor)
-      },
-      triggerCharacters: ["=", "!", ">", "<", "~", " "],
-    });
   }
+  
+  // Always re-register completion provider to ensure it has the latest props.availableFields
+  // This is crucial for dynamic field suggestions
+  monaco.languages.registerCompletionItemProvider('logchefql', {
+    provideCompletionItems: async (model, position) => {
+      console.log('LogchefQL completion triggered at position:', position)
+      let word = model.getWordUntilPosition(position)
+      const textBeforeCursorRange = {
+        startLineNumber: 1,
+        endLineNumber: position.lineNumber,
+        startColumn: 1,
+        endColumn: position.column,
+      }
+      const textBeforeCursor = model.getValueInRange(textBeforeCursorRange)
+      return await getSuggestions(word, position, textBeforeCursor)
+    },
+    triggerCharacters: ["=", "!", ">", "<", "~", " ", "."],
+  });
 }
 
 /**
@@ -765,6 +798,7 @@ function registerLogchefql() {
 function registerClickhouseSQL() {
   // Only register if it doesn't already exist
   if (!monaco.languages.getLanguages().some(lang => lang.id === 'clickhouse-sql')) {
+    console.log('Registering ClickHouse SQL language')
     // Register clickhouse-sql as a language that extends the built-in SQL language
     monaco.languages.register({
       id: "clickhouse-sql",
@@ -821,28 +855,31 @@ function registerClickhouseSQL() {
       },
       releaseDocumentSemanticTokens: () => { }
     });
-
-    // Register completion provider for SQL
-    monaco.languages.registerCompletionItemProvider('clickhouse-sql', {
-      provideCompletionItems: async (model, position) => {
-        let word = model.getWordUntilPosition(position)
-        const textBeforeCursorRange = {
-          startLineNumber: 1,
-          endLineNumber: position.lineNumber,
-          startColumn: 1,
-          endColumn: position.column,
-        }
-        const textBeforeCursor = model.getValueInRange(textBeforeCursorRange)
-        return await getSuggestions(word, position, textBeforeCursor)
-      },
-      triggerCharacters: [" ", ".", "(", ","],
-    });
   }
+  
+  // Always re-register completion provider to ensure it has the latest props.availableFields
+  monaco.languages.registerCompletionItemProvider('clickhouse-sql', {
+    provideCompletionItems: async (model, position) => {
+      console.log('SQL completion triggered at position:', position)
+      let word = model.getWordUntilPosition(position)
+      const textBeforeCursorRange = {
+        startLineNumber: 1,
+        endLineNumber: position.lineNumber,
+        startColumn: 1,
+        endColumn: position.column,
+      }
+      const textBeforeCursor = model.getValueInRange(textBeforeCursorRange)
+      return await getSuggestions(word, position, textBeforeCursor)
+    },
+    triggerCharacters: [" ", ".", "(", ","],
+  });
 }
 
 // Handle editor mount
 const handleMount = editor => {
   editorRef.value = editor
+  
+  console.log('Editor mounted, registering languages and completion providers')
 
   // Register both languages in QueryEditor component
   registerLogchefql();
@@ -878,7 +915,19 @@ const handleMount = editor => {
       monaco.KeyCode.Tab
     ],
     run: () => {
-      editor.trigger('triggerSuggest', 'editor.action.triggerSuggest', {})
+      editor.trigger('keyboard', 'editor.action.triggerSuggest', {})
+    }
+  })
+  
+  // Add Ctrl+Space trigger for suggestions
+  editor.addAction({
+    id: 'triggerSuggestCtrlSpace',
+    label: 'triggerSuggestCtrlSpace',
+    keybindings: [
+      monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space
+    ],
+    run: () => {
+      editor.trigger('keyboard', 'editor.action.triggerSuggest', {})
     }
   })
 
@@ -895,6 +944,17 @@ const handleMount = editor => {
 
   editor.onDidBlurEditorWidget(() => {
     editorFocused.value = false
+  })
+  
+  // Set up a listener for content changes to trigger suggestions
+  editor.onDidChangeModelContent(() => {
+    // Only trigger suggestions if the editor is focused
+    if (editorFocused.value) {
+      // Trigger suggestions after typing
+      setTimeout(() => {
+        editor.trigger('content', 'editor.action.triggerSuggest', {})
+      }, 100)
+    }
   })
 
   // Focus editor on mount

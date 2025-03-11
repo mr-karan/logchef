@@ -19,6 +19,7 @@ type Client struct {
 	conn       driver.Conn
 	logger     *slog.Logger
 	lastHealth models.SourceHealth
+	queryHooks []QueryHook
 }
 
 // ClientOptions represents options for creating a new client
@@ -81,10 +82,46 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 		return nil, fmt.Errorf("pinging clickhouse: %w", err)
 	}
 
-	return &Client{
-		conn:   conn,
-		logger: logger,
-	}, nil
+	client := &Client{
+		conn:       conn,
+		logger:     logger,
+		queryHooks: []QueryHook{},
+	}
+
+	// Add default log query hook if debug logging is enabled
+	client.AddQueryHook(NewLogQueryHook(logger, false))
+
+	return client, nil
+}
+
+// AddQueryHook adds a query hook to the client
+func (c *Client) AddQueryHook(hook QueryHook) {
+	c.queryHooks = append(c.queryHooks, hook)
+}
+
+// executeQueryWithHooks executes a query with hooks
+func (c *Client) executeQueryWithHooks(ctx context.Context, query string, fn func(context.Context) error) error {
+	var err error
+	start := time.Now()
+
+	// Call before hooks
+	for _, hook := range c.queryHooks {
+		ctx, err = hook.BeforeQuery(ctx, query)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Execute the query
+	err = fn(ctx)
+	duration := time.Since(start)
+
+	// Call after hooks
+	for _, hook := range c.queryHooks {
+		hook.AfterQuery(ctx, query, err, duration)
+	}
+
+	return err
 }
 
 // Query executes a query and returns the results
@@ -102,8 +139,15 @@ func (c *Client) Query(ctx context.Context, query string) (*models.QueryResult, 
 		return c.execDDL(ctx, query)
 	}
 
-	// Execute the query
-	rows, err := c.conn.Query(ctx, query)
+	var rows driver.Rows
+
+	// Execute the query with hooks
+	err := c.executeQueryWithHooks(ctx, query, func(ctx context.Context) error {
+		var err error
+		rows, err = c.conn.Query(ctx, query)
+		return err
+	})
+
 	if err != nil {
 		return nil, fmt.Errorf("executing query: %w", err)
 	}
@@ -166,7 +210,13 @@ func (c *Client) Query(ctx context.Context, query string) (*models.QueryResult, 
 func (c *Client) execDDL(ctx context.Context, query string) (*models.QueryResult, error) {
 	start := time.Now()
 
-	if err := c.conn.Exec(ctx, query); err != nil {
+	var execErr error
+	err := c.executeQueryWithHooks(ctx, query, func(ctx context.Context) error {
+		execErr = c.conn.Exec(ctx, query)
+		return execErr
+	})
+
+	if err != nil {
 		return nil, fmt.Errorf("executing DDL: %w", err)
 	}
 
@@ -217,8 +267,14 @@ func (c *Client) GetTimeSeries(ctx context.Context, params TimeSeriesParams, tab
 	qb := NewQueryBuilder(tableName)
 	query := qb.BuildTimeSeriesQuery(params.StartTime.Unix(), params.EndTime.Unix(), interval)
 
-	// Execute the query
-	rows, err := c.conn.Query(ctx, query)
+	var rows driver.Rows
+	// Execute the query with hooks
+	err := c.executeQueryWithHooks(ctx, query, func(ctx context.Context) error {
+		var err error
+		rows, err = c.conn.Query(ctx, query)
+		return err
+	})
+
 	if err != nil {
 		return nil, fmt.Errorf("executing time series query: %w", err)
 	}

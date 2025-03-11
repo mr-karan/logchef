@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/mr-karan/logchef/pkg/logger"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -27,9 +26,7 @@ type OIDCProvider struct {
 }
 
 // NewOIDCProvider creates a new OIDC provider
-func NewOIDCProvider(cfg *config.Config, store Store) (*OIDCProvider, error) {
-	log := logger.Default().With("component", "oidc")
-
+func NewOIDCProvider(cfg *config.Config, store Store, log *slog.Logger) (*OIDCProvider, error) {
 	// Validate admin emails configuration
 	if len(cfg.Auth.AdminEmails) == 0 {
 		log.Error("no admin emails configured")

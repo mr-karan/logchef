@@ -14,8 +14,6 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Plus, Trash2, Shield, User2 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
-import { useToast } from '@/components/ui/toast/use-toast'
-import { TOAST_DURATION } from '@/lib/constants'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -31,7 +29,6 @@ import { useUsersStore } from '@/stores/users'
 import { formatDate } from '@/utils/format'
 
 const router = useRouter()
-const { toast } = useToast()
 const usersStore = useUsersStore()
 const isLoading = ref(true)
 const showDeleteDialog = ref(false)

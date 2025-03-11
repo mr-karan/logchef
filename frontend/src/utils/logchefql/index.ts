@@ -3,10 +3,6 @@ const DELIMITER = " ";
 const DOT = ".";
 const UNDERSCORE = "_";
 const EQUAL_SIGN = "=";
-const NOT_EQUAL = "!=";
-const TILDE = "~";
-const TILDE_EQUAL = "~=";
-const NOT_TILDE = "!~";
 const DOUBLE_QUOTE = '"';
 const SINGLE_QUOTE = "'";
 const NEWLINE = "\n";
@@ -14,8 +10,6 @@ const BRACKET_OPEN = "(";
 const BRACKET_CLOSE = ")";
 const GREATER_THAN = ">";
 const LESS_THAN = "<";
-const GREATER_EQUAL = ">=";
-const LESS_EQUAL = "<=";
 
 // Define token types for syntax highlighting
 export const CharType = Object.freeze({
@@ -44,30 +38,17 @@ export const BoolOperator = Object.freeze({
 // Comparison operators
 export const Operator = Object.freeze({
   EQUALS: "=",
-  NOT_EQUALS: "!=",
-  CONTAINS: "~",
-  NOT_CONTAINS: "!~",
   GREATER_THAN: ">",
   LESS_THAN: "<",
-  GREATER_OR_EQUALS: ">=",
-  LESS_OR_EQUALS: "<=",
 });
 
 export const VALID_KEY_VALUE_OPERATORS = [
   Operator.EQUALS,
-  Operator.NOT_EQUALS,
-  Operator.CONTAINS,
-  Operator.NOT_CONTAINS,
   Operator.GREATER_THAN,
   Operator.LESS_THAN,
-  Operator.GREATER_OR_EQUALS,
-  Operator.LESS_OR_EQUALS,
 ];
 
-export const VALID_BOOL_OPERATORS = [
-  BoolOperator.AND,
-  BoolOperator.OR,
-];
+export const VALID_BOOL_OPERATORS = [BoolOperator.AND, BoolOperator.OR];
 
 // Character class for token parsing
 class Char {
@@ -98,8 +79,6 @@ class Char {
   isOp() {
     return (
       this.value === EQUAL_SIGN ||
-      this.value === "!" ||
-      this.value === TILDE ||
       this.value === GREATER_THAN ||
       this.value === LESS_THAN
     );
@@ -183,28 +162,18 @@ export class Expression {
   // Convert to ClickHouse SQL WHERE clause
   toSQL(): string {
     // Handle special JSON path notation (p.field)
-    if (this.key.includes('.')) {
-      const [parent, field] = this.key.split('.');
+    if (this.key.includes(".")) {
+      const [parent, field] = this.key.split(".");
       return this.toJsonSQL(parent, field);
     }
 
     switch (this.operator) {
       case Operator.EQUALS:
         return `${this.key} = ?`;
-      case Operator.NOT_EQUALS:
-        return `${this.key} != ?`;
-      case Operator.CONTAINS:
-        return `${this.key} ILIKE ?`;
-      case Operator.NOT_CONTAINS:
-        return `NOT(${this.key} ILIKE ?)`;
       case Operator.GREATER_THAN:
         return `${this.key} > ?`;
       case Operator.LESS_THAN:
         return `${this.key} < ?`;
-      case Operator.GREATER_OR_EQUALS:
-        return `${this.key} >= ?`;
-      case Operator.LESS_OR_EQUALS:
-        return `${this.key} <= ?`;
       default:
         return `${this.key} = ?`;
     }
@@ -215,20 +184,10 @@ export class Expression {
     switch (this.operator) {
       case Operator.EQUALS:
         return `JSONExtractString(${parent}, '${field}') = ?`;
-      case Operator.NOT_EQUALS:
-        return `JSONExtractString(${parent}, '${field}') != ?`;
-      case Operator.CONTAINS:
-        return `JSONExtractString(${parent}, '${field}') ILIKE ?`;
-      case Operator.NOT_CONTAINS:
-        return `NOT(JSONExtractString(${parent}, '${field}') ILIKE ?)`;
       case Operator.GREATER_THAN:
         return `JSONExtractString(${parent}, '${field}') > ?`;
       case Operator.LESS_THAN:
         return `JSONExtractString(${parent}, '${field}') < ?`;
-      case Operator.GREATER_OR_EQUALS:
-        return `JSONExtractString(${parent}, '${field}') >= ?`;
-      case Operator.LESS_OR_EQUALS:
-        return `JSONExtractString(${parent}, '${field}') <= ?`;
       default:
         return `JSONExtractString(${parent}, '${field}') = ?`;
     }
@@ -236,10 +195,6 @@ export class Expression {
 
   // Get parameter value for SQL query
   getParamValue(): string | number {
-    if (this.operator === Operator.CONTAINS || this.operator === Operator.NOT_CONTAINS) {
-      return `%${this.value}%`;
-    }
-
     // Return numeric value if applicable
     if (isNumeric(this.value)) {
       return parseFloat(this.value);
@@ -273,7 +228,7 @@ export class Node {
   }
 
   setBoolOperator(boolOperator: string) {
-    if (!VALID_BOOL_OPERATORS.includes(boolOperator)) {
+    if (!VALID_BOOL_OPERATORS.includes(boolOperator as any)) {
       throw new Error(`Invalid boolean operator: ${boolOperator}`);
     }
     this.boolOperator = boolOperator;
@@ -311,7 +266,7 @@ export class Node {
 
       return { sql, params };
     }
-    
+
     // Handle the case where we only have a left node (single expression)
     if (this.left && !this.right) {
       return this.left.toSQL();
@@ -510,7 +465,12 @@ export class Parser {
       this.currentNode.setBoolOperator(this.boolOperator);
     } else {
       const right = this.newNode("", this.newExpression(), null, null);
-      const node = this.newNode(this.boolOperator, null, this.currentNode, right);
+      const node = this.newNode(
+        this.boolOperator,
+        null,
+        this.currentNode,
+        right
+      );
       this.setCurrentNode(node);
     }
   }
@@ -585,7 +545,7 @@ export class Parser {
       this.extendKeyValueOperator();
       this.storeTypedChar(CharType.OPERATOR);
     } else if (this.char.isValue()) {
-      if (!VALID_KEY_VALUE_OPERATORS.includes(this.keyValueOperator)) {
+      if (!VALID_KEY_VALUE_OPERATORS.includes(this.keyValueOperator as any)) {
         this.setErrorState(`Unknown operator: ${this.keyValueOperator}`, 10);
       } else {
         this.setState(State.VALUE);
@@ -593,14 +553,14 @@ export class Parser {
         this.storeTypedChar(CharType.VALUE);
       }
     } else if (this.char.isSingleQuote()) {
-      if (!VALID_KEY_VALUE_OPERATORS.includes(this.keyValueOperator)) {
+      if (!VALID_KEY_VALUE_OPERATORS.includes(this.keyValueOperator as any)) {
         this.setErrorState(`Unknown operator: ${this.keyValueOperator}`, 10);
       } else {
         this.setState(State.SINGLE_QUOTED_VALUE);
         this.storeTypedChar(CharType.VALUE);
       }
     } else if (this.char.isDoubleQuote()) {
-      if (!VALID_KEY_VALUE_OPERATORS.includes(this.keyValueOperator)) {
+      if (!VALID_KEY_VALUE_OPERATORS.includes(this.keyValueOperator as any)) {
         this.setErrorState(`Unknown operator: ${this.keyValueOperator}`, 10);
       } else {
         this.setState(State.DOUBLE_QUOTED_VALUE);
@@ -768,14 +728,16 @@ export class Parser {
       this.storeTypedChar(CharType.OPERATOR);
 
       // Check if we've accumulated a valid boolean operator
-      if (this.boolOperator.length > 3 ||
-          !['a', 'n', 'd', 'o', 'r'].includes(this.char.value)) {
+      if (
+        this.boolOperator.length > 3 ||
+        !["a", "n", "d", "o", "r"].includes(this.char.value)
+      ) {
         this.setErrorState("Invalid boolean operator", 20);
         return;
       }
 
       // If we have a complete boolean operator, look for a delimiter next
-      if (VALID_BOOL_OPERATORS.includes(this.boolOperator)) {
+      if (VALID_BOOL_OPERATORS.includes(this.boolOperator as any)) {
         const nextPos = this.char.pos + 1;
         if (this.text.length > nextPos) {
           const nextChar = this.text[nextPos];
@@ -798,10 +760,16 @@ export class Parser {
     } else if (this.state === State.VALUE) {
       this.extendTree();
       this.resetBoolOperator();
-    } else if (this.state === State.SINGLE_QUOTED_VALUE || this.state === State.DOUBLE_QUOTED_VALUE) {
+    } else if (
+      this.state === State.SINGLE_QUOTED_VALUE ||
+      this.state === State.DOUBLE_QUOTED_VALUE
+    ) {
       this.setErrorState("Unterminated string", 26);
       return;
-    } else if (this.state === State.BOOL_OP_DELIMITER && this.state !== State.EXPECT_BOOL_OP) {
+    } else if (
+      this.state === State.BOOL_OP_DELIMITER &&
+      this.state !== (State.EXPECT_BOOL_OP as any)
+    ) {
       this.setErrorState("Unexpected EOF", 27);
       return;
     }
@@ -810,9 +778,14 @@ export class Parser {
       this.setErrorState("Unmatched parenthesis", 28);
       return;
     }
-    
+
     // Handle the case of a single expression without boolean operators
-    if (this.currentNode && !this.currentNode.left && !this.currentNode.right && !this.currentNode.expression) {
+    if (
+      this.currentNode &&
+      !this.currentNode.left &&
+      !this.currentNode.right &&
+      !this.currentNode.expression
+    ) {
       // If we have a key and value but no expression set yet, create it
       if (this.key && this.keyValueOperator && this.value) {
         this.currentNode.setExpression(this.newExpression());
@@ -861,11 +834,12 @@ export class Parser {
       let deltaLine = 0;
       let deltaStart = token.linePos;
       let tokenLength = token.length;
-      let typeIndex = tokenTypes.indexOf(token.type);
+      let typeIndex = tokenTypes.indexOf(token.type as any);
 
       if (prevToken != null) {
         deltaLine = token.line - prevToken.line;
-        deltaStart = deltaLine === 0 ? token.start - prevToken.start : token.linePos;
+        deltaStart =
+          deltaLine === 0 ? token.start - prevToken.start : token.linePos;
         prevToken = token;
       } else {
         prevToken = token;
@@ -877,9 +851,13 @@ export class Parser {
     return data;
   }
 
-  parse(text: string, raiseError: boolean = true, ignoreLastChar: boolean = false) {
+  parse(
+    text: string,
+    raiseError: boolean = true,
+    ignoreLastChar: boolean = false
+  ) {
     this.setText(text);
-    
+
     // Initialize with a new node
     this.resetData();
     this.setCurrentNode(this.newNode(this.boolOperator, null, null, null));
@@ -943,9 +921,15 @@ export class Parser {
     }
 
     // Handle the case of a single key=value expression
-    if (this.key && this.keyValueOperator && this.value && 
-        this.currentNode && !this.currentNode.expression && 
-        !this.currentNode.left && !this.currentNode.right) {
+    if (
+      this.key &&
+      this.keyValueOperator &&
+      this.value &&
+      this.currentNode &&
+      !this.currentNode.expression &&
+      !this.currentNode.left &&
+      !this.currentNode.right
+    ) {
       this.currentNode.setExpression(this.newExpression());
     }
 
@@ -969,8 +953,8 @@ export class Parser {
   }
 }
 
-function isNumeric(str) {
-  if (typeof str != "string") return false
-  return !isNaN(str) &&
-      !isNaN(parseFloat(str))
+function isNumeric(str: string | number): boolean {
+  // Convert to string if it's a number
+  const strValue = String(str);
+  return !isNaN(Number(strValue)) && !isNaN(parseFloat(strValue));
 }

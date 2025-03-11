@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useToast } from '@/components/ui/toast/use-toast'
 import { Card, CardHeader, CardContent, CardFooter } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,7 +20,6 @@ interface FormData extends CreateUserRequest {
 }
 
 const router = useRouter()
-const { toast } = useToast()
 const usersStore = useUsersStore()
 
 const formData = ref<FormData>({
