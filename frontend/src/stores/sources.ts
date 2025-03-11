@@ -1,10 +1,9 @@
 import { defineStore } from "pinia";
-import { ref, computed } from "vue";
+import { computed } from "vue";
 import { useTeamsStore } from "./teams";
 import { sourcesApi } from "@/api/sources";
 import type {
   Source,
-  SourceWithTeams,
   TeamGroupedQuery,
   CreateSourcePayload,
   SourceStats,
@@ -12,13 +11,17 @@ import type {
 } from "@/api/sources";
 import type { SavedTeamQuery } from "@/api/types";
 import { useBaseStore } from "./base";
-import { showErrorToast, showSuccessToast } from "@/api/error-handler";
+import { getErrorMessage } from "@/api/types";
+import { useSavedQueriesStore } from "./savedQueries";
 
 interface SourcesState {
   sources: Source[];
   teamSources: Source[];
   sourceQueries: Record<string, any>;
   sourceStats: Record<string, SourceStats>;
+  lastTeamId: number | null;
+  loadingTeamId: number | null;
+  pendingSourceRequests: Record<string, Promise<any>>;
 }
 
 export const useSourcesStore = defineStore("sources", () => {
@@ -29,7 +32,15 @@ export const useSourcesStore = defineStore("sources", () => {
     teamSources: [],
     sourceQueries: {},
     sourceStats: {},
+    lastTeamId: null,
+    loadingTeamId: null,
+    pendingSourceRequests: {},
   });
+  
+  // Initialize global cache if needed
+  if (typeof window !== 'undefined' && !window.__sourceCache) {
+    window.__sourceCache = {};
+  }
 
   // Computed properties
   const sources = computed(() => state.data.value.sources);
@@ -63,19 +74,45 @@ export const useSourcesStore = defineStore("sources", () => {
     });
   }
 
-  async function loadTeamSources(teamId: number, forceReload = false) {
-    // Skip if we already have team sources and no force reload
-    if (teamSources.value.length > 0 && !forceReload) {
+  async function loadTeamSources(teamId: number, useCache = false) {
+    // Skip loading if we already have sources for this team and useCache is true
+    if (
+      useCache &&
+      teamSources.value.length > 0 &&
+      state.data.value.lastTeamId === teamId
+    ) {
+      console.log(`Using cached sources for team ${teamId}`);
       return { success: true, data: teamSources.value };
     }
 
-    return await state.callApi<Source[]>({
+    // If we're already loading sources for this team, return the pending promise
+    // to prevent duplicate API calls
+    const requestKey = `team-${teamId}`;
+    if (state.data.value.pendingSourceRequests[requestKey]) {
+      console.log(`Already loading sources for team ${teamId}, reusing request`);
+      return state.data.value.pendingSourceRequests[requestKey];
+    }
+
+    // Create a new request and store it
+    const request = state.callApi<Source[]>({
       apiCall: () => sourcesApi.listTeamSources(teamId),
       onSuccess: (data) => {
         state.data.value.teamSources = data;
+        state.data.value.lastTeamId = teamId;
+        // Remove from pending requests
+        delete state.data.value.pendingSourceRequests[requestKey];
+      },
+      onError: () => {
+        // Remove from pending requests on error too
+        delete state.data.value.pendingSourceRequests[requestKey];
       },
       showToast: false,
     });
+
+    // Store the request
+    state.data.value.pendingSourceRequests[requestKey] = request;
+    
+    return request;
   }
 
   async function loadSourceQueries(
@@ -90,16 +127,41 @@ export const useSourcesStore = defineStore("sources", () => {
       return { success: true, data: state.data.value.sourceQueries[key] };
     }
 
-    return await state.callApi<TeamGroupedQuery[] | SavedTeamQuery[]>({
-      apiCall: () => sourcesApi.listSourceQueries(id),
-      onSuccess: (data) => {
+    try {
+      state.isLoading.value = true;
+      
+      // Use the savedQueriesStore to fetch queries
+      const savedQueriesStore = useSavedQueriesStore();
+      const result = await savedQueriesStore.fetchSourceQueries(
+        id,
+        teamsStore.currentTeamId
+      );
+      
+      if (result.success && result.data) {
         state.data.value.sourceQueries = {
           ...state.data.value.sourceQueries,
-          [key]: data,
+          [key]: result.data
         };
-      },
-      showToast: false,
-    });
+        
+        return {
+          success: true,
+          data: result.data
+        };
+      }
+      
+      return {
+        success: false,
+        error: result.error || "Failed to load source queries"
+      };
+    } catch (error) {
+      console.error("Error loading source queries:", error);
+      return {
+        success: false,
+        error: getErrorMessage(error)
+      };
+    } finally {
+      state.isLoading.value = false;
+    }
   }
 
   async function loadTeamSourceQueries(
@@ -249,15 +311,74 @@ export const useSourcesStore = defineStore("sources", () => {
     });
   }
 
-  async function getSource(sourceId: number) {
+  async function getSource(sourceId: number, useCache = false) {
     const currentTeamId = teamsStore.currentTeamId;
 
     if (!currentTeamId) {
       return { success: false, error: "No team selected" };
     }
 
-    return await state.callApi<Source>({
-      apiCall: () => sourcesApi.getTeamSource(currentTeamId, sourceId),
+    // Check if we already have this source in teamSources with complete data
+    if (useCache) {
+      const cachedSource = teamSources.value.find(
+        (s) => s.id === sourceId && s.columns && s.columns.length > 0
+      );
+      
+      if (cachedSource) {
+        console.log(`Using cached source from store for ID ${sourceId}`);
+        return {
+          success: true,
+          data: cachedSource
+        };
+      }
+    }
+    
+    // Check if we already have a pending request for this source
+    const requestKey = `source-${currentTeamId}-${sourceId}`;
+    if (state.data.value.pendingSourceRequests[requestKey]) {
+      console.log(`Already fetching source ${sourceId}, reusing request`);
+      return state.data.value.pendingSourceRequests[requestKey];
+    }
+    
+    // Create a new request and store it
+    const request = state.callApi<Source>({
+      apiCall: () => sourcesApi.getTeamSource(currentTeamId, sourceId, useCache),
+      onSuccess: (data) => {
+        // Update the source in teamSources if it exists
+        const index = teamSources.value.findIndex(s => s.id === sourceId);
+        if (index >= 0) {
+          // Create a new array to trigger reactivity
+          const newTeamSources = [...teamSources.value];
+          newTeamSources[index] = data;
+          state.data.value.teamSources = newTeamSources;
+        }
+        // Remove from pending requests
+        delete state.data.value.pendingSourceRequests[requestKey];
+      },
+      onError: () => {
+        // Remove from pending requests on error too
+        delete state.data.value.pendingSourceRequests[requestKey];
+      },
+      showToast: false,
+    });
+    
+    // Store the request
+    state.data.value.pendingSourceRequests[requestKey] = request;
+    
+    return request;
+  }
+
+  async function validateSourceConnection(connectionInfo: {
+    host: string;
+    username: string;
+    password: string;
+    database: string;
+    table_name: string;
+    timestamp_field?: string;
+    severity_field?: string;
+  }) {
+    return await state.callApi<{ success: boolean; message: string }>({
+      apiCall: () => sourcesApi.validateSourceConnection(connectionInfo),
       showToast: false,
     });
   }
@@ -285,5 +406,6 @@ export const useSourcesStore = defineStore("sources", () => {
     getSourceStats,
     getTeamSourceStats,
     getSource,
+    validateSourceConnection,
   };
 });

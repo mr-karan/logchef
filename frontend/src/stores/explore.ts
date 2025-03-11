@@ -14,13 +14,26 @@ import type { DateValue } from "@internationalized/date";
 import { computed } from "vue";
 import { useSourcesStore } from "./sources";
 import { addTimeRangeToSQL } from "@/utils/clickhouse-sql/parser";
+import { useTeamsStore } from "@/stores/teams";
 
 // Helper function to get formatted table name
 export function getFormattedTableName(source: any): string {
+  if (!source) {
+    console.error("getFormattedTableName called with null/undefined source");
+    return "logs.vector_logs"; // Default fallback
+  }
+
   if (source?.connection?.database && source?.connection?.table_name) {
     return `${source.connection.database}.${source.connection.table_name}`;
   }
-  return "logs.vector_logs"; // Default fallback
+
+  console.warn("Source missing connection details:", source);
+
+  // Try to extract information from source if possible
+  let database = source?.connection?.database || "logs";
+  let tableName = source?.connection?.table_name || "vector_logs";
+
+  return `${database}.${tableName}`; // Default fallback
 }
 
 export interface ExploreState {
@@ -38,6 +51,10 @@ export interface ExploreState {
   filterConditions: FilterCondition[];
   // Raw SQL state
   rawSql: string;
+  // DSL code state
+  dslCode?: string;
+  // Active mode (dsl or sql)
+  activeMode: "dsl" | "sql";
 }
 
 const DEFAULT_QUERY_STATS: QueryStats = {
@@ -57,6 +74,8 @@ export const useExploreStore = defineStore("explore", () => {
     timeRange: null,
     filterConditions: [],
     rawSql: "",
+    dslCode: undefined,
+    activeMode: "dsl",
   });
 
   // Getters
@@ -141,6 +160,16 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.rawSql = sql;
   }
 
+  // Set the active mode (dsl or sql)
+  function setActiveMode(mode: "dsl" | "sql") {
+    state.data.value.activeMode = mode;
+  }
+
+  // Set the DSL code
+  function setDslCode(code: string) {
+    state.data.value.dslCode = code;
+  }
+
   // Reset state
   function resetState() {
     state.data.value = {
@@ -152,6 +181,8 @@ export const useExploreStore = defineStore("explore", () => {
       timeRange: state.data.value.timeRange, // Preserve time range
       filterConditions: [],
       rawSql: "",
+      dslCode: state.data.value.dslCode,
+      activeMode: state.data.value.activeMode,
     };
   }
 
@@ -162,12 +193,63 @@ export const useExploreStore = defineStore("explore", () => {
     }
 
     const sourcesStore = useSourcesStore();
-    const currentSource = sourcesStore.sources.find(
+
+    // First check in teamSources (sources available to the current team)
+    let currentSource = sourcesStore.teamSources.find(
       (s) => s.id === state.data.value.sourceId
     );
 
+    // If not found in teamSources, try to find in all sources
     if (!currentSource) {
-      throw new Error("Source not found. Please select a valid source.");
+      // Check if we need to load team sources first
+      if (sourcesStore.teamSources.length === 0) {
+        const teamsStore = useTeamsStore();
+        if (teamsStore.currentTeamId) {
+          console.log("Team sources not loaded, loading them now");
+          await sourcesStore.loadTeamSources(teamsStore.currentTeamId, true);
+          
+          // Try again after loading
+          currentSource = sourcesStore.teamSources.find(
+            (s) => s.id === state.data.value.sourceId
+          );
+        }
+      }
+      
+      // If still not found, check all sources
+      if (!currentSource) {
+        currentSource = sourcesStore.sources.find(
+          (s) => s.id === state.data.value.sourceId
+        );
+
+        // If source is found in all sources but not in team sources, it means
+        // the current team doesn't have access to this source
+        if (currentSource) {
+          console.warn(
+            `Source ${state.data.value.sourceId} found but not accessible by current team`
+          );
+        }
+      }
+    }
+
+    if (!currentSource) {
+      console.error(`Source not found: ID ${state.data.value.sourceId}`);
+      console.log("Available team sources:", sourcesStore.teamSources);
+      console.log("All sources:", sourcesStore.sources);
+      throw new Error(
+        `Source with ID ${state.data.value.sourceId} not found. Please select a valid source.`
+      );
+    }
+
+    // Ensure source has connection details
+    if (
+      !currentSource.connection ||
+      !currentSource.connection.database ||
+      !currentSource.connection.table_name
+    ) {
+      console.error("Source missing connection details:", currentSource);
+      throw new Error(
+        "Source configuration is incomplete. Missing database or table information."
+      );
     }
 
     state.isLoading.value = true;
@@ -181,6 +263,7 @@ export const useExploreStore = defineStore("explore", () => {
 
       // Format the table name correctly
       const formattedTableName = getFormattedTableName(currentSource);
+      console.log("Using formatted table name:", formattedTableName);
 
       // Use our SQL parser to add time conditions and limit to the query
       let finalSql = sqlQuery;
@@ -237,8 +320,25 @@ export const useExploreStore = defineStore("explore", () => {
         end_timestamp: timestamps.end,
       };
 
+      // Execute the query
       const result = await state.callApi<QueryResponse>({
-        apiCall: () => exploreApi.getLogs(state.data.value.sourceId, params),
+        apiCall: () => {
+          // Get the teams store synchronously
+          const teamsStore = useTeamsStore();
+          const currentTeamId = teamsStore.currentTeamId;
+
+          if (!currentTeamId) {
+            throw new Error(
+              "No team selected. Please select a team before executing a query."
+            );
+          }
+
+          return exploreApi.getLogs(
+            state.data.value.sourceId,
+            params,
+            currentTeamId
+          );
+        },
         onSuccess: (response) => {
           if ("error" in response) {
             throw new Error(response.error);
@@ -248,13 +348,7 @@ export const useExploreStore = defineStore("explore", () => {
           state.data.value.columns = response.columns;
           state.data.value.queryStats = response.stats;
         },
-        onError: () => {
-          // Don't reset everything on error - just clear logs and stats
-          state.data.value.logs = [];
-          state.data.value.columns = [];
-          state.data.value.queryStats = DEFAULT_QUERY_STATS;
-        },
-        showToast: true,
+        showToast: false,
       });
 
       return result;
@@ -265,9 +359,23 @@ export const useExploreStore = defineStore("explore", () => {
 
   // Get log context
   async function getLogContext(sourceId: number, params: LogContextRequest) {
+    if (!sourceId) {
+      throw new Error("Source ID is required for getting log context");
+    }
+
+    // Get the teams store
+    const teamsStore = useTeamsStore();
+    const currentTeamId = teamsStore.currentTeamId;
+
+    if (!currentTeamId) {
+      throw new Error(
+        "No team selected. Please select a team before getting log context."
+      );
+    }
+
     return await state.callApi<LogContextResponse>({
-      apiCall: () => exploreApi.getLogContext(sourceId, params),
-      showToast: true,
+      apiCall: () => exploreApi.getLogContext(sourceId, params, currentTeamId),
+      showToast: false,
     });
   }
 
@@ -281,6 +389,8 @@ export const useExploreStore = defineStore("explore", () => {
     timeRange: computed(() => state.data.value.timeRange),
     filterConditions: computed(() => state.data.value.filterConditions),
     rawSql: computed(() => state.data.value.rawSql),
+    dslCode: computed(() => state.data.value.dslCode),
+    activeMode: computed(() => state.data.value.activeMode),
 
     // Loading state
     isLoading: computed(() => state.isLoading.value),
@@ -297,6 +407,8 @@ export const useExploreStore = defineStore("explore", () => {
     setLimit,
     setFilterConditions,
     setRawSql,
+    setDslCode,
+    setActiveMode,
     resetState,
     executeQuery,
     getLogContext,

@@ -21,56 +21,6 @@ type TimeSeriesRequest struct {
 	Window         clickhouse.TimeWindow `query:"window"`
 }
 
-// handleQueryLogs handles POST /api/v1/sources/:id/logs/search
-func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
-	id := c.Params("id")
-	if id == "" {
-		return SendError(c, fiber.StatusBadRequest, "source ID is required")
-	}
-
-	// Convert string to int for SourceID
-	idInt, err := strconv.Atoi(id)
-	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
-	}
-	sourceID := models.SourceID(idInt)
-
-	var req models.LogQueryRequest
-	if err := c.BodyParser(&req); err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid request body")
-	}
-
-	// Set defaults
-	if req.Limit <= 0 {
-		req.Limit = 100
-	}
-
-	// Convert to ClickHouse params
-	params := clickhouse.LogQueryParams{
-		RawSQL: req.RawSQL,
-		Limit:  req.Limit,
-	}
-
-	// If time range is provided, add it to params
-	if req.StartTimestamp > 0 {
-		params.StartTime = time.UnixMilli(req.StartTimestamp)
-	}
-	if req.EndTimestamp > 0 {
-		params.EndTime = time.UnixMilli(req.EndTimestamp)
-	}
-
-	// Execute query
-	result, err := s.logsService.QueryLogs(c.Context(), sourceID, params)
-	if err != nil {
-		if errors.Is(err, logs.ErrSourceNotFound) {
-			return SendError(c, fiber.StatusNotFound, "source not found")
-		}
-		return fmt.Errorf("error querying logs: %w", err)
-	}
-
-	return SendSuccess(c, fiber.StatusOK, result)
-}
-
 // handleQueryTeamSourceLogs handles POST /api/v1/teams/:teamId/sources/:sourceId/logs/query
 func (s *Server) handleQueryTeamSourceLogs(c *fiber.Ctx) error {
 	teamID := c.Params("teamId")

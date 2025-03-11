@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	lgr "github.com/mr-karan/logchef/pkg/logger"
-
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/identity"
@@ -19,6 +17,19 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/recover"
 )
 
+// ServerOptions contains all dependencies needed to create a new Server
+type ServerOptions struct {
+	Config           *config.Config
+	SourceService    *source.Service
+	LogsService      *logs.Service
+	IdentityService  *identity.Service
+	TeamQueryService *logs.TeamQueryService
+	Auth             *auth.Service
+	FS               http.FileSystem
+	Logger           *slog.Logger
+	BuildInfo        string
+}
+
 // Server represents the HTTP server
 type Server struct {
 	app    *fiber.App
@@ -29,19 +40,18 @@ type Server struct {
 	logsService      *logs.Service
 	identityService  *identity.Service
 	teamQueryService *logs.TeamQueryService
+	auth             *auth.Service
 
-	auth *auth.Service
-	fs   http.FileSystem
-	log  *slog.Logger
+	fs  http.FileSystem
+	log *slog.Logger
 
 	// Build information
 	buildInfo string
 }
 
 // New creates a new HTTP server
-func New(cfg *config.Config, sourceService *source.Service, logsService *logs.Service,
-	identityService *identity.Service, auth *auth.Service, fs http.FileSystem,
-	buildInfo string, teamQueryService *logs.TeamQueryService) *Server {
+func New(opts ServerOptions) *Server {
+	log := opts.Logger.With("component", "server")
 
 	// Initialize Fiber app with configuration
 	app := fiber.New(fiber.Config{
@@ -57,7 +67,7 @@ func New(cfg *config.Config, sourceService *source.Service, logsService *logs.Se
 			}
 
 			// Log the error
-			app.Logger.Error("request error", "path", c.Path(), "method", c.Method(), "error", err.Error())
+			log.Error("request error", "path", c.Path(), "method", c.Method(), "error", err.Error())
 
 			// Return JSON error response
 			return SendError(c, code, err.Error())
@@ -70,15 +80,15 @@ func New(cfg *config.Config, sourceService *source.Service, logsService *logs.Se
 	// Create server instance
 	s := &Server{
 		app:              app,
-		config:           cfg,
-		sourceService:    sourceService,
-		logsService:      logsService,
-		identityService:  identityService,
-		teamQueryService: teamQueryService,
-		auth:             auth,
-		fs:               fs,
-		log:              lgr.Default().With("component", "server"),
-		buildInfo:        buildInfo,
+		config:           opts.Config,
+		sourceService:    opts.SourceService,
+		logsService:      opts.LogsService,
+		identityService:  opts.IdentityService,
+		teamQueryService: opts.TeamQueryService,
+		auth:             opts.Auth,
+		fs:               opts.FS,
+		log:              opts.Logger,
+		buildInfo:        opts.BuildInfo,
 	}
 
 	// Setup routes

@@ -11,6 +11,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { useSourcesStore } from '@/stores/sources'
+import { sourcesApi } from '@/api/sources'
 import { Code, ChevronsUpDown, Plus, Database } from 'lucide-vue-next'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Separator } from '@/components/ui/separator'
@@ -169,44 +170,37 @@ const validateConnection = async () => {
 
         console.log('Validation payload:', payload)
 
-        const response = await fetch('/api/v1/sources/validate', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(payload),
-        })
+        // Use the sourcesStore instead of direct API call
+        const result = await sourcesStore.validateSourceConnection(payload)
 
-        const data = await response.json()
+        if (result.success) {
+            validationResult.value = result.data
 
-        if (response.ok) {
-            validationResult.value = data.data
-
-            if (data.data.success) {
+            if (result.data.success) {
                 isValidated.value = true
                 toast({
                     title: 'Success',
-                    description: data.data.message,
+                    description: result.data.message,
                     variant: 'default',
                     duration: TOAST_DURATION.SUCCESS,
                 })
             } else {
                 toast({
                     title: 'Connection Error',
-                    description: data.data.message,
+                    description: result.data.message,
                     variant: 'destructive',
                     duration: TOAST_DURATION.ERROR,
                 })
             }
         } else {
-            console.error('Validation error:', data)
+            console.error('Validation error:', result)
             validationResult.value = {
                 success: false,
-                message: data.error || 'Failed to validate connection'
+                message: result.error || 'Failed to validate connection'
             }
             toast({
                 title: 'Error',
-                description: data.error || 'Failed to validate connection',
+                description: result.error || 'Failed to validate connection',
                 variant: 'destructive',
                 duration: TOAST_DURATION.ERROR,
             })

@@ -1,5 +1,3 @@
-import type { AxiosError } from "axios";
-
 export interface APISuccessResponse<T> {
   status: "success";
   data: T;

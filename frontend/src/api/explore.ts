@@ -78,10 +78,15 @@ export interface LogContextResponse {
 export const exploreApi = {
   async getLogs(
     sourceId: number,
-    params: QueryParams
+    params: QueryParams,
+    teamId: number
   ): Promise<APIResponse<QueryResponse>> {
+    if (!teamId) {
+      throw new Error("Team ID is required for querying logs");
+    }
+
     const response = await api.post<APIResponse<QueryResponse>>(
-      `/sources/${sourceId}/logs/search`,
+      `/teams/${teamId}/sources/${sourceId}/logs/query`,
       params
     );
     return response.data;
@@ -89,10 +94,15 @@ export const exploreApi = {
 
   async getLogContext(
     sourceId: number,
-    params: LogContextRequest
+    params: LogContextRequest,
+    teamId: number
   ): Promise<APIResponse<LogContextResponse>> {
+    if (!teamId) {
+      throw new Error("Team ID is required for getting log context");
+    }
+
     const response = await api.post<APIResponse<LogContextResponse>>(
-      `/sources/${sourceId}/logs/context`,
+      `/${teamId}/sources/${sourceId}/logs/context`,
       params
     );
     return response.data;

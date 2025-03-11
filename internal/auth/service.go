@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mr-karan/logchef/pkg/logger"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -36,10 +35,10 @@ type Service struct {
 }
 
 // New creates a new authentication service
-func New(cfg *config.Config, store Store) (*Service, error) {
-	log := logger.Default().With("component", "auth")
+func New(cfg *config.Config, store Store, logger *slog.Logger) (*Service, error) {
+	log := logger.With("component", "auth")
 
-	oidc, err := NewOIDCProvider(cfg, store)
+	oidc, err := NewOIDCProvider(cfg, store, log)
 	if err != nil {
 		log.Error("failed to create OIDC provider",
 			"error", err,

@@ -24,7 +24,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'select', queryId: string): void;
+  (e: 'select', queryId: string, queryData?: any): void;
   (e: 'save'): void;
 }>();
 
@@ -88,8 +88,36 @@ function formatTime(dateStr: string): string {
 
 // Handle query selection
 function selectQuery(queryId: number) {
-  emit('select', String(queryId));
+  const query = savedQueriesStore.data.queries?.find(q => q.id === queryId);
+  if (query) {
+    try {
+      // Parse the query content
+      const content = JSON.parse(query.query_content);
+      
+      // Emit the select event with the query ID and the parsed content
+      emit('select', String(queryId), {
+        queryType: query.query_type,
+        content: content
+      });
+    } catch (error) {
+      console.error('Error parsing query content:', error);
+      // Fall back to just emitting the ID if parsing fails
+      emit('select', String(queryId));
+    }
+  } else {
+    emit('select', String(queryId));
+  }
   isOpen.value = false;
+}
+
+// Get query type for display
+function getQueryTypeLabel(query: SavedTeamQuery): string {
+  try {
+    const content = JSON.parse(query.query_content);
+    return content.queryType === 'dsl' ? 'DSL' : 'SQL';
+  } catch (e) {
+    return 'SQL'; // Default to SQL if parsing fails
+  }
 }
 
 // Handle save action
@@ -144,10 +172,13 @@ onMounted(async () => {
       <!-- Queries list -->
       <template v-else>
         <DropdownMenuItem v-for="query in (savedQueriesStore.data.queries || []).slice(0, 5)" :key="query.id"
-          @click="selectQuery(query.id)" class="flex flex-col items-start gap-1 py-2">
+          @click="selectQuery(query.id)" class="flex flex-col items-start gap-1 py-2 cursor-pointer">
           <div class="flex items-center justify-between w-full">
             <span class="font-medium">{{ query.name }}</span>
-            <span class="text-xs text-muted-foreground">{{ formatTime(query.updated_at) }}</span>
+            <div class="flex items-center gap-2">
+              <span class="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary">{{ getQueryTypeLabel(query) }}</span>
+              <span class="text-xs text-muted-foreground">{{ formatTime(query.updated_at) }}</span>
+            </div>
           </div>
           <span v-if="query.description" class="text-xs text-muted-foreground line-clamp-1">
             {{ query.description }}

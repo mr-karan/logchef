@@ -15,7 +15,7 @@ func New(debug bool) *slog.Logger {
 	}
 
 	// Create handler with appropriate level
-	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level:     logLevel,
 		AddSource: true,
 	})

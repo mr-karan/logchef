@@ -78,6 +78,7 @@ func (a *App) Initialize(ctx context.Context) error {
 	var err error
 	a.sqliteDB, err = sqlite.New(sqlite.Options{
 		Config: a.cfg.SQLite,
+		Logger: a.log,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to initialize sqlite: %w", err)
@@ -85,7 +86,7 @@ func (a *App) Initialize(ctx context.Context) error {
 
 	// Initialize auth service
 	a.log.Info("initializing authentication service")
-	a.authService, err = auth.New(a.cfg, a.sqliteDB)
+	a.authService, err = auth.New(a.cfg, a.sqliteDB, a.log)
 	if err != nil {
 		return fmt.Errorf("failed to initialize authentication service: %w", err)
 	}
@@ -138,16 +139,17 @@ func (a *App) Initialize(ctx context.Context) error {
 
 	// Initialize HTTP server
 	a.log.Info("initializing http server")
-	a.server = server.New(
-		a.cfg,
-		a.sourceService,
-		a.logsService,
-		a.identityService,
-		a.authService,
-		a.webFS,
-		a.buildInfo,
-		a.teamQueryService,
-	)
+	a.server = server.New(server.ServerOptions{
+		Config:           a.cfg,
+		SourceService:    a.sourceService,
+		LogsService:      a.logsService,
+		IdentityService:  a.identityService,
+		TeamQueryService: a.teamQueryService,
+		Auth:             a.authService,
+		FS:               a.webFS,
+		Logger:           a.log,
+		BuildInfo:        a.buildInfo,
+	})
 
 	return nil
 }

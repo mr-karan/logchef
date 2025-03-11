@@ -375,7 +375,7 @@ ORDER BY tq.created_at DESC;
 -- Check if a team has access to a source
 -- $1: team_id
 -- $2: source_id
-SELECT COUNT(*) FROM team_sources 
+SELECT COUNT(*) FROM team_sources
 WHERE team_id = ? AND source_id = ?;
 
 -- name: UserHasSourceAccess

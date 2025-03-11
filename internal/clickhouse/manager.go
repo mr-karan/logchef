@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mr-karan/logchef/pkg/logger"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -24,18 +23,16 @@ type Manager struct {
 	logger     *slog.Logger
 	health     map[models.SourceID]models.SourceHealth
 	mu         sync.RWMutex
+	hooks      []QueryHook // Store hooks to apply to new clients
 }
 
 // NewManager creates a new connection manager
 func NewManager(log *slog.Logger) *Manager {
-	if log == nil {
-		log = logger.NewLogger("clickhouse")
-	}
-
 	return &Manager{
 		clients: make(map[models.SourceID]*Client),
 		logger:  log.With("component", "clickhouse_manager"),
 		health:  make(map[models.SourceID]models.SourceHealth),
+		hooks:   []QueryHook{},
 	}
 }
 
@@ -56,29 +53,24 @@ func (m *Manager) AddSource(source *models.Source) error {
 		Database: source.Connection.Database,
 		Username: source.Connection.Username,
 		Password: source.Connection.Password,
-	}, m.logger.With("source_id", source.ID))
-
+	}, m.logger)
 	if err != nil {
-		m.logger.Error("failed to create client", "error", err, "source_id", source.ID)
-		m.health[source.ID] = models.SourceHealth{
-			SourceID:    source.ID,
-			Status:      models.HealthStatusUnhealthy,
-			Error:       err.Error(),
-			LastChecked: time.Now(),
-		}
-		return fmt.Errorf("error creating client: %w", err)
+		return fmt.Errorf("creating client: %w", err)
 	}
 
+	// Apply any existing hooks to the new client
 	m.clientsMux.Lock()
-	defer m.clientsMux.Unlock()
-
-	// Close existing client if it exists
-	if oldClient, exists := m.clients[source.ID]; exists {
-		m.logger.Info("closing existing client", "source_id", source.ID)
-		_ = oldClient.Close()
+	for _, hook := range m.hooks {
+		client.AddQueryHook(hook)
 	}
+	m.clientsMux.Unlock()
 
+	// Store the client
+	m.clientsMux.Lock()
 	m.clients[source.ID] = client
+	m.clientsMux.Unlock()
+
+	// Initialize health status
 	m.health[source.ID] = models.SourceHealth{
 		SourceID:    source.ID,
 		Status:      models.HealthStatusHealthy,
@@ -228,4 +220,20 @@ func (m *Manager) CreateTemporaryClient(source *models.Source) (*Client, error) 
 	}
 
 	return client, nil
+}
+
+// AddQueryHook adds a query hook to all clients
+func (m *Manager) AddQueryHook(hook QueryHook) {
+	m.clientsMux.Lock()
+	defer m.clientsMux.Unlock()
+
+	// Store the hook for future clients
+	m.hooks = append(m.hooks, hook)
+
+	// Add hook to all existing clients
+	for _, client := range m.clients {
+		client.AddQueryHook(hook)
+	}
+
+	m.logger.Info("added query hook to all clients", "hook_type", fmt.Sprintf("%T", hook))
 }
