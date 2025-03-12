@@ -127,42 +127,58 @@ type SavedQueryTimeRange struct {
 	} `json:"absolute"`
 }
 
+// SavedQueryType represents the type of saved query
+type SavedQueryType string
+
+const (
+	// SavedQueryTypeDSL represents a query saved in DSL format
+	SavedQueryTypeDSL SavedQueryType = "dsl"
+
+	// SavedQueryTypeSQL represents a query saved in SQL format
+	SavedQueryTypeSQL SavedQueryType = "sql"
+)
+
 // SavedQueryContent represents the content of a saved query
 type SavedQueryContent struct {
-	Version   int                 `json:"version"`
-	ActiveTab SavedQueryTab       `json:"activeTab"`
-	SourceID  SourceID            `json:"sourceId"`
-	TimeRange SavedQueryTimeRange `json:"timeRange"`
-	Limit     int                 `json:"limit"`
-	RawSQL    string              `json:"rawSql"`
+	Version    int                 `json:"version"`
+	ActiveTab  SavedQueryTab       `json:"activeTab"`
+	SourceID   SourceID            `json:"sourceId"`
+	TimeRange  SavedQueryTimeRange `json:"timeRange"`
+	Limit      int                 `json:"limit"`
+	QueryType  SavedQueryType      `json:"queryType"`  // Type of query (dsl or sql)
+	RawSQL     string              `json:"rawSql"`     // SQL representation
+	DSLContent string              `json:"dslContent"` // DSL representation (if applicable)
 }
 
 // SavedTeamQuery represents a saved query associated with a team
 type SavedTeamQuery struct {
-	ID           int       `json:"id" db:"id"`
-	TeamID       TeamID    `json:"team_id" db:"team_id"`
-	SourceID     SourceID  `json:"source_id" db:"source_id"`
-	Name         string    `json:"name" db:"name"`
-	Description  string    `json:"description" db:"description"`
-	QueryContent string    `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
-	CreatedAt    time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+	ID           int            `json:"id" db:"id"`
+	TeamID       TeamID         `json:"team_id" db:"team_id"`
+	SourceID     SourceID       `json:"source_id" db:"source_id"`
+	Name         string         `json:"name" db:"name"`
+	Description  string         `json:"description" db:"description"`
+	QueryType    SavedQueryType `json:"query_type" db:"query_type"`
+	QueryContent string         `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
+	CreatedAt    time.Time      `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at" db:"updated_at"`
 }
 
 // CreateTeamQueryRequest represents a request to create a team query
 type CreateTeamQueryRequest struct {
-	Name         string   `json:"name" validate:"required"`
-	Description  string   `json:"description"`
-	SourceID     SourceID `json:"source_id" validate:"required"`
-	QueryContent string   `json:"query_content" validate:"required"`
+	Name         string         `json:"name" validate:"required"`
+	Description  string         `json:"description"`
+	SourceID     SourceID       `json:"source_id" validate:"required"`
+	QueryType    SavedQueryType `json:"query_type" validate:"required"`
+	QueryContent string         `json:"query_content" validate:"required"`
 }
 
 // UpdateTeamQueryRequest represents a request to update a team query
 type UpdateTeamQueryRequest struct {
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	SourceID     SourceID `json:"source_id"`
-	QueryContent string   `json:"query_content"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	SourceID     SourceID       `json:"source_id"`
+	QueryType    SavedQueryType `json:"query_type"`
+	QueryContent string         `json:"query_content"`
 }
 
 // SavedQuery represents a generic saved query

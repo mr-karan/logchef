@@ -18,6 +18,7 @@ func (db *DB) CreateTeamQuery(ctx context.Context, query *models.TeamQuery) erro
 		query.SourceID,
 		query.Name,
 		query.Description,
+		query.QueryType,
 		query.QueryContent,
 	).Scan(&id)
 
@@ -42,6 +43,7 @@ func (db *DB) CreateSavedTeamQuery(ctx context.Context, teamID models.TeamID, re
 		req.SourceID,
 		req.Name,
 		req.Description,
+		req.QueryType,
 		req.QueryContent,
 	).Scan(&id)
 
@@ -50,15 +52,14 @@ func (db *DB) CreateSavedTeamQuery(ctx context.Context, teamID models.TeamID, re
 		return nil, fmt.Errorf("error creating saved team query: %w", err)
 	}
 
-	// Fetch the created query to get the timestamps
-	var savedQuery models.SavedTeamQuery
-	err = db.queries.GetTeamQuery.GetContext(ctx, &savedQuery, int(id))
+	// Get the created query
+	query, err := db.GetSavedTeamQuery(ctx, int(id))
 	if err != nil {
-		db.log.Error("failed to fetch created team query", "error", err, "query_id", id)
-		return nil, fmt.Errorf("error fetching created team query: %w", err)
+		db.log.Error("failed to get created team query", "error", err, "query_id", id)
+		return nil, fmt.Errorf("error getting created team query: %w", err)
 	}
 
-	return &savedQuery, nil
+	return query, nil
 }
 
 // GetTeamQuery implements the auth.Store interface
@@ -122,6 +123,7 @@ func (db *DB) UpdateTeamQuery(ctx context.Context, query *models.TeamQuery) erro
 		query.Name,
 		query.Description,
 		query.SourceID,
+		query.QueryType,
 		query.QueryContent,
 		time.Now().UTC(),
 		query.ID,
@@ -160,6 +162,9 @@ func (db *DB) UpdateSavedTeamQuery(ctx context.Context, id int, req models.Updat
 	if req.SourceID != 0 {
 		existing.SourceID = req.SourceID
 	}
+	if req.QueryType != "" {
+		existing.QueryType = req.QueryType
+	}
 	if req.QueryContent != "" {
 		existing.QueryContent = req.QueryContent
 	}
@@ -170,6 +175,7 @@ func (db *DB) UpdateSavedTeamQuery(ctx context.Context, id int, req models.Updat
 		existing.Name,
 		existing.Description,
 		existing.SourceID,
+		existing.QueryType,
 		existing.QueryContent,
 		now,
 		id,

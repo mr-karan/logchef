@@ -2,6 +2,15 @@ import * as monaco from "monaco-editor";
 import { loader } from "@guolao/vue-monaco-editor";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 
+import {
+  Parser as LogchefQLParser,
+  tokenTypes as logchefqlTokenTypes,
+} from "@/utils/logchefql";
+import {
+  Parser as ClickhouseSQLParser,
+  tokenTypes as sqlTokenTypes,
+} from "@/utils/clickhouse-sql";
+
 /**
  * Get default monaco editor options
  */
@@ -32,6 +41,7 @@ function getDefaultMonacoOptions() {
       seedSearchStringFromSelection: false,
     },
     wordBasedSuggestions: "off",
+    lineNumbersMinChars: 0,
     lineDecorationsWidth: 0,
     hideCursorInOverviewRuler: true,
     glyphMargin: false,
@@ -45,24 +55,25 @@ function getDefaultMonacoOptions() {
     renderLineHighlight: "none",
     matchBrackets: "always",
     "semanticHighlighting.enabled": true,
-    fixedOverflowWidgets: true,
-    wordWrap: "on",
-    links: false,
-    cursorBlinking: "smooth",
-    cursorStyle: "line",
-    multiCursorModifier: "alt",
-    lineHeight: 20,
-    renderWhitespace: "none",
-    selectOnLineNumbers: false,
-    dragAndDrop: false,
   };
 }
 
 /**
- * Define common themes that will be used for both languages
+ * Initialize Monaco editor setup
+ * - Sets up worker
+ * - Configures Monaco
+ * - Defines themes
  */
-function defineMonacoThemes() {
-  // Light theme for both logchefql and clickhouse-sql
+function initMonacoSetup() {
+  // Configure Monaco worker setup
+  window.MonacoEnvironment = {
+    getWorker: () => new EditorWorker(),
+  };
+
+  // Load Monaco configuration
+  loader.config({ monaco });
+
+  // Define themes
   monaco.editor.defineTheme("logchef", {
     base: "vs",
     inherit: true,
@@ -90,7 +101,6 @@ function defineMonacoThemes() {
     ],
   });
 
-  // Dark theme for both logchefql and clickhouse-sql
   monaco.editor.defineTheme("logchef-dark", {
     base: "vs-dark",
     inherit: true,
@@ -117,27 +127,107 @@ function defineMonacoThemes() {
       { token: "variable", foreground: "4fc1ff" },
     ],
   });
+
+  // Register languages
+  registerLanguages();
 }
 
 /**
- * Initialize Monaco editor setup
- * - Sets up worker
- * - Configures Monaco
- * - Defines themes
+ * Register languages for Monaco editor
  */
-function initMonacoSetup() {
-  // Configure Monaco worker setup
-  window.MonacoEnvironment = {
-    getWorker: () => new EditorWorker(),
-  };
-
-  // Load Monaco configuration
-  loader.config({
-    monaco,
+function registerLanguages() {
+  // Register LogchefQL language
+  monaco.languages.register({ id: "logchefql" });
+  monaco.languages.setLanguageConfiguration("logchefql", {
+    autoClosingPairs: [
+      { open: "(", close: ")" },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+    ],
+    wordPattern: /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
+  });
+  
+  monaco.languages.registerDocumentSemanticTokensProvider("logchefql", {
+    getLegend: () => ({
+      tokenTypes: logchefqlTokenTypes,
+      tokenModifiers: []
+    }),
+    provideDocumentSemanticTokens: (model) => {
+      try {
+        const parser = new LogchefQLParser();
+        parser.parse(model.getValue(), false);
+    
+        const data = parser.generateMonacoTokens();
+    
+        return {
+          data: new Uint32Array(data),
+          resultId: null,
+        };
+      } catch (e) {
+        console.error("Error parsing LogchefQL:", e);
+        return {
+          data: new Uint32Array([]),
+          resultId: null,
+        };
+      }
+    },
+    releaseDocumentSemanticTokens: () => { }
   });
 
-  // Define themes
-  defineMonacoThemes();
+  // Register ClickHouse SQL language
+  monaco.languages.register({
+    id: "clickhouse-sql",
+    extensions: ['.sql'],
+    aliases: ['ClickHouse SQL', 'Clickhouse SQL', 'clickhouse'],
+    mimetypes: ['application/sql', 'text/x-sql'],
+  });
+  
+  monaco.languages.setLanguageConfiguration("clickhouse-sql", {
+    autoClosingPairs: [
+      { open: "(", close: ")" },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+      { open: "[", close: "]" },
+      { open: "{", close: "}" },
+    ],
+    brackets: [
+      ["{", "}"],
+      ["[", "]"],
+      ["(", ")"],
+    ],
+    comments: {
+      lineComment: "--",
+      blockComment: ["/*", "*/"],
+    },
+    wordPattern: /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
+  });
+  
+  monaco.languages.registerDocumentSemanticTokensProvider("clickhouse-sql", {
+    getLegend: () => ({
+      tokenTypes: sqlTokenTypes,
+      tokenModifiers: []
+    }),
+    provideDocumentSemanticTokens: (model) => {
+      try {
+        const parser = new ClickhouseSQLParser();
+        parser.parse(model.getValue(), false);
+    
+        const data = parser.generateMonacoTokens();
+    
+        return {
+          data: new Uint32Array(data),
+          resultId: null,
+        };
+      } catch (e) {
+        console.error("Error parsing ClickHouse SQL:", e);
+        return {
+          data: new Uint32Array([]),
+          resultId: null,
+        };
+      }
+    },
+    releaseDocumentSemanticTokens: () => { }
+  });
 }
 
 /**
