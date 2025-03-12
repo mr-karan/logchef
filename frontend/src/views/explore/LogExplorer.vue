@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Plus, Play, Share } from 'lucide-vue-next'
@@ -506,31 +506,29 @@ const availableFields = computed((): FieldInfo[] => {
   // Add special metadata fields if available
   if (sourceDetails.value) {
     // Add timestamp field if not already in the list
-    if (sourceDetails.value._meta_ts_field) {
-      const tsField = fields.find(f => f.name === sourceDetails.value?._meta_ts_field);
-      if (tsField) {
-        tsField.isTimestamp = true;
-      } else {
-        fields.push({
-          name: sourceDetails.value._meta_ts_field,
-          type: 'timestamp',
-          isTimestamp: true
-        });
-      }
+    const tsFieldName = sourceDetails.value._meta_ts_field || 'timestamp';
+    const tsField = fields.find(f => f.name === tsFieldName);
+    if (tsField) {
+      tsField.isTimestamp = true;
+    } else {
+      fields.push({
+        name: tsFieldName,
+        type: 'timestamp',
+        isTimestamp: true
+      });
     }
 
     // Add severity field if not already in the list
-    if (sourceDetails.value._meta_severity_field) {
-      const severityField = fields.find(f => f.name === sourceDetails.value?._meta_severity_field);
-      if (severityField) {
-        severityField.isSeverity = true;
-      } else {
-        fields.push({
-          name: sourceDetails.value._meta_severity_field,
-          type: 'string',
-          isSeverity: true
-        });
-      }
+    const severityFieldName = sourceDetails.value._meta_severity_field || 'severity_text';
+    const severityField = fields.find(f => f.name === severityFieldName);
+    if (severityField) {
+      severityField.isSeverity = true;
+    } else {
+      fields.push({
+        name: severityFieldName,
+        type: 'string',
+        isSeverity: true
+      });
     }
   }
 
@@ -637,15 +635,27 @@ watch(
   { immediate: true }
 )
 
-// Watch for changes in availableFields
+// Watch for changes to availableFields to re-register completion providers
 watch(
   () => availableFields.value,
-  (newFields) => {
-    if (newFields && newFields.length > 0) {
-      console.log('Available fields for LogchefQL editor:', newFields)
+  (newFields, oldFields) => {
+    // Only update if fields have actually changed
+    if (newFields && newFields.length > 0 && 
+        (!oldFields || oldFields.length !== newFields.length || 
+         JSON.stringify(newFields) !== JSON.stringify(oldFields))) {
+      
+      console.log('Available fields updated, re-registering completion providers');
+      
+      // Re-register completion providers with updated fields
+      nextTick(() => {
+        if (queryEditorRef.value && queryEditorRef.value.registerCompletionProviders) {
+          // Call the exposed method to re-register completion providers
+          queryEditorRef.value.registerCompletionProviders();
+        }
+      });
     }
   },
-  { immediate: true }
+  { immediate: false, deep: true } // Changed to non-immediate to avoid initial empty fields issue
 )
 
 // Watch for changes in logchefQuery to update URL
@@ -1201,6 +1211,15 @@ onMounted(async () => {
     if (exploreStore.canExecuteQuery) {
       await executeQuery()
     }
+    
+    // Initialize the query editor with available fields after a short delay
+    // This ensures the editor is fully mounted and ready
+    setTimeout(() => {
+      if (queryEditorRef.value && queryEditorRef.value.registerCompletionProviders) {
+        console.log("Initializing query editor completion providers");
+        queryEditorRef.value.registerCompletionProviders();
+      }
+    }, 500);
   } catch (error) {
     console.error("Error during LogExplorer mount:", error)
     urlError.value = "Error initializing the explorer. Please try refreshing the page."

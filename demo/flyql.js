@@ -1,4 +1,5 @@
-// Constants for character types
+import { isNumeric } from "@/utils/utils.js";
+
 const DELIMITER = " ";
 const DOT = ".";
 const UNDERSCORE = "_";
@@ -16,17 +17,16 @@ const DOUBLE_QUOTE = '"';
 const SINGLE_QUOTE = "'";
 const NEWLINE = "\n";
 
-// Define token types for syntax highlighting
-export const CharType = Object.freeze({
-  KEY: "logchefqlKey",
-  VALUE: "logchefqlValue",
-  OPERATOR: "logchefqlOperator",
+const CharType = Object.freeze({
+  KEY: "flyqlKey",
+  VALUE: "flyqkValue",
+  OPERATOR: "flyqlOperator",
   NUMBER: "number",
   STRING: "string",
   SPACE: "space",
 });
 
-export const tokenTypes = [
+const tokenTypes = [
   CharType.KEY,
   CharType.VALUE,
   CharType.OPERATOR,
@@ -34,8 +34,44 @@ export const tokenTypes = [
   CharType.STRING,
 ];
 
-// Parser states
-export const State = Object.freeze({
+class Token {
+  constructor(char, charType) {
+    this.start = char.pos;
+    this.length = char.value.length;
+    this.type = charType;
+    this.value = char.value;
+    this.line = char.line;
+    this.linePos = char.linePos;
+  }
+  addChar(char) {
+    this.value += char.value;
+    this.length += char.value.length;
+  }
+}
+
+class FlyqlError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "FlyqlError";
+  }
+}
+
+class ParserError extends FlyqlError {
+  constructor(message, errno) {
+    super(message);
+    this.errno = errno;
+  }
+
+  toString() {
+    return this.message;
+  }
+
+  toRepresentation() {
+    return this.toString();
+  }
+}
+
+const State = Object.freeze({
   INITIAL: "Initial",
   ERROR: "Error",
   KEY: "Key",
@@ -47,14 +83,12 @@ export const State = Object.freeze({
   EXPECT_BOOL_OP: "ExpectBoolOp",
 });
 
-// Boolean operators
-export const BoolOperator = Object.freeze({
+const BoolOperator = Object.freeze({
   AND: "and",
   OR: "or",
 });
 
-// Comparison operators
-export const Operator = Object.freeze({
+const Operator = Object.freeze({
   EQUALS: "=",
   NOT_EQUALS: "!=",
   EQUALS_REGEX: "=~",
@@ -65,7 +99,7 @@ export const Operator = Object.freeze({
   LOWER_OR_EQUALS_THAN: "<=",
 });
 
-export const VALID_KEY_VALUE_OPERATORS = [
+const VALID_KEY_VALUE_OPERATORS = [
   Operator.EQUALS,
   Operator.NOT_EQUALS,
   Operator.EQUALS_REGEX,
@@ -76,38 +110,12 @@ export const VALID_KEY_VALUE_OPERATORS = [
   Operator.LOWER_OR_EQUALS_THAN,
 ];
 
-export const VALID_BOOL_OPERATORS = [BoolOperator.AND, BoolOperator.OR];
+const VALID_BOOL_OPERATORS = [BoolOperator.AND, BoolOperator.OR];
 
-export const VALID_BOOL_OPERATORS_CHARS = ["a", "n", "d", "o", "r"];
+const VALID_BOOL_OPERATORS_CHARS = ["a", "n", "d", "o", "r"];
 
-// Custom error class for parsing errors
-export class LogchefQLError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "LogchefQLError";
-  }
-}
-
-export class ParserError extends LogchefQLError {
-  errno: number;
-
-  constructor(message: string, errno: number) {
-    super(message);
-    this.errno = errno;
-  }
-
-  toString() {
-    return this.message;
-  }
-}
-
-// Expression class for parsed expressions
-export class Expression {
-  key: string;
-  operator: string;
-  value: string;
-
-  constructor(key: string, operator: string, value: string) {
+class Expression {
+  constructor(key, operator, value) {
     this.key = key;
     this.operator = operator;
     this.value = value;
@@ -116,87 +124,12 @@ export class Expression {
   toString() {
     return `${this.key}${this.operator}${this.value}`;
   }
-  
-  // Convert to ClickHouse SQL WHERE clause
-  toSQL(): string {
-    // Handle special JSON path notation (p.field)
-    if (this.key.includes(".")) {
-      const [parent, field] = this.key.split(".");
-      return this.toJsonSQL(parent, field);
-    }
-
-    switch (this.operator) {
-      case Operator.EQUALS:
-        return `${this.key} = ?`;
-      case Operator.NOT_EQUALS:
-        return `${this.key} != ?`;
-      case Operator.EQUALS_REGEX:
-        return `match(${this.key}, ?)`;
-      case Operator.NOT_EQUALS_REGEX:
-        return `NOT match(${this.key}, ?)`;
-      case Operator.GREATER_THAN:
-        return `${this.key} > ?`;
-      case Operator.LOWER_THAN:
-        return `${this.key} < ?`;
-      case Operator.GREATER_OR_EQUALS_THAN:
-        return `${this.key} >= ?`;
-      case Operator.LOWER_OR_EQUALS_THAN:
-        return `${this.key} <= ?`;
-      default:
-        return `${this.key} = ?`;
-    }
-  }
-
-  // Handle JSON extractions for nested fields
-  private toJsonSQL(parent: string, field: string): string {
-    switch (this.operator) {
-      case Operator.EQUALS:
-        return `JSONExtractString(${parent}, '${field}') = ?`;
-      case Operator.NOT_EQUALS:
-        return `JSONExtractString(${parent}, '${field}') != ?`;
-      case Operator.EQUALS_REGEX:
-        return `match(JSONExtractString(${parent}, '${field}'), ?)`;
-      case Operator.NOT_EQUALS_REGEX:
-        return `NOT match(JSONExtractString(${parent}, '${field}'), ?)`;
-      case Operator.GREATER_THAN:
-        return `JSONExtractString(${parent}, '${field}') > ?`;
-      case Operator.LOWER_THAN:
-        return `JSONExtractString(${parent}, '${field}') < ?`;
-      case Operator.GREATER_OR_EQUALS_THAN:
-        return `JSONExtractString(${parent}, '${field}') >= ?`;
-      case Operator.LOWER_OR_EQUALS_THAN:
-        return `JSONExtractString(${parent}, '${field}') <= ?`;
-      default:
-        return `JSONExtractString(${parent}, '${field}') = ?`;
-    }
-  }
-
-  // Get parameter value for SQL query
-  getParamValue(): string | number {
-    // Return numeric value if applicable
-    if (isNumeric(this.value)) {
-      return parseFloat(this.value);
-    }
-
-    return this.value;
-  }
 }
 
-// Node class for the parse tree
-export class Node {
-  boolOperator: string;
-  expression: Expression | null;
-  left: Node | null;
-  right: Node | null;
-
-  constructor(
-    boolOperator: string,
-    expression: Expression | null,
-    left: Node | null,
-    right: Node | null
-  ) {
+class Node {
+  constructor(boolOperator, expression, left, right) {
     if ((left || right) && expression) {
-      throw new LogchefQLError("either (left or right) or expression at same time");
+      throw new FlyqlError("either (left or right) or expression at same time");
     }
 
     this.boolOperator = boolOperator;
@@ -205,63 +138,28 @@ export class Node {
     this.right = right;
   }
 
-  setBoolOperator(boolOperator: string) {
-    if (!VALID_BOOL_OPERATORS.includes(boolOperator as any)) {
-      throw new LogchefQLError(`invalid bool operator: ${boolOperator}`);
+  setBoolOperator(boolOperator) {
+    if (!VALID_BOOL_OPERATORS.includes(boolOperator)) {
+      throw new FlyqlError(`invalid bool operator: ${boolOperator}`);
     }
     this.boolOperator = boolOperator;
   }
 
-  setLeft(node: Node) {
+  setLeft(node) {
     this.left = node;
   }
 
-  setRight(node: Node) {
+  setRight(node) {
     this.right = node;
   }
 
-  setExpression(expression: Expression) {
+  setExpression(expression) {
     this.expression = expression;
-  }
-  
-  // Generate SQL from the AST
-  toSQL(): { sql: string; params: Array<string | number> } {
-    if (this.expression) {
-      const sql = this.expression.toSQL();
-      return {
-        sql,
-        params: [this.expression.getParamValue()],
-      };
-    }
-
-    if (this.left && this.right) {
-      const leftSQL = this.left.toSQL();
-      const rightSQL = this.right.toSQL();
-
-      const boolOp = this.boolOperator.toUpperCase();
-      const sql = `(${leftSQL.sql}) ${boolOp} (${rightSQL.sql})`;
-      const params = [...leftSQL.params, ...rightSQL.params];
-
-      return { sql, params };
-    }
-
-    // Handle the case where we only have a left node (single expression)
-    if (this.left && !this.right) {
-      return this.left.toSQL();
-    }
-
-    return { sql: "", params: [] };
   }
 }
 
-// Character class for parsing
 class Char {
-  value: string;
-  pos: number;
-  line: number;
-  linePos: number;
-
-  constructor(value: string, pos: number, line: number, linePos: number) {
+  constructor(value, pos, line, linePos) {
     this.value = value;
     this.pos = pos;
     this.line = line;
@@ -340,50 +238,7 @@ class Char {
   }
 }
 
-// Token class for syntax highlighting
-class Token {
-  start: number;
-  length: number;
-  type: string;
-  value: string;
-  line: number;
-  linePos: number;
-
-  constructor(char: Char, charType: string) {
-    this.start = char.pos;
-    this.length = char.value.length;
-    this.type = charType;
-    this.value = char.value;
-    this.line = char.line;
-    this.linePos = char.linePos;
-  }
-
-  addChar(char: Char) {
-    this.value += char.value;
-    this.length += char.value.length;
-  }
-}
-
-// Main parser class
-export class Parser {
-  pos: number;
-  line: number;
-  linePos: number;
-  text: string;
-  state: string;
-  char: Char | null;
-  key: string;
-  value: string;
-  keyValueOperator: string;
-  boolOperator: string;
-  currentNode: Node | null;
-  nodesStack: Node[];
-  boolOpStack: string[];
-  errorText: string;
-  errno: number;
-  root: Node | null;
-  typedChars: [Char, string][];
-
+class Parser {
   constructor() {
     this.pos = 0;
     this.line = 0;
@@ -403,32 +258,30 @@ export class Parser {
     this.root = null;
     this.typedChars = [];
   }
-
-  setState(state: string) {
+  setState(state) {
     this.state = state;
   }
 
-  setText(text: string) {
+  setText(text) {
     this.text = text;
   }
 
-  setChar(char: Char) {
+  setChar(char) {
     this.char = char;
   }
 
-  setCurrentNode(node: Node) {
+  setCurrentNode(node) {
     this.currentNode = node;
   }
 
-  setErrorState(errorText: string, errno: number) {
+  setErrorState(errorText, errno) {
     this.state = State.ERROR;
-    this.errorText = errorText;
+    this.error_text = errorText;
     this.errno = errno;
     if (this.char) {
       this.errorText += ` [char ${this.char.value} at ${this.char.pos}], errno=${errno}`;
     }
   }
-
   resetPos() {
     this.pos = 0;
   }
@@ -456,27 +309,18 @@ export class Parser {
   }
 
   extendKey() {
-    if (this.char) {
-      this.key += this.char.value;
-    }
+    this.key += this.char.value;
   }
-
   extendValue() {
-    if (this.char) {
-      this.value += this.char.value;
-    }
+    this.value += this.char.value;
   }
 
   extendKeyValueOperator() {
-    if (this.char) {
-      this.keyValueOperator += this.char.value;
-    }
+    this.keyValueOperator += this.char.value;
   }
 
   extendBoolOperator() {
-    if (this.char) {
-      this.boolOperator += this.char.value;
-    }
+    this.boolOperator += this.char.value;
   }
 
   extendNodesStack() {
@@ -489,24 +333,15 @@ export class Parser {
     this.boolOpStack.push(this.boolOperator);
   }
 
-  newNode(boolOperator: string, expression: Expression | null, left: Node | null, right: Node | null) {
+  newNode(boolOperator, expression, left, right) {
     return new Node(boolOperator, expression, left, right);
   }
-
   newExpression() {
-    return new Expression(
-      this.key,
-      this.keyValueOperator,
-      this.value
-    );
+    return new Expression(this.key, this.keyValueOperator, this.value);
   }
-
-  storeTypedChar(charType: string) {
-    if (this.char) {
-      this.typedChars.push([this.char, charType]);
-    }
+  storeTypedChar(charType) {
+    this.typedChars.push([this.char, charType]);
   }
-
   extendTree() {
     if (this.currentNode && !this.currentNode.left) {
       const node = this.newNode("", this.newExpression(), null, null);
@@ -522,43 +357,25 @@ export class Parser {
         this.boolOperator,
         null,
         this.currentNode,
-        right
+        right,
       );
       this.setCurrentNode(node);
     }
   }
-
-  extendTreeFromStack(boolOperator: string) {
+  extendTreeFromStack(boolOperator) {
     const node = this.nodesStack.pop();
-    if (node && this.currentNode) {
-      if (node.right === null) {
-        node.right = this.currentNode;
-        node.setBoolOperator(boolOperator);
-        this.setCurrentNode(node);
-      } else {
-        const newNode = this.newNode(
-          boolOperator,
-          null,
-          node,
-          this.currentNode
-        );
-        this.setCurrentNode(newNode);
-      }
+    if (node.right === null) {
+      node.right = this.currentNode;
+      node.setBoolOperator(boolOperator);
+      this.setCurrentNode(node);
+    } else {
+      const newNode = this.newNode(boolOperator, null, node, this.currentNode);
+      this.setCurrentNode(newNode);
     }
   }
-
   inStateInitial() {
-    if (!this.char) return;
-
     this.resetData();
-    this.setCurrentNode(
-      this.newNode(
-        this.boolOperator,
-        null,
-        null,
-        null
-      )
-    );
+    this.setCurrentNode(this.newNode(this.boolOperator, null, null, null));
 
     if (this.char.isGroupOpen()) {
       this.extendNodesStack();
@@ -577,10 +394,7 @@ export class Parser {
       return;
     }
   }
-
   inStateKey() {
-    if (!this.char) return;
-
     if (this.char.isDelimiter()) {
       this.storeTypedChar(CharType.SPACE);
       this.setErrorState("unexpected delimiter in key", 2);
@@ -597,10 +411,7 @@ export class Parser {
       return;
     }
   }
-
   inStateKeyValueOperator() {
-    if (!this.char) return;
-
     if (this.char.isDelimiter()) {
       this.storeTypedChar(CharType.SPACE);
       this.setErrorState("unexpected delimiter in operator", 4);
@@ -608,7 +419,7 @@ export class Parser {
       this.extendKeyValueOperator();
       this.storeTypedChar(CharType.OPERATOR);
     } else if (this.char.isValue()) {
-      if (!VALID_KEY_VALUE_OPERATORS.includes(this.keyValueOperator as any)) {
+      if (!VALID_KEY_VALUE_OPERATORS.includes(this.keyValueOperator)) {
         this.setErrorState(`unknown operator: ${this.keyValueOperator}`, 10);
       } else {
         this.setState(State.VALUE);
@@ -616,14 +427,14 @@ export class Parser {
         this.storeTypedChar(CharType.VALUE);
       }
     } else if (this.char.isSingleQuote()) {
-      if (!VALID_KEY_VALUE_OPERATORS.includes(this.keyValueOperator as any)) {
+      if (!VALID_KEY_VALUE_OPERATORS.includes(this.keyValueOperator)) {
         this.setErrorState(`unknown operator: ${this.keyValueOperator}`, 10);
       } else {
         this.setState(State.SINGLE_QUOTED_VALUE);
         this.storeTypedChar(CharType.VALUE);
       }
     } else if (this.char.isDoubleQuote()) {
-      if (!VALID_KEY_VALUE_OPERATORS.includes(this.keyValueOperator as any)) {
+      if (!VALID_KEY_VALUE_OPERATORS.includes(this.keyValueOperator)) {
         this.setErrorState(`unknown operator: ${this.keyValueOperator}`, 10);
       } else {
         this.setState(State.DOUBLE_QUOTED_VALUE);
@@ -633,10 +444,7 @@ export class Parser {
       this.setErrorState("invalid character", 4);
     }
   }
-
   inStateValue() {
-    if (!this.char) return;
-
     if (this.char.isValue()) {
       this.extendValue();
       this.storeTypedChar(CharType.VALUE);
@@ -654,7 +462,7 @@ export class Parser {
         this.extendTree();
         this.resetData();
         if (this.boolOpStack.length) {
-          this.boolOperator = this.boolOpStack.pop() || "";
+          this.boolOperator = this.boolOpStack.pop();
         }
         this.extendTreeFromStack(this.boolOperator);
         this.resetBoolOperator();
@@ -666,10 +474,7 @@ export class Parser {
       return;
     }
   }
-
   inStateSingleQuotedValue() {
-    if (!this.char) return;
-
     this.storeTypedChar(CharType.VALUE);
     if (this.char.isSingleQuotedValue()) {
       this.extendValue();
@@ -688,10 +493,7 @@ export class Parser {
       return;
     }
   }
-
   inStateDoubleQuotedValue() {
-    if (!this.char) return;
-
     this.storeTypedChar(CharType.VALUE);
     if (this.char.isDoubleQuotedValue()) {
       this.extendValue();
@@ -710,10 +512,7 @@ export class Parser {
       return;
     }
   }
-
   inStateBoolOpDelimiter() {
-    if (!this.char) return;
-
     if (this.char.isDelimiter()) {
       this.storeTypedChar(CharType.SPACE);
       return;
@@ -728,13 +527,12 @@ export class Parser {
       this.setState(State.INITIAL);
     } else if (this.char.isGroupClose()) {
       this.storeTypedChar(CharType.OPERATOR);
-      if (!this.nodesStack.length) {
+      if (this.nodesStack.length) {
         this.setErrorState("unmatched parenthesis", 15);
         return;
       } else {
         this.resetData();
-        const boolOp = this.boolOpStack.pop() || "";
-        this.extendTreeFromStack(boolOp);
+        this.extendTreeFromStack(this.boolOpStack.pop());
         this.setState(State.EXPECT_BOOL_OP);
       }
     } else {
@@ -742,10 +540,7 @@ export class Parser {
       return;
     }
   }
-
   inStateExpectBoolOp() {
-    if (!this.char) return;
-
     if (this.char.isDelimiter()) {
       this.storeTypedChar(CharType.SPACE);
       return;
@@ -759,18 +554,20 @@ export class Parser {
         }
         this.resetData();
         this.resetBoolOperator();
-        const boolOp = this.boolOpStack.pop() || "";
-        this.extendTreeFromStack(boolOp);
+        this.extendTreeFromStack(this.boolOpStack.pop());
         this.setState(State.EXPECT_BOOL_OP);
         this.storeTypedChar(CharType.OPERATOR);
       }
     } else {
       this.extendBoolOperator();
       this.storeTypedChar(CharType.OPERATOR);
-      if (this.boolOperator.length > 3 || !VALID_BOOL_OPERATORS_CHARS.includes(this.char.value)) {
+      if (
+        this.boolOperator.length > 3 ||
+        !VALID_BOOL_OPERATORS_CHARS.includes(this.char.value)
+      ) {
         this.setErrorState("invalid character", 20);
       } else {
-        if (VALID_BOOL_OPERATORS.includes(this.boolOperator as any)) {
+        if (VALID_BOOL_OPERATORS.includes(this.boolOperator)) {
           const nextPos = this.char.pos + 1;
           if (this.text.length > nextPos) {
             const nextChar = new Char(this.text[nextPos], nextPos, 0, 0);
@@ -785,7 +582,6 @@ export class Parser {
       }
     }
   }
-
   inStateLastChar() {
     if (this.state === State.INITIAL && !this.nodesStack.length) {
       this.setErrorState("empty input", 24);
@@ -795,29 +591,21 @@ export class Parser {
       this.extendTree();
       this.resetBoolOperator();
     } else if (
-      this.state === State.SINGLE_QUOTED_VALUE ||
-      this.state === State.DOUBLE_QUOTED_VALUE
-    ) {
-      this.setErrorState("unterminated string", 26);
-      return;
-    } else if (
       this.state === State.BOOL_OP_DELIMITER &&
-      this.state !== (State.EXPECT_BOOL_OP as any)
+      this.state !== State.EXPECT_BOOL_OP
     ) {
-      this.setErrorState("unexpected EOF", 27);
+      this.setErrorState("unexpected EOF", 26);
       return;
     }
 
     if (this.state !== State.ERROR && this.nodesStack.length) {
-      this.setErrorState("unmatched parenthesis", 28);
+      this.setErrorState("unmatched parenthesis", 27);
       return;
     }
   }
-
   generateMonacoTokens() {
-    const tokens: Token[] = [];
-    let token: Token | null = null;
-    
+    const tokens = [];
+    let token = null;
     for (const [char, charType] of this.typedChars) {
       if (token == null) {
         token = new Token(char, charType);
@@ -830,11 +618,9 @@ export class Parser {
         }
       }
     }
-    
     if (token !== null) {
       tokens.push(token);
     }
-    
     for (const token of tokens) {
       if (token.type === CharType.VALUE) {
         if (isNumeric(token.value)) {
@@ -844,43 +630,35 @@ export class Parser {
         }
       }
     }
-    
-    const data: number[] = [];
+    const data = [];
     const tokenModifier = 0;
-    let prevToken: Token | null = null;
-    
-    for (const token of tokens) {
+    let prevToken = null;
+    for (const [index, token] of tokens.entries()) {
       let deltaLine = 0;
       let deltaStart = token.linePos;
       let tokenLength = token.length;
-      let typeIndex = tokenTypes.indexOf(token.type as any);
+      let typeIndex = tokenTypes.indexOf(token.type);
 
       if (prevToken != null) {
         deltaLine = token.line - prevToken.line;
-        deltaStart = deltaLine === 0 ? token.start - prevToken.start : token.linePos;
+        deltaStart =
+          deltaLine === 0 ? token.start - prevToken.start : token.linePos;
         prevToken = token;
       } else {
         prevToken = token;
       }
-      
       data.push(deltaLine, deltaStart, tokenLength, typeIndex, tokenModifier);
     }
-    
     return data;
   }
-
-  parse(text: string, raiseError = false, ignoreLastChar = false) {
+  parse(text, raiseError, ignoreLastChar) {
     this.setText(text);
-    
-    for (let i = 0; i < text.length; i++) {
+    for (let c of text) {
       if (this.state === State.ERROR) {
         break;
       }
-      
-      const c = text[i];
-      this.setChar(new Char(c, i, this.line, this.linePos));
-      
-      if (this.char?.isNewline()) {
+      this.setChar(new Char(c, this.pos, this.line, this.linePos));
+      if (this.char.isNewline()) {
         this.line += 1;
         this.linePos = 0;
         this.pos += 1;
@@ -913,19 +691,24 @@ export class Parser {
 
     if (this.state === State.ERROR) {
       if (raiseError) {
-        throw new ParserError(this.errorText, this.errno);
+        throw new ParserError({
+          message: this.errorText,
+          errno: this.errno,
+        });
       } else {
         return;
       }
     }
-    
     if (!ignoreLastChar) {
       this.inStateLastChar();
     }
 
     if (this.state === State.ERROR) {
       if (raiseError) {
-        throw new ParserError(this.errorText, this.errno);
+        throw new ParserError({
+          message: this.errorText,
+          errno: this.errno,
+        });
       } else {
         return;
       }
@@ -933,39 +716,13 @@ export class Parser {
 
     this.root = this.currentNode;
   }
-
-  // Generate SQL from the parsed query
-  toSQL(): { sql: string; params: Array<string | number> } {
-    if (!this.root) {
-      return { sql: "", params: [] };
-    }
-
-    const result = this.root.toSQL();
-
-    // Add WHERE keyword for complete SQL clause
-    if (result.sql) {
-      result.sql = `WHERE ${result.sql}`;
-    }
-
-    return result;
-  }
-  
-  // Get the current context for autocompletion
-  getCompletionContext() {
-    return {
-      state: this.state,
-      key: this.key,
-      value: this.value,
-      keyValueOperator: this.keyValueOperator,
-      needsOperator: this.state === State.KEY,
-      needsValue: this.state === State.KEY_VALUE_OPERATOR,
-      needsBooleanOperator: this.state === State.EXPECT_BOOL_OP
-    };
-  }
 }
 
-export function isNumeric(str: string | number): boolean {
-  // Convert to string if it's a number
-  const strValue = String(str);
-  return !isNaN(Number(strValue)) && !isNaN(parseFloat(strValue));
-}
+export {
+  Parser,
+  tokenTypes,
+  State,
+  Operator,
+  BoolOperator,
+  VALID_KEY_VALUE_OPERATORS,
+};

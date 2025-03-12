@@ -13,9 +13,19 @@
     </Tabs>
 
     <!-- Editor container with minimal styling -->
-    <div :style="{ height: `${editorHeight}px` }" class="rounded-md">
-      <vue-monaco-editor v-model:value="currentCode" :theme="currentTheme" :language="currentLanguage"
-        :options="editorOptions" @mount="handleMount" @change="onChange" />
+    <div 
+      :style="{ height: `${editorHeight}px` }" 
+      class="rounded-md border dark:border-neutral-700"
+      :class="{ 'border-sky-800 dark:border-sky-700': editorFocused }"
+    >
+      <vue-monaco-editor 
+        v-model:value="code" 
+        :theme="currentTheme" 
+        :language="currentLanguage"
+        :options="editorOptions" 
+        @mount="handleMount" 
+        @change="onChange" 
+      />
     </div>
 
     <!-- Error display -->
@@ -32,27 +42,15 @@
 </template>
 
 <script setup>
-import { ref, computed, shallowRef, nextTick, watch } from 'vue'
+import { ref, computed, shallowRef, nextTick, watch, defineExpose } from 'vue'
 import * as monaco from "monaco-editor"
 import { useDark } from '@vueuse/core'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
 import { getDefaultMonacoOptions } from '@/utils/monaco'
-import { translateLogchefQLToSQL, parseLogchefQL } from '@/utils/logchefql/api'
-import { isNumeric } from "@/utils/utils"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { Switch } from '@/components/ui/switch'
+import { translateLogchefQLToSQL } from '@/utils/logchefql/api'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Terminal, Database } from 'lucide-vue-next'
-import {
-  Parser as LogchefqlParser,
-  tokenTypes as logchefqlTokenTypes,
-} from "@/utils/logchefql"
-import {
-  Parser as ClickhouseSQLParser,
-  tokenTypes as clickhouseSQLTokenTypes,
-  SQL_KEYWORDS,
-  SQL_TYPES,
-  CLICKHOUSE_FUNCTIONS,
-} from "@/utils/clickhouse-sql"
+import { Parser, State, VALID_KEY_VALUE_OPERATORS } from "@/utils/logchefql"
 
 // Define emits and props
 const emit = defineEmits(['update:modelValue', 'change', 'submit', 'modeChange'])
@@ -63,15 +61,18 @@ const props = defineProps({
   },
   placeholder: {
     type: String,
-    default: 'service_name=\'api\' and severity_level=\'error\''
+    default: 'field="value" and another_field="value"'
   },
   availableFields: {
     type: Array,
     default: () => []
   },
   height: {
-    type: String,
-    default: '40'
+    type: [Number, String],
+    default: 40,
+    validator: (value) => {
+      return !isNaN(Number(value));
+    }
   },
   error: {
     type: String,
@@ -90,209 +91,102 @@ const props = defineProps({
 // State variables
 const isDark = useDark()
 const editorFocused = ref(false)
-const dslCode = ref(props.modelValue)
+const code = ref(props.modelValue)
 const sqlCode = ref('')
 const activeMode = ref('dsl')
 const editorRef = shallowRef()
 
-// Calculate editor options using Monaco's defaults where possible
-const editorOptions = computed(() => {
-  const options = getDefaultMonacoOptions()
-  return {
-    ...options,
-    // Use consistent lineHeight of 20 (matches default in monaco.ts)
-    lineHeight: 20,
-    // Use consistent top/bottom padding (these match monaco.ts defaults)
-    padding: {
-      top: 6,
-      bottom: 6
-    },
-    fontSize: 13,
-    placeholder: activeMode.value === 'dsl'
-      ? props.placeholder
-      : 'SQL query will be generated when switching to SQL mode'
-  }
-})
+// Editor options
+const editorOptions = computed(() => ({
+  ...getDefaultMonacoOptions(),
+  placeholder: props.placeholder
+}))
 
 // Current language based on active mode
-const currentLanguage = computed(() => {
-  return activeMode.value === 'dsl' ? 'logchefql' : 'clickhouse-sql'
-})
+const currentLanguage = computed(() => 
+  activeMode.value === 'dsl' ? 'logchefql' : 'clickhouse-sql'
+)
 
-// Set theme based on dark mode and active mode
-const currentTheme = computed(() => {
-  if (props.theme) {
-    return props.theme
-  }
-  return isDark.value ? 'logchef-dark' : 'logchef'
-})
+// Set theme based on dark mode
+const currentTheme = computed(() => 
+  props.theme || (isDark.value ? 'logchef-dark' : 'logchef')
+)
 
-// Current code based on active mode
-const currentCode = computed({
-  get: () => (activeMode.value === 'dsl' ? dslCode.value : sqlCode.value),
-  set: (val) => {
-    if (activeMode.value === 'dsl') {
-      dslCode.value = val
-    } else {
-      sqlCode.value = val
-    }
-    // Emit change event to parent component
-    emit('change', val)
-  }
-})
-
-// Height calculation aligned with the consistent lineHeight
+// Dynamic height calculation
 const editorHeight = computed(() => {
-  const content = activeMode.value === 'dsl' ? dslCode.value : sqlCode.value
-  const lines = (content.match(/\n/g) || []).length + 1
-
-  // Use consistent lineHeight of 20 (matches monaco.ts and our options)
-  // Monaco adds 12px padding (6px top + 6px bottom), so we don't need to add it again
-  return Math.max(32, lines * 20)
+  const lines = (code.value.match(/\n/g) || []).length + 1
+  const minHeight = Number(props.height)
+  return Math.max(minHeight, lines * 20)
 })
 
 /**
- * Get the default SQL query to use when no query is provided
- * Simple version that will have time range and limit added automatically
+ * Get the default SQL query
  */
 function getDefaultSQLQuery(tableName = 'logs.vector_logs') {
   return `SELECT * FROM ${tableName}`;
 }
 
-// Watch for changes to activeMode and handle mode switching
-watch(activeMode, (newMode, oldMode) => {
-  if (newMode === oldMode) return
-
-  if (newMode === 'sql') {
-    // When switching to SQL mode, generate SQL from DSL
-    try {
-      if (dslCode.value.trim()) {
-        console.log('Translating LogchefQL to SQL:', dslCode.value);
-
-        try {
-          // Try to parse using the LogchefQL parser directly to better diagnose issues
-          const { sql, params } = parseLogchefQL(dslCode.value);
-          console.log('Raw parsed SQL components:', { sql, params });
-
-          // Convert params to strings for logging
-          const paramsStr = params.map(p => typeof p === 'string' ? `'${p}'` : p).join(', ');
-          console.log(`SQL with params: ${sql.replace(/\?/g, () => `{param}`)}, params: [${paramsStr}]`);
-        } catch (e) {
-          console.error('Direct parse error:', e);
-        }
-
-        // For display, just show the WHERE conditions without time range and limits
-        sqlCode.value = translateLogchefQLToSQL(dslCode.value, {
-          table: props.tableName,
-          includeTimeRange: false // Don't include time range for display
-        });
-
-        console.log('Translated SQL for display:', sqlCode.value);
-      } else {
-        // Use default SQL query for empty DSL
-        sqlCode.value = getDefaultSQLQuery(props.tableName);
-        console.log('Using default SQL query for empty DSL:', sqlCode.value);
-      }
-    } catch (error) {
-      console.error('Error translating to SQL:', error);
-      sqlCode.value = getDefaultSQLQuery(props.tableName);
-    }
-  } else if (newMode === 'dsl' && sqlCode.value.trim()) {
-    // When switching from SQL to DSL, we could try to convert SQL to DSL
-    // but for now, we'll just keep the DSL code as is
-    console.log('Switching from SQL to DSL, keeping existing DSL code');
-  }
-
-  emit('modeChange', newMode)
-
-  // Ensure both languages are registered
-  if (!monaco.languages.getLanguages().some(lang => lang.id === 'logchefql')) {
-    registerLogchefql();
-  }
-  if (!monaco.languages.getLanguages().some(lang => lang.id === 'clickhouse-sql')) {
-    registerClickhouseSQL();
-  }
-
-  // Handle language switching in the editor
-  nextTick(() => {
-    // Emit the current code based on the new mode
-    emit('change', newMode === 'dsl' ? dslCode.value : sqlCode.value)
-
-    // Explicitly set the language on the model when the mode changes
-    if (editorRef.value) {
-      const model = editorRef.value.getModel();
-      if (model) {
-        const newLanguage = newMode === 'dsl' ? 'logchefql' : 'clickhouse-sql';
-        monaco.editor.setModelLanguage(model, newLanguage);
-        console.log(`Switched language to: ${newLanguage}`);
-
-        // Force a refresh of the editor to ensure the language change takes effect
-        const value = model.getValue();
-        model.setValue('');
-        nextTick(() => {
-          model.setValue(value);
-          editorRef.value.focus();
-        });
-      }
-    }
-  })
-})
-
-// Watch for changes to currentLanguage and update the editor model
-watch(currentLanguage, (newLanguage) => {
-  nextTick(() => {
-    if (editorRef.value) {
-      const model = editorRef.value.getModel();
-      if (model && model.getLanguageId() !== newLanguage) {
-        monaco.editor.setModelLanguage(model, newLanguage);
-        console.log(`Language watcher updated to: ${newLanguage}`);
-      }
-    }
-  });
-})
-
-// Helper to get suggestions from a list
+/**
+ * Helper to get suggestions from a list
+ */
 const getSuggestionsFromList = (params) => {
-  const suggestions = []
-  let defaultPostfix = (params.postfix === undefined) ? '' : params.postfix
-
-  const range = (params.range === undefined) ? {
+  // Use a Map to deduplicate suggestions by label
+  const suggestionMap = new Map();
+  const defaultPostfix = params.postfix || '';
+  
+  const range = params.range || {
     startLineNumber: params.position.lineNumber,
     endLineNumber: params.position.lineNumber,
     startColumn: params.position.column,
     endColumn: params.position.column,
-  } : params.range
-
-  for (const item of params.items) {
-    let label = null
-    let sortText = null
-    let postfix = defaultPostfix
-    if (typeof item === 'string' || item instanceof String) {
-      label = item
-      sortText = label
-    } else {
-      label = item.label
-      sortText = (item.sortText === undefined) ? label : item.sortText
-      postfix = (item.postfix === undefined) ? defaultPostfix : item.postfix
-    }
-    let insertText = (item.insertText === undefined) ? label : item.insertText
-    suggestions.push({
-      label: label,
-      kind: params.kind,
-      range: range,
-      sortText: sortText,
-      insertText: insertText + postfix,
-      command: {
-        id: 'editor.action.triggerSuggest',
-      }
-    })
+  };
+  
+  if (!params.items || !Array.isArray(params.items) || params.items.length === 0) {
+    return [];
   }
-  return suggestions
-}
+  
+  for (const item of params.items) {
+    let label, sortText, postfix = defaultPostfix, detail, documentation;
+    
+    if (typeof item === 'string') {
+      label = item;
+      sortText = label;
+    } else {
+      label = item.label;
+      sortText = item.sortText || label;
+      postfix = item.postfix ?? defaultPostfix;
+      detail = item.detail;
+      documentation = item.documentation;
+    }
+    
+    if (!label) continue;
+    
+    const insertText = (item.insertText || label) + postfix;
+    
+    // Only add if we haven't seen this label before
+    if (!suggestionMap.has(label)) {
+      suggestionMap.set(label, {
+        label,
+        kind: params.kind,
+        range,
+        sortText,
+        insertText,
+        detail,
+        documentation,
+        command: { id: 'editor.action.triggerSuggest' }
+      });
+    }
+  }
+  
+  // Convert Map values to array
+  return Array.from(suggestionMap.values());
+};
 
-// Get operator suggestions
+/**
+ * Get operator suggestions
+ */
 const getOperatorSuggestions = (field, position) => {
-  let operators = [
+  const operators = [
     { label: '=', sortText: 'a' },
     { label: '!=', sortText: 'b' },
     { label: '~=', sortText: 'c' },
@@ -301,722 +195,562 @@ const getOperatorSuggestions = (field, position) => {
     { label: '<', sortText: 'f' },
     { label: '>=', sortText: 'g' },
     { label: '<=', sortText: 'h' },
-  ]
+  ];
 
   return getSuggestionsFromList({
-    position: position,
+    position,
     items: operators,
     kind: monaco.languages.CompletionItemKind.Operator
-  })
-}
+  });
+};
 
-// Get boolean operator suggestions
+/**
+ * Get boolean operator suggestions
+ */
 const getBooleanOperatorSuggestions = (range) => {
   return getSuggestionsFromList({
-    range: range,
+    range,
     items: ['and', 'or'],
     kind: monaco.languages.CompletionItemKind.Keyword,
     postfix: ' '
-  })
-}
+  });
+};
 
-// Get field suggestions
+/**
+ * Get field suggestions
+ */
 const getFieldSuggestions = (range) => {
-  console.log('Getting field suggestions, available fields:', props.availableFields)
-  
   if (!props.availableFields || props.availableFields.length === 0) {
-    console.warn('No available fields for suggestions')
-    return []
+    return [];
   }
-  
-  const availableFieldNames = props.availableFields.map(field => {
-    // Create more detailed field suggestions with documentation
-    return {
-      label: field.name,
-      sortText: field.isTimestamp ? '0' + field.name : 
-                field.isSeverity ? '1' + field.name : '2' + field.name,
-      insertText: field.name,
-      detail: field.type || 'unknown',
-      documentation: field.isTimestamp ? 'Timestamp field' : 
-                     field.isSeverity ? 'Severity field' : 
-                     `Field type: ${field.type || 'unknown'}`
-    }
-  })
+
+  const fieldItems = props.availableFields.map(field => ({
+    label: field.name,
+    sortText: field.isTimestamp ? '0' + field.name :
+              field.isSeverity ? '1' + field.name : '2' + field.name,
+    insertText: field.name,
+    detail: field.type || 'unknown',
+    documentation: field.isTimestamp ? 'Timestamp field' :
+                  field.isSeverity ? 'Severity field' : `Field type: ${field.type || 'unknown'}`
+  }));
 
   return getSuggestionsFromList({
-    range: range,
-    items: availableFieldNames,
-    kind: monaco.languages.CompletionItemKind.Field,
-    postfix: ''
-  })
-}
+    range,
+    items: fieldItems,
+    kind: monaco.languages.CompletionItemKind.Field
+  });
+};
 
-// Prepare suggestion values with proper quoting
-const prepareSuggestionValues = (items, quoteChar) => {
-  const quoted = (quoteChar === undefined) ? false : true
-  const defaultQuoteChar = (quoteChar === undefined) ? '"' : quoteChar
-  const result = []
-
-  for (const item of items) {
-    if (isNumeric(item)) {
-      result.push({ label: item })
-    } else {
-      let insertText = ''
-      if (!quoted) {
-        insertText = defaultQuoteChar
-      }
-
-      // Escape quotes in value if needed
-      let displayValue = item
-      let escapedValue = item
-      if (typeof item === 'string') {
-        escapedValue = item.replace(new RegExp(defaultQuoteChar, 'g'), `\\${defaultQuoteChar}`)
-      }
-
-      insertText += escapedValue
-      insertText += defaultQuoteChar
-
-      result.push({
-        label: displayValue,
-        insertText: insertText
-      })
-    }
-  }
-
-  return result
-}
-
-// Get value suggestions based on field
+/**
+ * Get value suggestions based on field
+ */
 const getValueSuggestions = (fieldName, range) => {
-  // Common values for certain fields
-  const commonValues = {
-    'service_name': ['api', 'frontend', 'worker', 'scheduler', 'auth'],
-    'severity': ['error', 'warning', 'info', 'debug'],
-    'severity_text': ['error', 'warning', 'info', 'debug'],
-    'level': ['error', 'warning', 'info', 'debug'],
-    'body': ['error', 'exception', 'failed', 'success', 'started', 'completed'],
-  }
-
-  // Find field type if possible
-  const field = props.availableFields.find(f => f.name === fieldName)
-
-  // Use common values if available
-  const values = commonValues[fieldName] || []
-
-  if (values.length > 0) {
+  const field = props.availableFields.find(f => f.name === fieldName);
+  
+  // Timestamp field suggestions
+  if (field?.isTimestamp) {
+    const now = new Date();
+    const formattedDateTime = now.toISOString().replace('T', ' ').substring(0, 19);
+    
     return getSuggestionsFromList({
-      range: range,
-      items: prepareSuggestionValues(values),
-      kind: monaco.languages.CompletionItemKind.Value,
-      postfix: ' '
-    })
-  }
-
-  // Special handling for timestamp fields
-  if (field?.isTimestamp || fieldName.includes('time') || fieldName.includes('date')) {
-    return getSuggestionsFromList({
-      range: range,
-      items: ['now()', 'today()'],
+      range,
+      items: [
+        'now()',
+        'today()',
+        `"${formattedDateTime}"`
+      ],
       kind: monaco.languages.CompletionItemKind.Function,
       postfix: ' '
-    })
+    });
   }
-
-  // Generic value suggestions based on field type
-  if (field) {
-    if (field.type === 'string') {
+  
+  // Severity field suggestions
+  if (field?.isSeverity) {
+    return getSuggestionsFromList({
+      range,
+      items: ['"error"', '"warn"', '"info"', '"debug"', '"trace"'],
+      kind: monaco.languages.CompletionItemKind.Value,
+      postfix: ' '
+    });
+  }
+  
+  // Type-based suggestions
+  if (field?.type) {
+    if (/int|float|double|decimal|number/i.test(field.type)) {
       return getSuggestionsFromList({
-        range: range,
-        items: ['""'],
+        range,
+        items: ['0', '1'],
         kind: monaco.languages.CompletionItemKind.Value,
         postfix: ' '
-      })
-    } else if (field.type === 'number' || field.type === 'int' || field.type === 'float') {
+      });
+    }
+    
+    if (/bool/i.test(field.type)) {
       return getSuggestionsFromList({
-        range: range,
-        items: ['0', '1', '100'],
-        kind: monaco.languages.CompletionItemKind.Value,
-        postfix: ' '
-      })
-    } else if (field.type === 'boolean') {
-      return getSuggestionsFromList({
-        range: range,
+        range,
         items: ['true', 'false'],
         kind: monaco.languages.CompletionItemKind.Value,
         postfix: ' '
-      })
+      });
     }
   }
+  
+  return [];
+};
 
-  // Default to empty quoted string
-  return getSuggestionsFromList({
-    range: range,
-    items: prepareSuggestionValues(['']),
-    kind: monaco.languages.CompletionItemKind.Value,
-    postfix: ' '
-  })
-}
-
-// Analyze query for completions - for LogchefQL mode
-const analyzeQueryForCompletions = (text, cursorPosition) => {
-  const result = {
-    state: 'field', // Default to field suggestion state
-    fieldName: '',
-    needsOperator: false,
-    needsValue: false,
-    needsBooleanOperator: false
-  }
-
-  // Very basic logic to determine context
-  try {
-    // Find the most recent token by space
-    const tokens = text.substring(0, cursorPosition).split(/\s+/)
-    const lastToken = tokens[tokens.length - 1]
-
-    // Check if we're looking at a field name
-    const isFullFieldName = props.availableFields.some(field => field.name === lastToken)
-
-    if (isFullFieldName) {
-      result.state = 'operator'
-      result.fieldName = lastToken
-      result.needsOperator = true
-    }
-
-    // Check if we're after an operator
-    const operatorRegex = /[=!<>~]+$/
-    if (operatorRegex.test(text.substring(0, cursorPosition))) {
-      result.state = 'value'
-      result.needsValue = true
-
-      // Try to extract the field name
-      const fieldMatch = text.substring(0, cursorPosition).match(/(\w+)\s*[=!<>~]+$/)
-      if (fieldMatch && fieldMatch[1]) {
-        result.fieldName = fieldMatch[1]
-      }
-    }
-
-    // Check if we need a boolean operator
-    const valueRegex = /["'][^"']*["']\s*$/
-    if (valueRegex.test(text.substring(0, cursorPosition))) {
-      result.state = 'booleanOperator'
-      result.needsBooleanOperator = true
-    }
-  } catch (e) {
-    // Silently continue with default suggestions
-  }
-
-  return result
-}
-
-// Get suggestions based on editor state
-const getSuggestions = async (word, position, textBeforeCursor) => {
-  let incomplete = false
-  let suggestions = []
-
-  // Define suggestion range
+/**
+ * Get LogchefQL suggestions
+ */
+const getLogchefQLSuggestions = async (word, position, textBeforeCursor) => {
   const range = {
     startLineNumber: position.lineNumber,
     endLineNumber: position.lineNumber,
     startColumn: word.startColumn,
     endColumn: word.endColumn,
-  }
-
+  };
+  
   try {
-    if (activeMode.value === 'dsl') {
-      // Analyze query to determine context for LogchefQL
-      const analysis = analyzeQueryForCompletions(textBeforeCursor, position.column - 1)
-
-      console.log('LogchefQL completion context:', analysis)
-      console.log('Available fields for suggestions:', props.availableFields)
-
-      // Provide appropriate suggestions based on context
-      if (analysis.needsOperator) {
-        suggestions = getOperatorSuggestions(analysis.fieldName, position)
-      } else if (analysis.needsValue) {
-        suggestions = getValueSuggestions(analysis.fieldName, range)
-      } else if (analysis.needsBooleanOperator) {
-        suggestions = getBooleanOperatorSuggestions(range)
+    const parser = new Parser();
+    parser.parse(textBeforeCursor, false, true);
+    const context = parser.getCompletionContext();
+    
+    // Field suggestions
+    if ([State.KEY, State.INITIAL, State.BOOL_OP_DELIMITER].includes(context.state)) {
+      if (props.availableFields.some(field => field.name === word.word)) {
+        const suggestions = getOperatorSuggestions(word.word, position);
+        if (suggestions && suggestions.length > 0) {
+          return {
+            suggestions,
+            incomplete: false
+          };
+        }
       } else {
-        // Default to field suggestions
-        suggestions = getFieldSuggestions(range)
+        const suggestions = getFieldSuggestions(range);
+        if (suggestions && suggestions.length > 0) {
+          return {
+            suggestions,
+            incomplete: false
+          };
+        }
       }
-    } else if (activeMode.value === 'sql') {
-      // For SQL mode, provide custom suggestions based on context
-      suggestions = getSQLSuggestions(word, position, textBeforeCursor, range)
+    } 
+    // Value suggestions
+    else if (context.state === State.KEY_VALUE_OPERATOR && 
+             VALID_KEY_VALUE_OPERATORS.includes(context.keyValueOperator)) {
+      const suggestions = getValueSuggestions(context.key, range);
+      if (suggestions && suggestions.length > 0) {
+        return {
+          suggestions,
+          incomplete: false
+        };
+      }
     }
+    // Boolean operator suggestions
+    else if (context.state === State.EXPECT_BOOL_OP) {
+      const lastExpressionMatch = textBeforeCursor.match(/\w+\s*[=!<>~]+\s*(['"]?)[^'"]*\1\s*$/);
+      
+      if (lastExpressionMatch) {
+        const suggestions = getBooleanOperatorSuggestions(range);
+        if (suggestions && suggestions.length > 0) {
+          return {
+            suggestions,
+            incomplete: false
+          };
+        }
+      }
+    }
+    
+    return undefined;
   } catch (e) {
-    console.error('Error getting suggestions:', e)
-    // Always fall back to field suggestions on any error in DSL mode
-    if (activeMode.value === 'dsl') {
-      suggestions = getFieldSuggestions(range)
-    }
+    console.error('Error getting LogchefQL suggestions:', e);
+    return undefined;
   }
+};
 
-  console.log('Returning suggestions:', suggestions.length)
-  return {
-    suggestions: suggestions,
-    incomplete: incomplete,
-  }
-}
-
-// Get SQL suggestions based on context
-const getSQLSuggestions = (word, position, textBeforeCursor, range) => {
-  // Check if we're after a FROM or JOIN keyword to suggest table names
-  const isAfterFromOrJoin = /\b(FROM|JOIN)\s+\w*$/.test(textBeforeCursor)
-
-  // Check if we're after a table name and dot to suggest column names
-  const isAfterTableDot = /\b(\w+)\.\w*$/.test(textBeforeCursor)
-
-  // Check if we're in a SELECT clause to suggest column names
-  const isInSelectClause = /\bSELECT\b(?!.*\bFROM\b).*$/.test(textBeforeCursor)
-
-  // Check if we're in a WHERE clause to suggest column names
-  const isInWhereClause = /\bWHERE\b(?!.*\b(GROUP|ORDER|LIMIT)\b).*$/.test(textBeforeCursor)
-
-  // Check if we're in a GROUP BY, ORDER BY, or HAVING clause
-  const isInGroupByClause = /\bGROUP\s+BY\b(?!.*\b(ORDER|LIMIT)\b).*$/.test(textBeforeCursor)
-  const isInOrderByClause = /\bORDER\s+BY\b(?!.*\bLIMIT\b).*$/.test(textBeforeCursor)
-  const isInHavingClause = /\bHAVING\b(?!.*\b(ORDER|LIMIT)\b).*$/.test(textBeforeCursor)
-
-  // Common SQL keywords and ClickHouse functions
-  let suggestions = [
-    ...SQL_KEYWORDS.map(keyword => ({
-      label: keyword,
-      kind: monaco.languages.CompletionItemKind.Keyword,
-      insertText: keyword,
-      range: range,
-    })),
-    ...SQL_TYPES.map(type => ({
-      label: type,
-      kind: monaco.languages.CompletionItemKind.TypeParameter,
-      insertText: type,
-      range: range,
-    })),
-    ...CLICKHOUSE_FUNCTIONS.map(func => ({
-      label: func,
-      kind: monaco.languages.CompletionItemKind.Function,
-      insertText: func,
-      range: range,
-    })),
-  ]
-
-  // Add table name suggestion if after FROM or JOIN
-  if (isAfterFromOrJoin) {
-    // Replace all suggestions with table suggestions when after FROM/JOIN
-    suggestions = [
-      {
+/**
+ * Get SQL suggestions
+ */
+const getSQLSuggestions = async (word, position, textBeforeCursor, range) => {
+  try {
+    // Check context patterns
+    const isAfterFromOrJoin = /\b(FROM|JOIN)\s+\w*$/i.test(textBeforeCursor);
+    const isInSelectClause = /\bSELECT\b(?!.*\bFROM\b)/i.test(textBeforeCursor);
+    const isInWhereClause = /\bWHERE\b(?!.*\b(GROUP|ORDER|LIMIT)\b)/i.test(textBeforeCursor);
+    const isAfterOperator = /\b(AND|OR|WHERE|=|!=|<>|>|<|>=|<=|LIKE|NOT LIKE|IN|BETWEEN)\s+\w*$/i.test(textBeforeCursor);
+    
+    const suggestions = [];
+    
+    // Table suggestions
+    if (isAfterFromOrJoin) {
+      suggestions.push({
         label: props.tableName,
         kind: monaco.languages.CompletionItemKind.Class,
         insertText: props.tableName,
-        range: range,
+        range,
         detail: 'Current log table',
         documentation: 'The main logs table containing all log entries',
-        sortText: '0', // Sort to top
-      },
-      {
-        label: `${props.tableName} AS logs`,
-        kind: monaco.languages.CompletionItemKind.Class,
-        insertText: `${props.tableName} AS logs`,
-        range: range,
-        detail: 'Table with alias',
-        documentation: 'Use "logs" as an alias for better readability',
-        sortText: '1',
+        sortText: '0'
+      });
+      
+      return { suggestions, incomplete: false };
+    }
+    
+    // Field suggestions for SELECT/WHERE
+    if (isInSelectClause || isInWhereClause || isAfterOperator) {
+      // Add field suggestions
+      if (props.availableFields && props.availableFields.length > 0) {
+        props.availableFields.forEach(field => {
+          suggestions.push({
+            label: field.name,
+            kind: monaco.languages.CompletionItemKind.Field,
+            insertText: field.name,
+            range,
+            detail: field.type,
+            documentation: field.isTimestamp ? 'Timestamp field' :
+                          field.isSeverity ? 'Severity field' : `Type: ${field.type}`,
+            sortText: field.isTimestamp ? '0' : field.isSeverity ? '1' : '2'
+          });
+        });
+      } else {
+        // Default * suggestion
+        suggestions.push({
+          label: '*',
+          kind: monaco.languages.CompletionItemKind.Field,
+          insertText: '*',
+          range,
+          detail: 'All columns',
+          documentation: 'Select all columns',
+          sortText: '0'
+        });
       }
-    ]
+      
+      // Add SQL keywords
+      const sqlKeywords = [
+        'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'LIMIT',
+        'HAVING', 'JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'INNER JOIN',
+        'UNION', 'DISTINCT', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX',
+        'AND', 'OR', 'NOT', 'IN', 'BETWEEN', 'LIKE', 'IS NULL', 'IS NOT NULL'
+      ];
+      
+      // Only add keywords in appropriate contexts
+      if (!isAfterOperator) {
+        sqlKeywords.forEach(keyword => {
+          suggestions.push({
+            label: keyword,
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: keyword,
+            range,
+            sortText: '9' + keyword // Sort after fields
+          });
+        });
+      }
+      
+      return { suggestions, incomplete: false };
+    }
+    
+    // Default suggestions for empty context
+    if (!isInSelectClause && !isInWhereClause && !isAfterFromOrJoin) {
+      const basicKeywords = [
+        'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'LIMIT'
+      ];
+      
+      basicKeywords.forEach(keyword => {
+        suggestions.push({
+          label: keyword,
+          kind: monaco.languages.CompletionItemKind.Keyword,
+          insertText: keyword + ' ',
+          range,
+          sortText: keyword
+        });
+      });
+      
+      // Add common query templates
+      suggestions.push({
+        label: 'SELECT * FROM table',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        insertText: `SELECT * FROM ${props.tableName}`,
+        range,
+        detail: 'Basic query template',
+        sortText: '0template'
+      });
+      
+      return { suggestions, incomplete: false };
+    }
+    
+    return { suggestions: [], incomplete: false };
+  } catch (e) {
+    console.error('Error getting SQL suggestions:', e);
+    return { suggestions: [], incomplete: false };
+  }
+};
+
+// Handle mode switching
+watch(activeMode, (newMode, oldMode) => {
+  if (newMode === oldMode) return;
+
+  if (newMode === 'sql') {
+    // Generate SQL from LogchefQL
+    try {
+      if (code.value.trim()) {
+        // Store the current LogchefQL query before switching to SQL
+        const logchefqlQuery = code.value;
+        
+        // Generate SQL from LogchefQL
+        sqlCode.value = translateLogchefQLToSQL(logchefqlQuery, {
+          table: props.tableName,
+          includeTimeRange: false
+        });
+        
+        // Update editor with SQL
+        code.value = sqlCode.value;
+      } else {
+        code.value = getDefaultSQLQuery(props.tableName);
+      }
+    } catch (error) {
+      console.error('Error translating to SQL:', error);
+      code.value = getDefaultSQLQuery(props.tableName);
+    }
+  } else {
+    // When switching back to LogchefQL
+    // Store current SQL code for later
+    sqlCode.value = code.value;
+    
+    // Restore original LogchefQL code
+    code.value = props.modelValue || '';
   }
 
-  // Add column name suggestions for various clauses that need column names
-  if (isAfterTableDot || isInSelectClause || isInWhereClause ||
-    isInGroupByClause || isInOrderByClause || isInHavingClause) {
+  emit('modeChange', newMode);
 
-    // Extract table alias if present (for table.column syntax)
-    let tableAlias = null
-    if (isAfterTableDot) {
-      const tableMatch = textBeforeCursor.match(/(\w+)\.\w*$/)
-      if (tableMatch && tableMatch[1]) {
-        tableAlias = tableMatch[1]
+  // Update editor model language
+  nextTick(() => {
+    emit('change', code.value);
+    
+    if (editorRef.value) {
+      const model = editorRef.value.getModel();
+      if (model) {
+        monaco.editor.setModelLanguage(model, currentLanguage.value);
+        
+        // Wait a bit before registering completion providers to ensure
+        // the language change has taken effect
+        setTimeout(() => {
+          // Register new providers for the current language
+          completionProviders.value = registerCompletionProviders();
+          
+          // Position cursor at the end
+          const lastLine = model.getLineCount();
+          const lastColumn = model.getLineMaxColumn(lastLine);
+          editorRef.value.setPosition({ lineNumber: lastLine, column: lastColumn });
+          editorRef.value.focus();
+        }, 100);
       }
     }
+  });
+});
 
-    const columnSuggestions = []
+// Store providers for disposal
+let logchefProvider = null;
+let sqlProvider = null;
 
-    props.availableFields.forEach(field => {
-      // Basic field suggestion
-      columnSuggestions.push({
-        label: field.name,
-        kind: monaco.languages.CompletionItemKind.Field,
-        insertText: field.name,
-        range: range,
-        detail: field.type,
-        documentation: field.isTimestamp ? 'Timestamp field' :
-          field.isSeverity ? 'Severity field' :
-            `Type: ${field.type}`,
-        sortText: field.isTimestamp ? '0' :
-          field.isSeverity ? '1' : '2', // Sort special fields to top
-      })
-
-      // For SELECT clause, also add common aggregations and functions for numeric fields
-      if (isInSelectClause && ['int', 'float', 'number'].includes(field.type?.toLowerCase())) {
-        columnSuggestions.push({
-          label: `count(${field.name})`,
-          kind: monaco.languages.CompletionItemKind.Function,
-          insertText: `count(${field.name})`,
-          range: range,
-          detail: 'Count function',
-          documentation: `Count occurrences of ${field.name}`,
-          sortText: '3',
-        })
-
-        columnSuggestions.push({
-          label: `avg(${field.name})`,
-          kind: monaco.languages.CompletionItemKind.Function,
-          insertText: `avg(${field.name})`,
-          range: range,
-          detail: 'Average function',
-          documentation: `Calculate average of ${field.name}`,
-          sortText: '3',
-        })
-
-        columnSuggestions.push({
-          label: `sum(${field.name})`,
-          kind: monaco.languages.CompletionItemKind.Function,
-          insertText: `sum(${field.name})`,
-          range: range,
-          detail: 'Sum function',
-          documentation: `Calculate sum of ${field.name}`,
-          sortText: '3',
-        })
-      }
-
-      // For timestamp fields, add date/time functions
-      if (field.isTimestamp || field.name.includes('time') || field.name.includes('date')) {
-        columnSuggestions.push({
-          label: `toStartOfHour(${field.name})`,
-          kind: monaco.languages.CompletionItemKind.Function,
-          insertText: `toStartOfHour(${field.name})`,
-          range: range,
-          detail: 'Time function',
-          documentation: 'Round timestamp to start of hour',
-          sortText: '3',
-        })
-
-        columnSuggestions.push({
-          label: `toStartOfDay(${field.name})`,
-          kind: monaco.languages.CompletionItemKind.Function,
-          insertText: `toStartOfDay(${field.name})`,
-          range: range,
-          detail: 'Time function',
-          documentation: 'Round timestamp to start of day',
-          sortText: '3',
-        })
-      }
-    })
-
-    // If we're in a clause that needs column names, add column suggestions
-    if (isInSelectClause || isInWhereClause || isInGroupByClause ||
-      isInOrderByClause || isInHavingClause) {
-      suggestions = [...columnSuggestions, ...suggestions]
+// Register completion providers
+function registerCompletionProviders() {
+  // Store references to providers so we can dispose them later
+  const providers = [];
+  
+  // Dispose existing providers if they exist
+  if (logchefProvider) {
+    try {
+      logchefProvider.dispose();
+    } catch (e) {
+      console.error('Error disposing logchefQL provider:', e);
     }
-    // If we're after a table dot, only show column suggestions
-    else if (isAfterTableDot) {
-      suggestions = columnSuggestions
-    }
-  }
-
-  return suggestions
-}
-
-/**
- * Register the logchefql language
- */
-function registerLogchefql() {
-  // Only register if it doesn't already exist
-  if (!monaco.languages.getLanguages().some(lang => lang.id === 'logchefql')) {
-    console.log('Registering LogchefQL language')
-    monaco.languages.register({ id: "logchefql" });
-
-    monaco.languages.setLanguageConfiguration("logchefql", {
-      autoClosingPairs: [
-        { open: "(", close: ")" },
-        { open: '"', close: '"' },
-        { open: "'", close: "'" },
-      ],
-      wordPattern: /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
-    });
-
-    // Register semantic tokens provider
-    monaco.languages.registerDocumentSemanticTokensProvider("logchefql", {
-      getLegend: () => ({
-        tokenTypes: logchefqlTokenTypes,
-        tokenModifiers: []
-      }),
-      provideDocumentSemanticTokens: (model) => {
-        try {
-          const parser = new LogchefqlParser();
-          parser.parse(model.getValue(), false);
-
-          const data = parser.generateMonacoTokens();
-
-          return {
-            data: new Uint32Array(data),
-            resultId: null,
-          };
-        } catch (e) {
-          console.error("Error parsing LogchefQL:", e);
-          return {
-            data: new Uint32Array([]),
-            resultId: null,
-          };
-        }
-      },
-      releaseDocumentSemanticTokens: () => { }
-    });
   }
   
-  // Always re-register completion provider to ensure it has the latest props.availableFields
-  // This is crucial for dynamic field suggestions
-  monaco.languages.registerCompletionItemProvider('logchefql', {
-    provideCompletionItems: async (model, position) => {
-      console.log('LogchefQL completion triggered at position:', position)
-      let word = model.getWordUntilPosition(position)
-      const textBeforeCursorRange = {
-        startLineNumber: 1,
-        endLineNumber: position.lineNumber,
-        startColumn: 1,
-        endColumn: position.column,
-      }
-      const textBeforeCursor = model.getValueInRange(textBeforeCursorRange)
-      return await getSuggestions(word, position, textBeforeCursor)
-    },
+  if (sqlProvider) {
+    try {
+      sqlProvider.dispose();
+    } catch (e) {
+      console.error('Error disposing SQL provider:', e);
+    }
+  }
+  
+  // LogchefQL completion provider - only register one provider per language
+  logchefProvider = monaco.languages.registerCompletionItemProvider('logchefql', {
     triggerCharacters: ["=", "!", ">", "<", "~", " ", "."],
-  });
-}
-
-/**
- * Register the clickhouse-sql language
- */
-function registerClickhouseSQL() {
-  // Only register if it doesn't already exist
-  if (!monaco.languages.getLanguages().some(lang => lang.id === 'clickhouse-sql')) {
-    console.log('Registering ClickHouse SQL language')
-    // Register clickhouse-sql as a language that extends the built-in SQL language
-    monaco.languages.register({
-      id: "clickhouse-sql",
-      extensions: ['.sql'],
-      aliases: ['ClickHouse SQL', 'Clickhouse SQL', 'clickhouse'],
-      mimetypes: ['application/sql', 'text/x-sql'],
-    });
-
-    // Configure language features
-    monaco.languages.setLanguageConfiguration("clickhouse-sql", {
-      autoClosingPairs: [
-        { open: "(", close: ")" },
-        { open: '"', close: '"' },
-        { open: "'", close: "'" },
-        { open: "[", close: "]" },
-        { open: "{", close: "}" },
-      ],
-      brackets: [
-        ["{", "}"],
-        ["[", "]"],
-        ["(", ")"],
-      ],
-      comments: {
-        lineComment: "--",
-        blockComment: ["/*", "*/"],
-      },
-      wordPattern: /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
-    });
-
-    // Register tokenizer for clickhouse-sql - fallback to our parser if needed
-    monaco.languages.registerDocumentSemanticTokensProvider("clickhouse-sql", {
-      getLegend: () => ({
-        tokenTypes: clickhouseSQLTokenTypes,
-        tokenModifiers: []
-      }),
-      provideDocumentSemanticTokens: (model) => {
-        try {
-          const parser = new ClickhouseSQLParser();
-          parser.parse(model.getValue(), false);
-
-          const data = parser.generateMonacoTokens();
-
-          return {
-            data: new Uint32Array(data),
-            resultId: null,
-          };
-        } catch (e) {
-          console.error("Error parsing ClickHouse SQL:", e);
-          return {
-            data: new Uint32Array([]),
-            resultId: null,
-          };
-        }
-      },
-      releaseDocumentSemanticTokens: () => { }
-    });
-  }
-  
-  // Always re-register completion provider to ensure it has the latest props.availableFields
-  monaco.languages.registerCompletionItemProvider('clickhouse-sql', {
     provideCompletionItems: async (model, position) => {
-      console.log('SQL completion triggered at position:', position)
-      let word = model.getWordUntilPosition(position)
-      const textBeforeCursorRange = {
+      const word = model.getWordUntilPosition(position);
+      const textBeforeCursor = model.getValueInRange({
         startLineNumber: 1,
         endLineNumber: position.lineNumber,
         startColumn: 1,
         endColumn: position.column,
+      });
+      
+      try {
+        const result = await getLogchefQLSuggestions(word, position, textBeforeCursor);
+        return result;
+      } catch (e) {
+        console.error('Error in LogchefQL completion provider:', e);
+        return undefined;
       }
-      const textBeforeCursor = model.getValueInRange(textBeforeCursorRange)
-      return await getSuggestions(word, position, textBeforeCursor)
-    },
-    triggerCharacters: [" ", ".", "(", ","],
+    }
   });
+  providers.push(logchefProvider);
+
+  // SQL completion provider - only register one provider per language
+  sqlProvider = monaco.languages.registerCompletionItemProvider('clickhouse-sql', {
+    triggerCharacters: [" ", ".", "(", ","],
+    provideCompletionItems: async (model, position) => {
+      const word = model.getWordUntilPosition(position);
+      const textBeforeCursor = model.getValueInRange({
+        startLineNumber: 1,
+        endLineNumber: position.lineNumber,
+        startColumn: 1,
+        endColumn: position.column,
+      });
+      
+      const range = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endColumn: word.endColumn,
+      };
+      
+      try {
+        const result = await getSQLSuggestions(word, position, textBeforeCursor, range);
+        return result;
+      } catch (e) {
+        console.error('Error in SQL completion provider:', e);
+        return undefined;
+      }
+    }
+  });
+  providers.push(sqlProvider);
+  
+  // Return the providers array so they can be disposed later if needed
+  return providers;
 }
+
+// Store providers for disposal
+const completionProviders = ref([]);
 
 // Handle editor mount
 const handleMount = editor => {
-  editorRef.value = editor
+  editorRef.value = editor;
   
-  console.log('Editor mounted, registering languages and completion providers')
-
-  // Register both languages in QueryEditor component
-  registerLogchefql();
-  registerClickhouseSQL();
-
-  // Configure editor
-  editor.updateOptions({
+  // Set placeholder and other editor options
+  editor.updateOptions({ 
     placeholder: props.placeholder,
-  })
-
-  // Add keyboard shortcut for submitting query
+    suggest: {
+      showStatusBar: false,
+      showInlineDetails: true,
+      filterGraceful: true,
+      snippetsPreventQuickSuggestions: false,
+      localityBonus: true,
+      shareSuggestSelections: true,
+      showIcons: true,
+      maxVisibleSuggestions: 12
+    }
+  });
+  
+  // Register completion providers after a short delay to ensure
+  // the editor is fully initialized
+  setTimeout(() => {
+    completionProviders.value = registerCompletionProviders();
+  }, 100);
+  
+  // Add keyboard shortcuts
   editor.addAction({
     id: 'submit',
     label: 'submit',
     keybindings: [
-      monaco.KeyMod.chord(
-        monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
-      ),
-      monaco.KeyMod.chord(
-        monaco.KeyMod.Shift | monaco.KeyCode.Enter,
-      )
+      monaco.KeyMod.chord(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter),
+      monaco.KeyMod.chord(monaco.KeyMod.Shift | monaco.KeyCode.Enter)
     ],
-    run: () => {
-      emit('submit', activeMode.value)
-    }
-  })
-
-  // Add Tab trigger for suggestions
-  editor.addAction({
-    id: 'triggerSugggest',
-    label: 'triggerSuggest',
-    keybindings: [
-      monaco.KeyCode.Tab
-    ],
-    run: () => {
-      editor.trigger('keyboard', 'editor.action.triggerSuggest', {})
-    }
-  })
+    run: () => emit('submit', activeMode.value)
+  });
   
-  // Add Ctrl+Space trigger for suggestions
   editor.addAction({
-    id: 'triggerSuggestCtrlSpace',
-    label: 'triggerSuggestCtrlSpace',
-    keybindings: [
-      monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space
-    ],
-    run: () => {
-      editor.trigger('keyboard', 'editor.action.triggerSuggest', {})
-    }
-  })
-
+    id: 'triggerSuggest',
+    label: 'triggerSuggest',
+    keybindings: [monaco.KeyCode.Tab],
+    run: () => editor.trigger('keyboard', 'editor.action.triggerSuggest', {})
+  });
+  
   // Disable browser find
   monaco.editor.addKeybindingRule({
     keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF,
     command: null
-  })
-
-  // Track editor focus state
-  editor.onDidFocusEditorWidget(() => {
-    editorFocused.value = true
-  })
-
-  editor.onDidBlurEditorWidget(() => {
-    editorFocused.value = false
-  })
+  });
   
-  // Set up a listener for content changes to trigger suggestions
+  // Track focus state
+  editor.onDidFocusEditorWidget(() => { editorFocused.value = true });
+  editor.onDidBlurEditorWidget(() => { editorFocused.value = false });
+  
+  // Auto-suggest on content change
   editor.onDidChangeModelContent(() => {
-    // Only trigger suggestions if the editor is focused
-    if (editorFocused.value) {
-      // Trigger suggestions after typing
-      setTimeout(() => {
-        editor.trigger('content', 'editor.action.triggerSuggest', {})
-      }, 100)
+    if (editorFocused.value && props.availableFields?.length > 0) {
+      setTimeout(() => editor.trigger('content', 'editor.action.triggerSuggest', {}), 100);
     }
-  })
-
+  });
+  
+  // Configure editor to hide empty suggestions
+  editor.updateOptions({
+    suggest: {
+      showStatusBar: false,
+      showInlineDetails: true,
+      filterGraceful: true
+    }
+  });
+  
   // Focus editor on mount
-  nextTick(() => {
-    editor.focus()
-  })
-}
+  nextTick(() => editor.focus());
+};
 
-// Change handler
+// Handle content changes
 const onChange = () => {
-  // Update model value only when in DSL mode
-  if (activeMode.value === 'dsl') {
-    emit('update:modelValue', dslCode.value)
-    emit('change', dslCode.value)
-  } else {
-    // For SQL mode, we just emit the change event but don't update modelValue
-    emit('change', sqlCode.value)
-  }
-}
+  emit('update:modelValue', code.value);
+  emit('change', code.value);
+};
 
-// Update code when modelValue changes
+// Watch for model value changes
 watch(() => props.modelValue, (newValue) => {
-  if (newValue !== dslCode.value) {
-    dslCode.value = newValue
-
-    // If in SQL mode, regenerate SQL
-    if (activeMode.value === 'sql') {
-      try {
-        if (dslCode.value.trim()) {
-          sqlCode.value = translateLogchefQLToSQL(dslCode.value, {
-            table: props.tableName
-          })
-        } else {
-          sqlCode.value = getDefaultSQLQuery(props.tableName)
-        }
-      } catch (error) {
-        console.error('Error translating to SQL:', error)
-      }
-    }
+  if (newValue !== code.value && activeMode.value === 'dsl') {
+    code.value = newValue;
   }
-})
+});
+
+// Expose methods to parent component
+defineExpose({
+  editorRef,
+  registerCompletionProviders: () => {
+    // Register new providers
+    completionProviders.value = registerCompletionProviders();
+    
+    // Trigger suggestions if editor is available
+    if (editorRef.value) {
+      setTimeout(() => {
+        editorRef.value.trigger('keyboard', 'editor.action.triggerSuggest', {});
+      }, 100);
+    }
+  },
+  setMode: (mode) => {
+    activeMode.value = mode;
+  },
+  getMode: () => activeMode.value
+});
 </script>
 
 <style scoped>
 /* Clean, minimal editor styling */
-
-/* Hide line numbers */
 :deep(.margin) {
   display: none !important;
 }
 
-/* Placeholder text styling */
 :deep(.monaco-editor .placeholder) {
   color: hsl(var(--muted-foreground)) !important;
 }
 
-/* Ensure editor has the right background */
-:deep(.monaco-editor-background) {
-  background-color: transparent !important;
-}
-
-/* Make sure other Monaco elements are transparent too */
+:deep(.monaco-editor-background),
 :deep(.monaco-editor) .margin,
 :deep(.monaco-editor) .overflow-guard {
   background-color: transparent !important;

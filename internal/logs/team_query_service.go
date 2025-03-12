@@ -43,6 +43,21 @@ func (s *TeamQueryService) ValidateQueryContent(content string) error {
 		return fmt.Errorf("invalid query content: unknown active tab %q", queryContent.ActiveTab)
 	}
 
+	// Validate query type
+	if queryContent.QueryType != models.SavedQueryTypeDSL &&
+		queryContent.QueryType != models.SavedQueryTypeSQL {
+		return fmt.Errorf("invalid query content: unknown query type %q", queryContent.QueryType)
+	}
+
+	// Validate that appropriate content is provided based on query type
+	if queryContent.QueryType == models.SavedQueryTypeDSL && queryContent.DSLContent == "" {
+		return fmt.Errorf("invalid query content: DSL content is required for DSL query type")
+	}
+
+	if queryContent.QueryType == models.SavedQueryTypeSQL && queryContent.RawSQL == "" {
+		return fmt.Errorf("invalid query content: SQL content is required for SQL query type")
+	}
+
 	// Validate time range
 	if queryContent.TimeRange.Absolute.Start <= 0 {
 		return fmt.Errorf("invalid query content: start time must be positive")
@@ -74,6 +89,7 @@ func (s *TeamQueryService) CreateTeamQuery(ctx context.Context, teamID models.Te
 		SourceID:     models.SourceID(req.SourceID),
 		Name:         req.Name,
 		Description:  req.Description,
+		QueryType:    req.QueryType,
 		QueryContent: req.QueryContent,
 	}
 
@@ -179,11 +195,24 @@ func (s *TeamQueryService) ListQueriesForTeamAndSource(ctx context.Context, team
 
 // CreateTeamSourceQuery creates a new query for a team and source
 func (s *TeamQueryService) CreateTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, name, description, queryContent string, createdBy models.UserID) (*models.SavedTeamQuery, error) {
+	// Parse the query content to determine the query type
+	var queryType models.SavedQueryType = models.SavedQueryTypeSQL // Default to SQL
+
+	// Try to parse the query content to extract the query type
+	var content models.SavedQueryContent
+	if err := json.Unmarshal([]byte(queryContent), &content); err == nil {
+		// If parsing succeeds, use the query type from the content
+		if content.QueryType != "" {
+			queryType = content.QueryType
+		}
+	}
+
 	// Create a request to use the existing functionality
 	req := models.CreateTeamQueryRequest{
 		Name:         name,
 		Description:  description,
 		SourceID:     sourceID,
+		QueryType:    queryType,
 		QueryContent: queryContent,
 	}
 

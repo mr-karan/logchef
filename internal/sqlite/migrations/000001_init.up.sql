@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS team_queries (
     source_id INTEGER NOT NULL,
     name TEXT NOT NULL,
     description TEXT,
+    query_type TEXT NOT NULL DEFAULT 'sql', -- Type of query: 'sql' or 'dsl'
     query_content TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
@@ -106,3 +107,4 @@ CREATE INDEX IF NOT EXISTS idx_team_queries_source_id ON team_queries(source_id)
 CREATE INDEX IF NOT EXISTS idx_team_queries_name ON team_queries(name);
 CREATE INDEX IF NOT EXISTS idx_team_queries_created_at ON team_queries(created_at);
 CREATE INDEX IF NOT EXISTS idx_team_queries_source_team ON team_queries(source_id, team_id);
+CREATE INDEX IF NOT EXISTS idx_team_queries_query_type ON team_queries(query_type);

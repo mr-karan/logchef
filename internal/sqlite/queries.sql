@@ -284,9 +284,10 @@ ORDER BY t.name;
 -- $2: source_id
 -- $3: name
 -- $4: description
--- $5: query_content
-INSERT INTO team_queries (team_id, source_id, name, description, query_content)
-VALUES (?, ?, ?, ?, ?);
+-- $5: query_type
+-- $6: query_content
+INSERT INTO team_queries (team_id, source_id, name, description, query_type, query_content)
+VALUES (?, ?, ?, ?, ?, ?);
 SELECT last_insert_rowid();
 
 -- name: GetTeamQuery
@@ -299,12 +300,14 @@ SELECT * FROM team_queries WHERE id = ?;
 -- $1: name
 -- $2: description
 -- $3: source_id
--- $4: query_content
--- $5: id
+-- $4: query_type
+-- $5: query_content
+-- $6: id
 UPDATE team_queries
 SET name = ?,
     description = ?,
     source_id = ?,
+    query_type = ?,
     query_content = ?,
     updated_at = datetime('now')
 WHERE id = ?;
