@@ -13,7 +13,7 @@ import type {
 import type { DateValue } from "@internationalized/date";
 import { computed } from "vue";
 import { useSourcesStore } from "./sources";
-import { addTimeRangeToSQL } from "@/utils/clickhouse-sql/parser";
+// import { addTimeRangeToSQL } from "@/utils/clickhouse-sql/parser";
 import { useTeamsStore } from "@/stores/teams";
 
 // Helper function to get formatted table name
@@ -207,14 +207,14 @@ export const useExploreStore = defineStore("explore", () => {
         if (teamsStore.currentTeamId) {
           console.log("Team sources not loaded, loading them now");
           await sourcesStore.loadTeamSources(teamsStore.currentTeamId, true);
-          
+
           // Try again after loading
           currentSource = sourcesStore.teamSources.find(
             (s) => s.id === state.data.value.sourceId
           );
         }
       }
-      
+
       // If still not found, check all sources
       if (!currentSource) {
         currentSource = sourcesStore.sources.find(
@@ -284,17 +284,17 @@ export const useExploreStore = defineStore("explore", () => {
       console.log("SQL after table name formatting:", finalSql);
 
       // Add time range and limit
-      const sqlWithTimeRange = addTimeRangeToSQL(
-        finalSql,
-        timeField,
-        timestamps.start / 1000, // Convert to seconds for ClickHouse DateTime
-        timestamps.end / 1000, // Convert to seconds for ClickHouse DateTime
-        state.data.value.limit
-      );
+      // const sqlWithTimeRange = addTimeRangeToSQL(
+      //   finalSql,
+      //   timeField,
+      //   timestamps.start / 1000, // Convert to seconds for ClickHouse DateTime
+      //   timestamps.end / 1000, // Convert to seconds for ClickHouse DateTime
+      //   state.data.value.limit
+      // );
 
       // Log the SQL for debugging
       console.log("Original SQL:", sqlQuery);
-      console.log("SQL with time range and limit:", sqlWithTimeRange);
+      console.log("SQL with time range and limit:", "to implement");
       console.log("Timestamps:", {
         startMs: timestamps.start,
         endMs: timestamps.end,
@@ -314,7 +314,7 @@ export const useExploreStore = defineStore("explore", () => {
 
       // Use the modified SQL
       const params: QueryParams = {
-        raw_sql: sqlWithTimeRange,
+        raw_sql: finalSql,
         limit: state.data.value.limit,
         start_timestamp: timestamps.start,
         end_timestamp: timestamps.end,

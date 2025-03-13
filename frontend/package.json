@@ -27,7 +27,7 @@
     "nearley": "^2.20.1",
     "pinia": "^3.0.0",
     "radix-vue": "^1.9.13",
-    "reka-ui": "^2.0.0",
+    "reka-ui": "^2.0.2",
     "tailwind-merge": "^3.0.2",
     "tailwindcss-animate": "^1.0.7",
     "vaul-vue": "^0.3.0",
@@ -46,5 +46,6 @@
     "typescript": "~5.6.2",
     "vite": "^6.0.5",
     "vue-tsc": "^2.2.0"
-  }
+  },
+  "packageManager": "pnpm@10.6.2+sha512.47870716bea1572b53df34ad8647b42962bc790ce2bf4562ba0f643237d7302a3d6a8ecef9e4bdfc01d23af1969aa90485d4cebb0b9638fa5ef1daef656f6c1b"
 }

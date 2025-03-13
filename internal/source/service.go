@@ -477,30 +477,72 @@ func (s *Service) GetSourceStats(ctx context.Context, source *models.Source) (*S
 		return nil, fmt.Errorf("failed to get client for source: %w", err)
 	}
 
-	// Get table stats
+	// Create default empty stats in case we can't get real stats
+	defaultTableStats := &clickhouse.TableStat{
+		Database:     source.Connection.Database,
+		Table:        source.Connection.TableName,
+		Compressed:   "0B",
+		Uncompressed: "0B",
+		ComprRate:    0,
+		Rows:         0,
+		PartCount:    0,
+	}
+
+	// Get table stats with fallback to default
 	tableStats, err := client.GetTableStats(ctx, source.Connection.Database, source.Connection.TableName)
 	if err != nil {
-		s.log.Error("failed to get table stats",
+		s.log.Warn("failed to get table stats, using defaults",
 			"error", err,
 			"source_id", source.ID,
 		)
-		return nil, fmt.Errorf("failed to get table stats: %w", err)
+		// Use default stats instead of returning an error
+		tableStats = defaultTableStats
 	}
 
 	// Get column stats
-	columnStats, err := client.GetTableColumnStats(ctx, source.Connection.Database, source.Connection.TableName)
+	var columnStats []clickhouse.TableColumnStat
+	columnStatsResult, err := client.GetTableColumnStats(ctx, source.Connection.Database, source.Connection.TableName)
 	if err != nil {
-		s.log.Error("failed to get column stats",
+		s.log.Warn("failed to get column stats, will use schema if available",
 			"error", err,
 			"source_id", source.ID,
 		)
-		return nil, fmt.Errorf("failed to get column stats: %w", err)
+	} else {
+		columnStats = columnStatsResult
+	}
+
+	// If we have no column stats but we know the columns from the schema,
+	// create empty stats for each column for better UX
+	if len(columnStats) == 0 && len(source.Columns) > 0 {
+		s.log.Info("no column stats found, creating default empty stats",
+			"source_id", source.ID,
+			"column_count", len(source.Columns),
+		)
+
+		for _, col := range source.Columns {
+			columnStats = append(columnStats, clickhouse.TableColumnStat{
+				Database:     source.Connection.Database,
+				Table:        source.Connection.TableName,
+				Column:       col.Name,
+				Compressed:   "0B",
+				Uncompressed: "0B",
+				ComprRatio:   0,
+				RowsCount:    0,
+				AvgRowSize:   0,
+			})
+		}
 	}
 
 	stats := &SourceStats{
 		TableStats:  tableStats,
 		ColumnStats: columnStats,
 	}
+
+	s.log.Debug("successfully retrieved source stats",
+		"source_id", source.ID,
+		"table_stats_rows", tableStats.Rows,
+		"column_stats_count", len(columnStats),
+	)
 
 	return stats, nil
 }

@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
-import { Plus, Play, Share } from 'lucide-vue-next'
+import { Plus, Play, Share, ChevronLeft, ChevronRight, PanelRightOpen, PanelRightClose } from 'lucide-vue-next'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
@@ -32,10 +32,13 @@ import DataTable from './table/data-table.vue'
 import { formatSourceName } from '@/utils/format'
 import SavedQueriesDropdown from '@/components/saved-queries/SavedQueriesDropdown.vue'
 import SaveQueryModal from '@/components/saved-queries/SaveQueryModal.vue'
-import QueryEditor from '@/components/editor/QueryEditor.vue'
-import { translateLogchefQLToSQL } from '@/utils/logchefql/api'
+import QueryEditor from '@/components/query-editor/QueryEditor.vue'
+import { FieldSideBar } from '@/components/field-sidebar'
+import { translateToSQL, translateToSQLConditions } from '@/utils/logchefql/api'
+import { Parser as LogchefQLParser } from '@/utils/logchefql'
+import { getDefaultSQLQuery } from '@/utils/clickhouse-sql/api'
 import type { ColumnDef } from '@tanstack/vue-table'
-import type { SavedQueryContent } from '@/api/types'
+import type { SavedQueryContent } from '@/api/savedQueries'
 import type { Source } from '@/api/sources'
 import { getErrorMessage } from '@/api/types'
 
@@ -62,6 +65,7 @@ const tableColumns = ref<ColumnDef<Record<string, any>>[]>([])
 const logchefQuery = ref('')
 const sqlQuery = ref('')
 const queryError = ref('')
+const showFieldsPanel = ref(true)
 const queryMode = computed({
   get: () => exploreStore.activeMode,
   set: (value) => exploreStore.setActiveMode(value)
@@ -221,7 +225,7 @@ async function initializeFromURL() {
       // Validate source ID against current team
       const sourceExists = sourcesStore.teamSources.some(s => s.id === sourceId)
       if (!sourceExists) {
-        urlError.value = `Source with ID ${sourceId} not found or not accessible by the selected team. Selecting default source.`
+        urlError.value = `Source with ID ${sourceId} not found or not accessible by the selected team.`
 
         // Only select a default source if the team has sources
         if (sourcesStore.teamSources.length > 0) {
@@ -323,7 +327,7 @@ async function initializeFromURL() {
     if (route.query.q && typeof route.query.q === 'string') {
       try {
         const decodedQuery = decodeURIComponent(route.query.q)
-        
+
         if (queryMode.value === 'dsl') {
           logchefQuery.value = decodedQuery
           exploreStore.setDslCode(decodedQuery)
@@ -462,7 +466,7 @@ async function fetchSourceDetails(sourceId: number) {
 
   // Check if we already have this source in the store's teamSources
   const cachedSource = sourcesStore.teamSources.find(s => s.id === sourceId)
-  
+
   // If we have a complete cached source with columns, use it directly
   if (cachedSource && cachedSource.columns && cachedSource.columns.length > 0) {
     console.log(`Using cached source details for ID ${sourceId}`)
@@ -540,7 +544,7 @@ watch(
   () => exploreStore.columns,
   (newColumns) => {
     if (newColumns) {
-      tableColumns.value = createColumns(newColumns)
+      tableColumns.value = createColumns(newColumns, sourceDetails.value?._meta_ts_field || 'timestamp')
     }
   },
   { immediate: true }
@@ -635,28 +639,13 @@ watch(
   { immediate: true }
 )
 
-// Watch for changes to availableFields to re-register completion providers
-watch(
-  () => availableFields.value,
-  (newFields, oldFields) => {
-    // Only update if fields have actually changed
-    if (newFields && newFields.length > 0 && 
-        (!oldFields || oldFields.length !== newFields.length || 
-         JSON.stringify(newFields) !== JSON.stringify(oldFields))) {
-      
-      console.log('Available fields updated, re-registering completion providers');
-      
-      // Re-register completion providers with updated fields
-      nextTick(() => {
-        if (queryEditorRef.value && queryEditorRef.value.registerCompletionProviders) {
-          // Call the exposed method to re-register completion providers
-          queryEditorRef.value.registerCompletionProviders();
-        }
-      });
-    }
-  },
-  { immediate: false, deep: true } // Changed to non-immediate to avoid initial empty fields issue
-)
+// Insert field name into the current query
+function insertFieldIntoQuery(fieldName: string) {
+  if (!queryEditorRef.value) return;
+
+  // The QueryEditor component should handle field insertion
+  queryEditorRef.value.insertField(fieldName);
+}
 
 // Watch for changes in logchefQuery to update URL
 watch(
@@ -701,7 +690,7 @@ const copyShareUrl = () => {
   // Get the current URL with query parameters
   updateUrlWithCurrentState()
   const shareUrl = window.location.href
-  
+
   // Copy to clipboard
   navigator.clipboard.writeText(shareUrl).then(() => {
     toast({
@@ -721,15 +710,17 @@ const copyShareUrl = () => {
 }
 
 // Handle query changes from editor
-const handleQueryChange = (query: string) => {
+const handleQueryChange = (data: any) => {
+  const { query, mode } = data;
+
   // If in DSL mode, update the LogchefQL query
-  if (queryMode.value === 'dsl') {
+  if (mode === 'logchefql') {
     logchefQuery.value = query;
     exploreStore.setDslCode(query);
   } else {
     // In SQL mode, update the SQL query
     sqlQuery.value = query;
-    console.log('SQL query updated:', sqlQuery.value);
+    exploreStore.setRawSql(query);
   }
 
   // Always clear any error messages when the user is typing
@@ -738,32 +729,7 @@ const handleQueryChange = (query: string) => {
   }
 }
 
-// Handle mode changes between LogchefQL and SQL
-const handleModeChange = (mode: string) => {
-  // Update the mode in the store (this will also update the computed queryMode)
-  exploreStore.setActiveMode(mode as 'dsl' | 'sql');
-
-  // Simple test for LogchefQL -> SQL conversion
-  if (mode === 'sql' && logchefQuery.value.trim() !== '') {
-    try {
-      console.log('Testing LogchefQL -> SQL conversion:');
-      console.log('LogchefQL:', logchefQuery.value);
-
-      // This should convert the LogchefQL to SQL without time range for display
-      const result = translateLogchefQLToSQL(logchefQuery.value, {
-        table: activeSourceName.value,
-        includeTimeRange: false
-      });
-
-      console.log('Converted SQL for display:', result);
-    } catch (error) {
-      console.error('Error in test conversion:', error);
-    }
-  }
-
-  // Clear any previous errors when switching modes
-  queryError.value = '';
-}
+// The mode is now handled by the QueryEditor component
 
 // Get the active source table name (formatted as database.table_name)
 const activeSourceTableName = computed(() => {
@@ -778,16 +744,45 @@ const activeSourceName = computed(() => {
   return activeSourceTableName.value;
 });
 
+// Helper function to convert CalendarDateTime to timestamp
+const getTimestampFromCalendarDate = (date?: any): number => {
+  if (!date) return Math.floor(Date.now() / 1000);
+
+  try {
+    const dateObj = new Date(
+      date.year,
+      date.month - 1,
+      date.day,
+      'hour' in date ? date.hour : 0,
+      'minute' in date ? date.minute : 0,
+      'second' in date ? date.second : 0
+    );
+    return Math.floor(dateObj.getTime() / 1000);
+  } catch (e) {
+    console.error('Error converting calendar date to timestamp:', e);
+    return Math.floor(Date.now() / 1000);
+  }
+};
+
 // Handle query submission from either mode
-const handleQuerySubmit = async (mode: string) => {
-  // Use the current mode if not explicitly provided
-  const currentMode = mode || queryMode.value;
+const handleQuerySubmit = async (data: any) => {
+  // Get the query and mode from the event data
+  const { query, mode } = data;
+
+  // Update the appropriate query state
+  if (mode === 'logchefql') {
+    logchefQuery.value = query;
+    exploreStore.setDslCode(query);
+  } else {
+    sqlQuery.value = query;
+    exploreStore.setRawSql(query);
+  }
 
   // Update URL with current parameters before executing the query
   // This ensures that time ranges and limits are reflected in the URL
   updateUrlWithCurrentState();
 
-  if (currentMode === 'dsl') {
+  if (mode === 'logchefql') {
     // Execute LogchefQL query
     await executeQuery();
   } else {
@@ -837,15 +832,58 @@ const executeQuery = async () => {
         console.log('Source details:', sourceDetails.value);
         console.log('Active source table name:', activeSourceTableName.value);
 
-        // Parse the LogchefQL and convert to SQL with correct source table name
-        // For query execution, use includeTimeRange=true to include time conditions
-        basicSql = translateLogchefQLToSQL(logchefQuery.value, {
-          table: activeSourceTableName.value,
-          includeTimeRange: true,
-          startTime: exploreStore.timeRange ? new Date(exploreStore.timeRange.start.toString()) : undefined,
-          endTime: exploreStore.timeRange ? new Date(exploreStore.timeRange.end.toString()) : undefined,
-          limit: exploreStore.limit
-        });
+        // Parse the LogchefQL and convert to SQL
+        const parser = new LogchefQLParser();
+        parser.parse(logchefQuery.value);
+
+        if (parser.root) {
+          // Get just the WHERE conditions from LogchefQL
+          const whereConditions = translateToSQLConditions(parser.root);
+          console.log('Generated LogchefQL conditions:', whereConditions);
+
+          // Start with a base SQL query
+          basicSql = getDefaultSQLQuery(
+            activeSourceTableName.value,
+            sourceDetails.value?._meta_ts_field || 'timestamp',
+            getTimestampFromCalendarDate(exploreStore.timeRange?.start),
+            getTimestampFromCalendarDate(exploreStore.timeRange?.end),
+            exploreStore.limit
+          );
+
+          // Add the LogchefQL conditions if present
+          if (whereConditions && whereConditions.trim()) {
+            const tsField = sourceDetails.value?._meta_ts_field || 'timestamp';
+            // Find the timestamp condition in the query
+            const timestampRegex = new RegExp(`${tsField}\\s+BETWEEN\\s+'[^']+'\\s+AND\\s+'[^']+'`, 'i');
+            const match = basicSql.match(timestampRegex);
+
+            if (match) {
+              // Insert our conditions after the timestamp condition
+              basicSql = basicSql.replace(
+                match[0],
+                `${match[0]} AND (${whereConditions})`
+              );
+            } else {
+              // If no timestamp found, add WHERE clause
+              basicSql = basicSql.replace(
+                /FROM\s+([^\n]+)/i,
+                `FROM $1 WHERE ${whereConditions}`
+              );
+            }
+            console.log('Final SQL with LogchefQL conditions:', basicSql);
+          } else {
+            console.warn('No valid LogchefQL conditions generated');
+          }
+        } else {
+          // Empty query, use default SQL query
+          basicSql = getDefaultSQLQuery(
+            activeSourceTableName.value,
+            sourceDetails.value?._meta_ts_field || 'timestamp',
+            getTimestampFromCalendarDate(exploreStore.timeRange?.start),
+            getTimestampFromCalendarDate(exploreStore.timeRange?.end),
+            exploreStore.limit
+          );
+        }
       } catch (error) {
         console.error('LogchefQL parsing error:', error);
         // Only show an error if the user explicitly tries to run an invalid query
@@ -910,9 +948,15 @@ const executeSQLQuery = async () => {
 
     // Check for SQL query - if empty, use the default SQL query
     if (!sqlQuery.value.trim()) {
-      // Use a default query if none provided
-      sqlQuery.value = `SELECT * FROM ${activeSourceTableName.value}`;
-      console.log('Using default SQL query:', sqlQuery.value);
+      // Use a default query if none provided with time range and limit from the store
+      sqlQuery.value = getDefaultSQLQuery(
+        activeSourceTableName.value,
+        sourceDetails.value?._meta_ts_field || 'timestamp',
+        getTimestampFromCalendarDate(exploreStore.timeRange?.start),
+        getTimestampFromCalendarDate(exploreStore.timeRange?.end),
+        exploreStore.limit
+      );
+      console.log('Using default SQL query with ISO timestamps:', sqlQuery.value);
     }
 
     // Store the SQL for reference
@@ -941,9 +985,9 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
     // If we have queryData passed directly from the dropdown, use it
     if (queryData) {
       console.log('Loading query from dropdown data:', queryData);
-      
+
       const queryContent = queryData.content;
-      
+
       // Set the query mode based on the query type
       if (queryData.queryType === 'dsl') {
         queryMode.value = 'dsl';
@@ -963,7 +1007,7 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
           exploreStore.setRawSql(queryContent.rawSql);
         }
       }
-      
+
       // Set timeRange if available
       if (queryContent.timeRange && queryContent.timeRange.absolute) {
         exploreStore.setTimeRange({
@@ -985,27 +1029,27 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
           )
         });
       }
-      
+
       // Set limit if available
       if (queryContent.limit) {
         exploreStore.setLimit(queryContent.limit);
       }
-      
+
       // Execute the query
       await handleQuerySubmit(queryMode.value);
-      
+
       // Update URL to reflect the loaded query
       updateUrlWithCurrentState();
-      
+
       toast({
         title: 'Success',
         description: 'Query loaded successfully',
         duration: TOAST_DURATION.SUCCESS,
       });
-      
+
       return;
     }
-    
+
     // If no queryData provided, fetch it from the API
     const teamId = teamsStore.currentTeamId;
     if (!teamId) {
@@ -1023,11 +1067,18 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
       queryId
     );
 
-    if (!queryResponse.success || !queryResponse.data) {
-      throw new Error('Failed to load query');
+    // Check if the response has an error
+    if ('status' in queryResponse && queryResponse.status === 'error') {
+      throw new Error(queryResponse.message || 'Failed to load query');
     }
 
-    const query = queryResponse.data;
+    // Extract the data, handling both success property and direct data access
+    const query = 'data' in queryResponse ? queryResponse.data : queryResponse;
+
+    if (!query) {
+      throw new Error('Failed to load query - no data returned');
+    }
+
     const queryContent = JSON.parse(query.query_content) as SavedQueryContent;
 
     // Set the query mode based on the query type
@@ -1107,7 +1158,7 @@ function handleSaveQueryClick() {
     });
     return;
   }
-  
+
   // Check if we're in SQL mode with empty content
   if (queryMode.value === 'sql' && (!sqlQuery.value || !sqlQuery.value.trim())) {
     toast({
@@ -1118,7 +1169,7 @@ function handleSaveQueryClick() {
     });
     return;
   }
-  
+
   // If we have content, show the save modal
   showSaveQueryModal.value = true;
 }
@@ -1146,21 +1197,11 @@ async function handleSaveQuery(formData: any) {
       formData.team_id = teamsStore.currentTeamId.toString();
     }
 
-    console.log("LogExplorer: Calling savedQueriesStore.createQuery with:", {
-      teamId: Number(formData.team_id),
-      query: {
-        name: formData.name,
-        description: formData.description,
-        source_id: exploreStore.sourceId || 0,
-        query_type: formData.query_type,
-        query_content: formData.query_content,
-      }
-    });
-
-    // Create the query using the saved queries store
+    // Create the query with all required fields
     const response = await savedQueriesStore.createQuery(
       Number(formData.team_id),
       {
+        team_id: Number(formData.team_id), // Required by API
         name: formData.name,
         description: formData.description,
         source_id: exploreStore.sourceId || 0,
@@ -1211,15 +1252,8 @@ onMounted(async () => {
     if (exploreStore.canExecuteQuery) {
       await executeQuery()
     }
-    
-    // Initialize the query editor with available fields after a short delay
-    // This ensures the editor is fully mounted and ready
-    setTimeout(() => {
-      if (queryEditorRef.value && queryEditorRef.value.registerCompletionProviders) {
-        console.log("Initializing query editor completion providers");
-        queryEditorRef.value.registerCompletionProviders();
-      }
-    }, 500);
+
+    // The QueryEditor component now handles its own initialization
   } catch (error) {
     console.error("Error during LogExplorer mount:", error)
     urlError.value = "Error initializing the explorer. Please try refreshing the page."
@@ -1289,147 +1323,237 @@ onBeforeUnmount(() => {
   </div>
 
   <!-- Main content when not loading -->
-  <div v-else class="flex flex-col gap-5">
-    <!-- Navigation and Controls Section with improved design -->
-    <div class="border-b pb-3 mb-2">
-      <div class="flex flex-col gap-2">
-        <!-- Error Alert -->
-        <div v-if="urlError" class="bg-destructive/15 text-destructive px-4 py-2 rounded-md mb-2 flex items-center">
-          <span class="text-sm">{{ urlError }}</span>
+  <div v-else class="flex flex-col h-[calc(100vh-8rem)]">
+    <!-- Error Alert -->
+    <div v-if="urlError"
+      class="absolute top-0 left-0 right-0 bg-destructive/15 text-destructive px-4 py-2 z-10 flex items-center justify-between">
+      <span class="text-sm">{{ urlError }}</span>
+      <Button variant="ghost" size="sm" @click="urlError = null" class="h-7 px-2">Dismiss</Button>
+    </div>
+
+    <!-- Streamlined Filter Bar -->
+    <div class="border-b bg-background py-2 px-3 flex items-center gap-3">
+      <!-- Left side: Data selection controls -->
+      <div class="flex items-center space-x-2 flex-wrap gap-y-2">
+        <!-- Context selectors with more compact styling -->
+        <div class="flex items-center gap-1">
+          <Select :model-value="teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : ''"
+            @update:model-value="handleTeamChange" class="w-32" :disabled="isChangingTeam">
+            <SelectTrigger class="h-8 text-sm">
+              <SelectValue placeholder="Team">
+                <span v-if="isChangingTeam">Loading...</span>
+                <span v-else>{{ selectedTeamName }}</span>
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id.toString()">
+                {{ team.name }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select :model-value="exploreStore.sourceId ? exploreStore.sourceId.toString() : ''"
+            @update:model-value="handleSourceChange"
+            :disabled="isChangingSource || !teamsStore.currentTeamId || (sourcesStore.teamSources || []).length === 0"
+            class="w-40">
+            <SelectTrigger class="h-8 text-sm">
+              <SelectValue placeholder="Log Source">
+                <span v-if="isChangingSource">Loading...</span>
+                <span v-else>{{ selectedSourceName }}</span>
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="source in sourcesStore.teamSources || []" :key="source.id"
+                :value="source.id.toString()">
+                {{ formatSourceName(source) }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
-        <div class="flex items-center justify-between">
-          <!-- Left: Source Navigation (breadcrumb style) -->
-          <div class="flex items-center space-x-2 text-sm">
-            <Select :model-value="teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : ''"
-              @update:model-value="handleTeamChange" class="h-8 min-w-[160px]" :disabled="isChangingTeam">
-              <SelectTrigger>
-                <SelectValue placeholder="Select a team">
-                  <span v-if="isChangingTeam">Loading...</span>
-                  <span v-else>{{ selectedTeamName }}</span>
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id.toString()">
-                  {{ team.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+        <!-- Query parameters with more compact styling -->
+        <div class="flex items-center gap-1">
+          <DateTimePicker v-model="dateRange" class="h-8 w-[210px]" />
 
-            <span class="text-muted-foreground">→</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" class="h-8 min-w-[70px] text-sm">
+                {{ exploreStore.limit.toLocaleString() }} rows
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Results Limit</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem @click="exploreStore.setLimit(100)" :disabled="exploreStore.limit === 100">
+                100 rows
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="exploreStore.setLimit(500)" :disabled="exploreStore.limit === 500">
+                500 rows
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="exploreStore.setLimit(1000)" :disabled="exploreStore.limit === 1000">
+                1,000 rows
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="exploreStore.setLimit(2000)" :disabled="exploreStore.limit === 2000">
+                2,000 rows
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="exploreStore.setLimit(5000)" :disabled="exploreStore.limit === 5000">
+                5,000 rows
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="exploreStore.setLimit(10000)" :disabled="exploreStore.limit === 10000">
+                10,000 rows
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
 
-            <Select :model-value="exploreStore.sourceId ? exploreStore.sourceId.toString() : ''"
-              @update:model-value="handleSourceChange"
-              :disabled="isChangingSource || !teamsStore.currentTeamId || (sourcesStore.teamSources || []).length === 0"
-              class="h-8 min-w-[200px]">
-              <SelectTrigger>
-                <SelectValue placeholder="Select a source">
-                  <span v-if="isChangingSource">Loading...</span>
-                  <span v-else>{{ selectedSourceName }}</span>
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="source in sourcesStore.teamSources || []" :key="source.id"
-                  :value="source.id.toString()">
-                  {{ formatSourceName(source) }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+      <!-- Right side: Actions -->
+      <div class="ml-auto flex items-center gap-1.5">
+        <!-- Saved Queries -->
+        <SavedQueriesDropdown :source-id="exploreStore.sourceId" :team-id="teamsStore.currentTeamId"
+          :use-current-team="true" @select="loadSavedQuery" @save="handleSaveQueryClick" class="h-8" />
+
+        <!-- Compact action buttons -->
+        <Button variant="outline" size="sm" @click="copyShareUrl" class="h-8">
+          <Share class="h-3.5 w-3.5 mr-1" />
+          Share
+        </Button>
+
+        <Button variant="default" size="sm" class="h-8 px-3 flex items-center gap-1"
+          :disabled="isExecutingQuery || !exploreStore.canExecuteQuery" @click="handleQuerySubmit(queryMode)">
+          <Play class="h-3.5 w-3.5" />
+          <span>{{ isExecutingQuery ? 'Running...' : 'Run' }}</span>
+        </Button>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="flex flex-1 min-h-0">
+      <!-- Use the FieldSideBar component without field-click event -->
+      <FieldSideBar v-model:expanded="showFieldsPanel" :fields="availableFields" />
+
+      <!-- Main Content: Query Editor and Results -->
+      <div class="flex-1 flex flex-col h-full">
+        <!-- Query Editor Section -->
+        <div class="p-3 pb-2">
+          <div class="flex items-center justify-between mb-1.5">
+            <div class="flex items-center gap-2">
+              <Button variant="ghost" size="icon" class="h-6 w-6 text-muted-foreground hover:text-foreground"
+                @click="showFieldsPanel = !showFieldsPanel"
+                :title="showFieldsPanel ? 'Hide fields panel' : 'Show fields panel'">
+                <PanelRightClose v-if="showFieldsPanel" class="h-4 w-4" />
+                <PanelRightOpen v-else class="h-4 w-4" />
+              </Button>
+              <span class="text-xs text-muted-foreground">Query</span>
+            </div>
+            <!-- Keyboard hint - optional -->
+            <span class="text-xs text-muted-foreground hidden sm:block">Press Ctrl+Enter to run</span>
           </div>
 
-          <!-- Right: Time Range and Action Buttons -->
-          <div class="flex items-center">
-            <!-- Date Time Picker with enough width for full timestamps -->
-            <DateTimePicker v-model="dateRange" class="h-8 min-w-[380px] max-w-[400px] truncate" />
+          <div class="rounded-md border bg-card shadow-sm">
+            <QueryEditor ref="queryEditorRef" :sourceId="exploreStore.sourceId || 0"
+              :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
+              :startTimestamp="getTimestampFromCalendarDate(exploreStore.timeRange?.start)"
+              :endTimestamp="getTimestampFromCalendarDate(exploreStore.timeRange?.end)"
+              :initialValue="queryMode === 'dsl' ? logchefQuery : sqlQuery"
+              :initialTab="queryMode === 'dsl' ? 'logchefql' : 'sql'"
+              :placeholder="queryMode === 'dsl' ? 'Enter LogchefQL query or leave empty to run SELECT * FROM table' : 'Enter SQL query or leave empty for default query'"
+              :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
+              :limit="exploreStore.limit" @change="handleQueryChange" @submit="handleQuerySubmit" />
+          </div>
 
-            <!-- Vertical separator -->
-            <div class="h-6 w-px bg-border mx-2.5"></div>
+          <!-- Query Error Message -->
+          <div v-if="queryError" class="mt-2 text-sm text-destructive bg-destructive/10 p-2 rounded">
+            {{ queryError }}
+          </div>
+        </div>
 
-            <!-- Limit Dropdown -->
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" class="h-8 min-w-[100px]">
-                  Limit: {{ exploreStore.limit.toLocaleString() }}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>Results Limit</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem @click="exploreStore.setLimit(100)" :disabled="exploreStore.limit === 100">
-                  100 rows
-                </DropdownMenuItem>
-                <DropdownMenuItem @click="exploreStore.setLimit(500)" :disabled="exploreStore.limit === 500">
-                  500 rows
-                </DropdownMenuItem>
-                <DropdownMenuItem @click="exploreStore.setLimit(1000)" :disabled="exploreStore.limit === 1000">
-                  1,000 rows
-                </DropdownMenuItem>
-                <DropdownMenuItem @click="exploreStore.setLimit(2000)" :disabled="exploreStore.limit === 2000">
-                  2,000 rows
-                </DropdownMenuItem>
-                <DropdownMenuItem @click="exploreStore.setLimit(5000)" :disabled="exploreStore.limit === 5000">
-                  5,000 rows
-                </DropdownMenuItem>
-                <DropdownMenuItem @click="exploreStore.setLimit(10000)" :disabled="exploreStore.limit === 10000">
-                  10,000 rows
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <!-- Vertical separator -->
-            <div class="h-6 w-px bg-border mx-2.5"></div>
-
+        <!-- Results Section -->
+        <div class="flex-1 overflow-hidden flex flex-col border-t">
+          <!-- Stats header with fixed width -->
+          <div class="px-3 py-1.5 flex items-center justify-between bg-muted/10">
             <div class="flex items-center gap-2">
-              <SavedQueriesDropdown :source-id="exploreStore.sourceId" :team-id="teamsStore.currentTeamId"
-                :use-current-team="true" @select="loadSavedQuery" @save="handleSaveQueryClick" />
+              <span class="text-xs text-muted-foreground">Results</span>
+              <div v-if="exploreStore.logs?.length" class="flex items-center gap-2">
+                <!-- Stats display with better visuals -->
+                <span class="text-xs px-2 py-0.5 rounded-full bg-muted/60 font-medium">
+                  {{ exploreStore.logs.length.toLocaleString() }}
+                  <span class="font-normal"> shown</span>
+                </span>
 
-              <Button size="sm" variant="outline" class="h-8" @click="handleSaveQueryClick">
-                Save
-              </Button>
+                <div v-if="exploreStore.queryStats" class="flex items-center">
+                  <span class="text-xs text-muted-foreground/80">of</span>
+                  <span class="text-xs ml-1 font-medium">
+                    {{ exploreStore.queryStats.rows_read.toLocaleString() }}
+                    <span class="font-normal text-muted-foreground/80">rows</span>
+                  </span>
+                </div>
+              </div>
+            </div>
 
-              <Button size="sm" variant="outline" class="h-8" @click="copyShareUrl">
-                Share
-              </Button>
+            <div v-if="exploreStore.queryStats" class="flex items-center gap-3">
+              <!-- Execution time with visual indicator -->
+              <div class="flex items-center gap-1.5">
+                <div :class="{
+                  'bg-green-500': exploreStore.queryStats.execution_time_ms < 100,
+                  'bg-yellow-500': exploreStore.queryStats.execution_time_ms >= 100 && exploreStore.queryStats.execution_time_ms < 1000,
+                  'bg-orange-500': exploreStore.queryStats.execution_time_ms >= 1000 && exploreStore.queryStats.execution_time_ms < 5000,
+                  'bg-red-500': exploreStore.queryStats.execution_time_ms >= 5000
+                }" class="h-2 w-2 rounded-full"></div>
+                <span class="text-xs ml-1.5 font-medium">
+                  {{ exploreStore.queryStats.execution_time_ms < 1000 ?
+                    Math.round(exploreStore.queryStats.execution_time_ms) + 'ms' :
+                    (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2) + 's' }} </span>
+              </div>
 
-              <Button variant="default" size="sm" class="h-8 px-3 flex items-center gap-1"
-                :disabled="isExecutingQuery || !exploreStore.canExecuteQuery" @click="handleQuerySubmit(queryMode)">
-                <Play class="h-3.5 w-3.5" />
-                <span>{{ isExecutingQuery ? 'Running...' : 'Run' }}</span>
-              </Button>
+              <!-- Data read -->
+              <div v-if="exploreStore.queryStats.bytes_read" class="flex items-center">
+                <span class="text-xs text-muted-foreground">
+                  {{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2) }}MB read
+                </span>
+              </div>
             </div>
           </div>
+
+          <!-- Table container with proper scroll behavior -->
+          <div class="flex-1 overflow-hidden relative">
+            <template v-if="exploreStore.logs?.length">
+              <div class="absolute inset-0">
+                <DataTable :columns="tableColumns" :data="exploreStore.logs" :stats="exploreStore.queryStats"
+                  :source-id="exploreStore.sourceId?.toString() || ''" :timestamp-field="sourceDetails?._meta_ts_field"
+                  :severity-field="sourceDetails?._meta_severity_field" />
+              </div>
+            </template>
+            <template v-else>
+              <div class="h-full flex flex-col items-center justify-center p-10 text-center">
+                <div class="text-muted-foreground mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 3v4a1 1 0 0 0 1 1h4"></path>
+                    <path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"></path>
+                    <line x1="9" y1="9" x2="10" y2="9"></line>
+                    <line x1="9" y1="13" x2="15" y2="13"></line>
+                    <line x1="9" y1="17" x2="15" y2="17"></line>
+                  </svg>
+                </div>
+                <h3 class="text-lg font-medium mb-1">No logs found</h3>
+                <p class="text-sm text-muted-foreground max-w-lg">
+                  No logs match your current query and time range. Try adjusting your query,
+                  expanding the time range, or selecting different filters to see results.
+                </p>
+                <div class="mt-4 flex gap-3">
+                  <Button variant="outline" size="sm" class="h-8" @click="exploreStore.setTimeRange({
+                    start: now(getLocalTimeZone()).subtract({ hours: 24 }),
+                    end: now(getLocalTimeZone())
+                  })">
+                    Expand to 24h
+                  </Button>
+                </div>
+              </div>
+            </template>
+          </div>
         </div>
       </div>
-    </div>
-
-    <!-- Condensed Query Builder -->
-    <div class="rounded-md border bg-card shadow-sm mb-4">
-      <div class="flex items-start">
-        <div class="flex-1">
-          <QueryEditor ref="queryEditorRef" v-model="logchefQuery" :available-fields="availableFields"
-            :placeholder="queryMode === 'dsl' ? 'Enter LogchefQL query or leave empty to run SELECT * FROM table' : 'Enter SQL query or leave empty for default query'"
-            :error="queryError" :table-name="activeSourceTableName" height="32" @change="handleQueryChange"
-            @submit="handleQuerySubmit" @mode-change="handleModeChange" />
-        </div>
-      </div>
-
-      <!-- Helptext below editor with better padding -->
-      <div class="pl-0 pr-4 py-2 text-xs text-muted-foreground bg-muted/20 border-t">
-        <span v-if="queryMode === 'dsl'" class="italic">
-          Filter conditions only, e.g. service_name='api' and severity_level='error'. Time filter and LIMIT are applied
-          automatically. Leave empty to run SELECT * FROM table.
-        </span>
-        <span v-if="queryMode === 'sql'" class="italic">
-          Write a complete SQL query or leave empty for default SELECT * query. Time filter and LIMIT will be applied
-          automatically.
-        </span>
-      </div>
-    </div>
-
-    <!-- Results Section -->
-    <div class="flex-1 border rounded-md shadow-sm bg-card overflow-hidden">
-      <DataTable :columns="tableColumns" :data="exploreStore.logs || []" :stats="exploreStore.queryStats"
-        :source-id="exploreStore.sourceId?.toString() || ''" />
     </div>
 
     <!-- Save Query Modal -->
@@ -1463,5 +1587,85 @@ onBeforeUnmount(() => {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* Ensure proper table height */
+.h-full {
+  height: 100% !important;
+}
+
+/* Fix DataTable height issues */
+:deep(.datatable-wrapper) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+:deep(.datatable-container) {
+  flex: 1;
+  overflow: auto;
+}
+
+/* Enhance table styling */
+:deep(.table) {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+:deep(.table th) {
+  background-color: hsl(var(--muted));
+  font-weight: 500;
+  text-align: left;
+  font-size: 0.85rem;
+  color: hsl(var(--muted-foreground));
+  padding: 0.75rem 1rem;
+}
+
+:deep(.table td) {
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid hsl(var(--border));
+  font-size: 0.9rem;
+}
+
+:deep(.table tr:hover td) {
+  background-color: hsl(var(--muted)/0.3);
+}
+
+/* Style for long IDs to prevent table stretching */
+:deep(.table .cell-id) {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Severity label styling */
+:deep(.severity-label) {
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  display: inline-block;
+}
+
+:deep(.severity-error) {
+  background-color: hsl(var(--destructive)/0.15);
+  color: hsl(var(--destructive));
+}
+
+:deep(.severity-warn),
+:deep(.severity-warning) {
+  background-color: hsl(var(--warning)/0.15);
+  color: hsl(var(--warning));
+}
+
+:deep(.severity-info) {
+  background-color: hsl(var(--info)/0.15);
+  color: hsl(var(--info));
+}
+
+:deep(.severity-debug) {
+  background-color: hsl(var(--muted)/0.5);
+  color: hsl(var(--muted-foreground));
 }
 </style>

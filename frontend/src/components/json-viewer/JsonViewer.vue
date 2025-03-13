@@ -60,24 +60,23 @@ async function copyToClipboard() {
 <template>
     <div class="relative">
         <!-- Action buttons on the left -->
-        <div class="absolute left-3 top-3 flex gap-1.5 z-10">
+        <div class="absolute left-1 top-1 flex gap-1 z-10">
             <!-- Copy button -->
             <Button variant="secondary" size="sm" @click.stop.prevent="copyToClipboard" :disabled="isCopied"
-                class="h-7 px-2.5 shadow-sm transition-all duration-200 hover:shadow active:scale-95 cursor-pointer"
+                class="h-5 px-1.5 shadow-sm transition-all duration-200 hover:shadow active:scale-95 cursor-pointer text-xs"
                 :class="{
                     'bg-green-500/10 text-green-600 hover:bg-green-500/20': isCopied,
                     'hover:bg-muted': !isCopied
                 }">
-                <Check v-if="isCopied"
-                    class="h-3.5 w-3.5 mr-1.5 transition-transform duration-200 animate-in zoom-in" />
-                <Copy v-else class="h-3.5 w-3.5 mr-1.5" />
+                <Check v-if="isCopied" class="h-3 w-3 mr-0.5 transition-transform duration-200 animate-in zoom-in" />
+                <Copy v-else class="h-3 w-3 mr-0.5" />
                 {{ isCopied ? 'Copied!' : 'Copy' }}
             </Button>
 
             <!-- Context button -->
             <Button v-if="showContextButton" variant="secondary" size="sm" @click.stop.prevent="emit('showContext')"
-                class="h-7 px-2.5 shadow-sm transition-all duration-200 hover:shadow hover:bg-muted active:scale-95 cursor-pointer">
-                <History class="h-3.5 w-3.5 mr-1.5" />
+                class="h-5 px-1.5 shadow-sm transition-all duration-200 hover:shadow hover:bg-muted active:scale-95 cursor-pointer text-xs">
+                <History class="h-3 w-3 mr-0.5" />
                 Show Context
             </Button>
         </div>
@@ -85,13 +84,13 @@ async function copyToClipboard() {
         <!-- Highlighted JSON -->
         <div class="relative">
             <pre :class="{ 'max-h-[500px]': !isExpanded }"
-                class="text-sm font-mono overflow-auto pt-14 px-3"><code v-html="formatJSON(value)" /></pre>
+                class="text-xs font-mono overflow-auto pt-8 px-1.5"><code v-html="formatJSON(value)" /></pre>
 
             <!-- Expand/collapse overlay -->
             <div v-if="!isExpanded && formatJSON(value).split('\n').length > 20"
-                class="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-background to-transparent flex items-end justify-center pb-2">
+                class="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-background to-transparent flex items-end justify-center pb-1">
                 <Button variant="ghost" size="sm" @click.stop.prevent="isExpanded = true"
-                    class="transition-transform hover:scale-105 active:scale-95 cursor-pointer">
+                    class="transition-transform hover:scale-105 active:scale-95 cursor-pointer text-xs h-5 px-1.5">
                     Show More
                 </Button>
             </div>
