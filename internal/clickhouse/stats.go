@@ -142,8 +142,17 @@ func (c *Client) GetTableStats(ctx context.Context, database, table string) (*Ta
 		return nil, fmt.Errorf("error iterating table stats rows: %w", err)
 	}
 
+	// Return default empty stats if no data found
 	if len(stats) == 0 {
-		return nil, fmt.Errorf("no stats found for table %s.%s", database, table)
+		return &TableStat{
+			Database:     database,
+			Table:        table,
+			Compressed:   "0B",
+			Uncompressed: "0B",
+			ComprRate:    0,
+			Rows:         0,
+			PartCount:    0,
+		}, nil
 	}
 
 	return &stats[0], nil

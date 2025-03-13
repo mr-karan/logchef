@@ -1,306 +1,70 @@
-// Define constants for token types
-export const CharType = Object.freeze({
-  KEYWORD: "keyword",
-  FUNCTION: "function",
-  TYPE: "type",
-  OPERATOR: "operator",
-  STRING: "string",
-  NUMBER: "number",
-  DELIMITER: "delimiter",
-  COMMENT: "comment",
-  IDENTIFIER: "identifier",
-  PUNCTUATION: "punctuation",
-  VARIABLE: "variable",
-  SPACE: "space",
-});
-
-// Token types for Monaco editor
-export const tokenTypes = [
-  CharType.KEYWORD,
-  CharType.FUNCTION,
-  CharType.TYPE,
-  CharType.OPERATOR,
-  CharType.STRING,
-  CharType.NUMBER,
-  CharType.DELIMITER,
-  CharType.COMMENT,
-  CharType.IDENTIFIER,
-  CharType.PUNCTUATION,
-  CharType.VARIABLE,
-];
-
-// Common SQL keywords for ClickHouse
-export const SQL_KEYWORDS = [
+// Constants for the parser
+const SPACE = " ";
+const NEWLINE = "\n";
+const COMMENT_START = "--";
+const QUOTE = "'";
+const DOUBLE_QUOTE = '"';
+const KEYWORDS = [
   "SELECT",
   "FROM",
   "WHERE",
+  "GROUP",
+  "ORDER",
+  "BY",
+  "LIMIT",
+  "HAVING",
   "JOIN",
   "LEFT",
   "RIGHT",
   "INNER",
   "OUTER",
+  "FULL",
   "ON",
-  "GROUP",
-  "BY",
-  "HAVING",
-  "ORDER",
-  "ASC",
-  "DESC",
-  "LIMIT",
-  "OFFSET",
+  "AS",
+  "WITH",
   "UNION",
   "ALL",
+  "DISTINCT",
   "AND",
   "OR",
   "NOT",
-  "CASE",
-  "WHEN",
-  "THEN",
-  "ELSE",
-  "END",
+  "IN",
+  "BETWEEN",
+  "LIKE",
   "IS",
   "NULL",
-  "AS",
-  "DISTINCT",
-  "BETWEEN",
-  "IN",
-  "INTERVAL",
-  "WITH",
-  "PREWHERE",
-  "TOP",
-  "SAMPLE",
-  "USING",
+  "TRUE",
+  "FALSE",
 ];
 
-// Common ClickHouse data types
-export const SQL_TYPES = [
-  "Int8",
-  "Int16",
-  "Int32",
-  "Int64",
-  "Int128",
-  "Int256",
-  "UInt8",
-  "UInt16",
-  "UInt32",
-  "UInt64",
-  "UInt128",
-  "UInt256",
-  "Float32",
-  "Float64",
-  "Decimal",
-  "String",
-  "FixedString",
-  "UUID",
-  "Date",
-  "DateTime",
-  "DateTime64",
-  "IPv4",
-  "IPv6",
-  "Array",
-  "Tuple",
-  "Map",
-  "Enum",
+export const CharType = {
+  KEYWORD: "keyword",
+  IDENTIFIER: "identifier",
+  STRING: "string",
+  NUMBER: "number",
+  OPERATOR: "operator",
+  COMMENT: "comment",
+  SPACE: "space",
+  PUNCTUATION: "punctuation",
+};
+
+export const tokenTypes = [
+  CharType.KEYWORD,
+  CharType.IDENTIFIER,
+  CharType.STRING,
+  CharType.NUMBER,
+  CharType.OPERATOR,
+  CharType.COMMENT,
+  CharType.PUNCTUATION,
 ];
 
-// Common ClickHouse functions for log analytics
-export const CLICKHOUSE_FUNCTIONS = [
-  // Aggregate functions
-  "count",
-  "sum",
-  "avg",
-  "min",
-  "max",
-  "any",
-  "anyHeavy",
-  "quantile",
-  "median",
-  "stddev",
-  "variance",
-  "covariance",
-  "correlation",
-  "uniq",
-  "uniqExact",
-  "uniqCombined",
-  "groupArray",
-  "groupArrayInsertAt",
-  "groupUniqArray",
-  "topK",
-  "histogram",
-  "countIf",
-  "sumIf",
-  "avgIf",
-  "minIf",
-  "maxIf",
+export class ClickHouseSQLError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClickHouseSQLError";
+  }
+}
 
-  // Date/time functions
-  "now",
-  "today",
-  "yesterday",
-  "toStartOfHour",
-  "toStartOfDay",
-  "toStartOfWeek",
-  "toStartOfMonth",
-  "toStartOfQuarter",
-  "toStartOfYear",
-  "toDateTime",
-  "toDateTime64",
-  "toDate",
-  "formatDateTime",
-  "dateDiff",
-  "toUnixTimestamp",
-  "fromUnixTimestamp",
-  "toYear",
-  "toMonth",
-  "toDayOfMonth",
-  "toHour",
-  "toMinute",
-  "toSecond",
-  "toWeek",
-  "toISOWeek",
-  "toISOYear",
-  "toRelativeHourNum",
-  "toRelativeDayNum",
-  "toRelativeWeekNum",
-  "toRelativeMonthNum",
-
-  // String functions
-  "position",
-  "positionCaseInsensitive",
-  "substring",
-  "substringUTF8",
-  "replaceOne",
-  "replaceAll",
-  "replaceRegexpOne",
-  "replaceRegexpAll",
-  "lower",
-  "upper",
-  "lowerUTF8",
-  "upperUTF8",
-  "reverse",
-  "reverseUTF8",
-  "match",
-  "extract",
-  "extractAll",
-  "extractAllGroupsHorizontal",
-  "toLowerCase",
-  "toUpperCase",
-  "trim",
-  "trimLeft",
-  "trimRight",
-  "trimBoth",
-  "concat",
-  "empty",
-  "notEmpty",
-  "length",
-  "lengthUTF8",
-
-  // JSON functions
-  "JSONHas",
-  "JSONLength",
-  "JSONType",
-  "JSONExtractString",
-  "JSONExtractInt",
-  "JSONExtractUInt",
-  "JSONExtractFloat",
-  "JSONExtractBool",
-  "JSONExtractRaw",
-  "JSONExtractArrayRaw",
-  "JSONExtract",
-  "simpleJSONExtract",
-  "visitParamHas",
-  "visitParamExtractString",
-
-  // Array functions
-  "arrayJoin",
-  "splitByChar",
-  "splitByString",
-  "arrayConcat",
-  "arrayElement",
-  "has",
-  "indexOf",
-  "countEqual",
-  "arrayFilter",
-  "arrayMap",
-  "arrayFlatten",
-  "arrayCompact",
-  "arrayReverse",
-  "arraySlice",
-  "arrayDistinct",
-  "arrayEnumerate",
-  "arrayUniq",
-
-  // Window functions
-  "row_number",
-  "rank",
-  "dense_rank",
-  "lag",
-  "lead",
-
-  // Conditional functions
-  "if",
-  "multiIf",
-  "ifNull",
-  "nullIf",
-  "coalesce",
-  "isNull",
-  "isNotNull",
-  "assumeNotNull",
-  "greatest",
-  "least",
-
-  // Type conversion
-  "toInt8",
-  "toInt16",
-  "toInt32",
-  "toInt64",
-  "toInt128",
-  "toInt256",
-  "toUInt8",
-  "toUInt16",
-  "toUInt32",
-  "toUInt64",
-  "toUInt128",
-  "toUInt256",
-  "toFloat32",
-  "toFloat64",
-  "toDecimal32",
-  "toDecimal64",
-  "toDecimal128",
-  "toString",
-  "toFixedString",
-  "toDate32",
-  "toUUID",
-
-  // Formatting and display
-  "formatReadableSize",
-  "formatReadableTimeDelta",
-  "formatRow",
-  "formatBytes",
-  "bitmaskToList",
-  "formatDateTime",
-];
-
-// Operators
-export const OPERATORS = [
-  "+",
-  "-",
-  "*",
-  "/",
-  "%",
-  "=",
-  "<>",
-  "!=",
-  ">",
-  "<",
-  ">=",
-  "<=",
-  "LIKE",
-  "NOT LIKE",
-  "ILIKE",
-];
-
-// Character class for token parsing
 class Char {
   value: string;
   pos: number;
@@ -314,44 +78,56 @@ class Char {
     this.linePos = linePos;
   }
 
-  isWhitespace(): boolean {
-    return /\s/.test(this.value);
+  isSpace(): boolean {
+    return this.value === SPACE || this.value === "\t";
   }
 
   isNewline(): boolean {
-    return this.value === "\n";
+    return this.value === NEWLINE || this.value === "\r";
+  }
+
+  isWhitespace(): boolean {
+    return this.isSpace() || this.isNewline();
   }
 
   isDigit(): boolean {
     return /[0-9]/.test(this.value);
   }
 
-  isAlpha(): boolean {
-    return /[a-zA-Z_]/.test(this.value);
+  isLetter(): boolean {
+    return /[a-zA-Z]/.test(this.value);
   }
 
-  isAlphaNumeric(): boolean {
-    return /[a-zA-Z0-9_]/.test(this.value);
+  isIdentifierStart(): boolean {
+    return this.isLetter() || this.value === "_";
+  }
+
+  isIdentifierPart(): boolean {
+    return (
+      this.isLetter() ||
+      this.isDigit() ||
+      this.value === "_" ||
+      this.value === "."
+    );
   }
 
   isOperator(): boolean {
-    return /[+\-*/%=<>!]/.test(this.value);
-  }
-
-  isStringQuote(): boolean {
-    return this.value === "'" || this.value === '"';
+    return /[+\-*/<>=!&|^%]/.test(this.value);
   }
 
   isPunctuation(): boolean {
-    return /[,.;:()\[\]{}]/.test(this.value);
+    return /[,;:()\[\]{}]/.test(this.value);
   }
 
-  isCommentStart(): boolean {
-    return this.value === "-" || this.value === "/";
+  isQuote(): boolean {
+    return this.value === QUOTE;
+  }
+
+  isDoubleQuote(): boolean {
+    return this.value === DOUBLE_QUOTE;
   }
 }
 
-// Token class for syntax highlighting
 class Token {
   start: number;
   length: number;
@@ -362,46 +138,38 @@ class Token {
 
   constructor(char: Char, charType: string) {
     this.start = char.pos;
-    this.length = 1;
+    this.length = char.value.length;
     this.type = charType;
     this.value = char.value;
     this.line = char.line;
     this.linePos = char.linePos;
   }
 
-  addChar(char: Char): void {
+  addChar(char: Char) {
     this.value += char.value;
-    this.length += 1;
+    this.length += char.value.length;
   }
 }
 
-// Parser state enum
-export const State = Object.freeze({
-  INITIAL: "Initial",
-  IDENTIFIER: "Identifier",
-  NUMBER: "Number",
-  STRING: "String",
-  OPERATOR: "Operator",
-  COMMENT: "Comment",
-  PUNCTUATION: "Punctuation",
-  ERROR: "Error",
-});
-
-// Custom error class
-export class ClickHouseSQLError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ClickHouseSQLError";
-  }
+export enum State {
+  INITIAL = "Initial",
+  IDENTIFIER = "Identifier",
+  KEYWORD = "Keyword",
+  STRING = "String",
+  QUOTED_IDENTIFIER = "QuotedIdentifier",
+  NUMBER = "Number",
+  OPERATOR = "Operator",
+  COMMENT = "Comment",
+  PUNCTUATION = "Punctuation",
+  ERROR = "Error",
 }
 
-// Main parser class
 export class Parser {
   pos: number;
   line: number;
   linePos: number;
   text: string;
-  state: string;
+  state: State;
   char: Char | null;
   tokens: Token[];
   typedChars: [Char, string][];
@@ -419,19 +187,19 @@ export class Parser {
     this.errorText = "";
   }
 
-  setText(text: string): void {
-    this.text = text;
-  }
-
-  setChar(char: Char): void {
-    this.char = char;
-  }
-
-  setState(state: string): void {
+  setState(state: State) {
     this.state = state;
   }
 
-  setErrorState(errorText: string): void {
+  setText(text: string) {
+    this.text = text;
+  }
+
+  setChar(char: Char) {
+    this.char = char;
+  }
+
+  setErrorState(errorText: string) {
     this.state = State.ERROR;
     this.errorText = errorText;
     if (this.char) {
@@ -439,263 +207,183 @@ export class Parser {
     }
   }
 
-  storeTypedChar(charType: string): void {
+  storeTypedChar(charType: string) {
     if (this.char) {
       this.typedChars.push([this.char, charType]);
     }
   }
 
-  // Parse initial state
-  inStateInitial(): void {
+  inStateInitial() {
     if (!this.char) return;
 
     if (this.char.isWhitespace()) {
       this.storeTypedChar(CharType.SPACE);
-    } else if (this.char.isAlpha()) {
+    } else if (this.char.isIdentifierStart()) {
       this.setState(State.IDENTIFIER);
       this.storeTypedChar(CharType.IDENTIFIER);
     } else if (this.char.isDigit()) {
       this.setState(State.NUMBER);
       this.storeTypedChar(CharType.NUMBER);
-    } else if (this.char.isStringQuote()) {
+    } else if (this.char.isQuote()) {
       this.setState(State.STRING);
       this.storeTypedChar(CharType.STRING);
+    } else if (this.char.isDoubleQuote()) {
+      this.setState(State.QUOTED_IDENTIFIER);
+      this.storeTypedChar(CharType.IDENTIFIER);
     } else if (this.char.isOperator()) {
       this.setState(State.OPERATOR);
       this.storeTypedChar(CharType.OPERATOR);
+
+      // Check for comment start
+      if (
+        this.char.value === "-" &&
+        this.pos + 1 < this.text.length &&
+        this.text[this.pos + 1] === "-"
+      ) {
+        this.setState(State.COMMENT);
+      }
     } else if (this.char.isPunctuation()) {
       this.setState(State.PUNCTUATION);
       this.storeTypedChar(CharType.PUNCTUATION);
-    } else if (this.char.isCommentStart()) {
-      const nextPos = this.char.pos + 1;
-      if (this.text.length > nextPos) {
-        const nextChar = this.text[nextPos];
-        if (
-          (this.char.value === "-" && nextChar === "-") ||
-          (this.char.value === "/" && nextChar === "*")
-        ) {
-          this.setState(State.COMMENT);
-          this.storeTypedChar(CharType.COMMENT);
-          return;
-        }
-      }
-
-      if (this.char.value === "-") {
-        this.setState(State.OPERATOR);
-        this.storeTypedChar(CharType.OPERATOR);
-      } else if (this.char.value === "/") {
-        this.setState(State.OPERATOR);
-        this.storeTypedChar(CharType.OPERATOR);
-      }
     } else {
-      this.setErrorState("Invalid character in initial state");
+      this.setErrorState("Invalid character");
     }
   }
 
-  // Parse identifier state (keywords, functions, types, etc.)
-  inStateIdentifier(): void {
+  inStateIdentifier() {
     if (!this.char) return;
 
-    if (this.char.isAlphaNumeric() || this.char.value === ".") {
+    if (this.char.isIdentifierPart()) {
       this.storeTypedChar(CharType.IDENTIFIER);
     } else {
-      // Check if this is a keyword, function, or type
-      const identifier = this.typedChars
-        .filter(([_, type]) => type === CharType.IDENTIFIER)
-        .map(([char, _]) => char.value)
-        .join("");
-
-      // Update token type for the already stored characters
-      if (SQL_KEYWORDS.includes(identifier.toUpperCase())) {
-        for (
-          let i = this.typedChars.length - identifier.length;
-          i < this.typedChars.length;
-          i++
-        ) {
-          this.typedChars[i][1] = CharType.KEYWORD;
-        }
-      } else if (CLICKHOUSE_FUNCTIONS.includes(identifier.toLowerCase())) {
-        for (
-          let i = this.typedChars.length - identifier.length;
-          i < this.typedChars.length;
-          i++
-        ) {
-          this.typedChars[i][1] = CharType.FUNCTION;
-        }
-      } else if (SQL_TYPES.includes(identifier)) {
-        for (
-          let i = this.typedChars.length - identifier.length;
-          i < this.typedChars.length;
-          i++
-        ) {
-          this.typedChars[i][1] = CharType.TYPE;
-        }
+      // Check if the current token is a keyword
+      const lastToken = this.getLastToken();
+      if (lastToken && KEYWORDS.includes(lastToken.value.toUpperCase())) {
+        lastToken.type = CharType.KEYWORD;
       }
 
-      // Process the current character
-      if (this.char.isWhitespace()) {
-        this.setState(State.INITIAL);
-        this.storeTypedChar(CharType.SPACE);
-      } else if (this.char.isOperator()) {
-        this.setState(State.OPERATOR);
-        this.storeTypedChar(CharType.OPERATOR);
-      } else if (this.char.isPunctuation()) {
-        this.setState(State.PUNCTUATION);
-        this.storeTypedChar(CharType.PUNCTUATION);
+      this.setState(State.INITIAL);
+      this.inStateInitial(); // Process current char in INITIAL state
+    }
+  }
+
+  inStateKeyword() {
+    if (!this.char) return;
+
+    if (this.char.isIdentifierPart()) {
+      this.storeTypedChar(CharType.KEYWORD);
+    } else {
+      this.setState(State.INITIAL);
+      this.inStateInitial(); // Process current char in INITIAL state
+    }
+  }
+
+  inStateString() {
+    if (!this.char) return;
+
+    this.storeTypedChar(CharType.STRING);
+
+    if (this.char.isQuote()) {
+      // Check for escaped quote
+      const prevPos = this.char.pos - 1;
+      if (prevPos >= 0 && this.text[prevPos] === "\\") {
+        // This is an escaped quote, stay in STRING state
       } else {
-        this.setErrorState("Invalid character in identifier state");
+        this.setState(State.INITIAL);
       }
     }
   }
 
-  // Parse number state
-  inStateNumber(): void {
+  inStateQuotedIdentifier() {
+    if (!this.char) return;
+
+    this.storeTypedChar(CharType.IDENTIFIER);
+
+    if (this.char.isDoubleQuote()) {
+      // Check for escaped quote
+      const prevPos = this.char.pos - 1;
+      if (prevPos >= 0 && this.text[prevPos] === "\\") {
+        // This is an escaped quote, stay in QUOTED_IDENTIFIER state
+      } else {
+        this.setState(State.INITIAL);
+      }
+    }
+  }
+
+  inStateNumber() {
     if (!this.char) return;
 
     if (
       this.char.isDigit() ||
       this.char.value === "." ||
-      this.char.value.toLowerCase() === "e" ||
-      (this.char.value === "-" &&
-        this.typedChars[this.typedChars.length - 1][0].value.toLowerCase() ===
-          "e")
+      this.char.value.toLowerCase() === "e"
     ) {
       this.storeTypedChar(CharType.NUMBER);
-    } else if (this.char.isWhitespace()) {
-      this.setState(State.INITIAL);
-      this.storeTypedChar(CharType.SPACE);
-    } else if (this.char.isOperator()) {
-      this.setState(State.OPERATOR);
-      this.storeTypedChar(CharType.OPERATOR);
-    } else if (this.char.isPunctuation()) {
-      this.setState(State.PUNCTUATION);
-      this.storeTypedChar(CharType.PUNCTUATION);
     } else {
-      this.setErrorState("Invalid character in number state");
+      this.setState(State.INITIAL);
+      this.inStateInitial(); // Process current char in INITIAL state
     }
   }
 
-  // Parse string state
-  inStateString(): void {
-    if (!this.char) return;
-
-    const quoteType = this.typedChars.find(
-      ([_, type]) => type === CharType.STRING
-    )?.[0].value;
-
-    if (
-      this.char.value === quoteType &&
-      this.typedChars[this.typedChars.length - 1][0].value !== "\\"
-    ) {
-      this.storeTypedChar(CharType.STRING);
-      this.setState(State.INITIAL);
-    } else {
-      this.storeTypedChar(CharType.STRING);
-    }
-  }
-
-  // Parse operator state
-  inStateOperator(): void {
+  inStateOperator() {
     if (!this.char) return;
 
     if (this.char.isOperator()) {
       this.storeTypedChar(CharType.OPERATOR);
     } else {
-      if (this.char.isWhitespace()) {
-        this.setState(State.INITIAL);
-        this.storeTypedChar(CharType.SPACE);
-      } else if (this.char.isAlpha()) {
-        this.setState(State.IDENTIFIER);
-        this.storeTypedChar(CharType.IDENTIFIER);
-      } else if (this.char.isDigit()) {
-        this.setState(State.NUMBER);
-        this.storeTypedChar(CharType.NUMBER);
-      } else if (this.char.isStringQuote()) {
-        this.setState(State.STRING);
-        this.storeTypedChar(CharType.STRING);
-      } else if (this.char.isPunctuation()) {
-        this.setState(State.PUNCTUATION);
-        this.storeTypedChar(CharType.PUNCTUATION);
-      } else {
-        this.setErrorState("Invalid character in operator state");
-      }
+      this.setState(State.INITIAL);
+      this.inStateInitial(); // Process current char in INITIAL state
     }
   }
 
-  // Parse comment state
-  inStateComment(): void {
+  inStateComment() {
     if (!this.char) return;
 
-    // Check if it's a single-line or multi-line comment
-    if (
-      this.typedChars.length >= 2 &&
-      this.typedChars[this.typedChars.length - 2][0].value === "-" &&
-      this.typedChars[this.typedChars.length - 1][0].value === "-"
-    ) {
-      // Single-line comment
-      if (this.char.isNewline()) {
-        this.storeTypedChar(CharType.COMMENT);
-        this.setState(State.INITIAL);
-      } else {
-        this.storeTypedChar(CharType.COMMENT);
-      }
-    } else if (
-      this.typedChars.length >= 2 &&
-      this.typedChars[this.typedChars.length - 2][0].value === "/" &&
-      this.typedChars[this.typedChars.length - 1][0].value === "*"
-    ) {
-      // Multi-line comment
-      this.storeTypedChar(CharType.COMMENT);
-      if (this.char.value === "*") {
-        const nextPos = this.char.pos + 1;
-        if (this.text.length > nextPos && this.text[nextPos] === "/") {
-          // End of multi-line comment coming up
-        }
-      } else if (
-        this.typedChars.length >= 2 &&
-        this.typedChars[this.typedChars.length - 2][0].value === "*" &&
-        this.char.value === "/"
-      ) {
-        this.setState(State.INITIAL);
-      }
-    } else {
-      this.storeTypedChar(CharType.COMMENT);
+    this.storeTypedChar(CharType.COMMENT);
+
+    if (this.char.isNewline()) {
+      this.setState(State.INITIAL);
     }
   }
 
-  // Parse punctuation state
-  inStatePunctuation(): void {
+  inStatePunctuation() {
     if (!this.char) return;
 
     this.setState(State.INITIAL);
-    if (this.char.isWhitespace()) {
-      this.storeTypedChar(CharType.SPACE);
-    } else if (this.char.isAlpha()) {
-      this.setState(State.IDENTIFIER);
-      this.storeTypedChar(CharType.IDENTIFIER);
-    } else if (this.char.isDigit()) {
-      this.setState(State.NUMBER);
-      this.storeTypedChar(CharType.NUMBER);
-    } else if (this.char.isStringQuote()) {
-      this.setState(State.STRING);
-      this.storeTypedChar(CharType.STRING);
-    } else if (this.char.isOperator()) {
-      this.setState(State.OPERATOR);
-      this.storeTypedChar(CharType.OPERATOR);
-    } else if (this.char.isPunctuation()) {
-      this.storeTypedChar(CharType.PUNCTUATION);
-    } else {
-      this.setErrorState("Invalid character in punctuation state");
-    }
+    this.inStateInitial(); // Process current char in INITIAL state
   }
 
-  // Generate Monaco-compatible token data
-  generateMonacoTokens(): number[] {
+  getLastToken(): Token | null {
+    if (this.typedChars.length === 0) return null;
+
+    // Build tokens from typed chars
+    const tokens: Token[] = [];
+    let currentToken: Token | null = null;
+
+    for (const [char, type] of this.typedChars) {
+      if (!currentToken || currentToken.type !== type) {
+        if (currentToken) {
+          tokens.push(currentToken);
+        }
+        currentToken = new Token(char, type);
+      } else {
+        currentToken.addChar(char);
+      }
+    }
+
+    if (currentToken) {
+      tokens.push(currentToken);
+    }
+
+    return tokens.length > 0 ? tokens[tokens.length - 1] : null;
+  }
+
+  generateMonacoTokens() {
     const tokens: Token[] = [];
     let token: Token | null = null;
 
     for (const [char, charType] of this.typedChars) {
-      if (token === null) {
+      if (token == null) {
         token = new Token(char, charType);
       } else {
         if (token.type === charType) {
@@ -711,106 +399,95 @@ export class Parser {
       tokens.push(token);
     }
 
-    // Generate Monaco-compatible token data
+    // Check for keywords in identifiers
+    for (const token of tokens) {
+      if (
+        token.type === CharType.IDENTIFIER &&
+        KEYWORDS.includes(token.value.toUpperCase())
+      ) {
+        token.type = CharType.KEYWORD;
+      }
+    }
+
     const data: number[] = [];
+    const tokenModifier = 0;
     let prevToken: Token | null = null;
 
     for (const token of tokens) {
       let deltaLine = 0;
       let deltaStart = token.linePos;
       let tokenLength = token.length;
-      let typeIndex = tokenTypes.indexOf(token.type as any);
+      let typeIndex = tokenTypes.indexOf(token.type);
 
-      if (typeIndex === -1) {
-        // Skip spaces and other non-highlighted tokens
-        continue;
-      }
+      if (typeIndex === -1) continue; // Skip token types not in the legend
 
-      if (prevToken !== null) {
+      if (prevToken != null) {
         deltaLine = token.line - prevToken.line;
         deltaStart =
-          deltaLine === 0 ? token.linePos - prevToken.linePos : token.linePos;
+          deltaLine === 0 ? token.start - prevToken.start : token.linePos;
+        prevToken = token;
+      } else {
+        prevToken = token;
       }
 
-      prevToken = token;
-
-      // Format: [deltaLine, deltaStart, length, tokenType, tokenModifiers]
-      data.push(deltaLine, deltaStart, tokenLength, typeIndex, 0);
+      data.push(deltaLine, deltaStart, tokenLength, typeIndex, tokenModifier);
     }
 
     return data;
   }
 
-  // Parse the SQL text
-  parse(text: string, raiseError: boolean = true): void {
+  parse(text: string) {
     this.setText(text);
     this.pos = 0;
     this.line = 0;
     this.linePos = 0;
-    this.typedChars = [];
     this.state = State.INITIAL;
+    this.typedChars = [];
 
-    for (let i = 0; i < text.length; i++) {
-      if (this.state === State.ERROR) {
-        break;
-      }
+    for (; this.pos < text.length; this.pos++) {
+      const c = text[this.pos];
+      this.setChar(new Char(c, this.pos, this.line, this.linePos));
 
-      const char = new Char(text[i], i, this.line, this.linePos);
-      this.setChar(char);
-
-      if (char.isNewline()) {
-        this.line += 1;
+      if (this.char.isNewline()) {
+        this.line++;
         this.linePos = 0;
-        // Also store the newline
-        if (this.state === State.COMMENT) {
-          this.storeTypedChar(CharType.COMMENT);
-        } else {
-          this.storeTypedChar(CharType.SPACE);
-          this.setState(State.INITIAL);
-        }
       } else {
-        // Process based on current state
-        switch (this.state) {
-          case State.INITIAL:
-            this.inStateInitial();
-            break;
-          case State.IDENTIFIER:
-            this.inStateIdentifier();
-            break;
-          case State.NUMBER:
-            this.inStateNumber();
-            break;
-          case State.STRING:
-            this.inStateString();
-            break;
-          case State.OPERATOR:
-            this.inStateOperator();
-            break;
-          case State.COMMENT:
-            this.inStateComment();
-            break;
-          case State.PUNCTUATION:
-            this.inStatePunctuation();
-            break;
-          default:
-            this.setErrorState(`Unknown state: ${this.state}`);
-            break;
-        }
+        this.linePos++;
       }
 
-      this.pos += 1;
-      if (!char.isNewline()) {
-        this.linePos += 1;
+      switch (this.state) {
+        case State.INITIAL:
+          this.inStateInitial();
+          break;
+        case State.IDENTIFIER:
+          this.inStateIdentifier();
+          break;
+        case State.KEYWORD:
+          this.inStateKeyword();
+          break;
+        case State.STRING:
+          this.inStateString();
+          break;
+        case State.QUOTED_IDENTIFIER:
+          this.inStateQuotedIdentifier();
+          break;
+        case State.NUMBER:
+          this.inStateNumber();
+          break;
+        case State.OPERATOR:
+          this.inStateOperator();
+          break;
+        case State.COMMENT:
+          this.inStateComment();
+          break;
+        case State.PUNCTUATION:
+          this.inStatePunctuation();
+          break;
+        case State.ERROR:
+          throw new ClickHouseSQLError(this.errorText);
       }
     }
 
-    if (this.state === State.ERROR && raiseError) {
-      throw new ClickHouseSQLError(this.errorText);
-    }
+    return this.generateMonacoTokens();
   }
-}
-
-// Helper for checking numeric strings
-export function isNumeric(value: string): boolean {
-  return !isNaN(parseFloat(value)) && isFinite(Number(value));
 }

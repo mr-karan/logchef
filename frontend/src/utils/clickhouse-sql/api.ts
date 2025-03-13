@@ -1,157 +1,146 @@
-import { Parser } from './index';
-
 /**
- * Validate a ClickHouse SQL query
- * 
- * @param query The SQL query string to validate
- * @returns Object with validation status and error message if invalid
+ * Validates a ClickHouse SQL query
+ * @param query The query string to validate
+ * @returns True if valid, false otherwise
  */
-export function validateClickHouseSQL(query: string): { isValid: boolean; error?: string } {
-  if (!query || query.trim() === '') {
-    return { isValid: false, error: 'Empty query' };
+export function validateSQL(query: string): boolean {
+  if (!query || !query.trim()) {
+    return false;
   }
 
   try {
-    // Parse the query for validation
-    const parser = new Parser();
-    parser.parse(query);
-    return { isValid: true };
+    // Basic validation - make sure query has SELECT and FROM
+    const hasSelect = /\bSELECT\b/i.test(query);
+    const hasFrom = /\bFROM\b/i.test(query);
+
+    return hasSelect && hasFrom;
   } catch (error) {
-    return { 
-      isValid: false, 
-      error: error instanceof Error ? error.message : 'Unknown error validating query' 
-    };
+    return false;
   }
 }
 
 /**
- * Format SQL query with basic formatting rules
- * 
- * @param sql The SQL query to format
- * @returns Formatted SQL string
+ * Extracts table name from SQL query
+ * @param query The SQL query string
+ * @returns Table name or null if not found
  */
-export function formatSQL(sql: string): string {
-  if (!sql || sql.trim() === '') {
-    return '';
+export function extractTableName(query: string): string | null {
+  if (!query || !query.trim()) {
+    return null;
   }
 
   try {
-    const formattedSQL = sql
-      .replace(/\s+/g, ' ')
-      .replace(/\s*,\s*/g, ', ')
-      .replace(/\(\s+/g, '(')
-      .replace(/\s+\)/g, ')')
-      .replace(/\s*=\s*/g, ' = ')
-      .replace(/\s*>\s*/g, ' > ')
-      .replace(/\s*<\s*/g, ' < ')
-      .replace(/\s*>=\s*/g, ' >= ')
-      .replace(/\s*<=\s*/g, ' <= ')
-      .replace(/\s*<>\s*/g, ' <> ')
-      .replace(/\s*!=\s*/g, ' != ')
-      .replace(/\s+AND\s+/gi, ' AND ')
-      .replace(/\s+OR\s+/gi, ' OR ')
-      .replace(/\s+IN\s+/gi, ' IN ')
-      .replace(/\s+FROM\s+/gi, '\nFROM ')
-      .replace(/\s+WHERE\s+/gi, '\nWHERE ')
-      .replace(/\s+GROUP\s+BY\s+/gi, '\nGROUP BY ')
-      .replace(/\s+HAVING\s+/gi, '\nHAVING ')
-      .replace(/\s+ORDER\s+BY\s+/gi, '\nORDER BY ')
-      .replace(/\s+LIMIT\s+/gi, '\nLIMIT ')
-      .replace(/\s+UNION\s+/gi, '\nUNION\n')
-      .replace(/\s+JOIN\s+/gi, '\nJOIN ')
-      .replace(/\s+LEFT\s+JOIN\s+/gi, '\nLEFT JOIN ')
-      .replace(/\s+RIGHT\s+JOIN\s+/gi, '\nRIGHT JOIN ')
-      .replace(/\s+INNER\s+JOIN\s+/gi, '\nINNER JOIN ')
-      .replace(/\s+ON\s+/gi, '\n  ON ');
-
-    return formattedSQL.trim();
+    // Simple regex to extract table name from FROM clause
+    const fromMatch = query.match(/FROM\s+([a-zA-Z0-9_.]+)(?:\s+|$)/i);
+    if (fromMatch && fromMatch[1]) {
+      return fromMatch[1].trim();
+    }
+    return null;
   } catch (error) {
-    console.error('Error formatting SQL:', error);
-    return sql;
+    return null;
   }
 }
 
+import { SQLParser } from './ast';
+
 /**
- * Add time range conditions to a SQL query if not already present
- * 
- * @param sql The SQL query
- * @param options Time range options
- * @returns SQL query with time range conditions
+ * Gets a default SQL query for a table
+ * @param tableName The table name
+ * @param tsField The timestamp field
+ * @param startTimestamp Start timestamp in seconds (unix epoch)
+ * @param endTimestamp End timestamp in seconds (unix epoch)
+ * @param limit Number of results to return
+ * @returns A default SQL query
  */
-export function addTimeRangeToSQL(
-  sql: string,
-  options: {
-    timeField?: string;
-    startTime?: string | number;
-    endTime?: string | number;
-    limit?: number;
-  } = {}
+export function getDefaultSQLQuery(
+  tableName: string,
+  tsField: string = "timestamp",
+  startTimestamp?: number,
+  endTimestamp?: number,
+  limit: number = 1000
 ): string {
-  const {
-    timeField = 'timestamp',
-    startTime,
-    endTime,
-    limit = 100
-  } = options;
+  // Use provided timestamps or default to last 3 days
+  const threeDaysAgo = new Date();
+  threeDaysAgo.setHours(threeDaysAgo.getHours() - 72);
 
-  if (!sql || !sql.trim()) {
-    return `SELECT * FROM logs LIMIT ${limit}`;
+  const now = new Date();
+
+  // Format dates for ClickHouse
+  const startTimeFormatted = startTimestamp !== undefined 
+    ? startTimestamp 
+    : Math.floor(threeDaysAgo.getTime() / 1000);
+  
+  const endTimeFormatted = endTimestamp !== undefined 
+    ? endTimestamp 
+    : Math.floor(now.getTime() / 1000);
+
+  // Format dates as ISO strings for direct use in query
+  const startTimeIso = new Date(startTimeFormatted * 1000).toISOString();
+  const endTimeIso = new Date(endTimeFormatted * 1000).toISOString();
+
+  // Create a query using our AST builder
+  const query = {
+    type: 'query',
+    selectClause: { 
+      type: 'select', 
+      columns: ['*'] 
+    },
+    fromClause: { 
+      type: 'from', 
+      table: tableName 
+    },
+    whereClause: {
+      type: 'where',
+      conditions: `${tsField} BETWEEN '${startTimeIso}' AND '${endTimeIso}'`,
+      hasTimestampFilter: true
+    },
+    orderByClause: {
+      type: 'orderby',
+      columns: [{
+        type: 'orderby_column',
+        column: tsField,
+        direction: 'DESC'
+      }]
+    },
+    limitClause: {
+      type: 'limit',
+      value: limit
+    }
+  };
+
+  return SQLParser.toSQL(query as any);
+}
+
+/**
+ * Formats an SQL query for display
+ * @param query The SQL query to format
+ * @returns Formatted SQL query
+ */
+export function formatSQLQuery(query: string): string {
+  if (!query) return "";
+
+  // Replace multiple spaces with a single space
+  let formatted = query.replace(/\s+/g, " ");
+
+  // Add newlines after common SQL keywords
+  const keywords = [
+    "SELECT",
+    "FROM",
+    "WHERE",
+    "GROUP BY",
+    "HAVING",
+    "ORDER BY",
+    "LIMIT",
+  ];
+
+  for (const keyword of keywords) {
+    const regex = new RegExp(`\\b${keyword}\\b`, "gi");
+    formatted = formatted.replace(regex, `\n${keyword}`);
   }
 
-  try {
-    // Simple check if query already has WHERE clause
-    const hasWhere = /\bWHERE\b/i.test(sql);
-    const hasLimit = /\bLIMIT\b/i.test(sql);
-    
-    let result = sql.trim();
-    
-    // Add time conditions if requested
-    if (startTime || endTime) {
-      const timeConditions = [];
-      
-      if (startTime) {
-        const formattedStart = typeof startTime === 'string' 
-          ? `'${startTime}'` 
-          : `'${new Date(startTime).toISOString().replace('T', ' ').replace('Z', '')}'`;
-        timeConditions.push(`${timeField} >= ${formattedStart}`);
-      }
-      
-      if (endTime) {
-        const formattedEnd = typeof endTime === 'string'
-          ? `'${endTime}'`
-          : `'${new Date(endTime).toISOString().replace('T', ' ').replace('Z', '')}'`;
-        timeConditions.push(`${timeField} <= ${formattedEnd}`);
-      }
-      
-      if (timeConditions.length > 0) {
-        const timeClause = timeConditions.join(' AND ');
-        
-        if (hasWhere) {
-          // Add to existing WHERE clause
-          result = result.replace(/\bWHERE\b/i, `WHERE (${timeClause}) AND `);
-        } else {
-          // Add new WHERE clause before any GROUP BY, ORDER BY, or LIMIT
-          const match = result.match(/\b(GROUP BY|ORDER BY|LIMIT)\b/i);
-          if (match) {
-            const position = match.index;
-            result = result.substring(0, position) + 
-                    `WHERE ${timeClause} ` + 
-                    result.substring(position);
-          } else {
-            result += ` WHERE ${timeClause}`;
-          }
-        }
-      }
-    }
-    
-    // Add LIMIT if not present
-    if (!hasLimit && limit) {
-      result += ` LIMIT ${limit}`;
-    }
-    
-    return result;
-  } catch (error) {
-    console.error('Error adding time range to SQL:', error);
-    return sql;
-  }
+  // Add newlines and indentation for AND and OR
+  formatted = formatted.replace(/\b(AND|OR)\b/gi, "\n  $1");
+
+  // Trim extra whitespace
+  return formatted.trim();
 }

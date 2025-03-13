@@ -8,12 +8,29 @@ import type { ColumnInfo } from "@/api/explore";
 
 // Function to generate column definitions based on source schema
 export function createColumns(
-  columns: ColumnInfo[]
+  columns: ColumnInfo[],
+  timestampField: string = "timestamp"
 ): ColumnDef<Record<string, any>>[] {
-  return columns.map((col) => ({
+  // Create a new array with the columns in the desired order
+  // First, let's sort out the timestamp field to be first if it exists
+  let sortedColumns = [...columns];
+  const tsColumnIndex = sortedColumns.findIndex(
+    (col) => col.name === timestampField
+  );
+
+  // Move the timestamp field to the beginning if it exists
+  if (tsColumnIndex > 0) {
+    const tsColumn = sortedColumns.splice(tsColumnIndex, 1)[0];
+    sortedColumns.unshift(tsColumn);
+  }
+
+  return sortedColumns.map((col) => ({
     id: col.name,
     // Use accessor function instead of accessorKey for nested properties
-    accessorFn: (row) => get(row, col.name),
+    accessorFn: (row) => {
+      // Ensure we get the correct value for this specific column
+      return row[col.name];
+    },
     header: ({ column }) => {
       return h(
         Button,
@@ -28,19 +45,24 @@ export function createColumns(
         ]
       );
     },
-    cell: ({ row }) => {
-      const value = row.getValue(col.name);
+    cell: ({ row, column }) => {
+      // Get the value using the column ID to ensure correct mapping
+      const value = row.getValue(column.id);
 
       // Handle null/undefined values
       if (value === null || value === undefined) {
-        return h("div", { class: "text-muted-foreground text-xs" }, "-");
+        return h(
+          "div",
+          { class: "text-muted-foreground flex-render-content" },
+          "-"
+        );
       }
 
       // Special handling for timestamp column
-      if (col.name === "timestamp") {
+      if (col.name === timestampField) {
         return h(
           "div",
-          { class: "font-mono text-xs truncate" },
+          { class: "truncate flex-render-content" },
           formatTimestamp(value as string)
         );
       }
@@ -49,13 +71,13 @@ export function createColumns(
       if (typeof value === "object") {
         return h(
           "div",
-          { class: "font-mono text-xs truncate" },
+          { class: "truncate flex-render-content" },
           JSON.stringify(value)
         );
       }
 
       // Default to string representation
-      return h("div", { class: "font-mono text-xs truncate" }, String(value));
+      return h("div", { class: "truncate flex-render-content" }, String(value));
     },
     // Enable sorting for all columns
     enableSorting: true,
@@ -90,12 +112,18 @@ export function createColumns(
 }
 
 // Helper function to get initial visible columns (timestamp + first column if exists)
-export function getInitialVisibleColumns(columns: ColumnInfo[]): string[] {
-  const hasTimestamp = columns.some((col) => col.name === "timestamp");
+export function getInitialVisibleColumns(
+  columns: ColumnInfo[],
+  timestampField: string = "timestamp"
+): string[] {
+  const hasTimestamp = columns.some((col) => col.name === timestampField);
   if (hasTimestamp) {
     return columns.length > 1
-      ? ["timestamp", columns.find((col) => col.name !== "timestamp")!.name]
-      : ["timestamp"];
+      ? [
+          timestampField,
+          columns.find((col) => col.name !== timestampField)!.name,
+        ]
+      : [timestampField];
   }
   return columns.length > 0 ? [columns[0].name] : [];
 }
