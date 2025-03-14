@@ -1,62 +1,76 @@
 <template>
   <div class="query-editor">
-    <div class="flex items-center justify-between bg-muted/40 rounded-t-md px-2 mb-4">
-      <div class="flex space-x-1">
-        <button 
-          class="relative h-9 px-4 py-1 text-sm font-medium transition-all hover:bg-muted/80 focus-visible:outline-none rounded-t-md"
-          :class="{ 'bg-card text-foreground font-semibold shadow-sm': activeTab === 'logchefql', 'text-muted-foreground': activeTab !== 'logchefql' }"
-          @click="setActiveTab('logchefql')"
-        >
-          LogchefQL
+    <!-- Combined Query Editor Header with all controls in one bar -->
+    <div class="flex items-center justify-between bg-muted/40 rounded-t-md px-3 py-2">
+      <div class="flex items-center gap-3">
+        <!-- Fields Panel Toggle -->
+        <button class="p-1 text-muted-foreground hover:text-foreground flex items-center"
+          @click="$emit('toggle-fields')" :title="props.showFieldsPanel ? 'Hide fields panel' : 'Show fields panel'">
+          <PanelRightClose v-if="props.showFieldsPanel" class="h-4 w-4" />
+          <PanelRightOpen v-else class="h-4 w-4" />
         </button>
-        <button 
-          class="relative h-9 px-4 py-1 text-sm font-medium transition-all hover:bg-muted/80 focus-visible:outline-none rounded-t-md"
-          :class="{ 'bg-card text-foreground font-semibold shadow-sm': activeTab === 'clickhouse-sql', 'text-muted-foreground': activeTab !== 'clickhouse-sql' }"
-          @click="setActiveTab('sql')"
-        >
-          SQL
-        </button>
-      </div>
-      
-      <HoverCard>
-        <HoverCardTrigger>
-          <button class="p-1 text-muted-foreground hover:text-foreground">
-            <HelpCircle class="h-4 w-4" />
+
+        <!-- Tabs for LogchefQL / SQL -->
+        <div class="flex space-x-1">
+          <button
+            class="relative h-8 px-4 py-1 text-sm font-medium transition-all hover:bg-muted/80 focus-visible:outline-none rounded-t-md"
+            :class="{ 'bg-card text-foreground font-semibold shadow-sm': activeTab === 'logchefql', 'text-muted-foreground': activeTab !== 'logchefql' }"
+            @click="setActiveTab('logchefql')">
+            LogchefQL
           </button>
-        </HoverCardTrigger>
-        <HoverCardContent class="w-80 backdrop-blur-md bg-black/90 text-white border-gray-800">
-          <div class="space-y-2">
-            <h4 class="text-sm font-semibold text-white">{{ activeTab === 'logchefql' ? 'LogchefQL' : 'SQL' }} Syntax</h4>
-            <div v-if="activeTab === 'logchefql'" class="text-xs space-y-1.5">
-              <div><code class="bg-white/10 px-1 rounded">field="value"</code> - Exact match</div>
-              <div><code class="bg-white/10 px-1 rounded">field!="value"</code> - Not equal</div>
-              <div><code class="bg-white/10 px-1 rounded">field~"pattern"</code> - Partial match (regex)</div>
-              <div><code class="bg-white/10 px-1 rounded">field!~"pattern"</code> - Exclude pattern (regex)</div>
-              <div><code class="bg-white/10 px-1 rounded">condition1 and condition2</code> - Combine with AND</div>
-              <div><code class="bg-white/10 px-1 rounded">condition1 or condition2</code> - Combine with OR</div>
-              <div class="pt-1"><em>Example: <code class="bg-white/10 px-1 rounded">service_name="api" and status>=400</code></em></div>
+          <button
+            class="relative h-8 px-4 py-1 text-sm font-medium transition-all hover:bg-muted/80 focus-visible:outline-none rounded-t-md"
+            :class="{ 'bg-card text-foreground font-semibold shadow-sm': activeTab === 'clickhouse-sql', 'text-muted-foreground': activeTab !== 'clickhouse-sql' }"
+            @click="setActiveTab('sql')">
+            SQL
+          </button>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <!-- Help Icon -->
+        <HoverCard>
+          <HoverCardTrigger>
+            <button class="p-1 text-muted-foreground hover:text-foreground">
+              <HelpCircle class="h-4 w-4" />
+            </button>
+          </HoverCardTrigger>
+          <HoverCardContent class="w-80 backdrop-blur-md bg-card text-card-foreground border-border">
+            <div class="space-y-2">
+              <h4 class="text-sm font-semibold">{{ activeTab === 'logchefql' ? 'LogchefQL' : 'SQL' }} Syntax</h4>
+              <div v-if="activeTab === 'logchefql'" class="text-xs space-y-1.5">
+                <div><code class="bg-muted px-1 rounded">field="value"</code> - Exact match</div>
+                <div><code class="bg-muted px-1 rounded">field!="value"</code> - Not equal</div>
+                <div><code class="bg-muted px-1 rounded">field~"pattern"</code> - Partial match (regex)</div>
+                <div><code class="bg-muted px-1 rounded">field!~"pattern"</code> - Exclude pattern (regex)</div>
+                <div><code class="bg-muted px-1 rounded">condition1 and condition2</code> - Combine with AND</div>
+                <div><code class="bg-muted px-1 rounded">condition1 or condition2</code> - Combine with OR</div>
+                <div class="pt-1"><em>Example: <code
+                      class="bg-muted px-1 rounded">service_name="api" and status>=400</code></em></div>
+              </div>
+              <div v-else class="text-xs space-y-1.5">
+                <div><code class="bg-muted px-1 rounded">SELECT * FROM {{ tableName }}</code> - Basic query</div>
+                <div><code class="bg-muted px-1 rounded">WHERE field = 'value'</code> - Filter by exact match</div>
+                <div><code class="bg-muted px-1 rounded">WHERE field LIKE '%pattern%'</code> - Pattern matching</div>
+                <div class="pt-1"><em>Time range and limit are automatically applied.</em></div>
+              </div>
             </div>
-            <div v-else class="text-xs space-y-1.5">
-              <div><code class="bg-white/10 px-1 rounded">SELECT * FROM {{ tableName }}</code> - Basic query</div>
-              <div><code class="bg-white/10 px-1 rounded">WHERE field = 'value'</code> - Filter by exact match</div>
-              <div><code class="bg-white/10 px-1 rounded">WHERE field LIKE '%pattern%'</code> - Pattern matching</div>
-              <div class="pt-1"><em>Time range and limit are automatically applied.</em></div>
-            </div>
-          </div>
-        </HoverCardContent>
-      </HoverCard>
+          </HoverCardContent>
+        </HoverCard>
+      </div>
     </div>
 
-    <div :style="{ height: `${editorHeight}px` }" class="editor border rounded pl-2 pr-2 mb-2 dark:border-neutral-600"
-      :class="{ 'border-sky-800 dark:border-sky-700': editorFocused }">
+    <!-- Monaco Editor with simplified container -->
+    <div :style="{ height: `${editorHeight}px` }" class="editor border-x border-b rounded-b-md p-1"
+      :class="{ 'border-primary/50 ring-1 ring-primary/20': editorFocused }">
       <vue-monaco-editor v-model:value="code" :theme="theme" :language="activeTab" :options="getDefaultMonacoOptions()"
         @mount="handleMount" @change="onChange" />
     </div>
 
-    <div class="editor-controls flex items-center">
-      <div class="editor-status text-sm text-red-500" v-if="errorText">
-        {{ errorText }}
-      </div>
+    <!-- Error Message - more visible -->
+    <div v-if="errorText" class="mt-2 p-2 text-sm text-destructive bg-destructive/10 rounded flex items-center">
+      <AlertCircle class="h-4 w-4 mr-2" />
+      {{ errorText }}
     </div>
   </div>
 </template>
@@ -66,7 +80,7 @@ import { ref, computed, shallowRef, nextTick, watch, onMounted, onBeforeUnmount 
 import * as monaco from "monaco-editor";
 import { useDark } from "@vueuse/core";
 import { VueMonacoEditor } from "@guolao/vue-monaco-editor";
-import { HelpCircle } from "lucide-vue-next";
+import { HelpCircle, PanelRightOpen, PanelRightClose, AlertCircle } from "lucide-vue-next";
 import {
   HoverCard,
   HoverCardContent,
@@ -121,10 +135,14 @@ const props = defineProps({
   limit: {
     type: Number,
     default: 1000
+  },
+  showFieldsPanel: {
+    type: Boolean,
+    default: false
   }
 });
 
-const emit = defineEmits(["change", "submit"]);
+const emit = defineEmits(["change", "submit", "toggle-fields"]);
 
 // State
 const isDark = useDark();
@@ -190,16 +208,16 @@ function setActiveTab(tab: string) {
           // Get just the WHERE conditions from LogchefQL and create a complete SQL query
           const whereConditions = translateToSQLConditions(parser.root);
           console.log('QueryEditor - conditions from LogchefQL:', whereConditions);
-          
+
           // Use the existing getDefaultSQLQuery and add our conditions to it
           let baseQuery = getDefaultSQLQuery(
-            props.tableName, 
+            props.tableName,
             props.tsField,
             props.startTimestamp,
             props.endTimestamp
           );
-          
-          // Insert the WHERE conditions 
+
+          // Insert the WHERE conditions
           if (whereConditions && whereConditions.trim()) {
             // Check if there's already a WHERE clause
             if (baseQuery.includes("WHERE")) {
@@ -215,13 +233,13 @@ function setActiveTab(tab: string) {
                 `FROM $1 WHERE ${whereConditions}`
               );
             }
-            
+
             // Update SQL code with the new query
             sqlCode.value = baseQuery;
           } else {
             // Use default query if no conditions found
             sqlCode.value = getDefaultSQLQuery(
-              props.tableName, 
+              props.tableName,
               props.tsField,
               props.startTimestamp,
               props.endTimestamp
@@ -229,7 +247,7 @@ function setActiveTab(tab: string) {
           }
         } else {
           sqlCode.value = getDefaultSQLQuery(
-            props.tableName, 
+            props.tableName,
             props.tsField,
             props.startTimestamp,
             props.endTimestamp
@@ -238,7 +256,7 @@ function setActiveTab(tab: string) {
       } catch (error) {
         console.error('Error translating LogchefQL to SQL:', error);
         sqlCode.value = getDefaultSQLQuery(
-          props.tableName, 
+          props.tableName,
           props.tsField,
           props.startTimestamp,
           props.endTimestamp
@@ -247,7 +265,7 @@ function setActiveTab(tab: string) {
     } else if (!sqlCode.value) {
       // If no LogchefQL code and no SQL code, use default query
       sqlCode.value = getDefaultSQLQuery(
-        props.tableName, 
+        props.tableName,
         props.tsField,
         props.startTimestamp,
         props.endTimestamp
@@ -266,7 +284,7 @@ function setActiveTab(tab: string) {
 
     // Update editor options based on the new mode
     updateEditorOptions(editorRef.value);
-    
+
     // Re-register appropriate completion provider based on active tab
     if (activeTab.value === "logchefql") {
       registerLogchefQLCompletionProvider();
@@ -280,12 +298,22 @@ function validateQuery(): boolean {
   errorText.value = "";
 
   if (activeTab.value === "logchefql") {
+    // For LogchefQL, empty queries are valid - they'll be translated to default SQL
+    if (!code.value || !code.value.trim()) {
+      return true;
+    }
+
     const isValid = validateLogchefQL(code.value);
     if (!isValid) {
       errorText.value = "Invalid LogchefQL query";
       return false;
     }
   } else {
+    // For SQL, empty queries are also valid - they'll default to SELECT *
+    if (!code.value || !code.value.trim()) {
+      return true;
+    }
+
     const isValid = validateSQL(code.value);
     if (!isValid) {
       errorText.value = "Invalid SQL query";
@@ -300,22 +328,39 @@ function submitQuery() {
   if (!validateQuery()) return;
 
   // Format the query with human-readable timestamps before submitting
-  let finalQuery = code.value;
-  
+  let finalQuery = code.value || '';
+
   // If it's SQL and contains timestamp numbers without quotes, convert to ISO format
-  if (activeTab.value === "clickhouse-sql" && 
-      finalQuery.includes(props.tsField) && 
-      props.startTimestamp && 
-      props.endTimestamp) {
-    
+  if (activeTab.value === "clickhouse-sql" &&
+    finalQuery.includes(props.tsField) &&
+    props.startTimestamp &&
+    props.endTimestamp) {
+
     const startTimeIso = new Date(props.startTimestamp * 1000).toISOString();
     const endTimeIso = new Date(props.endTimestamp * 1000).toISOString();
-    
+
     // Replace UNIX timestamps with ISO strings
     finalQuery = finalQuery.replace(
       new RegExp(`${props.tsField}\\s+BETWEEN\\s+\\d+\\s+AND\\s+\\d+`, 'i'),
       `${props.tsField} BETWEEN '${startTimeIso}' AND '${endTimeIso}'`
     );
+  }
+
+  // If query is empty, use a default query based on the active mode
+  if (!finalQuery.trim()) {
+    if (activeTab.value === "logchefql") {
+      // Empty LogchefQL - just emit as is, parent will handle default
+      finalQuery = '';
+    } else {
+      // Empty SQL - use default query
+      finalQuery = getDefaultSQLQuery(
+        props.tableName,
+        props.tsField,
+        props.startTimestamp,
+        props.endTimestamp,
+        props.limit
+      );
+    }
   }
 
   emit("submit", {
@@ -532,7 +577,7 @@ function disposeAllProviders() {
 const registerSQLCompletionProvider = () => {
   // Dispose all existing providers before registering new ones
   disposeAllProviders();
-  
+
   // Register a new provider
   const provider = monaco.languages.registerCompletionItemProvider("clickhouse-sql", {
     provideCompletionItems: async (model, position) => {
@@ -551,13 +596,13 @@ const registerSQLCompletionProvider = () => {
         startColumn: 1,
         endColumn: position.column,
       });
-      
+
       // Get full text for more context
       const fullText = model.getValue();
 
       // Check for specific SQL contexts - add debug info
       console.log('QueryEditor tableName prop:', props.tableName);
-      
+
       // Improved regex for detecting being right after FROM keyword
       const isAfterFrom = /\bFROM\s+$/i.test(textBeforeCursor);
       const isInWhereClause = /\bWHERE\b/i.test(textBeforeCursor) && !/\bGROUP\s+BY\b|\bORDER\s+BY\b|\bLIMIT\b/i.test(textBeforeCursor);
@@ -570,7 +615,7 @@ const registerSQLCompletionProvider = () => {
       let suggestions = [];
 
       // Only suggest relevant items based on context
-      
+
       // After FROM or JOIN, suggest table name
       if (isAfterFrom || isAfterJoin) {
         // Suggest the table name from the parent component
@@ -585,7 +630,7 @@ const registerSQLCompletionProvider = () => {
             documentation: 'The current log table from the selected source'
           });
         }
-        
+
         // Also suggest keywords that might follow FROM
         suggestions = suggestions.concat([
           { label: 'WHERE', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'WHERE ', range, sortText: '1-where' },
@@ -610,7 +655,7 @@ const registerSQLCompletionProvider = () => {
             }))
           );
         }
-        
+
         // In WHERE clause, also suggest operators and functions
         if (isInWhereClause) {
           // Add operators
@@ -626,7 +671,7 @@ const registerSQLCompletionProvider = () => {
             { label: 'BETWEEN', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' BETWEEN ', range, sortText: '1-between' },
           ]);
         }
-        
+
         // Add relevant functions
         suggestions = suggestions.concat(
           CLICKHOUSE_FUNCTIONS.map(func => ({
@@ -651,7 +696,7 @@ const registerSQLCompletionProvider = () => {
             sortText: `1-${keyword}`,
           }))
         );
-        
+
         // Add functions for general context
         suggestions = suggestions.concat(
           CLICKHOUSE_FUNCTIONS.map(func => ({
@@ -663,7 +708,7 @@ const registerSQLCompletionProvider = () => {
             command: { id: "editor.action.triggerParameterHints" }
           }))
         );
-        
+
         // Add SQL types for general context
         suggestions = suggestions.concat(
           SQL_TYPES.map(type => ({
@@ -684,7 +729,7 @@ const registerSQLCompletionProvider = () => {
     // Trigger on relevant characters
     triggerCharacters: [" ", ".", ",", "(", "=", ">", "<"],
   });
-  
+
   // Add to the tracked providers
   activeProviders.push(provider);
   return provider;
@@ -693,7 +738,7 @@ const registerSQLCompletionProvider = () => {
 const registerLogchefQLCompletionProvider = () => {
   // Dispose all existing providers
   disposeAllProviders();
-  
+
   // Register a new provider
   const provider = monaco.languages.registerCompletionItemProvider("logchefql", {
     provideCompletionItems: async (model, position) => {
@@ -761,7 +806,7 @@ const registerLogchefQLCompletionProvider = () => {
       } else if (parser.state === State.EXPECT_BOOL_OP) {
         // Always show boolean operator suggestions when in this state
         // This state occurs after completing a filter expression like field="value"
-        
+
         // Check if we're right after a completed value expression
         // We don't want to show suggestions when already typing a boolean operator
         if (word.word === '' && !textBeforeCursor.trim().endsWith('and') && !textBeforeCursor.trim().endsWith('or')) {
@@ -776,7 +821,7 @@ const registerLogchefQLCompletionProvider = () => {
     },
     triggerCharacters: ["=", "!", ">", "<", "~", " ", "."],
   });
-  
+
   // Add to the tracked providers
   activeProviders.push(provider);
   return provider;
@@ -884,15 +929,15 @@ watch(() => logchefQLCode.value, (newCode) => {
         const whereConditions = translateToSQLConditions(parser.root);
         if (whereConditions && whereConditions.trim()) {
           console.log('Watch - LogchefQL changed, updating SQL conditions:', whereConditions);
-          
+
           // Prepare SQL code but don't set as current editor value
           let baseQuery = getDefaultSQLQuery(
-            props.tableName, 
+            props.tableName,
             props.tsField,
             props.startTimestamp,
             props.endTimestamp
           );
-          
+
           if (baseQuery.includes("WHERE")) {
             baseQuery = baseQuery.replace(
               /WHERE\s+([^\n]+)/i,
@@ -904,7 +949,7 @@ watch(() => logchefQLCode.value, (newCode) => {
               `FROM $1 WHERE ${whereConditions}`
             );
           }
-          
+
           // Set sqlCode for when we switch tabs, but don't change current editor
           sqlCode.value = baseQuery;
         }
@@ -918,30 +963,30 @@ watch(() => logchefQLCode.value, (newCode) => {
 // Watch for timestamp changes to update SQL queries with new time ranges
 watch([() => props.startTimestamp, () => props.endTimestamp], ([newStart, newEnd], [oldStart, oldEnd]) => {
   // Only update if we're in SQL mode and the timestamps have changed
-  if (activeTab.value === "clickhouse-sql" && 
-      (newStart !== oldStart || newEnd !== oldEnd) && 
-      sqlCode.value) {
-    
+  if (activeTab.value === "clickhouse-sql" &&
+    (newStart !== oldStart || newEnd !== oldEnd) &&
+    sqlCode.value) {
+
     // Use our AST parser for more robust updating
     const startTimeIso = new Date(newStart * 1000).toISOString();
     const endTimeIso = new Date(newEnd * 1000).toISOString();
-    
+
     try {
       // Parse the current SQL
       const parsedQuery = SQLParser.parse(sqlCode.value, props.tsField);
-      
+
       if (parsedQuery) {
         // Apply new time range
         const updatedQuery = SQLParser.applyTimeRange(
-          parsedQuery, 
-          props.tsField, 
-          startTimeIso, 
+          parsedQuery,
+          props.tsField,
+          startTimeIso,
           endTimeIso
         );
-        
+
         // Convert back to SQL
         sqlCode.value = SQLParser.toSQL(updatedQuery);
-        
+
         // Update the code value if we're currently in SQL mode
         if (activeTab.value === "clickhouse-sql") {
           code.value = sqlCode.value;
@@ -950,7 +995,7 @@ watch([() => props.startTimestamp, () => props.endTimestamp], ([newStart, newEnd
         // Fallback to regex approach if parsing fails
         const numericTimestampRegex = new RegExp(`${props.tsField}\\s+BETWEEN\\s+\\d+\\s+AND\\s+\\d+`, 'i');
         const stringTimestampRegex = new RegExp(`${props.tsField}\\s+BETWEEN\\s+'[^']+'\\s+AND\\s+'[^']+'`, 'i');
-        
+
         // Update the timestamp values
         if (numericTimestampRegex.test(sqlCode.value)) {
           sqlCode.value = sqlCode.value.replace(
@@ -963,7 +1008,7 @@ watch([() => props.startTimestamp, () => props.endTimestamp], ([newStart, newEnd
             `${props.tsField} BETWEEN '${startTimeIso}' AND '${endTimeIso}'`
           );
         }
-          
+
         // Update the code value if we're currently in SQL mode
         if (activeTab.value === "clickhouse-sql") {
           code.value = sqlCode.value;
@@ -978,22 +1023,22 @@ watch([() => props.startTimestamp, () => props.endTimestamp], ([newStart, newEnd
 
 // Also watch for limit changes
 watch([() => props.limit], ([newLimit], [oldLimit]) => {
-  if (activeTab.value === "clickhouse-sql" && 
-      newLimit !== oldLimit && 
-      sqlCode.value && 
-      typeof newLimit === 'number') {
-    
+  if (activeTab.value === "clickhouse-sql" &&
+    newLimit !== oldLimit &&
+    sqlCode.value &&
+    typeof newLimit === 'number') {
+
     try {
       // Parse the current SQL
       const parsedQuery = SQLParser.parse(sqlCode.value);
-      
+
       if (parsedQuery) {
         // Apply new limit
         const updatedQuery = SQLParser.applyLimit(parsedQuery, newLimit);
-        
+
         // Convert back to SQL
         sqlCode.value = SQLParser.toSQL(updatedQuery);
-        
+
         // Update the code value if we're currently in SQL mode
         if (activeTab.value === "clickhouse-sql") {
           code.value = sqlCode.value;
@@ -1001,7 +1046,7 @@ watch([() => props.limit], ([newLimit], [oldLimit]) => {
       } else {
         // Fallback to regex approach
         const limitRegex = /\bLIMIT\s+\d+/i;
-        
+
         if (limitRegex.test(sqlCode.value)) {
           sqlCode.value = sqlCode.value.replace(
             limitRegex,
@@ -1011,7 +1056,7 @@ watch([() => props.limit], ([newLimit], [oldLimit]) => {
           // Add limit if not present
           sqlCode.value = `${sqlCode.value}\nLIMIT ${newLimit}`;
         }
-        
+
         // Update the code value
         if (activeTab.value === "clickhouse-sql") {
           code.value = sqlCode.value;
@@ -1029,3 +1074,28 @@ onBeforeUnmount(() => {
 });
 </script>
 
+<style scoped>
+.query-editor {
+  display: flex;
+  flex-direction: column;
+}
+
+.editor {
+  background-color: hsl(var(--card));
+  transition: border-color 0.15s ease;
+}
+
+/* Additional styling for a cleaner look */
+button:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+.tab-button {
+  transition: all 0.15s ease;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+</style>

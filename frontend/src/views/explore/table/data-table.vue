@@ -167,16 +167,21 @@ onMounted(() => {
 </script>
 
 <template>
-    <div class="h-full flex flex-col">
-        <!-- Results Header with Controls (removed duplicated stats) -->
+    <div class="h-full flex flex-col w-full min-w-0 flex-grow">
+        <!-- Results Header with Controls and Pagination -->
         <div class="flex items-center justify-between p-2 border-b">
-            <div class="flex items-center gap-2">
-                <h3 class="text-sm font-medium">Data</h3>
-            </div>
+            <!-- Left side - Empty now that stats have been moved to LogExplorer.vue -->
+            <div class="flex-1"></div>
 
-            <!-- Right side controls -->
+            <!-- Right side controls with pagination moved to top -->
             <div class="flex items-center gap-3">
+                <!-- Pagination moved to top -->
+                <DataTablePagination v-if="table.getRowModel().rows?.length > 0" :table="table" />
+
+                <!-- Column selector -->
                 <DataTableColumnSelector :table="table" />
+
+                <!-- Search input -->
                 <div class="relative w-64">
                     <Search class="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                     <Input placeholder="Search across all columns..." aria-label="Search in all columns"
@@ -185,7 +190,7 @@ onMounted(() => {
             </div>
         </div>
 
-        <!-- Table Section with improved scrolling behavior -->
+        <!-- Table Section with full-height scrolling -->
         <div class="flex-1 relative overflow-hidden">
             <div v-if="table.getRowModel().rows?.length" class="absolute inset-0">
                 <div class="w-full h-full overflow-auto custom-scrollbar">
@@ -202,10 +207,10 @@ onMounted(() => {
                             </tr>
                         </thead>
 
-                        <!-- Improved table body styling without severity markers -->
+                        <!-- Improved table body styling -->
                         <tbody class="[&_tr:last-child]:border-0">
                             <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
-                                <!-- Main Row with improved styling -->
+                                <!-- Main Row -->
                                 <tr :data-state="row.getIsSelected() ? 'selected' : undefined"
                                     @click="(e) => handleRowClick(e, row)" :class="[
                                         'cursor-pointer hover:bg-muted/50 border-b border-b-muted-foreground/10 transition-colors',
@@ -261,29 +266,14 @@ onMounted(() => {
                 <EmptyState />
             </div>
         </div>
-
-        <!-- Bottom pagination controls with result count -->
-        <div v-if="table.getRowModel().rows?.length > 0"
-            class="flex items-center justify-between border-t pt-2 px-3 mt-auto">
-            <div class="text-xs text-muted-foreground">
-                {{ table.getFilteredRowModel().rows.length }}
-                <span class="text-muted-foreground/70">results</span>
-                <span v-if="table.getFilteredRowModel().rows.length !== props.data.length">
-                    (filtered from {{ props.data.length }} total)
-                </span>
-            </div>
-            <DataTablePagination :table="table" />
-        </div>
     </div>
 </template>
 
 <style>
-/* Remove hljs styles since they're now in JsonViewer */
-
-/* Custom scrollbar styles - improved for better visibility */
+/* Custom scrollbar styles for better visibility */
 .custom-scrollbar::-webkit-scrollbar {
-    width: 8px !important;
-    height: 8px !important;
+    width: 10px !important;
+    height: 10px !important;
     display: block !important;
 }
 
@@ -292,7 +282,7 @@ onMounted(() => {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-    background-color: rgba(155, 155, 155, 0.6);
+    background-color: rgba(155, 155, 155, 0.5);
     border-radius: 4px;
     min-height: 40px;
     min-width: 40px;
@@ -309,16 +299,27 @@ onMounted(() => {
 /* Firefox scrollbar */
 .custom-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: rgba(155, 155, 155, 0.6) transparent;
+    scrollbar-color: rgba(155, 155, 155, 0.5) transparent;
 }
 
-/* Ensure proper table layout */
+/* Ensure proper full-height table layout */
+.h-full.flex.flex-col {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    min-height: 0;
+    /* Important for flex child to shrink */
+}
+
 .flex-1.relative.overflow-hidden {
     position: relative;
     display: flex;
     flex-direction: column;
     flex: 1 1 auto;
     min-height: 0;
+    height: 100%;
+    overflow: hidden;
 }
 
 .absolute.inset-0 {
@@ -329,43 +330,56 @@ onMounted(() => {
     left: 0;
     display: flex;
     flex-direction: column;
-}
-
-/* Additional fixes for table rendering */
-table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
+    height: 100%;
 }
 
 .w-full.h-full.overflow-auto.custom-scrollbar {
     -webkit-overflow-scrolling: touch;
+    height: 100%;
+    flex: 1 1 auto;
 }
 
-/* Additional improvements for data table */
+/* Enhanced table rendering */
+table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+}
+
+/* Fixed header with shadow for better visibility */
+thead {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background-color: var(--background, #fff);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
 th {
     position: sticky;
     top: 0;
-    z-index: 10;
+    z-index: 20;
+    background-color: var(--background, #fff);
     transition: background-color 0.2s;
     font-family: var(--font-sans);
+    font-weight: 500;
 }
 
 th:hover {
-    background-color: rgba(0, 0, 0, 0.06);
+    background-color: rgba(0, 0, 0, 0.04);
 }
 
-/* Improve table cells */
+/* Improve table cells with consistent monospace for better log readability */
 td {
     max-width: 300px;
     overflow: hidden;
     line-height: 1.3;
     font-size: 11px;
-    /* Slightly smaller font size */
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-/* Make all cell content use monospace font */
+/* Ensure all cell content uses monospace font */
 td .max-w-none.flex.items-center.gap-1>span,
 td .max-w-none.flex.items-center.gap-1 div {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -385,7 +399,15 @@ td .max-w-none.flex.items-center.gap-1 div {
     font-size: 11px;
 }
 
-/* Remove severity marker styles as requested */
+/* Expand rows to take full width */
+tr {
+    width: 100%;
+}
+
+/* Improved zebra striping */
+tr:nth-of-type(even) {
+    background-color: rgba(0, 0, 0, 0.02);
+}
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
@@ -399,18 +421,20 @@ td .max-w-none.flex.items-center.gap-1 div {
     }
 }
 
-/* We ensure these styles are applied to the configured timestamp field */
-[data-column-id] {
-    /* Applied dynamically based on column ID */
+/* Ensure consistent styling for timestamp-related fields */
+/* We ensure these styles are applied to the timestamp field specifically */
+[data-column-id="timestamp"] {
+    white-space: nowrap !important;
+    font-variant-numeric: tabular-nums !important;
+    letter-spacing: -0.01em !important;
 }
 
-/* Ensure consistent styling for timestamp-related fields */
-td[data-column-id="timestamp"],
+/* Also apply to any field that looks like a timestamp */
 td[data-column-id$="_at"],
 td[data-column-id$="_time"] {
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.01em;
+    white-space: nowrap !important;
+    font-variant-numeric: tabular-nums !important;
+    letter-spacing: -0.01em !important;
 }
 
 /* Additional styles for all columns to ensure proper layout */

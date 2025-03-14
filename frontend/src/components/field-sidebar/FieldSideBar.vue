@@ -18,7 +18,7 @@ const props = withDefaults(defineProps<{
     fields: FieldInfo[]
     expanded: boolean
 }>(), {
-    expanded: true,
+    expanded: false,
 })
 
 // Local state
@@ -39,7 +39,8 @@ const filteredFields = computed((): FieldInfo[] => {
 <template>
     <!-- Sidebar Panel - without integrated toggle button -->
     <Transition name="slide">
-        <div v-if="expanded" class="w-64 border-r h-full flex flex-col bg-background">
+        <div v-if="expanded" class="w-64 border-r h-full flex flex-col bg-background flex-shrink-0"
+            style="max-width: 256px; min-width: 256px;">
             <div class="p-2 border-b bg-muted/10 flex items-center justify-between">
                 <span class="text-sm font-medium">Fields</span>
                 <!-- Search box for fields -->
@@ -87,6 +88,13 @@ const filteredFields = computed((): FieldInfo[] => {
 .slide-leave-to {
     transform: translateX(-100%);
     opacity: 0;
+}
+
+/* Fix sidebar width issues */
+div.w-64 {
+    width: 16rem !important;
+    max-width: 16rem !important;
+    flex: 0 0 16rem !important;
 }
 
 /* Add scrollbar styling for field list */
