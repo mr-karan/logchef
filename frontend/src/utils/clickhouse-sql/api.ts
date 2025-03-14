@@ -41,7 +41,7 @@ export function extractTableName(query: string): string | null {
   }
 }
 
-import { SQLParser } from './ast';
+import { SQLParser } from "./ast";
 
 /**
  * Gets a default SQL query for a table
@@ -59,20 +59,22 @@ export function getDefaultSQLQuery(
   endTimestamp?: number,
   limit: number = 1000
 ): string {
-  // Use provided timestamps or default to last 3 days
-  const threeDaysAgo = new Date();
-  threeDaysAgo.setHours(threeDaysAgo.getHours() - 72);
+  // Use provided timestamps or default to the last hour
+  const oneHourAgo = new Date();
+  oneHourAgo.setHours(oneHourAgo.getHours() - 1);
 
   const now = new Date();
 
   // Format dates for ClickHouse
-  const startTimeFormatted = startTimestamp !== undefined 
-    ? startTimestamp 
-    : Math.floor(threeDaysAgo.getTime() / 1000);
-  
-  const endTimeFormatted = endTimestamp !== undefined 
-    ? endTimestamp 
-    : Math.floor(now.getTime() / 1000);
+  const startTimeFormatted =
+    startTimestamp !== undefined
+      ? startTimestamp
+      : Math.floor(oneHourAgo.getTime() / 1000);
+
+  const endTimeFormatted =
+    endTimestamp !== undefined
+      ? endTimestamp
+      : Math.floor(now.getTime() / 1000);
 
   // Format dates as ISO strings for direct use in query
   const startTimeIso = new Date(startTimeFormatted * 1000).toISOString();
@@ -80,32 +82,34 @@ export function getDefaultSQLQuery(
 
   // Create a query using our AST builder
   const query = {
-    type: 'query',
-    selectClause: { 
-      type: 'select', 
-      columns: ['*'] 
+    type: "query",
+    selectClause: {
+      type: "select",
+      columns: ["*"],
     },
-    fromClause: { 
-      type: 'from', 
-      table: tableName 
+    fromClause: {
+      type: "from",
+      table: tableName,
     },
     whereClause: {
-      type: 'where',
+      type: "where",
       conditions: `${tsField} BETWEEN '${startTimeIso}' AND '${endTimeIso}'`,
-      hasTimestampFilter: true
+      hasTimestampFilter: true,
     },
     orderByClause: {
-      type: 'orderby',
-      columns: [{
-        type: 'orderby_column',
-        column: tsField,
-        direction: 'DESC'
-      }]
+      type: "orderby",
+      columns: [
+        {
+          type: "orderby_column",
+          column: tsField,
+          direction: "DESC",
+        },
+      ],
     },
     limitClause: {
-      type: 'limit',
-      value: limit
-    }
+      type: "limit",
+      value: limit,
+    },
   };
 
   return SQLParser.toSQL(query as any);

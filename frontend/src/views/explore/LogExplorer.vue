@@ -65,7 +65,7 @@ const tableColumns = ref<ColumnDef<Record<string, any>>[]>([])
 const logchefQuery = ref('')
 const sqlQuery = ref('')
 const queryError = ref('')
-const showFieldsPanel = ref(true)
+const showFieldsPanel = ref(false)
 const queryMode = computed({
   get: () => exploreStore.activeMode,
   set: (value) => exploreStore.setActiveMode(value)
@@ -183,7 +183,7 @@ async function initializeFromURL() {
 
     // Set default time range
     const currentTime = now(getLocalTimeZone())
-    const defaultStart = currentTime.subtract({ hours: 3 })
+    const defaultStart = currentTime.subtract({ hours: 1 })
     const defaultEnd = currentTime
     let timeRangeSet = false
 
@@ -358,7 +358,7 @@ async function initializeFromURL() {
 
     const currentTime = now(getLocalTimeZone())
     exploreStore.setTimeRange({
-      start: currentTime.subtract({ hours: 3 }),
+      start: currentTime.subtract({ hours: 1 }),
       end: currentTime
     })
 
@@ -819,13 +819,19 @@ const executeQuery = async () => {
     }
 
     // Check if the query is empty
-    const isEmptyQuery = !logchefQuery.value.trim();
+    const isEmptyQuery = !logchefQuery.value || !logchefQuery.value.trim();
     let basicSql = '';
 
     if (isEmptyQuery) {
       // Use a default query if none provided, similar to SQL mode
       console.log('Empty LogchefQL query, using default SQL query');
-      basicSql = `SELECT * FROM ${activeSourceTableName.value}`;
+      basicSql = getDefaultSQLQuery(
+        activeSourceTableName.value,
+        sourceDetails.value?._meta_ts_field || 'timestamp',
+        getTimestampFromCalendarDate(exploreStore.timeRange?.start),
+        getTimestampFromCalendarDate(exploreStore.timeRange?.end),
+        exploreStore.limit
+      );
     } else {
       try {
         console.log('Executing LogchefQL query:', logchefQuery.value);
@@ -942,12 +948,12 @@ const executeSQLQuery = async () => {
       }
     }
 
-    console.log('Executing SQL query:', sqlQuery.value);
+    console.log('Executing SQL query:', sqlQuery.value || '(empty)');
     console.log('Source details:', sourceDetails.value);
     console.log('Active source table name:', activeSourceTableName.value);
 
     // Check for SQL query - if empty, use the default SQL query
-    if (!sqlQuery.value.trim()) {
+    if (!sqlQuery.value || sqlQuery.value.trim() === '') {
       // Use a default query if none provided with time range and limit from the store
       sqlQuery.value = getDefaultSQLQuery(
         activeSourceTableName.value,
@@ -957,6 +963,57 @@ const executeSQLQuery = async () => {
         exploreStore.limit
       );
       console.log('Using default SQL query with ISO timestamps:', sqlQuery.value);
+    } else {
+      // Ensure the query has timestamp conditions
+      const tsField = sourceDetails.value?._meta_ts_field || 'timestamp';
+      const startTimestamp = getTimestampFromCalendarDate(exploreStore.timeRange?.start);
+      const endTimestamp = getTimestampFromCalendarDate(exploreStore.timeRange?.end);
+
+      // Check if the query contains timestamp conditions
+      const tsRegex = new RegExp(`${tsField}\\s+BETWEEN`, 'i');
+      if (!tsRegex.test(sqlQuery.value)) {
+        // If the query has a WHERE clause, append the timestamp condition
+        if (/\bWHERE\b/i.test(sqlQuery.value)) {
+          sqlQuery.value = sqlQuery.value.replace(
+            /WHERE\s+(.*?)(?:\s+ORDER\s+BY|\s+GROUP\s+BY|\s+LIMIT|\s*$)/i,
+            (match, whereClause) => {
+              const startIso = new Date(startTimestamp * 1000).toISOString();
+              const endIso = new Date(endTimestamp * 1000).toISOString();
+              return `WHERE (${whereClause}) AND ${tsField} BETWEEN '${startIso}' AND '${endIso}'`
+            }
+          );
+        } else {
+          // If the query doesn't have a WHERE clause, add one
+          const hasFrom = /\bFROM\b/i.test(sqlQuery.value);
+
+          if (hasFrom) {
+            // Add WHERE after FROM
+            const startIso = new Date(startTimestamp * 1000).toISOString();
+            const endIso = new Date(endTimestamp * 1000).toISOString();
+
+            sqlQuery.value = sqlQuery.value.replace(
+              /FROM\s+(.*?)(?:\s+ORDER\s+BY|\s+GROUP\s+BY|\s+LIMIT|\s*$)/i,
+              (match, fromClause) => {
+                return `FROM ${fromClause} WHERE ${tsField} BETWEEN '${startIso}' AND '${endIso}'`
+              }
+            );
+          } else {
+            // If no FROM, append a default query
+            sqlQuery.value = getDefaultSQLQuery(
+              activeSourceTableName.value,
+              tsField,
+              startTimestamp,
+              endTimestamp,
+              exploreStore.limit
+            );
+          }
+        }
+      }
+
+      // Ensure the query has a LIMIT
+      if (!(/\bLIMIT\b/i.test(sqlQuery.value))) {
+        sqlQuery.value = `${sqlQuery.value}\nLIMIT ${exploreStore.limit}`;
+      }
     }
 
     // Store the SQL for reference
@@ -1433,24 +1490,10 @@ onBeforeUnmount(() => {
       <FieldSideBar v-model:expanded="showFieldsPanel" :fields="availableFields" />
 
       <!-- Main Content: Query Editor and Results -->
-      <div class="flex-1 flex flex-col h-full">
+      <div class="flex-1 flex flex-col h-full min-w-0" style="flex-basis: 75%;">
         <!-- Query Editor Section -->
         <div class="p-3 pb-2">
-          <div class="flex items-center justify-between mb-1.5">
-            <div class="flex items-center gap-2">
-              <Button variant="ghost" size="icon" class="h-6 w-6 text-muted-foreground hover:text-foreground"
-                @click="showFieldsPanel = !showFieldsPanel"
-                :title="showFieldsPanel ? 'Hide fields panel' : 'Show fields panel'">
-                <PanelRightClose v-if="showFieldsPanel" class="h-4 w-4" />
-                <PanelRightOpen v-else class="h-4 w-4" />
-              </Button>
-              <span class="text-xs text-muted-foreground">Query</span>
-            </div>
-            <!-- Keyboard hint - optional -->
-            <span class="text-xs text-muted-foreground hidden sm:block">Press Ctrl+Enter to run</span>
-          </div>
-
-          <div class="rounded-md border bg-card shadow-sm">
+          <div class="rounded-md border-t bg-card">
             <QueryEditor ref="queryEditorRef" :sourceId="exploreStore.sourceId || 0"
               :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
               :startTimestamp="getTimestampFromCalendarDate(exploreStore.timeRange?.start)"
@@ -1459,7 +1502,8 @@ onBeforeUnmount(() => {
               :initialTab="queryMode === 'dsl' ? 'logchefql' : 'sql'"
               :placeholder="queryMode === 'dsl' ? 'Enter LogchefQL query or leave empty to run SELECT * FROM table' : 'Enter SQL query or leave empty for default query'"
               :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
-              :limit="exploreStore.limit" @change="handleQueryChange" @submit="handleQuerySubmit" />
+              :limit="exploreStore.limit" :showFieldsPanel="showFieldsPanel" @change="handleQueryChange"
+              @submit="handleQuerySubmit" @toggle-fields="showFieldsPanel = !showFieldsPanel" />
           </div>
 
           <!-- Query Error Message -->
@@ -1470,55 +1514,47 @@ onBeforeUnmount(() => {
 
         <!-- Results Section -->
         <div class="flex-1 overflow-hidden flex flex-col border-t">
-          <!-- Stats header with fixed width -->
+          <!-- Stats header - keep minimal -->
           <div class="px-3 py-1.5 flex items-center justify-between bg-muted/10">
             <div class="flex items-center gap-2">
-              <span class="text-xs text-muted-foreground">Results</span>
-              <div v-if="exploreStore.logs?.length" class="flex items-center gap-2">
-                <!-- Stats display with better visuals -->
-                <span class="text-xs px-2 py-0.5 rounded-full bg-muted/60 font-medium">
-                  {{ exploreStore.logs.length.toLocaleString() }}
-                  <span class="font-normal"> shown</span>
-                </span>
+              <!-- Remove "Results" text and use a more descriptive layout -->
+              <div v-if="exploreStore.queryStats?.rows_read" class="flex items-center gap-1">
+                <span class="text-xs text-muted-foreground">Fetched:</span>
+                <span class="text-xs font-medium">{{ exploreStore.queryStats.rows_read.toLocaleString() }}</span>
+                <span class="text-xs text-muted-foreground ml-0.5">rows</span>
+              </div>
 
-                <div v-if="exploreStore.queryStats" class="flex items-center">
-                  <span class="text-xs text-muted-foreground/80">of</span>
+              <!-- Time indication with color -->
+              <div v-if="exploreStore.queryStats" class="flex items-center gap-1 ml-2">
+                <span class="text-xs text-muted-foreground">Time:</span>
+                <div class="flex items-center">
+                  <div :class="{
+                    'bg-green-500': exploreStore.queryStats.execution_time_ms < 100,
+                    'bg-yellow-500': exploreStore.queryStats.execution_time_ms >= 100 && exploreStore.queryStats.execution_time_ms < 1000,
+                    'bg-orange-500': exploreStore.queryStats.execution_time_ms >= 1000 && exploreStore.queryStats.execution_time_ms < 5000,
+                    'bg-red-500': exploreStore.queryStats.execution_time_ms >= 5000
+                  }" class="h-2 w-2 rounded-full"></div>
                   <span class="text-xs ml-1 font-medium">
-                    {{ exploreStore.queryStats.rows_read.toLocaleString() }}
-                    <span class="font-normal text-muted-foreground/80">rows</span>
-                  </span>
+                    {{ exploreStore.queryStats.execution_time_ms < 1000 ?
+                      Math.round(exploreStore.queryStats.execution_time_ms) + 'ms' :
+                      (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2) + 's' }} </span>
                 </div>
               </div>
-            </div>
 
-            <div v-if="exploreStore.queryStats" class="flex items-center gap-3">
-              <!-- Execution time with visual indicator -->
-              <div class="flex items-center gap-1.5">
-                <div :class="{
-                  'bg-green-500': exploreStore.queryStats.execution_time_ms < 100,
-                  'bg-yellow-500': exploreStore.queryStats.execution_time_ms >= 100 && exploreStore.queryStats.execution_time_ms < 1000,
-                  'bg-orange-500': exploreStore.queryStats.execution_time_ms >= 1000 && exploreStore.queryStats.execution_time_ms < 5000,
-                  'bg-red-500': exploreStore.queryStats.execution_time_ms >= 5000
-                }" class="h-2 w-2 rounded-full"></div>
-                <span class="text-xs ml-1.5 font-medium">
-                  {{ exploreStore.queryStats.execution_time_ms < 1000 ?
-                    Math.round(exploreStore.queryStats.execution_time_ms) + 'ms' :
-                    (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2) + 's' }} </span>
-              </div>
-
-              <!-- Data read -->
-              <div v-if="exploreStore.queryStats.bytes_read" class="flex items-center">
-                <span class="text-xs text-muted-foreground">
-                  {{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2) }}MB read
-                </span>
+              <!-- Data read - formatted consistently -->
+              <div v-if="exploreStore.queryStats?.bytes_read" class="flex items-center gap-1 ml-2">
+                <span class="text-xs text-muted-foreground">Data:</span>
+                <span class="text-xs font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
+                  }}</span>
+                <span class="text-xs text-muted-foreground">MB</span>
               </div>
             </div>
           </div>
 
-          <!-- Table container with proper scroll behavior -->
-          <div class="flex-1 overflow-hidden relative">
+          <!-- Table container with proper scroll behavior - give it max available height -->
+          <div class="flex-1 h-full overflow-hidden relative">
             <template v-if="exploreStore.logs?.length">
-              <div class="absolute inset-0">
+              <div class="absolute inset-0 h-full">
                 <DataTable :columns="tableColumns" :data="exploreStore.logs" :stats="exploreStore.queryStats"
                   :source-id="exploreStore.sourceId?.toString() || ''" :timestamp-field="sourceDetails?._meta_ts_field"
                   :severity-field="sourceDetails?._meta_severity_field" />
@@ -1592,6 +1628,19 @@ onBeforeUnmount(() => {
 /* Ensure proper table height */
 .h-full {
   height: 100% !important;
+}
+
+/* Fix flex layout issues */
+.flex.flex-1.min-h-0 {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+}
+
+.flex.flex-1.min-h-0>div:last-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
 }
 
 /* Fix DataTable height issues */
