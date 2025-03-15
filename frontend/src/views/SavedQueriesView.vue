@@ -99,14 +99,14 @@ const filteredTeamQueries = computed(() => {
   }
 
   const search = searchQuery.value.toLowerCase();
-  
+
   return teamQueries.value.map(teamGroup => {
     // Filter queries within each team
-    const filteredQueries = teamGroup.queries.filter(query => 
-      query.name.toLowerCase().includes(search) || 
+    const filteredQueries = teamGroup.queries.filter(query =>
+      query.name.toLowerCase().includes(search) ||
       (query.description && query.description.toLowerCase().includes(search))
     );
-    
+
     // Only return teams that have matching queries
     if (filteredQueries.length > 0) {
       return {
@@ -114,7 +114,7 @@ const filteredTeamQueries = computed(() => {
         queries: filteredQueries
       };
     }
-    
+
     return null;
   }).filter(Boolean) as TeamGroupedQuery[];
 });
@@ -124,7 +124,7 @@ const displayedTeamQueries = computed(() => {
   if (!selectedTeamId.value || selectedTeamId.value === 'all') {
     return filteredTeamQueries.value;
   }
-  
+
   return filteredTeamQueries.value.filter(
     teamGroup => teamGroup.team_id.toString() === selectedTeamId.value
   );
@@ -153,7 +153,7 @@ const availableTeams = computed(() => {
 onMounted(async () => {
   try {
     console.log("SavedQueriesView component mounting");
-    
+
     // Load teams first
     await teamsStore.loadTeams();
 
@@ -284,27 +284,27 @@ async function handleSourceChange(sourceId: string) {
 async function loadSourceQueries(sourceId: string) {
   try {
     isLoading.value = true;
-    
+
     // Reset search and filters when changing source
     searchQuery.value = '';
     selectedTeamId.value = '';
-    
+
     if (!teamsStore.currentTeamId) {
       console.warn("No team selected, cannot load queries");
       teamQueries.value = [];
       return;
     }
-    
+
     // Use the team source queries endpoint
     const response = await savedQueriesApi.listTeamSourceQueries(
       teamsStore.currentTeamId,
       parseInt(sourceId)
     );
-    
+
     if (response.status === "success") {
       // Group queries by team
       const groupedQueries: Record<number, TeamGroupedQuery> = {};
-      
+
       response.data.forEach(query => {
         if (!groupedQueries[query.team_id]) {
           // Find team name
@@ -317,9 +317,9 @@ async function loadSourceQueries(sourceId: string) {
         }
         groupedQueries[query.team_id].queries.push(query);
       });
-      
+
       teamQueries.value = Object.values(groupedQueries);
-      
+
       // Auto-expand teams if there are only a few
       if (teamQueries.value.length <= 3) {
         teamQueries.value.forEach(team => {
@@ -371,7 +371,7 @@ function getQueryUrl(query: SavedTeamQuery): string {
   try {
     const queryContent = JSON.parse(query.query_content);
     const queryType = query.query_type || 'sql';
-    const activeTab = queryContent.activeTab || (queryType === 'dsl' ? 'filters' : 'raw_sql');
+    const activeTab = queryContent.activeTab || (queryType === 'logchefql' ? 'filters' : 'raw_sql');
 
     // Build the URL with the appropriate parameters
     let url = `/logs/explore?team=${query.team_id}&query_id=${query.id}`;
@@ -382,7 +382,7 @@ function getQueryUrl(query: SavedTeamQuery): string {
     }
 
     // Add mode parameter based on query type
-    url += `&mode=${queryType === 'dsl' ? 'dsl' : 'sql'}`;
+    url += `&mode=${queryType === 'logchefql' ? 'logchefql' : 'sql'}`;
 
     return url;
   } catch (error) {
@@ -435,8 +435,8 @@ async function handleSaveQuery(formData: any) {
   try {
     if (editingQuery.value) {
       await savedQueriesStore.updateQuery(
-        formData.team_id, 
-        editingQuery.value.id.toString(), 
+        formData.team_id,
+        editingQuery.value.id.toString(),
         {
           name: formData.name,
           description: formData.description,
@@ -468,7 +468,7 @@ async function handleSaveQuery(formData: any) {
 
 // Get query type badge color
 function getQueryTypeBadgeVariant(type: string): "default" | "secondary" | "destructive" | "outline" {
-  return type === 'dsl' ? 'default' : 'secondary';
+  return type === 'logchefql' ? 'default' : 'secondary';
 }
 
 // Create a new query in the explorer
@@ -483,7 +483,7 @@ function createNewQuery() {
 // Handle team filter change
 function handleTeamFilterChange(teamId: string) {
   selectedTeamId.value = teamId;
-  
+
   // Expand the selected team
   if (teamId && teamId !== 'all') {
     expandedTeams.value[teamId] = true;
@@ -585,8 +585,7 @@ function clearFilters() {
 
             <span class="text-muted-foreground">→</span>
 
-            <Select :model-value="selectedSourceId"
-              @update:model-value="handleSourceChange"
+            <Select :model-value="selectedSourceId" @update:model-value="handleSourceChange"
               :disabled="isChangingSource || !teamsStore.currentTeamId || (sourcesStore.teamSources || []).length === 0"
               class="h-8 min-w-[200px]">
               <SelectTrigger>
@@ -637,12 +636,8 @@ function clearFilters() {
               <label class="text-sm font-medium">Search</label>
               <div class="relative">
                 <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  v-model="searchQuery"
-                  type="search"
-                  placeholder="Search by name or description..."
-                  class="pl-8"
-                />
+                <Input v-model="searchQuery" type="search" placeholder="Search by name or description..."
+                  class="pl-8" />
               </div>
             </div>
           </div>
@@ -680,85 +675,85 @@ function clearFilters() {
         </div>
       </div>
 
-    <!-- Queries grouped by team -->
-    <div v-else class="space-y-4">
-      <div v-for="teamGroup in displayedTeamQueries" :key="teamGroup.team_id" class="border rounded-md shadow-sm">
-        <Collapsible :open="teamExpansionState[teamGroup.team_id]"
-          @update:open="val => expandedTeams[teamGroup.team_id] = val">
-          <CollapsibleTrigger class="flex justify-between items-center w-full p-4 cursor-pointer hover:bg-muted/50"
-            @click="toggleTeamExpansion(teamGroup.team_id)">
-            <div class="flex items-center">
-              <ChevronRight class="h-5 w-5 mr-2 transition-transform duration-200"
-                :class="{ 'rotate-90': teamExpansionState[teamGroup.team_id] }" />
-              <h3 class="text-lg font-medium">{{ teamGroup.team_name }}</h3>
-              <div class="ml-2 text-sm text-muted-foreground">
-                ({{ teamGroup.queries.length }} {{ teamGroup.queries.length === 1 ? 'query' : 'queries' }})
+      <!-- Queries grouped by team -->
+      <div v-else class="space-y-4">
+        <div v-for="teamGroup in displayedTeamQueries" :key="teamGroup.team_id" class="border rounded-md shadow-sm">
+          <Collapsible :open="teamExpansionState[teamGroup.team_id]"
+            @update:open="val => expandedTeams[teamGroup.team_id] = val">
+            <CollapsibleTrigger class="flex justify-between items-center w-full p-4 cursor-pointer hover:bg-muted/50"
+              @click="toggleTeamExpansion(teamGroup.team_id)">
+              <div class="flex items-center">
+                <ChevronRight class="h-5 w-5 mr-2 transition-transform duration-200"
+                  :class="{ 'rotate-90': teamExpansionState[teamGroup.team_id] }" />
+                <h3 class="text-lg font-medium">{{ teamGroup.team_name }}</h3>
+                <div class="ml-2 text-sm text-muted-foreground">
+                  ({{ teamGroup.queries.length }} {{ teamGroup.queries.length === 1 ? 'query' : 'queries' }})
+                </div>
               </div>
-            </div>
-          </CollapsibleTrigger>
+            </CollapsibleTrigger>
 
-          <CollapsibleContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead class="w-[250px]">Name</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead class="w-[100px]">Type</TableHead>
-                  <TableHead class="w-[150px]">Created</TableHead>
-                  <TableHead class="w-[150px]">Updated</TableHead>
-                  <TableHead class="w-[100px] text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow v-for="query in teamGroup.queries" :key="query.id">
-                  <TableCell class="font-medium">
-                    <a @click.prevent="openQuery(query)" :href="getQueryUrl(query)"
-                      class="text-primary hover:underline cursor-pointer">
-                      {{ query.name }}
-                    </a>
-                  </TableCell>
-                  <TableCell>{{ query.description || 'No description' }}</TableCell>
-                  <TableCell>
-                    <Badge :variant="getQueryTypeBadgeVariant(query.query_type)">
-                      {{ query.query_type.toUpperCase() }}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{{ formatTime(query.created_at) }}</TableCell>
-                  <TableCell>{{ formatTime(query.updated_at) }}</TableCell>
-                  <TableCell class="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon">
-                          <ChevronDown class="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem @click="openQuery(query)">
-                          <Eye class="mr-2 h-4 w-4" />
-                          Open
-                        </DropdownMenuItem>
-                        <DropdownMenuItem @click="editQuery(query)">
-                          <Pencil class="mr-2 h-4 w-4" />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem @click="deleteQuery(query)" class="text-destructive">
-                          <Trash2 class="mr-2 h-4 w-4" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </CollapsibleContent>
-        </Collapsible>
+            <CollapsibleContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead class="w-[250px]">Name</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead class="w-[100px]">Type</TableHead>
+                    <TableHead class="w-[150px]">Created</TableHead>
+                    <TableHead class="w-[150px]">Updated</TableHead>
+                    <TableHead class="w-[100px] text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow v-for="query in teamGroup.queries" :key="query.id">
+                    <TableCell class="font-medium">
+                      <a @click.prevent="openQuery(query)" :href="getQueryUrl(query)"
+                        class="text-primary hover:underline cursor-pointer">
+                        {{ query.name }}
+                      </a>
+                    </TableCell>
+                    <TableCell>{{ query.description || 'No description' }}</TableCell>
+                    <TableCell>
+                      <Badge :variant="getQueryTypeBadgeVariant(query.query_type)">
+                        {{ query.query_type.toUpperCase() }}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{{ formatTime(query.created_at) }}</TableCell>
+                    <TableCell>{{ formatTime(query.updated_at) }}</TableCell>
+                    <TableCell class="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon">
+                            <ChevronDown class="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem @click="openQuery(query)">
+                            <Eye class="mr-2 h-4 w-4" />
+                            Open
+                          </DropdownMenuItem>
+                          <DropdownMenuItem @click="editQuery(query)">
+                            <Pencil class="mr-2 h-4 w-4" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem @click="deleteQuery(query)" class="text-destructive">
+                            <Trash2 class="mr-2 h-4 w-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </CollapsibleContent>
+          </Collapsible>
+        </div>
       </div>
-    </div>
 
-    <!-- Edit query modal -->
-    <SaveQueryModal v-if="showSaveQueryModal && editingQuery" :is-open="showSaveQueryModal" :initial-data="editingQuery"
-      :is-edit-mode="true" @close="showSaveQueryModal = false" @save="handleSaveQuery" />
+      <!-- Edit query modal -->
+      <SaveQueryModal v-if="showSaveQueryModal && editingQuery" :is-open="showSaveQueryModal"
+        :initial-data="editingQuery" :is-edit-mode="true" @close="showSaveQueryModal = false" @save="handleSaveQuery" />
     </div>
   </div>
 </template>

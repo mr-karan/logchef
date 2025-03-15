@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"runtime"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/config"
@@ -105,8 +107,11 @@ func New(opts Options) (*DB, error) {
 	// Initialize logger with component tag
 	log := opts.Logger.With("component", "sqlite")
 
-	// Connect to SQLite with multi-statement support
-	db, err := sqlx.Connect("sqlite", opts.Config.Path+"?_multi_stmt=1")
+	// Connect to SQLite with more conservative parameters
+	// Add _txlock=immediate to reduce chance of "database is locked" errors
+	// Keep _multi_stmt=1 to maintain compatibility with existing code
+	dsn := opts.Config.Path + "?_multi_stmt=1&_txlock=immediate"
+	db, err := sqlx.Connect("sqlite", dsn)
 	if err != nil {
 		log.Error("failed to open database",
 			"error", err,
@@ -123,11 +128,25 @@ func New(opts Options) (*DB, error) {
 		}
 	}()
 
-	// Configure connection pool
-	db.SetMaxOpenConns(opts.Config.MaxOpenConns)
-	db.SetMaxIdleConns(opts.Config.MaxIdleConns)
-	db.SetConnMaxLifetime(opts.Config.ConnMaxLifetime)
-	db.SetConnMaxIdleTime(opts.Config.ConnMaxIdleTime)
+	// Configure connection pool with more conservative settings to prevent memory issues
+	// Limit the number of connections to reduce chance of memory/resource issues
+	maxOpenConns := 5
+	if opts.Config.MaxOpenConns > 0 && opts.Config.MaxOpenConns < maxOpenConns {
+		maxOpenConns = opts.Config.MaxOpenConns
+	}
+	db.SetMaxOpenConns(maxOpenConns)
+
+	// Keep fewer idle connections
+	maxIdleConns := 2
+	if opts.Config.MaxIdleConns > 0 && opts.Config.MaxIdleConns < maxIdleConns {
+		maxIdleConns = opts.Config.MaxIdleConns
+	}
+	db.SetMaxIdleConns(maxIdleConns)
+
+	// Set shorter connection lifetimes to prevent stale connections
+	// This helps avoid memory leaks in the SQLite driver
+	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
 
 	// Set pragmas for optimal performance
 	if err := setPragmas(db, opts.Config.BusyTimeout); err != nil {
@@ -196,6 +215,10 @@ func setPragmas(db *sqlx.DB, busyTimeout int) error {
 		"PRAGMA foreign_keys = ON",
 		"PRAGMA temp_store = MEMORY",
 		"PRAGMA cache_size = -16000",
+		"PRAGMA mmap_size = 0",             // Disable memory-mapped I/O which can cause issues with modernc.org/sqlite
+		"PRAGMA page_size = 4096",          // Set consistent page size
+		"PRAGMA wal_autocheckpoint = 1000", // Checkpoint WAL after 1000 pages
+		"PRAGMA secure_delete = OFF",       // Improve performance
 	}
 
 	for _, pragma := range pragmas {
@@ -265,7 +288,55 @@ func runMigrations(db *sql.DB) error {
 
 // Close closes the database connection and all prepared statements
 func (db *DB) Close() error {
-	return db.conn.Close()
+	// First, try to close all statements to prevent memory leaks
+	// Some implementations of sqlx.DB could panic if db.conn is nil,
+	// so we wrap this in a recover block
+	defer func() {
+		if r := recover(); r != nil {
+			db.log.Error("panic during database close",
+				"error", r)
+		}
+	}()
+
+	// Log that we're closing the database
+	db.log.Debug("closing database connection")
+
+	// Add a small delay before closing to allow any in-flight transactions to complete
+	// This can help prevent memory issues during shutdown
+	time.Sleep(100 * time.Millisecond)
+
+	// Close the connection
+	if err := db.conn.Close(); err != nil {
+		db.log.Error("error closing database connection",
+			"error", err)
+		return fmt.Errorf("error closing database connection: %w", err)
+	}
+
+	return nil
+}
+
+// safeExec is a helper that provides safer query execution with explicit
+// finalizer and recovery logic to prevent memory leaks in the SQLite driver
+func (db *DB) safeExec(stmt *sqlx.Stmt, args ...interface{}) (sql.Result, error) {
+	// Add recovery to prevent panics from crashing the application
+	defer func() {
+		if r := recover(); r != nil {
+			db.log.Error("panic during query execution",
+				"error", r,
+				"recover", fmt.Sprintf("%v", r))
+		}
+	}()
+
+	// Execute the statement
+	result, err := stmt.Exec(args...)
+
+	// Force garbage collection after potentially large operations
+	// This is somewhat of a last resort but can help prevent memory buildup
+	if err == nil {
+		runtime.GC()
+	}
+
+	return result, err
 }
 
 // Ensure DB implements auth.Store

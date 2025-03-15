@@ -88,7 +88,10 @@ watch(() => props.modelValue, (newValue) => {
         const start = toZoned(newValue.start as CalendarDateTime, getLocalTimeZone())
         const end = toZoned(newValue.end as CalendarDateTime, getLocalTimeZone())
 
-        dateRange.value = { start: newValue.start, end: newValue.end }
+        dateRange.value = {
+            start: newValue.start,
+            end: newValue.end
+        }
         draftRange.value = {
             start: formatDateTime(start),
             end: formatDateTime(end)
@@ -379,7 +382,7 @@ const selectedRangeText = computed(() => {
                 </div>
             </Button>
         </PopoverTrigger>
-        <PopoverContent class="w-[550px] p-4" align="start">
+        <PopoverContent class="w-[550px] p-4" align="start" side="bottom">
             <div class="flex space-x-4">
                 <!-- Left side - Date inputs -->
                 <div class="w-[300px] space-y-4">
@@ -398,8 +401,7 @@ const selectedRangeText = computed(() => {
                                             <CalendarIcon class="h-4 w-4" />
                                         </Button>
                                     </PopoverTrigger>
-                                    <PopoverContent class="w-auto p-3" :side="'right'" :align="'start'"
-                                        :side-offset="10">
+                                    <PopoverContent class="w-auto p-3 max-w-[300px]" :side="'bottom'" :align="'end'">
                                         <RangeCalendar v-model="calendarDateRange" class="rounded-md border"
                                             :weekday-format="'short'" @update:model-value="handleCalendarUpdate" />
                                     </PopoverContent>
@@ -420,8 +422,7 @@ const selectedRangeText = computed(() => {
                                             <CalendarIcon class="h-4 w-4" />
                                         </Button>
                                     </PopoverTrigger>
-                                    <PopoverContent class="w-auto p-3" :side="'right'" :align="'start'"
-                                        :side-offset="10">
+                                    <PopoverContent class="w-auto p-3 max-w-[300px]" :side="'bottom'" :align="'end'">
                                         <RangeCalendar v-model="calendarDateRange" class="rounded-md border"
                                             :weekday-format="'short'" @update:model-value="handleCalendarUpdate" />
                                     </PopoverContent>
@@ -467,7 +468,16 @@ const selectedRangeText = computed(() => {
 </template>
 
 <style scoped>
-.v-popper__popper {
-    max-width: none !important;
+/* Remove the problematic style that was disabling max-width */
+
+/* Add proper calendar constraints */
+:deep(.calendar) {
+    width: 100%;
+    max-width: 280px;
+}
+
+/* Ensure popovers aren't too wide */
+:deep(.v-popper__popper) {
+    max-width: 350px;
 }
 </style>

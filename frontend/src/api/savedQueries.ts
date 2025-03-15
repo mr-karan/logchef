@@ -15,9 +15,9 @@ export interface SavedQueryContent {
     };
   };
   limit: number;
-  queryType: "dsl" | "sql";
+  queryType: "logchefql" | "sql";
   rawSql: string;
-  dslContent?: string;
+  logchefqlContent?: string;
 }
 
 /**
@@ -29,7 +29,7 @@ export interface SavedTeamQuery {
   source_id: number;
   name: string;
   description: string;
-  query_type: "dsl" | "sql";
+  query_type: "logchefql" | "sql";
   query_content: string; // JSON string of SavedQueryContent
   created_at: string;
   updated_at: string;
@@ -81,7 +81,7 @@ export const savedQueriesApi = {
     const response = await api.get<APIResponse<SavedTeamQuery[]>>(url);
     return response.data;
   },
-  
+
   /**
    * List queries for a team's source
    */

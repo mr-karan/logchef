@@ -134,9 +134,9 @@ function prepareQueryContent(saveTimestamp: boolean): string {
   try {
     // Get the current active mode from the explore store
     const activeMode = exploreStore.activeMode || 'sql';
-    
+
     // If we have initial content, try to parse it first
-    let content = {};
+    let content: Record<string, any> = {};
     if (props.initialData?.query_content) {
       try {
         content = JSON.parse(props.initialData.query_content);
@@ -154,30 +154,29 @@ function prepareQueryContent(saveTimestamp: boolean): string {
     }
 
     // Determine query type
-    const queryType = activeMode === 'dsl' ? 'dsl' : 'sql';
+    const queryType = activeMode === 'logchefql' ? 'logchefql' : 'sql';
 
     // Get the appropriate query content based on mode
-    let dslContent = '';
+    let logchefqlContent = '';
     let rawSql = '';
-    
-    if (activeMode === 'dsl') {
-      // For DSL mode, prioritize content from different sources
-      dslContent = exploreStore.dslCode || 
-                  content.logchefql_query || 
-                  content.dslContent || 
-                  '';
-                  
-      // Ensure we have DSL content for DSL query type
-      if (!dslContent.trim()) {
-        throw new Error("DSL content is required for DSL query type");
+
+    if (activeMode === 'logchefql') {
+      // For LogchefQL mode, prioritize content from different sources
+      logchefqlContent = exploreStore.logchefqlCode ||
+        content.logchefql_query ||
+        '';
+
+      // Ensure we have LogchefQL content for LogchefQL query type
+      if (!logchefqlContent.trim()) {
+        throw new Error("LogchefQL content is required for LogchefQL query type");
       }
     } else {
       // For SQL mode, prioritize content from different sources
-      rawSql = exploreStore.rawSql || 
-              content.sql_query || 
-              content.rawSql || 
-              '';
-              
+      rawSql = exploreStore.rawSql ||
+        content.sql_query ||
+        content.rawSql ||
+        '';
+
       // Ensure we have SQL content for SQL query type
       if (!rawSql.trim()) {
         throw new Error("SQL content is required for SQL query type");
@@ -187,20 +186,20 @@ function prepareQueryContent(saveTimestamp: boolean): string {
     // Get current time values for timestamps
     const currentTime = Date.now();
     const oneHourAgo = currentTime - 3600000;
-    
+
     // Get time range from explore store or use defaults
-    const startTime = exploreStore.timeRange 
-      ? new Date(exploreStore.timeRange.start.toString()).getTime() 
+    const startTime = exploreStore.timeRange
+      ? new Date(exploreStore.timeRange.start.toString()).getTime()
       : oneHourAgo;
-      
-    const endTime = exploreStore.timeRange 
-      ? new Date(exploreStore.timeRange.end.toString()).getTime() 
+
+    const endTime = exploreStore.timeRange
+      ? new Date(exploreStore.timeRange.end.toString()).getTime()
       : currentTime;
 
     // Ensure we have the required structure
     const queryContent = {
       version: content.version || 1,
-      activeTab: content.activeTab || (activeMode === 'dsl' ? 'filters' : 'raw_sql'),
+      activeTab: content.activeTab || (activeMode === 'logchefql' ? 'filters' : 'raw_sql'),
       sourceId: content.sourceId || currentSourceId.value,
       // Always include timeRange with valid timestamps
       timeRange: {
@@ -213,7 +212,7 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       limit: saveTimestamp ? (content.limit || exploreStore.limit) : 100,
       queryType: queryType,
       rawSql: rawSql,
-      dslContent: dslContent,
+      logchefqlContent: logchefqlContent,
     };
 
     return JSON.stringify(queryContent);
@@ -223,22 +222,22 @@ function prepareQueryContent(saveTimestamp: boolean): string {
     const currentTime = Date.now();
     return JSON.stringify({
       version: 1,
-      activeTab: exploreStore.activeMode === 'dsl' ? 'filters' : 'raw_sql',
+      activeTab: exploreStore.activeMode === 'logchefql' ? 'filters' : 'raw_sql',
       sourceId: currentSourceId.value,
       timeRange: {
         absolute: {
-          start: saveTimestamp 
+          start: saveTimestamp
             ? (exploreStore.timeRange ? new Date(exploreStore.timeRange.start.toString()).getTime() : currentTime - 3600000)
             : currentTime - 3600000,
-          end: saveTimestamp 
+          end: saveTimestamp
             ? (exploreStore.timeRange ? new Date(exploreStore.timeRange.end.toString()).getTime() : currentTime)
             : currentTime,
         }
       },
       limit: saveTimestamp ? exploreStore.limit : 100,
-      queryType: exploreStore.activeMode === 'dsl' ? 'dsl' : 'sql',
+      queryType: exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'sql',
       rawSql: exploreStore.rawSql || '',
-      dslContent: exploreStore.dslCode || '',
+      logchefqlContent: exploreStore.logchefqlCode || '',
     });
   }
 }
@@ -246,7 +245,7 @@ function prepareQueryContent(saveTimestamp: boolean): string {
 // Handle form submission
 async function handleSubmit(event: Event) {
   event.preventDefault();
-  
+
   if (!isValid.value) {
     return;
   }
@@ -256,14 +255,14 @@ async function handleSubmit(event: Event) {
 
     // Get the current active mode from the explore store
     const activeMode = exploreStore.activeMode || 'sql';
-    
+
     // Determine query type
-    const queryType = activeMode === 'dsl' ? 'dsl' : 'sql';
-    
+    const queryType = activeMode === 'logchefql' ? 'logchefql' : 'sql';
+
     try {
       // Prepare the query content with the proper structure
       const preparedContent = prepareQueryContent(saveTimestamp.value);
-      
+
       // Create the payload
       const payload = {
         team_id: teamsStore.currentTeamId?.toString() || '',
@@ -332,23 +331,13 @@ const saveDescription = 'Save your current query configuration for future use.'
         <!-- Query Name -->
         <div class="grid gap-2">
           <Label for="name" class="required">Name</Label>
-          <Input 
-            id="name" 
-            v-model="name" 
-            placeholder="Enter a descriptive name" 
-            required
-          />
+          <Input id="name" v-model="name" placeholder="Enter a descriptive name" required />
         </div>
 
         <!-- Description -->
         <div class="grid gap-2">
           <Label for="description">Description (Optional)</Label>
-          <Textarea 
-            id="description" 
-            v-model="description" 
-            placeholder="Provide details about this query" 
-            rows="3" 
-          />
+          <Textarea id="description" v-model="description" placeholder="Provide details about this query" rows="3" />
           <p class="text-sm text-muted-foreground">
             Briefly describe the purpose of this query.
           </p>
@@ -356,10 +345,7 @@ const saveDescription = 'Save your current query configuration for future use.'
 
         <!-- Save Timestamp Checkbox -->
         <div class="flex items-start space-x-3 space-y-0 rounded-md border p-4">
-          <Checkbox 
-            id="save_timestamp" 
-            v-model="saveTimestamp"
-          />
+          <Checkbox id="save_timestamp" v-model="saveTimestamp" />
           <div class="space-y-1 leading-none">
             <Label for="save_timestamp">Save current timestamp</Label>
             <p class="text-sm text-muted-foreground">

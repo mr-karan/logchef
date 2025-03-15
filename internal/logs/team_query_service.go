@@ -44,14 +44,14 @@ func (s *TeamQueryService) ValidateQueryContent(content string) error {
 	}
 
 	// Validate query type
-	if queryContent.QueryType != models.SavedQueryTypeDSL &&
+	if queryContent.QueryType != models.SavedQueryTypeLogchefQL &&
 		queryContent.QueryType != models.SavedQueryTypeSQL {
 		return fmt.Errorf("invalid query content: unknown query type %q", queryContent.QueryType)
 	}
 
 	// Validate that appropriate content is provided based on query type
-	if queryContent.QueryType == models.SavedQueryTypeDSL && queryContent.DSLContent == "" {
-		return fmt.Errorf("invalid query content: DSL content is required for DSL query type")
+	if queryContent.QueryType == models.SavedQueryTypeLogchefQL && queryContent.LogchefQLContent == "" {
+		return fmt.Errorf("invalid query content: LogchefQL content is required for LogchefQL query type")
 	}
 
 	if queryContent.QueryType == models.SavedQueryTypeSQL && queryContent.RawSQL == "" {

@@ -63,7 +63,8 @@
     <!-- Monaco Editor with simplified container -->
     <div :style="{ height: `${editorHeight}px` }" class="editor border-x border-b rounded-b-md p-1"
       :class="{ 'border-primary/50 ring-1 ring-primary/20': editorFocused }">
-      <vue-monaco-editor v-model:value="code" :theme="theme" :language="activeTab" :options="getDefaultMonacoOptions()"
+      <!-- @ts-ignore -->
+      <vue-monaco-editor v-model:value="code" :theme="theme" :language="activeTab" :options="getEditorOptions()"
         @mount="handleMount" @change="onChange" />
     </div>
 
@@ -87,12 +88,14 @@ import {
   HoverCardTrigger,
 } from '@/components/ui/hover-card';
 
-import { getDefaultMonacoOptions, initMonacoSetup } from "@/utils/monaco";
-import { Parser as LogchefQLParser, State, Operator, VALID_KEY_VALUE_OPERATORS } from "@/utils/logchefql";
-import { translateToSQL, translateToSQLConditions, validateLogchefQL } from "@/utils/logchefql/api";
-import { validateSQL, getDefaultSQLQuery } from "@/utils/clickhouse-sql/api";
-import { isNumeric } from "@/utils/logchefql";
+import { initMonacoSetup } from "@/utils/monaco";
+import { Parser as LogchefQLParser, State, Operator, VALID_KEY_VALUE_OPERATORS, isNumeric } from "@/utils/logchefql";
+import { translateToSQLConditions } from "@/utils/logchefql/api";
+import { validateSQL } from "@/utils/clickhouse-sql/api";
 import { SQL_KEYWORDS, CLICKHOUSE_FUNCTIONS, SQL_TYPES } from "@/utils/clickhouse-sql/language";
+import { useExploreStore } from '@/stores/explore';
+import { QueryBuilder } from "@/utils/query-builder";
+import { SQLParser } from '@/utils/clickhouse-sql/ast';
 
 // Define props and emits
 const props = defineProps({
@@ -148,238 +151,36 @@ const emit = defineEmits(["change", "submit", "toggle-fields"]);
 const isDark = useDark();
 const activeTab = ref(props.initialTab === "sql" ? "clickhouse-sql" : "logchefql");
 const code = ref(props.initialValue || "");
-const logchefQLCode = ref(props.initialValue || "");
-const sqlCode = ref("");
+// Initialize mode-specific variables based on initial tab
+const logchefQLCode = ref(props.initialTab === "sql" ? "" : (props.initialValue || ""));
+const sqlCode = ref(props.initialTab === "sql" ? (props.initialValue || "") : "");
 const editorRef = shallowRef();
 const editorFocused = ref(false);
 const errorText = ref("");
 const fieldNames = computed(() => Object.keys(props.schema));
+const exploreStore = useExploreStore();
+const errorMessage = ref("");
 
-// Initialize Monaco
-onMounted(() => {
-  initMonacoSetup();
-});
+// Track editor model and instance for proper cleanup
+const editorModel = shallowRef();
+const disposeArray = ref<monaco.IDisposable[]>([]);
+const isDisposing = ref(false);
 
-// Computed properties
-const editorHeight = computed(() => {
-  // For LogchefQL, we use a smaller fixed height as they're typically single-line queries
-  // For SQL, we calculate based on content with a larger minimum
-  if (activeTab.value === 'logchefql') {
-    const lines = (code.value.match(/\n/g) || []).length + 1;
-    return Math.max(45, 14 + lines * 20); // Smaller height for LogchefQL
-  } else {
-    const lines = (code.value.match(/\n/g) || []).length + 1;
-    // Provide more space for SQL queries with comments
-    const hasComments = code.value.includes('--');
-    const baseHeight = hasComments ? 100 : 80;
-    return Math.max(baseHeight, 14 + lines * 20); // Larger minimum for SQL
-  }
-});
-
-const theme = computed(() => {
-  return isDark.value ? "logchef-dark" : "logchef-light";
-});
-
-// No longer needed - removed status text computed property
-
-// Methods
-function setActiveTab(tab: string) {
-  // Store current code based on current tab
-  if (activeTab.value === "logchefql") {
-    logchefQLCode.value = code.value;
-  } else {
-    sqlCode.value = code.value;
-  }
-
-  // Switch tab with transition
-  if (tab === "logchefql") {
-    activeTab.value = "logchefql";
-    code.value = logchefQLCode.value;
-  } else {
-    activeTab.value = "clickhouse-sql";
-
-    // ALWAYS translate LogchefQL to SQL when switching to SQL mode
-    if (logchefQLCode.value) {
-      try {
-        const parser = new LogchefQLParser();
-        parser.parse(logchefQLCode.value);
-
-        if (parser.root) {
-          // Get just the WHERE conditions from LogchefQL and create a complete SQL query
-          const whereConditions = translateToSQLConditions(parser.root);
-          console.log('QueryEditor - conditions from LogchefQL:', whereConditions);
-
-          // Use the existing getDefaultSQLQuery and add our conditions to it
-          let baseQuery = getDefaultSQLQuery(
-            props.tableName,
-            props.tsField,
-            props.startTimestamp,
-            props.endTimestamp
-          );
-
-          // Insert the WHERE conditions
-          if (whereConditions && whereConditions.trim()) {
-            // Check if there's already a WHERE clause
-            if (baseQuery.includes("WHERE")) {
-              // Add our conditions with AND
-              baseQuery = baseQuery.replace(
-                /WHERE\s+([^\n]+)/i,
-                `WHERE $1 AND (${whereConditions})`
-              );
-            } else {
-              // Add a new WHERE clause
-              baseQuery = baseQuery.replace(
-                /FROM\s+([^\n]+)/i,
-                `FROM $1 WHERE ${whereConditions}`
-              );
-            }
-
-            // Update SQL code with the new query
-            sqlCode.value = baseQuery;
-          } else {
-            // Use default query if no conditions found
-            sqlCode.value = getDefaultSQLQuery(
-              props.tableName,
-              props.tsField,
-              props.startTimestamp,
-              props.endTimestamp
-            );
-          }
-        } else {
-          sqlCode.value = getDefaultSQLQuery(
-            props.tableName,
-            props.tsField,
-            props.startTimestamp,
-            props.endTimestamp
-          );
-        }
-      } catch (error) {
-        console.error('Error translating LogchefQL to SQL:', error);
-        sqlCode.value = getDefaultSQLQuery(
-          props.tableName,
-          props.tsField,
-          props.startTimestamp,
-          props.endTimestamp
-        );
-      }
-    } else if (!sqlCode.value) {
-      // If no LogchefQL code and no SQL code, use default query
-      sqlCode.value = getDefaultSQLQuery(
-        props.tableName,
-        props.tsField,
-        props.startTimestamp,
-        props.endTimestamp
-      );
-    }
-
-    code.value = sqlCode.value;
-  }
-
-  // Update editor language
-  if (editorRef.value) {
-    monaco.editor.setModelLanguage(
-      editorRef.value.getModel(),
-      activeTab.value
-    );
-
-    // Update editor options based on the new mode
-    updateEditorOptions(editorRef.value);
-
-    // Re-register appropriate completion provider based on active tab
-    if (activeTab.value === "logchefql") {
-      registerLogchefQLCompletionProvider();
-    } else {
-      registerSQLCompletionProvider();
-    }
-  }
-}
-
-function validateQuery(): boolean {
-  errorText.value = "";
-
-  if (activeTab.value === "logchefql") {
-    // For LogchefQL, empty queries are valid - they'll be translated to default SQL
-    if (!code.value || !code.value.trim()) {
-      return true;
-    }
-
-    const isValid = validateLogchefQL(code.value);
-    if (!isValid) {
-      errorText.value = "Invalid LogchefQL query";
-      return false;
-    }
-  } else {
-    // For SQL, empty queries are also valid - they'll default to SELECT *
-    if (!code.value || !code.value.trim()) {
-      return true;
-    }
-
-    const isValid = validateSQL(code.value);
-    if (!isValid) {
-      errorText.value = "Invalid SQL query";
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function submitQuery() {
-  if (!validateQuery()) return;
-
-  // Format the query with human-readable timestamps before submitting
-  let finalQuery = code.value || '';
-
-  // If it's SQL and contains timestamp numbers without quotes, convert to ISO format
-  if (activeTab.value === "clickhouse-sql" &&
-    finalQuery.includes(props.tsField) &&
-    props.startTimestamp &&
-    props.endTimestamp) {
-
-    const startTimeIso = new Date(props.startTimestamp * 1000).toISOString();
-    const endTimeIso = new Date(props.endTimestamp * 1000).toISOString();
-
-    // Replace UNIX timestamps with ISO strings
-    finalQuery = finalQuery.replace(
-      new RegExp(`${props.tsField}\\s+BETWEEN\\s+\\d+\\s+AND\\s+\\d+`, 'i'),
-      `${props.tsField} BETWEEN '${startTimeIso}' AND '${endTimeIso}'`
-    );
-  }
-
-  // If query is empty, use a default query based on the active mode
-  if (!finalQuery.trim()) {
-    if (activeTab.value === "logchefql") {
-      // Empty LogchefQL - just emit as is, parent will handle default
-      finalQuery = '';
-    } else {
-      // Empty SQL - use default query
-      finalQuery = getDefaultSQLQuery(
-        props.tableName,
-        props.tsField,
-        props.startTimestamp,
-        props.endTimestamp,
-        props.limit
-      );
-    }
-  }
-
-  emit("submit", {
-    query: finalQuery,
-    mode: activeTab.value === "logchefql" ? "logchefql" : "sql",
-    sourceId: props.sourceId
-  });
-}
-
-function onChange() {
-  emit("change", {
-    query: code.value,
-    mode: activeTab.value === "logchefql" ? "logchefql" : "sql"
-  });
-}
+// Monaco-specific types for better type checking
+type MonacoCompletionItem = {
+  label: string;
+  kind: monaco.languages.CompletionItemKind;
+  insertText: string;
+  range: any;
+  sortText: string;
+  detail?: string;
+  documentation?: string;
+  command?: { id: string; title: string; snippet?: string };
+};
 
 // Auto-completion helpers
 const getSuggestionsFromList = (params: any) => {
-  const suggestions = [];
+  const suggestions: MonacoCompletionItem[] = [];
   let defaultPostfix = params.postfix === undefined ? "" : params.postfix;
 
   const range =
@@ -414,6 +215,7 @@ const getSuggestionsFromList = (params: any) => {
       insertText: insertText + postfix,
       command: {
         id: "editor.action.triggerSuggest",
+        title: "Trigger Suggest"
       },
     });
   }
@@ -421,7 +223,8 @@ const getSuggestionsFromList = (params: any) => {
 };
 
 const getOperatorsSuggestions = (field: string, position: any) => {
-  let operators = [
+  // Create operators as any[] type to avoid string[] conversion issues
+  const operators: any[] = [
     { label: Operator.EQUALS, sortText: "a" },
     { label: Operator.NOT_EQUALS, sortText: "b" },
     { label: Operator.GREATER_THAN, sortText: "e" },
@@ -433,10 +236,10 @@ const getOperatorsSuggestions = (field: string, position: any) => {
   // Only add regex operators for string fields
   const fieldType = props.schema[field]?.type || "";
   if (fieldType.includes("String") || fieldType.includes("string")) {
-    operators = operators.concat([
+    operators.push(
       { label: Operator.EQUALS_REGEX, sortText: "c" },
-      { label: Operator.NOT_EQUALS_REGEX, sortText: "d" },
-    ]);
+      { label: Operator.NOT_EQUALS_REGEX, sortText: "d" }
+    );
   }
 
   return getSuggestionsFromList({
@@ -467,7 +270,7 @@ const getBooleanOperatorsSuggestions = (range: any) => {
 };
 
 const getKeySuggestions = (range: any) => {
-  const suggestions = [];
+  const suggestions: MonacoCompletionItem[] = [];
   for (const name of fieldNames.value) {
     const fieldInfo = props.schema[name];
     if (fieldInfo) {
@@ -478,8 +281,10 @@ const getKeySuggestions = (range: any) => {
         range: range,
         documentation: documentation,
         insertText: name,
+        sortText: name.toLowerCase(), // Add missing sortText property
         command: {
           id: "editor.action.triggerSuggest",
+          title: "Trigger Suggest"
         },
       });
     }
@@ -535,7 +340,7 @@ const getSchemaFieldValues = (field: string): string[] => {
 
 const getValueSuggestions = async (key: string, value: string, range: any, quoteChar?: string) => {
   const result = {
-    suggestions: [],
+    suggestions: [] as MonacoCompletionItem[],
     incomplete: false,
   };
 
@@ -548,7 +353,8 @@ const getValueSuggestions = async (key: string, value: string, range: any, quote
       val.toLowerCase().includes(value.toLowerCase())
     );
 
-    const items = prepareSuggestionValues(filteredValues, quoteChar);
+    // Create suggestions with proper typing
+    const items: any[] = prepareSuggestionValues(filteredValues, quoteChar);
 
     result.suggestions = getSuggestionsFromList({
       range: range,
@@ -561,16 +367,276 @@ const getValueSuggestions = async (key: string, value: string, range: any, quote
   return result;
 };
 
+// Add a safe dispose function to handle all editor resources
+function safelyDisposeEditor() {
+  if (isDisposing.value) return; // Prevent concurrent dispose operations
+
+  isDisposing.value = true;
+
+  try {
+    // Dispose all registered completion providers
+    disposeAllProviders();
+
+    // Dispose all tracked disposables
+    disposeArray.value.forEach(disposable => {
+      try {
+        if (disposable && typeof disposable.dispose === 'function') {
+          disposable.dispose();
+        }
+      } catch (e) {
+        console.warn('Error disposing resource:', e);
+      }
+    });
+    disposeArray.value = [];
+
+    // Use safer null checks and defer model disposal
+    const currentEditor = editorRef.value;
+    const currentModel = editorModel.value;
+
+    // First clear the editor reference to prevent further operations
+    editorRef.value = null;
+
+    // Then handle the model with careful checks
+    if (currentModel && !currentModel.isDisposed?.()) {
+      try {
+        // Detach the model from the editor in a try-catch to prevent errors
+        if (currentEditor) {
+          try {
+            // Use a defensive approach when setting model to null
+            if (typeof currentEditor.setModel === 'function') {
+              currentEditor.setModel(null);
+            }
+          } catch (err) {
+            console.warn('Error detaching model from editor:', err);
+            // Continue with disposal even if detaching fails
+          }
+        }
+
+        // Schedule model disposal after a delay to avoid race conditions
+        setTimeout(() => {
+          try {
+            if (currentModel && !currentModel.isDisposed?.()) {
+              currentModel.dispose();
+            }
+          } catch (err) {
+            console.warn('Error during delayed model disposal:', err);
+          }
+          // Clear the model reference
+          editorModel.value = null;
+        }, 50);
+      } catch (e) {
+        console.warn('Error in model disposal process:', e);
+        editorModel.value = null; // Still clear the reference
+      }
+    }
+  } catch (e) {
+    console.error('Error in safelyDisposeEditor:', e);
+  } finally {
+    isDisposing.value = false;
+  }
+}
+
+// Initialize Monaco
+onMounted(() => {
+  initMonacoSetup();
+
+  // Initialize exploreStore's activeMode to match our component's initial tab
+  if (activeTab.value === 'logchefql') {
+    exploreStore.setActiveMode('logchefql');
+  } else {
+    exploreStore.setActiveMode('sql');
+  }
+});
+
+// Computed properties
+const editorHeight = computed(() => {
+  // For LogchefQL, we use a smaller fixed height as they're typically single-line queries
+  // For SQL, we calculate based on content with a larger minimum
+  if (activeTab.value === 'logchefql') {
+    const lines = (code.value.match(/\n/g) || []).length + 1;
+    return Math.max(45, 14 + lines * 20); // Smaller height for LogchefQL
+  } else {
+    const lines = (code.value.match(/\n/g) || []).length + 1;
+    // Provide more space for SQL queries with comments
+    const hasComments = code.value.includes('--');
+    const baseHeight = hasComments ? 100 : 80;
+    return Math.max(baseHeight, 14 + lines * 20); // Larger minimum for SQL
+  }
+});
+
+const theme = computed(() => {
+  return isDark.value ? "logchef-dark" : "logchef-light";
+});
+
+// Methods
+function setActiveTab(tab: string) {
+  // Guard against operations during dispose
+  if (isDisposing.value) return;
+
+  // Store current code based on current tab
+  if (activeTab.value === "logchefql") {
+    logchefQLCode.value = code.value || '';
+  } else {
+    sqlCode.value = code.value || '';
+  }
+
+  // Switch tab with transition
+  if (tab === "logchefql") {
+    activeTab.value = "logchefql";
+    
+    // First check if we have a value in the store
+    if (exploreStore.logchefqlCode) {
+      code.value = exploreStore.logchefqlCode;
+      logchefQLCode.value = exploreStore.logchefqlCode;
+    } else {
+      // Fall back to the saved local value
+      code.value = logchefQLCode.value || '';
+    }
+    
+    // Update exploreStore activeMode to ensure consistency
+    exploreStore.setActiveMode('logchefql');
+    exploreStore.setLogchefqlCode(code.value || '');
+  } else {
+    activeTab.value = "clickhouse-sql";
+    // Update exploreStore activeMode to ensure consistency
+    exploreStore.setActiveMode('sql');
+
+    // When switching to SQL mode, we'll generate SQL WITH time filter by default
+    if (logchefQLCode.value) {
+      try {
+        // Use our QueryBuilder to generate SQL from LogchefQL WITH time filter
+        const result = QueryBuilder.buildSqlFromLogchefQL(logchefQLCode.value, {
+          tableName: props.tableName,
+          tsField: props.tsField,
+          startTimestamp: props.startTimestamp,
+          endTimestamp: props.endTimestamp,
+          limit: props.limit,
+          includeTimeFilter: true, // Include time filter by default
+          forDisplay: true // Use human-readable timestamp format for display
+        });
+
+        if (result.success) {
+          // Store the raw SQL with time filter
+          sqlCode.value = result.sql;
+          // Set the editor value
+          code.value = result.sql;
+          // Store in the exploreStore for consistency, but don't use this for execution
+          exploreStore.setRawSql(result.sql);
+        } else {
+          console.error('Error generating SQL:', result.error);
+          // Use default SQL query as fallback
+          sqlCode.value = QueryBuilder.getDefaultSQLQuery({
+            tableName: props.tableName,
+            tsField: props.tsField,
+            startTimestamp: props.startTimestamp,
+            endTimestamp: props.endTimestamp,
+            limit: props.limit,
+            includeTimeFilter: true, // Include time filter by default
+            forDisplay: true // Use human-readable timestamp format for display
+          });
+
+          code.value = sqlCode.value;
+          exploreStore.setRawSql(sqlCode.value);
+        }
+      } catch (error) {
+        console.error('Error switching to SQL mode:', error);
+        // Use default SQL query as fallback with time filter
+        sqlCode.value = QueryBuilder.getDefaultSQLQuery({
+          tableName: props.tableName,
+          tsField: props.tsField,
+          startTimestamp: props.startTimestamp,
+          endTimestamp: props.endTimestamp,
+          limit: props.limit,
+          includeTimeFilter: true, // Include time filter by default
+          forDisplay: true // Use human-readable timestamp format for display
+        });
+
+        code.value = sqlCode.value;
+        exploreStore.setRawSql(sqlCode.value);
+      }
+    } else if (!sqlCode.value) {
+      // If no LogchefQL code and no SQL code, use default query with time filter
+      sqlCode.value = QueryBuilder.getDefaultSQLQuery({
+        tableName: props.tableName,
+        tsField: props.tsField,
+        startTimestamp: props.startTimestamp,
+        endTimestamp: props.endTimestamp,
+        limit: props.limit,
+        includeTimeFilter: true, // Include time filter by default
+        forDisplay: true // Use human-readable timestamp format for display
+      });
+
+      code.value = sqlCode.value;
+      exploreStore.setRawSql(sqlCode.value);
+    } else {
+      // Use existing SQL code
+      code.value = sqlCode.value;
+      exploreStore.setRawSql(sqlCode.value);
+    }
+  }
+
+  // Update editor language - guard with additional checks
+  if (editorRef.value && !isDisposing.value) {
+    try {
+      const model = editorRef.value.getModel();
+      if (model && !model.isDisposed()) {
+        monaco.editor.setModelLanguage(model, activeTab.value);
+
+        // Update editor options based on the new mode
+        updateEditorOptions(editorRef.value);
+
+        // Re-register appropriate completion provider based on active tab
+        if (activeTab.value === "logchefql") {
+          registerLogchefQLCompletionProvider();
+        } else {
+          registerSQLCompletionProvider();
+        }
+      }
+    } catch (error) {
+      console.error('Error updating editor language:', error);
+    }
+  }
+}
+
+function validateQuery(): boolean {
+  if (!code.value.trim()) {
+    return true; // Empty queries are allowed and will use defaults
+  }
+
+  if (activeTab.value === 'logchefql') {
+    // Validate LogchefQL
+    try {
+      const parser = new LogchefQLParser();
+      parser.parse(code.value);
+      return true;
+    } catch (error) {
+      errorMessage.value = error instanceof Error ? error.message : String(error);
+      return false;
+    }
+  } else {
+    // Validate SQL
+    const isValid = validateSQL(code.value);
+    if (!isValid) {
+      errorMessage.value = "Invalid SQL query. Please check the syntax.";
+    }
+    return isValid;
+  }
+}
+
 // Track all active providers
 const activeProviders: monaco.IDisposable[] = [];
 
 // Clean function to dispose all existing providers
 function disposeAllProviders() {
-  while (activeProviders.length > 0) {
-    const provider = activeProviders.pop();
-    if (provider) {
-      provider.dispose();
+  try {
+    while (activeProviders.length > 0) {
+      const provider = activeProviders.pop();
+      if (provider && typeof provider.dispose === 'function') {
+        provider.dispose();
+      }
     }
+  } catch (e) {
+    console.warn('Error in disposeAllProviders:', e);
   }
 }
 
@@ -597,9 +663,6 @@ const registerSQLCompletionProvider = () => {
         endColumn: position.column,
       });
 
-      // Get full text for more context
-      const fullText = model.getValue();
-
       // Check for specific SQL contexts - add debug info
       console.log('QueryEditor tableName prop:', props.tableName);
 
@@ -611,8 +674,8 @@ const registerSQLCompletionProvider = () => {
       const isInGroupByClause = /\bGROUP\s+BY\b/i.test(textBeforeCursor) && !/\bHAVING\b|\bORDER\s+BY\b|\bLIMIT\b/i.test(textBeforeCursor);
       const isInOrderByClause = /\bORDER\s+BY\b/i.test(textBeforeCursor) && !/\bLIMIT\b/i.test(textBeforeCursor);
 
-      // Create suggestions array
-      let suggestions = [];
+      // Create suggestions array with proper typing
+      let suggestions: monaco.languages.CompletionItem[] = [];
 
       // Only suggest relevant items based on context
 
@@ -633,11 +696,51 @@ const registerSQLCompletionProvider = () => {
 
         // Also suggest keywords that might follow FROM
         suggestions = suggestions.concat([
-          { label: 'WHERE', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'WHERE ', range, sortText: '1-where' },
-          { label: 'GROUP BY', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'GROUP BY ', range, sortText: '1-groupby' },
-          { label: 'ORDER BY', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'ORDER BY ', range, sortText: '1-orderby' },
-          { label: 'LIMIT', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'LIMIT ', range, sortText: '1-limit' },
-          { label: 'JOIN', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'JOIN ', range, sortText: '1-join' },
+          {
+            label: 'WHERE',
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: 'WHERE ',
+            range,
+            sortText: '1-where',
+            detail: 'Filter results',
+            documentation: 'Add a WHERE clause to filter results'
+          },
+          {
+            label: 'GROUP BY',
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: 'GROUP BY ',
+            range,
+            sortText: '1-groupby',
+            detail: 'Group results',
+            documentation: 'Add a GROUP BY clause to aggregate results'
+          },
+          {
+            label: 'ORDER BY',
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: 'ORDER BY ',
+            range,
+            sortText: '1-orderby',
+            detail: 'Sort results',
+            documentation: 'Add an ORDER BY clause to sort results'
+          },
+          {
+            label: 'LIMIT',
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: 'LIMIT ',
+            range,
+            sortText: '1-limit',
+            detail: 'Limit results',
+            documentation: 'Add a LIMIT clause to limit the number of results returned'
+          },
+          {
+            label: 'JOIN',
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: 'JOIN ',
+            range,
+            sortText: '1-join',
+            detail: 'Join tables',
+            documentation: 'Add a JOIN clause to combine data from multiple tables'
+          }
         ]);
       }
       // In WHERE, GROUP BY, ORDER BY, or SELECT clause, suggest fields
@@ -667,7 +770,7 @@ const registerSQLCompletionProvider = () => {
             { label: '>=', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' >= ', range, sortText: '1-gte' },
             { label: '<=', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' <= ', range, sortText: '1-lte' },
             { label: 'LIKE', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' LIKE ', range, sortText: '1-like' },
-            { label: 'IN', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' IN ()', range, sortText: '1-in', command: { id: 'editor.action.triggerSuggest' } },
+            { label: 'IN', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' IN ()', range, sortText: '1-in', command: { id: 'editor.action.triggerSuggest', title: 'Trigger Suggest' } },
             { label: 'BETWEEN', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' BETWEEN ', range, sortText: '1-between' },
           ]);
         }
@@ -680,7 +783,7 @@ const registerSQLCompletionProvider = () => {
             insertText: func + "(",
             range,
             sortText: `2-${func}`,
-            command: { id: "editor.action.triggerParameterHints" }
+            command: { id: "editor.action.triggerParameterHints", title: "Show Parameter Hints" }
           }))
         );
       }
@@ -705,7 +808,7 @@ const registerSQLCompletionProvider = () => {
             insertText: func + "(",
             range,
             sortText: `2-${func}`,
-            command: { id: "editor.action.triggerParameterHints" }
+            command: { id: "editor.action.triggerParameterHints", title: "Show Parameter Hints" }
           }))
         );
 
@@ -721,13 +824,29 @@ const registerSQLCompletionProvider = () => {
         );
       }
 
+      // Fix sortText for completion items
+      suggestions.push({
+        label: 'SELECT * FROM',
+        kind: monaco.languages.CompletionItemKind.Field,
+        range,
+        insertText: 'SELECT * FROM ',
+        documentation: 'Basic SELECT query template',
+        command: {
+          id: 'editor.action.insertSnippet',
+          title: 'Insert Snippet',
+          arguments: ['SELECT * FROM ${1:table} WHERE ${2:condition}']
+        },
+        sortText: '0001' // Add sortText property
+      });
+
+      // Return with proper typing
       return {
-        suggestions,
-        incomplete: false,
+        suggestions: suggestions as monaco.languages.CompletionItem[],
+        incomplete: false
       };
     },
     // Trigger on relevant characters
-    triggerCharacters: [" ", ".", ",", "(", "=", ">", "<"],
+    triggerCharacters: [" ", "\n", ".", "(", ","],
   });
 
   // Add to the tracked providers
@@ -755,7 +874,7 @@ const registerLogchefQLCompletionProvider = () => {
       const parser = new LogchefQLParser();
       parser.parse(textBeforeCursor, false, true);
 
-      let suggestions = [];
+      let suggestions: MonacoCompletionItem[] = [];
       let incomplete = false;
       const range = {
         startLineNumber: position.lineNumber,
@@ -777,6 +896,7 @@ const registerLogchefQLCompletionProvider = () => {
           suggestions = getKeySuggestions(range);
         }
       } else if (parser.state === State.KEY_VALUE_OPERATOR) {
+        // @ts-ignore: Type compatibility issues with operator types
         if (VALID_KEY_VALUE_OPERATORS.includes(parser.keyValueOperator)) {
           range.startColumn = word.endColumn - parser.value.length;
           const result = await getValueSuggestions(parser.key, parser.value, range);
@@ -815,7 +935,7 @@ const registerLogchefQLCompletionProvider = () => {
       }
 
       return {
-        suggestions,
+        suggestions: suggestions as monaco.languages.CompletionItem[],
         incomplete,
       };
     },
@@ -829,7 +949,22 @@ const registerLogchefQLCompletionProvider = () => {
 
 // Editor setup
 const handleMount = (editor: any) => {
+  // Guard against mount after dispose started
+  if (isDisposing.value) {
+    console.warn('Ignoring editor mount during disposal');
+    return;
+  }
+
   editorRef.value = editor;
+
+  // Store the model for proper disposal later
+  if (editor && editor.getModel) {
+    try {
+      editorModel.value = editor.getModel();
+    } catch (err) {
+      console.warn('Error getting editor model:', err);
+    }
+  }
 
   // Register only the completion provider for the active language
   if (activeTab.value === "logchefql") {
@@ -839,49 +974,77 @@ const handleMount = (editor: any) => {
   }
 
   // Set placeholder
-  editor.updateOptions({
-    placeholder: props.placeholder || "Enter your query here..."
-  });
+  if (editor && editor.updateOptions) {
+    editor.updateOptions({
+      placeholder: props.placeholder || "Enter your query here..."
+    });
+  }
 
   // Update editor options based on current mode
   updateEditorOptions(editor);
 
-  // Add keyboard shortcuts
-  editor.addAction({
-    id: "submit",
-    label: "Run Query",
-    keybindings: [
-      monaco.KeyMod.chord(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter),
-    ],
-    run: () => {
-      submitQuery();
-    },
-  });
+  // Add keyboard shortcuts - use disposables pattern for proper cleanup
+  if (editor && editor.addAction) {
+    try {
+      const submitAction = editor.addAction({
+        id: "submit",
+        label: "Run Query",
+        keybindings: [
+          monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
+        ],
+        run: () => {
+          submitQuery();
+        },
+      });
+      if (submitAction) disposeArray.value.push(submitAction);
+    } catch (err) {
+      console.warn('Error adding submit action:', err);
+    }
+  }
 
-  // Focus handling
-  editor.onDidFocusEditorWidget(() => {
-    editorFocused.value = true;
-  });
+  // Focus handling with defensive checks
+  if (editor && editor.onDidFocusEditorWidget) {
+    try {
+      const focusListener = editor.onDidFocusEditorWidget(() => {
+        editorFocused.value = true;
+      });
+      if (focusListener) disposeArray.value.push(focusListener);
+    } catch (err) {
+      console.warn('Error setting focus listener:', err);
+    }
+  }
 
-  editor.onDidBlurEditorWidget(() => {
-    editorFocused.value = false;
-  });
+  if (editor && editor.onDidBlurEditorWidget) {
+    try {
+      const blurListener = editor.onDidBlurEditorWidget(() => {
+        editorFocused.value = false;
+      });
+      if (blurListener) disposeArray.value.push(blurListener);
+    } catch (err) {
+      console.warn('Error setting blur listener:', err);
+    }
+  }
 
-  // Focus editor on mount
+  // Focus editor on mount, but use nextTick to ensure the DOM is ready
   nextTick(() => {
-    editor.focus();
+    if (editor && !isDisposing.value && typeof editor.focus === 'function') {
+      try {
+        editor.focus();
+      } catch (err) {
+        console.warn('Error focusing editor:', err);
+      }
+    }
   });
 };
 
 // Helper function to update editor options based on mode
 function updateEditorOptions(editor: any) {
-  const baseOptions = getDefaultMonacoOptions();
+  const baseOptions = getEditorOptions();
 
   if (activeTab.value === 'logchefql') {
-    // Single-line friendly options for LogchefQL
+    // @ts-ignore: Type compatibility issues with editor options
     editor.updateOptions({
       ...baseOptions,
-      lineNumbers: 'off',
       glyphMargin: false,
       folding: false,
       lineDecorationsWidth: 0,
@@ -890,10 +1053,9 @@ function updateEditorOptions(editor: any) {
       padding: { top: 8, bottom: 8 },
     });
   } else {
-    // More space for SQL queries
+    // @ts-ignore: Type compatibility issues with editor options
     editor.updateOptions({
       ...baseOptions,
-      lineNumbers: 'on',
       folding: true,
       wordWrap: 'on',
       padding: { top: 6, bottom: 6 },
@@ -914,109 +1076,62 @@ watch(() => props.initialValue, (newValue) => {
   }
 });
 
-// Import the SQL AST parser
-import { SQLParser } from '@/utils/clickhouse-sql/ast';
-
-// Watch for LogchefQL code changes to update SQL code when appropriate
-watch(() => logchefQLCode.value, (newCode) => {
-  // When LogchefQL code changes and we're in LogchefQL mode, prepare SQL for future tab switch
-  if (activeTab.value === "logchefql" && newCode.trim()) {
-    try {
-      const parser = new LogchefQLParser();
-      parser.parse(newCode);
-
-      if (parser.root) {
-        const whereConditions = translateToSQLConditions(parser.root);
-        if (whereConditions && whereConditions.trim()) {
-          console.log('Watch - LogchefQL changed, updating SQL conditions:', whereConditions);
-
-          // Prepare SQL code but don't set as current editor value
-          let baseQuery = getDefaultSQLQuery(
-            props.tableName,
-            props.tsField,
-            props.startTimestamp,
-            props.endTimestamp
-          );
-
-          if (baseQuery.includes("WHERE")) {
-            baseQuery = baseQuery.replace(
-              /WHERE\s+([^\n]+)/i,
-              `WHERE $1 AND (${whereConditions})`
-            );
-          } else {
-            baseQuery = baseQuery.replace(
-              /FROM\s+([^\n]+)/i,
-              `FROM $1 WHERE ${whereConditions}`
-            );
-          }
-
-          // Set sqlCode for when we switch tabs, but don't change current editor
-          sqlCode.value = baseQuery;
-        }
-      }
-    } catch (error) {
-      // Ignore parsing errors during typing - we'll handle them when switching tabs
-    }
-  }
-});
-
-// Watch for timestamp changes to update SQL queries with new time ranges
+// Update the watch handler for timestamp changes to implement one-way sync
 watch([() => props.startTimestamp, () => props.endTimestamp], ([newStart, newEnd], [oldStart, oldEnd]) => {
   // Only update if we're in SQL mode and the timestamps have changed
   if (activeTab.value === "clickhouse-sql" &&
     (newStart !== oldStart || newEnd !== oldEnd) &&
     sqlCode.value) {
 
-    // Use our AST parser for more robust updating
-    const startTimeIso = new Date(newStart * 1000).toISOString();
-    const endTimeIso = new Date(newEnd * 1000).toISOString();
-
     try {
-      // Parse the current SQL
+      // Parse the current query to understand its structure
       const parsedQuery = SQLParser.parse(sqlCode.value, props.tsField);
 
       if (parsedQuery) {
-        // Apply new time range
-        const updatedQuery = SQLParser.applyTimeRange(
-          parsedQuery,
+        // Create a new timestamp condition with the updated times
+        const newTimeCondition = QueryBuilder.formatTimeCondition(
           props.tsField,
-          startTimeIso,
-          endTimeIso
+          newStart * 1000,
+          newEnd * 1000,
+          true // Format for display
         );
 
+        // If there's already a timestamp filter, update it
+        if (parsedQuery.whereClause?.hasTimestampFilter) {
+          // Replace the existing timestamp condition
+          const timeFilterRegex = new RegExp(
+            `${props.tsField}\\s+BETWEEN\\s+'[^']+'\\s+AND\\s+'[^']+'`,
+            'i'
+          );
+
+          parsedQuery.whereClause.conditions = parsedQuery.whereClause.conditions.replace(
+            timeFilterRegex,
+            newTimeCondition
+          );
+        } else if (parsedQuery.whereClause) {
+          // Add timestamp condition to existing WHERE clause
+          parsedQuery.whereClause.conditions = `${newTimeCondition} AND (${parsedQuery.whereClause.conditions})`;
+          parsedQuery.whereClause.hasTimestampFilter = true;
+        } else {
+          // Add new WHERE clause with timestamp condition
+          parsedQuery.whereClause = {
+            type: 'where',
+            conditions: newTimeCondition,
+            hasTimestampFilter: true
+          };
+        }
+
         // Convert back to SQL
-        sqlCode.value = SQLParser.toSQL(updatedQuery);
+        const updatedSql = SQLParser.toSQL(parsedQuery);
 
-        // Update the code value if we're currently in SQL mode
-        if (activeTab.value === "clickhouse-sql") {
-          code.value = sqlCode.value;
-        }
-      } else {
-        // Fallback to regex approach if parsing fails
-        const numericTimestampRegex = new RegExp(`${props.tsField}\\s+BETWEEN\\s+\\d+\\s+AND\\s+\\d+`, 'i');
-        const stringTimestampRegex = new RegExp(`${props.tsField}\\s+BETWEEN\\s+'[^']+'\\s+AND\\s+'[^']+'`, 'i');
+        // Update the state
+        sqlCode.value = updatedSql;
+        code.value = updatedSql;
 
-        // Update the timestamp values
-        if (numericTimestampRegex.test(sqlCode.value)) {
-          sqlCode.value = sqlCode.value.replace(
-            numericTimestampRegex,
-            `${props.tsField} BETWEEN '${startTimeIso}' AND '${endTimeIso}'`
-          );
-        } else if (stringTimestampRegex.test(sqlCode.value)) {
-          sqlCode.value = sqlCode.value.replace(
-            stringTimestampRegex,
-            `${props.tsField} BETWEEN '${startTimeIso}' AND '${endTimeIso}'`
-          );
-        }
-
-        // Update the code value if we're currently in SQL mode
-        if (activeTab.value === "clickhouse-sql") {
-          code.value = sqlCode.value;
-        }
+        console.log('Updated SQL with new timestamp range:', updatedSql);
       }
     } catch (error) {
-      console.error('Error updating SQL with AST:', error);
-      // Continue with existing code if AST approach fails
+      console.error('Error updating timestamp in SQL:', error);
     }
   }
 });
@@ -1068,10 +1183,184 @@ watch([() => props.limit], ([newLimit], [oldLimit]) => {
   }
 });
 
-// Clean up when component is unmounted
+// Clean up when component is unmounted - improved cleanup process
 onBeforeUnmount(() => {
-  disposeAllProviders();
+  // Add a slight delay before disposal to allow pending operations to complete
+  setTimeout(() => {
+    safelyDisposeEditor();
+  }, 0);
 });
+
+// Update the watch handler for LogchefQL to include time filter
+watch(() => logchefQLCode.value, (newCode) => {
+  // When LogchefQL code changes and we're in LogchefQL mode, prepare SQL for future tab switch
+  if (activeTab.value === "logchefql" && newCode.trim()) {
+    try {
+      const parser = new LogchefQLParser();
+      parser.parse(newCode);
+
+      if (parser.root) {
+        const whereConditions = translateToSQLConditions(parser.root);
+        if (whereConditions && whereConditions.trim()) {
+          console.log('Watch - LogchefQL changed, updating SQL conditions:', whereConditions);
+
+          // Prepare SQL code but don't set as current editor value
+          // Include time filter by default
+          let baseQuery = QueryBuilder.getDefaultSQLQuery({
+            tableName: props.tableName,
+            tsField: props.tsField,
+            startTimestamp: props.startTimestamp,
+            endTimestamp: props.endTimestamp,
+            limit: props.limit,
+            includeTimeFilter: true, // Include time filter
+            forDisplay: true // Use human-readable timestamp format for display
+          });
+
+          if (baseQuery.includes("WHERE")) {
+            baseQuery = baseQuery.replace(
+              /WHERE\s+([^\n]+)/i,
+              `WHERE $1 AND (${whereConditions})`
+            );
+          } else {
+            baseQuery = baseQuery.replace(
+              /FROM\s+([^\n]+)/i,
+              `FROM $1 WHERE ${whereConditions}`
+            );
+          }
+
+          // Set sqlCode for when we switch tabs, but don't change current editor
+          sqlCode.value = baseQuery;
+        }
+      }
+    } catch (error) {
+      // Ignore parsing errors during typing - we'll handle them when switching tabs
+    }
+  }
+});
+
+// Watch for changes in the store's rawSql and update editor when in SQL mode
+watch(() => exploreStore.rawSql, (newValue) => {
+  if ((activeTab.value === 'clickhouse-sql' || activeTab.value === 'sql') && newValue) {
+    // Handle case where newValue might be an object instead of a string
+    const sqlString = typeof newValue === 'string'
+      ? newValue
+      : (typeof newValue === 'object' && newValue !== null && 'sql' in newValue)
+        ? (newValue as any).sql || ''
+        : '';
+
+    // Store the raw SQL as is, including time filter
+    sqlCode.value = sqlString;
+
+    // Only update the display if we're in SQL mode
+    if (activeTab.value === 'clickhouse-sql' || activeTab.value === 'sql') {
+      code.value = sqlCode.value;
+    }
+  }
+});
+
+// Update the submitQuery function to use QueryBuilder service
+const submitQuery = () => {
+  try {
+    if (!validateQuery()) {
+      return;
+    }
+
+    // Initialize finalQuery based on code.value (may be empty)
+    let finalQuery = code.value || '';
+
+    // If the query is empty, use a default based on the active mode
+    if (!finalQuery.trim()) {
+      if (activeTab.value === 'clickhouse-sql') {
+        // Empty SQL - will use default query when executed
+        finalQuery = '';
+      } else {
+        // Empty LogchefQL - use simple "all" query
+        finalQuery = '*';
+      }
+    }
+
+    // Update the appropriate store property based on the active tab
+    if (activeTab.value === 'logchefql') {
+      // For LogchefQL, save the query to the store
+      exploreStore.setLogchefqlCode(finalQuery);
+
+      // Ensure the store knows we're in LogchefQL mode
+      exploreStore.setActiveMode('logchefql');
+    } else {
+      // For SQL, save directly to the store
+      exploreStore.setRawSql(finalQuery);
+
+      // Ensure the store knows we're in SQL mode
+      exploreStore.setActiveMode('sql');
+    }
+
+    // Emit the submit event with mode and query info
+    emit('submit', {
+      type: activeTab.value,
+      query: finalQuery,
+      mode: activeTab.value === 'logchefql' ? 'logchefql' : 'sql'
+    });
+  } catch (error) {
+    console.error('Error submitting query:', error);
+    errorMessage.value = error instanceof Error ? error.message : 'An error occurred';
+  }
+};
+
+// Add onChange function definition
+const onChange = (value: string) => {
+  // Update local state
+  code.value = value;
+
+  // Also update the appropriate store properties to keep them in sync
+  if (activeTab.value === 'logchefql') {
+    logchefQLCode.value = value;
+    exploreStore.setLogchefqlCode(value);
+  } else {
+    sqlCode.value = value;
+    exploreStore.setRawSql(value);
+  }
+
+  // Emit change event to parent with proper structure
+  emit('change', {
+    query: value,
+    mode: activeTab.value === 'logchefql' ? 'logchefql' : 'sql'
+  });
+};
+
+// Editor setup
+function getEditorOptions() {
+  return {
+    readOnly: false,
+    fontSize: 14,
+    padding: {
+      top: 10,
+      bottom: 10,
+    },
+    contextmenu: false,
+    tabCompletion: "on" as "on" | "off" | "onlySnippets",
+    overviewRulerLanes: 0,
+    lineNumbersMinChars: 3,
+    scrollBeyondLastLine: false,
+    scrollbar: {
+      vertical: "auto" as const,
+      horizontal: "auto" as const,
+      useShadows: false,
+      verticalScrollbarSize: 8,
+      horizontalScrollbarSize: 8,
+    },
+    minimap: {
+      enabled: false,
+    },
+    guides: {
+      indentation: false,
+    },
+    folding: true,
+    renderLineHighlight: "none" as "none" | "line" | "gutter" | "all",
+    fixedOverflowWidgets: true,
+    wordWrap: "on" as "on" | "off" | "wordWrapColumn" | "bounded",
+    "semanticHighlighting.enabled": true,
+  };
+}
 </script>
 
 <style scoped>
