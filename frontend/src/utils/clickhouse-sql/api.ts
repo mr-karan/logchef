@@ -41,82 +41,8 @@ export function extractTableName(query: string): string | null {
   }
 }
 
-import { SQLParser } from "./ast";
-
 /**
- * Gets a default SQL query for a table
- * @param tableName The table name
- * @param tsField The timestamp field
- * @param startTimestamp Start timestamp in seconds (unix epoch)
- * @param endTimestamp End timestamp in seconds (unix epoch)
- * @param limit Number of results to return
- * @returns A default SQL query
- */
-export function getDefaultSQLQuery(
-  tableName: string,
-  tsField: string = "timestamp",
-  startTimestamp?: number,
-  endTimestamp?: number,
-  limit: number = 1000
-): string {
-  // Use provided timestamps or default to the last hour
-  const oneHourAgo = new Date();
-  oneHourAgo.setHours(oneHourAgo.getHours() - 1);
-
-  const now = new Date();
-
-  // Format dates for ClickHouse
-  const startTimeFormatted =
-    startTimestamp !== undefined
-      ? startTimestamp
-      : Math.floor(oneHourAgo.getTime() / 1000);
-
-  const endTimeFormatted =
-    endTimestamp !== undefined
-      ? endTimestamp
-      : Math.floor(now.getTime() / 1000);
-
-  // Format dates as ISO strings for direct use in query
-  const startTimeIso = new Date(startTimeFormatted * 1000).toISOString();
-  const endTimeIso = new Date(endTimeFormatted * 1000).toISOString();
-
-  // Create a query using our AST builder
-  const query = {
-    type: "query",
-    selectClause: {
-      type: "select",
-      columns: ["*"],
-    },
-    fromClause: {
-      type: "from",
-      table: tableName,
-    },
-    whereClause: {
-      type: "where",
-      conditions: `${tsField} BETWEEN '${startTimeIso}' AND '${endTimeIso}'`,
-      hasTimestampFilter: true,
-    },
-    orderByClause: {
-      type: "orderby",
-      columns: [
-        {
-          type: "orderby_column",
-          column: tsField,
-          direction: "DESC",
-        },
-      ],
-    },
-    limitClause: {
-      type: "limit",
-      value: limit,
-    },
-  };
-
-  return SQLParser.toSQL(query as any);
-}
-
-/**
- * Formats an SQL query for display
+ * Formats an SQL query for better readability
  * @param query The SQL query to format
  * @returns Formatted SQL query
  */

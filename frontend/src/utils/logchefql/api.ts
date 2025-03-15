@@ -8,56 +8,26 @@ import { Operator, VALID_KEY_VALUE_OPERATORS, Expression, Node } from "./index";
  */
 export function translateToSQLConditions(node: Node | null): string {
   if (!node) {
-    console.warn('translateToSQLConditions: Node is null, returning empty string');
+    console.warn(
+      "translateToSQLConditions: Node is null, returning empty string"
+    );
     return "";
   }
 
-  console.log('translateToSQLConditions: Processing node', {
+  console.log("translateToSQLConditions: Processing node", {
     hasExpression: !!node.expression,
     hasLeft: !!node.left,
     hasRight: !!node.right,
-    boolOperator: node.boolOperator
+    boolOperator: node.boolOperator,
   });
-  
+
   const sqlConditions = nodeToSQL(node);
-  console.log('translateToSQLConditions: Generated SQL conditions:', sqlConditions);
-  
+  console.log(
+    "translateToSQLConditions: Generated SQL conditions:",
+    sqlConditions
+  );
+
   return sqlConditions;
-}
-
-/**
- * Translates a LogchefQL query to a complete SQL query
- * @param node The query node tree
- * @param tableName The table name
- * @param tsField The timestamp field name
- * @param startTs The start timestamp
- * @param endTs The end timestamp
- * @returns SQL query string (for backward compatibility)
- * @deprecated Use translateToSQLConditions instead and let the SQL module handle the full query
- */
-export function translateToSQL(
-  node: Node | null,
-  tableName: string,
-  tsField: string,
-  startTs: number,
-  endTs: number
-): string {
-  // Format timestamps as ISO strings
-  const startTimeIso = new Date(startTs * 1000).toISOString();
-  const endTimeIso = new Date(endTs * 1000).toISOString();
-  
-  if (!node) {
-    return `SELECT * FROM ${tableName}
-       WHERE ${tsField} BETWEEN '${startTimeIso}' AND '${endTimeIso}'
-       ORDER BY ${tsField} DESC LIMIT 1000`;
-  }
-
-  const whereClause = nodeToSQL(node);
-
-  return `SELECT * FROM ${tableName}
-     WHERE ${tsField} BETWEEN '${startTimeIso}' AND '${endTimeIso}'
-     ${whereClause ? `AND (${whereClause})` : ""}
-     ORDER BY ${tsField} DESC LIMIT 1000`;
 }
 
 /**
@@ -87,14 +57,17 @@ function nodeToSQL(node: Node | null): string {
  */
 function expressionToSQL(expr: Expression): string {
   if (!expr) {
-    console.warn('expressionToSQL called with null/undefined expression');
+    console.warn("expressionToSQL called with null/undefined expression");
     return "";
   }
 
   const { key, operator, value } = expr;
-  
+
   if (!key || !operator) {
-    console.warn('expressionToSQL: Invalid expression, missing key or operator', { key, operator, value });
+    console.warn(
+      "expressionToSQL: Invalid expression, missing key or operator",
+      { key, operator, value }
+    );
     return "";
   }
 

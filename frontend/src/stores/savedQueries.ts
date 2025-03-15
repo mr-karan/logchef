@@ -29,22 +29,22 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   const parseQueryContent = (query: SavedTeamQuery): SavedQueryContent => {
     try {
       const content = JSON.parse(query.query_content);
-      
+
       // Ensure timeRange is always present with valid timestamps
       if (!content.timeRange || !content.timeRange.absolute) {
         content.timeRange = {
           absolute: {
             start: Date.now() - 3600000, // 1 hour ago
             end: Date.now(),
-          }
+          },
         };
       }
-      
+
       // Ensure limit is always present
       if (content.limit === null || content.limit === undefined) {
         content.limit = 100;
       }
-      
+
       return content;
     } catch (e) {
       console.error("Error parsing query content:", e);
@@ -61,7 +61,6 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         limit: 100,
         queryType: "sql",
         rawSql: "",
-        dslContent: "",
       };
     }
   };

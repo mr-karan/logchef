@@ -18,6 +18,7 @@ import { useTeamsStore } from '@/stores/teams';
 import { useToast } from '@/components/ui/toast';
 import { TOAST_DURATION } from '@/lib/constants';
 import { getErrorMessage } from '@/api/types';
+import { type SavedTeamQuery } from '@/api/savedQueries';
 
 const props = defineProps<{
   selectedTeamId?: number;
@@ -93,7 +94,7 @@ function selectQuery(queryId: number) {
     try {
       // Parse the query content
       const content = JSON.parse(query.query_content);
-      
+
       // Emit the select event with the query ID and the parsed content
       emit('select', String(queryId), {
         queryType: query.query_type,
@@ -114,7 +115,7 @@ function selectQuery(queryId: number) {
 function getQueryTypeLabel(query: SavedTeamQuery): string {
   try {
     const content = JSON.parse(query.query_content);
-    return content.queryType === 'dsl' ? 'DSL' : 'SQL';
+    return content.queryType === 'logchefql' ? 'LogchefQL' : 'SQL';
   } catch (e) {
     return 'SQL'; // Default to SQL if parsing fails
   }
@@ -176,7 +177,8 @@ onMounted(async () => {
           <div class="flex items-center justify-between w-full">
             <span class="font-medium">{{ query.name }}</span>
             <div class="flex items-center gap-2">
-              <span class="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary">{{ getQueryTypeLabel(query) }}</span>
+              <span class="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary">{{ getQueryTypeLabel(query)
+                }}</span>
               <span class="text-xs text-muted-foreground">{{ formatTime(query.updated_at) }}</span>
             </div>
           </div>

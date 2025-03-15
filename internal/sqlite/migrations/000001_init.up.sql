@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS team_queries (
     source_id INTEGER NOT NULL,
     name TEXT NOT NULL,
     description TEXT,
-    query_type TEXT NOT NULL DEFAULT 'sql', -- Type of query: 'sql' or 'dsl'
+    query_type TEXT NOT NULL DEFAULT 'sql', -- Type of query: 'sql' or 'logchefql'
     query_content TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
