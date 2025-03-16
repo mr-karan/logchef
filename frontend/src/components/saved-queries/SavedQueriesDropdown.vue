@@ -2,7 +2,6 @@
 import { ref, computed, onMounted } from 'vue';
 import { ChevronDown, Save, PlusCircle, ListTree } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
-import { formatDistance } from 'date-fns';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,7 +17,6 @@ import { useTeamsStore } from '@/stores/teams';
 import { useToast } from '@/components/ui/toast';
 import { TOAST_DURATION } from '@/lib/constants';
 import { getErrorMessage } from '@/api/types';
-import { type SavedTeamQuery } from '@/api/savedQueries';
 
 const props = defineProps<{
   selectedTeamId?: number;
@@ -58,33 +56,23 @@ async function onDropdownOpen() {
   }
 
   if (!savedQueriesStore.data.queries || savedQueriesStore.data.queries.length === 0) {
-    await loadTeamQueries();
+    try {
+      await loadTeamQueries();
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: getErrorMessage(error),
+        variant: 'destructive',
+        duration: TOAST_DURATION.ERROR,
+      });
+    }
   }
 }
 
 // Load team queries
 async function loadTeamQueries() {
   if (!currentTeamId.value) return;
-
-  try {
-    await savedQueriesStore.fetchTeamQueries(currentTeamId.value);
-  } catch (error) {
-    toast({
-      title: 'Error',
-      description: getErrorMessage(error),
-      variant: 'destructive',
-      duration: TOAST_DURATION.ERROR,
-    });
-  }
-}
-
-// Format relative time
-function formatTime(dateStr: string): string {
-  try {
-    return formatDistance(new Date(dateStr), new Date(), { addSuffix: true });
-  } catch (error) {
-    return dateStr;
-  }
+  return savedQueriesStore.fetchTeamQueries(currentTeamId.value);
 }
 
 // Handle query selection
@@ -109,16 +97,6 @@ function selectQuery(queryId: number) {
     emit('select', String(queryId));
   }
   isOpen.value = false;
-}
-
-// Get query type for display
-function getQueryTypeLabel(query: SavedTeamQuery): string {
-  try {
-    const content = JSON.parse(query.query_content);
-    return content.queryType === 'logchefql' ? 'LogchefQL' : 'SQL';
-  } catch (e) {
-    return 'SQL'; // Default to SQL if parsing fails
-  }
 }
 
 // Handle save action
@@ -172,19 +150,13 @@ onMounted(async () => {
 
       <!-- Queries list -->
       <template v-else>
-        <DropdownMenuItem v-for="query in (savedQueriesStore.data.queries || []).slice(0, 5)" :key="query.id"
-          @click="selectQuery(query.id)" class="flex flex-col items-start gap-1 py-2 cursor-pointer">
-          <div class="flex items-center justify-between w-full">
-            <span class="font-medium">{{ query.name }}</span>
-            <div class="flex items-center gap-2">
-              <span class="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary">{{ getQueryTypeLabel(query)
-                }}</span>
-              <span class="text-xs text-muted-foreground">{{ formatTime(query.updated_at) }}</span>
-            </div>
-          </div>
-          <span v-if="query.description" class="text-xs text-muted-foreground line-clamp-1">
-            {{ query.description }}
-          </span>
+        <DropdownMenuItem 
+          v-for="query in (savedQueriesStore.data.queries || []).slice(0, 5)" 
+          :key="query.id"
+          @click="selectQuery(query.id)" 
+          class="cursor-pointer py-2"
+        >
+          <span class="font-medium">{{ query.name }}</span>
         </DropdownMenuItem>
 
         <!-- Show "View All" option if there are more than 5 queries -->
@@ -198,13 +170,13 @@ onMounted(async () => {
       <DropdownMenuSeparator />
 
       <!-- Save current query -->
-      <DropdownMenuItem @click="handleSave">
+      <DropdownMenuItem @click="handleSave" class="cursor-pointer">
         <PlusCircle class="mr-2 h-4 w-4" />
         <span>Save Current Query</span>
       </DropdownMenuItem>
 
       <!-- Go to all queries -->
-      <DropdownMenuItem @click="goToQueries">
+      <DropdownMenuItem @click="goToQueries" class="cursor-pointer">
         <ListTree class="mr-2 h-4 w-4" />
         <span>Manage Saved Queries</span>
       </DropdownMenuItem>
