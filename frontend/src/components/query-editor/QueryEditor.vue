@@ -10,21 +10,13 @@
           <PanelRightOpen v-else class="h-4 w-4" />
         </button>
 
-        <!-- Tabs for LogchefQL / SQL -->
-        <div class="flex space-x-1">
-          <button
-            class="relative h-8 px-4 py-1 text-sm font-medium transition-all hover:bg-muted/80 focus-visible:outline-none rounded-t-md"
-            :class="{ 'bg-card text-foreground font-semibold shadow-sm': activeTab === 'logchefql', 'text-muted-foreground': activeTab !== 'logchefql' }"
-            @click="setActiveTab('logchefql')">
-            LogchefQL
-          </button>
-          <button
-            class="relative h-8 px-4 py-1 text-sm font-medium transition-all hover:bg-muted/80 focus-visible:outline-none rounded-t-md"
-            :class="{ 'bg-card text-foreground font-semibold shadow-sm': activeTab === 'clickhouse-sql', 'text-muted-foreground': activeTab !== 'clickhouse-sql' }"
-            @click="setActiveTab('sql')">
-            SQL
-          </button>
-        </div>
+        <!-- Tabs for LogchefQL / SQL using shadcn Tabs -->
+        <Tabs :default-value="initialTabValue" v-model="activeTabValue" class="w-auto">
+          <TabsList class="h-8">
+            <TabsTrigger value="logchefql">LogchefQL</TabsTrigger>
+            <TabsTrigger value="clickhouse-sql">SQL</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
 
       <div class="flex items-center gap-2">
@@ -87,6 +79,11 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from '@/components/ui/hover-card';
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs'; // Import Tabs component
 
 import { initMonacoSetup } from "@/utils/monaco";
 import { Parser as LogchefQLParser, State, Operator, VALID_KEY_VALUE_OPERATORS, isNumeric } from "@/utils/logchefql";
@@ -152,14 +149,23 @@ const isDark = useDark();
 const activeTab = ref(props.initialTab === "sql" ? "clickhouse-sql" : "logchefql");
 const code = ref(props.initialValue || "");
 // Initialize mode-specific variables based on initial tab
-const logchefQLCode = ref(props.initialTab === "sql" ? "" : (props.initialValue || ""));
+const logchefQLCode = ref(props.initialTab === "logchefql" ? (props.initialValue || "") : "");
 const sqlCode = ref(props.initialTab === "sql" ? (props.initialValue || "") : "");
+// Track if user has manually entered a LogchefQL query
+const hasManuallyEnteredLogchefQL = ref(props.initialTab === "logchefql" && !!props.initialValue);
 const editorRef = shallowRef();
 const editorFocused = ref(false);
 const errorText = ref("");
 const fieldNames = computed(() => Object.keys(props.schema));
 const exploreStore = useExploreStore();
 const errorMessage = ref("");
+
+// Add a computed property for the placeholder text based on activeTab
+const currentPlaceholder = computed(() => {
+  return activeTab.value === "logchefql" 
+    ? 'Enter LogchefQL query or leave empty to run SELECT * FROM table' 
+    : 'Enter SQL query or leave empty for default query';
+});
 
 // Track editor model and instance for proper cleanup
 const editorModel = shallowRef();
@@ -279,8 +285,8 @@ const getKeySuggestions = (range: any) => {
         label: name,
         kind: monaco.languages.CompletionItemKind.Field,
         range: range,
-        documentation: documentation,
         insertText: name,
+        documentation: documentation,
         sortText: name.toLowerCase(), // Add missing sortText property
         command: {
           id: "editor.action.triggerSuggest",
@@ -436,16 +442,19 @@ function safelyDisposeEditor() {
   }
 }
 
+// Watch for changes in initialTab prop to ensure URL parameters are respected
+watch(() => props.initialTab, (newTab) => {
+  if (newTab) {
+    setActiveTab(newTab === 'sql' ? 'clickhouse-sql' : 'logchefql');
+  }
+}, { immediate: true }); // immediate: true ensures it runs on component creation
+
 // Initialize Monaco
 onMounted(() => {
   initMonacoSetup();
-
-  // Initialize exploreStore's activeMode to match our component's initial tab
-  if (activeTab.value === 'logchefql') {
-    exploreStore.setActiveMode('logchefql');
-  } else {
-    exploreStore.setActiveMode('sql');
-  }
+  
+  // No need to override exploreStore's activeMode here as it's handled by the watch
+  // on props.initialTab with immediate: true
 });
 
 // Computed properties
@@ -482,20 +491,58 @@ function setActiveTab(tab: string) {
 
   // Switch tab with transition
   if (tab === "logchefql") {
+    // Store current tab before changing it
+    const previousTab = activeTab.value;
     activeTab.value = "logchefql";
     
-    // First check if we have a value in the store
-    if (exploreStore.logchefqlCode) {
-      code.value = exploreStore.logchefqlCode;
-      logchefQLCode.value = exploreStore.logchefqlCode;
+    // Special case: switching from SQL to LogchefQL
+    if (previousTab === "clickhouse-sql") {
+      // If user hasn't manually entered LogchefQL before, clear the query
+      if (!hasManuallyEnteredLogchefQL.value) {
+        logchefQLCode.value = '';
+        code.value = '';
+        
+        // Explicitly clear the query in the store
+        exploreStore.setLogchefqlCode('');
+        
+        // Force URL update with empty query by explicitly passing empty string
+        emit('change', {
+          query: '',
+          mode: 'logchefql'
+        });
+      } else {
+        // Use the previously saved LogchefQL code
+        code.value = logchefQLCode.value || '';
+        
+        // Update store with this code
+        exploreStore.setLogchefqlCode(code.value);
+        
+        // Update URL with current LogchefQL code
+        emit('change', {
+          query: code.value,
+          mode: 'logchefql'
+        });
+      }
     } else {
-      // Fall back to the saved local value
-      code.value = logchefQLCode.value || '';
+      // First check if we have a value in the store
+      if (exploreStore.logchefqlCode) {
+        code.value = exploreStore.logchefqlCode;
+        logchefQLCode.value = exploreStore.logchefqlCode;
+      } else {
+        // Fall back to the saved local value
+        code.value = logchefQLCode.value || '';
+      }
+      
+      // Update store and URL
+      exploreStore.setLogchefqlCode(code.value);
+      emit('change', {
+        query: code.value,
+        mode: 'logchefql'
+      });
     }
     
     // Update exploreStore activeMode to ensure consistency
     exploreStore.setActiveMode('logchefql');
-    exploreStore.setLogchefqlCode(code.value || '');
   } else {
     activeTab.value = "clickhouse-sql";
     // Update exploreStore activeMode to ensure consistency
@@ -579,7 +626,7 @@ function setActiveTab(tab: string) {
   if (editorRef.value && !isDisposing.value) {
     try {
       const model = editorRef.value.getModel();
-      if (model && !model.isDisposed()) {
+      if (model && !model.isDisposed?.()) {
         monaco.editor.setModelLanguage(model, activeTab.value);
 
         // Update editor options based on the new mode
@@ -751,8 +798,8 @@ const registerSQLCompletionProvider = () => {
             fieldNames.value.map(field => ({
               label: field,
               kind: monaco.languages.CompletionItemKind.Field,
+              range: range,
               insertText: field,
-              range,
               sortText: `0-${field}`, // Sort columns first
               detail: props.schema[field]?.type || "unknown",
             }))
@@ -976,7 +1023,7 @@ const handleMount = (editor: any) => {
   // Set placeholder
   if (editor && editor.updateOptions) {
     editor.updateOptions({
-      placeholder: props.placeholder || "Enter your query here..."
+      placeholder: currentPlaceholder.value || props.placeholder || "Enter your query here..."
     });
   }
 
@@ -1051,6 +1098,7 @@ function updateEditorOptions(editor: any) {
       lineNumbersMinChars: 0,
       wordWrap: 'off',
       padding: { top: 8, bottom: 8 },
+      placeholder: currentPlaceholder.value
     });
   } else {
     // @ts-ignore: Type compatibility issues with editor options
@@ -1059,6 +1107,7 @@ function updateEditorOptions(editor: any) {
       folding: true,
       wordWrap: 'on',
       padding: { top: 6, bottom: 6 },
+      placeholder: currentPlaceholder.value
     });
   }
 }
@@ -1292,6 +1341,12 @@ const submitQuery = () => {
 
       // Ensure the store knows we're in SQL mode
       exploreStore.setActiveMode('sql');
+      
+      // Emit change event to trigger URL update in parent
+      emit('change', {
+        query: code.value || '',
+        mode: 'sql'
+      });
     }
 
     // Emit the submit event with mode and query info
@@ -1315,6 +1370,12 @@ const onChange = (value: string) => {
   if (activeTab.value === 'logchefql') {
     logchefQLCode.value = value;
     exploreStore.setLogchefqlCode(value);
+    
+    // Set flag to indicate user has manually entered a LogchefQL query
+    // Only set if the value is not empty to avoid counting empty changes
+    if (value.trim()) {
+      hasManuallyEnteredLogchefQL.value = true;
+    }
   } else {
     sqlCode.value = value;
     exploreStore.setRawSql(value);
@@ -1361,6 +1422,23 @@ function getEditorOptions() {
     "semanticHighlighting.enabled": true,
   };
 }
+
+// Add a computed property for the initial tab value
+const initialTabValue = computed(() => {
+  return props.initialTab === 'sql' ? 'clickhouse-sql' : 'logchefql';
+});
+
+// Create a computed property for active tab with getter and setter
+const activeTabValue = computed({
+  get: () => activeTab.value,
+  set: (value: string) => {
+    if (value === 'clickhouse-sql') {
+      setActiveTab('clickhouse-sql');
+    } else {
+      setActiveTab('logchefql');
+    }
+  }
+});
 </script>
 
 <style scoped>

@@ -103,7 +103,8 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
       isLoading.value = true;
       const response = await savedQueriesApi.listQueries(teamId);
       if (response.status === "success") {
-        data.value.queries = response.data;
+        // Handle null data (no queries available)
+        data.value.queries = response.data || [];
       }
       return response;
     } catch (error) {
@@ -122,11 +123,28 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         teamId
       );
       if (response.status === "success") {
-        data.value.queries = response.data;
+        // Handle null data (no queries available)
+        data.value.queries = response.data || [];
       }
       return response;
     } catch (error) {
       console.error("Error fetching source queries:", getErrorMessage(error));
+      throw error;
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  async function fetchTeamSourceQueries(teamId: number, sourceId: number) {
+    try {
+      isLoading.value = true;
+      const response = await savedQueriesApi.listTeamSourceQueries(
+        teamId,
+        sourceId
+      );
+      return response;
+    } catch (error) {
+      console.error("Error fetching team source queries:", getErrorMessage(error));
       throw error;
     } finally {
       isLoading.value = false;
@@ -284,6 +302,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     setSelectedTeam,
     fetchTeamQueries,
     fetchSourceQueries,
+    fetchTeamSourceQueries,
     fetchQuery,
     createQuery,
     createSourceQuery,

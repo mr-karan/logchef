@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { formatDistance } from 'date-fns';
-import { ChevronDown, ChevronRight, Eye, Pencil, Trash2, Search, AlertCircle, Loader2, Plus } from 'lucide-vue-next';
+import { ChevronDown, Eye, Pencil, Trash2, Loader2, Plus, Search } from 'lucide-vue-next';
+import { formatDate } from '@/utils/format';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,13 +28,9 @@ import SaveQueryModal from '@/components/saved-queries/SaveQueryModal.vue';
 import { getErrorMessage } from '@/api/types';
 import { useSourcesStore } from '@/stores/sources';
 import { formatSourceName } from '@/utils/format';
-import type { TeamGroupedQuery } from '@/api/sources';
 import type { SavedTeamQuery } from '@/api/savedQueries';
-import { savedQueriesApi } from '@/api/savedQueries';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useTeamsStore } from '@/stores/teams';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 
 const router = useRouter();
 const { toast } = useToast();
@@ -47,10 +43,8 @@ const isLoading = ref(false);
 const showSaveQueryModal = ref(false);
 const editingQuery = ref<SavedTeamQuery | null>(null);
 const selectedSourceId = ref<string>('');
-const expandedTeams = ref<Record<string, boolean>>({});
 const searchQuery = ref('');
-const teamQueries = ref<TeamGroupedQuery[]>([]);
-const selectedTeamId = ref<string>('');
+const queries = ref<SavedTeamQuery[]>([]);
 const isChangingTeam = ref(false);
 const isChangingSource = ref(false);
 const urlError = ref<string | null>(null);
@@ -76,84 +70,33 @@ const selectedSourceName = computed(() => {
   return source ? formatSourceName(source) : 'Select a source';
 });
 
-// Keep track of which teams should be expanded by default
-const teamExpansionState = computed(() => {
-  // If there's only one team, expand it by default
-  if (teamQueries.value.length === 1) {
-    return { [teamQueries.value[0].team_id]: true };
-  }
-
-  // If user has selected a specific team, expand it
-  if (selectedTeamId.value && selectedTeamId.value !== 'all') {
-    return { [selectedTeamId.value]: true };
-  }
-
-  // Otherwise, use the current state
-  return expandedTeams.value;
-});
-
 // Filtered queries based on search
-const filteredTeamQueries = computed(() => {
+const filteredQueries = computed(() => {
   if (!searchQuery.value.trim()) {
-    return teamQueries.value;
+    return queries.value;
   }
 
   const search = searchQuery.value.toLowerCase();
-
-  return teamQueries.value.map(teamGroup => {
-    // Filter queries within each team
-    const filteredQueries = teamGroup.queries.filter(query =>
-      query.name.toLowerCase().includes(search) ||
-      (query.description && query.description.toLowerCase().includes(search))
-    );
-
-    // Only return teams that have matching queries
-    if (filteredQueries.length > 0) {
-      return {
-        ...teamGroup,
-        queries: filteredQueries
-      };
-    }
-
-    return null;
-  }).filter(Boolean) as TeamGroupedQuery[];
-});
-
-// Filter by selected team if any
-const displayedTeamQueries = computed(() => {
-  if (!selectedTeamId.value || selectedTeamId.value === 'all') {
-    return filteredTeamQueries.value;
-  }
-
-  return filteredTeamQueries.value.filter(
-    teamGroup => teamGroup.team_id.toString() === selectedTeamId.value
+  
+  return queries.value.filter(query =>
+    query.name.toLowerCase().includes(search) ||
+    (query.description && query.description.toLowerCase().includes(search))
   );
 });
 
 // Check if we have any queries to display
 const hasQueries = computed((): boolean => {
-  return displayedTeamQueries.value.some(teamGroup => teamGroup.queries.length > 0);
+  return filteredQueries.value.length > 0;
 });
 
 // Total query count
 const totalQueryCount = computed((): number => {
-  return teamQueries.value.reduce((count, teamGroup) => count + teamGroup.queries.length, 0);
-});
-
-// Available teams for filtering
-const availableTeams = computed(() => {
-  return teamQueries.value.map(teamGroup => ({
-    id: teamGroup.team_id,
-    name: teamGroup.team_name,
-    queryCount: teamGroup.queries.length
-  }));
+  return queries.value.length;
 });
 
 // Load sources and queries on mount
 onMounted(async () => {
   try {
-    console.log("SavedQueriesView component mounting");
-
     // Load teams first
     await teamsStore.loadTeams();
 
@@ -213,7 +156,7 @@ async function handleTeamChange(teamId: string) {
     if (!sourcesResult.success || !sourcesResult.data || sourcesResult.data.length === 0) {
       // Clear source selection when team has no sources
       selectedSourceId.value = '';
-      teamQueries.value = [];
+      queries.value = [];
       return;
     }
 
@@ -224,7 +167,7 @@ async function handleTeamChange(teamId: string) {
     } else {
       // No sources in this team
       selectedSourceId.value = '';
-      teamQueries.value = [];
+      queries.value = [];
     }
 
   } catch (error) {
@@ -249,7 +192,7 @@ async function handleSourceChange(sourceId: string) {
 
     if (!sourceId) {
       selectedSourceId.value = '';
-      teamQueries.value = [];
+      queries.value = [];
       return;
     }
 
@@ -285,49 +228,26 @@ async function loadSourceQueries(sourceId: string) {
   try {
     isLoading.value = true;
 
-    // Reset search and filters when changing source
+    // Reset search when changing source
     searchQuery.value = '';
-    selectedTeamId.value = '';
 
     if (!teamsStore.currentTeamId) {
       console.warn("No team selected, cannot load queries");
-      teamQueries.value = [];
+      queries.value = [];
       return;
     }
 
-    // Use the team source queries endpoint
-    const response = await savedQueriesApi.listTeamSourceQueries(
+    // Use the saved queries store
+    const response = await savedQueriesStore.fetchTeamSourceQueries(
       teamsStore.currentTeamId,
       parseInt(sourceId)
     );
 
     if (response.status === "success") {
-      // Group queries by team
-      const groupedQueries: Record<number, TeamGroupedQuery> = {};
-
-      response.data.forEach(query => {
-        if (!groupedQueries[query.team_id]) {
-          // Find team name
-          const team = teamsStore.teams.find(t => t.id === query.team_id);
-          groupedQueries[query.team_id] = {
-            team_id: query.team_id,
-            team_name: team?.name || `Team ${query.team_id}`,
-            queries: []
-          };
-        }
-        groupedQueries[query.team_id].queries.push(query);
-      });
-
-      teamQueries.value = Object.values(groupedQueries);
-
-      // Auto-expand teams if there are only a few
-      if (teamQueries.value.length <= 3) {
-        teamQueries.value.forEach(team => {
-          expandedTeams.value[team.team_id] = true;
-        });
-      }
+      // Check if response.data is null (no queries)
+      queries.value = response.data || [];
     } else {
-      teamQueries.value = [];
+      queries.value = [];
       toast({
         title: 'Error',
         description: 'Failed to load queries',
@@ -336,7 +256,7 @@ async function loadSourceQueries(sourceId: string) {
       });
     }
   } catch (error) {
-    teamQueries.value = [];
+    queries.value = [];
     toast({
       title: 'Error',
       description: getErrorMessage(error),
@@ -348,22 +268,9 @@ async function loadSourceQueries(sourceId: string) {
   }
 }
 
-// Toggle team expansion
-function toggleTeamExpansion(teamId: number | string) {
-  const teamIdStr = String(teamId);
-  expandedTeams.value = {
-    ...expandedTeams.value,
-    [teamIdStr]: !expandedTeams.value[teamIdStr]
-  };
-}
-
-// Format relative time
+// Format time using the formatDate utility
 function formatTime(dateStr: string): string {
-  try {
-    return formatDistance(new Date(dateStr), new Date(), { addSuffix: true });
-  } catch (error) {
-    return dateStr;
-  }
+  return formatDate(dateStr);
 }
 
 // Generate URL for a saved query
@@ -371,7 +278,6 @@ function getQueryUrl(query: SavedTeamQuery): string {
   try {
     const queryContent = JSON.parse(query.query_content);
     const queryType = query.query_type || 'sql';
-    const activeTab = queryContent.activeTab || (queryType === 'logchefql' ? 'filters' : 'raw_sql');
 
     // Build the URL with the appropriate parameters
     let url = `/logs/explore?team=${query.team_id}&query_id=${query.id}`;
@@ -383,6 +289,9 @@ function getQueryUrl(query: SavedTeamQuery): string {
 
     // Add mode parameter based on query type
     url += `&mode=${queryType === 'logchefql' ? 'logchefql' : 'sql'}`;
+    
+    // Add query content as a parameter
+    url += `&q=${encodeURIComponent(JSON.stringify(queryContent))}`;
 
     return url;
   } catch (error) {
@@ -480,20 +389,9 @@ function createNewQuery() {
   }
 }
 
-// Handle team filter change
-function handleTeamFilterChange(teamId: string) {
-  selectedTeamId.value = teamId;
-
-  // Expand the selected team
-  if (teamId && teamId !== 'all') {
-    expandedTeams.value[teamId] = true;
-  }
-}
-
-// Clear all filters
-function clearFilters() {
+// Clear search
+function clearSearch() {
   searchQuery.value = '';
-  selectedTeamId.value = '';
 }
 </script>
 
@@ -605,50 +503,16 @@ function clearFilters() {
         </div>
       </div>
 
-      <!-- Filters section -->
-      <Card>
-        <CardHeader class="pb-3">
-          <CardTitle>Query Filters</CardTitle>
-          <CardDescription>
-            Filter saved queries
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div class="grid gap-4 md:grid-cols-2">
-            <!-- Team filter -->
-            <div class="space-y-2">
-              <label class="text-sm font-medium">Team</label>
-              <Select v-model="selectedTeamId" :disabled="isLoading || availableTeams.length === 0">
-                <SelectTrigger>
-                  <SelectValue placeholder="All teams" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All teams</SelectItem>
-                  <SelectItem v-for="team in availableTeams" :key="team.id" :value="String(team.id)">
-                    {{ team.name }} ({{ team.queryCount }})
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <!-- Search box -->
-            <div class="space-y-2">
-              <label class="text-sm font-medium">Search</label>
-              <div class="relative">
-                <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input v-model="searchQuery" type="search" placeholder="Search by name or description..."
-                  class="pl-8" />
-              </div>
-            </div>
-          </div>
-        </CardContent>
-        <CardFooter class="flex justify-between border-t pt-4">
-          <div class="text-sm text-muted-foreground">
-            {{ totalQueryCount }} {{ totalQueryCount === 1 ? 'query' : 'queries' }} found
-          </div>
-          <Button variant="outline" size="sm" @click="clearFilters">Clear Filters</Button>
-        </CardFooter>
-      </Card>
+      <!-- Search box -->
+      <div class="my-4">
+        <div class="relative">
+          <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input v-model="searchQuery" type="search" placeholder="Search by name or description..." class="pl-8" />
+          <Button v-if="searchQuery" variant="outline" size="sm" class="absolute right-2 top-1.5" @click="clearSearch">
+            Clear
+          </Button>
+        </div>
+      </div>
 
       <!-- Loading state -->
       <div v-if="isLoading" class="flex justify-center items-center py-8">
@@ -656,18 +520,18 @@ function clearFilters() {
         <p class="ml-2 text-muted-foreground">Loading saved queries...</p>
       </div>
 
-      <!-- Empty state - no queries for source -->
+      <!-- Empty state - no queries -->
       <div v-else-if="!hasQueries" class="flex flex-col justify-center items-center py-12 space-y-4">
         <div class="rounded-full bg-muted p-3">
           <Search class="h-6 w-6 text-muted-foreground" />
         </div>
         <p class="text-xl text-muted-foreground">No saved queries found</p>
         <p class="text-muted-foreground">
-          {{ searchQuery || selectedTeamId ? 'No queries match your filters.' : 'Create a query in the Explorer and save it to access it here.' }}
+          {{ searchQuery ? 'No queries match your search.' : 'Create a query in the Explorer and save it to access it here.' }}
         </p>
         <div class="flex gap-3">
-          <Button v-if="searchQuery || selectedTeamId" variant="outline" @click="clearFilters">
-            Clear Filters
+          <Button v-if="searchQuery" variant="outline" @click="clearSearch">
+            Clear Search
           </Button>
           <Button v-else @click="createNewQuery">
             Create New Query
@@ -675,80 +539,61 @@ function clearFilters() {
         </div>
       </div>
 
-      <!-- Queries grouped by team -->
-      <div v-else class="space-y-4">
-        <div v-for="teamGroup in displayedTeamQueries" :key="teamGroup.team_id" class="border rounded-md shadow-sm">
-          <Collapsible :open="teamExpansionState[teamGroup.team_id]"
-            @update:open="val => expandedTeams[teamGroup.team_id] = val">
-            <CollapsibleTrigger class="flex justify-between items-center w-full p-4 cursor-pointer hover:bg-muted/50"
-              @click="toggleTeamExpansion(teamGroup.team_id)">
-              <div class="flex items-center">
-                <ChevronRight class="h-5 w-5 mr-2 transition-transform duration-200"
-                  :class="{ 'rotate-90': teamExpansionState[teamGroup.team_id] }" />
-                <h3 class="text-lg font-medium">{{ teamGroup.team_name }}</h3>
-                <div class="ml-2 text-sm text-muted-foreground">
-                  ({{ teamGroup.queries.length }} {{ teamGroup.queries.length === 1 ? 'query' : 'queries' }})
-                </div>
-              </div>
-            </CollapsibleTrigger>
-
-            <CollapsibleContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead class="w-[250px]">Name</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead class="w-[100px]">Type</TableHead>
-                    <TableHead class="w-[150px]">Created</TableHead>
-                    <TableHead class="w-[150px]">Updated</TableHead>
-                    <TableHead class="w-[100px] text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-for="query in teamGroup.queries" :key="query.id">
-                    <TableCell class="font-medium">
-                      <a @click.prevent="openQuery(query)" :href="getQueryUrl(query)"
-                        class="text-primary hover:underline cursor-pointer">
-                        {{ query.name }}
-                      </a>
-                    </TableCell>
-                    <TableCell>{{ query.description || 'No description' }}</TableCell>
-                    <TableCell>
-                      <Badge :variant="getQueryTypeBadgeVariant(query.query_type)">
-                        {{ query.query_type.toUpperCase() }}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{{ formatTime(query.created_at) }}</TableCell>
-                    <TableCell>{{ formatTime(query.updated_at) }}</TableCell>
-                    <TableCell class="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <ChevronDown class="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem @click="openQuery(query)">
-                            <Eye class="mr-2 h-4 w-4" />
-                            Open
-                          </DropdownMenuItem>
-                          <DropdownMenuItem @click="editQuery(query)">
-                            <Pencil class="mr-2 h-4 w-4" />
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem @click="deleteQuery(query)" class="text-destructive">
-                            <Trash2 class="mr-2 h-4 w-4" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </CollapsibleContent>
-          </Collapsible>
+      <!-- Queries table -->
+      <div v-else>
+        <div class="text-sm text-muted-foreground mb-2">
+          {{ totalQueryCount }} {{ totalQueryCount === 1 ? 'query' : 'queries' }} found
         </div>
+        
+        <Table class="font-sans">
+          <TableHeader>
+            <TableRow>
+              <TableHead class="w-[250px] font-sans">Name</TableHead>
+              <TableHead class="font-sans">Description</TableHead>
+              <TableHead class="w-[100px] font-sans">Type</TableHead>
+              <TableHead class="w-[150px] font-sans">Created</TableHead>
+              <TableHead class="w-[150px] font-sans">Updated</TableHead>
+              <TableHead class="w-[100px] text-right font-sans">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-for="query in filteredQueries" :key="query.id">
+              <TableCell class="font-medium font-sans">
+                <a @click.prevent="openQuery(query)" :href="getQueryUrl(query)"
+                  class="text-primary hover:underline cursor-pointer">
+                  {{ query.name }}
+                </a>
+              </TableCell>
+              <TableCell>{{ query.description || 'No description' }}</TableCell>
+              <TableCell>
+                <Badge :variant="getQueryTypeBadgeVariant(query.query_type)">
+                  {{ query.query_type.toUpperCase() }}
+                </Badge>
+              </TableCell>
+              <TableCell>{{ formatTime(query.created_at) }}</TableCell>
+              <TableCell>{{ formatTime(query.updated_at) }}</TableCell>
+              <TableCell class="text-right">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon">
+                      <ChevronDown class="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem @click="openQuery(query)">
+                      <Eye class="mr-2 h-4 w-4" />
+                      Open
+                    </DropdownMenuItem>
+                    <DropdownMenuItem @click="deleteQuery(query)" class="text-destructive">
+                      <Trash2 class="mr-2 h-4 w-4" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
       </div>
 
       <!-- Edit query modal -->
@@ -758,9 +603,4 @@ function clearFilters() {
   </div>
 </template>
 
-<style scoped>
-.required::after {
-  content: " *";
-  color: hsl(var(--destructive));
-}
-</style>
+<!-- Custom styles removed in favor of Tailwind classes -->

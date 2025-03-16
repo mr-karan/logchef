@@ -196,9 +196,15 @@ function updateUrlWithCurrentState() {
     query.mode = queryMode.value
   }
 
-  // Always add the current query to the URL, even if empty
+  // Always update the query parameter when mode changes, explicitly removing it when empty
   if (queryMode.value === 'logchefql') {
-    query.q = encodeURIComponent(exploreStore.logchefqlCode?.trim() || '')
+    const logchefqlCode = exploreStore.logchefqlCode?.trim() || '';
+    if (logchefqlCode) {
+      query.q = encodeURIComponent(logchefqlCode);
+    } else {
+      // Explicitly delete the q parameter when empty
+      delete query.q;
+    }
   } else if (queryMode.value === 'sql') {
     // Handle case where rawSql might be an object
     const rawSql = typeof exploreStore.rawSql === 'string'
@@ -206,7 +212,13 @@ function updateUrlWithCurrentState() {
       : (typeof exploreStore.rawSql === 'object' && exploreStore.rawSql !== null && 'sql' in exploreStore.rawSql)
         ? (exploreStore.rawSql as any).sql || ''
         : '';
-    query.q = encodeURIComponent(rawSql.trim())
+    
+    if (rawSql.trim()) {
+      query.q = encodeURIComponent(rawSql.trim());
+    } else {
+      // Explicitly delete the q parameter when empty
+      delete query.q;
+    }
   }
 
   // Update URL without triggering navigation events
@@ -343,6 +355,7 @@ async function setupFromUrl() {
       const mode = route.query.mode as 'logchefql' | 'sql'
       if (mode === 'logchefql' || mode === 'sql') {
         queryMode.value = mode
+        exploreStore.setActiveMode(mode)
       }
     }
 
@@ -646,45 +659,13 @@ watch(
   { immediate: true }
 )
 
-
-// Watch for changes in logchefQuery to update URL
-watch(
-  () => logchefQuery.value,
-  (newQuery) => {
-    if (queryMode.value === 'logchefql' && newQuery !== undefined) {
-      // Debounce URL updates to avoid excessive history entries
-      // Only update URL if query has content
-      if (newQuery.trim && newQuery.trim()) {
-        updateUrlWithCurrentState()
-      }
-    }
-  },
-  { deep: true }
-)
-
-// Watch for changes in sqlQuery to update URL
-watch(
-  () => sqlQuery.value,
-  (newQuery) => {
-    if (queryMode.value === 'sql' && newQuery !== undefined) {
-      // Debounce URL updates to avoid excessive history entries
-      // Only update URL if query has content
-      if (newQuery.trim && newQuery.trim()) {
-        updateUrlWithCurrentState()
-      }
-    }
-  },
-  { deep: true }
-)
-
 // Watch for changes in queryMode to update URL
 watch(
   () => queryMode.value,
   () => {
-    updateUrlWithCurrentState()
+    updateUrlWithCurrentState();
   }
 )
-
 
 // Handle query submission from either mode
 const handleQuerySubmit = async (data: any) => {
@@ -1063,6 +1044,15 @@ const handleQueryChange = (data: any) => {
 
   // Map the mode from editor to store format
   const mappedMode = mode === 'logchefql' ? 'logchefql' : 'sql';
+  
+  // Check if this is a mode switch
+  const isModeSwitch = queryMode.value !== mappedMode;
+  
+  // Update the queryMode if it's changing
+  if (isModeSwitch) {
+    queryMode.value = mappedMode;
+    exploreStore.setActiveMode(mappedMode);
+  }
 
   // If in LogchefQL mode, update the LogchefQL query
   if (mappedMode === 'logchefql') {
@@ -1106,6 +1096,10 @@ const handleQueryChange = (data: any) => {
   if (queryError.value) {
     queryError.value = '';
   }
+  
+  // Always update the URL after handling query changes
+  // This is especially important for mode switches
+  updateUrlWithCurrentState();
 }
 
 // Component lifecycle
