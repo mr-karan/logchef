@@ -15,13 +15,6 @@ interface ConnectionRequestInfo {
   table_name: string;
 }
 
-// Add global cache type declaration
-declare global {
-  interface Window {
-    __sourceCache?: Record<number, Source>;
-  }
-}
-
 export interface Source {
   id: number;
   _meta_is_auto_created: boolean;
@@ -108,29 +101,10 @@ export const sourcesApi = {
     return response.data;
   },
 
-  async getTeamSource(teamId: number, sourceId: number, useCache: boolean = false) {
-    // If useCache is true, check if we have this source in memory first
-    if (useCache) {
-      // Check if we have this source in memory from a previous call
-      const cacheKey = `${teamId}-${sourceId}`;
-      const cachedSource = window.__sourceCache?.[cacheKey];
-      if (cachedSource) {
-        console.log(`Using cached source data for team ${teamId}, source ${sourceId}`);
-        return { status: "success", data: cachedSource };
-      }
-    }
-    
+  async getTeamSource(teamId: number, sourceId: number) {
     const response = await api.get<APIResponse<Source>>(
       `/teams/${teamId}/sources/${sourceId}`
     );
-    
-    // Cache the result for future use
-    if (response.data.status === "success" && response.data.data) {
-      if (!window.__sourceCache) window.__sourceCache = {};
-      const cacheKey = `${teamId}-${sourceId}`;
-      window.__sourceCache[cacheKey] = response.data.data;
-    }
-    
     return response.data;
   },
 
@@ -213,10 +187,12 @@ export const sourcesApi = {
     return response.data;
   },
 
-  async validateSourceConnection(connectionInfo: ConnectionRequestInfo & { 
-    timestamp_field?: string;
-    severity_field?: string;
-  }) {
+  async validateSourceConnection(
+    connectionInfo: ConnectionRequestInfo & {
+      timestamp_field?: string;
+      severity_field?: string;
+    }
+  ) {
     const response = await api.post<
       APIResponse<{ success: boolean; message: string }>
     >("/admin/sources/validate", connectionInfo);

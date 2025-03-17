@@ -107,11 +107,11 @@ function handleSave() {
 
 // Go to queries view
 function goToQueries() {
-  if (currentTeamId.value) {
-    router.push(`/teams/${currentTeamId.value}/queries`);
-  } else {
-    router.push('/queries');
-  }
+  const query = currentTeamId.value ? { team: currentTeamId.value } : {};
+  router.push({
+    path: '/logs/saved',
+    query
+  });
   isOpen.value = false;
 }
 

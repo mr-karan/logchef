@@ -244,7 +244,7 @@ export const useExploreStore = defineStore("explore", () => {
           const teamsStore = useTeamsStore();
           if (teamsStore.currentTeamId) {
             console.log("Team sources not loaded, loading them now");
-            await sourcesStore.loadTeamSources(teamsStore.currentTeamId, true);
+            await sourcesStore.loadTeamSources(teamsStore.currentTeamId);
 
             // Try again after loading
             currentSource = sourcesStore.teamSources.find(

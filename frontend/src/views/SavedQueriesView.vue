@@ -77,7 +77,7 @@ const filteredQueries = computed(() => {
   }
 
   const search = searchQuery.value.toLowerCase();
-  
+
   return queries.value.filter(query =>
     query.name.toLowerCase().includes(search) ||
     (query.description && query.description.toLowerCase().includes(search))
@@ -100,8 +100,16 @@ onMounted(async () => {
     // Load teams first
     await teamsStore.loadTeams();
 
-    // Set default team if none selected
-    if (!teamsStore.currentTeamId && teamsStore.teams.length > 0) {
+    // Check if team ID is specified in the URL query
+    const teamIdFromUrl = router.currentRoute.value.query.team;
+
+    if (teamIdFromUrl) {
+      // Set the team from URL parameter
+      const teamId = parseInt(teamIdFromUrl as string);
+      teamsStore.setCurrentTeam(teamId);
+    }
+    // Set default team if none specified in URL and none selected
+    else if (!teamsStore.currentTeamId && teamsStore.teams.length > 0) {
       teamsStore.setCurrentTeam(teamsStore.teams[0].id);
     }
 
@@ -114,8 +122,16 @@ onMounted(async () => {
 
     // Get the first source if available
     if (sourcesStore.teamSources.length > 0) {
-      selectedSourceId.value = String(sourcesStore.teamSources[0].id);
-      // Load queries for the first source
+      // Check if source ID is specified in the URL query
+      const sourceIdFromUrl = router.currentRoute.value.query.source;
+
+      if (sourceIdFromUrl && sourcesStore.teamSources.some(s => s.id === parseInt(sourceIdFromUrl as string))) {
+        selectedSourceId.value = sourceIdFromUrl as string;
+      } else {
+        selectedSourceId.value = String(sourcesStore.teamSources[0].id);
+      }
+
+      // Load queries for the selected source
       await loadSourceQueries(selectedSourceId.value);
     }
   } catch (error) {
@@ -149,6 +165,12 @@ async function handleTeamChange(teamId: string) {
     const parsedTeamId = parseInt(teamId);
     teamsStore.setCurrentTeam(parsedTeamId);
 
+    // Update URL to reflect the team change
+    router.replace({
+      path: '/logs/saved',
+      query: { team: teamId }
+    });
+
     // Load sources for the selected team
     const sourcesResult = await sourcesStore.loadTeamSources(parsedTeamId, true);
 
@@ -163,6 +185,13 @@ async function handleTeamChange(teamId: string) {
     // Reset source selection to the first source from the new team
     if (sourcesStore.teamSources.length > 0) {
       selectedSourceId.value = String(sourcesStore.teamSources[0].id);
+
+      // Update URL with the new source
+      router.replace({
+        path: '/logs/saved',
+        query: { team: teamId, source: selectedSourceId.value }
+      });
+
       await loadSourceQueries(selectedSourceId.value);
     } else {
       // No sources in this team
@@ -193,6 +222,13 @@ async function handleSourceChange(sourceId: string) {
     if (!sourceId) {
       selectedSourceId.value = '';
       queries.value = [];
+
+      // Update URL to remove source parameter
+      router.replace({
+        path: '/logs/saved',
+        query: { team: teamsStore.currentTeamId }
+      });
+
       return;
     }
 
@@ -208,6 +244,16 @@ async function handleSourceChange(sourceId: string) {
     }
 
     selectedSourceId.value = sourceId;
+
+    // Update URL with the new source
+    router.replace({
+      path: '/logs/saved',
+      query: {
+        team: teamsStore.currentTeamId,
+        source: sourceId
+      }
+    });
+
     await loadSourceQueries(sourceId);
 
   } catch (error) {
@@ -276,8 +322,11 @@ function formatTime(dateStr: string): string {
 // Generate URL for a saved query
 function getQueryUrl(query: SavedTeamQuery): string {
   try {
-    const queryContent = JSON.parse(query.query_content);
+    // Get query type from the saved query
     const queryType = query.query_type || 'sql';
+
+    // Parse the query content
+    const queryContent = JSON.parse(query.query_content);
 
     // Build the URL with the appropriate parameters
     let url = `/logs/explore?team=${query.team_id}&query_id=${query.id}`;
@@ -289,9 +338,13 @@ function getQueryUrl(query: SavedTeamQuery): string {
 
     // Add mode parameter based on query type
     url += `&mode=${queryType === 'logchefql' ? 'logchefql' : 'sql'}`;
-    
-    // Add query content as a parameter
-    url += `&q=${encodeURIComponent(JSON.stringify(queryContent))}`;
+
+    // Add the appropriate query content based on type
+    if (queryType === 'logchefql' && queryContent.logchefqlContent) {
+      url += `&q=${encodeURIComponent(queryContent.logchefqlContent)}`;
+    } else if (queryType === 'sql' && queryContent.rawSql) {
+      url += `&q=${encodeURIComponent(queryContent.rawSql)}`;
+    }
 
     return url;
   } catch (error) {
@@ -544,7 +597,7 @@ function clearSearch() {
         <div class="text-sm text-muted-foreground mb-2">
           {{ totalQueryCount }} {{ totalQueryCount === 1 ? 'query' : 'queries' }} found
         </div>
-        
+
         <Table class="font-sans">
           <TableHeader>
             <TableRow>
@@ -564,7 +617,7 @@ function clearSearch() {
                   {{ query.name }}
                 </a>
               </TableCell>
-              <TableCell>{{ query.description || 'No description' }}</TableCell>
+              <TableCell>{{ query.description || '-' }}</TableCell>
               <TableCell>
                 <Badge :variant="getQueryTypeBadgeVariant(query.query_type)">
                   {{ query.query_type.toUpperCase() }}

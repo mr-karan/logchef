@@ -45,7 +45,7 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "Log Explorer" },
       },
       {
-        path: "queries",
+        path: "saved",
         name: "SavedQueries",
         component: () => import("@/views/SavedQueriesView.vue"),
         meta: { title: "Saved Queries" },
@@ -58,15 +58,15 @@ const routes: RouteRecordRaw[] = [
       // },
     ],
   },
-  // Team specific saved queries
+  // Redirect old team queries URLs to the new path
   {
     path: "/teams/:teamId/queries",
-    name: "TeamQueries",
-    component: () => import("@/views/SavedQueriesView.vue"),
-    meta: { 
-      title: "Team Queries",
-      requiresAuth: true
-    },
+    redirect: to => {
+      return { 
+        path: '/logs/saved',
+        query: { team: to.params.teamId }
+      }
+    }
   },
   // Sources Section
   {

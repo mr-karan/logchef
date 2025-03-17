@@ -62,7 +62,7 @@ export function createColumns(
       if (col.name === timestampField) {
         return h(
           "div",
-          { class: "truncate flex-render-content" },
+          { class: "flex-render-content" },
           formatTimestamp(value as string)
         );
       }
@@ -71,13 +71,13 @@ export function createColumns(
       if (typeof value === "object") {
         return h(
           "div",
-          { class: "truncate flex-render-content" },
+          { class: "flex-render-content" },
           JSON.stringify(value)
         );
       }
 
       // Default to string representation
-      return h("div", { class: "truncate flex-render-content" }, String(value));
+      return h("div", { class: "flex-render-content" }, String(value));
     },
     // Enable sorting for all columns
     enableSorting: true,

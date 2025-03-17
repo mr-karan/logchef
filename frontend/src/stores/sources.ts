@@ -19,9 +19,6 @@ interface SourcesState {
   teamSources: Source[];
   sourceQueries: Record<string, any>;
   sourceStats: Record<string, SourceStats>;
-  lastTeamId: number | null;
-  loadingTeamId: number | null;
-  pendingSourceRequests: Record<string, Promise<any>>;
 }
 
 export const useSourcesStore = defineStore("sources", () => {
@@ -32,15 +29,7 @@ export const useSourcesStore = defineStore("sources", () => {
     teamSources: [],
     sourceQueries: {},
     sourceStats: {},
-    lastTeamId: null,
-    loadingTeamId: null,
-    pendingSourceRequests: {},
   });
-  
-  // Initialize global cache if needed
-  if (typeof window !== 'undefined' && !window.__sourceCache) {
-    window.__sourceCache = {};
-  }
 
   // Computed properties
   const sources = computed(() => state.data.value.sources);
@@ -59,14 +48,10 @@ export const useSourcesStore = defineStore("sources", () => {
     return map;
   });
 
-  async function loadSources(forceReload = false) {
-    // Skip if we already have sources and no force reload
-    if (sources.value.length > 0 && !forceReload) {
-      return { success: true, data: sources.value };
-    }
-
+  async function loadSources() {
     return await state.callApi<Source[]>({
       apiCall: () => sourcesApi.listSources(),
+      operationKey: 'loadSources',
       onSuccess: (data) => {
         state.data.value.sources = data;
       },
@@ -74,107 +59,69 @@ export const useSourcesStore = defineStore("sources", () => {
     });
   }
 
-  async function loadTeamSources(teamId: number, useCache = false) {
-    // Skip loading if we already have sources for this team and useCache is true
-    if (
-      useCache &&
-      teamSources.value.length > 0 &&
-      state.data.value.lastTeamId === teamId
-    ) {
-      console.log(`Using cached sources for team ${teamId}`);
-      return { success: true, data: teamSources.value };
-    }
-
-    // If we're already loading sources for this team, return the pending promise
-    // to prevent duplicate API calls
-    const requestKey = `team-${teamId}`;
-    if (state.data.value.pendingSourceRequests[requestKey]) {
-      console.log(`Already loading sources for team ${teamId}, reusing request`);
-      return state.data.value.pendingSourceRequests[requestKey];
-    }
-
-    // Create a new request and store it
-    const request = state.callApi<Source[]>({
+  async function loadTeamSources(teamId: number) {
+    return await state.callApi<Source[]>({
       apiCall: () => sourcesApi.listTeamSources(teamId),
+      operationKey: `loadTeamSources-${teamId}`,
       onSuccess: (data) => {
         state.data.value.teamSources = data;
-        state.data.value.lastTeamId = teamId;
-        // Remove from pending requests
-        delete state.data.value.pendingSourceRequests[requestKey];
-      },
-      onError: () => {
-        // Remove from pending requests on error too
-        delete state.data.value.pendingSourceRequests[requestKey];
       },
       showToast: false,
     });
-
-    // Store the request
-    state.data.value.pendingSourceRequests[requestKey] = request;
-    
-    return request;
   }
 
-  async function loadSourceQueries(
-    sourceId: string | number,
-    refresh: boolean = false
-  ) {
+  async function loadSourceQueries(sourceId: string | number) {
     const id = typeof sourceId === "string" ? parseInt(sourceId) : sourceId;
-    const key = id.toString();
-
-    // Return cached data if available and not refreshing
-    if (state.data.value.sourceQueries[key] && !refresh) {
-      return { success: true, data: state.data.value.sourceQueries[key] };
-    }
 
     try {
       state.isLoading.value = true;
-      
+
       // Use the savedQueriesStore to fetch queries
       const savedQueriesStore = useSavedQueriesStore();
-      const result = await savedQueriesStore.fetchSourceQueries(
-        id,
-        teamsStore.currentTeamId
-      );
-      
-      if (result.success && result.data) {
-        state.data.value.sourceQueries = {
-          ...state.data.value.sourceQueries,
-          [key]: result.data
-        };
-        
+      const currentTeamId = teamsStore.currentTeamId;
+
+      if (!currentTeamId) {
         return {
-          success: true,
-          data: result.data
+          success: false,
+          error: "No team selected",
         };
       }
-      
+
+      const result = await savedQueriesStore.fetchSourceQueries(
+        id,
+        currentTeamId
+      );
+
+      if (result && "data" in result && result.data) {
+        state.data.value.sourceQueries = {
+          ...state.data.value.sourceQueries,
+          [id.toString()]: result.data,
+        };
+
+        return {
+          success: true,
+          data: result.data,
+        };
+      }
+
       return {
         success: false,
-        error: result.error || "Failed to load source queries"
+        error:
+          "error" in result ? result.error : "Failed to load source queries",
       };
     } catch (error) {
       console.error("Error loading source queries:", error);
       return {
         success: false,
-        error: getErrorMessage(error)
+        error: getErrorMessage(error),
       };
     } finally {
       state.isLoading.value = false;
     }
   }
 
-  async function loadTeamSourceQueries(
-    teamId: number,
-    sourceId: number,
-    refresh: boolean = false
-  ) {
+  async function loadTeamSourceQueries(teamId: number, sourceId: number) {
     const key = `${teamId}-${sourceId}`;
-
-    // Return cached data if available and not refreshing
-    if (state.data.value.sourceQueries[key] && !refresh) {
-      return { success: true, data: state.data.value.sourceQueries[key] };
-    }
 
     return await state.callApi<SavedTeamQuery[]>({
       apiCall: () => sourcesApi.listTeamSourceQueries(teamId, sourceId),
@@ -201,7 +148,7 @@ export const useSourcesStore = defineStore("sources", () => {
 
     if (result.success) {
       // Refresh queries for this source
-      await loadSourceQueries(id, true);
+      await loadSourceQueries(id);
     }
 
     return result;
@@ -219,7 +166,7 @@ export const useSourcesStore = defineStore("sources", () => {
 
     if (result.success) {
       // Refresh queries for this team source
-      await loadTeamSourceQueries(teamId, sourceId, true);
+      await loadTeamSourceQueries(teamId, sourceId);
     }
 
     return result;
@@ -233,7 +180,7 @@ export const useSourcesStore = defineStore("sources", () => {
 
     if (result.success) {
       // Refresh sources
-      await loadSources(true);
+      await loadSources();
     }
 
     return result;
@@ -247,7 +194,7 @@ export const useSourcesStore = defineStore("sources", () => {
 
     if (result.success) {
       // Refresh sources
-      await loadSources(true);
+      await loadSources();
 
       // Remove from local state
       state.data.value.sources = state.data.value.sources.filter(
@@ -267,37 +214,21 @@ export const useSourcesStore = defineStore("sources", () => {
     return sources.value.filter((source) => !ids.has(source.id));
   }
 
-  async function getSourceStats(sourceId: number, forceReload = false) {
-    const key = sourceId.toString();
-
-    // Return cached data if available and not forcing reload
-    if (state.data.value.sourceStats[key] && !forceReload) {
-      return { success: true, data: state.data.value.sourceStats[key] };
-    }
-
+  async function getSourceStats(sourceId: number) {
     return await state.callApi<SourceStats>({
       apiCall: () => sourcesApi.getSourceStats(sourceId),
       onSuccess: (data) => {
         state.data.value.sourceStats = {
           ...state.data.value.sourceStats,
-          [key]: data,
+          [sourceId.toString()]: data,
         };
       },
       showToast: false,
     });
   }
 
-  async function getTeamSourceStats(
-    teamId: number,
-    sourceId: number,
-    forceReload = false
-  ) {
+  async function getTeamSourceStats(teamId: number, sourceId: number) {
     const key = `${teamId}-${sourceId}`;
-
-    // Return cached data if available and not forcing reload
-    if (state.data.value.sourceStats[key] && !forceReload) {
-      return { success: true, data: state.data.value.sourceStats[key] };
-    }
 
     return await state.callApi<SourceStats>({
       apiCall: () => sourcesApi.getTeamSourceStats(teamId, sourceId),
@@ -311,61 +242,28 @@ export const useSourcesStore = defineStore("sources", () => {
     });
   }
 
-  async function getSource(sourceId: number, useCache = false) {
+  async function getSource(sourceId: number) {
     const currentTeamId = teamsStore.currentTeamId;
 
     if (!currentTeamId) {
       return { success: false, error: "No team selected" };
     }
 
-    // Check if we already have this source in teamSources with complete data
-    if (useCache) {
-      const cachedSource = teamSources.value.find(
-        (s) => s.id === sourceId && s.columns && s.columns.length > 0
-      );
-      
-      if (cachedSource) {
-        console.log(`Using cached source from store for ID ${sourceId}`);
-        return {
-          success: true,
-          data: cachedSource
-        };
-      }
-    }
-    
-    // Check if we already have a pending request for this source
-    const requestKey = `source-${currentTeamId}-${sourceId}`;
-    if (state.data.value.pendingSourceRequests[requestKey]) {
-      console.log(`Already fetching source ${sourceId}, reusing request`);
-      return state.data.value.pendingSourceRequests[requestKey];
-    }
-    
-    // Create a new request and store it
-    const request = state.callApi<Source>({
-      apiCall: () => sourcesApi.getTeamSource(currentTeamId, sourceId, useCache),
+    return await state.callApi<Source>({
+      apiCall: () => sourcesApi.getTeamSource(currentTeamId, sourceId),
+      operationKey: `getSource-${sourceId}`,
       onSuccess: (data) => {
         // Update the source in teamSources if it exists
-        const index = teamSources.value.findIndex(s => s.id === sourceId);
+        const index = teamSources.value.findIndex((s) => s.id === sourceId);
         if (index >= 0) {
           // Create a new array to trigger reactivity
           const newTeamSources = [...teamSources.value];
           newTeamSources[index] = data;
           state.data.value.teamSources = newTeamSources;
         }
-        // Remove from pending requests
-        delete state.data.value.pendingSourceRequests[requestKey];
-      },
-      onError: () => {
-        // Remove from pending requests on error too
-        delete state.data.value.pendingSourceRequests[requestKey];
       },
       showToast: false,
     });
-    
-    // Store the request
-    state.data.value.pendingSourceRequests[requestKey] = request;
-    
-    return request;
   }
 
   async function validateSourceConnection(connectionInfo: {
@@ -392,6 +290,12 @@ export const useSourcesStore = defineStore("sources", () => {
     error: state.error,
     teamSourcesMap,
     sourceStats,
+    loadingStates: state.loadingStates,
+    
+    // Loading state helpers
+    isLoadingOperation: state.isLoadingOperation,
+    isLoadingSource: (sourceId: number) => state.isLoadingOperation(`getSource-${sourceId}`),
+    isLoadingTeamSources: (teamId: number) => state.isLoadingOperation(`loadTeamSources-${teamId}`),
 
     // Actions
     loadSources,

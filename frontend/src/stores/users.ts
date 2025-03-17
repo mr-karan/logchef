@@ -16,12 +16,7 @@ export const useUsersStore = defineStore("users", () => {
   // Computed properties
   const users = computed(() => state.data.value.users);
 
-  async function loadUsers(forceReload = false) {
-    // Skip if we already have users and no force reload
-    if (users.value.length > 0 && !forceReload) {
-      return { success: true, data: users.value };
-    }
-
+  async function loadUsers() {
     return await state.callApi<User[]>({
       apiCall: () => usersApi.listUsers(),
       onSuccess: (data) => {
@@ -55,7 +50,7 @@ export const useUsersStore = defineStore("users", () => {
 
     if (result.success) {
       // Reload users to ensure we have the latest data
-      await loadUsers(true);
+      await loadUsers();
     }
 
     return result;
