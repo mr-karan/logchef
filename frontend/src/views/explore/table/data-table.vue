@@ -53,23 +53,10 @@ const globalFilter = ref('')
 
 const { toast } = useToast()
 
-// Helper functions for cell handling
+// Helper function for cell handling
 function formatCellValue(value: any): string {
     if (value === null || value === undefined) return '';
     return String(value);
-}
-
-function isLongIdField(cell: any): boolean {
-    const value = cell.getValue();
-    const columnId = cell.column.id;
-    return columnId.includes('id') &&
-        typeof value === 'string' &&
-        value.length > 20;
-}
-
-function truncateId(str: string): string {
-    if (str.length <= 20) return str;
-    return `${str.substring(0, 8)}...${str.substring(str.length - 8)}`;
 }
 
 // Check if a column is the timestamp or severity column
@@ -167,9 +154,9 @@ onMounted(() => {
 </script>
 
 <template>
-    <div class="h-full flex flex-col w-full min-w-0 flex-grow">
+    <div class="h-full flex flex-col w-full min-w-0 flex-1 overflow-hidden">
         <!-- Results Header with Controls and Pagination -->
-        <div class="flex items-center justify-between p-2 border-b">
+        <div class="flex items-center justify-between p-2 border-b flex-shrink-0">
             <!-- Left side - Empty now that stats have been moved to LogExplorer.vue -->
             <div class="flex-1"></div>
 
@@ -217,7 +204,7 @@ onMounted(() => {
                                         index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
                                     ]">
                                     <td v-for="cell in row.getVisibleCells()" :key="cell.id"
-                                        class="h-auto px-3 py-1.5 min-w-[120px] whitespace-normal break-all align-middle group"
+                                        class="h-auto px-3 py-1.5 min-w-[180px] whitespace-normal break-words align-middle group"
                                         :data-column-id="cell.column.id">
                                         <div class="max-w-none flex items-center gap-1">
                                             <!-- Cell Content with improved typography -->
@@ -226,12 +213,6 @@ onMounted(() => {
                                                 :class="getSeverityClasses(cell.getValue(), cell.column.id)"
                                                 class="font-medium px-1.5 py-0.5 rounded text-xs">
                                                 {{ cell.getValue() }}
-                                            </span>
-                                            <!-- Handle ID-like fields with truncation -->
-                                            <span v-else-if="isLongIdField(cell)"
-                                                :title="formatCellValue(cell.getValue())"
-                                                class="truncate max-w-[180px]">
-                                                {{ truncateId(formatCellValue(cell.getValue())) }}
                                             </span>
                                             <template v-else>
                                                 <FlexRender :render="cell.column.columnDef.cell"
@@ -302,23 +283,21 @@ onMounted(() => {
     scrollbar-color: rgba(155, 155, 155, 0.5) transparent;
 }
 
-/* Ensure proper full-height table layout */
+/* Enhanced full-height table layout - improve flex properties */
 .h-full.flex.flex-col {
     display: flex;
     flex-direction: column;
-    height: 100%;
+    height: 100% !important;
     width: 100%;
     min-height: 0;
+    flex: 1 1 auto !important;
     /* Important for flex child to shrink */
+    overflow: hidden;
 }
 
 .flex-1.relative.overflow-hidden {
     position: relative;
-    display: flex;
-    flex-direction: column;
-    flex: 1 1 auto;
-    min-height: 0;
-    height: 100%;
+    height: 100% !important;
     overflow: hidden;
 }
 
@@ -328,15 +307,15 @@ onMounted(() => {
     right: 0;
     bottom: 0;
     left: 0;
-    display: flex;
-    flex-direction: column;
     height: 100%;
+    width: 100%;
 }
 
 .w-full.h-full.overflow-auto.custom-scrollbar {
     -webkit-overflow-scrolling: touch;
-    height: 100%;
-    flex: 1 1 auto;
+    height: 100% !important;
+    max-height: 100% !important;
+    overflow: auto !important;
 }
 
 /* Enhanced table rendering */
@@ -372,9 +351,7 @@ th:hover {
 
 /* Improve table cells with consistent monospace for better log readability */
 td {
-    max-width: 300px;
-    overflow: hidden;
-    line-height: 1.3;
+    line-height: 1.4;
     font-size: 11px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
@@ -391,6 +368,9 @@ td .max-w-none.flex.items-center.gap-1 div {
 :deep(.flex-render-content) {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 11px;
+    word-break: normal;
+    overflow-wrap: break-word;
+    white-space: normal;
 }
 
 /* Ensure the JSON viewer also uses small monospace */
@@ -421,18 +401,8 @@ tr:nth-of-type(even) {
     }
 }
 
-/* Ensure consistent styling for timestamp-related fields */
-/* We ensure these styles are applied to the timestamp field specifically */
+/* Apply monospace tabular display to timestamps for better readability */
 [data-column-id="timestamp"] {
-    white-space: nowrap !important;
-    font-variant-numeric: tabular-nums !important;
-    letter-spacing: -0.01em !important;
-}
-
-/* Also apply to any field that looks like a timestamp */
-td[data-column-id$="_at"],
-td[data-column-id$="_time"] {
-    white-space: nowrap !important;
     font-variant-numeric: tabular-nums !important;
     letter-spacing: -0.01em !important;
 }
@@ -440,6 +410,8 @@ td[data-column-id$="_time"] {
 /* Additional styles for all columns to ensure proper layout */
 .max-w-none.flex.items-center.gap-1 {
     white-space: normal;
-    word-break: break-word;
+    word-break: normal;
+    overflow-wrap: break-word;
+    max-width: 100%;
 }
 </style>

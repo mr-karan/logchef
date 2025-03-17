@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Plus, Play } from 'lucide-vue-next'
@@ -108,9 +108,12 @@ const activeSourceTableName = computed(() => {
   return 'unknown.unknown'; // Default fallback
 });
 
-// Loading and empty states
+// Loading and empty states using the centralized loading states
 const showLoadingState = computed(() => {
-  return sourcesStore.isLoading || isChangingTeam.value
+  const currentTeamId = teamsStore.currentTeamId;
+  return teamsStore.isLoadingTeams() ||
+    (currentTeamId && sourcesStore.isLoadingTeamSources(currentTeamId)) ||
+    isChangingTeam.value;
 })
 
 const showEmptyState = computed(() => {
@@ -140,13 +143,29 @@ const dateRange = computed({
   }
 })
 
-// Add isInitializing state
+// Add more detailed initialization tracking
 const isInitializing = ref(true)
+const isTeamsLoaded = ref(false)
+const isSourcesLoaded = ref(false)
+const pendingEditorInit = ref(false)
 
 // Function to update URL with current state
 function updateUrlWithCurrentState() {
+  // Skip URL updates during initialization to prevent race conditions
+  if (isInitializing.value) {
+    console.log('Skipping URL update during initialization');
+    return;
+  }
   const currentTime = exploreStore.timeRange
-  const query: Record<string, string> = {}
+
+  // Check if we have a saved query ID in the current URL
+  const currentRoute = router.currentRoute.value;
+  const hasSavedQuery = currentRoute.query.query_id;
+
+  // Start with existing query parameters if we have a saved query
+  const query: Record<string, string> = hasSavedQuery
+    ? { ...currentRoute.query as Record<string, string> }
+    : {};
 
   // Add team and source IDs
   if (teamsStore.currentTeamId) {
@@ -212,7 +231,7 @@ function updateUrlWithCurrentState() {
       : (typeof exploreStore.rawSql === 'object' && exploreStore.rawSql !== null && 'sql' in exploreStore.rawSql)
         ? (exploreStore.rawSql as any).sql || ''
         : '';
-    
+
     if (rawSql.trim()) {
       query.q = encodeURIComponent(rawSql.trim());
     } else {
@@ -221,92 +240,145 @@ function updateUrlWithCurrentState() {
     }
   }
 
+  // Log what we're updating to for debugging
+  console.log('Updating URL with query params:', query);
+
   // Update URL without triggering navigation events
   router.replace({ query })
 }
 
-// Modify the initialization logic
+// Completely revised initialization logic to prevent race conditions
 async function setupFromUrl() {
   try {
-    // Wait for teams to be loaded
+    console.log('Starting setupFromUrl - initializing component from URL parameters');
+
+    // Check if this is a saved query request first
+    const hasSavedQueryParams = route.query.query_id && route.query.team;
+
+    // STEP 1: Load teams first and wait for completion
     if (!teamsStore.currentTeamId) {
-      console.log('Waiting for teams to load')
-      await teamsStore.loadTeams()
+      console.log('Loading teams first');
+      await teamsStore.loadTeams();
     }
 
-    // Process team parameter
+    // Mark teams as loaded
+    isTeamsLoaded.value = true;
+    console.log('Teams loaded successfully');
+
+    // STEP 2: Process team parameter (with proper error handling)
+    let teamId = null;
     if (route.query.team && typeof route.query.team === 'string') {
-      const teamId = parseInt(route.query.team)
+      teamId = parseInt(route.query.team);
       if (!isNaN(teamId)) {
         // Check if the team exists
-        const teamExists = teamsStore.teams.some(team => team.id === teamId)
+        const teamExists = teamsStore.teams.some(team => team.id === teamId);
         if (teamExists) {
-          teamsStore.setCurrentTeam(teamId)
+          console.log(`Setting current team to ID ${teamId}`);
+          teamsStore.setCurrentTeam(teamId);
         } else {
-          urlError.value = `Team with ID ${teamId} not found or not accessible by the current user.`
+          console.warn(`Team with ID ${teamId} not found, using default team`);
+          urlError.value = `Team with ID ${teamId} not found or not accessible by the current user.`;
+
+          // Fall back to first available team if the requested one doesn't exist
+          if (teamsStore.teams.length > 0) {
+            teamId = teamsStore.teams[0].id;
+            teamsStore.setCurrentTeam(teamId);
+          }
         }
       }
+    } else if (teamsStore.teams.length > 0) {
+      // No team in URL, use first team
+      teamId = teamsStore.teams[0].id;
+      teamsStore.setCurrentTeam(teamId);
     }
 
-    // Wait for sources to be loaded
+    // STEP 3: Load sources for the selected team (or first team)
     if (teamsStore.currentTeamId) {
-      console.log('Loading sources for team ' + teamsStore.currentTeamId)
-      await sourcesStore.loadTeamSources(teamsStore.currentTeamId)
+      console.log(`Loading sources for team ${teamsStore.currentTeamId}`);
+      await sourcesStore.loadTeamSources(teamsStore.currentTeamId);
     }
 
-    // Track if we've already set a source to avoid setting sourceId = 0 temporarily
-    let hasSetSource = false
+    // Mark sources as loaded
+    isSourcesLoaded.value = true;
+    console.log('Sources loaded successfully');
 
-    // Process source parameter
+    // STEP 4: Process source parameter - using a single consistent approach
+    let sourceId = null;
+    let hasSetSource = false;
+
+    // First check URL parameter
     if (route.query.source && typeof route.query.source === 'string' && teamsStore.currentTeamId) {
-      const sourceId = parseInt(route.query.source)
+      sourceId = parseInt(route.query.source);
 
       // Validate source ID against current team
-      const sourceExists = sourcesStore.teamSources.some(s => s.id === sourceId)
+      const sourceExists = sourcesStore.teamSources.some(s => s.id === sourceId);
 
       if (!sourceExists) {
-        urlError.value = `Source with ID ${sourceId} not found or not accessible by the selected team.`
-
-        // Only select a default source if the team has sources
-        if (sourcesStore.teamSources.length > 0) {
-          exploreStore.setSource(sourcesStore.teamSources[0].id)
-          await fetchSourceDetails(sourcesStore.teamSources[0].id)
-          hasSetSource = true
-        }
-        // We no longer set sourceId to 0 here
-      } else {
-        exploreStore.setSource(sourceId)
-        await fetchSourceDetails(sourceId)
-        hasSetSource = true
+        console.warn(`Source ID ${sourceId} not valid for current team, selecting first available source`);
+        urlError.value = `Source with ID ${sourceId} not found or not accessible by the selected team.`;
+        sourceId = null; // Reset for next check
       }
-    } else if (sourcesStore.teamSources.length > 0) {
-      // No source in URL, select first source if team has sources
-      exploreStore.setSource(sourcesStore.teamSources[0].id)
-      await fetchSourceDetails(sourcesStore.teamSources[0].id)
-      hasSetSource = true
-    }
-    // We no longer set sourceId to 0 here
-
-    // Initialize even if we don't have a source by showing empty state
-    if (!hasSetSource) {
-      console.log('No sources available, showing empty state')
-      sourceDetails.value = null
-      // But we don't set sourceId to 0, which causes unnecessary unmounting
     }
 
-    // Process limit parameter
-    if (route.query.limit && typeof route.query.limit === 'string') {
-      const limit = parseInt(route.query.limit)
-      if (!isNaN(limit) && limit > 0 && limit <= 10000) {
-        exploreStore.setLimit(limit)
-      } else {
-        exploreStore.setLimit(100) // Default limit
+    // If no valid source from URL, use first source if available
+    if (!sourceId && sourcesStore.teamSources.length > 0) {
+      sourceId = sourcesStore.teamSources[0].id;
+    }
+
+    // Set the source if we have a valid ID - with more caution to prevent duplicate calls
+    if (sourceId) {
+      console.log(`Setting source to ID ${sourceId}`);
+
+      try {
+        // Check if this sourceId is already set to avoid redundant updates
+        if (exploreStore.sourceId !== sourceId) {
+          exploreStore.setSource(sourceId);
+        } else {
+          console.log(`Source ID ${sourceId} already set, avoiding redundant update`);
+        }
+
+        hasSetSource = true;
+
+        // Fetch source details with debounce to prevent race conditions
+        console.log(`Fetching details for source ID ${sourceId}`);
+
+        // Reset the loadAttempted set to ensure we can load this source
+        sourceDetailsLoadAttempted.value = new Set();
+
+        // Wrap in try/catch since we want to continue even if this fails
+        try {
+          await fetchSourceDetails(sourceId);
+        } catch (detailsErr) {
+          console.error("Error fetching source details:", detailsErr);
+          // Continue with initialization even if details fetch fails
+        }
+      } catch (err) {
+        console.error("Error setting source during initialization:", err);
+        // Don't throw, just log - we'll continue with initialization
       }
     } else {
-      exploreStore.setLimit(100) // Default limit
+      console.log('No valid source available, showing empty state');
+      sourceDetails.value = null;
+    }
+
+    // STEP 5: Process other URL parameters after source is set
+    // This ensures we don't trigger unnecessary re-renders
+
+    // Process limit parameter
+    console.log('Processing limit parameter');
+    if (route.query.limit && typeof route.query.limit === 'string') {
+      const limit = parseInt(route.query.limit);
+      if (!isNaN(limit) && limit > 0 && limit <= 10000) {
+        exploreStore.setLimit(limit);
+      } else {
+        exploreStore.setLimit(100); // Default limit
+      }
+    } else {
+      exploreStore.setLimit(100); // Default limit
     }
 
     // Process time range parameters
+    console.log('Processing time range parameters');
     if (
       route.query.start_time &&
       route.query.end_time &&
@@ -314,12 +386,12 @@ async function setupFromUrl() {
       typeof route.query.end_time === 'string'
     ) {
       try {
-        const startValue = parseInt(route.query.start_time)
-        const endValue = parseInt(route.query.end_time)
+        const startValue = parseInt(route.query.start_time);
+        const endValue = parseInt(route.query.end_time);
 
         if (!isNaN(startValue) && !isNaN(endValue)) {
-          const startDate = new Date(startValue)
-          const endDate = new Date(endValue)
+          const startDate = new Date(startValue);
+          const endDate = new Date(endValue);
 
           // Create CalendarDateTime objects
           const start = new CalendarDateTime(
@@ -329,7 +401,7 @@ async function setupFromUrl() {
             startDate.getHours(),
             startDate.getMinutes(),
             startDate.getSeconds()
-          )
+          );
 
           const end = new CalendarDateTime(
             endDate.getFullYear(),
@@ -338,104 +410,157 @@ async function setupFromUrl() {
             endDate.getHours(),
             endDate.getMinutes(),
             endDate.getSeconds()
-          )
+          );
 
           exploreStore.setTimeRange({
             start,
             end
-          })
+          });
         }
       } catch (e) {
-        console.error('Failed to parse time range from URL', e)
+        console.error('Failed to parse time range from URL', e);
       }
     }
 
     // Process query mode parameter
+    console.log('Processing query mode parameter');
     if (route.query.mode && typeof route.query.mode === 'string') {
-      const mode = route.query.mode as 'logchefql' | 'sql'
+      const mode = route.query.mode as 'logchefql' | 'sql';
       if (mode === 'logchefql' || mode === 'sql') {
-        queryMode.value = mode
-        exploreStore.setActiveMode(mode)
+        queryMode.value = mode;
+        exploreStore.setActiveMode(mode);
       }
     }
 
     // Process query parameter
+    console.log('Processing query parameter');
     if (route.query.q && typeof route.query.q === 'string') {
       try {
-        const decodedQuery = decodeURIComponent(route.query.q)
+        const decodedQuery = decodeURIComponent(route.query.q);
 
         if (queryMode.value === 'logchefql') {
-          logchefQuery.value = decodedQuery
-          exploreStore.setLogchefqlCode(decodedQuery)
+          logchefQuery.value = decodedQuery;
+          exploreStore.setLogchefqlCode(decodedQuery);
         } else if (queryMode.value === 'sql') {
-          sqlQuery.value = decodedQuery
-          exploreStore.setRawSql(decodedQuery)
+          sqlQuery.value = decodedQuery;
+          exploreStore.setRawSql(decodedQuery);
         }
       } catch (e) {
-        console.error('Failed to parse query from URL', e)
+        console.error('Failed to parse query from URL', e);
       }
     }
 
-    // Update URL to ensure it's consistent with the state
-    updateUrlWithCurrentState()
+    // If this is a saved query URL, load the saved query
+    if (hasSavedQueryParams && route.query.query_id) {
+      console.log('Loading saved query from URL parameters');
+      // Set flag to indicate editor should initialize after URL is processed
+      pendingEditorInit.value = true;
+      await loadSavedQuery(route.query.query_id as string);
+      pendingEditorInit.value = false;
+      return; // Skip updating URL as loadSavedQuery will handle it
+    }
+
+    // Only update URL if not loading a saved query
+    if (!hasSavedQueryParams) {
+      // Now it's safe to update the URL
+      console.log('Setup complete, updating URL with initial state');
+
+      // Set initialization complete first
+      isInitializing.value = false;
+
+      // Then wait for next tick and update URL
+      nextTick(() => {
+        updateUrlWithCurrentState();
+      });
+    }
 
   } catch (error) {
-    console.error('Error initializing from URL:', error)
-    urlError.value = 'Error initializing view. Please try refreshing the page.'
+    console.error('Error initializing from URL:', error);
+    urlError.value = 'Error initializing view. Please try refreshing the page.';
+
+    // Show a toast for better visibility of the error
+    toast({
+      title: "Initialization Error",
+      description: "Error initializing view. Please try refreshing the page.",
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR,
+    });
   } finally {
-    isInitializing.value = false
+    console.log('Initialization complete');
+    isInitializing.value = false;
   }
 }
 
-// Handle team change
+// Handle team change with improved race condition handling
 async function handleTeamChange(teamId: string) {
   try {
-    isChangingTeam.value = true
-    urlError.value = null
+    // Skip if we're already changing team or initializing
+    if (isChangingTeam.value) {
+      console.log('Team change already in progress, skipping');
+      return;
+    }
 
-    const parsedTeamId = parseInt(teamId)
-    teamsStore.setCurrentTeam(parsedTeamId)
+    isChangingTeam.value = true;
+    urlError.value = null;
+    console.log(`Team change initiated to ID ${teamId}`);
+
+    const parsedTeamId = parseInt(teamId);
+    if (isNaN(parsedTeamId)) {
+      console.warn('Invalid team ID provided');
+      return;
+    }
+
+    // Set team synchronously to prevent race conditions
+    teamsStore.setCurrentTeam(parsedTeamId);
+
+    // Disable any pending editor operations during the transition
+    pendingEditorInit.value = true;
+
+    // Clear source details immediately to prevent stale data
+    sourceDetails.value = null;
 
     // Load sources for the selected team
-    const sourcesResult = await sourcesStore.loadTeamSources(parsedTeamId, true)
+    console.log(`Loading sources for team ${parsedTeamId}`);
+    const sourcesResult = await sourcesStore.loadTeamSources(parsedTeamId, true);
 
     // Handle case where team has no sources
     if (!sourcesResult.success || !sourcesResult.data || sourcesResult.data.length === 0) {
+      console.log('Team has no sources, clearing source selection');
       // Clear source selection when team has no sources
-      exploreStore.setSource(0)
-      sourceDetails.value = null
+      exploreStore.setSource(0);
+      sourceDetails.value = null;
+    } else {
+      // Reset source selection if current team doesn't have access to it
+      const currentSourceExists = sourcesStore.teamSources.some(
+        source => source.id === exploreStore.sourceId
+      );
 
-      // Update URL with only team ID (no source)
-      updateUrlWithCurrentState()
-      return
-    }
-
-    // Reset source selection if current team doesn't have access to it
-    const currentSourceExists = sourcesStore.teamSources.some(
-      source => source.id === exploreStore.sourceId
-    )
-
-    if (!currentSourceExists) {
-      // Select the first source from the new team
-      if (sourcesStore.teamSources.length > 0) {
-        exploreStore.setSource(sourcesStore.teamSources[0].id)
-        await fetchSourceDetails(sourcesStore.teamSources[0].id)
+      if (!currentSourceExists) {
+        console.log('Current source not available in new team, selecting first source');
+        // Select the first source from the new team
+        if (sourcesStore.teamSources.length > 0) {
+          const newSourceId = sourcesStore.teamSources[0].id;
+          exploreStore.setSource(newSourceId);
+          await fetchSourceDetails(newSourceId);
+        }
       } else {
-        // No sources in this team
-        exploreStore.setSource(0)
-        sourceDetails.value = null
+        // Current source is valid, just refresh its details
+        console.log('Current source is valid in new team, refreshing details');
+        await fetchSourceDetails(exploreStore.sourceId);
       }
     }
 
   } catch (error) {
-    console.error('Error changing team:', error)
-    urlError.value = 'Error changing team. Please try again.'
+    console.error('Error changing team:', error);
+    urlError.value = 'Error changing team. Please try again.';
   } finally {
-    isChangingTeam.value = false
+    isChangingTeam.value = false;
+    pendingEditorInit.value = false;
 
-    // Update URL after team change is complete and isChangingTeam is set to false
-    // This ensures the URL is updated with the final state
-    updateUrlWithCurrentState()
+    // Wait a tick to ensure state is stable before updating URL
+    await nextTick();
+    updateUrlWithCurrentState();
+    console.log('Team change completed');
   }
 }
 
@@ -477,36 +602,57 @@ async function handleSourceChange(sourceId: string) {
   }
 }
 
-// Fetch source details with caching to prevent redundant API calls
+// No longer needed - using store's loading states instead
+// const isLoadingSourceDetails = ref(false);
+// const sourceDetailsLoadAttempted = ref(new Set<number>());
+
+// Fetch source details with improved caching to prevent redundant API calls
 async function fetchSourceDetails(sourceId: number) {
   if (!sourceId || !teamsStore.currentTeamId) {
     sourceDetails.value = null
     return
   }
 
+  // Use the store's loading state tracking instead of local state
+  if (sourcesStore.isLoadingSource(sourceId)) {
+    console.log(`Already loading source details for ID ${sourceId}, skipping redundant call`);
+    return;
+  }
+
   // Check if we already have this source in the store's teamSources
-  const cachedSource = sourcesStore.teamSources.find(s => s.id === sourceId)
+  const cachedSource = sourcesStore.teamSources.find(s => s.id === sourceId);
 
   // If we have a complete cached source with columns, use it directly
   if (cachedSource && cachedSource.columns && cachedSource.columns.length > 0) {
-    console.log(`Using cached source details for ID ${sourceId}`)
-    sourceDetails.value = cachedSource
-    return
+    console.log(`Using cached source details for ID ${sourceId}`);
+
+    // Only update if source details has changed to prevent unnecessary renders
+    if (sourceDetails.value?.id !== cachedSource.id) {
+      sourceDetails.value = cachedSource;
+      console.log(`Source details loaded from cache for ID ${sourceId}`);
+    }
+
+    return;
   }
 
   try {
     // Only make the API call if we don't have complete data
-    const result = await sourcesStore.getSource(sourceId, true) // Pass true to use cache
+    console.log(`Fetching source details from API for ID ${sourceId}`);
+    const result = await sourcesStore.getSource(sourceId);
+
     if (result.success && result.data) {
-      sourceDetails.value = result.data
-      console.log(`Source details loaded for ID ${sourceId}`)
+      // Only update if details have changed or are not set
+      if (!sourceDetails.value || sourceDetails.value.id !== result.data.id) {
+        sourceDetails.value = result.data;
+        console.log(`Source details loaded from API for ID ${sourceId}`);
+      }
     } else {
-      console.warn(`No source details returned for source ID: ${sourceId}`)
-      sourceDetails.value = null
+      console.warn(`No source details returned for source ID: ${sourceId}`);
+      sourceDetails.value = null;
     }
   } catch (error) {
-    console.error('Error fetching source details:', error)
-    sourceDetails.value = null
+    console.error('Error fetching source details:', error);
+    sourceDetails.value = null;
   }
 }
 
@@ -579,27 +725,39 @@ watch(
   }
 )
 
-// Watch for changes in sourceId to fetch source details
+// Watch for changes in sourceId to fetch source details - with debounce
 watch(
   () => exploreStore.sourceId,
   async (newSourceId, oldSourceId) => {
+    // Skip during initialization to prevent redundant calls
+    if (isInitializing.value) {
+      console.log(`Skipping source details update during initialization phase`);
+      return;
+    }
+
     if (newSourceId !== oldSourceId) {
       if (newSourceId > 0) {
-        console.log(`Source changed from ${oldSourceId} to ${newSourceId}, checking details`)
+        console.log(`Source changed from ${oldSourceId} to ${newSourceId}, checking details`);
 
         // Verify the source exists in the current team's sources
-        const sourceExists = sourcesStore.teamSources.some(source => source.id === newSourceId)
+        const sourceExists = sourcesStore.teamSources.some(source => source.id === newSourceId);
 
         if (sourceExists) {
-          // Fetch details for the new source (with caching)
-          await fetchSourceDetails(newSourceId)
+          // Use a timeout to debounce rapid changes
+          setTimeout(async () => {
+            // Check if the source ID is still the same after the timeout
+            if (exploreStore.sourceId === newSourceId) {
+              // Fetch details for the new source (with improved caching)
+              await fetchSourceDetails(newSourceId);
+            }
+          }, 50);
         } else {
-          console.warn(`Source ${newSourceId} not found in current team's sources`)
-          sourceDetails.value = null
+          console.warn(`Source ${newSourceId} not found in current team's sources`);
+          sourceDetails.value = null;
         }
       } else if (newSourceId === 0) {
         // Clear source details when source is reset
-        sourceDetails.value = null
+        sourceDetails.value = null;
       }
     }
   }
@@ -647,12 +805,16 @@ watch(
   }
 )
 
-// Watch for changes in sourceDetails
+// Watch for changes in sourceDetails - with manual equality check
 watch(
   () => sourceDetails.value,
-  (newSourceDetails) => {
-    if (newSourceDetails) {
-      console.log('Source details changed, updating available fields')
+  (newSourceDetails, oldSourceDetails) => {
+    // Only log and update UI if actually changed (prevent duplicate notifications)
+    if (newSourceDetails &&
+      (!oldSourceDetails ||
+        newSourceDetails.id !== oldSourceDetails.id ||
+        JSON.stringify(newSourceDetails.columns) !== JSON.stringify(oldSourceDetails?.columns))) {
+      console.log('Source details changed, updating available fields');
       // The availableFields computed property will automatically update
     }
   },
@@ -707,35 +869,10 @@ const handleQuerySubmit = async (data: any) => {
     // Ensure local state is also updated for consistency
     logchefQuery.value = queryText;
   } else {
-    console.log("Setting SQL query in store:", {
-      query: queryText,
-      existingQuery: exploreStore.rawSql,
-      length: queryText.length,
-    });
-
-    // Make sure we have a valid string (not undefined/empty)
+    // For SQL mode, just set the query as-is without any manipulation
     if (queryText && queryText.trim()) {
       exploreStore.setRawSql(queryText);
-      // Ensure local state is also updated for consistency
       sqlQuery.value = queryText;
-    } else {
-      console.log(
-        "Empty SQL query received, generating default query as fallback"
-      );
-
-      // Generate a default query as a fallback
-      const defaultQuery = QueryBuilder.getDefaultSQLQuery({
-        tableName: activeSourceTableName.value || 'logs.vector_logs',
-        tsField: sourceDetails.value?._meta_ts_field || 'timestamp',
-        startTimestamp: Math.floor(exploreStore.timeRange?.start ? new Date(exploreStore.timeRange.start.toString()).getTime() / 1000 : (Date.now() / 1000) - 3600),
-        endTimestamp: Math.floor(exploreStore.timeRange?.end ? new Date(exploreStore.timeRange.end.toString()).getTime() / 1000 : Date.now() / 1000),
-        includeTimeFilter: true,
-        limit: exploreStore.limit
-      });
-
-      console.log("Generated default query:", defaultQuery);
-      exploreStore.setRawSql(defaultQuery);
-      sqlQuery.value = defaultQuery;
     }
   }
 
@@ -747,29 +884,27 @@ const handleQuerySubmit = async (data: any) => {
   queryError.value = '';
 
   try {
-    // Ensure we have source details
-    if (!sourceDetails.value && exploreStore.sourceId > 0) {
-      try {
-        await fetchSourceDetails(exploreStore.sourceId);
-        if (!sourceDetails.value) {
-          throw new Error('Could not fetch source details');
-        }
-      } catch (error) {
-        console.error('Failed to fetch source details:', error);
-        queryError.value = 'Failed to fetch source details. Please try selecting the source again.';
-        return;
-      }
-    }
-
-    // Execute query through the store - this will use the QueryBuilder internally
+    // Execute the query
     const result = await exploreStore.executeQuery();
 
-    if (result && 'error' in result) {
-      queryError.value = result.error as string;
+    if ('error' in result) {
+      queryError.value = result.error;
+      toast({
+        title: 'Error',
+        description: result.error,
+        variant: 'destructive',
+        duration: TOAST_DURATION.ERROR,
+      });
     }
   } catch (error) {
-    console.error('Query execution error:', error);
-    queryError.value = error instanceof Error ? error.message : 'An error occurred while executing the query';
+    console.error('Error executing query:', error);
+    queryError.value = error instanceof Error ? error.message : String(error);
+    toast({
+      title: 'Error',
+      description: queryError.value,
+      variant: 'destructive',
+      duration: TOAST_DURATION.ERROR,
+    });
   } finally {
     isExecutingQuery.value = false;
   }
@@ -799,54 +934,23 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
         queryMode.value = 'sql';
         // Set raw SQL if available
         if (queryContent.rawSql) {
-          sqlQuery.value = queryContent.rawSql;
-          exploreStore.setRawSql(queryContent.rawSql);
+          const sqlContent = queryContent.rawSql;
+          sqlQuery.value = sqlContent;
+          exploreStore.setRawSql(sqlContent);
+          // Prevent immediate overwrite by setting the local state
+          generatedSQL.value = sqlContent;
         }
       }
 
-      // Set timeRange if available
-      if (queryContent.timeRange && queryContent.timeRange.absolute) {
-        exploreStore.setTimeRange({
-          start: new CalendarDateTime(
-            new Date(queryContent.timeRange.absolute.start).getFullYear(),
-            new Date(queryContent.timeRange.absolute.start).getMonth() + 1,
-            new Date(queryContent.timeRange.absolute.start).getDate(),
-            new Date(queryContent.timeRange.absolute.start).getHours(),
-            new Date(queryContent.timeRange.absolute.start).getMinutes(),
-            new Date(queryContent.timeRange.absolute.start).getSeconds()
-          ),
-          end: new CalendarDateTime(
-            new Date(queryContent.timeRange.absolute.end).getFullYear(),
-            new Date(queryContent.timeRange.absolute.end).getMonth() + 1,
-            new Date(queryContent.timeRange.absolute.end).getDate(),
-            new Date(queryContent.timeRange.absolute.end).getHours(),
-            new Date(queryContent.timeRange.absolute.end).getMinutes(),
-            new Date(queryContent.timeRange.absolute.end).getSeconds()
-          )
-        });
-      }
-
-      // Set limit if available
-      if (queryContent.limit) {
-        exploreStore.setLimit(queryContent.limit);
-      }
+      // Update URL with current parameters
+      updateUrlWithCurrentState();
 
       // Execute the query
       await handleQuerySubmit(queryMode.value);
-
-      // Update URL to reflect the loaded query
-      updateUrlWithCurrentState();
-
-      toast({
-        title: 'Success',
-        description: 'Query loaded successfully',
-        duration: TOAST_DURATION.SUCCESS,
-      });
-
       return;
     }
 
-    // If no queryData provided, fetch it from the API
+    // Get the current team ID
     const teamId = teamsStore.currentTeamId;
     if (!teamId) {
       toast({
@@ -858,6 +962,7 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
       return;
     }
 
+    console.log(`Fetching saved query with ID: ${queryId} for team: ${teamId}`);
     const queryResponse = await savedQueriesStore.fetchQuery(
       teamId,
       queryId
@@ -875,7 +980,9 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
       throw new Error('Failed to load query - no data returned');
     }
 
+    console.log('Loaded query from API:', query);
     const queryContent = JSON.parse(query.query_content) as SavedQueryContent;
+    console.log('Parsed query content:', queryContent);
 
     // Set the query mode based on the query type
     if (query.query_type === 'logchefql') {
@@ -894,37 +1001,16 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
       if (queryContent.rawSql) {
         sqlQuery.value = queryContent.rawSql;
         exploreStore.setRawSql(queryContent.rawSql);
+        // Prevent immediate overwrite by setting the local state
+        generatedSQL.value = queryContent.rawSql;
       }
     }
 
-    // Always set timeRange - queryContent.timeRange is guaranteed to exist
-    exploreStore.setTimeRange({
-      start: new CalendarDateTime(
-        new Date(queryContent.timeRange.absolute.start).getFullYear(),
-        new Date(queryContent.timeRange.absolute.start).getMonth() + 1,
-        new Date(queryContent.timeRange.absolute.start).getDate(),
-        new Date(queryContent.timeRange.absolute.start).getHours(),
-        new Date(queryContent.timeRange.absolute.start).getMinutes(),
-        new Date(queryContent.timeRange.absolute.start).getSeconds()
-      ),
-      end: new CalendarDateTime(
-        new Date(queryContent.timeRange.absolute.end).getFullYear(),
-        new Date(queryContent.timeRange.absolute.end).getMonth() + 1,
-        new Date(queryContent.timeRange.absolute.end).getDate(),
-        new Date(queryContent.timeRange.absolute.end).getHours(),
-        new Date(queryContent.timeRange.absolute.end).getMinutes(),
-        new Date(queryContent.timeRange.absolute.end).getSeconds()
-      )
-    });
-
-    // Always set limit - queryContent.limit is guaranteed to exist
-    exploreStore.setLimit(queryContent.limit);
+    // Update URL with current parameters
+    updateUrlWithCurrentState();
 
     // Execute the query
     await handleQuerySubmit(queryMode.value);
-
-    // Update URL to reflect the loaded query
-    updateUrlWithCurrentState();
 
     toast({
       title: 'Success',
@@ -1044,10 +1130,10 @@ const handleQueryChange = (data: any) => {
 
   // Map the mode from editor to store format
   const mappedMode = mode === 'logchefql' ? 'logchefql' : 'sql';
-  
+
   // Check if this is a mode switch
   const isModeSwitch = queryMode.value !== mappedMode;
-  
+
   // Update the queryMode if it's changing
   if (isModeSwitch) {
     queryMode.value = mappedMode;
@@ -1060,35 +1146,10 @@ const handleQueryChange = (data: any) => {
     // Ensure local state is also updated for consistency
     logchefQuery.value = queryText;
   } else {
-    console.log("Setting SQL query in store:", {
-      query: queryText,
-      existingQuery: exploreStore.rawSql,
-      length: queryText.length,
-    });
-
-    // Make sure we have a valid string (not undefined/empty)
+    // For SQL mode, just set the query as-is without any manipulation
     if (queryText && queryText.trim()) {
       exploreStore.setRawSql(queryText);
-      // Ensure local state is also updated for consistency
       sqlQuery.value = queryText;
-    } else {
-      console.log(
-        "Empty SQL query received, generating default query as fallback"
-      );
-
-      // Generate a default query as a fallback
-      const defaultQuery = QueryBuilder.getDefaultSQLQuery({
-        tableName: activeSourceTableName.value || 'logs.vector_logs',
-        tsField: sourceDetails.value?._meta_ts_field || 'timestamp',
-        startTimestamp: Math.floor(exploreStore.timeRange?.start ? new Date(exploreStore.timeRange.start.toString()).getTime() / 1000 : (Date.now() / 1000) - 3600),
-        endTimestamp: Math.floor(exploreStore.timeRange?.end ? new Date(exploreStore.timeRange.end.toString()).getTime() / 1000 : Date.now() / 1000),
-        includeTimeFilter: true,
-        limit: exploreStore.limit
-      });
-
-      console.log("Generated default query:", defaultQuery);
-      exploreStore.setRawSql(defaultQuery);
-      sqlQuery.value = defaultQuery;
     }
   }
 
@@ -1096,42 +1157,86 @@ const handleQueryChange = (data: any) => {
   if (queryError.value) {
     queryError.value = '';
   }
-  
+
   // Always update the URL after handling query changes
   // This is especially important for mode switches
   updateUrlWithCurrentState();
 }
 
-// Component lifecycle
+// Component lifecycle with improved initialization sequence
 onMounted(async () => {
   try {
-    console.log("LogExplorer component mounting")
+    console.log("LogExplorer component mounting");
 
-    // Load teams first
-    await teamsStore.loadTeams()
+    // Check if this is a saved query load
+    const hasSavedQueryParams = route.query.query_id && route.query.team;
+    console.log('URL has saved query params:', hasSavedQueryParams);
 
-    // Initialize from URL parameters
-    await setupFromUrl()
+    // Make sure we start with initialization flags set correctly
+    isInitializing.value = true;
+    isTeamsLoaded.value = false;
+    isSourcesLoaded.value = false;
 
-    // Set initial values in the store
-    exploreStore.setLogchefqlCode(logchefQuery.value || '')
-    exploreStore.setRawSql(sqlQuery.value || '')
+    // Step 1: Load teams first (separate operation to reduce race conditions)
+    console.log("Step 1: Loading teams");
+    await teamsStore.loadTeams();
+    isTeamsLoaded.value = true;
 
-    // Make sure local refs are in sync with store
-    logchefQuery.value = exploreStore.logchefqlCode || ''
-    sqlQuery.value = exploreStore.rawSql || ''
+    // Step 2: Process URL and initialize everything else
+    console.log("Step 2: Setting up from URL parameters");
+    await setupFromUrl();
 
-    // Execute a default query if we have a valid source and time range
-    if (exploreStore.canExecuteQuery) {
-      await handleQuerySubmit(queryMode.value)
+    // Step 3: If not a saved query, handle regular initialization
+    if (!hasSavedQueryParams) {
+      console.log("Step 3: Handling regular initialization");
+
+      // Set initial values in the store
+      exploreStore.setLogchefqlCode(logchefQuery.value || '');
+      exploreStore.setRawSql(sqlQuery.value || '');
+
+      // Make sure local refs are in sync with store
+      logchefQuery.value = exploreStore.logchefqlCode || '';
+      sqlQuery.value = exploreStore.rawSql || '';
+
+      // Step 4: Execute default query only after everything is initialized
+      console.log("Step 4: Executing default query if possible");
+
+      // Use nextTick to ensure component is fully mounted
+      nextTick(async () => {
+        if (exploreStore.canExecuteQuery) {
+          console.log("Executing default query");
+          try {
+            await handleQuerySubmit(queryMode.value);
+          } catch (queryError) {
+            console.error("Error executing initial query:", queryError);
+            toast({
+              title: "Query Error",
+              description: "Error executing initial query",
+              variant: "destructive",
+              duration: TOAST_DURATION.ERROR,
+            });
+          }
+        }
+      });
     }
 
-    // The QueryEditor component now handles its own initialization
+    console.log("LogExplorer initialization complete");
   } catch (error) {
-    console.error("Error during LogExplorer mount:", error)
-    urlError.value = "Error initializing the explorer. Please try refreshing the page."
+    console.error("Error during LogExplorer mount:", error);
+    urlError.value = "Error initializing the explorer. Please try refreshing the page.";
+
+    // Show a toast for the error
+    toast({
+      title: "Explorer Error",
+      description: "Error initializing the explorer. Please try refreshing the page.",
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR,
+    });
+  } finally {
+    // Ensure initialization state is properly set regardless of errors
+    isInitializing.value = false;
   }
-})
+});
 
 onBeforeUnmount(() => {
   if (import.meta.env.MODE !== 'production') {
@@ -1197,7 +1302,7 @@ onBeforeUnmount(() => {
   </div>
 
   <!-- Main content when not loading -->
-  <div v-else class="flex flex-col h-[calc(100vh-8rem)]">
+  <div v-else class="flex flex-col h-screen overflow-hidden">
     <!-- Error Alert -->
     <div v-if="urlError"
       class="absolute top-0 left-0 right-0 bg-destructive/15 text-destructive px-4 py-2 z-10 flex items-center justify-between">
@@ -1232,7 +1337,8 @@ onBeforeUnmount(() => {
             class="w-40">
             <SelectTrigger class="h-8 text-sm">
               <SelectValue placeholder="Log Source">
-                <span v-if="isChangingSource">Loading...</span>
+                <span
+                  v-if="isChangingSource || (teamsStore.currentTeamId && sourcesStore.isLoadingTeamSources(teamsStore.currentTeamId))">Loading...</span>
                 <span v-else>{{ selectedSourceName }}</span>
               </SelectValue>
             </SelectTrigger>
@@ -1301,7 +1407,7 @@ onBeforeUnmount(() => {
       <FieldSideBar v-model:expanded="showFieldsPanel" :fields="availableFields" />
 
       <!-- Main Content: Query Editor and Results -->
-      <div class="flex-1 flex flex-col h-full min-w-0" style="flex-basis: 75%;">
+      <div class="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
         <!-- Query Editor Section -->
         <div class="p-3 pb-2">
           <div class="rounded-md border-t bg-card">
@@ -1326,7 +1432,7 @@ onBeforeUnmount(() => {
         <!-- Results Section -->
         <div class="flex-1 overflow-hidden flex flex-col border-t">
           <!-- Stats header - keep minimal -->
-          <div class="px-3 py-1.5 flex items-center justify-between bg-muted/10">
+          <div class="px-3 py-1.5 flex items-center justify-between bg-muted/10 flex-shrink-0">
             <div class="flex items-center gap-2">
               <!-- Remove "Results" text and use a more descriptive layout -->
               <div v-if="exploreStore.queryStats?.rows_read" class="flex items-center gap-1">
@@ -1356,14 +1462,14 @@ onBeforeUnmount(() => {
               <div v-if="exploreStore.queryStats?.bytes_read" class="flex items-center gap-1 ml-2">
                 <span class="text-xs text-muted-foreground">Data:</span>
                 <span class="text-xs font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
-                  }}</span>
+                }}</span>
                 <span class="text-xs text-muted-foreground">MB</span>
               </div>
             </div>
           </div>
 
-          <!-- Table container with proper scroll behavior - give it max available height -->
-          <div class="flex-1 h-full overflow-hidden relative">
+          <!-- Table container with proper scroll behavior - ensure it fills full available space -->
+          <div class="flex-1 overflow-hidden relative">
             <template v-if="exploreStore.logs?.length">
               <div class="absolute inset-0 h-full">
                 <DataTable :columns="tableColumns" :data="exploreStore.logs" :stats="exploreStore.queryStats"
@@ -1436,22 +1542,45 @@ onBeforeUnmount(() => {
   opacity: 0;
 }
 
-/* Ensure proper table height */
+/* Improved table height handling */
 .h-full {
   height: 100% !important;
 }
 
-/* Fix flex layout issues */
+/* Enhanced flex layout for proper table expansion */
 .flex.flex-1.min-h-0 {
   display: flex;
   width: 100%;
   min-height: 0;
+  flex: 1 1 auto !important;
+  max-height: 100%;
 }
 
 .flex.flex-1.min-h-0>div:last-child {
   flex: 1 1 auto;
   min-width: 0;
   width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Fix for main content area to ensure full height expansion */
+.flex-1.flex.flex-col.h-full.min-w-0 {
+  flex: 1 1 auto !important;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100% !important;
+  max-height: 100%;
+}
+
+/* Force the results section to expand fully */
+.flex-1.overflow-hidden.flex.flex-col.border-t {
+  flex: 1 1 auto !important;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100% !important;
 }
 
 /* Fix DataTable height issues */
@@ -1491,13 +1620,6 @@ onBeforeUnmount(() => {
   background-color: hsl(var(--muted)/0.3);
 }
 
-/* Style for long IDs to prevent table stretching */
-:deep(.table .cell-id) {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 /* Severity label styling */
 :deep(.severity-label) {

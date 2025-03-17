@@ -101,9 +101,9 @@ const mainNavItems = [
     url: '/logs/explore',
   },
   {
-    title: 'History',
+    title: 'Saved Queries',
     icon: ClipboardList,
-    url: '/logs/history',
+    url: '/logs/saved',
   },
   {
     title: 'Sources',
@@ -141,7 +141,7 @@ const settingsNavItems = [
   <div class="h-screen w-screen flex overflow-hidden">
     <SidebarProvider v-model:open="sidebarOpen" :defaultOpen="sidebarOpen">
       <Sidebar collapsible="icon"
-        class="flex-none z-50 bg-[hsl(var(--sidebar-background))] text-[hsl(var(--sidebar-foreground))]"
+        class="flex-none z-50 bg-[hsl(var(--sidebar-background))] text-[hsl(var(--sidebar-foreground))] h-screen"
         :class="{ 'w-64': sidebarOpen, 'w-[72px]': !sidebarOpen }">
         <SidebarHeader class="pt-4 pb-2">
           <!-- Layout when expanded - horizontal -->
@@ -187,7 +187,7 @@ const settingsNavItems = [
                 <template v-for="item in mainNavItems" :key="item.title">
                   <SidebarMenuItem v-if="!item.adminOnly || (item.adminOnly && authStore.user?.role === 'admin')">
                     <SidebarMenuButton asChild :tooltip="item.title"
-                      class="hover:bg-sidebar-accent hover:text-sidebar-accent-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md">
+                      class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
                       <router-link :to="item.url" class="flex items-center" active-class="font-medium">
                         <component :is="item.icon" class="size-5" :class="sidebarOpen ? 'mr-3 ml-1' : 'mx-auto'" />
                         <span v-if="sidebarOpen">{{ item.title }}</span>
@@ -207,7 +207,7 @@ const settingsNavItems = [
                 <template v-for="item in adminNavItems" :key="item.title">
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild :tooltip="item.title"
-                      class="hover:bg-sidebar-accent hover:text-sidebar-accent-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md">
+                      class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
                       <router-link :to="item.url" class="flex items-center" active-class="font-medium">
                         <component :is="item.icon" class="size-5" :class="sidebarOpen ? 'mr-3 ml-1' : 'mx-auto'" />
                         <span v-if="sidebarOpen">{{ item.title }}</span>
@@ -227,7 +227,7 @@ const settingsNavItems = [
                 <template v-for="item in settingsNavItems" :key="item.title">
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild :tooltip="item.title"
-                      class="hover:bg-sidebar-accent hover:text-sidebar-accent-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md">
+                      class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
                       <router-link :to="item.url" class="flex items-center" active-class="font-medium">
                         <component :is="item.icon" class="size-5" :class="sidebarOpen ? 'mr-3 ml-1' : 'mx-auto'" />
                         <span v-if="sidebarOpen">{{ item.title }}</span>
@@ -246,7 +246,7 @@ const settingsNavItems = [
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <SidebarMenuButton size="lg"
-                    class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
+                    class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground hover:bg-primary hover:text-primary-foreground">
                     <Avatar class="h-9 w-9 rounded-full border-2 border-sidebar-primary">
                       <AvatarFallback class="rounded-full bg-sidebar-primary text-sidebar-primary-foreground">
                         {{ getUserInitials(authStore.user?.full_name) }}
@@ -316,9 +316,9 @@ const settingsNavItems = [
         <SidebarRail />
       </Sidebar>
 
-      <SidebarInset class="flex flex-col flex-1 min-w-0">
-        <main class="flex-1 overflow-y-auto overflow-x-auto min-w-0">
-          <div class="h-full px-3 py-3 min-w-0">
+      <SidebarInset class="flex flex-col flex-1 min-w-0 overflow-hidden h-screen">
+        <main class="flex-1 overflow-hidden min-w-0 h-full">
+          <div class="h-full px-3 py-3 min-w-0 overflow-hidden flex flex-col">
             <router-view />
           </div>
         </main>

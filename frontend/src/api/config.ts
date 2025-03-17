@@ -17,10 +17,7 @@ export const api = axios.create({
 
 // Add request interceptor for security headers
 api.interceptors.request.use((config) => {
-  // Add security headers
-  config.headers["X-Requested-With"] = "XMLHttpRequest";
-
-  // Prevent caching of auth endpoints
+  // Only apply no-cache headers to authentication endpoints
   if (config.url?.startsWith("/auth/")) {
     config.headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
     config.headers["Pragma"] = "no-cache";

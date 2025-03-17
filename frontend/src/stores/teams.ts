@@ -34,14 +34,10 @@ export const useTeamsStore = defineStore("teams", () => {
       : null
   );
 
-  async function loadTeams(forceReload = false) {
-    // Skip if we already have teams and no force reload
-    if (teams.value.length > 0 && !forceReload) {
-      return { success: true, data: teams.value };
-    }
-
+  async function loadTeams() {
     return await state.callApi<TeamWithMemberCount[]>({
       apiCall: () => teamsApi.listUserTeams(),
+      operationKey: 'loadTeams',
       onSuccess: (response) => {
         state.data.value.teams = response.map((team) => ({
           ...team,
@@ -73,7 +69,7 @@ export const useTeamsStore = defineStore("teams", () => {
 
     if (result.success && result.data) {
       // Reload teams to get fresh data with member counts
-      await loadTeams(true);
+      await loadTeams();
 
       // If we have teams and no current team is selected, select the newly created one
       if (
@@ -105,7 +101,7 @@ export const useTeamsStore = defineStore("teams", () => {
       successMessage: "Team updated successfully",
       onSuccess: async () => {
         // Reload teams to get fresh data
-        await loadTeams(true);
+        await loadTeams();
       },
     });
   }
@@ -196,6 +192,15 @@ export const useTeamsStore = defineStore("teams", () => {
     error: state.error,
     currentTeamId,
     currentTeam,
+    loadingStates: state.loadingStates,
+    
+    // Loading state helpers
+    isLoadingOperation: state.isLoadingOperation,
+    isLoadingTeams: () => state.isLoadingOperation('loadTeams'),
+    isLoadingTeam: (teamId: number) => state.isLoadingOperation(`getTeam-${teamId}`),
+    isLoadingTeamMembers: (teamId: number) => state.isLoadingOperation(`listTeamMembers-${teamId}`),
+    
+    // Actions
     loadTeams,
     createTeam,
     getTeam,

@@ -13,9 +13,14 @@ export interface BaseState<T> {
  */
 export function useBaseStore<T>(initialState: T): BaseState<T> & {
   isLoading: Ref<boolean>;
-  withLoading: <R>(fn: () => Promise<R>) => Promise<R>;
+  loadingStates: Ref<Record<string, boolean>>;
+  withLoading: <R>(fn: () => Promise<R>, operationKey?: string) => Promise<R>;
+  isLoadingOperation: (key: string) => boolean;
+  startLoading: (key: string) => void;
+  stopLoading: (key: string) => void;
   callApi: <R>(options: {
     apiCall: () => Promise<any>;
+    operationKey?: string;
     onSuccess?: (data: R) => void;
     onError?: (error: string) => void;
     successMessage?: string;
@@ -27,15 +32,55 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
   const loading = ref(false);
   const error = ref<string | null>(null);
   const isLoading = ref(false);
+  // Track loading states by operation key
+  const loadingStates = ref<Record<string, boolean>>({});
+
+  /**
+   * Check if a specific operation is loading
+   */
+  function isLoadingOperation(key: string): boolean {
+    return !!loadingStates.value[key];
+  }
+
+  /**
+   * Manually start loading for a specific operation
+   */
+  function startLoading(key: string): void {
+    if (key) {
+      loadingStates.value[key] = true;
+      isLoading.value = true;
+    }
+  }
+
+  /**
+   * Manually stop loading for a specific operation
+   */
+  function stopLoading(key: string): void {
+    if (key) {
+      loadingStates.value[key] = false;
+      
+      // Only set isLoading to false if all operations are complete
+      const stillLoading = Object.values(loadingStates.value).some(state => state);
+      if (!stillLoading) {
+        isLoading.value = false;
+      }
+    }
+  }
 
   /**
    * Execute an async function with loading state management
    */
-  async function withLoading<R>(fn: () => Promise<R>): Promise<R> {
-    try {
+  async function withLoading<R>(fn: () => Promise<R>, operationKey?: string): Promise<R> {
+    if (operationKey) {
+      startLoading(operationKey);
+    } else {
       isLoading.value = true;
       loading.value = true;
-      error.value = null;
+    }
+
+    error.value = null;
+    
+    try {
       return await fn();
     } catch (err) {
       if (err instanceof Error) {
@@ -45,8 +90,12 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
       }
       throw err;
     } finally {
-      isLoading.value = false;
-      loading.value = false;
+      if (operationKey) {
+        stopLoading(operationKey);
+      } else {
+        isLoading.value = false;
+        loading.value = false;
+      }
     }
   }
 
@@ -55,6 +104,7 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
    */
   async function callApi<R>(options: {
     apiCall: () => Promise<any>;
+    operationKey?: string;
     onSuccess?: (data: R) => void;
     onError?: (error: string) => void;
     successMessage?: string;
@@ -63,7 +113,7 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
   }): Promise<{ success: boolean; data?: R; error?: string }> {
     return await withLoading(async () => {
       return handleApiCall<R>(options);
-    });
+    }, options.operationKey);
   }
 
   return {
@@ -71,7 +121,11 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
     loading,
     error,
     isLoading,
+    loadingStates,
     withLoading,
+    isLoadingOperation,
+    startLoading,
+    stopLoading,
     callApi,
   };
 }
