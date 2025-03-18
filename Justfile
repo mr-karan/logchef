@@ -2,7 +2,7 @@
 
 # Build variables
 last_commit := `git rev-parse --short HEAD`
-last_commit_date := `git show -s --format=%ci {{last_commit}}`
+last_commit_date := `git show -s --format=%ci HEAD`
 version := `git describe --tags --always`
 build_time := `date +"%Y-%m-%d %H:%M:%S %z"`
 build_info := version + " (Commit: " + last_commit_date + " (" + last_commit + "), Build: " + build_time + ")"
