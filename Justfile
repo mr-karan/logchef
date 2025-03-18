@@ -93,8 +93,10 @@ tidy:
 # Run all checks
 check: fmt vet lint test
 
-# Run frontend and backend in dev mode (requires tmux)
+# Run frontend, backend, and infrastructure in dev mode (requires tmux)
 dev:
-    tmux new-session -d -s logchef-dev 'just run-backend'
+    tmux new-session -d -s logchef-dev 'docker compose up'
+    tmux split-window -v 'just run-backend'
     tmux split-window -h 'just run-frontend'
+    tmux select-pane -t 0
     tmux -2 attach-session -d -t logchef-dev
