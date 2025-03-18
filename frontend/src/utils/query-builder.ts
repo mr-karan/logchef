@@ -396,6 +396,11 @@ export class QueryBuilder {
       forDisplay,
     } = options;
 
+    // Ensure we have a valid table name before building a query
+    if (!tableName) {
+      return ''; // Return empty string if no table name is available
+    }
+
     // Build a simple default query
     let sqlQuery = `SELECT * FROM ${tableName}`;
 

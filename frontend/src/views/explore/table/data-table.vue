@@ -12,6 +12,9 @@ import {
     type ExpandedState,
     type VisibilityState,
     type PaginationState,
+    type ColumnSizing,
+    type ColumnSizingState,
+    type ColumnResizeMode,
 } from '@tanstack/vue-table'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
@@ -50,6 +53,9 @@ const pagination = ref<PaginationState>({
     pageSize: 50,
 })
 const globalFilter = ref('')
+const columnSizing = ref<ColumnSizingState>({})
+const columnResizeMode = ref<ColumnResizeMode>('onChange')
+
 
 const { toast } = useToast()
 
@@ -80,7 +86,15 @@ const sortedColumns = computed(() => {
     ];
 });
 
-// Initialize table
+// Define default column configurations
+const defaultColumn = {
+    minSize: 100,
+    size: 150,
+    maxSize: 1500,
+    enableResizing: true, // Enable resizing for all columns by default
+}
+
+// Initialize table with explicit column sizing configurations
 const table = useVueTable({
     get data() {
         return props.data
@@ -103,13 +117,17 @@ const table = useVueTable({
         },
         get globalFilter() {
             return globalFilter.value
-        }
+        },
+        get columnSizing() {
+            return columnSizing.value
+        },
     },
     onSortingChange: updaterOrValue => valueUpdater(updaterOrValue, sorting),
     onExpandedChange: updaterOrValue => valueUpdater(updaterOrValue, expanded),
     onColumnVisibilityChange: updaterOrValue => valueUpdater(updaterOrValue, columnVisibility),
     onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
     onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
+    onColumnSizingChange: updaterOrValue => valueUpdater(updaterOrValue, columnSizing),
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
@@ -117,6 +135,11 @@ const table = useVueTable({
     getFilteredRowModel: getFilteredRowModel(),
     // Enable fuzzy search for better matching
     globalFilterFn: 'includesString',
+    // Enable column resizing with explicit settings
+    enableColumnResizing: true,
+    columnResizeMode: columnResizeMode.value,
+    defaultColumn: defaultColumn,
+    columnResizeDirection: 'ltr',
 })
 
 // Handle row click for expansion
@@ -150,11 +173,36 @@ onMounted(() => {
             }
         ]
     }
+
+    // Set initial column sizing mode
+    columnResizeMode.value = 'onChange'
+
+    // Set simple initial column sizes for basic starting point
+    const initialSizes: ColumnSizing = {}
+    
+    props.columns.forEach(column => {
+        const columnId = column.id || ''
+        if (columnId === timestampFieldName.value) {
+            initialSizes[columnId] = 180 // timestamps need more space
+        } else if (columnId === severityFieldName.value) {
+            initialSizes[columnId] = 100 // severity is usually short
+        } else if (columnId === 'message' || columnId === 'msg' || columnId === 'log') {
+            initialSizes[columnId] = 400 // message fields get more space
+        } else {
+            initialSizes[columnId] = 200 // default size for other columns
+        }
+    })
+    
+    // Apply the initial sizes - update the state with an object to trigger reactivity
+    columnSizing.value = { ...initialSizes }
+    
+    // Watch for column size changes to adjust table layout as needed
+    watch(columnSizing, () => {}, { deep: true })
 })
 </script>
 
 <template>
-    <div class="h-full flex flex-col w-full min-w-0 flex-1 overflow-hidden">
+    <div class="h-full flex flex-col w-full min-w-0 flex-1 overflow-hidden log-data-table">
         <!-- Results Header with Controls and Pagination -->
         <div class="flex items-center justify-between p-2 border-b flex-shrink-0">
             <!-- Left side - Empty now that stats have been moved to LogExplorer.vue -->
@@ -180,16 +228,46 @@ onMounted(() => {
         <!-- Table Section with full-height scrolling -->
         <div class="flex-1 relative overflow-hidden">
             <div v-if="table.getRowModel().rows?.length" class="absolute inset-0">
-                <div class="w-full h-full overflow-auto custom-scrollbar">
-                    <table class="w-full caption-bottom text-sm min-w-full">
-                        <!-- Enhanced header styling -->
-                        <thead class="sticky top-0 z-10 bg-card border-b">
+                <div class="w-full h-full overflow-auto custom-scrollbar" style="overflow-x: auto !important;">
+                    <div class="w-full" style="min-width: 100%;">
+                        <table class="caption-bottom text-sm w-full border-separate border-spacing-0 relative" style="min-width: 100%; table-layout: auto;">
+                            <!-- Enhanced header styling -->
+                        <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
                             <tr class="border-b border-b-muted-foreground/10">
                                 <th v-for="header in table.getHeaderGroups()[0]?.headers || []" :key="header.id"
-                                    class="h-8 px-3 text-xs font-medium min-w-[120px] text-left align-middle bg-muted/30"
-                                    :class="{ 'font-semibold': header.id === timestampFieldName || header.id === severityFieldName }">
+                                    class="h-8 px-3 text-xs font-medium text-left align-middle bg-muted/30 whitespace-nowrap relative sticky top-0 z-20 overflow-hidden"
+                                    :class="[
+                                        { 'font-semibold': header.id === timestampFieldName || header.id === severityFieldName },
+                                        { 'resizing': header.column.getIsResizing() },
+                                        header.column.columnDef.meta?.className
+                                    ]"
+                                    :style="{
+                                        width: header.column.getSize() ? `${header.column.getSize()}px` : 'auto',
+                                        minWidth: '100px'
+                                    }">
                                     <FlexRender v-if="!header.isPlaceholder" :render="header.column.columnDef.header"
                                         :props="header.getContext()" />
+                                        
+                                    <div v-if="header.column.getCanResize()"
+                                        :class="[
+                                            'resizer',
+                                            { 'isResizing': header.column.getIsResizing() }
+                                        ]"
+                                        @mousedown="(e) => {
+                                            try {
+                                                // Get and execute the resize handler
+                                                const handler = header.getResizeHandler();
+                                                handler(e);
+                                            } catch (error) {
+                                                console.error('Error in resize handler:', error);
+                                            }
+                                            
+                                            // Prevent the event from bubbling
+                                            e.stopPropagation();
+                                        }"
+                                        @touchstart="header.getResizeHandler()"
+                                        @click.stop
+                                    ></div>
                                 </th>
                             </tr>
                         </thead>
@@ -200,32 +278,37 @@ onMounted(() => {
                                 <!-- Main Row -->
                                 <tr :data-state="row.getIsSelected() ? 'selected' : undefined"
                                     @click="(e) => handleRowClick(e, row)" :class="[
-                                        'cursor-pointer hover:bg-muted/50 border-b border-b-muted-foreground/10 transition-colors',
+                                        'cursor-pointer hover:bg-muted/50 border-b border-b-muted-foreground/10 transition-colors w-full',
                                         index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
                                     ]">
                                     <td v-for="cell in row.getVisibleCells()" :key="cell.id"
-                                        class="h-auto px-3 py-1.5 min-w-[180px] whitespace-normal break-words align-middle group"
-                                        :data-column-id="cell.column.id">
-                                        <div class="max-w-none flex items-center gap-1">
+                                        class="h-auto px-3 py-1.5 align-top group overflow-hidden whitespace-nowrap text-ellipsis font-mono text-[11px] leading-tight"
+                                        :data-column-id="cell.column.id"
+                                        :class="[
+                                            cell.column.columnDef.meta?.className,
+                                            { 'resizing': cell.column.getIsResizing() }
+                                        ]"
+                                        :style="{
+                                            width: cell.column.getSize() ? `${cell.column.getSize()}px` : 'auto',
+                                            minWidth: '100px',
+                                            maxWidth: `${cell.column.getSize()}px`,
+                                            overflow: 'hidden'
+                                        }">
+                                        <div class="flex items-center gap-1 w-full overflow-hidden">
                                             <!-- Cell Content with improved typography -->
                                             <span
                                                 v-if="cell.column.id === severityFieldName && getSeverityClasses(cell.getValue(), cell.column.id)"
                                                 :class="getSeverityClasses(cell.getValue(), cell.column.id)"
-                                                class="font-medium px-1.5 py-0.5 rounded text-xs">
+                                                class="font-medium px-1.5 py-0.5 rounded text-xs shrink-0">
                                                 {{ cell.getValue() }}
                                             </span>
                                             <template v-else>
-                                                <FlexRender :render="cell.column.columnDef.cell"
-                                                    :props="cell.getContext()" />
+                                                <div class="cell-content overflow-hidden text-ellipsis">
+                                                    <FlexRender :render="cell.column.columnDef.cell"
+                                                        :props="cell.getContext()" />
+                                                </div>
                                             </template>
 
-                                            <!-- Enhanced Copy Value Button with tooltip -->
-                                            <Button variant="ghost" size="icon"
-                                                class="h-5 w-5 p-0 opacity-0 group-hover:opacity-100 transition-opacity ml-1 hover:bg-muted"
-                                                @click.stop="copyCell(cell.getValue())"
-                                                :title="`Copy ${cell.column.id} value`">
-                                                <Copy class="h-3 w-3" />
-                                            </Button>
                                         </div>
                                     </td>
                                 </tr>
@@ -241,6 +324,7 @@ onMounted(() => {
                             </template>
                         </tbody>
                     </table>
+                    </div>
                 </div>
             </div>
             <div v-else class="h-full">
@@ -250,168 +334,108 @@ onMounted(() => {
     </div>
 </template>
 
-<style>
-/* Custom scrollbar styles for better visibility */
-.custom-scrollbar::-webkit-scrollbar {
+<style scoped>
+/* Custom scrollbar styles scoped to this component only */
+.log-data-table .custom-scrollbar::-webkit-scrollbar {
     width: 10px !important;
     height: 10px !important;
     display: block !important;
 }
 
-.custom-scrollbar::-webkit-scrollbar-track {
+.log-data-table .custom-scrollbar::-webkit-scrollbar-track {
     background: transparent;
 }
 
-.custom-scrollbar::-webkit-scrollbar-thumb {
+.log-data-table .custom-scrollbar::-webkit-scrollbar-thumb {
     background-color: rgba(155, 155, 155, 0.5);
     border-radius: 4px;
     min-height: 40px;
     min-width: 40px;
 }
 
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+.log-data-table .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background-color: rgba(155, 155, 155, 0.8);
 }
 
-.custom-scrollbar::-webkit-scrollbar-corner {
+.log-data-table .custom-scrollbar::-webkit-scrollbar-corner {
     background: transparent;
 }
 
 /* Firefox scrollbar */
-.custom-scrollbar {
+.log-data-table .custom-scrollbar {
     scrollbar-width: thin;
     scrollbar-color: rgba(155, 155, 155, 0.5) transparent;
-}
-
-/* Enhanced full-height table layout - improve flex properties */
-.h-full.flex.flex-col {
-    display: flex;
-    flex-direction: column;
-    height: 100% !important;
-    width: 100%;
-    min-height: 0;
-    flex: 1 1 auto !important;
-    /* Important for flex child to shrink */
-    overflow: hidden;
-}
-
-.flex-1.relative.overflow-hidden {
-    position: relative;
-    height: 100% !important;
-    overflow: hidden;
-}
-
-.absolute.inset-0 {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    height: 100%;
-    width: 100%;
-}
-
-.w-full.h-full.overflow-auto.custom-scrollbar {
+    overflow-x: scroll !important; 
+    overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
     height: 100% !important;
     max-height: 100% !important;
-    overflow: auto !important;
 }
 
-/* Enhanced table rendering */
-table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    table-layout: fixed;
-}
-
-/* Fixed header with shadow for better visibility */
-thead {
-    position: sticky;
+/* Resizer styles - scoped to this component only */
+.log-data-table .resizer {
+    position: absolute;
+    right: -2px;
     top: 0;
-    z-index: 20;
-    background-color: var(--background, #fff);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    height: 100%;
+    width: 6px;
+    cursor: col-resize !important;
+    user-select: none;
+    touch-action: none;
+    z-index: 50;
+    transition: background-color 0.1s ease;
+    background-color: rgba(0, 0, 0, 0.05);
 }
 
-th {
-    position: sticky;
-    top: 0;
-    z-index: 20;
-    background-color: var(--background, #fff);
-    transition: background-color 0.2s;
-    font-family: var(--font-sans);
-    font-weight: 500;
+.log-data-table .resizer:hover {
+    background-color: rgba(0, 0, 0, 0.3);
+    width: 8px;
+    right: -3px;
 }
 
-th:hover {
-    background-color: rgba(0, 0, 0, 0.04);
+.log-data-table .resizer.isResizing {
+    background-color: rgba(0, 0, 0, 0.5);
+    opacity: 1;
+    width: 8px;
 }
 
-/* Improve table cells with consistent monospace for better log readability */
-td {
-    line-height: 1.4;
-    font-size: 11px;
+/* Class for column being resized */
+.log-data-table th.resizing,
+.log-data-table td.resizing {
+    border-right: 2px dashed rgba(0, 0, 0, 0.2);
+    user-select: none;
+}
+
+/* Column width presets */
+.log-data-table .timestamp-column {
+    min-width: 120px;
+}
+
+.log-data-table .severity-column {
+    min-width: 80px;
+}
+
+.log-data-table .message-column {
+    min-width: 200px;
+}
+
+.log-data-table .default-column {
+    min-width: 80px;
+}
+
+/* Special content styling */
+:deep(.log-data-table .json-content) {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 2px 0;
+    background-color: rgba(0, 0, 0, 0.01);
+    border-radius: 2px;
+}
+
+:deep(.log-data-table .flex-render-content) {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-}
-
-/* Ensure all cell content uses monospace font */
-td .max-w-none.flex.items-center.gap-1>span,
-td .max-w-none.flex.items-center.gap-1 div {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 11px;
-    letter-spacing: -0.01em;
-}
-
-/* Target FlexRender content specifically */
-:deep(.flex-render-content) {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 11px;
-    word-break: normal;
-    overflow-wrap: break-word;
-    white-space: normal;
-}
-
-/* Ensure the JSON viewer also uses small monospace */
-.json-viewer {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 11px;
-}
-
-/* Expand rows to take full width */
-tr {
     width: 100%;
-}
-
-/* Improved zebra striping */
-tr:nth-of-type(even) {
-    background-color: rgba(0, 0, 0, 0.02);
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-    .custom-scrollbar {
-        -webkit-overflow-scrolling: touch;
-    }
-
-    th,
-    td {
-        padding: 6px !important;
-    }
-}
-
-/* Apply monospace tabular display to timestamps for better readability */
-[data-column-id="timestamp"] {
-    font-variant-numeric: tabular-nums !important;
-    letter-spacing: -0.01em !important;
-}
-
-/* Additional styles for all columns to ensure proper layout */
-.max-w-none.flex.items-center.gap-1 {
-    white-space: normal;
-    word-break: normal;
-    overflow-wrap: break-word;
-    max-width: 100%;
 }
 </style>
