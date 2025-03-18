@@ -2,13 +2,13 @@
 
 # Build variables
 last_commit := `git rev-parse --short HEAD`
-last_commit_date := `git show -s --format=%ci HEAD | tr " " "_"`
+last_commit_date := `git show -s --format=%ci HEAD`
 version := `git describe --tags --always`
-build_time := `date +"%Y-%m-%d_%H:%M:%S_%z"`
+build_time := `date +"%Y-%m-%d %H:%M:%S %z"`
 build_info := version + " (Commit: " + last_commit_date + " (" + last_commit + "), Build: " + build_time + ")"
 
-# Build flags
-ldflags := "-s -w -X main.version=" + version + " -X main.commit=" + last_commit + " -X main.commitDate=" + last_commit_date + " -X main.buildTime=" + build_time
+# Build flags - properly escaped
+ldflags := "-s -w -X main.buildString=\"" + build_info + "\""
 
 # Binary output
 bin := "bin/logchef.bin"
@@ -26,7 +26,7 @@ build: build-ui build-backend
 # Build only the backend
 build-backend:
     @echo "Building backend..."
-    CGO_ENABLED=0 go build -o ../{{bin}} -ldflags {{ldflags}} ./cmd/server
+    CGO_ENABLED=0 go build -o ../{{bin}} -ldflags='{{ldflags}}' ./cmd/server
 
 # Build only the frontend
 build-ui:
