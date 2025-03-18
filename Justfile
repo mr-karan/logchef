@@ -8,11 +8,7 @@ build_time := `date +"%Y-%m-%d %H:%M:%S %z"`
 build_info := version + " (Commit: " + last_commit_date + " (" + last_commit + "), Build: " + build_time + ")"
 
 # Build flags
-ldflags := "-s -w " + 
-           "-X main.version=" + version + " " +
-           "-X main.commit=" + last_commit + " " +
-           "-X main.commitDate=" + last_commit_date + " " +
-           "-X main.buildTime=" + build_time
+ldflags := "-s -w -X main.version=" + version + " -X main.commit=" + last_commit + " -X main.commitDate=" + last_commit_date + " -X main.buildTime=" + build_time
 
 # Binary output
 bin := "bin/logchef.bin"
