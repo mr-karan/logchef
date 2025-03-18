@@ -4,6 +4,7 @@ import {
   type RouteRecordRaw,
 } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { error } from "@/utils/debug";
 
 const routes: RouteRecordRaw[] = [
   {
@@ -41,7 +42,11 @@ const routes: RouteRecordRaw[] = [
       {
         path: "explore",
         name: "LogExplorer",
-        component: () => import("@/views/explore/LogExplorer.vue"),
+        component: () => import("@/views/explore/LogExplorer.vue")
+          .catch(err => {
+            error("Router", "Failed to load LogExplorer component", err);
+            return import("@/views/error/ComponentLoadError.vue");
+          }),
         meta: { title: "Log Explorer" },
       },
       {
@@ -128,7 +133,11 @@ const routes: RouteRecordRaw[] = [
       {
         path: "teams",
         name: "Teams",
-        component: () => import("@/views/access/teams/TeamsList.vue"),
+        component: () => import("@/views/access/teams/TeamsList.vue")
+          .catch(err => {
+            error("Router", "Failed to load TeamsList component", err);
+            return import("@/views/error/ComponentLoadError.vue");
+          }),
         meta: { title: "Teams" },
       },
       {
