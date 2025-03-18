@@ -128,28 +128,16 @@ func New(opts Options) (*DB, error) {
 		}
 	}()
 
-	// Configure connection pool with more conservative settings to prevent memory issues
-	// Limit the number of connections to reduce chance of memory/resource issues
-	maxOpenConns := 5
-	if opts.Config.MaxOpenConns > 0 && opts.Config.MaxOpenConns < maxOpenConns {
-		maxOpenConns = opts.Config.MaxOpenConns
-	}
-	db.SetMaxOpenConns(maxOpenConns)
-
-	// Keep fewer idle connections
-	maxIdleConns := 2
-	if opts.Config.MaxIdleConns > 0 && opts.Config.MaxIdleConns < maxIdleConns {
-		maxIdleConns = opts.Config.MaxIdleConns
-	}
-	db.SetMaxIdleConns(maxIdleConns)
-
+	// Configure connection pool with conservative settings to prevent memory issues
+	db.SetMaxOpenConns(5)  // Limit connections to reduce memory/resource issues
+	db.SetMaxIdleConns(2)  // Keep fewer idle connections
+	
 	// Set shorter connection lifetimes to prevent stale connections
-	// This helps avoid memory leaks in the SQLite driver
 	db.SetConnMaxLifetime(30 * time.Minute)
 	db.SetConnMaxIdleTime(5 * time.Minute)
 
 	// Set pragmas for optimal performance
-	if err := setPragmas(db, opts.Config.BusyTimeout); err != nil {
+	if err := setPragmas(db); err != nil {
 		log.Error("failed to set pragmas",
 			"error", err,
 		)
@@ -206,9 +194,9 @@ func New(opts Options) (*DB, error) {
 }
 
 // setPragmas sets SQLite pragmas for optimal performance and reliability
-func setPragmas(db *sqlx.DB, busyTimeout int) error {
+func setPragmas(db *sqlx.DB) error {
 	pragmas := []string{
-		fmt.Sprintf("PRAGMA busy_timeout = %d", busyTimeout),
+		"PRAGMA busy_timeout = 5000",
 		"PRAGMA journal_mode = WAL",
 		"PRAGMA journal_size_limit = 5000000",
 		"PRAGMA synchronous = NORMAL",

@@ -11,16 +11,6 @@ frontend_url = "http://localhost:5173"  # Development frontend URL, empty in pro
 [sqlite]
 # Path to the SQLite database file
 path = "local.db"
-# Maximum number of open connections
-max_open_conns = 25
-# Maximum number of idle connections
-max_idle_conns = 5
-# Maximum connection lifetime in minutes
-conn_max_lifetime = 60
-# Maximum connection idle time in minutes
-conn_max_idle_time = 30
-# Busy timeout in milliseconds
-busy_timeout = 5000
 
 # OpenID Connect configuration
 [oidc]
