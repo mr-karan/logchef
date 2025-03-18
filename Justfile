@@ -26,7 +26,7 @@ build: build-ui build-backend
 # Build only the backend
 build-backend:
     @echo "Building backend..."
-    CGO_ENABLED=0 go build -o ../{{bin}} -ldflags={{ldflags}} ./cmd/server
+    CGO_ENABLED=0 go build -o ../{{bin}} -ldflags "{{ldflags}}" ./cmd/server
 
 # Build only the frontend
 build-ui:
