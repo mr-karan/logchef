@@ -29,12 +29,7 @@ type ServerConfig struct {
 
 // SQLiteConfig contains SQLite database settings
 type SQLiteConfig struct {
-	Path            string        `koanf:"path"`
-	MaxOpenConns    int           `koanf:"max_open_conns"`
-	MaxIdleConns    int           `koanf:"max_idle_conns"`
-	ConnMaxLifetime time.Duration `koanf:"conn_max_lifetime"`
-	ConnMaxIdleTime time.Duration `koanf:"conn_max_idle_time"`
-	BusyTimeout     int           `koanf:"busy_timeout"`
+	Path string `koanf:"path"`
 }
 
 // ClickhouseConfig contains Clickhouse database settings
@@ -87,10 +82,6 @@ func Load(path string) (*Config, error) {
 	if len(cfg.Auth.AdminEmails) == 0 {
 		return nil, fmt.Errorf("admin_emails is required in auth configuration")
 	}
-
-	// Convert minute values to time.Duration
-	cfg.SQLite.ConnMaxLifetime = time.Duration(cfg.SQLite.ConnMaxLifetime) * time.Minute
-	cfg.SQLite.ConnMaxIdleTime = time.Duration(cfg.SQLite.ConnMaxIdleTime) * time.Minute
 
 	return &cfg, nil
 }
