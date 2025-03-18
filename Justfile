@@ -7,8 +7,8 @@ version := `git describe --tags --always`
 build_time := `date +"%Y-%m-%d %H:%M:%S %z"`
 build_info := version + " (Commit: " + last_commit_date + " (" + last_commit + "), Build: " + build_time + ")"
 
-# Build flags - properly escaped
-ldflags := "-s -w -X main.buildString=\"" + build_info + "\""
+# Build flags
+ldflags := "-s -w -X 'main.buildString=" + build_info + "'"
 
 # Binary output
 bin := "bin/logchef.bin"
@@ -26,7 +26,7 @@ build: build-ui build-backend
 # Build only the backend
 build-backend:
     @echo "Building backend..."
-    CGO_ENABLED=0 go build -o ../{{bin}} -ldflags='{{ldflags}}' ./cmd/server
+    CGO_ENABLED=0 go build -o ../{{bin}} -ldflags={{ldflags}} ./cmd/server
 
 # Build only the frontend
 build-ui:
