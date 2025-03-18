@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"os"
+	"strings"
 
 	"github.com/mr-karan/logchef/pkg/logger"
 
@@ -30,16 +31,21 @@ func main() {
 	log.Info("starting logchef", 
 		"version", version,
 		"commit", commit,
-		"commitDate", commitDate,
-		"buildTime", buildTime)
+		"commitDate", formatBuildString(commitDate),
+		"buildTime", formatBuildString(buildTime))
 
 	// Run the application with the initialized logger
 	if err := app.Run(app.Options{
 		ConfigPath: *configPath,
 		WebFS:      getWebFS(),
-		BuildInfo:  version + " (Commit: " + commitDate + " (" + commit + "), Build: " + buildTime + ")",
+		BuildInfo:  version + " (Commit: " + formatBuildString(commitDate) + " (" + commit + "), Build: " + formatBuildString(buildTime) + ")",
 	}); err != nil {
 		log.Error("application error", "error", err)
 		os.Exit(1)
 	}
+}
+
+// formatBuildString replaces underscores with spaces for display
+func formatBuildString(s string) string {
+	return strings.ReplaceAll(s, "_", " ")
 }
