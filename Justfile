@@ -26,7 +26,7 @@ build: build-ui build-backend
 # Build only the backend
 build-backend:
     @echo "Building backend..."
-    CGO_ENABLED=0 go build -o ../{{bin}} -ldflags "{{ldflags}}" ./cmd/server
+    CGO_ENABLED=0 go build -o {{bin}} -ldflags "{{ldflags}}" ./cmd/server
 
 # Build only the frontend
 build-ui:
@@ -38,12 +38,12 @@ build-ui:
 # Run the server with config
 run: build
     @echo "Running server with config {{config}}..."
-    ../{{bin}} -config {{config}}
+    {{bin}} -config {{config}}
 
 # Run only the backend server
 run-backend: build-backend
     @echo "Running backend server with config {{config}}..."
-    ../{{bin}} -config {{config}}
+    {{bin}} -config {{config}}
 
 # Dev mode - run frontend with hot reload
 run-frontend:
