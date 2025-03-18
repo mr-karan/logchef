@@ -11,7 +11,7 @@ build_info := version + " (Commit: " + last_commit_date + " (" + last_commit + "
 ldflags := "-X 'main.buildString=" + build_info + "'"
 
 # Binary output
-bin := "bin/server"
+bin := "bin/logchef.bin"
 
 # Config file - can be overridden with 'just CONFIG=other.toml target'
 config := env_var_or_default('CONFIG', 'config.toml')
@@ -44,6 +44,10 @@ run: build
 run-backend: build-backend
     @echo "Running backend server with config {{config}}..."
     ../{{bin}} -config {{config}}
+
+# Dev mode - run frontend with hot reload
+run-frontend:
+    cd frontend && pnpm dev
 
 # Clean build artifacts
 clean:
@@ -89,24 +93,8 @@ tidy:
 # Run all checks
 check: fmt vet lint test
 
-# Dev mode - run backend with hot reload
-dev-backend:
-    @echo "Running backend in dev mode..."
-    air -c .air.toml
-
-# Dev mode - run frontend with hot reload
-dev-frontend:
-    cd frontend && pnpm dev
-
 # Run frontend and backend in dev mode (requires tmux)
 dev:
-    tmux new-session -d -s logchef-dev 'just dev-backend'
-    tmux split-window -h 'just dev-frontend'
-    tmux -2 attach-session -d
-
-# Install development tools
-setup:
-    @echo "Installing development tools..."
-    go install github.com/cosmtrek/air@latest
-    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-    cd frontend && pnpm install
+    tmux new-session -d -s logchef-dev 'just run-backend'
+    tmux split-window -h 'just run-frontend'
+    tmux -2 attach-session -d -t logchef-dev
