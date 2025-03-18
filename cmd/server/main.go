@@ -11,7 +11,10 @@ import (
 
 var (
 	// Build information, set by linker flags
-	buildString = "unknown"
+	version    = "unknown"
+	commit     = "unknown"
+	commitDate = "unknown"
+	buildTime  = "unknown"
 )
 
 func main() {
@@ -24,13 +27,17 @@ func main() {
 	log := logger.New(false)
 
 	// Log startup information
-	log.Info("starting logchef", "buildInfo", buildString)
+	log.Info("starting logchef", 
+		"version", version,
+		"commit", commit,
+		"commitDate", commitDate,
+		"buildTime", buildTime)
 
 	// Run the application with the initialized logger
 	if err := app.Run(app.Options{
 		ConfigPath: *configPath,
 		WebFS:      getWebFS(),
-		BuildInfo:  buildString,
+		BuildInfo:  version + " (Commit: " + commitDate + " (" + commit + "), Build: " + buildTime + ")",
 	}); err != nil {
 		log.Error("application error", "error", err)
 		os.Exit(1)
