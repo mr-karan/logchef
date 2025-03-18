@@ -95,8 +95,8 @@ check: fmt vet lint test
 
 # Run frontend, backend, and infrastructure in dev mode (requires tmux)
 dev:
-    tmux new-session -d -s logchef-dev 'docker compose up'
-    tmux split-window -v 'just run-backend'
-    tmux split-window -h 'just run-frontend'
+    tmux new-session -d -s logchef-dev 'cd deploy && docker compose up; exec bash'
+    tmux split-window -h 'just run-frontend; exec bash'
+    tmux split-window -v 'just run-backend; exec bash'
     tmux select-pane -t 0
     tmux -2 attach-session -d -t logchef-dev
