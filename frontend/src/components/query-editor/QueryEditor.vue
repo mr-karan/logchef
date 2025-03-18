@@ -69,7 +69,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, shallowRef, nextTick, watch, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, shallowRef, nextTick, watch, onMounted, onBeforeUnmount, defineExpose } from "vue";
 import * as monaco from "monaco-editor";
 import { useDark } from "@vueuse/core";
 import { VueMonacoEditor } from "@guolao/vue-monaco-editor";
@@ -552,12 +552,8 @@ function setActiveTab(tab: string) {
     // Update exploreStore activeMode to ensure consistency
     exploreStore.setActiveMode('sql');
 
-    // Check if we have a saved SQL query in the store
-    if (exploreStore.rawSql) {
-      sqlCode.value = exploreStore.rawSql;
-      code.value = exploreStore.rawSql;
-    } else if (logchefQLCode.value) {
-      // Only generate SQL from LogchefQL if we don't have a saved SQL query
+    // CHANGED: Always prioritize generating SQL from LogchefQL if available
+    if (logchefQLCode.value && logchefQLCode.value.trim()) {
       try {
         // Use our QueryBuilder to generate SQL from LogchefQL WITH time filter
         const result = QueryBuilder.buildSqlFromLogchefQL(logchefQLCode.value, {
@@ -604,7 +600,13 @@ function setActiveTab(tab: string) {
         code.value = sqlCode.value;
         exploreStore.setRawSql(sqlCode.value);
       }
-    } else if (!sqlCode.value) {
+    } 
+    // Only use stored SQL if we don't have LogchefQL to convert
+    else if (exploreStore.rawSql) {
+      sqlCode.value = exploreStore.rawSql;
+      code.value = exploreStore.rawSql;
+    } 
+    else if (!sqlCode.value) {
       // If no LogchefQL code and no SQL code, use default query
       sqlCode.value = QueryBuilder.getDefaultSQLQuery({
         tableName: props.tableName,
@@ -1496,6 +1498,13 @@ const activeTabValue = computed({
       setActiveTab('logchefql');
     }
   }
+});
+
+// Expose necessary properties and methods to parent components
+defineExpose({
+  code, // Current editor content
+  activeTab, // Current active tab
+  submitQuery // Submit method
 });
 
 const handleQueryChange = (data: any) => {

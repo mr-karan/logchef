@@ -1,4 +1,4 @@
-import type { ColumnDef } from "@tanstack/vue-table";
+import type { ColumnDef, Column } from "@tanstack/vue-table";
 import { formatTimestamp } from "@/lib/utils";
 import { h } from "vue";
 import get from "lodash/get";
@@ -26,6 +26,21 @@ export function createColumns(
 
   return sortedColumns.map((col) => ({
     id: col.name,
+    // Set width classes for different column types
+    meta: {
+      className: col.name === timestampField ? 'timestamp-column' : 
+              (col.name === "severity" || col.name === "severity_text") ? 'severity-column' : 
+              (col.name === "message" || col.name === "log" || col.name === "msg" || col.name === "content") ? 'message-column' : 'default-column'
+    },
+    // Enable column resizing with sensible defaults based on column type
+    enableResizing: true,
+    size: col.name === timestampField ? 180 : 
+          (col.name === "severity" || col.name === "severity_text") ? 110 : 
+          (col.name === "message" || col.name === "log" || col.name === "msg" || col.name === "content") ? 500 : 200,
+    minSize: col.name === timestampField ? 120 : 
+             (col.name === "severity" || col.name === "severity_text") ? 80 : 
+             (col.name === "message" || col.name === "log" || col.name === "msg" || col.name === "content") ? 200 : 80,
+    maxSize: 1000,
     // Use accessor function instead of accessorKey for nested properties
     accessorFn: (row) => {
       // Ensure we get the correct value for this specific column
@@ -60,24 +75,52 @@ export function createColumns(
 
       // Special handling for timestamp column
       if (col.name === timestampField) {
+        const formattedTimestamp = formatTimestamp(value as string);
         return h(
-          "div",
-          { class: "flex-render-content" },
-          formatTimestamp(value as string)
+          "span",
+          { 
+            class: "flex-render-content font-mono text-[11px]"
+          },
+          formattedTimestamp
         );
       }
 
-      // Handle objects by converting to JSON string
+      // Handle objects by converting to JSON string with proper formatting
       if (typeof value === "object") {
-        return h(
-          "div",
-          { class: "flex-render-content" },
-          JSON.stringify(value)
-        );
+        try {
+          // Try to format the JSON nicely with indentation
+          const jsonString = typeof value === 'object' && value !== null
+            ? JSON.stringify(value, null, 2)
+            : JSON.stringify(value);
+          
+          return h(
+            "span",
+            { 
+              class: "flex-render-content json-content font-mono text-[11px]"
+            },
+            jsonString
+          );
+        } catch (err) {
+          // Fallback to simple string if there's an error
+          return h(
+            "span",
+            { 
+              class: "flex-render-content"
+            },
+            String(value)
+          );
+        }
       }
 
-      // Default to string representation
-      return h("div", { class: "flex-render-content" }, String(value));
+      // Default to string representation with ellipsis support
+      const stringValue = String(value);
+      return h(
+        "span", 
+        { 
+          class: "flex-render-content font-mono text-[11px]"
+        }, 
+        stringValue
+      );
     },
     // Enable sorting for all columns
     enableSorting: true,

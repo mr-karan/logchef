@@ -39,10 +39,11 @@ api.interceptors.response.use(
       const authStore = useAuthStore();
       await authStore.clearState();
 
-      // Get current path for redirect
-      const currentPath = window.location.pathname + window.location.search;
+      // Get current path for redirect, including hash if present
+      const currentPath = window.location.pathname + window.location.search + 
+        (window.location.hash ? window.location.hash : '');
 
-      // Don't show toast for auth pages
+      // Don't show toast or redirect if already on login page
       if (!window.location.pathname.includes("/login")) {
         // Create a custom error object with the specific message and error type
         const sessionError = {
@@ -53,9 +54,11 @@ api.interceptors.response.use(
         showErrorToast(sessionError);
       }
 
+      // Redirect to login with the current path as redirect parameter
       router.push({
         name: "Login",
         query: { redirect: currentPath },
+        replace: true // Replace current history entry to avoid navigation issues after login
       });
       return Promise.reject(error);
     }

@@ -80,6 +80,13 @@ const isChangingTeam = ref(false)
 const isChangingSource = ref(false)
 const urlError = ref<string | null>(null)
 
+// Add a new computed property to check if we can execute the query
+const canExecuteQuery = computed(() => {
+  return exploreStore.sourceId > 0 && 
+         teamsStore.currentTeamId > 0 && 
+         hasValidSource.value;
+});
+
 // Helper function to convert CalendarDateTime to timestamp
 const getTimestampFromCalendarDate = (date?: any): number => {
   if (!date) return Math.floor(Date.now() / 1000);
@@ -105,7 +112,12 @@ const activeSourceTableName = computed(() => {
   if (sourceDetails.value?.connection) {
     return `${sourceDetails.value.connection.database}.${sourceDetails.value.connection.table_name}`;
   }
-  return 'unknown.unknown'; // Default fallback
+  return ''; // Empty string instead of 'unknown.unknown'
+});
+
+// Check if we have a valid source for querying
+const hasValidSource = computed(() => {
+  return !!sourceDetails.value?.connection;
 });
 
 // Loading and empty states using the centralized loading states
@@ -341,9 +353,6 @@ async function setupFromUrl() {
 
         // Fetch source details with debounce to prevent race conditions
         console.log(`Fetching details for source ID ${sourceId}`);
-
-        // Reset the loadAttempted set to ensure we can load this source
-        sourceDetailsLoadAttempted.value = new Set();
 
         // Wrap in try/catch since we want to continue even if this fails
         try {
@@ -831,6 +840,17 @@ watch(
 
 // Handle query submission from either mode
 const handleQuerySubmit = async (data: any) => {
+  // Check if we have a valid source before proceeding
+  if (!hasValidSource.value) {
+    toast({
+      title: 'Source Not Ready',
+      description: 'Please wait for source details to load or select a valid source.',
+      variant: 'warning',
+      duration: TOAST_DURATION.WARNING,
+    });
+    return;
+  }
+  
   // Handle both cases:
   // 1. Direct invocation from Run button with mode string
   // 2. Submission from QueryEditor with {query, mode} object
@@ -840,16 +860,34 @@ const handleQuerySubmit = async (data: any) => {
   if (typeof data === 'string') {
     // Called from Run button with mode string
     mode = data;
-    // Ensure we always have a string even if store values are undefined
-    if (mode === 'logchefql') {
-      queryText = exploreStore.logchefqlCode || '';
+    
+    // Get current editor content directly when Run button is clicked
+    // This ensures we use the latest content, not what might be in the store
+    if (queryEditorRef.value) {
+      const currentEditorContent = queryEditorRef.value.code || '';
+      
+      // Update both local state and store
+      if (mode === 'logchefql') {
+        logchefQuery.value = currentEditorContent;
+        exploreStore.setLogchefqlCode(currentEditorContent);
+        queryText = currentEditorContent;
+      } else {
+        sqlQuery.value = currentEditorContent;
+        exploreStore.setRawSql(currentEditorContent);
+        queryText = currentEditorContent;
+      }
     } else {
-      // Handle case where rawSql might be an object
-      queryText = typeof exploreStore.rawSql === 'string'
-        ? exploreStore.rawSql
-        : (typeof exploreStore.rawSql === 'object' && exploreStore.rawSql !== null && 'sql' in exploreStore.rawSql)
-          ? (exploreStore.rawSql as any).sql || ''
-          : '';
+      // Fallback to store values if editor ref isn't available
+      if (mode === 'logchefql') {
+        queryText = exploreStore.logchefqlCode || '';
+      } else {
+        // Handle case where rawSql might be an object
+        queryText = typeof exploreStore.rawSql === 'string'
+          ? exploreStore.rawSql
+          : (typeof exploreStore.rawSql === 'object' && exploreStore.rawSql !== null && 'sql' in exploreStore.rawSql)
+            ? (exploreStore.rawSql as any).sql || ''
+            : '';
+      }
     }
   } else {
     // Called from QueryEditor with {query, mode} object
@@ -1198,13 +1236,14 @@ onMounted(async () => {
       logchefQuery.value = exploreStore.logchefqlCode || '';
       sqlQuery.value = exploreStore.rawSql || '';
 
-      // Step 4: Execute default query only after everything is initialized
+      // Step 4: Execute default query only after everything is initialized and source details are loaded
       console.log("Step 4: Executing default query if possible");
 
       // Use nextTick to ensure component is fully mounted
       nextTick(async () => {
-        if (exploreStore.canExecuteQuery) {
-          console.log("Executing default query");
+        // Wait for source details to be available
+        if (hasValidSource.value && exploreStore.sourceId > 0 && teamsStore.currentTeamId > 0) {
+          console.log("Source details loaded, executing default query");
           try {
             await handleQuerySubmit(queryMode.value);
           } catch (queryError) {
@@ -1216,6 +1255,8 @@ onMounted(async () => {
               duration: TOAST_DURATION.ERROR,
             });
           }
+        } else {
+          console.log("Waiting for valid source details before executing query");
         }
       });
     }
@@ -1394,7 +1435,7 @@ onBeforeUnmount(() => {
 
         <!-- Compact action buttons -->
         <Button variant="default" size="sm" class="h-8 px-3 flex items-center gap-1"
-          :disabled="isExecutingQuery || !exploreStore.canExecuteQuery" @click="handleQuerySubmit(queryMode)">
+          :disabled="isExecutingQuery || !canExecuteQuery" @click="handleQuerySubmit(queryMode)">
           <Play class="h-3.5 w-3.5" />
           <span>{{ isExecutingQuery ? 'Running...' : 'Run' }}</span>
         </Button>

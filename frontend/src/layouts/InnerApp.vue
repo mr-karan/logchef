@@ -317,8 +317,8 @@ const settingsNavItems = [
       </Sidebar>
 
       <SidebarInset class="flex flex-col flex-1 min-w-0 overflow-hidden h-screen">
-        <main class="flex-1 overflow-hidden min-w-0 h-full">
-          <div class="h-full px-3 py-3 min-w-0 overflow-hidden flex flex-col">
+        <main class="flex-1 min-w-0 h-full flex flex-col">
+          <div class="flex-1 px-3 py-3 min-w-0 overflow-y-auto">
             <router-view />
           </div>
         </main>
