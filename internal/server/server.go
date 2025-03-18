@@ -186,7 +186,15 @@ func (s *Server) setupRoutes() {
 	// Handle 404 for API routes
 	s.app.Use("/api/*", s.notFoundHandler)
 
-	// Serve frontend static files
+	// Asset handling with proper MIME types
+	s.app.Use("/assets/*", filesystem.New(filesystem.Config{
+		Root:       s.fs,
+		PathPrefix: "assets",
+		Browse:     false,
+		MaxAge:     86400, // Cache assets for one day
+	}))
+
+	// For all other routes, serve the SPA index.html
 	s.app.Use("/", filesystem.New(filesystem.Config{
 		Root:         s.fs,
 		Browse:       false,
