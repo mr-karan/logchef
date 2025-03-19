@@ -43,8 +43,19 @@ api.interceptors.response.use(
       const currentPath = window.location.pathname + window.location.search + 
         (window.location.hash ? window.location.hash : '');
 
-      // Don't show toast or redirect if already on login page
-      if (!window.location.pathname.includes("/login")) {
+      // Check if we're already on the login page (including /auth/login pattern)
+      const isOnLoginPage = window.location.pathname.includes("/auth/login") || 
+                          window.location.pathname.includes("/login") || 
+                          router.currentRoute.value.name === "Login";
+      
+      // Check if this is the initial session check or a later API call
+      const isInitialSessionCheck = error.config?.url === "/auth/session" && 
+                                  !sessionStorage.getItem("hadPreviousSession");
+      
+      // Only show the toast if:
+      // 1. We're not on the login page already
+      // 2. This isn't the first session check when the app loads
+      if (!isOnLoginPage && !isInitialSessionCheck) {
         // Create a custom error object with the specific message and error type
         const sessionError = {
           status: "error",

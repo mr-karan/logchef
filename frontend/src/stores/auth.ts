@@ -42,15 +42,18 @@ export const useAuthStore = defineStore("auth", () => {
       onSuccess: (response) => {
         state.data.value.user = response.user;
         state.data.value.session = response.session;
+        // Mark that we've had a successful session for future reference
+        sessionStorage.setItem("hadPreviousSession", "true");
         console.log("Auth initialized successfully:", {
           user: user.value,
           isAuthenticated: isAuthenticated.value,
         });
       },
-      onError: () => {
+      onError: (error) => {
         // Handle session not found gracefully
         clearState();
-        console.log("No active session found");
+        // Log error for diagnostic purposes but don't show to user for initial load
+        console.log("No active session found", error);
       },
     });
 
@@ -64,6 +67,12 @@ export const useAuthStore = defineStore("auth", () => {
   function clearState() {
     state.data.value.user = null;
     state.data.value.session = null;
+    
+    // On manual logout, we should also clear the session flag
+    // but we don't do this on auth failures to distinguish between first visit and actual expiry
+    if (state.data.value.isInitialized) {
+      sessionStorage.removeItem("hadPreviousSession");
+    }
   }
 
   // Start OIDC login flow
