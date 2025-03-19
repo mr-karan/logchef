@@ -10,17 +10,6 @@ import { error } from "@/utils/debug";
 import ComponentLoadError from "@/views/error/ComponentLoadError.vue";
 
 /**
- * Helper function for consistent lazy-loading of components with error handling
- */
-const lazyLoad = (componentPath: string) => {
-  return () =>
-    import(`@/views/${componentPath}`).catch((err) => {
-      error("Router", `Failed to load component: ${componentPath}`, err);
-      return { default: ComponentLoadError };
-    });
-};
-
-/**
  * Route definitions
  */
 const routes: RouteRecordRaw[] = [
@@ -36,11 +25,10 @@ const routes: RouteRecordRaw[] = [
       {
         path: "login",
         name: "Login",
-        component: () =>
-          import("@/views/auth/Login.vue").catch((err) => {
-            error("Router", "Failed to load Login component", err);
-            return { default: ComponentLoadError };
-          }),
+        component: () => import("@/views/auth/Login.vue").catch(err => {
+          error("Router", "Failed to load Login component", err);
+          return { default: ComponentLoadError };
+        }),
         meta: {
           title: "Login",
           public: true,
@@ -53,11 +41,10 @@ const routes: RouteRecordRaw[] = [
   // Logs Section
   {
     path: "/logs",
-    component: () =>
-      import("@/views/explore/LogsLayout.vue").catch((err) => {
-        error("Router", "Failed to load LogsLayout component", err);
-        return { default: ComponentLoadError };
-      }),
+    component: () => import("@/views/explore/LogsLayout.vue").catch(err => {
+      error("Router", "Failed to load LogsLayout component", err);
+      return { default: ComponentLoadError };
+    }),
     meta: {
       requiresAuth: true,
     },
@@ -69,30 +56,25 @@ const routes: RouteRecordRaw[] = [
       {
         path: "explore",
         name: "LogExplorer",
-        component: () =>
-          import("@/views/explore/LogExplorer.vue").catch((err) => {
-            error("Router", "Failed to load LogExplorer component", err);
-            return { default: ComponentLoadError };
-          }),
+        component: () => import("@/views/explore/LogExplorer.vue").catch(err => {
+          error("Router", "Failed to load LogExplorer component", err);
+          return { default: ComponentLoadError };
+        }),
         meta: { title: "Log Explorer" },
       },
       {
         path: "saved",
         name: "SavedQueries",
-        component: () =>
-          import("@/views/SavedQueriesView.vue").catch((err) => {
-            error("Router", "Failed to load SavedQueriesView component", err);
-            return { default: ComponentLoadError };
-          }),
+        component: () => import("@/views/SavedQueriesView.vue").catch(err => {
+          error("Router", "Failed to load SavedQueriesView component", err);
+          return { default: ComponentLoadError };
+        }),
         meta: { title: "Saved Queries" },
       },
       // {
       //   path: "history",
       //   name: "QueryHistory",
-      //   component: () => import("@/views/explore/QueryHistory.vue").catch(err => {
-      //     error("Router", "Failed to load QueryHistory component", err);
-      //     return { default: ComponentLoadError };
-      //   }),
+      //   component: () => import("@/views/explore/QueryHistory.vue"),
       //   meta: { title: "Query History" },
       // },
     ],
@@ -110,11 +92,10 @@ const routes: RouteRecordRaw[] = [
   // Sources Section
   {
     path: "/sources",
-    component: () =>
-      import("@/views/sources/SourcesLayout.vue").catch((err) => {
-        error("Router", "Failed to load SourcesLayout component", err);
-        return { default: ComponentLoadError };
-      }),
+    component: () => import("@/views/sources/SourcesLayout.vue").catch(err => {
+      error("Router", "Failed to load SourcesLayout component", err);
+      return { default: ComponentLoadError };
+    }),
     meta: {
       requiresAuth: true,
     },
@@ -126,31 +107,28 @@ const routes: RouteRecordRaw[] = [
       {
         path: "list",
         name: "Sources",
-        component: () =>
-          import("@/views/sources/ManageSources.vue").catch((err) => {
-            error("Router", "Failed to load ManageSources component", err);
-            return { default: ComponentLoadError };
-          }),
+        component: () => import("@/views/sources/ManageSources.vue").catch(err => {
+          error("Router", "Failed to load ManageSources component", err);
+          return { default: ComponentLoadError };
+        }),
         meta: { title: "Sources" },
       },
       {
         path: "new",
         name: "NewSource",
-        component: () =>
-          import("@/views/sources/AddSource.vue").catch((err) => {
-            error("Router", "Failed to load AddSource component", err);
-            return { default: ComponentLoadError };
-          }),
+        component: () => import("@/views/sources/AddSource.vue").catch(err => {
+          error("Router", "Failed to load AddSource component", err);
+          return { default: ComponentLoadError };
+        }),
         meta: { title: "New Source" },
       },
       {
         path: "stats",
         name: "SourceStats",
-        component: () =>
-          import("@/views/sources/SourceStats.vue").catch((err) => {
-            error("Router", "Failed to load SourceStats component", err);
-            return { default: ComponentLoadError };
-          }),
+        component: () => import("@/views/sources/SourceStats.vue").catch(err => {
+          error("Router", "Failed to load SourceStats component", err);
+          return { default: ComponentLoadError };
+        }),
         meta: { title: "Source Stats" },
       },
     ],
@@ -159,11 +137,10 @@ const routes: RouteRecordRaw[] = [
   // Access Section (Admin only)
   {
     path: "/access",
-    component: () =>
-      import("@/views/access/AccessLayout.vue").catch((err) => {
-        error("Router", "Failed to load AccessLayout component", err);
-        return { default: ComponentLoadError };
-      }),
+    component: () => import("@/views/access/AccessLayout.vue").catch(err => {
+      error("Router", "Failed to load AccessLayout component", err);
+      return { default: ComponentLoadError };
+    }),
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
@@ -176,41 +153,37 @@ const routes: RouteRecordRaw[] = [
       {
         path: "users",
         name: "ManageUsers",
-        component: () =>
-          import("@/views/access/users/UsersList.vue").catch((err) => {
-            error("Router", "Failed to load UsersList component", err);
-            return { default: ComponentLoadError };
-          }),
+        component: () => import("@/views/access/users/UsersList.vue").catch(err => {
+          error("Router", "Failed to load UsersList component", err);
+          return { default: ComponentLoadError };
+        }),
         meta: { title: "Users" },
       },
       {
         path: "users/new",
         name: "NewUser",
-        component: () =>
-          import("@/views/access/users/AddUser.vue").catch((err) => {
-            error("Router", "Failed to load AddUser component", err);
-            return { default: ComponentLoadError };
-          }),
+        component: () => import("@/views/access/users/AddUser.vue").catch(err => {
+          error("Router", "Failed to load AddUser component", err);
+          return { default: ComponentLoadError };
+        }),
         meta: { title: "New User" },
       },
       {
         path: "teams",
         name: "Teams",
-        component: () =>
-          import("@/views/access/teams/TeamsList.vue").catch((err) => {
-            error("Router", "Failed to load TeamsList component", err);
-            return { default: ComponentLoadError };
-          }),
+        component: () => import("@/views/access/teams/TeamsList.vue").catch(err => {
+          error("Router", "Failed to load TeamsList component", err);
+          return { default: ComponentLoadError };
+        }),
         meta: { title: "Teams" },
       },
       {
         path: "teams/:id",
         name: "TeamSettings",
-        component: () =>
-          import("@/views/access/teams/TeamSettings.vue").catch((err) => {
-            error("Router", "Failed to load TeamSettings component", err);
-            return { default: ComponentLoadError };
-          }),
+        component: () => import("@/views/access/teams/TeamSettings.vue").catch(err => {
+          error("Router", "Failed to load TeamSettings component", err);
+          return { default: ComponentLoadError };
+        }),
         meta: { title: "Team Settings" },
       },
     ],
@@ -219,11 +192,10 @@ const routes: RouteRecordRaw[] = [
   // Settings Section
   {
     path: "/settings",
-    component: () =>
-      import("@/views/settings/SettingsLayout.vue").catch((err) => {
-        error("Router", "Failed to load SettingsLayout component", err);
-        return { default: ComponentLoadError };
-      }),
+    component: () => import("@/views/settings/SettingsLayout.vue").catch(err => {
+      error("Router", "Failed to load SettingsLayout component", err);
+      return { default: ComponentLoadError };
+    }),
     meta: {
       requiresAuth: true,
     },
@@ -235,11 +207,10 @@ const routes: RouteRecordRaw[] = [
       {
         path: "profile",
         name: "Profile",
-        component: () =>
-          import("@/views/settings/UserProfile.vue").catch((err) => {
-            error("Router", "Failed to load UserProfile component", err);
-            return { default: ComponentLoadError };
-          }),
+        component: () => import("@/views/settings/UserProfile.vue").catch(err => {
+          error("Router", "Failed to load UserProfile component", err);
+          return { default: ComponentLoadError };
+        }),
         meta: { title: "Profile Settings" },
       },
     ],
@@ -249,11 +220,10 @@ const routes: RouteRecordRaw[] = [
   {
     path: "/forbidden",
     name: "Forbidden",
-    component: () =>
-      import("@/views/error/Forbidden.vue").catch((err) => {
-        error("Router", "Failed to load Forbidden component", err);
-        return { default: ComponentLoadError };
-      }),
+    component: () => import("@/views/error/Forbidden.vue").catch(err => {
+      error("Router", "Failed to load Forbidden component", err);
+      return { default: ComponentLoadError };
+    }),
     meta: {
       title: "Access Denied",
       public: true,
@@ -262,11 +232,10 @@ const routes: RouteRecordRaw[] = [
   {
     path: "/:pathMatch(.*)*",
     name: "NotFound",
-    component: () =>
-      import("@/views/error/NotFound.vue").catch((err) => {
-        error("Router", "Failed to load NotFound component", err);
-        return { default: ComponentLoadError };
-      }),
+    component: () => import("@/views/error/NotFound.vue").catch(err => {
+      error("Router", "Failed to load NotFound component", err);
+      return { default: ComponentLoadError };
+    }),
     meta: {
       title: "Not Found",
       public: true,
