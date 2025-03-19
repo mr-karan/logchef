@@ -35,7 +35,6 @@ interface ValidateConnectionRequest extends ConnectionInfo {
 }
 
 interface ConnectionValidationResult {
-    success: boolean;
     message: string;
 }
 
@@ -174,18 +173,15 @@ const validateConnection = async () => {
         const result = await sourcesStore.validateSourceConnection(payload)
 
         if (result.success && result.data) {
-            // Only update validation result if successful
-            if (result.data.success) {
-                validationResult.value = result.data
-                isValidated.value = true
-                // Success toast is still shown here for confirmation to user
-                toast({
-                    title: 'Success',
-                    description: result.data.message,
-                    variant: 'default',
-                    duration: TOAST_DURATION.SUCCESS,
-                })
-            }
+            validationResult.value = result.data
+            isValidated.value = true
+            // Success toast is shown for confirmation to user
+            toast({
+                title: 'Success',
+                description: result.data.message,
+                variant: 'default',
+                duration: TOAST_DURATION.SUCCESS,
+            })
         }
         // Error cases are handled by the store's central error handling
     } catch (error) {
@@ -497,8 +493,8 @@ const handleSubmit = async () => {
                             </Button>
                         </div>
 
-                        <!-- Validation Success Result (only shown for success) -->
-                        <div v-if="validationResult && validationResult.success"
+                        <!-- Validation Success Result -->
+                        <div v-if="validationResult"
                             class="p-3 rounded-md text-sm bg-green-50 text-green-800 border border-green-200">
                             {{ validationResult.message }}
                         </div>

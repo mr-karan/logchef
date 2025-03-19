@@ -151,11 +151,12 @@ func (s *Server) handleValidateSourceConnection(c *fiber.Ctx) error {
 	}
 
 	s.log.Debug("validation result",
-		"success", result.Success,
 		"message", result.Message,
 		"host", req.Host,
 		"database", req.Database,
 	)
+
+	// No need for the if !result.Success check anymore since errors would have been returned above
 	return SendSuccess(c, fiber.StatusOK, result)
 }
 
