@@ -26,6 +26,7 @@ import { useExploreStore } from '@/stores/explore'
 import { useTeamsStore } from '@/stores/teams'
 import { useSourcesStore } from '@/stores/sources'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
+import { useUsersStore } from '@/stores/users'
 import { now, getLocalTimeZone, CalendarDateTime } from '@internationalized/date'
 import { createColumns } from './table/columns'
 import DataTable from './table/data-table.vue'
@@ -140,13 +141,15 @@ const showEmptyState = computed(() => {
          (!sourcesStore.teamSources || sourcesStore.teamSources.length === 0);
 })
 
-// Check if the current user is likely an admin
-// This is a simple check - should be replaced with proper authorization logic
+// Get user store
+const usersStore = useUsersStore()
+
+// Check if the current user is an admin
 const isUserAdmin = computed(() => {
-  // Placeholder for actual admin check logic
-  // In a real app, this would check user roles from auth store
-  // For example: return authStore.currentUser?.roles.includes('admin') || false;
-  return true; // Default to true to allow admin actions in development
+  // Find the current user from the users array
+  // This assumes the first user in the array is the current user
+  // In a real app, you might need a different way to identify the current user
+  return usersStore.users.length > 0 && usersStore.users[0].role === 'admin'
 })
 
 // Selected team name
