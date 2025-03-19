@@ -1,6 +1,7 @@
 -- Create the sources table
 CREATE TABLE IF NOT EXISTS sources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
     _meta_is_auto_created INTEGER NOT NULL CHECK (_meta_is_auto_created IN (0, 1)),
     _meta_ts_field TEXT NOT NULL DEFAULT '_timestamp',
     _meta_severity_field TEXT DEFAULT 'severity_text',
@@ -86,6 +87,7 @@ CREATE TABLE IF NOT EXISTS team_queries (
 -- Create indexes
 CREATE INDEX IF NOT EXISTS idx_sources_created_at ON sources(created_at);
 CREATE INDEX IF NOT EXISTS idx_sources_database_table ON sources(database, table_name);
+CREATE INDEX IF NOT EXISTS idx_sources_name ON sources(name);
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at);

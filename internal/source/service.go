@@ -116,13 +116,14 @@ func (s *Service) GetSource(ctx context.Context, id models.SourceID) (*models.So
 }
 
 // CreateSource creates a new source
-func (s *Service) CreateSource(ctx context.Context, autoCreateTable bool, conn models.ConnectionInfo, description string, ttlDays int, metaTSField string, metaSeverityField string) (*models.Source, error) {
+func (s *Service) CreateSource(ctx context.Context, name string, autoCreateTable bool, conn models.ConnectionInfo, description string, ttlDays int, metaTSField string, metaSeverityField string) (*models.Source, error) {
 	// Validate input
-	if err := s.validator.ValidateSourceCreation(conn, description, ttlDays, metaTSField, metaSeverityField, autoCreateTable); err != nil {
+	if err := s.validator.ValidateSourceCreation(name, conn, description, ttlDays, metaTSField, metaSeverityField, autoCreateTable); err != nil {
 		return nil, err
 	}
 
 	source := &models.Source{
+		Name:              name,
 		MetaIsAutoCreated: autoCreateTable,
 		MetaTSField:       metaTSField,
 		MetaSeverityField: metaSeverityField,

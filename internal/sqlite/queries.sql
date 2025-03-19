@@ -2,19 +2,20 @@
 
 -- name: CreateSource
 -- Create a new source entry
--- $1: _meta_is_auto_created
--- $2: _meta_ts_field
--- $3: _meta_severity_field
--- $4: host
--- $5: username
--- $6: password
--- $7: database
--- $8: table_name
--- $9: description
--- $10: ttl_days
+-- $1: name
+-- $2: _meta_is_auto_created
+-- $3: _meta_ts_field
+-- $4: _meta_severity_field
+-- $5: host
+-- $6: username
+-- $7: password
+-- $8: database
+-- $9: table_name
+-- $10: description
+-- $11: ttl_days
 INSERT INTO sources (
-    _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'));
+    name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'));
 SELECT last_insert_rowid();
 
 -- name: GetSource
@@ -34,19 +35,21 @@ SELECT * FROM sources ORDER BY created_at DESC;
 
 -- name: UpdateSource
 -- Update an existing source
--- $1: _meta_is_auto_created
--- $2: _meta_ts_field
--- $3: _meta_severity_field
--- $4: host
--- $5: username
--- $6: password
--- $7: database
--- $8: table_name
--- $9: description
--- $10: ttl_days
--- $11: id
+-- $1: name
+-- $2: _meta_is_auto_created
+-- $3: _meta_ts_field
+-- $4: _meta_severity_field
+-- $5: host
+-- $6: username
+-- $7: password
+-- $8: database
+-- $9: table_name
+-- $10: description
+-- $11: ttl_days
+-- $12: id
 UPDATE sources
-SET _meta_is_auto_created = ?,
+SET name = ?,
+    _meta_is_auto_created = ?,
     _meta_ts_field = ?,
     _meta_severity_field = ?,
     host = ?,
