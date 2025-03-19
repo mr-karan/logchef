@@ -26,7 +26,6 @@ import { useExploreStore } from '@/stores/explore'
 import { useTeamsStore } from '@/stores/teams'
 import { useSourcesStore } from '@/stores/sources'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
-import { useUsersStore } from '@/stores/users'
 import { now, getLocalTimeZone, CalendarDateTime } from '@internationalized/date'
 import { createColumns } from './table/columns'
 import DataTable from './table/data-table.vue'
@@ -141,16 +140,6 @@ const showEmptyState = computed(() => {
          (!sourcesStore.teamSources || sourcesStore.teamSources.length === 0);
 })
 
-// Get user store
-const usersStore = useUsersStore()
-
-// Check if the current user is an admin
-const isUserAdmin = computed(() => {
-  // Find the current user from the users array
-  // This assumes the first user in the array is the current user
-  // In a real app, you might need a different way to identify the current user
-  return usersStore.users.length > 0 && usersStore.users[0].role === 'admin'
-})
 
 // Selected team name
 const selectedTeamName = computed(() => {
@@ -1331,11 +1320,7 @@ onBeforeUnmount(() => {
         </p>
       </div>
       <div class="flex gap-3">
-        <Button v-if="isUserAdmin" @click="router.push({ name: 'Teams' })">
-          <Plus class="mr-2 h-4 w-4" />
-          Create Team
-        </Button>
-        <Button v-else variant="outline" @click="router.push({ name: 'Home' })">
+        <Button variant="outline" @click="router.push({ name: 'Home' })">
           Return to Dashboard
         </Button>
       </div>
