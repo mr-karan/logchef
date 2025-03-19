@@ -30,18 +30,33 @@ func NewValidator() *Validator {
 }
 
 // ValidateSourceCreation validates source creation parameters
-func (v *Validator) ValidateSourceCreation(conn models.ConnectionInfo, description string, ttlDays int, metaTSField string, metaSeverityField string, autoCreateTable bool) error {
+func (v *Validator) ValidateSourceCreation(name string, conn models.ConnectionInfo, description string, ttlDays int, metaTSField string, metaSeverityField string, autoCreateTable bool) error {
+	// Validate source name
+	if name == "" {
+		return &ValidationError{
+			Field:   "name",
+			Message: "source name is required",
+		}
+	}
+
+	if !isValidTableName(name) {
+		return &ValidationError{
+			Field:   "name",
+			Message: "source name must start with a letter and contain only letters, numbers, and underscores",
+		}
+	}
+
 	// Validate table name
 	if conn.TableName == "" {
 		return &ValidationError{
-			Field:   "TableName",
+			Field:   "table_name",
 			Message: "table name is required",
 		}
 	}
 
 	if !isValidTableName(conn.TableName) {
 		return &ValidationError{
-			Field:   "TableName",
+			Field:   "table_name",
 			Message: "table name must start with a letter and contain only letters, numbers, and underscores",
 		}
 	}

@@ -12,10 +12,11 @@ import (
 
 // CreateSource creates a new source in the database
 func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
-	db.log.Debug("creating source", "database", source.Connection.Database, "table", source.Connection.TableName)
+	db.log.Debug("creating source", "name", source.Name, "database", source.Connection.Database, "table", source.Connection.TableName)
 
 	var id int64
 	err := db.queries.CreateSource.QueryRowContext(ctx,
+		source.Name,
 		source.MetaIsAutoCreated,
 		source.MetaTSField,
 		source.MetaSeverityField,
@@ -39,7 +40,7 @@ func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
 	// Set the auto-generated ID
 	source.ID = models.SourceID(id)
 
-	db.log.Debug("source created", "source_id", source.ID)
+	db.log.Debug("source created", "source_id", source.ID, "name", source.Name)
 	return nil
 }
 
@@ -104,9 +105,10 @@ func (db *DB) ListSources(ctx context.Context) ([]*models.Source, error) {
 
 // UpdateSource updates an existing source
 func (db *DB) UpdateSource(ctx context.Context, source *models.Source) error {
-	db.log.Debug("updating source", "source_id", source.ID, "database", source.Connection.Database, "table", source.Connection.TableName)
+	db.log.Debug("updating source", "source_id", source.ID, "name", source.Name, "database", source.Connection.Database, "table", source.Connection.TableName)
 
 	result, err := db.queries.UpdateSource.ExecContext(ctx,
+		source.Name,
 		source.MetaIsAutoCreated,
 		source.MetaTSField,
 		source.MetaSeverityField,
@@ -153,6 +155,7 @@ func (db *DB) DeleteSource(ctx context.Context, id models.SourceID) error {
 // SourceRow represents a row in the sources table
 type SourceRow struct {
 	ID                int       `db:"id"`
+	Name              string    `db:"name"`
 	MetaIsAutoCreated int       `db:"_meta_is_auto_created"`
 	MetaTSField       string    `db:"_meta_ts_field"`
 	MetaSeverityField string    `db:"_meta_severity_field"`
@@ -171,6 +174,7 @@ type SourceRow struct {
 func mapSourceRowToModel(row *SourceRow) *models.Source {
 	return &models.Source{
 		ID:                models.SourceID(row.ID),
+		Name:              row.Name,
 		MetaIsAutoCreated: row.MetaIsAutoCreated == 1,
 		MetaTSField:       row.MetaTSField,
 		MetaSeverityField: row.MetaSeverityField,

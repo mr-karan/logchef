@@ -40,6 +40,7 @@ interface ConnectionValidationResult {
 }
 
 interface CreateSourcePayload {
+    name: string;
     meta_is_auto_created: boolean;
     meta_ts_field: string;
     meta_severity_field: string;
@@ -51,6 +52,7 @@ interface CreateSourcePayload {
 // Form state
 const tableMode = ref<'create' | 'connect'>('create') // 'create' or 'connect'
 const createTable = computed(() => tableMode.value === 'create')
+const sourceName = ref<string | number>('')
 const host = ref<string | number>('')
 const enableAuth = ref<boolean>(false)
 const username = ref<string | number>('')
@@ -107,7 +109,7 @@ const actualSchema = computed(() => {
 
 // Form validation
 const isValid = computed(() => {
-    if (!host.value || !database.value || !tableName.value) return false
+    if (!sourceName.value || !host.value || !database.value || !tableName.value) return false
     if (enableAuth.value && (!username.value || !password.value)) return false
     return true
 })
@@ -218,6 +220,7 @@ const handleSubmit = async () => {
 
     try {
         const result = await sourcesStore.createSource({
+            name: String(sourceName.value),
             meta_is_auto_created: createTable.value,
             meta_ts_field: String(metaTSField.value),
             meta_severity_field: metaSeverityField.value ? String(metaSeverityField.value) : "",
@@ -258,10 +261,10 @@ const handleSubmit = async () => {
                         <h3 class="text-lg font-medium">Basic Information</h3>
 
                         <div class="grid gap-2">
-                            <Label for="table_name" class="required">Source Name</Label>
-                            <Input id="table_name" v-model="tableName" placeholder="app_logs" required />
+                            <Label for="source_name" class="required">Source Name</Label>
+                            <Input id="source_name" v-model="sourceName" placeholder="app_logs" required />
                             <p class="text-sm text-muted-foreground">
-                                This will be used as the table name in ClickHouse
+                                This will be used as the source name
                             </p>
                         </div>
 
@@ -287,6 +290,14 @@ const handleSubmit = async () => {
                         <div class="grid gap-2">
                             <Label for="database" class="required">Database</Label>
                             <Input id="database" v-model="database" placeholder="logs" required />
+                        </div>
+
+                        <div class="grid gap-2">
+                            <Label for="table_name" class="required">Table Name</Label>
+                            <Input id="table_name" v-model="tableName" placeholder="app_logs" required />
+                            <p class="text-sm text-muted-foreground">
+                                The name of the table in ClickHouse
+                            </p>
                         </div>
 
                         <!-- Auth Toggle -->

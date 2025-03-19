@@ -69,7 +69,7 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 		req.MetaSeverityField = "severity_text" // Default severity field
 	}
 
-	created, err := s.sourceService.CreateSource(c.Context(), req.MetaIsAutoCreated, req.Connection, req.Description, req.TTLDays, req.MetaTSField, req.MetaSeverityField)
+	created, err := s.sourceService.CreateSource(c.Context(), req.Name, req.MetaIsAutoCreated, req.Connection, req.Description, req.TTLDays, req.MetaTSField, req.MetaSeverityField)
 	if err != nil {
 		var validationErr *source.ValidationError
 		if errors.As(err, &validationErr) {

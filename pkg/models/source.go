@@ -17,6 +17,7 @@ type ConnectionInfo struct {
 // Source represents a ClickHouse data source in our system
 type Source struct {
 	ID                SourceID       `db:"id" json:"id"`
+	Name              string         `db:"name" json:"name"`
 	MetaIsAutoCreated bool           `db:"_meta_is_auto_created" json:"_meta_is_auto_created"`
 	MetaTSField       string         `db:"_meta_ts_field" json:"_meta_ts_field"`
 	MetaSeverityField string         `db:"_meta_severity_field" json:"_meta_severity_field"`
@@ -39,6 +40,7 @@ type ConnectionInfoResponse struct {
 // SourceResponse represents a Source for API responses, with sensitive information removed
 type SourceResponse struct {
 	ID                SourceID               `json:"id"`
+	Name              string                 `json:"name"`
 	MetaIsAutoCreated bool                   `json:"_meta_is_auto_created"`
 	MetaTSField       string                 `json:"_meta_ts_field"`
 	MetaSeverityField string                 `json:"_meta_severity_field"`
@@ -56,6 +58,7 @@ type SourceResponse struct {
 func (s *Source) ToResponse() *SourceResponse {
 	return &SourceResponse{
 		ID:                s.ID,
+		Name:              s.Name,
 		MetaIsAutoCreated: s.MetaIsAutoCreated,
 		MetaTSField:       s.MetaTSField,
 		MetaSeverityField: s.MetaSeverityField,
@@ -89,6 +92,7 @@ type SourceHealth struct {
 
 // CreateSourceRequest represents a request to create a new data source
 type CreateSourceRequest struct {
+	Name              string         `json:"name"`
 	MetaIsAutoCreated bool           `json:"meta_is_auto_created"`
 	MetaTSField       string         `json:"meta_ts_field"`
 	MetaSeverityField string         `json:"meta_severity_field"`

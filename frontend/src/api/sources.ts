@@ -17,6 +17,7 @@ interface ConnectionRequestInfo {
 
 export interface Source {
   id: number;
+  name: string;
   _meta_is_auto_created: boolean;
   _meta_ts_field: string;
   _meta_severity_field?: string;
@@ -51,8 +52,10 @@ export interface TeamGroupedQuery {
 }
 
 export interface CreateSourcePayload {
+  name: string;
   meta_is_auto_created: boolean;
   meta_ts_field?: string;
+  meta_severity_field?: string;
   connection: ConnectionRequestInfo;
   description?: string;
   ttl_days: number;
