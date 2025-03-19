@@ -105,25 +105,25 @@ const mainNavItems = [
     icon: ClipboardList,
     url: '/logs/saved',
   },
-  {
-    title: 'Sources',
-    icon: Database,
-    url: '/sources/list',
-    adminOnly: true,
-  },
 ]
 
 const adminNavItems = [
   {
+    title: 'Sources',
+    icon: Database,
+    url: '/management/sources/list',
+    adminOnly: true,
+  },
+  {
     title: 'Users',
     icon: UsersRound,
-    url: '/access/users',
+    url: '/management/users',
     adminOnly: true,
   },
   {
     title: 'Teams',
     icon: Users,
-    url: '/access/teams',
+    url: '/management/teams',
     adminOnly: true,
   },
 ]

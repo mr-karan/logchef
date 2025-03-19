@@ -73,54 +73,9 @@ const routes: RouteRecordRaw[] = [
       },
     ],
   },
-  // Sources Section
+  // Management Section (Admin only)
   {
-    path: "/sources",
-    component: () => import("@/views/sources/SourcesLayout.vue").catch(err => {
-      error("Router", "Failed to load SourcesLayout component", err);
-      return { default: ComponentLoadError };
-    }),
-    meta: {
-      requiresAuth: true,
-    },
-    children: [
-      {
-        path: "",
-        redirect: "list",
-      },
-      {
-        path: "list",
-        name: "Sources",
-        component: () => import("@/views/sources/ManageSources.vue").catch(err => {
-          error("Router", "Failed to load ManageSources component", err);
-          return { default: ComponentLoadError };
-        }),
-        meta: { title: "Sources" },
-      },
-      {
-        path: "new",
-        name: "NewSource",
-        component: () => import("@/views/sources/AddSource.vue").catch(err => {
-          error("Router", "Failed to load AddSource component", err);
-          return { default: ComponentLoadError };
-        }),
-        meta: { title: "New Source" },
-      },
-      {
-        path: "stats",
-        name: "SourceStats",
-        component: () => import("@/views/sources/SourceStats.vue").catch(err => {
-          error("Router", "Failed to load SourceStats component", err);
-          return { default: ComponentLoadError };
-        }),
-        meta: { title: "Source Stats" },
-      },
-    ],
-  },
-
-  // Access Section (Admin only)
-  {
-    path: "/access",
+    path: "/management",
     component: () => import("@/views/access/AccessLayout.vue").catch(err => {
       error("Router", "Failed to load AccessLayout component", err);
       return { default: ComponentLoadError };
@@ -134,6 +89,7 @@ const routes: RouteRecordRaw[] = [
         path: "",
         redirect: "users",
       },
+      // Users Management
       {
         path: "users",
         name: "ManageUsers",
@@ -152,6 +108,7 @@ const routes: RouteRecordRaw[] = [
         }),
         meta: { title: "New User" },
       },
+      // Teams Management
       {
         path: "teams",
         name: "Teams",
@@ -169,6 +126,38 @@ const routes: RouteRecordRaw[] = [
           return { default: ComponentLoadError };
         }),
         meta: { title: "Team Settings" },
+      },
+      // Sources Management
+      {
+        path: "sources",
+        redirect: "sources/list",
+      },
+      {
+        path: "sources/list",
+        name: "Sources",
+        component: () => import("@/views/sources/ManageSources.vue").catch(err => {
+          error("Router", "Failed to load ManageSources component", err);
+          return { default: ComponentLoadError };
+        }),
+        meta: { title: "Sources" },
+      },
+      {
+        path: "sources/new",
+        name: "NewSource",
+        component: () => import("@/views/sources/AddSource.vue").catch(err => {
+          error("Router", "Failed to load AddSource component", err);
+          return { default: ComponentLoadError };
+        }),
+        meta: { title: "New Source" },
+      },
+      {
+        path: "sources/stats",
+        name: "SourceStats",
+        component: () => import("@/views/sources/SourceStats.vue").catch(err => {
+          error("Router", "Failed to load SourceStats component", err);
+          return { default: ComponentLoadError };
+        }),
+        meta: { title: "Source Stats" },
       },
     ],
   },
