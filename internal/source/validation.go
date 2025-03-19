@@ -39,10 +39,10 @@ func (v *Validator) ValidateSourceCreation(name string, conn models.ConnectionIn
 		}
 	}
 
-	if !isValidTableName(name) {
+	if !isValidSourceName(name) {
 		return &ValidationError{
 			Field:   "name",
-			Message: "source name must start with a letter and contain only letters, numbers, and underscores",
+			Message: "source name must not exceed 50 characters and can only contain letters, numbers, spaces, hyphens, and underscores",
 		}
 	}
 
@@ -355,4 +355,32 @@ func isLetter(r rune) bool {
 // isAlphanumericOrUnderscore checks if a character is alphanumeric or underscore
 func isAlphanumericOrUnderscore(r rune) bool {
 	return isLetter(r) || (r >= '0' && r <= '9') || r == '_'
+}
+
+// isValidSourceName checks if the name is valid for use as a source name
+// More relaxed than table name validation - allows spaces, hyphens
+func isValidSourceName(name string) bool {
+	// Check length constraint
+	if len(name) == 0 || len(name) > 50 {
+		return false
+	}
+
+	// Must not be empty and must not have leading/trailing spaces
+	if name == "" || name[0] == ' ' || name[len(name)-1] == ' ' {
+		return false
+	}
+
+	// Check allowed characters
+	for _, r := range name {
+		if !isAllowedInSourceName(r) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isAllowedInSourceName checks if a character is allowed in source names
+func isAllowedInSourceName(r rune) bool {
+	return isLetter(r) || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == ' '
 }

@@ -39,7 +39,7 @@ const handleDelete = (source: Source) => {
 
 const retryLoading = async () => {
     loadingError.value = null
-    const result = await sourcesStore.loadSources(true)
+    const result = await sourcesStore.loadSources()
     if (!result.success && result.error) {
         loadingError.value = result.error
         console.error("Failed to load sources:", result.error)
@@ -106,7 +106,7 @@ const formatDate = (dateString: string) => {
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead class="w-[200px]">Table Name</TableHead>
+                                <TableHead class="w-[200px]">Source Name</TableHead>
                                 <TableHead class="w-[150px]">Table Auto Created</TableHead>
                                 <TableHead class="w-[150px]">Timestamp Column</TableHead>
                                 <TableHead class="w-[300px]">Connection</TableHead>
@@ -119,7 +119,7 @@ const formatDate = (dateString: string) => {
                         <TableBody>
                             <TableRow v-for="source in sourcesStore.sources" :key="source.id">
                                 <TableCell class="font-medium">
-                                    {{ source.connection.table_name }}
+                                    {{ source.name }}
                                     <div v-if="source.description" class="text-sm text-muted-foreground">
                                         {{ source.description }}
                                     </div>
@@ -143,6 +143,10 @@ const formatDate = (dateString: string) => {
                                         <div class="flex items-center space-x-2">
                                             <span class="text-muted-foreground">Database</span>
                                             <span class="font-medium">{{ source.connection.database }}</span>
+                                        </div>
+                                        <div class="flex items-center space-x-2">
+                                            <span class="text-muted-foreground">Table</span>
+                                            <span class="font-medium">{{ source.connection.table_name }}</span>
                                         </div>
                                     </div>
                                 </TableCell>
@@ -174,7 +178,7 @@ const formatDate = (dateString: string) => {
                 <AlertDialogHeader>
                     <AlertDialogTitle>Delete Source</AlertDialogTitle>
                     <AlertDialogDescription class="space-y-2">
-                        <p>Are you sure you want to delete source "{{ sourceToDelete?.connection.table_name }}"?</p>
+                        <p>Are you sure you want to delete source "{{ sourceToDelete?.name }}"?</p>
                         <p class="font-medium text-muted-foreground">
                             Note: This will only remove the source configuration from LogChef. The actual data in
                             Clickhouse will not
