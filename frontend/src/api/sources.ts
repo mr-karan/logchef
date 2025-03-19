@@ -196,9 +196,10 @@ export const sourcesApi = {
       severity_field?: string;
     }
   ) {
-    const response = await api.post<
-      APIResponse<{ success: boolean; message: string }>
-    >("/admin/sources/validate", connectionInfo);
+    const response = await api.post<APIResponse<{ message: string }>>(
+      "/admin/sources/validate",
+      connectionInfo
+    );
     return response.data;
   },
 };

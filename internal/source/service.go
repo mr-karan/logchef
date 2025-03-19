@@ -357,10 +357,10 @@ func (s *Service) ValidateConnection(ctx context.Context, conn models.Connection
 			"host", conn.Host,
 			"database", conn.Database,
 		)
-		return &models.ConnectionValidationResult{
-			Success: false,
+		return nil, &ValidationError{
+			Field:   "connection",
 			Message: "Failed to connect to the database: " + err.Error(),
-		}, nil
+		}
 	}
 	defer client.Close()
 
@@ -375,10 +375,10 @@ func (s *Service) ValidateConnection(ctx context.Context, conn models.Connection
 				"database", conn.Database,
 				"table", conn.TableName,
 			)
-			return &models.ConnectionValidationResult{
-				Success: false,
+			return nil, &ValidationError{
+				Field:   "table_name",
 				Message: fmt.Sprintf("Connection successful, but table '%s' not found or not accessible: %s", conn.TableName, err.Error()),
-			}, nil
+			}
 		}
 	}
 
@@ -389,7 +389,6 @@ func (s *Service) ValidateConnection(ctx context.Context, conn models.Connection
 	)
 
 	return &models.ConnectionValidationResult{
-		Success: true,
 		Message: "Connection successful",
 	}, nil
 }
@@ -404,52 +403,48 @@ func (s *Service) ValidateConnectionWithColumns(ctx context.Context, conn models
 		"severity_field", severityField,
 	)
 
-	// First validate the basic connection
-	result, err := s.ValidateConnection(ctx, conn)
-	if err != nil {
+	// First validate the basic connection - just directly propagate any errors
+	if err := s.validator.ValidateConnection(conn); err != nil {
 		return nil, err
 	}
 
-	if !result.Success {
-		return result, nil
+	// Create a temporary source for validation
+	tempSource := &models.Source{
+		ID:         models.SourceID(-1), // Temporary ID
+		Connection: conn,
 	}
+
+	// Try to connect to the database
+	client, err := s.chDB.CreateTemporaryClient(tempSource)
+	if err != nil {
+		s.log.Error("failed to connect to database",
+			"error", err,
+			"host", conn.Host,
+			"database", conn.Database,
+		)
+		return nil, &ValidationError{
+			Field:   "connection",
+			Message: "Failed to connect to the database: " + err.Error(),
+		}
+	}
+	defer client.Close()
 
 	// If the connection is successful and we're validating an existing table, check column types
 	if conn.TableName != "" && tsField != "" {
-		// Create a temporary source for validation
-		tempSource := &models.Source{
-			ID:         models.SourceID(-1), // Temporary ID
-			Connection: conn,
-		}
-
-		// Try to connect to the database
-		client, err := s.chDB.CreateTemporaryClient(tempSource)
-		if err != nil {
-			return &models.ConnectionValidationResult{
-				Success: false,
-				Message: "Failed to connect to the database: " + err.Error(),
-			}, nil
-		}
-		defer client.Close()
-
 		// Validate column types
 		if err := s.validator.ValidateColumnTypes(ctx, client, conn.Database, conn.TableName, tsField, severityField); err != nil {
 			var validationErr *ValidationError
 			if errors.As(err, &validationErr) {
-				return &models.ConnectionValidationResult{
-					Success: false,
-					Message: validationErr.Message,
-				}, nil
+				return nil, validationErr
 			}
-			return &models.ConnectionValidationResult{
-				Success: false,
+			return nil, &ValidationError{
+				Field:   "columns",
 				Message: "Failed to validate column types: " + err.Error(),
-			}, nil
+			}
 		}
 	}
 
 	return &models.ConnectionValidationResult{
-		Success: true,
 		Message: "Connection and column types validated successfully",
 	}, nil
 }

@@ -18,7 +18,6 @@ import (
 type Client struct {
 	conn       driver.Conn
 	logger     *slog.Logger
-	lastHealth models.SourceHealth
 	queryHooks []QueryHook
 }
 

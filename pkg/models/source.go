@@ -123,6 +123,5 @@ type TeamGroupedQuery struct {
 
 // ConnectionValidationResult represents the result of a connection validation
 type ConnectionValidationResult struct {
-	Success bool   `json:"success"`
 	Message string `json:"message"`
 }

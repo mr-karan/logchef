@@ -275,7 +275,7 @@ export const useSourcesStore = defineStore("sources", () => {
     timestamp_field?: string;
     severity_field?: string;
   }) {
-    return await state.callApi<{ success: boolean; message: string }>({
+    return await state.callApi<{ message: string }>({
       apiCall: () => sourcesApi.validateSourceConnection(connectionInfo),
       showToast: true,
     });
