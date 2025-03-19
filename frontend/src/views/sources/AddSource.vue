@@ -258,63 +258,81 @@ const handleSubmit = async () => {
                 <div class="space-y-6">
                     <!-- Basic Info -->
                     <div class="space-y-4">
-                        <h3 class="text-lg font-medium">Basic Information</h3>
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-lg font-medium">Basic Information</h3>
+                            <div class="text-sm text-muted-foreground">
+                                Define your source details
+                            </div>
+                        </div>
 
                         <div class="grid gap-2">
                             <Label for="source_name" class="required">Source Name</Label>
-                            <Input id="source_name" v-model="sourceName" placeholder="app_logs" required />
+                            <Input id="source_name" v-model="sourceName" placeholder="My Application Logs"
+                                maxlength="50" required />
                             <p class="text-sm text-muted-foreground">
-                                This will be used as the source name
+                                A descriptive name (up to 50 characters) to identify this data source
                             </p>
                         </div>
 
                         <div class="grid gap-2">
                             <Label for="description">Description</Label>
-                            <Textarea id="description" v-model="description" placeholder="Optional description"
-                                rows="2" />
+                            <Textarea id="description" v-model="description"
+                                placeholder="Optional description of what this source contains" rows="2" />
+                            <p class="text-sm text-muted-foreground">
+                                Optional: Add details about what kind of logs this source will contain
+                            </p>
                         </div>
                     </div>
 
                     <!-- Connection Details -->
                     <div class="space-y-4">
-                        <h3 class="text-lg font-medium">Connection Details</h3>
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-lg font-medium">Connection Details</h3>
+                            <div class="text-sm text-muted-foreground">
+                                Configure ClickHouse connection
+                            </div>
+                        </div>
 
                         <div class="grid gap-2">
-                            <Label for="host" class="required">Host</Label>
+                            <Label for="host" class="required">Host and Port</Label>
                             <Input id="host" v-model="host" placeholder="localhost:9000" required />
                             <p class="text-sm text-muted-foreground">
-                                The ClickHouse server host and port
+                                Enter the ClickHouse server host and port in the format host:port (e.g.,
+                                localhost:9000). Port 9000 is the default TCP protocol port used by ClickHouse.
                             </p>
                         </div>
 
-                        <div class="grid gap-2">
-                            <Label for="database" class="required">Database</Label>
-                            <Input id="database" v-model="database" placeholder="logs" required />
-                        </div>
+                        <!-- Database and Table Name side by side -->
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="grid gap-2">
+                                <Label for="database" class="required">Database</Label>
+                                <Input id="database" v-model="database" placeholder="logs" required />
+                            </div>
 
-                        <div class="grid gap-2">
-                            <Label for="table_name" class="required">Table Name</Label>
-                            <Input id="table_name" v-model="tableName" placeholder="app_logs" required />
-                            <p class="text-sm text-muted-foreground">
-                                The name of the table in ClickHouse
-                            </p>
+                            <div class="grid gap-2">
+                                <Label for="table_name" class="required">Table Name</Label>
+                                <Input id="table_name" v-model="tableName" placeholder="app_logs" required />
+                            </div>
                         </div>
+                        <p class="text-sm text-muted-foreground">
+                            The database and table where your logs will be stored in ClickHouse
+                        </p>
 
                         <!-- Auth Toggle -->
                         <div class="space-y-4">
-                            <div class="flex items-center justify-between">
+                            <div class="flex items-center justify-between bg-muted/50 p-3 rounded-md">
                                 <div class="space-y-0.5">
-                                    <Label>Enable Authentication</Label>
+                                    <Label class="text-base">Authentication</Label>
                                     <p class="text-sm text-muted-foreground">
-                                        Use username and password authentication
+                                        Enable if your ClickHouse server requires authentication
                                     </p>
                                 </div>
                                 <Switch :checked="enableAuth" @update:checked="handleAuthToggle" />
                             </div>
 
-                            <!-- Auth Fields -->
+                            <!-- Auth Fields - Only shown when authentication is enabled -->
                             <div v-show="enableAuth"
-                                class="grid gap-4 md:grid-cols-2 animate-in fade-in slide-in-from-top-2">
+                                class="grid gap-4 md:grid-cols-2 border-l-2 border-primary/20 pl-3 animate-in fade-in slide-in-from-top-2">
                                 <div class="grid gap-2">
                                     <Label for="username" class="required">Username</Label>
                                     <Input id="username" v-model="username" placeholder="default"
@@ -329,20 +347,27 @@ const handleSubmit = async () => {
                         </div>
                     </div>
 
-                    <!-- Table Creation Option -->
+                    <!-- Table Configuration Option -->
                     <div class="space-y-4">
-                        <h3 class="text-lg font-medium">Table Configuration</h3>
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-lg font-medium">Table Configuration</h3>
+                            <div class="text-sm text-muted-foreground">
+                                Choose how to handle your log data table
+                            </div>
+                        </div>
 
                         <RadioGroup :model-value="tableMode"
                             @update:model-value="(val) => tableMode = val as 'create' | 'connect'"
                             class="grid grid-cols-[1fr_auto_1fr] items-start gap-4">
                             <!-- Create Table Card -->
-                            <Card :class="{ 'border-primary': tableMode === 'create' }" class="cursor-pointer"
+                            <Card
+                                :class="{ 'border-primary shadow-sm': tableMode === 'create', 'border-muted-foreground/20': tableMode !== 'create' }"
+                                class="cursor-pointer transition-all hover:border-primary/70"
                                 @click="tableMode = 'create' as const">
                                 <CardHeader>
                                     <div class="flex items-center gap-2">
                                         <RadioGroupItem value="create" id="create" />
-                                        <Label for="create" class="cursor-pointer">Create New Table</Label>
+                                        <Label for="create" class="cursor-pointer font-medium">Create New Table</Label>
                                     </div>
                                 </CardHeader>
                                 <CardContent class="space-y-4">
@@ -400,12 +425,15 @@ const handleSubmit = async () => {
                             </div>
 
                             <!-- Connect Table Card -->
-                            <Card :class="{ 'border-primary': tableMode === 'connect' }" class="cursor-pointer"
+                            <Card
+                                :class="{ 'border-primary shadow-sm': tableMode === 'connect', 'border-muted-foreground/20': tableMode !== 'connect' }"
+                                class="cursor-pointer transition-all hover:border-primary/70"
                                 @click="tableMode = 'connect' as const">
                                 <CardHeader>
                                     <div class="flex items-center gap-2">
                                         <RadioGroupItem value="connect" id="connect" />
-                                        <Label for="connect" class="cursor-pointer">Connect Existing Table</Label>
+                                        <Label for="connect" class="cursor-pointer font-medium">Connect Existing
+                                            Table</Label>
                                     </div>
                                 </CardHeader>
                                 <CardContent class="space-y-4">
@@ -449,27 +477,50 @@ const handleSubmit = async () => {
                     </div>
 
                     <!-- Validation Section -->
-                    <div v-if="!createTable" class="space-y-4">
-                        <div class="flex justify-end">
+                    <div v-if="!createTable" class="space-y-4 border-t pt-4">
+                        <div class="flex items-center justify-between">
+                            <div class="text-sm font-medium">Validate Connection</div>
                             <Button type="button" variant="outline" @click="validateConnection"
-                                :disabled="isValidating || isValidated">
-                                {{ isValidated ? 'Validated ✓' : validateButtonText }}
+                                :disabled="isValidating || isValidated" size="sm">
+                                <span v-if="isValidating" class="mr-2">
+                                    <svg class="animate-spin h-4 w-4 text-primary" xmlns="http://www.w3.org/2000/svg"
+                                        fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                            stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor"
+                                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                                        </path>
+                                    </svg>
+                                </span>
+                                <span v-else-if="isValidated" class="mr-2">✓</span>
+                                {{ isValidated ? 'Validated' : validateButtonText }}
                             </Button>
                         </div>
 
                         <!-- Validation Success Result (only shown for success) -->
                         <div v-if="validationResult && validationResult.success"
-                            class="p-3 rounded-md text-sm bg-green-50 text-green-800">
+                            class="p-3 rounded-md text-sm bg-green-50 text-green-800 border border-green-200">
                             {{ validationResult.message }}
                         </div>
                     </div>
                 </div>
 
-                <div class="flex justify-end space-x-4">
+                <div class="flex justify-end space-x-4 border-t pt-6 mt-6">
                     <Button type="button" variant="outline" @click="router.push({ name: 'Sources' })">
                         Cancel
                     </Button>
-                    <Button type="submit" :disabled="isSubmitting || !isValid || (!createTable && !isValidated)">
+                    <Button type="submit" :disabled="isSubmitting || !isValid || (!createTable && !isValidated)"
+                        :class="{ 'opacity-50': !isValid || (!createTable && !isValidated) }" size="lg">
+                        <span v-if="isSubmitting" class="mr-2">
+                            <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                    stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor"
+                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                                </path>
+                            </svg>
+                        </span>
                         {{ submitButtonText }}
                     </Button>
                 </div>
