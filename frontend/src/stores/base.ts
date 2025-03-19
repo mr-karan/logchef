@@ -1,6 +1,7 @@
 import { ref } from "vue";
 import type { Ref } from "vue";
 import { showErrorToast, showSuccessToast } from "@/api/error-handler";
+import type { AxiosError } from "axios";
 
 export interface BaseState<T> {
   data: Ref<T>;
@@ -58,9 +59,11 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
   function stopLoading(key: string): void {
     if (key) {
       loadingStates.value[key] = false;
-      
+
       // Only set isLoading to false if all operations are complete
-      const stillLoading = Object.values(loadingStates.value).some(state => state);
+      const stillLoading = Object.values(loadingStates.value).some(
+        (state) => state
+      );
       if (!stillLoading) {
         isLoading.value = false;
       }
@@ -70,7 +73,10 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
   /**
    * Execute an async function with loading state management
    */
-  async function withLoading<R>(fn: () => Promise<R>, operationKey?: string): Promise<R> {
+  async function withLoading<R>(
+    fn: () => Promise<R>,
+    operationKey?: string
+  ): Promise<R> {
     if (operationKey) {
       startLoading(operationKey);
     } else {
@@ -79,7 +85,7 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
     }
 
     error.value = null;
-    
+
     try {
       return await fn();
     } catch (err) {
@@ -175,8 +181,33 @@ export async function handleApiCall<T>({
     return { success: true, data: response.data };
   } catch (err) {
     // For network errors or other exceptions
-    const errorMsg =
-      errorMessage || (err instanceof Error ? err.message : "Unknown error");
+    let errorMsg = "";
+
+    // Check if this is an axios error with a response containing error details
+    if (err && typeof err === "object" && "isAxiosError" in err) {
+      const axiosErr = err as AxiosError<any>;
+
+      // If the response contains our API error format, use that
+      if (
+        axiosErr.response?.data?.status === "error" &&
+        axiosErr.response?.data?.message
+      ) {
+        errorMsg = axiosErr.response.data.message;
+
+        if (showToast) {
+          // Pass the entire response.data to showErrorToast to get the full context
+          showErrorToast(axiosErr.response.data);
+          onError?.(errorMsg);
+          return { success: false, error: errorMsg };
+        }
+      }
+    }
+
+    // Fallback for other types of errors
+    if (!errorMsg) {
+      errorMsg =
+        errorMessage || (err instanceof Error ? err.message : "Unknown error");
+    }
 
     if (showToast) {
       showErrorToast(err, errorMessage);

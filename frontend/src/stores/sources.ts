@@ -51,7 +51,7 @@ export const useSourcesStore = defineStore("sources", () => {
   async function loadSources() {
     return await state.callApi<Source[]>({
       apiCall: () => sourcesApi.listSources(),
-      operationKey: 'loadSources',
+      operationKey: "loadSources",
       onSuccess: (data) => {
         state.data.value.sources = data;
       },
@@ -262,7 +262,7 @@ export const useSourcesStore = defineStore("sources", () => {
           state.data.value.teamSources = newTeamSources;
         }
       },
-      showToast: false,
+      showToast: true,
     });
   }
 
@@ -277,7 +277,7 @@ export const useSourcesStore = defineStore("sources", () => {
   }) {
     return await state.callApi<{ success: boolean; message: string }>({
       apiCall: () => sourcesApi.validateSourceConnection(connectionInfo),
-      showToast: false,
+      showToast: true,
     });
   }
 
@@ -291,11 +291,13 @@ export const useSourcesStore = defineStore("sources", () => {
     teamSourcesMap,
     sourceStats,
     loadingStates: state.loadingStates,
-    
+
     // Loading state helpers
     isLoadingOperation: state.isLoadingOperation,
-    isLoadingSource: (sourceId: number) => state.isLoadingOperation(`getSource-${sourceId}`),
-    isLoadingTeamSources: (teamId: number) => state.isLoadingOperation(`loadTeamSources-${teamId}`),
+    isLoadingSource: (sourceId: number) =>
+      state.isLoadingOperation(`getSource-${sourceId}`),
+    isLoadingTeamSources: (teamId: number) =>
+      state.isLoadingOperation(`loadTeamSources-${teamId}`),
 
     // Actions
     loadSources,

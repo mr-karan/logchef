@@ -168,55 +168,27 @@ const validateConnection = async () => {
             }
         }
 
-        console.log('Validation payload:', payload)
-
         // Use the sourcesStore instead of direct API call
         const result = await sourcesStore.validateSourceConnection(payload)
 
-        if (result.success) {
-            validationResult.value = result.data
-
+        if (result.success && result.data) {
+            // Only update validation result if successful
             if (result.data.success) {
+                validationResult.value = result.data
                 isValidated.value = true
+                // Success toast is still shown here for confirmation to user
                 toast({
                     title: 'Success',
                     description: result.data.message,
                     variant: 'default',
                     duration: TOAST_DURATION.SUCCESS,
                 })
-            } else {
-                toast({
-                    title: 'Connection Error',
-                    description: result.data.message,
-                    variant: 'destructive',
-                    duration: TOAST_DURATION.ERROR,
-                })
             }
-        } else {
-            console.error('Validation error:', result)
-            validationResult.value = {
-                success: false,
-                message: result.error || 'Failed to validate connection'
-            }
-            toast({
-                title: 'Error',
-                description: result.error || 'Failed to validate connection',
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
-            })
         }
+        // Error cases are handled by the store's central error handling
     } catch (error) {
         console.error('Validation exception:', error)
-        validationResult.value = {
-            success: false,
-            message: 'An unexpected error occurred during validation'
-        }
-        toast({
-            title: 'Error',
-            description: 'Failed to validate connection',
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
+        // Error is handled by the central error handling
     } finally {
         isValidating.value = false
     }
@@ -474,9 +446,9 @@ const handleSubmit = async () => {
                             </Button>
                         </div>
 
-                        <!-- Validation Result -->
-                        <div v-if="validationResult" class="p-3 rounded-md text-sm"
-                            :class="validationResult.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'">
+                        <!-- Validation Success Result (only shown for success) -->
+                        <div v-if="validationResult && validationResult.success"
+                            class="p-3 rounded-md text-sm bg-green-50 text-green-800">
                             {{ validationResult.message }}
                         </div>
                     </div>
