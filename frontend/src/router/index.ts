@@ -71,24 +71,8 @@ const routes: RouteRecordRaw[] = [
         }),
         meta: { title: "Saved Queries" },
       },
-      // {
-      //   path: "history",
-      //   name: "QueryHistory",
-      //   component: () => import("@/views/explore/QueryHistory.vue"),
-      //   meta: { title: "Query History" },
-      // },
     ],
   },
-
-  // Redirect old team queries URLs to the new path
-  {
-    path: "/teams/:teamId/queries",
-    redirect: (to) => ({
-      path: "/logs/saved",
-      query: { team: to.params.teamId },
-    }),
-  },
-
   // Sources Section
   {
     path: "/sources",
