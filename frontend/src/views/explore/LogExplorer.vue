@@ -128,8 +128,25 @@ const showLoadingState = computed(() => {
     isChangingTeam.value;
 })
 
+// Check if there are no teams available at all
+const showNoTeamsState = computed(() => {
+  return !showLoadingState.value && (!teamsStore.teams || teamsStore.teams.length === 0);
+})
+
+// Show empty sources state only when we have teams but no sources
 const showEmptyState = computed(() => {
-  return !showLoadingState.value && (!sourcesStore.teamSources || sourcesStore.teamSources.length === 0)
+  return !showLoadingState.value && 
+         !showNoTeamsState.value && 
+         (!sourcesStore.teamSources || sourcesStore.teamSources.length === 0);
+})
+
+// Check if the current user is likely an admin
+// This is a simple check - should be replaced with proper authorization logic
+const isUserAdmin = computed(() => {
+  // Placeholder for actual admin check logic
+  // In a real app, this would check user roles from auth store
+  // For example: return authStore.currentUser?.roles.includes('admin') || false;
+  return true; // Default to true to allow admin actions in development
 })
 
 // Selected team name
@@ -1297,6 +1314,27 @@ onBeforeUnmount(() => {
       <div class="space-y-2">
         <Skeleton class="h-4 w-48" />
         <Skeleton class="h-4 w-40" />
+      </div>
+    </div>
+  </div>
+
+  <!-- Show empty state when no teams are available -->
+  <div v-else-if="showNoTeamsState" class="flex flex-col h-[calc(100vh-12rem)]">
+    <div class="flex flex-col items-center justify-center flex-1 gap-4">
+      <div class="text-center space-y-2">
+        <h2 class="text-2xl font-semibold tracking-tight">No Teams Available</h2>
+        <p class="text-muted-foreground">
+          You are not a member of any teams. Please contact your administrator to add you to a team.
+        </p>
+      </div>
+      <div class="flex gap-3">
+        <Button v-if="isUserAdmin" @click="router.push({ name: 'Teams' })">
+          <Plus class="mr-2 h-4 w-4" />
+          Create Team
+        </Button>
+        <Button v-else variant="outline" @click="router.push({ name: 'Home' })">
+          Return to Dashboard
+        </Button>
       </div>
     </div>
   </div>
