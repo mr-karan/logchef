@@ -119,7 +119,12 @@ const formatDate = (dateString: string) => {
                         <TableBody>
                             <TableRow v-for="source in sourcesStore.sources" :key="source.id">
                                 <TableCell class="font-medium">
-                                    {{ source.name }}
+                                    <a 
+                                      @click="router.push({ name: 'SourceStats', query: { sourceId: source.id } })" 
+                                      class="hover:underline cursor-pointer"
+                                    >
+                                      {{ source.name }}
+                                    </a>
                                     <div v-if="source.description" class="text-sm text-muted-foreground">
                                         {{ source.description }}
                                     </div>
