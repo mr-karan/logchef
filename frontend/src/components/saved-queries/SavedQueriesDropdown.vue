@@ -147,15 +147,6 @@ function selectQuery(queryId: number) {
     // Use existing data
     processQuerySelection();
   }
-    } catch (error) {
-      console.error('Error parsing query content:', error);
-      // Fall back to just emitting the ID if parsing fails
-      emit('select', String(queryId));
-    }
-  } else {
-    emit('select', String(queryId));
-  }
-  isOpen.value = false;
 }
 
 // Handle save action
