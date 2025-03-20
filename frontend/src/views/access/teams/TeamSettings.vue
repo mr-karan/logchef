@@ -231,8 +231,10 @@ const handleRemoveSource = async (sourceId: string | number) => {
 }
 
 onMounted(async () => {
+    // First load the team, since sources depends on team.id
+    await loadTeam()
+    // Then load the rest in parallel
     await Promise.all([
-        loadTeam(),
         usersStore.loadUsers(),
         loadTeamSources(),
     ])
