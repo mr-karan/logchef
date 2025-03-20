@@ -48,6 +48,7 @@ const queries = ref<SavedTeamQuery[]>([]);
 const isChangingTeam = ref(false);
 const isChangingSource = ref(false);
 const urlError = ref<string | null>(null);
+const isInitialLoad = ref(true); // Flag to prevent redundant API calls
 
 // Loading and empty states
 const showLoadingState = computed(() => {
@@ -131,8 +132,8 @@ onMounted(async () => {
         selectedSourceId.value = String(sourcesStore.teamSources[0].id);
       }
 
-      // Load queries for the selected source using the store
-      await loadSourceQueries();
+      // Don't explicitly call loadSourceQueries here, 
+      // the watcher on selectedSourceId will handle it
     }
   } catch (error) {
     console.error("Error during SavedQueriesView mount:", error);
@@ -152,8 +153,11 @@ watch(
   async (newSourceId) => {
     if (newSourceId) {
       await loadSourceQueries();
+      // Mark initial load as complete after first load
+      isInitialLoad.value = false;
     }
-  }
+  },
+  { immediate: true } // This will trigger immediately when component mounts
 );
 
 // Handle team change
