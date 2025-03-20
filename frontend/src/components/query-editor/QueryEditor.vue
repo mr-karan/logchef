@@ -1520,7 +1520,8 @@ const activeTabValue = computed({
 defineExpose({
   code, // Current editor content
   activeTab, // Current active tab
-  submitQuery // Submit method
+  submitQuery, // Submit method
+  setActiveTab // Expose setActiveTab to allow parent components to force tab changes
 });
 
 const handleQueryChange = (data: any) => {

@@ -6,7 +6,6 @@ import type { APIResponse } from "./types";
  */
 export interface SavedQueryContent {
   version: number;
-  activeTab: "filters" | "raw_sql";
   sourceId: number;
   timeRange: {
     absolute: {
@@ -15,9 +14,7 @@ export interface SavedQueryContent {
     };
   };
   limit: number;
-  queryType: "logchefql" | "sql";
-  rawSql: string;
-  logchefqlContent?: string;
+  content: string; // The content of the query (either LogchefQL or SQL)
 }
 
 /**

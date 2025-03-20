@@ -37,26 +37,12 @@ func (s *TeamQueryService) ValidateQueryContent(content string) error {
 		return fmt.Errorf("invalid query content: version must be positive")
 	}
 
-	// Validate tab
-	if queryContent.ActiveTab != models.SavedQueryTabFilters &&
-		queryContent.ActiveTab != models.SavedQueryTabRawSQL {
-		return fmt.Errorf("invalid query content: unknown active tab %q", queryContent.ActiveTab)
+	// Validate content
+	if queryContent.Content == "" {
+		return fmt.Errorf("invalid query content: query content cannot be empty")
 	}
-
-	// Validate query type
-	if queryContent.QueryType != models.SavedQueryTypeLogchefQL &&
-		queryContent.QueryType != models.SavedQueryTypeSQL {
-		return fmt.Errorf("invalid query content: unknown query type %q", queryContent.QueryType)
-	}
-
-	// Validate that appropriate content is provided based on query type
-	if queryContent.QueryType == models.SavedQueryTypeLogchefQL && queryContent.LogchefQLContent == "" {
-		return fmt.Errorf("invalid query content: LogchefQL content is required for LogchefQL query type")
-	}
-
-	if queryContent.QueryType == models.SavedQueryTypeSQL && queryContent.RawSQL == "" {
-		return fmt.Errorf("invalid query content: SQL content is required for SQL query type")
-	}
+	
+	// No need to validate activeTab anymore since we've removed it
 
 	// Validate time range
 	if queryContent.TimeRange.Absolute.Start <= 0 {
@@ -198,14 +184,8 @@ func (s *TeamQueryService) CreateTeamSourceQuery(ctx context.Context, teamID mod
 	// Parse the query content to determine the query type
 	var queryType models.SavedQueryType = models.SavedQueryTypeSQL // Default to SQL
 
-	// Try to parse the query content to extract the query type
-	var content models.SavedQueryContent
-	if err := json.Unmarshal([]byte(queryContent), &content); err == nil {
-		// If parsing succeeds, use the query type from the content
-		if content.QueryType != "" {
-			queryType = content.QueryType
-		}
-	}
+	// With our new simplified design, we rely on the provided query_type parameter
+	// and don't try to extract it from the content anymore
 
 	// Create a request to use the existing functionality
 	req := models.CreateTeamQueryRequest{

@@ -81,12 +81,12 @@ function selectQuery(queryId: number) {
   if (query) {
     try {
       // Parse the query content
-      const content = JSON.parse(query.query_content);
+      const queryContent = JSON.parse(query.query_content);
 
       // Emit the select event with the query ID and the parsed content
       emit('select', String(queryId), {
-        queryType: query.query_type,
-        content: content
+        query_type: query.query_type,
+        content: queryContent
       });
     } catch (error) {
       console.error('Error parsing query content:', error);

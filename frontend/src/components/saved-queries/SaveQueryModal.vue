@@ -90,7 +90,8 @@ const sourceName = computed(() => {
 
   // Find the source in the sources list
   const source = sourcesStore.teamSources.find(s => s.id === currentSourceId.value);
-  return source ? source.connection.table_name : '';
+  // Return the source name if available, otherwise fallback to table_name
+  return source ? (source.name || source.connection.table_name) : '';
 });
 
 // Form validation
@@ -153,32 +154,23 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       }
     }
 
-    // Determine query type
-    const queryType = activeMode === 'logchefql' ? 'logchefql' : 'sql';
-
     // Get the appropriate query content based on mode
-    let logchefqlContent = '';
-    let rawSql = '';
+    let queryContent = '';
 
     if (activeMode === 'logchefql') {
-      // For LogchefQL mode, prioritize content from different sources
-      logchefqlContent = exploreStore.logchefqlCode ||
-        content.logchefql_query ||
-        '';
+      // For LogchefQL mode, use the current logchefQL code
+      queryContent = exploreStore.logchefqlCode || '';
 
-      // Ensure we have LogchefQL content for LogchefQL query type
-      if (!logchefqlContent.trim()) {
+      // Ensure we have LogchefQL content
+      if (!queryContent.trim()) {
         throw new Error("LogchefQL content is required for LogchefQL query type");
       }
     } else {
-      // For SQL mode, prioritize content from different sources
-      rawSql = exploreStore.rawSql ||
-        content.sql_query ||
-        content.rawSql ||
-        '';
+      // For SQL mode, use the current raw SQL
+      queryContent = exploreStore.rawSql || '';
 
-      // Ensure we have SQL content for SQL query type
-      if (!rawSql.trim()) {
+      // Ensure we have SQL content
+      if (!queryContent.trim()) {
         throw new Error("SQL content is required for SQL query type");
       }
     }
@@ -187,57 +179,81 @@ function prepareQueryContent(saveTimestamp: boolean): string {
     const currentTime = Date.now();
     const oneHourAgo = currentTime - 3600000;
 
-    // Get time range from explore store or use defaults
-    const startTime = exploreStore.timeRange
-      ? new Date(exploreStore.timeRange.start.toString()).getTime()
-      : oneHourAgo;
+    // Get time range from explore store or use defaults, ensuring positive values
+    let startTime = oneHourAgo;
+    if (exploreStore.timeRange && exploreStore.timeRange.start) {
+      try {
+        const parsedTime = new Date(exploreStore.timeRange.start.toString()).getTime();
+        // Ensure it's a valid positive timestamp (at least 1ms since epoch)
+        startTime = parsedTime > 0 ? parsedTime : Math.max(1, oneHourAgo);
+      } catch (e) {
+        console.warn('Error parsing start time, using default:', e);
+        startTime = Math.max(1, oneHourAgo);
+      }
+    }
 
-    const endTime = exploreStore.timeRange
-      ? new Date(exploreStore.timeRange.end.toString()).getTime()
-      : currentTime;
+    let endTime = currentTime;
+    if (exploreStore.timeRange && exploreStore.timeRange.end) {
+      try {
+        const parsedTime = new Date(exploreStore.timeRange.end.toString()).getTime();
+        // Ensure it's a valid positive timestamp (at least 1ms since epoch)
+        endTime = parsedTime > 0 ? parsedTime : Math.max(1, currentTime);
+      } catch (e) {
+        console.warn('Error parsing end time, using default:', e);
+        endTime = Math.max(1, currentTime);
+      }
+    }
+    
+    // Final safety check - ensure times are positive
+    startTime = Math.max(1, startTime);
+    endTime = Math.max(1, endTime);
 
-    // Ensure we have the required structure
-    const queryContent = {
+    // Create simplified structure
+    const simplifiedContent = {
       version: content.version || 1,
-      activeTab: content.activeTab || (activeMode === 'logchefql' ? 'filters' : 'raw_sql'),
       sourceId: content.sourceId || currentSourceId.value,
-      // Always include timeRange with valid timestamps
+      // Always include timeRange with valid timestamps that are non-null positive values
       timeRange: {
         absolute: {
-          start: saveTimestamp ? startTime : oneHourAgo,
-          end: saveTimestamp ? endTime : currentTime,
+          start: saveTimestamp ? Math.max(1, startTime || oneHourAgo) : Math.max(1, oneHourAgo),
+          end: saveTimestamp ? Math.max(1, endTime || currentTime) : Math.max(1, currentTime),
         }
       },
       // Always include limit
       limit: saveTimestamp ? (content.limit || exploreStore.limit) : 100,
-      queryType: queryType,
-      rawSql: rawSql,
-      logchefqlContent: logchefqlContent,
+      content: queryContent,
     };
 
-    return JSON.stringify(queryContent);
+    return JSON.stringify(simplifiedContent);
   } catch (error) {
     console.error('Error preparing query content:', error);
-    // Return a minimal valid structure with guaranteed non-null timestamps
+    // Return a minimal valid structure with guaranteed positive non-null timestamps
     const currentTime = Date.now();
+    const oneHourAgo = currentTime - 3600000;
+    
+    // Ensure startTime is a positive value (at least 1 ms since epoch)
+    const safeStartTime = saveTimestamp && exploreStore.timeRange
+      ? Math.max(1, new Date(exploreStore.timeRange.start.toString()).getTime() || oneHourAgo)
+      : Math.max(1, oneHourAgo);
+      
+    // Ensure endTime is a positive value (at least 1 ms since epoch)
+    const safeEndTime = saveTimestamp && exploreStore.timeRange
+      ? Math.max(1, new Date(exploreStore.timeRange.end.toString()).getTime() || currentTime)
+      : Math.max(1, currentTime);
+      
     return JSON.stringify({
       version: 1,
-      activeTab: exploreStore.activeMode === 'logchefql' ? 'filters' : 'raw_sql',
       sourceId: currentSourceId.value,
       timeRange: {
         absolute: {
-          start: saveTimestamp
-            ? (exploreStore.timeRange ? new Date(exploreStore.timeRange.start.toString()).getTime() : currentTime - 3600000)
-            : currentTime - 3600000,
-          end: saveTimestamp
-            ? (exploreStore.timeRange ? new Date(exploreStore.timeRange.end.toString()).getTime() : currentTime)
-            : currentTime,
+          start: safeStartTime,
+          end: safeEndTime,
         }
       },
       limit: saveTimestamp ? exploreStore.limit : 100,
-      queryType: exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'sql',
-      rawSql: exploreStore.rawSql || '',
-      logchefqlContent: exploreStore.logchefqlCode || '',
+      content: exploreStore.activeMode === 'logchefql' ? 
+        (exploreStore.logchefqlCode || '') : 
+        (exploreStore.rawSql || ''),
     });
   }
 }
@@ -253,10 +269,10 @@ async function handleSubmit(event: Event) {
   try {
     isSubmitting.value = true;
 
-    // Get the current active mode from the explore store
+    // Get the current active mode from the explore store for query_type
     const activeMode = exploreStore.activeMode || 'sql';
 
-    // Determine query type
+    // Determine query type - this is separate from the content structure
     const queryType = activeMode === 'logchefql' ? 'logchefql' : 'sql';
 
     try {
