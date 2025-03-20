@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, reactive, watch } from 'vue'
 import { useToast } from '@/components/ui/toast'
+import { useRoute } from 'vue-router'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -10,6 +11,7 @@ import { type SourceStats } from '@/api/sources'
 
 const sourcesStore = useSourcesStore()
 const { toast } = useToast()
+const route = useRoute()
 const selectedSourceId = ref<string>('')
 const stats = reactive<{
   tableStats: SourceStats['table_stats'] | null
@@ -26,6 +28,21 @@ onMounted(async () => {
   if (sourcesStore.sources.length === 0) {
     // The base store will handle showing toast for errors
     await sourcesStore.loadSources()
+  }
+  
+  // Check if sourceId is provided in the URL query parameters
+  const sourceIdFromQuery = route.query.sourceId as string
+  if (sourceIdFromQuery) {
+    selectedSourceId.value = sourceIdFromQuery
+    await fetchSourceStats()
+  }
+})
+
+// Watch for changes in route query parameters
+watch(() => route.query.sourceId, (newSourceId) => {
+  if (newSourceId && newSourceId !== selectedSourceId.value) {
+    selectedSourceId.value = newSourceId as string
+    fetchSourceStats()
   }
 })
 
