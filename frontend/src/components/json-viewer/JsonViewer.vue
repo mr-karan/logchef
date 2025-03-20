@@ -83,9 +83,11 @@ async function copyToClipboard() {
 
         <!-- Highlighted JSON with self-contained scrollbar -->
         <div class="relative">
-            <div class="json-container border rounded-sm bg-muted/5 mt-0.5">
+            <div class="border rounded-sm bg-muted/5 mt-0.5 relative w-full overflow-hidden">
                 <pre :class="{ 'max-h-[500px]': !isExpanded }"
-                    class="text-xs font-mono overflow-y-auto overflow-x-auto pt-8 px-1.5 json-content"><code v-html="formatJSON(value)" /></pre>
+                    class="text-xs font-mono pt-8 px-1.5 overflow-y-auto overflow-x-auto whitespace-pre">
+                    <code v-html="formatJSON(value)" class="whitespace-pre" />
+                </pre>
             </div>
 
             <!-- Expand/collapse overlay -->
@@ -112,16 +114,8 @@ pre {
     transition: all 0.3s ease-in-out;
 }
 
-/* JSON container with self-contained scrolling */
-.json-container {
-    position: relative;
-    width: 100%;
-    overflow: hidden;
-}
-
-.json-content {
-    white-space: pre;
-    overflow-x: auto;
+/* Custom scrollbar styling preserved */
+pre {
     scrollbar-width: thin;
     scrollbar-color: rgba(155, 155, 155, 0.5) transparent;
 }

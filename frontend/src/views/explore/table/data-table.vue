@@ -307,7 +307,7 @@ onMounted(() => {
                                                 {{ cell.getValue() }}
                                             </span>
                                             <template v-else>
-                                                <div class="cell-content">
+                                                <div class="whitespace-nowrap overflow-hidden text-ellipsis w-full">
                                                     <FlexRender :render="cell.column.columnDef.cell"
                                                         :props="cell.getContext()" />
                                                 </div>
@@ -442,13 +442,6 @@ onMounted(() => {
     border-radius: 2px;
 }
 
-/* Cell content styling */
-.log-data-table .cell-content {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    width: 100%;
-}
 
 :deep(.log-data-table .flex-render-content) {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
