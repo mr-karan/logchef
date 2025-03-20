@@ -177,7 +177,7 @@ onMounted(() => {
     // Set initial column sizing mode
     columnResizeMode.value = 'onChange'
 
-    // Set simple initial column sizes for basic starting point
+    // Set explicit column sizes for better horizontal scrolling
     const initialSizes: ColumnSizing = {}
     
     props.columns.forEach(column => {
@@ -187,7 +187,11 @@ onMounted(() => {
         } else if (columnId === severityFieldName.value) {
             initialSizes[columnId] = 100 // severity is usually short
         } else if (columnId === 'message' || columnId === 'msg' || columnId === 'log') {
-            initialSizes[columnId] = 400 // message fields get more space
+            initialSizes[columnId] = 500 // message fields get more space
+        } else if (columnId.includes('time') || columnId.includes('date')) {
+            initialSizes[columnId] = 180 // date/time fields
+        } else if (columnId.includes('id')) {
+            initialSizes[columnId] = 120 // id fields
         } else {
             initialSizes[columnId] = 200 // default size for other columns
         }
@@ -229,8 +233,8 @@ onMounted(() => {
         <div class="flex-1 relative overflow-hidden">
             <div v-if="table.getRowModel().rows?.length" class="absolute inset-0">
                 <div class="w-full h-full overflow-auto custom-scrollbar">
-                    <div class="w-full" style="min-width: max-content;">
-                        <table class="caption-bottom text-sm w-full border-separate border-spacing-0 relative" style="min-width: 100%; table-layout: fixed;">
+                    <div style="min-width: max-content; width: auto;">
+                        <table class="caption-bottom text-sm border-separate border-spacing-0 relative" style="width: auto; table-layout: fixed;">
                             <!-- Enhanced header styling -->
                         <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
                             <tr class="border-b border-b-muted-foreground/10">
@@ -242,7 +246,7 @@ onMounted(() => {
                                         header.column.columnDef.meta?.className
                                     ]"
                                     :style="{
-                                        width: header.column.getSize() ? `${header.column.getSize()}px` : 'auto',
+                                        width: header.column.getSize() ? `${header.column.getSize()}px` : '200px',
                                         minWidth: '100px'
                                     }">
                                     <FlexRender v-if="!header.isPlaceholder" :render="header.column.columnDef.header"
@@ -289,9 +293,9 @@ onMounted(() => {
                                             { 'resizing': cell.column.getIsResizing() }
                                         ]"
                                         :style="{
-                                            width: cell.column.getSize() ? `${cell.column.getSize()}px` : 'auto',
+                                            width: cell.column.getSize() ? `${cell.column.getSize()}px` : '200px',
                                             minWidth: '100px',
-                                            maxWidth: `${cell.column.getSize()}px`,
+                                            maxWidth: cell.column.getSize() ? `${cell.column.getSize()}px` : '200px',
                                             overflow: 'hidden'
                                         }">
                                         <div class="flex items-center gap-1 w-full overflow-hidden">
@@ -376,10 +380,10 @@ onMounted(() => {
 /* Resizer styles - scoped to this component only */
 .log-data-table .resizer {
     position: absolute;
-    right: -2px;
+    right: 0;
     top: 0;
     height: 100%;
-    width: 6px;
+    width: 4px;
     cursor: col-resize !important;
     user-select: none;
     touch-action: none;
@@ -407,21 +411,25 @@ onMounted(() => {
     user-select: none;
 }
 
-/* Column width presets */
+/* Column width presets - with specific widths for log viewing */
 .log-data-table .timestamp-column {
-    min-width: 120px;
+    min-width: 180px;
+    width: 180px;
 }
 
 .log-data-table .severity-column {
-    min-width: 80px;
+    min-width: 100px;
+    width: 100px;
 }
 
 .log-data-table .message-column {
-    min-width: 200px;
+    min-width: 500px;
+    width: 500px;
 }
 
 .log-data-table .default-column {
-    min-width: 80px;
+    min-width: 200px;
+    width: 200px;
 }
 
 /* Special content styling */
