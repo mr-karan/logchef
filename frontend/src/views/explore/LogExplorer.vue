@@ -1652,7 +1652,37 @@ onBeforeUnmount(() => {
 
           <!-- Table container with proper scroll behavior - ensure it fills full available space -->
           <div class="flex-1 overflow-hidden relative">
-            <template v-if="exploreStore.logs?.length">
+            <!-- Show loading skeleton when executing query -->
+            <template v-if="isExecutingQuery">
+              <div class="h-full flex flex-col items-center justify-center p-10">
+                <div class="w-full max-w-5xl space-y-4">
+                  <!-- Header skeleton -->
+                  <div class="flex justify-between items-center mb-2">
+                    <Skeleton class="h-7 w-32" />
+                    <Skeleton class="h-7 w-24" />
+                  </div>
+                  
+                  <!-- Table header skeleton -->
+                  <div class="flex space-x-2 mb-2">
+                    <Skeleton class="h-8 w-40" />
+                    <Skeleton class="h-8 w-56" />
+                    <Skeleton class="h-8 w-48" />
+                    <Skeleton class="h-8 w-64" />
+                  </div>
+                  
+                  <!-- Table rows skeletons -->
+                  <div class="space-y-3">
+                    <div v-for="i in 8" :key="i" class="flex space-x-2">
+                      <Skeleton class="h-10 w-40" />
+                      <Skeleton class="h-10 w-56" />
+                      <Skeleton class="h-10 w-48" />
+                      <Skeleton class="h-10 w-64" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <template v-else-if="exploreStore.logs?.length">
               <div class="absolute inset-0 h-full">
                 <DataTable :columns="tableColumns" :data="exploreStore.logs" :stats="exploreStore.queryStats"
                   :source-id="exploreStore.sourceId?.toString() || ''" :timestamp-field="sourceDetails?._meta_ts_field"
