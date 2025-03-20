@@ -81,10 +81,12 @@ async function copyToClipboard() {
             </Button>
         </div>
 
-        <!-- Highlighted JSON -->
+        <!-- Highlighted JSON with self-contained scrollbar -->
         <div class="relative">
-            <pre :class="{ 'max-h-[500px]': !isExpanded }"
-                class="text-xs font-mono overflow-auto pt-8 px-1.5"><code v-html="formatJSON(value)" /></pre>
+            <div class="json-container border rounded-sm bg-muted/5 mt-0.5">
+                <pre :class="{ 'max-h-[500px]': !isExpanded }"
+                    class="text-xs font-mono overflow-y-auto overflow-x-auto pt-8 px-1.5 json-content"><code v-html="formatJSON(value)" /></pre>
+            </div>
 
             <!-- Expand/collapse overlay -->
             <div v-if="!isExpanded && formatJSON(value).split('\n').length > 20"
@@ -108,6 +110,46 @@ pre code.hljs {
 /* Add smooth transition for expand/collapse */
 pre {
     transition: all 0.3s ease-in-out;
+}
+
+/* JSON container with self-contained scrolling */
+.json-container {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+}
+
+.json-content {
+    white-space: pre;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(155, 155, 155, 0.5) transparent;
+}
+
+/* Custom scrollbar styles for JSON viewer */
+.json-content::-webkit-scrollbar {
+    width: 8px !important;
+    height: 8px !important;
+    display: block !important;
+}
+
+.json-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.json-content::-webkit-scrollbar-thumb {
+    background-color: rgba(155, 155, 155, 0.5);
+    border-radius: 4px;
+    min-height: 40px;
+    min-width: 40px;
+}
+
+.json-content::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(155, 155, 155, 0.8);
+}
+
+.json-content::-webkit-scrollbar-corner {
+    background: transparent;
 }
 
 /* Add animation utilities */
