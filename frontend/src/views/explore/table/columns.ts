@@ -9,7 +9,8 @@ import type { ColumnInfo } from "@/api/explore";
 // Function to generate column definitions based on source schema
 export function createColumns(
   columns: ColumnInfo[],
-  timestampField: string = "timestamp"
+  timestampField: string = "timestamp",
+  timezone: 'local' | 'utc' = 'local'
 ): ColumnDef<Record<string, any>>[] {
   // Create a new array with the columns in the desired order
   // First, let's sort out the timestamp field to be first if it exists
@@ -75,11 +76,43 @@ export function createColumns(
 
       // Special handling for timestamp column
       if (col.name === timestampField) {
-        const formattedTimestamp = formatTimestamp(value as string);
+        let formattedTimestamp;
+        try {
+          // Parse the timestamp
+          const date = new Date(value as string);
+          
+          // Check if the date is valid
+          if (isNaN(date.getTime())) {
+            // If invalid, just use the original formatting
+            formattedTimestamp = formatTimestamp(value as string);
+          } else {
+            // Format based on timezone preference
+            if (timezone === 'utc') {
+              // Use UTC formatting - keep the 'Z' to indicate UTC
+              formattedTimestamp = date.toISOString();
+            } else {
+              // Use local timezone
+              formattedTimestamp = new Date(date).toLocaleString(undefined, {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                fractionalSecondDigits: 3
+              });
+            }
+          }
+        } catch (e) {
+          // Fallback to original formatting if there's an error
+          formattedTimestamp = formatTimestamp(value as string);
+        }
+
         return h(
           "span",
           { 
-            class: "flex-render-content font-mono text-[11px]"
+            class: "flex-render-content font-mono text-[11px]",
+            title: value as string // Show original value on hover
           },
           formattedTimestamp
         );

@@ -36,6 +36,7 @@ interface Props {
     sourceId: string
     timestampField?: string
     severityField?: string
+    timezone?: 'local' | 'utc'
 }
 
 const props = defineProps<Props>()
@@ -55,6 +56,12 @@ const pagination = ref<PaginationState>({
 const globalFilter = ref('')
 const columnSizing = ref<ColumnSizingState>({})
 const columnResizeMode = ref<ColumnResizeMode>('onChange')
+const displayTimezone = ref<'local' | 'utc'>(localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local')
+
+// Save timezone preference whenever it changes
+watch(displayTimezone, (newValue) => {
+    localStorage.setItem('logchef_timezone', newValue)
+})
 
 
 const { toast } = useToast()
@@ -214,6 +221,28 @@ onMounted(() => {
 
             <!-- Right side controls with pagination moved to top -->
             <div class="flex items-center gap-3">
+                <!-- Timezone toggle -->
+                <div class="flex items-center space-x-1 mr-1">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      class="h-8 px-2 text-xs" 
+                      :class="{'bg-muted': displayTimezone === 'local'}"
+                      @click="displayTimezone = 'local'"
+                    >
+                      Local Time
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      class="h-8 px-2 text-xs" 
+                      :class="{'bg-muted': displayTimezone === 'utc'}"
+                      @click="displayTimezone = 'utc'"
+                    >
+                      UTC
+                    </Button>
+                </div>
+
                 <!-- Pagination moved to top -->
                 <DataTablePagination v-if="table.getRowModel().rows?.length > 0" :table="table" />
 
