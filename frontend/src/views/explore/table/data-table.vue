@@ -320,7 +320,7 @@ onMounted(() => {
                                 <!-- Expanded Row with improved JSON viewer styling -->
                                 <tr v-if="row.getIsExpanded()">
                                     <td :colspan="row.getVisibleCells().length" class="p-0">
-                                        <div class="p-1 bg-muted/30 border-t border-b border-muted">
+                                        <div class="p-1 bg-muted/30 border-t border-b border-muted overflow-hidden">
                                             <JsonViewer :value="row.original" :expanded="false" class="text-xs" />
                                         </div>
                                     </td>
