@@ -107,6 +107,7 @@ export class QueryBuilder {
       sqlQuery,
       type: typeof sqlQuery,
       isEmpty: !sqlQuery || !sqlQuery.trim(),
+      hasTableName: sqlQuery && sqlQuery.includes('FROM '),
       isActive: document.hasFocus(),
     });
 
@@ -118,6 +119,14 @@ export class QueryBuilder {
         success: true,
         error: null,
       };
+    }
+    
+    // Check if query has a FROM clause with a table name
+    const hasTableNameMatch = sqlQuery.match(/FROM\s+([^\s\n]+)/i);
+    
+    if (hasTableNameMatch && hasTableNameMatch[1]) {
+      const tableName = hasTableNameMatch[1];
+      console.log(`Query has specific table name: ${tableName}, preserving it`);
     }
 
     try {
@@ -398,10 +407,36 @@ export class QueryBuilder {
 
     // Ensure we have a valid table name before building a query
     if (!tableName) {
-      return ''; // Return empty string if no table name is available
+      console.warn('getDefaultSQLQuery called with empty tableName');
+      // Instead of returning empty string, preserve the FROM clause for later substitution
+      let sqlQuery = `SELECT * FROM `;
+
+      // Add time filter if needed
+      if (includeTimeFilter) {
+        const startMs = startTimestamp * 1000;
+        const endMs = endTimestamp * 1000;
+
+        const timeCondition = this.formatTimeCondition(
+          tsField,
+          startMs,
+          endMs,
+          forDisplay
+        );
+
+        sqlQuery += `\nWHERE ${timeCondition}`;
+      }
+
+      // Add order by and limit
+      sqlQuery += `\nORDER BY ${tsField} DESC`;
+
+      if (limit) {
+        sqlQuery += `\nLIMIT ${limit}`;
+      }
+
+      return sqlQuery;
     }
 
-    // Build a simple default query
+    // Build a simple default query with the provided table name
     let sqlQuery = `SELECT * FROM ${tableName}`;
 
     // Add time filter if needed
