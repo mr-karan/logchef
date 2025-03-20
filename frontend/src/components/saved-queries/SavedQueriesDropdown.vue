@@ -83,9 +83,13 @@ function selectQuery(queryId: number) {
       // Parse the query content
       const queryContent = JSON.parse(query.query_content);
 
+      // Debug the query type
+      console.log(`Loading query ${queryId} with query_type:`, query.query_type);
+
       // Emit the select event with the query ID and the parsed content
+      // Ensure query_type is always set to a valid value (logchefql or sql)
       emit('select', String(queryId), {
-        query_type: query.query_type,
+        query_type: query.query_type === 'logchefql' ? 'logchefql' : 'sql',
         content: queryContent
       });
     } catch (error) {

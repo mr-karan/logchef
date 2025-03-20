@@ -136,120 +136,130 @@ function prepareQueryContent(saveTimestamp: boolean): string {
     // Get the current active mode from the explore store
     const activeMode = exploreStore.activeMode || 'sql';
 
-    // If we have initial content, try to parse it first
+    // Get initial content if available
     let content: Record<string, any> = {};
-    if (props.initialData?.query_content) {
-      try {
-        content = JSON.parse(props.initialData.query_content);
-      } catch (e) {
-        // Not valid JSON, create a new object
-        console.error("Failed to parse initial query content", e);
-      }
-    } else if (props.queryContent) {
+    if (props.queryContent) {
       try {
         content = JSON.parse(props.queryContent);
       } catch (e) {
-        // Not valid JSON, create a new object
         console.error("Failed to parse provided query content", e);
       }
-    }
-
-    // Get the appropriate query content based on mode
-    let queryContent = '';
-
-    if (activeMode === 'logchefql') {
-      // For LogchefQL mode, use the current logchefQL code
-      queryContent = exploreStore.logchefqlCode || '';
-
-      // Ensure we have LogchefQL content
-      if (!queryContent.trim()) {
-        throw new Error("LogchefQL content is required for LogchefQL query type");
-      }
-    } else {
-      // For SQL mode, use the current raw SQL
-      queryContent = exploreStore.rawSql || '';
-
-      // Ensure we have SQL content
-      if (!queryContent.trim()) {
-        throw new Error("SQL content is required for SQL query type");
+    } else if (props.initialData?.query_content) {
+      try {
+        content = JSON.parse(props.initialData.query_content);
+      } catch (e) {
+        console.error("Failed to parse initial query content", e);
       }
     }
 
-    // Get current time values for timestamps
+    // Get the query content based on mode
+    const queryContent = activeMode === 'logchefql' 
+      ? exploreStore.logchefqlCode || ''
+      : exploreStore.rawSql || '';
+      
+    // Validate query content
+    if (!queryContent.trim()) {
+      throw new Error(`${activeMode === 'logchefql' ? 'LogchefQL' : 'SQL'} content is required`);
+    }
+
+    // Time values setup
     const currentTime = Date.now();
     const oneHourAgo = currentTime - 3600000;
-
-    // Get time range from explore store or use defaults, ensuring positive values
-    let startTime = oneHourAgo;
-    if (exploreStore.timeRange && exploreStore.timeRange.start) {
-      try {
-        const parsedTime = new Date(exploreStore.timeRange.start.toString()).getTime();
-        // Ensure it's a valid positive timestamp (at least 1ms since epoch)
-        startTime = parsedTime > 0 ? parsedTime : Math.max(1, oneHourAgo);
-      } catch (e) {
-        console.warn('Error parsing start time, using default:', e);
-        startTime = Math.max(1, oneHourAgo);
-      }
-    }
-
-    let endTime = currentTime;
-    if (exploreStore.timeRange && exploreStore.timeRange.end) {
-      try {
-        const parsedTime = new Date(exploreStore.timeRange.end.toString()).getTime();
-        // Ensure it's a valid positive timestamp (at least 1ms since epoch)
-        endTime = parsedTime > 0 ? parsedTime : Math.max(1, currentTime);
-      } catch (e) {
-        console.warn('Error parsing end time, using default:', e);
-        endTime = Math.max(1, currentTime);
-      }
-    }
     
-    // Final safety check - ensure times are positive
-    startTime = Math.max(1, startTime);
-    endTime = Math.max(1, endTime);
+    // If saving timestamp, use the selected time range from explore store
+    // Otherwise, use a default 1-hour range
+    let timeRange = {
+      absolute: {
+        start: oneHourAgo,
+        end: currentTime
+      }
+    };
+
+    if (saveTimestamp && exploreStore.timeRange) {
+      try {
+        // Convert DateValue objects to timestamps
+        const startDate = new Date(
+          exploreStore.timeRange.start.year,
+          exploreStore.timeRange.start.month - 1,
+          exploreStore.timeRange.start.day,
+          'hour' in exploreStore.timeRange.start ? exploreStore.timeRange.start.hour : 0,
+          'minute' in exploreStore.timeRange.start ? exploreStore.timeRange.start.minute : 0,
+          'second' in exploreStore.timeRange.start ? exploreStore.timeRange.start.second : 0
+        );
+        
+        const endDate = new Date(
+          exploreStore.timeRange.end.year,
+          exploreStore.timeRange.end.month - 1,
+          exploreStore.timeRange.end.day,
+          'hour' in exploreStore.timeRange.end ? exploreStore.timeRange.end.hour : 0,
+          'minute' in exploreStore.timeRange.end ? exploreStore.timeRange.end.minute : 0,
+          'second' in exploreStore.timeRange.end ? exploreStore.timeRange.end.second : 0
+        );
+        
+        timeRange.absolute.start = startDate.getTime();
+        timeRange.absolute.end = endDate.getTime();
+      } catch (e) {
+        console.warn('Error parsing time range, using default:', e);
+      }
+    }
 
     // Create simplified structure
     const simplifiedContent = {
       version: content.version || 1,
       sourceId: content.sourceId || currentSourceId.value,
-      // Always include timeRange with valid timestamps that are non-null positive values
-      timeRange: {
-        absolute: {
-          start: saveTimestamp ? Math.max(1, startTime || oneHourAgo) : Math.max(1, oneHourAgo),
-          end: saveTimestamp ? Math.max(1, endTime || currentTime) : Math.max(1, currentTime),
-        }
-      },
-      // Always include limit
-      limit: saveTimestamp ? (content.limit || exploreStore.limit) : 100,
+      timeRange: timeRange,
+      limit: saveTimestamp ? exploreStore.limit : 100,
       content: queryContent,
     };
 
     return JSON.stringify(simplifiedContent);
   } catch (error) {
     console.error('Error preparing query content:', error);
-    // Return a minimal valid structure with guaranteed positive non-null timestamps
+    
+    // Fallback to a minimal valid structure
     const currentTime = Date.now();
     const oneHourAgo = currentTime - 3600000;
     
-    // Ensure startTime is a positive value (at least 1 ms since epoch)
-    const safeStartTime = saveTimestamp && exploreStore.timeRange
-      ? Math.max(1, new Date(exploreStore.timeRange.start.toString()).getTime() || oneHourAgo)
-      : Math.max(1, oneHourAgo);
-      
-    // Ensure endTime is a positive value (at least 1 ms since epoch)
-    const safeEndTime = saveTimestamp && exploreStore.timeRange
-      ? Math.max(1, new Date(exploreStore.timeRange.end.toString()).getTime() || currentTime)
-      : Math.max(1, currentTime);
-      
+    // Default values for timeRange
+    let timeRange = {
+      absolute: {
+        start: oneHourAgo,
+        end: currentTime
+      }
+    };
+    
+    // If saving timestamp and timeRange is available, use it
+    if (saveTimestamp && exploreStore.timeRange) {
+      try {
+        const startDate = new Date(
+          exploreStore.timeRange.start.year,
+          exploreStore.timeRange.start.month - 1,
+          exploreStore.timeRange.start.day,
+          'hour' in exploreStore.timeRange.start ? exploreStore.timeRange.start.hour : 0,
+          'minute' in exploreStore.timeRange.start ? exploreStore.timeRange.start.minute : 0,
+          'second' in exploreStore.timeRange.start ? exploreStore.timeRange.start.second : 0
+        );
+        
+        const endDate = new Date(
+          exploreStore.timeRange.end.year,
+          exploreStore.timeRange.end.month - 1,
+          exploreStore.timeRange.end.day,
+          'hour' in exploreStore.timeRange.end ? exploreStore.timeRange.end.hour : 0,
+          'minute' in exploreStore.timeRange.end ? exploreStore.timeRange.end.minute : 0,
+          'second' in exploreStore.timeRange.end ? exploreStore.timeRange.end.second : 0
+        );
+        
+        timeRange.absolute.start = startDate.getTime();
+        timeRange.absolute.end = endDate.getTime();
+      } catch (e) {
+        console.warn('Error parsing time range in fallback, using default:', e);
+      }
+    }
+    
     return JSON.stringify({
       version: 1,
       sourceId: currentSourceId.value,
-      timeRange: {
-        absolute: {
-          start: safeStartTime,
-          end: safeEndTime,
-        }
-      },
+      timeRange: timeRange,
       limit: saveTimestamp ? exploreStore.limit : 100,
       content: exploreStore.activeMode === 'logchefql' ? 
         (exploreStore.logchefqlCode || '') : 
