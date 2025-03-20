@@ -1690,7 +1690,7 @@ onBeforeUnmount(() => {
               <div class="absolute inset-0 h-full">
                 <DataTable :columns="tableColumns" :data="exploreStore.logs" :stats="exploreStore.queryStats"
                   :source-id="exploreStore.sourceId?.toString() || ''" :timestamp-field="sourceDetails?._meta_ts_field"
-                  :severity-field="sourceDetails?._meta_severity_field" />
+                  :severity-field="sourceDetails?._meta_severity_field" :timezone="displayTimezone" />
               </div>
             </template>
             <template v-else>
