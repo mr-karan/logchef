@@ -228,9 +228,9 @@ onMounted(() => {
         <!-- Table Section with full-height scrolling -->
         <div class="flex-1 relative overflow-hidden">
             <div v-if="table.getRowModel().rows?.length" class="absolute inset-0">
-                <div class="w-full h-full overflow-auto custom-scrollbar" style="overflow-x: auto !important;">
-                    <div class="w-full" style="min-width: 100%;">
-                        <table class="caption-bottom text-sm w-full border-separate border-spacing-0 relative" style="min-width: 100%; table-layout: auto;">
+                <div class="w-full h-full overflow-auto custom-scrollbar">
+                    <div class="w-full" style="min-width: max-content;">
+                        <table class="caption-bottom text-sm w-full border-separate border-spacing-0 relative" style="min-width: 100%; table-layout: fixed;">
                             <!-- Enhanced header styling -->
                         <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
                             <tr class="border-b border-b-muted-foreground/10">
@@ -303,7 +303,7 @@ onMounted(() => {
                                                 {{ cell.getValue() }}
                                             </span>
                                             <template v-else>
-                                                <div class="cell-content overflow-hidden text-ellipsis">
+                                                <div class="cell-content">
                                                     <FlexRender :render="cell.column.columnDef.cell"
                                                         :props="cell.getContext()" />
                                                 </div>
@@ -370,6 +370,7 @@ onMounted(() => {
     -webkit-overflow-scrolling: touch;
     height: 100% !important;
     max-height: 100% !important;
+    width: 100% !important;
 }
 
 /* Resizer styles - scoped to this component only */
@@ -431,6 +432,14 @@ onMounted(() => {
     padding: 2px 0;
     background-color: rgba(0, 0, 0, 0.01);
     border-radius: 2px;
+}
+
+/* Cell content styling */
+.log-data-table .cell-content {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100%;
 }
 
 :deep(.log-data-table .flex-render-content) {
