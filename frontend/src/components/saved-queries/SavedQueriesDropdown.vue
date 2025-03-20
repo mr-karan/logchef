@@ -85,11 +85,19 @@ function selectQuery(queryId: number) {
 
       // Debug the query type
       console.log(`Loading query ${queryId} with query_type:`, query.query_type);
+      
+      // Normalize query_type to ensure it's always a valid value
+      // Default to 'sql' if not explicitly 'logchefql'
+      const normalizedQueryType = 
+        query.query_type && query.query_type.toLowerCase() === 'logchefql' 
+          ? 'logchefql' 
+          : 'sql';
+      
+      console.log(`Normalized query_type: ${normalizedQueryType}`);
 
       // Emit the select event with the query ID and the parsed content
-      // Ensure query_type is always set to a valid value (logchefql or sql)
       emit('select', String(queryId), {
-        query_type: query.query_type === 'logchefql' ? 'logchefql' : 'sql',
+        query_type: normalizedQueryType,
         content: queryContent
       });
     } catch (error) {
