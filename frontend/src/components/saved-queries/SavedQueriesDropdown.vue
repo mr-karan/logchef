@@ -72,34 +72,81 @@ async function onDropdownOpen() {
 // Load team queries
 async function loadTeamQueries() {
   if (!currentTeamId.value) return;
-  return savedQueriesStore.fetchTeamQueries(currentTeamId.value);
+  return savedQueriesStore.fetchTeamQueries(currentTeamId.value, true);
 }
 
 // Handle query selection
 function selectQuery(queryId: number) {
-  const query = savedQueriesStore.data.queries?.find(q => q.id === queryId);
-  if (query) {
-    try {
-      // Parse the query content
-      const queryContent = JSON.parse(query.query_content);
+  // First check if we need to refresh the queries list
+  // This helps ensure we have the most up-to-date query data
+  const needsRefresh = !savedQueriesStore.data.lastFetchTime || 
+                      (Date.now() - savedQueriesStore.data.lastFetchTime > 30000); // 30 seconds
 
-      // Debug the query type
-      console.log(`Loading query ${queryId} with query_type:`, query.query_type);
-      
-      // Normalize query_type to ensure it's always a valid value
-      // Default to 'sql' if not explicitly 'logchefql'
-      const normalizedQueryType = 
-        query.query_type && query.query_type.toLowerCase() === 'logchefql' 
-          ? 'logchefql' 
-          : 'sql';
-      
-      console.log(`Normalized query_type: ${normalizedQueryType}`);
+  // Function to process the query selection with the current data
+  const processQuerySelection = () => {
+    const query = savedQueriesStore.data.queries?.find(q => q.id === queryId);
+    if (query) {
+      try {
+        // Parse the query content
+        const queryContent = JSON.parse(query.query_content);
 
-      // Emit the select event with the query ID and the parsed content
-      emit('select', String(queryId), {
-        query_type: normalizedQueryType,
-        content: queryContent
+        // Debug the query type
+        console.log(`Loading query ${queryId} with query_type:`, query.query_type);
+        
+        // Enhanced normalization of query_type with more robust handling
+        // Default to 'sql' if not explicitly 'logchefql'
+        let normalizedQueryType = 'sql'; // Safe default
+        
+        if (query.query_type && typeof query.query_type === 'string') {
+          normalizedQueryType = query.query_type.toLowerCase() === 'logchefql' 
+            ? 'logchefql' 
+            : 'sql';
+        }
+        
+        console.log(`Normalized query_type: ${normalizedQueryType}`);
+
+        // Verify the query content has the expected format for the query type
+        if (!queryContent || typeof queryContent !== 'object') {
+          console.warn(`Invalid query content format for query ${queryId}, using empty object`);
+          queryContent = { content: '' };
+        }
+
+        // Emit the select event with the query ID and the parsed content
+        emit('select', String(queryId), {
+          query_type: normalizedQueryType,
+          content: queryContent
+        });
+      } catch (error) {
+        console.error('Error processing query selection:', error);
+        // Use a safer fallback with explicit query type
+        emit('select', String(queryId), {
+          query_type: 'sql', // Safe default
+          content: { content: '' }
+        });
+      }
+    } else {
+      console.warn(`Query with ID ${queryId} not found in store`);
+      emit('select', String(queryId));
+    }
+    isOpen.value = false;
+  };
+  
+  // If we need a refresh and have a current team ID, fetch the latest queries first
+  if (needsRefresh && currentTeamId.value) {
+    savedQueriesStore.fetchTeamQueries(currentTeamId.value, true)
+      .then(() => {
+        console.log("Refreshed queries list before selection");
+        processQuerySelection();
+      })
+      .catch(error => {
+        console.error("Error refreshing queries:", error);
+        // Still try to process with existing data
+        processQuerySelection();
       });
+  } else {
+    // Use existing data
+    processQuerySelection();
+  }
     } catch (error) {
       console.error('Error parsing query content:', error);
       // Fall back to just emitting the ID if parsing fails

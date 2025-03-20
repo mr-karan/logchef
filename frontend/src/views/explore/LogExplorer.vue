@@ -1242,6 +1242,13 @@ async function handleSaveQuery(formData: any) {
     // Close the modal
     showSaveQueryModal.value = false;
 
+    // Refresh the saved queries list to ensure the newly created query is available
+    // with correct data in the dropdown
+    if (response.success && teamsStore.currentTeamId) {
+      console.log("Refreshing saved queries list after creating new query");
+      await savedQueriesStore.fetchTeamQueries(teamsStore.currentTeamId, true);
+    }
+
     // Show success toast
     toast({
       title: 'Success',
