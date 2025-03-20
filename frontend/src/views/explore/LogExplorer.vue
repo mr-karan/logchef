@@ -749,7 +749,11 @@ watch(
   () => exploreStore.columns,
   (newColumns) => {
     if (newColumns) {
-      tableColumns.value = createColumns(newColumns, sourceDetails.value?._meta_ts_field || 'timestamp')
+      tableColumns.value = createColumns(
+        newColumns, 
+        sourceDetails.value?._meta_ts_field || 'timestamp',
+        localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local'
+      )
     }
   },
   { immediate: true }
