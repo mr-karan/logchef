@@ -35,7 +35,7 @@ export function createColumns(
     },
     // Enable column resizing with sensible defaults based on column type
     enableResizing: true,
-    size: col.name === timestampField ? 180 : 
+    size: col.name === timestampField ? 200 : 
           (col.name === "severity" || col.name === "severity_text") ? 110 : 
           (col.name === "message" || col.name === "log" || col.name === "msg" || col.name === "content") ? 500 : 200,
     minSize: col.name === timestampField ? 120 : 

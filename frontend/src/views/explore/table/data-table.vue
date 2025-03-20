@@ -190,7 +190,7 @@ onMounted(() => {
     props.columns.forEach(column => {
         const columnId = column.id || ''
         if (columnId === timestampFieldName.value) {
-            initialSizes[columnId] = 180 // timestamps need more space
+            initialSizes[columnId] = 200 // timestamps need more space
         } else if (columnId === severityFieldName.value) {
             initialSizes[columnId] = 100 // severity is usually short
         } else if (columnId === 'message' || columnId === 'msg' || columnId === 'log') {
@@ -442,8 +442,8 @@ onMounted(() => {
 
 /* Column width presets - with specific widths for log viewing */
 .log-data-table .timestamp-column {
-    min-width: 180px;
-    width: 180px;
+    min-width: 200px;
+    width: 200px;
 }
 
 .log-data-table .severity-column {
