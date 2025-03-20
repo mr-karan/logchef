@@ -77,7 +77,7 @@ export const BoolOperator = Object.freeze({
 export const Operator = Object.freeze({
   EQUALS: "=",
   NOT_EQUALS: "!=",
-  EQUALS_REGEX: "=~",
+  EQUALS_REGEX: "~",  // Changed from "=~" to "~" for simplicity
   NOT_EQUALS_REGEX: "!~",
   GREATER_THAN: ">",
   LOWER_THAN: "<",
@@ -191,7 +191,7 @@ class Char {
     return (
       this.value === EQUAL_SIGN ||
       this.value === EXCL_MARK ||
-      this.value === TILDE ||
+      this.value === TILDE ||  // Now a standalone operator
       this.value === LOWER_THAN ||
       this.value === GREATER_THAN
     );

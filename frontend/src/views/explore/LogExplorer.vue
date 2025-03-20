@@ -112,7 +112,11 @@ const activeSourceTableName = computed(() => {
   if (sourceDetails.value?.connection) {
     return `${sourceDetails.value.connection.database}.${sourceDetails.value.connection.table_name}`;
   }
-  return ''; // Empty string instead of 'unknown.unknown'
+  // Return a placeholder if source details aren't loaded yet
+  // This prevents the table name from being lost during URL loading
+  return exploreStore.rawSql && typeof exploreStore.rawSql === 'string' && exploreStore.rawSql.includes('FROM ') 
+    ? exploreStore.rawSql.match(/FROM\s+([^\s\n]+)/i)?.[1] || ''
+    : ''; 
 });
 
 // Check if we have a valid source for querying
@@ -455,13 +459,30 @@ async function setupFromUrl() {
     if (route.query.q && typeof route.query.q === 'string') {
       try {
         const decodedQuery = decodeURIComponent(route.query.q);
-
+        
+        // Preserve the query regardless of whether all details are loaded yet
         if (queryMode.value === 'logchefql') {
           logchefQuery.value = decodedQuery;
           exploreStore.setLogchefqlCode(decodedQuery);
         } else if (queryMode.value === 'sql') {
+          // Preserve original SQL query without modification
           sqlQuery.value = decodedQuery;
           exploreStore.setRawSql(decodedQuery);
+          
+          // Important: For SQL queries with a table name, make sure we always
+          // preserve the original query, regardless of whether source details are loaded
+          if (decodedQuery.includes('FROM ')) {
+            // Extract the table name from the query for logging
+            const tableName = decodedQuery.match(/FROM\s+([^\s\n]+)/i)?.[1] || '<unknown>';
+            console.log(`SQL query with table name "${tableName}" detected, preserving for execution`);
+            
+            // Store the original query as pending to ensure it doesn't get overwritten
+            exploreStore.pendingRawSql = decodedQuery;
+            
+            // Prevent any default query generation by setting the raw SQL explicitly
+            sqlQuery.value = decodedQuery;
+            exploreStore.setRawSql(decodedQuery);
+          }
         }
       } catch (e) {
         console.error('Failed to parse query from URL', e);
@@ -823,7 +844,7 @@ watch(
   }
 )
 
-// Watch for changes in sourceDetails - with manual equality check
+// Watch for changes in sourceDetails - with manual equality check and pending query handling
 watch(
   () => sourceDetails.value,
   (newSourceDetails, oldSourceDetails) => {
@@ -834,6 +855,21 @@ watch(
         JSON.stringify(newSourceDetails.columns) !== JSON.stringify(oldSourceDetails?.columns))) {
       console.log('Source details changed, updating available fields');
       // The availableFields computed property will automatically update
+      
+      // Check if we have a pending SQL query to restore
+      if (exploreStore.pendingRawSql && queryMode.value === 'sql') {
+        console.log('Source details loaded, restoring pending SQL query:', exploreStore.pendingRawSql);
+        
+        // Restore the pending query now that we have source details
+        sqlQuery.value = exploreStore.pendingRawSql;
+        exploreStore.setRawSql(exploreStore.pendingRawSql);
+        
+        // Clear the pending query to avoid reapplying it
+        exploreStore.pendingRawSql = undefined;
+        
+        // Update the URL to show the restored query
+        updateUrlWithCurrentState();
+      }
     }
   },
   { immediate: true }
@@ -931,27 +967,18 @@ const handleQuerySubmit = async (data: any) => {
   queryError.value = '';
 
   try {
-    // Execute the query
+    // Execute the query - errors will be handled by the baseStore's callApi mechanism
+    // and automatically displayed as toasts
     const result = await exploreStore.executeQuery();
-
-    if ('error' in result) {
+    
+    // Store error message if query failed, but toast is already shown by base store
+    if (!result.success && result.error) {
       queryError.value = result.error;
-      toast({
-        title: 'Error',
-        description: result.error,
-        variant: 'destructive',
-        duration: TOAST_DURATION.ERROR,
-      });
     }
   } catch (error) {
     console.error('Error executing query:', error);
-    queryError.value = error instanceof Error ? error.message : String(error);
-    toast({
-      title: 'Error',
-      description: queryError.value,
-      variant: 'destructive',
-      duration: TOAST_DURATION.ERROR,
-    });
+    queryError.value = getErrorMessage(error);
+    // No need to show toast here as the base store will handle it
   } finally {
     isExecutingQuery.value = false;
   }
@@ -1068,7 +1095,7 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
     console.error('Error loading query:', error);
     toast({
       title: 'Error',
-      description: error instanceof Error ? error.message : 'Failed to load query',
+      description: getErrorMessage(error),
       variant: 'destructive',
       duration: TOAST_DURATION.ERROR,
     });
@@ -1250,9 +1277,19 @@ onMounted(async () => {
 
       // Use nextTick to ensure component is fully mounted
       nextTick(async () => {
+        // Check if we have a pending SQL query that's from the URL
+        const hasPendingFromUrl = queryMode.value === 'sql' && exploreStore.pendingRawSql && sqlQuery.value;
+        
         // Wait for source details to be available
         if (hasValidSource.value && exploreStore.sourceId > 0 && teamsStore.currentTeamId > 0) {
-          console.log("Source details loaded, executing default query");
+          console.log("Source details loaded, executing query");
+          
+          // If we have a pending SQL query from URL with table name, use it rather than default
+          if (hasPendingFromUrl) {
+            console.log("Using preserved SQL query from URL");
+            // The preserved query is already in the store and will be used by handleQuerySubmit
+          }
+          
           try {
             await handleQuerySubmit(queryMode.value);
           } catch (queryError) {

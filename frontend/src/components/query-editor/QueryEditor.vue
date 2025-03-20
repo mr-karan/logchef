@@ -603,24 +603,40 @@ function setActiveTab(tab: string) {
     } 
     // Only use stored SQL if we don't have LogchefQL to convert
     else if (exploreStore.rawSql) {
+      console.log('Using existing SQL from store:', exploreStore.rawSql);
       sqlCode.value = exploreStore.rawSql;
       code.value = exploreStore.rawSql;
     } 
     else if (!sqlCode.value) {
-      // If no LogchefQL code and no SQL code, use default query
-      sqlCode.value = QueryBuilder.getDefaultSQLQuery({
-        tableName: props.tableName,
-        tsField: props.tsField,
-        startTimestamp: props.startTimestamp,
-        endTimestamp: props.endTimestamp,
-        limit: props.limit,
-        includeTimeFilter: true,
-        forDisplay: true
-      });
-      code.value = sqlCode.value;
-      exploreStore.setRawSql(sqlCode.value);
+      // If we have a pending SQL query, use that instead of generating a default
+      if (exploreStore.pendingRawSql) {
+        console.log('Using pending SQL query:', exploreStore.pendingRawSql);
+        sqlCode.value = exploreStore.pendingRawSql;
+        code.value = exploreStore.pendingRawSql;
+        exploreStore.setRawSql(exploreStore.pendingRawSql);
+        exploreStore.pendingRawSql = undefined;
+      } else {
+        // If no LogchefQL code and no SQL code, use default query
+        console.log('No SQL or LogchefQL found, generating default query for:', props.tableName);
+        
+        // Only generate default query if we have a valid table name
+        if (props.tableName) {
+          sqlCode.value = QueryBuilder.getDefaultSQLQuery({
+            tableName: props.tableName,
+            tsField: props.tsField,
+            startTimestamp: props.startTimestamp,
+            endTimestamp: props.endTimestamp,
+            limit: props.limit,
+            includeTimeFilter: true,
+            forDisplay: true
+          });
+          code.value = sqlCode.value;
+          exploreStore.setRawSql(sqlCode.value);
+        }
+      }
     } else {
       // Use existing SQL code
+      console.log('Using existing SQL code from local state:', sqlCode.value);
       code.value = sqlCode.value;
       exploreStore.setRawSql(sqlCode.value);
     }

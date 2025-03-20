@@ -49,7 +49,16 @@ function nodeToSQL(node: Node | null): string {
   if (!right) return left;
 
   const operator = node.boolOperator.toUpperCase();
-  return `(${left} ${operator} ${right})`;
+  
+  // Check if left or right are already wrapped in parentheses
+  const leftWrapped = left.trim().startsWith('(') && left.trim().endsWith(')');
+  const rightWrapped = right.trim().startsWith('(') && right.trim().endsWith(')');
+  
+  // Only add parentheses if not already wrapped
+  const wrappedLeft = leftWrapped ? left : `(${left})`;
+  const wrappedRight = rightWrapped ? right : `(${right})`;
+  
+  return `${wrappedLeft} ${operator} ${wrappedRight}`;
 }
 
 /**
@@ -78,9 +87,9 @@ function expressionToSQL(expr: Expression): string {
     case Operator.NOT_EQUALS:
       return `${key} != ${formatValue(value)}`;
     case Operator.EQUALS_REGEX:
-      return `match(${key}, ${formatValue(value)})`;
+      return `positionCaseInsensitive(${key}, ${formatValue(value)}) > 0`;
     case Operator.NOT_EQUALS_REGEX:
-      return `NOT match(${key}, ${formatValue(value)})`;
+      return `positionCaseInsensitive(${key}, ${formatValue(value)}) = 0`;
     case Operator.GREATER_THAN:
       return `${key} > ${formatValue(value)}`;
     case Operator.LOWER_THAN:
@@ -121,5 +130,27 @@ export function validateLogchefQL(query: string): boolean {
     return true;
   } catch (error) {
     return false;
+  }
+}
+
+/**
+ * Test function for verifying the translation from LogchefQL to SQL
+ * This can be used in unit tests or debugging
+ * @param query The LogchefQL query to test
+ * @returns The translated SQL condition
+ */
+export function testTranslateLogchefQL(query: string): string {
+  try {
+    // Import parser dynamically to avoid circular dependencies
+    const { Parser } = require("./index");
+    const parser = new Parser();
+    parser.parse(query);
+    if (parser.root) {
+      return translateToSQLConditions(parser.root);
+    }
+    return "";
+  } catch (error) {
+    console.error("Error translating LogchefQL:", error);
+    return `Error: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
