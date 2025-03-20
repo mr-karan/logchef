@@ -142,6 +142,10 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         teamId,
         sourceId
       );
+      if (response.status === "success") {
+        // Update the store's state with the returned queries
+        data.value.queries = response.data || [];
+      }
       return response;
     } catch (error) {
       console.error("Error fetching team source queries:", getErrorMessage(error));

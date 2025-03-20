@@ -131,8 +131,8 @@ onMounted(async () => {
         selectedSourceId.value = String(sourcesStore.teamSources[0].id);
       }
 
-      // Load queries for the selected source
-      await loadSourceQueries(selectedSourceId.value);
+      // Load queries for the selected source using the store
+      await loadSourceQueries();
     }
   } catch (error) {
     console.error("Error during SavedQueriesView mount:", error);
@@ -151,7 +151,7 @@ watch(
   () => selectedSourceId.value,
   async (newSourceId) => {
     if (newSourceId) {
-      await loadSourceQueries(newSourceId);
+      await loadSourceQueries();
     }
   }
 );
@@ -192,7 +192,7 @@ async function handleTeamChange(teamId: string) {
         query: { team: teamId, source: selectedSourceId.value }
       });
 
-      await loadSourceQueries(selectedSourceId.value);
+      await loadSourceQueries();
     } else {
       // No sources in this team
       selectedSourceId.value = '';
@@ -254,7 +254,7 @@ async function handleSourceChange(sourceId: string) {
       }
     });
 
-    await loadSourceQueries(sourceId);
+    await loadSourceQueries();
 
   } catch (error) {
     console.error('Error changing source:', error);
@@ -270,15 +270,15 @@ async function handleSourceChange(sourceId: string) {
   }
 }
 
-async function loadSourceQueries(sourceId: string) {
+async function loadSourceQueries() {
   try {
     isLoading.value = true;
 
     // Reset search when changing source
     searchQuery.value = '';
 
-    if (!teamsStore.currentTeamId) {
-      console.warn("No team selected, cannot load queries");
+    if (!teamsStore.currentTeamId || !selectedSourceId.value) {
+      console.warn("No team or source selected, cannot load queries");
       queries.value = [];
       return;
     }
@@ -286,12 +286,12 @@ async function loadSourceQueries(sourceId: string) {
     // Use the saved queries store
     const response = await savedQueriesStore.fetchTeamSourceQueries(
       teamsStore.currentTeamId,
-      parseInt(sourceId)
+      parseInt(selectedSourceId.value)
     );
 
     if (response.status === "success") {
-      // Check if response.data is null (no queries)
-      queries.value = response.data || [];
+      // The store now handles setting data.queries, just update our local copy
+      queries.value = savedQueriesStore.data.queries;
     } else {
       queries.value = [];
       toast({
@@ -373,7 +373,7 @@ async function deleteQuery(query: SavedTeamQuery) {
 
       // Refresh the source queries to update the UI
       if (selectedSourceId.value) {
-        await loadSourceQueries(selectedSourceId.value);
+        await loadSourceQueries();
       }
 
       toast({
@@ -407,7 +407,7 @@ async function handleSaveQuery(formData: any) {
 
       // Refresh the source queries to update the UI
       if (selectedSourceId.value) {
-        await loadSourceQueries(selectedSourceId.value);
+        await loadSourceQueries();
       }
 
       toast({

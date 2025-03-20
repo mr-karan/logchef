@@ -990,6 +990,9 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
     // If we have queryData passed directly from the dropdown, use it
     if (queryData) {
       console.log('Loading query from dropdown data:', queryData);
+      
+      // Additional debug logging for query type
+      console.log(`Query type from dropdown: "${queryData.query_type}", type: ${typeof queryData.query_type}`);
 
       const queryContent = queryData.content;
       
@@ -1002,7 +1005,9 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
       
       // Force the editor to switch to the appropriate tab first
       // This is crucial to avoid incorrect query execution when a different tab was active
-      if (queryData.query_type === 'logchefql') {
+      const isLogchefQL = queryData.query_type && queryData.query_type.toLowerCase() === 'logchefql';
+      
+      if (isLogchefQL) {
         console.log('Setting mode to logchefql for saved query');
         queryMode.value = 'logchefql';
         exploreStore.setActiveMode('logchefql');
