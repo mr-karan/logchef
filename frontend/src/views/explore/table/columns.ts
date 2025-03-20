@@ -91,16 +91,19 @@ export function createColumns(
               // Use UTC formatting - keep the 'Z' to indicate UTC
               formattedTimestamp = date.toISOString();
             } else {
-              // Use local timezone
-              formattedTimestamp = new Date(date).toLocaleString(undefined, {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                fractionalSecondDigits: 3
-              });
+              // Use local timezone with ISO format and timezone offset
+              const tzOffset = date.getTimezoneOffset();
+              const absOffset = Math.abs(tzOffset);
+              const offsetHours = Math.floor(absOffset / 60).toString().padStart(2, '0');
+              const offsetMinutes = (absOffset % 60).toString().padStart(2, '0');
+              const offsetSign = tzOffset <= 0 ? '+' : '-'; // Note: getTimezoneOffset returns negative for positive offsets
+              
+              // Format the date in ISO format with timezone offset
+              const localISOTime = new Date(date.getTime() - (tzOffset * 60000))
+                .toISOString()
+                .slice(0, -1); // Remove the trailing Z
+                
+              formattedTimestamp = `${localISOTime}${offsetSign}${offsetHours}:${offsetMinutes}`;
             }
           }
         } catch (e) {
