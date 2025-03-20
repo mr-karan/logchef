@@ -140,14 +140,11 @@ const (
 
 // SavedQueryContent represents the content of a saved query
 type SavedQueryContent struct {
-	Version          int                 `json:"version"`
-	ActiveTab        SavedQueryTab       `json:"activeTab"`
-	SourceID         SourceID            `json:"sourceId"`
-	TimeRange        SavedQueryTimeRange `json:"timeRange"`
-	Limit            int                 `json:"limit"`
-	QueryType        SavedQueryType      `json:"queryType"`        // Type of query (logchefql or sql)
-	RawSQL           string              `json:"rawSql"`           // SQL representation
-	LogchefQLContent string              `json:"logchefqlContent"` // LogchefQL representation (if applicable)
+	Version   int                 `json:"version"`
+	SourceID  SourceID            `json:"sourceId"`
+	TimeRange SavedQueryTimeRange `json:"timeRange"`
+	Limit     int                 `json:"limit"`
+	Content   string              `json:"content"` // Query content (SQL or LogchefQL)
 }
 
 // SavedTeamQuery represents a saved query associated with a team

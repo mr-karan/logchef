@@ -992,23 +992,48 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
       console.log('Loading query from dropdown data:', queryData);
 
       const queryContent = queryData.content;
-
-      // Set the query mode based on the query type
-      if (queryData.queryType === 'logchefql') {
+      
+      // IMPORTANT: First completely reset the query editor state before loading saved query
+      // This prevents any issues with mixing query modes or content
+      logchefQuery.value = '';
+      sqlQuery.value = '';
+      exploreStore.setLogchefqlCode('');
+      exploreStore.setRawSql('');
+      
+      // Force the editor to switch to the appropriate tab first
+      // This is crucial to avoid incorrect query execution when a different tab was active
+      if (queryData.query_type === 'logchefql') {
+        console.log('Setting mode to logchefql for saved query');
         queryMode.value = 'logchefql';
-        // Set the LogchefQL content if available
-        if (queryContent.logchefqlContent) {
-          logchefQuery.value = queryContent.logchefqlContent;
-          exploreStore.setLogchefqlCode(queryContent.logchefqlContent);
+        exploreStore.setActiveMode('logchefql');
+        
+        // Ensure the QueryEditor UI tab is synchronized (force it to reset)
+        if (queryEditorRef.value && typeof queryEditorRef.value.setActiveTab === 'function') {
+          queryEditorRef.value.setActiveTab('logchefql');
         }
-        // Reset any existing SQL
-        exploreStore.setRawSql('');
+        
+        // Set the LogchefQL content
+        if (queryContent.content) {
+          // Wait a tick to ensure the mode change is processed
+          await nextTick();
+          logchefQuery.value = queryContent.content;
+          exploreStore.setLogchefqlCode(queryContent.content);
+        }
       } else {
-        // Set SQL mode
+        console.log('Setting mode to sql for saved query');
         queryMode.value = 'sql';
-        // Set raw SQL if available
-        if (queryContent.rawSql) {
-          const sqlContent = queryContent.rawSql;
+        exploreStore.setActiveMode('sql');
+        
+        // Ensure the QueryEditor UI tab is synchronized (force it to reset)
+        if (queryEditorRef.value && typeof queryEditorRef.value.setActiveTab === 'function') {
+          queryEditorRef.value.setActiveTab('clickhouse-sql');
+        }
+        
+        // Set SQL content
+        if (queryContent.content) {
+          // Wait a tick to ensure the mode change is processed
+          await nextTick();
+          const sqlContent = queryContent.content;
           sqlQuery.value = sqlContent;
           exploreStore.setRawSql(sqlContent);
           // Prevent immediate overwrite by setting the local state
@@ -1016,9 +1041,16 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
         }
       }
 
+      console.log('Saved query loaded, mode:', queryMode.value, 
+                  'content:', queryMode.value === 'logchefql' ? 
+                    logchefQuery.value : sqlQuery.value);
+
       // Update URL with current parameters
       updateUrlWithCurrentState();
 
+      // Wait another tick to ensure everything is updated before submitting
+      await nextTick();
+      
       // Execute the query
       await handleQuerySubmit(queryMode.value);
       return;
@@ -1058,31 +1090,65 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
     const queryContent = JSON.parse(query.query_content) as SavedQueryContent;
     console.log('Parsed query content:', queryContent);
 
-    // Set the query mode based on the query type
+    // IMPORTANT: First completely reset the query editor state before loading saved query
+    // This prevents any issues with mixing query modes or content
+    logchefQuery.value = '';
+    sqlQuery.value = '';
+    exploreStore.setLogchefqlCode('');
+    exploreStore.setRawSql('');
+    
+    // Force the editor to switch to the appropriate tab first based on the saved query type
+    // This is crucial to avoid incorrect query execution when a different tab was active
     if (query.query_type === 'logchefql') {
+      console.log('Setting mode to logchefql for saved query from API');
       queryMode.value = 'logchefql';
-      // Set the LogchefQL content if available
-      if (queryContent.logchefqlContent) {
-        logchefQuery.value = queryContent.logchefqlContent;
-        exploreStore.setLogchefqlCode(queryContent.logchefqlContent);
+      exploreStore.setActiveMode('logchefql');
+      
+      // Ensure the QueryEditor UI tab is synchronized (force it to reset)
+      if (queryEditorRef.value && typeof queryEditorRef.value.setActiveTab === 'function') {
+        queryEditorRef.value.setActiveTab('logchefql');
       }
-      // Reset any existing SQL
-      exploreStore.setRawSql('');
+      
+      // Wait a tick to ensure the mode change is processed
+      await nextTick();
+      
+      // Set the LogchefQL content if available
+      if (queryContent.content) {
+        logchefQuery.value = queryContent.content;
+        exploreStore.setLogchefqlCode(queryContent.content);
+      }
     } else {
-      // Set SQL mode
+      console.log('Setting mode to sql for saved query from API');
       queryMode.value = 'sql';
-      // Set raw SQL if available
-      if (queryContent.rawSql) {
-        sqlQuery.value = queryContent.rawSql;
-        exploreStore.setRawSql(queryContent.rawSql);
+      exploreStore.setActiveMode('sql');
+      
+      // Ensure the QueryEditor UI tab is synchronized (force it to reset)
+      if (queryEditorRef.value && typeof queryEditorRef.value.setActiveTab === 'function') {
+        queryEditorRef.value.setActiveTab('clickhouse-sql');
+      }
+      
+      // Wait a tick to ensure the mode change is processed
+      await nextTick();
+      
+      // Set SQL content if available
+      if (queryContent.content) {
+        sqlQuery.value = queryContent.content;
+        exploreStore.setRawSql(queryContent.content);
         // Prevent immediate overwrite by setting the local state
-        generatedSQL.value = queryContent.rawSql;
+        generatedSQL.value = queryContent.content;
       }
     }
+    
+    console.log('Saved query loaded from API, mode:', queryMode.value, 
+                'content:', queryMode.value === 'logchefql' ? 
+                  logchefQuery.value : sqlQuery.value);
 
     // Update URL with current parameters
     updateUrlWithCurrentState();
 
+    // Wait another tick to ensure everything is updated before submitting
+    await nextTick();
+    
     // Execute the query
     await handleQuerySubmit(queryMode.value);
 
@@ -1615,16 +1681,10 @@ onBeforeUnmount(() => {
 
     <!-- Save Query Modal -->
     <SaveQueryModal v-if="showSaveQueryModal" :is-open="showSaveQueryModal" :query-content="JSON.stringify({
-      filter_conditions: exploreStore.filterConditions,
-      raw_sql: exploreStore.rawSql,
-      logchefql_query: exploreStore.logchefqlCode,
-      sql_query: exploreStore.rawSql,
-      query_mode: exploreStore.activeMode,
-      generated_sql: generatedSQL,
-      time_range: exploreStore.timeRange,
-      limit: exploreStore.limit,
       sourceId: exploreStore.sourceId,
-      team_id: teamsStore.currentTeamId
+      timeRange: exploreStore.timeRange,
+      limit: exploreStore.limit,
+      content: exploreStore.activeMode === 'logchefql' ? exploreStore.logchefqlCode : exploreStore.rawSql
     })" @close="showSaveQueryModal = false" @save="handleSaveQuery" />
   </div>
 </template>

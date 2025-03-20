@@ -303,6 +303,7 @@ func (db *DB) ListTeamSources(ctx context.Context, teamID models.TeamID) ([]*mod
 
 	var rows []struct {
 		ID          int       `db:"id"`
+		Name        string    `db:"name"`
 		Database    string    `db:"database"`
 		TableName   string    `db:"table_name"`
 		Description string    `db:"description"`
@@ -318,6 +319,7 @@ func (db *DB) ListTeamSources(ctx context.Context, teamID models.TeamID) ([]*mod
 	for i, row := range rows {
 		sources[i] = &models.Source{
 			ID:          models.SourceID(row.ID),
+			Name:        row.Name,
 			Description: row.Description,
 			Connection: models.ConnectionInfo{
 				Database:  row.Database,
@@ -355,6 +357,7 @@ func (db *DB) ListSourcesForUser(ctx context.Context, userID models.UserID) ([]*
 	// We need to get full source information for each source
 	var rows []struct {
 		ID                int       `db:"id"`
+		Name              string    `db:"name"`
 		MetaIsAutoCreated int       `db:"_meta_is_auto_created"`
 		MetaTSField       string    `db:"_meta_ts_field"`
 		MetaSeverityField string    `db:"_meta_severity_field"`
@@ -386,6 +389,7 @@ func (db *DB) ListSourcesForUser(ctx context.Context, userID models.UserID) ([]*
 	for i, row := range rows {
 		sources[i] = &models.Source{
 			ID:                models.SourceID(row.ID),
+			Name:              row.Name,
 			MetaIsAutoCreated: row.MetaIsAutoCreated == 1,
 			MetaTSField:       row.MetaTSField,
 			MetaSeverityField: row.MetaSeverityField,
