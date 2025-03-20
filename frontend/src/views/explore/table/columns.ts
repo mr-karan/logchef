@@ -75,6 +75,62 @@ export function createColumns(
 
       // Special handling for timestamp column
       if (col.name === timestampField) {
+        // Format timestamp with better readability
+        try {
+          const timestamp = new Date(value as string);
+          
+          // Check if timestamp is valid before formatting
+          if (!isNaN(timestamp.getTime())) {
+            // Keep raw timestamp for tooltip
+            const isoTimestamp = timestamp.toISOString();
+            
+            // Format relative time for recent timestamps (within last 24 hours)
+            const now = new Date();
+            const diffMs = now.getTime() - timestamp.getTime();
+            const diffHours = diffMs / (1000 * 60 * 60);
+            
+            let displayTime;
+            if (diffHours < 24) {
+              // For timestamps less than 24 hours old, show relative time
+              if (diffHours < 0.016) { // less than 1 minute
+                displayTime = 'just now';
+              } else if (diffHours < 1) {
+                displayTime = `${Math.round(diffHours * 60)} min ago`;
+              } else {
+                displayTime = `${Math.round(diffHours)} hour${Math.round(diffHours) !== 1 ? 's' : ''} ago`;
+              }
+            } else {
+              // For older timestamps, show date and time
+              const options: Intl.DateTimeFormatOptions = { 
+                month: 'short', 
+                day: 'numeric',
+                hour: '2-digit', 
+                minute: '2-digit',
+                second: '2-digit'
+              };
+              
+              // Add year if not current year
+              if (timestamp.getFullYear() !== now.getFullYear()) {
+                options.year = 'numeric';
+              }
+              
+              displayTime = timestamp.toLocaleString(undefined, options);
+            }
+            
+            return h(
+              "span",
+              { 
+                class: "flex-render-content font-mono text-[11px] relative group cursor-default",
+                title: isoTimestamp
+              },
+              displayTime
+            );
+          }
+        } catch (e) {
+          console.error("Error formatting timestamp:", e);
+        }
+        
+        // Fallback to basic formatting if there's an error
         const formattedTimestamp = formatTimestamp(value as string);
         return h(
           "span",
