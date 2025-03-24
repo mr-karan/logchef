@@ -4,8 +4,8 @@ import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { RangeCalendar } from '@/components/ui/range-calendar'
-import { CalendarIcon, Search } from 'lucide-vue-next'
+import { Calendar } from '@/components/ui/calendar'
+import { CalendarIcon, Clock } from 'lucide-vue-next'
 import type { DateRange } from 'radix-vue'
 import { getLocalTimeZone, now, ZonedDateTime, toZoned, CalendarDateTime, type DateValue } from '@internationalized/date'
 
@@ -25,7 +25,6 @@ const emit = defineEmits<{
 const showDatePicker = ref(false)
 const showFromCalendar = ref(false)
 const showToCalendar = ref(false)
-const searchQuery = ref('')
 const errorMessage = ref('')
 
 // Date state
@@ -55,26 +54,16 @@ const calendarDateRange = computed({
 const startZoned = toZoned(dateRange.value.start as CalendarDateTime, getLocalTimeZone())
 const endZoned = toZoned(dateRange.value.end as CalendarDateTime, getLocalTimeZone())
 
-const draftTimeState = ref({
+// Separate date and time inputs
+const draftState = ref({
     start: {
-        hour: startZoned.hour,
-        minute: startZoned.minute,
-        second: startZoned.second
+        date: formatDate(startZoned),
+        time: formatTime(startZoned)
     },
     end: {
-        hour: endZoned.hour,
-        minute: endZoned.minute,
-        second: endZoned.second
+        date: formatDate(endZoned),
+        time: formatTime(endZoned)
     }
-})
-
-// Draft state for editing
-const draftRange = ref<{
-    start: string;
-    end: string;
-}>({
-    start: formatDateTime(startZoned),
-    end: formatDateTime(endZoned)
 })
 
 // Initialize modelValue if not provided
@@ -92,99 +81,61 @@ watch(() => props.modelValue, (newValue) => {
             start: newValue.start,
             end: newValue.end
         }
-        draftRange.value = {
-            start: formatDateTime(start),
-            end: formatDateTime(end)
-        }
-        draftTimeState.value = {
+        draftState.value = {
             start: {
-                hour: start.hour,
-                minute: start.minute,
-                second: start.second
+                date: formatDate(start),
+                time: formatTime(start)
             },
             end: {
-                hour: end.hour,
-                minute: end.minute,
-                second: end.second
+                date: formatDate(end),
+                time: formatTime(end)
             }
         }
     }
 }, { immediate: true })
 
-// Watch for changes to the draft range inputs and update time state
-watch(() => draftRange.value.start, (newVal) => {
-    const parsed = parseDateTime(newVal)
-    if (parsed) {
-        draftTimeState.value.start = {
-            hour: parsed.hour,
-            minute: parsed.minute,
-            second: parsed.second
-        }
-    }
-})
+const quickRanges = [
+    { label: 'Last 5m', duration: { minutes: 5 } },
+    { label: 'Last 15m', duration: { minutes: 15 } },
+    { label: 'Last 30m', duration: { minutes: 30 } },
+    { label: 'Last 1h', duration: { hours: 1 } },
+    { label: 'Last 3h', duration: { hours: 3 } },
+    { label: 'Last 6h', duration: { hours: 6 } },
+    { label: 'Last 12h', duration: { hours: 12 } },
+    { label: 'Last 24h', duration: { hours: 24 } },
+    { label: 'Last 2d', duration: { days: 2 } },
+    { label: 'Last 7d', duration: { days: 7 } },
+    { label: 'Last 30d', duration: { days: 30 } },
+    { label: 'Last 90d', duration: { days: 90 } },
+] as const
 
-watch(() => draftRange.value.end, (newVal) => {
-    const parsed = parseDateTime(newVal)
-    if (parsed) {
-        draftTimeState.value.end = {
-            hour: parsed.hour,
-            minute: parsed.minute,
-            second: parsed.second
-        }
-    }
-})
-
-const quickRanges = {
-    'Last 5 minutes': { hours: 0, minutes: 5 },
-    'Last 15 minutes': { hours: 0, minutes: 15 },
-    'Last 30 minutes': { hours: 0, minutes: 30 },
-    'Last 1 hour': { hours: 1 },
-    'Last 3 hours': { hours: 3 },
-    'Last 6 hours': { hours: 6 },
-    'Last 12 hours': { hours: 12 },
-    'Last 24 hours': { hours: 24 },
-    'Last 2 days': { days: 2 },
-    'Last 7 days': { days: 7 },
-    'Last 30 days': { days: 30 },
-    'Last 90 days': { days: 90 },
-} as const
-
-const filteredRanges = computed(() => {
-    if (!searchQuery.value) return quickRanges
-    return Object.fromEntries(
-        Object.entries(quickRanges).filter(([label]) =>
-            label.toLowerCase().includes(searchQuery.value.toLowerCase())
-        )
-    )
-})
-
-function formatDateTime(date: ZonedDateTime | null | undefined): string {
+function formatDate(date: ZonedDateTime | null | undefined): string {
     if (!date) return ''
-
     try {
         const isoString = date.toString()
-        const [datePart, timePart] = isoString.split('T')
-        const time = timePart.slice(0, 8) // Get HH:MM:SS
-        return `${datePart} ${time}`
+        return isoString.split('T')[0]
     } catch (e) {
         console.error('Error formatting date:', e)
         return ''
     }
 }
 
-function parseDateTime(value: string): ZonedDateTime | null {
-    if (!value) return null
+function formatTime(date: ZonedDateTime | null | undefined): string {
+    if (!date) return ''
     try {
-        const [datePart, timePart] = value.split(' ')
+        const isoString = date.toString()
+        return isoString.split('T')[1].slice(0, 8) // Get HH:MM:SS
+    } catch (e) {
+        console.error('Error formatting time:', e)
+        return ''
+    }
+}
 
-        if (!datePart || !timePart) {
-            errorMessage.value = 'Invalid date-time format. Expected "YYYY-MM-DD HH:mm:ss"'
-            return null
-        }
-
-        const [year, month, day] = datePart.split('-').map(Number)
-
-        const [hour, minute, second] = timePart.split(':').map(Number)
+function parseDateTime(date: string, time: string): ZonedDateTime | null {
+    if (!date || !time) return null
+    try {
+        const [year, month, day] = date.split('-').map(Number)
+        const [hour, minute, second] = time.split(':').map(Number)
 
         if (isNaN(year) || isNaN(month) || isNaN(day)) {
             errorMessage.value = 'Invalid date format. Expected "YYYY-MM-DD"'
@@ -199,141 +150,92 @@ function parseDateTime(value: string): ZonedDateTime | null {
         }
 
         try {
-            // Create a CalendarDateTime first, then convert to ZonedDateTime
             const calendarDate = new CalendarDateTime(year, month, day, hour, minute, second)
-            const result = toZoned(calendarDate, getLocalTimeZone())
-            return result
+            return toZoned(calendarDate, getLocalTimeZone())
         } catch (e) {
             console.error('Error creating ZonedDateTime:', e)
             errorMessage.value = 'Invalid date/time values'
             return null
         }
     } catch (e) {
-        console.error('Error parsing date-time string:', e)
+        console.error('Error parsing date-time:', e)
         errorMessage.value = 'Error parsing date-time. Please use format: YYYY-MM-DD HH:mm:ss'
         return null
     }
 }
 
-function handleCalendarUpdate(range: DateRange | null) {
-    if (!range?.start || !range?.end) return
+function handleCalendarUpdate(type: 'start' | 'end', date: DateValue | null) {
+    if (!date) return
 
-    if (range.start) {
-        // Set time to 00:00:00 when clicking a date
-        const zonedStart = toZoned(range.start, getLocalTimeZone())
-        const newDate = zonedStart.set({
-            hour: 0,
-            minute: 0,
-            second: 0
-        })
-        draftRange.value.start = formatDateTime(newDate)
-        // Update draft time state to match
-        draftTimeState.value.start = {
-            hour: 0,
-            minute: 0,
-            second: 0
-        }
-    }
+    const zonedDate = toZoned(date as CalendarDateTime, getLocalTimeZone())
+    draftState.value[type].date = formatDate(zonedDate)
 
-    if (range.end) {
-        // Set time to 00:00:00 when clicking a date
-        const zonedEnd = toZoned(range.end, getLocalTimeZone())
-        const newDate = zonedEnd.set({
-            hour: 0,
-            minute: 0,
-            second: 0
-        })
-        draftRange.value.end = formatDateTime(newDate)
-        // Update draft time state to match
-        draftTimeState.value.end = {
-            hour: 0,
-            minute: 0,
-            second: 0
-        }
+    // Close the respective calendar popover
+    if (type === 'start') {
+        showFromCalendar.value = false
+    } else {
+        showToCalendar.value = false
     }
 }
 
 function formatDisplayText() {
     const start = toZoned(dateRange.value.start as CalendarDateTime, getLocalTimeZone())
     const end = toZoned(dateRange.value.end as CalendarDateTime, getLocalTimeZone())
-    return `${formatDateTime(start)} - ${formatDateTime(end)}`
+    return `${formatDate(start)} ${formatTime(start)} - ${formatDate(end)} ${formatTime(end)}`
 }
 
 function handleApply() {
-    // Clear any previous error
     errorMessage.value = ''
 
-    const start = parseDateTime(draftRange.value.start)
-    const end = parseDateTime(draftRange.value.end)
+    const start = parseDateTime(draftState.value.start.date, draftState.value.start.time)
+    const end = parseDateTime(draftState.value.end.date, draftState.value.end.time)
 
-    if (!start || !end) {
-        // Error message already set by parseDateTime
-        return
-    }
+    if (!start || !end) return
 
-    // Validate that start is before end
     if (start.compare(end) > 0) {
         errorMessage.value = 'Start date must be before end date'
         return
     }
 
-    // Update the actual date range and emit
     dateRange.value = { start, end }
-
-    // Update draft time state with the latest valid times
-    draftTimeState.value.start = {
-        hour: start.hour,
-        minute: start.minute,
-        second: start.second
-    }
-    draftTimeState.value.end = {
-        hour: end.hour,
-        minute: end.minute,
-        second: end.second
-    }
-
     selectedQuickRange.value = null
     emitUpdate()
     showDatePicker.value = false
 }
 
-function applyQuickRange(range: keyof typeof quickRanges) {
+function applyQuickRange(range: typeof quickRanges[number]) {
     const end = now(getLocalTimeZone())
-    const start = end.subtract(quickRanges[range])
+    const start = end.subtract(range.duration)
 
     dateRange.value = { start, end }
-
-    // Update draft time state with quick range times
-    draftTimeState.value.start = {
-        hour: start.hour,
-        minute: start.minute,
-        second: start.second
+    draftState.value = {
+        start: {
+            date: formatDate(start),
+            time: formatTime(start)
+        },
+        end: {
+            date: formatDate(end),
+            time: formatTime(end)
+        }
     }
-    draftTimeState.value.end = {
-        hour: end.hour,
-        minute: end.minute,
-        second: end.second
-    }
-
-    draftRange.value = {
-        start: formatDateTime(start),
-        end: formatDateTime(end)
-    }
-    selectedQuickRange.value = range
+    selectedQuickRange.value = range.label
     emitUpdate()
     showDatePicker.value = false
 }
 
 function handleCancel() {
-    // Clear any error message
     errorMessage.value = ''
-
-    // Reset draft values to current values
     const start = toZoned(dateRange.value.start as CalendarDateTime, getLocalTimeZone())
     const end = toZoned(dateRange.value.end as CalendarDateTime, getLocalTimeZone())
-    draftRange.value = {
-        start: formatDateTime(start),
-        end: formatDateTime(end)
+    draftState.value = {
+        start: {
+            date: formatDate(start),
+            time: formatTime(start)
+        },
+        end: {
+            date: formatDate(end),
+            time: formatTime(end)
+        }
     }
     showDatePicker.value = false
 }
@@ -357,19 +259,27 @@ const selectedQuickRange = ref<string | null>(null)
 
 const selectedRangeText = computed(() => {
     if (!dateRange.value?.start || !dateRange.value?.end) return 'Select time range'
-
-    // If a quick range is selected, show that
-    if (selectedQuickRange.value) {
-        return selectedQuickRange.value
-    }
-
-    // Otherwise show the full date range
+    if (selectedQuickRange.value) return selectedQuickRange.value
     return formatDisplayText()
+})
+
+// Compute duration between dates
+const durationText = computed(() => {
+    if (!dateRange.value?.start || !dateRange.value?.end) return ''
+    const start = toZoned(dateRange.value.start as CalendarDateTime, getLocalTimeZone())
+    const end = toZoned(dateRange.value.end as CalendarDateTime, getLocalTimeZone())
+    const diffMs = end.toDate().getTime() - start.toDate().getTime()
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+    const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+    const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+
+    if (diffDays > 0) return `Duration: ${diffDays}d ${diffHours}h ${diffMinutes}m`
+    if (diffHours > 0) return `Duration: ${diffHours}h ${diffMinutes}m`
+    return `Duration: ${diffMinutes}m`
 })
 </script>
 
 <template>
-    <!-- Main Date Picker Popover -->
     <Popover v-model:open="showDatePicker">
         <PopoverTrigger as-child>
             <Button variant="outline" :class="[
@@ -382,18 +292,17 @@ const selectedRangeText = computed(() => {
                 </div>
             </Button>
         </PopoverTrigger>
-        <PopoverContent class="w-[550px] p-4" align="start" side="bottom">
-            <div class="flex space-x-4">
-                <!-- Left side - Date inputs -->
-                <div class="w-[300px] space-y-4">
-                    <div class="space-y-4">
-                        <!-- From -->
-                        <div class="space-y-1.5">
-                            <Label class="text-xs text-muted-foreground">From</Label>
-                            <div class="relative">
-                                <Input v-model="draftRange.start" class="pr-10 font-mono text-sm h-9"
-                                    @keydown="handleKeyDown" />
-                                <!-- From Calendar Popover -->
+        <PopoverContent class="w-[400px] p-4" align="start" side="bottom">
+            <div class="space-y-4">
+                <!-- Date/Time Inputs -->
+                <div class="space-y-4">
+                    <!-- From -->
+                    <div class="space-y-2">
+                        <Label class="text-sm font-medium">From</Label>
+                        <div class="flex gap-2">
+                            <div class="relative flex-1">
+                                <Input v-model="draftState.start.date" class="pr-10 font-mono text-sm h-9"
+                                    placeholder="YYYY-MM-DD" @keydown="handleKeyDown" />
                                 <Popover v-model:open="showFromCalendar">
                                     <PopoverTrigger as-child>
                                         <Button variant="ghost" size="icon"
@@ -401,20 +310,31 @@ const selectedRangeText = computed(() => {
                                             <CalendarIcon class="h-4 w-4" />
                                         </Button>
                                     </PopoverTrigger>
-                                    <PopoverContent class="w-auto p-3 max-w-[300px]" :side="'bottom'" :align="'end'">
-                                        <RangeCalendar v-model="calendarDateRange" class="rounded-md border"
-                                            :weekday-format="'short'" @update:model-value="handleCalendarUpdate" />
+                                    <PopoverContent class="w-auto p-0" :side="'bottom'" :align="'end'">
+                                        <Calendar
+                                            :selected-date="dateRange.start !== undefined ? dateRange.start : null"
+                                            class="rounded-md border"
+                                            @update:model-value="date => handleCalendarUpdate('start', date)" />
                                     </PopoverContent>
                                 </Popover>
                             </div>
+                            <div class="relative w-[120px]">
+                                <Input v-model="draftState.start.time" class="font-mono text-sm h-9"
+                                    placeholder="HH:mm:ss" @keydown="handleKeyDown" />
+                                <Button variant="ghost" size="icon"
+                                    class="absolute right-0 top-0 h-full w-9 px-0 hover:bg-accent pointer-events-none">
+                                    <Clock class="h-4 w-4" />
+                                </Button>
+                            </div>
                         </div>
-                        <!-- To -->
-                        <div class="space-y-1.5">
-                            <Label class="text-xs text-muted-foreground">To</Label>
-                            <div class="relative">
-                                <Input v-model="draftRange.end" class="pr-10 font-mono text-sm h-9"
-                                    @keydown="handleKeyDown" />
-                                <!-- To Calendar Popover -->
+                    </div>
+                    <!-- To -->
+                    <div class="space-y-2">
+                        <Label class="text-sm font-medium">To</Label>
+                        <div class="flex gap-2">
+                            <div class="relative flex-1">
+                                <Input v-model="draftState.end.date" class="pr-10 font-mono text-sm h-9"
+                                    placeholder="YYYY-MM-DD" @keydown="handleKeyDown" />
                                 <Popover v-model:open="showToCalendar">
                                     <PopoverTrigger as-child>
                                         <Button variant="ghost" size="icon"
@@ -422,45 +342,52 @@ const selectedRangeText = computed(() => {
                                             <CalendarIcon class="h-4 w-4" />
                                         </Button>
                                     </PopoverTrigger>
-                                    <PopoverContent class="w-auto p-3 max-w-[300px]" :side="'bottom'" :align="'end'">
-                                        <RangeCalendar v-model="calendarDateRange" class="rounded-md border"
-                                            :weekday-format="'short'" @update:model-value="handleCalendarUpdate" />
+                                    <PopoverContent class="w-auto p-0" :side="'bottom'" :align="'end'">
+                                        <Calendar :selected-date="dateRange.end !== undefined ? dateRange.end : null"
+                                            class="rounded-md border"
+                                            @update:model-value="date => handleCalendarUpdate('end', date)" />
                                     </PopoverContent>
                                 </Popover>
                             </div>
-                        </div>
-
-                        <!-- Error message -->
-                        <div v-if="errorMessage" class="text-sm text-destructive">
-                            {{ errorMessage }}
-                        </div>
-
-                        <!-- Action buttons moved here -->
-                        <div class="flex justify-end space-x-2 pt-2">
-                            <Button variant="outline" @click="handleCancel">Cancel</Button>
-                            <Button @click="handleApply">Apply</Button>
+                            <div class="relative w-[120px]">
+                                <Input v-model="draftState.end.time" class="font-mono text-sm h-9"
+                                    placeholder="HH:mm:ss" @keydown="handleKeyDown" />
+                                <Button variant="ghost" size="icon"
+                                    class="absolute right-0 top-0 h-full w-9 px-0 hover:bg-accent pointer-events-none">
+                                    <Clock class="h-4 w-4" />
+                                </Button>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Right side - Quick ranges -->
-                <div class="border-l pl-4 w-[200px]">
-                    <div class="space-y-3">
-                        <div class="sticky top-0 bg-background">
-                            <div class="relative">
-                                <Search class="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                                <Input v-model="searchQuery" class="pl-8 h-9 text-sm w-full"
-                                    placeholder="Search quick ranges" />
-                            </div>
-                        </div>
-                        <div class="space-y-0.5 max-h-[400px] overflow-y-auto pr-2">
-                            <Button v-for="(_, label) in filteredRanges" :key="label" variant="ghost"
-                                class="justify-start w-full h-9 px-2 text-sm hover:bg-accent"
-                                @click="applyQuickRange(label)">
-                                {{ label }}
-                            </Button>
-                        </div>
+                <!-- Duration -->
+                <div class="text-sm text-muted-foreground">
+                    {{ durationText }}
+                </div>
+
+                <!-- Error message -->
+                <div v-if="errorMessage" class="text-sm text-destructive">
+                    {{ errorMessage }}
+                </div>
+
+                <!-- Quick Ranges -->
+                <div class="space-y-2">
+                    <Label class="text-sm font-medium">Quick Ranges</Label>
+                    <div class="grid grid-cols-4 gap-2">
+                        <Button v-for="range in quickRanges" :key="range.label" variant="outline" size="sm" :class="[
+                            'h-8',
+                            selectedQuickRange === range.label && 'bg-accent text-accent-foreground'
+                        ]" @click="applyQuickRange(range)">
+                            {{ range.label }}
+                        </Button>
                     </div>
+                </div>
+
+                <!-- Action buttons -->
+                <div class="flex justify-end space-x-2 pt-2">
+                    <Button variant="outline" @click="handleCancel">Cancel</Button>
+                    <Button @click="handleApply">Apply</Button>
                 </div>
             </div>
         </PopoverContent>
@@ -468,14 +395,6 @@ const selectedRangeText = computed(() => {
 </template>
 
 <style scoped>
-/* Remove the problematic style that was disabling max-width */
-
-/* Add proper calendar constraints */
-:deep(.calendar) {
-    width: 100%;
-    max-width: 280px;
-}
-
 /* Ensure popovers aren't too wide */
 :deep(.v-popper__popper) {
     max-width: 350px;

@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/mr-karan/logchef/pkg/models"
@@ -69,13 +70,13 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 		req.MetaSeverityField = "severity_text" // Default severity field
 	}
 
-	created, err := s.sourceService.CreateSource(c.Context(), req.Name, req.MetaIsAutoCreated, req.Connection, req.Description, req.TTLDays, req.MetaTSField, req.MetaSeverityField)
+	created, err := s.sourceService.CreateSource(c.Context(), req.Name, req.MetaIsAutoCreated, req.Connection, req.Description, req.TTLDays, req.MetaTSField, req.MetaSeverityField, req.Schema)
 	if err != nil {
 		var validationErr *source.ValidationError
 		if errors.As(err, &validationErr) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
 		}
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error creating source: "+err.Error(), models.DatabaseErrorType)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Error creating source: %v", err), models.DatabaseErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusCreated, created.ToResponse())

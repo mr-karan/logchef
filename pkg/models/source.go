@@ -99,6 +99,7 @@ type CreateSourceRequest struct {
 	Connection        ConnectionInfo `json:"connection"`
 	Description       string         `json:"description"`
 	TTLDays           int            `json:"ttl_days"`
+	Schema            string         `json:"schema,omitempty"`
 }
 
 // ValidateConnectionRequest represents a request to validate a connection
