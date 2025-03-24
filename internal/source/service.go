@@ -116,7 +116,7 @@ func (s *Service) GetSource(ctx context.Context, id models.SourceID) (*models.So
 }
 
 // CreateSource creates a new source
-func (s *Service) CreateSource(ctx context.Context, name string, autoCreateTable bool, conn models.ConnectionInfo, description string, ttlDays int, metaTSField string, metaSeverityField string) (*models.Source, error) {
+func (s *Service) CreateSource(ctx context.Context, name string, autoCreateTable bool, conn models.ConnectionInfo, description string, ttlDays int, metaTSField string, metaSeverityField string, customSchema string) (*models.Source, error) {
 	// Validate input
 	if err := s.validator.ValidateSourceCreation(name, conn, description, ttlDays, metaTSField, metaSeverityField, autoCreateTable); err != nil {
 		return nil, err
@@ -130,6 +130,7 @@ func (s *Service) CreateSource(ctx context.Context, name string, autoCreateTable
 		Connection:        conn,
 		Description:       description,
 		TTLDays:           ttlDays,
+		Schema:            customSchema,
 		Timestamps: models.Timestamps{
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
@@ -166,7 +167,8 @@ func (s *Service) CreateSource(ctx context.Context, name string, autoCreateTable
 		)
 		return nil, &ValidationError{
 			Field:   "connection",
-			Message: "Failed to connect to the database. Please check your connection details.",
+			Message: "Failed to connect to the database",
+			Err:     err,
 		}
 	}
 	defer tempClient.Close()
@@ -200,14 +202,17 @@ func (s *Service) CreateSource(ctx context.Context, name string, autoCreateTable
 
 	// Create table if needed
 	if autoCreateTable {
-		// Create table using the schema
-		schema := models.OTELLogsTableSchema
-		schema = strings.ReplaceAll(schema, "{{database_name}}", source.Connection.Database)
-		schema = strings.ReplaceAll(schema, "{{table_name}}", source.Connection.TableName)
-		if source.TTLDays > 0 {
-			schema = strings.ReplaceAll(schema, "{{ttl_day}}", strconv.Itoa(source.TTLDays))
-		} else {
-			schema = strings.ReplaceAll(schema, "TTL toDateTime(timestamp) + INTERVAL {{ttl_day}} DAY", "")
+		// Use custom schema if provided, otherwise use default
+		schema := customSchema
+		if schema == "" {
+			schema = models.OTELLogsTableSchema
+			schema = strings.ReplaceAll(schema, "{{database_name}}", source.Connection.Database)
+			schema = strings.ReplaceAll(schema, "{{table_name}}", source.Connection.TableName)
+			if source.TTLDays > 0 {
+				schema = strings.ReplaceAll(schema, "{{ttl_day}}", strconv.Itoa(source.TTLDays))
+			} else {
+				schema = strings.ReplaceAll(schema, "TTL toDateTime(timestamp) + INTERVAL {{ttl_day}} DAY", "")
+			}
 		}
 
 		if _, err := tempClient.Query(ctx, schema); err != nil {

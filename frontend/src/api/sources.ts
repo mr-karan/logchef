@@ -59,6 +59,7 @@ export interface CreateSourcePayload {
   connection: ConnectionRequestInfo;
   description?: string;
   ttl_days: number;
+  schema?: string;
 }
 
 export interface CreateTeamQueryRequest {
