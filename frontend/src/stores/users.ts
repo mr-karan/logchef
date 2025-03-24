@@ -3,6 +3,7 @@ import { useBaseStore } from "./base";
 import type { User } from "@/types";
 import { usersApi } from "@/api/users";
 import { computed } from "vue";
+import type { APIResponse } from "@/api/types";
 
 interface UsersState {
   users: User[];
@@ -14,20 +15,30 @@ export const useUsersStore = defineStore("users", () => {
   });
 
   // Computed properties
-  const users = computed(() => state.data.value.users);
+  const users = computed(() => {
+    console.log("Users computed value:", state.data.value.users);
+    return state.data.value.users;
+  });
 
   async function loadUsers() {
-    return await state.callApi<User[]>({
+    console.log("Loading users...");
+    const result = await state.callApi<APIResponse<User[]>>({
       apiCall: () => usersApi.listUsers(),
-      onSuccess: (data) => {
-        state.data.value.users = data || [];
+      onSuccess: (response) => {
+        console.log("API Response:", response);
+        if (Array.isArray(response)) {
+          state.data.value.users = response;
+          console.log("Updated users state:", state.data.value.users);
+        }
       },
       showToast: true,
     });
+    console.log("Load users result:", result);
+    return result;
   }
 
   async function getUser(id: string) {
-    return await state.callApi<{ user: User }>({
+    return await state.callApi<APIResponse<{ user: User }>>({
       apiCall: () => usersApi.getUser(id),
       showToast: true,
     });
@@ -38,18 +49,17 @@ export const useUsersStore = defineStore("users", () => {
     full_name: string;
     role: "admin" | "member";
   }) {
-    const result = await state.callApi<{ user: User }>({
+    const result = await state.callApi<APIResponse<{ user: User }>>({
       apiCall: () => usersApi.createUser(data),
       onSuccess: (response) => {
-        if (response.user) {
-          state.data.value.users.push(response.user);
+        if (response.status === "success" && response.data.user) {
+          state.data.value.users.push(response.data.user);
         }
       },
       successMessage: "User created successfully",
     });
 
     if (result.success) {
-      // Reload users to ensure we have the latest data
       await loadUsers();
     }
 
@@ -60,19 +70,20 @@ export const useUsersStore = defineStore("users", () => {
     id: string,
     data: {
       full_name?: string;
+      email?: string;
       role?: "admin" | "member";
       status?: "active" | "inactive";
     }
   ) {
-    return await state.callApi<{ user: User }>({
+    return await state.callApi<APIResponse<{ user: User }>>({
       apiCall: () => usersApi.updateUser(id, data),
       onSuccess: (response) => {
-        if (response.user) {
+        if (response.status === "success" && response.data.user) {
           const index = state.data.value.users.findIndex(
-            (u) => u.id === response.user.id
+            (u) => u.id === response.data.user.id
           );
           if (index >= 0) {
-            state.data.value.users[index] = response.user;
+            state.data.value.users[index] = response.data.user;
           }
         }
       },
@@ -81,7 +92,7 @@ export const useUsersStore = defineStore("users", () => {
   }
 
   async function deleteUser(id: string) {
-    return await state.callApi<{ message: string }>({
+    return await state.callApi<APIResponse<{ message: string }>>({
       apiCall: () => usersApi.deleteUser(id),
       onSuccess: () => {
         state.data.value.users = state.data.value.users.filter(
