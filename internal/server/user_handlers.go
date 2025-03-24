@@ -167,6 +167,9 @@ func (s *Server) handleDeleteUser(c *fiber.Ctx) error {
 
 	// Delete user from database
 	if err := s.identityService.DeleteUser(c.Context(), models.UserID(userID)); err != nil {
+		if validationErr, ok := err.(*identity.ValidationError); ok {
+			return SendError(c, fiber.StatusBadRequest, validationErr.Message)
+		}
 		return SendError(c, fiber.StatusInternalServerError, "Failed to delete user")
 	}
 
