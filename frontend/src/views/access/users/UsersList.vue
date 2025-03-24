@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, h, computed } from 'vue'
+import { onMounted, ref, h, computed, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -51,6 +51,7 @@ import {
     SelectValue,
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
+import AddUser from './AddUser.vue'
 
 const router = useRouter()
 const usersStore = useUsersStore()
@@ -135,23 +136,23 @@ const columns: ColumnDef<User>[] = [
     },
 ]
 
-const tableData = computed(() => {
-    console.log("Table data computed:", usersStore.users);
-    return usersStore.users || [];
-});
+const searchQuery = ref('')
+
+const filteredUsers = computed(() => {
+    if (!searchQuery.value) return usersStore.users || []
+
+    const query = searchQuery.value.toLowerCase()
+    return (usersStore.users || []).filter(user =>
+        user.full_name.toLowerCase().includes(query) ||
+        user.email.toLowerCase().includes(query)
+    )
+})
 
 const table = useVueTable({
-    data: tableData,
+    data: filteredUsers,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    onColumnFiltersChange: (updaterOrValue) => {
-        if (typeof updaterOrValue === 'function') {
-            columnFilters.value = updaterOrValue(columnFilters.value)
-        } else {
-            columnFilters.value = updaterOrValue
-        }
-    },
     state: {
         get columnFilters() { return columnFilters.value },
     },
@@ -236,33 +237,27 @@ onMounted(() => {
                             View and manage your users
                         </CardDescription>
                     </div>
-                    <Button @click="router.push({ name: 'NewUser' })">
-                        <Plus class="mr-2 h-4 w-4" />
-                        Add User
-                    </Button>
+                    <AddUser @user-created="loadUsers" />
                 </div>
             </CardHeader>
             <CardContent>
                 <div v-if="isLoading" class="text-center py-4">
                     Loading users...
                 </div>
-                <div v-else-if="!tableData || tableData.length === 0" class="rounded-lg border p-4 text-center">
+                <div v-else-if="!filteredUsers || filteredUsers.length === 0" class="rounded-lg border p-4 text-center">
                     <p class="text-muted-foreground mb-4">No users found</p>
-                    <Button @click="router.push({ name: 'NewUser' })">
-                        <Plus class="mr-2 h-4 w-4" />
-                        Add Your First User
-                    </Button>
+                    <AddUser @user-created="loadUsers">
+                        <Button>
+                            <Plus class="mr-2 h-4 w-4" />
+                            Add Your First User
+                        </Button>
+                    </AddUser>
                 </div>
                 <div v-else class="space-y-4">
                     <div class="flex items-center">
                         <div class="relative w-full max-w-sm">
                             <Search class="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                            <Input placeholder="Search users by name or email..." class="pl-8"
-                                :model-value="(table.getColumn('full_name')?.getFilterValue() as string) ?? ''"
-                                @update:model-value="(value) => {
-                                    table.getColumn('full_name')?.setFilterValue(value)
-                                    table.getColumn('email')?.setFilterValue(value)
-                                }" />
+                            <Input placeholder="Search users by name or email..." class="pl-8" v-model="searchQuery" />
                         </div>
                     </div>
                     <div class="rounded-md border">
