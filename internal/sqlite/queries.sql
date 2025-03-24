@@ -112,7 +112,7 @@ WHERE id = ?;
 
 -- name: ListUsers
 -- List all users
-SELECT * FROM users ORDER BY created_at DESC;
+SELECT * FROM users ORDER BY created_at ASC;
 
 -- name: CountAdminUsers
 -- Count active admin users

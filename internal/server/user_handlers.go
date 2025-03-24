@@ -92,6 +92,7 @@ func (s *Server) handleUpdateUser(c *fiber.Ctx) error {
 	// Parse request body
 	var req struct {
 		FullName *string `json:"full_name"`
+		Email    *string `json:"email"`
 		Role     *string `json:"role"`
 		Status   *string `json:"status"`
 	}
@@ -109,6 +110,14 @@ func (s *Server) handleUpdateUser(c *fiber.Ctx) error {
 	// Update user fields if provided
 	if req.FullName != nil {
 		user.FullName = *req.FullName
+	}
+
+	if req.Email != nil {
+		// Validate email format
+		if *req.Email == "" {
+			return SendError(c, fiber.StatusBadRequest, "Email cannot be empty")
+		}
+		user.Email = *req.Email
 	}
 
 	if req.Role != nil {
@@ -131,6 +140,11 @@ func (s *Server) handleUpdateUser(c *fiber.Ctx) error {
 
 	// Update user in database
 	if err := s.identityService.UpdateUser(c.Context(), user); err != nil {
+		var validationErr *identity.ValidationError
+		if errors.As(err, &validationErr) {
+			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
+		}
+		s.log.Error("Failed to update user", "error", err, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to update user")
 	}
 

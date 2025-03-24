@@ -81,6 +81,16 @@ func (v *Validator) ValidateCreateUser(req *models.CreateUserRequest) error {
 
 // ValidateUpdateUser validates an update user request
 func (v *Validator) ValidateUpdateUser(req *models.UpdateUserRequest) error {
+	// Email validation (if provided)
+	if req.Email != "" {
+		if !isValidEmail(req.Email) {
+			return &ValidationError{
+				Field:   "Email",
+				Message: "invalid email format",
+			}
+		}
+	}
+
 	// Full Name validation (if provided)
 	if req.FullName != "" {
 		if len(req.FullName) < 2 || len(req.FullName) > 100 {

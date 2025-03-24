@@ -59,6 +59,7 @@ type CreateUserRequest struct {
 
 // UpdateUserRequest represents a request to update a user
 type UpdateUserRequest struct {
+	Email    string     `json:"email,omitempty"`
 	FullName string     `json:"full_name,omitempty"`
 	Role     UserRole   `json:"role,omitempty"`
 	Status   UserStatus `json:"status,omitempty"`
