@@ -34,7 +34,7 @@
                 </div>
                 <DialogFooter>
                     <Button type="submit" :disabled="isLoading">
-                        <span v-if="isLoading" class="loader mr-2"></span>
+                        <Loader2 v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
                         {{ isLoading ? 'Creating...' : 'Create Team' }}
                     </Button>
                 </DialogFooter>
@@ -58,7 +58,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Plus } from 'lucide-vue-next'
+import { Plus, Loader2 } from 'lucide-vue-next'
 import { useTeamsStore } from '@/stores/teams'
 
 const emit = defineEmits<{
@@ -68,7 +68,6 @@ const emit = defineEmits<{
 const teamsStore = useTeamsStore()
 const teamName = ref('')
 const description = ref('')
-const isLoading = ref(false)
 const showDialog = ref(false)
 
 const { isLoading, error: formError } = storeToRefs(teamsStore)
