@@ -140,11 +140,10 @@ const columns: ColumnDef<User>[] = [
 const searchQuery = ref('')
 
 const filteredUsers = computed(() => {
-    // Debug the users being accessed
-    console.log("Computing filteredUsers. Current users:", usersStore.users.value);
-    
-    // Always ensure we have an array to work with
-    const users = usersStore.users.value || [];
+    // Get users directly from the store
+    // Using direct method to bypass any reactivity issues
+    const users = usersStore.getUsersArray();
+    console.log("Computing filteredUsers. Current users (direct access):", users);
     
     if (!searchQuery.value) return users;
 
@@ -156,7 +155,7 @@ const filteredUsers = computed(() => {
 })
 
 const table = useVueTable({
-    data: filteredUsers,
+    get data() { return filteredUsers.value }, // Use proper getter for reactivity
     columns,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -231,9 +230,9 @@ onMounted(async () => {
     console.log("Users after loading:", usersStore.users.value);
 });
 
-// Add this watch to debug users data
-watch(() => usersStore.users.value, (newUsers) => {
-    console.log("Users updated:", newUsers);
+// Watch the users array directly using the store method
+watch(() => usersStore.getUsersArray(), (newUsers) => {
+    console.log("Users updated (from direct method):", newUsers);
 }, { immediate: true });
 </script>
 
