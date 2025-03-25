@@ -2,7 +2,6 @@
 import { onMounted, ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
-import { useApiQuery } from '@/composables/useApiQuery'
 import ErrorAlert from '@/components/ui/ErrorAlert.vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -49,7 +48,7 @@ const confirmDelete = async () => {
     if (!sourceToDelete.value) return
 
     await sourcesStore.deleteSource(sourceToDelete.value.id)
-    
+
     // Reset UI state - store handles success/error
     showDeleteDialog.value = false
     sourceToDelete.value = null
@@ -85,12 +84,8 @@ import { formatDate } from '@/utils/format'
                 <div v-if="sourcesStore.isLoadingOperation('loadSources')" class="text-center py-4">
                     Loading sources...
                 </div>
-                <ErrorAlert 
-                    v-else-if="loadingError"
-                    :error="loadingError"
-                    title="Failed to load sources"
-                    @retry="retryLoading"
-                />
+                <ErrorAlert v-else-if="loadingError" :error="loadingError" title="Failed to load sources"
+                    @retry="retryLoading" />
                 <div v-else-if="sourcesStore.sources.length === 0" class="rounded-lg border p-4 text-center">
                     <p class="text-muted-foreground mb-4">No sources configured yet</p>
                     <Button @click="router.push({ name: 'NewSource' })">
@@ -115,11 +110,9 @@ import { formatDate } from '@/utils/format'
                         <TableBody>
                             <TableRow v-for="source in sourcesStore.sources" :key="source.id">
                                 <TableCell class="font-medium">
-                                    <a 
-                                      @click="router.push({ name: 'SourceStats', query: { sourceId: source.id } })" 
-                                      class="hover:underline cursor-pointer"
-                                    >
-                                      {{ source.name }}
+                                    <a @click="router.push({ name: 'SourceStats', query: { sourceId: source.id } })"
+                                        class="hover:underline cursor-pointer">
+                                        {{ source.name }}
                                     </a>
                                     <div v-if="source.description" class="text-sm text-muted-foreground">
                                         {{ source.description }}
