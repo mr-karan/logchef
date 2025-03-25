@@ -61,7 +61,7 @@ const editForm = ref({
 const searchQuery = ref('')
 
 // Computed properties from store
-const users = computed(() => usersStore.getUsersArray())
+const users = computed(() => usersStore.users)
 
 // Simple computed property to filter users
 const filteredUsers = computed(() => {
