@@ -54,10 +54,13 @@ export const useUsersStore = defineStore("users", () => {
         }
         
         const response = await usersApi.listUsers();
-        // Directly access the data array from successful response
-        const usersData = response.status === 'success' ? response.data || [] : [];
-        
-        state.data.value.users = usersData;
+      
+        // Store the users array from the response
+        if (response.status === 'success') {
+          state.data.value.users = response.data || [];
+        } else {
+          state.data.value.users = [];
+        }
         return { 
           success: true, 
           data: usersData
