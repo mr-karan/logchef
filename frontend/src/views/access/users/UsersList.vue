@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, h, computed, watch } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -14,7 +14,6 @@ import {
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Plus, Trash2, Shield, User2, Search, Pencil } from 'lucide-vue-next'
-import { useRouter } from 'vue-router'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
@@ -29,13 +28,6 @@ import {
 import type { User } from '@/types'
 import { useUsersStore } from '@/stores/users'
 import { formatDate } from '@/utils/format'
-import {
-    useVueTable,
-    getCoreRowModel,
-    getFilteredRowModel,
-    type ColumnDef,
-    type ColumnFiltersState,
-} from '@tanstack/vue-table'
 import {
     Dialog,
     DialogContent,
@@ -54,12 +46,10 @@ import {
 import { Label } from '@/components/ui/label'
 import AddUser from './AddUser.vue'
 
-const router = useRouter()
 const usersStore = useUsersStore()
 const { isLoading, error: userError } = storeToRefs(usersStore)
 const showDeleteDialog = ref(false)
 const userToDelete = ref<User | null>(null)
-const columnFilters = ref<ColumnFiltersState>([])
 const showEditDialog = ref(false)
 const userToEdit = ref<User | null>(null)
 const editForm = ref({
@@ -68,81 +58,11 @@ const editForm = ref({
     role: '' as 'admin' | 'member'
 })
 
-const columns: ColumnDef<User>[] = [
-    {
-        accessorKey: 'full_name',
-        header: 'Name',
-        cell: (props) => props.getValue() as string,
-    },
-    {
-        accessorKey: 'email',
-        header: 'Email',
-        cell: (props) => props.getValue() as string,
-    },
-    {
-        accessorKey: 'role',
-        header: 'Role',
-        cell: (props) => {
-            const role = props.getValue() as string
-            return h(Badge, {
-                variant: role === 'admin' ? 'destructive' : 'outline',
-                class: 'capitalize inline-flex items-center gap-1 font-medium'
-            }, () => [
-                role === 'admin' ? h(Shield, { class: 'h-3 w-3' }) : h(User2, { class: 'h-3 w-3' }),
-                role
-            ])
-        },
-    },
-    {
-        accessorKey: 'status',
-        header: 'Status',
-        cell: (props) => {
-            const user = props.row.original
-            return h('div', { class: 'flex items-center space-x-2' }, [
-                h(Switch, {
-                    checked: user.status === 'active',
-                    'onUpdate:checked': () => toggleUserStatus(user),
-                }),
-                h('span', { class: 'capitalize' }, user.status),
-            ])
-        },
-    },
-    {
-        accessorKey: 'created_at',
-        header: 'Created At',
-        cell: (props) => formatDate(props.getValue() as string | undefined),
-    },
-    {
-        accessorKey: 'last_login_at',
-        header: 'Last Login',
-        cell: (props) => formatDate(props.getValue() as string | undefined),
-    },
-    {
-        id: 'actions',
-        cell: (props) => {
-            const user = props.row.original
-            return h('div', { class: 'flex items-center gap-2 justify-end' }, [
-                h(Button, {
-                    variant: 'outline',
-                    size: 'icon',
-                    onClick: () => handleEdit(user),
-                }, () => h(Pencil, { class: 'h-4 w-4' })),
-                h(Button, {
-                    variant: 'destructive',
-                    size: 'icon',
-                    onClick: () => handleDelete(user),
-                }, () => h(Trash2, { class: 'h-4 w-4' }))
-            ])
-        },
-    },
-]
-
 const searchQuery = ref('')
 
+// Simple computed property to filter users
 const filteredUsers = computed(() => {
-    // Get users from the store, ensuring we always have an array
     const users = usersStore.getUsersArray() || [];
-    console.log("Computing filteredUsers. Current users (direct access):", users);
     
     if (!searchQuery.value) return users;
 
@@ -153,41 +73,8 @@ const filteredUsers = computed(() => {
     );
 })
 
-// Initialize table with empty data first to avoid undefined errors
-const table = ref(useVueTable({
-    data: [],
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    state: {
-        columnFilters: columnFilters.value,
-    },
-}))
-
-// Update table when filteredUsers changes
-watch(filteredUsers, (newUsers) => {
-    console.log("filteredUsers changed - updating table with", newUsers.length, "users");
-    
-    // Only update if we have the table ref and actual users
-    if (!table.value) return;
-    
-    // Create a new table instance with the updated data
-    table.value = useVueTable({
-        data: [...newUsers], // Create a new array to force reactivity
-        columns,
-        getCoreRowModel: getCoreRowModel(),
-        getFilteredRowModel: getFilteredRowModel(),
-        state: {
-            columnFilters: columnFilters.value,
-        },
-    });
-}, { immediate: true, deep: true })
-
 const loadUsers = async () => {
-    console.log("Starting loadUsers...");
-    const result = await usersStore.loadUsers();
-    console.log("loadUsers completed");
-    return result;
+    return await usersStore.loadUsers();
 }
 
 const confirmDelete = async () => {
@@ -195,11 +82,9 @@ const confirmDelete = async () => {
 
     const result = await usersStore.deleteUser(userToDelete.value.id);
     if (result.success) {
-        await loadUsers();
         showDeleteDialog.value = false;
         userToDelete.value = null;
     }
-    // Keep dialog open on error
 }
 
 const handleDelete = (user: User) => {
@@ -208,13 +93,9 @@ const handleDelete = (user: User) => {
 }
 
 const toggleUserStatus = async (user: User) => {
-    const result = await usersStore.updateUser(user.id, {
+    await usersStore.updateUser(user.id, {
         status: user.status === 'active' ? 'inactive' : 'active',
     });
-    
-    if (result.success) {
-        await loadUsers();
-    }
 }
 
 const handleEdit = (user: User) => {
@@ -237,31 +118,14 @@ const confirmEdit = async () => {
     });
     
     if (result.success) {
-        await loadUsers();
         showEditDialog.value = false;
         userToEdit.value = null;
     }
 }
 
-onMounted(async () => {
-    console.log("Component mounted, loading users...");
-    const result = await loadUsers();
-    console.log("User loading result:", result);
-    console.log("Users after loading:", usersStore.getUsersArray());
-    
-    // Log the current state of filtered users and table
-    console.log("Filtered users after loading:", filteredUsers.value.length);
-    console.log("Table rows:", table.value?.getRowModel().rows.length);
+onMounted(() => {
+    loadUsers();
 });
-
-// Watch the users array directly using the store method
-watch(() => usersStore.getUsersArray(), (newUsers) => {
-    console.log("Users updated (from direct method):", newUsers);
-    // Force table to rebuild with new data
-    if (newUsers && newUsers.length > 0) {
-        console.log("Refreshing table with new users data");
-    }
-}, { immediate: true, deep: true });
 </script>
 
 <template>
@@ -302,22 +166,45 @@ watch(() => usersStore.getUsersArray(), (newUsers) => {
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead v-for="column in columns" :key="column.id">
-                                        {{ column.id === 'actions' ? '' : column.header }}
-                                    </TableHead>
+                                    <TableHead>Name</TableHead>
+                                    <TableHead>Email</TableHead>
+                                    <TableHead>Role</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    <TableHead>Created At</TableHead>
+                                    <TableHead>Last Login</TableHead>
+                                    <TableHead></TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                <template v-if="filteredUsers.length > 0">
-                                    <TableRow v-for="row in table.value.getRowModel().rows" :key="row.id">
-                                        <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id">
-                                            <component :is="cell.column.columnDef.cell" v-bind="cell.getContext()" />
-                                        </TableCell>
-                                    </TableRow>
-                                </template>
-                                <TableRow v-else>
-                                    <TableCell :colspan="columns.length" class="h-24 text-center">
-                                        No results found.
+                                <TableRow v-for="user in filteredUsers" :key="user.id">
+                                    <TableCell>{{ user.full_name }}</TableCell>
+                                    <TableCell>{{ user.email }}</TableCell>
+                                    <TableCell>
+                                        <Badge :variant="user.role === 'admin' ? 'destructive' : 'outline'"
+                                            class="capitalize inline-flex items-center gap-1 font-medium">
+                                            <Shield v-if="user.role === 'admin'" class="h-3 w-3" />
+                                            <User2 v-else class="h-3 w-3" />
+                                            {{ user.role }}
+                                        </Badge>
+                                    </TableCell>
+                                    <TableCell>
+                                        <div class="flex items-center space-x-2">
+                                            <Switch :checked="user.status === 'active'" 
+                                                @update:checked="toggleUserStatus(user)" />
+                                            <span class="capitalize">{{ user.status }}</span>
+                                        </div>
+                                    </TableCell>
+                                    <TableCell>{{ formatDate(user.created_at) }}</TableCell>
+                                    <TableCell>{{ formatDate(user.last_login_at) }}</TableCell>
+                                    <TableCell>
+                                        <div class="flex items-center gap-2 justify-end">
+                                            <Button variant="outline" size="icon" @click="handleEdit(user)">
+                                                <Pencil class="h-4 w-4" />
+                                            </Button>
+                                            <Button variant="destructive" size="icon" @click="handleDelete(user)">
+                                                <Trash2 class="h-4 w-4" />
+                                            </Button>
+                                        </div>
                                     </TableCell>
                                 </TableRow>
                             </TableBody>
