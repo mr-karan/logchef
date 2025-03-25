@@ -54,14 +54,13 @@ export const useUsersStore = defineStore("users", () => {
         }
         
         const response = await usersApi.listUsers();
-        // Handle APIListResponse
-        const usersData = isSuccessResponse(response) ? response.data ?? [] : [];
+        // Directly access the data array from successful response
+        const usersData = response.status === 'success' ? response.data || [] : [];
         
         state.data.value.users = usersData;
         return { 
           success: true, 
-          data: usersData,
-          count: isSuccessResponse(response) && 'count' in response ? response.count : undefined
+          data: usersData
         };
       } catch (error) {
         return handleError(error as Error, 'loadUsers');
