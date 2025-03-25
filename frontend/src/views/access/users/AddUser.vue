@@ -29,8 +29,8 @@
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
                         <Label for="role" class="text-right">Role</Label>
-                        <div class="col-span-3">
-                            <Select v-model="formData.role">
+                        <div class="col-span-3 w-full">
+                            <Select v-model="formData.role" class="w-full">
                                 <SelectTrigger class="w-full">
                                     <SelectValue placeholder="Select role" />
                                 </SelectTrigger>
@@ -43,8 +43,8 @@
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
                         <Label for="status" class="text-right">Status</Label>
-                        <div class="col-span-3">
-                            <Select v-model="formData.status">
+                        <div class="col-span-3 w-full">
+                            <Select v-model="formData.status" class="w-full">
                                 <SelectTrigger class="w-full">
                                     <SelectValue placeholder="Select status" />
                                 </SelectTrigger>

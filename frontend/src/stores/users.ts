@@ -64,9 +64,10 @@ export const useUsersStore = defineStore("users", () => {
         operationKey: 'createUser',
         onSuccess: (response) => {
           if (response) {
-            // Create a new array instead of modifying the existing one for better reactivity
-            const newUsers = [response, ...(state.data.value.users || [])];
-            state.data.value.users = newUsers;
+            // Create a new array to ensure reactivity is triggered
+            state.data.value.users = [response, ...(state.data.value.users || [])];
+            // Force reactivity by ensuring a new array reference
+            state.data.value = { ...state.data.value };
             console.log("User added to store:", response);
           }
         }
@@ -89,14 +90,17 @@ export const useUsersStore = defineStore("users", () => {
         successMessage: "User updated successfully",
         operationKey: `updateUser-${id}`,
         onSuccess: (response) => {
-          if (response?.status === 'success' && response.data?.user) {
+          if (response) {
             // Update in local state
             const index = state.data.value.users.findIndex(
-              (u) => u.id === response.data.user.id
+              (u) => u.id === id || u.id === Number(id)
             );
             if (index >= 0) {
-              state.data.value.users[index] = response.data.user;
-              console.log("User updated in store:", response.data.user);
+              // Create a new array to ensure reactivity
+              const updatedUsers = [...state.data.value.users];
+              updatedUsers[index] = { ...updatedUsers[index], ...response };
+              state.data.value.users = updatedUsers;
+              console.log("User updated in store:", response);
             }
           }
         }
