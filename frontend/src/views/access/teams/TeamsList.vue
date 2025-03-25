@@ -73,7 +73,7 @@ import { formatDate } from '@/utils/format'
                             Groups of users that have common dashboard and permission needs
                         </CardDescription>
                     </div>
-                    <AddTeam @team-created="refreshTeams" />
+                    <AddTeam @team-created="teamsStore.loadTeams(true)" />
                 </div>
             </CardHeader>
             <CardContent>
@@ -89,7 +89,7 @@ import { formatDate } from '@/utils/format'
                     </div>
                     <div v-else-if="teams.length === 0" class="rounded-lg border p-4 text-center">
                         <p class="text-muted-foreground mb-4">No teams found</p>
-                        <AddTeam @team-created="refreshTeams">
+                        <AddTeam @team-created="teamsStore.loadTeams(true)">
                             <Button>
                                 <Plus class="mr-2 h-4 w-4" />
                                 Create Your First Team

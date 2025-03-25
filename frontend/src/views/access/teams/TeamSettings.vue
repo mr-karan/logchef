@@ -87,6 +87,11 @@ watch(() => team.value, (newTeam) => {
   }
 }, { immediate: true })
 
+// Function to refresh teams list
+const refreshTeams = async () => {
+  await teamsStore.loadTeams(true) // Force reload
+}
+
 // Compute available users (users not in team)
 const availableUsers = computed(() => {
     const teamMemberIds = members.value?.map(m => String(m.user_id)) || []
