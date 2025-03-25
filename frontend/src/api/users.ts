@@ -39,8 +39,8 @@ export const usersApi = {
    */
   async createUser(
     data: CreateUserRequest
-  ): Promise<APIResponse<{ user: User }>> {
-    const response = await api.post<APIResponse<{ user: User }>>(
+  ): Promise<APIResponse<User>> {
+    const response = await api.post<APIResponse<User>>(
       "/admin/users",
       data
     );
