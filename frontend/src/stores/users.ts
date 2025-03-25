@@ -26,12 +26,15 @@ export const useUsersStore = defineStore("users", () => {
         return { success: true, data: state.data.value.users };
       }
       
+      console.log("Loading users from API...");
       return await state.callApi({
         apiCall: () => usersApi.listUsers(),
         operationKey: 'loadUsers',
         onSuccess: (response) => {
-          // Store the users array from the response
-          state.data.value.users = response.data || [];
+          console.log("User API response:", response);
+          // Store the users array from the response - without trying to access response.data
+          // because callApi already extracts the data property from the response
+          state.data.value.users = response || [];
         },
         showToast: false,
       });
