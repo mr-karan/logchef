@@ -235,7 +235,7 @@ onMounted(() => {
                             View and manage your users
                         </CardDescription>
                     </div>
-                    <AddUser @user-created="loadUsers" />
+                    <AddUser />
                 </div>
             </CardHeader>
             <CardContent>
@@ -244,7 +244,7 @@ onMounted(() => {
                 </div>
                 <div v-else-if="!filteredUsers || filteredUsers.length === 0" class="rounded-lg border p-4 text-center">
                     <p class="text-muted-foreground mb-4">No users found</p>
-                    <AddUser @user-created="loadUsers">
+                    <AddUser>
                         <Button>
                             <Plus class="mr-2 h-4 w-4" />
                             Add Your First User

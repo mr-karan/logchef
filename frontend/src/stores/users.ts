@@ -89,11 +89,8 @@ export const useUsersStore = defineStore("users", () => {
         const response = await usersApi.createUser(data);
         
         if (response.user) {
-          // Update local state
-          state.data.value.users.push(response.user);
-          
-          // Reload users to ensure we have the latest data
-          await loadUsers(true);
+          // Optimistic update - add to beginning of list
+          state.data.value.users.unshift(response.user);
         }
         
         return { 

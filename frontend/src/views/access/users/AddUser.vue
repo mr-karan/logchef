@@ -92,9 +92,6 @@ import {
 import type { CreateUserRequest } from '@/api/users'
 import { useUsersStore } from '@/stores/users'
 
-const emit = defineEmits<{
-    (e: 'user-created'): void
-}>()
 
 const usersStore = useUsersStore()
 const showDialog = ref(false)
@@ -128,7 +125,6 @@ async function handleSubmit() {
             status: 'active',
         }
         showDialog.value = false
-        emit('user-created')
     }
 }
 </script>
