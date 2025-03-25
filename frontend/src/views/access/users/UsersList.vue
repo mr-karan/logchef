@@ -140,6 +140,9 @@ const columns: ColumnDef<User>[] = [
 const searchQuery = ref('')
 
 const filteredUsers = computed(() => {
+    // Debug the users being accessed
+    console.log("Computing filteredUsers. Current users:", usersStore.users.value);
+    
     if (!searchQuery.value) return usersStore.users.value || []
 
     const query = searchQuery.value.toLowerCase()
@@ -222,6 +225,11 @@ onMounted(() => {
     console.log("Component mounted, loading users...");
     loadUsers();
 });
+
+// Add this watch to debug users data
+watch(() => usersStore.users.value, (newUsers) => {
+    console.log("Users updated:", newUsers);
+}, { immediate: true });
 </script>
 
 <template>
