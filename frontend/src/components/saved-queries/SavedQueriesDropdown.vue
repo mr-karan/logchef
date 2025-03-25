@@ -34,7 +34,7 @@ const { toast } = useToast();
 
 // Local state
 const isOpen = ref(false);
-const currentTeamId = computed(() => props.selectedTeamId || teamsStore.currentTeam?.id || savedQueriesStore.data.selectedTeamId);
+const currentTeamId = computed(() => props.selectedTeamId || teamsStore.currentTeamId || savedQueriesStore.data.selectedTeamId);
 const isLoading = computed(() => savedQueriesStore.isLoading);
 const hasQueries = computed(() => savedQueriesStore.data.queries?.length > 0);
 

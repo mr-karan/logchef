@@ -9,6 +9,7 @@ import {
   type UpdateTeamRequest,
 } from "@/api/teams";
 import type { Source } from "@/api/sources";
+import type { APIErrorResponse } from "@/api/types";
 import { useApiQuery } from "@/composables/useApiQuery";
 
 export interface TeamWithMemberCount extends Team {
@@ -18,12 +19,14 @@ export interface TeamWithMemberCount extends Team {
 interface TeamsState {
   teams: TeamWithMemberCount[];
   currentTeamId: number | null;
+  teamSourcesMap: Record<number, Source[]>;
 }
 
 export const useTeamsStore = defineStore("teams", () => {
   const state = useBaseStore<TeamsState>({
     teams: [],
     currentTeamId: null,
+    teamSourcesMap: {},
   });
 
   // Use our API query composable
@@ -32,11 +35,20 @@ export const useTeamsStore = defineStore("teams", () => {
   // Computed properties
   const teams = computed(() => state.data.value.teams);
   const currentTeamId = computed(() => state.data.value.currentTeamId);
-  const currentTeam = computed(() =>
-    currentTeamId.value
-      ? teams.value.find((t) => t.id === currentTeamId.value)
-      : null
-  );
+  
+  // Get team by ID helper
+  const getTeamById = computed(() => (id: number | null) => {
+    if (!id) return null;
+    return teams.value.find((t) => t.id === id);
+  });
+  
+  // Current team using the getter
+  const currentTeam = computed(() => getTeamById.value(currentTeamId.value));
+  
+  // Get team sources helper
+  const getTeamSources = computed(() => (teamId: number) => {
+    return state.data.value.teamSourcesMap?.[teamId] || [];
+  });
 
   async function loadTeams() {
     return await state.withLoading('loadTeams', async () => {
@@ -66,8 +78,8 @@ export const useTeamsStore = defineStore("teams", () => {
   }
 
   // Set the current team
-  function setCurrentTeam(teamId: number) {
-    state.data.value.currentTeamId = teamId;
+  function setCurrentTeam(teamId: number | string) {
+    state.data.value.currentTeamId = typeof teamId === 'string' ? parseInt(teamId) : teamId;
   }
 
   async function createTeam(data: CreateTeamRequest) {
@@ -155,26 +167,78 @@ export const useTeamsStore = defineStore("teams", () => {
     teamId: number,
     data: { user_id: number; role: "admin" | "member" }
   ) {
+    // Validate parameters
+    if (!teamId || !data.user_id) {
+      return { 
+        success: false, 
+        error: { 
+          message: "Invalid team or user ID", 
+          error_type: "ValidationError" 
+        } as APIErrorResponse 
+      };
+    }
+    
     return await state.withLoading(`addTeamMember-${teamId}`, async () => {
-      return await execute(() => teamsApi.addTeamMember(teamId, data), {
+      const result = await execute(() => teamsApi.addTeamMember(teamId, data), {
         successMessage: "Member added successfully"
       });
+      
+      // Update member count if successful
+      if (result.success) {
+        const team = getTeamById.value(teamId);
+        if (team) {
+          team.memberCount = (team.memberCount || 0) + 1;
+        }
+      }
+      
+      return result;
     });
   }
 
   async function removeTeamMember(teamId: number, userId: number) {
+    // Validate parameters
+    if (!teamId || !userId) {
+      return { 
+        success: false, 
+        error: { 
+          message: "Invalid team or user ID", 
+          error_type: "ValidationError" 
+        } as APIErrorResponse 
+      };
+    }
+    
     return await state.withLoading(`removeTeamMember-${teamId}-${userId}`, async () => {
-      return await execute(() => teamsApi.removeTeamMember(teamId, userId), {
+      const result = await execute(() => teamsApi.removeTeamMember(teamId, userId), {
         successMessage: "Member removed successfully"
       });
+      
+      // Update member count if successful
+      if (result.success) {
+        const team = getTeamById.value(teamId);
+        if (team && team.memberCount > 0) {
+          team.memberCount--;
+        }
+      }
+      
+      return result;
     });
   }
 
   async function listTeamSources(teamId: number) {
     return await state.withLoading(`listTeamSources-${teamId}`, async () => {
-      return await execute(() => teamsApi.listTeamSources(teamId), {
+      const result = await execute(() => teamsApi.listTeamSources(teamId), {
         showToast: true
       });
+      
+      // Cache the sources in the teamSourcesMap if successful
+      if (result.success && result.data) {
+        state.data.value.teamSourcesMap = {
+          ...state.data.value.teamSourcesMap,
+          [teamId]: result.data
+        };
+      }
+      
+      return result;
     });
   }
 
@@ -196,9 +260,24 @@ export const useTeamsStore = defineStore("teams", () => {
 
   // Get team source IDs - helper method for filtering
   async function getTeamSourceIds(teamId: number) {
+    // Check if we already have the sources cached
+    if (state.data.value.teamSourcesMap?.[teamId]?.length > 0) {
+      return state.data.value.teamSourcesMap[teamId].map(source => source.id);
+    }
+    
+    // Otherwise fetch them
     const result = await state.withLoading(`getTeamSourceIds-${teamId}`, async () => {
       return await execute(() => teamsApi.listTeamSources(teamId), {
-        showToast: false
+        showToast: false,
+        onSuccess: (data) => {
+          if (data) {
+            // Cache the sources
+            state.data.value.teamSourcesMap = {
+              ...state.data.value.teamSourcesMap,
+              [teamId]: data
+            };
+          }
+        }
       });
     });
 
@@ -207,6 +286,25 @@ export const useTeamsStore = defineStore("teams", () => {
     }
 
     return [];
+  }
+
+  // Invalidate team cache
+  async function invalidateTeamCache(teamId: number) {
+    // Remove team from teams array
+    state.data.value.teams = state.data.value.teams.filter(t => t.id !== teamId);
+    
+    // Remove team sources from cache
+    if (state.data.value.teamSourcesMap?.[teamId]) {
+      const { [teamId]: _, ...rest } = state.data.value.teamSourcesMap;
+      state.data.value.teamSourcesMap = rest;
+    }
+    
+    // Reset current team if it was the invalidated one
+    if (state.data.value.currentTeamId === teamId) {
+      state.data.value.currentTeamId = state.data.value.teams.length > 0 
+        ? state.data.value.teams[0].id 
+        : null;
+    }
   }
 
   return {
@@ -223,6 +321,10 @@ export const useTeamsStore = defineStore("teams", () => {
     isLoadingTeam: (teamId: number) => state.isLoadingOperation(`getTeam-${teamId}`),
     isLoadingTeamMembers: (teamId: number) => state.isLoadingOperation(`listTeamMembers-${teamId}`),
     
+    // Getters
+    getTeamById: (id: number) => getTeamById.value(id),
+    getTeamSources: (teamId: number) => getTeamSources.value(teamId),
+    
     // Actions
     loadTeams,
     createTeam,
@@ -237,5 +339,6 @@ export const useTeamsStore = defineStore("teams", () => {
     addTeamSource,
     removeTeamSource,
     getTeamSourceIds,
+    invalidateTeamCache,
   };
 });
