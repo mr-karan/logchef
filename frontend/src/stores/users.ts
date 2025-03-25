@@ -46,6 +46,14 @@ export const useUsersStore = defineStore("users", () => {
       operation
     };
     
+    // Use the toast API directly for consistent error handling
+    const { toast } = useToast();
+    toast({
+      title: 'Error',
+      description: errorMessage,
+      variant: 'destructive',
+    });
+    
     return { 
       success: false,
       error: state.error.value
@@ -98,25 +106,19 @@ export const useUsersStore = defineStore("users", () => {
     role: "admin" | "member";
   }) {
     return await state.withLoading('createUser', async () => {
-      try {
-        const response = await usersApi.createUser(data);
-        
-        // Check if response contains user data in the data property
-        if (response.status === 'success' && response.data) {
-          // Create a new array instead of modifying the existing one for better reactivity
-          const newUsers = [response.data, ...(state.data.value.users || [])];
-          state.data.value.users = newUsers;
-          console.log("User added to store:", response.data);
+      return await state.callApi({
+        apiCall: () => usersApi.createUser(data),
+        successMessage: "User created successfully",
+        operationKey: 'createUser',
+        onSuccess: (response) => {
+          if (response) {
+            // Create a new array instead of modifying the existing one for better reactivity
+            const newUsers = [response, ...(state.data.value.users || [])];
+            state.data.value.users = newUsers;
+            console.log("User added to store:", response);
+          }
         }
-        
-        return { 
-          success: true, 
-          data: response,
-          message: "User created successfully"
-        };
-      } catch (error) {
-        return handleError(error as Error, 'createUser');
-      }
+      });
     });
   }
 
@@ -130,48 +132,39 @@ export const useUsersStore = defineStore("users", () => {
     }
   ) {
     return await state.withLoading(`updateUser-${id}`, async () => {
-      try {
-        const response = await usersApi.updateUser(id, data);
-        
-        if (response.status === 'success' && response.data?.user) {
-          // Update in local state
-          const index = state.data.value.users.findIndex(
-            (u) => u.id === response.data.user.id
-          );
-          if (index >= 0) {
-            state.data.value.users[index] = response.data.user;
-            console.log("User updated in store:", response.data.user);
+      return await state.callApi({
+        apiCall: () => usersApi.updateUser(id, data),
+        successMessage: "User updated successfully",
+        operationKey: `updateUser-${id}`,
+        onSuccess: (response) => {
+          if (response?.status === 'success' && response.data?.user) {
+            // Update in local state
+            const index = state.data.value.users.findIndex(
+              (u) => u.id === response.data.user.id
+            );
+            if (index >= 0) {
+              state.data.value.users[index] = response.data.user;
+              console.log("User updated in store:", response.data.user);
+            }
           }
         }
-        
-        return { 
-          success: true, 
-          data: response,
-          message: "User updated successfully"
-        };
-      } catch (error) {
-        return handleError(error as Error, `updateUser-${id}`);
-      }
+      });
     });
   }
 
   async function deleteUser(id: string) {
     return await state.withLoading(`deleteUser-${id}`, async () => {
-      try {
-        await usersApi.deleteUser(id);
-        
-        // Update local state
-        state.data.value.users = state.data.value.users.filter(
-          (u) => u.id !== id
-        );
-        
-        return { 
-          success: true,
-          message: "User deleted successfully"
-        };
-      } catch (error) {
-        return handleError(error as Error, `deleteUser-${id}`);
-      }
+      return await state.callApi({
+        apiCall: () => usersApi.deleteUser(id),
+        successMessage: "User deleted successfully",
+        operationKey: `deleteUser-${id}`,
+        onSuccess: () => {
+          // Update local state
+          state.data.value.users = state.data.value.users.filter(
+            (u) => u.id !== id
+          );
+        }
+      });
     });
   }
 

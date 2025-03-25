@@ -68,7 +68,6 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useToast } from '@/components/ui/toast/use-toast'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import {
@@ -95,7 +94,6 @@ import { useUsersStore } from '@/stores/users'
 
 
 const usersStore = useUsersStore()
-const { toast } = useToast()
 const showDialog = ref(false)
 
 interface FormData extends CreateUserRequest {
@@ -130,20 +128,6 @@ async function handleSubmit() {
         
         // Reload users from API to ensure our store has the most up-to-date data
         await usersStore.loadUsers(true);
-        
-        // Show success toast
-        toast({
-            title: 'Success',
-            description: 'User created successfully.',
-            variant: 'default',
-        });
-    } else {
-        // Show error toast
-        toast({
-            title: 'Error',
-            description: result.error?.message || 'Failed to create user.',
-            variant: 'destructive',
-        });
     }
 }
 </script>

@@ -59,11 +59,14 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
     showToast?: boolean;
     defaultData?: R;
   }) {
+    // Default showToast to true unless explicitly set to false
+    const showToast = options.showToast !== false;
+    
     const executeApiCall = async () => {
       const result = await execute<R>(options.apiCall, {
         successMessage: options.successMessage,
         errorMessage: options.errorMessage,
-        showToast: options.showToast,
+        showToast: showToast,
         defaultData: options.defaultData,
         onSuccess: options.onSuccess,
         onError: (err) => {
