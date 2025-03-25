@@ -52,15 +52,18 @@ export const useUsersStore = defineStore("users", () => {
     return await state.withLoading('loadUsers', async () => {
       try {
         // Skip loading if we already have users and not forcing reload
-        if (!forceReload && state.data.value.users.length > 0) {
+        if (!forceReload && state.data.value.users && state.data.value.users.length > 0) {
           return { success: true, data: state.data.value.users };
         }
         
+        console.log("Fetching users from API...");
         const response = await usersApi.listUsers();
+        console.log("API response:", response);
       
         // Store the users array from the response
         if (response.status === 'success') {
           state.data.value.users = response.data || [];
+          console.log("Users stored in state:", state.data.value.users);
         } else {
           state.data.value.users = [];
         }
