@@ -132,13 +132,14 @@ export const useUsersStore = defineStore("users", () => {
       try {
         const response = await usersApi.updateUser(id, data);
         
-        if (response.user) {
+        if (response.status === 'success' && response.data?.user) {
           // Update in local state
           const index = state.data.value.users.findIndex(
-            (u) => u.id === response.user.id
+            (u) => u.id === response.data.user.id
           );
           if (index >= 0) {
-            state.data.value.users[index] = response.user;
+            state.data.value.users[index] = response.data.user;
+            console.log("User updated in store:", response.data.user);
           }
         }
         
