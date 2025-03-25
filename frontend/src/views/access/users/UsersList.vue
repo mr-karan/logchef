@@ -166,17 +166,22 @@ const table = ref(useVueTable({
 
 // Update table when filteredUsers changes
 watch(filteredUsers, (newUsers) => {
-    // Create a new table instance with updated data
+    console.log("filteredUsers changed - updating table with", newUsers.length, "users");
+    
+    // Only update if we have the table ref and actual users
+    if (!table.value) return;
+    
+    // Create a new table instance with the updated data
     table.value = useVueTable({
-        data: newUsers,
+        data: [...newUsers], // Create a new array to force reactivity
         columns,
         getCoreRowModel: getCoreRowModel(),
         getFilteredRowModel: getFilteredRowModel(),
         state: {
             columnFilters: columnFilters.value,
         },
-    })
-}, { immediate: true })
+    });
+}, { immediate: true, deep: true })
 
 const loadUsers = async () => {
     console.log("Starting loadUsers...");
@@ -243,6 +248,10 @@ onMounted(async () => {
     const result = await loadUsers();
     console.log("User loading result:", result);
     console.log("Users after loading:", usersStore.getUsersArray());
+    
+    // Log the current state of filtered users and table
+    console.log("Filtered users after loading:", filteredUsers.value.length);
+    console.log("Table rows:", table.value?.getRowModel().rows.length);
 });
 
 // Watch the users array directly using the store method
@@ -273,7 +282,7 @@ watch(() => usersStore.getUsersArray(), (newUsers) => {
                 <div v-if="isLoading" class="text-center py-4">
                     Loading users...
                 </div>
-                <div v-else-if="!filteredUsers.length" class="rounded-lg border p-4 text-center">
+                <div v-else-if="filteredUsers.length === 0" class="rounded-lg border p-4 text-center">
                     <p class="text-muted-foreground mb-4">No users found</p>
                     <AddUser>
                         <Button>
@@ -299,7 +308,7 @@ watch(() => usersStore.getUsersArray(), (newUsers) => {
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                <template v-if="table.value && table.value.getRowModel().rows.length > 0">
+                                <template v-if="filteredUsers.length > 0">
                                     <TableRow v-for="row in table.value.getRowModel().rows" :key="row.id">
                                         <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id">
                                             <component :is="cell.column.columnDef.cell" v-bind="cell.getContext()" />
