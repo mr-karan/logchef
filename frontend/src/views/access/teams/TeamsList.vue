@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { storeToRefs } from 'pinia'
 import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -29,7 +28,6 @@ import { type Team } from '@/api/teams'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import AddTeam from './AddTeam.vue'
 import { useTeamsStore } from '@/stores/teams'
-import { storeToRefs } from 'pinia'
 
 const router = useRouter()
 const teamsStore = useTeamsStore()
