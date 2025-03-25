@@ -4,6 +4,10 @@ import type { User } from "@/types";
 import { usersApi } from "@/api/users";
 import { computed } from "vue";
 import { useApiQuery } from "@/composables/useApiQuery";
+import type { 
+  APIErrorResponse, 
+  isSuccessResponse 
+} from "@/api/types";
 
 interface UsersState {
   users: User[];
@@ -21,15 +25,23 @@ export const useUsersStore = defineStore("users", () => {
   const users = computed(() => state.data.value.users);
 
   // Helper function to handle errors
-  function handleError(error: Error, operation: string) {
-    console.error(`Error in users store (${operation}):`, error);
+  function handleError(error: Error | APIErrorResponse, operation: string) {
+    console.error(`[${operation} Error]`, error);
+    
+    const errorMessage = error instanceof Error ? error.message : error.message;
+    const errorType = error instanceof Error ? 'UnknownError' : (error.error_type || 'UnknownError');
+    const errorData = error instanceof Error ? undefined : error.data;
+    
     state.error.value = {
-      message: error.message,
+      message: errorMessage,
+      error_type: errorType,
+      data: errorData,
       operation
     };
-    return {
+    
+    return { 
       success: false,
-      error: error.message
+      error: state.error.value
     };
   }
 
@@ -42,8 +54,15 @@ export const useUsersStore = defineStore("users", () => {
         }
         
         const response = await usersApi.listUsers();
-        state.data.value.users = response?.data ?? [];
-        return { success: true, data: state.data.value.users };
+        // Handle APIListResponse
+        const usersData = isSuccessResponse(response) ? response.data ?? [] : [];
+        
+        state.data.value.users = usersData;
+        return { 
+          success: true, 
+          data: usersData,
+          count: isSuccessResponse(response) && 'count' in response ? response.count : undefined
+        };
       } catch (error) {
         return handleError(error as Error, 'loadUsers');
       }

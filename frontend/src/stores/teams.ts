@@ -9,7 +9,10 @@ import {
   type UpdateTeamRequest,
 } from "@/api/teams";
 import type { Source } from "@/api/sources";
-import type { APIErrorResponse } from "@/api/types";
+import type { 
+  APIErrorResponse, 
+  isSuccessResponse 
+} from "@/api/types";
 
 export interface TeamWithMemberCount extends Team {
   memberCount: number;
@@ -29,15 +32,23 @@ export const useTeamsStore = defineStore("teams", () => {
   });
 
   // Helper function to handle errors
-  function handleError(error: Error, operation: string) {
-    console.error(`Error in teams store (${operation}):`, error);
+  function handleError(error: Error | APIErrorResponse, operation: string) {
+    console.error(`[${operation} Error]`, error);
+    
+    const errorMessage = error instanceof Error ? error.message : error.message;
+    const errorType = error instanceof Error ? 'UnknownError' : (error.error_type || 'UnknownError');
+    const errorData = error instanceof Error ? undefined : error.data;
+    
     state.error.value = {
-      message: error.message,
+      message: errorMessage,
+      error_type: errorType,
+      data: errorData,
       operation
     };
-    return {
+    
+    return { 
       success: false,
-      error: error.message
+      error: state.error.value
     };
   }
 
@@ -68,8 +79,11 @@ export const useTeamsStore = defineStore("teams", () => {
         }
         
         const response = await teamsApi.listUserTeams();
-        if (response) {
-          state.data.value.teams = response.map((team) => ({
+        // Handle APIListResponse
+        const teamsData = isSuccessResponse(response) ? response.data ?? [] : [];
+        
+        if (teamsData.length > 0) {
+          state.data.value.teams = teamsData.map((team) => ({
             ...team,
             memberCount: team.member_count ?? 0,
           }));
@@ -85,7 +99,11 @@ export const useTeamsStore = defineStore("teams", () => {
           state.data.value.teams = [];
         }
         
-        return { success: true, data: state.data.value.teams };
+        return { 
+          success: true, 
+          data: state.data.value.teams,
+          count: isSuccessResponse(response) && 'count' in response ? response.count : undefined
+        };
       } catch (error) {
         return handleError(error as Error, 'loadTeams');
       }

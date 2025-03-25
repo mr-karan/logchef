@@ -10,7 +10,11 @@ import type {
   SourceStats,
   CreateTeamQueryRequest,
 } from "@/api/sources";
-import type { SavedTeamQuery } from "@/api/types";
+import type { 
+  SavedTeamQuery, 
+  APIErrorResponse,
+  isSuccessResponse
+} from "@/api/types";
 import { useBaseStore } from "./base";
 import { useSavedQueriesStore } from "./savedQueries";
 import { useApiQuery } from "@/composables/useApiQuery";
@@ -75,19 +79,22 @@ export const useSourcesStore = defineStore("sources", () => {
   async function loadSources() {
     return await state.withLoading("loadSources", async () => {
       state.error.value = null; // Reset error before loading
-      const result = await execute(() => sourcesApi.listSources(), {
-        onSuccess: (data) => {
-          state.data.value.sources = data ?? [];
-          isHydrated.value = true;
-        },
-        onError: (error) => {
-          state.error.value = { message: error.message, operation: 'loadSources' };
-        },
-        defaultData: [],
-        showToast: false,
-      });
-      
-      return result;
+      try {
+        const response = await sourcesApi.listSources();
+        // Handle APIListResponse
+        const sourcesData = isSuccessResponse(response) ? response.data ?? [] : [];
+        
+        state.data.value.sources = sourcesData;
+        isHydrated.value = true;
+        
+        return { 
+          success: true, 
+          data: sourcesData,
+          count: isSuccessResponse(response) && 'count' in response ? response.count : undefined
+        };
+      } catch (error) {
+        return handleError(error as Error, 'loadSources');
+      }
     });
   }
   
@@ -347,15 +354,23 @@ export const useSourcesStore = defineStore("sources", () => {
     delete state.data.value.sourceStats[sourceId.toString()];
   }
   
-  function handleError(error: Error, operation: string) {
-    console.error(`Error in sources store (${operation}):`, error);
+  function handleError(error: Error | APIErrorResponse, operation: string) {
+    console.error(`[${operation} Error]`, error);
+    
+    const errorMessage = error instanceof Error ? error.message : error.message;
+    const errorType = error instanceof Error ? 'UnknownError' : (error.error_type || 'UnknownError');
+    const errorData = error instanceof Error ? undefined : error.data;
+    
     state.error.value = {
-      message: error.message,
+      message: errorMessage,
+      error_type: errorType,
+      data: errorData,
       operation
     };
-    return {
+    
+    return { 
       success: false,
-      error: error.message
+      error: state.error.value
     };
   }
   

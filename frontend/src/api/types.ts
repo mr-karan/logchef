@@ -3,6 +3,22 @@ export interface APISuccessResponse<T> {
   data: T | null;
 }
 
+export interface APIListResponse<T> {
+  status: "success";
+  data: T[];
+  count?: number;
+  total?: number;
+  page?: number;
+  per_page?: number;
+}
+
+export interface APIPaginatedResponse<T> extends APIListResponse<T> {
+  count: number;
+  total: number;
+  page: number;
+  per_page: number;
+}
+
 export interface APIErrorResponse {
   status: "error";
   message: string;
@@ -62,6 +78,16 @@ export function isSuccessResponse<T>(
   response: APIResponse<T>
 ): response is APISuccessResponse<T> {
   return response.status === "success";
+}
+
+export function isAPIListResponse<T>(response: any): response is APIListResponse<T> {
+  return response?.status === "success" && Array.isArray(response?.data);
+}
+
+export function isPaginatedResponse<T>(response: any): response is APIPaginatedResponse<T> {
+  return response?.status === "success" && 
+         typeof response?.data?.count === 'number' && 
+         Array.isArray(response?.data);
 }
 
 // Import from our new error handler utility
