@@ -287,23 +287,26 @@ async function loadSourceQueries() {
       return;
     }
 
-    // Use the saved queries store
-    const response = await savedQueriesStore.fetchTeamSourceQueries(
+    // Use the new store pattern with proper null handling
+    const result = await savedQueriesStore.fetchTeamSourceQueries(
       teamsStore.currentTeamId,
       parseInt(selectedSourceId.value)
     );
 
-    if (response.status === "success") {
-      // The store now handles setting data.queries, just update our local copy
-      queries.value = savedQueriesStore.data.queries;
+    // Handle both success and error cases properly
+    if (result.success) {
+      // Directly use the result data which is already null-safe
+      queries.value = result.data ?? [];
     } else {
       queries.value = [];
-      toast({
-        title: 'Error',
-        description: 'Failed to load queries',
-        variant: 'destructive',
-        duration: TOAST_DURATION.ERROR,
-      });
+      if (result.error) {
+        toast({
+          title: 'Error',
+          description: result.error.message,
+          variant: 'destructive',
+          duration: TOAST_DURATION.ERROR,
+        });
+      }
     }
   } catch (error) {
     queries.value = [];

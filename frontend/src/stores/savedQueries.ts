@@ -98,37 +98,47 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
 
   async function fetchTeamQueries(teamId: number) {
     return await withLoading(`fetchTeamQueries-${teamId}`, async () => {
-      return await execute(() => savedQueriesApi.listQueries(teamId), {
-        onSuccess: (response) => {
-          // Handle null data (no queries available)
-          data.value.queries = response ?? [];
-        },
-        defaultData: []
-      });
+      return await execute(
+        () => savedQueriesApi.listQueries(teamId),
+        {
+          onSuccess: (responseData) => {
+            data.value.queries = responseData;
+          },
+          defaultData: [],
+          showToast: false,
+        }
+      );
     });
   }
 
   async function fetchSourceQueries(sourceId: number, teamId: number) {
     return await withLoading(`fetchSourceQueries-${sourceId}-${teamId}`, async () => {
-      return await execute(() => savedQueriesApi.listSourceQueries(sourceId, teamId), {
-        onSuccess: (response) => {
-          // Handle null data (no queries available)
-          data.value.queries = response ?? [];
-        },
-        defaultData: []
-      });
+      return await execute(
+        () => savedQueriesApi.listSourceQueries(sourceId, teamId),
+        {
+          onSuccess: (responseData) => {
+            data.value.queries = responseData;
+          },
+          defaultData: [],
+          showToast: false,
+        }
+      );
     });
   }
 
   async function fetchTeamSourceQueries(teamId: number, sourceId: number) {
     return await withLoading(`fetchTeamSourceQueries-${teamId}-${sourceId}`, async () => {
-      return await execute(() => savedQueriesApi.listTeamSourceQueries(teamId, sourceId), {
-        onSuccess: (response) => {
-          // Update the store's state with the returned queries
-          data.value.queries = response ?? [];
-        },
-        defaultData: []
-      });
+      return await execute(
+        () => savedQueriesApi.listTeamSourceQueries(teamId, sourceId),
+        {
+          onSuccess: (responseData) => {
+            // ResponseData is already null-safe due to defaultData
+            data.value.queries = responseData;
+          },
+          defaultData: [], // Ensure empty array fallback
+          showToast: false,
+        }
+      );
     });
   }
 
