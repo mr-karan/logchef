@@ -125,6 +125,9 @@ async function handleSubmit() {
             status: 'active',
         }
         showDialog.value = false
+        
+        // Reload users from API to ensure our store has the most up-to-date data
+        await usersStore.loadUsers(true);
     }
 }
 </script>

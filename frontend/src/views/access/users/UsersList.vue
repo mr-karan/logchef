@@ -73,8 +73,8 @@ const filteredUsers = computed(() => {
     );
 })
 
-const loadUsers = async () => {
-    return await usersStore.loadUsers();
+const loadUsers = async (forceReload = false) => {
+    return await usersStore.loadUsers(forceReload);
 }
 
 const confirmDelete = async () => {
@@ -82,6 +82,8 @@ const confirmDelete = async () => {
 
     const result = await usersStore.deleteUser(userToDelete.value.id);
     if (result.success) {
+        // Fetch fresh data from the API
+        await loadUsers(true);
         showDeleteDialog.value = false;
         userToDelete.value = null;
     }
@@ -93,9 +95,14 @@ const handleDelete = (user: User) => {
 }
 
 const toggleUserStatus = async (user: User) => {
-    await usersStore.updateUser(user.id, {
+    const result = await usersStore.updateUser(user.id, {
         status: user.status === 'active' ? 'inactive' : 'active',
     });
+    
+    if (result.success) {
+        // Refresh the users list to ensure we have the latest data
+        await loadUsers(true);
+    }
 }
 
 const handleEdit = (user: User) => {
@@ -118,6 +125,8 @@ const confirmEdit = async () => {
     });
     
     if (result.success) {
+        // Refresh the users list to ensure we have the latest data
+        await loadUsers(true);
         showEditDialog.value = false;
         userToEdit.value = null;
     }
