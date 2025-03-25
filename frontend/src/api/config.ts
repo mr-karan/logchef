@@ -33,6 +33,13 @@ api.interceptors.response.use(
     return response;
   },
   async (error) => {
+    // Create a standardized error response
+    const errorResponse = error.response?.data || {
+      status: "error",
+      message: error.message || "Network error: Unable to connect to the server",
+      error_type: "NetworkError",
+    };
+
     // Handle session expiration
     if (error.response?.status === 401) {
       // Clear auth state using the store
@@ -71,7 +78,7 @@ api.interceptors.response.use(
         query: { redirect: currentPath },
         replace: true // Replace current history entry to avoid navigation issues after login
       });
-      return Promise.reject(error);
+      return Promise.reject(errorResponse);
     }
 
     // Handle forbidden errors
@@ -82,9 +89,13 @@ api.interceptors.response.use(
         message: "You don't have permission to access this resource.",
         error_type: "AuthorizationError",
       };
-      showErrorToast(forbiddenError);
-      router.push({ name: "Forbidden" });
-      return Promise.reject(error);
+      
+      // Only show toast if not a CSRF error (which is handled separately)
+      if (error.response?.data?.code !== "CSRF_TOKEN_MISMATCH") {
+        showErrorToast(forbiddenError);
+        router.push({ name: "Forbidden" });
+      }
+      return Promise.reject(forbiddenError);
     }
 
     // Handle CSRF token errors
@@ -100,10 +111,11 @@ api.interceptors.response.use(
         error_type: "SecurityError",
       };
       showErrorToast(csrfError);
-      return Promise.reject(new Error("Security verification failed"));
+      return Promise.reject(csrfError);
     }
 
     // For other errors, we'll let the calling code handle them
-    return Promise.reject(error);
+    // but we standardize the error format
+    return Promise.reject(errorResponse);
   }
 );

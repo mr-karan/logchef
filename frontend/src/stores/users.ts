@@ -3,7 +3,7 @@ import { useBaseStore } from "./base";
 import type { User } from "@/types";
 import { usersApi } from "@/api/users";
 import { computed } from "vue";
-import type { APIResponse } from "@/api/types";
+import { useApiQuery } from "@/composables/useApiQuery";
 
 interface UsersState {
   users: User[];
@@ -14,33 +14,31 @@ export const useUsersStore = defineStore("users", () => {
     users: [],
   });
 
+  // Use our API query composable
+  const { execute, isLoading } = useApiQuery<User[]>();
+
   // Computed properties
-  const users = computed(() => {
-    console.log("Users computed value:", state.data.value.users);
-    return state.data.value.users;
-  });
+  const users = computed(() => state.data.value.users);
 
   async function loadUsers() {
     console.log("Loading users...");
-    const result = await state.callApi<APIResponse<User[]>>({
-      apiCall: () => usersApi.listUsers(),
-      onSuccess: (response) => {
-        console.log("API Response:", response);
-        if (Array.isArray(response)) {
+    const result = await state.withLoading('loadUsers', async () => {
+      return await execute(() => usersApi.listUsers(), {
+        onSuccess: (response) => {
           state.data.value.users = response;
-          console.log("Updated users state:", state.data.value.users);
-        }
-      },
-      showToast: true,
+        },
+        showToast: true,
+      });
     });
-    console.log("Load users result:", result);
+    
     return result;
   }
 
   async function getUser(id: string) {
-    return await state.callApi<APIResponse<{ user: User }>>({
-      apiCall: () => usersApi.getUser(id),
-      showToast: true,
+    return await state.withLoading(`getUser-${id}`, async () => {
+      return await execute(() => usersApi.getUser(id), {
+        showToast: true,
+      });
     });
   }
 
@@ -49,14 +47,15 @@ export const useUsersStore = defineStore("users", () => {
     full_name: string;
     role: "admin" | "member";
   }) {
-    const result = await state.callApi<APIResponse<{ user: User }>>({
-      apiCall: () => usersApi.createUser(data),
-      onSuccess: (response) => {
-        if (response.status === "success" && response.data.user) {
-          state.data.value.users.push(response.data.user);
-        }
-      },
-      successMessage: "User created successfully",
+    const result = await state.withLoading('createUser', async () => {
+      return await execute(() => usersApi.createUser(data), {
+        successMessage: "User created successfully",
+        onSuccess: (response) => {
+          if (response.user) {
+            state.data.value.users.push(response.user);
+          }
+        },
+      });
     });
 
     if (result.success) {
@@ -75,31 +74,33 @@ export const useUsersStore = defineStore("users", () => {
       status?: "active" | "inactive";
     }
   ) {
-    return await state.callApi<APIResponse<{ user: User }>>({
-      apiCall: () => usersApi.updateUser(id, data),
-      onSuccess: (response) => {
-        if (response.status === "success" && response.data.user) {
-          const index = state.data.value.users.findIndex(
-            (u) => u.id === response.data.user.id
-          );
-          if (index >= 0) {
-            state.data.value.users[index] = response.data.user;
+    return await state.withLoading(`updateUser-${id}`, async () => {
+      return await execute(() => usersApi.updateUser(id, data), {
+        successMessage: "User updated successfully",
+        onSuccess: (response) => {
+          if (response.user) {
+            const index = state.data.value.users.findIndex(
+              (u) => u.id === response.user.id
+            );
+            if (index >= 0) {
+              state.data.value.users[index] = response.user;
+            }
           }
-        }
-      },
-      successMessage: "User updated successfully",
+        },
+      });
     });
   }
 
   async function deleteUser(id: string) {
-    return await state.callApi<APIResponse<{ message: string }>>({
-      apiCall: () => usersApi.deleteUser(id),
-      onSuccess: () => {
-        state.data.value.users = state.data.value.users.filter(
-          (u) => u.id !== id
-        );
-      },
-      successMessage: "User deleted successfully",
+    return await state.withLoading(`deleteUser-${id}`, async () => {
+      return await execute(() => usersApi.deleteUser(id), {
+        successMessage: "User deleted successfully",
+        onSuccess: () => {
+          state.data.value.users = state.data.value.users.filter(
+            (u) => u.id !== id
+          );
+        },
+      });
     });
   }
 
@@ -114,7 +115,7 @@ export const useUsersStore = defineStore("users", () => {
 
   return {
     users,
-    isLoading: state.isLoading,
+    isLoading: computed(() => isLoading.value || state.isLoading.value),
     error: state.error,
     loadUsers,
     getUser,
@@ -122,5 +123,7 @@ export const useUsersStore = defineStore("users", () => {
     updateUser,
     deleteUser,
     getUsersNotInTeam,
+    // Loading state helpers
+    isLoadingOperation: state.isLoadingOperation,
   };
 });

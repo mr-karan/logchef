@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useTeamsStore } from "./teams";
 import { sourcesApi } from "@/api/sources";
 import type {
@@ -11,8 +11,9 @@ import type {
 } from "@/api/sources";
 import type { SavedTeamQuery } from "@/api/types";
 import { useBaseStore } from "./base";
-import { getErrorMessage } from "@/api/types";
 import { useSavedQueriesStore } from "./savedQueries";
+import { useApiQuery } from "@/composables/useApiQuery";
+import { useLoadingState } from "@/composables/useLoadingState";
 
 interface SourcesState {
   sources: Source[];
@@ -23,6 +24,8 @@ interface SourcesState {
 
 export const useSourcesStore = defineStore("sources", () => {
   const teamsStore = useTeamsStore();
+  const { execute } = useApiQuery();
+  const { withLoading, isLoadingOperation } = useLoadingState();
 
   const state = useBaseStore<SourcesState>({
     sources: [],
@@ -49,33 +52,31 @@ export const useSourcesStore = defineStore("sources", () => {
   });
 
   async function loadSources() {
-    return await state.callApi<Source[]>({
-      apiCall: () => sourcesApi.listSources(),
-      operationKey: "loadSources",
-      onSuccess: (data) => {
-        state.data.value.sources = data;
-      },
-      showToast: false,
+    return await state.withLoading("loadSources", async () => {
+      return await execute(() => sourcesApi.listSources(), {
+        onSuccess: (data) => {
+          state.data.value.sources = data;
+        },
+        showToast: false,
+      });
     });
   }
 
   async function loadTeamSources(teamId: number) {
-    return await state.callApi<Source[]>({
-      apiCall: () => sourcesApi.listTeamSources(teamId),
-      operationKey: `loadTeamSources-${teamId}`,
-      onSuccess: (data) => {
-        state.data.value.teamSources = data;
-      },
-      showToast: false,
+    return await state.withLoading(`loadTeamSources-${teamId}`, async () => {
+      return await execute(() => sourcesApi.listTeamSources(teamId), {
+        onSuccess: (data) => {
+          state.data.value.teamSources = data;
+        },
+        showToast: false,
+      });
     });
   }
 
   async function loadSourceQueries(sourceId: string | number) {
     const id = typeof sourceId === "string" ? parseInt(sourceId) : sourceId;
 
-    try {
-      state.isLoading.value = true;
-
+    return await state.withLoading(`loadSourceQueries-${id}`, async () => {
       // Use the savedQueriesStore to fetch queries
       const savedQueriesStore = useSavedQueriesStore();
       const currentTeamId = teamsStore.currentTeamId;
@@ -92,7 +93,7 @@ export const useSourcesStore = defineStore("sources", () => {
         currentTeamId
       );
 
-      if (result && "data" in result && result.data) {
+      if (result && result.success && result.data) {
         state.data.value.sourceQueries = {
           ...state.data.value.sourceQueries,
           [id.toString()]: result.data,
@@ -106,32 +107,24 @@ export const useSourcesStore = defineStore("sources", () => {
 
       return {
         success: false,
-        error:
-          "error" in result ? result.error : "Failed to load source queries",
+        error: result.error || "Failed to load source queries",
       };
-    } catch (error) {
-      console.error("Error loading source queries:", error);
-      return {
-        success: false,
-        error: getErrorMessage(error),
-      };
-    } finally {
-      state.isLoading.value = false;
-    }
+    });
   }
 
   async function loadTeamSourceQueries(teamId: number, sourceId: number) {
     const key = `${teamId}-${sourceId}`;
 
-    return await state.callApi<SavedTeamQuery[]>({
-      apiCall: () => sourcesApi.listTeamSourceQueries(teamId, sourceId),
-      onSuccess: (data) => {
-        state.data.value.sourceQueries = {
-          ...state.data.value.sourceQueries,
-          [key]: data,
-        };
-      },
-      showToast: false,
+    return await state.withLoading(`loadTeamSourceQueries-${key}`, async () => {
+      return await execute(() => sourcesApi.listTeamSourceQueries(teamId, sourceId), {
+        onSuccess: (data) => {
+          state.data.value.sourceQueries = {
+            ...state.data.value.sourceQueries,
+            [key]: data,
+          };
+        },
+        showToast: false,
+      });
     });
   }
 
@@ -141,9 +134,10 @@ export const useSourcesStore = defineStore("sources", () => {
   ) {
     const id = typeof sourceId === "string" ? parseInt(sourceId) : sourceId;
 
-    const result = await state.callApi<SavedTeamQuery>({
-      apiCall: () => sourcesApi.createSourceQuery(id, query),
-      successMessage: "Query saved successfully",
+    const result = await state.withLoading(`createSourceQuery-${id}`, async () => {
+      return await execute(() => sourcesApi.createSourceQuery(id, query), {
+        successMessage: "Query saved successfully",
+      });
     });
 
     if (result.success) {
@@ -159,9 +153,12 @@ export const useSourcesStore = defineStore("sources", () => {
     sourceId: number,
     query: Omit<CreateTeamQueryRequest, "team_id">
   ) {
-    const result = await state.callApi<SavedTeamQuery>({
-      apiCall: () => sourcesApi.createTeamSourceQuery(teamId, sourceId, query),
-      successMessage: "Query saved successfully",
+    const key = `${teamId}-${sourceId}`;
+    
+    const result = await state.withLoading(`createTeamSourceQuery-${key}`, async () => {
+      return await execute(() => sourcesApi.createTeamSourceQuery(teamId, sourceId, query), {
+        successMessage: "Query saved successfully",
+      });
     });
 
     if (result.success) {
@@ -173,9 +170,10 @@ export const useSourcesStore = defineStore("sources", () => {
   }
 
   async function createSource(payload: CreateSourcePayload) {
-    const result = await state.callApi<Source>({
-      apiCall: () => sourcesApi.createSource(payload),
-      successMessage: "Source created successfully",
+    const result = await state.withLoading("createSource", async () => {
+      return await execute(() => sourcesApi.createSource(payload), {
+        successMessage: "Source created successfully",
+      });
     });
 
     if (result.success) {
@@ -187,19 +185,21 @@ export const useSourcesStore = defineStore("sources", () => {
   }
 
   async function deleteSource(id: number) {
-    const result = await state.callApi<{ message: string }>({
-      apiCall: () => sourcesApi.deleteSource(id),
-      successMessage: "Source deleted successfully",
+    const result = await state.withLoading(`deleteSource-${id}`, async () => {
+      return await execute(() => sourcesApi.deleteSource(id), {
+        successMessage: "Source deleted successfully",
+        onSuccess: () => {
+          // Remove from local state
+          state.data.value.sources = state.data.value.sources.filter(
+            (source) => source.id !== id
+          );
+        }
+      });
     });
 
     if (result.success) {
       // Refresh sources
       await loadSources();
-
-      // Remove from local state
-      state.data.value.sources = state.data.value.sources.filter(
-        (source) => source.id !== id
-      );
     }
 
     return result;
@@ -215,30 +215,32 @@ export const useSourcesStore = defineStore("sources", () => {
   }
 
   async function getSourceStats(sourceId: number) {
-    return await state.callApi<SourceStats>({
-      apiCall: () => sourcesApi.getSourceStats(sourceId),
-      onSuccess: (data) => {
-        state.data.value.sourceStats = {
-          ...state.data.value.sourceStats,
-          [sourceId.toString()]: data,
-        };
-      },
-      showToast: false,
+    return await state.withLoading(`getSourceStats-${sourceId}`, async () => {
+      return await execute(() => sourcesApi.getSourceStats(sourceId), {
+        onSuccess: (data) => {
+          state.data.value.sourceStats = {
+            ...state.data.value.sourceStats,
+            [sourceId.toString()]: data,
+          };
+        },
+        showToast: false,
+      });
     });
   }
 
   async function getTeamSourceStats(teamId: number, sourceId: number) {
     const key = `${teamId}-${sourceId}`;
 
-    return await state.callApi<SourceStats>({
-      apiCall: () => sourcesApi.getTeamSourceStats(teamId, sourceId),
-      onSuccess: (data) => {
-        state.data.value.sourceStats = {
-          ...state.data.value.sourceStats,
-          [key]: data,
-        };
-      },
-      showToast: false,
+    return await state.withLoading(`getTeamSourceStats-${key}`, async () => {
+      return await execute(() => sourcesApi.getTeamSourceStats(teamId, sourceId), {
+        onSuccess: (data) => {
+          state.data.value.sourceStats = {
+            ...state.data.value.sourceStats,
+            [key]: data,
+          };
+        },
+        showToast: false,
+      });
     });
   }
 
@@ -249,20 +251,20 @@ export const useSourcesStore = defineStore("sources", () => {
       return { success: false, error: "No team selected" };
     }
 
-    return await state.callApi<Source>({
-      apiCall: () => sourcesApi.getTeamSource(currentTeamId, sourceId),
-      operationKey: `getSource-${sourceId}`,
-      onSuccess: (data) => {
-        // Update the source in teamSources if it exists
-        const index = teamSources.value.findIndex((s) => s.id === sourceId);
-        if (index >= 0) {
-          // Create a new array to trigger reactivity
-          const newTeamSources = [...teamSources.value];
-          newTeamSources[index] = data;
-          state.data.value.teamSources = newTeamSources;
-        }
-      },
-      showToast: true,
+    return await state.withLoading(`getSource-${sourceId}`, async () => {
+      return await execute(() => sourcesApi.getTeamSource(currentTeamId, sourceId), {
+        onSuccess: (data) => {
+          // Update the source in teamSources if it exists
+          const index = teamSources.value.findIndex((s) => s.id === sourceId);
+          if (index >= 0) {
+            // Create a new array to trigger reactivity
+            const newTeamSources = [...teamSources.value];
+            newTeamSources[index] = data;
+            state.data.value.teamSources = newTeamSources;
+          }
+        },
+        showToast: true,
+      });
     });
   }
 
@@ -275,9 +277,10 @@ export const useSourcesStore = defineStore("sources", () => {
     timestamp_field?: string;
     severity_field?: string;
   }) {
-    return await state.callApi<{ message: string }>({
-      apiCall: () => sourcesApi.validateSourceConnection(connectionInfo),
-      showToast: true,
+    return await state.withLoading("validateSourceConnection", async () => {
+      return await execute(() => sourcesApi.validateSourceConnection(connectionInfo), {
+        showToast: true,
+      });
     });
   }
 

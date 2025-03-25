@@ -4,6 +4,7 @@ import type { Session, User } from "@/types";
 import { authApi, type SessionResponse } from "@/api/auth";
 import router from "@/router";
 import { useBaseStore } from "./base";
+import { useApiQuery } from "@/composables/useApiQuery";
 
 interface AuthState {
   user: User | null;
@@ -19,6 +20,9 @@ export const useAuthStore = defineStore("auth", () => {
     isInitialized: false,
     isInitializing: false,
   });
+
+  // Use our API query composable
+  const { execute } = useApiQuery<SessionResponse>();
 
   // Computed properties
   const user = computed(() => state.data.value.user);
@@ -36,8 +40,7 @@ export const useAuthStore = defineStore("auth", () => {
     console.log("Initializing auth store...");
     state.data.value.isInitializing = true;
 
-    const result = await state.callApi<SessionResponse>({
-      apiCall: () => authApi.getSession(),
+    const result = await execute(() => authApi.getSession(), {
       showToast: false,
       onSuccess: (response) => {
         state.data.value.user = response.user;
@@ -49,11 +52,11 @@ export const useAuthStore = defineStore("auth", () => {
           isAuthenticated: isAuthenticated.value,
         });
       },
-      onError: (error) => {
+      onError: () => {
         // Handle session not found gracefully
         clearState();
         // Log error for diagnostic purposes but don't show to user for initial load
-        console.log("No active session found", error);
+        console.log("No active session found");
       },
     });
 
@@ -82,9 +85,8 @@ export const useAuthStore = defineStore("auth", () => {
 
   // Logout user
   async function logout() {
-    const result = await state.callApi({
-      apiCall: () => authApi.logout(),
-      showToast: false,
+    const result = await execute(() => authApi.logout(), {
+      showToast: false
     });
 
     // Always clear state and redirect to login, regardless of API result

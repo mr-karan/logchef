@@ -9,6 +9,7 @@ import {
   type UpdateTeamRequest,
 } from "@/api/teams";
 import type { Source } from "@/api/sources";
+import { useApiQuery } from "@/composables/useApiQuery";
 
 export interface TeamWithMemberCount extends Team {
   memberCount: number;
@@ -25,6 +26,9 @@ export const useTeamsStore = defineStore("teams", () => {
     currentTeamId: null,
   });
 
+  // Use our API query composable
+  const { execute } = useApiQuery();
+
   // Computed properties
   const teams = computed(() => state.data.value.teams);
   const currentTeamId = computed(() => state.data.value.currentTeamId);
@@ -35,24 +39,24 @@ export const useTeamsStore = defineStore("teams", () => {
   );
 
   async function loadTeams() {
-    return await state.callApi<TeamWithMemberCount[]>({
-      apiCall: () => teamsApi.listUserTeams(),
-      operationKey: 'loadTeams',
-      onSuccess: (response) => {
-        state.data.value.teams = response.map((team) => ({
-          ...team,
-          memberCount: team.member_count ?? 0,
-        }));
-
-        // Set current team if none is selected and we have teams
-        if (
-          !state.data.value.currentTeamId &&
-          state.data.value.teams.length > 0
-        ) {
-          state.data.value.currentTeamId = state.data.value.teams[0].id;
-        }
-      },
-      showToast: true,
+    return await state.withLoading('loadTeams', async () => {
+      return await execute(() => teamsApi.listUserTeams(), {
+        onSuccess: (response) => {
+          state.data.value.teams = response.map((team) => ({
+            ...team,
+            memberCount: team.member_count ?? 0,
+          }));
+  
+          // Set current team if none is selected and we have teams
+          if (
+            !state.data.value.currentTeamId &&
+            state.data.value.teams.length > 0
+          ) {
+            state.data.value.currentTeamId = state.data.value.teams[0].id;
+          }
+        },
+        showToast: true,
+      });
     });
   }
 
@@ -62,9 +66,10 @@ export const useTeamsStore = defineStore("teams", () => {
   }
 
   async function createTeam(data: CreateTeamRequest) {
-    const result = await state.callApi<Team>({
-      apiCall: () => teamsApi.createTeam(data),
-      successMessage: "Team created successfully",
+    const result = await state.withLoading('createTeam', async () => {
+      return await execute(() => teamsApi.createTeam(data), {
+        successMessage: "Team created successfully"
+      });
     });
 
     if (result.success && result.data) {
@@ -89,48 +94,55 @@ export const useTeamsStore = defineStore("teams", () => {
   }
 
   async function getTeam(teamId: number) {
-    return await state.callApi<Team>({
-      apiCall: () => teamsApi.getTeam(teamId),
-      showToast: true,
+    return await state.withLoading(`getTeam-${teamId}`, async () => {
+      return await execute(() => teamsApi.getTeam(teamId), {
+        showToast: true
+      });
     });
   }
 
   async function updateTeam(teamId: number, data: UpdateTeamRequest) {
-    return await state.callApi<Team>({
-      apiCall: () => teamsApi.updateTeam(teamId, data),
-      successMessage: "Team updated successfully",
-      onSuccess: async () => {
+    return await state.withLoading(`updateTeam-${teamId}`, async () => {
+      const result = await execute(() => teamsApi.updateTeam(teamId, data), {
+        successMessage: "Team updated successfully"
+      });
+      
+      if (result.success) {
         // Reload teams to get fresh data
         await loadTeams();
-      },
+      }
+      
+      return result;
     });
   }
 
   async function deleteTeam(teamId: number) {
-    return await state.callApi<{ message: string }>({
-      apiCall: () => teamsApi.deleteTeam(teamId),
-      successMessage: "Team deleted successfully",
-      onSuccess: () => {
-        // Remove from local state
-        state.data.value.teams = state.data.value.teams.filter(
-          (t) => t.id !== teamId
-        );
-
-        // If this was the current team, reset current team
-        if (state.data.value.currentTeamId === teamId) {
-          state.data.value.currentTeamId =
-            state.data.value.teams.length > 0
-              ? state.data.value.teams[0].id
-              : null;
+    return await state.withLoading(`deleteTeam-${teamId}`, async () => {
+      return await execute(() => teamsApi.deleteTeam(teamId), {
+        successMessage: "Team deleted successfully",
+        onSuccess: () => {
+          // Remove from local state
+          state.data.value.teams = state.data.value.teams.filter(
+            (t) => t.id !== teamId
+          );
+  
+          // If this was the current team, reset current team
+          if (state.data.value.currentTeamId === teamId) {
+            state.data.value.currentTeamId =
+              state.data.value.teams.length > 0
+                ? state.data.value.teams[0].id
+                : null;
+          }
         }
-      },
+      });
     });
   }
 
   async function listTeamMembers(teamId: number) {
-    return await state.callApi<TeamMember[]>({
-      apiCall: () => teamsApi.listTeamMembers(teamId),
-      showToast: true,
+    return await state.withLoading(`listTeamMembers-${teamId}`, async () => {
+      return await execute(() => teamsApi.listTeamMembers(teamId), {
+        showToast: true
+      });
     });
   }
 
@@ -138,45 +150,51 @@ export const useTeamsStore = defineStore("teams", () => {
     teamId: number,
     data: { user_id: number; role: "admin" | "member" }
   ) {
-    return await state.callApi<TeamMember>({
-      apiCall: () => teamsApi.addTeamMember(teamId, data),
-      successMessage: "Member added successfully",
+    return await state.withLoading(`addTeamMember-${teamId}`, async () => {
+      return await execute(() => teamsApi.addTeamMember(teamId, data), {
+        successMessage: "Member added successfully"
+      });
     });
   }
 
   async function removeTeamMember(teamId: number, userId: number) {
-    return await state.callApi<{ message: string }>({
-      apiCall: () => teamsApi.removeTeamMember(teamId, userId),
-      successMessage: "Member removed successfully",
+    return await state.withLoading(`removeTeamMember-${teamId}-${userId}`, async () => {
+      return await execute(() => teamsApi.removeTeamMember(teamId, userId), {
+        successMessage: "Member removed successfully"
+      });
     });
   }
 
   async function listTeamSources(teamId: number) {
-    return await state.callApi<Source[]>({
-      apiCall: () => teamsApi.listTeamSources(teamId),
-      showToast: true,
+    return await state.withLoading(`listTeamSources-${teamId}`, async () => {
+      return await execute(() => teamsApi.listTeamSources(teamId), {
+        showToast: true
+      });
     });
   }
 
   async function addTeamSource(teamId: number, sourceId: number) {
-    return await state.callApi<Source>({
-      apiCall: () => teamsApi.addTeamSource(teamId, sourceId),
-      successMessage: "Source added successfully",
+    return await state.withLoading(`addTeamSource-${teamId}-${sourceId}`, async () => {
+      return await execute(() => teamsApi.addTeamSource(teamId, sourceId), {
+        successMessage: "Source added successfully"
+      });
     });
   }
 
   async function removeTeamSource(teamId: number, sourceId: number) {
-    return await state.callApi<{ message: string }>({
-      apiCall: () => teamsApi.removeTeamSource(teamId, sourceId),
-      successMessage: "Source removed successfully",
+    return await state.withLoading(`removeTeamSource-${teamId}-${sourceId}`, async () => {
+      return await execute(() => teamsApi.removeTeamSource(teamId, sourceId), {
+        successMessage: "Source removed successfully"
+      });
     });
   }
 
   // Get team source IDs - helper method for filtering
   async function getTeamSourceIds(teamId: number) {
-    const result = await state.callApi<Source[]>({
-      apiCall: () => teamsApi.listTeamSources(teamId),
-      showToast: false,
+    const result = await state.withLoading(`getTeamSourceIds-${teamId}`, async () => {
+      return await execute(() => teamsApi.listTeamSources(teamId), {
+        showToast: false
+      });
     });
 
     if (result.success && result.data) {

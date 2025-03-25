@@ -6,7 +6,8 @@ import {
   type Team,
   type SavedQueryContent,
 } from "@/api/savedQueries";
-import { getErrorMessage } from "@/api/types";
+import { useApiQuery } from "@/composables/useApiQuery";
+import { useLoadingState } from "@/composables/useLoadingState";
 
 export interface SavedQueriesState {
   queries: SavedTeamQuery[];
@@ -17,13 +18,16 @@ export interface SavedQueriesState {
 
 export const useSavedQueriesStore = defineStore("savedQueries", () => {
   // State
-  const isLoading = ref(false);
   const data = ref<SavedQueriesState>({
     queries: [],
     selectedQuery: null,
     teams: [],
     selectedTeamId: null,
   });
+
+  // Use our composables
+  const { execute, isLoading } = useApiQuery();
+  const { withLoading } = useLoadingState();
 
   // Getters
   const parseQueryContent = (query: SavedTeamQuery): SavedQueryContent => {
@@ -76,22 +80,16 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
 
   // Actions
   async function fetchUserTeams() {
-    try {
-      isLoading.value = true;
-      const response = await savedQueriesApi.getUserTeams();
-      if (response.status === "success") {
-        data.value.teams = response.data;
-        if (response.data.length > 0 && !data.value.selectedTeamId) {
-          data.value.selectedTeamId = response.data[0].id;
+    return await withLoading('fetchUserTeams', async () => {
+      return await execute(() => savedQueriesApi.getUserTeams(), {
+        onSuccess: (response) => {
+          data.value.teams = response;
+          if (response.length > 0 && !data.value.selectedTeamId) {
+            data.value.selectedTeamId = response[0].id;
+          }
         }
-      }
-      return response;
-    } catch (error) {
-      console.error("Error fetching user teams:", getErrorMessage(error));
-      throw error;
-    } finally {
-      isLoading.value = false;
-    }
+      });
+    });
   }
 
   function setSelectedTeam(teamId: number) {
@@ -99,100 +97,65 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   }
 
   async function fetchTeamQueries(teamId: number) {
-    try {
-      isLoading.value = true;
-      const response = await savedQueriesApi.listQueries(teamId);
-      if (response.status === "success") {
-        // Handle null data (no queries available)
-        data.value.queries = response.data || [];
-      }
-      return response;
-    } catch (error) {
-      console.error("Error fetching team queries:", getErrorMessage(error));
-      throw error;
-    } finally {
-      isLoading.value = false;
-    }
+    return await withLoading(`fetchTeamQueries-${teamId}`, async () => {
+      return await execute(() => savedQueriesApi.listQueries(teamId), {
+        onSuccess: (response) => {
+          // Handle null data (no queries available)
+          data.value.queries = response || [];
+        }
+      });
+    });
   }
 
   async function fetchSourceQueries(sourceId: number, teamId: number) {
-    try {
-      isLoading.value = true;
-      const response = await savedQueriesApi.listSourceQueries(
-        sourceId,
-        teamId
-      );
-      if (response.status === "success") {
-        // Handle null data (no queries available)
-        data.value.queries = response.data || [];
-      }
-      return response;
-    } catch (error) {
-      console.error("Error fetching source queries:", getErrorMessage(error));
-      throw error;
-    } finally {
-      isLoading.value = false;
-    }
+    return await withLoading(`fetchSourceQueries-${sourceId}-${teamId}`, async () => {
+      return await execute(() => savedQueriesApi.listSourceQueries(sourceId, teamId), {
+        onSuccess: (response) => {
+          // Handle null data (no queries available)
+          data.value.queries = response || [];
+        }
+      });
+    });
   }
 
   async function fetchTeamSourceQueries(teamId: number, sourceId: number) {
-    try {
-      isLoading.value = true;
-      const response = await savedQueriesApi.listTeamSourceQueries(
-        teamId,
-        sourceId
-      );
-      if (response.status === "success") {
-        // Update the store's state with the returned queries
-        data.value.queries = response.data || [];
-      }
-      return response;
-    } catch (error) {
-      console.error("Error fetching team source queries:", getErrorMessage(error));
-      throw error;
-    } finally {
-      isLoading.value = false;
-    }
+    return await withLoading(`fetchTeamSourceQueries-${teamId}-${sourceId}`, async () => {
+      return await execute(() => savedQueriesApi.listTeamSourceQueries(teamId, sourceId), {
+        onSuccess: (response) => {
+          // Update the store's state with the returned queries
+          data.value.queries = response || [];
+        }
+      });
+    });
   }
 
   async function fetchQuery(teamId: number, queryId: string) {
-    try {
-      isLoading.value = true;
-      const response = await savedQueriesApi.getQuery(teamId, queryId);
-      if (response.status === "success") {
-        data.value.selectedQuery = response.data;
-      }
-      return response;
-    } catch (error) {
-      console.error("Error fetching query:", getErrorMessage(error));
-      throw error;
-    } finally {
-      isLoading.value = false;
-    }
+    return await withLoading(`fetchQuery-${teamId}-${queryId}`, async () => {
+      return await execute(() => savedQueriesApi.getQuery(teamId, queryId), {
+        onSuccess: (response) => {
+          data.value.selectedQuery = response;
+        }
+      });
+    });
   }
 
   async function createQuery(
     teamId: number,
     query: Omit<SavedTeamQuery, "id" | "created_at" | "updated_at">
   ) {
-    try {
-      isLoading.value = true;
-      const response = await savedQueriesApi.createQuery(teamId, query);
-      if (response.status === "success") {
-        // Ensure queries array exists before modifying it
-        if (!data.value.queries) {
-          data.value.queries = [];
+    return await withLoading(`createQuery-${teamId}`, async () => {
+      return await execute(() => savedQueriesApi.createQuery(teamId, query), {
+        successMessage: "Query created successfully",
+        onSuccess: (response) => {
+          // Ensure queries array exists before modifying it
+          if (!data.value.queries) {
+            data.value.queries = [];
+          }
+          data.value.queries.unshift(response);
+          data.value.selectedQuery = response;
         }
-        data.value.queries.unshift(response.data);
-        data.value.selectedQuery = response.data;
-      }
-      return response;
-    } catch (error) {
-      console.error("Error creating query:", getErrorMessage(error));
-      throw error;
-    } finally {
-      isLoading.value = false;
-    }
+      });
+    });
   }
 
   async function createSourceQuery(
@@ -202,34 +165,26 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     description: string,
     queryContent: SavedQueryContent
   ) {
-    try {
-      isLoading.value = true;
+    return await withLoading(`createSourceQuery-${teamId}-${sourceId}`, async () => {
       const query = {
         name,
         description,
         query_type: queryContent.queryType || "sql",
         query_content: JSON.stringify(queryContent),
       };
-      const response = await savedQueriesApi.createSourceQuery(
-        teamId,
-        sourceId,
-        query
-      );
-      if (response.status === "success") {
-        // Ensure queries array exists before modifying it
-        if (!data.value.queries) {
-          data.value.queries = [];
+      
+      return await execute(() => savedQueriesApi.createSourceQuery(teamId, sourceId, query), {
+        successMessage: "Query created successfully",
+        onSuccess: (response) => {
+          // Ensure queries array exists before modifying it
+          if (!data.value.queries) {
+            data.value.queries = [];
+          }
+          data.value.queries.unshift(response);
+          data.value.selectedQuery = response;
         }
-        data.value.queries.unshift(response.data);
-        data.value.selectedQuery = response.data;
-      }
-      return response;
-    } catch (error) {
-      console.error("Error creating source query:", getErrorMessage(error));
-      throw error;
-    } finally {
-      isLoading.value = false;
-    }
+      });
+    });
   }
 
   async function updateQuery(
@@ -237,55 +192,41 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     queryId: string,
     query: Partial<SavedTeamQuery>
   ) {
-    try {
-      isLoading.value = true;
-      const response = await savedQueriesApi.updateQuery(
-        teamId,
-        queryId,
-        query
-      );
-      if (response.status === "success") {
-        const index = data.value.queries.findIndex(
-          (q) => String(q.id) === queryId
-        );
-        if (index >= 0) {
-          data.value.queries[index] = response.data;
+    return await withLoading(`updateQuery-${teamId}-${queryId}`, async () => {
+      return await execute(() => savedQueriesApi.updateQuery(teamId, queryId, query), {
+        successMessage: "Query updated successfully",
+        onSuccess: (response) => {
+          const index = data.value.queries.findIndex(
+            (q) => String(q.id) === queryId
+          );
+          if (index >= 0) {
+            data.value.queries[index] = response;
+          }
+          if (data.value.selectedQuery?.id === Number(queryId)) {
+            data.value.selectedQuery = response;
+          }
         }
-        if (data.value.selectedQuery?.id === Number(queryId)) {
-          data.value.selectedQuery = response.data;
-        }
-      }
-      return response;
-    } catch (error) {
-      console.error("Error updating query:", getErrorMessage(error));
-      throw error;
-    } finally {
-      isLoading.value = false;
-    }
+      });
+    });
   }
 
   async function deleteQuery(teamId: number, queryId: string) {
-    try {
-      isLoading.value = true;
-      const response = await savedQueriesApi.deleteQuery(teamId, queryId);
-      if (response.status === "success") {
-        data.value.queries = data.value.queries.filter(
-          (q) => String(q.id) !== queryId
-        );
-        if (data.value.selectedQuery?.id === Number(queryId)) {
-          data.value.selectedQuery = null;
+    return await withLoading(`deleteQuery-${teamId}-${queryId}`, async () => {
+      return await execute(() => savedQueriesApi.deleteQuery(teamId, queryId), {
+        successMessage: "Query deleted successfully",
+        onSuccess: () => {
+          data.value.queries = data.value.queries.filter(
+            (q) => String(q.id) !== queryId
+          );
+          if (data.value.selectedQuery?.id === Number(queryId)) {
+            data.value.selectedQuery = null;
+          }
         }
-      }
-      return response;
-    } catch (error) {
-      console.error("Error deleting query:", getErrorMessage(error));
-      throw error;
-    } finally {
-      isLoading.value = false;
-    }
+      });
+    });
   }
 
-  // Reset state function (similar to explore.ts)
+  // Reset state function
   function resetState() {
     data.value = {
       queries: [], // Ensure this is always initialized as an empty array
