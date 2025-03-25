@@ -104,7 +104,8 @@ const isSaving = computed(() => {
 const name = ref('')
 const description = ref('')
 
-// Add member dialog state
+// UI state
+const activeTab = ref('members')
 const showAddMemberDialog = ref(false)
 const newMemberRole = ref('member')
 const selectedUserId = ref('')
@@ -277,6 +278,9 @@ const handleRemoveMember = async (userId: string | number) => {
 const handleAddSource = async () => {
     if (!team.value || !selectedSourceId.value) return
 
+    // Make sure we're on the sources tab
+    activeTab.value = 'sources'
+    
     const result = await teamsStore.addTeamSource(team.value.id, Number(selectedSourceId.value))
     
     if (result.success) {
@@ -292,6 +296,9 @@ const handleAddSource = async () => {
 const handleRemoveSource = async (sourceId: string | number) => {
     if (!team.value) return
 
+    // Make sure we're on the sources tab
+    activeTab.value = 'sources'
+    
     const result = await teamsStore.removeTeamSource(team.value.id, Number(sourceId))
     
     if (result.success) {
@@ -358,7 +365,7 @@ onMounted(async () => {
             </div>
 
             <!-- Tabs -->
-            <Tabs defaultValue="members" class="space-y-6">
+            <Tabs v-model="activeTab" class="space-y-6">
                 <TabsList>
                     <TabsTrigger value="members">Members</TabsTrigger>
                     <TabsTrigger value="sources">Sources</TabsTrigger>
@@ -480,7 +487,7 @@ onMounted(async () => {
                                 </div>
                                 <Dialog v-model:open="showAddSourceDialog">
                                     <DialogTrigger asChild>
-                                        <Button>
+                                        <Button @click="activeTab = 'sources'">
                                             <Database class="mr-2 h-4 w-4" />
                                             Add Source
                                         </Button>
