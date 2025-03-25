@@ -1,24 +1,16 @@
 import { defineStore } from "pinia";
-import { computed, ref, reactive, onMounted } from "vue";
+import { computed, ref, reactive } from "vue";
 import { useTeamsStore } from "./teams";
 import { sourcesApi } from "@/api/sources";
-import { useRouter } from "vue-router";
 import type {
   Source,
-  TeamGroupedQuery,
   CreateSourcePayload,
   SourceStats,
   CreateTeamQueryRequest,
 } from "@/api/sources";
-import type { 
-  SavedTeamQuery, 
-  APIErrorResponse,
-  isSuccessResponse
-} from "@/api/types";
+import type { APIErrorResponse } from "@/api/types";
 import { useBaseStore } from "./base";
 import { useSavedQueriesStore } from "./savedQueries";
-import { useApiQuery } from "@/composables/useApiQuery";
-import { useLoadingState } from "@/composables/useLoadingState";
 
 interface SourcesState {
   sources: Source[];
@@ -29,8 +21,6 @@ interface SourcesState {
 
 export const useSourcesStore = defineStore("sources", () => {
   const teamsStore = useTeamsStore();
-  const { execute } = useApiQuery();
-  const { withLoading, isLoadingOperation } = useLoadingState();
 
   const state = useBaseStore<SourcesState>({
     sources: [],
@@ -138,39 +128,19 @@ export const useSourcesStore = defineStore("sources", () => {
         );
       }
 
-      const result = await savedQueriesStore.fetchSourceQueries(
-        id,
-        currentTeamId
-      );
-
-      if (result && result.success && result.data) {
-        state.data.value.sourceQueries = {
-          ...state.data.value.sourceQueries,
-          [id.toString()]: result.data,
-        };
-
-        return {
-          success: true,
-          data: result.data,
-        };
-      }
-
-      // Handle error from result
-      if (result && result.error) {
-        return {
-          success: false,
-          error: result.error
-        };
-      }
-
-      return state.handleError(
-        { 
-          status: "error",
-          message: "Failed to load source queries", 
-          error_type: "GeneralError" 
-        } as APIErrorResponse, 
-        `loadSourceQueries-${id}`
-      );
+      return await state.callApi({
+        apiCall: () => savedQueriesStore.fetchSourceQueries(id, currentTeamId),
+        operationKey: `loadSourceQueries-${id}`,
+        onSuccess: (result) => {
+          if (result) {
+            state.data.value.sourceQueries = {
+              ...state.data.value.sourceQueries,
+              [id.toString()]: result,
+            };
+          }
+        },
+        showToast: false,
+      });
     });
   }
 
