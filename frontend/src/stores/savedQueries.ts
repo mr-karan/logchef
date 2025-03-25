@@ -8,6 +8,7 @@ import {
 } from "@/api/savedQueries";
 import { useApiQuery } from "@/composables/useApiQuery";
 import { useLoadingState } from "@/composables/useLoadingState";
+import { useBaseStore } from "./base";
 
 export interface SavedQueriesState {
   queries: SavedTeamQuery[];
@@ -17,8 +18,8 @@ export interface SavedQueriesState {
 }
 
 export const useSavedQueriesStore = defineStore("savedQueries", () => {
-  // State
-  const data = ref<SavedQueriesState>({
+  // Create base store for common functionality and error handling
+  const state = useBaseStore<SavedQueriesState>({
     queries: [],
     selectedQuery: null,
     teams: [],
@@ -27,7 +28,14 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
 
   // Use our composables
   const { execute, isLoading } = useApiQuery();
-  const { withLoading } = useLoadingState();
+  
+  // Local state for data binding
+  const data = ref<SavedQueriesState>({
+    queries: [],
+    selectedQuery: null,
+    teams: [],
+    selectedTeamId: null,
+  });
 
   // Getters
   const parseQueryContent = (query: SavedTeamQuery): SavedQueryContent => {
@@ -78,13 +86,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     );
   });
 
-  // Actions
-  const state = useBaseStore<SavedQueriesState>({
-    queries: [],
-    selectedQuery: null,
-    teams: [],
-    selectedTeamId: null,
-  });
+  // State was already initialized above
 
   async function fetchUserTeams() {
     return await state.withLoading('fetchUserTeams', async () => {
@@ -134,18 +136,17 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   }
 
   async function fetchTeamSourceQueries(teamId: number, sourceId: number) {
-    return await withLoading(`fetchTeamSourceQueries-${teamId}-${sourceId}`, async () => {
-      return await execute(
-        () => savedQueriesApi.listTeamSourceQueries(teamId, sourceId),
-        {
-          onSuccess: (responseData) => {
-            // ResponseData is already null-safe due to defaultData
-            data.value.queries = responseData;
-          },
-          defaultData: [], // Ensure empty array fallback
-          showToast: false,
-        }
-      );
+    return await state.withLoading(`fetchTeamSourceQueries-${teamId}-${sourceId}`, async () => {
+      return await state.callApi({
+        apiCall: () => savedQueriesApi.listTeamSourceQueries(teamId, sourceId),
+        operationKey: `fetchTeamSourceQueries-${teamId}-${sourceId}`,
+        onSuccess: (responseData) => {
+          // ResponseData is already null-safe due to defaultData
+          data.value.queries = responseData;
+        },
+        defaultData: [], // Ensure empty array fallback
+        showToast: false,
+      });
     });
   }
 
@@ -187,7 +188,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     description: string,
     queryContent: SavedQueryContent
   ) {
-    return await withLoading(`createSourceQuery-${teamId}-${sourceId}`, async () => {
+    return await state.withLoading(`createSourceQuery-${teamId}-${sourceId}`, async () => {
       const query = {
         name,
         description,
@@ -195,7 +196,9 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         query_content: JSON.stringify(queryContent),
       };
       
-      return await execute(() => savedQueriesApi.createSourceQuery(teamId, sourceId, query), {
+      return await state.callApi({
+        apiCall: () => savedQueriesApi.createSourceQuery(teamId, sourceId, query),
+        operationKey: `createSourceQuery-${teamId}-${sourceId}`,
         successMessage: "Query created successfully",
         onSuccess: (response) => {
           // Ensure queries array exists before modifying it
@@ -214,8 +217,10 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     queryId: string,
     query: Partial<SavedTeamQuery>
   ) {
-    return await withLoading(`updateQuery-${teamId}-${queryId}`, async () => {
-      return await execute(() => savedQueriesApi.updateQuery(teamId, queryId, query), {
+    return await state.withLoading(`updateQuery-${teamId}-${queryId}`, async () => {
+      return await state.callApi({
+        apiCall: () => savedQueriesApi.updateQuery(teamId, queryId, query),
+        operationKey: `updateQuery-${teamId}-${queryId}`,
         successMessage: "Query updated successfully",
         onSuccess: (response) => {
           const index = data.value.queries.findIndex(
@@ -233,8 +238,10 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   }
 
   async function deleteQuery(teamId: number, queryId: string) {
-    return await withLoading(`deleteQuery-${teamId}-${queryId}`, async () => {
-      return await execute(() => savedQueriesApi.deleteQuery(teamId, queryId), {
+    return await state.withLoading(`deleteQuery-${teamId}-${queryId}`, async () => {
+      return await state.callApi({
+        apiCall: () => savedQueriesApi.deleteQuery(teamId, queryId),
+        operationKey: `deleteQuery-${teamId}-${queryId}`,
         successMessage: "Query deleted successfully",
         onSuccess: () => {
           data.value.queries = data.value.queries.filter(
