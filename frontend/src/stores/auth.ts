@@ -5,6 +5,7 @@ import { authApi, type SessionResponse } from "@/api/auth";
 import router from "@/router";
 import { useBaseStore } from "./base";
 import { useApiQuery } from "@/composables/useApiQuery";
+import type { APIErrorResponse } from "@/api/types";
 
 interface AuthState {
   user: User | null;
@@ -21,8 +22,8 @@ export const useAuthStore = defineStore("auth", () => {
     isInitializing: false,
   });
 
-  // Use our API query composable
-  const { execute } = useApiQuery<SessionResponse>();
+  // Use our API query composable for loading state only
+  const { isLoading: apiLoading } = useApiQuery<SessionResponse>();
 
   // Computed properties
   const user = computed(() => state.data.value.user);
@@ -30,41 +31,49 @@ export const useAuthStore = defineStore("auth", () => {
   const isAuthenticated = computed(() => !!user.value);
   const isInitialized = computed(() => state.data.value.isInitialized);
   const isInitializing = computed(() => state.data.value.isInitializing);
+  const error = computed(() => state.error.value);
 
   // Initialize auth state from session cookie
   async function initialize() {
     if (isInitialized.value || isInitializing.value) {
-      return;
+      return { success: false, message: "Already initializing" };
     }
 
-    console.log("Initializing auth store...");
-    state.data.value.isInitializing = true;
+    return await state.withLoading('initialize', async () => {
+      try {
+        console.log("Initializing auth store...");
+        state.data.value.isInitializing = true;
 
-    const result = await state.callApi({
-      apiCall: () => authApi.getSession(),
-      showToast: false,
-      onSuccess: (response) => {
-        state.data.value.user = response.user;
-        state.data.value.session = response.session;
-        // Mark that we've had a successful session for future reference
-        sessionStorage.setItem("hadPreviousSession", "true");
-        console.log("Auth initialized successfully:", {
-          user: user.value,
-          isAuthenticated: isAuthenticated.value,
+        const result = await state.callApi({
+          apiCall: () => authApi.getSession(),
+          showToast: false,
+          operationKey: 'initialize',
+          onSuccess: (response) => {
+            state.data.value.user = response.user;
+            state.data.value.session = response.session;
+            // Mark that we've had a successful session for future reference
+            sessionStorage.setItem("hadPreviousSession", "true");
+            console.log("Auth initialized successfully:", {
+              user: user.value,
+              isAuthenticated: isAuthenticated.value,
+            });
+          },
+          onError: () => {
+            // Handle session not found gracefully
+            clearState();
+            // Log error for diagnostic purposes but don't show to user for initial load
+            console.log("No active session found");
+          },
         });
-      },
-      onError: () => {
-        // Handle session not found gracefully
-        clearState();
-        // Log error for diagnostic purposes but don't show to user for initial load
-        console.log("No active session found");
-      },
+
+        state.data.value.isInitialized = true;
+        return result;
+      } catch (error) {
+        return state.handleError(error as Error | APIErrorResponse, 'initialize');
+      } finally {
+        state.data.value.isInitializing = false;
+      }
     });
-
-    state.data.value.isInitialized = true;
-    state.data.value.isInitializing = false;
-
-    return result;
   }
 
   // Clear auth state
@@ -81,28 +90,40 @@ export const useAuthStore = defineStore("auth", () => {
 
   // Start OIDC login flow
   async function startLogin(redirectPath?: string) {
-    try {
-      const loginUrl = authApi.getLoginUrl(redirectPath);
-      window.location.href = loginUrl;
-      return { success: true };
-    } catch (error) {
-      console.error("Failed to initiate login:", error);
-      return { success: false, error };
-    }
+    return await state.withLoading('startLogin', async () => {
+      try {
+        const loginUrl = authApi.getLoginUrl(redirectPath);
+        window.location.href = loginUrl;
+        return { success: true };
+      } catch (error) {
+        console.error("Failed to initiate login:", error);
+        return state.handleError(error as Error | APIErrorResponse, 'startLogin');
+      }
+    });
   }
 
   // Logout user
   async function logout() {
-    const result = await state.callApi({
-      apiCall: () => authApi.logout(),
-      showToast: false
+    return await state.withLoading('logout', async () => {
+      try {
+        const result = await state.callApi({
+          apiCall: () => authApi.logout(),
+          showToast: false,
+          operationKey: 'logout'
+        });
+
+        // Always clear state and redirect to login, regardless of API result
+        clearState();
+        router.push({ name: "Login" });
+
+        return result;
+      } catch (error) {
+        // Still clear state and redirect on error
+        clearState();
+        router.push({ name: "Login" });
+        return state.handleError(error as Error | APIErrorResponse, 'logout');
+      }
     });
-
-    // Always clear state and redirect to login, regardless of API result
-    clearState();
-    router.push({ name: "Login" });
-
-    return result;
   }
 
   return {
@@ -111,9 +132,13 @@ export const useAuthStore = defineStore("auth", () => {
     isAuthenticated,
     isInitialized,
     isInitializing,
+    error,
     initialize,
     startLogin,
     logout,
     clearState,
+    // Loading state helpers
+    isLoading: computed(() => apiLoading.value || state.isLoading.value),
+    isLoadingOperation: state.isLoadingOperation,
   };
 });
