@@ -33,7 +33,16 @@ import { useTeamsStore } from '@/stores/teams'
 const router = useRouter()
 const teamsStore = useTeamsStore()
 const { isLoading, error: teamsError } = storeToRefs(teamsStore)
-const teams = computed(() => teamsStore.teams)
+const teams = computed(() => {
+    const storeTeams = teamsStore.teams || [];
+    // Ensure each team has a name for display
+    return storeTeams.map(team => ({
+        ...team,
+        name: team.name || `Team ${team.id}`,
+        description: team.description || '',
+        memberCount: team.memberCount || 0
+    }));
+});
 const showDeleteDialog = ref(false)
 const teamToDelete = ref<Team | null>(null)
 
