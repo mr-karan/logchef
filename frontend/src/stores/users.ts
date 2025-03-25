@@ -4,6 +4,7 @@ import type { User } from "@/types";
 import { usersApi } from "@/api/users";
 import { computed } from "vue";
 import { useApiQuery } from "@/composables/useApiQuery";
+import { useToast } from "@/components/ui/toast/use-toast";
 import type { 
   APIErrorResponse, 
   isSuccessResponse 
