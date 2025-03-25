@@ -14,6 +14,7 @@ import { useSourcesStore } from '@/stores/sources'
 import { Code, ChevronsUpDown, Plus, Database } from 'lucide-vue-next'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Separator } from '@/components/ui/separator'
+import { useApiQuery } from '@/composables/useApiQuery'
 import {
     Dialog,
     DialogContent,
@@ -27,7 +28,6 @@ import {
 const router = useRouter()
 const { toast } = useToast()
 const sourcesStore = useSourcesStore()
-const { execute } = useApiQuery()
 
 // Define types for our API requests and responses
 interface ConnectionInfo {
