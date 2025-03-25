@@ -110,6 +110,11 @@ const formData = ref<FormData>({
 const { isLoading, error: formError } = storeToRefs(usersStore)
 
 async function handleSubmit() {
+    // Validation should be handled by the form, but we can do basic checks
+    if (!formData.value.email || !formData.value.full_name) {
+        return // Let the store handle validation errors
+    }
+    
     const result = await usersStore.createUser({
         email: formData.value.email,
         full_name: formData.value.full_name,

@@ -13,6 +13,7 @@ import type {
   APIErrorResponse, 
   isSuccessResponse 
 } from "@/api/types";
+import { useToast } from "@/components/ui/toast/use-toast";
 
 export interface TeamWithMemberCount extends Team {
   memberCount: number;
@@ -45,6 +46,14 @@ export const useTeamsStore = defineStore("teams", () => {
       data: errorData,
       operation
     };
+    
+    // Use the toast API directly for consistent error handling
+    const { toast } = useToast();
+    toast({
+      title: 'Error',
+      description: errorMessage,
+      variant: 'destructive',
+    });
     
     return { 
       success: false,
@@ -116,36 +125,30 @@ export const useTeamsStore = defineStore("teams", () => {
 
   async function createTeam(data: CreateTeamRequest) {
     return await state.withLoading('createTeam', async () => {
-      try {
-        const response = await teamsApi.createTeam(data);
-        
-        // Update local state
-        if (response) {
-          // Add the new team to the local state
-          const newTeam = {
-            ...response,
-            memberCount: 0
-          };
-          state.data.value.teams.push(newTeam);
-          
-          // If we have teams and no current team is selected, select the newly created one
-          if (
-            state.data.value.teams.length > 0 &&
-            !state.data.value.currentTeamId &&
-            response.id
-          ) {
-            setCurrentTeam(response.id);
+      return await state.callApi({
+        apiCall: () => teamsApi.createTeam(data),
+        successMessage: "Team created successfully",
+        operationKey: 'createTeam',
+        onSuccess: (response) => {
+          if (response) {
+            // Add the new team to the local state
+            const newTeam = {
+              ...response,
+              memberCount: 0
+            };
+            state.data.value.teams.push(newTeam);
+            
+            // If we have teams and no current team is selected, select the newly created one
+            if (
+              state.data.value.teams.length > 0 &&
+              !state.data.value.currentTeamId &&
+              response.id
+            ) {
+              setCurrentTeam(response.id);
+            }
           }
         }
-        
-        return { 
-          success: true, 
-          data: response,
-          message: "Team created successfully"
-        };
-      } catch (error) {
-        return handleError(error as Error, 'createTeam');
-      }
+      });
     });
   }
 
@@ -174,56 +177,46 @@ export const useTeamsStore = defineStore("teams", () => {
 
   async function updateTeam(teamId: number, data: UpdateTeamRequest) {
     return await state.withLoading(`updateTeam-${teamId}`, async () => {
-      try {
-        const response = await teamsApi.updateTeam(teamId, data);
-        
-        // Update in local state
-        if (response) {
-          const index = state.data.value.teams.findIndex(t => t.id === teamId);
-          if (index >= 0) {
-            state.data.value.teams[index] = {
-              ...state.data.value.teams[index],
-              ...response,
-            };
+      return await state.callApi({
+        apiCall: () => teamsApi.updateTeam(teamId, data),
+        successMessage: "Team updated successfully",
+        operationKey: `updateTeam-${teamId}`,
+        onSuccess: (response) => {
+          if (response) {
+            const index = state.data.value.teams.findIndex(t => t.id === teamId);
+            if (index >= 0) {
+              state.data.value.teams[index] = {
+                ...state.data.value.teams[index],
+                ...response,
+              };
+            }
           }
         }
-        
-        return { 
-          success: true, 
-          data: response,
-          message: "Team updated successfully"
-        };
-      } catch (error) {
-        return handleError(error as Error, `updateTeam-${teamId}`);
-      }
+      });
     });
   }
 
   async function deleteTeam(teamId: number) {
     return await state.withLoading(`deleteTeam-${teamId}`, async () => {
-      try {
-        await teamsApi.deleteTeam(teamId);
-        
-        // Remove from local state
-        state.data.value.teams = state.data.value.teams.filter(
-          (t) => t.id !== teamId
-        );
+      return await state.callApi({
+        apiCall: () => teamsApi.deleteTeam(teamId),
+        successMessage: "Team deleted successfully",
+        operationKey: `deleteTeam-${teamId}`,
+        onSuccess: () => {
+          // Remove from local state
+          state.data.value.teams = state.data.value.teams.filter(
+            (t) => t.id !== teamId
+          );
 
-        // If this was the current team, reset current team
-        if (state.data.value.currentTeamId === teamId) {
-          state.data.value.currentTeamId =
-            state.data.value.teams.length > 0
-              ? state.data.value.teams[0].id
-              : null;
+          // If this was the current team, reset current team
+          if (state.data.value.currentTeamId === teamId) {
+            state.data.value.currentTeamId =
+              state.data.value.teams.length > 0
+                ? state.data.value.teams[0].id
+                : null;
+          }
         }
-        
-        return { 
-          success: true,
-          message: "Team deleted successfully"
-        };
-      } catch (error) {
-        return handleError(error as Error, `deleteTeam-${teamId}`);
-      }
+      });
     });
   }
 
@@ -244,6 +237,13 @@ export const useTeamsStore = defineStore("teams", () => {
   ) {
     // Validate parameters
     if (!teamId || !data.user_id) {
+      const { toast } = useToast();
+      toast({
+        title: 'Error',
+        description: 'Invalid team or user ID',
+        variant: 'destructive',
+      });
+      
       return { 
         success: false, 
         error: { 
@@ -254,29 +254,31 @@ export const useTeamsStore = defineStore("teams", () => {
     }
     
     return await state.withLoading(`addTeamMember-${teamId}`, async () => {
-      try {
-        const response = await teamsApi.addTeamMember(teamId, data);
-        
-        // Update member count if successful
-        const team = getTeamById.value(teamId);
-        if (team) {
-          team.memberCount = (team.memberCount || 0) + 1;
+      return await state.callApi({
+        apiCall: () => teamsApi.addTeamMember(teamId, data),
+        successMessage: "Member added successfully",
+        operationKey: `addTeamMember-${teamId}`,
+        onSuccess: (response) => {
+          // Update member count if successful
+          const team = getTeamById.value(teamId);
+          if (team) {
+            team.memberCount = (team.memberCount || 0) + 1;
+          }
         }
-        
-        return { 
-          success: true, 
-          data: response,
-          message: "Member added successfully"
-        };
-      } catch (error) {
-        return handleError(error as Error, `addTeamMember-${teamId}`);
-      }
+      });
     });
   }
 
   async function removeTeamMember(teamId: number, userId: number) {
     // Validate parameters
     if (!teamId || !userId) {
+      const { toast } = useToast();
+      toast({
+        title: 'Error',
+        description: 'Invalid team or user ID',
+        variant: 'destructive',
+      });
+      
       return { 
         success: false, 
         error: { 
@@ -287,23 +289,18 @@ export const useTeamsStore = defineStore("teams", () => {
     }
     
     return await state.withLoading(`removeTeamMember-${teamId}-${userId}`, async () => {
-      try {
-        const response = await teamsApi.removeTeamMember(teamId, userId);
-        
-        // Update member count if successful
-        const team = getTeamById.value(teamId);
-        if (team && team.memberCount > 0) {
-          team.memberCount--;
+      return await state.callApi({
+        apiCall: () => teamsApi.removeTeamMember(teamId, userId),
+        successMessage: "Member removed successfully",
+        operationKey: `removeTeamMember-${teamId}-${userId}`,
+        onSuccess: (response) => {
+          // Update member count if successful
+          const team = getTeamById.value(teamId);
+          if (team && team.memberCount > 0) {
+            team.memberCount--;
+          }
         }
-        
-        return { 
-          success: true, 
-          data: response,
-          message: "Member removed successfully"
-        };
-      } catch (error) {
-        return handleError(error as Error, `removeTeamMember-${teamId}-${userId}`);
-      }
+      });
     });
   }
 
@@ -329,31 +326,21 @@ export const useTeamsStore = defineStore("teams", () => {
 
   async function addTeamSource(teamId: number, sourceId: number) {
     return await state.withLoading(`addTeamSource-${teamId}-${sourceId}`, async () => {
-      try {
-        const response = await teamsApi.addTeamSource(teamId, sourceId);
-        return { 
-          success: true, 
-          data: response,
-          message: "Source added successfully"
-        };
-      } catch (error) {
-        return handleError(error as Error, `addTeamSource-${teamId}-${sourceId}`);
-      }
+      return await state.callApi({
+        apiCall: () => teamsApi.addTeamSource(teamId, sourceId),
+        successMessage: "Source added successfully",
+        operationKey: `addTeamSource-${teamId}-${sourceId}`,
+      });
     });
   }
 
   async function removeTeamSource(teamId: number, sourceId: number) {
     return await state.withLoading(`removeTeamSource-${teamId}-${sourceId}`, async () => {
-      try {
-        const response = await teamsApi.removeTeamSource(teamId, sourceId);
-        return { 
-          success: true, 
-          data: response,
-          message: "Source removed successfully"
-        };
-      } catch (error) {
-        return handleError(error as Error, `removeTeamSource-${teamId}-${sourceId}`);
-      }
+      return await state.callApi({
+        apiCall: () => teamsApi.removeTeamSource(teamId, sourceId),
+        successMessage: "Source removed successfully",
+        operationKey: `removeTeamSource-${teamId}-${sourceId}`,
+      });
     });
   }
 
