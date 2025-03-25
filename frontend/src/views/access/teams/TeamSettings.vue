@@ -243,7 +243,7 @@ onMounted(async () => {
     await loadTeam()
     // Then load the rest in parallel
     await Promise.all([
-        usersStore.execute(() => usersStore.loadUsers(), { showToast: false }),
+        usersStore.loadUsers(),
         loadTeamSources(),
     ])
 })

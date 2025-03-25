@@ -14,28 +14,50 @@ export const useUsersStore = defineStore("users", () => {
     users: [],
   });
 
-  // Use our API query composable
-  const { execute, isLoading } = useApiQuery<User[]>();
+  // Use our API query composable for loading state only
+  const { isLoading: apiLoading } = useApiQuery();
 
   // Computed properties
   const users = computed(() => state.data.value.users);
 
-  async function loadUsers() {
-    console.log("Loading users...");
-    return await execute(() => usersApi.listUsers(), {
-      onSuccess: (response) => {
+  // Helper function to handle errors
+  function handleError(error: Error, operation: string) {
+    console.error(`Error in users store (${operation}):`, error);
+    state.error.value = {
+      message: error.message,
+      operation
+    };
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+
+  async function loadUsers(forceReload = false) {
+    return await state.withLoading('loadUsers', async () => {
+      try {
+        // Skip loading if we already have users and not forcing reload
+        if (!forceReload && state.data.value.users.length > 0) {
+          return { success: true, data: state.data.value.users };
+        }
+        
+        const response = await usersApi.listUsers();
         state.data.value.users = response?.data ?? [];
-      },
-      defaultData: [],
-      showToast: false
+        return { success: true, data: state.data.value.users };
+      } catch (error) {
+        return handleError(error as Error, 'loadUsers');
+      }
     });
   }
 
   async function getUser(id: string) {
     return await state.withLoading(`getUser-${id}`, async () => {
-      return await execute(() => usersApi.getUser(id), {
-        showToast: true,
-      });
+      try {
+        const response = await usersApi.getUser(id);
+        return { success: true, data: response };
+      } catch (error) {
+        return handleError(error as Error, `getUser-${id}`);
+      }
     });
   }
 
@@ -44,22 +66,27 @@ export const useUsersStore = defineStore("users", () => {
     full_name: string;
     role: "admin" | "member";
   }) {
-    const result = await state.withLoading('createUser', async () => {
-      return await execute(() => usersApi.createUser(data), {
-        successMessage: "User created successfully",
-        onSuccess: (response) => {
-          if (response.user) {
-            state.data.value.users.push(response.user);
-          }
-        },
-      });
+    return await state.withLoading('createUser', async () => {
+      try {
+        const response = await usersApi.createUser(data);
+        
+        if (response.user) {
+          // Update local state
+          state.data.value.users.push(response.user);
+          
+          // Reload users to ensure we have the latest data
+          await loadUsers(true);
+        }
+        
+        return { 
+          success: true, 
+          data: response,
+          message: "User created successfully"
+        };
+      } catch (error) {
+        return handleError(error as Error, 'createUser');
+      }
     });
-
-    if (result.success) {
-      await loadUsers();
-    }
-
-    return result;
   }
 
   async function updateUser(
@@ -72,32 +99,47 @@ export const useUsersStore = defineStore("users", () => {
     }
   ) {
     return await state.withLoading(`updateUser-${id}`, async () => {
-      return await execute(() => usersApi.updateUser(id, data), {
-        successMessage: "User updated successfully",
-        onSuccess: (response) => {
-          if (response.user) {
-            const index = state.data.value.users.findIndex(
-              (u) => u.id === response.user.id
-            );
-            if (index >= 0) {
-              state.data.value.users[index] = response.user;
-            }
+      try {
+        const response = await usersApi.updateUser(id, data);
+        
+        if (response.user) {
+          // Update in local state
+          const index = state.data.value.users.findIndex(
+            (u) => u.id === response.user.id
+          );
+          if (index >= 0) {
+            state.data.value.users[index] = response.user;
           }
-        },
-      });
+        }
+        
+        return { 
+          success: true, 
+          data: response,
+          message: "User updated successfully"
+        };
+      } catch (error) {
+        return handleError(error as Error, `updateUser-${id}`);
+      }
     });
   }
 
   async function deleteUser(id: string) {
     return await state.withLoading(`deleteUser-${id}`, async () => {
-      return await execute(() => usersApi.deleteUser(id), {
-        successMessage: "User deleted successfully",
-        onSuccess: () => {
-          state.data.value.users = state.data.value.users.filter(
-            (u) => u.id !== id
-          );
-        },
-      });
+      try {
+        await usersApi.deleteUser(id);
+        
+        // Update local state
+        state.data.value.users = state.data.value.users.filter(
+          (u) => u.id !== id
+        );
+        
+        return { 
+          success: true,
+          message: "User deleted successfully"
+        };
+      } catch (error) {
+        return handleError(error as Error, `deleteUser-${id}`);
+      }
     });
   }
 
@@ -112,8 +154,7 @@ export const useUsersStore = defineStore("users", () => {
 
   return {
     users,
-    execute,
-    isLoading: computed(() => isLoading.value || state.isLoading.value),
+    isLoading: computed(() => apiLoading.value || state.isLoading.value),
     error: state.error,
     loadUsers,
     getUser,

@@ -161,30 +161,20 @@ const table = useVueTable({
 
 const loadUsers = async () => {
     console.log("Starting loadUsers...");
-    await usersStore.execute(() => usersStore.loadUsers(), {
-        successMessage: 'Users loaded successfully',
-        showToast: false
-    });
+    await usersStore.loadUsers();
     console.log("loadUsers completed");
 }
 
 const confirmDelete = async () => {
     if (!userToDelete.value) return
 
-    await usersStore.execute(
-        () => usersStore.deleteUser(userToDelete.value.id),
-        {
-            successMessage: 'User deleted successfully',
-            onSuccess: async () => {
-                await loadUsers()
-                showDeleteDialog.value = false
-                userToDelete.value = null
-            },
-            onError: () => {
-                // Keep dialog open on error
-            }
-        }
-    )
+    const result = await usersStore.deleteUser(userToDelete.value.id);
+    if (result.success) {
+        await loadUsers();
+        showDeleteDialog.value = false;
+        userToDelete.value = null;
+    }
+    // Keep dialog open on error
 }
 
 const handleDelete = (user: User) => {
@@ -193,16 +183,13 @@ const handleDelete = (user: User) => {
 }
 
 const toggleUserStatus = async (user: User) => {
-    await usersStore.execute(
-        () => usersStore.updateUser(user.id, {
-            status: user.status === 'active' ? 'inactive' : 'active',
-        }),
-        {
-            successMessage: `User ${user.status === 'active' ? 'deactivated' : 'activated'} successfully`,
-            onSuccess: loadUsers,
-            showToast: false
-        }
-    )
+    const result = await usersStore.updateUser(user.id, {
+        status: user.status === 'active' ? 'inactive' : 'active',
+    });
+    
+    if (result.success) {
+        await loadUsers();
+    }
 }
 
 const handleEdit = (user: User) => {
@@ -218,21 +205,17 @@ const handleEdit = (user: User) => {
 const confirmEdit = async () => {
     if (!userToEdit.value) return
 
-    await usersStore.execute(
-        () => usersStore.updateUser(userToEdit.value.id.toString(), {
-            full_name: editForm.value.full_name,
-            email: editForm.value.email,
-            role: editForm.value.role
-        }),
-        {
-            successMessage: 'User updated successfully',
-            onSuccess: async () => {
-                await loadUsers()
-                showEditDialog.value = false
-                userToEdit.value = null
-            }
-        }
-    )
+    const result = await usersStore.updateUser(userToEdit.value.id.toString(), {
+        full_name: editForm.value.full_name,
+        email: editForm.value.email,
+        role: editForm.value.role
+    });
+    
+    if (result.success) {
+        await loadUsers();
+        showEditDialog.value = false;
+        userToEdit.value = null;
+    }
 }
 
 onMounted(() => {

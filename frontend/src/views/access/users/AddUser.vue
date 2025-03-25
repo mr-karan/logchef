@@ -113,26 +113,22 @@ const formData = ref<FormData>({
 const { isLoading, error: formError } = storeToRefs(usersStore)
 
 async function handleSubmit() {
-    await usersStore.execute(
-        () => usersStore.createUser({
-            email: formData.value.email,
-            full_name: formData.value.full_name,
-            role: formData.value.role,
-        }),
-        {
-            successMessage: 'User created successfully',
-            onSuccess: () => {
-                // Reset form
-                formData.value = {
-                    email: '',
-                    full_name: '',
-                    role: 'member',
-                    status: 'active',
-                }
-                showDialog.value = false
-                emit('user-created')
-            }
+    const result = await usersStore.createUser({
+        email: formData.value.email,
+        full_name: formData.value.full_name,
+        role: formData.value.role,
+    });
+    
+    if (result.success) {
+        // Reset form
+        formData.value = {
+            email: '',
+            full_name: '',
+            role: 'member',
+            status: 'active',
         }
-    )
+        showDialog.value = false
+        emit('user-created')
+    }
 }
 </script>
