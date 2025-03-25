@@ -154,10 +154,10 @@ const filteredUsers = computed(() => {
     );
 })
 
-// Reactive table that rebuilds when filteredUsers changes
-const table = computed(() => 
+// Create a standard ref for the table to avoid reactivity issues
+const table = ref(
     useVueTable({
-        data: filteredUsers.value,
+        data: [],
         columns,
         getCoreRowModel: getCoreRowModel(),
         getFilteredRowModel: getFilteredRowModel(),
@@ -166,6 +166,13 @@ const table = computed(() =>
         },
     })
 )
+
+// Update table data when filteredUsers changes
+watch(filteredUsers, (newUsers) => {
+    if (table.value) {
+        table.value.setData(newUsers);
+    }
+}, { immediate: true });
 
 const loadUsers = async () => {
     console.log("Starting loadUsers...");
@@ -282,18 +289,18 @@ watch(() => usersStore.getUsersArray(), (newUsers) => {
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead v-for="column in table.value.getAllColumns()" :key="column.id">
+                                    <TableHead v-for="column in table.getAllColumns()" :key="column.id">
                                         {{ column.id === 'actions' ? '' : column.columnDef.header }}
                                     </TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                <TableRow v-for="row in table.value.getRowModel().rows" :key="row.id">
+                                <TableRow v-for="row in table.getRowModel().rows" :key="row.id">
                                     <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id">
                                         <component :is="cell.column.columnDef.cell" v-bind="cell.getContext()" />
                                     </TableCell>
                                 </TableRow>
-                                <TableRow v-if="table.value.getRowModel().rows.length === 0">
+                                <TableRow v-if="table.getRowModel().rows.length === 0">
                                     <TableCell :colspan="columns.length" class="h-24 text-center">
                                         No results found.
                                     </TableCell>
