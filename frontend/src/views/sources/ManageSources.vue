@@ -2,6 +2,7 @@
 import { onMounted, ref, computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { useApiQuery } from '@/composables/useApiQuery'
+import ErrorAlert from '@/components/ui/ErrorAlert.vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
     AlertDialog,
@@ -32,15 +33,7 @@ const sourcesStore = useSourcesStore()
 const { execute } = useApiQuery()
 const showDeleteDialog = ref(false)
 const sourceToDelete = ref<Source | null>(null)
-const loadingError = computed(() => {
-  // Check for explicit API errors
-  if (sourcesStore.error?.value) {
-    return sourcesStore.error.value.message
-  }
-  
-  // Handle empty state without error
-  return null
-})
+const loadingError = computed(() => sourcesStore.error?.value)
 
 const handleDelete = (source: Source) => {
     sourceToDelete.value = source
@@ -63,8 +56,8 @@ const confirmDelete = async () => {
 }
 
 onMounted(async () => {
-    // Load all sources (admin view)
-    await retryLoading()
+    // Hydrate the store
+    await sourcesStore.hydrate()
 })
 
 const formatDate = (dateString: string) => {
@@ -93,14 +86,12 @@ const formatDate = (dateString: string) => {
                 <div v-if="sourcesStore.isLoadingOperation('loadSources')" class="text-center py-4">
                     Loading sources...
                 </div>
-                <div v-else-if="loadingError"
-                    class="rounded-lg border border-destructive p-4 text-center text-destructive">
-                    <p class="mb-2">Failed to load sources</p>
-                    <p class="text-sm">{{ loadingError }}</p>
-                    <Button variant="outline" class="mt-4" @click="retryLoading">
-                        Retry
-                    </Button>
-                </div>
+                <ErrorAlert 
+                    v-else-if="loadingError"
+                    :error="loadingError"
+                    title="Failed to load sources"
+                    @retry="retryLoading"
+                />
                 <div v-else-if="sourcesStore.sources.length === 0" class="rounded-lg border p-4 text-center">
                     <p class="text-muted-foreground mb-4">No sources configured yet</p>
                     <Button @click="router.push({ name: 'NewSource' })">

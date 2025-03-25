@@ -1,7 +1,8 @@
 import { defineStore } from "pinia";
-import { computed, ref, reactive } from "vue";
+import { computed, ref, reactive, onMounted } from "vue";
 import { useTeamsStore } from "./teams";
 import { sourcesApi } from "@/api/sources";
+import { useRouter } from "vue-router";
 import type {
   Source,
   TeamGroupedQuery,
@@ -56,6 +57,9 @@ export const useSourcesStore = defineStore("sources", () => {
   
   // Track validated connections
   const validatedConnections = reactive(new Set<string>());
+  
+  // Hydration state
+  const isHydrated = ref(false);
 
   // Get sources for a specific team
   const teamSourcesMap = computed(() => {
@@ -71,9 +75,10 @@ export const useSourcesStore = defineStore("sources", () => {
   async function loadSources() {
     return await state.withLoading("loadSources", async () => {
       state.error.value = null; // Reset error before loading
-      return await execute(() => sourcesApi.listSources(), {
+      const result = await execute(() => sourcesApi.listSources(), {
         onSuccess: (data) => {
           state.data.value.sources = data ?? [];
+          isHydrated.value = true;
         },
         onError: (error) => {
           state.error.value = { message: error.message, operation: 'loadSources' };
@@ -81,7 +86,17 @@ export const useSourcesStore = defineStore("sources", () => {
         defaultData: [],
         showToast: false,
       });
+      
+      return result;
     });
+  }
+  
+  // Hydrate the store
+  async function hydrate() {
+    if (!isHydrated.value && sources.value.length === 0) {
+      await loadSources();
+    }
+    return isHydrated.value;
   }
 
   async function loadTeamSources(teamId: number) {
@@ -338,6 +353,46 @@ export const useSourcesStore = defineStore("sources", () => {
       message: error.message,
       operation
     };
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+  
+  // Update source
+  async function updateSource(id: number, payload: Partial<Source>) {
+    return await state.withLoading(`updateSource-${id}`, async () => {
+      return await execute(() => sourcesApi.updateSource(id, payload), {
+        successMessage: "Source updated successfully",
+        onSuccess: (data) => {
+          // Update in local state
+          const index = sources.value.findIndex(s => s.id === id);
+          if (index >= 0) {
+            const updatedSource = { ...sources.value[index], ...data };
+            state.data.value.sources = [
+              ...sources.value.slice(0, index),
+              updatedSource,
+              ...sources.value.slice(index + 1)
+            ];
+          }
+          
+          // Also update in team sources if present
+          const teamIndex = teamSources.value.findIndex(s => s.id === id);
+          if (teamIndex >= 0) {
+            const updatedTeamSource = { ...teamSources.value[teamIndex], ...data };
+            state.data.value.teamSources = [
+              ...teamSources.value.slice(0, teamIndex),
+              updatedTeamSource,
+              ...teamSources.value.slice(teamIndex + 1)
+            ];
+          }
+          
+          // Invalidate cache for this source
+          invalidateSourceCache(id);
+        },
+        onError: (error) => handleError(error, `updateSource-${id}`),
+      });
+    });
   }
 
   return {
@@ -352,6 +407,7 @@ export const useSourcesStore = defineStore("sources", () => {
     loadingStates: state.loadingStates,
     validatedConnections,
     visibleSources,
+    isHydrated,
 
     // Loading state helpers
     isLoadingOperation: state.isLoadingOperation,
@@ -373,6 +429,7 @@ export const useSourcesStore = defineStore("sources", () => {
     createSourceQuery,
     createTeamSourceQuery,
     createSource,
+    updateSource,
     deleteSource,
     getSourcesNotInTeam,
     getSourceStats,
@@ -381,5 +438,6 @@ export const useSourcesStore = defineStore("sources", () => {
     validateSourceConnection,
     invalidateSourceCache,
     handleError,
+    hydrate,
   };
 });
