@@ -108,11 +108,6 @@ const description = ref('')
 const showAddMemberDialog = ref(false)
 const newMemberRole = ref('member')
 const selectedUserId = ref('')
-const usersStore = useUsersStore()
-
-// Add sources store
-const sourcesStore = useSourcesStore()
-const teamsStore = useTeamsStore()
 const teamSources = ref<Source[]>([])
 const showAddSourceDialog = ref(false)
 const selectedSourceId = ref('')
