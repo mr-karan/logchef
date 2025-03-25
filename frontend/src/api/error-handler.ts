@@ -87,7 +87,7 @@ export function getErrorType(error: unknown): string {
 /**
  * Format error type to a readable title
  */
-function formatErrorTypeToTitle(errorType: string): string {
+export function formatErrorTypeToTitle(errorType: string): string {
   // Handle common error types
   switch (errorType) {
     case "ValidationError":
