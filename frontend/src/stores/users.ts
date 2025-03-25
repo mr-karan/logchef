@@ -21,11 +21,15 @@ export const useUsersStore = defineStore("users", () => {
   // Use our API query composable for loading state only
   const { isLoading: apiLoading } = useApiQuery();
 
-  // Add debugging to see what we're working with
+  // Debugging - add more details about state structure
   console.log("State data structure:", state.data.value);
+  console.log("Users array in state:", state.data.value.users);
   
-  // Computed properties - use non-null assertion to avoid undefined
-  const users = computed(() => state.data.value.users || []);
+  // Define users as a computed property that returns the array directly
+  // This is to ensure the component can access it properly
+  const users = computed(() => {
+    return state.data.value.users || [];
+  });
 
   // Helper function to handle errors
   function handleError(error: Error | APIErrorResponse, operation: string) {
@@ -177,7 +181,10 @@ export const useUsersStore = defineStore("users", () => {
   }
 
   return {
+    // Make sure users is accessible as a simple ref, not a getter that requires .value
     users,
+    // Export a plain getter as well for debugging
+    getUsersArray: () => state.data.value.users || [],
     isLoading: computed(() => apiLoading.value || state.isLoading.value),
     error: state.error,
     loadUsers,
