@@ -166,8 +166,9 @@ const table = useVueTable({
 
 const loadUsers = async () => {
     console.log("Starting loadUsers...");
-    await usersStore.loadUsers();
+    const result = await usersStore.loadUsers();
     console.log("loadUsers completed");
+    return result;
 }
 
 const confirmDelete = async () => {
@@ -227,7 +228,7 @@ onMounted(async () => {
     console.log("Component mounted, loading users...");
     const result = await loadUsers();
     console.log("User loading result:", result);
-    console.log("Users after loading:", usersStore.users.value);
+    console.log("Users after loading:", usersStore.getUsersArray());
 });
 
 // Watch the users array directly using the store method
