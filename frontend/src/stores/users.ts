@@ -58,20 +58,19 @@ export const useUsersStore = defineStore("users", () => {
     role: "admin" | "member";
   }) {
     return await state.withLoading('createUser', async () => {
-      return await state.callApi({
+      const result = await state.callApi({
         apiCall: () => usersApi.createUser(data),
         successMessage: "User created successfully",
         operationKey: 'createUser',
-        onSuccess: (response) => {
-          if (response) {
-            // Create a new array to ensure reactivity is triggered
-            state.data.value.users = [response, ...(state.data.value.users || [])];
-            // Force reactivity by ensuring a new array reference
-            state.data.value = { ...state.data.value };
-            console.log("User added to store:", response);
-          }
-        }
       });
+      
+      if (result && result.success) {
+        // Reload all users from backend to ensure frontend state is in sync
+        await loadUsers(true);
+        console.log("Users reloaded after creating new user");
+      }
+      
+      return result;
     });
   }
 
@@ -85,42 +84,37 @@ export const useUsersStore = defineStore("users", () => {
     }
   ) {
     return await state.withLoading(`updateUser-${id}`, async () => {
-      return await state.callApi({
+      const result = await state.callApi({
         apiCall: () => usersApi.updateUser(id, data),
         successMessage: "User updated successfully",
         operationKey: `updateUser-${id}`,
-        onSuccess: (response) => {
-          if (response) {
-            // Update in local state
-            const index = state.data.value.users.findIndex(
-              (u) => u.id === id || u.id === Number(id)
-            );
-            if (index >= 0) {
-              // Create a new array to ensure reactivity
-              const updatedUsers = [...state.data.value.users];
-              updatedUsers[index] = { ...updatedUsers[index], ...response };
-              state.data.value.users = updatedUsers;
-              console.log("User updated in store:", response);
-            }
-          }
-        }
       });
+      
+      if (result && result.success) {
+        // Reload all users from backend to ensure frontend state is in sync
+        await loadUsers(true);
+        console.log("Users reloaded after updating user");
+      }
+      
+      return result;
     });
   }
 
   async function deleteUser(id: string) {
     return await state.withLoading(`deleteUser-${id}`, async () => {
-      return await state.callApi({
+      const result = await state.callApi({
         apiCall: () => usersApi.deleteUser(id),
         successMessage: "User deleted successfully",
         operationKey: `deleteUser-${id}`,
-        onSuccess: () => {
-          // Update local state
-          state.data.value.users = state.data.value.users.filter(
-            (u) => u.id !== id
-          );
-        }
       });
+      
+      if (result && result.success) {
+        // Reload all users from backend to ensure frontend state is in sync
+        await loadUsers(true);
+        console.log("Users reloaded after deleting user");
+      }
+      
+      return result;
     });
   }
 
