@@ -32,7 +32,15 @@ const sourcesStore = useSourcesStore()
 const { execute } = useApiQuery()
 const showDeleteDialog = ref(false)
 const sourceToDelete = ref<Source | null>(null)
-const loadingError = computed(() => sourcesStore.error?.value?.message || null)
+const loadingError = computed(() => {
+  // Check for explicit API errors
+  if (sourcesStore.error?.value) {
+    return sourcesStore.error.value.message
+  }
+  
+  // Handle empty state without error
+  return null
+})
 
 const handleDelete = (source: Source) => {
     sourceToDelete.value = source
@@ -40,11 +48,7 @@ const handleDelete = (source: Source) => {
 }
 
 const retryLoading = async () => {
-    await execute(() => sourcesStore.loadSources(), {
-        onError: (error) => {
-            console.error("Failed to load sources:", error)
-        }
-    })
+    await sourcesStore.loadSources();
 }
 
 const confirmDelete = async () => {
@@ -92,7 +96,7 @@ const formatDate = (dateString: string) => {
                 <div v-else-if="loadingError"
                     class="rounded-lg border border-destructive p-4 text-center text-destructive">
                     <p class="mb-2">Failed to load sources</p>
-                    <p class="text-sm">{{ sourcesStore.error?.value?.message || loadingError }}</p>
+                    <p class="text-sm">{{ loadingError }}</p>
                     <Button variant="outline" class="mt-4" @click="retryLoading">
                         Retry
                     </Button>
