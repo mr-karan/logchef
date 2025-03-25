@@ -144,17 +144,29 @@ const loadTeam = async () => {
     
     if (isNaN(teamId) || teamId <= 0) {
         console.error("Invalid team ID:", teamId);
-        return;
+        return null;
     }
     
+    // First check if the team is already in the store
+    let existingTeam = teamsStore.getTeamById(teamId);
+    if (existingTeam) {
+        console.log("TeamSettings - Team found in store:", existingTeam);
+        team.value = existingTeam;
+        name.value = existingTeam.name || '';
+        description.value = existingTeam.description || '';
+        return existingTeam;
+    }
+    
+    // If not in store, fetch from API
     const result = await teamsStore.getTeam(teamId);
     console.log("TeamSettings - getTeam result:", result);
     
     if (result.success && result.data) {
         team.value = result.data;
-        name.value = team.value.name;
+        name.value = team.value.name || '';
         description.value = team.value.description || '';
         console.log("TeamSettings - Team loaded successfully:", team.value);
+        return result.data;
     } else {
         console.error("Failed to load team:", result.error);
         toast({
@@ -162,18 +174,22 @@ const loadTeam = async () => {
             description: 'Failed to load team details',
             variant: 'destructive',
         });
+        return null;
     }
 }
 
 const loadTeamMembers = async () => {
-    if (!team.value || !team.value.id) {
+    // Get team ID from route if team object not yet available
+    const teamId = team.value?.id || Number(route.params.id);
+    
+    if (!teamId || isNaN(teamId)) {
         console.warn("Cannot load team members: No team or invalid team ID");
         return;
     }
 
-    console.log("TeamSettings - Loading members for team ID:", team.value.id);
+    console.log("TeamSettings - Loading members for team ID:", teamId);
     
-    const result = await teamsStore.listTeamMembers(team.value.id);
+    const result = await teamsStore.listTeamMembers(teamId);
     console.log("TeamSettings - listTeamMembers result:", result);
     
     if (result.success && result.data) {
@@ -185,14 +201,17 @@ const loadTeamMembers = async () => {
 }
 
 const loadTeamSources = async () => {
-    if (!team.value || !team.value.id) {
+    // Get team ID from route if team object not yet available
+    const teamId = team.value?.id || Number(route.params.id);
+    
+    if (!teamId || isNaN(teamId)) {
         console.warn("Cannot load team sources: No team or invalid team ID");
         return;
     }
 
-    console.log("TeamSettings - Loading sources for team ID:", team.value.id);
+    console.log("TeamSettings - Loading sources for team ID:", teamId);
     
-    const result = await teamsStore.listTeamSources(team.value.id);
+    const result = await teamsStore.listTeamSources(teamId);
     console.log("TeamSettings - listTeamSources result:", result);
     
     if (result.success && result.data) {
@@ -292,22 +311,20 @@ onMounted(async () => {
     }
     
     try {
-        // First load the team
-        await loadTeam();
+        // Load all data in parallel for better performance, but process results sequentially
+        const [usersPromise, teamPromise] = await Promise.all([
+            usersStore.loadUsers(),
+            loadTeam()
+        ]);
         
-        // Only continue if team was loaded successfully
-        if (team.value) {
-            console.log("TeamSettings - Team loaded, now loading users, members, and sources");
-            
-            // First load users
-            await usersStore.loadUsers();
-            
-            // Then load members and sources sequentially to avoid race conditions
-            await loadTeamMembers();
-            await loadTeamSources();
-        } else {
-            console.warn("TeamSettings - Team not loaded, skipping members and sources");
-        }
+        // Load members and sources regardless of team object status
+        // Our enhanced functions will use route param if team not available
+        const [membersPromise, sourcesPromise] = await Promise.all([
+            loadTeamMembers(),
+            loadTeamSources()
+        ]);
+        
+        console.log("TeamSettings - All data loaded");
     } catch (error) {
         console.error("Error in TeamSettings onMounted:", error);
         toast({
