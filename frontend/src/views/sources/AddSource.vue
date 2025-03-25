@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useApiQuery } from '@/composables/useApiQuery'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,6 +29,7 @@ import {
 const router = useRouter()
 const { toast } = useToast()
 const sourcesStore = useSourcesStore()
+const { execute } = useApiQuery()
 
 // Define types for our API requests and responses
 interface ConnectionInfo {
@@ -78,7 +80,15 @@ const metaSeverityField = ref<string | number>('severity_text')
 // Validation state
 const isValidating = ref(false)
 const validationResult = ref<ConnectionValidationResult | null>(null)
-const isValidated = ref(false) // Track if validation was successful
+// Compute validation status from store
+const isValidated = computed(() => {
+    if (!host.value || !database.value || !tableName.value) return false;
+    return sourcesStore.isConnectionValidated(
+        String(host.value), 
+        String(database.value), 
+        String(tableName.value)
+    );
+})
 
 // Schema preview
 const tableSchema = `CREATE TABLE IF NOT EXISTS {{database_name}}.{{table_name}}
@@ -183,7 +193,6 @@ const validateConnection = async () => {
 
     isValidating.value = true
     validationResult.value = null
-    isValidated.value = false
 
     try {
         // Prepare request payload
@@ -204,26 +213,28 @@ const validateConnection = async () => {
             }
         }
 
-        // Use the sourcesStore instead of direct API call
-        const result = await sourcesStore.validateSourceConnection(payload)
-
-        if (result.success && result.data) {
-            validationResult.value = result.data
-            isValidated.value = true
-            // Success toast is shown for confirmation to user
-            toast({
-                title: 'Success',
-                description: result.data.message,
-                variant: 'default',
-                duration: TOAST_DURATION.SUCCESS,
-            })
-        }
-        // Error cases are handled by the store's central error handling
+        // Use the sourcesStore with execute pattern
+        await execute(() => sourcesStore.validateSourceConnection(payload), {
+            onSuccess: (data) => {
+                if (data) {
+                    validationResult.value = data;
+                    // Success toast is shown for confirmation to user
+                    toast({
+                        title: 'Success',
+                        description: data.message,
+                        variant: 'default',
+                        duration: TOAST_DURATION.SUCCESS,
+                    });
+                }
+            }
+        });
     } catch (error) {
-        console.error('Validation exception:', error)
-        // Error is handled by the central error handling
+        if (error instanceof Error) {
+            sourcesStore.handleError(error, 'validateConnection');
+        }
+        console.error('Validation exception:', error);
     } finally {
-        isValidating.value = false
+        isValidating.value = false;
     }
 }
 
@@ -250,7 +261,7 @@ const handleSubmit = async () => {
     isSubmitting.value = true
 
     try {
-        const result = await sourcesStore.createSource({
+        await execute(() => sourcesStore.createSource({
             name: String(sourceName.value),
             meta_is_auto_created: createTable.value,
             meta_ts_field: String(metaTSField.value),
@@ -265,11 +276,15 @@ const handleSubmit = async () => {
             description: String(description.value),
             ttl_days: Number(ttlDays.value),
             schema: createTable.value ? actualSchema.value : undefined,
-        } as CreateSourcePayload)
-
-        if (result.success) {
-            // Redirect to sources list
-            router.push({ name: 'Sources' })
+        } as CreateSourcePayload), {
+            onSuccess: () => {
+                // Redirect to sources list
+                router.push({ name: 'Sources' })
+            }
+        })
+    } catch (error) {
+        if (error instanceof Error) {
+            sourcesStore.handleError(error, 'createSource');
         }
     } finally {
         isSubmitting.value = false

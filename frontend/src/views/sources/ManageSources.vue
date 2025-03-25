@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { Button } from '@/components/ui/button'
+import { useApiQuery } from '@/composables/useApiQuery'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
     AlertDialog,
@@ -28,9 +29,10 @@ import { useSourcesStore } from '@/stores/sources'
 
 const router = useRouter()
 const sourcesStore = useSourcesStore()
+const { execute } = useApiQuery()
 const showDeleteDialog = ref(false)
 const sourceToDelete = ref<Source | null>(null)
-const loadingError = ref<string | null>(null)
+const loadingError = computed(() => sourcesStore.error.value?.message || null)
 
 const handleDelete = (source: Source) => {
     sourceToDelete.value = source
@@ -38,22 +40,22 @@ const handleDelete = (source: Source) => {
 }
 
 const retryLoading = async () => {
-    loadingError.value = null
-    const result = await sourcesStore.loadSources()
-    if (!result.success && result.error) {
-        loadingError.value = result.error
-        console.error("Failed to load sources:", result.error)
-    }
+    await execute(() => sourcesStore.loadSources(), {
+        onError: (error) => {
+            console.error("Failed to load sources:", error)
+        }
+    })
 }
 
 const confirmDelete = async () => {
     if (!sourceToDelete.value) return
 
-    const result = await sourcesStore.deleteSource(sourceToDelete.value.id)
-    if (result.success) {
-        showDeleteDialog.value = false
-        sourceToDelete.value = null
-    }
+    const result = await execute(() => sourcesStore.deleteSource(sourceToDelete.value!.id), {
+        onSuccess: () => {
+            showDeleteDialog.value = false
+            sourceToDelete.value = null
+        }
+    })
 }
 
 onMounted(async () => {
@@ -84,7 +86,7 @@ const formatDate = (dateString: string) => {
                 </div>
             </CardHeader>
             <CardContent>
-                <div v-if="sourcesStore.isLoading" class="text-center py-4">
+                <div v-if="sourcesStore.isLoadingOperation('loadSources')" class="text-center py-4">
                     Loading sources...
                 </div>
                 <div v-else-if="loadingError"

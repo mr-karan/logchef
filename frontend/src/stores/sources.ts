@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, reactive } from "vue";
 import { useTeamsStore } from "./teams";
 import { sourcesApi } from "@/api/sources";
 import type {
@@ -39,6 +39,23 @@ export const useSourcesStore = defineStore("sources", () => {
   const teamSources = computed(() => state.data.value.teamSources);
   const sourceQueries = computed(() => state.data.value.sourceQueries);
   const sourceStats = computed(() => state.data.value.sourceStats);
+  
+  // Filtered sources
+  const visibleSources = computed(() => 
+    sources.value.filter(source => !source.archived)
+  );
+  
+  // Source getters
+  const getSourceById = computed(() => (id: number) => 
+    sources.value.find(source => source.id === id)
+  );
+  
+  const getTeamSourceById = computed(() => (id: number) =>
+    teamSources.value.find(source => source.id === id)
+  );
+  
+  // Track validated connections
+  const validatedConnections = reactive(new Set<string>());
 
   // Get sources for a specific team
   const teamSourcesMap = computed(() => {
@@ -279,11 +296,44 @@ export const useSourcesStore = defineStore("sources", () => {
     timestamp_field?: string;
     severity_field?: string;
   }) {
+    const connectionKey = `${connectionInfo.host}-${connectionInfo.database}-${connectionInfo.table_name}`;
+    
     return await state.withLoading("validateSourceConnection", async () => {
-      return await execute(() => sourcesApi.validateSourceConnection(connectionInfo), {
+      const result = await execute(() => sourcesApi.validateSourceConnection(connectionInfo), {
         showToast: true,
       });
+      
+      if (result.success) {
+        validatedConnections.add(connectionKey);
+      }
+      
+      return result;
     });
+  }
+  
+  function isConnectionValidated(host: string, database: string, tableName: string): boolean {
+    const connectionKey = `${host}-${database}-${tableName}`;
+    return validatedConnections.has(connectionKey);
+  }
+  
+  function invalidateSourceCache(sourceId: number) {
+    state.data.value.sources = state.data.value.sources.filter(
+      s => s.id !== sourceId
+    );
+    state.data.value.teamSources = state.data.value.teamSources.filter(
+      s => s.id !== sourceId
+    );
+    
+    // Also clear any stats for this source
+    delete state.data.value.sourceStats[sourceId.toString()];
+  }
+  
+  function handleError(error: Error, operation: string) {
+    console.error(`Error in sources store (${operation}):`, error);
+    state.error.value = {
+      message: error.message,
+      operation
+    };
   }
 
   return {
@@ -296,6 +346,8 @@ export const useSourcesStore = defineStore("sources", () => {
     teamSourcesMap,
     sourceStats,
     loadingStates: state.loadingStates,
+    validatedConnections,
+    visibleSources,
 
     // Loading state helpers
     isLoadingOperation: state.isLoadingOperation,
@@ -303,6 +355,11 @@ export const useSourcesStore = defineStore("sources", () => {
       state.isLoadingOperation(`getSource-${sourceId}`),
     isLoadingTeamSources: (teamId: number) =>
       state.isLoadingOperation(`loadTeamSources-${teamId}`),
+
+    // Getters
+    getSourceById,
+    getTeamSourceById,
+    isConnectionValidated,
 
     // Actions
     loadSources,
@@ -318,5 +375,7 @@ export const useSourcesStore = defineStore("sources", () => {
     getTeamSourceStats,
     getSource,
     validateSourceConnection,
+    invalidateSourceCache,
+    handleError,
   };
 });

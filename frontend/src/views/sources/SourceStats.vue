@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive, watch } from 'vue'
+import { ref, onMounted, reactive, watch, computed } from 'vue'
 import { useToast } from '@/components/ui/toast'
+import { useApiQuery } from '@/composables/useApiQuery'
 import { useRoute } from 'vue-router'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -11,6 +12,7 @@ import { type SourceStats } from '@/api/sources'
 
 const sourcesStore = useSourcesStore()
 const { toast } = useToast()
+const { execute } = useApiQuery()
 const route = useRoute()
 const selectedSourceId = ref<string>('')
 const stats = reactive<{
@@ -62,18 +64,24 @@ const fetchSourceStats = async () => {
   statsError.value = null
 
   try {
-    const result = await sourcesStore.getSourceStats(parseInt(selectedSourceId.value), true)
-
-    if (result.success && result.data) {
-      stats.tableStats = result.data.table_stats
-      stats.columnStats = result.data.column_stats
-    } else if (result.error) {
-      // Just store the error for UI display, no need for toast
-      statsError.value = result.error
-    }
+    await execute(() => sourcesStore.getSourceStats(parseInt(selectedSourceId.value)), {
+      onSuccess: (data) => {
+        if (data) {
+          stats.tableStats = data.table_stats
+          stats.columnStats = data.column_stats
+        }
+      },
+      onError: (error) => {
+        statsError.value = error instanceof Error ? error.message : 'Unknown error occurred'
+      }
+    })
   } catch (error) {
-    // Handle unexpected errors not caught by the store
-    statsError.value = error instanceof Error ? error.message : 'Unknown error occurred'
+    if (error instanceof Error) {
+      sourcesStore.handleError(error, 'fetchSourceStats')
+      statsError.value = error.message
+    } else {
+      statsError.value = 'Unknown error occurred'
+    }
   } finally {
     isLoadingStats.value = false
   }
@@ -98,7 +106,7 @@ const fetchSourceStats = async () => {
                 <SelectValue placeholder="Select a source" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem v-for="source in sourcesStore.sources" :key="source.id" :value="String(source.id)">
+                <SelectItem v-for="source in sourcesStore.visibleSources" :key="source.id" :value="String(source.id)">
                   {{ source.connection.database }}.{{ source.connection.table_name }}
                 </SelectItem>
               </SelectContent>
