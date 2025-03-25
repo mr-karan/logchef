@@ -526,7 +526,7 @@ const submitForm = async () => {
                         <div v-if="!createTable" class="space-y-4 border-t pt-4">
                             <div class="flex items-center justify-between">
                                 <div class="text-sm font-medium">Validate Connection</div>
-                                <Button type="button" variant="outline" @click="validateConnection"
+                                <Button type="button" variant="outline" @click="handleValidateConnection"
                                     :disabled="isValidating || isValidated" size="sm">
                                     <span v-if="isValidating" class="mr-2">
                                         <svg class="animate-spin h-4 w-4 text-primary"
