@@ -80,8 +80,15 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   // Start OIDC login flow
-  function startLogin(redirectPath?: string) {
-    window.location.href = authApi.getLoginUrl(redirectPath);
+  async function startLogin(redirectPath?: string) {
+    try {
+      const loginUrl = authApi.getLoginUrl(redirectPath);
+      window.location.href = loginUrl;
+      return { success: true };
+    } catch (error) {
+      console.error("Failed to initiate login:", error);
+      return { success: false, error };
+    }
   }
 
   // Logout user
