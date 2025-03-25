@@ -36,14 +36,42 @@ import { Badge } from '@/components/ui/badge';
 const router = useRouter();
 const { toast } = useToast();
 
-// Initialize stores - ensure these are available before use
-const savedQueriesStore = useSavedQueriesStore();
-const sourcesStore = useSourcesStore();
-const teamsStore = useTeamsStore();
+// Initialize stores with error handling
+let savedQueriesStore, sourcesStore, teamsStore;
+try {
+  savedQueriesStore = useSavedQueriesStore();
+  sourcesStore = useSourcesStore();
+  teamsStore = useTeamsStore();
+} catch (error) {
+  console.error("Error initializing stores:", error);
+}
 
-// Simple check to ensure store is available
+// Create fallback objects if stores fail to initialize
+if (!savedQueriesStore) {
+  console.error("Saved queries store failed to initialize!");
+  savedQueriesStore = {
+    fetchTeamSourceQueries: async () => ({ success: false, error: { message: "Store initialization failed" } }),
+  };
+}
+
+if (!sourcesStore) {
+  console.error("Sources store failed to initialize!");
+  sourcesStore = {
+    loadTeamSources: async () => ({ success: false }),
+    teamSources: [],
+    isLoading: false
+  };
+}
+
 if (!teamsStore) {
   console.error("Teams store failed to initialize!");
+  teamsStore = {
+    loadTeams: async () => {},
+    setCurrentTeam: () => {},
+    currentTeamId: null,
+    currentTeam: null,
+    teams: []
+  };
 }
 
 // Local UI state
@@ -67,9 +95,12 @@ const showEmptyState = computed(() => {
   return !showLoadingState.value && (!sourcesStore.teamSources || sourcesStore.teamSources.length === 0);
 });
 
-// Selected team name
+// Selected team name with better null handling
 const selectedTeamName = computed(() => {
-  return teamsStore?.currentTeam?.name || 'Select a team';
+  if (!teamsStore || !teamsStore.currentTeam) {
+    return 'Select a team';
+  }
+  return teamsStore.currentTeam.name || 'Select a team';
 });
 
 // Selected source name
@@ -155,11 +186,14 @@ onMounted(async () => {
   }
 });
 
-// Watch for source selection changes and team changes
+// Watch for source selection changes and team changes with safer access
 watch(
-  [() => selectedSourceId.value, () => teamsStore.currentTeamId],
-  async ([newSourceId]) => {
-    if (newSourceId && teamsStore.currentTeamId) {
+  [
+    () => selectedSourceId.value, 
+    () => teamsStore && teamsStore.currentTeamId ? teamsStore.currentTeamId : null
+  ],
+  async ([newSourceId, currentTeamId]) => {
+    if (newSourceId && currentTeamId) {
       await loadSourceQueries();
       // Mark initial load as complete after first load
       isInitialLoad.value = false;
