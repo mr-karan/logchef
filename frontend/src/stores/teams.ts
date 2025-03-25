@@ -203,7 +203,11 @@ export const useTeamsStore = defineStore("teams", () => {
     return await state.withLoading(`listTeamMembers-${teamId}`, async () => {
       try {
         const response = await teamsApi.listTeamMembers(teamId);
-        return { success: true, data: response };
+        // Ensure we return the array of team members from the data property
+        return { 
+          success: true, 
+          data: response.status === 'success' ? response.data : [] 
+        };
       } catch (error) {
         return state.handleError(error as Error, `listTeamMembers-${teamId}`);
       }
@@ -276,15 +280,16 @@ export const useTeamsStore = defineStore("teams", () => {
       try {
         const response = await teamsApi.listTeamSources(teamId);
         
-        // Cache the sources in the teamSourcesMap
-        if (response) {
-          state.data.value.teamSourcesMap = {
-            ...state.data.value.teamSourcesMap,
-            [teamId]: response
-          };
-        }
+        // Get the sources array from the response
+        const sources = response.status === 'success' ? response.data : [];
         
-        return { success: true, data: response };
+        // Cache the sources in the teamSourcesMap
+        state.data.value.teamSourcesMap = {
+          ...state.data.value.teamSourcesMap,
+          [teamId]: sources
+        };
+        
+        return { success: true, data: sources };
       } catch (error) {
         return state.handleError(error as Error, `listTeamSources-${teamId}`);
       }

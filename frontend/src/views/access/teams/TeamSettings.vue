@@ -193,9 +193,11 @@ const loadTeamMembers = async () => {
     console.log("TeamSettings - listTeamMembers result:", result);
     
     if (result.success && result.data) {
-        members.value = result.data;
+        // Ensure we're assigning the array of members, not the entire response object
+        members.value = Array.isArray(result.data) ? result.data : [];
         console.log("TeamSettings - Members loaded successfully:", members.value.length, "members");
     } else {
+        members.value = []; // Initialize with empty array on error
         console.error("Failed to load team members:", result.error);
     }
 }
@@ -215,9 +217,11 @@ const loadTeamSources = async () => {
     console.log("TeamSettings - listTeamSources result:", result);
     
     if (result.success && result.data) {
-        teamSources.value = result.data;
+        // Ensure we're assigning the array of sources, not the entire response object
+        teamSources.value = Array.isArray(result.data) ? result.data : [];
         console.log("TeamSettings - Sources loaded successfully:", teamSources.value.length, "sources");
     } else {
+        teamSources.value = []; // Initialize with empty array on error
         console.error("Failed to load team sources:", result.error);
     }
 }
