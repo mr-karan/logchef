@@ -63,24 +63,18 @@ const fetchSourceStats = async () => {
   statsError.value = null
 
   try {
-    await execute(() => sourcesStore.getSourceStats(parseInt(selectedSourceId.value)), {
-      onSuccess: (data) => {
-        if (data) {
-          stats.tableStats = data.table_stats
-          stats.columnStats = data.column_stats
-        }
-      },
-      onError: (error) => {
-        statsError.value = error instanceof Error ? error.message : 'Unknown error occurred'
-      }
-    })
-  } catch (error) {
-    if (error instanceof Error) {
-      sourcesStore.handleError(error, 'fetchSourceStats')
-      statsError.value = error.message
-    } else {
-      statsError.value = 'Unknown error occurred'
+    const result = await sourcesStore.getSourceStats(parseInt(selectedSourceId.value));
+    
+    if (result.success && result.data) {
+      stats.tableStats = result.data.table_stats
+      stats.columnStats = result.data.column_stats
+      statsError.value = null
+    } else if (result.error) {
+      statsError.value = result.error.message
     }
+  } catch (error) {
+    console.error("Error in fetchSourceStats:", error)
+    statsError.value = error instanceof Error ? error.message : 'Unknown error occurred'
   } finally {
     isLoadingStats.value = false
   }
