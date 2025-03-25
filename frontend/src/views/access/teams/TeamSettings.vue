@@ -296,7 +296,7 @@ onMounted(async () => {
         await loadTeam();
         
         // Only continue if team was loaded successfully
-        if (team.value && team.value.id) {
+        if (team.value) {
             console.log("TeamSettings - Team loaded, now loading users, members, and sources");
             
             // First load users
