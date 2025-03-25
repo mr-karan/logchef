@@ -79,12 +79,21 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   });
 
   // Actions
+  const state = useBaseStore<SavedQueriesState>({
+    queries: [],
+    selectedQuery: null,
+    teams: [],
+    selectedTeamId: null,
+  });
+
   async function fetchUserTeams() {
-    return await withLoading('fetchUserTeams', async () => {
-      return await execute(() => savedQueriesApi.getUserTeams(), {
+    return await state.withLoading('fetchUserTeams', async () => {
+      return await state.callApi({
+        apiCall: () => savedQueriesApi.getUserTeams(),
+        operationKey: 'fetchUserTeams',
         onSuccess: (response) => {
           data.value.teams = response;
-          if (response.length > 0 && !data.value.selectedTeamId) {
+          if (response && response.length > 0 && !data.value.selectedTeamId) {
             data.value.selectedTeamId = response[0].id;
           }
         }
@@ -97,32 +106,30 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   }
 
   async function fetchTeamQueries(teamId: number) {
-    return await withLoading(`fetchTeamQueries-${teamId}`, async () => {
-      return await execute(
-        () => savedQueriesApi.listQueries(teamId),
-        {
-          onSuccess: (responseData) => {
-            data.value.queries = responseData;
-          },
-          defaultData: [],
-          showToast: false,
-        }
-      );
+    return await state.withLoading(`fetchTeamQueries-${teamId}`, async () => {
+      return await state.callApi({
+        apiCall: () => savedQueriesApi.listQueries(teamId),
+        operationKey: `fetchTeamQueries-${teamId}`,
+        onSuccess: (responseData) => {
+          data.value.queries = responseData;
+        },
+        defaultData: [],
+        showToast: false,
+      });
     });
   }
 
   async function fetchSourceQueries(sourceId: number, teamId: number) {
-    return await withLoading(`fetchSourceQueries-${sourceId}-${teamId}`, async () => {
-      return await execute(
-        () => savedQueriesApi.listSourceQueries(sourceId, teamId),
-        {
-          onSuccess: (responseData) => {
-            data.value.queries = responseData;
-          },
-          defaultData: [],
-          showToast: false,
-        }
-      );
+    return await state.withLoading(`fetchSourceQueries-${sourceId}-${teamId}`, async () => {
+      return await state.callApi({
+        apiCall: () => savedQueriesApi.listSourceQueries(sourceId, teamId),
+        operationKey: `fetchSourceQueries-${sourceId}-${teamId}`,
+        onSuccess: (responseData) => {
+          data.value.queries = responseData;
+        },
+        defaultData: [],
+        showToast: false,
+      });
     });
   }
 
@@ -156,8 +163,10 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     teamId: number,
     query: Omit<SavedTeamQuery, "id" | "created_at" | "updated_at">
   ) {
-    return await withLoading(`createQuery-${teamId}`, async () => {
-      return await execute(() => savedQueriesApi.createQuery(teamId, query), {
+    return await state.withLoading(`createQuery-${teamId}`, async () => {
+      return await state.callApi({
+        apiCall: () => savedQueriesApi.createQuery(teamId, query),
+        operationKey: `createQuery-${teamId}`,
         successMessage: "Query created successfully",
         onSuccess: (response) => {
           // Ensure queries array exists before modifying it
@@ -250,12 +259,18 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   }
 
   return {
-    isLoading,
+    // State
+    isLoading: state.isLoading,
+    error: state.error,
     data,
+    
+    // Computed properties
     parseQueryContent,
     hasTeams,
     hasQueries,
     selectedTeam,
+    
+    // Actions
     fetchUserTeams,
     setSelectedTeam,
     fetchTeamQueries,
@@ -267,5 +282,8 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     updateQuery,
     deleteQuery,
     resetState,
+    
+    // Loading state helpers
+    isLoadingOperation: state.isLoadingOperation,
   };
 });

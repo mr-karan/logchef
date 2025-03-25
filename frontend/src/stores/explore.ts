@@ -499,7 +499,14 @@ export const useExploreStore = defineStore("explore", () => {
   // Get log context
   async function getLogContext(sourceId: number, params: LogContextRequest) {
     if (!sourceId) {
-      throw new Error("Source ID is required for getting log context");
+      return state.handleError(
+        { 
+          status: "error",
+          message: "Source ID is required for getting log context", 
+          error_type: "ValidationError" 
+        } as APIErrorResponse, 
+        "getLogContext"
+      );
     }
 
     // Get the teams store
@@ -507,13 +514,19 @@ export const useExploreStore = defineStore("explore", () => {
     const currentTeamId = teamsStore.currentTeamId;
 
     if (!currentTeamId) {
-      throw new Error(
-        "No team selected. Please select a team before getting log context."
+      return state.handleError(
+        { 
+          status: "error",
+          message: "No team selected. Please select a team before getting log context.", 
+          error_type: "ValidationError" 
+        } as APIErrorResponse, 
+        "getLogContext"
       );
     }
 
     return await state.callApi<LogContextResponse>({
       apiCall: () => exploreApi.getLogContext(sourceId, params, currentTeamId),
+      operationKey: `getLogContext-${sourceId}`,
       showToast: false,
     });
   }
