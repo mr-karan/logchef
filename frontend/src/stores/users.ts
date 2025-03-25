@@ -22,17 +22,13 @@ export const useUsersStore = defineStore("users", () => {
 
   async function loadUsers() {
     console.log("Loading users...");
-    const result = await state.withLoading('loadUsers', async () => {
-      return await execute(() => usersApi.listUsers(), {
-        onSuccess: (response) => {
-          state.data.value.users = response ?? [];
-        },
-        defaultData: [],
-        showToast: true,
-      });
+    return await execute(() => usersApi.listUsers(), {
+      onSuccess: (response) => {
+        state.data.value.users = response?.data ?? [];
+      },
+      defaultData: [],
+      showToast: false
     });
-    
-    return result;
   }
 
   async function getUser(id: string) {
@@ -116,6 +112,7 @@ export const useUsersStore = defineStore("users", () => {
 
   return {
     users,
+    execute,
     isLoading: computed(() => isLoading.value || state.isLoading.value),
     error: state.error,
     loadUsers,
