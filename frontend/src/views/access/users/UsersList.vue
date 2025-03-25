@@ -94,10 +94,7 @@ const handleDelete = (user: User) => {
     showDeleteDialog.value = true
 }
 
-import { useToast } from '@/components/ui/toast/use-toast'
-
-// Add toast at the top with other imports
-const { toast } = useToast()
+// Toast is now handled centrally in the store
 
 const toggleUserStatus = async (user: User) => {
     const result = await usersStore.updateUser(user.id, {

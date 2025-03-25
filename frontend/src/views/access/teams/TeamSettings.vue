@@ -8,8 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useToast } from '@/components/ui/toast'
-import { TOAST_DURATION } from '@/lib/constants'
+import { useToast } from '@/components/ui/toast/use-toast'
 import { type Team, type TeamMember } from '@/api/teams'
 import { type Source } from '@/api/sources'
 import { Loader2, Plus, Trash2, UserPlus, Database } from 'lucide-vue-next'
@@ -48,6 +47,11 @@ const { toast } = useToast()
 const team = ref<Team | null>(null)
 const members = ref<TeamMember[]>([])
 const { isLoading, error: teamError } = storeToRefs(teamsStore)
+const isSaving = computed(() => teamsStore.isLoadingOperation('updateTeam-' + route.params.id) ||
+                            teamsStore.isLoadingOperation('addTeamMember-' + route.params.id) ||
+                            teamsStore.isLoadingOperation('removeTeamMember-' + route.params.id) ||
+                            teamsStore.isLoadingOperation('addTeamSource-' + route.params.id) ||
+                            teamsStore.isLoadingOperation('removeTeamSource-' + route.params.id))
 
 // Form state
 const name = ref('')
@@ -130,12 +134,7 @@ const handleSubmit = async () => {
 
     // Basic validation
     if (!name.value) {
-        toast({
-            title: 'Error',
-            description: 'Please enter a team name',
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
+        // Let store handle the error toast
         return
     }
 
