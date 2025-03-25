@@ -283,8 +283,8 @@ const durationText = computed(() => {
     <Popover v-model:open="showDatePicker">
         <PopoverTrigger as-child>
             <Button variant="outline" :class="[
-                'min-w-[200px] max-w-[320px]',
-                selectedQuickRange ? 'w-[200px]' : 'w-[320px]'
+                'min-w-[200px] max-w-[420px]',
+                selectedQuickRange ? 'w-[200px]' : 'w-auto'
             ]">
                 <div class="flex items-center">
                     <CalendarIcon class="mr-2 h-4 w-4 flex-shrink-0" />
