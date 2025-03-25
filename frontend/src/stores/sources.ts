@@ -70,9 +70,13 @@ export const useSourcesStore = defineStore("sources", () => {
 
   async function loadSources() {
     return await state.withLoading("loadSources", async () => {
+      state.error.value = null; // Reset error before loading
       return await execute(() => sourcesApi.listSources(), {
         onSuccess: (data) => {
           state.data.value.sources = data ?? [];
+        },
+        onError: (error) => {
+          state.error.value = { message: error.message, operation: 'loadSources' };
         },
         defaultData: [],
         showToast: false,
