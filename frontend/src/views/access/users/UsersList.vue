@@ -140,9 +140,8 @@ const columns: ColumnDef<User>[] = [
 const searchQuery = ref('')
 
 const filteredUsers = computed(() => {
-    // Get users directly from the store
-    // Using direct method to bypass any reactivity issues
-    const users = usersStore.getUsersArray();
+    // Get users from the store, ensuring we always have an array
+    const users = usersStore.getUsersArray() || [];
     console.log("Computing filteredUsers. Current users (direct access):", users);
     
     if (!searchQuery.value) return users;
@@ -154,12 +153,22 @@ const filteredUsers = computed(() => {
     );
 })
 
-// Create the table with dynamic data from filteredUsers
-const table = computed(() => {
-    return useVueTable({
-        get data() { 
-            return filteredUsers.value 
-        },
+// Initialize table with empty data first to avoid undefined errors
+const table = ref(useVueTable({
+    data: [],
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    state: {
+        columnFilters: columnFilters.value,
+    },
+}))
+
+// Update table when filteredUsers changes
+watch(filteredUsers, (newUsers) => {
+    // Create a new table instance with updated data
+    table.value = useVueTable({
+        data: newUsers,
         columns,
         getCoreRowModel: getCoreRowModel(),
         getFilteredRowModel: getFilteredRowModel(),
@@ -167,7 +176,7 @@ const table = computed(() => {
             columnFilters: columnFilters.value,
         },
     })
-})
+}, { immediate: true })
 
 const loadUsers = async () => {
     console.log("Starting loadUsers...");
@@ -284,18 +293,20 @@ watch(() => usersStore.getUsersArray(), (newUsers) => {
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead v-for="column in table.value.getAllColumns()" :key="column.id">
-                                        {{ column.id === 'actions' ? '' : column.columnDef.header }}
+                                    <TableHead v-for="column in columns" :key="column.id">
+                                        {{ column.id === 'actions' ? '' : column.header }}
                                     </TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                <TableRow v-for="row in table.value.getRowModel().rows" :key="row.id">
-                                    <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id">
-                                        <component :is="cell.column.columnDef.cell" v-bind="cell.getContext()" />
-                                    </TableCell>
-                                </TableRow>
-                                <TableRow v-if="table.value.getRowModel().rows.length === 0">
+                                <template v-if="table.value && table.value.getRowModel().rows.length > 0">
+                                    <TableRow v-for="row in table.value.getRowModel().rows" :key="row.id">
+                                        <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id">
+                                            <component :is="cell.column.columnDef.cell" v-bind="cell.getContext()" />
+                                        </TableCell>
+                                    </TableRow>
+                                </template>
+                                <TableRow v-else>
                                     <TableCell :colspan="columns.length" class="h-24 text-center">
                                         No results found.
                                     </TableCell>
