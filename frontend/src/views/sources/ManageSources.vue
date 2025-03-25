@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
+import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import { useApiQuery } from '@/composables/useApiQuery'
 import ErrorAlert from '@/components/ui/ErrorAlert.vue'
