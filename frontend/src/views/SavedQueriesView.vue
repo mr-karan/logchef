@@ -166,8 +166,8 @@ async function handleTeamChange(teamId: string) {
     isChangingTeam.value = true;
     urlError.value = null;
 
-    const parsedTeamId = parseInt(teamId);
-    teamsStore.setCurrentTeam(parsedTeamId);
+    // Use the improved setCurrentTeam that handles string IDs
+    teamsStore.setCurrentTeam(teamId);
 
     // Update URL to reflect the team change
     router.replace({
@@ -176,7 +176,7 @@ async function handleTeamChange(teamId: string) {
     });
 
     // Load sources for the selected team
-    const sourcesResult = await sourcesStore.loadTeamSources(parsedTeamId, true);
+    const sourcesResult = await sourcesStore.loadTeamSources(teamsStore.currentTeamId, true);
 
     // Handle case where team has no sources
     if (!sourcesResult.success || !sourcesResult.data || sourcesResult.data.length === 0) {
