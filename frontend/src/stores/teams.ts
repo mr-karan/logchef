@@ -32,34 +32,7 @@ export const useTeamsStore = defineStore("teams", () => {
     teamSourcesMap: {},
   });
 
-  // Helper function to handle errors
-  function handleError(error: Error | APIErrorResponse, operation: string) {
-    console.error(`[${operation} Error]`, error);
-    
-    const errorMessage = error instanceof Error ? error.message : error.message;
-    const errorType = error instanceof Error ? 'UnknownError' : (error.error_type || 'UnknownError');
-    const errorData = error instanceof Error ? undefined : error.data;
-    
-    state.error.value = {
-      message: errorMessage,
-      error_type: errorType,
-      data: errorData,
-      operation
-    };
-    
-    // Use the toast API directly for consistent error handling
-    const { toast } = useToast();
-    toast({
-      title: 'Error',
-      description: errorMessage,
-      variant: 'destructive',
-    });
-    
-    return { 
-      success: false,
-      error: state.error.value
-    };
-  }
+  // Use the centralized error handler from base store
 
   // Computed properties
   const teams = computed(() => state.data.value.teams);
@@ -113,7 +86,7 @@ export const useTeamsStore = defineStore("teams", () => {
           data: state.data.value.teams
         };
       } catch (error) {
-        return handleError(error as Error, 'loadTeams');
+        return state.handleError(error as Error, 'loadTeams');
       }
     });
   }
@@ -170,7 +143,7 @@ export const useTeamsStore = defineStore("teams", () => {
         
         return { success: true, data: response };
       } catch (error) {
-        return handleError(error as Error, `getTeam-${teamId}`);
+        return state.handleError(error as Error, `getTeam-${teamId}`);
       }
     });
   }
@@ -226,7 +199,7 @@ export const useTeamsStore = defineStore("teams", () => {
         const response = await teamsApi.listTeamMembers(teamId);
         return { success: true, data: response };
       } catch (error) {
-        return handleError(error as Error, `listTeamMembers-${teamId}`);
+        return state.handleError(error as Error, `listTeamMembers-${teamId}`);
       }
     });
   }
@@ -237,20 +210,14 @@ export const useTeamsStore = defineStore("teams", () => {
   ) {
     // Validate parameters
     if (!teamId || !data.user_id) {
-      const { toast } = useToast();
-      toast({
-        title: 'Error',
-        description: 'Invalid team or user ID',
-        variant: 'destructive',
-      });
-      
-      return { 
-        success: false, 
-        error: { 
+      return state.handleError(
+        { 
+          status: "error",
           message: "Invalid team or user ID", 
           error_type: "ValidationError" 
-        } as APIErrorResponse 
-      };
+        } as APIErrorResponse, 
+        `addTeamMember-${teamId}`
+      );
     }
     
     return await state.withLoading(`addTeamMember-${teamId}`, async () => {
@@ -272,20 +239,14 @@ export const useTeamsStore = defineStore("teams", () => {
   async function removeTeamMember(teamId: number, userId: number) {
     // Validate parameters
     if (!teamId || !userId) {
-      const { toast } = useToast();
-      toast({
-        title: 'Error',
-        description: 'Invalid team or user ID',
-        variant: 'destructive',
-      });
-      
-      return { 
-        success: false, 
-        error: { 
+      return state.handleError(
+        { 
+          status: "error",
           message: "Invalid team or user ID", 
           error_type: "ValidationError" 
-        } as APIErrorResponse 
-      };
+        } as APIErrorResponse, 
+        `removeTeamMember-${teamId}-${userId}`
+      );
     }
     
     return await state.withLoading(`removeTeamMember-${teamId}-${userId}`, async () => {
@@ -319,7 +280,7 @@ export const useTeamsStore = defineStore("teams", () => {
         
         return { success: true, data: response };
       } catch (error) {
-        return handleError(error as Error, `listTeamSources-${teamId}`);
+        return state.handleError(error as Error, `listTeamSources-${teamId}`);
       }
     });
   }
@@ -366,7 +327,7 @@ export const useTeamsStore = defineStore("teams", () => {
         
         return { success: true, data: response };
       } catch (error) {
-        return handleError(error as Error, `getTeamSourceIds-${teamId}`);
+        return state.handleError(error as Error, `getTeamSourceIds-${teamId}`);
       }
     });
 

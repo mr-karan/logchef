@@ -32,34 +32,7 @@ export const useUsersStore = defineStore("users", () => {
     return state.data.value.users || [];
   });
 
-  // Helper function to handle errors
-  function handleError(error: Error | APIErrorResponse, operation: string) {
-    console.error(`[${operation} Error]`, error);
-    
-    const errorMessage = error instanceof Error ? error.message : error.message;
-    const errorType = error instanceof Error ? 'UnknownError' : (error.error_type || 'UnknownError');
-    const errorData = error instanceof Error ? undefined : error.data;
-    
-    state.error.value = {
-      message: errorMessage,
-      error_type: errorType,
-      data: errorData,
-      operation
-    };
-    
-    // Use the toast API directly for consistent error handling
-    const { toast } = useToast();
-    toast({
-      title: 'Error',
-      description: errorMessage,
-      variant: 'destructive',
-    });
-    
-    return { 
-      success: false,
-      error: state.error.value
-    };
-  }
+  // Use the centralized error handler from base store
 
   async function loadUsers(forceReload = false) {
     return await state.withLoading('loadUsers', async () => {
@@ -85,7 +58,7 @@ export const useUsersStore = defineStore("users", () => {
           data: state.data.value.users
         };
       } catch (error) {
-        return handleError(error as Error, 'loadUsers');
+        return state.handleError(error as Error, 'loadUsers');
       }
     });
   }
@@ -96,7 +69,7 @@ export const useUsersStore = defineStore("users", () => {
         const response = await usersApi.getUser(id);
         return { success: true, data: response };
       } catch (error) {
-        return handleError(error as Error, `getUser-${id}`);
+        return state.handleError(error as Error, `getUser-${id}`);
       }
     });
   }
