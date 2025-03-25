@@ -101,9 +101,11 @@ export const useUsersStore = defineStore("users", () => {
       try {
         const response = await usersApi.createUser(data);
         
-        if (response.user) {
-          // Optimistic update - add to beginning of list
-          state.data.value.users.unshift(response.user);
+        // Check if response contains user data in the data property
+        if (response.status === 'success' && response.data) {
+          // Add the new user to the beginning of the users array
+          state.data.value.users = [response.data, ...state.data.value.users];
+          console.log("User added to store:", response.data);
         }
         
         return { 

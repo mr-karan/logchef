@@ -154,15 +154,18 @@ const filteredUsers = computed(() => {
     );
 })
 
-const table = useVueTable({
-    get data() { return filteredUsers.value }, // Use proper getter for reactivity
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    state: {
-        get columnFilters() { return columnFilters.value },
-    },
-})
+// Reactive table that rebuilds when filteredUsers changes
+const table = computed(() => 
+    useVueTable({
+        data: filteredUsers.value,
+        columns,
+        getCoreRowModel: getCoreRowModel(),
+        getFilteredRowModel: getFilteredRowModel(),
+        state: {
+            columnFilters: columnFilters.value,
+        },
+    })
+)
 
 const loadUsers = async () => {
     console.log("Starting loadUsers...");
@@ -234,7 +237,11 @@ onMounted(async () => {
 // Watch the users array directly using the store method
 watch(() => usersStore.getUsersArray(), (newUsers) => {
     console.log("Users updated (from direct method):", newUsers);
-}, { immediate: true });
+    // Force table to rebuild with new data
+    if (newUsers && newUsers.length > 0) {
+        console.log("Refreshing table with new users data");
+    }
+}, { immediate: true, deep: true });
 </script>
 
 <template>
@@ -275,18 +282,18 @@ watch(() => usersStore.getUsersArray(), (newUsers) => {
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead v-for="column in table.getAllColumns()" :key="column.id">
+                                    <TableHead v-for="column in table.value.getAllColumns()" :key="column.id">
                                         {{ column.id === 'actions' ? '' : column.columnDef.header }}
                                     </TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                <TableRow v-for="row in table.getRowModel().rows" :key="row.id">
+                                <TableRow v-for="row in table.value.getRowModel().rows" :key="row.id">
                                     <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id">
                                         <component :is="cell.column.columnDef.cell" v-bind="cell.getContext()" />
                                     </TableCell>
                                 </TableRow>
-                                <TableRow v-if="table.getRowModel().rows.length === 0">
+                                <TableRow v-if="table.value.getRowModel().rows.length === 0">
                                     <TableCell :colspan="columns.length" class="h-24 text-center">
                                         No results found.
                                     </TableCell>
