@@ -31,7 +31,8 @@ import { storeToRefs } from 'pinia'
 
 const router = useRouter()
 const teamsStore = useTeamsStore()
-const { teams, isLoading } = storeToRefs(teamsStore)
+const { isLoading, error: teamsError } = storeToRefs(teamsStore)
+const teams = computed(() => teamsStore.teams)
 const showDeleteDialog = ref(false)
 const teamToDelete = ref<Team | null>(null)
 
@@ -42,20 +43,36 @@ const handleDelete = (team: Team) => {
 
 // Function to refresh teams list
 const refreshTeams = async () => {
-    await teamsStore.loadTeams(true) // Force reload
+    await teamsStore.execute(
+        () => teamsStore.loadTeams(true), // Force reload
+        {
+            successMessage: 'Teams refreshed',
+            showToast: false
+        }
+    )
 }
 
 const confirmDelete = async () => {
     if (!teamToDelete.value) return
-    const success = await teamsStore.deleteTeam(teamToDelete.value.id)
-    if (success) {
-        showDeleteDialog.value = false
-        teamToDelete.value = null
-    }
+    
+    await teamsStore.execute(
+        () => teamsStore.deleteTeam(teamToDelete.value.id),
+        {
+            successMessage: 'Team deleted successfully',
+            onSuccess: () => {
+                showDeleteDialog.value = false
+                teamToDelete.value = null
+                refreshTeams()
+            }
+        }
+    )
 }
 
 onMounted(() => {
-    teamsStore.loadTeams()
+    teamsStore.execute(
+        () => teamsStore.loadTeams(),
+        { showToast: false }
+    )
 })
 
 const formatDate = (dateString: string) => {

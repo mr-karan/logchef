@@ -46,8 +46,7 @@ const { toast } = useToast()
 
 const team = ref<Team | null>(null)
 const members = ref<TeamMember[]>([])
-const isLoading = ref(true)
-const isSaving = ref(false)
+const { isLoading, error: teamError } = storeToRefs(teamsStore)
 
 // Form state
 const name = ref('')
@@ -93,44 +92,61 @@ watch(showAddSourceDialog, async (isOpen) => {
 })
 
 const loadTeam = async () => {
-    isLoading.value = true
-
-    const result = await teamsStore.getTeam(Number(route.params.id))
-
-    if (result.success && result.data) {
-        team.value = result.data
-        name.value = team.value.name
-        description.value = team.value.description || ''
-
-        // Load team members
-        await loadTeamMembers()
-    }
-
-    isLoading.value = false
+    await teamsStore.execute(
+        () => teamsStore.getTeam(Number(route.params.id)),
+        {
+            operationKey: `team-${route.params.id}`,
+            showToast: false,
+            onSuccess: (result) => {
+                if (result?.data) {
+                    team.value = result.data
+                    name.value = team.value.name
+                    description.value = team.value.description || ''
+                    
+                    // Load team members
+                    loadTeamMembers()
+                }
+            }
+        }
+    )
 }
 
 const loadTeamMembers = async () => {
     if (!team.value) return
 
-    const result = await teamsStore.listTeamMembers(team.value.id)
-
-    if (result.success && result.data) {
-        members.value = result.data
-    }
+    await teamsStore.execute(
+        () => teamsStore.listTeamMembers(team.value.id),
+        {
+            operationKey: `team-${team.value.id}-members`,
+            showToast: false,
+            onSuccess: (result) => {
+                if (result?.data) {
+                    members.value = result.data
+                }
+            }
+        }
+    )
 }
 
 const loadTeamSources = async () => {
     if (!team.value) return
 
-    const result = await teamsStore.listTeamSources(team.value.id)
-
-    if (result.success && result.data) {
-        teamSources.value = result.data
-    }
+    await teamsStore.execute(
+        () => teamsStore.listTeamSources(team.value.id),
+        {
+            operationKey: `team-${team.value.id}-sources`,
+            showToast: false,
+            onSuccess: (result) => {
+                if (result?.data) {
+                    teamSources.value = result.data
+                }
+            }
+        }
+    )
 }
 
 const handleSubmit = async () => {
-    if (isSaving.value || !team.value) return
+    if (!team.value) return
 
     // Basic validation
     if (!name.value) {
@@ -143,91 +159,82 @@ const handleSubmit = async () => {
         return
     }
 
-    isSaving.value = true
-
-    const result = await teamsStore.updateTeam(team.value.id, {
-        name: name.value,
-        description: description.value || '',
-    })
-
-    if (result.success) {
-        // Reload team data
-        await loadTeam()
-    }
-
-    isSaving.value = false
+    await teamsStore.execute(
+        () => teamsStore.updateTeam(team.value.id, {
+            name: name.value,
+            description: description.value || '',
+        }),
+        {
+            successMessage: 'Team updated successfully',
+            onSuccess: loadTeam
+        }
+    )
 }
 
 const handleAddMember = async () => {
     if (!team.value || !selectedUserId.value) return
 
-    isSaving.value = true
+    await teamsStore.execute(
+        () => teamsStore.addTeamMember(team.value.id, {
+            user_id: Number(selectedUserId.value),
+            role: newMemberRole.value as 'admin' | 'member',
+        }),
+        {
+            successMessage: 'Team member added successfully',
+            onSuccess: () => {
+                // Reset form
+                selectedUserId.value = ''
+                newMemberRole.value = 'member'
+                showAddMemberDialog.value = false
 
-    const result = await teamsStore.addTeamMember(team.value.id, {
-        user_id: Number(selectedUserId.value),
-        role: newMemberRole.value as 'admin' | 'member',
-    })
-
-    if (result.success) {
-        // Reset form
-        selectedUserId.value = ''
-        newMemberRole.value = 'member'
-        showAddMemberDialog.value = false
-
-        // Reload members
-        await loadTeamMembers()
-    }
-
-    isSaving.value = false
+                // Reload members
+                loadTeamMembers()
+            }
+        }
+    )
 }
 
 const handleRemoveMember = async (userId: string | number) => {
     if (!team.value) return
 
-    isSaving.value = true
-
-    const result = await teamsStore.removeTeamMember(team.value.id, Number(userId))
-
-    if (result.success) {
-        // Reload members
-        await loadTeamMembers()
-    }
-
-    isSaving.value = false
+    await teamsStore.execute(
+        () => teamsStore.removeTeamMember(team.value.id, Number(userId)),
+        {
+            successMessage: 'Team member removed successfully',
+            onSuccess: loadTeamMembers
+        }
+    )
 }
 
 const handleAddSource = async () => {
     if (!team.value || !selectedSourceId.value) return
 
-    isSaving.value = true
+    await teamsStore.execute(
+        () => teamsStore.addTeamSource(team.value.id, Number(selectedSourceId.value)),
+        {
+            successMessage: 'Source added to team successfully',
+            onSuccess: () => {
+                // Reset form
+                selectedSourceId.value = ''
+                showAddSourceDialog.value = false
 
-    const result = await teamsStore.addTeamSource(team.value.id, Number(selectedSourceId.value))
-
-    if (result.success) {
-        // Reset form
-        selectedSourceId.value = ''
-        showAddSourceDialog.value = false
-
-        // Reload sources
-        await loadTeamSources()
-    }
-
-    isSaving.value = false
+                // Reload sources
+                loadTeamSources()
+            }
+        }
+    )
 }
 
 const handleRemoveSource = async (sourceId: string | number) => {
     if (!team.value) return
 
-    isSaving.value = true
-
-    const result = await teamsStore.removeTeamSource(team.value.id, Number(sourceId))
-
-    if (result.success) {
-        // Reload sources
-        await loadTeamSources()
-    }
-
-    isSaving.value = false
+    await teamsStore.execute(
+        () => teamsStore.removeTeamSource(team.value.id, Number(sourceId)),
+        {
+            successMessage: 'Source removed from team successfully',
+            onSuccess: loadTeamSources
+        }
+    )
 }
 
 onMounted(async () => {
@@ -235,7 +242,7 @@ onMounted(async () => {
     await loadTeam()
     // Then load the rest in parallel
     await Promise.all([
-        usersStore.loadUsers(),
+        usersStore.execute(() => usersStore.loadUsers(), { showToast: false }),
         loadTeamSources(),
     ])
 })
