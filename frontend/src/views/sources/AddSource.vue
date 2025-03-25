@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { useApiQuery } from '@/composables/useApiQuery'
-import { useFormHandling } from '@/composables/useFormHandling'
-import { useConnectionValidation, type ConnectionInfo } from '@/composables/useConnectionValidation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,7 +11,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { useSourcesStore } from '@/stores/sources'
-import { sourcesApi } from '@/api/sources'
 import { Code, ChevronsUpDown, Plus, Database } from 'lucide-vue-next'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Separator } from '@/components/ui/separator'
@@ -78,13 +74,30 @@ const showSchema = ref<boolean>(false)
 const metaTSField = ref<string | number>('timestamp')
 const metaSeverityField = ref<string | number>('severity_text')
 
-// Use connection validation composable
-const { 
-    isValidating, 
-    validationResult, 
-    isValidated, 
-    validateConnection 
-} = useConnectionValidation()
+// Use connection validation with source store
+const isValidating = ref(false)
+const validationResult = ref(null)
+const isValidated = ref(false)
+
+// Validate connection using source store
+const validateConnection = async (connectionInfo) => {
+    isValidating.value = true
+    isValidated.value = false
+    validationResult.value = null
+    
+    try {
+        const result = await sourcesStore.validateSourceConnection(connectionInfo)
+        
+        if (result.success && result.data) {
+            validationResult.value = result.data
+            isValidated.value = true
+        }
+    } catch (error) {
+        console.error("Validation error:", error)
+    } finally {
+        isValidating.value = false
+    }
+}
 
 // Schema preview
 const tableSchema = `CREATE TABLE IF NOT EXISTS {{database_name}}.{{table_name}}
@@ -197,20 +210,9 @@ const handleValidateConnection = async () => {
     await validateConnection(connectionInfo)
 }
 
-// Use form handling composable
-const { isSubmitting, formError, handleSubmit } = useFormHandling(
-    (payload: CreateSourcePayload) => sourcesStore.createSource(payload),
-    {
-        successMessage: 'Source created successfully',
-        onSuccess: () => {
-            // Redirect to sources list
-            router.push({ name: 'Sources' })
-        },
-        onError: (error) => {
-            sourcesStore.handleError(error, 'createSource')
-        }
-    }
-)
+// Form state
+const isSubmitting = ref(false)
+const formError = ref(null)
 
 const submitForm = async () => {
     if (!isValid.value) {
@@ -230,22 +232,42 @@ const submitForm = async () => {
         if (!isValidated.value) return
     }
 
-    await handleSubmit({
-        name: String(sourceName.value),
-        meta_is_auto_created: createTable.value,
-        meta_ts_field: String(metaTSField.value),
-        meta_severity_field: metaSeverityField.value ? String(metaSeverityField.value) : "",
-        connection: {
-            host: String(host.value),
-            username: enableAuth.value ? String(username.value) : '',
-            password: enableAuth.value ? String(password.value) : '',
-            database: String(database.value),
-            table_name: String(tableName.value),
-        },
-        description: String(description.value),
-        ttl_days: Number(ttlDays.value),
-        schema: createTable.value ? actualSchema.value : undefined,
-    } as CreateSourcePayload)
+    isSubmitting.value = true
+    
+    try {
+        // Create payload with proper types
+        const payload = {
+            name: String(sourceName.value),
+            meta_is_auto_created: createTable.value,
+            meta_ts_field: String(metaTSField.value),
+            meta_severity_field: metaSeverityField.value ? String(metaSeverityField.value) : "",
+            connection: {
+                host: String(host.value),
+                username: enableAuth.value ? String(username.value) : '',
+                password: enableAuth.value ? String(password.value) : '',
+                database: String(database.value),
+                table_name: String(tableName.value),
+            },
+            description: String(description.value),
+            ttl_days: Number(ttlDays.value),
+            schema: createTable.value ? actualSchema.value : undefined,
+        }
+        
+        // Use the store directly
+        const result = await sourcesStore.createSource(payload)
+        
+        if (result.success) {
+            // Redirect to sources list
+            router.push({ name: 'Sources' })
+        } else {
+            formError.value = result.error
+        }
+    } catch (error) {
+        console.error("Error creating source:", error)
+        formError.value = error instanceof Error ? error.message : 'Unknown error'
+    } finally {
+        isSubmitting.value = false
+    }
 }
 </script>
 

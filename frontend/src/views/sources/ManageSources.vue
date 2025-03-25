@@ -47,12 +47,12 @@ const retryLoading = async () => {
 const confirmDelete = async () => {
     if (!sourceToDelete.value) return
 
-    const result = await execute(() => sourcesStore.deleteSource(sourceToDelete.value!.id), {
-        onSuccess: () => {
-            showDeleteDialog.value = false
-            sourceToDelete.value = null
-        }
-    })
+    const result = await sourcesStore.deleteSource(sourceToDelete.value.id)
+    
+    if (result.success) {
+        showDeleteDialog.value = false
+        sourceToDelete.value = null
+    }
 }
 
 onMounted(async () => {
