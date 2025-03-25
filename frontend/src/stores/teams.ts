@@ -131,13 +131,19 @@ export const useTeamsStore = defineStore("teams", () => {
         const response = await teamsApi.getTeam(teamId);
         
         // Update in local state if needed
-        if (response) {
+        if (response && response.id) {
           const index = state.data.value.teams.findIndex(t => t.id === teamId);
           if (index >= 0) {
             state.data.value.teams[index] = {
               ...response,
-              memberCount: state.data.value.teams[index].memberCount
+              memberCount: state.data.value.teams[index].memberCount || response.member_count || 0
             };
+          } else {
+            // Team not in local state yet, add it
+            state.data.value.teams.push({
+              ...response,
+              memberCount: response.member_count || 0
+            });
           }
         }
         
