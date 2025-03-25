@@ -74,6 +74,10 @@ const showDialog = ref(false)
 const { isLoading, error: formError } = storeToRefs(teamsStore)
 
 const handleSubmit = async () => {
+    if (!teamName.value.trim()) {
+        return // Let the store handle validation errors
+    }
+
     const result = await teamsStore.createTeam({
         name: teamName.value,
         description: description.value
