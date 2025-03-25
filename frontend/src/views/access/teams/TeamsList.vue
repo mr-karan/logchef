@@ -63,13 +63,20 @@ onMounted(() => {
     teamsStore.loadTeams()
 })
 
-const formatDate = (dateString: string) => {
+const formatDate = (dateString: string | undefined) => {
+    if (!dateString) return 'N/A';
+    
     try {
-        const date = new Date(dateString)
-        return format(date, 'PPp') // Format like "Feb 17, 2025, 3:17 PM"
+        // Ensure dateString is valid before creating a Date object
+        if (isNaN(Date.parse(dateString))) {
+            return 'Invalid date';
+        }
+        
+        const date = new Date(dateString);
+        return format(date, 'PPp'); // Format like "Feb 17, 2025, 3:17 PM"
     } catch (error) {
-        console.error('Error formatting date:', error)
-        return 'Invalid date'
+        console.error('Error formatting date:', error);
+        return 'Invalid date';
     }
 }
 </script>
@@ -122,7 +129,7 @@ const formatDate = (dateString: string) => {
                             <TableBody>
                                 <TableRow v-for="team in teams" :key="team.id">
                                     <TableCell>
-                                        <router-link :to="{ name: 'TeamSettings', params: { id: team.id } }"
+                                        <router-link :to="{ name: 'TeamSettings', params: { id: String(team.id) } }"
                                             class="font-medium hover:underline flex items-center gap-2">
                                             {{ team.name }}
                                         </router-link>
@@ -135,7 +142,7 @@ const formatDate = (dateString: string) => {
                                             <Tooltip>
                                                 <TooltipTrigger asChild>
                                                     <Button variant="ghost" size="icon"
-                                                        @click="router.push({ name: 'TeamSettings', params: { id: team.id } })">
+                                                        @click="router.push({ name: 'TeamSettings', params: { id: String(team.id) } })">
                                                         <Settings class="h-4 w-4" />
                                                     </Button>
                                                 </TooltipTrigger>
