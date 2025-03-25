@@ -86,18 +86,6 @@ const confirmDelete = async () => {
         await loadUsers(true);
         showDeleteDialog.value = false;
         userToDelete.value = null;
-        toast({
-            title: 'Success',
-            description: 'User deleted successfully.',
-            variant: 'default',
-        });
-    } else {
-        // Show error toast
-        toast({
-            title: 'Error',
-            description: result.error?.message || 'Failed to delete user.',
-            variant: 'destructive',
-        });
     }
 }
 
@@ -119,18 +107,6 @@ const toggleUserStatus = async (user: User) => {
     if (result.success) {
         // Refresh the users list to ensure we have the latest data
         await loadUsers(true);
-        toast({
-            title: 'Success',
-            description: `User ${user.full_name}'s status updated successfully.`,
-            variant: 'default',
-        });
-    } else {
-        // Show error toast
-        toast({
-            title: 'Error',
-            description: result.error?.message || 'Failed to update user status.',
-            variant: 'destructive',
-        });
     }
 }
 
@@ -158,18 +134,6 @@ const confirmEdit = async () => {
         await loadUsers(true);
         showEditDialog.value = false;
         userToEdit.value = null;
-        toast({
-            title: 'Success',
-            description: 'User updated successfully.',
-            variant: 'default',
-        });
-    } else {
-        // Show error toast
-        toast({
-            title: 'Error',
-            description: result.error?.message || 'Failed to update user.',
-            variant: 'destructive',
-        });
     }
 }
 
