@@ -9,6 +9,7 @@ import {
   type UpdateTeamRequest,
 } from "@/api/teams";
 import type { Source } from "@/api/sources";
+import { reactive } from "vue";
 import type { 
   APIErrorResponse, 
   isSuccessResponse 
@@ -50,6 +51,24 @@ export const useTeamsStore = defineStore("teams", () => {
   // Get team sources helper
   const getTeamSources = computed(() => (teamId: number) => {
     return state.data.value.teamSourcesMap?.[teamId] || [];
+  });
+  
+  // Return teams with default values for empty fields
+  const getTeamsWithDefaults = computed(() => {
+    return teams.value.map(team => ({
+      ...team,
+      name: team.name || `Team ${team.id}`,
+      description: team.description || '',
+      memberCount: team.member_count || 0
+    }));
+  });
+  
+  // Get the last created team (most recent by created_at date)
+  const getLastCreatedTeam = computed(() => {
+    if (!teams.value.length) return null;
+    return [...teams.value].sort((a, b) => 
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    )[0];
   });
 
   async function loadTeams(forceReload = false) {
@@ -199,14 +218,27 @@ export const useTeamsStore = defineStore("teams", () => {
     });
   }
 
+  // Store team members in state
+  const teamMembersMap = reactive(new Map<number, TeamMember[]>());
+  
+  // Get team members by team ID
+  const getTeamMembersByTeamId = computed(() => (teamId: number) => {
+    return teamMembersMap.get(teamId) || [];
+  });
+
   async function listTeamMembers(teamId: number) {
     return await state.withLoading(`listTeamMembers-${teamId}`, async () => {
       try {
         const response = await teamsApi.listTeamMembers(teamId);
         // Ensure we return the array of team members from the data property
+        const members = response.status === 'success' ? response.data : [];
+        
+        // Store in our map for later use
+        teamMembersMap.set(teamId, members);
+        
         return { 
           success: true, 
-          data: response.status === 'success' ? response.data : [] 
+          data: members
         };
       } catch (error) {
         return state.handleError(error as Error, `listTeamMembers-${teamId}`);
@@ -275,6 +307,14 @@ export const useTeamsStore = defineStore("teams", () => {
     });
   }
 
+  // Store team sources in state
+  const teamSourcesMap = reactive(new Map<number, Source[]>());
+  
+  // Get team sources by team ID
+  const getTeamSourcesByTeamId = computed(() => (teamId: number) => {
+    return teamSourcesMap.get(teamId) || [];
+  });
+
   async function listTeamSources(teamId: number) {
     return await state.withLoading(`listTeamSources-${teamId}`, async () => {
       try {
@@ -283,7 +323,10 @@ export const useTeamsStore = defineStore("teams", () => {
         // Get the sources array from the response
         const sources = response.status === 'success' ? response.data : [];
         
-        // Cache the sources in the teamSourcesMap
+        // Cache the sources in our maps
+        teamSourcesMap.set(teamId, sources);
+        
+        // Also keep the old cache for backward compatibility
         state.data.value.teamSourcesMap = {
           ...state.data.value.teamSourcesMap,
           [teamId]: sources
@@ -385,6 +428,10 @@ export const useTeamsStore = defineStore("teams", () => {
     // Getters
     getTeamById: (id: number) => getTeamById.value(id),
     getTeamSources: (teamId: number) => getTeamSources.value(teamId),
+    getTeamMembersByTeamId: (teamId: number) => getTeamMembersByTeamId.value(teamId),
+    getTeamSourcesByTeamId: (teamId: number) => getTeamSourcesByTeamId.value(teamId),
+    getTeamsWithDefaults: () => getTeamsWithDefaults.value,
+    getLastCreatedTeam: () => getLastCreatedTeam.value,
     
     // Actions
     loadTeams,

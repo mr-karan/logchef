@@ -59,6 +59,11 @@ export const useSourcesStore = defineStore("sources", () => {
     teamSources.value.find(source => source.id === id)
   );
   
+  // Source stats getter
+  const getSourceStatsById = computed(() => (id: number) =>
+    sourceStats.value[id.toString()]
+  );
+  
   // Track validated connections
   const validatedConnections = reactive(new Set<string>());
   
@@ -451,6 +456,7 @@ export const useSourcesStore = defineStore("sources", () => {
     // Getters
     getSourceById,
     getTeamSourceById,
+    getSourceStatsById: (id: number) => getSourceStatsById.value(id),
     isConnectionValidated,
 
     // Actions
