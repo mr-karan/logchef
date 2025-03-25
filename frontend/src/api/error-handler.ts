@@ -51,6 +51,17 @@ export function formatErrorMessage(error: unknown): string {
 }
 
 /**
+ * Parse error to get both title and message
+ */
+export function parseError(error: unknown): { title: string; message: string } {
+  const errorType = getErrorType(error);
+  const title = formatErrorTypeToTitle(errorType);
+  const message = formatErrorMessage(error);
+  
+  return { title, message };
+}
+
+/**
  * Gets the error type from an error object
  */
 export function getErrorType(error: unknown): string {
