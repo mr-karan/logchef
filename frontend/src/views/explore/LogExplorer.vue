@@ -1538,7 +1538,7 @@ onBeforeUnmount(() => {
 
         <!-- Query parameters with more compact styling -->
         <div class="flex items-center gap-1">
-          <DateTimePicker v-model="dateRange" class="h-8 w-[280px]" />
+          <DateTimePicker v-model="dateRange" class="h-8" />
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
