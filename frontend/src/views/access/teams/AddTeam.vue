@@ -74,35 +74,28 @@ const showDialog = ref(false)
 const { isLoading, error: formError } = storeToRefs(teamsStore)
 
 const handleSubmit = async () => {
-    await teamsStore.execute(
-        () => teamsStore.createTeam({
-            name: teamName.value,
-            description: description.value
-        }),
-        {
-            successMessage: 'Team created successfully',
-            onSuccess: async (result) => {
-                // Reset form
-                teamName.value = ''
-                description.value = ''
-                showDialog.value = false
+    const result = await teamsStore.createTeam({
+        name: teamName.value,
+        description: description.value
+    })
+    
+    if (result.success) {
+        // Reset form
+        teamName.value = ''
+        description.value = ''
+        showDialog.value = false
 
-                // Force reload teams to ensure we have the latest data
-                await teamsStore.execute(
-                    () => teamsStore.loadTeams(true),
-                    { showToast: false }
-                )
+        // Force reload teams to ensure we have the latest data
+        await teamsStore.loadTeams(true)
 
-                // Get the newly created team ID from the result or from the store
-                const newTeamId = result?.data?.id || (teamsStore.teams.length > 0
-                    ? teamsStore.teams[teamsStore.teams.length - 1].id
-                    : undefined)
+        // Get the newly created team ID from the result or from the store
+        const newTeamId = result?.data?.id || (teamsStore.teams.length > 0
+            ? teamsStore.teams[teamsStore.teams.length - 1].id
+            : undefined)
 
-                // Emit event to refresh teams list with the new team ID
-                emit('team-created', newTeamId)
-            }
-        }
-    )
+        // Emit event to refresh teams list with the new team ID
+        emit('team-created', newTeamId)
+    }
 }
 </script>
 
