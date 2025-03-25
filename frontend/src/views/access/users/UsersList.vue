@@ -140,10 +140,10 @@ const columns: ColumnDef<User>[] = [
 const searchQuery = ref('')
 
 const filteredUsers = computed(() => {
-    if (!searchQuery.value) return usersStore.users || []
+    if (!searchQuery.value) return usersStore.users.value || []
 
     const query = searchQuery.value.toLowerCase()
-    return (usersStore.users || []).filter(user =>
+    return (usersStore.users.value || []).filter(user =>
         user.full_name.toLowerCase().includes(query) ||
         user.email.toLowerCase().includes(query)
     )
