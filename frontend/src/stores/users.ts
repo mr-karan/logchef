@@ -103,8 +103,9 @@ export const useUsersStore = defineStore("users", () => {
         
         // Check if response contains user data in the data property
         if (response.status === 'success' && response.data) {
-          // Add the new user to the beginning of the users array
-          state.data.value.users = [response.data, ...state.data.value.users];
+          // Create a new array instead of modifying the existing one for better reactivity
+          const newUsers = [response.data, ...(state.data.value.users || [])];
+          state.data.value.users = newUsers;
           console.log("User added to store:", response.data);
         }
         
