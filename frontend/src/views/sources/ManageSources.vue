@@ -30,10 +30,10 @@ import { useSourcesStore } from '@/stores/sources'
 
 const router = useRouter()
 const sourcesStore = useSourcesStore()
-const { execute } = useApiQuery()
+const { error } = storeToRefs(sourcesStore)
 const showDeleteDialog = ref(false)
 const sourceToDelete = ref<Source | null>(null)
-const loadingError = computed(() => sourcesStore.error?.value)
+const loadingError = computed(() => error.value?.loadSources)
 
 const handleDelete = (source: Source) => {
     sourceToDelete.value = source
@@ -41,18 +41,17 @@ const handleDelete = (source: Source) => {
 }
 
 const retryLoading = async () => {
-    await sourcesStore.loadSources();
+    await sourcesStore.loadSources()
 }
 
 const confirmDelete = async () => {
     if (!sourceToDelete.value) return
 
-    const result = await sourcesStore.deleteSource(sourceToDelete.value.id)
+    await sourcesStore.deleteSource(sourceToDelete.value.id)
     
-    if (result.success) {
-        showDeleteDialog.value = false
-        sourceToDelete.value = null
-    }
+    // Reset UI state - store handles success/error
+    showDeleteDialog.value = false
+    sourceToDelete.value = null
 }
 
 onMounted(async () => {
@@ -60,9 +59,8 @@ onMounted(async () => {
     await sourcesStore.hydrate()
 })
 
-const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString()
-}
+// Import formatDate from utils
+import { formatDate } from '@/utils/format'
 </script>
 
 <template>

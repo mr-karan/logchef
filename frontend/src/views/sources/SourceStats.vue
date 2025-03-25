@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive, watch, computed } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useToast } from '@/components/ui/toast'
-import { useApiQuery } from '@/composables/useApiQuery'
 import ErrorAlert from '@/components/ui/ErrorAlert.vue'
 import { useRoute } from 'vue-router'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -9,22 +8,38 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { useSourcesStore } from '@/stores/sources'
-import { type SourceStats } from '@/api/sources'
+import { storeToRefs } from 'pinia'
 
 const sourcesStore = useSourcesStore()
 const { toast } = useToast()
-const { execute } = useApiQuery()
 const route = useRoute()
 const selectedSourceId = ref<string>('')
-const stats = reactive<{
-  tableStats: SourceStats['table_stats'] | null
-  columnStats: SourceStats['column_stats'] | null
-}>({
-  tableStats: null,
-  columnStats: null,
+
+// Get reactive state from the store
+const { loadingStates, error: storeError } = storeToRefs(sourcesStore)
+
+// Computed properties to reactively access store state
+const isLoadingStats = computed(() => 
+  sourcesStore.isLoadingOperation(`getSourceStats-${selectedSourceId.value}`)
+)
+
+const statsError = computed(() => {
+  if (storeError.value && selectedSourceId.value) {
+    return storeError.value.getSourceStats?.[selectedSourceId.value] || null
+  }
+  return null
 })
-const isLoadingStats = ref(false)
-const statsError = ref<string | null>(null)
+
+// Computed properties for stats data
+const stats = computed(() => {
+  if (!selectedSourceId.value) return { tableStats: null, columnStats: null }
+  
+  const sourceStats = sourcesStore.getSourceStatsById(parseInt(selectedSourceId.value))
+  return {
+    tableStats: sourceStats?.table_stats || null,
+    columnStats: sourceStats?.column_stats || null
+  }
+})
 
 // Fetch all sources on component mount
 onMounted(async () => {
@@ -59,25 +74,7 @@ const fetchSourceStats = async () => {
     return
   }
 
-  isLoadingStats.value = true
-  statsError.value = null
-
-  try {
-    const result = await sourcesStore.getSourceStats(parseInt(selectedSourceId.value));
-    
-    if (result.success && result.data) {
-      stats.tableStats = result.data.table_stats
-      stats.columnStats = result.data.column_stats
-      statsError.value = null
-    } else if (result.error) {
-      statsError.value = result.error.message
-    }
-  } catch (error) {
-    console.error("Error in fetchSourceStats:", error)
-    statsError.value = error instanceof Error ? error.message : 'Unknown error occurred'
-  } finally {
-    isLoadingStats.value = false
-  }
+  await sourcesStore.getSourceStats(parseInt(selectedSourceId.value))
 }
 </script>
 

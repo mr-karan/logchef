@@ -73,92 +73,30 @@ const showDialog = ref(false)
 
 const { isLoading, error: formError } = storeToRefs(teamsStore)
 
-const handleSubmit = async () => {
-    if (!teamName.value.trim()) {
-        return // Let the store handle validation errors
-    }
+const isFormValid = computed(() => {
+    return !!teamName.value.trim()
+})
 
-    const result = await teamsStore.createTeam({
+const handleSubmit = async () => {
+    if (!isFormValid.value) return
+    
+    await teamsStore.createTeam({
         name: teamName.value,
         description: description.value
     })
     
-    if (result.success) {
+    // Check for success through absence of error
+    if (!teamsStore.error?.createTeam) {
         // Reset form
         teamName.value = ''
         description.value = ''
         showDialog.value = false
-
-        // Force reload teams to ensure we have the latest data
-        await teamsStore.loadTeams(true)
-
-        // Get the newly created team ID from the result or from the store
-        const newTeamId = result?.data?.id || (teamsStore.teams.length > 0
-            ? teamsStore.teams[teamsStore.teams.length - 1].id
-            : undefined)
-
-        // Emit event to refresh teams list with the new team ID
-        emit('team-created', newTeamId)
+        
+        // Emit event to notify parent component
+        const lastCreatedTeam = teamsStore.getLastCreatedTeam()
+        emit('team-created', lastCreatedTeam?.id)
     }
 }
 </script>
 
-<style scoped>
-.add-team {
-    max-width: 600px;
-    margin: 2rem auto;
-    padding: 1rem;
-}
-
-.form-group {
-    margin-bottom: 1rem;
-}
-
-.form-group label {
-    display: block;
-    margin-bottom: 0.5rem;
-}
-
-.form-control {
-    width: 100%;
-    padding: 0.5rem;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-}
-
-.btn {
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-.btn-primary {
-    background-color: #4CAF50;
-    color: white;
-}
-
-.btn-primary:hover {
-    background-color: #45a049;
-}
-
-.loader {
-    width: 16px;
-    height: 16px;
-    border: 2px solid #FFF;
-    border-bottom-color: transparent;
-    border-radius: 50%;
-    display: inline-block;
-    animation: rotation 1s linear infinite;
-}
-
-@keyframes rotation {
-    0% {
-        transform: rotate(0deg);
-    }
-
-    100% {
-        transform: rotate(360deg);
-    }
-}
-</style>
+<!-- Removed unnecessary CSS styles -->
