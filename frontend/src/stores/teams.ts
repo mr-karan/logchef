@@ -79,8 +79,8 @@ export const useTeamsStore = defineStore("teams", () => {
         }
         
         const response = await teamsApi.listUserTeams();
-        // Handle APIListResponse
-        const teamsData = isSuccessResponse(response) ? response.data ?? [] : [];
+        // Directly access the data array from successful response
+        const teamsData = response.status === 'success' ? response.data || [] : [];
         
         if (teamsData.length > 0) {
           state.data.value.teams = teamsData.map((team) => ({
@@ -101,8 +101,7 @@ export const useTeamsStore = defineStore("teams", () => {
         
         return { 
           success: true, 
-          data: state.data.value.teams,
-          count: isSuccessResponse(response) && 'count' in response ? response.count : undefined
+          data: state.data.value.teams
         };
       } catch (error) {
         return handleError(error as Error, 'loadTeams');

@@ -81,16 +81,15 @@ export const useSourcesStore = defineStore("sources", () => {
       state.error.value = null; // Reset error before loading
       try {
         const response = await sourcesApi.listSources();
-        // Handle APIListResponse
-        const sourcesData = isSuccessResponse(response) ? response.data ?? [] : [];
+        // Directly access the data array from successful response
+        const sourcesData = response.status === 'success' ? response.data || [] : [];
         
         state.data.value.sources = sourcesData;
         isHydrated.value = true;
         
         return { 
           success: true, 
-          data: sourcesData,
-          count: isSuccessResponse(response) && 'count' in response ? response.count : undefined
+          data: sourcesData
         };
       } catch (error) {
         return handleError(error as Error, 'loadSources');
