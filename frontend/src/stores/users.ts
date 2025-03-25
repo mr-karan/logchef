@@ -21,8 +21,11 @@ export const useUsersStore = defineStore("users", () => {
   // Use our API query composable for loading state only
   const { isLoading: apiLoading } = useApiQuery();
 
-  // Computed properties
-  const users = computed(() => state.data.value.users);
+  // Add debugging to see what we're working with
+  console.log("State data structure:", state.data.value);
+  
+  // Computed properties - use non-null assertion to avoid undefined
+  const users = computed(() => state.data.value.users || []);
 
   // Helper function to handle errors
   function handleError(error: Error | APIErrorResponse, operation: string) {

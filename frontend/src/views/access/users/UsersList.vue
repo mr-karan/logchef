@@ -143,13 +143,16 @@ const filteredUsers = computed(() => {
     // Debug the users being accessed
     console.log("Computing filteredUsers. Current users:", usersStore.users.value);
     
-    if (!searchQuery.value) return usersStore.users.value || []
+    // Always ensure we have an array to work with
+    const users = usersStore.users.value || [];
+    
+    if (!searchQuery.value) return users;
 
-    const query = searchQuery.value.toLowerCase()
-    return (usersStore.users.value || []).filter(user =>
-        user.full_name.toLowerCase().includes(query) ||
-        user.email.toLowerCase().includes(query)
-    )
+    const query = searchQuery.value.toLowerCase();
+    return users.filter(user =>
+        user?.full_name?.toLowerCase().includes(query) ||
+        user?.email?.toLowerCase().includes(query)
+    );
 })
 
 const table = useVueTable({
@@ -221,9 +224,11 @@ const confirmEdit = async () => {
     }
 }
 
-onMounted(() => {
+onMounted(async () => {
     console.log("Component mounted, loading users...");
-    loadUsers();
+    const result = await loadUsers();
+    console.log("User loading result:", result);
+    console.log("Users after loading:", usersStore.users.value);
 });
 
 // Add this watch to debug users data
@@ -250,7 +255,7 @@ watch(() => usersStore.users.value, (newUsers) => {
                 <div v-if="isLoading" class="text-center py-4">
                     Loading users...
                 </div>
-                <div v-else-if="!filteredUsers || filteredUsers.length === 0" class="rounded-lg border p-4 text-center">
+                <div v-else-if="!filteredUsers.length" class="rounded-lg border p-4 text-center">
                     <p class="text-muted-foreground mb-4">No users found</p>
                     <AddUser>
                         <Button>
