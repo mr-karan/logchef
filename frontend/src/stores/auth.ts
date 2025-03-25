@@ -40,7 +40,8 @@ export const useAuthStore = defineStore("auth", () => {
     console.log("Initializing auth store...");
     state.data.value.isInitializing = true;
 
-    const result = await execute(() => authApi.getSession(), {
+    const result = await state.callApi({
+      apiCall: () => authApi.getSession(),
       showToast: false,
       onSuccess: (response) => {
         state.data.value.user = response.user;
@@ -85,7 +86,8 @@ export const useAuthStore = defineStore("auth", () => {
 
   // Logout user
   async function logout() {
-    const result = await execute(() => authApi.logout(), {
+    const result = await state.callApi({
+      apiCall: () => authApi.logout(),
       showToast: false
     });
 

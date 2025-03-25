@@ -79,21 +79,16 @@ export const useSourcesStore = defineStore("sources", () => {
   async function loadSources() {
     return await state.withLoading("loadSources", async () => {
       state.error.value = null; // Reset error before loading
-      try {
-        const response = await sourcesApi.listSources();
-        // Directly access the data array from successful response
-        const sourcesData = response.status === 'success' ? response.data || [] : [];
-        
-        state.data.value.sources = sourcesData;
-        isHydrated.value = true;
-        
-        return { 
-          success: true, 
-          data: sourcesData
-        };
-      } catch (error) {
-        return handleError(error as Error, 'loadSources');
-      }
+      return await state.callApi({
+        apiCall: () => sourcesApi.listSources(),
+        operationKey: "loadSources",
+        onSuccess: (response) => {
+          // Directly access the data array from successful response
+          const sourcesData = response || [];
+          state.data.value.sources = sourcesData;
+          isHydrated.value = true;
+        }
+      });
     });
   }
   
@@ -215,8 +210,10 @@ export const useSourcesStore = defineStore("sources", () => {
 
   async function createSource(payload: CreateSourcePayload) {
     const result = await state.withLoading("createSource", async () => {
-      return await execute(() => sourcesApi.createSource(payload), {
+      return await state.callApi({
+        apiCall: () => sourcesApi.createSource(payload),
         successMessage: "Source created successfully",
+        operationKey: "createSource"
       });
     });
 
@@ -230,8 +227,10 @@ export const useSourcesStore = defineStore("sources", () => {
 
   async function deleteSource(id: number) {
     const result = await state.withLoading(`deleteSource-${id}`, async () => {
-      return await execute(() => sourcesApi.deleteSource(id), {
+      return await state.callApi({
+        apiCall: () => sourcesApi.deleteSource(id),
         successMessage: "Source deleted successfully",
+        operationKey: `deleteSource-${id}`,
         onSuccess: () => {
           // Remove from local state
           state.data.value.sources = state.data.value.sources.filter(
@@ -324,15 +323,14 @@ export const useSourcesStore = defineStore("sources", () => {
     const connectionKey = `${connectionInfo.host}-${connectionInfo.database}-${connectionInfo.table_name}`;
     
     return await state.withLoading("validateSourceConnection", async () => {
-      const result = await execute(() => sourcesApi.validateSourceConnection(connectionInfo), {
+      return await state.callApi({
+        apiCall: () => sourcesApi.validateSourceConnection(connectionInfo),
+        operationKey: "validateSourceConnection",
         showToast: true,
+        onSuccess: () => {
+          validatedConnections.add(connectionKey);
+        }
       });
-      
-      if (result.success) {
-        validatedConnections.add(connectionKey);
-      }
-      
-      return result;
     });
   }
   
@@ -353,31 +351,15 @@ export const useSourcesStore = defineStore("sources", () => {
     delete state.data.value.sourceStats[sourceId.toString()];
   }
   
-  function handleError(error: Error | APIErrorResponse, operation: string) {
-    console.error(`[${operation} Error]`, error);
-    
-    const errorMessage = error instanceof Error ? error.message : error.message;
-    const errorType = error instanceof Error ? 'UnknownError' : (error.error_type || 'UnknownError');
-    const errorData = error instanceof Error ? undefined : error.data;
-    
-    state.error.value = {
-      message: errorMessage,
-      error_type: errorType,
-      data: errorData,
-      operation
-    };
-    
-    return { 
-      success: false,
-      error: state.error.value
-    };
-  }
+  // Use the centralized error handler from base store
   
   // Update source
   async function updateSource(id: number, payload: Partial<Source>) {
     return await state.withLoading(`updateSource-${id}`, async () => {
-      return await execute(() => sourcesApi.updateSource(id, payload), {
+      return await state.callApi({
+        apiCall: () => sourcesApi.updateSource(id, payload),
         successMessage: "Source updated successfully",
+        operationKey: `updateSource-${id}`,
         onSuccess: (data) => {
           // Update in local state
           const index = sources.value.findIndex(s => s.id === id);
@@ -403,8 +385,7 @@ export const useSourcesStore = defineStore("sources", () => {
           
           // Invalidate cache for this source
           invalidateSourceCache(id);
-        },
-        onError: (error) => handleError(error, `updateSource-${id}`),
+        }
       });
     });
   }
@@ -451,7 +432,6 @@ export const useSourcesStore = defineStore("sources", () => {
     getSource,
     validateSourceConnection,
     invalidateSourceCache,
-    handleError,
     hydrate,
   };
 });
