@@ -22,12 +22,13 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
   callApi: <R>(options: {
     apiCall: () => Promise<any>;
     operationKey?: string;
-    onSuccess?: (data: R) => void;
+    onSuccess?: (data: R | null) => void;
     onError?: (error: APIErrorResponse) => void;
     successMessage?: string;
     errorMessage?: string;
     showToast?: boolean;
-  }) => Promise<{ success: boolean; data?: R; error?: APIErrorResponse }>;
+    defaultData?: R;
+  }) => Promise<{ success: boolean; data?: R | null; error?: APIErrorResponse }>;
 } {
   const data = ref(initialState) as Ref<T>;
   const error = ref<APIErrorResponse | null>(null);
@@ -51,17 +52,19 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
   async function callApi<R>(options: {
     apiCall: () => Promise<any>;
     operationKey?: string;
-    onSuccess?: (data: R) => void;
+    onSuccess?: (data: R | null) => void;
     onError?: (error: APIErrorResponse) => void;
     successMessage?: string;
     errorMessage?: string;
     showToast?: boolean;
+    defaultData?: R;
   }) {
     const executeApiCall = async () => {
       const result = await execute<R>(options.apiCall, {
         successMessage: options.successMessage,
         errorMessage: options.errorMessage,
         showToast: options.showToast,
+        defaultData: options.defaultData,
         onSuccess: options.onSuccess,
         onError: (err) => {
           error.value = err;

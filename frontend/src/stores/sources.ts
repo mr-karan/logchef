@@ -55,8 +55,9 @@ export const useSourcesStore = defineStore("sources", () => {
     return await state.withLoading("loadSources", async () => {
       return await execute(() => sourcesApi.listSources(), {
         onSuccess: (data) => {
-          state.data.value.sources = data;
+          state.data.value.sources = data ?? [];
         },
+        defaultData: [],
         showToast: false,
       });
     });
@@ -66,8 +67,9 @@ export const useSourcesStore = defineStore("sources", () => {
     return await state.withLoading(`loadTeamSources-${teamId}`, async () => {
       return await execute(() => sourcesApi.listTeamSources(teamId), {
         onSuccess: (data) => {
-          state.data.value.teamSources = data;
+          state.data.value.teamSources = data ?? [];
         },
+        defaultData: [],
         showToast: false,
       });
     });

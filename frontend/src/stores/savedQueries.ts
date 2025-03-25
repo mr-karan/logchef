@@ -101,8 +101,9 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
       return await execute(() => savedQueriesApi.listQueries(teamId), {
         onSuccess: (response) => {
           // Handle null data (no queries available)
-          data.value.queries = response || [];
-        }
+          data.value.queries = response ?? [];
+        },
+        defaultData: []
       });
     });
   }
@@ -112,8 +113,9 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
       return await execute(() => savedQueriesApi.listSourceQueries(sourceId, teamId), {
         onSuccess: (response) => {
           // Handle null data (no queries available)
-          data.value.queries = response || [];
-        }
+          data.value.queries = response ?? [];
+        },
+        defaultData: []
       });
     });
   }
@@ -123,8 +125,9 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
       return await execute(() => savedQueriesApi.listTeamSourceQueries(teamId, sourceId), {
         onSuccess: (response) => {
           // Update the store's state with the returned queries
-          data.value.queries = response || [];
-        }
+          data.value.queries = response ?? [];
+        },
+        defaultData: []
       });
     });
   }

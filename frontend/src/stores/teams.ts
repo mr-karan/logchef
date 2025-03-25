@@ -42,19 +42,24 @@ export const useTeamsStore = defineStore("teams", () => {
     return await state.withLoading('loadTeams', async () => {
       return await execute(() => teamsApi.listUserTeams(), {
         onSuccess: (response) => {
-          state.data.value.teams = response.map((team) => ({
-            ...team,
-            memberCount: team.member_count ?? 0,
-          }));
-  
-          // Set current team if none is selected and we have teams
-          if (
-            !state.data.value.currentTeamId &&
-            state.data.value.teams.length > 0
-          ) {
-            state.data.value.currentTeamId = state.data.value.teams[0].id;
+          if (response) {
+            state.data.value.teams = response.map((team) => ({
+              ...team,
+              memberCount: team.member_count ?? 0,
+            }));
+    
+            // Set current team if none is selected and we have teams
+            if (
+              !state.data.value.currentTeamId &&
+              state.data.value.teams.length > 0
+            ) {
+              state.data.value.currentTeamId = state.data.value.teams[0].id;
+            }
+          } else {
+            state.data.value.teams = [];
           }
         },
+        defaultData: [],
         showToast: true,
       });
     });
