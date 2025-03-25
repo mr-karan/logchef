@@ -68,16 +68,16 @@ async function copyToClipboard() {
 <template>
     <div class="relative">
         <!-- Action buttons on the left -->
-        <div class="absolute left-1 top-1 flex gap-1 z-10">
+        <div class="absolute left-2 top-2 flex gap-2 z-10">
             <!-- Copy button -->
             <Button variant="secondary" size="sm" @click.stop.prevent="copyToClipboard" :disabled="isCopied"
-                class="h-5 px-1 shadow-sm transition-all duration-200 hover:shadow active:scale-95 cursor-pointer text-xs"
+                class="h-5 px-2.5 shadow-sm transition-all duration-200 hover:shadow active:scale-95 cursor-pointer text-xs"
                 :class="{
                     'bg-green-500/10 text-green-600 hover:bg-green-500/20': isCopied,
                     'hover:bg-muted': !isCopied
                 }">
-                <Check v-if="isCopied" class="h-3 w-3 mr-0.5 transition-transform duration-200 animate-in zoom-in" />
-                <Copy v-else class="h-3 w-3 mr-0.5" />
+                <Check v-if="isCopied" class="h-3 w-3 mr-1 transition-transform duration-200 animate-in zoom-in" />
+                <Copy v-else class="h-3 w-3 mr-1" />
                 {{ isCopied ? 'Copied!' : 'Copy' }}
             </Button>
 
@@ -93,9 +93,7 @@ async function copyToClipboard() {
         <div class="relative">
             <div class="border rounded-sm bg-muted/5 mt-0.5 relative w-full overflow-hidden">
                 <pre :class="{ 'max-h-[500px]': !isExpanded }"
-                    class="text-xs font-mono pt-8 px-1.5 overflow-y-auto overflow-x-auto whitespace-pre">
-                    <code v-html="formatJSON(value)" class="whitespace-pre" contenteditable="plaintext-only" spellcheck="false" />
-                </pre>
+                    class="text-xs font-mono pt-8 px-1.5 overflow-y-auto overflow-x-auto whitespace-pre"><code v-html="formatJSON(value)" class="whitespace-pre" contenteditable="plaintext-only" spellcheck="false" /></pre>
             </div>
 
             <!-- Expand/collapse overlay -->

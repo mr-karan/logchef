@@ -186,7 +186,7 @@ onMounted(() => {
 
     // Set explicit column sizes for better horizontal scrolling
     const initialSizes: ColumnSizing = {}
-    
+
     props.columns.forEach(column => {
         const columnId = column.id || ''
         if (columnId === timestampFieldName.value) {
@@ -203,12 +203,12 @@ onMounted(() => {
             initialSizes[columnId] = 200 // default size for other columns
         }
     })
-    
+
     // Apply the initial sizes - update the state with an object to trigger reactivity
     columnSizing.value = { ...initialSizes }
-    
+
     // Watch for column size changes to adjust table layout as needed
-    watch(columnSizing, () => {}, { deep: true })
+    watch(columnSizing, () => { }, { deep: true })
 })
 </script>
 
@@ -223,23 +223,13 @@ onMounted(() => {
             <div class="flex items-center gap-3">
                 <!-- Timezone toggle -->
                 <div class="flex items-center space-x-1 mr-1">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      class="h-8 px-2 text-xs" 
-                      :class="{'bg-muted': displayTimezone === 'local'}"
-                      @click="displayTimezone = 'local'"
-                    >
-                      Local Time
+                    <Button variant="ghost" size="sm" class="h-8 px-2 text-xs"
+                        :class="{ 'bg-muted': displayTimezone === 'local' }" @click="displayTimezone = 'local'">
+                        Local Time
                     </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      class="h-8 px-2 text-xs" 
-                      :class="{'bg-muted': displayTimezone === 'utc'}"
-                      @click="displayTimezone = 'utc'"
-                    >
-                      UTC
+                    <Button variant="ghost" size="sm" class="h-8 px-2 text-xs"
+                        :class="{ 'bg-muted': displayTimezone === 'utc' }" @click="displayTimezone = 'utc'">
+                        UTC
                     </Button>
                 </div>
 
@@ -263,30 +253,28 @@ onMounted(() => {
             <div v-if="table.getRowModel().rows?.length" class="absolute inset-0">
                 <div class="w-full h-full overflow-auto custom-scrollbar">
                     <div style="min-width: max-content; width: auto;">
-                        <table class="caption-bottom text-sm border-separate border-spacing-0 relative" style="width: auto; table-layout: fixed;">
+                        <table class="caption-bottom text-sm border-separate border-spacing-0 relative"
+                            style="width: auto; table-layout: fixed;">
                             <!-- Enhanced header styling -->
-                        <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
-                            <tr class="border-b border-b-muted-foreground/10">
-                                <th v-for="header in table.getHeaderGroups()[0]?.headers || []" :key="header.id"
-                                    class="h-8 px-3 text-xs font-medium text-left align-middle bg-muted/30 whitespace-nowrap relative sticky top-0 z-20 overflow-hidden"
-                                    :class="[
-                                        { 'font-semibold': header.id === timestampFieldName || header.id === severityFieldName },
-                                        { 'resizing': header.column.getIsResizing() },
-                                        header.column.columnDef.meta?.className
-                                    ]"
-                                    :style="{
+                            <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
+                                <tr class="border-b border-b-muted-foreground/10">
+                                    <th v-for="header in table.getHeaderGroups()[0]?.headers || []" :key="header.id"
+                                        class="h-8 px-3 text-xs font-medium text-left align-middle bg-muted/30 whitespace-nowrap relative sticky top-0 z-20 overflow-hidden"
+                                        :class="[
+                                            { 'font-semibold': header.id === timestampFieldName || header.id === severityFieldName },
+                                            { 'resizing': header.column.getIsResizing() },
+                                            header.column.columnDef.meta?.className
+                                        ]" :style="{
                                         width: header.column.getSize() ? `${header.column.getSize()}px` : '200px',
                                         minWidth: '100px'
                                     }">
-                                    <FlexRender v-if="!header.isPlaceholder" :render="header.column.columnDef.header"
-                                        :props="header.getContext()" />
-                                        
-                                    <div v-if="header.column.getCanResize()"
-                                        :class="[
+                                        <FlexRender v-if="!header.isPlaceholder"
+                                            :render="header.column.columnDef.header" :props="header.getContext()" />
+
+                                        <div v-if="header.column.getCanResize()" :class="[
                                             'resizer',
                                             { 'isResizing': header.column.getIsResizing() }
-                                        ]"
-                                        @mousedown="(e) => {
+                                        ]" @mousedown="(e) => {
                                             try {
                                                 // Get and execute the resize handler
                                                 const handler = header.getResizeHandler();
@@ -294,69 +282,65 @@ onMounted(() => {
                                             } catch (error) {
                                                 console.error('Error in resize handler:', error);
                                             }
-                                            
+
                                             // Prevent the event from bubbling
                                             e.stopPropagation();
-                                        }"
-                                        @touchstart="header.getResizeHandler()"
-                                        @click.stop
-                                    ></div>
-                                </th>
-                            </tr>
-                        </thead>
+                                        }" @touchstart="header.getResizeHandler()" @click.stop></div>
+                                    </th>
+                                </tr>
+                            </thead>
 
-                        <!-- Improved table body styling -->
-                        <tbody class="[&_tr:last-child]:border-0">
-                            <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
-                                <!-- Main Row -->
-                                <tr :data-state="row.getIsSelected() ? 'selected' : undefined"
-                                    @click="(e) => handleRowClick(e, row)" :class="[
-                                        'cursor-pointer hover:bg-muted/50 border-b border-b-muted-foreground/10 transition-colors w-full',
-                                        index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
-                                    ]">
-                                    <td v-for="cell in row.getVisibleCells()" :key="cell.id"
-                                        class="h-auto px-3 py-1.5 align-top group overflow-hidden whitespace-nowrap text-ellipsis font-mono text-[11px] leading-tight"
-                                        :data-column-id="cell.column.id"
-                                        :class="[
-                                            cell.column.columnDef.meta?.className,
-                                            { 'resizing': cell.column.getIsResizing() }
-                                        ]"
-                                        :style="{
+                            <!-- Improved table body styling -->
+                            <tbody class="[&_tr:last-child]:border-0">
+                                <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
+                                    <!-- Main Row -->
+                                    <tr :data-state="row.getIsSelected() ? 'selected' : undefined"
+                                        @click="(e) => handleRowClick(e, row)" :class="[
+                                            'cursor-pointer hover:bg-muted/50 border-b border-b-muted-foreground/10 transition-colors w-full',
+                                            index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5',
+                                            row.getIsExpanded() ? 'bg-primary/5 hover:bg-primary/10 border-primary/10' : ''
+                                        ]">
+                                        <td v-for="cell in row.getVisibleCells()" :key="cell.id"
+                                            class="h-auto px-3 py-1.5 align-top group overflow-hidden whitespace-nowrap text-ellipsis font-mono text-[11px] leading-tight"
+                                            :data-column-id="cell.column.id" :class="[
+                                                cell.column.columnDef.meta?.className,
+                                                { 'resizing': cell.column.getIsResizing() }
+                                            ]" :style="{
                                             width: cell.column.getSize() ? `${cell.column.getSize()}px` : '200px',
                                             minWidth: '100px',
                                             maxWidth: cell.column.getSize() ? `${cell.column.getSize()}px` : '200px',
                                             overflow: 'hidden'
                                         }">
-                                        <div class="flex items-center gap-1 w-full overflow-hidden">
-                                            <!-- Cell Content with improved typography -->
-                                            <span
-                                                v-if="cell.column.id === severityFieldName && getSeverityClasses(cell.getValue(), cell.column.id)"
-                                                :class="getSeverityClasses(cell.getValue(), cell.column.id)"
-                                                class="font-medium px-1.5 py-0.5 rounded text-xs shrink-0">
-                                                {{ cell.getValue() }}
-                                            </span>
-                                            <template v-else>
-                                                <div class="whitespace-nowrap overflow-hidden text-ellipsis w-full">
-                                                    <FlexRender :render="cell.column.columnDef.cell"
-                                                        :props="cell.getContext()" />
-                                                </div>
-                                            </template>
+                                            <div class="flex items-center gap-1 w-full overflow-hidden">
+                                                <!-- Cell Content with improved typography -->
+                                                <span
+                                                    v-if="cell.column.id === severityFieldName && getSeverityClasses(cell.getValue(), cell.column.id)"
+                                                    :class="getSeverityClasses(cell.getValue(), cell.column.id)"
+                                                    class="font-medium px-1.5 py-0.5 rounded text-xs shrink-0">
+                                                    {{ cell.getValue() }}
+                                                </span>
+                                                <template v-else>
+                                                    <div class="whitespace-nowrap overflow-hidden text-ellipsis w-full">
+                                                        <FlexRender :render="cell.column.columnDef.cell"
+                                                            :props="cell.getContext()" />
+                                                    </div>
+                                                </template>
 
-                                        </div>
-                                    </td>
-                                </tr>
+                                            </div>
+                                        </td>
+                                    </tr>
 
-                                <!-- Expanded Row with improved JSON viewer styling -->
-                                <tr v-if="row.getIsExpanded()">
-                                    <td :colspan="row.getVisibleCells().length" class="p-0">
-                                        <div class="p-1 bg-muted/30 border-t border-b border-muted overflow-hidden">
-                                            <JsonViewer :value="row.original" :expanded="false" class="text-xs" />
-                                        </div>
-                                    </td>
-                                </tr>
-                            </template>
-                        </tbody>
-                    </table>
+                                    <!-- Expanded Row with improved JSON viewer styling -->
+                                    <tr v-if="row.getIsExpanded()">
+                                        <td :colspan="row.getVisibleCells().length" class="p-0">
+                                            <div class="p-1 bg-muted/30 border-y border-primary/10 overflow-hidden">
+                                                <JsonViewer :value="row.original" :expanded="false" class="text-xs" />
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -398,7 +382,7 @@ onMounted(() => {
 .log-data-table .custom-scrollbar {
     scrollbar-width: thin;
     scrollbar-color: rgba(155, 155, 155, 0.5) transparent;
-    overflow-x: scroll !important; 
+    overflow-x: scroll !important;
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
     height: 100% !important;
