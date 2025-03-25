@@ -1,6 +1,6 @@
 export interface APISuccessResponse<T> {
   status: "success";
-  data: T;
+  data: T | null;
 }
 
 export interface APIErrorResponse {

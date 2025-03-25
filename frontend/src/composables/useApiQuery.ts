@@ -13,8 +13,9 @@ export function useApiQuery<T>() {
       successMessage?: string;
       errorMessage?: string;
       showToast?: boolean;
-      onSuccess?: (data: T) => void;
+      onSuccess?: (data: T | null) => void;  // Allow null in success handler
       onError?: (error: APIErrorResponse) => void;
+      defaultData?: T;  // New option for fallback data
     }
   ) => {
     isLoading.value = true;
@@ -23,12 +24,17 @@ export function useApiQuery<T>() {
     try {
       const response = await apiCall();
       if (response.status === "success") {
-        data.value = response.data;
+        // Use null-coalescing with optional default
+        const resultData = response.data ?? options?.defaultData ?? null;
+        data.value = resultData;
+        
         if (options?.successMessage && options?.showToast !== false) {
           showSuccessToast(options.successMessage);
         }
-        options?.onSuccess?.(response.data);
-        return { success: true, data: response.data };
+        
+        // Pass null-safe data to success handler
+        options?.onSuccess?.(resultData);
+        return { success: true, data: resultData };
       } else {
         // Handle API error response
         error.value = response as APIErrorResponse;

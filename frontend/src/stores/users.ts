@@ -25,8 +25,9 @@ export const useUsersStore = defineStore("users", () => {
     const result = await state.withLoading('loadUsers', async () => {
       return await execute(() => usersApi.listUsers(), {
         onSuccess: (response) => {
-          state.data.value.users = response;
+          state.data.value.users = response ?? [];
         },
+        defaultData: [],
         showToast: true,
       });
     });
