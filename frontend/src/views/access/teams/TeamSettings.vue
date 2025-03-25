@@ -44,14 +44,61 @@ import { formatDate, formatSourceName } from '@/utils/format'
 const route = useRoute()
 const { toast } = useToast()
 
+// Initialize stores with error handling
+let usersStore, sourcesStore, teamsStore;
+try {
+  usersStore = useUsersStore();
+  sourcesStore = useSourcesStore();
+  teamsStore = useTeamsStore();
+} catch (error) {
+  console.error("Error initializing stores:", error);
+}
+
+// Create fallback objects if stores fail to initialize
+if (!teamsStore) {
+  console.error("Teams store failed to initialize!");
+  teamsStore = {
+    getTeam: async () => ({ success: false }),
+    listTeamMembers: async () => ({ success: false }),
+    listTeamSources: async () => ({ success: false }),
+    isLoading: false,
+    error: null,
+    loadingStates: {},
+    isLoadingOperation: () => false,
+  };
+}
+
+if (!usersStore) {
+  console.error("Users store failed to initialize!");
+  usersStore = {
+    loadUsers: async () => {},
+    getUsersNotInTeam: () => [],
+    users: []
+  };
+}
+
+if (!sourcesStore) {
+  console.error("Sources store failed to initialize!");
+  sourcesStore = {
+    loadSources: async () => {},
+    getSourcesNotInTeam: () => [],
+    sources: []
+  };
+}
+
 const team = ref<Team | null>(null)
 const members = ref<TeamMember[]>([])
 const { isLoading, error: teamError } = storeToRefs(teamsStore)
-const isSaving = computed(() => teamsStore.isLoadingOperation('updateTeam-' + route.params.id) ||
-                            teamsStore.isLoadingOperation('addTeamMember-' + route.params.id) ||
-                            teamsStore.isLoadingOperation('removeTeamMember-' + route.params.id) ||
-                            teamsStore.isLoadingOperation('addTeamSource-' + route.params.id) ||
-                            teamsStore.isLoadingOperation('removeTeamSource-' + route.params.id))
+const isSaving = computed(() => {
+  if (!teamsStore || typeof teamsStore.isLoadingOperation !== 'function') {
+    return false;
+  }
+  return teamsStore.isLoadingOperation('updateTeam-' + route.params.id) ||
+         teamsStore.isLoadingOperation('addTeamMember-' + route.params.id) ||
+         teamsStore.isLoadingOperation('removeTeamMember-' + route.params.id) ||
+         teamsStore.isLoadingOperation('addTeamSource-' + route.params.id) ||
+         teamsStore.isLoadingOperation('removeTeamSource-' + route.params.id);
+})
 
 // Form state
 const name = ref('')
