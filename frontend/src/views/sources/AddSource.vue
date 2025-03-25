@@ -2,6 +2,8 @@
 import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApiQuery } from '@/composables/useApiQuery'
+import { useFormHandling } from '@/composables/useFormHandling'
+import { useConnectionValidation, type ConnectionInfo } from '@/composables/useConnectionValidation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -77,18 +79,13 @@ const showSchema = ref<boolean>(false)
 const metaTSField = ref<string | number>('timestamp')
 const metaSeverityField = ref<string | number>('severity_text')
 
-// Validation state
-const isValidating = ref(false)
-const validationResult = ref<ConnectionValidationResult | null>(null)
-// Compute validation status from store
-const isValidated = computed(() => {
-    if (!host.value || !database.value || !tableName.value) return false;
-    return sourcesStore.isConnectionValidated(
-        String(host.value), 
-        String(database.value), 
-        String(tableName.value)
-    );
-})
+// Use connection validation composable
+const { 
+    isValidating, 
+    validationResult, 
+    isValidated, 
+    validateConnection 
+} = useConnectionValidation()
 
 // Schema preview
 const tableSchema = `CREATE TABLE IF NOT EXISTS {{database_name}}.{{table_name}}
@@ -178,69 +175,45 @@ const submitButtonText = computed(() => {
     return 'Validate & Import'
 })
 
-// Validate connection
-const validateConnection = async () => {
-    if (isValidating.value) return
-    if (!host.value || !database.value) {
-        toast({
-            title: 'Error',
-            description: 'Please fill in host and database fields',
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
-        return
+// Validate connection handler
+const handleValidateConnection = async () => {
+    // Prepare connection info
+    const connectionInfo: ConnectionInfo = {
+        host: String(host.value),
+        username: enableAuth.value ? String(username.value) : '',
+        password: enableAuth.value ? String(password.value) : '',
+        database: String(database.value),
+        table_name: String(tableName.value),
     }
-
-    isValidating.value = true
-    validationResult.value = null
-
-    try {
-        // Prepare request payload
-        const payload: ValidateConnectionRequest = {
-            host: String(host.value),
-            username: enableAuth.value ? String(username.value) : '',
-            password: enableAuth.value ? String(password.value) : '',
-            database: String(database.value),
-            table_name: String(tableName.value),
+    
+    // Add timestamp and severity fields if connecting to existing table
+    if (tableMode.value === 'connect' && tableName.value) {
+        connectionInfo.timestamp_field = String(metaTSField.value)
+        // Only add severity field if it's not empty
+        if (metaSeverityField.value) {
+            connectionInfo.severity_field = String(metaSeverityField.value)
         }
-
-        // Add timestamp and severity fields if connecting to existing table
-        if (tableMode.value === 'connect' && tableName.value) {
-            payload.timestamp_field = String(metaTSField.value)
-            // Only add severity field if it's not empty
-            if (metaSeverityField.value) {
-                payload.severity_field = String(metaSeverityField.value)
-            }
-        }
-
-        // Use the sourcesStore with execute pattern
-        await execute(() => sourcesStore.validateSourceConnection(payload), {
-            onSuccess: (data) => {
-                if (data) {
-                    validationResult.value = data;
-                    // Success toast is shown for confirmation to user
-                    toast({
-                        title: 'Success',
-                        description: data.message,
-                        variant: 'default',
-                        duration: TOAST_DURATION.SUCCESS,
-                    });
-                }
-            }
-        });
-    } catch (error) {
-        if (error instanceof Error) {
-            sourcesStore.handleError(error, 'validateConnection');
-        }
-        console.error('Validation exception:', error);
-    } finally {
-        isValidating.value = false;
     }
+    
+    await validateConnection(connectionInfo)
 }
 
-const handleSubmit = async () => {
-    if (isSubmitting.value) return
+// Use form handling composable
+const { isSubmitting, formError, handleSubmit } = useFormHandling(
+    (payload: CreateSourcePayload) => sourcesStore.createSource(payload),
+    {
+        successMessage: 'Source created successfully',
+        onSuccess: () => {
+            // Redirect to sources list
+            router.push({ name: 'Sources' })
+        },
+        onError: (error) => {
+            sourcesStore.handleError(error, 'createSource')
+        }
+    }
+)
 
+const submitForm = async () => {
     if (!isValid.value) {
         toast({
             title: 'Error',
@@ -253,42 +226,27 @@ const handleSubmit = async () => {
 
     // For "Connect Existing Table" mode, validate first if not already validated
     if (!createTable.value && !isValidated.value) {
-        await validateConnection()
+        await handleValidateConnection()
         // If validation failed, don't proceed
         if (!isValidated.value) return
     }
 
-    isSubmitting.value = true
-
-    try {
-        await execute(() => sourcesStore.createSource({
-            name: String(sourceName.value),
-            meta_is_auto_created: createTable.value,
-            meta_ts_field: String(metaTSField.value),
-            meta_severity_field: metaSeverityField.value ? String(metaSeverityField.value) : "",
-            connection: {
-                host: String(host.value),
-                username: enableAuth.value ? String(username.value) : '',
-                password: enableAuth.value ? String(password.value) : '',
-                database: String(database.value),
-                table_name: String(tableName.value),
-            },
-            description: String(description.value),
-            ttl_days: Number(ttlDays.value),
-            schema: createTable.value ? actualSchema.value : undefined,
-        } as CreateSourcePayload), {
-            onSuccess: () => {
-                // Redirect to sources list
-                router.push({ name: 'Sources' })
-            }
-        })
-    } catch (error) {
-        if (error instanceof Error) {
-            sourcesStore.handleError(error, 'createSource');
-        }
-    } finally {
-        isSubmitting.value = false
-    }
+    await handleSubmit({
+        name: String(sourceName.value),
+        meta_is_auto_created: createTable.value,
+        meta_ts_field: String(metaTSField.value),
+        meta_severity_field: metaSeverityField.value ? String(metaSeverityField.value) : "",
+        connection: {
+            host: String(host.value),
+            username: enableAuth.value ? String(username.value) : '',
+            password: enableAuth.value ? String(password.value) : '',
+            database: String(database.value),
+            table_name: String(tableName.value),
+        },
+        description: String(description.value),
+        ttl_days: Number(ttlDays.value),
+        schema: createTable.value ? actualSchema.value : undefined,
+    } as CreateSourcePayload)
 }
 </script>
 
@@ -302,7 +260,7 @@ const handleSubmit = async () => {
                 </CardDescription>
             </CardHeader>
             <CardContent>
-                <form @submit.prevent="handleSubmit" class="space-y-6">
+                <form @submit.prevent="submitForm" class="space-y-6">
                     <div class="space-y-6">
                         <!-- Basic Info -->
                         <div class="space-y-4">

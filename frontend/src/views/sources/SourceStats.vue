@@ -2,6 +2,7 @@
 import { ref, onMounted, reactive, watch, computed } from 'vue'
 import { useToast } from '@/components/ui/toast'
 import { useApiQuery } from '@/composables/useApiQuery'
+import ErrorAlert from '@/components/ui/ErrorAlert.vue'
 import { useRoute } from 'vue-router'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -27,10 +28,8 @@ const statsError = ref<string | null>(null)
 
 // Fetch all sources on component mount
 onMounted(async () => {
-  if (sourcesStore.sources.length === 0) {
-    // The base store will handle showing toast for errors
-    await sourcesStore.loadSources()
-  }
+  // Hydrate the store
+  await sourcesStore.hydrate()
   
   // Check if sourceId is provided in the URL query parameters
   const sourceIdFromQuery = route.query.sourceId as string
@@ -186,13 +185,13 @@ const fetchSourceStats = async () => {
           </CardContent>
         </Card>
 
-        <div v-if="statsError" class="rounded-lg border border-destructive p-4 text-center text-destructive mb-6">
-          <p class="mb-2">Failed to load statistics</p>
-          <p class="text-sm">{{ statsError }}</p>
-          <Button variant="outline" class="mt-4" @click="fetchSourceStats">
-            Retry
-          </Button>
-        </div>
+        <ErrorAlert 
+          v-if="statsError"
+          :error="statsError"
+          title="Failed to load statistics"
+          @retry="fetchSourceStats"
+          class="mb-6"
+        />
 
         <div v-if="!stats.tableStats && !isLoadingStats && !statsError" class="text-center py-6 text-muted-foreground">
           Select a source and click "Get Stats" to view statistics
