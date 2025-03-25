@@ -60,33 +60,34 @@ const editForm = ref({
 
 const searchQuery = ref('')
 
+// Computed properties from store
+const users = computed(() => usersStore.getUsersArray())
+
 // Simple computed property to filter users
 const filteredUsers = computed(() => {
-    const users = usersStore.getUsersArray() || [];
-    
-    if (!searchQuery.value) return users;
+    if (!searchQuery.value) return users.value;
 
     const query = searchQuery.value.toLowerCase();
-    return users.filter(user =>
+    return users.value.filter(user =>
         user?.full_name?.toLowerCase().includes(query) ||
         user?.email?.toLowerCase().includes(query)
     );
 })
 
+// Load users with automatic error handling in store
 const loadUsers = async (forceReload = false) => {
-    return await usersStore.loadUsers(forceReload);
+    await usersStore.loadUsers(forceReload);
 }
 
 const confirmDelete = async () => {
     if (!userToDelete.value) return
 
-    const result = await usersStore.deleteUser(userToDelete.value.id);
-    if (result.success) {
-        // Fetch fresh data from the API
-        await loadUsers(true);
-        showDeleteDialog.value = false;
-        userToDelete.value = null;
-    }
+    await usersStore.deleteUser(userToDelete.value.id);
+    // Store automatically handles errors and success
+    
+    // Reset UI state
+    showDeleteDialog.value = false;
+    userToDelete.value = null;
 }
 
 const handleDelete = (user: User) => {
@@ -94,17 +95,11 @@ const handleDelete = (user: User) => {
     showDeleteDialog.value = true
 }
 
-// Toast is now handled centrally in the store
-
 const toggleUserStatus = async (user: User) => {
-    const result = await usersStore.updateUser(user.id, {
+    await usersStore.updateUser(user.id, {
         status: user.status === 'active' ? 'inactive' : 'active',
     });
-    
-    if (result.success) {
-        // Refresh the users list to ensure we have the latest data
-        await loadUsers(true);
-    }
+    // Store handles loading state and errors automatically
 }
 
 const handleEdit = (user: User) => {
@@ -120,18 +115,15 @@ const handleEdit = (user: User) => {
 const confirmEdit = async () => {
     if (!userToEdit.value) return
 
-    const result = await usersStore.updateUser(userToEdit.value.id.toString(), {
+    await usersStore.updateUser(userToEdit.value.id.toString(), {
         full_name: editForm.value.full_name,
         email: editForm.value.email,
         role: editForm.value.role
     });
     
-    if (result.success) {
-        // Refresh the users list to ensure we have the latest data
-        await loadUsers(true);
-        showEditDialog.value = false;
-        userToEdit.value = null;
-    }
+    // Reset UI state
+    showEditDialog.value = false;
+    userToEdit.value = null;
 }
 
 onMounted(() => {

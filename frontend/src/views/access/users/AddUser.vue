@@ -109,20 +109,23 @@ const formData = ref<FormData>({
 
 const { isLoading, error: formError } = storeToRefs(usersStore)
 
+const isFormValid = computed(() => {
+    return formData.value.email && formData.value.full_name
+})
+
 async function handleSubmit() {
-    // Validation should be handled by the form, but we can do basic checks
-    if (!formData.value.email || !formData.value.full_name) {
-        return // Let the store handle validation errors
-    }
+    if (!isFormValid.value) return
     
-    const result = await usersStore.createUser({
+    await usersStore.createUser({
         email: formData.value.email,
         full_name: formData.value.full_name,
         role: formData.value.role,
-    });
+    })
     
-    if (result.success) {
-        // Reset form
+    // Store handles success/failure states
+    
+    // Reset form on success - check if store operation succeeded
+    if (!usersStore.error?.createUser) {
         formData.value = {
             email: '',
             full_name: '',
@@ -130,9 +133,6 @@ async function handleSubmit() {
             status: 'active',
         }
         showDialog.value = false
-        
-        // Reload users from API to ensure our store has the most up-to-date data
-        await usersStore.loadUsers(true);
     }
 }
 </script>
