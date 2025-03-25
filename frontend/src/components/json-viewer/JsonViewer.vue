@@ -27,8 +27,16 @@ hljs.registerLanguage('json', json)
 
 // Format JSON with indentation and highlighting
 function formatJSON(data: any): string {
-    const jsonString = JSON.stringify(data, null, 2)
-    return hljs.highlight(jsonString, { language: 'json' }).value
+    try {
+        // Ensure proper formatting even if data is already a string
+        const jsonObject = typeof data === 'string' ? JSON.parse(data) : data
+        const jsonString = JSON.stringify(jsonObject, null, 2)
+        return hljs.highlight(jsonString, { language: 'json' }).value
+    } catch (e) {
+        // Fallback in case of parsing errors
+        const jsonString = JSON.stringify(data, null, 2)
+        return hljs.highlight(jsonString, { language: 'json' }).value
+    }
 }
 
 // Handle copy to clipboard with toast notification
@@ -63,7 +71,7 @@ async function copyToClipboard() {
         <div class="absolute left-1 top-1 flex gap-1 z-10">
             <!-- Copy button -->
             <Button variant="secondary" size="sm" @click.stop.prevent="copyToClipboard" :disabled="isCopied"
-                class="h-5 px-1.5 shadow-sm transition-all duration-200 hover:shadow active:scale-95 cursor-pointer text-xs"
+                class="h-5 px-1 shadow-sm transition-all duration-200 hover:shadow active:scale-95 cursor-pointer text-xs"
                 :class="{
                     'bg-green-500/10 text-green-600 hover:bg-green-500/20': isCopied,
                     'hover:bg-muted': !isCopied
@@ -86,7 +94,7 @@ async function copyToClipboard() {
             <div class="border rounded-sm bg-muted/5 mt-0.5 relative w-full overflow-hidden">
                 <pre :class="{ 'max-h-[500px]': !isExpanded }"
                     class="text-xs font-mono pt-8 px-1.5 overflow-y-auto overflow-x-auto whitespace-pre">
-                    <code v-html="formatJSON(value)" class="whitespace-pre" />
+                    <code v-html="formatJSON(value)" class="whitespace-pre" contenteditable="plaintext-only" spellcheck="false" />
                 </pre>
             </div>
 
