@@ -162,6 +162,30 @@ const routes: RouteRecordRaw[] = [
     ],
   },
 
+  // Profile Section
+  {
+    path: "/profile",
+    component: () => import("@/views/settings/SettingsLayout.vue").catch(err => {
+      error("Router", "Failed to load SettingsLayout component", err);
+      return { default: ComponentLoadError };
+    }),
+    meta: {
+      requiresAuth: true,
+      title: "Profile"
+    },
+    children: [
+      {
+        path: "",
+        name: "Profile",
+        component: () => import("@/views/settings/UserProfile.vue").catch(err => {
+          error("Router", "Failed to load UserProfile component", err);
+          return { default: ComponentLoadError };
+        }),
+        meta: { title: "Profile" },
+      },
+    ],
+  },
+
   // Settings Section
   {
     path: "/settings",
@@ -175,16 +199,16 @@ const routes: RouteRecordRaw[] = [
     children: [
       {
         path: "",
-        redirect: "profile",
+        redirect: "preferences",
       },
       {
-        path: "profile",
-        name: "Profile",
-        component: () => import("@/views/settings/UserProfile.vue").catch(err => {
-          error("Router", "Failed to load UserProfile component", err);
+        path: "preferences",
+        name: "Preferences",
+        component: () => import("@/views/settings/UserPreferences.vue").catch(err => {
+          error("Router", "Failed to load UserPreferences component", err);
           return { default: ComponentLoadError };
         }),
-        meta: { title: "Profile Settings" },
+        meta: { title: "User Preferences" },
       },
     ],
   },
