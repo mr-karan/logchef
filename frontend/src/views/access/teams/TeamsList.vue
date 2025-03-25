@@ -44,36 +44,23 @@ const handleDelete = (team: Team) => {
 
 // Function to refresh teams list
 const refreshTeams = async () => {
-    await teamsStore.execute(
-        () => teamsStore.loadTeams(true), // Force reload
-        {
-            successMessage: 'Teams refreshed',
-            showToast: false
-        }
-    )
+    await teamsStore.loadTeams(true) // Force reload
 }
 
 const confirmDelete = async () => {
     if (!teamToDelete.value) return
     
-    await teamsStore.execute(
-        () => teamsStore.deleteTeam(teamToDelete.value.id),
-        {
-            successMessage: 'Team deleted successfully',
-            onSuccess: () => {
-                showDeleteDialog.value = false
-                teamToDelete.value = null
-                refreshTeams()
-            }
-        }
-    )
+    const result = await teamsStore.deleteTeam(teamToDelete.value.id)
+    
+    if (result.success) {
+        showDeleteDialog.value = false
+        teamToDelete.value = null
+        refreshTeams()
+    }
 }
 
 onMounted(() => {
-    teamsStore.execute(
-        () => teamsStore.loadTeams(),
-        { showToast: false }
-    )
+    teamsStore.loadTeams()
 })
 
 const formatDate = (dateString: string) => {
