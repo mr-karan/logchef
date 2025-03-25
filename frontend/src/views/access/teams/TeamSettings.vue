@@ -139,35 +139,55 @@ watch(showAddSourceDialog, async (isOpen) => {
 })
 
 const loadTeam = async () => {
-    const result = await teamsStore.getTeam(Number(route.params.id))
+    const teamId = Number(route.params.id);
+    if (isNaN(teamId) || teamId <= 0) {
+        console.error("Invalid team ID:", teamId);
+        return;
+    }
+    
+    const result = await teamsStore.getTeam(teamId);
     
     if (result.success && result.data) {
-        team.value = result.data
-        name.value = team.value.name
-        description.value = team.value.description || ''
-        
-        // Load team members
-        loadTeamMembers()
+        team.value = result.data;
+        name.value = team.value.name;
+        description.value = team.value.description || '';
+    } else {
+        console.error("Failed to load team:", result.error);
+        toast({
+            title: 'Error',
+            description: 'Failed to load team details',
+            variant: 'destructive',
+        });
     }
 }
 
 const loadTeamMembers = async () => {
-    if (!team.value) return
+    if (!team.value || !team.value.id) {
+        console.warn("Cannot load team members: No team or invalid team ID");
+        return;
+    }
 
-    const result = await teamsStore.listTeamMembers(team.value.id)
+    const result = await teamsStore.listTeamMembers(team.value.id);
     
     if (result.success && result.data) {
-        members.value = result.data
+        members.value = result.data;
+    } else {
+        console.error("Failed to load team members:", result.error);
     }
 }
 
 const loadTeamSources = async () => {
-    if (!team.value) return
+    if (!team.value || !team.value.id) {
+        console.warn("Cannot load team sources: No team or invalid team ID");
+        return;
+    }
 
-    const result = await teamsStore.listTeamSources(team.value.id)
+    const result = await teamsStore.listTeamSources(team.value.id);
     
     if (result.success && result.data) {
-        teamSources.value = result.data
+        teamSources.value = result.data;
+    } else {
+        console.error("Failed to load team sources:", result.error);
     }
 }
 
@@ -245,13 +265,30 @@ const handleRemoveSource = async (sourceId: string | number) => {
 }
 
 onMounted(async () => {
+    // Make sure we have a valid team ID from route
+    const teamId = Number(route.params.id);
+    if (isNaN(teamId) || teamId <= 0) {
+        console.error("Invalid team ID in route:", route.params.id);
+        toast({
+            title: 'Error',
+            description: `Invalid team ID: ${route.params.id}`,
+            variant: 'destructive',
+        });
+        return;
+    }
+    
     // First load the team, since sources depends on team.id
-    await loadTeam()
-    // Then load the rest in parallel
-    await Promise.all([
-        usersStore.loadUsers(),
-        loadTeamSources(),
-    ])
+    await loadTeam();
+    
+    // Only load members and sources if team was loaded successfully
+    if (team.value) {
+        // Then load the rest in parallel
+        await Promise.all([
+            usersStore.loadUsers(),
+            loadTeamMembers(),
+            loadTeamSources(),
+        ]);
+    }
 })
 </script>
 
