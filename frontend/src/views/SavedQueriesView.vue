@@ -32,11 +32,19 @@ import type { SavedTeamQuery } from '@/api/savedQueries';
 import { useTeamsStore } from '@/stores/teams';
 import { Badge } from '@/components/ui/badge';
 
+// Initialize router and services with better error handling
 const router = useRouter();
 const { toast } = useToast();
+
+// Initialize stores - ensure these are available before use
 const savedQueriesStore = useSavedQueriesStore();
 const sourcesStore = useSourcesStore();
 const teamsStore = useTeamsStore();
+
+// Simple check to ensure store is available
+if (!teamsStore) {
+  console.error("Teams store failed to initialize!");
+}
 
 // Local UI state
 const isLoading = ref(false);
@@ -61,7 +69,7 @@ const showEmptyState = computed(() => {
 
 // Selected team name
 const selectedTeamName = computed(() => {
-  return teamsStore.currentTeam?.name || 'Select a team';
+  return teamsStore?.currentTeam?.name || 'Select a team';
 });
 
 // Selected source name
@@ -147,11 +155,11 @@ onMounted(async () => {
   }
 });
 
-// Watch for source selection changes
+// Watch for source selection changes and team changes
 watch(
-  () => selectedSourceId.value,
-  async (newSourceId) => {
-    if (newSourceId) {
+  [() => selectedSourceId.value, () => teamsStore.currentTeamId],
+  async ([newSourceId]) => {
+    if (newSourceId && teamsStore.currentTeamId) {
       await loadSourceQueries();
       // Mark initial load as complete after first load
       isInitialLoad.value = false;
@@ -168,6 +176,8 @@ async function handleTeamChange(teamId: string) {
 
     // Use the improved setCurrentTeam that handles string IDs
     teamsStore.setCurrentTeam(teamId);
+    
+    const currentTeamId = parseInt(teamId);
 
     // Update URL to reflect the team change
     router.replace({
@@ -176,7 +186,7 @@ async function handleTeamChange(teamId: string) {
     });
 
     // Load sources for the selected team
-    const sourcesResult = await sourcesStore.loadTeamSources(teamsStore.currentTeamId, true);
+    const sourcesResult = await sourcesStore.loadTeamSources(currentTeamId, true);
 
     // Handle case where team has no sources
     if (!sourcesResult.success || !sourcesResult.data || sourcesResult.data.length === 0) {
@@ -190,10 +200,13 @@ async function handleTeamChange(teamId: string) {
     if (sourcesStore.teamSources.length > 0) {
       selectedSourceId.value = String(sourcesStore.teamSources[0].id);
 
-      // Update URL with the new source
+      // Update URL with the new source - use currentTeamId for safety
       router.replace({
         path: '/logs/saved',
-        query: { team: teamId, source: selectedSourceId.value }
+        query: { 
+          team: teamId, 
+          source: selectedSourceId.value 
+        }
       });
 
       await loadSourceQueries();
@@ -230,7 +243,7 @@ async function handleSourceChange(sourceId: string) {
       // Update URL to remove source parameter
       router.replace({
         path: '/logs/saved',
-        query: { team: teamsStore.currentTeamId }
+        query: { team: teamsStore?.currentTeamId?.toString() || '' }
       });
 
       return;
@@ -253,7 +266,7 @@ async function handleSourceChange(sourceId: string) {
     router.replace({
       path: '/logs/saved',
       query: {
-        team: teamsStore.currentTeamId,
+        team: teamsStore?.currentTeamId?.toString() || '',
         source: sourceId
       }
     });
@@ -281,7 +294,10 @@ async function loadSourceQueries() {
     // Reset search when changing source
     searchQuery.value = '';
 
-    if (!teamsStore.currentTeamId || !selectedSourceId.value) {
+    // Safe check for teamsStore and currentTeamId
+    const currentTeamId = teamsStore?.currentTeamId;
+    
+    if (!currentTeamId || !selectedSourceId.value) {
       console.warn("No team or source selected, cannot load queries");
       queries.value = [];
       return;
@@ -289,7 +305,7 @@ async function loadSourceQueries() {
 
     // Use the new store pattern with proper null handling
     const result = await savedQueriesStore.fetchTeamSourceQueries(
-      teamsStore.currentTeamId,
+      currentTeamId,
       parseInt(selectedSourceId.value)
     );
 
