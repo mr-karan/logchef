@@ -7,14 +7,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { useSourcesStore } from '@/stores/sources'
 import { Code, ChevronsUpDown, Plus, Database } from 'lucide-vue-next'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Separator } from '@/components/ui/separator'
-import { useApiQuery } from '@/composables/useApiQuery'
 import {
     Dialog,
     DialogContent,
@@ -38,26 +36,6 @@ interface ConnectionInfo {
     table_name: string;
 }
 
-interface ValidateConnectionRequest extends ConnectionInfo {
-    timestamp_field?: string;
-    severity_field?: string;
-}
-
-interface ConnectionValidationResult {
-    message: string;
-}
-
-interface CreateSourcePayload {
-    name: string;
-    meta_is_auto_created: boolean;
-    meta_ts_field: string;
-    meta_severity_field: string;
-    connection: ConnectionInfo;
-    description: string;
-    ttl_days: number;
-    schema?: string;
-}
-
 // Form state
 const tableMode = ref<'create' | 'connect'>('create') // 'create' or 'connect'
 const createTable = computed(() => tableMode.value === 'create')
@@ -70,7 +48,6 @@ const database = ref<string | number>('')
 const tableName = ref<string | number>('')
 const description = ref<string | number>('')
 const ttlDays = ref<string | number>(90)
-const showSchema = ref<boolean>(false)
 const metaTSField = ref<string | number>('timestamp')
 const metaSeverityField = ref<string | number>('severity_text')
 
@@ -84,10 +61,10 @@ const validateConnection = async (connectionInfo) => {
     isValidating.value = true
     isValidated.value = false
     validationResult.value = null
-    
+
     try {
         const result = await sourcesStore.validateSourceConnection(connectionInfo)
-        
+
         if (result.success && result.data) {
             validationResult.value = result.data
             isValidated.value = true
@@ -197,7 +174,7 @@ const handleValidateConnection = async () => {
         database: String(database.value),
         table_name: String(tableName.value),
     }
-    
+
     // Add timestamp and severity fields if connecting to existing table
     if (tableMode.value === 'connect' && tableName.value) {
         connectionInfo.timestamp_field = String(metaTSField.value)
@@ -206,7 +183,7 @@ const handleValidateConnection = async () => {
             connectionInfo.severity_field = String(metaSeverityField.value)
         }
     }
-    
+
     await validateConnection(connectionInfo)
 }
 
@@ -233,7 +210,7 @@ const submitForm = async () => {
     }
 
     isSubmitting.value = true
-    
+
     try {
         // Create payload with proper types
         const payload = {
@@ -252,10 +229,10 @@ const submitForm = async () => {
             ttl_days: Number(ttlDays.value),
             schema: createTable.value ? actualSchema.value : undefined,
         }
-        
+
         // Use the store directly
         const result = await sourcesStore.createSource(payload)
-        
+
         if (result.success) {
             // Redirect to sources list
             router.push({ name: 'Sources' })
