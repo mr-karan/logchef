@@ -63,7 +63,7 @@ export const useUsersStore = defineStore("users", () => {
         }
         return { 
           success: true, 
-          data: usersData
+          data: state.data.value.users
         };
       } catch (error) {
         return handleError(error as Error, 'loadUsers');
