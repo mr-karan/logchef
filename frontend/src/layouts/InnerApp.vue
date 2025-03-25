@@ -128,11 +128,16 @@ const adminNavItems = [
   },
 ]
 
-const settingsNavItems = [
+const navItems = [
   {
-    title: 'Settings',
+    title: 'Profile',
+    icon: UserCircle2,
+    url: '/profile',
+  },
+  {
+    title: 'Preferences',
     icon: Settings,
-    url: '/settings/profile',
+    url: '/settings/preferences',
   },
 ]
 </script>
@@ -219,12 +224,12 @@ const settingsNavItems = [
             </SidebarGroupContent>
           </SidebarGroup>
 
-          <!-- Settings Navigation -->
+          <!-- User Settings Navigation -->
           <SidebarGroup class="mt-4">
-            <SidebarGroupLabel v-if="sidebarOpen">Settings</SidebarGroupLabel>
+            <SidebarGroupLabel v-if="sidebarOpen">User</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                <template v-for="item in settingsNavItems" :key="item.title">
+                <template v-for="item in navItems" :key="item.title">
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild :tooltip="item.title"
                       class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
@@ -298,9 +303,9 @@ const settingsNavItems = [
                   <DropdownMenuSeparator />
                   <DropdownMenuLabel>Account</DropdownMenuLabel>
                   <DropdownMenuItem asChild>
-                    <router-link to="/settings/profile" class="cursor-pointer">
+                    <router-link to="/profile" class="cursor-pointer">
                       <UserCircle2 class="mr-2 h-4 w-4" />
-                      <span>Profile Settings</span>
+                      <span>Profile</span>
                     </router-link>
                   </DropdownMenuItem>
                   <DropdownMenuItem class="text-destructive focus:text-destructive cursor-pointer"
