@@ -3,12 +3,7 @@ import { useBaseStore } from "./base";
 import type { User } from "@/types";
 import { usersApi } from "@/api/users";
 import { computed } from "vue";
-import { useApiQuery } from "@/composables/useApiQuery";
-import { useToast } from "@/components/ui/toast/use-toast";
-import type { 
-  APIErrorResponse, 
-  isSuccessResponse 
-} from "@/api/types";
+import type { APIErrorResponse } from "@/api/types";
 
 interface UsersState {
   users: User[];
@@ -18,48 +13,28 @@ export const useUsersStore = defineStore("users", () => {
   const state = useBaseStore<UsersState>({
     users: [],
   });
-
-  // Use our API query composable for loading state only
-  const { isLoading: apiLoading } = useApiQuery();
-
-  // Debugging - add more details about state structure
-  console.log("State data structure:", state.data.value);
-  console.log("Users array in state:", state.data.value.users);
   
   // Define users as a computed property that returns the array directly
-  // This is to ensure the component can access it properly
-  const users = computed(() => {
-    return state.data.value.users || [];
-  });
+  const users = computed(() => state.data.value.users || []);
 
   // Use the centralized error handler from base store
 
   async function loadUsers(forceReload = false) {
     return await state.withLoading('loadUsers', async () => {
-      try {
-        // Skip loading if we already have users and not forcing reload
-        if (!forceReload && state.data.value.users && state.data.value.users.length > 0) {
-          return { success: true, data: state.data.value.users };
-        }
-        
-        console.log("Fetching users from API...");
-        const response = await usersApi.listUsers();
-        console.log("API response:", response);
-      
-        // Store the users array from the response
-        if (response.status === 'success') {
-          state.data.value.users = response.data || [];
-          console.log("Users stored in state:", state.data.value.users);
-        } else {
-          state.data.value.users = [];
-        }
-        return { 
-          success: true, 
-          data: state.data.value.users
-        };
-      } catch (error) {
-        return state.handleError(error as Error, 'loadUsers');
+      // Skip loading if we already have users and not forcing reload
+      if (!forceReload && state.data.value.users && state.data.value.users.length > 0) {
+        return { success: true, data: state.data.value.users };
       }
+      
+      return await state.callApi({
+        apiCall: () => usersApi.listUsers(),
+        operationKey: 'loadUsers',
+        onSuccess: (response) => {
+          // Store the users array from the response
+          state.data.value.users = response.data || [];
+        },
+        showToast: false,
+      });
     });
   }
 
@@ -152,18 +127,19 @@ export const useUsersStore = defineStore("users", () => {
   }
 
   return {
-    // Make sure users is accessible as a simple ref, not a getter that requires .value
+    // State
     users,
-    // Export a plain getter as well for debugging
-    getUsersArray: () => state.data.value.users || [],
-    isLoading: computed(() => apiLoading.value || state.isLoading.value),
+    isLoading: state.isLoading,
     error: state.error,
+    
+    // Actions
     loadUsers,
     getUser,
     createUser,
     updateUser,
     deleteUser,
     getUsersNotInTeam,
+    
     // Loading state helpers
     isLoadingOperation: state.isLoadingOperation,
   };

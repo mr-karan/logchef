@@ -1,14 +1,13 @@
 import { defineStore } from "pinia";
-import { ref, computed } from "vue";
+import { computed } from "vue";
 import {
   savedQueriesApi,
   type SavedTeamQuery,
   type Team,
   type SavedQueryContent,
 } from "@/api/savedQueries";
-import { useApiQuery } from "@/composables/useApiQuery";
-import { useLoadingState } from "@/composables/useLoadingState";
 import { useBaseStore } from "./base";
+import type { APIErrorResponse } from "@/api/types";
 
 export interface SavedQueriesState {
   queries: SavedTeamQuery[];
@@ -20,17 +19,6 @@ export interface SavedQueriesState {
 export const useSavedQueriesStore = defineStore("savedQueries", () => {
   // Create base store for common functionality and error handling
   const state = useBaseStore<SavedQueriesState>({
-    queries: [],
-    selectedQuery: null,
-    teams: [],
-    selectedTeamId: null,
-  });
-
-  // Use our composables
-  const { execute, isLoading } = useApiQuery();
-  
-  // Local state for data binding
-  const data = ref<SavedQueriesState>({
     queries: [],
     selectedQuery: null,
     teams: [],
@@ -78,11 +66,16 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   };
 
   // Computed properties
-  const hasTeams = computed(() => (data.value.teams?.length || 0) > 0);
-  const hasQueries = computed(() => (data.value.queries?.length || 0) > 0);
+  const queries = computed(() => state.data.value.queries);
+  const selectedQuery = computed(() => state.data.value.selectedQuery);
+  const teams = computed(() => state.data.value.teams);
+  const selectedTeamId = computed(() => state.data.value.selectedTeamId);
+  
+  const hasTeams = computed(() => (state.data.value.teams?.length || 0) > 0);
+  const hasQueries = computed(() => (state.data.value.queries?.length || 0) > 0);
   const selectedTeam = computed(() => {
     return (
-      data.value.teams?.find((t) => t.id === data.value.selectedTeamId) || null
+      state.data.value.teams?.find((t) => t.id === state.data.value.selectedTeamId) || null
     );
   });
 
@@ -94,9 +87,9 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         apiCall: () => savedQueriesApi.getUserTeams(),
         operationKey: 'fetchUserTeams',
         onSuccess: (response) => {
-          data.value.teams = response;
-          if (response && response.length > 0 && !data.value.selectedTeamId) {
-            data.value.selectedTeamId = response[0].id;
+          state.data.value.teams = response;
+          if (response && response.length > 0 && !state.data.value.selectedTeamId) {
+            state.data.value.selectedTeamId = response[0].id;
           }
         }
       });
@@ -104,7 +97,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   }
 
   function setSelectedTeam(teamId: number) {
-    data.value.selectedTeamId = teamId;
+    state.data.value.selectedTeamId = teamId;
   }
 
   async function fetchTeamQueries(teamId: number) {
@@ -113,7 +106,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         apiCall: () => savedQueriesApi.listQueries(teamId),
         operationKey: `fetchTeamQueries-${teamId}`,
         onSuccess: (responseData) => {
-          data.value.queries = responseData;
+          state.data.value.queries = responseData;
         },
         defaultData: [],
         showToast: false,
@@ -127,7 +120,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         apiCall: () => savedQueriesApi.listSourceQueries(sourceId, teamId),
         operationKey: `fetchSourceQueries-${sourceId}-${teamId}`,
         onSuccess: (responseData) => {
-          data.value.queries = responseData;
+          state.data.value.queries = responseData;
         },
         defaultData: [],
         showToast: false,
@@ -142,7 +135,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         operationKey: `fetchTeamSourceQueries-${teamId}-${sourceId}`,
         onSuccess: (responseData) => {
           // ResponseData is already null-safe due to defaultData
-          data.value.queries = responseData;
+          state.data.value.queries = responseData;
         },
         defaultData: [], // Ensure empty array fallback
         showToast: false,
@@ -156,7 +149,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         apiCall: () => savedQueriesApi.getQuery(teamId, queryId),
         operationKey: `fetchQuery-${teamId}-${queryId}`,
         onSuccess: (response) => {
-          data.value.selectedQuery = response;
+          state.data.value.selectedQuery = response;
         }
       });
     });
@@ -173,11 +166,11 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         successMessage: "Query created successfully",
         onSuccess: (response) => {
           // Ensure queries array exists before modifying it
-          if (!data.value.queries) {
-            data.value.queries = [];
+          if (!state.data.value.queries) {
+            state.data.value.queries = [];
           }
-          data.value.queries.unshift(response);
-          data.value.selectedQuery = response;
+          state.data.value.queries.unshift(response);
+          state.data.value.selectedQuery = response;
         }
       });
     });
@@ -204,11 +197,11 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         successMessage: "Query created successfully",
         onSuccess: (response) => {
           // Ensure queries array exists before modifying it
-          if (!data.value.queries) {
-            data.value.queries = [];
+          if (!state.data.value.queries) {
+            state.data.value.queries = [];
           }
-          data.value.queries.unshift(response);
-          data.value.selectedQuery = response;
+          state.data.value.queries.unshift(response);
+          state.data.value.selectedQuery = response;
         }
       });
     });
@@ -225,14 +218,14 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         operationKey: `updateQuery-${teamId}-${queryId}`,
         successMessage: "Query updated successfully",
         onSuccess: (response) => {
-          const index = data.value.queries.findIndex(
+          const index = state.data.value.queries.findIndex(
             (q) => String(q.id) === queryId
           );
           if (index >= 0) {
-            data.value.queries[index] = response;
+            state.data.value.queries[index] = response;
           }
-          if (data.value.selectedQuery?.id === Number(queryId)) {
-            data.value.selectedQuery = response;
+          if (state.data.value.selectedQuery?.id === Number(queryId)) {
+            state.data.value.selectedQuery = response;
           }
         }
       });
@@ -246,11 +239,11 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         operationKey: `deleteQuery-${teamId}-${queryId}`,
         successMessage: "Query deleted successfully",
         onSuccess: () => {
-          data.value.queries = data.value.queries.filter(
+          state.data.value.queries = state.data.value.queries.filter(
             (q) => String(q.id) !== queryId
           );
-          if (data.value.selectedQuery?.id === Number(queryId)) {
-            data.value.selectedQuery = null;
+          if (state.data.value.selectedQuery?.id === Number(queryId)) {
+            state.data.value.selectedQuery = null;
           }
         }
       });
@@ -259,8 +252,8 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
 
   // Reset state function
   function resetState() {
-    data.value = {
-      queries: [], // Ensure this is always initialized as an empty array
+    state.data.value = {
+      queries: [],
       selectedQuery: null,
       teams: [],
       selectedTeamId: null,
@@ -271,9 +264,12 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     // State
     isLoading: state.isLoading,
     error: state.error,
-    data,
     
     // Computed properties
+    queries,
+    selectedQuery,
+    teams,
+    selectedTeamId,
     parseQueryContent,
     hasTeams,
     hasQueries,
