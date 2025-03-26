@@ -113,11 +113,23 @@ const activeSourceTableName = computed(() => {
   if (sourceDetails.value?.connection) {
     return `${sourceDetails.value.connection.database}.${sourceDetails.value.connection.table_name}`;
   }
+  
   // Return a placeholder if source details aren't loaded yet
-  // This prevents the table name from being lost during URL loading
-  return exploreStore.rawSql && typeof exploreStore.rawSql === 'string' && exploreStore.rawSql.includes('FROM ') 
-    ? exploreStore.rawSql.match(/FROM\s+([^\s\n]+)/i)?.[1] || ''
-    : ''; 
+  if (exploreStore.rawSql && typeof exploreStore.rawSql === 'string' && exploreStore.rawSql.includes('FROM ')) {
+    // Improved regex to avoid extracting WHERE as a table name
+    // Looking for an actual table name after FROM, not a SQL keyword
+    const tableNameMatch = exploreStore.rawSql.match(/FROM\s+([^\s\n;()]+)(?:\s|$)/i);
+    const extractedName = tableNameMatch?.[1] || '';
+    
+    // Make sure we're not returning SQL keywords as table names
+    if (extractedName && 
+        !['WHERE', 'SELECT', 'ORDER', 'GROUP', 'LIMIT', 'HAVING'].includes(extractedName.toUpperCase())) {
+      return extractedName;
+    }
+  }
+  
+  // Default empty string if no valid table name found
+  return ''; 
 });
 
 // Check if we have a valid source for querying
@@ -683,6 +695,7 @@ async function fetchSourceDetails(sourceId: number) {
   try {
     // Only make the API call if we don't have complete data
     console.log(`Fetching source details from API for ID ${sourceId}`);
+    console.log(`Current activeSourceTableName: "${activeSourceTableName.value}"`);
     const result = await sourcesStore.getSource(sourceId);
 
     if (result.success && result.data) {
