@@ -71,7 +71,8 @@ const queryMode = computed({
   set: (value) => exploreStore.setActiveMode(value)
 })
 const generatedSQL = ref('')
-const isExecutingQuery = ref(false)
+// Use store's loading state instead of local state
+const isExecutingQuery = computed(() => exploreStore.isLoadingOperation('executeQuery'))
 const sourceDetails = ref<Source | null>(null)
 const queryEditorRef = ref()
 
@@ -899,7 +900,7 @@ const handleQuerySubmit = async (data: any) => {
     });
     return;
   }
-  
+    
   // Handle both cases:
   // 1. Direct invocation from Run button with mode string
   // 2. Submission from QueryEditor with {query, mode} object
@@ -909,12 +910,12 @@ const handleQuerySubmit = async (data: any) => {
   if (typeof data === 'string') {
     // Called from Run button with mode string
     mode = data;
-    
+      
     // Get current editor content directly when Run button is clicked
     // This ensures we use the latest content, not what might be in the store
     if (queryEditorRef.value) {
       const currentEditorContent = queryEditorRef.value.code || '';
-      
+        
       // Update both local state and store
       if (mode === 'logchefql') {
         logchefQuery.value = currentEditorContent;
@@ -966,25 +967,22 @@ const handleQuerySubmit = async (data: any) => {
   // Update URL with current parameters before executing the query
   updateUrlWithCurrentState();
 
-  // Show loading state
-  isExecutingQuery.value = true;
+  // Clear any previous error
   queryError.value = '';
 
   try {
     // Execute the query - errors will be handled by the baseStore's callApi mechanism
     // and automatically displayed as toasts
     const result = await exploreStore.executeQuery();
-    
+      
     // Store error message if query failed, but toast is already shown by base store
     if (!result.success && result.error) {
-      queryError.value = result.error;
+      queryError.value = result.error.message || 'An error occurred';
     }
   } catch (error) {
     console.error('Error executing query:', error);
     queryError.value = getErrorMessage(error);
     // No need to show toast here as the base store will handle it
-  } finally {
-    isExecutingQuery.value = false;
   }
 };
 
@@ -1610,8 +1608,8 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- Query Error Message -->
-          <div v-if="queryError" class="mt-2 text-sm text-destructive bg-destructive/10 p-2 rounded">
-            {{ queryError }}
+          <div v-if="queryError || exploreStore.error" class="mt-2 text-sm text-destructive bg-destructive/10 p-2 rounded">
+            {{ queryError || (exploreStore.error && exploreStore.error.message) || 'An error occurred' }}
           </div>
         </div>
 
@@ -1656,8 +1654,8 @@ onBeforeUnmount(() => {
 
           <!-- Table container with proper scroll behavior - ensure it fills full available space -->
           <div class="flex-1 overflow-hidden relative">
-            <!-- Show loading skeleton when executing query -->
-            <template v-if="isExecutingQuery">
+            <!-- Show loading skeleton when executing query - use store loading state -->
+            <template v-if="exploreStore.isLoadingOperation('executeQuery')">
               <div class="h-full flex flex-col items-center justify-center p-10">
                 <div class="w-full max-w-5xl space-y-4">
                   <!-- Header skeleton -->
