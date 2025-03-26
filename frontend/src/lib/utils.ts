@@ -35,14 +35,14 @@ export function formatTimestamp(timestamp: string): string {
 const BADGE_BASE_STYLES =
   "inline-flex items-center rounded-full px-2 py-[2px] text-[11px] font-semibold tracking-wide uppercase leading-none ring-1 ring-inset ring-opacity-10";
 
-// Severity level color mapping with improved contrast
+// Severity level color mapping with improved contrast and consistent saturation
 const severityColorMap = new Map([
-  // Debug - Neutral Gray
+  // Debug - Neutral Gray (lighter than Trace)
   [
     "debug",
-    `${BADGE_BASE_STYLES} text-gray-700 bg-gray-200 ring-gray-400 dark:text-gray-200 dark:bg-gray-700 dark:ring-gray-600`,
+    `${BADGE_BASE_STYLES} text-gray-800 bg-gray-300 ring-gray-400 dark:text-gray-200 dark:bg-gray-700 dark:ring-gray-600`,
   ],
-  // Info - Slightly brighter blue
+  // Info - Balanced blue at 500 level
   [
     "info",
     `${BADGE_BASE_STYLES} text-white bg-blue-500 ring-blue-600 dark:text-blue-50 dark:bg-blue-700 dark:ring-blue-500`,
@@ -51,38 +51,38 @@ const severityColorMap = new Map([
     "information",
     `${BADGE_BASE_STYLES} text-white bg-blue-500 ring-blue-600 dark:text-blue-50 dark:bg-blue-700 dark:ring-blue-500`,
   ],
-  // Warning - Adjusted text color for better contrast
+  // Warning - Improved contrast with black text on yellow
   [
     "warn",
-    `${BADGE_BASE_STYLES} text-amber-800 bg-amber-300 ring-amber-400 dark:text-amber-100 dark:bg-amber-700 dark:ring-amber-600`,
+    `${BADGE_BASE_STYLES} text-black bg-yellow-400 ring-yellow-500 dark:text-yellow-100 dark:bg-yellow-600 dark:ring-yellow-500`,
   ],
   [
     "warning",
-    `${BADGE_BASE_STYLES} text-amber-800 bg-amber-300 ring-amber-400 dark:text-amber-100 dark:bg-amber-700 dark:ring-amber-600`,
+    `${BADGE_BASE_STYLES} text-black bg-yellow-400 ring-yellow-500 dark:text-yellow-100 dark:bg-yellow-600 dark:ring-yellow-500`,
   ],
-  // Error - Brighter background for better contrast
+  // Error - Bright red at 500 level
   [
     "error",
-    `${BADGE_BASE_STYLES} text-gray-50 bg-red-500 ring-red-600 dark:text-red-50 dark:bg-red-700 dark:ring-red-500 animate-pulse-subtle`,
+    `${BADGE_BASE_STYLES} text-white bg-red-500 ring-red-600 dark:text-red-50 dark:bg-red-700 dark:ring-red-500 animate-pulse-subtle`,
   ],
-  // Fatal/Critical - Darker red
+  // Fatal/Critical - Darker red for highest severity
   [
     "fatal",
-    `${BADGE_BASE_STYLES} text-gray-50 bg-red-700 ring-red-800 dark:text-red-50 dark:bg-red-800 dark:ring-red-700 animate-pulse-subtle`,
+    `${BADGE_BASE_STYLES} text-white bg-red-700 ring-red-800 dark:text-red-50 dark:bg-red-800 dark:ring-red-700 animate-pulse-subtle`,
   ],
   [
     "critical",
-    `${BADGE_BASE_STYLES} text-gray-50 bg-red-700 ring-red-800 dark:text-red-50 dark:bg-red-800 dark:ring-red-700 animate-pulse-subtle`,
+    `${BADGE_BASE_STYLES} text-white bg-red-700 ring-red-800 dark:text-red-50 dark:bg-red-800 dark:ring-red-700 animate-pulse-subtle`,
   ],
-  // Trace - Cool Gray (Subtle)
+  // Trace - Slightly darker gray than Debug
   [
     "trace",
-    `${BADGE_BASE_STYLES} text-gray-600 bg-gray-100 ring-gray-300 dark:text-gray-300 dark:bg-gray-800 dark:ring-gray-700`,
+    `${BADGE_BASE_STYLES} text-gray-800 bg-gray-200 ring-gray-300 dark:text-gray-200 dark:bg-gray-600 dark:ring-gray-500`,
   ],
 ]);
 
 // Default fallback style for unknown severity levels
-const defaultSeverityStyle = `${BADGE_BASE_STYLES} text-gray-700 bg-gray-200 ring-gray-400 dark:text-gray-200 dark:bg-gray-700 dark:ring-gray-600`;
+const defaultSeverityStyle = `${BADGE_BASE_STYLES} text-gray-800 bg-gray-300 ring-gray-400 dark:text-gray-200 dark:bg-gray-700 dark:ring-gray-600`;
 
 // Common severity column names for O(1) lookup
 const severityColumnNames = new Set([
