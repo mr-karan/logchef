@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ColumnDef, ColumnMeta } from '@tanstack/vue-table'
+import type { ColumnDef, ColumnMeta, Row } from '@tanstack/vue-table'
 import {
     FlexRender,
     getCoreRowModel,
@@ -76,9 +76,9 @@ function formatCellValue(value: any): string {
     return String(value);
 }
 
-// Check if a column is the timestamp or severity column
-function isSpecialColumn(columnId: string): boolean {
-    return columnId === timestampFieldName.value || columnId === severityFieldName.value;
+// Get column type from meta data
+function getColumnType(column: any): string | undefined {
+    return column?.columnDef?.meta?.columnType;
 }
 
 // Make sure timestamp field is first in column order
@@ -149,18 +149,19 @@ const table = useVueTable({
     // Enable column resizing with explicit settings
     enableColumnResizing: true,
     columnResizeMode: columnResizeMode.value,
-    defaultColumn: defaultColumn,
+    defaultColumn,
     columnResizeDirection: 'ltr',
 })
 
-// Handle row click for expansion
-const handleRowClick = (e: MouseEvent, row: any) => {
-    // Don't expand if clicking on the dropdown
-    if ((e.target as HTMLElement).closest('.actions-dropdown')) {
-        return
+// Simplified row expansion handler
+const handleRowClick = (row: Row<Record<string, any>>) => (e: MouseEvent) => {
+    // Don't expand if clicking on an interactive element
+    if ((e.target as HTMLElement).closest('.actions-dropdown, button, a, input, select')) {
+        return;
     }
-    row.toggleExpanded()
+    row.toggleExpanded();
 }
+
 
 // Add back the copyCell function since it's still needed for individual cells
 const copyCell = (value: any) => {
@@ -173,7 +174,7 @@ const copyCell = (value: any) => {
     })
 }
 
-// Ensure timestamp field is always first when component mounts
+// Initialize table when component mounts with sensible defaults
 onMounted(() => {
     // Initialize default sort by timestamp if available
     if (timestampFieldName.value) {
@@ -187,32 +188,6 @@ onMounted(() => {
 
     // Set initial column sizing mode
     columnResizeMode.value = 'onChange'
-
-    // Set explicit column sizes for better horizontal scrolling
-    const initialSizes: Record<string, number> = {}
-
-    props.columns.forEach(column => {
-        const columnId = column.id || ''
-        if (columnId === timestampFieldName.value) {
-            initialSizes[columnId] = 220 // timestamps need more space for timezone
-        } else if (columnId === severityFieldName.value) {
-            initialSizes[columnId] = 100 // severity is usually short
-        } else if (columnId === 'message' || columnId === 'msg' || columnId === 'log') {
-            initialSizes[columnId] = 500 // message fields get more space
-        } else if (columnId.includes('time') || columnId.includes('date')) {
-            initialSizes[columnId] = 180 // date/time fields
-        } else if (columnId.includes('id')) {
-            initialSizes[columnId] = 120 // id fields
-        } else {
-            initialSizes[columnId] = 200 // default size for other columns
-        }
-    })
-
-    // Apply the initial sizes - update the state with an object to trigger reactivity
-    columnSizing.value = { ...initialSizes }
-
-    // Watch for column size changes to adjust table layout as needed
-    watch(columnSizing, () => { }, { deep: true })
 })
 
 const exploreStore = useExploreStore()
@@ -263,7 +238,7 @@ watch(
 </script>
 
 <template>
-    <div class="h-full flex flex-col w-full min-w-0 flex-1 overflow-hidden log-data-table">
+    <div class="h-full flex flex-col w-full min-w-0 flex-1 overflow-hidden">
         <!-- Results Header with Controls and Pagination -->
         <div class="flex items-center justify-between p-2 border-b flex-shrink-0">
             <!-- Left side - Empty now that stats have been moved to LogExplorer.vue -->
@@ -273,12 +248,16 @@ watch(
             <div class="flex items-center gap-3">
                 <!-- Timezone toggle -->
                 <div class="flex items-center space-x-1 mr-1">
-                    <Button variant="ghost" size="sm" class="h-8 px-2 text-xs"
-                        :class="{ 'bg-muted': displayTimezone === 'local' }" @click="displayTimezone = 'local'">
+                    <Button variant="ghost" size="sm" 
+                        class="h-8 px-2 text-xs"
+                        :class="{ 'bg-muted': displayTimezone === 'local' }" 
+                        @click="displayTimezone = 'local'">
                         Local Time
                     </Button>
-                    <Button variant="ghost" size="sm" class="h-8 px-2 text-xs"
-                        :class="{ 'bg-muted': displayTimezone === 'utc' }" @click="displayTimezone = 'utc'">
+                    <Button variant="ghost" size="sm" 
+                        class="h-8 px-2 text-xs"
+                        :class="{ 'bg-muted': displayTimezone === 'utc' }" 
+                        @click="displayTimezone = 'utc'">
                         UTC
                     </Button>
                 </div>
@@ -292,8 +271,10 @@ watch(
                 <!-- Search input -->
                 <div class="relative w-64">
                     <Search class="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input placeholder="Search across all columns..." aria-label="Search in all columns"
-                        v-model="globalFilter" class="pl-8 h-8 text-sm" />
+                    <Input placeholder="Search across all columns..." 
+                        aria-label="Search in all columns"
+                        v-model="globalFilter" 
+                        class="pl-8 h-8 text-sm" />
                 </div>
             </div>
         </div>
@@ -301,91 +282,95 @@ watch(
         <!-- Table Section with full-height scrolling -->
         <div class="flex-1 relative overflow-hidden">
             <div v-if="table.getRowModel().rows?.length" class="absolute inset-0">
-                <div class="w-full h-full overflow-auto custom-scrollbar">
-                    <div style="min-width: max-content; width: auto;">
-                        <table class="caption-bottom text-sm border-separate border-spacing-0 relative"
-                            style="width: auto; table-layout: fixed;">
-                            <!-- Enhanced header styling -->
+                <div class="w-full h-full overflow-auto scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent">
+                    <div class="min-w-max w-auto">
+                        <table class="w-auto table-fixed border-separate border-spacing-0 text-sm">
+                            <!-- Table Header -->
                             <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
                                 <tr class="border-b border-b-muted-foreground/10">
-                                    <th v-for="header in table.getHeaderGroups()[0]?.headers || []" :key="header.id"
-                                        class="h-9 px-3 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap relative sticky top-0 z-20 overflow-hidden"
+                                    <th v-for="header in table.getHeaderGroups()[0]?.headers || []" 
+                                        :key="header.id"
+                                        class="h-9 px-3 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden"
                                         :class="[
-                                            { 'font-semibold': header.id === timestampFieldName || header.id === severityFieldName },
-                                            { 'resizing': header.column.getIsResizing() },
-                                            (header.column.columnDef as CustomColumnDef).meta?.className
-                                        ]" :style="{
-                                            width: header.column.getSize() ? `${header.column.getSize()}px` : '200px',
-                                            minWidth: '100px'
+                                            getColumnType(header.column) === 'timestamp' ? 'font-semibold' : '',
+                                            getColumnType(header.column) === 'severity' ? 'font-semibold' : '',
+                                            header.column.getIsResizing() ? 'relative border-r-2 border-r-primary/30' : ''
+                                        ]"
+                                        :style="{
+                                            width: `${header.column.getSize()}px`,
+                                            minWidth: `${header.column.getSize() / 2}px`
                                         }">
-                                        <FlexRender v-if="!header.isPlaceholder"
-                                            :render="header.column.columnDef.header" :props="header.getContext()" />
+                                        <FlexRender 
+                                            v-if="!header.isPlaceholder"
+                                            :render="header.column.columnDef.header" 
+                                            :props="header.getContext()" />
 
-                                        <div v-if="header.column.getCanResize()" :class="[
-                                            'resizer',
-                                            { 'isResizing': header.column.getIsResizing() }
-                                        ]" @mousedown="(e) => {
-                                            try {
-                                                // Get and execute the resize handler
-                                                const handler = header.getResizeHandler();
-                                                handler(e);
-                                            } catch (error) {
-                                                console.error('Error in resize handler:', error);
-                                            }
-
-                                            // Prevent the event from bubbling
-                                            e.stopPropagation();
-                                        }" @touchstart="header.getResizeHandler()" @click.stop></div>
+                                        <!-- Column Resizer Handle -->
+                                        <div 
+                                            v-if="header.column.getCanResize()"
+                                            class="absolute right-0 top-0 h-full w-1.5 group-hover:bg-primary/20 cursor-col-resize"
+                                            :class="{ 'bg-primary/50 w-2': header.column.getIsResizing() }"
+                                            @mousedown="header.getResizeHandler()"
+                                            @touchstart="header.getResizeHandler()"
+                                            @click.stop>
+                                        </div>
                                     </th>
                                 </tr>
                             </thead>
 
-                            <!-- Improved table body styling -->
-                            <tbody class="[&_tr:last-child]:border-0">
+                            <!-- Table Body -->
+                            <tbody>
                                 <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
-                                    <!-- Main Row -->
-                                    <tr :data-state="row.getIsSelected() ? 'selected' : undefined"
-                                        @click="(e) => handleRowClick(e, row)" :class="[
-                                            'cursor-pointer hover:bg-muted/50 border-b border-b-muted-foreground/10 transition-colors w-full',
+                                    <!-- Main Data Row -->
+                                    <tr 
+                                        :data-state="row.getIsSelected() ? 'selected' : undefined"
+                                        @click="handleRowClick(row)"
+                                        class="group cursor-pointer border-b border-b-muted-foreground/10 transition-colors"
+                                        :class="[
+                                            'hover:bg-muted/50',
                                             index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5',
                                             row.getIsExpanded() ? 'bg-primary/5 hover:bg-primary/10 border-primary/10' : ''
                                         ]">
-                                        <td v-for="cell in row.getVisibleCells()" :key="cell.id"
-                                            class="h-auto px-3 py-2 align-top group overflow-hidden whitespace-nowrap text-ellipsis font-mono text-[13px] leading-normal"
-                                            :data-column-id="cell.column.id" :class="[
-                                                (cell.column.columnDef as CustomColumnDef).meta?.className,
-                                                { 'resizing': cell.column.getIsResizing() }
-                                            ]" :style="{
-                                                width: cell.column.getSize() ? `${cell.column.getSize()}px` : '200px',
-                                                minWidth: '100px',
-                                                maxWidth: cell.column.getSize() ? `${cell.column.getSize()}px` : '200px',
-                                                overflow: 'hidden'
+                                        <td 
+                                            v-for="cell in row.getVisibleCells()" 
+                                            :key="cell.id"
+                                            class="px-3 py-2 align-top font-mono text-xs leading-normal overflow-hidden"
+                                            :class="[
+                                                cell.column.getIsResizing() ? 'border-r-2 border-r-primary/30' : ''
+                                            ]"
+                                            :style="{
+                                                width: `${cell.column.getSize()}px`,
+                                                maxWidth: `${cell.column.getSize()}px`
                                             }">
+                                            <!-- Cell Content -->
                                             <div class="flex items-center gap-1 w-full overflow-hidden">
-                                                <!-- Cell Content with improved typography -->
+                                                <!-- Severity Field Cell -->
                                                 <span
                                                     v-if="cell.column.id === severityFieldName && getSeverityClasses(cell.getValue(), cell.column.id)"
                                                     :class="getSeverityClasses(cell.getValue(), cell.column.id)"
                                                     class="shrink-0 mx-1">
                                                     {{ formatCellValue(cell.getValue()).toUpperCase() }}
                                                 </span>
+                                                <!-- Regular Cell Content -->
                                                 <template v-else>
                                                     <div class="whitespace-nowrap overflow-hidden text-ellipsis w-full">
-                                                        <FlexRender :render="cell.column.columnDef.cell"
-                                                            :props="cell.getContext()" class="text-[13px]" />
+                                                        <FlexRender 
+                                                            :render="cell.column.columnDef.cell"
+                                                            :props="cell.getContext()" />
                                                     </div>
                                                 </template>
-
                                             </div>
                                         </td>
                                     </tr>
 
-                                    <!-- Expanded Row with improved JSON viewer styling -->
+                                    <!-- Expanded Row -->
                                     <tr v-if="row.getIsExpanded()">
                                         <td :colspan="row.getVisibleCells().length" class="p-0">
-                                            <div class="p-1 bg-muted/30 border-y border-primary/10 overflow-hidden">
-                                                <JsonViewer :value="row.original" :expanded="false"
-                                                    class="text-[13px]" />
+                                            <div class="p-3 bg-muted/30 border-y border-primary/10">
+                                                <JsonViewer 
+                                                    :value="row.original" 
+                                                    :expanded="false"
+                                                    class="text-xs" />
                                             </div>
                                         </td>
                                     </tr>
@@ -402,146 +387,6 @@ watch(
     </div>
 </template>
 
-<style scoped>
-/* Custom scrollbar styles scoped to this component only */
-.log-data-table .custom-scrollbar::-webkit-scrollbar {
-    width: 10px !important;
-    height: 10px !important;
-    display: block !important;
-}
-
-.log-data-table .custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.log-data-table .custom-scrollbar::-webkit-scrollbar-thumb {
-    background-color: rgba(155, 155, 155, 0.5);
-    border-radius: 4px;
-    min-height: 40px;
-    min-width: 40px;
-}
-
-.log-data-table .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(155, 155, 155, 0.8);
-}
-
-.log-data-table .custom-scrollbar::-webkit-scrollbar-corner {
-    background: transparent;
-}
-
-/* Firefox scrollbar */
-.log-data-table .custom-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(155, 155, 155, 0.5) transparent;
-    overflow-x: scroll !important;
-    overflow-y: auto !important;
-    -webkit-overflow-scrolling: touch;
-    height: 100% !important;
-    max-height: 100% !important;
-    width: 100% !important;
-}
-
-/* Resizer styles - scoped to this component only */
-.log-data-table .resizer {
-    position: absolute;
-    right: 0;
-    top: 0;
-    height: 100%;
-    width: 4px;
-    cursor: col-resize !important;
-    user-select: none;
-    touch-action: none;
-    z-index: 50;
-    transition: background-color 0.1s ease;
-    background-color: rgba(0, 0, 0, 0.05);
-}
-
-.log-data-table .resizer:hover {
-    background-color: rgba(0, 0, 0, 0.3);
-    width: 8px;
-    right: -3px;
-}
-
-.log-data-table .resizer.isResizing {
-    background-color: rgba(0, 0, 0, 0.5);
-    opacity: 1;
-    width: 8px;
-}
-
-/* Class for column being resized */
-.log-data-table th.resizing,
-.log-data-table td.resizing {
-    border-right: 2px dashed rgba(0, 0, 0, 0.2);
-    user-select: none;
-}
-
-/* Column width presets - with specific widths for log viewing */
-.log-data-table .timestamp-column {
-    min-width: 220px;
-    width: 220px;
-}
-
-.log-data-table .severity-column {
-    min-width: 100px;
-    width: 100px;
-}
-
-.log-data-table .message-column {
-    min-width: 500px;
-    width: 500px;
-}
-
-.log-data-table .default-column {
-    min-width: 200px;
-    width: 200px;
-}
-
-/* Special content styling */
-:deep(.log-data-table .json-content) {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding: 2px 0;
-    background-color: rgba(0, 0, 0, 0.01);
-    border-radius: 2px;
-    font-size: 13px;
-}
-
-
-:deep(.log-data-table .flex-render-content) {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 13px;
-    width: 100%;
-}
-
-/* Update severity label styling to be more compact */
-:deep(.severity-label) {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 80px;
-    margin: 0 4px;
-    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-:deep(.severity-error) {
-    background-color: hsl(var(--destructive));
-    color: white;
-}
-
-:deep(.severity-warn),
-:deep(.severity-warning) {
-    background-color: hsl(var(--warning));
-    color: hsl(var(--warning-foreground));
-}
-
-:deep(.severity-info) {
-    background-color: hsl(var(--info));
-    color: white;
-}
-
-:deep(.severity-debug) {
-    background-color: hsl(var(--muted));
-    color: hsl(var(--muted-foreground));
-}
+<style>
+/* No component-specific styles needed - all moved to Tailwind utility classes */
 </style>
