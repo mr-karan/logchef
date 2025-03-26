@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ColumnDef } from '@tanstack/vue-table'
+import type { ColumnDef, ColumnMeta } from '@tanstack/vue-table'
 import {
     FlexRender,
     getCoreRowModel,
@@ -12,7 +12,7 @@ import {
     type ExpandedState,
     type VisibilityState,
     type PaginationState,
-    type ColumnSizing,
+    type ColumnSizing as TColumnSizing,
     type ColumnSizingState,
     type ColumnResizeMode,
 } from '@tanstack/vue-table'
@@ -28,6 +28,10 @@ import { TOAST_DURATION } from '@/lib/constants'
 import type { QueryStats } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
+import { createColumns } from './columns'
+import { useExploreStore } from '@/stores/explore'
+import type { Source } from '@/api/sources'
+import { useSourcesStore } from '@/stores/sources'
 
 interface Props {
     columns: ColumnDef<Record<string, any>>[]
@@ -185,12 +189,12 @@ onMounted(() => {
     columnResizeMode.value = 'onChange'
 
     // Set explicit column sizes for better horizontal scrolling
-    const initialSizes: ColumnSizing = {}
+    const initialSizes: Record<string, number> = {}
 
     props.columns.forEach(column => {
         const columnId = column.id || ''
         if (columnId === timestampFieldName.value) {
-            initialSizes[columnId] = 200 // timestamps need more space
+            initialSizes[columnId] = 220 // timestamps need more space for timezone
         } else if (columnId === severityFieldName.value) {
             initialSizes[columnId] = 100 // severity is usually short
         } else if (columnId === 'message' || columnId === 'msg' || columnId === 'log') {
@@ -210,6 +214,52 @@ onMounted(() => {
     // Watch for column size changes to adjust table layout as needed
     watch(columnSizing, () => { }, { deep: true })
 })
+
+const exploreStore = useExploreStore()
+const sourcesStore = useSourcesStore()
+
+// Add type for column meta
+interface CustomColumnMeta extends ColumnMeta<Record<string, any>, unknown> {
+    className?: string;
+}
+
+// Add type for column definition with custom meta
+type CustomColumnDef = ColumnDef<Record<string, any>> & {
+    meta?: CustomColumnMeta;
+}
+
+// Update refs with proper types
+const tableColumns = ref<CustomColumnDef[]>([])
+const sourceDetails = ref<Source | null>(null)
+
+// Watch for source details changes
+watch(
+    () => exploreStore.sourceId,
+    async (newSourceId) => {
+        if (newSourceId) {
+            const result = await sourcesStore.getSource(newSourceId)
+            if (result.success && result.data) {
+                sourceDetails.value = result.data as Source
+            }
+        }
+    },
+    { immediate: true }
+)
+
+watch(
+    () => exploreStore.columns,
+    (newColumns) => {
+        if (newColumns) {
+            tableColumns.value = createColumns(
+                newColumns,
+                sourceDetails.value?._meta_ts_field || 'timestamp',
+                localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local',
+                sourceDetails.value?._meta_severity_field || 'severity_text'
+            )
+        }
+    },
+    { immediate: true }
+)
 </script>
 
 <template>
@@ -259,15 +309,15 @@ onMounted(() => {
                             <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
                                 <tr class="border-b border-b-muted-foreground/10">
                                     <th v-for="header in table.getHeaderGroups()[0]?.headers || []" :key="header.id"
-                                        class="h-8 px-3 text-xs font-medium text-left align-middle bg-muted/30 whitespace-nowrap relative sticky top-0 z-20 overflow-hidden"
+                                        class="h-9 px-3 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap relative sticky top-0 z-20 overflow-hidden"
                                         :class="[
                                             { 'font-semibold': header.id === timestampFieldName || header.id === severityFieldName },
                                             { 'resizing': header.column.getIsResizing() },
-                                            header.column.columnDef.meta?.className
+                                            (header.column.columnDef as CustomColumnDef).meta?.className
                                         ]" :style="{
-                                        width: header.column.getSize() ? `${header.column.getSize()}px` : '200px',
-                                        minWidth: '100px'
-                                    }">
+                                            width: header.column.getSize() ? `${header.column.getSize()}px` : '200px',
+                                            minWidth: '100px'
+                                        }">
                                         <FlexRender v-if="!header.isPlaceholder"
                                             :render="header.column.columnDef.header" :props="header.getContext()" />
 
@@ -301,28 +351,28 @@ onMounted(() => {
                                             row.getIsExpanded() ? 'bg-primary/5 hover:bg-primary/10 border-primary/10' : ''
                                         ]">
                                         <td v-for="cell in row.getVisibleCells()" :key="cell.id"
-                                            class="h-auto px-3 py-1.5 align-top group overflow-hidden whitespace-nowrap text-ellipsis font-mono text-[11px] leading-tight"
+                                            class="h-auto px-3 py-2 align-top group overflow-hidden whitespace-nowrap text-ellipsis font-mono text-[13px] leading-normal"
                                             :data-column-id="cell.column.id" :class="[
-                                                cell.column.columnDef.meta?.className,
+                                                (cell.column.columnDef as CustomColumnDef).meta?.className,
                                                 { 'resizing': cell.column.getIsResizing() }
                                             ]" :style="{
-                                            width: cell.column.getSize() ? `${cell.column.getSize()}px` : '200px',
-                                            minWidth: '100px',
-                                            maxWidth: cell.column.getSize() ? `${cell.column.getSize()}px` : '200px',
-                                            overflow: 'hidden'
-                                        }">
+                                                width: cell.column.getSize() ? `${cell.column.getSize()}px` : '200px',
+                                                minWidth: '100px',
+                                                maxWidth: cell.column.getSize() ? `${cell.column.getSize()}px` : '200px',
+                                                overflow: 'hidden'
+                                            }">
                                             <div class="flex items-center gap-1 w-full overflow-hidden">
                                                 <!-- Cell Content with improved typography -->
                                                 <span
                                                     v-if="cell.column.id === severityFieldName && getSeverityClasses(cell.getValue(), cell.column.id)"
                                                     :class="getSeverityClasses(cell.getValue(), cell.column.id)"
-                                                    class="font-medium px-1.5 py-0.5 rounded text-xs shrink-0">
-                                                    {{ cell.getValue() }}
+                                                    class="shrink-0 mx-1">
+                                                    {{ formatCellValue(cell.getValue()).toUpperCase() }}
                                                 </span>
                                                 <template v-else>
                                                     <div class="whitespace-nowrap overflow-hidden text-ellipsis w-full">
                                                         <FlexRender :render="cell.column.columnDef.cell"
-                                                            :props="cell.getContext()" />
+                                                            :props="cell.getContext()" class="text-[13px]" />
                                                     </div>
                                                 </template>
 
@@ -334,7 +384,8 @@ onMounted(() => {
                                     <tr v-if="row.getIsExpanded()">
                                         <td :colspan="row.getVisibleCells().length" class="p-0">
                                             <div class="p-1 bg-muted/30 border-y border-primary/10 overflow-hidden">
-                                                <JsonViewer :value="row.original" :expanded="false" class="text-xs" />
+                                                <JsonViewer :value="row.original" :expanded="false"
+                                                    class="text-[13px]" />
                                             </div>
                                         </td>
                                     </tr>
@@ -426,8 +477,8 @@ onMounted(() => {
 
 /* Column width presets - with specific widths for log viewing */
 .log-data-table .timestamp-column {
-    min-width: 200px;
-    width: 200px;
+    min-width: 220px;
+    width: 220px;
 }
 
 .log-data-table .severity-column {
@@ -453,12 +504,44 @@ onMounted(() => {
     padding: 2px 0;
     background-color: rgba(0, 0, 0, 0.01);
     border-radius: 2px;
+    font-size: 13px;
 }
 
 
 :deep(.log-data-table .flex-render-content) {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 11px;
+    font-size: 13px;
     width: 100%;
+}
+
+/* Update severity label styling to be more compact */
+:deep(.severity-label) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 60px;
+    margin: 0 4px;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+:deep(.severity-error) {
+    background-color: hsl(var(--destructive));
+    color: white;
+}
+
+:deep(.severity-warn),
+:deep(.severity-warning) {
+    background-color: hsl(var(--warning));
+    color: hsl(var(--warning-foreground));
+}
+
+:deep(.severity-info) {
+    background-color: hsl(var(--info));
+    color: white;
+}
+
+:deep(.severity-debug) {
+    background-color: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
 }
 </style>
