@@ -120,6 +120,6 @@ module.exports = {
   plugins: [
     animate, 
     require("tailwindcss-animate"),
-    require("tailwindcss-scrollbar")
+    require("tailwind-scrollbar")
   ],
 }
