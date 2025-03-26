@@ -324,12 +324,12 @@ watch(
                                     <!-- Main Data Row -->
                                     <tr 
                                         :data-state="row.getIsSelected() ? 'selected' : undefined"
-                                        @click="handleRowClick(row)"
+                                        @click="handleRowClick(row)($event)"
                                         class="group cursor-pointer border-b border-b-muted-foreground/10 transition-colors"
                                         :class="[
                                             'hover:bg-muted/50',
                                             index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5',
-                                            row.getIsExpanded() ? 'bg-primary/5 hover:bg-primary/10 border-primary/10' : ''
+                                            row.getIsExpanded() ? 'bg-primary/10 hover:bg-primary/20 border-primary/20' : ''
                                         ]">
                                         <td 
                                             v-for="cell in row.getVisibleCells()" 
@@ -366,7 +366,7 @@ watch(
                                     <!-- Expanded Row -->
                                     <tr v-if="row.getIsExpanded()">
                                         <td :colspan="row.getVisibleCells().length" class="p-0">
-                                            <div class="p-3 bg-muted/30 border-y border-primary/10">
+                                            <div class="p-3 bg-muted/30 border-y border-y-primary/20">
                                                 <JsonViewer 
                                                     :value="row.original" 
                                                     :expanded="false"
