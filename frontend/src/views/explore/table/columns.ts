@@ -82,9 +82,9 @@ export function createColumns(
       size: widthConfig.defaultWidth,
       minSize: widthConfig.minWidth,
       maxSize: widthConfig.maxWidth,
-    // Use accessor function instead of accessorKey for nested properties
-    accessorFn: (row) => row[col.name],
-    header: ({ column }) => {
+      // Use accessor function instead of accessorKey for nested properties
+      accessorFn: (row) => row[col.name],
+      header: ({ column }) => {
       return h(
         Button,
         {
