@@ -219,19 +219,27 @@ export const useExploreStore = defineStore("explore", () => {
 
   // Main query execution
   async function executeQuery(rawSql?: string) {
-    if (!canExecuteQuery.value) {
-      throw new Error("Cannot execute query: Invalid source or time range");
-    }
+    return await state.withLoading('executeQuery', async () => {
+      if (!canExecuteQuery.value) {
+        return state.handleError(
+          { 
+            status: "error",
+            message: "Cannot execute query: Invalid source or time range", 
+            error_type: "ValidationError" 
+          } as APIErrorResponse, 
+          'executeQuery'
+        );
+      }
 
-    // Reset state before executing query
-    state.data.value.logs = [];
-    state.data.value.queryStats = DEFAULT_QUERY_STATS;
-    state.data.value.columns = [];
-    state.data.value.queryId = null;
-    state.data.value.error = null;
+      // Reset state before executing query
+      state.data.value.logs = [];
+      state.data.value.queryStats = DEFAULT_QUERY_STATS;
+      state.data.value.columns = [];
+      state.data.value.queryId = null;
+      state.data.value.error = null;
 
-    // Use the centralized API calling mechanism from base store
-    return await state.callApi({
+      // Use the centralized API calling mechanism from base store
+      return await state.callApi({
       apiCall: async () => {
         // Get the source details
         const sourcesStore = useSourcesStore();
@@ -498,36 +506,38 @@ export const useExploreStore = defineStore("explore", () => {
 
   // Get log context
   async function getLogContext(sourceId: number, params: LogContextRequest) {
-    if (!sourceId) {
-      return state.handleError(
-        { 
-          status: "error",
-          message: "Source ID is required for getting log context", 
-          error_type: "ValidationError" 
-        } as APIErrorResponse, 
-        "getLogContext"
-      );
-    }
+    return await state.withLoading(`getLogContext-${sourceId}`, async () => {
+      if (!sourceId) {
+        return state.handleError(
+          { 
+            status: "error",
+            message: "Source ID is required for getting log context", 
+            error_type: "ValidationError" 
+          } as APIErrorResponse, 
+          "getLogContext"
+        );
+      }
 
-    // Get the teams store
-    const teamsStore = useTeamsStore();
-    const currentTeamId = teamsStore.currentTeamId;
+      // Get the teams store
+      const teamsStore = useTeamsStore();
+      const currentTeamId = teamsStore.currentTeamId;
 
-    if (!currentTeamId) {
-      return state.handleError(
-        { 
-          status: "error",
-          message: "No team selected. Please select a team before getting log context.", 
-          error_type: "ValidationError" 
-        } as APIErrorResponse, 
-        "getLogContext"
-      );
-    }
+      if (!currentTeamId) {
+        return state.handleError(
+          { 
+            status: "error",
+            message: "No team selected. Please select a team before getting log context.", 
+            error_type: "ValidationError" 
+          } as APIErrorResponse, 
+          "getLogContext"
+        );
+      }
 
-    return await state.callApi<LogContextResponse>({
-      apiCall: () => exploreApi.getLogContext(sourceId, params, currentTeamId),
-      operationKey: `getLogContext-${sourceId}`,
-      showToast: false,
+      return await state.callApi<LogContextResponse>({
+        apiCall: () => exploreApi.getLogContext(sourceId, params, currentTeamId),
+        operationKey: `getLogContext-${sourceId}`,
+        showToast: false,
+      });
     });
   }
 
@@ -548,11 +558,13 @@ export const useExploreStore = defineStore("explore", () => {
     }),
     logchefqlCode: computed(() => state.data.value.logchefqlCode),
     activeMode: computed(() => state.data.value.activeMode),
-    isLoading: computed(() => state.data.value.isLoading),
-    error: computed(() => state.data.value.error),
+    error: state.error,
     queryId: computed(() => state.data.value.queryId),
     stats: computed(() => state.data.value.stats),
-
+    
+    // Loading state
+    isLoading: state.isLoading,
+    
     // Derived values
     canExecuteQuery,
 
@@ -567,5 +579,8 @@ export const useExploreStore = defineStore("explore", () => {
     resetState,
     executeQuery,
     getLogContext,
+    
+    // Loading state helpers
+    isLoadingOperation: state.isLoadingOperation,
   };
 });
