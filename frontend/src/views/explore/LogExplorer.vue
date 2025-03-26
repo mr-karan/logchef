@@ -169,6 +169,11 @@ const dateRange = computed({
   }
 })
 
+// Add timezone preference for display
+const displayTimezone = computed(() => 
+  localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local'
+);
+
 // Add more detailed initialization tracking
 const isInitializing = ref(true)
 const isTeamsLoaded = ref(false)
