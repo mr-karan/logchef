@@ -10,7 +10,8 @@ import type { ColumnInfo } from "@/api/explore";
 export function createColumns(
   columns: ColumnInfo[],
   timestampField: string = "timestamp",
-  timezone: 'local' | 'utc' = 'local'
+  timezone: 'local' | 'utc' = 'local',
+  severityField: string = "severity_text"
 ): ColumnDef<Record<string, any>>[] {
   // Create a new array with the columns in the desired order
   // First, let's sort out the timestamp field to be first if it exists
@@ -25,22 +26,31 @@ export function createColumns(
     sortedColumns.unshift(tsColumn);
   }
 
+  // Move severity field to be second if it exists
+  const severityColumnIndex = sortedColumns.findIndex(
+    (col) => col.name === severityField
+  );
+  if (severityColumnIndex > 0) {
+    const severityColumn = sortedColumns.splice(severityColumnIndex, 1)[0];
+    sortedColumns.splice(1, 0, severityColumn);
+  }
+
   return sortedColumns.map((col) => ({
     id: col.name,
     // Set width classes for different column types
     meta: {
-      className: col.name === timestampField ? 'timestamp-column' : 
-              (col.name === "severity" || col.name === "severity_text") ? 'severity-column' : 
-              (col.name === "message" || col.name === "log" || col.name === "msg" || col.name === "content") ? 'message-column' : 'default-column'
+      className: col.name === timestampField ? 'timestamp-column' :
+              col.name === severityField ? 'severity-column' :
+              (col.name === "message" || col.name === "log" || col.name === "msg" || col.name === "body" || col.name === "content") ? 'message-column' : 'default-column'
     },
     // Enable column resizing with sensible defaults based on column type
     enableResizing: true,
-    size: col.name === timestampField ? 200 : 
-          (col.name === "severity" || col.name === "severity_text") ? 110 : 
-          (col.name === "message" || col.name === "log" || col.name === "msg" || col.name === "content") ? 500 : 200,
-    minSize: col.name === timestampField ? 120 : 
-             (col.name === "severity" || col.name === "severity_text") ? 80 : 
-             (col.name === "message" || col.name === "log" || col.name === "msg" || col.name === "content") ? 200 : 80,
+    size: col.name === timestampField ? 200 :
+          col.name === severityField ? 100 :
+          (col.name === "message" || col.name === "log" || col.name === "msg" || col.name === "body" || col.name === "content") ? 500 : 200,
+    minSize: col.name === timestampField ? 120 :
+             col.name === severityField ? 80 :
+             (col.name === "message" || col.name === "log" || col.name === "msg" || col.name === "body" || col.name === "content") ? 200 : 80,
     maxSize: 1000,
     // Use accessor function instead of accessorKey for nested properties
     accessorFn: (row) => {
@@ -80,7 +90,7 @@ export function createColumns(
         try {
           // Parse the timestamp
           const date = new Date(value as string);
-          
+
           // Check if the date is valid
           if (isNaN(date.getTime())) {
             // If invalid, just use the original formatting
@@ -97,12 +107,12 @@ export function createColumns(
               const offsetHours = Math.floor(absOffset / 60).toString().padStart(2, '0');
               const offsetMinutes = (absOffset % 60).toString().padStart(2, '0');
               const offsetSign = tzOffset <= 0 ? '+' : '-'; // Note: getTimezoneOffset returns negative for positive offsets
-              
+
               // Format the date in ISO format with timezone offset
               const localISOTime = new Date(date.getTime() - (tzOffset * 60000))
                 .toISOString()
                 .slice(0, -1); // Remove the trailing Z
-                
+
               formattedTimestamp = `${localISOTime}${offsetSign}${offsetHours}:${offsetMinutes}`;
             }
           }
@@ -113,11 +123,23 @@ export function createColumns(
 
         return h(
           "span",
-          { 
-            class: "flex-render-content font-mono text-[11px]",
+          {
+            class: "flex-render-content font-mono text-[13px]",
             title: value as string // Show original value on hover
           },
           formattedTimestamp
+        );
+      }
+
+      // Special handling for severity column
+      if (col.name === severityField) {
+        return h(
+          "span",
+          {
+            class: "flex-render-content font-mono text-[13px] px-1.5 py-0.5 rounded-sm",
+            title: value as string // Show original value on hover
+          },
+          () => value
         );
       }
 
@@ -128,11 +150,11 @@ export function createColumns(
           const jsonString = typeof value === 'object' && value !== null
             ? JSON.stringify(value, null, 2)
             : JSON.stringify(value);
-          
+
           return h(
             "span",
-            { 
-              class: "flex-render-content json-content font-mono text-[11px]"
+            {
+              class: "flex-render-content json-content font-mono text-[13px]"
             },
             jsonString
           );
@@ -140,7 +162,7 @@ export function createColumns(
           // Fallback to simple string if there's an error
           return h(
             "span",
-            { 
+            {
               class: "flex-render-content"
             },
             String(value)
@@ -151,10 +173,10 @@ export function createColumns(
       // Default to string representation with ellipsis support
       const stringValue = String(value);
       return h(
-        "span", 
-        { 
-          class: "flex-render-content font-mono text-[11px]"
-        }, 
+        "span",
+        {
+          class: "flex-render-content font-mono text-[13px]"
+        },
         stringValue
       );
     },
