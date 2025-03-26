@@ -235,7 +235,7 @@ export function createColumns(
         default:
           return false;
       }
-    },
+    }
   });
 }
 
