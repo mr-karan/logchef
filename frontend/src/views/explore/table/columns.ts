@@ -236,6 +236,7 @@ export function createColumns(
           return false;
       }
     }
+  };
   });
 }
 
