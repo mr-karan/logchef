@@ -65,6 +65,11 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     }
   };
 
+  // Public helper method to use outside the store
+  function parseQueryContentHelper(query: SavedTeamQuery): SavedQueryContent {
+    return parseQueryContent(query);
+  }
+
   // Computed properties
   const queries = computed(() => state.data.value.queries);
   const selectedQuery = computed(() => state.data.value.selectedQuery);
@@ -264,13 +269,14 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     // State
     isLoading: state.isLoading,
     error: state.error,
+    data: state.data.value, // Directly expose data for backward compatibility
     
     // Computed properties
     queries,
     selectedQuery,
     teams,
     selectedTeamId,
-    parseQueryContent,
+    parseQueryContent: parseQueryContentHelper, // Expose the helper function
     hasTeams,
     hasQueries,
     selectedTeam,
