@@ -1383,6 +1383,17 @@ watch(() => exploreStore.rawSql, (newValue) => {
   }
 });
 
+// Watch for loading state from the store to disable editor during API calls
+watch(() => exploreStore.isLoadingOperation('executeQuery'), (isLoading) => {
+  if (editorRef.value && !isDisposing.value) {
+    try {
+      editorRef.value.updateOptions({ readOnly: isLoading });
+    } catch (error) {
+      console.warn('Error updating editor readOnly state:', error);
+    }
+  }
+});
+
 // Update the submitQuery function to use QueryBuilder service
 const submitQuery = () => {
   try {
@@ -1417,13 +1428,11 @@ const submitQuery = () => {
 
       // Ensure the store knows we're in SQL mode
       exploreStore.setActiveMode('sql');
-
-      // Emit change event to trigger URL update in parent
-      emit('change', {
-        query: code.value || '',
-        mode: 'sql'
-      });
     }
+
+    // Clear any previous error
+    errorMessage.value = '';
+    errorText.value = '';
 
     // Emit the submit event with mode and query info
     emit('submit', {
@@ -1431,9 +1440,16 @@ const submitQuery = () => {
       query: finalQuery,
       mode: activeTab.value === 'logchefql' ? 'logchefql' : 'sql'
     });
+
+    // Always emit change event to trigger URL update in parent
+    emit('change', {
+      query: finalQuery,
+      mode: activeTab.value === 'logchefql' ? 'logchefql' : 'sql'
+    });
   } catch (error) {
     console.error('Error submitting query:', error);
     errorMessage.value = error instanceof Error ? error.message : 'An error occurred';
+    errorText.value = errorMessage.value;
   }
 };
 
