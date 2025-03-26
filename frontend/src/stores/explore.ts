@@ -501,7 +501,8 @@ export const useExploreStore = defineStore("explore", () => {
       // Error handler will automatically add the error to state.data.value.error
       // and will show a toast notification with the error message
       operationKey: 'executeQuery',
-    }));
+    });
+  });
   }
 
   // Get log context
