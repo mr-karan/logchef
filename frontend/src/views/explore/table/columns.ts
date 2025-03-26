@@ -1,10 +1,44 @@
 import type { ColumnDef, Column } from "@tanstack/vue-table";
 import { formatTimestamp } from "@/lib/utils";
 import { h } from "vue";
-import get from "lodash/get";
 import { Button } from "@/components/ui/button";
 import { ArrowUpDown } from "lucide-vue-next";
 import type { ColumnInfo } from "@/api/explore";
+
+/**
+ * Column type definitions with consistent size handling
+ */
+// Common column types for width settings
+type ColumnType = 'timestamp' | 'severity' | 'message' | 'default';
+
+// Column width configuration
+interface ColumnWidthConfig {
+  defaultWidth: number;
+  minWidth: number;
+  maxWidth: number;
+}
+
+// Width configurations for each column type
+const COLUMN_WIDTH_CONFIG: Record<ColumnType, ColumnWidthConfig> = {
+  timestamp: { defaultWidth: 220, minWidth: 180, maxWidth: 300 },
+  severity: { defaultWidth: 120, minWidth: 80, maxWidth: 150 },
+  message: { defaultWidth: 500, minWidth: 200, maxWidth: 1200 },
+  default: { defaultWidth: 180, minWidth: 100, maxWidth: 400 }
+};
+
+// Determine column type based on field name
+function getColumnType(columnName: string, timestampField: string, severityField: string): ColumnType {
+  if (columnName === timestampField) {
+    return 'timestamp';
+  }
+  if (columnName === severityField) {
+    return 'severity';
+  }
+  if (['message', 'log', 'msg', 'body', 'content'].includes(columnName)) {
+    return 'message';
+  }
+  return 'default';
+}
 
 // Function to generate column definitions based on source schema
 export function createColumns(
@@ -35,28 +69,21 @@ export function createColumns(
     sortedColumns.splice(1, 0, severityColumn);
   }
 
-  return sortedColumns.map((col) => ({
-    id: col.name,
-    // Set width classes for different column types
-    meta: {
-      className: col.name === timestampField ? 'timestamp-column' :
-              col.name === severityField ? 'severity-column' :
-              (col.name === "message" || col.name === "log" || col.name === "msg" || col.name === "body" || col.name === "content") ? 'message-column' : 'default-column'
-    },
-    // Enable column resizing with sensible defaults based on column type
-    enableResizing: true,
-    size: col.name === timestampField ? 200 :
-          col.name === severityField ? 100 :
-          (col.name === "message" || col.name === "log" || col.name === "msg" || col.name === "body" || col.name === "content") ? 500 : 200,
-    minSize: col.name === timestampField ? 120 :
-             col.name === severityField ? 80 :
-             (col.name === "message" || col.name === "log" || col.name === "msg" || col.name === "body" || col.name === "content") ? 200 : 80,
-    maxSize: 1000,
+  return sortedColumns.map((col) => {
+    const columnType = getColumnType(col.name, timestampField, severityField);
+    const widthConfig = COLUMN_WIDTH_CONFIG[columnType];
+    
+    return {
+      id: col.name,
+      // Store column type in meta for easy access
+      meta: { columnType },
+      // Enable column resizing with consistent sizes from config
+      enableResizing: true,
+      size: widthConfig.defaultWidth,
+      minSize: widthConfig.minWidth,
+      maxSize: widthConfig.maxWidth,
     // Use accessor function instead of accessorKey for nested properties
-    accessorFn: (row) => {
-      // Ensure we get the correct value for this specific column
-      return row[col.name];
-    },
+    accessorFn: (row) => row[col.name],
     header: ({ column }) => {
       return h(
         Button,
