@@ -20,6 +20,13 @@
       </div>
 
       <div class="flex items-center gap-2">
+        <!-- Table name indicator (for SQL) -->
+        <div v-if="activeTab === 'clickhouse-sql'" class="text-xs text-muted-foreground">
+          <span v-if="props.tableName" class="mr-1">Table:</span>
+          <code v-if="props.tableName" class="bg-muted px-1 rounded">{{ props.tableName }}</code>
+          <span v-else class="italic">No table selected</span>
+        </div>
+      
         <!-- Help Icon -->
         <HoverCard>
           <HoverCardTrigger>
@@ -555,9 +562,14 @@ function setActiveTab(tab: string) {
     // CHANGED: Always prioritize generating SQL from LogchefQL if available
     if (logchefQLCode.value && logchefQLCode.value.trim()) {
       try {
+        // Make sure we have a table name before generating SQL
+        if (!props.tableName) {
+          console.warn('No table name available when converting LogchefQL to SQL');
+        }
+        
         // Use our QueryBuilder to generate SQL from LogchefQL WITH time filter
         const result = QueryBuilder.buildSqlFromLogchefQL(logchefQLCode.value, {
-          tableName: props.tableName,
+          tableName: props.tableName || '<table_name>',  // Provide a placeholder if missing
           tsField: props.tsField,
           startTimestamp: props.startTimestamp,
           endTimestamp: props.endTimestamp,
@@ -617,10 +629,10 @@ function setActiveTab(tab: string) {
         exploreStore.pendingRawSql = undefined;
       } else {
         // If no LogchefQL code and no SQL code, use default query
-        console.log('No SQL or LogchefQL found, generating default query for:', props.tableName);
+        console.log('No SQL or LogchefQL found, generating default query for table:', props.tableName || '<MISSING>');
         
         // Only generate default query if we have a valid table name
-        if (props.tableName) {
+        if (props.tableName && props.tableName.trim()) {
           sqlCode.value = QueryBuilder.getDefaultSQLQuery({
             tableName: props.tableName,
             tsField: props.tsField,
@@ -630,6 +642,12 @@ function setActiveTab(tab: string) {
             includeTimeFilter: true,
             forDisplay: true
           });
+          code.value = sqlCode.value;
+          exploreStore.setRawSql(sqlCode.value);
+        } else {
+          console.warn('No table name available for SQL query generation');
+          // Set a placeholder to make it obvious there's a missing table name
+          sqlCode.value = `-- Please select a valid source with a table name\nSELECT * FROM <table_name>\nWHERE ${props.tsField} BETWEEN '...' AND '...'\nORDER BY ${props.tsField} DESC\nLIMIT ${props.limit}`;
           code.value = sqlCode.value;
           exploreStore.setRawSql(sqlCode.value);
         }
