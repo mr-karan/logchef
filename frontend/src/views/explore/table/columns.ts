@@ -236,7 +236,7 @@ export function createColumns(
           return false;
       }
     },
-  }));
+  });
 }
 
 // Helper function to get initial visible columns (timestamp + first column if exists)
