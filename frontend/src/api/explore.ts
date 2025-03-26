@@ -90,7 +90,7 @@ export const exploreApi = {
       throw new Error("Team ID is required for getting log context");
     }
     return apiClient.post<LogContextResponse>(
-      `/${teamId}/sources/${sourceId}/logs/context`,
+      `/teams/${teamId}/sources/${sourceId}/logs/context`,
       params
     );
   }
