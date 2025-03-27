@@ -336,20 +336,20 @@ const handleTabChange = (newMode: EditorMode) => {
 const getOperatorsSuggestions = (field: string, position: any) => {
   // Create operators as any[] type to avoid string[] conversion issues
   const operators: any[] = [
-    { label: Operator.EQUALS, sortText: "a" },
-    { label: Operator.NOT_EQUALS, sortText: "b" },
-    { label: Operator.GREATER_THAN, sortText: "e" },
-    { label: Operator.GREATER_OR_EQUALS_THAN, sortText: "f" },
-    { label: Operator.LOWER_THAN, sortText: "g" },
-    { label: Operator.LOWER_OR_EQUALS_THAN, sortText: "h" },
+    { label: LogchefQLOperator.EQUALS, sortText: "a" },
+    { label: LogchefQLOperator.NOT_EQUALS, sortText: "b" },
+    { label: LogchefQLOperator.GREATER_THAN, sortText: "e" },
+    { label: LogchefQLOperator.GREATER_OR_EQUALS_THAN, sortText: "f" },
+    { label: LogchefQLOperator.LOWER_THAN, sortText: "g" },
+    { label: LogchefQLOperator.LOWER_OR_EQUALS_THAN, sortText: "h" },
   ];
 
   // Only add regex operators for string fields
   const fieldType = props.schema[field]?.type || "";
   if (fieldType.includes("String") || fieldType.includes("string")) {
     operators.push(
-      { label: Operator.EQUALS_REGEX, sortText: "c" },
-      { label: Operator.NOT_EQUALS_REGEX, sortText: "d" }
+      { label: LogchefQLOperator.EQUALS_REGEX, sortText: "c" },
+      { label: LogchefQLOperator.NOT_EQUALS_REGEX, sortText: "d" }
     );
   }
 
