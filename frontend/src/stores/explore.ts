@@ -217,7 +217,7 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   // Main query execution - accepts finalSql directly
-  async function executeQuery(finalSql: string) {
+  async function executeQuery(finalSql: string, originalQuery?: string, queryType?: string) {
     return await state.withLoading('executeQuery', async () => {
       if (!canExecuteQuery.value) {
         return state.handleError(
@@ -236,6 +236,9 @@ export const useExploreStore = defineStore("explore", () => {
       state.data.value.columns = [];
       state.data.value.queryId = null;
       state.data.value.error = null;
+      
+      // Store the original query and type for reference
+      state.data.value.logchefQuery = originalQuery || "";
 
       // Use the centralized API calling mechanism from base store
       return await state.callApi({
@@ -329,6 +332,9 @@ export const useExploreStore = defineStore("explore", () => {
           limit: state.data.value.limit,
           start_timestamp: startTimestampSec,
           end_timestamp: endTimestampSec,
+          // Include original query info if available
+          original_query: originalQuery,
+          query_type: queryType || state.data.value.activeMode
         };
 
         console.log("Executing query with params:", params);
