@@ -18,19 +18,23 @@ const NEWLINE = "\n";
 
 export const CharType = Object.freeze({
   KEY: "logchefqlKey",
-  VALUE: "logchefqlValue",
+  VALUE: "logchefqlValue", // Base type before number/string refinement
   OPERATOR: "logchefqlOperator",
-  NUMBER: "number",
-  STRING: "string",
+  NUMBER: "number", // Final type for numeric values
+  STRING: "string", // Final type for non-numeric values/quoted strings
   SPACE: "space",
+  COMMENT: "comment", // Added for potential future use
+  PUNCTUATION: "punctuation", // For brackets, quotes
 });
 
+// Updated tokenTypes for Monaco legend
 export const tokenTypes = [
   CharType.KEY,
-  CharType.VALUE,
   CharType.OPERATOR,
   CharType.NUMBER,
   CharType.STRING,
+  CharType.PUNCTUATION,
+  // CharType.VALUE is intermediate, not directly used in legend
 ];
 
 export class LogchefQLError extends Error {
@@ -177,25 +181,9 @@ class Char {
     return this.value === DELIMITER;
   }
 
-  isKey() {
-    return (
-      this.value.match(/^[a-zA-Z0-9]$/) ||
-      this.value === UNDERSCORE ||
-      this.value === DOT ||
-      this.value === COLON ||
-      this.value === SLASH
-    );
-  }
+  isKey() { return /^[a-zA-Z0-9_.:\/]$/.test(this.value); } // Slightly simpler regex
 
-  isOp() {
-    return (
-      this.value === EQUAL_SIGN ||
-      this.value === EXCL_MARK ||
-      this.value === TILDE ||  // Now a standalone operator
-      this.value === LOWER_THAN ||
-      this.value === GREATER_THAN
-    );
-  }
+  isOp() { return /[=!<>\~]/.test(this.value); } // Includes ~, excludes +-*/ etc.
 
   isGroupOpen() {
     return this.value === BRACKET_OPEN;
@@ -452,7 +440,7 @@ export class Parser {
       this.extendNodesStack();
       this.extendBoolOpStack();
       this.setState(State.INITIAL);
-      this.storeTypedChar(CharType.OPERATOR);
+      this.storeTypedChar(CharType.PUNCTUATION); // Store '(' as punctuation
     } else if (this.char?.isDelimiter()) {
       this.storeTypedChar(CharType.SPACE);
       this.setState(State.BOOL_OP_DELIMITER);
@@ -519,16 +507,17 @@ export class Parser {
   }
 
   inStateValue() {
-    if (this.char?.isValue()) {
-      this.extendValue();
-      this.storeTypedChar(CharType.VALUE);
-    } else if (this.char?.isDelimiter()) {
+    // isValue() check within the state machine logic is more robust
+    const char = this.char;
+    if (!char) return; // Should not happen in loop
+
+    if (char.isDelimiter()) {
       this.storeTypedChar(CharType.SPACE);
       this.setState(State.EXPECT_BOOL_OP);
       this.extendTree();
       this.resetData();
       this.resetBoolOperator();
-    } else if (this.char?.isGroupClose()) {
+    } else if (char.isGroupClose()) {
       if (!this.nodesStack.length) {
         this.setErrorState("unmatched parenthesis", 9);
         return;
@@ -541,7 +530,7 @@ export class Parser {
         this.extendTreeFromStack(this.boolOperator);
         this.resetBoolOperator();
         this.setState(State.EXPECT_BOOL_OP);
-        this.storeTypedChar(CharType.OPERATOR);
+        this.storeTypedChar(CharType.PUNCTUATION); // Store ')' as punctuation
       }
     } else {
       this.setErrorState("invalid character", 10);
@@ -550,19 +539,28 @@ export class Parser {
   }
 
   inStateSingleQuotedValue() {
-    this.storeTypedChar(CharType.VALUE);
-    if (this.char?.isSingleQuotedValue()) {
-      this.extendValue();
-    } else if (this.char?.isSingleQuote()) {
-      const prevPos = this.char.pos - 1;
-      if (this.text[prevPos] === "\\") {
+    const char = this.char;
+    if (!char) return;
+
+    if (char.isSingleQuote()) {
+      // Check for escaped quote
+      const prevPos = char.pos - 1;
+      if (prevPos >= 0 && this.text[prevPos] === BACKSLASH) {
+        // It's an escaped quote, part of the value
         this.extendValue();
+        this.storeTypedChar(CharType.VALUE); // Still part of the string value
       } else {
+        // It's the closing quote
+        this.storeTypedChar(CharType.PUNCTUATION); // Store closing quote
         this.setState(State.EXPECT_BOOL_OP);
         this.extendTree();
         this.resetData();
         this.resetBoolOperator();
       }
+    } else {
+      // Any other character is part of the value
+      this.extendValue();
+      this.storeTypedChar(CharType.VALUE); // Store as VALUE
     } else {
       this.setErrorState("invalid character", 11);
       return;
@@ -570,19 +568,24 @@ export class Parser {
   }
 
   inStateDoubleQuotedValue() {
-    this.storeTypedChar(CharType.VALUE);
-    if (this.char?.isDoubleQuotedValue()) {
-      this.extendValue();
-    } else if (this.char?.isDoubleQuote()) {
-      const prevPos = this.char.pos - 1;
-      if (this.text[prevPos] === "\\") {
+    const char = this.char;
+    if (!char) return;
+
+    if (char.isDoubleQuote()) {
+      const prevPos = char.pos - 1;
+      if (prevPos >= 0 && this.text[prevPos] === BACKSLASH) {
         this.extendValue();
+        this.storeTypedChar(CharType.VALUE);
       } else {
+        this.storeTypedChar(CharType.PUNCTUATION); // Store closing quote
         this.setState(State.EXPECT_BOOL_OP);
         this.extendTree();
         this.resetData();
         this.resetBoolOperator();
       }
+    } else {
+        this.extendValue();
+        this.storeTypedChar(CharType.VALUE);
     } else {
       this.setErrorState("invalid character", 11);
       return;
@@ -687,51 +690,77 @@ export class Parser {
 
   generateMonacoTokens() {
     const tokens: Token[] = [];
-    let token: Token | null = null;
-    for (const [char, charType] of this.typedChars) {
-      if (token == null) {
-        token = new Token(char, charType);
-      } else {
-        if (token.type == charType) {
-          token.addChar(char);
-        } else {
-          tokens.push(token);
-          token = new Token(char, charType);
-        }
-      }
-    }
-    if (token !== null) {
-      tokens.push(token);
-    }
-    for (const token of tokens) {
-      if (token.type === CharType.VALUE) {
-        // Check if numeric
-        if (!isNaN(Number(token.value))) {
-          token.type = CharType.NUMBER;
-        } else {
-          token.type = CharType.STRING;
-        }
-      }
-    }
-    const data: number[] = [];
-    const tokenModifier = 0;
-    let prevToken: Token | null = null;
-    for (const token of tokens) {
-      let deltaLine = 0;
-      let deltaStart = token.linePos;
-      let tokenLength = token.length;
-      let typeIndex = tokenTypes.indexOf(token.type);
+    let currentToken: Token | null = null;
 
-      if (prevToken != null) {
-        deltaLine = token.line - prevToken.line;
-        deltaStart =
-          deltaLine === 0 ? token.start - prevToken.start : token.linePos;
-        prevToken = token;
-      } else {
-        prevToken = token;
+    for (const [char, charType] of this.typedChars) {
+      // Handle specific punctuation/operators immediately
+      if (charType === CharType.PUNCTUATION || charType === CharType.OPERATOR || charType === CharType.SPACE) {
+        if (currentToken) {
+          tokens.push(currentToken); // Push previous token
+          currentToken = null;
+        }
+        tokens.push(new Token(char, charType)); // Push the punctuation/operator/space token
+        continue;
       }
-      data.push(deltaLine, deltaStart, tokenLength, typeIndex, tokenModifier);
+
+      // Group consecutive characters of the same base type (KEY or VALUE)
+      if (currentToken === null) {
+        currentToken = new Token(char, charType);
+      } else {
+        // Group KEYs together, and VALUEs together.
+        // Other types were handled above.
+        if (currentToken.type === charType && (charType === CharType.KEY || charType === CharType.VALUE)) {
+          currentToken.addChar(char);
+        } else {
+          tokens.push(currentToken);
+          currentToken = new Token(char, charType);
+        }
+      }
     }
+    // Push the last token if it exists
+    if (currentToken !== null) {
+      tokens.push(currentToken);
+    }
+
+    // Refine token types (VALUE -> NUMBER or STRING) and filter out spaces
+    const finalTokens = tokens
+      .map(token => {
+        if (token.type === CharType.VALUE) {
+          // Use the stricter isNumeric check
+          token.type = isNumeric(token.value) ? CharType.NUMBER : CharType.STRING;
+        }
+        return token;
+      })
+      .filter(token => token.type !== CharType.SPACE); // Exclude space tokens from semantic highlighting
+
+    // --- Generate Monaco data array ---
+    const data: number[] = [];
+    let prevLine = 0;
+    let prevChar = 0;
+
+    for (const token of finalTokens) {
+        const deltaLine = token.line - prevLine;
+        const deltaStart = deltaLine === 0 ? token.linePos - prevChar : token.linePos;
+        const typeIndex = tokenTypes.indexOf(token.type);
+
+        // Monaco expects typeIndex >= 0. Handle unknown types gracefully.
+        if (typeIndex === -1) {
+             console.warn(`Unknown token type encountered: ${token.type}`);
+             continue; // Skip this token if its type isn't in the legend
+        }
+
+        data.push(
+            deltaLine,       // delta line
+            deltaStart,      // delta start char
+            token.length,    // length
+            typeIndex,       // token type index
+            0                // token modifier (0 for none)
+        );
+
+        prevLine = token.line;
+        prevChar = token.linePos;
+    }
+    // console.log("Generated Monaco Tokens Data:", data); // Debugging
     return data;
   }
 
@@ -797,7 +826,9 @@ export class Parser {
   }
 }
 
-// Helper function to check if a value is numeric
+// Helper function (can be moved or kept here) - Stricter numeric check
 export function isNumeric(value: string): boolean {
-  return !isNaN(parseFloat(value)) && isFinite(Number(value));
+  if (typeof value !== 'string' || value.trim() === '') return false;
+  // Allows integers and floats, handles negative sign
+  return /^-?\d+(\.\d+)?$/.test(value.trim());
 }
