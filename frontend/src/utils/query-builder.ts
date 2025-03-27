@@ -70,13 +70,13 @@ export class QueryBuilder {
   }
 
   /**
-   * Creates the time condition part of the WHERE clause using toDateTime64 for human-readable timestamps.
+   * Creates the time condition part of the WHERE clause using raw timestamp values for better index usage.
    * Ensures the timestamp field is quoted with backticks.
    */
   private static formatTimeCondition(tsField: string, startSeconds: number, endSeconds: number): string {
     try {
-        // Convert UNIX timestamps to DateTime64 for human-readable querying
-        return `toDateTime64(\`${tsField}\`, 3, 'UTC') BETWEEN toDateTime64(${startSeconds}, 3, 'UTC') AND toDateTime64(${endSeconds}, 3, 'UTC')`;
+        // Use raw timestamp values for better index utilization
+        return `\`${tsField}\` BETWEEN ${startSeconds} AND ${endSeconds}`;
     } catch (error: any) {
         console.error("Error formatting time condition:", error);
         throw new Error(`Failed to format time condition: ${error.message}`);
@@ -135,17 +135,16 @@ export class QueryBuilder {
     }
 
     // --- Prepare base query components ---
-    // Convert timestamp columns to human-readable format
-    const formattedSelect = selectColumns.map(col => {
-      if (col === tsField) {
-        return `toDateTime64(\`${tsField}\`, 3, 'UTC') AS formatted_${tsField}`;
-      }
-      return col === '*' ? '*' : `\`${col}\``;
-    }).join(', ');
+    // Simplified select clause with formatted timestamp and all columns
+    const formattedSelect = [
+      `toDateTime64(\`${tsField}\`, 3, 'UTC') AS formatted_timestamp`,
+      '*'
+    ].join(', ');
     
     const selectClause = `SELECT ${formattedSelect}`;
     const fromClause = `FROM \`${tableName}\``;
-    const timeWhereClause = `WHERE (${timeCondition})`;
+    const namespaceCondition = `\`namespace\` = 'hello'`;
+    const timeWhereClause = `WHERE ${timeCondition}`;
     const orderByClause = `ORDER BY \`${orderByField}\` ${orderByDirection}`;
     const limitClause = `LIMIT ${limit}`;
 
@@ -185,22 +184,18 @@ export class QueryBuilder {
     }
 
     // --- Combine WHERE conditions ---
-    let whereClause = timeWhereClause;
+    let whereClause = `${timeWhereClause} AND ${namespaceCondition}`;
     if (logchefqlConditions) {
       // Ensure namespace condition is included
-      const namespaceCondition = "`namespace` = 'hello'";
       const hasNamespaceInConditions = logchefqlConditions.includes('`namespace`') || 
                                       logchefqlConditions.includes('namespace');
       
       if (hasNamespaceInConditions) {
-        whereClause = `WHERE (${timeCondition}) AND (${logchefqlConditions})`;
+        whereClause = `WHERE ${timeCondition} AND (${logchefqlConditions})`;
       } else {
-        whereClause = `WHERE (${timeCondition}) AND (${namespaceCondition}) AND (${logchefqlConditions})`;
+        whereClause = `WHERE ${timeCondition} AND ${namespaceCondition} AND (${logchefqlConditions})`;
       }
       meta.operations.push('filter');
-    } else {
-      // If no LogchefQL conditions, still include namespace
-      whereClause = `WHERE (${timeCondition}) AND (\`namespace\` = 'hello')`;
     }
 
     // --- Assemble the final query string ---
@@ -209,7 +204,7 @@ export class QueryBuilder {
       fromClause,
       whereClause,
       orderByClause,
-      limitClause,
+      limitClause
     ].join('\n'); // Join with newlines for readability
 
     return { 
@@ -273,18 +268,19 @@ export class QueryBuilder {
        }
      });
 
-     // Combine timestamp and namespace conditions with DateTime64 conversion
-     const baseCondition = `toDateTime64(\`${tsField}\`, 3, 'UTC') BETWEEN toDateTime64(${startTimestamp}, 3, 'UTC') AND toDateTime64(${endTimestamp}, 3, 'UTC')`;
+     // Combine timestamp and namespace conditions using raw values for better performance
+     const baseCondition = `\`${tsField}\` BETWEEN ${startTimestamp} AND ${endTimestamp}`;
+     const namespaceCondition = `\`namespace\` = 'hello'`;
      const whereClause = options.whereClause 
-       ? `${baseCondition} AND (${options.whereClause})`
-       : baseCondition;
+       ? `${baseCondition} AND ${namespaceCondition} AND (${options.whereClause})`
+       : `${baseCondition} AND ${namespaceCondition}`;
 
      const sql = [
-       `SELECT ${formattedSelect}`,
+       `SELECT ${formattedSelect.join(', ')}`,
        `FROM \`${tableName}\``,
        `WHERE ${whereClause}`,
        `ORDER BY \`${orderByField}\` ${orderByDirection}`,
-       `LIMIT ${limit}`,
+       `LIMIT ${limit}`
      ].join('\n');
 
      return {
