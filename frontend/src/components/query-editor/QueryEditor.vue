@@ -252,15 +252,21 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
   const blurListener = editor.onDidBlurEditorWidget(() => { editorFocused.value = false; });
   activeProviders.value.push(focusListener, blurListener);
 
-  // Improved autofocus with delay
-  setTimeout(() => {
+  // Improved autofocus with cursor positioning
+  nextTick(() => {
     if (editorRef.value && !isDisposing.value) {
       editorRef.value.focus();
-      // Force layout calculation
+      // Set cursor to end of document
+      const model = editorRef.value.getModel();
+      if (model) {
+        const lastLine = model.getLineCount();
+        const lastColumn = model.getLineMaxColumn(lastLine);
+        editorRef.value.setPosition({ lineNumber: lastLine, column: lastColumn });
+      }
       editorRef.value.layout();
-      console.log("QueryEditor: Autofocus attempted with layout refresh.");
+      console.log("QueryEditor: Autofocus attempted with cursor positioning.");
     }
-  }, 150); // Slight delay to ensure editor is ready
+  });
 };
 
 const handleEditorChange = (value: string | undefined) => {
@@ -316,12 +322,30 @@ const syncEditorContentWithStore = (isInitialSync = false) => {
 };
 
 // --- Mode Switching ---
-const handleTabChange = (newMode: EditorMode) => {
+const handleTabChange = async (newMode: EditorMode) => {
   if (newMode === activeMode.value) return;
 
   // Save current editor content to the appropriate store property
   if (activeMode.value === 'logchefql') {
     exploreStore.setLogchefqlCode(editorContent.value);
+    
+    // Handle translation when switching from LogchefQL to SQL
+    if (newMode === 'clickhouse-sql' && editorContent.value.trim()) {
+      const translation = parseAndTranslateLogchefQL(editorContent.value);
+      if (translation.success) {
+        exploreStore.setRawSql(
+          QueryBuilder.buildSqlFromLogchefQL({
+            tableName: props.tableName,
+            tsField: props.tsField,
+            startTimestamp: props.startTimestamp,
+            endTimestamp: props.endTimestamp,
+            limit: props.limit,
+            logchefqlQuery: editorContent.value,
+            whereClause: '`namespace` = \'hello\''
+          }).sql
+        );
+      }
+    }
   } else {
     exploreStore.setRawSql(editorContent.value);
   }
@@ -343,6 +367,10 @@ const handleTabChange = (newMode: EditorMode) => {
       const model = editorRef.value.getModel();
       if (model) {
         monaco.editor.setModelLanguage(model, newMode);
+        // Set cursor to end of document
+        const lastLine = model.getLineCount();
+        const lastColumn = model.getLineMaxColumn(lastLine);
+        editorRef.value.setPosition({ lineNumber: lastLine, column: lastColumn });
       }
     }
   });
