@@ -817,7 +817,7 @@ const registerLogchefQLCompletionProvider = () => {
         } else {
           suggestions = getKeySuggestions(range);
         }
-      } else if (parser.state === State.KEY_VALUE_OPERATOR) {
+      } else if (parser.state === LogchefQLState.KEY_VALUE_OPERATOR) {
         // @ts-ignore: Type compatibility issues with operator types
         if (VALID_KEY_VALUE_OPERATORS.includes(parser.keyValueOperator)) {
           range.startColumn = word.endColumn - parser.value.length;
@@ -826,9 +826,9 @@ const registerLogchefQLCompletionProvider = () => {
           suggestions = result.suggestions;
         }
       } else if (
-        parser.state === State.VALUE ||
-        parser.state === State.DOUBLE_QUOTED_VALUE ||
-        parser.state === State.SINGLE_QUOTED_VALUE
+        parser.state === LogchefQLState.VALUE ||
+        parser.state === LogchefQLState.DOUBLE_QUOTED_VALUE ||
+        parser.state === LogchefQLState.SINGLE_QUOTED_VALUE
       ) {
         range.startColumn = word.endColumn - parser.value.length;
         let quoteChar = "";
@@ -845,7 +845,7 @@ const registerLogchefQLCompletionProvider = () => {
         );
         incomplete = result.incomplete;
         suggestions = result.suggestions;
-      } else if (parser.state === State.EXPECT_BOOL_OP) {
+      } else if (parser.state === LogchefQLState.EXPECT_BOOL_OP) {
         // Always show boolean operator suggestions when in this state
         // This state occurs after completing a filter expression like field="value"
 
