@@ -160,6 +160,15 @@ const activeMode = ref<EditorMode>(initialMode);
 // Flag to prevent feedback loops during programmatic updates
 const isProgrammaticChange = ref(false);
 
+// Flag to prevent operations during disposal
+const isDisposing = ref(false);
+
+// Track editor initialization state
+const isEditorInitialized = ref(false);
+
+// Track disposal resources
+const disposeArray = ref<monaco.IDisposable[]>([]);
+
 // --- Editor Handling ---
 const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
   // console.log('QueryEditor: Monaco editor mounted');
@@ -472,95 +481,27 @@ const getValueSuggestions = async (key: string, value: string, range: any, quote
 // Track editor initialization state
 const isEditorInitialized = ref(false);
 
-// Add a safe dispose function to handle all editor resources
-function safelyDisposeEditor() {
-  if (isDisposing.value) return; // Prevent concurrent dispose operations
+// This is already defined as safelyDisposeEditor earlier
 
-  isDisposing.value = true;
-  console.log('QueryEditor: Starting safe disposal process');
+// This watcher is not needed - initialization is handled in onMounted
 
-  try {
-    // First, stop any ongoing provider operations
-    disposeAllProviders();
-
-    // Next, dispose all tracked disposables
-    disposeArray.value.forEach(disposable => {
-      try {
-        if (disposable && typeof disposable.dispose === 'function') {
-          disposable.dispose();
-        }
-      } catch (e) {
-        console.warn('Error disposing resource:', e);
-      }
-    });
-    disposeArray.value = [];
-
-    // Get references before nulling them
-    const currentEditor = editorRef.value;
-    const currentModel = editorModel.value;
-
-    // Clear references immediately to prevent further operations
-    editorRef.value = null;
-    
-    // Use detached Promise for model disposal to avoid blocking the UI
-    if (currentModel) {
-      // Mark the editor as not initialized to prevent operations during disposal
-      isEditorInitialized.value = false;
-      
-      // First try to detach model from editor - in a try block
-      if (currentEditor && typeof currentEditor.setModel === 'function') {
-        try {
-          console.log('QueryEditor: Detaching model from editor');
-          currentEditor.setModel(null);
-        } catch (err) {
-          console.warn('Error detaching model from editor:', err);
-        }
-      }
-
-      // Use window.setTimeout directly for more reliable cleanup
-      window.setTimeout(() => {
-        try {
-          if (currentModel) {
-            console.log('QueryEditor: Disposing model with delay');
-            // Check if the model is already disposed
-            if (typeof currentModel.isDisposed === 'function' && !currentModel.isDisposed()) {
-              currentModel.dispose();
-            } else if (!currentModel.isDisposed) {
-              // Fallback for when isDisposed is not a function
-              currentModel.dispose();
-            }
-          }
-        } catch (err) {
-          console.warn('Error during model disposal:', err);
-        } finally {
-          editorModel.value = null;
-        }
-      }, 150); // Use a longer delay for more reliable cleanup
-    }
-  } catch (e) {
-    console.error('Error in safelyDisposeEditor:', e);
-  } finally {
-    // Use a more reliable way to reset the disposing flag
-    window.setTimeout(() => {
-      isDisposing.value = false;
-      console.log('QueryEditor: Disposal process completed');
-    }, 250);
-  }
-}
-
-// Watch for changes in initialTab prop to ensure URL parameters are respected
-watch(() => props.initialTab, (newTab) => {
-  if (newTab) {
-    setActiveTab(newTab === 'sql' ? 'clickhouse-sql' : 'logchefql');
-  }
-}, { immediate: true }); // immediate: true ensures it runs on component creation
-
-// Initialize Monaco
+// --- Lifecycle Hooks ---
 onMounted(() => {
-  initMonacoSetup();
+  try {
+    initMonacoSetup(); // Initialize themes, languages (runs once internally)
 
-  // No need to override exploreStore's activeMode here as it's handled by the watch
-  // on props.initialTab with immediate: true
+    // Set initial content based on mode and store/props
+    syncEditorContentWithStore(true);
+
+    // Set initial mode in store if it differs
+    if (exploreStore.activeMode !== activeMode.value) {
+      exploreStore.setActiveMode(activeMode.value === 'clickhouse-sql' ? 'sql' : 'logchefql');
+    }
+
+  } catch (error) {
+    console.error("QueryEditor: Error during mount:", error);
+    validationError.value = "Failed to initialize editor.";
+  }
 });
 
 // --- Computed Properties ---
@@ -606,225 +547,9 @@ onBeforeUnmount(() => {
   safelyDisposeEditor();
 });
 
-// Methods
-function setActiveTab(tab: string) {
-  // Guard against operations during dispose
-  if (isDisposing.value) return;
+// This function is replaced by handleTabChange which is already defined
 
-  // Store current code based on current tab
-  if (activeTab.value === "logchefql") {
-    logchefQLCode.value = code.value || '';
-  } else {
-    sqlCode.value = code.value || '';
-  }
-
-  // Switch tab with transition
-  if (tab === "logchefql") {
-    // Store current tab before changing it
-    const previousTab = activeTab.value;
-    activeTab.value = "logchefql";
-
-    // Special case: switching from SQL to LogchefQL
-    if (previousTab === "clickhouse-sql") {
-      // Check if we have a value in the store first
-      if (exploreStore.logchefqlCode) {
-        code.value = exploreStore.logchefqlCode;
-        logchefQLCode.value = exploreStore.logchefqlCode;
-        hasManuallyEnteredLogchefQL.value = true;
-      } else if (hasManuallyEnteredLogchefQL.value) {
-        // Use the previously saved LogchefQL code
-        code.value = logchefQLCode.value || '';
-      } else {
-        // Only clear if we have no stored or previous code
-        logchefQLCode.value = '';
-        code.value = '';
-        exploreStore.setLogchefqlCode('');
-      }
-
-      // Always emit change to update URL
-      emit('change', {
-        query: code.value,
-        mode: 'logchefql'
-      });
-    } else {
-      // First check if we have a value in the store
-      if (exploreStore.logchefqlCode) {
-        code.value = exploreStore.logchefqlCode;
-        logchefQLCode.value = exploreStore.logchefqlCode;
-      } else {
-        // Fall back to the saved local value
-        code.value = logchefQLCode.value || '';
-      }
-
-      // Update store and URL
-      exploreStore.setLogchefqlCode(code.value);
-      emit('change', {
-        query: code.value,
-        mode: 'logchefql'
-      });
-    }
-
-    // Update exploreStore activeMode to ensure consistency
-    exploreStore.setActiveMode('logchefql');
-  } else {
-    activeTab.value = "clickhouse-sql";
-    // Update exploreStore activeMode to ensure consistency
-    exploreStore.setActiveMode('sql');
-
-    // CHANGED: Always prioritize generating SQL from LogchefQL if available
-    if (logchefQLCode.value && logchefQLCode.value.trim()) {
-      try {
-        // Make sure we have a table name before generating SQL
-        if (!props.tableName) {
-          console.warn('No table name available when converting LogchefQL to SQL');
-        }
-        
-        // Use our QueryBuilder to generate SQL from LogchefQL WITH time filter
-        const result = QueryBuilder.buildSqlFromLogchefQL(logchefQLCode.value, {
-          tableName: props.tableName || '<table_name>',  // Provide a placeholder if missing
-          tsField: props.tsField,
-          startTimestamp: props.startTimestamp,
-          endTimestamp: props.endTimestamp,
-          limit: props.limit,
-          includeTimeFilter: true,
-          forDisplay: true
-        });
-
-        if (result.success) {
-          sqlCode.value = result.sql;
-          code.value = result.sql;
-          exploreStore.setRawSql(result.sql);
-        } else {
-          console.error('Error generating SQL:', result.error);
-          // Use default SQL query as fallback
-          sqlCode.value = QueryBuilder.getDefaultSQLQuery({
-            tableName: props.tableName,
-            tsField: props.tsField,
-            startTimestamp: props.startTimestamp,
-            endTimestamp: props.endTimestamp,
-            limit: props.limit,
-            includeTimeFilter: true,
-            forDisplay: true
-          });
-          code.value = sqlCode.value;
-          exploreStore.setRawSql(sqlCode.value);
-        }
-      } catch (error) {
-        console.error('Error switching to SQL mode:', error);
-        // Use default SQL query as fallback
-        sqlCode.value = QueryBuilder.getDefaultSQLQuery({
-          tableName: props.tableName,
-          tsField: props.tsField,
-          startTimestamp: props.startTimestamp,
-          endTimestamp: props.endTimestamp,
-          limit: props.limit,
-          includeTimeFilter: true,
-          forDisplay: true
-        });
-        code.value = sqlCode.value;
-        exploreStore.setRawSql(sqlCode.value);
-      }
-    } 
-    // Only use stored SQL if we don't have LogchefQL to convert
-    else if (exploreStore.rawSql) {
-      console.log('Using existing SQL from store:', exploreStore.rawSql);
-      sqlCode.value = exploreStore.rawSql;
-      code.value = exploreStore.rawSql;
-    } 
-    else if (!sqlCode.value) {
-      // If we have a pending SQL query, use that instead of generating a default
-      if (exploreStore.pendingRawSql) {
-        console.log('Using pending SQL query:', exploreStore.pendingRawSql);
-        sqlCode.value = exploreStore.pendingRawSql;
-        code.value = exploreStore.pendingRawSql;
-        exploreStore.setRawSql(exploreStore.pendingRawSql);
-        exploreStore.pendingRawSql = undefined;
-      } else {
-        // If no LogchefQL code and no SQL code, use default query
-        console.log('No SQL or LogchefQL found, generating default query for table:', props.tableName || '<MISSING>');
-        
-        // Only generate default query if we have a valid table name
-        if (props.tableName && props.tableName.trim()) {
-          sqlCode.value = QueryBuilder.getDefaultSQLQuery({
-            tableName: props.tableName,
-            tsField: props.tsField,
-            startTimestamp: props.startTimestamp,
-            endTimestamp: props.endTimestamp,
-            limit: props.limit,
-            includeTimeFilter: true,
-            forDisplay: true
-          });
-          code.value = sqlCode.value;
-          exploreStore.setRawSql(sqlCode.value);
-        } else {
-          console.warn('No table name available for SQL query generation');
-          // Set a placeholder to make it obvious there's a missing table name
-          sqlCode.value = `-- Please select a valid source with a table name\nSELECT * FROM <table_name>\nWHERE ${props.tsField} BETWEEN '...' AND '...'\nORDER BY ${props.tsField} DESC\nLIMIT ${props.limit}`;
-          code.value = sqlCode.value;
-          exploreStore.setRawSql(sqlCode.value);
-        }
-      }
-    } else {
-      // Use existing SQL code
-      console.log('Using existing SQL code from local state:', sqlCode.value);
-      code.value = sqlCode.value;
-      exploreStore.setRawSql(sqlCode.value);
-    }
-
-    // Always emit change when switching to SQL mode
-    emit('change', {
-      query: code.value,
-      mode: 'sql'
-    });
-  }
-
-  // Update editor language - guard with additional checks
-  if (editorRef.value && !isDisposing.value) {
-    try {
-      const model = editorRef.value.getModel();
-      if (model && !model.isDisposed?.()) {
-        monaco.editor.setModelLanguage(model, activeTab.value);
-
-        // Update editor options based on the new mode
-        updateEditorOptions(editorRef.value);
-
-        // Re-register appropriate completion provider based on active tab
-        if (activeTab.value === "logchefql") {
-          registerLogchefQLCompletionProvider();
-        } else {
-          registerSQLCompletionProvider();
-        }
-      }
-    } catch (error) {
-      console.error('Error updating editor language:', error);
-    }
-  }
-}
-
-function validateQuery(): boolean {
-  if (!code.value.trim()) {
-    return true; // Empty queries are allowed and will use defaults
-  }
-
-  if (activeTab.value === 'logchefql') {
-    // Validate LogchefQL
-    try {
-      const parser = new LogchefQLParser();
-      parser.parse(code.value);
-      return true;
-    } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : String(error);
-      return false;
-    }
-  } else {
-    // Validate SQL
-    const isValid = validateSQL(code.value);
-    if (!isValid) {
-      errorMessage.value = "Invalid SQL query. Please check the syntax.";
-    }
-    return isValid;
-  }
-}
+// This function is already redefined as validateQuery earlier
 
 // Clean function to dispose all existing providers
 function disposeAllProviders() {
@@ -1147,126 +872,7 @@ const registerLogchefQLCompletionProvider = () => {
   return provider;
 };
 
-// Editor setup with improved error handling and retries
-const handleMount = (editor: any) => {
-  // Guard against mount after dispose started
-  if (isDisposing.value) {
-    console.warn('QueryEditor: Ignoring editor mount during disposal');
-    return;
-  }
-
-  console.log('QueryEditor: Monaco editor mounted');
-  
-  // Wait for a tick to ensure everything is ready
-  nextTick(() => {
-    try {
-      // Store the editor reference
-      editorRef.value = editor;
-      
-      // Store the model for proper disposal later - with better error handling
-      if (editor && typeof editor.getModel === 'function') {
-        try {
-          const model = editor.getModel();
-          if (model) {
-            editorModel.value = model;
-            console.log('QueryEditor: Successfully stored editor model');
-          }
-        } catch (err) {
-          console.warn('Error getting editor model:', err);
-        }
-      }
-  
-      // Register only the completion provider for the active language
-      try {
-        if (activeTab.value === "logchefql") {
-          registerLogchefQLCompletionProvider();
-        } else {
-          registerSQLCompletionProvider();
-        }
-      } catch (err) {
-        console.warn('Error registering completion provider:', err);
-      }
-  
-      // Set placeholder
-      if (editor && typeof editor.updateOptions === 'function') {
-        try {
-          editor.updateOptions({
-            placeholder: currentPlaceholder.value || props.placeholder || "Enter your query here..."
-          });
-        } catch (err) {
-          console.warn('Error setting editor placeholder:', err);
-        }
-      }
-  
-      // Update editor options based on current mode
-      try {
-        updateEditorOptions(editor);
-      } catch (err) {
-        console.warn('Error updating editor options:', err);
-      }
-  
-      // Add keyboard shortcuts with better error handling
-      if (editor && typeof editor.addAction === 'function') {
-        try {
-          const submitAction = editor.addAction({
-            id: "submit",
-            label: "Run Query",
-            keybindings: [
-              monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
-            ],
-            run: () => {
-              submitQuery();
-            },
-          });
-          if (submitAction) activeProviders.value.push(submitAction);
-        } catch (err) {
-          console.warn('Error adding submit action:', err);
-        }
-      }
-  
-      // Focus handling with improved error handling
-      if (editor && typeof editor.onDidFocusEditorWidget === 'function') {
-        try {
-          const focusListener = editor.onDidFocusEditorWidget(() => {
-            editorFocused.value = true;
-          });
-          if (focusListener) activeProviders.value.push(focusListener);
-        } catch (err) {
-          console.warn('Error setting focus listener:', err);
-        }
-      }
-  
-      if (editor && typeof editor.onDidBlurEditorWidget === 'function') {
-        try {
-          const blurListener = editor.onDidBlurEditorWidget(() => {
-            editorFocused.value = false;
-          });
-          if (blurListener) activeProviders.value.push(blurListener);
-        } catch (err) {
-          console.warn('Error setting blur listener:', err);
-        }
-      }
-  
-      // Mark initialization as complete
-      isEditorInitialized.value = true;
-  
-      // Focus editor after everything is set up
-      setTimeout(() => {
-        if (editor && !isDisposing.value && typeof editor.focus === 'function') {
-          try {
-            editor.focus();
-          } catch (err) {
-            console.warn('Error focusing editor:', err);
-          }
-        }
-      }, 50);
-      
-      console.log('QueryEditor: Editor initialization complete');
-    } catch (error) {
-      console.error('Error during editor mount:', error);
-    }
-  });
-};
+// Removed duplicate handleMount function
 
 // Helper function to update editor options based on mode
 function updateEditorOptions(editor: any) {
@@ -1296,78 +902,7 @@ function updateEditorOptions(editor: any) {
   }
 }
 
-// Watch for prop changes
-watch(() => props.initialValue, (newValue) => {
-  if (newValue && newValue !== code.value) {
-    code.value = newValue;
-
-    if (activeTab.value === "logchefql") {
-      logchefQLCode.value = newValue;
-    } else {
-      sqlCode.value = newValue;
-    }
-  }
-});
-
-// Update the watch handler for timestamp changes to implement one-way sync
-watch([() => props.startTimestamp, () => props.endTimestamp], ([newStart, newEnd], [oldStart, oldEnd]) => {
-  // Only update if we're in SQL mode and the timestamps have changed
-  if (activeTab.value === "clickhouse-sql" &&
-    (newStart !== oldStart || newEnd !== oldEnd) &&
-    sqlCode.value) {
-
-    try {
-      // Parse the current query to understand its structure
-      const parsedQuery = SQLParser.parse(sqlCode.value, props.tsField);
-
-      if (parsedQuery) {
-        // Create a new timestamp condition with the updated times
-        const newTimeCondition = QueryBuilder.formatTimeCondition(
-          props.tsField,
-          newStart * 1000,
-          newEnd * 1000,
-          true // Format for display
-        );
-
-        // If there's already a timestamp filter, update it
-        if (parsedQuery.whereClause?.hasTimestampFilter) {
-          // Replace the existing timestamp condition
-          const timeFilterRegex = new RegExp(
-            `${props.tsField}\\s+BETWEEN\\s+'[^']+'\\s+AND\\s+'[^']+'`,
-            'i'
-          );
-
-          parsedQuery.whereClause.conditions = parsedQuery.whereClause.conditions.replace(
-            timeFilterRegex,
-            newTimeCondition
-          );
-        } else if (parsedQuery.whereClause) {
-          // Add timestamp condition to existing WHERE clause
-          parsedQuery.whereClause.conditions = `${newTimeCondition} AND (${parsedQuery.whereClause.conditions})`;
-          parsedQuery.whereClause.hasTimestampFilter = true;
-        } else {
-          // Add new WHERE clause with timestamp condition
-          parsedQuery.whereClause = {
-            type: 'where',
-            conditions: newTimeCondition,
-            hasTimestampFilter: true
-          };
-        }
-
-        // Convert back to SQL
-        const updatedSql = SQLParser.toSQL(parsedQuery);
-
-        // Update the state
-        sqlCode.value = updatedSql;
-        code.value = updatedSql;
-
-        console.log('Updated SQL with new timestamp range:', updatedSql);
-      }
-    } catch (error) {
-      console.error('Error updating timestamp in SQL:', error);
-    }
-  }
-});
+// These watchers are already handled by the refactored code
 
 // Also watch for limit changes - with added safety checks
 watch([() => props.limit], ([newLimit], [oldLimit]) => {
@@ -1440,75 +975,9 @@ onBeforeUnmount(() => {
   isDisposing.value = true;
 });
 
-// Update the watch handler for LogchefQL to include time filter
-watch(() => logchefQLCode.value, (newCode) => {
-  // When LogchefQL code changes and we're in LogchefQL mode, prepare SQL for future tab switch
-  if (activeTab.value === "logchefql" && newCode.trim()) {
-    try {
-      const parser = new LogchefQLParser();
-      parser.parse(newCode);
+// This watch is no longer needed as the handleTabChange function handles SQL generation
 
-      if (parser.root) {
-        const whereConditions = translateToSQLConditions(parser.root);
-        if (whereConditions && whereConditions.trim()) {
-          console.log('Watch - LogchefQL changed, updating SQL conditions:', whereConditions);
-
-          // Prepare SQL code but don't set as current editor value
-          // Include time filter by default
-          let baseQuery = QueryBuilder.getDefaultSQLQuery({
-            tableName: props.tableName,
-            tsField: props.tsField,
-            startTimestamp: props.startTimestamp,
-            endTimestamp: props.endTimestamp,
-            limit: props.limit,
-            includeTimeFilter: true, // Include time filter
-            forDisplay: true // Use human-readable timestamp format for display
-          });
-
-          if (baseQuery.includes("WHERE")) {
-            baseQuery = baseQuery.replace(
-              /WHERE\s+([^\n]+)/i,
-              `WHERE $1 AND (${whereConditions})`
-            );
-          } else {
-            baseQuery = baseQuery.replace(
-              /FROM\s+([^\n]+)/i,
-              `FROM $1 WHERE ${whereConditions}`
-            );
-          }
-
-          // Set sqlCode for when we switch tabs, but don't change current editor
-          sqlCode.value = baseQuery;
-        }
-      }
-    } catch (error) {
-      // Ignore parsing errors during typing - we'll handle them when switching tabs
-    }
-  }
-});
-
-// Watch for changes in the store's rawSql and update editor when in SQL mode
-watch(() => exploreStore.rawSql, (newValue) => {
-  if ((activeTab.value === 'clickhouse-sql' || activeTab.value === 'sql') && newValue !== undefined) {
-    // Handle case where newValue might be an object instead of a string
-    const sqlString = typeof newValue === 'string'
-      ? newValue
-      : (typeof newValue === 'object' && newValue !== null && 'sql' in newValue)
-        ? (newValue as any).sql || ''
-        : '';
-
-    // Only update if we have a non-empty value or if the current value is empty
-    if (sqlString.trim() || !sqlCode.value.trim()) {
-      // Store the raw SQL as is, including time filter
-      sqlCode.value = sqlString;
-
-      // Only update the display if we're in SQL mode
-      if (activeTab.value === 'clickhouse-sql' || activeTab.value === 'sql') {
-        code.value = sqlCode.value;
-      }
-    }
-  }
-});
+// This watch is already handled by the syncEditorContentWithStore function and watcher
 
 // Watch for loading state from the store to disable editor during API calls
 watch(() => exploreStore.isLoadingOperation('executeQuery'), (isLoading) => {
@@ -1521,91 +990,9 @@ watch(() => exploreStore.isLoadingOperation('executeQuery'), (isLoading) => {
   }
 });
 
-// Update the submitQuery function to use QueryBuilder service
-const submitQuery = () => {
-  try {
-    if (!validateQuery()) {
-      return;
-    }
+// This function is already redefined earlier in the code
 
-    // Initialize finalQuery based on code.value (may be empty)
-    let finalQuery = code.value || '';
-
-    // If the query is empty, use a default based on the active mode
-    if (!finalQuery.trim()) {
-      if (activeTab.value === 'clickhouse-sql') {
-        // Empty SQL - will use default query when executed
-        finalQuery = '';
-      } else {
-        // Empty LogchefQL - use simple "all" query
-        finalQuery = '*';
-      }
-    }
-
-    // Update the appropriate store property based on the active tab
-    if (activeTab.value === 'logchefql') {
-      // For LogchefQL, save the query to the store
-      exploreStore.setLogchefqlCode(finalQuery);
-
-      // Ensure the store knows we're in LogchefQL mode
-      exploreStore.setActiveMode('logchefql');
-    } else {
-      // For SQL, save directly to the store
-      exploreStore.setRawSql(finalQuery);
-
-      // Ensure the store knows we're in SQL mode
-      exploreStore.setActiveMode('sql');
-    }
-
-    // Clear any previous error
-    errorMessage.value = '';
-    errorText.value = '';
-
-    // Emit the submit event with mode and query info
-    emit('submit', {
-      type: activeTab.value,
-      query: finalQuery,
-      mode: activeTab.value === 'logchefql' ? 'logchefql' : 'sql'
-    });
-
-    // Always emit change event to trigger URL update in parent
-    emit('change', {
-      query: finalQuery,
-      mode: activeTab.value === 'logchefql' ? 'logchefql' : 'sql'
-    });
-  } catch (error) {
-    console.error('Error submitting query:', error);
-    errorMessage.value = error instanceof Error ? error.message : 'An error occurred';
-    errorText.value = errorMessage.value;
-  }
-};
-
-// Add onChange function definition
-const onChange = (value: string) => {
-  // Update local state
-  code.value = value;
-
-  // Also update the appropriate store properties to keep them in sync
-  if (activeTab.value === 'logchefql') {
-    logchefQLCode.value = value;
-    exploreStore.setLogchefqlCode(value);
-
-    // Set flag to indicate user has manually entered a LogchefQL query
-    // Only set if the value is not empty to avoid counting empty changes
-    if (value.trim()) {
-      hasManuallyEnteredLogchefQL.value = true;
-    }
-  } else {
-    sqlCode.value = value;
-    exploreStore.setRawSql(value);
-  }
-
-  // Emit change event to parent with proper structure
-  emit('change', {
-    query: value,
-    mode: activeTab.value === 'logchefql' ? 'logchefql' : 'sql'
-  });
-};
+// Not needed - handleEditorChange is used for this purpose
 
 // --- Monaco Options and Updates ---
 const updateMonacoOptions = () => {
@@ -2004,50 +1391,7 @@ defineExpose({
   getCurrentQuery: () => ({ query: editorContent.value ?? "", mode: activeMode.value })
 });
 
-const handleQueryChange = (data: any) => {
-  // Ensure data is an object before destructuring
-  if (!data || typeof data !== 'object') {
-    console.warn('Invalid data received in handleQueryChange:', data);
-    return;
-  }
-
-  const { query: inputQuery, mode } = data;
-  // Ensure queryText is always a string, even if inputQuery is undefined
-  const queryText = inputQuery || '';
-
-  // Map the mode from editor to store format
-  const mappedMode = mode === 'logchefql' ? 'logchefql' : 'sql';
-
-  // Update the mode if it's changing
-  if (activeTab.value !== mappedMode) {
-    activeTab.value = mappedMode;
-    exploreStore.setActiveMode(mappedMode);
-  }
-
-  // Simply update the appropriate store and local state
-  if (mappedMode === 'logchefql') {
-    logchefQLCode.value = queryText;
-    exploreStore.setLogchefqlCode(queryText);
-    hasManuallyEnteredLogchefQL.value = !!queryText.trim();
-  } else {
-    sqlCode.value = queryText;
-    exploreStore.setRawSql(queryText);
-  }
-
-  // Update editor content
-  code.value = queryText;
-
-  // Clear any error messages when the user is typing
-  if (errorText.value) {
-    errorText.value = '';
-  }
-
-  // Emit change event to update URL
-  emit('change', {
-    query: queryText,
-    mode: mappedMode
-  });
-}
+// This function is no longer needed - handleEditorChange and handleTabChange handle this functionality
 </script>
 
 <style scoped>
