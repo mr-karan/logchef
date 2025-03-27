@@ -216,8 +216,8 @@ export const useExploreStore = defineStore("explore", () => {
     };
   }
 
-  // Main query execution - accepts finalSql directly
-  async function executeQuery(finalSql: string, originalQuery?: string, queryType?: string) {
+  // Main query execution
+  async function executeQuery() {
     return await state.withLoading('executeQuery', async () => {
       if (!canExecuteQuery.value) {
         return state.handleError(
@@ -230,152 +230,144 @@ export const useExploreStore = defineStore("explore", () => {
         );
       }
 
+      // Always get fresh values from the store state
+      const currentMode = state.data.value.activeMode;
+      const logchefqlQuery = state.data.value.logchefqlCode || "";
+      const rawSql = state.data.value.rawSql || "";
+
+      // Generate final SQL based on current mode
+      let finalSql = "";
+      try {
+        if (currentMode === 'logchefql') {
+          // Get the source details for table name
+          const sourcesStore = useSourcesStore();
+          const currentSource = sourcesStore.teamSources.find(
+            (s) => s.id === state.data.value.sourceId
+          ) || sourcesStore.sources.find(
+            (s) => s.id === state.data.value.sourceId
+          );
+
+          if (!currentSource) {
+            throw new Error(`Source with ID ${state.data.value.sourceId} not found.`);
+          }
+
+          const tableName = getFormattedTableName(currentSource);
+          const timeField = currentSource._meta_ts_field || "timestamp";
+          const timestamps = getTimestamps();
+
+          const result = QueryBuilder.buildSqlFromLogchefQL({
+            tableName,
+            tsField: timeField,
+            startTimestamp: Math.floor(timestamps.start / 1000),
+            endTimestamp: Math.floor(timestamps.end / 1000),
+            limit: state.data.value.limit,
+            logchefqlQuery
+          });
+          
+          if (!result.success) throw new Error(result.error || "Query conversion failed");
+          finalSql = result.sql;
+        } else {
+          // In SQL mode, use the raw SQL directly
+          if (!rawSql.trim()) {
+            // If empty, generate default SQL
+            const sourcesStore = useSourcesStore();
+            const currentSource = sourcesStore.teamSources.find(
+              (s) => s.id === state.data.value.sourceId
+            ) || sourcesStore.sources.find(
+              (s) => s.id === state.data.value.sourceId
+            );
+
+            if (!currentSource) {
+              throw new Error(`Source with ID ${state.data.value.sourceId} not found.`);
+            }
+
+            const tableName = getFormattedTableName(currentSource);
+            const timeField = currentSource._meta_ts_field || "timestamp";
+            const timestamps = getTimestamps();
+
+            const result = QueryBuilder.getDefaultSQLQuery({
+              tableName,
+              tsField: timeField,
+              startTimestamp: Math.floor(timestamps.start / 1000),
+              endTimestamp: Math.floor(timestamps.end / 1000),
+              limit: state.data.value.limit
+            });
+            
+            if (!result.success) throw new Error(result.error || "Failed to generate default SQL");
+            finalSql = result.sql;
+          } else {
+            finalSql = rawSql;
+          }
+        }
+      } catch (error: any) {
+        return state.handleError(
+          { 
+            status: "error",
+            message: error.message || "Failed to prepare query", 
+            error_type: "QueryError" 
+          } as APIErrorResponse, 
+          'executeQuery'
+        );
+      }
+
       // Reset state before executing query
       state.data.value.logs = [];
       state.data.value.queryStats = DEFAULT_QUERY_STATS;
       state.data.value.columns = [];
       state.data.value.queryId = null;
       state.data.value.error = null;
-      
-      // Store the original query and type for reference
-      state.data.value.logchefQuery = originalQuery || "";
 
       // Use the centralized API calling mechanism from base store
       return await state.callApi({
-      apiCall: async () => {
-        // Get the source details
-        const sourcesStore = useSourcesStore();
+        apiCall: async () => {
+          // Get time parameters
+          const timestamps = getTimestamps();
+          const startTimestampSec = Math.floor(timestamps.start / 1000);
+          const endTimestampSec = Math.floor(timestamps.end / 1000);
 
-        // First check in teamSources (sources available to the current team)
-        let currentSource = sourcesStore.teamSources.find(
-          (s) => s.id === state.data.value.sourceId
-        );
+          // Create API params
+          const params: QueryParams = {
+            raw_sql: finalSql,
+            limit: state.data.value.limit,
+            start_timestamp: startTimestampSec,
+            end_timestamp: endTimestampSec,
+            query_type: currentMode
+          };
 
-        // If not found in teamSources, try to find in all sources
-        if (!currentSource) {
-          // Check if we need to load team sources first
-          if (sourcesStore.teamSources.length === 0) {
-            const teamsStore = useTeamsStore();
-            if (teamsStore.currentTeamId) {
-              console.log("Team sources not loaded, loading them now");
-              await sourcesStore.loadTeamSources(teamsStore.currentTeamId);
+          console.log("Executing query with params:", params);
 
-              // Try again after loading
-              currentSource = sourcesStore.teamSources.find(
-                (s) => s.id === state.data.value.sourceId
-              );
-            }
-          }
+          // Get the teams store
+          const teamsStore = useTeamsStore();
+          const currentTeamId = teamsStore.currentTeamId;
 
-          // If still not found, check all sources
-          if (!currentSource) {
-            currentSource = sourcesStore.sources.find(
-              (s) => s.id === state.data.value.sourceId
+          if (!currentTeamId) {
+            throw new Error(
+              "No team selected. Please select a team before executing a query."
             );
-
-            // If source is found in all sources but not in team sources, it means
-            // the current team doesn't have access to this source
-            if (currentSource) {
-              console.warn(
-                `Source ${state.data.value.sourceId} found but not accessible by current team`
-              );
-            }
           }
-        }
 
-        if (!currentSource) {
-          console.error(`Source not found: ID ${state.data.value.sourceId}`);
-          console.log("Available team sources:", sourcesStore.teamSources);
-          console.log("All sources:", sourcesStore.sources);
-          throw new Error(
-            `Source with ID ${state.data.value.sourceId} not found. Please select a valid source.`
+          // Execute the API call
+          return await exploreApi.getLogs(
+            state.data.value.sourceId,
+            params,
+            currentTeamId
           );
-        }
+        },
+        // Provide success handler to update the state
+        onSuccess: (data: QuerySuccessResponse) => {
+          // Update state with results
+          state.data.value.logs = data.logs || [];
+          state.data.value.columns = data.columns || [];
+          state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
 
-        // Ensure source has connection details
-        if (
-          !currentSource.connection ||
-          !currentSource.connection.database ||
-          !currentSource.connection.table_name
-        ) {
-          console.error("Source missing connection details:", currentSource);
-          throw new Error(
-            "Source configuration is incomplete. Missing database or table information."
-          );
-        }
-
-        // Get time parameters
-        const timestamps = getTimestamps();
-        const startTimestampSec = Math.floor(timestamps.start / 1000);
-        const endTimestampSec = Math.floor(timestamps.end / 1000);
-
-        // Get time field from source metadata, default to 'timestamp'
-        const timeField = currentSource._meta_ts_field || "timestamp";
-
-        // Use the finalSql directly - no need to build it here
-        const sqlToExecute = finalSql;
-        
-        // Format for display
-        const displaySql = QueryBuilder.formatQueryForDisplay(sqlToExecute, timeField);
-        
-        // Store the display version for reference
-        state.data.value.displaySql = displaySql;
-
-        // Log queries for debugging
-        console.log("Mode:", state.data.value.activeMode);
-        console.log("SQL to execute:", sqlToExecute);
-        console.log("Display SQL:", displaySql);
-
-        // Create API params
-        const params: QueryParams = {
-          raw_sql: sqlToExecute,
-          limit: state.data.value.limit,
-          start_timestamp: startTimestampSec,
-          end_timestamp: endTimestampSec,
-          // Include original query info if available
-          original_query: originalQuery,
-          query_type: queryType || state.data.value.activeMode
-        };
-
-        console.log("Executing query with params:", params);
-
-        // Get the teams store
-        const teamsStore = useTeamsStore();
-        const currentTeamId = teamsStore.currentTeamId;
-
-        if (!currentTeamId) {
-          throw new Error(
-            "No team selected. Please select a team before executing a query."
-          );
-        }
-
-        // Execute the API call
-        const response = await exploreApi.getLogs(
-          state.data.value.sourceId,
-          params,
-          currentTeamId
-        );
-
-        // The actual response will be handled by the callApi function in base store
-        return response;
-      },
-      // Provide success handler to update the state
-      onSuccess: (data: QuerySuccessResponse) => {
-        // Update state with results
-        state.data.value.logs = data.logs || [];
-        state.data.value.columns = data.columns || [];
-        state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
-
-        // Store query ID if available
-        if (data.params && "query_id" in data.params) {
-          state.data.value.queryId = data.params.query_id as string;
-        }
-      },
-      // Error handler will automatically add the error to state.data.value.error
-      // and will show a toast notification with the error message
-      operationKey: 'executeQuery',
+          // Store query ID if available
+          if (data.params && "query_id" in data.params) {
+            state.data.value.queryId = data.params.query_id as string;
+          }
+        },
+        operationKey: 'executeQuery',
+      });
     });
-  });
   }
 
   // Get log context
