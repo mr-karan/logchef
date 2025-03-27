@@ -363,11 +363,24 @@ const handleTabChange = (newMode: EditorMode) => {
 
   // 5. Update Monaco language and options
   if (editorRef.value) {
-    const model = editorRef.value.getModel();
-    if (model) {
-      monaco.editor.setModelLanguage(model, newMode);
+    try {
+      const model = editorRef.value.getModel();
+      if (model && !model.isDisposed?.()) {
+        // Change language first
+        monaco.editor.setModelLanguage(model, newMode);
+        
+        // Then update options after a small delay to ensure model stability
+        setTimeout(() => {
+          if (!isDisposing.value) {
+            updateMonacoOptions(); // Apply mode-specific options
+          }
+        }, 50);
+      } else {
+        console.warn('Cannot update language: model is not available or disposed');
+      }
+    } catch (error) {
+      console.error('Error updating editor language/options:', error);
     }
-    updateMonacoOptions(); // Apply mode-specific options
   }
 
   // 6. Re-register completion provider for the new mode
@@ -968,28 +981,41 @@ watch(() => exploreStore.isLoadingOperation('executeQuery'), (isLoading) => {
 // --- Monaco Options and Updates ---
 const updateMonacoOptions = () => {
   const editor = editorRef.value;
-  if (!editor) return;
+  if (!editor || isDisposing.value) return;
 
-  const isSqlMode = activeMode.value === 'clickhouse-sql';
+  try {
+    // Defensive check to ensure the editor is ready for option updates
+    const model = editor.getModel();
+    if (!model || model.isDisposed?.()) {
+      console.warn('Cannot update Monaco options: model is not available or disposed');
+      return;
+    }
 
-  // Update reactive options object
-  Object.assign(monacoOptions, {
-      ...getDefaultMonacoOptions(), // Start with base defaults
-      // Mode-specific overrides:
-      folding: isSqlMode,
-      lineNumbers: isSqlMode ? "on" : "off",
-      wordWrap: isSqlMode ? "on" : "off",
-      glyphMargin: isSqlMode, // Show glyph margin only for SQL (folding)
-      lineDecorationsWidth: isSqlMode ? 10 : 0,
-      lineNumbersMinChars: isSqlMode ? 3 : 0,
-      padding: { top: isSqlMode ? 6 : 8, bottom: isSqlMode ? 6 : 8 },
-      // Update placeholder via options
-      // Disabled: placeholder option doesn't work well with vue-monaco-editor's value binding
-      // 'placeholder': currentPlaceholder.value,
-  });
+    const isSqlMode = activeMode.value === 'clickhouse-sql';
 
-   // Apply the updated options to the editor instance
-   editor.updateOptions(monacoOptions);
+    // Update reactive options object
+    Object.assign(monacoOptions, {
+        ...getDefaultMonacoOptions(), // Start with base defaults
+        // Mode-specific overrides:
+        folding: isSqlMode,
+        lineNumbers: isSqlMode ? "on" : "off",
+        wordWrap: isSqlMode ? "on" : "off",
+        glyphMargin: isSqlMode, // Show glyph margin only for SQL (folding)
+        lineDecorationsWidth: isSqlMode ? 10 : 0,
+        lineNumbersMinChars: isSqlMode ? 3 : 0,
+        padding: { top: isSqlMode ? 6 : 8, bottom: isSqlMode ? 6 : 8 },
+    });
+
+    // Apply the updated options to the editor instance
+    // Use nextTick to ensure model is fully attached
+    nextTick(() => {
+      if (!isDisposing.value && editor === editorRef.value) {
+        editor.updateOptions(monacoOptions);
+      }
+    });
+  } catch (error) {
+    console.warn('Error updating Monaco options:', error);
+  }
 };
 
 // --- Completion Providers ---
@@ -1157,7 +1183,17 @@ const submitQuery = () => {
 
 // --- Disposal ---
 const safelyDisposeEditor = () => {
+    if (isDisposing.value) return; // Prevent multiple disposals
+    
+    isDisposing.value = true;
     console.log('QueryEditor: Starting disposal');
+    
+    // First, clear any pending timeouts
+    if (sqlUpdateTimeout) {
+        clearTimeout(sqlUpdateTimeout);
+        sqlUpdateTimeout = null;
+    }
+    
     // Dispose Monaco resources (listeners, providers, actions)
     activeProviders.value.forEach(disposable => {
         try {
@@ -1166,30 +1202,47 @@ const safelyDisposeEditor = () => {
     });
     activeProviders.value = [];
 
-    // Dispose editor instance and model
+    // Get references before clearing
     const editor = editorRef.value;
     const model = editorModel.value;
 
-    // Nullify refs immediately
+    // Clear refs immediately to prevent further usage
     editorRef.value = null;
     editorModel.value = null;
 
-    if (editor) {
+    // Use setTimeout to ensure disposal happens after all current operations
+    setTimeout(() => {
         try {
-            // It's generally recommended to dispose the model associated with the editor *first*
-            // or let the editor dispose its current model upon its own disposal.
-            // Disposing the editor instance should handle its model.
-            editor.dispose();
-            console.log('QueryEditor: Editor instance disposed');
+            // Detach model first (safer)
+            if (editor) {
+                try {
+                    editor.setModel(null);
+                } catch (e) {
+                    console.warn("Error detaching model:", e);
+                }
+                
+                // Dispose editor after model detachment
+                try {
+                    editor.dispose();
+                    console.log('QueryEditor: Editor instance disposed');
+                } catch (e) {
+                    console.warn("Error disposing editor instance:", e);
+                }
+            }
+            
+            // After reliable timeout, reset the disposing flag
+            setTimeout(() => {
+                isDisposing.value = false;
+                console.log('QueryEditor: Disposal reset completed');
+            }, 200);
         } catch (e) {
-            console.warn("Error disposing editor instance:", e);
+            console.error("Error in editor disposal:", e);
+            // Still reset the flag
+            isDisposing.value = false;
         }
-    }
-     // Models might be shared, but if we got it via getModel(), dispose it *if* the editor didn't
-     // However, editor.dispose() *should* handle the model it holds. Explicit model disposal
-     // here can cause issues if the model is used elsewhere or already disposed.
-     // Rely on editor.dispose() for cleanup.
-    console.log('QueryEditor: Disposal finished');
+    }, 50);
+    
+    console.log('QueryEditor: Disposal sequence initiated');
 };
 
 // --- Expose ---
