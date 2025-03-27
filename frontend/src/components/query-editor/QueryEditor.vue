@@ -105,7 +105,6 @@ import { initMonacoSetup, getDefaultMonacoOptions } from "@/utils/monaco";
 import { Parser as LogchefQLParser, State as LogchefQLState, Operator as LogchefQLOperator, VALID_KEY_VALUE_OPERATORS as LogchefQLValidOperators, isNumeric } from "@/utils/logchefql";
 import { parseAndTranslateLogchefQL, validateLogchefQL } from "@/utils/logchefql/api";
 import { validateSQL, SQL_KEYWORDS, CLICKHOUSE_FUNCTIONS, SQL_TYPES } from "@/utils/clickhouse-sql"; // Assuming these exist and are correct
-import { SQLParser } from '@/utils/clickhouse-sql/ast'; // Assuming this exists
 import { useExploreStore } from '@/stores/explore';
 import { QueryBuilder } from "@/utils/query-builder";
 
@@ -320,18 +319,24 @@ const handleTabChange = (newMode: EditorMode) => {
     // Switching TO SQL: Try generating from LogchefQL first
     const logchefqlToConvert = exploreStore.logchefqlCode;
     let conversionSuccess = false;
+    let generatedSql = ""; // Variable to hold the result
+
     if (logchefqlToConvert && validateLogchefQL(logchefqlToConvert)) {
-        const result = QueryBuilder.buildSqlFromLogchefQL(logchefqlToConvert, {
+        // Construct the options object correctly
+        const buildOptions: BuildSqlOptions = {
+            logchefqlQuery: logchefqlToConvert, // Pass the query string inside the object
             tableName: props.tableName,
             tsField: props.tsField,
             startTimestamp: props.startTimestamp,
             endTimestamp: props.endTimestamp,
             limit: props.limit,
-            includeTimeFilter: true, // Include time filter when generating
-            forDisplay: true
-        });
+            // selectColumns, orderByField, orderByDirection can use defaults from QueryBuilder
+        };
+        // Call with a single options object
+        const result = QueryBuilder.buildSqlFromLogchefQL(buildOptions);
+
         if (result.success) {
-            newContent = result.sql;
+            generatedSql = result.sql; // Use generatedSql variable
             conversionSuccess = true;
         } else {
             console.warn("Failed to convert LogchefQL to SQL:", result.error);
@@ -341,15 +346,17 @@ const handleTabChange = (newMode: EditorMode) => {
 
     // If conversion failed or no LogchefQL, use stored SQL or generate default
     if (!conversionSuccess) {
-        newContent = exploreStore.rawSql ?? QueryBuilder.getDefaultSQLQuery({
-            tableName: props.tableName,
-            tsField: props.tsField,
-            startTimestamp: props.startTimestamp,
-            endTimestamp: props.endTimestamp,
-            limit: props.limit,
-            includeTimeFilter: true, // Include time filter in default
-            forDisplay: true
-        });
+        // Construct options for default query
+        const defaultOptions: Omit<BuildSqlOptions, 'logchefqlQuery'> = {
+             tableName: props.tableName,
+             tsField: props.tsField,
+             startTimestamp: props.startTimestamp,
+             endTimestamp: props.endTimestamp,
+             limit: props.limit,
+        };
+        newContent = exploreStore.rawSql ?? QueryBuilder.getDefaultSQLQuery(defaultOptions);
+    } else {
+        newContent = generatedSql; // Use the successfully generated SQL
     }
     exploreStore.setRawSql(newContent); // Update store with the SQL we decided on
 
@@ -1050,63 +1057,6 @@ watch(() => [exploreStore.logchefqlCode, exploreStore.rawSql, exploreStore.activ
     }
 });
 
-// Watch relevant props to regenerate SQL if needed (timestamp, limit, table)
-// Debounce this to avoid excessive updates during rapid prop changes
-let sqlUpdateTimeout: number | null = null;
-watch([() => props.startTimestamp, () => props.endTimestamp, () => props.limit, () => props.tableName, () => props.tsField],
-  () => {
-    if (sqlUpdateTimeout) clearTimeout(sqlUpdateTimeout);
-    sqlUpdateTimeout = window.setTimeout(() => {
-        // Only update SQL if currently in SQL mode AND the SQL likely contains generated parts
-        if (activeMode.value === 'clickhouse-sql' && editorContent.value) {
-            // More robust: check if the current SQL seems to be generated/default
-            // This is tricky. For now, let's update if AST parsing works.
-            try {
-                 const parsed = SQLParser.parse(editorContent.value, props.tsField);
-                 if (parsed) {
-                     // Re-generate the query using current props IF it was likely generated
-                     // Heuristic: Does it have the standard time filter and limit?
-                     const needsUpdate = parsed.whereClause?.hasTimestampFilter || parsed.limit === oldLimitValue; // Need to store oldLimitValue
-
-                     // Or simpler: Always try to update if parseable
-                     let updatedSql = editorContent.value;
-
-                     // Update Time Filter
-                     if (parsed.whereClause?.hasTimestampFilter) {
-                         const timeFilterRegex = new RegExp(
-                             `${props.tsField}\\s+BETWEEN\\s+'[^']+'\\s+AND\\s+'[^']+'`, 'i'
-                         );
-                         const newTimeCondition = QueryBuilder.formatTimeCondition(
-                             props.tsField, props.startTimestamp * 1000, props.endTimestamp * 1000, true
-                         );
-                         updatedSql = updatedSql.replace(timeFilterRegex, newTimeCondition);
-                     } // Else: Don't add time filter if user removed it
-
-                     // Update Limit
-                     const limitRegex = /\bLIMIT\s+\d+/i;
-                     const newLimitClause = `LIMIT ${props.limit}`;
-                     if (parsed.limit && limitRegex.test(updatedSql)) {
-                         updatedSql = updatedSql.replace(limitRegex, newLimitClause);
-                     } else if (!parsed.limit) {
-                         // Add limit if it was missing
-                         updatedSql = SQLParser.toSQL(SQLParser.applyLimit(parsed, props.limit));
-                     }
-
-                     if (updatedSql !== editorContent.value) {
-                        runProgrammaticUpdate(updatedSql);
-                        // Optionally notify user?
-                     }
-                 }
-            } catch(e) {
-                console.warn("Could not parse existing SQL for auto-update:", e)
-            }
-        }
-        // Store current limit for next comparison
-        oldLimitValue = props.limit;
-
-    }, 300); // Debounce updates
-});
-let oldLimitValue = props.limit; // Store initial limit
 
 // Update placeholder when it changes
 watch(currentPlaceholder, () => {
