@@ -163,7 +163,7 @@ const isProgrammaticChange = ref(false);
 // Flag to prevent operations during disposal
 const isDisposing = ref(false);
 
-// Track editor initialization state
+// Track if editor is initialized
 const isEditorInitialized = ref(false);
 
 // Track disposal resources
@@ -1260,6 +1260,14 @@ let oldLimitValue = props.limit; // Store initial limit
 watch(currentPlaceholder, () => {
     // Placeholder update via options is unreliable with v-model
     // Consider adding a visual placeholder element behind the editor if needed
+    if (editorRef.value) {
+        try {
+            // Try to update placeholder anyway, might work in some cases
+            editorRef.value.updateOptions({ 'placeholder': currentPlaceholder.value });
+        } catch (err) {
+            console.warn('Error updating placeholder:', err);
+        }
+    }
 });
 
 // Watch for loading state to make editor read-only
