@@ -1,512 +1,20 @@
-import { Parser as LogchefQLParser, Node } from "./logchefql";
-import { translateToSQLConditions } from "./logchefql/api";
-import { SQLParser } from "./clickhouse-sql/ast";
+import { parseAndTranslateLogchefQL } from './logchefql/api';
+import { format } from 'date-fns'; // Using date-fns for reliable formatting
 
-/**
- * QueryBuilder is a service that handles all query transformations
- * including LogchefQL to SQL conversion, timestamp handling, and format conversions.
- */
-export class QueryBuilder {
-  /**
-   * Builds a complete SQL query from LogchefQL input
-   * @param logchefqlQuery The LogchefQL query
-   * @param options Query building options
-   * @returns Complete SQL query ready for execution
-   */
-  static buildSqlFromLogchefQL(
-    logchefqlQuery: string,
-    options: QueryBuildOptions
-  ): QueryResult {
-    const {
-      tableName,
-      tsField,
-      startTimestamp,
-      endTimestamp,
-      limit,
-      includeTimeFilter,
-      forDisplay,
-    } = options;
-
-    try {
-      // Parse the LogchefQL query
-      const parser = new LogchefQLParser();
-      parser.parse(logchefqlQuery);
-
-      // Generate SQL conditions from LogchefQL
-      let whereConditions = "";
-      if (parser.root) {
-        whereConditions = translateToSQLConditions(parser.root);
-      }
-
-      // Build the base query without time filter
-      let sqlQuery = `SELECT * FROM ${tableName}`;
-
-      // Add WHERE clause with conditions if they exist
-      if (whereConditions && whereConditions.trim()) {
-        sqlQuery += `\nWHERE ${whereConditions}`;
-      }
-
-      // Add time filter if needed
-      if (includeTimeFilter) {
-        // Convert timestamps to milliseconds
-        const startMs = startTimestamp * 1000;
-        const endMs = endTimestamp * 1000;
-
-        // Format the time condition based on display preference
-        const timeCondition = this.formatTimeCondition(
-          tsField,
-          startMs,
-          endMs,
-          forDisplay
-        );
-
-        // Add time condition to the query
-        if (sqlQuery.includes("WHERE")) {
-          sqlQuery += `\n  AND ${timeCondition}`;
-        } else {
-          sqlQuery += `\nWHERE ${timeCondition}`;
-        }
-      }
-
-      // Add ORDER BY and LIMIT
-      sqlQuery += `\nORDER BY ${tsField} DESC`;
-      if (limit) {
-        sqlQuery += `\nLIMIT ${limit}`;
-      }
-
-      return {
-        sql: sqlQuery,
-        success: true,
-        error: null,
-      };
-    } catch (error) {
-      console.error("Error building SQL from LogchefQL:", error);
-      return {
-        sql: "",
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-
-  /**
-   * Prepares an SQL query for execution with proper timestamp handling
-   * @param sqlQuery The SQL query to prepare
-   * @param options Query building options
-   * @returns SQL query ready for execution
-   */
-  static prepareQueryForExecution(
-    sqlQuery: string,
-    options: QueryBuildOptions
-  ): QueryResult {
-    const { tsField, startTimestamp, endTimestamp, includeTimeFilter } =
-      options;
-
-    // Add better logging for debugging the incoming query
-    console.log("prepareQueryForExecution received:", {
-      sqlQuery,
-      type: typeof sqlQuery,
-      isEmpty: !sqlQuery || !sqlQuery.trim(),
-      hasTableName: sqlQuery && sqlQuery.includes('FROM '),
-      isActive: document.hasFocus(),
-    });
-
-    if (!sqlQuery || (typeof sqlQuery === "string" && !sqlQuery.trim())) {
-      console.error("Empty SQL query received in prepareQueryForExecution");
-      // Provide a default query instead of an error
-      return {
-        sql: this.getDefaultSQLQuery(options),
-        success: true,
-        error: null,
-      };
-    }
-    
-    // Check if query has a FROM clause with a table name
-    const hasTableNameMatch = sqlQuery.match(/FROM\s+([^\s\n]+)/i);
-    
-    if (hasTableNameMatch && hasTableNameMatch[1]) {
-      const tableName = hasTableNameMatch[1];
-      console.log(`Query has specific table name: ${tableName}, preserving it`);
-    }
-
-    try {
-      // Convert timestamps to milliseconds
-      const startMs = startTimestamp * 1000;
-      const endMs = endTimestamp * 1000;
-
-      // Check if query has a timestamp filter
-      const hasTimeFilter = this.hasTimestampFilter(sqlQuery, tsField);
-
-      // Parse the SQL using the AST parser
-      const parsedQuery = SQLParser.parse(sqlQuery, tsField);
-
-      if (!parsedQuery) {
-        throw new Error("Failed to parse SQL query");
-      }
-
-      let resultSql: string;
-
-      // If query already has a timestamp filter, respect it
-      if (hasTimeFilter) {
-        // Convert any human-readable dates to timestamp functions
-        resultSql = this.convertHumanReadableDatesToFunctions(
-          sqlQuery,
-          tsField,
-          startMs,
-          endMs
-        );
-      } else if (includeTimeFilter) {
-        // Add timestamp filter using the AST
-        const timeFilterQuery = SQLParser.applyTimeRange(
-          parsedQuery,
-          tsField,
-          new Date(startMs).toISOString(),
-          new Date(endMs).toISOString()
-        );
-
-        // Convert to SQL and replace ISO strings with timestamp functions
-        resultSql = SQLParser.toSQL(timeFilterQuery).replace(
-          new RegExp(`${tsField}\\s+BETWEEN\\s+'[^']+'\\s+AND\\s+'[^']+'`, "i"),
-          `${tsField} BETWEEN fromUnixTimestamp64Milli(${startMs}) AND fromUnixTimestamp64Milli(${endMs})`
-        );
-      } else {
-        // No timestamp filter needed
-        resultSql = sqlQuery;
-      }
-
-      return {
-        sql: resultSql,
-        success: true,
-        error: null,
-      };
-    } catch (error) {
-      console.error("Error preparing query for execution:", error);
-
-      // Fallback to simple handling when AST parsing fails
-      try {
-        return this.fallbackPrepareQuery(sqlQuery, options);
-      } catch (fallbackError) {
-        return {
-          sql: "",
-          success: false,
-          error:
-            fallbackError instanceof Error
-              ? fallbackError.message
-              : String(fallbackError),
-        };
-      }
-    }
-  }
-
-  /**
-   * Fallback method for preparing a query when AST parsing fails
-   * @param sqlQuery The SQL query
-   * @param options Query options
-   * @returns Prepared query
-   */
-  private static fallbackPrepareQuery(
-    sqlQuery: string,
-    options: QueryBuildOptions
-  ): QueryResult {
-    const { tsField, startTimestamp, endTimestamp, includeTimeFilter } =
-      options;
-
-    // Convert timestamps to milliseconds
-    const startMs = startTimestamp * 1000;
-    const endMs = endTimestamp * 1000;
-
-    // Format time condition
-    const timeCondition = `${tsField} BETWEEN fromUnixTimestamp64Milli(${startMs}) AND fromUnixTimestamp64Milli(${endMs})`;
-
-    // Check for existing timestamp filter
-    const hasTimeFilter = this.hasTimestampFilter(sqlQuery, tsField);
-
-    if (hasTimeFilter) {
-      // Try to replace existing timestamp filter with regex patterns
-      const patterns = [
-        new RegExp(`${tsField}\\s+BETWEEN\\s+'[^']+'\\s+AND\\s+'[^']+'`, "i"),
-        new RegExp(`${tsField}\\s+BETWEEN\\s+\\d+\\s+AND\\s+\\d+`, "i"),
-        new RegExp(
-          `${tsField}\\s+BETWEEN\\s+fromUnixTimestamp64Milli\\(\\d+\\)\\s+AND\\s+fromUnixTimestamp64Milli\\(\\d+\\)`,
-          "i"
-        ),
-      ];
-
-      for (const pattern of patterns) {
-        if (pattern.test(sqlQuery)) {
-          return {
-            sql: sqlQuery.replace(pattern, timeCondition),
-            success: true,
-            error: null,
-          };
-        }
-      }
-
-      // Couldn't find a pattern to replace, return as is
-      return { sql: sqlQuery, success: true, error: null };
-    } else if (includeTimeFilter) {
-      // Add time filter based on query structure
-      const hasWhere = /\bWHERE\b/i.test(sqlQuery);
-
-      if (hasWhere) {
-        // Add to existing WHERE clause
-        return {
-          sql: sqlQuery.replace(/WHERE/i, `WHERE ${timeCondition} AND `),
-          success: true,
-          error: null,
-        };
-      } else {
-        // Add new WHERE clause
-        return {
-          sql: sqlQuery.replace(
-            /FROM\s+([^\n]+)/i,
-            `FROM $1\nWHERE ${timeCondition}`
-          ),
-          success: true,
-          error: null,
-        };
-      }
-    } else {
-      // No time filter needed
-      return { sql: sqlQuery, success: true, error: null };
-    }
-  }
-
-  /**
-   * Formats a SQL query for display with human-readable dates
-   * @param sqlQuery The SQL query to format
-   * @returns SQL query with human-readable dates
-   */
-  static formatQueryForDisplay(sqlQuery: string): string {
-    if (!sqlQuery) return "";
-
-    // Replace fromUnixTimestamp64Milli timestamp formats with human-readable dates
-    return sqlQuery.replace(
-      /fromUnixTimestamp64Milli\((\d+)\)/g,
-      (match, timestamp) => {
-        const date = new Date(parseInt(timestamp));
-
-        // Format in local timezone as YYYY-MM-DD HH:MM:SS
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, "0");
-        const day = String(date.getDate()).padStart(2, "0");
-        const hours = String(date.getHours()).padStart(2, "0");
-        const minutes = String(date.getMinutes()).padStart(2, "0");
-        const seconds = String(date.getSeconds()).padStart(2, "0");
-
-        return `'${year}-${month}-${day} ${hours}:${minutes}:${seconds}'`;
-      }
-    );
-  }
-
-  /**
-   * Formats a time condition for a query
-   * @param tsField Timestamp field name
-   * @param startMs Start timestamp in milliseconds
-   * @param endMs End timestamp in milliseconds
-   * @param forDisplay Whether to format for display (human-readable) or execution
-   * @returns Formatted time condition
-   */
-  static formatTimeCondition(
-    tsField: string,
-    startMs: number,
-    endMs: number,
-    forDisplay: boolean = false
-  ): string {
-    if (forDisplay) {
-      // Format dates as human-readable strings in local timezone
-      const formatDate = (timestamp: number): string => {
-        const date = new Date(timestamp);
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, "0");
-        const day = String(date.getDate()).padStart(2, "0");
-        const hours = String(date.getHours()).padStart(2, "0");
-        const minutes = String(date.getMinutes()).padStart(2, "0");
-        const seconds = String(date.getSeconds()).padStart(2, "0");
-
-        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-      };
-
-      return `${tsField} BETWEEN '${formatDate(startMs)}' AND '${formatDate(
-        endMs
-      )}'`;
-    } else {
-      // Use timestamp functions for execution
-      return `${tsField} BETWEEN fromUnixTimestamp64Milli(${startMs}) AND fromUnixTimestamp64Milli(${endMs})`;
-    }
-  }
-
-  /**
-   * Checks if a SQL query has a timestamp filter
-   * @param sqlQuery The SQL query to check
-   * @param tsField Timestamp field name
-   * @returns True if the query has a timestamp filter
-   */
-  static hasTimestampFilter(sqlQuery: string, tsField: string): boolean {
-    try {
-      const parsedQuery = SQLParser.parse(sqlQuery, tsField);
-      return !!parsedQuery?.whereClause?.hasTimestampFilter;
-    } catch (error) {
-      // Fallback to regex check if parsing fails
-      const timeFilterRegex = new RegExp(
-        `${tsField}\\s+(BETWEEN|>=|>|<=|<|=)`,
-        "i"
-      );
-      return timeFilterRegex.test(sqlQuery);
-    }
-  }
-
-  /**
-   * Converts human-readable dates in a query to timestamp functions
-   * @param sqlQuery The SQL query with human-readable dates
-   * @param tsField Timestamp field name
-   * @param startMs Start timestamp in milliseconds
-   * @param endMs End timestamp in milliseconds
-   * @returns SQL query with timestamp functions
-   */
-  private static convertHumanReadableDatesToFunctions(
-    sqlQuery: string,
-    tsField: string,
-    startMs: number,
-    endMs: number
-  ): string {
-    // Find and replace human-readable dates with timestamp functions
-    const timeConditionRegex = new RegExp(
-      `${tsField}\\s+BETWEEN\\s+'([^']+)'\\s+AND\\s+'([^']+)'`,
-      "i"
-    );
-
-    const match = sqlQuery.match(timeConditionRegex);
-    if (match) {
-      // Replace with timestamp functions
-      return sqlQuery.replace(
-        timeConditionRegex,
-        `${tsField} BETWEEN fromUnixTimestamp64Milli(${startMs}) AND fromUnixTimestamp64Milli(${endMs})`
-      );
-    }
-
-    // If no matches found, return as is
-    return sqlQuery;
-  }
-
-  /**
-   * Creates a default SQL query
-   * @param options Query options
-   * @returns Default SQL query
-   */
-  static getDefaultSQLQuery(options: QueryBuildOptions): string {
-    const {
-      tableName,
-      tsField,
-      startTimestamp,
-      endTimestamp,
-      limit,
-      includeTimeFilter,
-      forDisplay,
-    } = options;
-
-    // Ensure we have a valid table name before building a query
-    if (!tableName) {
-      console.warn('getDefaultSQLQuery called with empty tableName');
-      // Instead of returning empty string, preserve the FROM clause for later substitution
-      let sqlQuery = `SELECT * FROM `;
-
-      // Add time filter if needed
-      if (includeTimeFilter) {
-        const startMs = startTimestamp * 1000;
-        const endMs = endTimestamp * 1000;
-
-        const timeCondition = this.formatTimeCondition(
-          tsField,
-          startMs,
-          endMs,
-          forDisplay
-        );
-
-        sqlQuery += `\nWHERE ${timeCondition}`;
-      }
-
-      // Add order by and limit
-      sqlQuery += `\nORDER BY ${tsField} DESC`;
-
-      if (limit) {
-        sqlQuery += `\nLIMIT ${limit}`;
-      }
-
-      return sqlQuery;
-    }
-
-    // Build a simple default query with the provided table name
-    let sqlQuery = `SELECT * FROM ${tableName}`;
-
-    // Add time filter if needed
-    if (includeTimeFilter) {
-      const startMs = startTimestamp * 1000;
-      const endMs = endTimestamp * 1000;
-
-      const timeCondition = this.formatTimeCondition(
-        tsField,
-        startMs,
-        endMs,
-        forDisplay
-      );
-
-      sqlQuery += `\nWHERE ${timeCondition}`;
-    }
-
-    // Add order by and limit
-    sqlQuery += `\nORDER BY ${tsField} DESC`;
-
-    if (limit) {
-      sqlQuery += `\nLIMIT ${limit}`;
-    }
-
-    return sqlQuery;
-  }
-
-  /**
-   * Format a timestamp for display in local timezone
-   * @param timestamp Unix timestamp in seconds
-   * @returns Formatted date string in YYYY-MM-DD HH:MM:SS format
-   */
-  static formatTimestampForDisplay(timestamp: number): string {
-    const date = new Date(timestamp * 1000);
-
-    // Format date as YYYY-MM-DD HH:MM:SS in user's local timezone
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    const hours = String(date.getHours()).padStart(2, "0");
-    const minutes = String(date.getMinutes()).padStart(2, "0");
-    const seconds = String(date.getSeconds()).padStart(2, "0");
-
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-  }
-}
-
-/**
- * Options for building a query
- */
-export interface QueryBuildOptions {
-  /** Table name */
+// Interface for build options
+export interface BuildSqlOptions {
   tableName: string;
-  /** Timestamp field name */
   tsField: string;
-  /** Start timestamp in seconds (unix epoch) */
-  startTimestamp: number;
-  /** End timestamp in seconds (unix epoch) */
-  endTimestamp: number;
-  /** Maximum number of results to return */
-  limit?: number;
-  /** Whether to include time filters */
-  includeTimeFilter: boolean;
-  /** Whether to format for display (with readable dates) */
-  forDisplay?: boolean;
+  startTimestamp: number; // Unix timestamp in seconds
+  endTimestamp: number;   // Unix timestamp in seconds
+  limit: number;
+  logchefqlQuery?: string; // Optional LogchefQL query string
+  selectColumns?: string[]; // Default to '*'
+  orderByField?: string; // Default to tsField
+  orderByDirection?: 'ASC' | 'DESC'; // Default to DESC
 }
 
-/**
- * Result of a query building operation
- */
+// Interface for the result
 export interface QueryResult {
   /** The resulting SQL query */
   sql: string;
@@ -514,4 +22,231 @@ export interface QueryResult {
   success: boolean;
   /** Error message if operation failed */
   error: string | null;
+}
+
+export class QueryBuilder {
+
+  /**
+   * Formats a Unix timestamp (seconds) into ClickHouse DateTime string format 'YYYY-MM-DD HH:MM:SS'.
+   */
+  private static formatTimestampForSQL(timestampSeconds: number): string {
+    // ClickHouse generally expects 'YYYY-MM-DD HH:MM:SS' for DateTime fields in WHERE clauses
+    const date = new Date(timestampSeconds * 1000);
+    // Ensure date is valid before formatting
+    if (isNaN(date.getTime())) {
+        throw new Error(`Invalid timestamp provided: ${timestampSeconds}`);
+    }
+    return format(date, 'yyyy-MM-dd HH:mm:ss');
+  }
+
+  /**
+   * Creates the time condition part of the WHERE clause using standard DateTime format.
+   * Ensures the timestamp field is quoted with backticks.
+   */
+  private static formatTimeCondition(tsField: string, startSeconds: number, endSeconds: number): string {
+    try {
+        const formattedStart = QueryBuilder.formatTimestampForSQL(startSeconds);
+        const formattedEnd = QueryBuilder.formatTimestampForSQL(endSeconds);
+        // Use backticks for the timestamp field identifier
+        return `\`${tsField}\` BETWEEN '${formattedStart}' AND '${formattedEnd}'`;
+    } catch (error: any) {
+        console.error("Error formatting time condition:", error);
+        // Re-throw or handle as appropriate, maybe return an empty string or a specific error condition
+        throw new Error(`Failed to format time condition: ${error.message}`);
+    }
+  }
+
+  /**
+   * Builds a complete ClickHouse SQL query from LogchefQL and other options.
+   * This function constructs the final, executable query.
+   */
+  static buildSqlFromLogchefQL(options: BuildSqlOptions): QueryResult {
+    const {
+      tableName,
+      tsField,
+      startTimestamp,
+      endTimestamp,
+      limit,
+      logchefqlQuery,
+      selectColumns = ['*'], // Default to selecting all columns
+      orderByField = tsField, // Default ordering by timestamp field
+      orderByDirection = 'DESC', // Default to descending order
+    } = options;
+
+    // --- Input Validation ---
+    if (!tableName) {
+      return { success: false, sql: "", error: "Table name is required." };
+    }
+    if (!tsField) {
+        return { success: false, sql: "", error: "Timestamp field name is required." };
+    }
+    if (typeof startTimestamp !== 'number' || typeof endTimestamp !== 'number' || startTimestamp > endTimestamp) {
+        return { success: false, sql: "", error: "Invalid start or end timestamp." };
+    }
+     if (typeof limit !== 'number' || limit <= 0) {
+        return { success: false, sql: "", error: "Invalid limit value." };
+     }
+
+    let logchefqlConditions = "";
+
+    // --- Translate LogchefQL ---
+    if (logchefqlQuery && logchefqlQuery.trim()) {
+      const translationResult = parseAndTranslateLogchefQL(logchefqlQuery);
+      if (!translationResult.success) {
+        // Return the specific error from the translation
+        return { success: false, sql: "", error: translationResult.error || "Failed to translate LogchefQL." };
+      }
+      logchefqlConditions = translationResult.sql || "";
+    }
+
+    // --- Format Time Condition ---
+    let timeCondition: string;
+    try {
+        timeCondition = QueryBuilder.formatTimeCondition(tsField, startTimestamp, endTimestamp);
+    } catch (error: any) {
+        return { success: false, sql: "", error: error.message };
+    }
+
+
+    // --- Combine WHERE conditions ---
+    let whereClause = "";
+    const conditions = [logchefqlConditions, timeCondition].filter(Boolean); // Filter out empty strings
+    if (conditions.length > 0) {
+        // Wrap individual conditions in parentheses if both exist for clarity
+        whereClause = `WHERE ${conditions.map(c => `(${c})`).join(' AND ')}`;
+    }
+
+    // --- Construct the full query ---
+    // Quote column names if they aren't '*' or potentially complex expressions/functions
+    const safeSelectColumns = selectColumns.map(col =>
+        col === '*' || col.includes('(') || col.includes(' ') ? col : `\`${col}\``
+    ).join(', ');
+    const selectClause = `SELECT ${safeSelectColumns}`;
+
+    // Quote table name and order by field
+    const fromClause = `FROM \`${tableName}\``;
+    const orderByClause = `ORDER BY \`${orderByField}\` ${orderByDirection}`;
+    const limitClause = `LIMIT ${limit}`;
+
+    // Assemble the final query string
+    const finalSql = [
+      selectClause,
+      fromClause,
+      whereClause, // Will be empty if no conditions
+      orderByClause,
+      limitClause,
+    ]
+      .filter(Boolean) // Remove empty lines (like whereClause if no conditions)
+      .join('\n'); // Join with newlines for readability
+
+    return { success: true, sql: finalSql, error: null };
+  }
+
+  /**
+   * Generates a default SQL query when no specific LogchefQL is provided.
+   * Uses the same structure as buildSqlFromLogchefQL but without LogchefQL translation.
+   */
+  static getDefaultSQLQuery(options: Omit<BuildSqlOptions, 'logchefqlQuery'>): string {
+     const {
+       tableName,
+       tsField,
+       startTimestamp,
+       endTimestamp,
+       limit,
+       selectColumns = ['*'],
+       orderByField = tsField,
+       orderByDirection = 'DESC',
+     } = options;
+
+     // Basic validation for default query generation
+     if (!tableName || !tsField) {
+         console.warn("Cannot generate default SQL: Missing tableName or tsField.");
+         // Return a placeholder template
+         return `SELECT *\nFROM your_table\nORDER BY timestamp_field DESC\nLIMIT 1000`;
+     }
+      if (typeof startTimestamp !== 'number' || typeof endTimestamp !== 'number' || typeof limit !== 'number') {
+          console.warn("Cannot generate default SQL: Invalid timestamp or limit.");
+          return `SELECT *\nFROM \`${tableName}\`\n-- Invalid time range or limit provided\nORDER BY \`${tsField}\` DESC\nLIMIT 1000`;
+      }
+
+     let timeCondition: string;
+     try {
+         timeCondition = QueryBuilder.formatTimeCondition(tsField, startTimestamp, endTimestamp);
+     } catch (error: any) {
+         console.error("Error formatting time condition for default query:", error);
+         // Handle error, maybe return query without time filter or with a comment
+         return `SELECT ${selectColumns.join(', ')}\nFROM \`${tableName}\`\n-- Error generating time filter: ${error.message}\nORDER BY \`${orderByField}\` ${orderByDirection}\nLIMIT ${limit}`;
+     }
+
+
+     // Quote identifiers similarly to buildSqlFromLogchefQL
+     const safeSelectColumns = selectColumns.map(col =>
+        col === '*' || col.includes('(') || col.includes(' ') ? col : `\`${col}\``
+     ).join(', ');
+
+     const sql = [
+       `SELECT ${safeSelectColumns}`,
+       `FROM \`${tableName}\``,
+       `WHERE ${timeCondition}`, // Always include time condition for default query
+       `ORDER BY \`${orderByField}\` ${orderByDirection}`,
+       `LIMIT ${limit}`,
+     ].join('\n');
+
+     return sql;
+  }
+
+  /**
+   * Formats a SQL query for display purposes, replacing specific timestamp
+   * functions or formats with human-readable dates in the user's local timezone.
+   * NOTE: This is for DISPLAY ONLY and does not affect query execution.
+   * It currently targets the 'YYYY-MM-DD HH:MM:SS' format used in WHERE clauses.
+   *
+   * @param sqlQuery The SQL query string potentially containing time conditions.
+   * @param tsField The timestamp field name used in the query.
+   * @returns SQL query string with time conditions potentially formatted for display.
+   */
+  static formatQueryForDisplay(sqlQuery: string, tsField: string): string {
+    if (!sqlQuery || !tsField) return sqlQuery;
+
+    // Regex to find the specific BETWEEN clause format we generate
+    // It captures the field, start date, and end date strings
+    const timeConditionRegex = new RegExp(
+      // Match the timestamp field (potentially quoted)
+      `([\\\`]?${tsField}[\\\`]?)` +
+      // Match BETWEEN and the opening quote for the start date
+      `\\s+BETWEEN\\s+'` +
+      // Capture the start date string (YYYY-MM-DD HH:MM:SS)
+      `(\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2})` +
+      // Match the closing quote, AND, and opening quote for the end date
+      `'\\s+AND\\s+'` +
+      // Capture the end date string (YYYY-MM-DD HH:MM:SS)
+      `(\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2})` +
+      // Match the final closing quote
+      `'`,
+      'gi' // Global and case-insensitive search
+    );
+
+    return sqlQuery.replace(timeConditionRegex, (match, field, startDateStr, endDateStr) => {
+      try {
+        // Attempt to parse the captured date strings (assuming they are UTC or server time)
+        // and format them nicely in the user's local time zone.
+        const startDate = new Date(startDateStr + 'Z'); // Assume UTC if no timezone info
+        const endDate = new Date(endDateStr + 'Z'); // Assume UTC
+
+        // Format in local timezone (e.g., "yyyy-MM-dd HH:mm:ss")
+        // Adjust format string as desired for display
+        const localStartDate = format(startDate, 'yyyy-MM-dd HH:mm:ss');
+        const localEndDate = format(endDate, 'yyyy-MM-dd HH:mm:ss');
+
+        // Reconstruct the clause with local dates (still as strings for display)
+        // Note: This is purely for visual representation in the editor.
+        return `${field} BETWEEN '${localStartDate}' AND '${localEndDate}' /* Local Time */`;
+
+      } catch (e) {
+        // If parsing/formatting fails, return the original match
+        console.warn("Could not format date for display:", e);
+        return match;
+      }
+    });
+  }
 }
