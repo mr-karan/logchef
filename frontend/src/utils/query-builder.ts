@@ -70,13 +70,13 @@ export class QueryBuilder {
   }
 
   /**
-   * Creates the time condition part of the WHERE clause using UNIX timestamps.
+   * Creates the time condition part of the WHERE clause using toDateTime64 for human-readable timestamps.
    * Ensures the timestamp field is quoted with backticks.
    */
   private static formatTimeCondition(tsField: string, startSeconds: number, endSeconds: number): string {
     try {
-        // Use UNIX timestamps directly for more reliable querying
-        return `\`${tsField}\` BETWEEN ${startSeconds} AND ${endSeconds}`;
+        // Convert UNIX timestamps to DateTime64 for human-readable querying
+        return `toDateTime64(\`${tsField}\`, 3, 'UTC') BETWEEN toDateTime64(${startSeconds}, 3, 'UTC') AND toDateTime64(${endSeconds}, 3, 'UTC')`;
     } catch (error: any) {
         console.error("Error formatting time condition:", error);
         throw new Error(`Failed to format time condition: ${error.message}`);
@@ -273,8 +273,8 @@ export class QueryBuilder {
        }
      });
 
-     // Combine timestamp and namespace conditions
-     const baseCondition = `\`${tsField}\` BETWEEN ${startTimestamp} AND ${endTimestamp}`;
+     // Combine timestamp and namespace conditions with DateTime64 conversion
+     const baseCondition = `toDateTime64(\`${tsField}\`, 3, 'UTC') BETWEEN toDateTime64(${startTimestamp}, 3, 'UTC') AND toDateTime64(${endTimestamp}, 3, 'UTC')`;
      const whereClause = options.whereClause 
        ? `${baseCondition} AND (${options.whereClause})`
        : baseCondition;
