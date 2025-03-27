@@ -69,18 +69,15 @@ export class QueryBuilder {
   }
 
   /**
-   * Creates the time condition part of the WHERE clause using standard DateTime format.
+   * Creates the time condition part of the WHERE clause using UNIX timestamps.
    * Ensures the timestamp field is quoted with backticks.
    */
   private static formatTimeCondition(tsField: string, startSeconds: number, endSeconds: number): string {
     try {
-        const formattedStart = QueryBuilder.formatTimestampForSQL(startSeconds);
-        const formattedEnd = QueryBuilder.formatTimestampForSQL(endSeconds);
-        // Use backticks for the timestamp field identifier
-        return `\`${tsField}\` BETWEEN '${formattedStart}' AND '${formattedEnd}'`;
+        // Use UNIX timestamps directly for more reliable querying
+        return `\`${tsField}\` BETWEEN ${startSeconds} AND ${endSeconds}`;
     } catch (error: any) {
         console.error("Error formatting time condition:", error);
-        // Re-throw or handle as appropriate, maybe return an empty string or a specific error condition
         throw new Error(`Failed to format time condition: ${error.message}`);
     }
   }
@@ -197,7 +194,7 @@ export class QueryBuilder {
 
   /**
    * Generates a default SQL query when no specific LogchefQL is provided.
-   * Uses the same structure as buildSqlFromLogchefQL but without LogchefQL translation.
+   * Uses a simplified structure with direct timestamp values.
    * Returns a QueryResult with success status and metadata.
    */
   static getDefaultSQLQuery(options: Omit<BuildSqlOptions, 'logchefqlQuery'>): QueryResult {
@@ -215,7 +212,6 @@ export class QueryBuilder {
      // Basic validation for default query generation
      if (!tableName || !tsField) {
          console.warn("Cannot generate default SQL: Missing tableName or tsField.");
-         // Return a placeholder template with error
          return {
            success: false,
            sql: `SELECT *\nFROM your_table\nORDER BY timestamp_field DESC\nLIMIT 1000`,
@@ -234,21 +230,7 @@ export class QueryBuilder {
          };
      }
 
-     let timeCondition: string;
-     try {
-         timeCondition = QueryBuilder.formatTimeCondition(tsField, startTimestamp, endTimestamp);
-     } catch (error: any) {
-         console.error("Error formatting time condition for default query:", error);
-         // Handle error, maybe return query without time filter or with a comment
-         return {
-           success: false,
-           sql: `SELECT ${selectColumns.join(', ')}\nFROM \`${tableName}\`\n-- Error generating time filter: ${error.message}\nORDER BY \`${orderByField}\` ${orderByDirection}\nLIMIT ${limit}`,
-           error: `Error formatting time condition: ${error.message}`,
-           warnings: ["Using query without time filter"]
-         };
-     }
-
-     // Quote identifiers similarly to buildSqlFromLogchefQL
+     // Quote identifiers and use direct timestamp values
      const safeSelectColumns = selectColumns.map(col =>
         col === '*' || col.includes('(') || col.includes(' ') ? col : `\`${col}\``
      ).join(', ');
@@ -256,7 +238,7 @@ export class QueryBuilder {
      const sql = [
        `SELECT ${safeSelectColumns}`,
        `FROM \`${tableName}\``,
-       `WHERE ${timeCondition}`, // Always include time condition for default query
+       `WHERE \`${tsField}\` BETWEEN ${startTimestamp} AND ${endTimestamp}`,
        `ORDER BY \`${orderByField}\` ${orderByDirection}`,
        `LIMIT ${limit}`,
      ].join('\n');
@@ -272,58 +254,5 @@ export class QueryBuilder {
      };
   }
 
-  /**
-   * Formats a SQL query for display purposes, replacing specific timestamp
-   * functions or formats with human-readable dates in the user's local timezone.
-   * NOTE: This is for DISPLAY ONLY and does not affect query execution.
-   * It currently targets the 'YYYY-MM-DD HH:MM:SS' format used in WHERE clauses.
-   *
-   * @param sqlQuery The SQL query string potentially containing time conditions.
-   * @param tsField The timestamp field name used in the query.
-   * @returns SQL query string with time conditions potentially formatted for display.
-   */
-  static formatQueryForDisplay(sqlQuery: string, tsField: string): string {
-    if (!sqlQuery || !tsField) return sqlQuery;
-
-    // Regex to find the specific BETWEEN clause format we generate
-    // It captures the field, start date, and end date strings
-    const timeConditionRegex = new RegExp(
-      // Match the timestamp field (potentially quoted)
-      `([\\\`]?${tsField}[\\\`]?)` +
-      // Match BETWEEN and the opening quote for the start date
-      `\\s+BETWEEN\\s+'` +
-      // Capture the start date string (YYYY-MM-DD HH:MM:SS)
-      `(\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2})` +
-      // Match the closing quote, AND, and opening quote for the end date
-      `'\\s+AND\\s+'` +
-      // Capture the end date string (YYYY-MM-DD HH:MM:SS)
-      `(\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2})` +
-      // Match the final closing quote
-      `'`,
-      'gi' // Global and case-insensitive search
-    );
-
-    return sqlQuery.replace(timeConditionRegex, (match, field, startDateStr, endDateStr) => {
-      try {
-        // Attempt to parse the captured date strings (assuming they are UTC or server time)
-        // and format them nicely in the user's local time zone.
-        const startDate = new Date(startDateStr + 'Z'); // Assume UTC if no timezone info
-        const endDate = new Date(endDateStr + 'Z'); // Assume UTC
-
-        // Format in local timezone (e.g., "yyyy-MM-dd HH:mm:ss")
-        // Adjust format string as desired for display
-        const localStartDate = format(startDate, 'yyyy-MM-dd HH:mm:ss');
-        const localEndDate = format(endDate, 'yyyy-MM-dd HH:mm:ss');
-
-        // Reconstruct the clause with local dates (still as strings for display)
-        // Note: This is purely for visual representation in the editor.
-        return `${field} BETWEEN '${localStartDate}' AND '${localEndDate}' /* Local Time */`;
-
-      } catch (e) {
-        // If parsing/formatting fails, return the original match
-        console.warn("Could not format date for display:", e);
-        return match;
-      }
-    });
-  }
+  // Removed formatQueryForDisplay method as we now use direct timestamp values
 }
