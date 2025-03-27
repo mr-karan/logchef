@@ -536,7 +536,9 @@ const currentPlaceholder = computed(() => {
 });
 
 const editorHeight = computed(() => {
-  const lines = (editorContent.value?.match(/\n/g) || []).length + 1;
+  // Ensure we're working with a string
+  const content = String(editorContent.value || '');
+  const lines = (content.match(/\n/g) || []).length + 1;
   const lineHeight = monacoOptions.lineHeight || 21; // Use configured line height
   const padding = (monacoOptions.padding?.top ?? 8) + (monacoOptions.padding?.bottom ?? 8);
   const minHeight = activeMode.value === 'logchefql' ? 45 : 90; // Smaller min for LogchefQL
