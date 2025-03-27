@@ -320,11 +320,10 @@ const syncEditorContentWithStore = (isInitialSync = false) => {
 const handleTabChange = (newMode: EditorMode) => {
   if (newMode === activeMode.value) return;
 
-  // Always preserve both query versions
   const currentQuery = editorContent.value;
   
+  // When leaving LogchefQL mode, update SQL version
   if (activeMode.value === 'logchefql') {
-    // When leaving LogchefQL mode, update store and convert to SQL
     exploreStore.setLogchefqlCode(currentQuery);
     
     try {
@@ -349,10 +348,11 @@ const handleTabChange = (newMode: EditorMode) => {
       validationError.value = error.message;
       return; // Don't switch modes if conversion failed
     }
-  } else {
-    // When leaving SQL mode, preserve SQL but switch editor content to LogchefQL
-    exploreStore.setRawSql(currentQuery);
-    runProgrammaticUpdate(exploreStore.logchefqlCode || "");
+  }
+  // When leaving SQL mode, restore LogchefQL version
+  else {
+    exploreStore.setRawSql(currentQuery); // Save SQL edits
+    runProgrammaticUpdate(exploreStore.logchefqlCode || ""); // Restore LogchefQL
   }
 
   // Update active mode in both local state and store
