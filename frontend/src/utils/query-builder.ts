@@ -254,19 +254,11 @@ export class QueryBuilder {
          };
      }
 
-     // Always include timestamp conversion even when using *
+     // Simplified select clause - format timestamp for display and include all columns
      const formattedSelect = [
-       `toDateTime64(\`${tsField}\`, 3, 'UTC') AS formatted_${tsField}`
+       `toDateTime64(\`${tsField}\`, 3, 'UTC') AS formatted_timestamp`,
+       '*'
      ];
-     
-     // Add other columns, excluding timestamp and handling * separately
-     selectColumns.forEach(col => {
-       if (col !== tsField && col !== '*') {
-         formattedSelect.push(`\`${col}\``);
-       } else if (col === '*') {
-         formattedSelect.push('*');
-       }
-     });
 
      // Combine timestamp and namespace conditions using raw values for better performance
      const baseCondition = `\`${tsField}\` BETWEEN ${startTimestamp} AND ${endTimestamp}`;
