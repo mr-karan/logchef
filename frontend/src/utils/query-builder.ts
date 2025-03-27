@@ -47,7 +47,7 @@ export class QueryBuilder {
         const start = format(startDate, "yyyy-MM-dd HH:mm:ss");
         const end = format(endDate, "yyyy-MM-dd HH:mm:ss");
         
-        return `\`${tsField}\` BETWEEN toDateTime('${start}') AND toDateTime('${end}')`;
+        return `${tsField} BETWEEN toDateTime('${start}') AND toDateTime('${end}')`;
     } catch (error: any) {
         console.error("Error formatting time condition:", error);
         throw new Error(`Failed to format time condition: ${error.message}`);
@@ -129,10 +129,10 @@ export class QueryBuilder {
     // --- Prepare base query components ---
     // Simplified select clause - just select all columns
     const selectClause = `SELECT *`;
-    const fromClause = `FROM \`${tableName}\``;
-    const namespaceCondition = `\`namespace\` = 'hello'`;
+    const fromClause = `FROM ${tableName}`;
+    const namespaceCondition = `namespace = 'hello'`;
     const timeWhereClause = `WHERE ${timeCondition}`;
-    const orderByClause = `ORDER BY \`${orderByField}\` ${orderByDirection}`;
+    const orderByClause = `ORDER BY ${orderByField} ${orderByDirection}`;
     const limitClause = `LIMIT ${limit}`;
 
     // --- Translate LogchefQL ---
@@ -259,7 +259,7 @@ export class QueryBuilder {
      }
 
      // Combine conditions
-     const namespaceCondition = `\`namespace\` = 'hello'`;
+     const namespaceCondition = `namespace = 'hello'`;
      let whereClause = `${timeCondition} AND ${namespaceCondition}`;
      if (options.whereClause) {
        whereClause += ` AND (${options.whereClause})`;
@@ -267,9 +267,9 @@ export class QueryBuilder {
 
      const sql = [
        `SELECT ${formattedSelect.join(', ')}`, // Should be SELECT *
-       `FROM \`${tableName}\``,
+       `FROM ${tableName}`,
        `WHERE ${whereClause}`,
-       `ORDER BY \`${orderByField}\` ${orderByDirection}`,
+       `ORDER BY ${orderByField} ${orderByDirection}`,
        `LIMIT ${limit}`
      ].join('\n');
 
