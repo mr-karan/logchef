@@ -227,6 +227,7 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
       startTimestamp: props.startTimestamp,
       endTimestamp: props.endTimestamp,
       limit: props.limit,
+      whereClause: '`namespace` = \'hello\'' // Add namespace condition
     };
     const defaultQuery = QueryBuilder.getDefaultSQLQuery(defaultOptions);
     initialContent = defaultQuery.sql || "";
@@ -251,13 +252,15 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
   const blurListener = editor.onDidBlurEditorWidget(() => { editorFocused.value = false; });
   activeProviders.value.push(focusListener, blurListener);
 
-  // Ensure Autofocus - use nextTick for more reliable focusing
-  nextTick(() => {
+  // Improved autofocus with delay
+  setTimeout(() => {
     if (editorRef.value && !isDisposing.value) {
       editorRef.value.focus();
-      console.log("QueryEditor: Autofocus attempted.");
+      // Force layout calculation
+      editorRef.value.layout();
+      console.log("QueryEditor: Autofocus attempted with layout refresh.");
     }
-  });
+  }, 150); // Slight delay to ensure editor is ready
 };
 
 const handleEditorChange = (value: string | undefined) => {

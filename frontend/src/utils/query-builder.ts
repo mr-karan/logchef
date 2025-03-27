@@ -13,6 +13,7 @@ export interface BuildSqlOptions {
   selectColumns?: string[]; // Default to '*'
   orderByField?: string; // Default to tsField
   orderByDirection?: 'ASC' | 'DESC'; // Default to DESC
+  whereClause?: string; // Additional WHERE conditions
 }
 
 // Interface for the result with enhanced error handling
@@ -112,6 +113,15 @@ export class QueryBuilder {
     if (typeof limit !== 'number' || limit <= 0) {
         return { success: false, sql: "", error: "Invalid limit value." };
     }
+    
+    // Add namespace validation
+    if (logchefqlQuery && !logchefqlQuery.includes('namespace=')) {
+      return {
+        success: false,
+        sql: "",
+        error: "Namespace condition is required in LogchefQL queries"
+      };
+    }
 
     // --- Format Time Condition ---
     let timeCondition: string;
@@ -122,11 +132,15 @@ export class QueryBuilder {
     }
 
     // --- Prepare base query components ---
-    // Quote column names if they aren't '*' or potentially complex expressions/functions
-    const safeSelectColumns = selectColumns.map(col =>
-        col === '*' || col.includes('(') || col.includes(' ') ? col : `\`${col}\``
-    ).join(', ');
-    const selectClause = `SELECT ${safeSelectColumns}`;
+    // Convert timestamp columns to human-readable format
+    const formattedSelect = selectColumns.map(col => {
+      if (col === tsField) {
+        return `toDateTime64(\`${tsField}\`, 3, 'UTC') AS formatted_${tsField}`;
+      }
+      return col === '*' ? '*' : `\`${col}\``;
+    }).join(', ');
+    
+    const selectClause = `SELECT ${formattedSelect}`;
     const fromClause = `FROM \`${tableName}\``;
     const timeWhereClause = `WHERE (${timeCondition})`;
     const orderByClause = `ORDER BY \`${orderByField}\` ${orderByDirection}`;
@@ -230,15 +244,22 @@ export class QueryBuilder {
          };
      }
 
-     // Quote identifiers and use direct timestamp values
-     const safeSelectColumns = selectColumns.map(col =>
-        col === '*' || col.includes('(') || col.includes(' ') ? col : `\`${col}\``
-     ).join(', ');
+     // Convert timestamp columns to human-readable format
+     const formattedSelect = selectColumns.map(col => {
+       if (col === tsField) {
+         return `toDateTime64(\`${tsField}\`, 3, 'UTC') AS formatted_${tsField}`;
+       }
+       return col === '*' ? '*' : `\`${col}\``;
+     }).join(', ');
+
+     // Add namespace condition if needed
+     const whereClause = `\`${tsField}\` BETWEEN ${startTimestamp} AND ${endTimestamp}` + 
+       (options.whereClause ? ` AND ${options.whereClause}` : '');
 
      const sql = [
-       `SELECT ${safeSelectColumns}`,
+       `SELECT ${formattedSelect}`,
        `FROM \`${tableName}\``,
-       `WHERE \`${tsField}\` BETWEEN ${startTimestamp} AND ${endTimestamp}`,
+       `WHERE ${whereClause}`,
        `ORDER BY \`${orderByField}\` ${orderByDirection}`,
        `LIMIT ${limit}`,
      ].join('\n');
