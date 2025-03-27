@@ -76,25 +76,6 @@ export class QueryBuilder {
   }
 
   /**
-   * Formats a time condition for ClickHouse using toDateTime() for better readability.
-   */
-  private static formatTimeCondition(tsField: string, startSeconds: number, endSeconds: number): string {
-    try {
-        const startDate = new Date(startSeconds * 1000);
-        const endDate = new Date(endSeconds * 1000);
-        
-        // Format to ClickHouse-readable datetime format
-        const start = format(startDate, "yyyy-MM-dd HH:mm:ss");
-        const end = format(endDate, "yyyy-MM-dd HH:mm:ss");
-        
-        return `\`${tsField}\` BETWEEN toDateTime('${start}') AND toDateTime('${end}')`;
-    } catch (error: any) {
-        console.error("Error formatting time condition:", error);
-        throw new Error(`Failed to format time condition: ${error.message}`);
-    }
-  }
-
-  /**
    * Builds a complete ClickHouse SQL query from LogchefQL and other options.
    * This function constructs the final, executable query with enhanced error handling.
    */
@@ -263,15 +244,29 @@ export class QueryBuilder {
      // Simplified select clause - just select all columns
      const formattedSelect = ['*'];
 
-     // Combine timestamp and namespace conditions using raw values for better performance
-     const baseCondition = `\`${tsField}\` BETWEEN ${startTimestamp} AND ${endTimestamp}`;
+     // Format time condition
+     let timeCondition: string;
+     try {
+         timeCondition = QueryBuilder.formatTimeCondition(tsField, startTimestamp, endTimestamp);
+     } catch (error: any) {
+         console.warn("Cannot generate default SQL: Error formatting time condition.", error);
+         return {
+           success: false,
+           sql: `SELECT *\nFROM \`${tableName}\`\n-- Error formatting time range\nORDER BY \`${tsField}\` DESC\nLIMIT ${limit}`,
+           error: `Error formatting time condition: ${error.message}`,
+           warnings: ["Using fallback query due to time formatting error"]
+         };
+     }
+
+     // Combine conditions
      const namespaceCondition = `\`namespace\` = 'hello'`;
-     const whereClause = options.whereClause 
-       ? `${baseCondition} AND ${namespaceCondition} AND (${options.whereClause})`
-       : `${baseCondition} AND ${namespaceCondition}`;
+     let whereClause = `${timeCondition} AND ${namespaceCondition}`;
+     if (options.whereClause) {
+       whereClause += ` AND (${options.whereClause})`;
+     }
 
      const sql = [
-       `SELECT ${formattedSelect.join(', ')}`,
+       `SELECT ${formattedSelect.join(', ')}`, // Should be SELECT *
        `FROM \`${tableName}\``,
        `WHERE ${whereClause}`,
        `ORDER BY \`${orderByField}\` ${orderByDirection}`,
