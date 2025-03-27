@@ -903,6 +903,8 @@ watch(() => exploreStore.isLoadingOperation('executeQuery'), (isLoading) => {
   }
 });
 
+// Remove duplicate provider registration functions since they're already defined earlier
+
 // This function is already redefined earlier in the code
 
 // Not needed - handleEditorChange is used for this purpose
