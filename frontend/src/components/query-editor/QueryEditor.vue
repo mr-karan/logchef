@@ -226,8 +226,7 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
       tsField: props.tsField,
       startTimestamp: props.startTimestamp,
       endTimestamp: props.endTimestamp,
-      limit: props.limit,
-      whereClause: '`namespace` = \'hello\'' // Add namespace condition
+      limit: props.limit
     };
     const defaultQuery = QueryBuilder.getDefaultSQLQuery(defaultOptions);
     initialContent = defaultQuery.sql || "";
