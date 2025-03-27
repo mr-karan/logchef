@@ -15,14 +15,14 @@ export function validateSQL(query: string): boolean {
     const hasSelect = /\bSELECT\b/i.test(query);
     const hasFrom = /\bFROM\b/i.test(query);
     
-    // Check for timestamp conversion functions
-    const hasTimeConversion = /\btoDateTime64\(/i.test(query);
+    // Check for timestamp field (either raw or with conversion)
+    const hasTimestamp = /\b(timestamp|toDateTime64\()/i.test(query);
     
     // Check for required namespace condition - match both quoted and unquoted versions
     const hasNamespace = /\b(namespace\s*=|`namespace`\s*=)/i.test(query);
     
     return hasSelect && hasFrom && 
-           hasTimeConversion &&
+           hasTimestamp &&
            hasNamespace;
   } catch (error) {
     console.error("Error during SQL validation:", error); // Log error
