@@ -875,9 +875,9 @@ const registerLogchefQLCompletionProvider = () => {
       ) {
         range.startColumn = word.endColumn - parser.value.length;
         let quoteChar = "";
-        if (parser.state === State.DOUBLE_QUOTED_VALUE) {
+        if (parser.state === LogchefQLState.DOUBLE_QUOTED_VALUE) {
           quoteChar = '"';
-        } else if (parser.state === State.SINGLE_QUOTED_VALUE) {
+        } else if (parser.state === LogchefQLState.SINGLE_QUOTED_VALUE) {
           quoteChar = "'";
         }
         const result = await getValueSuggestions(
