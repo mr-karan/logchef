@@ -492,14 +492,14 @@ export class Parser {
         this.setErrorState(`unknown operator: ${this.keyValueOperator}`, 10);
       } else {
         this.setState(State.SINGLE_QUOTED_VALUE);
-        this.storeTypedChar(CharType.VALUE);
+        this.storeTypedChar(CharType.STRING);
       }
     } else if (this.char?.isDoubleQuote()) {
       if (!VALID_KEY_VALUE_OPERATORS.includes(this.keyValueOperator)) {
         this.setErrorState(`unknown operator: ${this.keyValueOperator}`, 10);
       } else {
         this.setState(State.DOUBLE_QUOTED_VALUE);
-        this.storeTypedChar(CharType.VALUE);
+        this.storeTypedChar(CharType.STRING);
       }
     } else {
       this.setErrorState("invalid character", 4);
@@ -553,10 +553,10 @@ export class Parser {
       if (prevPos >= 0 && this.text[prevPos] === BACKSLASH) {
         // It's an escaped quote, part of the value
         this.extendValue();
-        this.storeTypedChar(CharType.VALUE); // Still part of the string value
+        this.storeTypedChar(CharType.STRING); // Store escaped quote as part of the string
       } else {
         // It's the closing quote
-        this.storeTypedChar(CharType.PUNCTUATION); // Store closing quote
+        this.storeTypedChar(CharType.STRING); // Store closing quote as STRING type
         this.setState(State.EXPECT_BOOL_OP);
         this.extendTree();
         this.resetData();
@@ -565,7 +565,7 @@ export class Parser {
     } else {
       // Any other character is part of the value
       this.extendValue();
-      this.storeTypedChar(CharType.VALUE); // Store as VALUE
+      this.storeTypedChar(CharType.STRING); // Store as STRING
     }
   }
 
@@ -577,9 +577,9 @@ export class Parser {
       const prevPos = char.pos - 1;
       if (prevPos >= 0 && this.text[prevPos] === BACKSLASH) {
         this.extendValue();
-        this.storeTypedChar(CharType.VALUE);
+        this.storeTypedChar(CharType.STRING);
       } else {
-        this.storeTypedChar(CharType.PUNCTUATION); // Store closing quote
+        this.storeTypedChar(CharType.STRING); // Store closing quote as STRING type
         this.setState(State.EXPECT_BOOL_OP);
         this.extendTree();
         this.resetData();
@@ -587,7 +587,7 @@ export class Parser {
       }
     } else {
         this.extendValue();
-        this.storeTypedChar(CharType.VALUE);
+        this.storeTypedChar(CharType.STRING);
     }
   }
 
@@ -702,13 +702,14 @@ export class Parser {
         continue;
       }
 
-      // Group consecutive characters of the same base type (KEY or VALUE)
+      // Group consecutive characters of the same base type (KEY or VALUE/STRING)
       if (currentToken === null) {
         currentToken = new Token(char, charType);
       } else {
-        // Group KEYs together, and VALUEs together.
+        // Group KEYs together, and VALUEs/STRINGs together.
         // Other types were handled above.
-        if (currentToken.type === charType && (charType === CharType.KEY || charType === CharType.VALUE)) {
+        if (currentToken.type === charType && 
+            (charType === CharType.KEY || charType === CharType.VALUE || charType === CharType.STRING)) {
           currentToken.addChar(char);
         } else {
           tokens.push(currentToken);

@@ -62,11 +62,11 @@ function expressionToSQL(expr: Expression): string {
     case Operator.NOT_EQUALS:
       return `${formattedKey} != ${formattedValue}`;
     case Operator.EQUALS_REGEX:
-      // Using ClickHouse's match function for case-insensitive regex
-      return `match(${formattedKey}, ${formatValueForSQL(value)})`;
+      // Use positionCaseInsensitive > 0 for substring check
+      return `positionCaseInsensitive(${formattedKey}, ${formatValueForSQL(String(value))}) > 0`;
     case Operator.NOT_EQUALS_REGEX:
-      // Using ClickHouse's match function for case-insensitive regex negation
-      return `NOT match(${formattedKey}, ${formatValueForSQL(value)})`;
+      // Use positionCaseInsensitive = 0 for substring absence check
+      return `positionCaseInsensitive(${formattedKey}, ${formatValueForSQL(String(value))}) = 0`;
     case Operator.GREATER_THAN:
       return `${formattedKey} > ${formattedValue}`;
     case Operator.LOWER_THAN:
