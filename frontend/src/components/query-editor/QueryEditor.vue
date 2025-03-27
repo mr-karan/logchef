@@ -478,9 +478,6 @@ const getValueSuggestions = async (key: string, value: string, range: any, quote
   return result;
 };
 
-// Track editor initialization state
-const isEditorInitialized = ref(false);
-
 // This is already defined as safelyDisposeEditor earlier
 
 // This watcher is not needed - initialization is handled in onMounted
