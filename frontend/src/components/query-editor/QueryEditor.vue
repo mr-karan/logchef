@@ -826,14 +826,11 @@ function validateQuery(): boolean {
   }
 }
 
-// Track all active providers
-const activeProviders: monaco.IDisposable[] = [];
-
 // Clean function to dispose all existing providers
 function disposeAllProviders() {
   try {
-    while (activeProviders.length > 0) {
-      const provider = activeProviders.pop();
+    while (activeProviders.value.length > 0) {
+      const provider = activeProviders.value.pop();
       if (provider && typeof provider.dispose === 'function') {
         provider.dispose();
       }
@@ -1053,7 +1050,7 @@ const registerSQLCompletionProvider = () => {
   });
 
   // Add to the tracked providers
-  activeProviders.push(provider);
+  activeProviders.value.push(provider);
   return provider;
 };
 
@@ -1146,7 +1143,7 @@ const registerLogchefQLCompletionProvider = () => {
   });
 
   // Add to the tracked providers
-  activeProviders.push(provider);
+  activeProviders.value.push(provider);
   return provider;
 };
 
@@ -1221,7 +1218,7 @@ const handleMount = (editor: any) => {
               submitQuery();
             },
           });
-          if (submitAction) disposeArray.value.push(submitAction);
+          if (submitAction) activeProviders.value.push(submitAction);
         } catch (err) {
           console.warn('Error adding submit action:', err);
         }
@@ -1233,7 +1230,7 @@ const handleMount = (editor: any) => {
           const focusListener = editor.onDidFocusEditorWidget(() => {
             editorFocused.value = true;
           });
-          if (focusListener) disposeArray.value.push(focusListener);
+          if (focusListener) activeProviders.value.push(focusListener);
         } catch (err) {
           console.warn('Error setting focus listener:', err);
         }
@@ -1244,7 +1241,7 @@ const handleMount = (editor: any) => {
           const blurListener = editor.onDidBlurEditorWidget(() => {
             editorFocused.value = false;
           });
-          if (blurListener) disposeArray.value.push(blurListener);
+          if (blurListener) activeProviders.value.push(blurListener);
         } catch (err) {
           console.warn('Error setting blur listener:', err);
         }
