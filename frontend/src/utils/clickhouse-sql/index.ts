@@ -122,7 +122,7 @@ class Char {
   }
 
   isPunctuation(): boolean {
-    return /[,;:()\[\]{}]/.test(this.value);
+    return /[,;:()\[\]{}]/.test(this.value) && this.value !== "`";
   }
 
   isQuote(): boolean {
@@ -131,6 +131,10 @@ class Char {
 
   isDoubleQuote(): boolean {
     return this.value === DOUBLE_QUOTE;
+  }
+  
+  isBacktick(): boolean {
+    return this.value === "`";
   }
 }
 
@@ -163,6 +167,7 @@ export enum State {
   KEYWORD = "Keyword",
   STRING = "String",
   QUOTED_IDENTIFIER = "QuotedIdentifier",
+  BACKTICK_IDENTIFIER = "BacktickIdentifier", // For `identifier` style quotes
   NUMBER = "Number",
   OPERATOR = "Operator",
   COMMENT = "Comment",
@@ -235,6 +240,9 @@ export class Parser {
       this.storeTypedChar(CharType.STRING);
     } else if (this.char.isDoubleQuote()) {
       this.setState(State.QUOTED_IDENTIFIER);
+      this.storeTypedChar(CharType.IDENTIFIER);
+    } else if (this.char.isBacktick()) {
+      this.setState(State.BACKTICK_IDENTIFIER);
       this.storeTypedChar(CharType.IDENTIFIER);
     } else if (this.char.isOperator()) {
       this.setState(State.OPERATOR);
@@ -310,6 +318,22 @@ export class Parser {
       const prevPos = this.char.pos - 1;
       if (prevPos >= 0 && this.text[prevPos] === "\\") {
         // This is an escaped quote, stay in QUOTED_IDENTIFIER state
+      } else {
+        this.setState(State.INITIAL);
+      }
+    }
+  }
+
+  inStateBacktickIdentifier() {
+    if (!this.char) return;
+
+    this.storeTypedChar(CharType.IDENTIFIER);
+
+    if (this.char.isBacktick()) {
+      // Check for escaped backtick
+      const prevPos = this.char.pos - 1;
+      if (prevPos >= 0 && this.text[prevPos] === "\\") {
+        // This is an escaped backtick, stay in BACKTICK_IDENTIFIER state
       } else {
         this.setState(State.INITIAL);
       }
@@ -476,6 +500,9 @@ export class Parser {
           break;
         case State.QUOTED_IDENTIFIER:
           this.inStateQuotedIdentifier();
+          break;
+        case State.BACKTICK_IDENTIFIER:
+          this.inStateBacktickIdentifier();
           break;
         case State.NUMBER:
           this.inStateNumber();
