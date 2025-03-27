@@ -74,6 +74,7 @@
       :class="{ 'ring-1 ring-primary/50 border-primary/50': editorFocused }"
     >
       <vue-monaco-editor
+        :key="activeMode"
         v-model:value="editorContent"
         :theme="theme"
         :language="activeMode"
