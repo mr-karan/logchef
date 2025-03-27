@@ -89,15 +89,6 @@ export class QueryBuilder {
 
     let logchefqlConditions = "";
 
-    // Build query options (used for LogchefQL conversion and display formatting)
-    const queryOptions = {
-      tableName: formattedTableName,
-      tsField: timeField,
-      startTimestamp: startTimestampSec,
-      endTimestamp: endTimestampSec,
-      limit: state.data.value.limit,
-    };
-
     // --- Format Time Condition ---
     let timeCondition: string;
     try {
