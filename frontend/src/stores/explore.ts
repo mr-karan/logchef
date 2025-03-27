@@ -17,7 +17,6 @@ import { computed } from "vue";
 import { useSourcesStore } from "./sources";
 import { useTeamsStore } from "@/stores/teams";
 import { QueryBuilder } from "@/utils/query-builder";
-import { SQLParser } from "@/utils/clickhouse-sql/ast";
 
 // Helper function to get formatted table name
 export function getFormattedTableName(source: any): string {
@@ -335,10 +334,10 @@ export const useExploreStore = defineStore("explore", () => {
             state.data.value.logchefqlCode
           );
           // Convert LogchefQL to SQL using centralized QueryBuilder
-          const logchefQLResult = QueryBuilder.buildSqlFromLogchefQL(
-            state.data.value.logchefqlCode || "",
-            queryOptions
-          );
+          const logchefQLResult = QueryBuilder.buildSqlFromLogchefQL({
+            ...queryOptions,
+            logchefqlQuery: state.data.value.logchefqlCode || "",
+          });
 
           if (!logchefQLResult.success) {
             throw new Error(
@@ -347,99 +346,26 @@ export const useExploreStore = defineStore("explore", () => {
           }
 
           sqlToExecute = logchefQLResult.sql;
-
-          // Generate display version with human-readable dates
-          const displayOptions = { ...queryOptions, forDisplay: true };
-          const displayResult = QueryBuilder.buildSqlFromLogchefQL(
-            state.data.value.logchefqlCode || "",
-            displayOptions
-          );
-
-          displaySql = displayResult.success ? displayResult.sql : sqlToExecute;
+          
+          // Use formatQueryForDisplay for the display version
+          displaySql = QueryBuilder.formatQueryForDisplay(sqlToExecute, timeField);
         } else {
-          // SQL mode - prepare the SQL for execution
-          console.log("executeQuery in SQL mode with:", {
-            rawSql: rawSql,
-            storeRawSql: state.data.value.rawSql,
-            rawSqlType: typeof state.data.value.rawSql,
-            query: rawSql || state.data.value.rawSql || "",
-          });
+          // SQL mode - use raw SQL directly
+          console.log("Executing in SQL mode with raw SQL.");
 
-          // Ensure we have a non-empty SQL query to execute
+          // Get the raw SQL from argument or store
           const sqlToExecuteRaw = rawSql || state.data.value.rawSql || "";
 
-          // Use SQLParser from ast.ts to detect custom timestamp conditions
-          try {
-            const parsedQuery = SQLParser.parse(sqlToExecuteRaw, timeField);
-
-            // If the query has a timestamp filter (detected by the SQLParser)
-            // then we should use the SQL as-is
-            if (parsedQuery?.whereClause?.hasTimestampFilter) {
-              console.log(
-                `Detected custom timestamp filter for field '${timeField}' in SQL query`
-              );
-              // Keep the query as-is - we respect user-defined timestamp conditions
-              sqlToExecute = sqlToExecuteRaw;
-
-              // For display, we keep the original query with its custom timestamp conditions
-              displaySql = sqlToExecuteRaw;
-            } else {
-              // No custom timestamp filter detected, apply our standard handling
-              console.log(
-                "No custom timestamp filter detected, applying standard timestamp handling"
-              );
-
-              // Apply standard timestamp handling through QueryBuilder
-              const sqlResult = QueryBuilder.prepareQueryForExecution(
-                sqlToExecuteRaw,
-                queryOptions
-              );
-
-              if (!sqlResult.success) {
-                throw new Error(
-                  sqlResult.error || "Failed to prepare SQL query for execution"
-                );
-              }
-
-              sqlToExecute = sqlResult.sql;
-
-              // Generate display version with human-readable dates
-              const displayOptions = { ...queryOptions, forDisplay: true };
-              const displayResult = QueryBuilder.prepareQueryForExecution(
-                sqlToExecuteRaw,
-                displayOptions
-              );
-
-              displaySql = displayResult.success
-                ? displayResult.sql
-                : sqlToExecute;
-            }
-          } catch (error) {
-            console.error("Error analyzing SQL query:", error);
-
-            // Fallback to standard handling if parsing fails
-            const sqlResult = QueryBuilder.prepareQueryForExecution(
-              sqlToExecuteRaw,
-              queryOptions
-            );
-
-            if (!sqlResult.success) {
-              throw new Error(
-                sqlResult.error || "Failed to prepare SQL query for execution"
-              );
-            }
-
-            sqlToExecute = sqlResult.sql;
-
-            // Generate display version with human-readable dates
-            const displayOptions = { ...queryOptions, forDisplay: true };
-            const displayResult = QueryBuilder.prepareQueryForExecution(
-              sqlToExecuteRaw,
-              displayOptions
-            );
-
-            displaySql = displayResult.success ? displayResult.sql : sqlToExecute;
+          if (!sqlToExecuteRaw.trim()) {
+            throw new Error("Cannot execute empty SQL query.");
           }
+
+          // The SQL to execute is simply the raw SQL provided by the user.
+          // The backend API is responsible for handling the full query.
+          sqlToExecute = sqlToExecuteRaw;
+
+          // Use formatQueryForDisplay for the display version
+          displaySql = QueryBuilder.formatQueryForDisplay(sqlToExecute, timeField);
         }
 
         // Store the display version for reference

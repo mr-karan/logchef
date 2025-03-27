@@ -89,15 +89,14 @@ export class QueryBuilder {
 
     let logchefqlConditions = "";
 
-    // --- Translate LogchefQL ---
-    if (logchefqlQuery && logchefqlQuery.trim()) {
-      const translationResult = parseAndTranslateLogchefQL(logchefqlQuery);
-      if (!translationResult.success) {
-        // Return the specific error from the translation
-        return { success: false, sql: "", error: translationResult.error || "Failed to translate LogchefQL." };
-      }
-      logchefqlConditions = translationResult.sql || "";
-    }
+    // Build query options (used for LogchefQL conversion and display formatting)
+    const queryOptions = {
+      tableName: formattedTableName,
+      tsField: timeField,
+      startTimestamp: startTimestampSec,
+      endTimestamp: endTimestampSec,
+      limit: state.data.value.limit,
+    };
 
     // --- Format Time Condition ---
     let timeCondition: string;
