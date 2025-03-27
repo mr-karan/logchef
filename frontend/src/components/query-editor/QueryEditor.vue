@@ -340,8 +340,7 @@ const handleTabChange = async (newMode: EditorMode) => {
             startTimestamp: props.startTimestamp,
             endTimestamp: props.endTimestamp,
             limit: props.limit,
-            logchefqlQuery: editorContent.value,
-            whereClause: '`namespace` = \'hello\''
+            logchefqlQuery: editorContent.value
           }).sql
         );
       }

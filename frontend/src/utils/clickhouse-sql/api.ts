@@ -18,12 +18,7 @@ export function validateSQL(query: string): boolean {
     // Check for timestamp field (either raw or with conversion)
     const hasTimestamp = /\b(timestamp|toDateTime\(|toDateTime64\()/i.test(query);
     
-    // Check for required namespace condition - match both quoted and unquoted versions
-    const hasNamespace = /\b(namespace\s*=|`namespace`\s*=)/i.test(query);
-    
-    return hasSelect && hasFrom && 
-           hasTimestamp &&
-           hasNamespace;
+    return hasSelect && hasFrom && hasTimestamp;
   } catch (error) {
     console.error("Error during SQL validation:", error); // Log error
     return false;
