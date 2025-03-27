@@ -169,6 +169,49 @@ const isEditorInitialized = ref(false);
 // Track disposal resources
 const disposeArray = ref<monaco.IDisposable[]>([]);
 
+// Helper function for building completion suggestions
+const getSuggestionsFromList = (params: any) => {
+  const suggestions: MonacoCompletionItem[] = [];
+  let defaultPostfix = params.postfix === undefined ? "" : params.postfix;
+
+  const range =
+    params.range === undefined
+      ? {
+        startLineNumber: params.position.lineNumber,
+        endLineNumber: params.position.lineNumber,
+        startColumn: params.position.column,
+        endColumn: params.position.column,
+      }
+      : params.range;
+
+  for (const item of params.items) {
+    let label = null;
+    let sortText = null;
+    let postfix = defaultPostfix;
+    if (typeof item === "string" || item instanceof String) {
+      label = item;
+      sortText = label;
+    } else {
+      label = item.label;
+      sortText = item.sortText === undefined ? label : item.sortText;
+      postfix = item.postfix === undefined ? defaultPostfix : item.postfix;
+    }
+    let insertText = item.insertText === undefined ? label : item.insertText;
+    suggestions.push({
+      label: label,
+      kind: params.kind,
+      range: range,
+      sortText: sortText,
+      insertText: insertText + postfix,
+      command: {
+        id: "editor.action.triggerSuggest",
+        title: "Trigger Suggest"
+      },
+    });
+  }
+  return suggestions;
+};
+
 // --- Editor Handling ---
 const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
   // console.log('QueryEditor: Monaco editor mounted');
