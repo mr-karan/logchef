@@ -874,33 +874,7 @@ const registerLogchefQLCompletionProvider = () => {
 
 // Removed duplicate handleMount function
 
-// Helper function to update editor options based on mode
-function updateEditorOptions(editor: any) {
-  const baseOptions = getEditorOptions();
-
-  if (activeTab.value === 'logchefql') {
-    // @ts-ignore: Type compatibility issues with editor options
-    editor.updateOptions({
-      ...baseOptions,
-      glyphMargin: false,
-      folding: false,
-      lineDecorationsWidth: 0,
-      lineNumbersMinChars: 0,
-      wordWrap: 'off',
-      padding: { top: 8, bottom: 8 },
-      placeholder: currentPlaceholder.value
-    });
-  } else {
-    // @ts-ignore: Type compatibility issues with editor options
-    editor.updateOptions({
-      ...baseOptions,
-      folding: true,
-      wordWrap: 'on',
-      padding: { top: 6, bottom: 6 },
-      placeholder: currentPlaceholder.value
-    });
-  }
-}
+// This function is replaced by updateMonacoOptions which is already defined
 
 // These watchers are already handled by the refactored code
 
