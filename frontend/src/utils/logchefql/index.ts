@@ -561,9 +561,6 @@ export class Parser {
       // Any other character is part of the value
       this.extendValue();
       this.storeTypedChar(CharType.VALUE); // Store as VALUE
-    } else {
-      this.setErrorState("invalid character", 11);
-      return;
     }
   }
 
@@ -586,9 +583,6 @@ export class Parser {
     } else {
         this.extendValue();
         this.storeTypedChar(CharType.VALUE);
-    } else {
-      this.setErrorState("invalid character", 11);
-      return;
     }
   }
 
