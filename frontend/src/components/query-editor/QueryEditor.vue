@@ -288,12 +288,6 @@ const handleEditorChange = (value: string | undefined) => {
 const runProgrammaticUpdate = (newValue: string) => {
     isProgrammaticChange.value = true;
     editorContent.value = newValue;
-    // Also update the corresponding store value
-    if (activeMode.value === 'logchefql') {
-      exploreStore.setLogchefqlCode(newValue);
-    } else {
-      exploreStore.setRawSql(newValue);
-    }
     // Wait for editor to potentially update, then release the flag
     nextTick(() => {
         isProgrammaticChange.value = false;
@@ -320,47 +314,33 @@ const syncEditorContentWithStore = (isInitialSync = false) => {
 const handleTabChange = (newMode: EditorMode) => {
   if (newMode === activeMode.value) return;
 
-  const currentQuery = editorContent.value;
-  
-  // When leaving LogchefQL mode, update SQL version
+  // Save current editor content to the appropriate store property
   if (activeMode.value === 'logchefql') {
-    exploreStore.setLogchefqlCode(currentQuery);
-    
-    try {
-      const buildOptions: BuildSqlOptions = {
-        logchefqlQuery: currentQuery,
-        tableName: props.tableName,
-        tsField: props.tsField,
-        startTimestamp: props.startTimestamp,
-        endTimestamp: props.endTimestamp,
-        limit: props.limit,
-      };
-      const result = QueryBuilder.buildSqlFromLogchefQL(buildOptions);
-      
-      if (result.success) {
-        exploreStore.setRawSql(result.sql);
-        runProgrammaticUpdate(result.sql);
-      } else {
-        validationError.value = result.error || "Conversion error";
-        return; // Don't switch modes if conversion failed
-      }
-    } catch (error: any) {
-      validationError.value = error.message;
-      return; // Don't switch modes if conversion failed
-    }
-  }
-  // When leaving SQL mode, restore LogchefQL version
-  else {
-    exploreStore.setRawSql(currentQuery); // Save SQL edits
-    runProgrammaticUpdate(exploreStore.logchefqlCode || ""); // Restore LogchefQL
+    exploreStore.setLogchefqlCode(editorContent.value);
+  } else {
+    exploreStore.setRawSql(editorContent.value);
   }
 
-  // Update active mode in both local state and store
+  // Update active mode first
   activeMode.value = newMode;
   exploreStore.setActiveMode(newMode === 'clickhouse-sql' ? 'sql' : 'logchefql');
+
+  // Then update editor content from the store
+  const newContent = newMode === 'logchefql' 
+    ? exploreStore.logchefqlCode 
+    : exploreStore.rawSql;
   
-  // Update Monaco language and options
-  updateEditorLanguageAndOptions(newMode);
+  runProgrammaticUpdate(newContent || '');
+
+  // Force editor language update
+  nextTick(() => {
+    if (editorRef.value) {
+      const model = editorRef.value.getModel();
+      if (model) {
+        monaco.editor.setModelLanguage(model, newMode);
+      }
+    }
+  });
   
   // Clear validation error from previous mode
   validationError.value = null;
@@ -371,27 +351,6 @@ const handleTabChange = (newMode: EditorMode) => {
 
 // Helper function to update editor language and options
 const updateEditorLanguageAndOptions = (mode: EditorMode) => {
-  if (editorRef.value) {
-    try {
-      const model = editorRef.value.getModel();
-      if (model && !model.isDisposed?.()) {
-        // Change language first
-        monaco.editor.setModelLanguage(model, mode);
-        
-        // Then update options after a small delay to ensure model stability
-        setTimeout(() => {
-          if (!isDisposing.value) {
-            updateMonacoOptions(); // Apply mode-specific options
-          }
-        }, 50);
-      } else {
-        console.warn('Cannot update language: model is not available or disposed');
-      }
-    } catch (error) {
-      console.error('Error updating editor language/options:', error);
-    }
-  }
-
   // Re-register completion provider for the new mode
   registerCompletionProvider();
 };
