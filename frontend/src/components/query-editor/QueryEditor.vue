@@ -260,6 +260,10 @@ const handleEditorChange = (value: string | undefined) => {
 
   // Emit change event
   emit("change", { query: currentQuery, mode: activeMode.value });
+      
+  // Re-register completion provider if we change content
+  // This helps ensure proper suggestions after typing "and" or "or"
+  setTimeout(() => registerCompletionProvider(), 10);
 };
 
 const runProgrammaticUpdate = (newValue: string) => {
@@ -835,6 +839,9 @@ const registerLogchefQLCompletionProvider = () => {
       };
       const textBeforeCursor = model.getValueInRange(textBeforeCursorRange);
 
+      // Check if we're right after "and" or "or"
+      const afterBoolOp = /\b(and|or)\s+$/i.test(textBeforeCursor);
+      
       // Parse the current state
       const parser = new LogchefQLParser();
       parser.parse(textBeforeCursor, false, true);
@@ -860,6 +867,12 @@ const registerLogchefQLCompletionProvider = () => {
         } else {
           suggestions = getKeySuggestions(range);
         }
+      } else if (parser.state === LogchefQLState.EXPECT_BOOL_OP) {
+        // We're right after a completed expression, suggest boolean operators
+        suggestions = getBooleanOperatorsSuggestions(range);
+      } else if (parser.boolOperator === "and" || parser.boolOperator === "or") {
+        // We're after a boolean operator, suggest field names
+        suggestions = getKeySuggestions(range);
       } else if (parser.state === LogchefQLState.KEY_VALUE_OPERATOR) {
         // @ts-ignore: Type compatibility issues with operator types
         if (LogchefQLValidOperators.includes(parser.keyValueOperator)) {
