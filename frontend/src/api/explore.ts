@@ -35,6 +35,8 @@ export interface QueryParams {
     field: string;
     order: "ASC" | "DESC";
   };
+  original_query?: string; // Original LogchefQL query if applicable
+  query_type?: string; // 'logchefql' or 'sql'
 }
 
 export interface QueryStats {

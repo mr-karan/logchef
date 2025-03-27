@@ -324,19 +324,12 @@ const handleTabChange = (newMode: EditorMode) => {
   const currentQuery = editorContent.value ?? "";
   const previousMode = activeMode.value;
 
-  // 2. Update active mode
-  activeMode.value = newMode;
-  exploreStore.setActiveMode(newMode === 'clickhouse-sql' ? 'sql' : 'logchefql');
-
-  // 3. Determine content for the new mode
-  let newContent = "";
-  if (newMode === 'clickhouse-sql') {
-    // Switching TO SQL: Try generating from LogchefQL first
-    const logchefqlToConvert = (previousMode === 'logchefql') ? currentQuery : exploreStore.logchefqlCode;
-    let conversionSuccess = false;
-    let generatedSql = "";
-
-    if (logchefqlToConvert && validateLogchefQL(logchefqlToConvert)) {
+  // 2. Prepare for mode switch
+  if (newMode === 'clickhouse-sql' && previousMode === 'logchefql') {
+    // Switching FROM LogchefQL TO SQL: Try generating from LogchefQL first
+    const logchefqlToConvert = currentQuery;
+    
+    if (logchefqlToConvert && logchefqlToConvert.trim()) {
       const buildOptions: BuildSqlOptions = {
         logchefqlQuery: logchefqlToConvert,
         tableName: props.tableName,
@@ -347,28 +340,56 @@ const handleTabChange = (newMode: EditorMode) => {
       };
       const result = QueryBuilder.buildSqlFromLogchefQL(buildOptions);
 
-      if (result.success) {
-        generatedSql = result.sql;
-        conversionSuccess = true;
-      } else {
-        console.warn("Failed to convert LogchefQL to SQL:", result.error);
+      // Check for conversion errors
+      if (!result.success) {
         validationError.value = `Error converting query: ${result.error}`;
+        // Don't switch modes if conversion failed with a critical error
+        return;
       }
+      
+      // Show warnings if any, but still proceed with mode switch
+      if (result.warnings && result.warnings.length > 0) {
+        console.warn("LogchefQL conversion warnings:", result.warnings);
+        validationError.value = `Query converted with warnings: ${result.warnings[0]}`;
+        // Continue with mode switch despite warnings
+      }
+      
+      // Update active mode
+      activeMode.value = newMode;
+      exploreStore.setActiveMode('sql');
+      
+      // Update content with the converted SQL
+      runProgrammaticUpdate(result.sql);
+      
+      // Update Monaco language and options
+      updateEditorLanguageAndOptions(newMode);
+      
+      // Emit change event
+      emit("change", { query: result.sql, mode: newMode });
+      
+      return; // Exit early after successful conversion
     }
+  }
+  
+  // 3. Default handling for other mode switches
+  
+  // Update active mode
+  activeMode.value = newMode;
+  exploreStore.setActiveMode(newMode === 'clickhouse-sql' ? 'sql' : 'logchefql');
 
-    if (!conversionSuccess) {
-      // If conversion failed or no LogchefQL, generate default SQL
-      const defaultOptions: Omit<BuildSqlOptions, 'logchefqlQuery'> = {
-        tableName: props.tableName,
-        tsField: props.tsField,
-        startTimestamp: props.startTimestamp,
-        endTimestamp: props.endTimestamp,
-        limit: props.limit,
-      };
-      newContent = QueryBuilder.getDefaultSQLQuery(defaultOptions);
-    } else {
-      newContent = generatedSql;
-    }
+  // Determine content for the new mode
+  let newContent = "";
+  if (newMode === 'clickhouse-sql') {
+    // Generate default SQL if we didn't have LogchefQL to convert
+    const defaultOptions: Omit<BuildSqlOptions, 'logchefqlQuery'> = {
+      tableName: props.tableName,
+      tsField: props.tsField,
+      startTimestamp: props.startTimestamp,
+      endTimestamp: props.endTimestamp,
+      limit: props.limit,
+    };
+    const result = QueryBuilder.getDefaultSQLQuery(defaultOptions);
+    newContent = result.sql;
   } else {
     // Switching TO LogchefQL: Always restore from the store's logchefqlCode value
     newContent = exploreStore.logchefqlCode ?? "";
@@ -378,12 +399,23 @@ const handleTabChange = (newMode: EditorMode) => {
   runProgrammaticUpdate(newContent);
 
   // 5. Update Monaco language and options
+  updateEditorLanguageAndOptions(newMode);
+
+  // 6. Clear validation error from previous mode
+  validationError.value = null;
+
+  // 7. Emit change event AFTER updating internal state and editor
+  emit("change", { query: newContent, mode: newMode });
+};
+
+// Helper function to update editor language and options
+const updateEditorLanguageAndOptions = (mode: EditorMode) => {
   if (editorRef.value) {
     try {
       const model = editorRef.value.getModel();
       if (model && !model.isDisposed?.()) {
         // Change language first
-        monaco.editor.setModelLanguage(model, newMode);
+        monaco.editor.setModelLanguage(model, mode);
         
         // Then update options after a small delay to ensure model stability
         setTimeout(() => {
@@ -399,14 +431,8 @@ const handleTabChange = (newMode: EditorMode) => {
     }
   }
 
-  // 6. Re-register completion provider for the new mode
+  // Re-register completion provider for the new mode
   registerCompletionProvider();
-
-  // 7. Clear validation error from previous mode
-  validationError.value = null;
-
-  // 8. Emit change event AFTER updating internal state and editor
-  emit("change", { query: newContent, mode: newMode });
 };
 
 const getOperatorsSuggestions = (field: string, position: any) => {
@@ -1111,8 +1137,15 @@ const submitQuery = () => {
         limit: props.limit,
       };
       const result = QueryBuilder.buildSqlFromLogchefQL(buildOptions);
+      
       if (result.success) {
         finalSql = result.sql;
+        
+        // Show warnings if any, but still proceed with execution
+        if (result.warnings && result.warnings.length > 0) {
+          console.warn("LogchefQL conversion warnings:", result.warnings);
+          // Don't set validation error for warnings, just log them
+        }
       } else {
         errorMsg = result.error || "Failed to build SQL from LogchefQL";
       }
@@ -1128,9 +1161,13 @@ const submitQuery = () => {
           endTimestamp: props.endTimestamp,
           limit: props.limit,
         };
-        finalSql = QueryBuilder.getDefaultSQLQuery(defaultOptions);
-        // Optionally update the editor content visually
-        // runProgrammaticUpdate(finalSql);
+        const result = QueryBuilder.getDefaultSQLQuery(defaultOptions);
+        
+        if (result.success) {
+          finalSql = result.sql;
+        } else {
+          errorMsg = result.error || "Failed to generate default SQL query";
+        }
       } else {
         // 2. In SQL mode with content, validate the SQL syntax
         if (!validateSQL(currentContent)) {
@@ -1170,7 +1207,15 @@ const submitQuery = () => {
 
   // Emit the FINAL SQL and the mode
   console.log(`Emitting submit event with finalSql: "${finalSql}"`); // Add log
-  emit("submit", { query: currentContent, finalSql: finalSql, mode: activeMode.value });
+  emit("submit", { 
+    query: currentContent, 
+    finalSql: finalSql, 
+    mode: activeMode.value,
+    meta: {
+      originalMode: activeMode.value,
+      converted: activeMode.value === 'logchefql' && finalSql !== currentContent
+    }
+  });
 };
 
 // --- Disposal ---

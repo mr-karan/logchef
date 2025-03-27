@@ -126,6 +126,53 @@ export function validateLogchefQL(query: string): boolean {
 }
 
 /**
+ * Enhanced validation with detailed error information
+ * @param query The LogchefQL query string
+ * @returns Object with validation result and error details
+ */
+export function validateLogchefQLWithDetails(query: string): { 
+  valid: boolean; 
+  error?: string;
+  errorPosition?: { line: number; column: number };
+} {
+  // Allow empty query as valid
+  if (!query || query.trim() === "") {
+    return { valid: true };
+  }
+  
+  try {
+    const parser = new LogchefQLParser();
+    // Use raiseError=true to catch parsing issues
+    parser.parse(query, true);
+    
+    // Additional check: ensure the parser produced a root node if the query wasn't empty
+    if (!parser.root && query.trim() !== "") {
+      return { 
+        valid: false, 
+        error: "Query parsed but did not produce a valid expression tree"
+      };
+    }
+    
+    return { valid: true };
+  } catch (error: any) {
+    // Extract position information if available
+    let errorPosition;
+    if (error.errno && parser.char) {
+      errorPosition = {
+        line: parser.char.line,
+        column: parser.char.linePos
+      };
+    }
+    
+    return { 
+      valid: false, 
+      error: error.message || "Invalid LogchefQL syntax",
+      errorPosition
+    };
+  }
+}
+
+/**
  * Parses a LogchefQL query and returns the translated SQL conditions.
  * Includes error handling.
  * @param query The LogchefQL query string.

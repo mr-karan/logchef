@@ -1,5 +1,6 @@
 import { parseAndTranslateLogchefQL } from './logchefql/api';
 import { format } from 'date-fns'; // Using date-fns for reliable formatting
+import { Parser as LogchefQLParser } from './logchefql';
 
 // Interface for build options
 export interface BuildSqlOptions {
@@ -14,7 +15,7 @@ export interface BuildSqlOptions {
   orderByDirection?: 'ASC' | 'DESC'; // Default to DESC
 }
 
-// Interface for the result
+// Interface for the result with enhanced error handling
 export interface QueryResult {
   /** The resulting SQL query */
   sql: string;
@@ -22,6 +23,13 @@ export interface QueryResult {
   success: boolean;
   /** Error message if operation failed */
   error: string | null;
+  /** Optional warnings that didn't prevent query generation */
+  warnings?: string[];
+  /** Metadata about the query for analytics */
+  meta?: {
+    fieldsUsed: string[];
+    operations: ('filter' | 'sort' | 'limit')[];
+  };
 }
 
 export class QueryBuilder {
@@ -37,6 +45,27 @@ export class QueryBuilder {
         throw new Error(`Invalid timestamp provided: ${timestampSeconds}`);
     }
     return format(date, 'yyyy-MM-dd HH:mm:ss');
+  }
+
+  /**
+   * Analyzes a LogchefQL query to extract metadata about fields and operations used
+   */
+  private static analyzeQuery(parser: LogchefQLParser): QueryResult['meta'] {
+    const fieldsUsed: string[] = [];
+    const operations: ('filter' | 'sort' | 'limit')[] = ['limit']; // Always has limit
+    
+    // Extract fields from the parser's typed chars
+    parser.typedChars.forEach(([char, type]) => {
+      if (type === 'logchefqlKey' && char.value && !fieldsUsed.includes(char.value)) {
+        fieldsUsed.push(char.value);
+      }
+    });
+    
+    if (fieldsUsed.length > 0) {
+      operations.push('filter');
+    }
+    
+    return { fieldsUsed, operations };
   }
 
   /**
@@ -58,7 +87,7 @@ export class QueryBuilder {
 
   /**
    * Builds a complete ClickHouse SQL query from LogchefQL and other options.
-   * This function constructs the final, executable query.
+   * This function constructs the final, executable query with enhanced error handling.
    */
   static buildSqlFromLogchefQL(options: BuildSqlOptions): QueryResult {
     const {
@@ -83,20 +112,8 @@ export class QueryBuilder {
     if (typeof startTimestamp !== 'number' || typeof endTimestamp !== 'number' || startTimestamp > endTimestamp) {
         return { success: false, sql: "", error: "Invalid start or end timestamp." };
     }
-     if (typeof limit !== 'number' || limit <= 0) {
+    if (typeof limit !== 'number' || limit <= 0) {
         return { success: false, sql: "", error: "Invalid limit value." };
-     }
-
-    let logchefqlConditions = "";
-
-    // --- Translate LogchefQL ---
-    if (logchefqlQuery && logchefqlQuery.trim()) {
-      const translationResult = parseAndTranslateLogchefQL(logchefqlQuery);
-      if (!translationResult.success) {
-        return { success: false, sql: "", error: translationResult.error || "Failed to translate LogchefQL." };
-      }
-      // Assign the translated conditions
-      logchefqlConditions = translationResult.sql || "";
     }
 
     // --- Format Time Condition ---
@@ -107,46 +124,83 @@ export class QueryBuilder {
         return { success: false, sql: "", error: error.message };
     }
 
-
-    // --- Combine WHERE conditions ---
-    let whereClause = "";
-    const conditions = [logchefqlConditions, timeCondition].filter(Boolean); // Filter out empty strings
-    if (conditions.length > 0) {
-        // Wrap individual conditions in parentheses if both exist for clarity
-        whereClause = `WHERE ${conditions.map(c => `(${c})`).join(' AND ')}`;
-    }
-
-    // --- Construct the full query ---
+    // --- Prepare base query components ---
     // Quote column names if they aren't '*' or potentially complex expressions/functions
     const safeSelectColumns = selectColumns.map(col =>
         col === '*' || col.includes('(') || col.includes(' ') ? col : `\`${col}\``
     ).join(', ');
     const selectClause = `SELECT ${safeSelectColumns}`;
-
-    // Quote table name and order by field
     const fromClause = `FROM \`${tableName}\``;
+    const timeWhereClause = `WHERE (${timeCondition})`;
     const orderByClause = `ORDER BY \`${orderByField}\` ${orderByDirection}`;
     const limitClause = `LIMIT ${limit}`;
 
-    // Assemble the final query string
+    // --- Translate LogchefQL ---
+    const warnings: string[] = [];
+    let logchefqlConditions = "";
+    let meta: QueryResult['meta'] = {
+      fieldsUsed: [],
+      operations: ['sort', 'limit'] // Base operations
+    };
+
+    if (logchefqlQuery && logchefqlQuery.trim()) {
+      try {
+        // First try to parse with our parser to extract metadata
+        const parser = new LogchefQLParser();
+        parser.parse(logchefqlQuery, false, false);
+        
+        if (parser.state === 'Error') {
+          warnings.push(`LogchefQL parse warning: ${parser.errorText}`);
+        } else {
+          meta = QueryBuilder.analyzeQuery(parser);
+        }
+        
+        // Then use the translator to get SQL conditions
+        const translationResult = parseAndTranslateLogchefQL(logchefqlQuery);
+        if (!translationResult.success) {
+          // Don't fail completely, just add warning and continue with base query
+          warnings.push(translationResult.error || "Failed to translate LogchefQL.");
+        } else {
+          // Assign the translated conditions
+          logchefqlConditions = translationResult.sql || "";
+        }
+      } catch (error: any) {
+        // Capture error but don't fail - use base query instead
+        warnings.push(`LogchefQL error: ${error.message}`);
+      }
+    }
+
+    // --- Combine WHERE conditions ---
+    let whereClause = timeWhereClause;
+    if (logchefqlConditions) {
+      whereClause = `WHERE (${timeCondition}) AND (${logchefqlConditions})`;
+      meta.operations.push('filter');
+    }
+
+    // --- Assemble the final query string ---
     const finalSql = [
       selectClause,
       fromClause,
-      whereClause, // Will be empty if no conditions
+      whereClause,
       orderByClause,
       limitClause,
-    ]
-      .filter(Boolean) // Remove empty lines (like whereClause if no conditions)
-      .join('\n'); // Join with newlines for readability
+    ].join('\n'); // Join with newlines for readability
 
-    return { success: true, sql: finalSql, error: null };
+    return { 
+      success: true, 
+      sql: finalSql, 
+      error: null,
+      warnings: warnings.length > 0 ? warnings : undefined,
+      meta
+    };
   }
 
   /**
    * Generates a default SQL query when no specific LogchefQL is provided.
    * Uses the same structure as buildSqlFromLogchefQL but without LogchefQL translation.
+   * Returns a QueryResult with success status and metadata.
    */
-  static getDefaultSQLQuery(options: Omit<BuildSqlOptions, 'logchefqlQuery'>): string {
+  static getDefaultSQLQuery(options: Omit<BuildSqlOptions, 'logchefqlQuery'>): QueryResult {
      const {
        tableName,
        tsField,
@@ -161,13 +215,24 @@ export class QueryBuilder {
      // Basic validation for default query generation
      if (!tableName || !tsField) {
          console.warn("Cannot generate default SQL: Missing tableName or tsField.");
-         // Return a placeholder template
-         return `SELECT *\nFROM your_table\nORDER BY timestamp_field DESC\nLIMIT 1000`;
+         // Return a placeholder template with error
+         return {
+           success: false,
+           sql: `SELECT *\nFROM your_table\nORDER BY timestamp_field DESC\nLIMIT 1000`,
+           error: "Missing table name or timestamp field",
+           warnings: ["Using placeholder query"]
+         };
      }
-      if (typeof startTimestamp !== 'number' || typeof endTimestamp !== 'number' || typeof limit !== 'number') {
-          console.warn("Cannot generate default SQL: Invalid timestamp or limit.");
-          return `SELECT *\nFROM \`${tableName}\`\n-- Invalid time range or limit provided\nORDER BY \`${tsField}\` DESC\nLIMIT 1000`;
-      }
+     
+     if (typeof startTimestamp !== 'number' || typeof endTimestamp !== 'number' || typeof limit !== 'number') {
+         console.warn("Cannot generate default SQL: Invalid timestamp or limit.");
+         return {
+           success: false,
+           sql: `SELECT *\nFROM \`${tableName}\`\n-- Invalid time range or limit provided\nORDER BY \`${tsField}\` DESC\nLIMIT 1000`,
+           error: "Invalid time range or limit parameters",
+           warnings: ["Using fallback query with default values"]
+         };
+     }
 
      let timeCondition: string;
      try {
@@ -175,9 +240,13 @@ export class QueryBuilder {
      } catch (error: any) {
          console.error("Error formatting time condition for default query:", error);
          // Handle error, maybe return query without time filter or with a comment
-         return `SELECT ${selectColumns.join(', ')}\nFROM \`${tableName}\`\n-- Error generating time filter: ${error.message}\nORDER BY \`${orderByField}\` ${orderByDirection}\nLIMIT ${limit}`;
+         return {
+           success: false,
+           sql: `SELECT ${selectColumns.join(', ')}\nFROM \`${tableName}\`\n-- Error generating time filter: ${error.message}\nORDER BY \`${orderByField}\` ${orderByDirection}\nLIMIT ${limit}`,
+           error: `Error formatting time condition: ${error.message}`,
+           warnings: ["Using query without time filter"]
+         };
      }
-
 
      // Quote identifiers similarly to buildSqlFromLogchefQL
      const safeSelectColumns = selectColumns.map(col =>
@@ -192,7 +261,15 @@ export class QueryBuilder {
        `LIMIT ${limit}`,
      ].join('\n');
 
-     return sql;
+     return {
+       success: true,
+       sql,
+       error: null,
+       meta: {
+         fieldsUsed: [],
+         operations: ['sort', 'limit']
+       }
+     };
   }
 
   /**
