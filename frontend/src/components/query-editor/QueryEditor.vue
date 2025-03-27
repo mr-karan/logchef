@@ -160,16 +160,85 @@ const activeMode = ref<EditorMode>(initialMode);
 // Flag to prevent feedback loops during programmatic updates
 const isProgrammaticChange = ref(false);
 
-// Monaco-specific types for better type checking
-type MonacoCompletionItem = {
-  label: string;
-  kind: monaco.languages.CompletionItemKind;
-  insertText: string;
-  range: any;
-  sortText: string;
-  detail?: string;
-  documentation?: string;
-  command?: { id: string; title: string; snippet?: string };
+// --- Editor Handling ---
+const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
+  // console.log('QueryEditor: Monaco editor mounted');
+  editorRef.value = editor;
+  editorModel.value = editor.getModel();
+
+  updateMonacoOptions(); // Apply initial options for the active mode
+  registerCompletionProvider(); // Register for the initial mode
+
+  // Add Submit Shortcut
+  const submitAction = editor.addAction({
+    id: "submit-query",
+    label: "Run Query",
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+    run: submitQuery,
+  });
+  if (submitAction) activeProviders.value.push(submitAction); // Track action for disposal
+
+  // Focus/Blur Tracking
+  const focusListener = editor.onDidFocusEditorWidget(() => { editorFocused.value = true; });
+  const blurListener = editor.onDidBlurEditorWidget(() => { editorFocused.value = false; });
+  activeProviders.value.push(focusListener, blurListener);
+
+  // Focus the editor shortly after mount
+  setTimeout(() => editor.focus(), 50);
+};
+
+const handleEditorChange = (value: string | undefined) => {
+  // If change is programmatic, ignore to prevent loops
+  if (isProgrammaticChange.value) return;
+
+  const currentQuery = value ?? "";
+  editorContent.value = currentQuery; // Update local ref immediately
+
+  // Update the store based on the current mode
+  if (activeMode.value === 'logchefql') {
+    exploreStore.setLogchefqlCode(currentQuery);
+  } else {
+    exploreStore.setRawSql(currentQuery);
+  }
+
+  // Clear validation errors on manual input
+  if (validationError.value) {
+    validationError.value = null;
+  }
+
+  // Emit change event
+  emit("change", { query: currentQuery, mode: activeMode.value });
+};
+
+const runProgrammaticUpdate = (newValue: string) => {
+    isProgrammaticChange.value = true;
+    editorContent.value = newValue;
+    // Also update the corresponding store value
+    if (activeMode.value === 'logchefql') {
+      exploreStore.setLogchefqlCode(newValue);
+    } else {
+      exploreStore.setRawSql(newValue);
+    }
+    // Wait for editor to potentially update, then release the flag
+    nextTick(() => {
+        isProgrammaticChange.value = false;
+    });
+};
+
+const syncEditorContentWithStore = (isInitialSync = false) => {
+    let storeValue: string | undefined;
+    if (activeMode.value === 'logchefql') {
+        storeValue = exploreStore.logchefqlCode;
+    } else {
+        storeValue = exploreStore.rawSql;
+    }
+
+    // On initial sync, props have higher priority if provided
+    const valueToSet = (isInitialSync && props.initialValue) ? props.initialValue : (storeValue ?? "");
+
+    if (editorContent.value !== valueToSet) {
+        runProgrammaticUpdate(valueToSet);
+    }
 };
 
 // --- Mode Switching ---
