@@ -532,8 +532,13 @@ export class Parser {
         this.setState(State.EXPECT_BOOL_OP);
         this.storeTypedChar(CharType.PUNCTUATION); // Store ')' as punctuation
       }
+    } else if (!char.isGroupOpen() && !char.isSingleQuote() && !char.isDoubleQuote()) {
+      // If it's not a delimiter, bracket, or quote, treat as part of the value
+      this.extendValue();
+      this.storeTypedChar(CharType.VALUE); // Store as VALUE
     } else {
-      this.setErrorState("invalid character", 10);
+      // Any other character is invalid here
+      this.setErrorState(`invalid character '${char.value}' in unquoted value`, 10);
       return;
     }
   }
