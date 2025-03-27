@@ -146,13 +146,8 @@ export class QueryBuilder {
     }
 
     // --- Prepare base query components ---
-    // Simplified select clause with formatted timestamp and all columns
-    const formattedSelect = [
-      `toDateTime64(\`${tsField}\`, 3, 'UTC') AS formatted_timestamp`,
-      '*'
-    ].join(', ');
-    
-    const selectClause = `SELECT ${formattedSelect}`;
+    // Simplified select clause - just select all columns
+    const selectClause = `SELECT *`;
     const fromClause = `FROM \`${tableName}\``;
     const namespaceCondition = `\`namespace\` = 'hello'`;
     const timeWhereClause = `WHERE ${timeCondition}`;
