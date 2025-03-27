@@ -370,8 +370,8 @@ const handleTabChange = (newMode: EditorMode) => {
       newContent = generatedSql;
     }
   } else {
-    // Switching TO LogchefQL: Use current editor content if switching from SQL, otherwise empty
-    newContent = (previousMode === 'clickhouse-sql') ? "" : exploreStore.logchefqlCode || "";
+    // Switching TO LogchefQL: Always restore from the store's logchefqlCode value
+    newContent = exploreStore.logchefqlCode ?? "";
   }
 
   // 4. Update editor content programmatically
@@ -1141,8 +1141,24 @@ const submitQuery = () => {
         errorMsg = result.error || "Failed to build SQL from LogchefQL";
       }
     } else {
-      // In SQL mode, the current content is the final SQL
-      finalSql = currentContent;
+      // In SQL mode, handle empty content
+      if (!currentContent.trim()) {
+        // If SQL mode and content is empty, generate default SQL
+        console.log("SQL content is empty, generating default query for submission.");
+        const defaultOptions: Omit<BuildSqlOptions, 'logchefqlQuery'> = {
+          tableName: props.tableName,
+          tsField: props.tsField,
+          startTimestamp: props.startTimestamp,
+          endTimestamp: props.endTimestamp,
+          limit: props.limit,
+        };
+        finalSql = QueryBuilder.getDefaultSQLQuery(defaultOptions);
+        // Optionally update the editor content visually with the default query
+        // runProgrammaticUpdate(finalSql); // Uncomment if you want the editor to show the default query
+      } else {
+        // In SQL mode with content, the current content is the final SQL
+        finalSql = currentContent;
+      }
     }
   } catch (e: any) {
     errorMsg = `Error preparing query: ${e.message}`;
@@ -1153,8 +1169,9 @@ const submitQuery = () => {
     return;
   }
 
-  if (!finalSql.trim()) {
-    validationError.value = "Cannot submit an empty query.";
+  // Check finalSql after potential default generation
+  if (!finalSql || !finalSql.trim()) {
+    validationError.value = "Cannot submit an empty or invalid query.";
     return;
   }
 

@@ -4,7 +4,9 @@
  * @returns True if valid, false otherwise
  */
 export function validateSQL(query: string): boolean {
+  // Empty query is not valid for direct execution
   if (!query || !query.trim()) {
+    // Return false so submitQuery knows to generate default
     return false;
   }
 
@@ -15,6 +17,7 @@ export function validateSQL(query: string): boolean {
 
     return hasSelect && hasFrom;
   } catch (error) {
+    console.error("Error during SQL validation:", error); // Log error
     return false;
   }
 }
