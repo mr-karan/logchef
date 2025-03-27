@@ -1080,54 +1080,30 @@ watch(() => exploreStore.isLoadingOperation('executeQuery'), (isLoading) => {
 });
 
 
-// --- Validation ---
-const validateQuery = (): boolean => {
-  const query = editorContent.value ?? "";
-  validationError.value = null; // Clear previous error
-
-  if (!query.trim()) {
-    return true; // Empty query is considered valid (will run default)
-  }
-
-  let isValid = false;
-  let errorMsg: string | null = null;
-
-  try {
-    if (activeMode.value === 'logchefql') {
-      isValid = validateLogchefQL(query);
-      if (!isValid) errorMsg = "Invalid LogchefQL syntax.";
-    } else {
-      // Use a more specific validation if available
-      isValid = validateSQL(query); // Assuming validateSQL returns boolean
-      if (!isValid) errorMsg = "Invalid SQL syntax.";
-      // Consider using the CH parser here for more detailed errors
-    }
-  } catch (error: any) {
-     console.error("Validation Error:", error);
-     isValid = false;
-     errorMsg = error.message || "Query validation failed.";
-  }
-
-  if (!isValid) {
-    validationError.value = errorMsg;
-  }
-  return isValid;
-};
-
 // --- Actions ---
 const submitQuery = () => {
-  if (!validateQuery()) {
-    return;
-  }
   const currentContent = editorContent.value ?? "";
   let finalSql = "";
   let errorMsg: string | null = null;
+  validationError.value = null; // Clear previous error at the start
 
   try {
     if (activeMode.value === 'logchefql') {
-      // Build SQL from LogchefQL content
+      // 1. Validate LogchefQL syntax first
+      if (!validateLogchefQL(currentContent)) {
+         // If empty LogchefQL, treat as valid (will run default equivalent)
+         if (!currentContent.trim()) {
+             console.log("LogchefQL content is empty, will generate default SQL.");
+             // Proceed to generate default SQL below
+         } else {
+             validationError.value = "Invalid LogchefQL syntax.";
+             return; // Stop if invalid non-empty LogchefQL
+         }
+      }
+
+      // 2. Build SQL from LogchefQL content (or generate default if LogchefQL was empty)
       const buildOptions: BuildSqlOptions = {
-        logchefqlQuery: currentContent,
+        logchefqlQuery: currentContent, // Pass empty string if it was empty
         tableName: props.tableName,
         tsField: props.tsField,
         startTimestamp: props.startTimestamp,
@@ -1140,10 +1116,10 @@ const submitQuery = () => {
       } else {
         errorMsg = result.error || "Failed to build SQL from LogchefQL";
       }
-    } else {
-      // In SQL mode, handle empty content
+
+    } else { // SQL Mode
       if (!currentContent.trim()) {
-        // If SQL mode and content is empty, generate default SQL
+        // 1. If SQL mode and content is empty, generate default SQL
         console.log("SQL content is empty, generating default query for submission.");
         const defaultOptions: Omit<BuildSqlOptions, 'logchefqlQuery'> = {
           tableName: props.tableName,
@@ -1153,36 +1129,47 @@ const submitQuery = () => {
           limit: props.limit,
         };
         finalSql = QueryBuilder.getDefaultSQLQuery(defaultOptions);
-        // Optionally update the editor content visually with the default query
-        // runProgrammaticUpdate(finalSql); // Uncomment if you want the editor to show the default query
+        // Optionally update the editor content visually
+        // runProgrammaticUpdate(finalSql);
       } else {
-        // In SQL mode with content, the current content is the final SQL
+        // 2. In SQL mode with content, validate the SQL syntax
+        if (!validateSQL(currentContent)) {
+            validationError.value = "Invalid SQL syntax (e.g., missing SELECT/FROM).";
+            return; // Stop if user-provided SQL is invalid
+        }
+        // If valid, use the user's SQL
         finalSql = currentContent;
       }
     }
   } catch (e: any) {
+    console.error("Error preparing query:", e);
     errorMsg = `Error preparing query: ${e.message}`;
   }
 
+  // Handle any preparation errors (e.g., from QueryBuilder)
   if (errorMsg) {
     validationError.value = errorMsg;
     return;
   }
 
-  // Check finalSql after potential default generation
+  // Final check: Ensure finalSql is not empty after all preparations
   if (!finalSql || !finalSql.trim()) {
+    // This should ideally not happen if default generation works, but check anyway
     validationError.value = "Cannot submit an empty or invalid query.";
+    console.error("Final SQL is empty or whitespace after preparation:", { currentContent, activeMode: activeMode.value });
     return;
   }
 
-  // Update store with the content that was just submitted
+  // Update store with the content that was *in the editor* before submit
   if (activeMode.value === 'logchefql') {
     exploreStore.setLogchefqlCode(currentContent);
   } else {
+    // Store the raw SQL (even if default was generated for execution)
     exploreStore.setRawSql(currentContent);
   }
 
-  // Emit the FINAL SQL and the mode it was derived from
+  // Emit the FINAL SQL and the mode
+  console.log(`Emitting submit event with finalSql: "${finalSql}"`); // Add log
   emit("submit", { query: currentContent, finalSql: finalSql, mode: activeMode.value });
 };
 
