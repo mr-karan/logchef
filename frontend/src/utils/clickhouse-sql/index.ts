@@ -2,7 +2,7 @@
 export { SQL_KEYWORDS, CLICKHOUSE_FUNCTIONS, SQL_TYPES, isNumeric } from './language';
 
 // Re-export from api.ts
-export { validateSQL, extractTableName, formatSQLQuery } from './api';
+export { validateSQL } from './api';
 
 // Constants for the parser
 const SPACE = " ";

@@ -1330,9 +1330,7 @@ const handleQueryChange = (data: any) => {
     queryError.value = '';
   }
 
-  // Always update the URL after handling query changes
-  // This is especially important for mode switches
-  updateUrlWithCurrentState();
+  // Don't update URL on every keystroke - will be updated on query submission
 }
 
 // Component lifecycle with improved initialization sequence
