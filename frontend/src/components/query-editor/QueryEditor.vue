@@ -808,9 +808,9 @@ const registerLogchefQLCompletionProvider = () => {
       // Only provide suggestions for the specific state we're in
       // to prevent duplicate suggestions
       if (
-        parser.state === State.KEY ||
-        parser.state === State.INITIAL ||
-        parser.state === State.BOOL_OP_DELIMITER
+        parser.state === LogchefQLState.KEY ||
+        parser.state === LogchefQLState.INITIAL ||
+        parser.state === LogchefQLState.BOOL_OP_DELIMITER
       ) {
         if (fieldNames.value.includes(word.word)) {
           suggestions = getOperatorsSuggestions(word.word, position);
