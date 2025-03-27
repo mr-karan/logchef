@@ -106,17 +106,7 @@ export class QueryBuilder {
         return { success: false, sql: "", error: "Invalid limit value." };
     }
     
-    // Add namespace validation and ensure it's included
-    const hasNamespace = logchefqlQuery && (
-      logchefqlQuery.includes('namespace=') || 
-      logchefqlQuery.includes('namespace ') || 
-      logchefqlQuery.includes('`namespace`')
-    );
-    
-    if (!hasNamespace && logchefqlQuery && logchefqlQuery.trim()) {
-      // Instead of failing, we'll add the namespace condition later
-      console.warn("No namespace condition found in LogchefQL query, will add automatically");
-    }
+    // No longer requiring namespace in query
 
     // --- Format Time Condition ---
     let timeCondition: string;
@@ -130,7 +120,6 @@ export class QueryBuilder {
     // Simplified select clause - just select all columns
     const selectClause = `SELECT *`;
     const fromClause = `FROM ${tableName}`;
-    const namespaceCondition = `namespace = 'hello'`;
     const timeWhereClause = `WHERE ${timeCondition}`;
     const orderByClause = `ORDER BY ${orderByField} ${orderByDirection}`;
     const limitClause = `LIMIT ${limit}`;
@@ -171,17 +160,9 @@ export class QueryBuilder {
     }
 
     // --- Combine WHERE conditions ---
-    let whereClause = `${timeWhereClause} AND ${namespaceCondition}`;
+    let whereClause = timeWhereClause;
     if (logchefqlConditions) {
-      // Ensure namespace condition is included
-      const hasNamespaceInConditions = logchefqlConditions.includes('`namespace`') || 
-                                      logchefqlConditions.includes('namespace');
-      
-      if (hasNamespaceInConditions) {
-        whereClause = `WHERE ${timeCondition} AND (${logchefqlConditions})`;
-      } else {
-        whereClause = `WHERE ${timeCondition} AND ${namespaceCondition} AND (${logchefqlConditions})`;
-      }
+      whereClause = `WHERE ${timeCondition} AND (${logchefqlConditions})`;
       meta.operations.push('filter');
     }
 
@@ -259,8 +240,7 @@ export class QueryBuilder {
      }
 
      // Combine conditions
-     const namespaceCondition = `namespace = 'hello'`;
-     let whereClause = `${timeCondition} AND ${namespaceCondition}`;
+     let whereClause = timeCondition;
      if (options.whereClause) {
        whereClause += ` AND (${options.whereClause})`;
      }
