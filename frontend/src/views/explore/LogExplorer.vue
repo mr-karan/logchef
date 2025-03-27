@@ -192,41 +192,33 @@ const isTeamsLoaded = ref(false)
 const isSourcesLoaded = ref(false)
 const pendingEditorInit = ref(false)
 
-// Function to update URL with current state
+// Function to update URL with current state - simplified
 function updateUrlWithCurrentState() {
   // Skip URL updates during initialization to prevent race conditions
   if (isInitializing.value) {
     console.log('Skipping URL update during initialization');
     return;
   }
-  const currentTime = exploreStore.timeRange
-
-  // Check if we have a saved query ID in the current URL
-  const currentRoute = router.currentRoute.value;
-  const hasSavedQuery = currentRoute.query.query_id;
-
-  // Start with existing query parameters if we have a saved query
-  const query: Record<string, string> = hasSavedQuery
-    ? { ...currentRoute.query as Record<string, string> }
-    : {};
+  
+  const currentTime = exploreStore.timeRange;
+  const query: Record<string, string> = {};
 
   // Add team and source IDs
   if (teamsStore.currentTeamId) {
-    query.team = teamsStore.currentTeamId.toString()
+    query.team = teamsStore.currentTeamId.toString();
   }
 
   // Only add source ID if it's valid (non-zero)
   if (exploreStore.sourceId && exploreStore.sourceId > 0) {
     // Verify the source exists in the current team's sources
-    const sourceExists = sourcesStore.teamSources.some(source => source.id === exploreStore.sourceId)
-
+    const sourceExists = sourcesStore.teamSources.some(source => source.id === exploreStore.sourceId);
     if (sourceExists) {
-      query.source = exploreStore.sourceId.toString()
+      query.source = exploreStore.sourceId.toString();
     }
   }
 
   // Add limit
-  query.limit = exploreStore.limit.toString()
+  query.limit = exploreStore.limit.toString();
 
   // Add time range if available
   if (currentTime) {
@@ -238,7 +230,7 @@ function updateUrlWithCurrentState() {
       'hour' in currentTime.start ? currentTime.start.hour : 0,
       'minute' in currentTime.start ? currentTime.start.minute : 0,
       'second' in currentTime.start ? currentTime.start.second : 0
-    )
+    );
 
     const endDate = new Date(
       currentTime.end.year,
@@ -247,47 +239,33 @@ function updateUrlWithCurrentState() {
       'hour' in currentTime.end ? currentTime.end.hour : 0,
       'minute' in currentTime.end ? currentTime.end.minute : 0,
       'second' in currentTime.end ? currentTime.end.second : 0
-    )
+    );
 
-    query.start_time = startDate.getTime().toString()
-    query.end_time = endDate.getTime().toString()
+    query.start_time = startDate.getTime().toString();
+    query.end_time = endDate.getTime().toString();
   }
 
-  // Add query mode
-  if (queryMode.value) {
-    query.mode = queryMode.value
+  // Add query mode from store
+  query.mode = exploreStore.activeMode;
+
+  // Get query content from the STORE
+  let queryContent = "";
+  if (exploreStore.activeMode === 'logchefql') {
+    queryContent = exploreStore.logchefqlCode?.trim() || '';
+  } else {
+    queryContent = exploreStore.rawSql?.trim() || '';
   }
 
-  // Always update the query parameter when mode changes, explicitly removing it when empty
-  if (queryMode.value === 'logchefql') {
-    const logchefqlCode = exploreStore.logchefqlCode?.trim() || '';
-    if (logchefqlCode) {
-      query.q = encodeURIComponent(logchefqlCode);
-    } else {
-      // Explicitly delete the q parameter when empty
-      delete query.q;
-    }
-  } else if (queryMode.value === 'sql') {
-    // Handle case where rawSql might be an object
-    const rawSql = typeof exploreStore.rawSql === 'string'
-      ? exploreStore.rawSql
-      : (typeof exploreStore.rawSql === 'object' && exploreStore.rawSql !== null && 'sql' in exploreStore.rawSql)
-        ? (exploreStore.rawSql as any).sql || ''
-        : '';
-
-    if (rawSql.trim()) {
-      query.q = encodeURIComponent(rawSql.trim());
-    } else {
-      // Explicitly delete the q parameter when empty
-      delete query.q;
-    }
+  if (queryContent) {
+    query.q = encodeURIComponent(queryContent);
+  } else {
+    delete query.q; // Remove q if empty
   }
 
-  // Log what we're updating to for debugging
   console.log('Updating URL with query params:', query);
 
   // Update URL without triggering navigation events
-  router.replace({ query })
+  router.replace({ query });
 }
 
 // Completely revised initialization logic to prevent race conditions
@@ -906,8 +884,8 @@ watch(
   }
 )
 
-// Handle query submission from either mode
-const handleQuerySubmit = async (data: any) => {
+// Handle query submission from QueryEditor
+const handleQuerySubmit = async (data: { query: string, finalSql: string, mode: string }) => {
   // Check if we have a valid source before proceeding
   if (!hasValidSource.value) {
     toast({
@@ -919,49 +897,7 @@ const handleQuerySubmit = async (data: any) => {
     return;
   }
     
-  // Handle both cases:
-  // 1. Direct invocation from Run button with mode string
-  // 2. Submission from QueryEditor with {query, mode} object
-  let queryText: string;
-  let mode: string;
-
-  if (typeof data === 'string') {
-    // Called from Run button with mode string
-    mode = data;
-      
-    // Get current editor content directly when Run button is clicked
-    // This ensures we use the latest content, not what might be in the store
-    if (queryEditorRef.value) {
-      const currentEditorContent = queryEditorRef.value.code || '';
-        
-      // Update both local state and store
-      if (mode === 'logchefql') {
-        logchefQuery.value = currentEditorContent;
-        exploreStore.setLogchefqlCode(currentEditorContent);
-        queryText = currentEditorContent;
-      } else {
-        sqlQuery.value = currentEditorContent;
-        exploreStore.setRawSql(currentEditorContent);
-        queryText = currentEditorContent;
-      }
-    } else {
-      // Fallback to store values if editor ref isn't available
-      if (mode === 'logchefql') {
-        queryText = exploreStore.logchefqlCode || '';
-      } else {
-        // Handle case where rawSql might be an object
-        queryText = typeof exploreStore.rawSql === 'string'
-          ? exploreStore.rawSql
-          : (typeof exploreStore.rawSql === 'object' && exploreStore.rawSql !== null && 'sql' in exploreStore.rawSql)
-            ? (exploreStore.rawSql as any).sql || ''
-            : '';
-      }
-    }
-  } else {
-    // Called from QueryEditor with {query, mode} object
-    queryText = data.query || '';
-    mode = data.mode;
-  }
+  const { query, finalSql, mode } = data;
 
   // Map the mode from editor to store format
   const mappedMode = mode === 'logchefql' ? 'logchefql' : 'sql';
@@ -971,14 +907,14 @@ const handleQuerySubmit = async (data: any) => {
 
   // Update the appropriate query state in the store
   if (mappedMode === 'logchefql') {
-    exploreStore.setLogchefqlCode(queryText);
+    exploreStore.setLogchefqlCode(query);
     // Ensure local state is also updated for consistency
-    logchefQuery.value = queryText;
+    logchefQuery.value = query;
   } else {
     // For SQL mode, just set the query as-is without any manipulation
-    if (queryText && queryText.trim()) {
-      exploreStore.setRawSql(queryText);
-      sqlQuery.value = queryText;
+    if (query && query.trim()) {
+      exploreStore.setRawSql(query);
+      sqlQuery.value = query;
     }
   }
 
@@ -989,9 +925,8 @@ const handleQuerySubmit = async (data: any) => {
   queryError.value = '';
 
   try {
-    // Execute the query - errors will be handled by the baseStore's callApi mechanism
-    // and automatically displayed as toasts
-    const result = await exploreStore.executeQuery();
+    // Execute the query with the final SQL
+    const result = await exploreStore.executeQuery(finalSql);
       
     // Store error message if query failed, but toast is already shown by base store
     if (!result.success && result.error) {
@@ -1288,44 +1223,35 @@ async function handleSaveQuery(formData: any) {
   }
 }
 
-// Handle query changes from editor
-const handleQueryChange = (data: any) => {
+// Handle query changes from editor - simplified
+const handleQueryChange = (data: { query: string, mode: string }) => {
   // Ensure data is an object before destructuring
   if (!data || typeof data !== 'object') {
     console.warn('Invalid data received in handleQueryChange:', data);
     return;
   }
 
-  const { query: inputQuery, mode } = data;
-  // Ensure queryText is always a string, even if inputQuery is undefined
-  const queryText = inputQuery || '';
-
+  const { query, mode } = data;
+  
   // Map the mode from editor to store format
   const mappedMode = mode === 'logchefql' ? 'logchefql' : 'sql';
 
-  // Check if this is a mode switch
-  const isModeSwitch = queryMode.value !== mappedMode;
-
-  // Update the queryMode if it's changing
-  if (isModeSwitch) {
+  // Update the store's active mode if it changed
+  if (queryMode.value !== mappedMode) {
     queryMode.value = mappedMode;
     exploreStore.setActiveMode(mappedMode);
   }
 
-  // If in LogchefQL mode, update the LogchefQL query
+  // Update the appropriate query state in the store
   if (mappedMode === 'logchefql') {
-    exploreStore.setLogchefqlCode(queryText);
-    // Ensure local state is also updated for consistency
-    logchefQuery.value = queryText;
+    exploreStore.setLogchefqlCode(query);
+    logchefQuery.value = query;
   } else {
-    // For SQL mode, just set the query as-is without any manipulation
-    if (queryText && queryText.trim()) {
-      exploreStore.setRawSql(queryText);
-      sqlQuery.value = queryText;
-    }
+    exploreStore.setRawSql(query);
+    sqlQuery.value = query;
   }
 
-  // Always clear any error messages when the user is typing
+  // Clear any error messages when the user is typing
   if (queryError.value) {
     queryError.value = '';
   }
@@ -1335,80 +1261,181 @@ const handleQueryChange = (data: any) => {
 
 // Component lifecycle with improved initialization sequence
 onMounted(async () => {
+  isInitializing.value = true;
+  console.log("LogExplorer component mounting - Simplified");
+
   try {
-    console.log("LogExplorer component mounting");
-
-    // Check if this is a saved query load
-    const hasSavedQueryParams = route.query.query_id && route.query.team;
-    console.log('URL has saved query params:', hasSavedQueryParams);
-
-    // Make sure we start with initialization flags set correctly
-    isInitializing.value = true;
-    isTeamsLoaded.value = false;
-    isSourcesLoaded.value = false;
-
-    // Step 1: Load teams first (separate operation to reduce race conditions)
-    console.log("Step 1: Loading teams");
+    // 1. Load Teams
     await teamsStore.loadTeams();
     isTeamsLoaded.value = true;
 
-    // Step 2: Process URL and initialize everything else
-    console.log("Step 2: Setting up from URL parameters");
-    await setupFromUrl();
+    // 2. Set Team from URL or default
+    let teamId = null;
+    if (route.query.team && typeof route.query.team === 'string') {
+      teamId = parseInt(route.query.team);
+      if (isNaN(teamId) || !teamsStore.teams.some(t => t.id === teamId)) {
+        urlError.value = `Invalid or inaccessible team ID: ${route.query.team}.`;
+        teamId = teamsStore.teams[0]?.id || null; // Fallback
+      }
+    } else {
+      teamId = teamsStore.teams[0]?.id || null; // Default to first team
+    }
+    if (teamId) {
+      teamsStore.setCurrentTeam(teamId);
+    } else {
+      urlError.value = "No teams available or accessible.";
+      isInitializing.value = false;
+      return; // Stop initialization if no team
+    }
 
-    // Step 3: If not a saved query, handle regular initialization
-    if (!hasSavedQueryParams) {
-      console.log("Step 3: Handling regular initialization");
+    // 3. Load Sources for the selected team
+    await sourcesStore.loadTeamSources(teamsStore.currentTeamId);
+    isSourcesLoaded.value = true;
 
-      // Set initial values in the store
-      exploreStore.setLogchefqlCode(logchefQuery.value || '');
-      exploreStore.setRawSql(sqlQuery.value || '');
+    // 4. Set Source from URL or default
+    let sourceId = null;
+    if (route.query.source && typeof route.query.source === 'string') {
+      sourceId = parseInt(route.query.source);
+      if (isNaN(sourceId) || !sourcesStore.teamSources.some(s => s.id === sourceId)) {
+        urlError.value = `Invalid or inaccessible source ID: ${route.query.source} for team ${teamsStore.currentTeamId}.`;
+        sourceId = sourcesStore.teamSources[0]?.id || null; // Fallback
+      }
+    } else {
+      sourceId = sourcesStore.teamSources[0]?.id || null; // Default to first source
+    }
+    if (sourceId) {
+      exploreStore.setSource(sourceId);
+      await fetchSourceDetails(sourceId); // Fetch details needed for props
+    } else {
+      urlError.value = `No sources available for team ${teamsStore.currentTeamId}.`;
+      // Don't stop initialization, allow user to select source
+    }
 
-      // Make sure local refs are in sync with store
-      logchefQuery.value = exploreStore.logchefqlCode || '';
-      sqlQuery.value = exploreStore.rawSql || '';
+    // 5. Set Limit, Time, Mode, Query from URL directly into the store
+    // Limit
+    const limit = parseInt(route.query.limit as string || '100');
+    exploreStore.setLimit(!isNaN(limit) && limit > 0 && limit <= 10000 ? limit : 100);
 
-      // Step 4: Execute default query only after everything is initialized and source details are loaded
-      console.log("Step 4: Executing default query if possible");
+    // Time Range
+    if (route.query.start_time && route.query.end_time) {
+      try {
+        const startValue = parseInt(route.query.start_time as string);
+        const endValue = parseInt(route.query.end_time as string);
 
-      // Use nextTick to ensure component is fully mounted
-      nextTick(async () => {
-        // Check if we have a pending SQL query that's from the URL
-        const hasPendingFromUrl = queryMode.value === 'sql' && exploreStore.pendingRawSql && sqlQuery.value;
-        
-        // Wait for source details to be available
-        if (hasValidSource.value && exploreStore.sourceId > 0 && teamsStore.currentTeamId > 0) {
-          console.log("Source details loaded, executing query");
-          
-          // If we have a pending SQL query from URL with table name, use it rather than default
-          if (hasPendingFromUrl) {
-            console.log("Using preserved SQL query from URL");
-            // The preserved query is already in the store and will be used by handleQuerySubmit
-          }
-          
-          try {
-            await handleQuerySubmit(queryMode.value);
-          } catch (queryError) {
-            console.error("Error executing initial query:", queryError);
-            toast({
-              title: "Query Error",
-              description: "Error executing initial query",
-              variant: "destructive",
-              duration: TOAST_DURATION.ERROR,
-            });
-          }
-        } else {
-          console.log("Waiting for valid source details before executing query");
+        if (!isNaN(startValue) && !isNaN(endValue)) {
+          const startDate = new Date(startValue);
+          const endDate = new Date(endValue);
+
+          // Create CalendarDateTime objects
+          const start = new CalendarDateTime(
+            startDate.getFullYear(),
+            startDate.getMonth() + 1,
+            startDate.getDate(),
+            startDate.getHours(),
+            startDate.getMinutes(),
+            startDate.getSeconds()
+          );
+
+          const end = new CalendarDateTime(
+            endDate.getFullYear(),
+            endDate.getMonth() + 1,
+            endDate.getDate(),
+            endDate.getHours(),
+            endDate.getMinutes(),
+            endDate.getSeconds()
+          );
+
+          exploreStore.setTimeRange({ start, end });
         }
+      } catch (e) {
+        console.error('Failed to parse time range from URL', e);
+        // Set default time range on error
+        const now = new Date();
+        const oneHourAgo = new Date(now.getTime() - 3600000);
+        exploreStore.setTimeRange({
+          start: new CalendarDateTime(
+            oneHourAgo.getFullYear(),
+            oneHourAgo.getMonth() + 1,
+            oneHourAgo.getDate(),
+            oneHourAgo.getHours(),
+            oneHourAgo.getMinutes(),
+            oneHourAgo.getSeconds()
+          ),
+          end: new CalendarDateTime(
+            now.getFullYear(),
+            now.getMonth() + 1,
+            now.getDate(),
+            now.getHours(),
+            now.getMinutes(),
+            now.getSeconds()
+          )
+        });
+      }
+    } else {
+      // Set default time range if not in URL
+      const now = new Date();
+      const oneHourAgo = new Date(now.getTime() - 3600000);
+      exploreStore.setTimeRange({
+        start: new CalendarDateTime(
+          oneHourAgo.getFullYear(),
+          oneHourAgo.getMonth() + 1,
+          oneHourAgo.getDate(),
+          oneHourAgo.getHours(),
+          oneHourAgo.getMinutes(),
+          oneHourAgo.getSeconds()
+        ),
+        end: new CalendarDateTime(
+          now.getFullYear(),
+          now.getMonth() + 1,
+          now.getDate(),
+          now.getHours(),
+          now.getMinutes(),
+          now.getSeconds()
+        )
       });
     }
 
-    console.log("LogExplorer initialization complete");
+    // Mode
+    const mode = (route.query.mode === 'sql' ? 'sql' : 'logchefql') as 'logchefql' | 'sql';
+    exploreStore.setActiveMode(mode);
+    queryMode.value = mode;
+
+    // Query (set initial value in store for QueryEditor prop)
+    const initialQuery = route.query.q ? decodeURIComponent(route.query.q as string) : "";
+    if (mode === 'logchefql') {
+      exploreStore.setLogchefqlCode(initialQuery);
+      logchefQuery.value = initialQuery;
+      exploreStore.setRawSql(""); // Clear other mode
+      sqlQuery.value = "";
+    } else {
+      exploreStore.setRawSql(initialQuery);
+      sqlQuery.value = initialQuery;
+      exploreStore.setLogchefqlCode(""); // Clear other mode
+      logchefQuery.value = "";
+    }
+
+    // 6. Update URL to reflect final initial state
+    // Use nextTick to ensure all store updates are processed
+    await nextTick();
+    isInitializing.value = false; // Mark initialization complete BEFORE first URL update
+    updateUrlWithCurrentState();
+
+    // 7. Trigger initial query execution if source is valid
+    if (exploreStore.sourceId > 0 && hasValidSource.value) {
+      console.log("Triggering initial query execution after mount.");
+      // Use the QueryEditor's submit mechanism to build the query
+      if (queryEditorRef.value) {
+        queryEditorRef.value.submitQuery();
+      } else {
+        console.warn("QueryEditor ref not available for initial submit.");
+      }
+    } else {
+      console.log("Skipping initial query execution (no valid source).");
+    }
+
   } catch (error) {
     console.error("Error during LogExplorer mount:", error);
-    urlError.value = "Error initializing the explorer. Please try refreshing the page.";
-
-    // Show a toast for the error
+    urlError.value = "Error initializing the explorer.";
     toast({
       title: "Explorer Error",
       description: "Error initializing the explorer. Please try refreshing the page.",
@@ -1416,8 +1443,7 @@ onMounted(async () => {
       duration: TOAST_DURATION.ERROR,
     });
   } finally {
-    // Ensure initialization state is properly set regardless of errors
-    isInitializing.value = false;
+    isInitializing.value = false; // Ensure flag is reset
   }
 });
 
@@ -1615,9 +1641,9 @@ onBeforeUnmount(() => {
               :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
               :startTimestamp="getTimestampFromCalendarDate(exploreStore.timeRange?.start)"
               :endTimestamp="getTimestampFromCalendarDate(exploreStore.timeRange?.end)"
-              :initialValue="queryMode === 'logchefql' ? logchefQuery : sqlQuery"
-              :initialTab="queryMode === 'logchefql' ? 'logchefql' : 'sql'"
-              :placeholder="queryMode === 'logchefql' ? 'Enter LogchefQL query or leave empty to run SELECT * FROM table' : 'Enter SQL query or leave empty for default query'"
+              :initialValue="exploreStore.activeMode === 'logchefql' ? exploreStore.logchefqlCode : exploreStore.rawSql"
+              :initialTab="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
+              :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter LogchefQL query or leave empty to run SELECT * FROM table' : 'Enter SQL query or leave empty for default query'"
               :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
               :limit="exploreStore.limit" :showFieldsPanel="showFieldsPanel" @change="handleQueryChange"
               @submit="handleQuerySubmit" @toggle-fields="showFieldsPanel = !showFieldsPanel" />

@@ -213,9 +213,24 @@ const getSuggestionsFromList = (params: any) => {
 
 // --- Editor Handling ---
 const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
-  // console.log('QueryEditor: Monaco editor mounted');
   editorRef.value = editor;
   editorModel.value = editor.getModel();
+
+  // Set initial content directly based on props and mode
+  let initialContent = props.initialValue ?? "";
+  if (!initialContent && activeMode.value === 'clickhouse-sql') {
+    // If SQL mode and no initial value, generate default SQL
+    const defaultOptions: Omit<BuildSqlOptions, 'logchefqlQuery'> = {
+      tableName: props.tableName,
+      tsField: props.tsField,
+      startTimestamp: props.startTimestamp,
+      endTimestamp: props.endTimestamp,
+      limit: props.limit,
+    };
+    initialContent = QueryBuilder.getDefaultSQLQuery(defaultOptions);
+  }
+  // Use runProgrammaticUpdate to set initial content without triggering change events
+  runProgrammaticUpdate(initialContent);
 
   updateMonacoOptions(); // Apply initial options for the active mode
   registerCompletionProvider(); // Register for the initial mode
@@ -234,8 +249,13 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
   const blurListener = editor.onDidBlurEditorWidget(() => { editorFocused.value = false; });
   activeProviders.value.push(focusListener, blurListener);
 
-  // Focus the editor shortly after mount
-  setTimeout(() => editor.focus(), 50);
+  // Ensure Autofocus - use nextTick for more reliable focusing
+  nextTick(() => {
+    if (editorRef.value && !isDisposing.value) {
+      editorRef.value.focus();
+      console.log("QueryEditor: Autofocus attempted.");
+    }
+  });
 };
 
 const handleEditorChange = (value: string | undefined) => {
@@ -300,16 +320,11 @@ const syncEditorContentWithStore = (isInitialSync = false) => {
 const handleTabChange = (newMode: EditorMode) => {
   if (newMode === activeMode.value) return;
 
-  // 1. Persist current editor content to the store
+  // 1. Get current content before switching
   const currentQuery = editorContent.value ?? "";
-  if (activeMode.value === 'logchefql') {
-    exploreStore.setLogchefqlCode(currentQuery);
-  } else {
-    exploreStore.setRawSql(currentQuery);
-  }
+  const previousMode = activeMode.value;
 
   // 2. Update active mode
-  const previousMode = activeMode.value;
   activeMode.value = newMode;
   exploreStore.setActiveMode(newMode === 'clickhouse-sql' ? 'sql' : 'logchefql');
 
@@ -317,52 +332,46 @@ const handleTabChange = (newMode: EditorMode) => {
   let newContent = "";
   if (newMode === 'clickhouse-sql') {
     // Switching TO SQL: Try generating from LogchefQL first
-    const logchefqlToConvert = exploreStore.logchefqlCode;
+    const logchefqlToConvert = (previousMode === 'logchefql') ? currentQuery : exploreStore.logchefqlCode;
     let conversionSuccess = false;
-    let generatedSql = ""; // Variable to hold the result
+    let generatedSql = "";
 
     if (logchefqlToConvert && validateLogchefQL(logchefqlToConvert)) {
-        // Construct the options object correctly
-        const buildOptions: BuildSqlOptions = {
-            logchefqlQuery: logchefqlToConvert, // Pass the query string inside the object
-            tableName: props.tableName,
-            tsField: props.tsField,
-            startTimestamp: props.startTimestamp,
-            endTimestamp: props.endTimestamp,
-            limit: props.limit,
-            // selectColumns, orderByField, orderByDirection can use defaults from QueryBuilder
-        };
-        // Call with a single options object
-        const result = QueryBuilder.buildSqlFromLogchefQL(buildOptions);
+      const buildOptions: BuildSqlOptions = {
+        logchefqlQuery: logchefqlToConvert,
+        tableName: props.tableName,
+        tsField: props.tsField,
+        startTimestamp: props.startTimestamp,
+        endTimestamp: props.endTimestamp,
+        limit: props.limit,
+      };
+      const result = QueryBuilder.buildSqlFromLogchefQL(buildOptions);
 
-        if (result.success) {
-            generatedSql = result.sql; // Use generatedSql variable
-            conversionSuccess = true;
-        } else {
-            console.warn("Failed to convert LogchefQL to SQL:", result.error);
-            validationError.value = `Error converting query: ${result.error}`;
-        }
+      if (result.success) {
+        generatedSql = result.sql;
+        conversionSuccess = true;
+      } else {
+        console.warn("Failed to convert LogchefQL to SQL:", result.error);
+        validationError.value = `Error converting query: ${result.error}`;
+      }
     }
 
-    // If conversion failed or no LogchefQL, use stored SQL or generate default
     if (!conversionSuccess) {
-        // Construct options for default query
-        const defaultOptions: Omit<BuildSqlOptions, 'logchefqlQuery'> = {
-             tableName: props.tableName,
-             tsField: props.tsField,
-             startTimestamp: props.startTimestamp,
-             endTimestamp: props.endTimestamp,
-             limit: props.limit,
-        };
-        newContent = exploreStore.rawSql ?? QueryBuilder.getDefaultSQLQuery(defaultOptions);
+      // If conversion failed or no LogchefQL, generate default SQL
+      const defaultOptions: Omit<BuildSqlOptions, 'logchefqlQuery'> = {
+        tableName: props.tableName,
+        tsField: props.tsField,
+        startTimestamp: props.startTimestamp,
+        endTimestamp: props.endTimestamp,
+        limit: props.limit,
+      };
+      newContent = QueryBuilder.getDefaultSQLQuery(defaultOptions);
     } else {
-        newContent = generatedSql; // Use the successfully generated SQL
+      newContent = generatedSql;
     }
-    exploreStore.setRawSql(newContent); // Update store with the SQL we decided on
-
   } else {
-    // Switching TO LogchefQL: Use stored value or empty
-    newContent = exploreStore.logchefqlCode ?? "";
+    // Switching TO LogchefQL: Use current editor content if switching from SQL, otherwise empty
+    newContent = (previousMode === 'clickhouse-sql') ? "" : exploreStore.logchefqlCode || "";
   }
 
   // 4. Update editor content programmatically
@@ -396,7 +405,7 @@ const handleTabChange = (newMode: EditorMode) => {
   // 7. Clear validation error from previous mode
   validationError.value = null;
 
-  // 8. Emit change for URL update etc.
+  // 8. Emit change event AFTER updating internal state and editor
   emit("change", { query: newContent, mode: newMode });
 };
 
@@ -1045,13 +1054,8 @@ const registerCompletionProvider = () => {
 };
 
 // --- Watchers ---
-// Watch for external changes to sync editor (e.g., URL change updates store)
-watch(() => [exploreStore.logchefqlCode, exploreStore.rawSql, exploreStore.activeMode], () => {
-    // Avoid sync if a programmatic change is in progress
-    if (!isProgrammaticChange.value) {
-        syncEditorContentWithStore();
-    }
-});
+// We no longer sync from store to editor automatically
+// The editor is now the source of truth for its content
 
 
 // Update placeholder when it changes
@@ -1115,16 +1119,54 @@ const submitQuery = () => {
   if (!validateQuery()) {
     return;
   }
-  const queryToSubmit = editorContent.value ?? "";
+  const currentContent = editorContent.value ?? "";
+  let finalSql = "";
+  let errorMsg: string | null = null;
 
-   // Update store just before submitting to ensure it's current
-  if (activeMode.value === 'logchefql') {
-    exploreStore.setLogchefqlCode(queryToSubmit);
-  } else {
-    exploreStore.setRawSql(queryToSubmit);
+  try {
+    if (activeMode.value === 'logchefql') {
+      // Build SQL from LogchefQL content
+      const buildOptions: BuildSqlOptions = {
+        logchefqlQuery: currentContent,
+        tableName: props.tableName,
+        tsField: props.tsField,
+        startTimestamp: props.startTimestamp,
+        endTimestamp: props.endTimestamp,
+        limit: props.limit,
+      };
+      const result = QueryBuilder.buildSqlFromLogchefQL(buildOptions);
+      if (result.success) {
+        finalSql = result.sql;
+      } else {
+        errorMsg = result.error || "Failed to build SQL from LogchefQL";
+      }
+    } else {
+      // In SQL mode, the current content is the final SQL
+      finalSql = currentContent;
+    }
+  } catch (e: any) {
+    errorMsg = `Error preparing query: ${e.message}`;
   }
 
-  emit("submit", { query: queryToSubmit, mode: activeMode.value });
+  if (errorMsg) {
+    validationError.value = errorMsg;
+    return;
+  }
+
+  if (!finalSql.trim()) {
+    validationError.value = "Cannot submit an empty query.";
+    return;
+  }
+
+  // Update store with the content that was just submitted
+  if (activeMode.value === 'logchefql') {
+    exploreStore.setLogchefqlCode(currentContent);
+  } else {
+    exploreStore.setRawSql(currentContent);
+  }
+
+  // Emit the FINAL SQL and the mode it was derived from
+  emit("submit", { query: currentContent, finalSql: finalSql, mode: activeMode.value });
 };
 
 // --- Disposal ---
@@ -1195,7 +1237,7 @@ const safelyDisposeEditor = () => {
 defineExpose({
   submitQuery,
   setActiveMode: handleTabChange, // Expose function to allow parent control
-  getCurrentQuery: () => ({ query: editorContent.value ?? "", mode: activeMode.value })
+  code: computed(() => editorContent.value)
 });
 
 // This function is no longer needed - handleEditorChange and handleTabChange handle this functionality

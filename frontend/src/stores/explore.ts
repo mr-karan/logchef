@@ -216,8 +216,8 @@ export const useExploreStore = defineStore("explore", () => {
     };
   }
 
-  // Main query execution
-  async function executeQuery(rawSql?: string) {
+  // Main query execution - accepts finalSql directly
+  async function executeQuery(finalSql: string) {
     return await state.withLoading('executeQuery', async () => {
       if (!canExecuteQuery.value) {
         return state.handleError(
@@ -309,76 +309,17 @@ export const useExploreStore = defineStore("explore", () => {
         // Get time field from source metadata, default to 'timestamp'
         const timeField = currentSource._meta_ts_field || "timestamp";
 
-        // Format the table name correctly
-        const formattedTableName = getFormattedTableName(currentSource);
-        console.log("Using formatted table name:", formattedTableName);
-
-        // Build query options to pass to QueryBuilder
-        const queryOptions = {
-          tableName: formattedTableName,
-          tsField: timeField,
-          startTimestamp: startTimestampSec,
-          endTimestamp: endTimestampSec,
-          limit: state.data.value.limit,
-          includeTimeFilter: true,
-          forDisplay: false, // Use functions for execution, not readable dates
-        };
-
-        // Centralized query building - handle both LogchefQL and SQL modes appropriately
-        let sqlToExecute = "";
-        let displaySql = "";
-
-        if (state.data.value.activeMode === "logchefql") {
-          console.log(
-            "Building SQL from LogchefQL:",
-            state.data.value.logchefqlCode
-          );
-          // Convert LogchefQL to SQL using centralized QueryBuilder
-          const logchefQLResult = QueryBuilder.buildSqlFromLogchefQL({
-            ...queryOptions,
-            logchefqlQuery: state.data.value.logchefqlCode || "",
-          });
-
-          if (!logchefQLResult.success) {
-            throw new Error(
-              logchefQLResult.error || "Failed to convert LogchefQL to SQL"
-            );
-          }
-
-          sqlToExecute = logchefQLResult.sql;
-          
-          // Use formatQueryForDisplay for the display version
-          displaySql = QueryBuilder.formatQueryForDisplay(sqlToExecute, timeField);
-        } else {
-          // SQL mode - use raw SQL directly
-          console.log("Executing in SQL mode with raw SQL.");
-
-          // Get the raw SQL from argument or store
-          const sqlToExecuteRaw = rawSql || state.data.value.rawSql || "";
-
-          if (!sqlToExecuteRaw.trim()) {
-            throw new Error("Cannot execute empty SQL query.");
-          }
-
-          // The SQL to execute is simply the raw SQL provided by the user.
-          // The backend API is responsible for handling the full query.
-          sqlToExecute = sqlToExecuteRaw;
-
-          // Use formatQueryForDisplay for the display version
-          displaySql = QueryBuilder.formatQueryForDisplay(sqlToExecute, timeField);
-        }
-
+        // Use the finalSql directly - no need to build it here
+        const sqlToExecute = finalSql;
+        
+        // Format for display
+        const displaySql = QueryBuilder.formatQueryForDisplay(sqlToExecute, timeField);
+        
         // Store the display version for reference
         state.data.value.displaySql = displaySql;
 
         // Log queries for debugging
         console.log("Mode:", state.data.value.activeMode);
-        console.log(
-          "Original query:",
-          state.data.value.activeMode === "logchefql"
-            ? state.data.value.logchefqlCode
-            : rawSql || state.data.value.rawSql
-        );
         console.log("SQL to execute:", sqlToExecute);
         console.log("Display SQL:", displaySql);
 
