@@ -36,16 +36,22 @@ export interface QueryResult {
 export class QueryBuilder {
 
   /**
-   * Formats a Unix timestamp (seconds) into ClickHouse DateTime string format 'YYYY-MM-DD HH:MM:SS'.
+   * Formats a time condition for ClickHouse using toDateTime() for better readability.
    */
-  private static formatTimestampForSQL(timestampSeconds: number): string {
-    // ClickHouse generally expects 'YYYY-MM-DD HH:MM:SS' for DateTime fields in WHERE clauses
-    const date = new Date(timestampSeconds * 1000);
-    // Ensure date is valid before formatting
-    if (isNaN(date.getTime())) {
-        throw new Error(`Invalid timestamp provided: ${timestampSeconds}`);
+  private static formatTimeCondition(tsField: string, startSeconds: number, endSeconds: number): string {
+    try {
+        const startDate = new Date(startSeconds * 1000);
+        const endDate = new Date(endSeconds * 1000);
+        
+        // Format to ClickHouse-readable datetime format
+        const start = format(startDate, "yyyy-MM-dd HH:mm:ss");
+        const end = format(endDate, "yyyy-MM-dd HH:mm:ss");
+        
+        return `\`${tsField}\` BETWEEN toDateTime('${start}') AND toDateTime('${end}')`;
+    } catch (error: any) {
+        console.error("Error formatting time condition:", error);
+        throw new Error(`Failed to format time condition: ${error.message}`);
     }
-    return format(date, 'yyyy-MM-dd HH:mm:ss');
   }
 
   /**
@@ -70,13 +76,18 @@ export class QueryBuilder {
   }
 
   /**
-   * Creates the time condition part of the WHERE clause using raw timestamp values for better index usage.
-   * Ensures the timestamp field is quoted with backticks.
+   * Formats a time condition for ClickHouse using toDateTime() for better readability.
    */
   private static formatTimeCondition(tsField: string, startSeconds: number, endSeconds: number): string {
     try {
-        // Use raw timestamp values for better index utilization
-        return `\`${tsField}\` BETWEEN ${startSeconds} AND ${endSeconds}`;
+        const startDate = new Date(startSeconds * 1000);
+        const endDate = new Date(endSeconds * 1000);
+        
+        // Format to ClickHouse-readable datetime format
+        const start = format(startDate, "yyyy-MM-dd HH:mm:ss");
+        const end = format(endDate, "yyyy-MM-dd HH:mm:ss");
+        
+        return `\`${tsField}\` BETWEEN toDateTime('${start}') AND toDateTime('${end}')`;
     } catch (error: any) {
         console.error("Error formatting time condition:", error);
         throw new Error(`Failed to format time condition: ${error.message}`);
@@ -254,11 +265,8 @@ export class QueryBuilder {
          };
      }
 
-     // Simplified select clause - format timestamp for display and include all columns
-     const formattedSelect = [
-       `toDateTime64(\`${tsField}\`, 3, 'UTC') AS formatted_timestamp`,
-       '*'
-     ];
+     // Simplified select clause - just select all columns
+     const formattedSelect = ['*'];
 
      // Combine timestamp and namespace conditions using raw values for better performance
      const baseCondition = `\`${tsField}\` BETWEEN ${startTimestamp} AND ${endTimestamp}`;
