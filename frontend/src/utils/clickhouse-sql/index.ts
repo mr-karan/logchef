@@ -1,3 +1,9 @@
+// Re-export from language.ts
+export { SQL_KEYWORDS, CLICKHOUSE_FUNCTIONS, SQL_TYPES, isNumeric } from './language';
+
+// Re-export from api.ts
+export { validateSQL, extractTableName, formatSQLQuery } from './api';
+
 // Constants for the parser
 const SPACE = " ";
 const NEWLINE = "\n";
