@@ -228,7 +228,8 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
       endTimestamp: props.endTimestamp,
       limit: props.limit,
     };
-    initialContent = QueryBuilder.getDefaultSQLQuery(defaultOptions);
+    const defaultQuery = QueryBuilder.getDefaultSQLQuery(defaultOptions);
+    initialContent = defaultQuery.sql || "";
   }
   // Use runProgrammaticUpdate to set initial content without triggering change events
   runProgrammaticUpdate(initialContent);
@@ -328,8 +329,8 @@ const handleTabChange = (newMode: EditorMode) => {
 
   // Then update editor content from the store
   const newContent = newMode === 'logchefql' 
-    ? exploreStore.logchefqlCode 
-    : exploreStore.rawSql;
+    ? (typeof exploreStore.logchefqlCode === 'string' ? exploreStore.logchefqlCode : '')
+    : (typeof exploreStore.rawSql === 'string' ? exploreStore.rawSql : '');
   
   runProgrammaticUpdate(newContent || '');
 
@@ -932,6 +933,12 @@ watch(() => exploreStore.isLoadingOperation('executeQuery'), (isLoading) => {
     }
   }
 });
+
+// Helper function to extract SQL string from QueryResult
+const getDefaultSQLQuery = (options: any) => {
+  const result = QueryBuilder.getDefaultSQLQuery(options);
+  return result.success ? result.sql : '';
+};
 
 // Remove duplicate provider registration functions since they're already defined earlier
 
