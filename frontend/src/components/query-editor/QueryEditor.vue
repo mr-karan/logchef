@@ -862,7 +862,7 @@ const registerLogchefQLCompletionProvider = () => {
         }
       } else if (parser.state === LogchefQLState.KEY_VALUE_OPERATOR) {
         // @ts-ignore: Type compatibility issues with operator types
-        if (VALID_KEY_VALUE_OPERATORS.includes(parser.keyValueOperator)) {
+        if (LogchefQLValidOperators.includes(parser.keyValueOperator)) {
           range.startColumn = word.endColumn - parser.value.length;
           const result = await getValueSuggestions(parser.key, parser.value, range);
           incomplete = result.incomplete;
