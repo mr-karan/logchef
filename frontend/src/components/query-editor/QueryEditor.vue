@@ -964,10 +964,6 @@ onBeforeUnmount(() => {
   isDisposing.value = true;
 });
 
-// This watch is no longer needed as the handleTabChange function handles SQL generation
-
-// This watch is already handled by the syncEditorContentWithStore function and watcher
-
 // Watch for loading state from the store to disable editor during API calls
 watch(() => exploreStore.isLoadingOperation('executeQuery'), (isLoading) => {
   if (editorRef.value && !isDisposing.value) {
