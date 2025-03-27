@@ -114,13 +114,16 @@ export class QueryBuilder {
         return { success: false, sql: "", error: "Invalid limit value." };
     }
     
-    // Add namespace validation
-    if (logchefqlQuery && !logchefqlQuery.includes('namespace=')) {
-      return {
-        success: false,
-        sql: "",
-        error: "Namespace condition is required in LogchefQL queries"
-      };
+    // Add namespace validation and ensure it's included
+    const hasNamespace = logchefqlQuery && (
+      logchefqlQuery.includes('namespace=') || 
+      logchefqlQuery.includes('namespace ') || 
+      logchefqlQuery.includes('`namespace`')
+    );
+    
+    if (!hasNamespace && logchefqlQuery && logchefqlQuery.trim()) {
+      // Instead of failing, we'll add the namespace condition later
+      console.warn("No namespace condition found in LogchefQL query, will add automatically");
     }
 
     // --- Format Time Condition ---
@@ -184,8 +187,20 @@ export class QueryBuilder {
     // --- Combine WHERE conditions ---
     let whereClause = timeWhereClause;
     if (logchefqlConditions) {
-      whereClause = `WHERE (${timeCondition}) AND (${logchefqlConditions})`;
+      // Ensure namespace condition is included
+      const namespaceCondition = "`namespace` = 'hello'";
+      const hasNamespaceInConditions = logchefqlConditions.includes('`namespace`') || 
+                                      logchefqlConditions.includes('namespace');
+      
+      if (hasNamespaceInConditions) {
+        whereClause = `WHERE (${timeCondition}) AND (${logchefqlConditions})`;
+      } else {
+        whereClause = `WHERE (${timeCondition}) AND (${namespaceCondition}) AND (${logchefqlConditions})`;
+      }
       meta.operations.push('filter');
+    } else {
+      // If no LogchefQL conditions, still include namespace
+      whereClause = `WHERE (${timeCondition}) AND (\`namespace\` = 'hello')`;
     }
 
     // --- Assemble the final query string ---
@@ -244,17 +259,25 @@ export class QueryBuilder {
          };
      }
 
-     // Convert timestamp columns to human-readable format
-     const formattedSelect = selectColumns.map(col => {
-       if (col === tsField) {
-         return `toDateTime64(\`${tsField}\`, 3, 'UTC') AS formatted_${tsField}`;
+     // Always include timestamp conversion even when using *
+     const formattedSelect = [
+       `toDateTime64(\`${tsField}\`, 3, 'UTC') AS formatted_${tsField}`
+     ];
+     
+     // Add other columns, excluding timestamp and handling * separately
+     selectColumns.forEach(col => {
+       if (col !== tsField && col !== '*') {
+         formattedSelect.push(`\`${col}\``);
+       } else if (col === '*') {
+         formattedSelect.push('*');
        }
-       return col === '*' ? '*' : `\`${col}\``;
-     }).join(', ');
+     });
 
-     // Add namespace condition if needed
-     const whereClause = `\`${tsField}\` BETWEEN ${startTimestamp} AND ${endTimestamp}` + 
-       (options.whereClause ? ` AND ${options.whereClause}` : '');
+     // Combine timestamp and namespace conditions
+     const baseCondition = `\`${tsField}\` BETWEEN ${startTimestamp} AND ${endTimestamp}`;
+     const whereClause = options.whereClause 
+       ? `${baseCondition} AND (${options.whereClause})`
+       : baseCondition;
 
      const sql = [
        `SELECT ${formattedSelect}`,

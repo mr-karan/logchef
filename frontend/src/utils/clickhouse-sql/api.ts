@@ -16,13 +16,13 @@ export function validateSQL(query: string): boolean {
     const hasFrom = /\bFROM\b/i.test(query);
     
     // Check for timestamp conversion functions
-    const hasTimeConversion = /\btoDateTime(64)?\(/i.test(query);
+    const hasTimeConversion = /\btoDateTime64\(/i.test(query);
     
-    // Check for required namespace condition
-    const hasNamespace = /\bnamespace\s*=/i.test(query);
+    // Check for required namespace condition - match both quoted and unquoted versions
+    const hasNamespace = /\b(namespace\s*=|`namespace`\s*=)/i.test(query);
     
     return hasSelect && hasFrom && 
-           (hasTimeConversion || !/\btimestamp\b/i.test(query)) &&
+           hasTimeConversion &&
            hasNamespace;
   } catch (error) {
     console.error("Error during SQL validation:", error); // Log error
