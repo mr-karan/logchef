@@ -158,11 +158,8 @@ function registerClickhouseSQL() {
 
   monaco.languages.register({ id: LANGUAGE_ID });
 
-  // Use Monaco's built-in SQL configuration as a base, then customize if needed
-  const sqlConfig = monaco.languages.languageConfigurationRegistry.get('sql');
-
+  // Set language configuration directly for ClickHouse SQL
   monaco.languages.setLanguageConfiguration(LANGUAGE_ID, {
-    ...(sqlConfig || {}), // Spread base SQL config
      autoClosingPairs: [
        { open: "(", close: ")" },
        { open: '"', close: '"' }, // Keep if CH uses double quotes for identifiers
