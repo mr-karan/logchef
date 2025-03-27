@@ -89,6 +89,16 @@ export class QueryBuilder {
 
     let logchefqlConditions = "";
 
+    // --- Translate LogchefQL ---
+    if (logchefqlQuery && logchefqlQuery.trim()) {
+      const translationResult = parseAndTranslateLogchefQL(logchefqlQuery);
+      if (!translationResult.success) {
+        return { success: false, sql: "", error: translationResult.error || "Failed to translate LogchefQL." };
+      }
+      // Assign the translated conditions
+      logchefqlConditions = translationResult.sql || "";
+    }
+
     // --- Format Time Condition ---
     let timeCondition: string;
     try {
