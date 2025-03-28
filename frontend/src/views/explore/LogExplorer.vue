@@ -1351,51 +1351,9 @@ onMounted(async () => {
           exploreStore.setTimeRange({ start, end });
         }
       } catch (e) {
-        console.error('Failed to parse time range from URL', e);
-        // Set default time range on error
-        const now = new Date();
-        const oneHourAgo = new Date(now.getTime() - 3600000);
-        exploreStore.setTimeRange({
-          start: new CalendarDateTime(
-            oneHourAgo.getFullYear(),
-            oneHourAgo.getMonth() + 1,
-            oneHourAgo.getDate(),
-            oneHourAgo.getHours(),
-            oneHourAgo.getMinutes(),
-            oneHourAgo.getSeconds()
-          ),
-          end: new CalendarDateTime(
-            now.getFullYear(),
-            now.getMonth() + 1,
-            now.getDate(),
-            now.getHours(),
-            now.getMinutes(),
-            now.getSeconds()
-          )
-        });
+        console.error('Failed to parse time range from URL, keeping default', e);
+        // Use the default time range already set earlier
       }
-    } else {
-      // Set default time range if not in URL
-      const now = new Date();
-      const oneHourAgo = new Date(now.getTime() - 3600000);
-      exploreStore.setTimeRange({
-        start: new CalendarDateTime(
-          oneHourAgo.getFullYear(),
-          oneHourAgo.getMonth() + 1,
-          oneHourAgo.getDate(),
-          oneHourAgo.getHours(),
-          oneHourAgo.getMinutes(),
-          oneHourAgo.getSeconds()
-        ),
-        end: new CalendarDateTime(
-          now.getFullYear(),
-          now.getMonth() + 1,
-          now.getDate(),
-          now.getHours(),
-          now.getMinutes(),
-          now.getSeconds()
-        )
-      });
     }
 
     // Mode
