@@ -706,7 +706,7 @@ watch(
             // Check if the source ID is still the same after the timeout
             if (exploreStore.sourceId === newSourceId) {
               // Fetch details for the new source (with improved caching)
-              await fetchSourceDetails(newSourceId);
+              await sourcesStore.loadSourceDetails(newSourceId);
             }
           }, 50);
         } else {
@@ -753,7 +753,7 @@ watch(
         if (!currentSourceExists && sourcesStore.teamSources.length > 0) {
           // Select first source from the new team
           exploreStore.setSource(sourcesStore.teamSources[0].id)
-          await fetchSourceDetails(sourcesStore.teamSources[0].id)
+          await sourcesStore.loadSourceDetails(sourcesStore.teamSources[0].id)
         }
       }
 
@@ -1284,7 +1284,7 @@ onMounted(async () => {
     }
     if (sourceId) {
       exploreStore.setSource(sourceId);
-      await fetchSourceDetails(sourceId); // Fetch details needed for props
+      await sourcesStore.loadSourceDetails(sourceId); // Fetch details needed for props
     } else {
       urlError.value = `No sources available for team ${teamsStore.currentTeamId}.`;
       // Don't stop initialization, allow user to select source
