@@ -5,8 +5,9 @@ sql:
     schema: "internal/sqlite/migrations/000001_init.up.sql"
     gen:
       go:
-        package: "sqlite"
+        package: "sqlc"
         out: "internal/sqlite/sqlc"
+        sql_package: "database/sql"
         emit_json_tags: true
         emit_prepared_queries: true
         emit_interface: true
