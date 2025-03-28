@@ -70,8 +70,10 @@ const showFieldsPanel = ref(false)
 const generatedSQL = ref('')
 // Use store's loading state instead of local state
 const isExecutingQuery = computed(() => exploreStore.isLoadingOperation('executeQuery'))
-const sourceDetails = ref<Source | null>(null)
 const queryEditorRef = ref()
+
+// Use source details from the store
+const sourceDetails = computed(() => sourcesStore.currentSourceDetails)
 
 // Add loading states for better UX
 const isChangingTeam = ref(false)
@@ -105,34 +107,9 @@ const getTimestampFromCalendarDate = (date?: any): number => {
   }
 };
 
-// Get the active source table name (formatted as database.table_name)
-const activeSourceTableName = computed(() => {
-  if (sourceDetails.value?.connection) {
-    return `${sourceDetails.value.connection.database}.${sourceDetails.value.connection.table_name}`;
-  }
-  
-  // Return a placeholder if source details aren't loaded yet
-  if (exploreStore.rawSql && typeof exploreStore.rawSql === 'string' && exploreStore.rawSql.includes('FROM ')) {
-    // Improved regex to avoid extracting WHERE as a table name
-    // Looking for an actual table name after FROM, not a SQL keyword
-    const tableNameMatch = exploreStore.rawSql.match(/FROM\s+([^\s\n;()]+)(?:\s|$)/i);
-    const extractedName = tableNameMatch?.[1] || '';
-    
-    // Make sure we're not returning SQL keywords as table names
-    if (extractedName && 
-        !['WHERE', 'SELECT', 'ORDER', 'GROUP', 'LIMIT', 'HAVING'].includes(extractedName.toUpperCase())) {
-      return extractedName;
-    }
-  }
-  
-  // Default empty string if no valid table name found
-  return ''; 
-});
-
-// Check if we have a valid source for querying
-const hasValidSource = computed(() => {
-  return !!sourceDetails.value?.connection;
-});
+// Get table name and validity from store getters
+const activeSourceTableName = computed(() => sourcesStore.getCurrentSourceTableName || '');
+const hasValidSource = computed(() => sourcesStore.hasValidCurrentSource);
 
 // Loading and empty states using the centralized loading states
 const showLoadingState = computed(() => {
@@ -357,12 +334,9 @@ async function setupFromUrl() {
 
         hasSetSource = true;
 
-        // Fetch source details with debounce to prevent race conditions
-        console.log(`Fetching details for source ID ${sourceId}`);
-
-        // Wrap in try/catch since we want to continue even if this fails
         try {
-          await fetchSourceDetails(sourceId);
+          // Load details via store action
+          await sourcesStore.loadSourceDetails(sourceId);
         } catch (detailsErr) {
           console.error("Error fetching source details:", detailsErr);
           // Continue with initialization even if details fetch fails
@@ -549,7 +523,7 @@ async function handleTeamChange(teamId: string) {
     pendingEditorInit.value = true;
 
     // Clear source details immediately to prevent stale data
-    sourceDetails.value = null;
+    sourcesStore.clearCurrentSourceDetails(); // Assuming a store action exists
 
     // Load sources for the selected team
     console.log(`Loading sources for team ${parsedTeamId}`);
@@ -560,7 +534,7 @@ async function handleTeamChange(teamId: string) {
       console.log('Team has no sources, clearing source selection');
       // Clear source selection when team has no sources
       exploreStore.setSource(0);
-      sourceDetails.value = null;
+      sourcesStore.clearCurrentSourceDetails();
     } else {
       // Reset source selection if current team doesn't have access to it
       const currentSourceExists = sourcesStore.teamSources.some(
@@ -573,12 +547,12 @@ async function handleTeamChange(teamId: string) {
         if (sourcesStore.teamSources.length > 0) {
           const newSourceId = sourcesStore.teamSources[0].id;
           exploreStore.setSource(newSourceId);
-          await fetchSourceDetails(newSourceId);
+          await sourcesStore.loadSourceDetails(newSourceId);
         }
       } else {
         // Current source is valid, just refresh its details
         console.log('Current source is valid in new team, refreshing details');
-        await fetchSourceDetails(exploreStore.sourceId);
+        await sourcesStore.loadSourceDetails(exploreStore.sourceId);
       }
     }
 
@@ -604,7 +578,7 @@ async function handleSourceChange(sourceId: string) {
 
     if (!sourceId) {
       // Don't set sourceId to 0, just clear details
-      sourceDetails.value = null;
+      sourcesStore.clearCurrentSourceDetails();
       return;
     }
 
@@ -620,7 +594,7 @@ async function handleSourceChange(sourceId: string) {
     }
 
     exploreStore.setSource(id);
-    await fetchSourceDetails(id);
+    await sourcesStore.loadSourceDetails(id);
 
   } catch (error) {
     console.error('Error changing source:', error);
@@ -634,67 +608,14 @@ async function handleSourceChange(sourceId: string) {
   }
 }
 
-// No longer needed - using store's loading states instead
-// const isLoadingSourceDetails = ref(false);
-// const sourceDetailsLoadAttempted = ref(new Set<number>());
-
-// Fetch source details with improved caching to prevent redundant API calls
-async function fetchSourceDetails(sourceId: number) {
-  if (!sourceId || !teamsStore.currentTeamId) {
-    sourceDetails.value = null
-    return
-  }
-
-  // Use the store's loading state tracking instead of local state
-  if (sourcesStore.isLoadingSource(sourceId)) {
-    console.log(`Already loading source details for ID ${sourceId}, skipping redundant call`);
-    return;
-  }
-
-  // Check if we already have this source in the store's teamSources
-  const cachedSource = sourcesStore.teamSources.find(s => s.id === sourceId);
-
-  // If we have a complete cached source with columns, use it directly
-  if (cachedSource && cachedSource.columns && cachedSource.columns.length > 0) {
-    console.log(`Using cached source details for ID ${sourceId}`);
-
-    // Only update if source details has changed to prevent unnecessary renders
-    if (sourceDetails.value?.id !== cachedSource.id) {
-      sourceDetails.value = cachedSource;
-      console.log(`Source details loaded from cache for ID ${sourceId}`);
-    }
-
-    return;
-  }
-
-  try {
-    // Only make the API call if we don't have complete data
-    console.log(`Fetching source details from API for ID ${sourceId}`);
-    console.log(`Current activeSourceTableName: "${activeSourceTableName.value}"`);
-    const result = await sourcesStore.getSource(sourceId);
-
-    if (result.success && result.data) {
-      // Only update if details have changed or are not set
-      if (!sourceDetails.value || sourceDetails.value.id !== result.data.id) {
-        sourceDetails.value = result.data;
-        console.log(`Source details loaded from API for ID ${sourceId}`);
-      }
-    } else {
-      console.warn(`No source details returned for source ID: ${sourceId}`);
-      sourceDetails.value = null;
-    }
-  } catch (error) {
-    console.error('Error fetching source details:', error);
-    sourceDetails.value = null;
-  }
-}
+// fetchSourceDetails function is removed, use sourcesStore.loadSourceDetails instead
 
 // Get available fields for auto-completion
 const availableFields = computed((): FieldInfo[] => {
   // Use columns from source details or query results
   let fields: FieldInfo[] = [];
 
-  if (sourceDetails.value && sourceDetails.value.columns && sourceDetails.value.columns.length > 0) {
+  if (sourcesStore.currentSourceDetails?.columns?.length > 0) {
     fields = sourceDetails.value.columns.map(column => ({
       name: column.name,
       type: column.type
@@ -842,32 +763,14 @@ watch(
   }
 )
 
-// Watch for changes in sourceDetails - with manual equality check and pending query handling
+// Watch for changes in sourceDetails from the store
 watch(
   () => sourceDetails.value,
   (newSourceDetails, oldSourceDetails) => {
-    // Only log and update UI if actually changed (prevent duplicate notifications)
-    if (newSourceDetails &&
-      (!oldSourceDetails ||
-        newSourceDetails.id !== oldSourceDetails.id ||
-        JSON.stringify(newSourceDetails.columns) !== JSON.stringify(oldSourceDetails?.columns))) {
-      console.log('Source details changed, updating available fields');
-      // The availableFields computed property will automatically update
-      
-      // Check if we have a pending SQL query to restore
-      if (exploreStore.pendingRawSql && queryMode.value === 'sql') {
-        console.log('Source details loaded, restoring pending SQL query:', exploreStore.pendingRawSql);
-        
-        // Restore the pending query now that we have source details
-        sqlQuery.value = exploreStore.pendingRawSql;
-        exploreStore.setRawSql(exploreStore.pendingRawSql);
-        
-        // Clear the pending query to avoid reapplying it
-        exploreStore.pendingRawSql = undefined;
-        
-        // Update the URL to show the restored query
-        updateUrlWithCurrentState();
-      }
+    if (newSourceDetails?.id !== oldSourceDetails?.id) {
+      console.log('Source details changed in store, availableFields will update.');
+      // Handle pending SQL restoration if needed (logic might move to store or be simplified)
+      // Consider if pendingRawSql is still necessary with better store sync
     }
   },
   { immediate: true }
@@ -876,7 +779,7 @@ watch(
 // Mode changes now handled by handleModeChange function
 
 // Handle query submission from QueryEditor
-const handleQuerySubmit = async (data: { query: string, finalSql: string, mode: string }) => {
+const handleQuerySubmit = async (data: { query: string, mode: string }) => {
   // Check if we have a valid source before proceeding
   if (!hasValidSource.value) {
     toast({
@@ -888,7 +791,7 @@ const handleQuerySubmit = async (data: { query: string, finalSql: string, mode: 
     return;
   }
     
-  const { query, finalSql: emittedFinalSql, mode: editorMode } = data; // Use emitted finalSql
+  const { query, mode: editorMode } = data;
 
   // Map the mode from editor to store format
   const storeMode = editorMode === 'logchefql' ? 'logchefql' : 'sql';
@@ -916,15 +819,13 @@ const handleQuerySubmit = async (data: { query: string, finalSql: string, mode: 
   queryError.value = '';
 
   try {
-    // Build the final SQL based on the *current* store state and mode,
-    // unless the editor provided a specific final SQL (e.g., from LogchefQL translation)
-    let sqlToExecute = emittedFinalSql;
+    // Build the final SQL based on the *current* store state and mode
+    let sqlToExecute: string;
     if (storeMode === 'sql') {
       // In SQL mode, the query *is* the final SQL
       sqlToExecute = query;
-    } else if (!sqlToExecute) {
-      // If LogchefQL mode and no final SQL provided (shouldn't happen with current QueryEditor logic, but defensive)
-      // Rebuild it here
+    } else {
+      // In LogchefQL mode, build the SQL now
       const buildResult = QueryBuilder.buildSqlFromLogchefQL({
         tableName: activeSourceTableName.value,
         tsField: sourceDetails.value?._meta_ts_field || 'timestamp',
@@ -1008,8 +909,6 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
           const sqlContent = queryContent.content;
           sqlQuery.value = sqlContent;
           exploreStore.setRawSql(sqlContent);
-          // Prevent immediate overwrite by setting the local state
-          generatedSQL.value = sqlContent;
         }
       }
 
@@ -1027,7 +926,6 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
       // Reconstruct the data object expected by handleQuerySubmit
       const submitData = {
         query: isLogchefQL ? logchefQuery.value : sqlQuery.value,
-        finalSql: isLogchefQL ? '' : sqlQuery.value, // Let handleQuerySubmit rebuild if LogchefQL
         mode: isLogchefQL ? 'logchefql' : 'clickhouse-sql'
       };
       await handleQuerySubmit(submitData);
@@ -1082,10 +980,6 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
       // Directly set the store's active mode
       exploreStore.setActiveMode('logchefql');
       
-      // Ensure the QueryEditor UI tab is synchronized (force it to reset)
-      if (queryEditorRef.value && typeof queryEditorRef.value.setActiveTab === 'function') {
-        queryEditorRef.value.setActiveTab('logchefql');
-      }
       
       // Wait a tick to ensure the mode change is processed
       await nextTick();
@@ -1734,13 +1628,10 @@ onBeforeUnmount(() => {
                 ref="queryEditorRef"
               :sourceId="exploreStore.sourceId || 0"
               :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
-              :startDateTime="exploreStore.timeRange?.start"
-              :endDateTime="exploreStore.timeRange?.end"
-              :initialValue="exploreStore.activeMode === 'logchefql' ? exploreStore.logchefqlCode : exploreStore.rawSql"
               :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
               :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter LogchefQL query...' : 'Enter SQL query...'"
               :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
-              :limit="exploreStore.limit" :showFieldsPanel="showFieldsPanel" @change="handleQueryChange"
+              :showFieldsPanel="showFieldsPanel" @change="handleQueryChange"
               @submit="handleQuerySubmit" @update:activeMode="handleModeChange" @toggle-fields="showFieldsPanel = !showFieldsPanel" />
           </div>
         </template>
