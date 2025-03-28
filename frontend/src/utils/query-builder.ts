@@ -178,9 +178,9 @@ export class QueryBuilder {
       limitClause
     ].join('\n'); // Join with newlines for readability
 
-    return { 
-      success: true, 
-      sql: finalSql, 
+    return {
+      success: true,
+      sql: finalSqlParts, // Correct variable name
       error: null,
       warnings: warnings.length > 0 ? warnings : undefined,
       meta

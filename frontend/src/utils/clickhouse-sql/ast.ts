@@ -1,3 +1,6 @@
+import type { CalendarDateTime } from '@internationalized/date';
+import { QueryBuilder } from '../query-builder'; // Import QueryBuilder for formatTimeCondition
+
 // Simple AST for SQL queries to help with dynamic updates
 export interface SQLNode {
   type: string;
