@@ -84,7 +84,9 @@ export function useSavedQueries() {
       const queryToLoad = content.content || ''
 
       // Reset state
-      exploreStore.clearError()
+      if (exploreStore.clearError) {
+        exploreStore.clearError()
+      }
 
       // Set mode
       exploreStore.setActiveMode(isLogchefQL ? 'logchefql' : 'sql')

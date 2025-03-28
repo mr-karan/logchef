@@ -84,7 +84,9 @@ export function useQueryExecution() {
   // Wrapper for executeQuery with error handling
   async function triggerQueryExecution() {
     localQueryError.value = ''
-    exploreStore.clearError()
+    if (exploreStore.clearError) {
+      exploreStore.clearError()
+    }
 
     try {
       const result = await executeQuery()
