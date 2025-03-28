@@ -36,6 +36,7 @@ import QueryEditor from '@/components/query-editor/QueryEditor.vue'
 import { FieldSideBar } from '@/components/field-sidebar'
 import { translateToSQLConditions } from '@/utils/logchefql/api'
 import { Parser as LogchefQLParser } from '@/utils/logchefql'
+import { SQLParser } from '@/utils/clickhouse-sql/ast'; // Import SQLParser
 import { QueryBuilder } from '@/utils/query-builder'
 import type { ColumnDef } from '@tanstack/vue-table'
 import type { SavedQueryContent } from '@/api/savedQueries'
