@@ -29,7 +29,7 @@ func isUniqueConstraintError(err error, table, column string) bool {
 	if errors.As(err, &sqliteErr) {
 		return sqliteErr.Code == sqlite3.ErrConstraint && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique
 	}
-	
+
 	// Fallback to string matching for compatibility
 	constraintErr := fmt.Sprintf("UNIQUE constraint failed: %s.%s", table, column)
 	return err != nil && strings.Contains(err.Error(), constraintErr)
