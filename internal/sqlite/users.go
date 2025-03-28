@@ -117,9 +117,6 @@ func (db *DB) CountAdminUsers(ctx context.Context) (int, error) {
 		Status: string(models.UserStatusActive),
 	})
 	count := int(count64)
-		Role:   string(models.UserRoleAdmin),
-		Status: string(models.UserStatusActive),
-	})
 	if err != nil {
 		db.log.Error("failed to count admin users", "error", err)
 		return 0, fmt.Errorf("failed to count admin users: %w", err)
