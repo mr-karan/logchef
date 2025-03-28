@@ -442,7 +442,7 @@ async function setupFromUrl() {
     if (route.query.mode && typeof route.query.mode === 'string') {
       const mode = route.query.mode as 'logchefql' | 'sql';
       if (mode === 'logchefql' || mode === 'sql') {
-        queryMode.value = mode;
+        // Directly set the store's active mode
         exploreStore.setActiveMode(mode);
       }
     }
@@ -454,10 +454,10 @@ async function setupFromUrl() {
         const decodedQuery = decodeURIComponent(route.query.q);
         
         // Preserve the query regardless of whether all details are loaded yet
-        if (queryMode.value === 'logchefql') {
+        if (exploreStore.activeMode === 'logchefql') {
           logchefQuery.value = decodedQuery;
           exploreStore.setLogchefqlCode(decodedQuery);
-        } else if (queryMode.value === 'sql') {
+        } else if (exploreStore.activeMode === 'sql') {
           // Preserve original SQL query without modification
           sqlQuery.value = decodedQuery;
           exploreStore.setRawSql(decodedQuery);
@@ -976,7 +976,7 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
       
       if (isLogchefQL) {
         console.log('Setting mode to logchefql for saved query');
-        queryMode.value = 'logchefql';
+        // Directly set the store's active mode
         exploreStore.setActiveMode('logchefql');
         
         // Ensure the QueryEditor UI tab is synchronized (force it to reset)
@@ -993,7 +993,7 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
         }
       } else {
         console.log('Setting mode to sql for saved query');
-        queryMode.value = 'sql';
+        // Directly set the store's active mode
         exploreStore.setActiveMode('sql');
         
         // Ensure the QueryEditor UI tab is synchronized (force it to reset)
@@ -1013,8 +1013,8 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
         }
       }
 
-      console.log('Saved query loaded, mode:', queryMode.value, 
-                  'content:', queryMode.value === 'logchefql' ? 
+      console.log('Saved query loaded, mode:', exploreStore.activeMode,
+                  'content:', exploreStore.activeMode === 'logchefql' ? 
                     logchefQuery.value : sqlQuery.value);
 
       // Update URL with current parameters
@@ -1024,7 +1024,13 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
       await nextTick();
       
       // Execute the query
-      await handleQuerySubmit(queryMode.value);
+      // Reconstruct the data object expected by handleQuerySubmit
+      const submitData = {
+        query: isLogchefQL ? logchefQuery.value : sqlQuery.value,
+        finalSql: isLogchefQL ? '' : sqlQuery.value, // Let handleQuerySubmit rebuild if LogchefQL
+        mode: isLogchefQL ? 'logchefql' : 'clickhouse-sql'
+      };
+      await handleQuerySubmit(submitData);
       return;
     }
 
@@ -1073,7 +1079,7 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
     // This is crucial to avoid incorrect query execution when a different tab was active
     if (query.query_type === 'logchefql') {
       console.log('Setting mode to logchefql for saved query from API');
-      queryMode.value = 'logchefql';
+      // Directly set the store's active mode
       exploreStore.setActiveMode('logchefql');
       
       // Ensure the QueryEditor UI tab is synchronized (force it to reset)
@@ -1091,7 +1097,7 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
       }
     } else {
       console.log('Setting mode to sql for saved query from API');
-      queryMode.value = 'sql';
+      // Directly set the store's active mode
       exploreStore.setActiveMode('sql');
       
       // Ensure the QueryEditor UI tab is synchronized (force it to reset)
@@ -1111,8 +1117,8 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
       }
     }
     
-    console.log('Saved query loaded from API, mode:', queryMode.value, 
-                'content:', queryMode.value === 'logchefql' ? 
+    console.log('Saved query loaded from API, mode:', exploreStore.activeMode,
+                'content:', exploreStore.activeMode === 'logchefql' ? 
                   logchefQuery.value : sqlQuery.value);
 
     // Update URL with current parameters
@@ -1122,7 +1128,14 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
     await nextTick();
     
     // Execute the query
-    await handleQuerySubmit(queryMode.value);
+    // Reconstruct the data object expected by handleQuerySubmit
+    const isLogchefQL = query.query_type === 'logchefql';
+    const submitData = {
+      query: isLogchefQL ? logchefQuery.value : sqlQuery.value,
+      finalSql: isLogchefQL ? '' : sqlQuery.value, // Let handleQuerySubmit rebuild if LogchefQL
+      mode: isLogchefQL ? 'logchefql' : 'clickhouse-sql'
+    };
+    await handleQuerySubmit(submitData);
 
     toast({
       title: 'Success',
@@ -1407,8 +1420,7 @@ onMounted(async () => {
 
     // Mode
     const mode = (route.query.mode === 'sql' ? 'sql' : 'logchefql') as 'logchefql' | 'sql';
-    exploreStore.setActiveMode(mode);
-    queryMode.value = mode;
+    exploreStore.setActiveMode(mode); // Set store directly
 
     // Query (set initial value in store for QueryEditor prop)
     const initialQuery = route.query.q ? decodeURIComponent(route.query.q as string) : "";

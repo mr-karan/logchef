@@ -94,7 +94,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, shallowRef, watch, onMounted, onBeforeUnmount, nextTick, reactive } from "vue";
+import { ref, computed, shallowRef, watch, onMounted, onBeforeUnmount, nextTick, reactive, watchEffect } from "vue";
 import * as monaco from "monaco-editor";
 import { useDark } from "@vueuse/core";
 import { VueMonacoEditor } from "@guolao/vue-monaco-editor";
@@ -1093,7 +1093,7 @@ const submitQuery = () => {
     }
     
     // Update store with latest content
-    if (activeMode.value === 'logchefql') {
+    if (props.activeMode === 'logchefql') {
       exploreStore.setLogchefqlCode(currentContent);
     } else {
       exploreStore.setRawSql(currentContent);
