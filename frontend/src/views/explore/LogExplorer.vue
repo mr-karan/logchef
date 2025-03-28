@@ -1662,6 +1662,7 @@ onBeforeUnmount(() => {
               :limit="exploreStore.limit" :showFieldsPanel="showFieldsPanel" @change="handleQueryChange"
               @submit="handleQuerySubmit" @toggle-fields="showFieldsPanel = !showFieldsPanel" />
           </div>
+        </template>
 
           <!-- Query Error Message -->
           <div v-if="queryError || exploreStore.error" class="mt-2 text-sm text-destructive bg-destructive/10 p-2 rounded">
