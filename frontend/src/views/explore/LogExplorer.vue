@@ -1287,6 +1287,9 @@ onMounted(async () => {
       isInitializing.value = false;
       return; // Stop initialization if no team
     }
+    
+    // Set default time range early to ensure it's always available
+    setDefaultTimeRange();
 
     // 3. Load Sources for the selected team
     await sourcesStore.loadTeamSources(teamsStore.currentTeamId);
@@ -1420,18 +1423,7 @@ onMounted(async () => {
     isInitializing.value = false; // Mark initialization complete BEFORE first URL update
     updateUrlWithCurrentState();
 
-    // 7. Trigger initial query execution if source is valid
-    if (exploreStore.sourceId > 0 && hasValidSource.value) {
-      console.log("Triggering initial query execution after mount.");
-      // Use the QueryEditor's submit mechanism to build the query
-      if (queryEditorRef.value) {
-        queryEditorRef.value.submitQuery();
-      } else {
-        console.warn("QueryEditor ref not available for initial submit.");
-      }
-    } else {
-      console.log("Skipping initial query execution (no valid source).");
-    }
+    // Initial query execution moved to a watch effect for better reliability
 
   } catch (error) {
     console.error("Error during LogExplorer mount:", error);
@@ -1446,6 +1438,67 @@ onMounted(async () => {
     isInitializing.value = false; // Ensure flag is reset
   }
 });
+
+// Helper to set default time range
+function setDefaultTimeRange() {
+  const nowDt = now(getLocalTimeZone());
+  const oneHourAgoDt = nowDt.subtract({ hours: 1 });
+  exploreStore.setTimeRange({
+    start: oneHourAgoDt,
+    end: nowDt
+  });
+  console.log('Default time range set in store.');
+}
+
+// Watch for conditions to be met for initial query execution
+watch(
+  [() => isInitializing.value, () => exploreStore.sourceId, () => hasValidSource.value, () => exploreStore.timeRange],
+  async ([initializing, sourceId, isValidSource, timeRange], [prevInitializing]) => {
+    // Only trigger once after initialization completes and all conditions are met
+    if (!initializing && prevInitializing && sourceId > 0 && isValidSource && timeRange) {
+      console.log("Conditions met for initial query execution.");
+      try {
+        // Build the initial SQL query explicitly
+        const buildOptions: any = { // Use 'any' temporarily if BuildSqlOptions type causes issues here
+          tableName: activeSourceTableName.value,
+          tsField: sourceDetails.value?._meta_ts_field || 'timestamp',
+          startDateTime: timeRange.start,
+          endDateTime: timeRange.end,
+          limit: exploreStore.limit,
+        };
+
+        let queryResult: { success: boolean; sql: string; error?: string | null };
+        if (exploreStore.activeMode === 'logchefql') {
+          buildOptions.logchefqlQuery = exploreStore.logchefqlCode;
+          queryResult = QueryBuilder.buildSqlFromLogchefQL(buildOptions);
+        } else {
+          // For SQL mode, use the raw SQL if present, otherwise generate default
+          queryResult = exploreStore.rawSql
+            ? { success: true, sql: exploreStore.rawSql, error: null } // Assume raw SQL is valid for initial load
+            : QueryBuilder.getDefaultSQLQuery(buildOptions);
+        }
+
+        if (queryResult.success) {
+          await exploreStore.executeQuery(queryResult.sql); // Pass the built SQL
+        } else {
+          throw new Error(queryResult.error || "Failed to build initial query");
+        }
+      } catch (buildError: any) {
+        console.error("Error building or executing initial query:", buildError);
+        queryError.value = buildError.message || "Failed to run initial query";
+        toast({
+          title: "Initial Query Error",
+          description: queryError.value,
+          variant: "destructive",
+          duration: TOAST_DURATION.ERROR,
+        });
+      }
+    } else if (!initializing && prevInitializing && (sourceId <= 0 || !isValidSource)) {
+      console.log("Skipping initial query execution (no valid source after initialization).");
+    }
+  },
+  { immediate: false } // Don't run immediately, wait for changes after mount
+);
 
 onBeforeUnmount(() => {
   if (import.meta.env.MODE !== 'production') {
@@ -1636,9 +1689,11 @@ onBeforeUnmount(() => {
       <div class="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
         <!-- Query Editor Section -->
         <div class="p-3 pb-2">
-          <div class="rounded-md border-t bg-card">
-            <QueryEditor
-              ref="queryEditorRef"
+          <!-- Only render QueryEditor when timeRange AND sourceDetails are available -->
+          <template v-if="exploreStore.timeRange && sourceDetails">
+            <div class="rounded-md border-t bg-card">
+              <QueryEditor
+                ref="queryEditorRef"
               :sourceId="exploreStore.sourceId || 0"
               :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
               :startDateTime="exploreStore.timeRange?.start"
