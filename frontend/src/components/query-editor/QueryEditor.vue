@@ -220,24 +220,7 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
   editorModel.value = editor.getModel();
 
   // Set initial content directly based on props and mode
-  let initialContent = props.initialValue ?? "";
-  if (!initialContent && props.activeMode === 'clickhouse-sql') {
-    // If SQL mode and no initial value, generate default SQL using date objects
-    if (props.startDateTime && props.endDateTime) {
-      const defaultOptions: Omit<BuildSqlOptions, 'logchefqlQuery'> = {
-        tableName: props.tableName,
-        tsField: props.tsField,
-        startDateTime: props.startDateTime,
-        endDateTime: props.endDateTime,
-        limit: props.limit
-      };
-      const defaultQuery = QueryBuilder.getDefaultSQLQuery(defaultOptions);
-      initialContent = defaultQuery.sql || "";
-    } else {
-      // Fallback if date props are not ready
-      initialContent = `SELECT *\nFROM \`${props.tableName}\`\n-- Waiting for date range...\nORDER BY \`${props.tsField}\` DESC\nLIMIT ${props.limit}`;
-    }
-  }
+  const initialContent = props.initialValue ?? "";
   // Use runProgrammaticUpdate to set initial content without triggering change events
   runProgrammaticUpdate(initialContent);
 

@@ -1281,14 +1281,34 @@ const handleModeChange = async (newEditorMode: 'logchefql' | 'clickhouse-sql') =
       console.warn("Cannot translate LogchefQL to SQL: Missing time range or source details.");
       exploreStore.setRawSql(`-- Cannot translate: Missing time range or source details`);
     }
+  } else if (newStoreMode === 'sql' && !exploreStore.rawSql?.trim()) {
+    // Switching TO SQL mode and the current SQL content is empty, generate default
+    if (exploreStore.timeRange && sourceDetails.value) {
+      const defaultResult = QueryBuilder.getDefaultSQLQuery({
+        tableName: activeSourceTableName.value,
+        tsField: sourceDetails.value._meta_ts_field || 'timestamp',
+        startDateTime: exploreStore.timeRange.start,
+        endDateTime: exploreStore.timeRange.end,
+        limit: exploreStore.limit,
+      });
+      if (defaultResult.success) {
+        exploreStore.setRawSql(defaultResult.sql);
+      } else {
+        console.warn("Failed to generate default SQL on mode switch:", defaultResult.error);
+        exploreStore.setRawSql(`-- Error generating default SQL: ${defaultResult.error}`);
+      }
+    } else {
+      console.warn("Cannot generate default SQL: Missing time range or source details.");
+      exploreStore.setRawSql(`-- Cannot generate default SQL: Missing time range or source details`);
+    }
   }
   // Note: No translation needed when switching from SQL to LogchefQL
 
   // Update the store's active mode
   exploreStore.setActiveMode(newStoreMode);
 
-  // Update URL to reflect the mode change
-  updateUrlWithCurrentState();
+  // Remove URL update from here - only update URL on query submission
+  // updateUrlWithCurrentState();
 
   // Clear validation error from previous mode
   queryError.value = null;
