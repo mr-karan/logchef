@@ -616,12 +616,17 @@ onBeforeUnmount(() => {
           </template>
 
           <!-- Run Button -->
-          <div class="mt-2 flex justify-end" v-if="currentSourceId && hasValidSource && exploreStore.timeRange">
-            <Button variant="default" size="md" class="px-4 flex items-center gap-2 transition-colors duration-200"
-              :class="{ 'bg-primary/80 hover:bg-primary/70': isDirty && !isExecutingQuery }"
+          <div class="mt-3 flex justify-start" v-if="currentSourceId && hasValidSource && exploreStore.timeRange">
+            <Button variant="primary" size="md" 
+              class="px-5 py-2 h-10 flex items-center gap-2 font-medium shadow-sm transition-all duration-200"
+              :class="{ 
+                'bg-primary hover:bg-primary/90': !isDirty && !isExecutingQuery, 
+                'bg-green-600 hover:bg-green-700': isDirty && !isExecutingQuery,
+                'bg-blue-500 hover:bg-blue-600 animate-pulse': isExecutingQuery
+              }"
               :disabled="isExecutingQuery || !canExecuteQuery" @click="triggerQueryExecution">
-              <Play class="h-4 w-4" />
-              <span>{{ isExecutingQuery ? 'Running...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>
+              <Play class="h-4 w-4" :class="{ 'animate-spin': isExecutingQuery }" />
+              <span>{{ isExecutingQuery ? 'Running Query...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>
             </Button>
           </div>
 
