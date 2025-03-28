@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -54,7 +55,7 @@ func (db *DB) GetSource(ctx context.Context, id models.SourceID) (*models.Source
 		return nil, handleNotFoundError(err, "error getting source")
 	}
 
-	source := mapSourceRowToModel(&row)
+	source := mapSourceRowToModel(sourceRow)
 	return source, nil
 }
 
@@ -70,7 +71,7 @@ func (db *DB) GetSourceByName(ctx context.Context, database, tableName string) (
 		return nil, handleNotFoundError(err, "error getting source by name")
 	}
 
-	source := mapSourceRowToModel(&row)
+	source := mapSourceRowToModel(sourceRow)
 	return source, nil
 }
 
@@ -83,10 +84,9 @@ func (db *DB) ListSources(ctx context.Context) ([]*models.Source, error) {
 		db.log.Error("failed to list sources", "error", err)
 		return nil, fmt.Errorf("error listing sources: %w", err)
 	}
-	defer rows.Close()
 
 	var sources []*models.Source
-	for rows.Next() {
+	for _, sourceRow := range sourceRows {
 		var row SourceRow
 		if err := rows.StructScan(&row); err != nil {
 			db.log.Error("failed to scan source row", "error", err)
