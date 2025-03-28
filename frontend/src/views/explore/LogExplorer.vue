@@ -66,10 +66,7 @@ const logchefQuery = ref('')
 const sqlQuery = ref('')
 const queryError = ref('')
 const showFieldsPanel = ref(false)
-const queryMode = computed({
-  get: () => exploreStore.activeMode,
-  set: (value) => exploreStore.setActiveMode(value)
-})
+// No longer need local computed for queryMode, rely directly on store
 const generatedSQL = ref('')
 // Use store's loading state instead of local state
 const isExecutingQuery = computed(() => exploreStore.isLoadingOperation('executeQuery'))
@@ -876,13 +873,7 @@ watch(
   { immediate: true }
 )
 
-// Watch for changes in queryMode to update URL
-watch(
-  () => queryMode.value,
-  () => {
-    updateUrlWithCurrentState();
-  }
-)
+// Mode changes now handled by handleModeChange function
 
 // Handle query submission from QueryEditor
 const handleQuerySubmit = async (data: { query: string, finalSql: string, mode: string }) => {
@@ -897,16 +888,16 @@ const handleQuerySubmit = async (data: { query: string, finalSql: string, mode: 
     return;
   }
     
-  const { query, finalSql, mode } = data;
+  const { query, finalSql: emittedFinalSql, mode: editorMode } = data; // Use emitted finalSql
 
   // Map the mode from editor to store format
-  const mappedMode = mode === 'logchefql' ? 'logchefql' : 'sql';
+  const storeMode = editorMode === 'logchefql' ? 'logchefql' : 'sql';
 
   // Update the store's active mode
-  exploreStore.setActiveMode(mappedMode);
+  exploreStore.setActiveMode(storeMode);
 
   // Update the appropriate query state in the store
-  if (mappedMode === 'logchefql') {
+  if (storeMode === 'logchefql') {
     exploreStore.setLogchefqlCode(query);
     // Ensure local state is also updated for consistency
     logchefQuery.value = query;
@@ -925,8 +916,29 @@ const handleQuerySubmit = async (data: { query: string, finalSql: string, mode: 
   queryError.value = '';
 
   try {
-    // Execute the query with the final SQL
-    const result = await exploreStore.executeQuery(finalSql);
+    // Build the final SQL based on the *current* store state and mode,
+    // unless the editor provided a specific final SQL (e.g., from LogchefQL translation)
+    let sqlToExecute = emittedFinalSql;
+    if (storeMode === 'sql') {
+      // In SQL mode, the query *is* the final SQL
+      sqlToExecute = query;
+    } else if (!sqlToExecute) {
+      // If LogchefQL mode and no final SQL provided (shouldn't happen with current QueryEditor logic, but defensive)
+      // Rebuild it here
+      const buildResult = QueryBuilder.buildSqlFromLogchefQL({
+        tableName: activeSourceTableName.value,
+        tsField: sourceDetails.value?._meta_ts_field || 'timestamp',
+        startDateTime: exploreStore.timeRange!.start, // Assume timeRange is valid here
+        endDateTime: exploreStore.timeRange!.end,
+        limit: exploreStore.limit,
+        logchefqlQuery: query
+      });
+      if (!buildResult.success) throw new Error(buildResult.error || "Failed to build query");
+      sqlToExecute = buildResult.sql;
+    }
+
+    // Execute the query with the determined final SQL
+    const result = await exploreStore.executeQuery(sqlToExecute);
       
     // Store error message if query failed, but toast is already shown by base store
     if (!result.success && result.error) {
@@ -1223,6 +1235,52 @@ async function handleSaveQuery(formData: any) {
   }
 }
 
+// Handle mode changes emitted from QueryEditor
+const handleModeChange = async (newEditorMode: 'logchefql' | 'clickhouse-sql') => {
+  const newStoreMode = newEditorMode === 'logchefql' ? 'logchefql' : 'sql';
+  const oldStoreMode = exploreStore.activeMode;
+
+  if (newStoreMode === oldStoreMode) return;
+
+  console.log(`LogExplorer: Handling mode change from ${oldStoreMode} to ${newStoreMode}`);
+
+  // Get current content before switching mode
+  const currentContent = oldStoreMode === 'logchefql' ? exploreStore.logchefqlCode : exploreStore.rawSql;
+
+  // Handle translation when switching from LogchefQL to SQL
+  if (oldStoreMode === 'logchefql' && newStoreMode === 'sql' && currentContent?.trim()) {
+    if (exploreStore.timeRange && sourceDetails.value) {
+      const buildResult = QueryBuilder.buildSqlFromLogchefQL({
+        tableName: activeSourceTableName.value,
+        tsField: sourceDetails.value._meta_ts_field || 'timestamp',
+        startDateTime: exploreStore.timeRange.start,
+        endDateTime: exploreStore.timeRange.end,
+        limit: exploreStore.limit,
+        logchefqlQuery: currentContent
+      });
+      if (buildResult.success) {
+        exploreStore.setRawSql(buildResult.sql);
+      } else {
+        console.warn("Failed to translate LogchefQL to SQL on mode switch:", buildResult.error);
+        exploreStore.setRawSql(`-- Error translating LogchefQL: ${buildResult.error}`);
+      }
+    } else {
+      console.warn("Cannot translate LogchefQL to SQL: Missing time range or source details.");
+      exploreStore.setRawSql(`-- Cannot translate: Missing time range or source details`);
+    }
+  }
+  // Note: No translation needed when switching from SQL to LogchefQL
+
+  // Update the store's active mode
+  exploreStore.setActiveMode(newStoreMode);
+
+  // Update URL to reflect the mode change
+  updateUrlWithCurrentState();
+
+  // Clear validation error from previous mode
+  queryError.value = null;
+};
+
 // Handle query changes from editor - simplified
 const handleQueryChange = (data: { query: string, mode: string }) => {
   // Ensure data is an object before destructuring
@@ -1233,17 +1291,8 @@ const handleQueryChange = (data: { query: string, mode: string }) => {
 
   const { query, mode } = data;
   
-  // Map the mode from editor to store format
-  const mappedMode = mode === 'logchefql' ? 'logchefql' : 'sql';
-
-  // Update the store's active mode if it changed
-  if (queryMode.value !== mappedMode) {
-    queryMode.value = mappedMode;
-    exploreStore.setActiveMode(mappedMode);
-  }
-
   // Update the appropriate query state in the store
-  if (mappedMode === 'logchefql') {
+  if (mode === 'logchefql') {
     exploreStore.setLogchefqlCode(query);
     logchefQuery.value = query;
   } else {
@@ -1656,11 +1705,11 @@ onBeforeUnmount(() => {
               :startDateTime="exploreStore.timeRange?.start"
               :endDateTime="exploreStore.timeRange?.end"
               :initialValue="exploreStore.activeMode === 'logchefql' ? exploreStore.logchefqlCode : exploreStore.rawSql"
-              :initialTab="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
+              :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
               :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter LogchefQL query...' : 'Enter SQL query...'"
               :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
               :limit="exploreStore.limit" :showFieldsPanel="showFieldsPanel" @change="handleQueryChange"
-              @submit="handleQuerySubmit" @toggle-fields="showFieldsPanel = !showFieldsPanel" />
+              @submit="handleQuerySubmit" @update:activeMode="handleModeChange" @toggle-fields="showFieldsPanel = !showFieldsPanel" />
           </div>
         </template>
 

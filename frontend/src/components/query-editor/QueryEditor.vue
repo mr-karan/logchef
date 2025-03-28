@@ -14,8 +14,8 @@
           <PanelRightOpen v-else class="h-4 w-4" />
         </button>
 
-        <!-- Tabs for Mode Switching -->
-        <Tabs :model-value="activeMode" @update:model-value="handleTabChange" class="w-auto">
+        <!-- Tabs for Mode Switching - Emit event -->
+        <Tabs :model-value="props.activeMode" @update:model-value="$emit('update:activeMode', $event)" class="w-auto">
           <TabsList class="h-8">
             <TabsTrigger value="logchefql">LogchefQL</TabsTrigger>
             <TabsTrigger value="clickhouse-sql">SQL</TabsTrigger>
@@ -24,8 +24,8 @@
       </div>
 
       <div class="flex items-center gap-2">
-        <!-- Table name indicator (SQL mode) -->
-        <div v-if="activeMode === 'clickhouse-sql'" class="text-xs text-muted-foreground mr-2">
+        <!-- Table name indicator (SQL mode) - Use prop -->
+        <div v-if="props.activeMode === 'clickhouse-sql'" class="text-xs text-muted-foreground mr-2">
           <template v-if="props.tableName">
             <span class="mr-1">Table:</span>
             <code class="bg-muted px-1.5 py-0.5 rounded text-xs">{{ props.tableName }}</code>
@@ -43,8 +43,8 @@
           <HoverCardContent class="w-80 backdrop-blur-md bg-card text-card-foreground border-border shadow-lg" side="bottom" align="end">
              <!-- Help Content (Keep existing template) -->
              <div class="space-y-2">
-              <h4 class="text-sm font-semibold">{{ activeMode === 'logchefql' ? 'LogchefQL' : 'SQL' }} Syntax</h4>
-              <div v-if="activeMode === 'logchefql'" class="text-xs space-y-1.5">
+              <h4 class="text-sm font-semibold">{{ props.activeMode === 'logchefql' ? 'LogchefQL' : 'SQL' }} Syntax</h4>
+              <div v-if="props.activeMode === 'logchefql'" class="text-xs space-y-1.5">
                  <!-- LogchefQL Help -->
                  <div><code class="bg-muted px-1 rounded">field="value"</code> - Exact match</div>
                  <div><code class="bg-muted px-1 rounded">field!="value"</code> - Not equal</div>
@@ -74,10 +74,10 @@
       :class="{ 'ring-1 ring-primary/50 border-primary/50': editorFocused }"
     >
       <vue-monaco-editor
-        :key="activeMode"
+        :key="props.activeMode"
         v-model:value="editorContent"
         :theme="theme"
-        :language="activeMode"
+        :language="props.activeMode"
         :options="monacoOptions"
         @mount="handleMount"
         @update:value="handleEditorChange"
@@ -126,7 +126,7 @@ const props = defineProps({
   startDateTime: { type: Object as () => CalendarDateTime | undefined, required: true },
   endDateTime: { type: Object as () => CalendarDateTime | undefined, required: true },
   initialValue: { type: String, default: "" },
-  initialTab: { type: String as () => 'logchefql' | 'sql', default: "logchefql" },
+  activeMode: { type: String as () => EditorMode, required: true }, // Changed from initialTab to activeMode
   placeholder: { type: String, default: "" },
   tsField: { type: String, default: "timestamp" },
   tableName: { type: String, required: true },
@@ -137,6 +137,7 @@ const props = defineProps({
 const emit = defineEmits<{
   (e: "change", value: EditorChangeEvent): void;
   (e: "submit", value: EditorChangeEvent): void;
+  (e: "update:activeMode", value: EditorMode): void; // Add event for mode changes
   (e: "toggle-fields"): void;
 }>();
 
@@ -156,9 +157,7 @@ const editorContent = ref(props.initialValue ?? "");
 // Reactive state for options to allow dynamic updates
 const monacoOptions = reactive(getDefaultMonacoOptions());
 
-// Determine initial mode based on prop and store, prioritizing prop
-const initialMode: EditorMode = props.initialTab === 'sql' ? 'clickhouse-sql' : 'logchefql';
-const activeMode = ref<EditorMode>(initialMode);
+// No longer need local activeMode ref - use prop directly
 
 // Flag to prevent feedback loops during programmatic updates
 const isProgrammaticChange = ref(false);
@@ -222,7 +221,7 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
 
   // Set initial content directly based on props and mode
   let initialContent = props.initialValue ?? "";
-  if (!initialContent && activeMode.value === 'clickhouse-sql') {
+  if (!initialContent && props.activeMode === 'clickhouse-sql') {
     // If SQL mode and no initial value, generate default SQL using date objects
     if (props.startDateTime && props.endDateTime) {
       const defaultOptions: Omit<BuildSqlOptions, 'logchefqlQuery'> = {
@@ -284,7 +283,7 @@ const handleEditorChange = (value: string | undefined) => {
   editorContent.value = currentQuery; // Update local ref immediately
 
   // Update the store based on the current mode
-  if (activeMode.value === 'logchefql') {
+  if (props.activeMode === 'logchefql') {
     exploreStore.setLogchefqlCode(currentQuery);
   } else {
     exploreStore.setRawSql(currentQuery);
@@ -296,7 +295,7 @@ const handleEditorChange = (value: string | undefined) => {
   }
 
   // Emit change event
-  emit("change", { query: currentQuery, mode: activeMode.value });
+  emit("change", { query: currentQuery, mode: props.activeMode });
       
   // Re-register completion provider if we change content
   // This helps ensure proper suggestions after typing "and" or "or"
@@ -314,7 +313,7 @@ const runProgrammaticUpdate = (newValue: string) => {
 
 const syncEditorContentWithStore = (isInitialSync = false) => {
     let storeValue: string | undefined;
-    if (activeMode.value === 'logchefql') {
+    if (props.activeMode === 'logchefql') {
         storeValue = exploreStore.logchefqlCode;
     } else {
         storeValue = exploreStore.rawSql;
@@ -329,71 +328,7 @@ const syncEditorContentWithStore = (isInitialSync = false) => {
 };
 
 // --- Mode Switching ---
-const handleTabChange = async (newMode: EditorMode) => {
-  if (newMode === activeMode.value) return;
-
-  // Save current editor content to the appropriate store property
-  if (activeMode.value === 'logchefql') {
-    exploreStore.setLogchefqlCode(editorContent.value);
-    
-    // Handle translation when switching from LogchefQL to SQL
-    if (newMode === 'clickhouse-sql' && editorContent.value.trim()) {
-      const translation = parseAndTranslateLogchefQL(editorContent.value);
-      if (translation.success) {
-        // Generate SQL from LogchefQL using date objects
-        if (props.startDateTime && props.endDateTime) {
-          exploreStore.setRawSql(
-            QueryBuilder.buildSqlFromLogchefQL({
-              tableName: props.tableName,
-              tsField: props.tsField,
-              startDateTime: props.startDateTime,
-              endDateTime: props.endDateTime,
-              limit: props.limit,
-              logchefqlQuery: editorContent.value
-            }).sql
-          );
-        } else {
-          console.warn("Cannot translate LogchefQL to SQL: Date range not available.");
-          // Set a placeholder or keep the existing SQL
-          exploreStore.setRawSql(`-- Error: Date range not available for translation`);
-        }
-      }
-    }
-  } else {
-    exploreStore.setRawSql(editorContent.value);
-  }
-
-  // Update active mode first
-  activeMode.value = newMode;
-  exploreStore.setActiveMode(newMode === 'clickhouse-sql' ? 'sql' : 'logchefql');
-
-  // Then update editor content from the store
-  const newContent = newMode === 'logchefql' 
-    ? (typeof exploreStore.logchefqlCode === 'string' ? exploreStore.logchefqlCode : '')
-    : (typeof exploreStore.rawSql === 'string' ? exploreStore.rawSql : '');
-  
-  runProgrammaticUpdate(newContent || '');
-
-  // Force editor language update
-  nextTick(() => {
-    if (editorRef.value) {
-      const model = editorRef.value.getModel();
-      if (model) {
-        monaco.editor.setModelLanguage(model, newMode);
-        // Set cursor to end of document
-        const lastLine = model.getLineCount();
-        const lastColumn = model.getLineMaxColumn(lastLine);
-        editorRef.value.setPosition({ lineNumber: lastLine, column: lastColumn });
-      }
-    }
-  });
-  
-  // Clear validation error from previous mode
-  validationError.value = null;
-  
-  // Emit change event
-  emit("change", { query: editorContent.value, mode: newMode });
-};
+// handleTabChange removed - parent component now handles mode switching
 
 // Helper function to update editor language and options
 const updateEditorLanguageAndOptions = (mode: EditorMode) => {
@@ -554,15 +489,9 @@ const getValueSuggestions = async (key: string, value: string, range: any, quote
 onMounted(() => {
   try {
     initMonacoSetup(); // Initialize themes, languages (runs once internally)
-
-    // Set initial content based on mode and store/props
-    syncEditorContentWithStore(true);
-
-    // Set initial mode in store if it differs
-    if (exploreStore.activeMode !== activeMode.value) {
-      exploreStore.setActiveMode(activeMode.value === 'clickhouse-sql' ? 'sql' : 'logchefql');
-    }
-
+    
+    // Initial content sync now handled by watchEffect
+    
   } catch (error) {
     console.error("QueryEditor: Error during mount:", error);
     validationError.value = "Failed to initialize editor.";
@@ -573,7 +502,7 @@ onMounted(() => {
 const theme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
 
 const currentPlaceholder = computed(() => {
-    if (activeMode.value === 'logchefql') {
+    if (props.activeMode === 'logchefql') {
         return props.placeholder || 'Enter LogchefQL query (e.g., level="error" and status>400)';
     } else {
         return props.placeholder || `Enter ClickHouse SQL query for table ${props.tableName || '...'}`;
@@ -586,7 +515,7 @@ const editorHeight = computed(() => {
   const lines = (content.match(/\n/g) || []).length + 1;
   const lineHeight = monacoOptions.lineHeight || 21; // Use configured line height
   const padding = (monacoOptions.padding?.top ?? 8) + (monacoOptions.padding?.bottom ?? 8);
-  const minHeight = activeMode.value === 'logchefql' ? 45 : 90; // Smaller min for LogchefQL
+  const minHeight = props.activeMode === 'logchefql' ? 45 : 90; // Smaller min for LogchefQL
   const calculatedHeight = padding + lines * lineHeight;
   return Math.max(minHeight, calculatedHeight);
 });
@@ -596,13 +525,7 @@ onMounted(() => {
   try {
     initMonacoSetup(); // Initialize themes, languages (runs once internally)
 
-    // Set initial content based on mode and store/props
-    syncEditorContentWithStore(true);
-
-    // Set initial mode in store if it differs
-    if (exploreStore.activeMode !== activeMode.value) {
-      exploreStore.setActiveMode(activeMode.value === 'clickhouse-sql' ? 'sql' : 'logchefql');
-    }
+    // Initial content sync now handled by watchEffect
 
   } catch (error) {
     console.error("QueryEditor: Error during mount:", error);
@@ -1003,7 +926,7 @@ const updateMonacoOptions = () => {
       return;
     }
 
-    const isSqlMode = activeMode.value === 'clickhouse-sql';
+    const isSqlMode = props.activeMode === 'clickhouse-sql';
 
     // Update reactive options object
     Object.assign(monacoOptions, {
@@ -1042,7 +965,7 @@ const registerCompletionProvider = () => {
   disposeCompletionProviders(); // Dispose previous before registering new
 
   let provider: monaco.IDisposable | null = null;
-  if (activeMode.value === 'logchefql') {
+  if (props.activeMode === 'logchefql') {
     provider = registerLogchefQLCompletionProvider();
   } else {
     provider = registerSQLCompletionProvider();
@@ -1054,11 +977,34 @@ const registerCompletionProvider = () => {
 };
 
 // --- Watchers ---
+// Add watchers for mode and content synchronization
+watchEffect(() => {
+  if (editorRef.value) {
+    const model = editorRef.value.getModel();
+    if (model) {
+      monaco.editor.setModelLanguage(model, props.activeMode);
+    }
+    updateMonacoOptions(); // Update folding, line numbers etc.
+    registerCompletionProvider(); // Update syntax highlighting/completion
+  }
+  // Sync content from store when mode changes
+  syncEditorContentWithStore();
+});
+
+// Watch initialValue prop (might be needed if parent loads data async)
+watch(() => props.initialValue, (newInitialValue) => {
+  // Only update if the editor content hasn't been manually changed yet
+  // or if the mode matches the initial value's intended mode
+  if (editorContent.value === "" || editorContent.value !== newInitialValue) {
+     syncEditorContentWithStore(); // Re-sync based on current mode and store
+  }
+});
+
 // Watch for date changes to update SQL query
 watch([() => props.startDateTime, () => props.endDateTime], ([newStart, newEnd], [oldStart, oldEnd]) => {
   // Only run if in SQL mode, dates are valid, and dates actually changed
   if (
-    activeMode.value === 'clickhouse-sql' &&
+    props.activeMode === 'clickhouse-sql' &&
     newStart && newEnd &&
     editorRef.value &&
     !isProgrammaticChange.value && // Avoid loops
@@ -1134,7 +1080,7 @@ const submitQuery = () => {
   
   try {
     // Validate query based on mode
-    if (activeMode.value === 'logchefql') {
+    if (props.activeMode === 'logchefql') {
       if (!validateLogchefQL(currentContent) && currentContent.trim()) {
         validationError.value = "Invalid LogchefQL syntax.";
         return;
@@ -1154,7 +1100,7 @@ const submitQuery = () => {
     }
     
     // Trigger execution through store
-    exploreStore.executeQuery();
+    emit('submit', { query: currentContent, finalSql: currentContent, mode: props.activeMode }); // Emit submit event
     
   } catch (e: any) {
     console.error("Error preparing query:", e);
@@ -1229,7 +1175,7 @@ const safelyDisposeEditor = () => {
 // --- Expose ---
 defineExpose({
   submitQuery,
-  setActiveMode: handleTabChange, // Expose function to allow parent control
+  // setActiveMode no longer needed - parent controls via prop
   code: computed(() => editorContent.value)
 });
 
