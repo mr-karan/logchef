@@ -946,151 +946,23 @@ const handleQueryChange = (data: { query: string, mode: string }) => {
 
 // Component lifecycle with improved initialization sequence
 onMounted(async () => {
-  isInitializing.value = true;
   console.log("LogExplorer component mounting - Simplified");
-
   try {
-    // 1. Load Teams
-    await teamsStore.loadTeams();
-    isTeamsLoaded.value = true;
-
-    // 2. Set Team from URL or default
-    let teamId = null;
-    if (route.query.team && typeof route.query.team === 'string') {
-      teamId = parseInt(route.query.team);
-      if (isNaN(teamId) || !teamsStore.teams.some(t => t.id === teamId)) {
-        urlError.value = `Invalid or inaccessible team ID: ${route.query.team}.`;
-        teamId = teamsStore.teams[0]?.id || null; // Fallback
-      }
-    } else {
-      teamId = teamsStore.teams[0]?.id || null; // Default to first team
-    }
-    if (teamId) {
-      teamsStore.setCurrentTeam(teamId);
-    } else {
-      urlError.value = "No teams available or accessible.";
-      isInitializing.value = false;
-      return; // Stop initialization if no team
-    }
-    
-    // Set default time range early to ensure it's always available
-    setDefaultTimeRange();
-
-    // 3. Load Sources for the selected team
-    await sourcesStore.loadTeamSources(teamsStore.currentTeamId);
-    isSourcesLoaded.value = true;
-
-    // 4. Set Source from URL or default
-    let sourceId = null;
-    if (route.query.source && typeof route.query.source === 'string') {
-      sourceId = parseInt(route.query.source);
-      if (isNaN(sourceId) || !sourcesStore.teamSources.some(s => s.id === sourceId)) {
-        urlError.value = `Invalid or inaccessible source ID: ${route.query.source} for team ${teamsStore.currentTeamId}.`;
-        sourceId = sourcesStore.teamSources[0]?.id || null; // Fallback
-      }
-    } else {
-      sourceId = sourcesStore.teamSources[0]?.id || null; // Default to first source
-    }
-    if (sourceId) {
-      exploreStore.setSource(sourceId);
-      await sourcesStore.loadSourceDetails(sourceId); // Fetch details needed for props
-    } else {
-      urlError.value = `No sources available for team ${teamsStore.currentTeamId}.`;
-      // Don't stop initialization, allow user to select source
-    }
-
-    // 5. Set Limit, Time, Mode, Query from URL directly into the store
-    // Limit
-    const limit = parseInt(route.query.limit as string || '100');
-    exploreStore.setLimit(!isNaN(limit) && limit > 0 && limit <= 10000 ? limit : 100);
-
-    // Time Range
-    if (route.query.start_time && route.query.end_time) {
-      try {
-        const startValue = parseInt(route.query.start_time as string);
-        const endValue = parseInt(route.query.end_time as string);
-
-        if (!isNaN(startValue) && !isNaN(endValue)) {
-          const startDate = new Date(startValue);
-          const endDate = new Date(endValue);
-
-          // Create CalendarDateTime objects
-          const start = new CalendarDateTime(
-            startDate.getFullYear(),
-            startDate.getMonth() + 1,
-            startDate.getDate(),
-            startDate.getHours(),
-            startDate.getMinutes(),
-            startDate.getSeconds()
-          );
-
-          const end = new CalendarDateTime(
-            endDate.getFullYear(),
-            endDate.getMonth() + 1,
-            endDate.getDate(),
-            endDate.getHours(),
-            endDate.getMinutes(),
-            endDate.getSeconds()
-          );
-
-          exploreStore.setTimeRange({ start, end });
-        }
-      } catch (e) {
-        console.error('Failed to parse time range from URL, keeping default', e);
-        // Use the default time range already set earlier
-      }
-    }
-
-    // Mode
-    const mode = (route.query.mode === 'sql' ? 'sql' : 'logchefql') as 'logchefql' | 'sql';
-    exploreStore.setActiveMode(mode); // Set store directly
-
-    // Query (set initial value in store for QueryEditor prop)
-    const initialQuery = route.query.q ? decodeURIComponent(route.query.q as string) : "";
-    if (mode === 'logchefql') {
-      exploreStore.setLogchefqlCode(initialQuery);
-      logchefQuery.value = initialQuery;
-      exploreStore.setRawSql(""); // Clear other mode
-      sqlQuery.value = "";
-    } else {
-      exploreStore.setRawSql(initialQuery);
-      sqlQuery.value = initialQuery;
-      exploreStore.setLogchefqlCode(""); // Clear other mode
-      logchefQuery.value = "";
-    }
-
-    // 6. Update URL to reflect final initial state
-    // Use nextTick to ensure all store updates are processed
-    await nextTick();
-    isInitializing.value = false; // Mark initialization complete BEFORE first URL update
-    updateUrlWithCurrentState();
+    // Call the initialization function from the composable
+    await initializeFromUrl();
 
     // Initial query execution moved to a watch effect for better reliability
 
   } catch (error) {
     console.error("Error during LogExplorer mount:", error);
-    urlError.value = "Error initializing the explorer.";
     toast({
       title: "Explorer Error",
       description: "Error initializing the explorer. Please try refreshing the page.",
       variant: "destructive",
       duration: TOAST_DURATION.ERROR,
     });
-  } finally {
-    isInitializing.value = false; // Ensure flag is reset
   }
 });
-
-// Helper to set default time range
-function setDefaultTimeRange() {
-  const nowDt = now(getLocalTimeZone());
-  const oneHourAgoDt = nowDt.subtract({ hours: 1 });
-  exploreStore.setTimeRange({
-    start: oneHourAgoDt,
-    end: nowDt
-  });
-  console.log('Default time range set in store.');
-}
 
 // Watch for conditions to be met for initial query execution
 watch(
