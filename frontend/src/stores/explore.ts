@@ -459,6 +459,11 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.lastExecutedState = executedState;
   }
 
+  // Clear error helper
+  function clearError() {
+    state.error.value = null;
+  }
+
   // Return the store
   return {
     // State
@@ -499,6 +504,7 @@ export const useExploreStore = defineStore("explore", () => {
     resetState,
     executeQuery,
     getLogContext,
+    clearError,
 
     // Loading state helpers
     isLoadingOperation: state.isLoadingOperation,
