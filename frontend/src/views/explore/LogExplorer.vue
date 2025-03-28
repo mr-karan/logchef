@@ -911,8 +911,8 @@ const handleModeChange = async (newEditorMode: 'logchefql' | 'clickhouse-sql') =
   // Update the store's active mode
   exploreStore.setActiveMode(newStoreMode);
 
-  // Remove URL update from here - only update URL on query submission
-  // updateUrlWithCurrentState();
+  // Sync URL immediately when mode changes
+  syncUrlFromState();
 
   // Clear validation error from previous mode
   queryError.value = null;
