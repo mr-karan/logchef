@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"time"
 
 	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -270,7 +269,7 @@ func (db *DB) ListTeamQueries(ctx context.Context, teamID models.TeamID) ([]*mod
 		if sq.Description.Valid {
 			description = sq.Description.String
 		}
-		
+
 		queries[i] = &models.TeamQuery{
 			ID:           int(sq.ID),
 			TeamID:       models.TeamID(sq.TeamID),
@@ -306,7 +305,7 @@ func (db *DB) ListSavedTeamQueries(ctx context.Context, teamID models.TeamID) ([
 		if sq.Description.Valid {
 			description = sq.Description.String
 		}
-		
+
 		queries[i] = &models.SavedTeamQuery{
 			ID:           int(sq.ID),
 			TeamID:       int(sq.TeamID),
@@ -343,7 +342,7 @@ func (db *DB) ListQueriesForUserAndTeam(ctx context.Context, userID models.UserI
 		if sq.Description.Valid {
 			description = sq.Description.String
 		}
-		
+
 		queries[i] = &models.SavedTeamQuery{
 			ID:           int(sq.ID),
 			TeamID:       int(sq.TeamID),
@@ -377,7 +376,7 @@ func (db *DB) ListQueriesForUser(ctx context.Context, userID models.UserID) ([]*
 		if sq.Description.Valid {
 			description = sq.Description.String
 		}
-		
+
 		queries[i] = &models.SavedTeamQuery{
 			ID:           int(sq.ID),
 			TeamID:       int(sq.TeamID),
@@ -411,7 +410,7 @@ func (db *DB) ListQueriesBySource(ctx context.Context, sourceID models.SourceID)
 		if sq.Description.Valid {
 			description = sq.Description.String
 		}
-		
+
 		queries[i] = &models.SavedTeamQuery{
 			ID:           int(sq.ID),
 			TeamID:       int(sq.TeamID),
@@ -448,7 +447,7 @@ func (db *DB) ListQueriesByTeamAndSource(ctx context.Context, teamID models.Team
 		if sq.Description.Valid {
 			description = sq.Description.String
 		}
-		
+
 		queries[i] = &models.SavedTeamQuery{
 			ID:           int(sq.ID),
 			TeamID:       int(sq.TeamID),
@@ -485,7 +484,7 @@ func (db *DB) ListQueriesForUserBySource(ctx context.Context, userID models.User
 		if sq.Description.Valid {
 			description = sq.Description.String
 		}
-		
+
 		queries[i] = &models.SavedTeamQuery{
 			ID:           int(sq.ID),
 			TeamID:       int(sq.TeamID),
