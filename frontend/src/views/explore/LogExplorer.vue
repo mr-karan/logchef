@@ -776,6 +776,54 @@ watch(
   { immediate: true }
 )
 
+// Watch for time range changes to update SQL query reactively
+watch(
+  () => exploreStore.timeRange,
+  (newTimeRange, oldTimeRange) => {
+    // Skip during initialization or if mode is not SQL
+    if (isInitializing.value || exploreStore.activeMode !== 'sql') {
+      return;
+    }
+
+    // Ensure time range is valid and actually changed
+    if (!newTimeRange || !newTimeRange.start || !newTimeRange.end || !sourceDetails.value) {
+      console.warn("Skipping SQL time update: Invalid time range or missing source details.");
+      return;
+    }
+
+    // Simple check if dates changed (more robust check might be needed if CalendarDateTime objects are complex)
+    if (JSON.stringify(newTimeRange) === JSON.stringify(oldTimeRange)) {
+       return;
+    }
+
+    console.log("LogExplorer: Time range changed, updating SQL query display.");
+    const currentSql = exploreStore.rawSql;
+    const tsField = sourceDetails.value._meta_ts_field || 'timestamp';
+
+    // Attempt to parse the current SQL
+    const parsedQuery = SQLParser.parse(currentSql, tsField);
+
+    if (parsedQuery) {
+      try {
+        // Apply the new time range to the parsed AST
+        const updatedAst = SQLParser.applyTimeRange(parsedQuery, tsField, newTimeRange.start, newTimeRange.end);
+        const newSql = SQLParser.toSQL(updatedAst);
+
+        // Update the store's rawSql - QueryEditor will react to this change
+        exploreStore.setRawSql(newSql);
+
+      } catch (error) {
+        console.error("Error updating SQL query with new time range:", error);
+        // Optionally show a warning toast
+      }
+    } else {
+      console.warn("Could not parse existing SQL to update time range display. Query will use correct range on execution.");
+      // Optional: Could generate default SQL here if parsing fails, but might overwrite user input unexpectedly.
+    }
+  },
+  { deep: true } // Use deep watch for the timeRange object
+);
+
 // Mode changes now handled by handleModeChange function
 
 // Handle query submission from QueryEditor
