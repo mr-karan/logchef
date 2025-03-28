@@ -83,6 +83,12 @@ export interface ExploreState {
   queryId?: string | null;
   // Query stats
   stats?: any;
+  // Last executed query state
+  lastExecutedState?: {
+    timeRange: string;
+    limit: number;
+    query: string;
+  };
 }
 
 const DEFAULT_QUERY_STATS: QueryStats = {
@@ -162,6 +168,11 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function setTimeRange(range: ExploreState["timeRange"]) {
+    console.log('Explore store: Setting time range:', {
+      oldRange: JSON.stringify(state.data.value.timeRange),
+      newRange: JSON.stringify(range),
+      lastExecutedRange: state.data.value.lastExecutedState?.timeRange
+    });
     state.data.value.timeRange = range;
   }
 
@@ -213,21 +224,31 @@ export const useExploreStore = defineStore("explore", () => {
       rawSql: "",
       logchefqlCode: state.data.value.logchefqlCode,
       activeMode: state.data.value.activeMode,
+      lastExecutedState: undefined, // Reset last executed state
     };
   }
 
   // Main query execution
   async function executeQuery(finalSql?: string) {
     return await state.withLoading('executeQuery', async () => {
+      console.log('Explore store: Starting query execution:', {
+        currentTimeRange: JSON.stringify(state.data.value.timeRange),
+        currentLimit: state.data.value.limit,
+        currentQuery: state.data.value.activeMode === 'logchefql'
+          ? state.data.value.logchefqlCode
+          : state.data.value.rawSql,
+        lastExecutedState: state.data.value.lastExecutedState
+      });
+
       // If finalSql is not provided, use the current mode to generate it
       if (!finalSql) {
         if (!canExecuteQuery.value) {
           return state.handleError(
-            { 
+            {
               status: "error",
-              message: "Cannot execute query: Invalid source or time range", 
-              error_type: "ValidationError" 
-            } as APIErrorResponse, 
+              message: "Cannot execute query: Invalid source or time range",
+              error_type: "ValidationError"
+            } as APIErrorResponse,
             'executeQuery'
           );
         }
@@ -264,7 +285,7 @@ export const useExploreStore = defineStore("explore", () => {
               limit: state.data.value.limit,
               logchefqlQuery
             });
-            
+
             if (!result.success) throw new Error(result.error || "Query conversion failed");
             finalSql = result.sql;
           } else {
@@ -292,7 +313,7 @@ export const useExploreStore = defineStore("explore", () => {
                 endDateTime: state.data.value.timeRange?.end,
                 limit: state.data.value.limit
               });
-              
+
               if (!result.success) throw new Error(result.error || "Failed to generate default SQL");
               finalSql = result.sql;
             } else {
@@ -301,11 +322,11 @@ export const useExploreStore = defineStore("explore", () => {
           }
         } catch (error: any) {
           return state.handleError(
-            { 
+            {
               status: "error",
-              message: error.message || "Failed to prepare query", 
-              error_type: "QueryError" 
-            } as APIErrorResponse, 
+              message: error.message || "Failed to prepare query",
+              error_type: "QueryError"
+            } as APIErrorResponse,
             'executeQuery'
           );
         }
@@ -330,12 +351,23 @@ export const useExploreStore = defineStore("explore", () => {
       state.data.value.queryId = null;
       state.data.value.error = null;
 
+      // Store current state before execution
+      const executionState = {
+        timeRange: JSON.stringify(state.data.value.timeRange),
+        limit: state.data.value.limit,
+        query: state.data.value.activeMode === 'logchefql'
+          ? state.data.value.logchefqlCode
+          : state.data.value.rawSql
+      };
+      console.log('Explore store: Setting last executed state:', executionState);
+      state.data.value.lastExecutedState = executionState;
+
       // Use the centralized API calling mechanism from base store
       return await state.callApi({
         apiCall: async () => {
           // Get time parameters
           const timestamps = getTimestamps();
-          
+
           // Create API params
           const params: QueryParams = {
             raw_sql: finalSql,
@@ -386,11 +418,11 @@ export const useExploreStore = defineStore("explore", () => {
     return await state.withLoading(`getLogContext-${sourceId}`, async () => {
       if (!sourceId) {
         return state.handleError(
-          { 
+          {
             status: "error",
-            message: "Source ID is required for getting log context", 
-            error_type: "ValidationError" 
-          } as APIErrorResponse, 
+            message: "Source ID is required for getting log context",
+            error_type: "ValidationError"
+          } as APIErrorResponse,
           "getLogContext"
         );
       }
@@ -401,11 +433,11 @@ export const useExploreStore = defineStore("explore", () => {
 
       if (!currentTeamId) {
         return state.handleError(
-          { 
+          {
             status: "error",
-            message: "No team selected. Please select a team before getting log context.", 
-            error_type: "ValidationError" 
-          } as APIErrorResponse, 
+            message: "No team selected. Please select a team before getting log context.",
+            error_type: "ValidationError"
+          } as APIErrorResponse,
           "getLogContext"
         );
       }
@@ -416,6 +448,15 @@ export const useExploreStore = defineStore("explore", () => {
         showToast: false,
       });
     });
+  }
+
+  // Add function to set last executed state
+  function setLastExecutedState(executedState: NonNullable<ExploreState['lastExecutedState']>) {
+    console.log('Explore store: Setting last executed state:', {
+      oldState: state.data.value.lastExecutedState,
+      newState: executedState
+    });
+    state.data.value.lastExecutedState = executedState;
   }
 
   // Return the store
@@ -438,10 +479,11 @@ export const useExploreStore = defineStore("explore", () => {
     error: state.error,
     queryId: computed(() => state.data.value.queryId),
     stats: computed(() => state.data.value.stats),
-    
+    lastExecutedState: computed(() => state.data.value.lastExecutedState),
+
     // Loading state
     isLoading: state.isLoading,
-    
+
     // Derived values
     canExecuteQuery,
 
@@ -453,10 +495,11 @@ export const useExploreStore = defineStore("explore", () => {
     setRawSql,
     setActiveMode,
     setLogchefqlCode,
+    setLastExecutedState,
     resetState,
     executeQuery,
     getLogContext,
-    
+
     // Loading state helpers
     isLoadingOperation: state.isLoadingOperation,
   };

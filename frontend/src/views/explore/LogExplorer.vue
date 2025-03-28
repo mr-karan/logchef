@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
-import { Plus, Play } from 'lucide-vue-next'
+import { Plus, Play, RefreshCw } from 'lucide-vue-next'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
@@ -85,9 +85,44 @@ const urlError = computed(() => initializationError.value); // Use error from co
 
 // Add a new computed property to check if we can execute the query
 const canExecuteQuery = computed(() => {
-  return exploreStore.sourceId > 0 && 
-         teamsStore.currentTeamId > 0 && 
-         hasValidSource.value;
+  return exploreStore.sourceId > 0 &&
+    teamsStore.currentTeamId > 0 &&
+    hasValidSource.value;
+});
+
+// Add isDirty computed after other computed properties
+const isDirty = computed(() => {
+  // Get current query based on active mode
+  const currentQuery = exploreStore.activeMode === 'logchefql'
+    ? exploreStore.logchefqlCode
+    : exploreStore.rawSql;
+
+  // Get current state for comparison
+  const currentTimeRange = JSON.stringify(exploreStore.timeRange);
+  const lastTimeRange = exploreStore.lastExecutedState?.timeRange;
+  const currentLimit = exploreStore.limit;
+  const lastLimit = exploreStore.lastExecutedState?.limit;
+  const lastQuery = exploreStore.lastExecutedState?.query;
+
+  // Debug log the comparison
+  console.log('LogExplorer: isDirty check:', {
+    currentTimeRange,
+    lastTimeRange,
+    currentLimit,
+    lastLimit,
+    currentQuery,
+    lastQuery,
+    hasLastState: !!exploreStore.lastExecutedState,
+    activeMode: exploreStore.activeMode
+  });
+
+  // Compare current state with state from last execution
+  const isDirty = currentTimeRange !== lastTimeRange ||
+    currentLimit !== lastLimit ||
+    currentQuery !== lastQuery;
+
+  console.log('LogExplorer: isDirty result:', isDirty);
+  return isDirty;
 });
 
 // Helper function to convert CalendarDateTime to timestamp
@@ -129,9 +164,9 @@ const showNoTeamsState = computed(() => {
 
 // Show empty sources state only when we have teams but no sources
 const showEmptyState = computed(() => {
-  return !showLoadingState.value && 
-         !showNoTeamsState.value && 
-         (!sourcesStore.teamSources || sourcesStore.teamSources.length === 0);
+  return !showLoadingState.value &&
+    !showNoTeamsState.value &&
+    (!sourcesStore.teamSources || sourcesStore.teamSources.length === 0);
 })
 
 
@@ -159,20 +194,12 @@ const dateRange = computed({
 })
 
 // Add timezone preference for display
-const displayTimezone = computed(() => 
+const displayTimezone = computed(() =>
   localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local'
 );
 
 const pendingEditorInit = ref(false)
 
-// Function to update URL with current state - simplified
-function updateUrlWithCurrentState() {
-  // Skip URL updates during initialization to prevent race conditions
-  if (isInitializing.value) {
-    console.log('Skipping URL update during initialization');
-    return;
-  }
-}
 
 
 // Handle team change with improved race condition handling
@@ -343,7 +370,7 @@ watch(
   (newColumns) => {
     if (newColumns) {
       tableColumns.value = createColumns(
-        newColumns, 
+        newColumns,
         sourceDetails.value?._meta_ts_field || 'timestamp',
         localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local'
       )
@@ -455,7 +482,7 @@ watch(
 
     // Simple check if dates changed (more robust check might be needed if CalendarDateTime objects are complex)
     if (JSON.stringify(newTimeRange) === JSON.stringify(oldTimeRange)) {
-       return;
+      return;
     }
 
     console.log("LogExplorer: Time range changed, updating SQL query display.");
@@ -500,7 +527,7 @@ const handleQuerySubmit = async (data: { query: string, mode: string }) => {
     });
     return;
   }
-    
+
   const { query, mode: editorMode } = data;
 
   // Map the mode from editor to store format
@@ -532,14 +559,12 @@ const handleQuerySubmit = async (data: { query: string, mode: string }) => {
     // Build the final SQL based on the *current* store state and mode
     let sqlToExecute: string;
     if (storeMode === 'sql') {
-      // In SQL mode, the query *is* the final SQL
       sqlToExecute = query;
     } else {
-      // In LogchefQL mode, build the SQL now
       const buildResult = QueryBuilder.buildSqlFromLogchefQL({
         tableName: activeSourceTableName.value,
         tsField: sourceDetails.value?._meta_ts_field || 'timestamp',
-        startDateTime: exploreStore.timeRange!.start, // Assume timeRange is valid here
+        startDateTime: exploreStore.timeRange!.start,
         endDateTime: exploreStore.timeRange!.end,
         limit: exploreStore.limit,
         logchefqlQuery: query
@@ -548,17 +573,30 @@ const handleQuerySubmit = async (data: { query: string, mode: string }) => {
       sqlToExecute = buildResult.sql;
     }
 
+    console.log('Setting last executed state:', {
+      timeRange: JSON.stringify(exploreStore.timeRange),
+      limit: exploreStore.limit,
+      query: data.query
+    });
+
+    // Store current state before execution
+    exploreStore.setLastExecutedState({
+      timeRange: JSON.stringify(exploreStore.timeRange),
+      limit: exploreStore.limit,
+      query: data.query
+    });
+
     // Execute the query with the determined final SQL
     const result = await exploreStore.executeQuery(sqlToExecute);
-      
-    // Store error message if query failed, but toast is already shown by base store
+
     if (!result.success && result.error) {
       queryError.value = result.error.message || 'An error occurred';
+    } else {
+      console.log('Query executed successfully, lastExecutedState:', exploreStore.lastExecutedState);
     }
   } catch (error) {
     console.error('Error executing query:', error);
     queryError.value = getErrorMessage(error);
-    // No need to show toast here as the base store will handle it
   }
 };
 
@@ -568,33 +606,33 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
     // If we have queryData passed directly from the dropdown, use it
     if (queryData) {
       console.log('Loading query from dropdown data:', queryData);
-      
+
       // Additional debug logging for query type
       console.log(`Query type from dropdown: "${queryData.query_type}", type: ${typeof queryData.query_type}`);
 
       const queryContent = queryData.content;
-      
+
       // IMPORTANT: First completely reset the query editor state before loading saved query
       // This prevents any issues with mixing query modes or content
       logchefQuery.value = '';
       sqlQuery.value = '';
       exploreStore.setLogchefqlCode('');
       exploreStore.setRawSql('');
-      
+
       // Force the editor to switch to the appropriate tab first
       // This is crucial to avoid incorrect query execution when a different tab was active
       const isLogchefQL = queryData.query_type && queryData.query_type.toLowerCase() === 'logchefql';
-      
+
       if (isLogchefQL) {
         console.log('Setting mode to logchefql for saved query');
         // Directly set the store's active mode
         exploreStore.setActiveMode('logchefql');
-        
+
         // Ensure the QueryEditor UI tab is synchronized (force it to reset)
         if (queryEditorRef.value && typeof queryEditorRef.value.setActiveTab === 'function') {
           queryEditorRef.value.setActiveTab('logchefql');
         }
-        
+
         // Set the LogchefQL content
         if (queryContent.content) {
           // Wait a tick to ensure the mode change is processed
@@ -606,12 +644,12 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
         console.log('Setting mode to sql for saved query');
         // Directly set the store's active mode
         exploreStore.setActiveMode('sql');
-        
+
         // Ensure the QueryEditor UI tab is synchronized (force it to reset)
         if (queryEditorRef.value && typeof queryEditorRef.value.setActiveTab === 'function') {
           queryEditorRef.value.setActiveTab('clickhouse-sql');
         }
-        
+
         // Set SQL content
         if (queryContent.content) {
           // Wait a tick to ensure the mode change is processed
@@ -623,15 +661,15 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
       }
 
       console.log('Saved query loaded, mode:', exploreStore.activeMode,
-                  'content:', exploreStore.activeMode === 'logchefql' ? 
-                    logchefQuery.value : sqlQuery.value);
+        'content:', exploreStore.activeMode === 'logchefql' ?
+        logchefQuery.value : sqlQuery.value);
 
       // Update URL with current parameters
       // updateUrlWithCurrentState(); // Handled by watcher
 
       // Wait another tick to ensure everything is updated before submitting
       await nextTick();
-      
+
       // Execute the query
       // Reconstruct the data object expected by handleQuerySubmit
       const submitData = {
@@ -682,18 +720,18 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
     sqlQuery.value = '';
     exploreStore.setLogchefqlCode('');
     exploreStore.setRawSql('');
-    
+
     // Force the editor to switch to the appropriate tab first based on the saved query type
     // This is crucial to avoid incorrect query execution when a different tab was active
     if (query.query_type === 'logchefql') {
       console.log('Setting mode to logchefql for saved query from API');
       // Directly set the store's active mode
       exploreStore.setActiveMode('logchefql');
-      
-      
+
+
       // Wait a tick to ensure the mode change is processed
       await nextTick();
-      
+
       // Set the LogchefQL content if available
       if (queryContent.content) {
         logchefQuery.value = queryContent.content;
@@ -703,15 +741,15 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
       console.log('Setting mode to sql for saved query from API');
       // Directly set the store's active mode
       exploreStore.setActiveMode('sql');
-      
+
       // Ensure the QueryEditor UI tab is synchronized (force it to reset)
       if (queryEditorRef.value && typeof queryEditorRef.value.setActiveTab === 'function') {
         queryEditorRef.value.setActiveTab('clickhouse-sql');
       }
-      
+
       // Wait a tick to ensure the mode change is processed
       await nextTick();
-      
+
       // Set SQL content if available
       if (queryContent.content) {
         sqlQuery.value = queryContent.content;
@@ -720,17 +758,17 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
         generatedSQL.value = queryContent.content;
       }
     }
-    
+
     console.log('Saved query loaded from API, mode:', exploreStore.activeMode,
-                'content:', exploreStore.activeMode === 'logchefql' ? 
-                  logchefQuery.value : sqlQuery.value);
+      'content:', exploreStore.activeMode === 'logchefql' ?
+      logchefQuery.value : sqlQuery.value);
 
     // Update URL with current parameters
     // updateUrlWithCurrentState(); // Handled by watcher
 
     // Wait another tick to ensure everything is updated before submitting
     await nextTick();
-    
+
     // Execute the query
     // Reconstruct the data object expected by handleQuerySubmit
     const isLogchefQL = query.query_type === 'logchefql';
@@ -916,7 +954,7 @@ const handleModeChange = async (newEditorMode: 'logchefql' | 'clickhouse-sql') =
 
   // Clear validation error from previous mode
   queryError.value = null;
-  
+
   // No need to manually focus the editor here as the QueryEditor component
   // now handles auto-focusing whenever the activeMode changes through its watchEffect
 };
@@ -930,7 +968,7 @@ const handleQueryChange = (data: { query: string, mode: string }) => {
   }
 
   const { query, mode } = data;
-  
+
   // Update the appropriate query state in the store
   if (mode === 'logchefql') {
     exploreStore.setLogchefqlCode(query);
@@ -1189,10 +1227,15 @@ onBeforeUnmount(() => {
           :use-current-team="true" @select="loadSavedQuery" @save="handleSaveQueryClick" class="h-8" />
 
         <!-- Compact action buttons -->
-        <Button variant="default" size="sm" class="h-8 px-3 flex items-center gap-1"
-          :disabled="isExecutingQuery || !canExecuteQuery" @click="queryEditorRef?.submitQuery()">
-          <Play class="h-3.5 w-3.5" />
-          <span>{{ isExecutingQuery ? 'Running...' : 'Run' }}</span>
+        <Button variant="default" size="sm" class="h-8 px-3 flex items-center gap-1.5 transition-all duration-200"
+          :class="{
+            'bg-primary/90 hover:bg-primary/80': isDirty && !isExecutingQuery,
+            'opacity-90': isDirty && !isExecutingQuery
+          }" :disabled="isExecutingQuery || !canExecuteQuery" @click="queryEditorRef?.submitQuery()">
+          <Play class="h-3.5 w-3.5" :class="{
+            'opacity-90': isDirty && !isExecutingQuery
+          }" />
+          <span>{{ isExecutingQuery ? 'Running...' : (isDirty ? 'Run (Modified)' : 'Run') }}</span>
         </Button>
       </div>
     </div>
@@ -1209,20 +1252,19 @@ onBeforeUnmount(() => {
           <!-- Only render QueryEditor when timeRange AND sourceDetails are available -->
           <template v-if="exploreStore.timeRange && sourceDetails">
             <div class="rounded-md border-t bg-card">
-              <QueryEditor
-                ref="queryEditorRef"
-              :sourceId="exploreStore.sourceId || 0"
-              :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
-              :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
-              :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter LogchefQL query...' : 'Enter SQL query...'"
-              :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
-              :showFieldsPanel="showFieldsPanel" @change="handleQueryChange"
-              @submit="handleQuerySubmit" @update:activeMode="handleModeChange" @toggle-fields="showFieldsPanel = !showFieldsPanel" />
-          </div>
-        </template>
+              <QueryEditor ref="queryEditorRef" :sourceId="exploreStore.sourceId || 0"
+                :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
+                :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
+                :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter LogchefQL query...' : 'Enter SQL query...'"
+                :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
+                :showFieldsPanel="showFieldsPanel" @change="handleQueryChange" @submit="handleQuerySubmit"
+                @update:activeMode="handleModeChange" @toggle-fields="showFieldsPanel = !showFieldsPanel" />
+            </div>
+          </template>
 
           <!-- Query Error Message -->
-          <div v-if="queryError || exploreStore.error" class="mt-2 text-sm text-destructive bg-destructive/10 p-2 rounded">
+          <div v-if="queryError || exploreStore.error"
+            class="mt-2 text-sm text-destructive bg-destructive/10 p-2 rounded">
             {{ queryError || (exploreStore.error && exploreStore.error.message) || 'An error occurred' }}
           </div>
         </div>
@@ -1277,7 +1319,7 @@ onBeforeUnmount(() => {
                     <Skeleton class="h-7 w-32" />
                     <Skeleton class="h-7 w-24" />
                   </div>
-                  
+
                   <!-- Table header skeleton -->
                   <div class="flex space-x-2 mb-2">
                     <Skeleton class="h-8 w-40" />
@@ -1285,7 +1327,7 @@ onBeforeUnmount(() => {
                     <Skeleton class="h-8 w-48" />
                     <Skeleton class="h-8 w-64" />
                   </div>
-                  
+
                   <!-- Table rows skeletons -->
                   <div class="space-y-3">
                     <div v-for="i in 8" :key="i" class="flex space-x-2">
