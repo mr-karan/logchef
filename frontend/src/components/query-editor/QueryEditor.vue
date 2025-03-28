@@ -90,7 +90,6 @@
       <AlertCircle class="h-4 w-4 flex-shrink-0" />
       <span>{{ validationError }}</span>
     </div>
-  </div>
 </template>
 
 <script setup lang="ts">
