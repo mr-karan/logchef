@@ -11,7 +11,7 @@ import (
 
 // CreateTeamQuery implements the auth.Store interface
 func (db *DB) CreateTeamQuery(ctx context.Context, query *models.TeamQuery) error {
-	db.log.Debug("creating team query from TeamQuery model", "team_id", query.TeamID, "name", query.Name)
+	db.log.Debug("creating team query", "team_id", query.TeamID, "source_id", query.SourceID)
 
 	description := sql.NullString{}
 	if query.Description != "" {
@@ -27,21 +27,21 @@ func (db *DB) CreateTeamQuery(ctx context.Context, query *models.TeamQuery) erro
 		QueryType:    string(query.QueryType),
 		QueryContent: query.QueryContent,
 	})
-
 	if err != nil {
 		db.log.Error("failed to create team query", "error", err, "team_id", query.TeamID)
 		return fmt.Errorf("error creating team query: %w", err)
 	}
 
-	// Set the ID on the original query object
+	// Set the auto-generated ID
 	query.ID = int(id)
 
+	db.log.Debug("team query created", "query_id", query.ID)
 	return nil
 }
 
-// CreateSavedTeamQuery creates a new saved query for a team (used by the team query service)
+// CreateSavedTeamQuery implements auth.Store interface
 func (db *DB) CreateSavedTeamQuery(ctx context.Context, teamID models.TeamID, req models.CreateTeamQueryRequest) (*models.SavedTeamQuery, error) {
-	db.log.Debug("creating saved team query", "team_id", teamID, "name", req.Name, "source_id", req.SourceID)
+	db.log.Debug("creating saved team query", "team_id", teamID, "name", req.Name)
 
 	description := sql.NullString{}
 	if req.Description != "" {
@@ -54,7 +54,7 @@ func (db *DB) CreateSavedTeamQuery(ctx context.Context, teamID models.TeamID, re
 		SourceID:     int64(req.SourceID),
 		Name:         req.Name,
 		Description:  description,
-		QueryType:    req.QueryType,
+		QueryType:    string(req.QueryType),
 		QueryContent: req.QueryContent,
 	})
 
@@ -63,14 +63,28 @@ func (db *DB) CreateSavedTeamQuery(ctx context.Context, teamID models.TeamID, re
 		return nil, fmt.Errorf("error creating saved team query: %w", err)
 	}
 
-	// Get the created query
-	query, err := db.GetSavedTeamQuery(ctx, int(id))
+	sqlcQuery, err := db.queries.GetTeamQuery(ctx, id)
 	if err != nil {
-		db.log.Error("failed to get created team query", "error", err, "query_id", id)
-		return nil, fmt.Errorf("error getting created team query: %w", err)
+		db.log.Error("failed to get newly created team query", "error", err, "id", id)
+		return nil, fmt.Errorf("error retrieving newly created team query: %w", err)
 	}
 
-	return query, nil
+	descStr := ""
+	if sqlcQuery.Description.Valid {
+		descStr = sqlcQuery.Description.String
+	}
+
+	return &models.SavedTeamQuery{
+		ID:           int(sqlcQuery.ID),
+		TeamID:       models.TeamID(sqlcQuery.TeamID),
+		SourceID:     models.SourceID(sqlcQuery.SourceID),
+		Name:         sqlcQuery.Name,
+		Description:  descStr,
+		QueryType:    models.SavedQueryType(sqlcQuery.QueryType),
+		QueryContent: sqlcQuery.QueryContent,
+		CreatedAt:    sqlcQuery.CreatedAt,
+		UpdatedAt:    sqlcQuery.UpdatedAt,
+	}, nil
 }
 
 // GetTeamQuery implements the auth.Store interface
@@ -94,7 +108,7 @@ func (db *DB) GetTeamQuery(ctx context.Context, queryID int) (*models.TeamQuery,
 		SourceID:     models.SourceID(sqlcQuery.SourceID),
 		Name:         sqlcQuery.Name,
 		Description:  description,
-		QueryType:    sqlcQuery.QueryType,
+		QueryType:    models.SavedQueryType(sqlcQuery.QueryType),
 		QueryContent: sqlcQuery.QueryContent,
 		Timestamps: models.Timestamps{
 			CreatedAt: sqlcQuery.CreatedAt,
@@ -119,11 +133,11 @@ func (db *DB) GetSavedTeamQuery(ctx context.Context, id int) (*models.SavedTeamQ
 
 	return &models.SavedTeamQuery{
 		ID:           int(sqlcQuery.ID),
-		TeamID:       int(sqlcQuery.TeamID),
+		TeamID:       models.TeamID(sqlcQuery.TeamID),
 		SourceID:     models.SourceID(sqlcQuery.SourceID),
 		Name:         sqlcQuery.Name,
 		Description:  description,
-		QueryType:    sqlcQuery.QueryType,
+		QueryType:    models.SavedQueryType(sqlcQuery.QueryType),
 		QueryContent: sqlcQuery.QueryContent,
 		CreatedAt:    sqlcQuery.CreatedAt,
 		UpdatedAt:    sqlcQuery.UpdatedAt,
@@ -149,11 +163,11 @@ func (db *DB) GetTeamQueryWithAccess(ctx context.Context, id int, userID models.
 
 	return &models.SavedTeamQuery{
 		ID:           int(sqlcQuery.ID),
-		TeamID:       int(sqlcQuery.TeamID),
+		TeamID:       models.TeamID(sqlcQuery.TeamID),
 		SourceID:     models.SourceID(sqlcQuery.SourceID),
 		Name:         sqlcQuery.Name,
 		Description:  description,
-		QueryType:    sqlcQuery.QueryType,
+		QueryType:    models.SavedQueryType(sqlcQuery.QueryType),
 		QueryContent: sqlcQuery.QueryContent,
 		CreatedAt:    sqlcQuery.CreatedAt,
 		UpdatedAt:    sqlcQuery.UpdatedAt,
@@ -175,7 +189,7 @@ func (db *DB) UpdateTeamQuery(ctx context.Context, query *models.TeamQuery) erro
 		Name:         query.Name,
 		Description:  description,
 		SourceID:     int64(query.SourceID),
-		QueryType:    query.QueryType,
+		QueryType:    string(query.QueryType),
 		QueryContent: query.QueryContent,
 		ID:           int64(query.ID),
 	})
@@ -226,7 +240,7 @@ func (db *DB) UpdateSavedTeamQuery(ctx context.Context, id int, req models.Updat
 		Name:         existing.Name,
 		Description:  description,
 		SourceID:     int64(existing.SourceID),
-		QueryType:    existing.QueryType,
+		QueryType:    string(existing.QueryType),
 		QueryContent: existing.QueryContent,
 		ID:           int64(id),
 	})
@@ -276,7 +290,7 @@ func (db *DB) ListTeamQueries(ctx context.Context, teamID models.TeamID) ([]*mod
 			SourceID:     models.SourceID(sq.SourceID),
 			Name:         sq.Name,
 			Description:  description,
-			QueryType:    sq.QueryType,
+			QueryType:    models.SavedQueryType(sq.QueryType),
 			QueryContent: sq.QueryContent,
 			Timestamps: models.Timestamps{
 				CreatedAt: sq.CreatedAt,
@@ -289,7 +303,7 @@ func (db *DB) ListTeamQueries(ctx context.Context, teamID models.TeamID) ([]*mod
 	return queries, nil
 }
 
-// ListSavedTeamQueries lists all saved queries for a team returning SavedTeamQuery models
+// ListSavedTeamQueries lists all saved queries for a team using SavedTeamQuery model
 func (db *DB) ListSavedTeamQueries(ctx context.Context, teamID models.TeamID) ([]*models.SavedTeamQuery, error) {
 	db.log.Debug("listing saved team queries", "team_id", teamID)
 
@@ -299,6 +313,7 @@ func (db *DB) ListSavedTeamQueries(ctx context.Context, teamID models.TeamID) ([
 		return nil, fmt.Errorf("error listing saved team queries: %w", err)
 	}
 
+	// Convert sqlc.TeamQuery to models.SavedTeamQuery
 	queries := make([]*models.SavedTeamQuery, len(sqlcQueries))
 	for i, sq := range sqlcQueries {
 		description := ""
@@ -308,11 +323,11 @@ func (db *DB) ListSavedTeamQueries(ctx context.Context, teamID models.TeamID) ([
 
 		queries[i] = &models.SavedTeamQuery{
 			ID:           int(sq.ID),
-			TeamID:       int(sq.TeamID),
+			TeamID:       models.TeamID(sq.TeamID),
 			SourceID:     models.SourceID(sq.SourceID),
 			Name:         sq.Name,
 			Description:  description,
-			QueryType:    sq.QueryType,
+			QueryType:    models.SavedQueryType(sq.QueryType),
 			QueryContent: sq.QueryContent,
 			CreatedAt:    sq.CreatedAt,
 			UpdatedAt:    sq.UpdatedAt,
@@ -345,11 +360,11 @@ func (db *DB) ListQueriesForUserAndTeam(ctx context.Context, userID models.UserI
 
 		queries[i] = &models.SavedTeamQuery{
 			ID:           int(sq.ID),
-			TeamID:       int(sq.TeamID),
+			TeamID:       models.TeamID(sq.TeamID),
 			SourceID:     models.SourceID(sq.SourceID),
 			Name:         sq.Name,
 			Description:  description,
-			QueryType:    sq.QueryType,
+			QueryType:    models.SavedQueryType(sq.QueryType),
 			QueryContent: sq.QueryContent,
 			CreatedAt:    sq.CreatedAt,
 			UpdatedAt:    sq.UpdatedAt,
@@ -379,11 +394,11 @@ func (db *DB) ListQueriesForUser(ctx context.Context, userID models.UserID) ([]*
 
 		queries[i] = &models.SavedTeamQuery{
 			ID:           int(sq.ID),
-			TeamID:       int(sq.TeamID),
+			TeamID:       models.TeamID(sq.TeamID),
 			SourceID:     models.SourceID(sq.SourceID),
 			Name:         sq.Name,
 			Description:  description,
-			QueryType:    sq.QueryType,
+			QueryType:    models.SavedQueryType(sq.QueryType),
 			QueryContent: sq.QueryContent,
 			CreatedAt:    sq.CreatedAt,
 			UpdatedAt:    sq.UpdatedAt,
@@ -413,11 +428,11 @@ func (db *DB) ListQueriesBySource(ctx context.Context, sourceID models.SourceID)
 
 		queries[i] = &models.SavedTeamQuery{
 			ID:           int(sq.ID),
-			TeamID:       int(sq.TeamID),
+			TeamID:       models.TeamID(sq.TeamID),
 			SourceID:     models.SourceID(sq.SourceID),
 			Name:         sq.Name,
 			Description:  description,
-			QueryType:    sq.QueryType,
+			QueryType:    models.SavedQueryType(sq.QueryType),
 			QueryContent: sq.QueryContent,
 			CreatedAt:    sq.CreatedAt,
 			UpdatedAt:    sq.UpdatedAt,
@@ -450,11 +465,11 @@ func (db *DB) ListQueriesByTeamAndSource(ctx context.Context, teamID models.Team
 
 		queries[i] = &models.SavedTeamQuery{
 			ID:           int(sq.ID),
-			TeamID:       int(sq.TeamID),
+			TeamID:       models.TeamID(sq.TeamID),
 			SourceID:     models.SourceID(sq.SourceID),
 			Name:         sq.Name,
 			Description:  description,
-			QueryType:    sq.QueryType,
+			QueryType:    models.SavedQueryType(sq.QueryType),
 			QueryContent: sq.QueryContent,
 			CreatedAt:    sq.CreatedAt,
 			UpdatedAt:    sq.UpdatedAt,
@@ -487,11 +502,11 @@ func (db *DB) ListQueriesForUserBySource(ctx context.Context, userID models.User
 
 		queries[i] = &models.SavedTeamQuery{
 			ID:           int(sq.ID),
-			TeamID:       int(sq.TeamID),
+			TeamID:       models.TeamID(sq.TeamID),
 			SourceID:     models.SourceID(sq.SourceID),
 			Name:         sq.Name,
 			Description:  description,
-			QueryType:    sq.QueryType,
+			QueryType:    models.SavedQueryType(sq.QueryType),
 			QueryContent: sq.QueryContent,
 			CreatedAt:    sq.CreatedAt,
 			UpdatedAt:    sq.UpdatedAt,

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"time"
 
 	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -55,7 +54,7 @@ func (db *DB) GetSource(ctx context.Context, id models.SourceID) (*models.Source
 		return nil, handleNotFoundError(err, "error getting source")
 	}
 
-	source := mapSourceRowToModel(sourceRow)
+	source := mapSourceRowToModel(&sourceRow)
 	return source, nil
 }
 
@@ -71,7 +70,7 @@ func (db *DB) GetSourceByName(ctx context.Context, database, tableName string) (
 		return nil, handleNotFoundError(err, "error getting source by name")
 	}
 
-	source := mapSourceRowToModel(sourceRow)
+	source := mapSourceRowToModel(&sourceRow)
 	return source, nil
 }
 
@@ -117,7 +116,6 @@ func (db *DB) UpdateSource(ctx context.Context, source *models.Source) error {
 		return fmt.Errorf("error updating source: %w", err)
 	}
 
-
 	return nil
 }
 
@@ -131,7 +129,5 @@ func (db *DB) DeleteSource(ctx context.Context, id models.SourceID) error {
 		return fmt.Errorf("error deleting source: %w", err)
 	}
 
-
 	return nil
 }
-

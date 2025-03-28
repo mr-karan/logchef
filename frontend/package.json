@@ -30,6 +30,7 @@
     "radix-vue": "^1.9.13",
     "reka-ui": "^2.0.2",
     "tailwind-merge": "^3.0.2",
+    "tailwind-scrollbar": "^4.0.1",
     "tailwindcss-animate": "^1.0.7",
     "vaul-vue": "^0.3.0",
     "vee-validate": "^4.15.0",

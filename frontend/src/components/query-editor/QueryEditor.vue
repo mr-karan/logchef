@@ -4,12 +4,9 @@
     <div class="flex items-center justify-between bg-muted/40 rounded-t-md px-3 py-1.5 border border-b-0">
       <div class="flex items-center gap-3">
         <!-- Fields Panel Toggle -->
-        <button
-          class="p-1 text-muted-foreground hover:text-foreground flex items-center"
-          @click="$emit('toggle-fields')"
-          :title="props.showFieldsPanel ? 'Hide fields panel' : 'Show fields panel'"
-          aria-label="Toggle fields panel"
-        >
+        <button class="p-1 text-muted-foreground hover:text-foreground flex items-center"
+          @click="$emit('toggle-fields')" :title="props.showFieldsPanel ? 'Hide fields panel' : 'Show fields panel'"
+          aria-label="Toggle fields panel">
           <PanelRightClose v-if="props.showFieldsPanel" class="h-4 w-4" />
           <PanelRightOpen v-else class="h-4 w-4" />
         </button>
@@ -40,26 +37,31 @@
               <HelpCircle class="h-4 w-4" />
             </button>
           </HoverCardTrigger>
-          <HoverCardContent class="w-80 backdrop-blur-md bg-card text-card-foreground border-border shadow-lg" side="bottom" align="end">
-             <!-- Help Content (Keep existing template) -->
-             <div class="space-y-2">
+          <HoverCardContent class="w-80 backdrop-blur-md bg-card text-card-foreground border-border shadow-lg"
+            side="bottom" align="end">
+            <!-- Help Content (Keep existing template) -->
+            <div class="space-y-2">
               <h4 class="text-sm font-semibold">{{ props.activeMode === 'logchefql' ? 'LogchefQL' : 'SQL' }} Syntax</h4>
               <div v-if="props.activeMode === 'logchefql'" class="text-xs space-y-1.5">
-                 <!-- LogchefQL Help -->
-                 <div><code class="bg-muted px-1 rounded">field="value"</code> - Exact match</div>
-                 <div><code class="bg-muted px-1 rounded">field!="value"</code> - Not equal</div>
-                 <div><code class="bg-muted px-1 rounded">field~"pattern"</code> - Regex match</div>
-                 <div><code class="bg-muted px-1 rounded">field!~"pattern"</code> - Regex exclusion</div>
-                 <div><code class="bg-muted px-1 rounded">field>100</code> - Comparison</div>
-                 <div><code class="bg-muted px-1 rounded">(c1 and c2) or c3</code> - Grouping</div>
-                 <div class="pt-1"><em>Example: <code class="bg-muted px-1 rounded">level="error" and status>=500</code></em></div>
+                <!-- LogchefQL Help -->
+                <div><code class="bg-muted px-1 rounded">field="value"</code> - Exact match</div>
+                <div><code class="bg-muted px-1 rounded">field!="value"</code> - Not equal</div>
+                <div><code class="bg-muted px-1 rounded">field~"pattern"</code> - Regex match</div>
+                <div><code class="bg-muted px-1 rounded">field!~"pattern"</code> - Regex exclusion</div>
+                <div><code class="bg-muted px-1 rounded">field>100</code> - Comparison</div>
+                <div><code class="bg-muted px-1 rounded">(c1 and c2) or c3</code> - Grouping</div>
+                <div class="pt-1"><em>Example: <code
+                      class="bg-muted px-1 rounded">level="error" and status>=500</code></em>
+                </div>
               </div>
               <div v-else class="text-xs space-y-1.5">
-                 <!-- SQL Help -->
-                 <div><code class="bg-muted px-1 rounded">SELECT count() FROM {{ tableName || 'table' }}</code></div>
-                 <div><code class="bg-muted px-1 rounded">WHERE field = 'value' AND time > now() - interval 1 hour</code></div>
-                 <div><code class="bg-muted px-1 rounded">GROUP BY user ORDER BY count() DESC</code></div>
-                 <div class="pt-1"><em>Time range & limit applied if not specified. Use standard ClickHouse SQL.</em></div>
+                <!-- SQL Help -->
+                <div><code class="bg-muted px-1 rounded">SELECT count() FROM {{ tableName || 'table' }}</code></div>
+                <div><code class="bg-muted px-1 rounded">WHERE field = 'value' AND time > now() - interval 1 hour</code>
+                </div>
+                <div><code class="bg-muted px-1 rounded">GROUP BY user ORDER BY count() DESC</code></div>
+                <div class="pt-1"><em>Time range & limit applied if not specified. Use standard ClickHouse SQL.</em>
+                </div>
               </div>
             </div>
           </HoverCardContent>
@@ -68,25 +70,16 @@
     </div>
 
     <!-- Monaco Editor -->
-    <div
-      :style="{ height: `${editorHeight}px` }"
-      class="editor-container border rounded-b-md overflow-hidden"
-      :class="{ 'ring-1 ring-primary/50 border-primary/50': editorFocused }"
-    >
-      <vue-monaco-editor
-        :key="props.activeMode"
-        v-model:value="editorContent"
-        :theme="theme"
-        :language="props.activeMode"
-        :options="monacoOptions"
-        @mount="handleMount"
-        @update:value="handleEditorChange"
-        class="h-full w-full"
-        />
+    <div :style="{ height: `${editorHeight}px` }" class="editor-container border rounded-b-md overflow-hidden"
+      :class="{ 'ring-1 ring-primary/50 border-primary/50': editorFocused }">
+      <vue-monaco-editor :key="props.activeMode" v-model:value="editorContent" :theme="theme"
+        :language="props.activeMode" :options="monacoOptions" @mount="handleMount" @update:value="handleEditorChange"
+        class="h-full w-full" />
     </div>
 
     <!-- Error Message Display -->
-    <div v-if="validationError" class="mt-2 p-2 text-sm text-destructive bg-destructive/10 rounded flex items-center gap-2">
+    <div v-if="validationError"
+      class="mt-2 p-2 text-sm text-destructive bg-destructive/10 rounded flex items-center gap-2">
       <AlertCircle class="h-4 w-4 flex-shrink-0" />
       <span>{{ validationError }}</span>
     </div>
@@ -145,6 +138,7 @@ const editorFocused = ref(false);
 const validationError = ref<string | null>(null);
 const fieldNames = computed(() => Object.keys(props.schema ?? {}));
 const activeProviders = ref<monaco.IDisposable[]>([]); // Track completion providers
+let sqlUpdateTimeout: number | null = null; // Add missing variable declaration
 
 // Centralized state for editor content managed via computed property
 const editorContent = ref("");
@@ -272,27 +266,27 @@ const handleEditorChange = (value: string | undefined) => {
 
   // Emit change event
   emit("change", { query: currentQuery, mode: props.activeMode });
-      
+
   // Re-register completion provider if we change content
   // This helps ensure proper suggestions after typing "and" or "or"
   setTimeout(() => registerCompletionProvider(), 10);
 };
 
 const runProgrammaticUpdate = (newValue: string) => {
-    if (!editorRef.value || isDisposing.value) return;
-    isProgrammaticChange.value = true;
-    // Use editor's API to set value
-    editorRef.value.setValue(newValue);
-    // Update local ref *after* setting editor value
-    editorContent.value = newValue;
-    // Wait for editor to potentially update, then release the flag
-    nextTick(() => {
-        isProgrammaticChange.value = false;
-    });
+  if (!editorRef.value || isDisposing.value) return;
+  isProgrammaticChange.value = true;
+  // Use editor's API to set value
+  editorRef.value.setValue(newValue);
+  // Update local ref *after* setting editor value
+  editorContent.value = newValue;
+  // Wait for editor to potentially update, then release the flag
+  nextTick(() => {
+    isProgrammaticChange.value = false;
+  });
 };
 
 const syncEditorContentWithStore = (isInitialSync = false) => {
-    // This function is no longer needed, logic moved to watchEffect
+  // This function is no longer needed, logic moved to watchEffect
 };
 
 // --- Mode Switching ---
@@ -457,9 +451,9 @@ const getValueSuggestions = async (key: string, value: string, range: any, quote
 onMounted(() => {
   try {
     initMonacoSetup(); // Initialize themes, languages (runs once internally)
-    
+
     // Initial content sync now handled by watchEffect
-    
+
   } catch (error) {
     console.error("QueryEditor: Error during mount:", error);
     validationError.value = "Failed to initialize editor.";
@@ -470,11 +464,11 @@ onMounted(() => {
 const theme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
 
 const currentPlaceholder = computed(() => {
-    if (props.activeMode === 'logchefql') {
-        return props.placeholder || 'Enter LogchefQL query (e.g., level="error" and status>400)';
-    } else {
-        return props.placeholder || `Enter ClickHouse SQL query for table ${props.tableName || '...'}`;
-    }
+  if (props.activeMode === 'logchefql') {
+    return props.placeholder || 'Enter LogchefQL query (e.g., level="error" and status>400)';
+  } else {
+    return props.placeholder || `Enter ClickHouse SQL query for table ${props.tableName || '...'}`;
+  }
 });
 
 const editorHeight = computed(() => {
@@ -755,7 +749,7 @@ const registerLogchefQLCompletionProvider = () => {
 
       // Check if we're right after "and" or "or"
       const afterBoolOp = /\b(and|or)\s+$/i.test(textBeforeCursor);
-      
+
       // Parse the current state
       const parser = new LogchefQLParser();
       parser.parse(textBeforeCursor, false, true);
@@ -853,7 +847,7 @@ onBeforeUnmount(() => {
   setTimeout(() => {
     safelyDisposeEditor();
   }, 50);
-  
+
   // Set a flag to prevent any further editor operations
   isDisposing.value = true;
 });
@@ -898,15 +892,15 @@ const updateMonacoOptions = () => {
 
     // Update reactive options object
     Object.assign(monacoOptions, {
-        ...getDefaultMonacoOptions(), // Start with base defaults
-        // Mode-specific overrides:
-        folding: isSqlMode,
-        lineNumbers: isSqlMode ? "on" : "off",
-        wordWrap: isSqlMode ? "on" : "off",
-        glyphMargin: isSqlMode, // Show glyph margin only for SQL (folding)
-        lineDecorationsWidth: isSqlMode ? 10 : 0,
-        lineNumbersMinChars: isSqlMode ? 3 : 0,
-        padding: { top: isSqlMode ? 6 : 8, bottom: isSqlMode ? 6 : 8 },
+      ...getDefaultMonacoOptions(), // Start with base defaults
+      // Mode-specific overrides:
+      folding: isSqlMode,
+      lineNumbers: isSqlMode ? "on" : "off",
+      wordWrap: isSqlMode ? "on" : "off",
+      glyphMargin: isSqlMode, // Show glyph margin only for SQL (folding)
+      lineDecorationsWidth: isSqlMode ? 10 : 0,
+      lineNumbersMinChars: isSqlMode ? 3 : 0,
+      padding: { top: isSqlMode ? 6 : 8, bottom: isSqlMode ? 6 : 8 },
     });
 
     // Apply the updated options to the editor instance
@@ -975,16 +969,16 @@ watchEffect(() => {
 
 // Update placeholder when it changes
 watch(currentPlaceholder, () => {
-    // Placeholder update via options is unreliable with v-model
-    // Consider adding a visual placeholder element behind the editor if needed
-    if (editorRef.value) {
-        try {
-            // Try to update placeholder anyway, might work in some cases
-            editorRef.value.updateOptions({ 'placeholder': currentPlaceholder.value });
-        } catch (err) {
-            console.warn('Error updating placeholder:', err);
-        }
+  // Placeholder update via options is unreliable with v-model
+  // Consider adding a visual placeholder element behind the editor if needed
+  if (editorRef.value) {
+    try {
+      // Try to update placeholder anyway, might work in some cases
+      editorRef.value.updateOptions({ 'placeholder': currentPlaceholder.value });
+    } catch (err) {
+      console.warn('Error updating placeholder:', err);
     }
+  }
 });
 
 // Watch for loading state to make editor read-only
@@ -999,7 +993,7 @@ watch(() => exploreStore.isLoadingOperation('executeQuery'), (isLoading) => {
 const submitQuery = () => {
   const currentContent = editorContent.value;
   validationError.value = null; // Clear previous error
-  
+
   try {
     // Validate query based on mode
     if (props.activeMode === 'logchefql') {
@@ -1013,17 +1007,17 @@ const submitQuery = () => {
         return;
       }
     }
-    
+
     // Update store with latest content
     if (props.activeMode === 'logchefql') {
       exploreStore.setLogchefqlCode(currentContent);
     } else {
       exploreStore.setRawSql(currentContent);
     }
-    
+
     // Trigger execution through store
     emit('submit', { query: currentContent, mode: props.activeMode }); // Emit submit event (no finalSql needed from editor)
-    
+
   } catch (e: any) {
     console.error("Error preparing query:", e);
     validationError.value = e.message || "Error preparing query";
@@ -1032,66 +1026,66 @@ const submitQuery = () => {
 
 // --- Disposal ---
 const safelyDisposeEditor = () => {
-    if (isDisposing.value) return; // Prevent multiple disposals
-    
-    isDisposing.value = true;
-    console.log('QueryEditor: Starting disposal');
-    
-    // First, clear any pending timeouts
-    if (sqlUpdateTimeout) {
-        clearTimeout(sqlUpdateTimeout);
-        sqlUpdateTimeout = null;
-    }
-    
-    // Dispose Monaco resources (listeners, providers, actions)
-    activeProviders.value.forEach(disposable => {
+  if (isDisposing.value) return; // Prevent multiple disposals
+
+  isDisposing.value = true;
+  console.log('QueryEditor: Starting disposal');
+
+  // First, clear any pending timeouts
+  if (sqlUpdateTimeout) {
+    clearTimeout(sqlUpdateTimeout);
+    sqlUpdateTimeout = null;
+  }
+
+  // Dispose Monaco resources (listeners, providers, actions)
+  activeProviders.value.forEach(disposable => {
+    try {
+      disposable.dispose();
+    } catch (e) { console.warn("Error disposing resource:", e); }
+  });
+  activeProviders.value = [];
+
+  // Get references before clearing
+  const editor = editorRef.value;
+  const model = editorModel.value;
+
+  // Clear refs immediately to prevent further usage
+  editorRef.value = null;
+  editorModel.value = null;
+
+  // Use setTimeout to ensure disposal happens after all current operations
+  setTimeout(() => {
+    try {
+      // Detach model first (safer)
+      if (editor) {
         try {
-            disposable.dispose();
-        } catch (e) { console.warn("Error disposing resource:", e); }
-    });
-    activeProviders.value = [];
-
-    // Get references before clearing
-    const editor = editorRef.value;
-    const model = editorModel.value;
-
-    // Clear refs immediately to prevent further usage
-    editorRef.value = null;
-    editorModel.value = null;
-
-    // Use setTimeout to ensure disposal happens after all current operations
-    setTimeout(() => {
-        try {
-            // Detach model first (safer)
-            if (editor) {
-                try {
-                    editor.setModel(null);
-                } catch (e) {
-                    console.warn("Error detaching model:", e);
-                }
-                
-                // Dispose editor after model detachment
-                try {
-                    editor.dispose();
-                    console.log('QueryEditor: Editor instance disposed');
-                } catch (e) {
-                    console.warn("Error disposing editor instance:", e);
-                }
-            }
-            
-            // After reliable timeout, reset the disposing flag
-            setTimeout(() => {
-                isDisposing.value = false;
-                console.log('QueryEditor: Disposal reset completed');
-            }, 200);
+          editor.setModel(null);
         } catch (e) {
-            console.error("Error in editor disposal:", e);
-            // Still reset the flag
-            isDisposing.value = false;
+          console.warn("Error detaching model:", e);
         }
-    }, 50);
-    
-    console.log('QueryEditor: Disposal sequence initiated');
+
+        // Dispose editor after model detachment
+        try {
+          editor.dispose();
+          console.log('QueryEditor: Editor instance disposed');
+        } catch (e) {
+          console.warn("Error disposing editor instance:", e);
+        }
+      }
+
+      // After reliable timeout, reset the disposing flag
+      setTimeout(() => {
+        isDisposing.value = false;
+        console.log('QueryEditor: Disposal reset completed');
+      }, 200);
+    } catch (e) {
+      console.error("Error in editor disposal:", e);
+      // Still reset the flag
+      isDisposing.value = false;
+    }
+  }, 50);
+
+  console.log('QueryEditor: Disposal sequence initiated');
 };
 
 // --- Expose ---
@@ -1108,24 +1102,29 @@ defineExpose({
 .query-editor {
   display: flex;
   flex-direction: column;
-  position: relative; /* For potential placeholder positioning */
+  position: relative;
+  /* For potential placeholder positioning */
 }
 
 .editor-container {
   background-color: hsl(var(--card));
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
-  min-height: 45px; /* Ensure container has a minimum height */
+  min-height: 45px;
+  /* Ensure container has a minimum height */
 }
 
 /* Optional: Style for visual placeholder if needed */
 .editor-placeholder {
   position: absolute;
-  top: calc(theme(padding.2) + theme(spacing[1.5])); /* Adjust based on editor padding */
-  left: calc(theme(padding.3) + 5px); /* Adjust based on line number width/padding */
+  top: calc(theme(padding.2) + theme(spacing[1.5]));
+  /* Adjust based on editor padding */
+  left: calc(theme(padding.3) + 5px);
+  /* Adjust based on line number width/padding */
   color: hsl(var(--muted-foreground));
   opacity: 0.6;
   pointer-events: none;
-  font-size: 14px; /* Match editor font size */
+  font-size: 14px;
+  /* Match editor font size */
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
@@ -1137,6 +1136,7 @@ button:focus-visible {
 }
 
 code {
-  font-family: inherit; /* Inherit from editor/UI */
+  font-family: inherit;
+  /* Inherit from editor/UI */
 }
 </style>
