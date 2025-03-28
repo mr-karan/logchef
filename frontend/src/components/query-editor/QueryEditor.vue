@@ -30,6 +30,13 @@
           <span v-else class="italic text-orange-500">No table selected</span>
         </div>
 
+        <!-- Clear button -->
+        <button class="p-1 text-muted-foreground hover:text-destructive flex items-center text-xs gap-1"
+          @click="clearEditor" title="Clear editor content" aria-label="Clear editor content">
+          <span>Clear</span>
+          <XCircle class="h-3 w-3" />
+        </button>
+
         <!-- Help Icon -->
         <HoverCard :open-delay="200">
           <HoverCardTrigger as-child>
@@ -91,7 +98,7 @@ import { ref, computed, shallowRef, watch, onMounted, onBeforeUnmount, nextTick,
 import * as monaco from "monaco-editor";
 import { useDark } from "@vueuse/core";
 import { VueMonacoEditor } from "@guolao/vue-monaco-editor";
-import { HelpCircle, PanelRightOpen, PanelRightClose, AlertCircle } from "lucide-vue-next";
+import { HelpCircle, PanelRightOpen, PanelRightClose, AlertCircle, XCircle } from "lucide-vue-next";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -1024,6 +1031,25 @@ const submitQuery = () => {
   }
 };
 
+const clearEditor = () => {
+  if (props.activeMode === 'logchefql') {
+    exploreStore.setLogchefqlCode("");
+  } else {
+    exploreStore.setRawSql("");
+  }
+
+  // Let watchEffect handle the update to editor content via store sync
+  // Clear any validation errors
+  validationError.value = null;
+
+  // Focus the editor after clearing
+  nextTick(() => {
+    if (editorRef.value && !isDisposing.value) {
+      editorRef.value.focus();
+    }
+  });
+};
+
 // --- Disposal ---
 const safelyDisposeEditor = () => {
   if (isDisposing.value) return; // Prevent multiple disposals
@@ -1091,7 +1117,7 @@ const safelyDisposeEditor = () => {
 // --- Expose ---
 defineExpose({
   submitQuery,
-  // setActiveMode no longer needed - parent controls via prop
+  clearEditor,
   code: computed(() => editorContent.value)
 });
 
