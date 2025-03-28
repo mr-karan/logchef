@@ -105,9 +105,11 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { initMonacoSetup, getDefaultMonacoOptions } from "@/utils/monaco";
 import { Parser as LogchefQLParser, State as LogchefQLState, Operator as LogchefQLOperator, VALID_KEY_VALUE_OPERATORS as LogchefQLValidOperators, isNumeric } from "@/utils/logchefql";
 import { parseAndTranslateLogchefQL, validateLogchefQL } from "@/utils/logchefql/api";
-import { validateSQL, SQL_KEYWORDS, CLICKHOUSE_FUNCTIONS, SQL_TYPES } from "@/utils/clickhouse-sql"; // Assuming these exist and are correct
+import { validateSQL, SQL_KEYWORDS, CLICKHOUSE_FUNCTIONS, SQL_TYPES } from "@/utils/clickhouse-sql";
+import { SQLParser } from "@/utils/clickhouse-sql/ast"; // Import SQLParser
 import { useExploreStore } from '@/stores/explore';
-import { QueryBuilder } from "@/utils/query-builder";
+import { QueryBuilder, type BuildSqlOptions } from "@/utils/query-builder"; // Import BuildSqlOptions type
+import type { CalendarDateTime } from '@internationalized/date'; // Import CalendarDateTime
 
 // --- Types ---
 type EditorMode = "logchefql" | "clickhouse-sql";
@@ -119,9 +121,10 @@ type EditorChangeEvent = { query: string; mode: EditorMode };
 // --- Props and Emits ---
 const props = defineProps({
   sourceId: { type: Number, required: true },
-  schema: { type: Object as () => Record<string, { type: string }>, required: true }, // More specific type
-  startTimestamp: { type: Number, required: true },
-  endTimestamp: { type: Number, required: true },
+  schema: { type: Object as () => Record<string, { type: string }>, required: true },
+  // Use CalendarDateTime for date props
+  startDateTime: { type: Object as () => CalendarDateTime | undefined, required: true },
+  endDateTime: { type: Object as () => CalendarDateTime | undefined, required: true },
   initialValue: { type: String, default: "" },
   initialTab: { type: String as () => 'logchefql' | 'sql', default: "logchefql" },
   placeholder: { type: String, default: "" },
@@ -220,16 +223,21 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
   // Set initial content directly based on props and mode
   let initialContent = props.initialValue ?? "";
   if (!initialContent && activeMode.value === 'clickhouse-sql') {
-    // If SQL mode and no initial value, generate default SQL
-    const defaultOptions: Omit<BuildSqlOptions, 'logchefqlQuery'> = {
-      tableName: props.tableName,
-      tsField: props.tsField,
-      startTimestamp: props.startTimestamp,
-      endTimestamp: props.endTimestamp,
-      limit: props.limit
-    };
-    const defaultQuery = QueryBuilder.getDefaultSQLQuery(defaultOptions);
-    initialContent = defaultQuery.sql || "";
+    // If SQL mode and no initial value, generate default SQL using date objects
+    if (props.startDateTime && props.endDateTime) {
+      const defaultOptions: Omit<BuildSqlOptions, 'logchefqlQuery'> = {
+        tableName: props.tableName,
+        tsField: props.tsField,
+        startDateTime: props.startDateTime,
+        endDateTime: props.endDateTime,
+        limit: props.limit
+      };
+      const defaultQuery = QueryBuilder.getDefaultSQLQuery(defaultOptions);
+      initialContent = defaultQuery.sql || "";
+    } else {
+      // Fallback if date props are not ready
+      initialContent = `SELECT *\nFROM \`${props.tableName}\`\n-- Waiting for date range...\nORDER BY \`${props.tsField}\` DESC\nLIMIT ${props.limit}`;
+    }
   }
   // Use runProgrammaticUpdate to set initial content without triggering change events
   runProgrammaticUpdate(initialContent);
@@ -332,16 +340,23 @@ const handleTabChange = async (newMode: EditorMode) => {
     if (newMode === 'clickhouse-sql' && editorContent.value.trim()) {
       const translation = parseAndTranslateLogchefQL(editorContent.value);
       if (translation.success) {
-        exploreStore.setRawSql(
-          QueryBuilder.buildSqlFromLogchefQL({
-            tableName: props.tableName,
-            tsField: props.tsField,
-            startTimestamp: props.startTimestamp,
-            endTimestamp: props.endTimestamp,
-            limit: props.limit,
-            logchefqlQuery: editorContent.value
-          }).sql
-        );
+        // Generate SQL from LogchefQL using date objects
+        if (props.startDateTime && props.endDateTime) {
+          exploreStore.setRawSql(
+            QueryBuilder.buildSqlFromLogchefQL({
+              tableName: props.tableName,
+              tsField: props.tsField,
+              startDateTime: props.startDateTime,
+              endDateTime: props.endDateTime,
+              limit: props.limit,
+              logchefqlQuery: editorContent.value
+            }).sql
+          );
+        } else {
+          console.warn("Cannot translate LogchefQL to SQL: Date range not available.");
+          // Set a placeholder or keep the existing SQL
+          exploreStore.setRawSql(`-- Error: Date range not available for translation`);
+        }
       }
     }
   } else {
@@ -1039,8 +1054,55 @@ const registerCompletionProvider = () => {
 };
 
 // --- Watchers ---
-// We no longer sync from store to editor automatically
-// The editor is now the source of truth for its content
+// Watch for date changes to update SQL query
+watch([() => props.startDateTime, () => props.endDateTime], ([newStart, newEnd], [oldStart, oldEnd]) => {
+  // Only run if in SQL mode, dates are valid, and dates actually changed
+  if (
+    activeMode.value === 'clickhouse-sql' &&
+    newStart && newEnd &&
+    editorRef.value &&
+    !isProgrammaticChange.value && // Avoid loops
+    (newStart?.toString() !== oldStart?.toString() || newEnd?.toString() !== oldEnd?.toString())
+  ) {
+    console.log("QueryEditor: Date range changed, updating SQL query.");
+    const currentSql = editorContent.value;
+    const parsedQuery = SQLParser.parse(currentSql, props.tsField);
+
+    if (parsedQuery) {
+      try {
+        const updatedAst = SQLParser.applyTimeRange(parsedQuery, props.tsField, newStart, newEnd);
+        const newSql = SQLParser.toSQL(updatedAst);
+
+        // Update editor content programmatically
+        runProgrammaticUpdate(newSql);
+
+        // Also update the store's rawSql
+        exploreStore.setRawSql(newSql);
+
+      } catch (error) {
+        console.error("Error updating SQL query with new time range:", error);
+        // Optionally show a warning to the user
+      }
+    } else {
+      console.warn("Could not parse existing SQL to update time range.");
+      // Optionally try to generate a default query if parsing fails
+      if (props.tableName && props.tsField && newStart && newEnd) {
+         const defaultOptions: Omit<BuildSqlOptions, 'logchefqlQuery'> = {
+           tableName: props.tableName,
+           tsField: props.tsField,
+           startDateTime: newStart,
+           endDateTime: newEnd,
+           limit: props.limit
+         };
+         const defaultQuery = QueryBuilder.getDefaultSQLQuery(defaultOptions);
+         if (defaultQuery.success) {
+           runProgrammaticUpdate(defaultQuery.sql);
+           exploreStore.setRawSql(defaultQuery.sql);
+         }
+      }
+    }
+  }
+}, { deep: true }); // Use deep watch for objects
 
 
 // Update placeholder when it changes
