@@ -115,18 +115,9 @@ const columnSizingVars = computed(() => {
     return styles
 })
 
-// Handle column resizing state with a completely custom implementation
+// Handle column resizing with a clean custom implementation
 function handleResize(e: MouseEvent | TouchEvent, header: any) {
-    console.log('Custom resize handler initiated', { 
-        id: header.id, 
-        columnId: header.column.id,
-        canResize: header.column.getCanResize(),
-        event: e.type,
-        clientX: 'clientX' in e ? e.clientX : 'N/A',
-        clientY: 'clientY' in e ? e.clientY : 'N/A'
-    });
-    
-    // Let's prevent any default behavior
+    // Prevent default behavior
     if ('preventDefault' in e) {
         e.preventDefault();
     }
@@ -143,14 +134,6 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
         startX = e.touches[0].clientX;
     }
     
-    console.log('Starting resize', {
-        column: header.column.id,
-        startX,
-        startSize,
-        minSize: header.column.columnDef.minSize || defaultColumn.minSize,
-        maxSize: header.column.columnDef.maxSize || defaultColumn.maxSize
-    });
-    
     // Create custom resize handlers
     const onMouseMove = (moveEvent: MouseEvent) => {
         // Calculate how far the mouse has moved
@@ -160,15 +143,6 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
         const minSize = header.column.columnDef.minSize || defaultColumn.minSize;
         const maxSize = header.column.columnDef.maxSize || defaultColumn.maxSize;
         let newSize = Math.max(minSize, Math.min(maxSize, startSize + delta));
-        
-        console.log('Resizing in progress', {
-            column: header.column.id,
-            startX,
-            currentX: moveEvent.clientX,
-            delta,
-            startSize,
-            newSize
-        });
         
         // Update column size in the state
         const newSizing = {
@@ -194,15 +168,6 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
         const maxSize = header.column.columnDef.maxSize || defaultColumn.maxSize;
         let newSize = Math.max(minSize, Math.min(maxSize, startSize + delta));
         
-        console.log('Touch resizing in progress', {
-            column: header.column.id,
-            startX,
-            currentX: moveEvent.touches[0].clientX,
-            delta,
-            startSize,
-            newSize
-        });
-        
         // Update column size in the state
         const newSizing = {
             ...columnSizing.value,
@@ -217,11 +182,6 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
     };
     
     const onEnd = () => {
-        console.log('Resize ended', { 
-            column: header.column.id,
-            finalSize: columnSizing.value[header.column.id]
-        });
-        
         isResizing.value = false;
         
         // Clean up event listeners
@@ -271,15 +231,7 @@ const table = useVueTable({
     onColumnVisibilityChange: updaterOrValue => valueUpdater(updaterOrValue, columnVisibility),
     onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
     onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
-    onColumnSizingChange: updaterOrValue => {
-        console.log('onColumnSizingChange called', { 
-            type: typeof updaterOrValue, 
-            value: typeof updaterOrValue === 'function' ? 'function' : updaterOrValue 
-        });
-        const result = valueUpdater(updaterOrValue, columnSizing);
-        console.log('Column sizing updated to:', result);
-        return result;
-    },
+    onColumnSizingChange: updaterOrValue => valueUpdater(updaterOrValue, columnSizing),
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
@@ -289,18 +241,7 @@ const table = useVueTable({
     columnResizeMode: columnResizeMode.value,
     onColumnSizingInfoChange: (info) => {
         // Update isResizing state based on columnSizingInfo
-        console.log('onColumnSizingInfoChange called', { 
-            columnSizingInfo: table.getState().columnSizingInfo, 
-            info
-        });
-        
         if (table.getState().columnSizingInfo?.isResizingColumn) {
-            console.log('Column resize in progress', {
-                column: table.getState().columnSizingInfo.columnId,
-                startOffset: table.getState().columnSizingInfo.startOffset,
-                startSize: table.getState().columnSizingInfo.startSize,
-                deltaOffset: table.getState().columnSizingInfo.deltaOffset
-            });
             isResizing.value = true;
         }
     },
@@ -330,8 +271,6 @@ const copyCell = (value: any) => {
 
 // Initialize column sizing on mount
 onMounted(() => {
-    console.log('onMounted - initializing column sizing');
-    
     // Initialize default sort by timestamp if available
     if (timestampFieldName.value) {
         sorting.value = [{ id: timestampFieldName.value, desc: true }]
@@ -342,10 +281,8 @@ onMounted(() => {
     table.getAllLeafColumns().forEach(column => {
         const size = column.columnDef.size || defaultColumn.size;
         initialSizing[column.id] = size;
-        console.log(`Setting initial size for column ${column.id}: ${size}px`);
     })
     columnSizing.value = initialSizing;
-    console.log('Initial columnSizing state:', initialSizing);
 })
 
 // Add refs for DOM elements
@@ -416,14 +353,7 @@ watch(
 
 <template>
     <div class="h-full flex flex-col w-full min-w-0 flex-1 overflow-hidden" :class="{ 'cursor-col-resize select-none': isResizing }">
-        <!-- Absolute positioned resize overlay that appears during resize -->
-        <div v-if="isResizing" class="absolute inset-0 z-50 pointer-events-none">
-            <div class="w-full h-full bg-primary/5 flex items-center justify-center">
-                <div class="bg-primary/10 px-4 py-2 rounded-md shadow-md text-xs">
-                    Resizing column...
-                </div>
-            </div>
-        </div>
+        <!-- Subtle resize indicator - just a cursor change, no overlay -->
     
         <!-- Results Header with Controls and Pagination -->
         <div class="flex items-center justify-between p-2 border-b flex-shrink-0">
@@ -469,17 +399,17 @@ watch(
         <div class="flex-1 relative overflow-hidden" ref="tableContainerRef">
             <div v-if="table.getRowModel().rows?.length" class="absolute inset-0">
                 <div class="w-full h-full overflow-auto scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent">
-                    <table ref="tableRef" class="table-fixed border-separate border-spacing-0 text-sm" :data-resizing="isResizing">
+                    <table ref="tableRef" class="table-fixed border-separate border-spacing-0 text-sm shadow-sm" :data-resizing="isResizing">
                         <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
                             <tr class="border-b border-b-muted-foreground/10">
                                 <th v-for="header in table.getHeaderGroups()[0]?.headers"
                                     :key="header.id"
                                     scope="col"
-                                    class="group relative h-9 px-3 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden"
+                                    class="group relative h-9 px-3 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden border-r border-muted/30"
                                     :class="[
                                         getColumnType(header.column) === 'timestamp' ? 'font-semibold' : '',
                                         getColumnType(header.column) === 'severity' ? 'font-semibold' : '',
-                                        header.column.getIsResizing() ? 'border-r-2 border-r-primary/30' : ''
+                                        header.column.getIsResizing() ? 'border-r-2 border-r-primary' : ''
                                     ]"
                                     :style="{
                                         width: `${header.getSize()}px`,
@@ -492,35 +422,28 @@ watch(
                                             :render="header.column.columnDef.header"
                                             :props="header.getContext()" />
 
-                                        <!-- Column Resizer -->
+                                        <!-- Column Resizer - More visible design -->
                                         <div v-if="header.column.getCanResize()"
-                                            class="absolute right-0 top-0 h-full w-6 cursor-col-resize select-none touch-none group-hover:bg-primary/30 flex items-center justify-center"
-                                            :class="[
-                                                header.column.getIsResizing() ? 'bg-primary/50 opacity-100' : ''
-                                            ]"
+                                            class="absolute right-0 top-0 h-full w-5 cursor-col-resize select-none touch-none flex items-center justify-center hover:bg-muted/40 transition-colors"
                                             @mousedown="(e) => {
-                                                console.log('Resize handle mousedown', {
-                                                    column: header.column.id,
-                                                    event: e,
-                                                    target: e.target
-                                                });
                                                 e.preventDefault();
                                                 e.stopPropagation();
                                                 handleResize(e, header);
                                             }"
                                             @touchstart="(e) => {
-                                                console.log('Resize handle touchstart', {
-                                                    column: header.column.id,
-                                                    event: e,
-                                                    target: e.target
-                                                });
                                                 e.preventDefault();
                                                 e.stopPropagation();
                                                 handleResize(e, header);
                                             }"
                                             @click.stop>
-                                            <!-- Visual indicator for resize handle - vertical bar -->
-                                            <div class="h-5/6 w-0.5 bg-primary/50 group-hover:bg-primary"></div>
+                                            <!-- Enhanced resize handle with grip pattern -->
+                                            <div class="h-full w-4 flex flex-col items-center justify-center">
+                                                <div class="resize-grip flex flex-col items-center justify-center gap-1">
+                                                    <div class="w-1 h-1 rounded-full bg-muted-foreground/60 group-hover:bg-primary"></div>
+                                                    <div class="w-1 h-1 rounded-full bg-muted-foreground/60 group-hover:bg-primary"></div>
+                                                    <div class="w-1 h-1 rounded-full bg-muted-foreground/60 group-hover:bg-primary"></div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </th>
@@ -536,9 +459,9 @@ watch(
                                     @click="handleRowClick(row)($event)">
                                     <td v-for="cell in row.getVisibleCells()"
                                         :key="cell.id"
-                                        class="px-3 py-2 align-top font-mono text-xs leading-normal overflow-hidden"
+                                        class="px-3 py-2 align-top font-mono text-xs leading-normal overflow-hidden border-r border-muted/20"
                                         :class="[
-                                            cell.column.getIsResizing() ? 'border-r-2 border-r-primary/30' : '',
+                                            cell.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
                                         ]"
                                         :style="{
                                             width: `${cell.column.getSize()}px`,
@@ -590,37 +513,78 @@ watch(
 </template>
 
 <style>
-/* Ensure table layout is fixed */
+/* Table styling for log analytics */
 .table-fixed {
     table-layout: fixed;
     width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
 }
 
-/* Prevent text selection while resizing */
+/* Add clear borders to create a grid-like structure */
+.table-fixed th:last-child,
+.table-fixed td:last-child {
+    border-right: none;
+}
+
+/* Resize handle and cursor styling */
 .cursor-col-resize {
     user-select: none;
     -webkit-user-select: none;
     -moz-user-select: none;
     -ms-user-select: none;
     touch-action: none;
+    cursor: col-resize !important;
 }
 
-/* Add styles for resizing visual feedback */
+/* Ensure resize cursor and prevent text selection during resizing */
 [data-resizing="true"] * {
     cursor: col-resize !important;
     user-select: none !important;
 }
 
-/* Make the resize handle active area larger for easier grabbing */
-.cursor-col-resize {
-    cursor: col-resize !important;
+/* Highlight column being resized */
+[data-resizing="true"] th.border-r-primary,
+[data-resizing="true"] td.border-r-primary {
+    border-right-width: 2px;
+    border-right-color: hsl(var(--primary)) !important;
 }
 
-/* Prevent selection during resizing */
-.select-none {
-    user-select: none !important;
-    -webkit-user-select: none !important;
-    -moz-user-select: none !important;
-    -ms-user-select: none !important;
+/* Style for resize grip */
+.resize-grip {
+    height: 16px;
+    transition: transform 0.15s ease;
+}
+
+.group:hover .resize-grip {
+    transform: scale(1.2);
+}
+
+.group:hover .w-1 {
+    background-color: hsl(var(--primary));
+}
+
+/* Better visibility for cell borders */
+.border-muted\/20 {
+    border-color: hsl(var(--muted) / 0.2);
+}
+
+.border-muted\/30 {
+    border-color: hsl(var(--muted) / 0.3);
+}
+
+/* Add visual marker for column boundaries */
+.table-fixed th,
+.table-fixed td {
+    position: relative;
+}
+
+/* Make table row alternating colors more visible */
+.table-fixed tbody tr:nth-child(odd) {
+    background-color: hsl(var(--muted) / 0.03);
+}
+
+.table-fixed tbody tr:nth-child(even) {
+    background-color: transparent;
 }
 </style>

@@ -1,6 +1,6 @@
 <template>
   <div class="query-editor">
-    <!-- Header Bar -->
+    <!-- Header Bar (Keep existing structure) -->
     <div class="flex items-center justify-between bg-muted/40 rounded-t-md px-3 py-1.5 border border-b-0">
       <div class="flex items-center gap-3">
         <!-- Fields Panel Toggle -->
@@ -11,8 +11,10 @@
           <PanelRightOpen v-else class="h-4 w-4" />
         </button>
 
-        <!-- Tabs for Mode Switching - Emit event -->
-        <Tabs :model-value="props.activeMode" @update:model-value="$emit('update:activeMode', $event)" class="w-auto">
+        <!-- Tabs for Mode Switching -->
+        <Tabs :model-value="props.activeMode"
+          @update:model-value="(value: string | number) => $emit('update:activeMode', asEditorMode(value))"
+          class="w-auto">
           <TabsList class="h-8">
             <TabsTrigger value="logchefql">LogchefQL</TabsTrigger>
             <TabsTrigger value="clickhouse-sql">SQL</TabsTrigger>
@@ -21,7 +23,7 @@
       </div>
 
       <div class="flex items-center gap-2">
-        <!-- Table name indicator (SQL mode) - Use prop -->
+        <!-- Table name indicator -->
         <div v-if="props.activeMode === 'clickhouse-sql'" class="text-xs text-muted-foreground mr-2">
           <template v-if="props.tableName">
             <span class="mr-1">Table:</span>
@@ -50,7 +52,6 @@
             <div class="space-y-2">
               <h4 class="text-sm font-semibold">{{ props.activeMode === 'logchefql' ? 'LogchefQL' : 'SQL' }} Syntax</h4>
               <div v-if="props.activeMode === 'logchefql'" class="text-xs space-y-1.5">
-                <!-- LogchefQL Help -->
                 <div><code class="bg-muted px-1 rounded">field="value"</code> - Exact match</div>
                 <div><code class="bg-muted px-1 rounded">field!="value"</code> - Not equal</div>
                 <div><code class="bg-muted px-1 rounded">field~"pattern"</code> - Regex match</div>
@@ -62,7 +63,6 @@
                 </div>
               </div>
               <div v-else class="text-xs space-y-1.5">
-                <!-- SQL Help -->
                 <div><code class="bg-muted px-1 rounded">SELECT count() FROM {{ tableName || 'table' }}</code></div>
                 <div><code class="bg-muted px-1 rounded">WHERE field = 'value' AND time > now() - interval 1 hour</code>
                 </div>
@@ -76,12 +76,15 @@
       </div>
     </div>
 
-    <!-- Monaco Editor -->
-    <div :style="{ height: `${editorHeight}px` }" class="editor-container border rounded-b-md overflow-hidden"
-      :class="{ 'ring-1 ring-primary/50 border-primary/50': editorFocused }">
+    <!-- Monaco Editor Container -->
+    <div class="editor-container border rounded-b-md overflow-hidden relative" :class="{
+      'ring-1 ring-primary/50 border-primary/50': editorFocused,
+      'is-empty': isEditorEmpty
+    }" :style="{ height: `${editorHeight}px` }" :data-placeholder="currentPlaceholder">
+      <!-- Monaco Editor Component -->
       <vue-monaco-editor :key="props.activeMode" v-model:value="editorContent" :theme="theme"
         :language="props.activeMode" :options="monacoOptions" @mount="handleMount" @update:value="handleEditorChange"
-        class="h-full w-full" />
+        class="h-full w-full absolute inset-0" />
     </div>
 
     <!-- Error Message Display -->
@@ -104,19 +107,21 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import { initMonacoSetup, getDefaultMonacoOptions } from "@/utils/monaco";
 import { Parser as LogchefQLParser, State as LogchefQLState, Operator as LogchefQLOperator, VALID_KEY_VALUE_OPERATORS as LogchefQLValidOperators, isNumeric } from "@/utils/logchefql";
-import { parseAndTranslateLogchefQL, validateLogchefQL } from "@/utils/logchefql/api";
+import { validateLogchefQL } from "@/utils/logchefql/api"; // Simpler validation import
 import { validateSQL, SQL_KEYWORDS, CLICKHOUSE_FUNCTIONS, SQL_TYPES } from "@/utils/clickhouse-sql";
-import { SQLParser } from "@/utils/clickhouse-sql/ast"; // Import SQLParser
 import { useExploreStore } from '@/stores/explore';
-import { QueryBuilder, type BuildSqlOptions } from "@/utils/query-builder"; // Import BuildSqlOptions type
-import type { CalendarDateTime } from '@internationalized/date'; // Import CalendarDateTime
-
+// Keep other necessary imports like types...
 // --- Types ---
 type EditorMode = "logchefql" | "clickhouse-sql";
-type MonacoCompletionItem = monaco.languages.CompletionItem; // Alias for clarity
+type EditorChangeEvent = { query: string; mode: EditorMode };
+// Monaco type aliases for clarity
+type MonacoEditor = monaco.editor.IStandaloneCodeEditor;
+type MonacoModel = monaco.editor.ITextModel;
+type MonacoDisposable = monaco.IDisposable;
+type MonacoCompletionItem = monaco.languages.CompletionItem;
 type MonacoPosition = monaco.Position;
 type MonacoRange = monaco.IRange;
-type EditorChangeEvent = { query: string; mode: EditorMode };
+
 
 // --- Props and Emits ---
 const props = defineProps({
@@ -132,808 +137,204 @@ const props = defineProps({
 const emit = defineEmits<{
   (e: "change", value: EditorChangeEvent): void;
   (e: "submit", value: EditorChangeEvent): void;
-  (e: "update:activeMode", value: EditorMode): void; // Add event for mode changes
+  (e: "update:activeMode", value: EditorMode): void;
   (e: "toggle-fields"): void;
 }>();
 
-// --- State ---
+// --- Core State ---
 const isDark = useDark();
 const exploreStore = useExploreStore();
-const editorRef = shallowRef<monaco.editor.IStandaloneCodeEditor | null>(null);
-const editorModel = shallowRef<monaco.editor.ITextModel | null>(null);
+const editorRef = shallowRef<MonacoEditor | null>(null);
+const editorContent = ref(""); // Internal state for editor value
 const editorFocused = ref(false);
 const validationError = ref<string | null>(null);
+const isProgrammaticChange = ref(false); // Flag to prevent update loops
+const isDisposing = ref(false); // Flag to prevent operations during disposal
+const activeDisposables = ref<MonacoDisposable[]>([]); // Track all disposables
+
+// --- Computed Properties ---
+const theme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
 const fieldNames = computed(() => Object.keys(props.schema ?? {}));
-const activeProviders = ref<monaco.IDisposable[]>([]); // Track completion providers
-let sqlUpdateTimeout: number | null = null; // Add missing variable declaration
+const isEditorEmpty = computed(() => !editorContent.value?.trim());
 
-// Centralized state for editor content managed via computed property
-const editorContent = ref("");
+const currentPlaceholder = computed(() => {
+  // Use prop placeholder if provided, otherwise generate default
+  if (props.placeholder) return props.placeholder;
 
-// Reactive state for options to allow dynamic updates
+  return props.activeMode === 'logchefql'
+    ? 'Enter LogchefQL query (e.g., level="error" and status>400)'
+    : `Enter ClickHouse SQL query (e.g., SELECT * FROM ${props.tableName || 'your_table'} WHERE ...)`;
+});
+
+const editorHeight = computed(() => {
+  const content = editorContent.value || '';
+  const lines = (content.match(/\n/g) || []).length + 1;
+  const baseLineHeight = 21; // Match monaco options
+  const padding = 16; // Match monaco options (top + bottom)
+  const minHeight = props.activeMode === 'logchefql' ? 45 : 90;
+  // Calculate height based on lines, ensuring minHeight is respected
+  // Add a small buffer for better spacing, especially for single line
+  const calculatedHeight = padding + (lines * baseLineHeight) + (lines > 1 ? 0 : 4);
+  return Math.max(minHeight, calculatedHeight);
+});
+
+// Reactive Monaco options (base + dynamic updates)
 const monacoOptions = reactive(getDefaultMonacoOptions());
 
-// No longer need local activeMode ref - use prop directly
+// --- Editor Lifecycle & Handling ---
+const handleMount = (editor: MonacoEditor) => {
+  if (isDisposing.value) return; // Prevent setup if disposing
 
-// Flag to prevent feedback loops during programmatic updates
-const isProgrammaticChange = ref(false);
-
-// Flag to prevent operations during disposal
-const isDisposing = ref(false);
-
-// Track if editor is initialized
-const isEditorInitialized = ref(false);
-
-// Track disposal resources
-const disposeArray = ref<monaco.IDisposable[]>([]);
-
-// Helper function for building completion suggestions
-const getSuggestionsFromList = (params: any) => {
-  const suggestions: MonacoCompletionItem[] = [];
-  let defaultPostfix = params.postfix === undefined ? "" : params.postfix;
-
-  const range =
-    params.range === undefined
-      ? {
-        startLineNumber: params.position.lineNumber,
-        endLineNumber: params.position.lineNumber,
-        startColumn: params.position.column,
-        endColumn: params.position.column,
-      }
-      : params.range;
-
-  for (const item of params.items) {
-    let label = null;
-    let sortText = null;
-    let postfix = defaultPostfix;
-    if (typeof item === "string" || item instanceof String) {
-      label = item;
-      sortText = label;
-    } else {
-      label = item.label;
-      sortText = item.sortText === undefined ? label : item.sortText;
-      postfix = item.postfix === undefined ? defaultPostfix : item.postfix;
-    }
-    let insertText = item.insertText === undefined ? label : item.insertText;
-    suggestions.push({
-      label: label,
-      kind: params.kind,
-      range: range,
-      sortText: sortText,
-      insertText: insertText + postfix,
-      command: {
-        id: "editor.action.triggerSuggest",
-        title: "Trigger Suggest"
-      },
-    });
-  }
-  return suggestions;
-};
-
-// --- Editor Handling ---
-const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
+  console.log("QueryEditor: Mounting Monaco instance");
   editorRef.value = editor;
-  editorModel.value = editor.getModel();
+  initMonacoSetup(); // Ensure themes/languages are registered (runs once internally)
 
-  // Initial content sync is now handled by watchEffect
-
-  updateMonacoOptions(); // Apply initial options for the active mode
-  registerCompletionProvider(); // Register for the initial mode
+  // Add Focus/Blur Listeners
+  activeDisposables.value.push(
+    editor.onDidFocusEditorWidget(() => editorFocused.value = true),
+    editor.onDidBlurEditorWidget(() => editorFocused.value = false)
+  );
 
   // Add Submit Shortcut
-  const submitAction = editor.addAction({
-    id: "submit-query",
-    label: "Run Query",
-    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
-    run: submitQuery,
-  });
-  if (submitAction) activeProviders.value.push(submitAction); // Track action for disposal
+  activeDisposables.value.push(
+    editor.addAction({
+      id: "submit-query",
+      label: "Run Query",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+      run: submitQuery,
+    })
+  );
 
-  // Focus/Blur Tracking
-  const focusListener = editor.onDidFocusEditorWidget(() => { editorFocused.value = true; });
-  const blurListener = editor.onDidBlurEditorWidget(() => { editorFocused.value = false; });
-  activeProviders.value.push(focusListener, blurListener);
+  // Initial setup is handled by watchEffect which runs immediately
 
-  // Improved autofocus with cursor positioning
-  nextTick(() => {
-    if (editorRef.value && !isDisposing.value) {
-      editorRef.value.focus();
-      // Set cursor to end of document
-      const model = editorRef.value.getModel();
-      if (model) {
-        const lastLine = model.getLineCount();
-        const lastColumn = model.getLineMaxColumn(lastLine);
-        editorRef.value.setPosition({ lineNumber: lastLine, column: lastColumn });
-      }
-      editorRef.value.layout();
-      console.log("QueryEditor: Autofocus attempted with cursor positioning.");
-    }
-  });
+  // Attempt initial focus
+  focusEditor(true);
 };
 
 const handleEditorChange = (value: string | undefined) => {
-  // If change is programmatic, ignore to prevent loops
-  if (isProgrammaticChange.value) return;
+  if (isProgrammaticChange.value || isDisposing.value) {
+    return; // Prevent feedback loop or changes during disposal
+  }
 
   const currentQuery = value ?? "";
-  // Avoid updating local editorContent directly here, let watchEffect handle it
+  editorContent.value = currentQuery; // Update internal state FIRST
 
-  // Update the store based on the current mode
+  // Update store based on current mode
   if (props.activeMode === 'logchefql') {
-    // Check if store value is different before setting to avoid redundant updates
-    if (exploreStore.logchefqlCode !== currentQuery) exploreStore.setLogchefqlCode(currentQuery);
+    exploreStore.setLogchefqlCode(currentQuery);
   } else {
     exploreStore.setRawSql(currentQuery);
   }
 
   // Clear validation errors on manual input
-  if (validationError.value) {
-    validationError.value = null;
-  }
+  validationError.value = null;
 
   // Emit change event
   emit("change", { query: currentQuery, mode: props.activeMode });
-
-  // Re-register completion provider if we change content
-  // This helps ensure proper suggestions after typing "and" or "or"
-  setTimeout(() => registerCompletionProvider(), 10);
 };
 
+// Function to programmatically update editor content (e.g., from store or clear)
 const runProgrammaticUpdate = (newValue: string) => {
   if (!editorRef.value || isDisposing.value) return;
+
   isProgrammaticChange.value = true;
-  // Use editor's API to set value
-  editorRef.value.setValue(newValue);
-  // Update local ref *after* setting editor value
-  editorContent.value = newValue;
-  // Wait for editor to potentially update, then release the flag
+  editorContent.value = newValue; // Update internal state
+  editorRef.value.setValue(newValue); // Update Monaco instance
+
+  // Release the flag after the update is likely processed
   nextTick(() => {
     isProgrammaticChange.value = false;
   });
 };
 
-const syncEditorContentWithStore = (isInitialSync = false) => {
-  // This function is no longer needed, logic moved to watchEffect
-};
+// --- Synchronization and Option Updates ---
+watchEffect(() => {
+  // 1. Sync content from store if it differs from internal state
+  const storeValue = props.activeMode === 'logchefql'
+    ? exploreStore.logchefqlCode
+    : exploreStore.rawSql;
+  const valueToSet = storeValue ?? "";
 
-// --- Mode Switching ---
-// handleTabChange removed - parent component now handles mode switching
-
-// Helper function to update editor language and options
-const updateEditorLanguageAndOptions = (mode: EditorMode) => {
-  // Re-register completion provider for the new mode
-  registerCompletionProvider();
-};
-
-const getOperatorsSuggestions = (field: string, position: any) => {
-  // Create operators as any[] type to avoid string[] conversion issues
-  const operators: any[] = [
-    { label: LogchefQLOperator.EQUALS, sortText: "a" },
-    { label: LogchefQLOperator.NOT_EQUALS, sortText: "b" },
-    { label: LogchefQLOperator.GREATER_THAN, sortText: "e" },
-    { label: LogchefQLOperator.GREATER_OR_EQUALS_THAN, sortText: "f" },
-    { label: LogchefQLOperator.LOWER_THAN, sortText: "g" },
-    { label: LogchefQLOperator.LOWER_OR_EQUALS_THAN, sortText: "h" },
-  ];
-
-  // Only add regex operators for string fields
-  const fieldType = props.schema[field]?.type || "";
-  if (fieldType.includes("String") || fieldType.includes("string")) {
-    operators.push(
-      { label: LogchefQLOperator.EQUALS_REGEX, sortText: "c" },
-      { label: LogchefQLOperator.NOT_EQUALS_REGEX, sortText: "d" }
-    );
+  if (editorContent.value !== valueToSet) {
+    runProgrammaticUpdate(valueToSet);
   }
 
-  return getSuggestionsFromList({
-    position: position,
-    items: operators,
-    kind: monaco.languages.CompletionItemKind.Operator,
-  });
-};
-
-const getBooleanOperatorsSuggestions = (range: any) => {
-  // Create suggestions with very distinct IDs to avoid duplicates
-  return [
-    {
-      label: "and",
-      kind: monaco.languages.CompletionItemKind.Keyword,
-      insertText: "and ",
-      range: range,
-      sortText: "1and"
-    },
-    {
-      label: "or",
-      kind: monaco.languages.CompletionItemKind.Keyword,
-      insertText: "or ",
-      range: range,
-      sortText: "2or"
+  // 2. Update editor options and language if editor instance exists
+  const editor = editorRef.value;
+  if (editor && !isDisposing.value) {
+    const model = editor.getModel();
+    if (model && model.getLanguageId() !== props.activeMode) {
+      monaco.editor.setModelLanguage(model, props.activeMode);
+      console.log(`QueryEditor: Language set to ${props.activeMode}`);
     }
-  ];
-};
 
-const getKeySuggestions = (range: any) => {
-  const suggestions: MonacoCompletionItem[] = [];
-  for (const name of fieldNames.value) {
-    const fieldInfo = props.schema[name];
-    if (fieldInfo) {
-      let documentation = `Field (${fieldInfo.type})`;
-      suggestions.push({
-        label: name,
-        kind: monaco.languages.CompletionItemKind.Field,
-        range: range,
-        insertText: name,
-        documentation: documentation,
-        sortText: name.toLowerCase(), // Add missing sortText property
-        command: {
-          id: "editor.action.triggerSuggest",
-          title: "Trigger Suggest"
-        },
-      });
-    }
-  }
-  return suggestions;
-};
+    updateMonacoOptions(); // Update options like folding, line numbers, etc.
+    registerCompletionProvider(); // Update syntax highlighting/completion
 
-const prepareSuggestionValues = (items: string[], quoteChar?: string) => {
-  const quoted = quoteChar !== undefined;
-  const defaultQuoteChar = quoteChar === undefined ? '"' : quoteChar;
-  const result = [];
-
-  for (const item of items) {
-    if (isNumeric(item)) {
-      result.push({ label: item });
-    } else {
-      let insertText = "";
-      if (!quoted) {
-        insertText = defaultQuoteChar;
-      }
-
-      // Handle escaping of quotes in the value
-      for (const char of item) {
-        if (char === defaultQuoteChar) {
-          insertText += `\\${defaultQuoteChar}`;
-        } else {
-          insertText += char;
-        }
-      }
-
-      if (!quoted) {
-        insertText += defaultQuoteChar;
-      }
-
-      result.push({ label: item, insertText });
-    }
-  }
-
-  return result;
-};
-
-// Sample values for auto-completion (in real use you would get these from your backend)
-const getSchemaFieldValues = (field: string): string[] => {
-  // This would normally come from props or an API call
-  const sampleValues: Record<string, string[]> = {
-    level: ["info", "error", "warning", "debug"],
-    service: ["api", "frontend", "database", "auth", "cache"],
-    status: ["200", "404", "500", "403", "401"]
-  };
-
-  return sampleValues[field] || [];
-};
-
-const getValueSuggestions = async (key: string, value: string, range: any, quoteChar?: string) => {
-  const result = {
-    suggestions: [] as MonacoCompletionItem[],
-    incomplete: false,
-  };
-
-  if (fieldNames.value.includes(key)) {
-    // Get sample values for the field
-    const fieldValues = getSchemaFieldValues(key);
-
-    // Filter values based on current input
-    const filteredValues = fieldValues.filter(val =>
-      val.toLowerCase().includes(value.toLowerCase())
-    );
-
-    // Create suggestions with proper typing
-    const items: any[] = prepareSuggestionValues(filteredValues, quoteChar);
-
-    result.suggestions = getSuggestionsFromList({
-      range: range,
-      items: items,
-      kind: monaco.languages.CompletionItemKind.Value,
-      postfix: " ",
-    });
-  }
-
-  return result;
-};
-
-// This is already defined as safelyDisposeEditor earlier
-
-// This watcher is not needed - initialization is handled in onMounted
-
-// --- Lifecycle Hooks ---
-onMounted(() => {
-  try {
-    initMonacoSetup(); // Initialize themes, languages (runs once internally)
-
-    // Initial content sync now handled by watchEffect
-
-  } catch (error) {
-    console.error("QueryEditor: Error during mount:", error);
-    validationError.value = "Failed to initialize editor.";
+    // Refocus editor after mode change for better UX
+    focusEditor();
   }
 });
 
-// --- Computed Properties ---
-const theme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
-
-const currentPlaceholder = computed(() => {
-  if (props.activeMode === 'logchefql') {
-    return props.placeholder || 'Enter LogchefQL query (e.g., level="error" and status>400)';
-  } else {
-    return props.placeholder || `Enter ClickHouse SQL query for table ${props.tableName || '...'}`;
+// Watch for schema changes to update completion providers
+watch(() => props.schema, () => {
+  if (editorRef.value && !isDisposing.value) {
+    console.log("QueryEditor: Schema changed, re-registering completions.");
+    registerCompletionProvider();
   }
-});
-
-const editorHeight = computed(() => {
-  // Ensure we're working with a string
-  const content = String(editorContent.value || '');
-  const lines = (content.match(/\n/g) || []).length + 1;
-  const lineHeight = monacoOptions.lineHeight || 21; // Use configured line height
-  const padding = (monacoOptions.padding?.top ?? 8) + (monacoOptions.padding?.bottom ?? 8);
-  const minHeight = props.activeMode === 'logchefql' ? 45 : 90; // Smaller min for LogchefQL
-  const calculatedHeight = padding + lines * lineHeight;
-  return Math.max(minHeight, calculatedHeight);
-});
-
-// --- Lifecycle Hooks ---
-onMounted(() => {
-  try {
-    initMonacoSetup(); // Initialize themes, languages (runs once internally)
-
-    // Initial content sync now handled by watchEffect
-
-  } catch (error) {
-    console.error("QueryEditor: Error during mount:", error);
-    validationError.value = "Failed to initialize editor.";
-  }
-});
-
-onBeforeUnmount(() => {
-  safelyDisposeEditor();
-});
-
-// This function is replaced by handleTabChange which is already defined
-
-// This function is already redefined as validateQuery earlier
-
-// Clean function to dispose all existing providers
-function disposeAllProviders() {
-  try {
-    while (activeProviders.value.length > 0) {
-      const provider = activeProviders.value.pop();
-      if (provider && typeof provider.dispose === 'function') {
-        provider.dispose();
-      }
-    }
-  } catch (e) {
-    console.warn('Error in disposeAllProviders:', e);
-  }
-}
-
-const registerSQLCompletionProvider = () => {
-  // Dispose all existing providers before registering new ones
-  disposeAllProviders();
-
-  // Register a new provider
-  const provider = monaco.languages.registerCompletionItemProvider("clickhouse-sql", {
-    provideCompletionItems: async (model, position) => {
-      const word = model.getWordUntilPosition(position);
-      const range = {
-        startLineNumber: position.lineNumber,
-        endLineNumber: position.lineNumber,
-        startColumn: word.startColumn,
-        endColumn: word.endColumn,
-      };
-
-      // Get the line before the current position
-      const textBeforeCursor = model.getValueInRange({
-        startLineNumber: position.lineNumber,
-        endLineNumber: position.lineNumber,
-        startColumn: 1,
-        endColumn: position.column,
-      });
-
-      // Check for specific SQL contexts - add debug info
-      console.log('QueryEditor tableName prop:', props.tableName);
-
-      // Improved regex for detecting being right after FROM keyword
-      const isAfterFrom = /\bFROM\s+$/i.test(textBeforeCursor);
-      const isInWhereClause = /\bWHERE\b/i.test(textBeforeCursor) && !/\bGROUP\s+BY\b|\bORDER\s+BY\b|\bLIMIT\b/i.test(textBeforeCursor);
-      const isInSelectClause = /\bSELECT\b/i.test(textBeforeCursor) && !/\bFROM\b/i.test(textBeforeCursor);
-      const isAfterJoin = /\b(JOIN|INNER\s+JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|FULL\s+JOIN|OUTER\s+JOIN)\s+$/i.test(textBeforeCursor);
-      const isInGroupByClause = /\bGROUP\s+BY\b/i.test(textBeforeCursor) && !/\bHAVING\b|\bORDER\s+BY\b|\bLIMIT\b/i.test(textBeforeCursor);
-      const isInOrderByClause = /\bORDER\s+BY\b/i.test(textBeforeCursor) && !/\bLIMIT\b/i.test(textBeforeCursor);
-
-      // Create suggestions array with proper typing
-      let suggestions: monaco.languages.CompletionItem[] = [];
-
-      // Only suggest relevant items based on context
-
-      // After FROM or JOIN, suggest table name
-      if (isAfterFrom || isAfterJoin) {
-        // Suggest the table name from the parent component
-        if (props.tableName) {
-          suggestions.push({
-            label: props.tableName,
-            kind: monaco.languages.CompletionItemKind.Folder,
-            insertText: props.tableName,
-            range,
-            sortText: '0-table',
-            detail: 'Current log table',
-            documentation: 'The current log table from the selected source'
-          });
-        }
-
-        // Also suggest keywords that might follow FROM
-        suggestions = suggestions.concat([
-          {
-            label: 'WHERE',
-            kind: monaco.languages.CompletionItemKind.Keyword,
-            insertText: 'WHERE ',
-            range,
-            sortText: '1-where',
-            detail: 'Filter results',
-            documentation: 'Add a WHERE clause to filter results'
-          },
-          {
-            label: 'GROUP BY',
-            kind: monaco.languages.CompletionItemKind.Keyword,
-            insertText: 'GROUP BY ',
-            range,
-            sortText: '1-groupby',
-            detail: 'Group results',
-            documentation: 'Add a GROUP BY clause to aggregate results'
-          },
-          {
-            label: 'ORDER BY',
-            kind: monaco.languages.CompletionItemKind.Keyword,
-            insertText: 'ORDER BY ',
-            range,
-            sortText: '1-orderby',
-            detail: 'Sort results',
-            documentation: 'Add an ORDER BY clause to sort results'
-          },
-          {
-            label: 'LIMIT',
-            kind: monaco.languages.CompletionItemKind.Keyword,
-            insertText: 'LIMIT ',
-            range,
-            sortText: '1-limit',
-            detail: 'Limit results',
-            documentation: 'Add a LIMIT clause to limit the number of results returned'
-          },
-          {
-            label: 'JOIN',
-            kind: monaco.languages.CompletionItemKind.Keyword,
-            insertText: 'JOIN ',
-            range,
-            sortText: '1-join',
-            detail: 'Join tables',
-            documentation: 'Add a JOIN clause to combine data from multiple tables'
-          }
-        ]);
-      }
-      // In WHERE, GROUP BY, ORDER BY, or SELECT clause, suggest fields
-      else if (isInWhereClause || isInGroupByClause || isInOrderByClause || isInSelectClause) {
-        // Add schema columns if available
-        if (fieldNames.value.length > 0) {
-          suggestions = suggestions.concat(
-            fieldNames.value.map(field => ({
-              label: field,
-              kind: monaco.languages.CompletionItemKind.Field,
-              range: range,
-              insertText: field,
-              sortText: `0-${field}`, // Sort columns first
-              detail: props.schema[field]?.type || "unknown",
-            }))
-          );
-        }
-
-        // In WHERE clause, also suggest operators and functions
-        if (isInWhereClause) {
-          // Add operators
-          suggestions = suggestions.concat([
-            { label: '=', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' = ', range, sortText: '1-eq' },
-            { label: '!=', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' != ', range, sortText: '1-neq' },
-            { label: '>', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' > ', range, sortText: '1-gt' },
-            { label: '<', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' < ', range, sortText: '1-lt' },
-            { label: '>=', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' >= ', range, sortText: '1-gte' },
-            { label: '<=', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' <= ', range, sortText: '1-lte' },
-            { label: 'LIKE', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' LIKE ', range, sortText: '1-like' },
-            { label: 'IN', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' IN ()', range, sortText: '1-in', command: { id: 'editor.action.triggerSuggest', title: 'Trigger Suggest' } },
-            { label: 'BETWEEN', kind: monaco.languages.CompletionItemKind.Operator, insertText: ' BETWEEN ', range, sortText: '1-between' },
-          ]);
-        }
-
-        // Add relevant functions
-        suggestions = suggestions.concat(
-          CLICKHOUSE_FUNCTIONS.map(func => ({
-            label: func,
-            kind: monaco.languages.CompletionItemKind.Function,
-            insertText: func + "(",
-            range,
-            sortText: `2-${func}`,
-            command: { id: "editor.action.triggerParameterHints", title: "Show Parameter Hints" }
-          }))
-        );
-      }
-      // Default suggestions for other contexts
-      else {
-        // Add common SQL keywords
-        suggestions = suggestions.concat(
-          SQL_KEYWORDS.map(keyword => ({
-            label: keyword,
-            kind: monaco.languages.CompletionItemKind.Keyword,
-            insertText: keyword + ' ',
-            range,
-            sortText: `1-${keyword}`,
-          }))
-        );
-
-        // Add functions for general context
-        suggestions = suggestions.concat(
-          CLICKHOUSE_FUNCTIONS.map(func => ({
-            label: func,
-            kind: monaco.languages.CompletionItemKind.Function,
-            insertText: func + "(",
-            range,
-            sortText: `2-${func}`,
-            command: { id: "editor.action.triggerParameterHints", title: "Show Parameter Hints" }
-          }))
-        );
-
-        // Add SQL types for general context
-        suggestions = suggestions.concat(
-          SQL_TYPES.map(type => ({
-            label: type,
-            kind: monaco.languages.CompletionItemKind.Class,
-            insertText: type,
-            range,
-            sortText: `3-${type}`,
-          }))
-        );
-      }
-
-      // Fix sortText for completion items
-      suggestions.push({
-        label: 'SELECT * FROM',
-        kind: monaco.languages.CompletionItemKind.Field,
-        range,
-        insertText: 'SELECT * FROM ',
-        documentation: 'Basic SELECT query template',
-        command: {
-          id: 'editor.action.insertSnippet',
-          title: 'Insert Snippet',
-          arguments: ['SELECT * FROM ${1:table} WHERE ${2:condition}']
-        },
-        sortText: '0001' // Add sortText property
-      });
-
-      // Return with proper typing
-      return {
-        suggestions: suggestions as monaco.languages.CompletionItem[],
-        incomplete: false
-      };
-    },
-    // Trigger on relevant characters
-    triggerCharacters: [" ", "\n", ".", "(", ","],
-  });
-
-  // Add to the tracked providers
-  activeProviders.value.push(provider);
-  return provider;
-};
-
-const registerLogchefQLCompletionProvider = () => {
-  // Dispose all existing providers
-  disposeAllProviders();
-
-  // Register a new provider
-  const provider = monaco.languages.registerCompletionItemProvider("logchefql", {
-    provideCompletionItems: async (model, position) => {
-      const word = model.getWordUntilPosition(position);
-      const textBeforeCursorRange = {
-        startLineNumber: 1,
-        endLineNumber: position.lineNumber,
-        startColumn: 1,
-        endColumn: position.column,
-      };
-      const textBeforeCursor = model.getValueInRange(textBeforeCursorRange);
-
-      // Check if we're right after "and" or "or"
-      const afterBoolOp = /\b(and|or)\s+$/i.test(textBeforeCursor);
-
-      // Parse the current state
-      const parser = new LogchefQLParser();
-      parser.parse(textBeforeCursor, false, true);
-
-      let suggestions: MonacoCompletionItem[] = [];
-      let incomplete = false;
-      const range = {
-        startLineNumber: position.lineNumber,
-        endLineNumber: position.lineNumber,
-        startColumn: word.startColumn,
-        endColumn: word.endColumn,
-      };
-
-      // Only provide suggestions for the specific state we're in
-      // to prevent duplicate suggestions
-      if (
-        parser.state === LogchefQLState.KEY ||
-        parser.state === LogchefQLState.INITIAL ||
-        parser.state === LogchefQLState.BOOL_OP_DELIMITER
-      ) {
-        if (fieldNames.value.includes(word.word)) {
-          suggestions = getOperatorsSuggestions(word.word, position);
-        } else {
-          suggestions = getKeySuggestions(range);
-        }
-      } else if (parser.state === LogchefQLState.EXPECT_BOOL_OP) {
-        // We're right after a completed expression, suggest boolean operators
-        suggestions = getBooleanOperatorsSuggestions(range);
-      } else if (parser.boolOperator === "and" || parser.boolOperator === "or") {
-        // We're after a boolean operator, suggest field names
-        suggestions = getKeySuggestions(range);
-      } else if (parser.state === LogchefQLState.KEY_VALUE_OPERATOR) {
-        // @ts-ignore: Type compatibility issues with operator types
-        if (LogchefQLValidOperators.includes(parser.keyValueOperator)) {
-          range.startColumn = word.endColumn - parser.value.length;
-          const result = await getValueSuggestions(parser.key, parser.value, range);
-          incomplete = result.incomplete;
-          suggestions = result.suggestions;
-        }
-      } else if (
-        parser.state === LogchefQLState.VALUE ||
-        parser.state === LogchefQLState.DOUBLE_QUOTED_VALUE ||
-        parser.state === LogchefQLState.SINGLE_QUOTED_VALUE
-      ) {
-        range.startColumn = word.endColumn - parser.value.length;
-        let quoteChar = "";
-        if (parser.state === LogchefQLState.DOUBLE_QUOTED_VALUE) {
-          quoteChar = '"';
-        } else if (parser.state === LogchefQLState.SINGLE_QUOTED_VALUE) {
-          quoteChar = "'";
-        }
-        const result = await getValueSuggestions(
-          parser.key,
-          parser.value,
-          range,
-          quoteChar
-        );
-        incomplete = result.incomplete;
-        suggestions = result.suggestions;
-      } else if (parser.state === LogchefQLState.EXPECT_BOOL_OP) {
-        // Always show boolean operator suggestions when in this state
-        // This state occurs after completing a filter expression like field="value"
-
-        // Check if we're right after a completed value expression
-        // We don't want to show suggestions when already typing a boolean operator
-        if (word.word === '' && !textBeforeCursor.trim().endsWith('and') && !textBeforeCursor.trim().endsWith('or')) {
-          suggestions = getBooleanOperatorsSuggestions(range);
-        }
-      }
-
-      return {
-        suggestions: suggestions as monaco.languages.CompletionItem[],
-        incomplete,
-      };
-    },
-    triggerCharacters: ["=", "!", ">", "<", "~", " ", "."],
-  });
-
-  // Add to the tracked providers
-  activeProviders.value.push(provider);
-  return provider;
-};
-
-// Removed duplicate handleMount function
-
-// This function is replaced by updateMonacoOptions which is already defined
-
-// These watchers are already handled by the refactored code
+}, { deep: true });
 
 
-// Clean up when component is unmounted - improved cleanup process
-onBeforeUnmount(() => {
-  // Use a more significant delay to ensure all operations have completed
-  // This helps prevent race conditions with editor operations
-  setTimeout(() => {
-    safelyDisposeEditor();
-  }, 50);
-
-  // Set a flag to prevent any further editor operations
-  isDisposing.value = true;
-});
-
-// Watch for loading state from the store to disable editor during API calls
+// Watch for loading state to make editor read-only
 watch(() => exploreStore.isLoadingOperation('executeQuery'), (isLoading) => {
   if (editorRef.value && !isDisposing.value) {
-    try {
-      editorRef.value.updateOptions({ readOnly: isLoading });
-    } catch (error) {
-      console.warn('Error updating editor readOnly state:', error);
-    }
+    editorRef.value.updateOptions({ readOnly: isLoading });
   }
 });
 
-// Helper function to extract SQL string from QueryResult
-const getDefaultSQLQuery = (options: any) => {
-  const result = QueryBuilder.getDefaultSQLQuery(options);
-  return result.success ? result.sql : '';
-};
-
-// Remove duplicate provider registration functions since they're already defined earlier
-
-// This function is already redefined earlier in the code
-
-// Not needed - handleEditorChange is used for this purpose
-
-// --- Monaco Options and Updates ---
+// --- Monaco Options Update ---
 const updateMonacoOptions = () => {
   const editor = editorRef.value;
   if (!editor || isDisposing.value) return;
 
-  try {
-    // Defensive check to ensure the editor is ready for option updates
-    const model = editor.getModel();
-    if (!model || model.isDisposed?.()) {
-      console.warn('Cannot update Monaco options: model is not available or disposed');
-      return;
+  const isSqlMode = props.activeMode === 'clickhouse-sql';
+
+  // Update reactive options object
+  Object.assign(monacoOptions, {
+    ...getDefaultMonacoOptions(), // Start with base defaults
+    folding: isSqlMode,
+    lineNumbers: isSqlMode ? "on" : "off",
+    wordWrap: isSqlMode ? "on" : "off", // Enable word wrap for SQL
+    glyphMargin: isSqlMode,
+    lineDecorationsWidth: isSqlMode ? 10 : 0,
+    lineNumbersMinChars: isSqlMode ? 3 : 0,
+    padding: { top: isSqlMode ? 6 : 8, bottom: isSqlMode ? 6 : 8 },
+    // Placeholder is now handled by CSS, remove from options
+    // 'placeholder': currentPlaceholder.value, // NO LONGER NEEDED HERE
+  });
+
+  // Apply the updated options to the editor instance
+  // Use nextTick to ensure model changes (like language) are potentially processed
+  nextTick(() => {
+    if (editor === editorRef.value && !isDisposing.value) {
+      editor.updateOptions(monacoOptions);
+      // Force layout recalculation in case options affect dimensions
+      editor.layout();
     }
-
-    const isSqlMode = props.activeMode === 'clickhouse-sql';
-
-    // Update reactive options object
-    Object.assign(monacoOptions, {
-      ...getDefaultMonacoOptions(), // Start with base defaults
-      // Mode-specific overrides:
-      folding: isSqlMode,
-      lineNumbers: isSqlMode ? "on" : "off",
-      wordWrap: isSqlMode ? "on" : "off",
-      glyphMargin: isSqlMode, // Show glyph margin only for SQL (folding)
-      lineDecorationsWidth: isSqlMode ? 10 : 0,
-      lineNumbersMinChars: isSqlMode ? 3 : 0,
-      padding: { top: isSqlMode ? 6 : 8, bottom: isSqlMode ? 6 : 8 },
-    });
-
-    // Apply the updated options to the editor instance
-    // Use nextTick to ensure model is fully attached
-    nextTick(() => {
-      if (!isDisposing.value && editor === editorRef.value) {
-        editor.updateOptions(monacoOptions);
-      }
-    });
-  } catch (error) {
-    console.warn('Error updating Monaco options:', error);
-  }
+  });
 };
 
 // --- Completion Providers ---
-const disposeCompletionProviders = () => {
-  activeProviders.value.forEach(p => p.dispose());
-  activeProviders.value = activeProviders.value.filter(p =>
-    !p.hasOwnProperty('provideCompletionItems') // Keep non-completion disposables
-  );
-};
+const activeCompletionProvider = ref<MonacoDisposable | null>(null);
 
 const registerCompletionProvider = () => {
-  disposeCompletionProviders(); // Dispose previous before registering new
+  // Dispose previous provider if it exists
+  if (activeCompletionProvider.value) {
+    activeCompletionProvider.value.dispose();
+    activeCompletionProvider.value = null;
+  }
 
-  let provider: monaco.IDisposable | null = null;
+  let provider: MonacoDisposable | null = null;
   if (props.activeMode === 'logchefql') {
     provider = registerLogchefQLCompletionProvider();
   } else {
@@ -941,60 +342,12 @@ const registerCompletionProvider = () => {
   }
 
   if (provider) {
-    activeProviders.value.push(provider);
+    activeCompletionProvider.value = provider;
+    // Note: We don't add this to activeDisposables because we manage it separately
+    // to avoid disposing it with general listeners on unmount if not needed.
+    // It will be disposed when the mode changes or on final unmount.
   }
 };
-
-// --- Watchers ---
-// Add watchers for mode and content synchronization
-watchEffect(() => {
-  const storeValue = props.activeMode === 'logchefql'
-    ? exploreStore.logchefqlCode
-    : exploreStore.rawSql;
-  const valueToSet = storeValue ?? "";
-
-  // Sync editor content if it differs from the store
-  if (editorContent.value !== valueToSet) {
-    runProgrammaticUpdate(valueToSet);
-  }
-
-  // Update editor options and language based on mode
-  if (editorRef.value) {
-    const model = editorRef.value.getModel();
-    if (model) {
-      monaco.editor.setModelLanguage(model, props.activeMode);
-    }
-    updateMonacoOptions(); // Update folding, line numbers etc.
-    registerCompletionProvider(); // Update syntax highlighting/completion
-  }
-});
-
-// initialValue watcher removed - content sync now handled by watchEffect
-
-// Date change watcher removed - SQL updates now handled by LogExplorer
-
-
-// Update placeholder when it changes
-watch(currentPlaceholder, () => {
-  // Placeholder update via options is unreliable with v-model
-  // Consider adding a visual placeholder element behind the editor if needed
-  if (editorRef.value) {
-    try {
-      // Try to update placeholder anyway, might work in some cases
-      editorRef.value.updateOptions({ 'placeholder': currentPlaceholder.value });
-    } catch (err) {
-      console.warn('Error updating placeholder:', err);
-    }
-  }
-});
-
-// Watch for loading state to make editor read-only
-watch(() => exploreStore.isLoadingOperation('executeQuery'), (isLoading) => {
-  if (editorRef.value) {
-    editorRef.value.updateOptions({ readOnly: isLoading });
-  }
-});
-
 
 // --- Actions ---
 const submitQuery = () => {
@@ -1002,156 +355,506 @@ const submitQuery = () => {
   validationError.value = null; // Clear previous error
 
   try {
-    // Validate query based on mode
-    if (props.activeMode === 'logchefql') {
-      if (!validateLogchefQL(currentContent) && currentContent.trim()) {
-        validationError.value = "Invalid LogchefQL syntax.";
-        return;
-      }
-    } else {
-      if (!validateSQL(currentContent) && currentContent.trim()) {
-        validationError.value = "Invalid SQL syntax (e.g., missing SELECT/FROM).";
-        return;
+    let isValid = true;
+    if (currentContent.trim()) { // Only validate non-empty queries
+      if (props.activeMode === 'logchefql') {
+        isValid = validateLogchefQL(currentContent);
+        if (!isValid) validationError.value = "Invalid LogchefQL syntax.";
+      } else {
+        isValid = validateSQL(currentContent); // Assuming validateSQL returns boolean
+        if (!isValid) validationError.value = "Invalid SQL syntax (e.g., missing SELECT/FROM or unbalanced parentheses).";
       }
     }
 
-    // Update store with latest content
-    if (props.activeMode === 'logchefql') {
-      exploreStore.setLogchefqlCode(currentContent);
-    } else {
-      exploreStore.setRawSql(currentContent);
+    if (!isValid) {
+      return; // Stop if validation fails
     }
 
-    // Trigger execution through store
-    emit('submit', { query: currentContent, mode: props.activeMode }); // Emit submit event (no finalSql needed from editor)
+    // Update store (might be redundant if handleEditorChange already did, but ensures consistency)
+    if (props.activeMode === 'logchefql') {
+      if (exploreStore.logchefqlCode !== currentContent) exploreStore.setLogchefqlCode(currentContent);
+    } else {
+      if (exploreStore.rawSql !== currentContent) exploreStore.setRawSql(currentContent);
+    }
+
+    // Emit submit event
+    emit('submit', { query: currentContent, mode: props.activeMode });
 
   } catch (e: any) {
-    console.error("Error preparing query:", e);
+    console.error("Error validating or submitting query:", e);
     validationError.value = e.message || "Error preparing query";
   }
 };
 
 const clearEditor = () => {
+  // Update the store, which will trigger watchEffect to update the editor
   if (props.activeMode === 'logchefql') {
     exploreStore.setLogchefqlCode("");
   } else {
     exploreStore.setRawSql("");
   }
-
-  // Let watchEffect handle the update to editor content via store sync
-  // Clear any validation errors
   validationError.value = null;
 
   // Focus the editor after clearing
+  focusEditor();
+};
+
+const focusEditor = (revealLastPosition = false) => {
   nextTick(() => {
-    if (editorRef.value && !isDisposing.value) {
-      editorRef.value.focus();
-    }
+    // Add a slight delay to allow Monaco to fully process updates after :key change / options update
+    setTimeout(() => {
+      const editor = editorRef.value;
+      if (editor && !isDisposing.value && document.contains(editor.getDomNode())) {
+        console.log("QueryEditor: Attempting focus...");
+        editor.focus();
+
+        // Explicitly set position and reveal to ensure cursor visibility and placement
+        const model = editor.getModel();
+        if (model) {
+          let positionToSet: monaco.Position | null = null;
+          if (revealLastPosition) {
+            const lineCount = model.getLineCount();
+            const lastCol = model.getLineMaxColumn(lineCount);
+            positionToSet = new monaco.Position(lineCount, lastCol);
+          } else {
+            // Try to keep current position if not revealing last
+            positionToSet = editor.getPosition();
+          }
+
+          if (positionToSet) {
+            try {
+              editor.setPosition(positionToSet);
+              // Use revealPositionInCenterIfOutsideViewport for less jarring scroll
+              editor.revealPositionInCenterIfOutsideViewport(positionToSet, monaco.editor.ScrollType.Smooth);
+              console.log(`QueryEditor: Focused and position set to ${positionToSet.lineNumber}:${positionToSet.column}`);
+            } catch (e) {
+              console.warn("QueryEditor: Error setting position/revealing:", e);
+            }
+          } else {
+            console.log("QueryEditor: Focused, but could not determine position.");
+          }
+        } else {
+          console.log("QueryEditor: Focused (model not available for positioning).");
+        }
+      } else {
+        console.log("QueryEditor: Focus skipped (editor not ready, disposing, or detached).");
+      }
+    }, 50); // Small delay to allow Monaco to settle
   });
 };
 
+
 // --- Disposal ---
 const safelyDisposeEditor = () => {
-  if (isDisposing.value) return; // Prevent multiple disposals
-
+  if (isDisposing.value) return;
   isDisposing.value = true;
-  console.log('QueryEditor: Starting disposal');
+  console.log('QueryEditor: Starting disposal...');
 
-  // First, clear any pending timeouts
-  if (sqlUpdateTimeout) {
-    clearTimeout(sqlUpdateTimeout);
-    sqlUpdateTimeout = null;
+  // Dispose the active completion provider
+  if (activeCompletionProvider.value) {
+    try {
+      activeCompletionProvider.value.dispose();
+    } catch (e) { console.warn("Error disposing completion provider:", e); }
+    activeCompletionProvider.value = null;
   }
 
-  // Dispose Monaco resources (listeners, providers, actions)
-  activeProviders.value.forEach(disposable => {
+  // Dispose general listeners and actions
+  [...activeDisposables.value].forEach(disposable => {
     try {
       disposable.dispose();
     } catch (e) { console.warn("Error disposing resource:", e); }
   });
-  activeProviders.value = [];
+  activeDisposables.value = [];
 
-  // Get references before clearing
   const editor = editorRef.value;
-  const model = editorModel.value;
+  editorRef.value = null; // Clear ref immediately
 
-  // Clear refs immediately to prevent further usage
-  editorRef.value = null;
-  editorModel.value = null;
-
-  // Use setTimeout to ensure disposal happens after all current operations
+  // Use a minimal timeout to ensure disposal happens after any pending rendering/updates
   setTimeout(() => {
-    try {
-      // Detach model first (safer)
-      if (editor) {
-        try {
-          editor.setModel(null);
-        } catch (e) {
-          console.warn("Error detaching model:", e);
+    if (editor) {
+      try {
+        const model = editor.getModel();
+        if (model && !model.isDisposed()) {
+          // Detach model - might help prevent leaks but often not strictly necessary if editor is disposed
+          // editor.setModel(null);
         }
-
-        // Dispose editor after model detachment
-        try {
-          editor.dispose();
-          console.log('QueryEditor: Editor instance disposed');
-        } catch (e) {
-          console.warn("Error disposing editor instance:", e);
-        }
+        editor.dispose(); // Dispose the editor instance itself
+        console.log('QueryEditor: Editor instance disposed.');
+      } catch (e) {
+        console.error("Error during editor instance disposal:", e);
       }
-
-      // After reliable timeout, reset the disposing flag
-      setTimeout(() => {
-        isDisposing.value = false;
-        console.log('QueryEditor: Disposal reset completed');
-      }, 200);
-    } catch (e) {
-      console.error("Error in editor disposal:", e);
-      // Still reset the flag
-      isDisposing.value = false;
     }
-  }, 50);
-
-  console.log('QueryEditor: Disposal sequence initiated');
+    // Optionally reset isDisposing flag after a delay if needed for complex re-mount scenarios
+    // setTimeout(() => { isDisposing.value = false; }, 100);
+  }, 50); // Small delay
 };
+
+onBeforeUnmount(() => {
+  safelyDisposeEditor();
+});
 
 // --- Expose ---
 defineExpose({
   submitQuery,
   clearEditor,
+  focus: focusEditor, // Expose focus method
   code: computed(() => editorContent.value)
 });
 
-// This function is no longer needed - handleEditorChange and handleTabChange handle this functionality
+
+// --- Completion Provider Logic (Simplified stubs - keep your detailed logic) ---
+// Assume getSuggestionsFromList, getSchemaFieldValues, prepareSuggestionValues remain similar
+
+const registerLogchefQLCompletionProvider = (): MonacoDisposable | null => {
+  return monaco.languages.registerCompletionItemProvider("logchefql", {
+    provideCompletionItems: async (model, position) => {
+      const wordInfo = model.getWordUntilPosition(position);
+      const range: MonacoRange = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: wordInfo.startColumn,
+        endColumn: wordInfo.endColumn
+      };
+
+      const lineStartToPosition: MonacoRange = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: 1,
+        endColumn: position.column
+      };
+      const textBeforeCursor = model.getValueInRange(lineStartToPosition);
+
+      const parser = new LogchefQLParser();
+      parser.parse(textBeforeCursor, false, true);
+
+      let suggestions: MonacoCompletionItem[] = [];
+      let incomplete = false;
+
+      if (parser.state === LogchefQLState.KEY ||
+        parser.state === LogchefQLState.INITIAL ||
+        parser.state === LogchefQLState.BOOL_OP_DELIMITER) {
+        if (fieldNames.value.includes(wordInfo.word)) {
+          const operatorRange: MonacoRange = {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: position.column,
+            endColumn: position.column
+          };
+          suggestions = getOperatorsSuggestions(wordInfo.word, operatorRange);
+        } else {
+          suggestions = getKeySuggestions(range);
+        }
+      } else if (parser.state === LogchefQLState.EXPECT_BOOL_OP) {
+        suggestions = getBooleanOperatorsSuggestions(range);
+      } else if (parser.state === LogchefQLState.KEY_VALUE_OPERATOR) {
+        const valueRange: MonacoRange = {
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: wordInfo.startColumn,
+          endColumn: wordInfo.endColumn
+        };
+        const valueResult = await getValueSuggestions(parser.key, parser.value, valueRange);
+        suggestions = valueResult.suggestions;
+        incomplete = valueResult.incomplete;
+      }
+
+      return { suggestions, incomplete };
+    },
+    triggerCharacters: ["=", "!", ">", "<", "~", " ", ".", '"', "'", "("]
+  });
+};
+
+const registerSQLCompletionProvider = (): MonacoDisposable | null => {
+  return monaco.languages.registerCompletionItemProvider("clickhouse-sql", {
+    provideCompletionItems: async (model, position) => {
+      const wordInfo = model.getWordUntilPosition(position);
+      const range: MonacoRange = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: wordInfo.startColumn,
+        endColumn: wordInfo.endColumn
+      };
+
+      const lineStartToPosition: MonacoRange = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: 1,
+        endColumn: position.column
+      };
+      const textBeforeCursor = model.getValueInRange(lineStartToPosition);
+      let suggestions: MonacoCompletionItem[] = [];
+
+      if (/\bFROM\s+$/i.test(textBeforeCursor) && props.tableName) {
+        suggestions.push({
+          label: props.tableName,
+          kind: monaco.languages.CompletionItemKind.Folder,
+          insertText: props.tableName,
+          range: range,
+          detail: 'Current log table'
+        });
+      }
+
+      if (fieldNames.value.length > 0 &&
+        (/\bSELECT\s+(?:[\w,\s*]+\s+)?$|\bWHERE\s+(?:.+?\s+)?$/i.test(textBeforeCursor))) {
+        suggestions = suggestions.concat(
+          fieldNames.value.map(field => ({
+            label: field,
+            kind: monaco.languages.CompletionItemKind.Field,
+            insertText: field,
+            range: range,
+            detail: props.schema[field]?.type || 'unknown'
+          }))
+        );
+      }
+
+      const typedPrefix = wordInfo.word.toUpperCase();
+      suggestions = suggestions.concat(
+        getSuggestionsFromList({
+          items: SQL_KEYWORDS.filter(kw => kw.startsWith(typedPrefix))
+            .map(kw => ({ label: kw, insertText: kw + ' ' })),
+          kind: monaco.languages.CompletionItemKind.Keyword,
+          range: range
+        })
+      );
+
+      return { suggestions };
+    },
+    triggerCharacters: [" ", "\n", ".", "(", ","]
+  });
+};
+
+
+// --- Helper functions for completions (Keep your existing logic) ---
+const getSuggestionsFromList = (params: {
+  items: any[],
+  kind: monaco.languages.CompletionItemKind,
+  range: MonacoRange,
+  postfix?: string
+}): MonacoCompletionItem[] => {
+  const suggestions: MonacoCompletionItem[] = [];
+  const defaultPostfix = params.postfix ?? "";
+  const range = params.range;
+
+  // Validate range
+  if (!range || typeof range.startLineNumber !== 'number' ||
+    typeof range.startColumn !== 'number' ||
+    typeof range.endLineNumber !== 'number' ||
+    typeof range.endColumn !== 'number') {
+    console.error("Invalid range provided to getSuggestionsFromList:", range);
+    return [];
+  }
+
+  for (const item of params.items) {
+    let label: string;
+    let insertText: string;
+    let sortText: string;
+    let documentation: string | undefined;
+
+    if (typeof item === 'string') {
+      label = item;
+      insertText = item;
+      sortText = item.toLowerCase();
+    } else {
+      label = item.label;
+      insertText = item.insertText ?? label;
+      sortText = item.sortText ?? label.toLowerCase();
+      documentation = item.documentation;
+    }
+
+    suggestions.push({
+      label,
+      kind: params.kind,
+      insertText: insertText + defaultPostfix,
+      range: range,
+      sortText,
+      documentation,
+      command: { id: "editor.action.triggerSuggest", title: "Trigger Suggest" },
+      detail: documentation ? ' ' : undefined,
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+    });
+  }
+  return suggestions;
+};
+
+const getKeySuggestions = (range: MonacoRange): MonacoCompletionItem[] => {
+  return fieldNames.value.map(name => ({
+    label: name,
+    kind: monaco.languages.CompletionItemKind.Field,
+    insertText: name,
+    range: range,
+    detail: props.schema[name]?.type || 'Unknown',
+    sortText: `0-${name}`,
+    command: { id: "editor.action.triggerSuggest", title: "Trigger Suggest" }
+  }));
+};
+
+const getBooleanOperatorsSuggestions = (range: MonacoRange): MonacoCompletionItem[] => {
+  return [
+    {
+      label: 'and',
+      kind: monaco.languages.CompletionItemKind.Keyword,
+      insertText: 'and ',
+      range: range,
+      sortText: '1-and'
+    },
+    {
+      label: 'or',
+      kind: monaco.languages.CompletionItemKind.Keyword,
+      insertText: 'or ',
+      range: range,
+      sortText: '1-or'
+    }
+  ];
+};
+
+const getSchemaFieldValues = (field: string): string[] => { // Example implementation
+  const sampleValues: Record<string, string[]> = {
+    level: ["info", "error", "warning", "debug"],
+    status: ["200", "404", "500"],
+    // ... add more based on your schema/data
+  };
+  return sampleValues[field] || [];
+};
+
+const prepareSuggestionValues = (items: string[], quoteChar?: string): { label: string, insertText?: string }[] => {
+  // ... your existing implementation ...
+  const needsQuotes = quoteChar !== undefined;
+  const q = quoteChar || '"'; // Default to double quotes if needed but not specified
+  return items.map(item => {
+    if (!needsQuotes && isNumeric(item)) {
+      return { label: item }; // Numeric values don't need quotes unless context demands it
+    } else {
+      // Escape existing quotes within the value
+      const escapedValue = item.replace(new RegExp(`\\${q}`, 'g'), `\\${q}`);
+      return {
+        label: item,
+        insertText: `${q}${escapedValue}${q}`
+      };
+    }
+  });
+};
+
+const getValueSuggestions = async (
+  key: string,
+  currentValue: string,
+  range: MonacoRange,
+  quoteChar?: string
+): Promise<{ suggestions: MonacoCompletionItem[], incomplete: boolean }> => {
+  const fieldValues = getSchemaFieldValues(key);
+  const filteredValues = fieldValues.filter(v =>
+    v.toLowerCase().includes(currentValue?.toLowerCase() || ''));
+  const preparedItems = prepareSuggestionValues(filteredValues, quoteChar);
+
+  const suggestions = getSuggestionsFromList({
+    items: preparedItems,
+    kind: monaco.languages.CompletionItemKind.Value,
+    range: range,
+    postfix: ' '
+  });
+
+  return { suggestions, incomplete: false };
+};
+
+const getOperatorsSuggestions = (key: string, range: MonacoRange): MonacoCompletionItem[] => {
+  const operators = [
+    { label: '=', insertText: '=' },
+    { label: '!=', insertText: '!=' },
+    { label: '>', insertText: '>' },
+    { label: '<', insertText: '<' },
+    { label: '>=', insertText: '>=' },
+    { label: '<=', insertText: '<=' },
+    { label: '~', insertText: '~' },
+    { label: '!~', insertText: '!~' }
+  ];
+
+  // Filter operators based on field type if needed
+  const fieldType = props.schema[key]?.type?.toLowerCase() || '';
+  const filteredOperators = operators.filter(op => {
+    // For numeric fields, only allow comparison operators
+    if (fieldType === 'number' || fieldType === 'integer') {
+      return ['=', '!=', '>', '<', '>=', '<='].includes(op.label);
+    }
+    // For string fields, allow all operators
+    return true;
+  });
+
+  return getSuggestionsFromList({
+    items: filteredOperators.map(op => ({
+      ...op,
+      insertText: op.insertText + ' ', // Add space after operator
+      documentation: `${key} ${op.label} value`
+    })),
+    kind: monaco.languages.CompletionItemKind.Operator,
+    range: range,
+    postfix: ''
+  });
+};
+
+// Add type assertion function
+const asEditorMode = (value: string | number): EditorMode => {
+  if (value === 'logchefql' || value === 'clickhouse-sql') {
+    return value;
+  }
+  console.warn(`Received unexpected value for editor mode: ${value}. Defaulting to logchefql.`);
+  return 'logchefql';
+};
+
 </script>
 
 <style scoped>
 .query-editor {
   display: flex;
   flex-direction: column;
-  position: relative;
-  /* For potential placeholder positioning */
 }
 
 .editor-container {
   background-color: hsl(var(--card));
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
   min-height: 45px;
-  /* Ensure container has a minimum height */
+  /* Default min height */
+  position: relative;
+  /* Crucial for ::before positioning */
 }
 
-/* Optional: Style for visual placeholder if needed */
-.editor-placeholder {
+/* NEW: CSS Placeholder Implementation */
+.editor-container.is-empty::before {
+  content: attr(data-placeholder);
+  /* Read placeholder text from data attribute */
   position: absolute;
-  top: calc(theme(padding.2) + theme(spacing[1.5]));
-  /* Adjust based on editor padding */
-  left: calc(theme(padding.3) + 5px);
-  /* Adjust based on line number width/padding */
+  top: 8px;
+  /* Adjust to match editor's top padding */
+  left: 5px;
+  /* Adjust to match Monaco's text starting position */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  /* Match editor font */
+  font-size: 14px;
+  /* Match editor font size */
   color: hsl(var(--muted-foreground));
   opacity: 0.6;
   pointer-events: none;
-  font-size: 14px;
-  /* Match editor font size */
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  /* Allow clicks to pass through */
+  white-space: pre-wrap;
+  /* Allow multiline placeholders */
+  padding-right: 10px;
+  /* Prevent text overlapping with cursor */
+  z-index: 1;
+  /* Ensure it's above the editor background but below text */
+  max-width: calc(100% - 10px);
+  /* Prevent overflow */
+}
+
+/* Ensure editor itself is positioned correctly within container */
+.editor-container> :deep(.monaco-editor-container) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Ensure cursor visibility (especially when empty) */
+:deep(.monaco-editor .cursor) {
+  visibility: visible !important;
+  /* You might need blink animation if default doesn't work */
 }
 
 /* Shadcn focus styling */
@@ -1163,6 +866,5 @@ button:focus-visible {
 
 code {
   font-family: inherit;
-  /* Inherit from editor/UI */
 }
 </style>
