@@ -85,20 +85,9 @@ func (db *DB) ListSources(ctx context.Context) ([]*models.Source, error) {
 		return nil, fmt.Errorf("error listing sources: %w", err)
 	}
 
-	var sources []*models.Source
-	for _, sourceRow := range sourceRows {
-		var row SourceRow
-		if err := rows.StructScan(&row); err != nil {
-			db.log.Error("failed to scan source row", "error", err)
-			return nil, fmt.Errorf("error scanning row: %w", err)
-		}
-
-		sources = append(sources, mapSourceRowToModel(&row))
-	}
-
-	if err := rows.Err(); err != nil {
-		db.log.Error("error iterating source rows", "error", err)
-		return nil, fmt.Errorf("error iterating rows: %w", err)
+	sources := make([]*models.Source, len(sourceRows))
+	for i, sourceRow := range sourceRows {
+		sources[i] = mapSourceRowToModel(&sourceRow)
 	}
 
 	db.log.Debug("sources listed", "count", len(sources))
@@ -128,10 +117,6 @@ func (db *DB) UpdateSource(ctx context.Context, source *models.Source) error {
 		return fmt.Errorf("error updating source: %w", err)
 	}
 
-	if err := checkRowsAffected(result, "update source"); err != nil {
-		db.log.Error("unexpected rows affected", "error", err, "source_id", source.ID)
-		return err
-	}
 
 	return nil
 }
@@ -146,52 +131,7 @@ func (db *DB) DeleteSource(ctx context.Context, id models.SourceID) error {
 		return fmt.Errorf("error deleting source: %w", err)
 	}
 
-	if err := checkRowsAffected(result, "delete source"); err != nil {
-		db.log.Error("unexpected rows affected", "error", err, "source_id", id)
-		return err
-	}
 
 	return nil
 }
 
-// SourceRow represents a row in the sources table
-type SourceRow struct {
-	ID                int       `db:"id"`
-	Name              string    `db:"name"`
-	MetaIsAutoCreated int       `db:"_meta_is_auto_created"`
-	MetaTSField       string    `db:"_meta_ts_field"`
-	MetaSeverityField string    `db:"_meta_severity_field"`
-	Host              string    `db:"host"`
-	Username          string    `db:"username"`
-	Password          string    `db:"password"`
-	Database          string    `db:"database"`
-	TableName         string    `db:"table_name"`
-	Description       string    `db:"description"`
-	TTLDays           int       `db:"ttl_days"`
-	CreatedAt         time.Time `db:"created_at"`
-	UpdatedAt         time.Time `db:"updated_at"`
-}
-
-// mapSourceRowToModel maps a SourceRow to a models.Source
-func mapSourceRowToModel(row *SourceRow) *models.Source {
-	return &models.Source{
-		ID:                models.SourceID(row.ID),
-		Name:              row.Name,
-		MetaIsAutoCreated: row.MetaIsAutoCreated == 1,
-		MetaTSField:       row.MetaTSField,
-		MetaSeverityField: row.MetaSeverityField,
-		Description:       row.Description,
-		TTLDays:           row.TTLDays,
-		Connection: models.ConnectionInfo{
-			Host:      row.Host,
-			Username:  row.Username,
-			Password:  row.Password,
-			Database:  row.Database,
-			TableName: row.TableName,
-		},
-		Timestamps: models.Timestamps{
-			CreatedAt: row.CreatedAt,
-			UpdatedAt: row.UpdatedAt,
-		},
-	}
-}
