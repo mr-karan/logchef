@@ -1463,7 +1463,6 @@ onBeforeUnmount(() => {
     console.log("LogExplorer unmounted")
   }
 })
-
 </script>
 
 <template>
