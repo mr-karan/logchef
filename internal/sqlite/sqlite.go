@@ -6,95 +6,26 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"runtime"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/sqlite3"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	"github.com/jmoiron/sqlx"
-	"github.com/knadh/goyesql/v2"
-	goyesqlx "github.com/knadh/goyesql/v2/sqlx"
 	_ "modernc.org/sqlite"
 )
-
-//go:embed queries.sql
-var queriesSQL string
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
 // DB represents our SQLite database manager
 type DB struct {
-	conn    *sqlx.DB
-	queries *Queries
+	db      *sql.DB
+	queries *sqlc.Queries
 	log     *slog.Logger
-}
-
-// Queries contains all prepared SQL statements
-type Queries struct {
-	// Source queries
-	CreateSource    *sqlx.Stmt `query:"CreateSource"`
-	GetSource       *sqlx.Stmt `query:"GetSource"`
-	GetSourceByName *sqlx.Stmt `query:"GetSourceByName"`
-	ListSources     *sqlx.Stmt `query:"ListSources"`
-	UpdateSource    *sqlx.Stmt `query:"UpdateSource"`
-	DeleteSource    *sqlx.Stmt `query:"DeleteSource"`
-
-	// User queries
-	CreateUser      *sqlx.Stmt `query:"CreateUser"`
-	GetUser         *sqlx.Stmt `query:"GetUser"`
-	GetUserByEmail  *sqlx.Stmt `query:"GetUserByEmail"`
-	UpdateUser      *sqlx.Stmt `query:"UpdateUser"`
-	ListUsers       *sqlx.Stmt `query:"ListUsers"`
-	CountAdminUsers *sqlx.Stmt `query:"CountAdminUsers"`
-	DeleteUser      *sqlx.Stmt `query:"DeleteUser"`
-
-	// Session queries
-	CreateSession      *sqlx.Stmt `query:"CreateSession"`
-	GetSession         *sqlx.Stmt `query:"GetSession"`
-	DeleteSession      *sqlx.Stmt `query:"DeleteSession"`
-	DeleteUserSessions *sqlx.Stmt `query:"DeleteUserSessions"`
-	CountUserSessions  *sqlx.Stmt `query:"CountUserSessions"`
-
-	// Team queries
-	CreateTeam                 *sqlx.Stmt `query:"CreateTeam"`
-	GetTeam                    *sqlx.Stmt `query:"GetTeam"`
-	UpdateTeam                 *sqlx.Stmt `query:"UpdateTeam"`
-	DeleteTeam                 *sqlx.Stmt `query:"DeleteTeam"`
-	ListTeams                  *sqlx.Stmt `query:"ListTeams"`
-	AddTeamMember              *sqlx.Stmt `query:"AddTeamMember"`
-	GetTeamMember              *sqlx.Stmt `query:"GetTeamMember"`
-	UpdateTeamMemberRole       *sqlx.Stmt `query:"UpdateTeamMemberRole"`
-	RemoveTeamMember           *sqlx.Stmt `query:"RemoveTeamMember"`
-	ListTeamMembers            *sqlx.Stmt `query:"ListTeamMembers"`
-	ListTeamMembersWithDetails *sqlx.Stmt `query:"ListTeamMembersWithDetails"`
-	ListUserTeams              *sqlx.Stmt `query:"ListUserTeams"`
-
-	// Team source queries
-	AddTeamSource       *sqlx.Stmt `query:"AddTeamSource"`
-	RemoveTeamSource    *sqlx.Stmt `query:"RemoveTeamSource"`
-	ListTeamSources     *sqlx.Stmt `query:"ListTeamSources"`
-	ListSourceTeams     *sqlx.Stmt `query:"ListSourceTeams"`
-	TeamHasSource       *sqlx.Stmt `query:"TeamHasSource"`
-	UserHasSourceAccess *sqlx.Stmt `query:"UserHasSourceAccess"`
-	GetTeamByName       *sqlx.Stmt `query:"GetTeamByName"`
-
-	// Team query queries
-	CreateTeamQuery            *sqlx.Stmt `query:"CreateTeamQuery"`
-	GetTeamQuery               *sqlx.Stmt `query:"GetTeamQuery"`
-	GetTeamQueryWithAccess     *sqlx.Stmt `query:"GetTeamQueryWithAccess"`
-	UpdateTeamQuery            *sqlx.Stmt `query:"UpdateTeamQuery"`
-	DeleteTeamQuery            *sqlx.Stmt `query:"DeleteTeamQuery"`
-	ListTeamQueries            *sqlx.Stmt `query:"ListTeamQueries"`
-	ListQueriesForUserAndTeam  *sqlx.Stmt `query:"ListQueriesForUserAndTeam"`
-	ListQueriesForUser         *sqlx.Stmt `query:"ListQueriesForUser"`
-	ListQueriesBySource        *sqlx.Stmt `query:"ListQueriesBySource"`
-	ListQueriesByTeamAndSource *sqlx.Stmt `query:"ListQueriesByTeamAndSource"`
-	ListQueriesForUserBySource *sqlx.Stmt `query:"ListQueriesForUserBySource"`
 }
 
 type Options struct {
@@ -111,7 +42,7 @@ func New(opts Options) (*DB, error) {
 	// Add _txlock=immediate to reduce chance of "database is locked" errors
 	// Keep _multi_stmt=1 to maintain compatibility with existing code
 	dsn := opts.Config.Path + "?_multi_stmt=1&_txlock=immediate"
-	db, err := sqlx.Connect("sqlite", dsn)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		log.Error("failed to open database",
 			"error", err,
@@ -164,27 +95,12 @@ func New(opts Options) (*DB, error) {
 		return nil, fmt.Errorf("error running migrations: %w", err)
 	}
 
-	// Parse our queries
-	qMap, err := goyesql.ParseBytes([]byte(queriesSQL))
-	if err != nil {
-		log.Error("failed to parse SQL queries",
-			"error", err,
-		)
-		return nil, fmt.Errorf("error parsing SQL queries: %w", err)
-	}
-
-	// Prepare statements
-	var q Queries
-	if err := goyesqlx.ScanToStruct(&q, qMap, db); err != nil {
-		log.Error("failed to prepare SQL queries",
-			"error", err,
-		)
-		return nil, fmt.Errorf("error preparing SQL queries: %w", err)
-	}
+	// Initialize sqlc queries
+	queries := sqlc.New(db)
 
 	sqlite := &DB{
-		conn:    db,
-		queries: &q,
+		db:      db,
+		queries: queries,
 		log:     log,
 	}
 
@@ -194,7 +110,7 @@ func New(opts Options) (*DB, error) {
 }
 
 // setPragmas sets SQLite pragmas for optimal performance and reliability
-func setPragmas(db *sqlx.DB) error {
+func setPragmas(db *sql.DB) error {
 	pragmas := []string{
 		"PRAGMA busy_timeout = 5000",
 		"PRAGMA journal_mode = WAL",
@@ -274,18 +190,8 @@ func runMigrations(db *sql.DB) error {
 	return nil
 }
 
-// Close closes the database connection and all prepared statements
+// Close closes the database connection
 func (db *DB) Close() error {
-	// First, try to close all statements to prevent memory leaks
-	// Some implementations of sqlx.DB could panic if db.conn is nil,
-	// so we wrap this in a recover block
-	defer func() {
-		if r := recover(); r != nil {
-			db.log.Error("panic during database close",
-				"error", r)
-		}
-	}()
-
 	// Log that we're closing the database
 	db.log.Debug("closing database connection")
 
@@ -294,37 +200,13 @@ func (db *DB) Close() error {
 	time.Sleep(100 * time.Millisecond)
 
 	// Close the connection
-	if err := db.conn.Close(); err != nil {
+	if err := db.db.Close(); err != nil {
 		db.log.Error("error closing database connection",
 			"error", err)
 		return fmt.Errorf("error closing database connection: %w", err)
 	}
 
 	return nil
-}
-
-// safeExec is a helper that provides safer query execution with explicit
-// finalizer and recovery logic to prevent memory leaks in the SQLite driver
-func (db *DB) safeExec(stmt *sqlx.Stmt, args ...interface{}) (sql.Result, error) {
-	// Add recovery to prevent panics from crashing the application
-	defer func() {
-		if r := recover(); r != nil {
-			db.log.Error("panic during query execution",
-				"error", r,
-				"recover", fmt.Sprintf("%v", r))
-		}
-	}()
-
-	// Execute the statement
-	result, err := stmt.Exec(args...)
-
-	// Force garbage collection after potentially large operations
-	// This is somewhat of a last resort but can help prevent memory buildup
-	if err == nil {
-		runtime.GC()
-	}
-
-	return result, err
 }
 
 // Ensure DB implements auth.Store
