@@ -217,59 +217,30 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   // Main query execution
-  async function executeQuery() {
+  async function executeQuery(finalSql?: string) {
     return await state.withLoading('executeQuery', async () => {
-      if (!canExecuteQuery.value) {
-        return state.handleError(
-          { 
-            status: "error",
-            message: "Cannot execute query: Invalid source or time range", 
-            error_type: "ValidationError" 
-          } as APIErrorResponse, 
-          'executeQuery'
-        );
-      }
-
-      // Always get fresh values from the store state
-      const currentMode = state.data.value.activeMode;
-      const logchefqlQuery = state.data.value.logchefqlCode || "";
-      const rawSql = state.data.value.rawSql || "";
-
-      // Generate final SQL based on current mode
-      let finalSql = "";
-      try {
-        if (currentMode === 'logchefql') {
-          // Get the source details for table name
-          const sourcesStore = useSourcesStore();
-          const currentSource = sourcesStore.teamSources.find(
-            (s) => s.id === state.data.value.sourceId
-          ) || sourcesStore.sources.find(
-            (s) => s.id === state.data.value.sourceId
+      // If finalSql is not provided, use the current mode to generate it
+      if (!finalSql) {
+        if (!canExecuteQuery.value) {
+          return state.handleError(
+            { 
+              status: "error",
+              message: "Cannot execute query: Invalid source or time range", 
+              error_type: "ValidationError" 
+            } as APIErrorResponse, 
+            'executeQuery'
           );
+        }
 
-          if (!currentSource) {
-            throw new Error(`Source with ID ${state.data.value.sourceId} not found.`);
-          }
+        // Always get fresh values from the store state
+        const currentMode = state.data.value.activeMode;
+        const logchefqlQuery = state.data.value.logchefqlCode || "";
+        const rawSql = state.data.value.rawSql || "";
 
-          const tableName = getFormattedTableName(currentSource);
-          const timeField = currentSource._meta_ts_field || "timestamp";
-          const timestamps = getTimestamps();
-
-          const result = QueryBuilder.buildSqlFromLogchefQL({
-            tableName,
-            tsField: timeField,
-            startTimestamp: Math.floor(timestamps.start / 1000),
-            endTimestamp: Math.floor(timestamps.end / 1000),
-            limit: state.data.value.limit,
-            logchefqlQuery
-          });
-          
-          if (!result.success) throw new Error(result.error || "Query conversion failed");
-          finalSql = result.sql;
-        } else {
-          // In SQL mode, use the raw SQL directly
-          if (!rawSql.trim()) {
-            // If empty, generate default SQL
+        // Generate final SQL based on current mode
+        try {
+          if (currentMode === 'logchefql') {
+            // Get the source details for table name
             const sourcesStore = useSourcesStore();
             const currentSource = sourcesStore.teamSources.find(
               (s) => s.id === state.data.value.sourceId
@@ -285,27 +256,69 @@ export const useExploreStore = defineStore("explore", () => {
             const timeField = currentSource._meta_ts_field || "timestamp";
             const timestamps = getTimestamps();
 
-            const result = QueryBuilder.getDefaultSQLQuery({
+            const result = QueryBuilder.buildSqlFromLogchefQL({
               tableName,
               tsField: timeField,
-              startTimestamp: Math.floor(timestamps.start / 1000),
-              endTimestamp: Math.floor(timestamps.end / 1000),
-              limit: state.data.value.limit
+              startDateTime: state.data.value.timeRange?.start,
+              endDateTime: state.data.value.timeRange?.end,
+              limit: state.data.value.limit,
+              logchefqlQuery
             });
             
-            if (!result.success) throw new Error(result.error || "Failed to generate default SQL");
+            if (!result.success) throw new Error(result.error || "Query conversion failed");
             finalSql = result.sql;
           } else {
-            finalSql = rawSql;
+            // In SQL mode, use the raw SQL directly
+            if (!rawSql.trim()) {
+              // If empty, generate default SQL
+              const sourcesStore = useSourcesStore();
+              const currentSource = sourcesStore.teamSources.find(
+                (s) => s.id === state.data.value.sourceId
+              ) || sourcesStore.sources.find(
+                (s) => s.id === state.data.value.sourceId
+              );
+
+              if (!currentSource) {
+                throw new Error(`Source with ID ${state.data.value.sourceId} not found.`);
+              }
+
+              const tableName = getFormattedTableName(currentSource);
+              const timeField = currentSource._meta_ts_field || "timestamp";
+
+              const result = QueryBuilder.getDefaultSQLQuery({
+                tableName,
+                tsField: timeField,
+                startDateTime: state.data.value.timeRange?.start,
+                endDateTime: state.data.value.timeRange?.end,
+                limit: state.data.value.limit
+              });
+              
+              if (!result.success) throw new Error(result.error || "Failed to generate default SQL");
+              finalSql = result.sql;
+            } else {
+              finalSql = rawSql;
+            }
           }
+        } catch (error: any) {
+          return state.handleError(
+            { 
+              status: "error",
+              message: error.message || "Failed to prepare query", 
+              error_type: "QueryError" 
+            } as APIErrorResponse, 
+            'executeQuery'
+          );
         }
-      } catch (error: any) {
+      }
+
+      // Validate the finalSql
+      if (!finalSql || !finalSql.trim()) {
         return state.handleError(
-          { 
+          {
             status: "error",
-            message: error.message || "Failed to prepare query", 
-            error_type: "QueryError" 
-          } as APIErrorResponse, 
+            message: "Cannot execute an empty query.",
+            error_type: "ValidationError"
+          } as APIErrorResponse,
           'executeQuery'
         );
       }
@@ -322,16 +335,14 @@ export const useExploreStore = defineStore("explore", () => {
         apiCall: async () => {
           // Get time parameters
           const timestamps = getTimestamps();
-          const startTimestampSec = Math.floor(timestamps.start / 1000);
-          const endTimestampSec = Math.floor(timestamps.end / 1000);
-
+          
           // Create API params
           const params: QueryParams = {
             raw_sql: finalSql,
             limit: state.data.value.limit,
-            start_timestamp: startTimestampSec,
-            end_timestamp: endTimestampSec,
-            query_type: currentMode
+            start_timestamp: timestamps.start,
+            end_timestamp: timestamps.end,
+            query_type: state.data.value.activeMode
           };
 
           console.log("Executing query with params:", params);
