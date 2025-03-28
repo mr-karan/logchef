@@ -92,8 +92,8 @@ func (db *DB) CountUserSessions(ctx context.Context, userID models.UserID) (int,
 	db.log.Debug("counting user sessions", "user_id", userID)
 
 	count, err := db.queries.CountUserSessions(ctx, sqlc.CountUserSessionsParams{
-		UserID:      int64(userID),
-		CurrentTime: time.Now(),
+		UserID:    int64(userID),
+		ExpiresAt: time.Now(),
 	})
 	if err != nil {
 		db.log.Error("failed to count user sessions",

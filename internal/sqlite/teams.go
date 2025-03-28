@@ -125,11 +125,11 @@ func (db *DB) AddTeamMember(ctx context.Context, teamID models.TeamID, userID mo
 	}
 
 	// Finally add the team member
-	result, err := db.queries.AddTeamMember.ExecContext(ctx,
-		teamID,
-		userID,
-		role,
-	)
+	err := db.queries.AddTeamMember(ctx, sqlc.AddTeamMemberParams{
+		TeamID: int64(teamID),
+		UserID: int64(userID),
+		Role:   string(role),
+	})
 	if err != nil {
 		if isUniqueConstraintError(err, "team_members", "team_id") {
 			return fmt.Errorf("user %d is already a member of team %d", userID, teamID)
@@ -262,7 +262,10 @@ func (db *DB) AddTeamSource(ctx context.Context, teamID models.TeamID, sourceID 
 	}
 
 	// Add source to team
-	result, err := db.queries.AddTeamSource.ExecContext(ctx, teamID, sourceID)
+	err := db.queries.AddTeamSource(ctx, sqlc.AddTeamSourceParams{
+		TeamID:   int64(teamID),
+		SourceID: int64(sourceID),
+	})
 	if err != nil {
 		if isUniqueConstraintError(err, "team_sources", "team_id") {
 			return nil // Already exists, not an error

@@ -432,6 +432,14 @@ func (q *Queries) Close() error {
 	return err
 }
 
+// boolToInt converts a boolean to an integer (1 for true, 0 for false)
+func boolToInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func (q *Queries) exec(ctx context.Context, stmt *sql.Stmt, query string, args ...interface{}) (sql.Result, error) {
 	switch {
 	case stmt != nil && q.tx != nil:
