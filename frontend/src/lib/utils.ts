@@ -15,20 +15,40 @@ export function valueUpdater<T extends Updater<any>>(
     typeof updaterOrValue === "function"
       ? updaterOrValue(ref.value)
       : updaterOrValue;
+  return ref.value;
 }
 
-export function formatTimestamp(timestamp: string): string {
-  try {
-    const date = new Date(timestamp);
-    // Check if the date is valid
-    if (isNaN(date.getTime())) {
-      return timestamp;
+export function formatTimestamp(value: string, timezone: 'local' | 'utc' = 'local'): string {
+    try {
+        const date = new Date(value);
+
+        // Check if the date is valid
+        if (isNaN(date.getTime())) {
+            return value; // Return original value if invalid
+        }
+
+        // Format based on timezone preference
+        if (timezone === 'utc') {
+            // Use UTC formatting - keep the 'Z' to indicate UTC
+            return date.toISOString();
+        } else {
+            // Use local timezone with ISO format and timezone offset
+            const tzOffset = date.getTimezoneOffset();
+            const absOffset = Math.abs(tzOffset);
+            const offsetHours = Math.floor(absOffset / 60).toString().padStart(2, '0');
+            const offsetMinutes = (absOffset % 60).toString().padStart(2, '0');
+            const offsetSign = tzOffset <= 0 ? '+' : '-'; // Note: getTimezoneOffset returns negative for positive offsets
+
+            // Format the date in ISO format with timezone offset
+            const localISOTime = new Date(date.getTime() - (tzOffset * 60000))
+                .toISOString()
+                .slice(0, -1); // Remove the trailing Z
+
+            return `${localISOTime}${offsetSign}${offsetHours}:${offsetMinutes}`;
+        }
+    } catch (e) {
+        return value; // Return original value if there's an error
     }
-    // Format as RFC3339 / ISO8601 with milliseconds
-    return date.toISOString();
-  } catch (e) {
-    return timestamp;
-  }
 }
 
 // Common badge styles with subtle ring border

@@ -11,6 +11,7 @@ import (
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
+
 	// Ensure sqlc generated code is imported correctly
 
 	"github.com/golang-migrate/migrate/v4"
@@ -39,62 +40,71 @@ func New(opts Options) (*DB, error) {
 	// Initialize logger with component tag
 	log := opts.Logger.With("component", "sqlite")
 
-	// Connect to SQLite with more conservative parameters
-	// Add _txlock=immediate to reduce chance of "database is locked" errors
-	// Keep _multi_stmt=1 to maintain compatibility with existing code
-	dsn := opts.Config.Path + "?_multi_stmt=1&_txlock=immediate"
+	// --- Main Database Connection Setup ---
+	// Use default DEFERRED locking and rely on busy_timeout
+	dsn := opts.Config.Path
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		log.Error("failed to open database",
+		log.Error("failed to open main database",
 			"error", err,
-			"path", opts.Config.Path,
-		)
-		return nil, fmt.Errorf("error opening database: %w", err)
+			"path", opts.Config.Path)
+		return nil, fmt.Errorf("error opening main database: %w", err)
 	}
 
-	// Set up cleanup in case of initialization error
+	// Set up cleanup for main DB in case of initialization error
 	var success bool
 	defer func() {
 		if !success {
-			db.Close()
+			log.Debug("closing main database due to initialization error")
+			db.Close() // Attempt to close, ignore error as we're already failing
 		}
 	}()
 
-	// Configure connection pool with conservative settings to prevent memory issues
-	db.SetMaxOpenConns(5) // Limit connections to reduce memory/resource issues
-	db.SetMaxIdleConns(2) // Keep fewer idle connections
-
-	// Set shorter connection lifetimes to prevent stale connections
+	// Configure connection pool with settings based on expected workload
+	db.SetMaxOpenConns(25) // Allow more concurrent connections based on workload
+	db.SetMaxIdleConns(10) // Keep more idle connections for better performance
 	db.SetConnMaxLifetime(30 * time.Minute)
 	db.SetConnMaxIdleTime(5 * time.Minute)
 
 	// Set pragmas for optimal performance
 	if err := setPragmas(db); err != nil {
-		log.Error("failed to set pragmas",
-			"error", err,
-		)
-		return nil, fmt.Errorf("error setting pragmas: %w", err)
+		log.Error("failed to set pragmas on main database",
+			"error", err)
+		return nil, fmt.Errorf("error setting pragmas on main database: %w", err)
 	}
 
-	// Create a separate connection for migrations to avoid interfering with the main connection
-	migrationDB, err := sql.Open("sqlite", opts.Config.Path)
+	// --- Migration Setup ---
+	// Open a separate, temporary connection just for migrations
+	migrationDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		log.Error("failed to open migration database",
 			"error", err,
-			"path", opts.Config.Path,
-		)
+			"path", opts.Config.Path)
 		return nil, fmt.Errorf("error opening migration database: %w", err)
 	}
-	defer migrationDB.Close()
 
-	// Run migrations
-	if err := runMigrations(migrationDB); err != nil {
+	// Ensure migration DB is closed after migrations run
+	defer func() {
+		log.Debug("closing migration database connection")
+		migrationDB.Close() // Attempt to close, ignore error
+	}()
+
+	// Set busy_timeout on migration connection
+	if _, err := migrationDB.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		log.Error("failed to set busy_timeout on migration database",
+			"error", err)
+		return nil, fmt.Errorf("error setting busy_timeout on migration database: %w", err)
+	}
+
+	// Run migrations using the dedicated migration database connection
+	log.Info("running database migrations")
+	if err := runMigrations(migrationDB, log); err != nil {
 		log.Error("failed to run migrations",
 			"error", err,
-			"path", opts.Config.Path,
-		)
+			"path", opts.Config.Path)
 		return nil, fmt.Errorf("error running migrations: %w", err)
 	}
+	log.Info("database migrations completed successfully")
 
 	// Initialize sqlc queries
 	queries := sqlc.New(db)
@@ -107,6 +117,7 @@ func New(opts Options) (*DB, error) {
 
 	// Mark initialization as successful
 	success = true
+	log.Info("sqlite database initialized successfully")
 	return sqlite, nil
 }
 
@@ -119,7 +130,7 @@ func setPragmas(db *sql.DB) error {
 		"PRAGMA synchronous = NORMAL",
 		"PRAGMA foreign_keys = ON",
 		"PRAGMA temp_store = MEMORY",
-		"PRAGMA cache_size = -16000",
+		"PRAGMA cache_size = -16000",       // ~16MB cache
 		"PRAGMA mmap_size = 0",             // Disable memory-mapped I/O which can cause issues with modernc.org/sqlite
 		"PRAGMA page_size = 4096",          // Set consistent page size
 		"PRAGMA wal_autocheckpoint = 1000", // Checkpoint WAL after 1000 pages
@@ -128,6 +139,7 @@ func setPragmas(db *sql.DB) error {
 
 	for _, pragma := range pragmas {
 		if _, err := db.Exec(pragma); err != nil {
+			// Log the specific pragma that failed
 			return fmt.Errorf("error setting pragma %q: %w", pragma, err)
 		}
 	}
@@ -136,7 +148,7 @@ func setPragmas(db *sql.DB) error {
 }
 
 // runMigrations runs all pending migrations
-func runMigrations(db *sql.DB) error {
+func runMigrations(db *sql.DB, log *slog.Logger) error {
 	// Create a filesystem driver for migrations
 	migrationFS, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
@@ -149,11 +161,11 @@ func runMigrations(db *sql.DB) error {
 	}
 
 	driver, err := sqlite3.WithInstance(db, &sqlite3.Config{
-		NoTxWrap:        true, // Disable transaction wrapping
+		// Enable transaction wrapping for atomic migrations
 		MigrationsTable: "schema_migrations",
 	})
 	if err != nil {
-		return fmt.Errorf("error creating sqlite driver: %w", err)
+		return fmt.Errorf("error creating sqlite migration driver: %w", err)
 	}
 
 	m, err := migrate.NewWithInstance(
@@ -171,22 +183,26 @@ func runMigrations(db *sql.DB) error {
 		if m != nil {
 			sourceErr, dbErr := m.Close()
 			if sourceErr != nil {
-				fmt.Printf("Warning: error closing migration source: %v\n", sourceErr)
+				log.Warn("error closing migration source driver", "error", sourceErr)
 			}
 			if dbErr != nil {
-				fmt.Printf("Warning: error closing migration db: %v\n", dbErr)
+				log.Warn("error closing migration database driver", "error", dbErr)
 			}
 		}
 	}()
 
 	// Run migrations
+	log.Info("applying migrations...")
 	if err := m.Up(); err != nil {
 		if err == migrate.ErrNoChange {
 			// This is fine - it just means we're up to date
+			log.Info("migrations are already up to date")
 			return nil
 		}
-		return fmt.Errorf("error running migrations: %w", err)
+		log.Error("migration failed", "error", err)
+		return fmt.Errorf("error applying migrations: %w", err)
 	}
+	log.Info("migrations applied successfully")
 
 	return nil
 }
@@ -194,15 +210,11 @@ func runMigrations(db *sql.DB) error {
 // Close closes the database connection
 func (db *DB) Close() error {
 	// Log that we're closing the database
-	db.log.Debug("closing database connection")
+	db.log.Debug("closing main database connection pool")
 
-	// Add a small delay before closing to allow any in-flight transactions to complete
-	// This can help prevent memory issues during shutdown
-	time.Sleep(100 * time.Millisecond)
-
-	// Close the connection
+	// Close the connection - db.Close() waits for idle connections
 	if err := db.db.Close(); err != nil {
-		db.log.Error("error closing database connection",
+		db.log.Error("error closing main database connection pool",
 			"error", err)
 		return fmt.Errorf("error closing database connection: %w", err)
 	}

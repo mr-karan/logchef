@@ -1,0 +1,1056 @@
+
+
+==================== data-table-toolbar.vue ====================
+
+
+<script setup lang="ts">
+import type { Table } from '@tanstack/vue-table'
+import type { QueryStats } from '@/api/explore'
+
+interface Props {
+    table: Table<Record<string, any>>
+    stats: QueryStats
+    totalResults: number
+}
+
+defineProps<Props>()
+</script>
+
+<template>
+    <div class="flex items-center gap-3 text-xs">
+        <div class="flex items-center gap-1.5">
+            <div class="h-1.5 w-1.5 rounded-full bg-primary"></div>
+            <span class="text-foreground">{{ totalResults.toLocaleString() }} logs</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+            <div class="h-1.5 w-1.5 rounded-full bg-primary"></div>
+            <span class="text-foreground">{{ stats?.execution_time_ms?.toFixed(2) ?? 0 }}ms</span>
+        </div>
+    </div>
+</template>
+
+
+==================== data-table-column-selector.vue ====================
+
+
+<script setup lang="ts">
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Label } from '@/components/ui/label'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { computed } from 'vue'
+import type { Table } from '@tanstack/vue-table'
+
+interface Props {
+  table: Table<Record<string, any>>
+}
+
+const props = defineProps<Props>()
+
+const columns = computed(() => props.table.getAllColumns().filter(column => column.getCanHide()))
+const visibleColumns = computed(() => columns.value.filter(column => column.getIsVisible()))
+
+const isAllSelected = computed(() => {
+  const hideable = columns.value.length
+  const visible = visibleColumns.value.length
+  return hideable > 0 && hideable === visible
+})
+
+const toggleAll = (checked: boolean) => {
+  columns.value.forEach(column => {
+    column.toggleVisibility(checked)
+  })
+}
+</script>
+
+<template>
+  <Popover>
+    <PopoverTrigger as-child>
+      <Button variant="outline" size="sm" class="w-[150px]">
+        <span class="mr-2">Columns</span>
+        <span class="text-xs text-muted-foreground">({{ visibleColumns.length }})</span>
+      </Button>
+    </PopoverTrigger>
+    <PopoverContent class="w-80">
+      <div class="grid gap-4">
+        <div class="space-y-2">
+          <h4 class="font-medium leading-none">
+            Table Columns
+          </h4>
+          <p class="text-sm text-muted-foreground">
+            Select columns to display in the table
+          </p>
+        </div>
+        <ScrollArea class="h-[300px] pr-4">
+          <div class="grid gap-2">
+            <!-- Select All option -->
+            <div class="flex items-center space-x-2 py-1 border-b border-border mb-2">
+              <Checkbox
+                id="select-all"
+                :checked="isAllSelected"
+                @update:checked="toggleAll"
+              />
+              <Label for="select-all" class="flex-1 cursor-pointer font-medium">
+                Select All
+              </Label>
+            </div>
+
+            <div
+              v-for="column in columns"
+              :key="column.id"
+              class="flex items-center space-x-2 py-1"
+            >
+              <Checkbox
+                :id="column.id"
+                :checked="column.getIsVisible()"
+                @update:checked="(checked) => column.toggleVisibility(!!checked)"
+              />
+              <Label :for="column.id" class="flex-1 cursor-pointer">
+                {{ column.id }}
+              </Label>
+            </div>
+          </div>
+        </ScrollArea>
+      </div>
+    </PopoverContent>
+  </Popover>
+</template>
+
+
+==================== data-table-filters.vue ====================
+
+
+<script setup lang="ts">
+import { ref, computed, watch } from 'vue'
+import { Button } from '@/components/ui/button'
+import { Plus, X } from 'lucide-vue-next'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
+import type { FilterCondition } from '@/api/explore'
+import { Badge } from '@/components/ui/badge'
+
+interface Props {
+  columns?: { name: string; type: string }[]
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  columns: () => []
+})
+
+const emit = defineEmits<{
+  (e: 'update:filters', value: FilterCondition[]): void
+}>()
+
+// Available operators
+const operators = [
+  { value: '=', label: 'equals' },
+  { value: '!=', label: 'does not equal' },
+  { value: 'contains', label: 'contains' },
+  { value: 'startsWith', label: 'starts with' },
+  { value: 'endsWith', label: 'ends with' },
+  { value: '>', label: 'greater than' },
+  { value: '<', label: 'less than' },
+  { value: '>=', label: 'greater than or equal' },
+  { value: '<=', label: 'less than or equal' },
+] as const
+
+// Active filters
+const filters = ref<FilterCondition[]>([])
+const editingFilter = ref<number | null>(null)
+const showAddFilter = ref(false)
+const newFilter = ref<FilterCondition>({
+  field: '',
+  operator: '=',
+  value: ''
+})
+
+// Get available columns for filtering
+const columns = computed(() => {
+  return props.columns.map(column => ({
+    id: column.name,
+    label: column.name.charAt(0).toUpperCase() + column.name.slice(1).replace(/_/g, ' ')
+  }))
+})
+
+// Get operator label
+const getOperatorLabel = (operator: string) => {
+  return operators.find(op => op.value === operator)?.label || operator
+}
+
+// Get column label
+const getColumnLabel = (field: string) => {
+  return columns.value.find(col => col.id === field)?.label || field
+}
+
+
+// Add a new filter
+const addFilter = () => {
+  if (newFilter.value.field && newFilter.value.operator && newFilter.value.value) {
+    filters.value.push({ ...newFilter.value })
+    newFilter.value = { field: '', operator: '=', value: '' }
+    showAddFilter.value = false
+    applyFilters()
+  }
+}
+
+// Remove a filter
+const removeFilter = (index: number) => {
+  filters.value.splice(index, 1)
+  editingFilter.value = null
+  applyFilters()
+}
+
+// Start editing a filter
+const startEditing = (index: number) => {
+  editingFilter.value = index
+}
+
+// Update an existing filter
+const updateFilter = (index: number) => {
+  if (editingFilter.value === index) {
+    editingFilter.value = null
+    applyFilters()
+  }
+}
+
+// Cancel editing
+const cancelEditing = () => {
+  editingFilter.value = null
+}
+
+// Apply filters to the table
+const applyFilters = () => {
+  // Only emit filters that have all fields filled
+  const validFilters = filters.value.filter(f => f.field && f.operator && f.value)
+  emit('update:filters', validFilters)
+}
+
+// Watch for changes and apply filters
+watch(filters, () => {
+  applyFilters()
+}, { deep: true })
+</script>
+
+<template>
+  <div class="space-y-2">
+    <!-- Filters Row -->
+    <div class="flex flex-wrap items-center gap-2">
+      <!-- Existing Filters -->
+      <template v-for="(filter, idx) in filters" :key="filter.field">
+        <!-- Collapsed View -->
+        <Badge v-if="editingFilter !== idx" variant="secondary"
+          class="h-7 pl-2 pr-1.5 flex items-center gap-1 hover:bg-muted/50" @click="startEditing(idx)">
+          <span class="flex items-center gap-1 text-xs">
+            <span class="font-normal">{{ getColumnLabel(filter.field) }}</span>
+            <span class="text-muted-foreground">{{ getOperatorLabel(filter.operator) }}</span>
+            <span class="font-medium">"{{ filter.value }}"</span>
+          </span>
+          <Button variant="ghost" size="sm" @click.stop="removeFilter(idx)" class="h-4 w-4 p-0 hover:bg-transparent">
+            <X class="h-3 w-3" />
+          </Button>
+        </Badge>
+
+        <!-- Expanded Edit View -->
+        <div v-else class="flex items-center gap-2 w-full">
+          <!-- Field Selector -->
+          <Select v-model="filter.field" class="w-[180px]">
+            <SelectTrigger class="h-8">
+              <SelectValue placeholder="Select field" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="column in columns" :key="column.id" :value="column.id">
+                {{ column.label }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+
+          <!-- Operator Selector -->
+          <Select v-model="filter.operator" class="w-[140px]">
+            <SelectTrigger class="h-8">
+              <SelectValue placeholder="Select operator" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="op in operators" :key="op.value" :value="op.value">
+                {{ op.label }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+
+          <!-- Value Input -->
+          <Input v-model="filter.value" placeholder="Enter value" class="h-8 flex-1" />
+
+          <!-- Action Buttons -->
+          <div class="flex gap-1">
+            <Button variant="ghost" size="sm" @click="cancelEditing" class="h-8 px-2">
+              Cancel
+            </Button>
+            <Button variant="default" size="sm" @click="updateFilter(idx)" class="h-8 px-2">
+              Update
+            </Button>
+          </div>
+        </div>
+      </template>
+
+      <!-- Add Filter Button -->
+      <Button variant="outline" size="sm" @click="showAddFilter = true" class="gap-1.5 h-7" v-if="!showAddFilter">
+        <Plus class="h-3.5 w-3.5" />
+        Add Filter
+      </Button>
+    </div>
+
+    <!-- Add Filter Form -->
+    <div v-if="showAddFilter" class="flex items-center gap-2 w-full border rounded-md bg-muted/20 p-2">
+      <!-- Field Selector -->
+      <Select v-model="newFilter.field" class="w-[180px]">
+        <SelectTrigger class="h-8">
+          <SelectValue placeholder="Select field" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem v-for="column in columns" :key="column.id" :value="column.id">
+            {{ column.label }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+
+      <!-- Operator Selector -->
+      <Select v-model="newFilter.operator" class="w-[140px]">
+        <SelectTrigger class="h-8">
+          <SelectValue placeholder="Select operator" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem v-for="op in operators" :key="op.value" :value="op.value">
+            {{ op.label }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+
+      <!-- Value Input -->
+      <Input v-model="newFilter.value" placeholder="Enter value" class="h-8 flex-1" />
+
+      <!-- Action Buttons -->
+      <div class="flex gap-1">
+        <Button variant="ghost" size="sm" @click="showAddFilter = false" class="h-8 px-2">
+          Cancel
+        </Button>
+        <Button variant="default" size="sm" @click="addFilter" class="h-8 px-2"
+          :disabled="!newFilter.field || !newFilter.operator || !newFilter.value">
+          Add
+        </Button>
+      </div>
+    </div>
+  </div>
+</template>
+
+
+==================== data-table-pagination.vue ====================
+
+
+<script setup lang="ts">
+import type { Table } from '@tanstack/vue-table'
+import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  ChevronsLeft,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsRight,
+} from 'lucide-vue-next'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+
+interface Props {
+  table: Table<Record<string, any>>
+}
+
+defineProps<Props>()
+
+const pageSizes = [10, 25, 50, 100, 250, 500, 1000]
+</script>
+
+<template>
+  <div class="flex items-center gap-2">
+    <!-- Rows per page - more compact -->
+    <TooltipProvider>
+      <Tooltip :delayDuration="200">
+        <TooltipTrigger>
+          <Select :model-value="`${table.getState().pagination.pageSize}`"
+            @update:model-value="(value) => table.setPageSize(Number(value))">
+            <SelectTrigger class="h-7 w-[70px] text-xs">
+              <SelectValue :placeholder="`${table.getState().pagination.pageSize}`" />
+            </SelectTrigger>
+            <SelectContent side="top">
+              <SelectItem v-for="size in pageSizes" :key="size" :value="`${size}`" class="text-xs">
+                {{ size }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </TooltipTrigger>
+        <TooltipContent :sideOffset="4" side="top" align="center" class="text-xs">
+          <p>Rows per page</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+
+    <!-- Page navigation - more compact -->
+    <div class="flex items-center gap-1">
+      <!-- First Page -->
+      <Button variant="ghost" size="icon" class="h-6 w-6 p-0" :disabled="!table.getCanPreviousPage()"
+        @click="table.setPageIndex(0)">
+        <span class="sr-only">Go to first page</span>
+        <ChevronsLeft class="h-3 w-3" />
+      </Button>
+
+      <!-- Previous Page -->
+      <Button variant="ghost" size="icon" class="h-6 w-6 p-0" :disabled="!table.getCanPreviousPage()"
+        @click="table.previousPage()">
+        <span class="sr-only">Go to previous page</span>
+        <ChevronLeft class="h-3 w-3" />
+      </Button>
+
+      <span class="text-xs mx-1">
+        {{ table.getState().pagination.pageIndex + 1 }}/{{ table.getPageCount() }}
+      </span>
+
+      <!-- Next Page -->
+      <Button variant="ghost" size="icon" class="h-6 w-6 p-0" :disabled="!table.getCanNextPage()"
+        @click="table.nextPage()">
+        <span class="sr-only">Go to next page</span>
+        <ChevronRight class="h-3 w-3" />
+      </Button>
+
+      <!-- Last Page -->
+      <Button variant="ghost" size="icon" class="h-6 w-6 p-0" :disabled="!table.getCanNextPage()"
+        @click="table.setPageIndex(table.getPageCount() - 1)">
+        <span class="sr-only">Go to last page</span>
+        <ChevronsRight class="h-3 w-3" />
+      </Button>
+    </div>
+  </div>
+</template>
+
+
+==================== data-table.vue ====================
+
+
+<script setup lang="ts">
+import type { ColumnDef, ColumnMeta, Row } from '@tanstack/vue-table'
+import {
+    FlexRender,
+    getCoreRowModel,
+    getSortedRowModel,
+    getExpandedRowModel,
+    getPaginationRowModel,
+    getFilteredRowModel,
+    useVueTable,
+    type SortingState,
+    type ExpandedState,
+    type VisibilityState,
+    type PaginationState,
+    type ColumnSizing as TColumnSizing,
+    type ColumnSizingState,
+    type ColumnResizeMode,
+} from '@tanstack/vue-table'
+import { ref, computed, onMounted, watch } from 'vue'
+import { Button } from '@/components/ui/button'
+import { Copy, Search } from 'lucide-vue-next'
+import { valueUpdater, getSeverityClasses } from '@/lib/utils'
+import { Input } from '@/components/ui/input'
+import DataTableColumnSelector from './data-table-column-selector.vue'
+import DataTablePagination from './data-table-pagination.vue'
+import { useToast } from '@/components/ui/toast'
+import { TOAST_DURATION } from '@/lib/constants'
+import type { QueryStats } from '@/api/explore'
+import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
+import EmptyState from '@/views/explore/EmptyState.vue'
+import { createColumns } from './columns'
+import { useExploreStore } from '@/stores/explore'
+import type { Source } from '@/api/sources'
+import { useSourcesStore } from '@/stores/sources'
+
+interface Props {
+    columns: ColumnDef<Record<string, any>>[]
+    data: Record<string, any>[]
+    stats: QueryStats
+    sourceId: string
+    timestampField?: string
+    severityField?: string
+    timezone?: 'local' | 'utc'
+}
+
+const props = defineProps<Props>()
+
+// Get the actual field names to use with fallbacks
+const timestampFieldName = computed(() => props.timestampField || 'timestamp')
+const severityFieldName = computed(() => props.severityField || 'severity_text')
+
+// Table state
+const sorting = ref<SortingState>([])
+const expanded = ref<ExpandedState>({})
+const columnVisibility = ref<VisibilityState>({})
+const pagination = ref<PaginationState>({
+    pageIndex: 0,
+    pageSize: 50,
+})
+const globalFilter = ref('')
+const columnSizing = ref<ColumnSizingState>({})
+const columnResizeMode = ref<ColumnResizeMode>('onChange')
+const displayTimezone = ref<'local' | 'utc'>(localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local')
+
+// Save timezone preference whenever it changes
+watch(displayTimezone, (newValue) => {
+    localStorage.setItem('logchef_timezone', newValue)
+})
+
+
+const { toast } = useToast()
+
+// Helper function for cell handling
+function formatCellValue(value: any): string {
+    if (value === null || value === undefined) return '';
+    return String(value);
+}
+
+// Get column type from meta data
+function getColumnType(column: any): string | undefined {
+    return column?.columnDef?.meta?.columnType;
+}
+
+// Make sure timestamp field is first in column order
+const sortedColumns = computed(() => {
+    // If no timestamp field specified, just return the columns as is
+    if (!timestampFieldName.value) return props.columns;
+
+    // Filter the columns to put timestamp first
+    const tsColumn = props.columns.find(col => col.id === timestampFieldName.value);
+    if (!tsColumn) return props.columns;
+
+    // Create a new array with timestamp column first, then all other columns
+    return [
+        tsColumn,
+        ...props.columns.filter(col => col.id !== timestampFieldName.value)
+    ];
+});
+
+// Define default column configurations
+const defaultColumn = {
+    minSize: 100,
+    size: 150,
+    maxSize: 1500,
+    enableResizing: true, // Enable resizing for all columns by default
+}
+
+// Initialize table with explicit column sizing configurations
+const table = useVueTable({
+    get data() {
+        return props.data
+    },
+    get columns() {
+        return sortedColumns.value
+    },
+    state: {
+        get sorting() {
+            return sorting.value
+        },
+        get expanded() {
+            return expanded.value
+        },
+        get columnVisibility() {
+            return columnVisibility.value
+        },
+        get pagination() {
+            return pagination.value
+        },
+        get globalFilter() {
+            return globalFilter.value
+        },
+        get columnSizing() {
+            return columnSizing.value
+        },
+    },
+    onSortingChange: updaterOrValue => valueUpdater(updaterOrValue, sorting),
+    onExpandedChange: updaterOrValue => valueUpdater(updaterOrValue, expanded),
+    onColumnVisibilityChange: updaterOrValue => valueUpdater(updaterOrValue, columnVisibility),
+    onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
+    onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
+    onColumnSizingChange: updaterOrValue => valueUpdater(updaterOrValue, columnSizing),
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    // Enable fuzzy search for better matching
+    globalFilterFn: 'includesString',
+    // Enable column resizing with explicit settings
+    enableColumnResizing: true,
+    columnResizeMode: columnResizeMode.value,
+    defaultColumn,
+    columnResizeDirection: 'ltr',
+})
+
+// Simplified row expansion handler
+const handleRowClick = (row: Row<Record<string, any>>) => (e: MouseEvent) => {
+    // Don't expand if clicking on an interactive element
+    if ((e.target as HTMLElement).closest('.actions-dropdown, button, a, input, select')) {
+        return;
+    }
+    row.toggleExpanded();
+}
+
+
+// Add back the copyCell function since it's still needed for individual cells
+const copyCell = (value: any) => {
+    const text = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)
+    navigator.clipboard.writeText(text)
+    toast({
+        title: 'Copied',
+        description: 'Value copied to clipboard',
+        duration: TOAST_DURATION.SUCCESS,
+    })
+}
+
+// Initialize table when component mounts with sensible defaults
+onMounted(() => {
+    // Initialize default sort by timestamp if available
+    if (timestampFieldName.value) {
+        sorting.value = [
+            {
+                id: timestampFieldName.value,
+                desc: true // Sort newest first by default
+            }
+        ]
+    }
+
+    // Set initial column sizing mode
+    columnResizeMode.value = 'onChange'
+})
+
+const exploreStore = useExploreStore()
+const sourcesStore = useSourcesStore()
+
+// Add type for column meta
+interface CustomColumnMeta extends ColumnMeta<Record<string, any>, unknown> {
+    className?: string;
+}
+
+// Add type for column definition with custom meta
+type CustomColumnDef = ColumnDef<Record<string, any>> & {
+    meta?: CustomColumnMeta;
+}
+
+// Update refs with proper types
+const tableColumns = ref<CustomColumnDef[]>([])
+const sourceDetails = ref<Source | null>(null)
+
+// Watch for source details changes
+watch(
+    () => exploreStore.sourceId,
+    async (newSourceId) => {
+        if (newSourceId) {
+            const result = await sourcesStore.getSource(newSourceId)
+            if (result.success && result.data) {
+                sourceDetails.value = result.data as Source
+            }
+        }
+    },
+    { immediate: true }
+)
+
+watch(
+    () => exploreStore.columns,
+    (newColumns) => {
+        if (newColumns) {
+            tableColumns.value = createColumns(
+                newColumns,
+                sourceDetails.value?._meta_ts_field || 'timestamp',
+                localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local',
+                sourceDetails.value?._meta_severity_field || 'severity_text'
+            )
+        }
+    },
+    { immediate: true }
+)
+</script>
+
+<template>
+    <div class="h-full flex flex-col w-full min-w-0 flex-1 overflow-hidden">
+        <!-- Results Header with Controls and Pagination -->
+        <div class="flex items-center justify-between p-2 border-b flex-shrink-0">
+            <!-- Left side - Empty now that stats have been moved to LogExplorer.vue -->
+            <div class="flex-1"></div>
+
+            <!-- Right side controls with pagination moved to top -->
+            <div class="flex items-center gap-3">
+                <!-- Timezone toggle -->
+                <div class="flex items-center space-x-1 mr-1">
+                    <Button variant="ghost" size="sm" 
+                        class="h-8 px-2 text-xs"
+                        :class="{ 'bg-muted': displayTimezone === 'local' }" 
+                        @click="displayTimezone = 'local'">
+                        Local Time
+                    </Button>
+                    <Button variant="ghost" size="sm" 
+                        class="h-8 px-2 text-xs"
+                        :class="{ 'bg-muted': displayTimezone === 'utc' }" 
+                        @click="displayTimezone = 'utc'">
+                        UTC
+                    </Button>
+                </div>
+
+                <!-- Pagination moved to top -->
+                <DataTablePagination v-if="table.getRowModel().rows?.length > 0" :table="table" />
+
+                <!-- Column selector -->
+                <DataTableColumnSelector :table="table" />
+
+                <!-- Search input -->
+                <div class="relative w-64">
+                    <Search class="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input placeholder="Search across all columns..." 
+                        aria-label="Search in all columns"
+                        v-model="globalFilter" 
+                        class="pl-8 h-8 text-sm" />
+                </div>
+            </div>
+        </div>
+
+        <!-- Table Section with full-height scrolling -->
+        <div class="flex-1 relative overflow-hidden">
+            <div v-if="table.getRowModel().rows?.length" class="absolute inset-0">
+                <div class="w-full h-full overflow-auto scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent">
+                    <div class="min-w-max w-auto">
+                        <table class="w-auto table-fixed border-separate border-spacing-0 text-sm">
+                            <!-- Table Header -->
+                            <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
+                                <tr class="border-b border-b-muted-foreground/10">
+                                    <th v-for="header in table.getHeaderGroups()[0]?.headers || []" 
+                                        :key="header.id"
+                                        class="h-9 px-3 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden"
+                                        :class="[
+                                            getColumnType(header.column) === 'timestamp' ? 'font-semibold' : '',
+                                            getColumnType(header.column) === 'severity' ? 'font-semibold' : '',
+                                            header.column.getIsResizing() ? 'relative border-r-2 border-r-primary/30' : ''
+                                        ]"
+                                        :style="{
+                                            width: `${header.column.getSize()}px`,
+                                            minWidth: `${header.column.getSize() / 2}px`
+                                        }">
+                                        <FlexRender 
+                                            v-if="!header.isPlaceholder"
+                                            :render="header.column.columnDef.header" 
+                                            :props="header.getContext()" />
+
+                                        <!-- Column Resizer Handle -->
+                                        <div 
+                                            v-if="header.column.getCanResize()"
+                                            class="absolute right-0 top-0 h-full w-1.5 group-hover:bg-primary/20 cursor-col-resize"
+                                            :class="{ 'bg-primary/50 w-2': header.column.getIsResizing() }"
+                                            @mousedown="header.getResizeHandler()"
+                                            @touchstart="header.getResizeHandler()"
+                                            @click.stop>
+                                        </div>
+                                    </th>
+                                </tr>
+                            </thead>
+
+                            <!-- Table Body -->
+                            <tbody>
+                                <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
+                                    <!-- Main Data Row -->
+                                    <tr 
+                                        :data-state="row.getIsSelected() ? 'selected' : undefined"
+                                        @click="handleRowClick(row)($event)"
+                                        class="group cursor-pointer border-b transition-colors"
+                                        :class="[
+                                            row.getIsExpanded() 
+                                                ? 'bg-primary/10 hover:bg-primary/20 border-primary/20' 
+                                                : [
+                                                    'hover:bg-muted/50 border-b-muted-foreground/10',
+                                                    index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
+                                                ]
+                                        ]">
+                                        <td 
+                                            v-for="cell in row.getVisibleCells()" 
+                                            :key="cell.id"
+                                            class="px-3 py-2 align-top font-mono text-xs leading-normal overflow-hidden"
+                                            :class="[
+                                                cell.column.getIsResizing() ? 'border-r-2 border-r-primary/30' : ''
+                                            ]"
+                                            :style="{
+                                                width: `${cell.column.getSize()}px`,
+                                                maxWidth: `${cell.column.getSize()}px`
+                                            }">
+                                            <!-- Cell Content -->
+                                            <div class="flex items-center gap-1 w-full overflow-hidden">
+                                                <!-- Severity Field Cell -->
+                                                <span
+                                                    v-if="cell.column.id === severityFieldName && getSeverityClasses(cell.getValue(), cell.column.id)"
+                                                    :class="getSeverityClasses(cell.getValue(), cell.column.id)"
+                                                    class="shrink-0 mx-1">
+                                                    {{ formatCellValue(cell.getValue()).toUpperCase() }}
+                                                </span>
+                                                <!-- Regular Cell Content -->
+                                                <template v-else>
+                                                    <div class="whitespace-nowrap overflow-hidden text-ellipsis w-full">
+                                                        <FlexRender 
+                                                            :render="cell.column.columnDef.cell"
+                                                            :props="cell.getContext()" />
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </td>
+                                    </tr>
+
+                                    <!-- Expanded Row -->
+                                    <tr v-if="row.getIsExpanded()">
+                                        <td :colspan="row.getVisibleCells().length" class="p-0">
+                                            <div class="p-3 bg-muted/30 border-y border-y-primary/40">
+                                                <JsonViewer 
+                                                    :value="row.original" 
+                                                    :expanded="false"
+                                                    class="text-xs" />
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div v-else class="h-full">
+                <EmptyState />
+            </div>
+        </div>
+    </div>
+</template>
+
+<style>
+/* No component-specific styles needed - all moved to Tailwind utility classes */
+</style>
+
+
+==================== columns.ts ====================
+
+
+import type { ColumnDef, Column } from "@tanstack/vue-table";
+import { formatTimestamp } from "@/lib/utils";
+import { h } from "vue";
+import { Button } from "@/components/ui/button";
+import { ArrowUpDown } from "lucide-vue-next";
+import type { ColumnInfo } from "@/api/explore";
+
+/**
+ * Column type definitions with consistent size handling
+ */
+// Common column types for width settings
+type ColumnType = 'timestamp' | 'severity' | 'message' | 'default';
+
+// Column width configuration
+interface ColumnWidthConfig {
+  defaultWidth: number;
+  minWidth: number;
+  maxWidth: number;
+}
+
+// Width configurations for each column type
+const COLUMN_WIDTH_CONFIG: Record<ColumnType, ColumnWidthConfig> = {
+  timestamp: { defaultWidth: 220, minWidth: 180, maxWidth: 400 },
+  severity: { defaultWidth: 120, minWidth: 80, maxWidth: 200 },
+  message: { defaultWidth: 500, minWidth: 200, maxWidth: 1200 },
+  default: { defaultWidth: 180, minWidth: 100, maxWidth: 400 }
+};
+
+// Determine column type based on field name
+function getColumnType(columnName: string, timestampField: string, severityField: string): ColumnType {
+  if (columnName === timestampField) {
+    return 'timestamp';
+  }
+  if (columnName === severityField) {
+    return 'severity';
+  }
+  if (['message', 'log', 'msg', 'body', 'content'].includes(columnName)) {
+    return 'message';
+  }
+  return 'default';
+}
+
+// Function to generate column definitions based on source schema
+export function createColumns(
+  columns: ColumnInfo[],
+  timestampField: string = "timestamp",
+  timezone: 'local' | 'utc' = 'local',
+  severityField: string = "severity_text"
+): ColumnDef<Record<string, any>>[] {
+  // Create a new array with the columns in the desired order
+  // First, let's sort out the timestamp field to be first if it exists
+  let sortedColumns = [...columns];
+  const tsColumnIndex = sortedColumns.findIndex(
+    (col) => col.name === timestampField
+  );
+
+  // Move the timestamp field to the beginning if it exists
+  if (tsColumnIndex > 0) {
+    const tsColumn = sortedColumns.splice(tsColumnIndex, 1)[0];
+    sortedColumns.unshift(tsColumn);
+  }
+
+  // Move severity field to be second if it exists
+  const severityColumnIndex = sortedColumns.findIndex(
+    (col) => col.name === severityField
+  );
+  if (severityColumnIndex > 0) {
+    const severityColumn = sortedColumns.splice(severityColumnIndex, 1)[0];
+    sortedColumns.splice(1, 0, severityColumn);
+  }
+
+  return sortedColumns.map((col) => {
+    const columnType = getColumnType(col.name, timestampField, severityField);
+    const widthConfig = COLUMN_WIDTH_CONFIG[columnType];
+
+    return {
+      id: col.name,
+      // Store column type in meta for easy access
+      meta: {
+        columnType,
+        // Store width config in meta for reference
+        widthConfig
+      },
+      // Column sizing configuration
+      enableResizing: true,
+      size: widthConfig.defaultWidth,
+      minSize: widthConfig.minWidth,
+      maxSize: widthConfig.maxWidth,
+
+      // Accessor function for data
+      accessorFn: (row) => row[col.name],
+
+      // Header configuration with sorting
+      header: ({ column }) => {
+        return h(
+          Button,
+          {
+            variant: "ghost",
+            class: "h-8 px-2 hover:bg-muted/20",
+            onClick: () => column.toggleSorting(column.getIsSorted() === "asc"),
+          },
+          () => [
+            col.name,
+            h(ArrowUpDown, { class: "ml-2 h-3 w-3 text-muted-foreground" }),
+          ]
+        );
+      },
+
+      // Cell configuration
+      cell: ({ row, column }) => {
+        const value = row.getValue(column.id);
+
+        // Handle null/undefined values
+        if (value === null || value === undefined) {
+          return h(
+            "div",
+            { class: "text-muted-foreground flex-render-content" },
+            "-"
+          );
+        }
+
+        // Special handling for timestamp column
+        if (col.name === timestampField) {
+          return h(
+            "span",
+            {
+              class: "flex-render-content font-mono text-[13px]",
+              title: value as string
+            },
+            formatTimestamp(value as string, timezone)
+          );
+        }
+
+        // Special handling for severity column
+        if (col.name === severityField) {
+          return h(
+            "span",
+            {
+              class: "flex-render-content font-mono text-[13px] px-1.5 py-0.5 rounded-sm",
+              title: value as string
+            },
+            () => value
+          );
+        }
+
+        // Handle objects
+        if (typeof value === "object") {
+          try {
+            const jsonString = JSON.stringify(value, null, 2);
+            return h(
+              "span",
+              {
+                class: "flex-render-content json-content font-mono text-[13px]"
+              },
+              jsonString
+            );
+          } catch (err) {
+            return h(
+              "span",
+              {
+                class: "flex-render-content"
+              },
+              String(value)
+            );
+          }
+        }
+
+        // Default string representation
+        return h(
+          "span",
+          {
+            class: "flex-render-content font-mono text-[13px]"
+          },
+          String(value)
+        );
+      },
+
+      // Enable sorting and filtering
+      enableSorting: true,
+      enableHiding: true,
+      enableColumnFilter: true,
+    };
+  });
+}
+
+// Helper function to get initial visible columns (timestamp + first column if exists)
+export function getInitialVisibleColumns(
+  columns: ColumnInfo[],
+  timestampField: string = "timestamp"
+): string[] {
+  const hasTimestamp = columns.some((col) => col.name === timestampField);
+  if (hasTimestamp) {
+    return columns.length > 1
+      ? [
+          timestampField,
+          columns.find((col) => col.name !== timestampField)!.name,
+        ]
+      : [timestampField];
+  }
+  return columns.length > 0 ? [columns[0].name] : [];
+}

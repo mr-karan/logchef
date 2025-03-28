@@ -20,10 +20,10 @@ interface ColumnWidthConfig {
 
 // Width configurations for each column type
 const COLUMN_WIDTH_CONFIG: Record<ColumnType, ColumnWidthConfig> = {
-  timestamp: { defaultWidth: 220, minWidth: 180, maxWidth: 300 },
-  severity: { defaultWidth: 120, minWidth: 80, maxWidth: 150 },
+  timestamp: { defaultWidth: 220, minWidth: 180, maxWidth: 400 },
+  severity: { defaultWidth: 120, minWidth: 80, maxWidth: 200 },
   message: { defaultWidth: 500, minWidth: 200, maxWidth: 1200 },
-  default: { defaultWidth: 180, minWidth: 100, maxWidth: 400 }
+  default: { defaultWidth: 180, minWidth: 100, maxWidth: 600 }
 };
 
 // Determine column type based on field name
@@ -72,171 +72,114 @@ export function createColumns(
   return sortedColumns.map((col) => {
     const columnType = getColumnType(col.name, timestampField, severityField);
     const widthConfig = COLUMN_WIDTH_CONFIG[columnType];
-    
+
     return {
       id: col.name,
       // Store column type in meta for easy access
-      meta: { columnType },
-      // Enable column resizing with consistent sizes from config
+      meta: {
+        columnType,
+        // Store width config in meta for reference
+        widthConfig
+      },
+      // Column sizing configuration
       enableResizing: true,
       size: widthConfig.defaultWidth,
       minSize: widthConfig.minWidth,
       maxSize: widthConfig.maxWidth,
-      // Use accessor function instead of accessorKey for nested properties
+
+      // Accessor function for data
       accessorFn: (row) => row[col.name],
+
+      // Header configuration with sorting
       header: ({ column }) => {
-      return h(
-        Button,
-        {
-          variant: "ghost",
-          class: "h-8 px-2 hover:bg-muted/20",
-          onClick: () => column.toggleSorting(column.getIsSorted() === "asc"),
-        },
-        () => [
-          col.name,
-          h(ArrowUpDown, { class: "ml-2 h-3 w-3 text-muted-foreground" }),
-        ]
-      );
-    },
-    cell: ({ row, column }) => {
-      // Get the value using the column ID to ensure correct mapping
-      const value = row.getValue(column.id);
-
-      // Handle null/undefined values
-      if (value === null || value === undefined) {
         return h(
-          "div",
-          { class: "text-muted-foreground flex-render-content" },
-          "-"
+          Button,
+          {
+            variant: "ghost",
+            class: "h-8 px-2 hover:bg-muted/20",
+            onClick: () => column.toggleSorting(column.getIsSorted() === "asc"),
+          },
+          () => [
+            col.name,
+            h(ArrowUpDown, { class: "ml-2 h-3 w-3 text-muted-foreground" }),
+          ]
         );
-      }
+      },
 
-      // Special handling for timestamp column
-      if (col.name === timestampField) {
-        let formattedTimestamp;
-        try {
-          // Parse the timestamp
-          const date = new Date(value as string);
+      // Cell configuration
+      cell: ({ row, column }) => {
+        const value = row.getValue(column.id);
 
-          // Check if the date is valid
-          if (isNaN(date.getTime())) {
-            // If invalid, just use the original formatting
-            formattedTimestamp = formatTimestamp(value as string);
-          } else {
-            // Format based on timezone preference
-            if (timezone === 'utc') {
-              // Use UTC formatting - keep the 'Z' to indicate UTC
-              formattedTimestamp = date.toISOString();
-            } else {
-              // Use local timezone with ISO format and timezone offset
-              const tzOffset = date.getTimezoneOffset();
-              const absOffset = Math.abs(tzOffset);
-              const offsetHours = Math.floor(absOffset / 60).toString().padStart(2, '0');
-              const offsetMinutes = (absOffset % 60).toString().padStart(2, '0');
-              const offsetSign = tzOffset <= 0 ? '+' : '-'; // Note: getTimezoneOffset returns negative for positive offsets
+        // Handle null/undefined values
+        if (value === null || value === undefined) {
+          return h(
+            "div",
+            { class: "text-muted-foreground flex-render-content" },
+            "-"
+          );
+        }
 
-              // Format the date in ISO format with timezone offset
-              const localISOTime = new Date(date.getTime() - (tzOffset * 60000))
-                .toISOString()
-                .slice(0, -1); // Remove the trailing Z
+        // Special handling for timestamp column
+        if (col.name === timestampField) {
+          return h(
+            "span",
+            {
+              class: "flex-render-content font-mono text-[13px]",
+              title: value as string
+            },
+            formatTimestamp(value as string, timezone)
+          );
+        }
 
-              formattedTimestamp = `${localISOTime}${offsetSign}${offsetHours}:${offsetMinutes}`;
-            }
+        // Special handling for severity column
+        if (col.name === severityField) {
+          return h(
+            "span",
+            {
+              class: "flex-render-content font-mono text-[13px] px-1.5 py-0.5 rounded-sm",
+              title: value as string
+            },
+            () => value
+          );
+        }
+
+        // Handle objects
+        if (typeof value === "object") {
+          try {
+            const jsonString = JSON.stringify(value, null, 2);
+            return h(
+              "span",
+              {
+                class: "flex-render-content json-content font-mono text-[13px]"
+              },
+              jsonString
+            );
+          } catch (err) {
+            return h(
+              "span",
+              {
+                class: "flex-render-content"
+              },
+              String(value)
+            );
           }
-        } catch (e) {
-          // Fallback to original formatting if there's an error
-          formattedTimestamp = formatTimestamp(value as string);
         }
 
+        // Default string representation
         return h(
           "span",
           {
-            class: "flex-render-content font-mono text-[13px]",
-            title: value as string // Show original value on hover
+            class: "flex-render-content font-mono text-[13px]"
           },
-          formattedTimestamp
+          String(value)
         );
-      }
+      },
 
-      // Special handling for severity column
-      if (col.name === severityField) {
-        return h(
-          "span",
-          {
-            class: "flex-render-content font-mono text-[13px] px-1.5 py-0.5 rounded-sm",
-            title: value as string // Show original value on hover
-          },
-          () => value
-        );
-      }
-
-      // Handle objects by converting to JSON string with proper formatting
-      if (typeof value === "object") {
-        try {
-          // Try to format the JSON nicely with indentation
-          const jsonString = typeof value === 'object' && value !== null
-            ? JSON.stringify(value, null, 2)
-            : JSON.stringify(value);
-
-          return h(
-            "span",
-            {
-              class: "flex-render-content json-content font-mono text-[13px]"
-            },
-            jsonString
-          );
-        } catch (err) {
-          // Fallback to simple string if there's an error
-          return h(
-            "span",
-            {
-              class: "flex-render-content"
-            },
-            String(value)
-          );
-        }
-      }
-
-      // Default to string representation with ellipsis support
-      const stringValue = String(value);
-      return h(
-        "span",
-        {
-          class: "flex-render-content font-mono text-[13px]"
-        },
-        stringValue
-      );
-    },
-    // Enable sorting for all columns
-    enableSorting: true,
-    // Enable column visibility toggle
-    enableHiding: true,
-    // Enable filtering for all columns
-    enableColumnFilter: true,
-    filterFn: (row, id, filterValue) => {
-      const value = row.getValue(id);
-      if (!value) return false;
-
-      const stringValue = String(value).toLowerCase();
-      const { operator, value: searchValue } = filterValue;
-      const searchString = String(searchValue).toLowerCase();
-
-      switch (operator) {
-        case "=":
-          return stringValue === searchString;
-        case "!=":
-          return stringValue !== searchString;
-        case "contains":
-          return stringValue.includes(searchString);
-        case "startsWith":
-          return stringValue.startsWith(searchString);
-        case "endsWith":
-          return stringValue.endsWith(searchString);
-        default:
-          return false;
-      }
-    }
-  };
+      // Enable sorting and filtering
+      enableSorting: true,
+      enableHiding: true,
+      enableColumnFilter: true,
+    };
   });
 }
 
