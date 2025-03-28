@@ -482,19 +482,21 @@ onBeforeUnmount(() => {
   <!-- No Sources State (Team Selected) -->
   <div v-else-if="showNoSourcesState" class="flex flex-col h-[calc(100vh-12rem)]">
     <!-- Header bar for team selection -->
-    <div class="border-b py-2 px-3 flex items-center gap-3">
-      <Select :model-value="currentTeamId?.toString() ?? ''" @update:model-value="handleTeamChange" class="w-40"
-        :disabled="isProcessingTeamChange">
-        <SelectTrigger class="h-8 text-sm">
-          <SelectValue placeholder="Select team">{{ selectedTeamName }}</SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem v-for="team in availableTeams" :key="team.id" :value="team.id.toString()">
-            {{ team.name }}
-          </SelectItem>
-        </SelectContent>
-      </Select>
-      <span class="text-sm text-muted-foreground italic">No sources in this team.</span>
+    <div class="border-b py-2 px-4 flex items-center h-12">
+      <div class="flex items-center space-x-3">
+        <Select :model-value="currentTeamId?.toString() ?? ''" @update:model-value="handleTeamChange"
+          :disabled="isProcessingTeamChange">
+          <SelectTrigger class="h-8 text-sm w-32">
+            <SelectValue placeholder="Select team">{{ selectedTeamName }}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem v-for="team in availableTeams" :key="team.id" :value="team.id.toString()">
+              {{ team.name }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <span class="text-sm text-muted-foreground italic">No sources in this team.</span>
+      </div>
       <Button size="sm" class="ml-auto h-8" @click="router.push({ name: 'NewSource' })">
         Add Source
       </Button>
@@ -518,56 +520,66 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Filter Bar -->
-    <div class="border-b bg-background py-2 px-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-      <!-- Team/Source Selectors -->
-      <Select :model-value="currentTeamId?.toString() ?? ''" @update:model-value="handleTeamChange" class="w-36"
-        :disabled="isProcessingTeamChange">
-        <SelectTrigger class="h-8 text-sm">
-          <SelectValue placeholder="Select team">{{ selectedTeamName }}</SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem v-for="team in availableTeams" :key="team.id" :value="team.id.toString()">
-            {{ team.name }}
-          </SelectItem>
-        </SelectContent>
-      </Select>
+    <div class="border-b bg-background py-2 px-4 flex items-center h-12">
+      <!-- Data Source Group -->
+      <div class="flex items-center space-x-2 min-w-0">
+        <!-- Team Selector -->
+        <Select :model-value="currentTeamId?.toString() ?? ''" @update:model-value="handleTeamChange" 
+          :disabled="isProcessingTeamChange">
+          <SelectTrigger class="h-8 text-sm w-32">
+            <SelectValue placeholder="Select team">{{ selectedTeamName }}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem v-for="team in availableTeams" :key="team.id" :value="team.id.toString()">
+              {{ team.name }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
 
-      <Select :model-value="currentSourceId?.toString() ?? ''" @update:model-value="handleSourceChange" class="w-48"
-        :disabled="isProcessingSourceChange || !currentTeamId || availableSources.length === 0">
-        <SelectTrigger class="h-8 text-sm">
-          <SelectValue placeholder="Select source">{{ selectedSourceName }}</SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem v-if="!currentTeamId" value="no-team" disabled>Select a team first</SelectItem>
-          <SelectItem v-else-if="availableSources.length === 0" value="no-sources" disabled>No sources available</SelectItem>
-          <SelectItem v-for="source in availableSources" :key="source.id" :value="source.id.toString()">
-            {{ formatSourceName(source) }}
-          </SelectItem>
-        </SelectContent>
-      </Select>
+        <!-- Source Selector -->
+        <Select :model-value="currentSourceId?.toString() ?? ''" @update:model-value="handleSourceChange"
+          :disabled="isProcessingSourceChange || !currentTeamId || availableSources.length === 0">
+          <SelectTrigger class="h-8 text-sm w-40">
+            <SelectValue placeholder="Select source">{{ selectedSourceName }}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem v-if="!currentTeamId" value="no-team" disabled>Select a team first</SelectItem>
+            <SelectItem v-else-if="availableSources.length === 0" value="no-sources" disabled>No sources available</SelectItem>
+            <SelectItem v-for="source in availableSources" :key="source.id" :value="source.id.toString()">
+              {{ formatSourceName(source) }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
-      <!-- Date/Time Picker -->
-      <DateTimePicker v-model="dateRange" class="h-8" />
+      <!-- Divider -->
+      <div class="h-6 w-px bg-border mx-3"></div>
 
-      <!-- Limit Dropdown -->
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" class="h-8 w-[90px] text-sm justify-between px-2">
-            <span>Limit:</span> {{ exploreStore.limit.toLocaleString() }}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuLabel>Results Limit</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem v-for="limit in [100, 500, 1000, 2000, 5000, 10000]" :key="limit"
-            @click="exploreStore.setLimit(limit)" :disabled="exploreStore.limit === limit">
-            {{ limit.toLocaleString() }} rows
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <!-- Time Controls Group -->
+      <div class="flex items-center space-x-2 flex-grow">
+        <!-- Date/Time Picker -->
+        <DateTimePicker v-model="dateRange" class="h-8" />
 
-      <!-- Actions -->
-      <div class="ml-auto flex items-center gap-1.5">
+        <!-- Limit Dropdown -->
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" class="h-8 text-sm justify-between px-2 min-w-[90px]">
+              <span>Limit:</span> {{ exploreStore.limit.toLocaleString() }}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Results Limit</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem v-for="limit in [100, 500, 1000, 2000, 5000, 10000]" :key="limit"
+              @click="exploreStore.setLimit(limit)" :disabled="exploreStore.limit === limit">
+              {{ limit.toLocaleString() }} rows
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <!-- Actions Group -->
+      <div class="flex items-center space-x-2">
         <SavedQueriesDropdown :source-id="currentSourceId" :team-id="currentTeamId" :use-current-team="true"
           @select="loadSavedQuery" @save="handleSaveQueryClick" class="h-8" />
         <Button variant="default" size="sm" class="h-8 px-3 flex items-center gap-1.5 transition-colors duration-200"
