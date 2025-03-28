@@ -916,6 +916,9 @@ const handleModeChange = async (newEditorMode: 'logchefql' | 'clickhouse-sql') =
 
   // Clear validation error from previous mode
   queryError.value = null;
+  
+  // No need to manually focus the editor here as the QueryEditor component
+  // now handles auto-focusing whenever the activeMode changes through its watchEffect
 };
 
 // Handle query changes from editor - simplified

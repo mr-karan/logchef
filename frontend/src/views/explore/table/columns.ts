@@ -20,7 +20,7 @@ interface ColumnWidthConfig {
 
 // Width configurations for each column type
 const COLUMN_WIDTH_CONFIG: Record<ColumnType, ColumnWidthConfig> = {
-  timestamp: { defaultWidth: 220, minWidth: 180, maxWidth: 400 },
+  timestamp: { defaultWidth: 260, minWidth: 200, maxWidth: 400 },
   severity: { defaultWidth: 120, minWidth: 80, maxWidth: 200 },
   message: { defaultWidth: 500, minWidth: 200, maxWidth: 1200 },
   default: { defaultWidth: 180, minWidth: 100, maxWidth: 600 }

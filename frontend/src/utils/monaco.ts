@@ -43,6 +43,14 @@ export function getDefaultMonacoOptions(): monaco.editor.IStandaloneEditorConstr
     hideCursorInOverviewRuler: true,
     fixedOverflowWidgets: true, // Important for suggestion widgets
     wordWrap: "off", // Default to off, enable per language if needed
+    // Force cursor options to be visible
+    cursorBlinking: "phase",  // Use phase for a smoother blink
+    cursorStyle: "line",       // Ensure line style for visibility
+    cursorWidth: 2,            // Make cursor slightly thicker
+    cursorSmoothCaretAnimation: "on", // Smooth transitions when moving cursor
+    renderWhitespace: "none",  // Don't show whitespace by default
+    // Enable placeholder support
+    'placeholder': '', // Default empty, will be set by component
   };
 }
 
