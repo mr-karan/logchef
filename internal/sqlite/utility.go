@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/mattn/go-sqlite3"
+	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // boolToInt converts a boolean to an integer (1 for true, 0 for false)

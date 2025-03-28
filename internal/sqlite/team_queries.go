@@ -24,7 +24,7 @@ func (db *DB) CreateTeamQuery(ctx context.Context, query *models.TeamQuery) erro
 		SourceID:     int64(query.SourceID),
 		Name:         query.Name,
 		Description:  description,
-		QueryType:    query.QueryType,
+		QueryType:    string(query.QueryType),
 		QueryContent: query.QueryContent,
 	})
 

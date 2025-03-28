@@ -15,11 +15,10 @@ import (
 func (db *DB) CreateTeam(ctx context.Context, team *models.Team) error {
 	db.log.Debug("creating team", "name", team.Name)
 
-	var id int64
-	err := db.queries.CreateTeam.QueryRowContext(ctx,
-		team.Name,
-		team.Description,
-	).Scan(&id)
+	id, err := db.queries.CreateTeam(ctx, sqlc.CreateTeamParams{
+		Name:        team.Name,
+		Description: sql.NullString{String: team.Description, Valid: team.Description != ""},
+	})
 
 	if err != nil {
 		if isUniqueConstraintError(err, "teams", "name") {
@@ -126,7 +125,7 @@ func (db *DB) AddTeamMember(ctx context.Context, teamID models.TeamID, userID mo
 	}
 
 	// Finally add the team member
-	err := db.queries.AddTeamMember(ctx, sqlc.AddTeamMemberParams{
+	err = db.queries.AddTeamMember(ctx, sqlc.AddTeamMemberParams{
 		TeamID: int64(teamID),
 		UserID: int64(userID),
 		Role:   string(role),
@@ -263,7 +262,7 @@ func (db *DB) AddTeamSource(ctx context.Context, teamID models.TeamID, sourceID 
 	}
 
 	// Add source to team
-	err := db.queries.AddTeamSource(ctx, sqlc.AddTeamSourceParams{
+	err = db.queries.AddTeamSource(ctx, sqlc.AddTeamSourceParams{
 		TeamID:   int64(teamID),
 		SourceID: int64(sourceID),
 	})

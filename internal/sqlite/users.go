@@ -112,7 +112,11 @@ func (db *DB) CountAdminUsers(ctx context.Context) (int, error) {
 	db.log.Debug("counting admin users")
 
 	var count int
-	count, err := db.queries.CountAdminUsers(ctx, sqlc.CountAdminUsersParams{
+	count64, err := db.queries.CountAdminUsers(ctx, sqlc.CountAdminUsersParams{
+		Role:   string(models.UserRoleAdmin),
+		Status: string(models.UserStatusActive),
+	})
+	count := int(count64)
 		Role:   string(models.UserRoleAdmin),
 		Status: string(models.UserStatusActive),
 	})
