@@ -44,14 +44,14 @@ func (db *DB) GetSession(ctx context.Context, sessionID models.SessionID) (*mode
 		)
 		return nil, handleNotFoundError(err, "error getting session")
 	}
-	
+
 	session := &models.Session{
 		ID:        models.SessionID(sqlcSession.ID),
 		UserID:    models.UserID(sqlcSession.UserID),
 		ExpiresAt: sqlcSession.ExpiresAt,
 		CreatedAt: sqlcSession.CreatedAt,
 	}
-	
+
 	return session, nil
 }
 

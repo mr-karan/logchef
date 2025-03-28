@@ -60,9 +60,9 @@ func New(opts Options) (*DB, error) {
 	}()
 
 	// Configure connection pool with conservative settings to prevent memory issues
-	db.SetMaxOpenConns(5)  // Limit connections to reduce memory/resource issues
-	db.SetMaxIdleConns(2)  // Keep fewer idle connections
-	
+	db.SetMaxOpenConns(5) // Limit connections to reduce memory/resource issues
+	db.SetMaxIdleConns(2) // Keep fewer idle connections
+
 	// Set shorter connection lifetimes to prevent stale connections
 	db.SetConnMaxLifetime(30 * time.Minute)
 	db.SetConnMaxIdleTime(5 * time.Minute)
