@@ -24,7 +24,7 @@ var migrationsFS embed.FS
 // DB represents our SQLite database manager
 type DB struct {
 	db      *sql.DB
-	queries *sqlc.Queries
+	queries sqlc.Querier
 	log     *slog.Logger
 }
 

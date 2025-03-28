@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
