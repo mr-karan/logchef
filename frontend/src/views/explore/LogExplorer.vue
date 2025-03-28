@@ -577,12 +577,6 @@ onBeforeUnmount(() => {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-
-      <!-- Actions Group -->
-      <div class="flex items-center space-x-2">
-        <SavedQueriesDropdown :source-id="currentSourceId" :team-id="currentTeamId" :use-current-team="true"
-          @select="loadSavedQuery" @save="handleSaveQueryClick" class="h-8" />
-      </div>
     </div>
 
     <!-- Main Content Area -->
@@ -603,6 +597,8 @@ onBeforeUnmount(() => {
                 :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
                 :showFieldsPanel="showFieldsPanel" @change="handleQueryChange" @submit="triggerQueryExecution"
                 @update:activeMode="handleModeChange" @toggle-fields="showFieldsPanel = !showFieldsPanel"
+                :teamId="currentTeamId" :useCurrentTeam="true"
+                @select-saved-query="loadSavedQuery" @save-query="handleSaveQueryClick"
                 class="border-0 border-b" />
             </div>
           </template>
