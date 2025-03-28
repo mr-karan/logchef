@@ -20,7 +20,9 @@
             <TabsTrigger value="clickhouse-sql">SQL</TabsTrigger>
           </TabsList>
         </Tabs>
-      
+      </div>
+
+      <div class="flex items-center gap-2">
         <!-- Saved Queries Dropdown (Integrated from LogExplorer) -->
         <SavedQueriesDropdown 
           :source-id="props.sourceId" 
@@ -29,9 +31,7 @@
           @select="(query) => $emit('select-saved-query', query)" 
           @save="$emit('save-query')"
           class="h-8" />
-      </div>
-
-      <div class="flex items-center gap-2">
+      
         <!-- Table name indicator -->
         <div v-if="props.activeMode === 'clickhouse-sql'" class="text-xs text-muted-foreground mr-2">
           <template v-if="props.tableName">
