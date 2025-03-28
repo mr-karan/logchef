@@ -17,6 +17,7 @@ interface SourcesState {
   teamSources: Source[];
   sourceQueries: Record<string, any>;
   sourceStats: Record<string, SourceStats>;
+  currentSourceDetails: Source | null;
 }
 
 export const useSourcesStore = defineStore("sources", () => {
@@ -34,6 +35,7 @@ export const useSourcesStore = defineStore("sources", () => {
   const teamSources = computed(() => state.data.value.teamSources);
   const sourceQueries = computed(() => state.data.value.sourceQueries);
   const sourceStats = computed(() => state.data.value.sourceStats);
+  const currentSourceDetails = computed(() => state.data.value.currentSourceDetails);
   
   // Filtered sources
   const visibleSources = computed(() => 
@@ -69,6 +71,23 @@ export const useSourcesStore = defineStore("sources", () => {
       });
     }
     return map;
+  });
+  
+  // Check if current source is valid for querying
+  const hasValidCurrentSource = computed(() => {
+    const details = state.data.value.currentSourceDetails;
+    // Define what constitutes a "valid" source for querying
+    // e.g., must have connection info and columns
+    return !!(details && details.connection && details.columns && details.columns.length > 0);
+  });
+  
+  // Get formatted table name from current source details
+  const getCurrentSourceTableName = computed(() => {
+    const details = state.data.value.currentSourceDetails;
+    if (details?.connection?.database && details?.connection?.table_name) {
+      return `${details.connection.database}.${details.connection.table_name}`;
+    }
+    return null; // Or a default/placeholder
   });
 
   async function loadSources() {
@@ -322,6 +341,66 @@ export const useSourcesStore = defineStore("sources", () => {
       });
     });
   }
+  
+  async function loadSourceDetails(sourceId: number) {
+    // Use a unique loading key
+    const loadingKey = `loadSourceDetails-${sourceId}`;
+    console.log(`sourcesStore: Loading details for source ${sourceId}`);
+
+    // Check cache first (optional but recommended)
+    const cachedSource = state.data.value.teamSources.find(s => s.id === sourceId);
+    if (cachedSource && cachedSource.columns && cachedSource.columns.length > 0) {
+       // Check if current details are already set to this source to avoid redundant updates
+       if (state.data.value.currentSourceDetails?.id !== sourceId) {
+          console.log(`sourcesStore: Using cached details for source ${sourceId}`);
+          state.data.value.currentSourceDetails = cachedSource;
+       } else {
+          console.log(`sourcesStore: Details for source ${sourceId} already loaded and match cache.`);
+       }
+       // Return success immediately if cached
+       return { success: true, data: cachedSource };
+    }
+
+    return await state.withLoading(loadingKey, async () => {
+      // Reset current details before fetching (only if not already loading this specific source)
+      if (!state.isLoadingOperation(loadingKey)) {
+         state.data.value.currentSourceDetails = null;
+      }
+
+      // Use the existing getSource function which seems to handle team context
+      const currentTeamId = teamsStore.currentTeamId;
+      if (!currentTeamId) {
+        console.error(`sourcesStore: Cannot load source details - no team selected.`);
+        return state.handleError(
+          { status: "error", message: "No team selected", error_type: "ValidationError" } as APIErrorResponse,
+          loadingKey
+        );
+      }
+
+      console.log(`sourcesStore: Fetching details via API for source ${sourceId} in team ${currentTeamId}`);
+      return await state.callApi<Source>({
+        // Use getTeamSource API call as it seems to be the one implemented
+        apiCall: () => sourcesApi.getTeamSource(currentTeamId, sourceId),
+        onSuccess: (data) => {
+          console.log(`sourcesStore: Successfully loaded details for source ${sourceId}`, data);
+          state.data.value.currentSourceDetails = data;
+          // Update the source in teamSources as well (like the existing getSource does)
+          const index = state.data.value.teamSources.findIndex((s) => s.id === sourceId);
+          if (index >= 0) {
+            const newTeamSources = [...state.data.value.teamSources];
+            newTeamSources[index] = data;
+            state.data.value.teamSources = newTeamSources;
+          }
+        },
+        onError: (error) => {
+          console.error(`sourcesStore: Error loading details for source ${sourceId}`, error);
+          state.data.value.currentSourceDetails = null; // Clear on error
+        },
+        operationKey: loadingKey,
+        showToast: false, // Don't show toast for background loading
+      });
+    });
+  }
 
   async function validateSourceConnection(connectionInfo: {
     host: string;
@@ -361,6 +440,16 @@ export const useSourcesStore = defineStore("sources", () => {
     
     // Also clear any stats for this source
     delete state.data.value.sourceStats[sourceId.toString()];
+    
+    // Clear current source details if it matches this source
+    if (state.data.value.currentSourceDetails?.id === sourceId) {
+      state.data.value.currentSourceDetails = null;
+    }
+  }
+  
+  function clearCurrentSourceDetails() {
+    console.log("sourcesStore: Clearing current source details");
+    state.data.value.currentSourceDetails = null;
   }
   
   // Use the centralized error handler from base store
@@ -413,6 +502,9 @@ export const useSourcesStore = defineStore("sources", () => {
     sourceStats,
     loadingStates: state.loadingStates,
     validatedConnections,
+    currentSourceDetails,
+    getCurrentSourceTableName,
+    hasValidCurrentSource,
     visibleSources,
     isHydrated,
 
@@ -445,6 +537,8 @@ export const useSourcesStore = defineStore("sources", () => {
     getSource,
     validateSourceConnection,
     invalidateSourceCache,
+    loadSourceDetails,
+    clearCurrentSourceDetails,
     hydrate,
   };
 });
