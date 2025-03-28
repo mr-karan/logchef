@@ -38,6 +38,7 @@ import { translateToSQLConditions } from '@/utils/logchefql/api'
 import { Parser as LogchefQLParser } from '@/utils/logchefql'
 import { SQLParser } from '@/utils/clickhouse-sql/ast'; // Import SQLParser
 import { QueryBuilder } from '@/utils/query-builder'
+import { useExploreUrlSync } from '@/composables/useExploreUrlSync'; // Import the composable
 import type { ColumnDef } from '@tanstack/vue-table'
 import type { SavedQueryContent } from '@/api/savedQueries'
 import type { Source } from '@/api/sources'
@@ -59,6 +60,7 @@ const teamsStore = useTeamsStore()
 const sourcesStore = useSourcesStore()
 const savedQueriesStore = useSavedQueriesStore()
 const { toast } = useToast()
+const { isInitializing, initializationError, initializeFromUrl } = useExploreUrlSync(); // Use the composable
 
 // Basic state
 const showSaveQueryModal = ref(false)
@@ -79,7 +81,7 @@ const sourceDetails = computed(() => sourcesStore.currentSourceDetails)
 // Add loading states for better UX
 const isChangingTeam = ref(false)
 const isChangingSource = ref(false)
-const urlError = ref<string | null>(null)
+const urlError = computed(() => initializationError.value); // Use error from composable
 
 // Add a new computed property to check if we can execute the query
 const canExecuteQuery = computed(() => {
@@ -161,10 +163,6 @@ const displayTimezone = computed(() =>
   localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local'
 );
 
-// Add more detailed initialization tracking
-const isInitializing = ref(true)
-const isTeamsLoaded = ref(false)
-const isSourcesLoaded = ref(false)
 const pendingEditorInit = ref(false)
 
 // Function to update URL with current state - simplified
@@ -174,329 +172,8 @@ function updateUrlWithCurrentState() {
     console.log('Skipping URL update during initialization');
     return;
   }
-  
-  const currentTime = exploreStore.timeRange;
-  const query: Record<string, string> = {};
-
-  // Add team and source IDs
-  if (teamsStore.currentTeamId) {
-    query.team = teamsStore.currentTeamId.toString();
-  }
-
-  // Only add source ID if it's valid (non-zero)
-  if (exploreStore.sourceId && exploreStore.sourceId > 0) {
-    // Verify the source exists in the current team's sources
-    const sourceExists = sourcesStore.teamSources.some(source => source.id === exploreStore.sourceId);
-    if (sourceExists) {
-      query.source = exploreStore.sourceId.toString();
-    }
-  }
-
-  // Add limit
-  query.limit = exploreStore.limit.toString();
-
-  // Add time range if available
-  if (currentTime) {
-    // Convert to timestamps for URL
-    const startDate = new Date(
-      currentTime.start.year,
-      currentTime.start.month - 1,
-      currentTime.start.day,
-      'hour' in currentTime.start ? currentTime.start.hour : 0,
-      'minute' in currentTime.start ? currentTime.start.minute : 0,
-      'second' in currentTime.start ? currentTime.start.second : 0
-    );
-
-    const endDate = new Date(
-      currentTime.end.year,
-      currentTime.end.month - 1,
-      currentTime.end.day,
-      'hour' in currentTime.end ? currentTime.end.hour : 0,
-      'minute' in currentTime.end ? currentTime.end.minute : 0,
-      'second' in currentTime.end ? currentTime.end.second : 0
-    );
-
-    query.start_time = startDate.getTime().toString();
-    query.end_time = endDate.getTime().toString();
-  }
-
-  // Add query mode from store
-  query.mode = exploreStore.activeMode;
-
-  // Get query content from the STORE
-  let queryContent = "";
-  if (exploreStore.activeMode === 'logchefql') {
-    queryContent = exploreStore.logchefqlCode?.trim() || '';
-  } else {
-    queryContent = exploreStore.rawSql?.trim() || '';
-  }
-
-  if (queryContent) {
-    query.q = encodeURIComponent(queryContent);
-  } else {
-    delete query.q; // Remove q if empty
-  }
-
-  console.log('Updating URL with query params:', query);
-
-  // Update URL without triggering navigation events
-  router.replace({ query });
 }
 
-// Completely revised initialization logic to prevent race conditions
-async function setupFromUrl() {
-  try {
-    console.log('Starting setupFromUrl - initializing component from URL parameters');
-
-    // Check if this is a saved query request first
-    const hasSavedQueryParams = route.query.query_id && route.query.team;
-
-    // STEP 1: Load teams first and wait for completion
-    if (!teamsStore.currentTeamId) {
-      console.log('Loading teams first');
-      await teamsStore.loadTeams();
-    }
-
-    // Mark teams as loaded
-    isTeamsLoaded.value = true;
-    console.log('Teams loaded successfully');
-
-    // STEP 2: Process team parameter (with proper error handling)
-    let teamId = null;
-    if (route.query.team && typeof route.query.team === 'string') {
-      teamId = parseInt(route.query.team);
-      if (!isNaN(teamId)) {
-        // Check if the team exists
-        const teamExists = teamsStore.teams.some(team => team.id === teamId);
-        if (teamExists) {
-          console.log(`Setting current team to ID ${teamId}`);
-          teamsStore.setCurrentTeam(teamId);
-        } else {
-          console.warn(`Team with ID ${teamId} not found, using default team`);
-          urlError.value = `Team with ID ${teamId} not found or not accessible by the current user.`;
-
-          // Fall back to first available team if the requested one doesn't exist
-          if (teamsStore.teams.length > 0) {
-            teamId = teamsStore.teams[0].id;
-            teamsStore.setCurrentTeam(teamId);
-          }
-        }
-      }
-    } else if (teamsStore.teams.length > 0) {
-      // No team in URL, use first team
-      teamId = teamsStore.teams[0].id;
-      teamsStore.setCurrentTeam(teamId);
-    }
-
-    // STEP 3: Load sources for the selected team (or first team)
-    if (teamsStore.currentTeamId) {
-      console.log(`Loading sources for team ${teamsStore.currentTeamId}`);
-      await sourcesStore.loadTeamSources(teamsStore.currentTeamId);
-    }
-
-    // Mark sources as loaded
-    isSourcesLoaded.value = true;
-    console.log('Sources loaded successfully');
-
-    // STEP 4: Process source parameter - using a single consistent approach
-    let sourceId = null;
-    let hasSetSource = false;
-
-    // First check URL parameter
-    if (route.query.source && typeof route.query.source === 'string' && teamsStore.currentTeamId) {
-      sourceId = parseInt(route.query.source);
-
-      // Validate source ID against current team
-      const sourceExists = sourcesStore.teamSources.some(s => s.id === sourceId);
-
-      if (!sourceExists) {
-        console.warn(`Source ID ${sourceId} not valid for current team, selecting first available source`);
-        urlError.value = `Source with ID ${sourceId} not found or not accessible by the selected team.`;
-        sourceId = null; // Reset for next check
-      }
-    }
-
-    // If no valid source from URL, use first source if available
-    if (!sourceId && sourcesStore.teamSources.length > 0) {
-      sourceId = sourcesStore.teamSources[0].id;
-    }
-
-    // Set the source if we have a valid ID - with more caution to prevent duplicate calls
-    if (sourceId) {
-      console.log(`Setting source to ID ${sourceId}`);
-
-      try {
-        // Check if this sourceId is already set to avoid redundant updates
-        if (exploreStore.sourceId !== sourceId) {
-          exploreStore.setSource(sourceId);
-        } else {
-          console.log(`Source ID ${sourceId} already set, avoiding redundant update`);
-        }
-
-        hasSetSource = true;
-
-        try {
-          // Load details via store action
-          await sourcesStore.loadSourceDetails(sourceId);
-        } catch (detailsErr) {
-          console.error("Error fetching source details:", detailsErr);
-          // Continue with initialization even if details fetch fails
-        }
-      } catch (err) {
-        console.error("Error setting source during initialization:", err);
-        // Don't throw, just log - we'll continue with initialization
-      }
-    } else {
-      console.log('No valid source available, showing empty state');
-      sourceDetails.value = null;
-    }
-
-    // STEP 5: Process other URL parameters after source is set
-    // This ensures we don't trigger unnecessary re-renders
-
-    // Process limit parameter
-    console.log('Processing limit parameter');
-    if (route.query.limit && typeof route.query.limit === 'string') {
-      const limit = parseInt(route.query.limit);
-      if (!isNaN(limit) && limit > 0 && limit <= 10000) {
-        exploreStore.setLimit(limit);
-      } else {
-        exploreStore.setLimit(100); // Default limit
-      }
-    } else {
-      exploreStore.setLimit(100); // Default limit
-    }
-
-    // Process time range parameters
-    console.log('Processing time range parameters');
-    if (
-      route.query.start_time &&
-      route.query.end_time &&
-      typeof route.query.start_time === 'string' &&
-      typeof route.query.end_time === 'string'
-    ) {
-      try {
-        const startValue = parseInt(route.query.start_time);
-        const endValue = parseInt(route.query.end_time);
-
-        if (!isNaN(startValue) && !isNaN(endValue)) {
-          const startDate = new Date(startValue);
-          const endDate = new Date(endValue);
-
-          // Create CalendarDateTime objects
-          const start = new CalendarDateTime(
-            startDate.getFullYear(),
-            startDate.getMonth() + 1,
-            startDate.getDate(),
-            startDate.getHours(),
-            startDate.getMinutes(),
-            startDate.getSeconds()
-          );
-
-          const end = new CalendarDateTime(
-            endDate.getFullYear(),
-            endDate.getMonth() + 1,
-            endDate.getDate(),
-            endDate.getHours(),
-            endDate.getMinutes(),
-            endDate.getSeconds()
-          );
-
-          exploreStore.setTimeRange({
-            start,
-            end
-          });
-        }
-      } catch (e) {
-        console.error('Failed to parse time range from URL', e);
-      }
-    }
-
-    // Process query mode parameter
-    console.log('Processing query mode parameter');
-    if (route.query.mode && typeof route.query.mode === 'string') {
-      const mode = route.query.mode as 'logchefql' | 'sql';
-      if (mode === 'logchefql' || mode === 'sql') {
-        // Directly set the store's active mode
-        exploreStore.setActiveMode(mode);
-      }
-    }
-
-    // Process query parameter
-    console.log('Processing query parameter');
-    if (route.query.q && typeof route.query.q === 'string') {
-      try {
-        const decodedQuery = decodeURIComponent(route.query.q);
-        
-        // Preserve the query regardless of whether all details are loaded yet
-        if (exploreStore.activeMode === 'logchefql') {
-          logchefQuery.value = decodedQuery;
-          exploreStore.setLogchefqlCode(decodedQuery);
-        } else if (exploreStore.activeMode === 'sql') {
-          // Preserve original SQL query without modification
-          sqlQuery.value = decodedQuery;
-          exploreStore.setRawSql(decodedQuery);
-          
-          // Important: For SQL queries with a table name, make sure we always
-          // preserve the original query, regardless of whether source details are loaded
-          if (decodedQuery.includes('FROM ')) {
-            // Extract the table name from the query for logging
-            const tableName = decodedQuery.match(/FROM\s+([^\s\n]+)/i)?.[1] || '<unknown>';
-            console.log(`SQL query with table name "${tableName}" detected, preserving for execution`);
-            
-            // Store the original query as pending to ensure it doesn't get overwritten
-            exploreStore.pendingRawSql = decodedQuery;
-            
-            // Prevent any default query generation by setting the raw SQL explicitly
-            sqlQuery.value = decodedQuery;
-            exploreStore.setRawSql(decodedQuery);
-          }
-        }
-      } catch (e) {
-        console.error('Failed to parse query from URL', e);
-      }
-    }
-
-    // If this is a saved query URL, load the saved query
-    if (hasSavedQueryParams && route.query.query_id) {
-      console.log('Loading saved query from URL parameters');
-      // Set flag to indicate editor should initialize after URL is processed
-      pendingEditorInit.value = true;
-      await loadSavedQuery(route.query.query_id as string);
-      pendingEditorInit.value = false;
-      return; // Skip updating URL as loadSavedQuery will handle it
-    }
-
-    // Only update URL if not loading a saved query
-    if (!hasSavedQueryParams) {
-      // Now it's safe to update the URL
-      console.log('Setup complete, updating URL with initial state');
-
-      // Set initialization complete first
-      isInitializing.value = false;
-
-      // Then wait for next tick and update URL
-      nextTick(() => {
-        updateUrlWithCurrentState();
-      });
-    }
-
-  } catch (error) {
-    console.error('Error initializing from URL:', error);
-    urlError.value = 'Error initializing view. Please try refreshing the page.';
-
-    // Show a toast for better visibility of the error
-    toast({
-      title: "Initialization Error",
-      description: "Error initializing view. Please try refreshing the page.",
-      variant: "destructive",
-      duration: TOAST_DURATION.ERROR,
-    });
-  } finally {
-    console.log('Initialization complete');
-    isInitializing.value = false;
-  }
-}
 
 // Handle team change with improved race condition handling
 async function handleTeamChange(teamId: string) {
@@ -566,7 +243,7 @@ async function handleTeamChange(teamId: string) {
 
     // Wait a tick to ensure state is stable before updating URL
     await nextTick();
-    updateUrlWithCurrentState();
+    // updateUrlWithCurrentState(); // URL update now handled by composable watcher
     console.log('Team change completed');
   }
 }
@@ -605,7 +282,7 @@ async function handleSourceChange(sourceId: string) {
 
     // Update URL after source change is complete and isChangingSource is set to false
     // This ensures the URL is updated with the final state
-    updateUrlWithCurrentState();
+    // updateUrlWithCurrentState(); // URL update now handled by composable watcher
   }
 }
 
@@ -675,14 +352,6 @@ watch(
   { immediate: true }
 )
 
-// Watch for changes in time range to update URL
-watch(
-  () => exploreStore.timeRange,
-  () => {
-    // Don't automatically update URL when time range changes
-    // URL will be updated when the Run button is pressed
-  }
-)
 
 // Watch for changes in sourceId to fetch source details - with debounce
 watch(
@@ -722,14 +391,6 @@ watch(
   }
 )
 
-// Watch for changes in limit to update URL
-watch(
-  () => exploreStore.limit,
-  () => {
-    // Don't automatically update URL when limit changes
-    // URL will be updated when the Run button is pressed
-  }
-)
 
 // Watch for changes in currentTeamId to ensure sources are updated
 watch(
@@ -759,7 +420,7 @@ watch(
       }
 
       // Update URL with new state
-      updateUrlWithCurrentState()
+      // updateUrlWithCurrentState() // URL update now handled by composable watcher
     }
   }
 )
@@ -861,8 +522,7 @@ const handleQuerySubmit = async (data: { query: string, mode: string }) => {
     }
   }
 
-  // Update URL with current parameters before executing the query
-  updateUrlWithCurrentState();
+  // Update URL with current parameters before executing the query - Handled by watcher now
 
   // Clear any previous error
   queryError.value = '';
@@ -966,7 +626,7 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
                     logchefQuery.value : sqlQuery.value);
 
       // Update URL with current parameters
-      updateUrlWithCurrentState();
+      // updateUrlWithCurrentState(); // Handled by watcher
 
       // Wait another tick to ensure everything is updated before submitting
       await nextTick();
@@ -1065,7 +725,7 @@ async function loadSavedQuery(queryId: string, queryData?: any) {
                   logchefQuery.value : sqlQuery.value);
 
     // Update URL with current parameters
-    updateUrlWithCurrentState();
+    // updateUrlWithCurrentState(); // Handled by watcher
 
     // Wait another tick to ensure everything is updated before submitting
     await nextTick();
