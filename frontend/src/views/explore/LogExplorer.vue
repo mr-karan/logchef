@@ -60,7 +60,7 @@ const teamsStore = useTeamsStore()
 const sourcesStore = useSourcesStore()
 const savedQueriesStore = useSavedQueriesStore()
 const { toast } = useToast()
-const { isInitializing, initializationError, initializeFromUrl } = useExploreUrlSync(); // Use the composable
+const { isInitializing, initializationError, initializeFromUrl, syncUrlFromState } = useExploreUrlSync(); // Use the composable
 
 // Basic state
 const showSaveQueryModal = ref(false)
@@ -522,7 +522,8 @@ const handleQuerySubmit = async (data: { query: string, mode: string }) => {
     }
   }
 
-  // Update URL with current parameters before executing the query - Handled by watcher now
+  // Update URL with current parameters before executing the query
+  syncUrlFromState(); // Call the sync function here
 
   // Clear any previous error
   queryError.value = '';
