@@ -83,7 +83,6 @@
         @update:value="handleEditorChange"
         class="h-full w-full"
         />
-    </template>
 
     <!-- Error Message Display -->
     <div v-if="validationError" class="mt-2 p-2 text-sm text-destructive bg-destructive/10 rounded flex items-center gap-2">
@@ -91,7 +90,6 @@
       <span>{{ validationError }}</span>
     </div>
   </div>
-</div>
 </template>
 
 <script setup lang="ts">
