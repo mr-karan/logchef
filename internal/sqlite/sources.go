@@ -15,19 +15,19 @@ func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
 	db.log.Debug("creating source", "name", source.Name, "database", source.Connection.Database, "table", source.Connection.TableName)
 
 	var id int64
-	err := db.queries.CreateSource.QueryRowContext(ctx,
-		source.Name,
-		source.MetaIsAutoCreated,
-		source.MetaTSField,
-		source.MetaSeverityField,
-		source.Connection.Host,
-		source.Connection.Username,
-		source.Connection.Password,
-		source.Connection.Database,
-		source.Connection.TableName,
-		source.Description,
-		source.TTLDays,
-	).Scan(&id)
+	id, err := db.queries.CreateSource(ctx, sqlc.CreateSourceParams{
+		Name:              source.Name,
+		MetaIsAutoCreated: boolToInt(source.MetaIsAutoCreated),
+		MetaTsField:       source.MetaTSField,
+		MetaSeverityField: sql.NullString{String: source.MetaSeverityField, Valid: source.MetaSeverityField != ""},
+		Host:              source.Connection.Host,
+		Username:          source.Connection.Username,
+		Password:          source.Connection.Password,
+		Database:          source.Connection.Database,
+		TableName:         source.Connection.TableName,
+		Description:       sql.NullString{String: source.Description, Valid: source.Description != ""},
+		TtlDays:           int64(source.TTLDays),
+	})
 
 	if err != nil {
 		if isUniqueConstraintError(err, "sources", "database") {
@@ -48,8 +48,7 @@ func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
 func (db *DB) GetSource(ctx context.Context, id models.SourceID) (*models.Source, error) {
 	db.log.Debug("getting source", "source_id", id)
 
-	var row SourceRow
-	err := db.queries.GetSource.QueryRowxContext(ctx, id).StructScan(&row)
+	sourceRow, err := db.queries.GetSource(ctx, int64(id))
 	if err != nil {
 		return nil, handleNotFoundError(err, "error getting source")
 	}
@@ -62,8 +61,10 @@ func (db *DB) GetSource(ctx context.Context, id models.SourceID) (*models.Source
 func (db *DB) GetSourceByName(ctx context.Context, database, tableName string) (*models.Source, error) {
 	db.log.Debug("getting source by name", "database", database, "table", tableName)
 
-	var row SourceRow
-	err := db.queries.GetSourceByName.QueryRowxContext(ctx, database, tableName).StructScan(&row)
+	sourceRow, err := db.queries.GetSourceByName(ctx, sqlc.GetSourceByNameParams{
+		Database:  database,
+		TableName: tableName,
+	})
 	if err != nil {
 		return nil, handleNotFoundError(err, "error getting source by name")
 	}
@@ -76,7 +77,7 @@ func (db *DB) GetSourceByName(ctx context.Context, database, tableName string) (
 func (db *DB) ListSources(ctx context.Context) ([]*models.Source, error) {
 	db.log.Debug("listing sources")
 
-	rows, err := db.queries.ListSources.QueryxContext(ctx)
+	sourceRows, err := db.queries.ListSources(ctx)
 	if err != nil {
 		db.log.Error("failed to list sources", "error", err)
 		return nil, fmt.Errorf("error listing sources: %w", err)
@@ -107,20 +108,20 @@ func (db *DB) ListSources(ctx context.Context) ([]*models.Source, error) {
 func (db *DB) UpdateSource(ctx context.Context, source *models.Source) error {
 	db.log.Debug("updating source", "source_id", source.ID, "name", source.Name, "database", source.Connection.Database, "table", source.Connection.TableName)
 
-	result, err := db.queries.UpdateSource.ExecContext(ctx,
-		source.Name,
-		source.MetaIsAutoCreated,
-		source.MetaTSField,
-		source.MetaSeverityField,
-		source.Connection.Host,
-		source.Connection.Username,
-		source.Connection.Password,
-		source.Connection.Database,
-		source.Connection.TableName,
-		source.Description,
-		source.TTLDays,
-		source.ID,
-	)
+	err := db.queries.UpdateSource(ctx, sqlc.UpdateSourceParams{
+		Name:              source.Name,
+		MetaIsAutoCreated: boolToInt(source.MetaIsAutoCreated),
+		MetaTsField:       source.MetaTSField,
+		MetaSeverityField: sql.NullString{String: source.MetaSeverityField, Valid: source.MetaSeverityField != ""},
+		Host:              source.Connection.Host,
+		Username:          source.Connection.Username,
+		Password:          source.Connection.Password,
+		Database:          source.Connection.Database,
+		TableName:         source.Connection.TableName,
+		Description:       sql.NullString{String: source.Description, Valid: source.Description != ""},
+		TtlDays:           int64(source.TTLDays),
+		ID:                int64(source.ID),
+	})
 	if err != nil {
 		db.log.Error("failed to update source", "error", err, "source_id", source.ID)
 		return fmt.Errorf("error updating source: %w", err)
@@ -138,7 +139,7 @@ func (db *DB) UpdateSource(ctx context.Context, source *models.Source) error {
 func (db *DB) DeleteSource(ctx context.Context, id models.SourceID) error {
 	db.log.Debug("deleting source", "source_id", id)
 
-	result, err := db.queries.DeleteSource.ExecContext(ctx, id)
+	err := db.queries.DeleteSource(ctx, int64(id))
 	if err != nil {
 		db.log.Error("failed to delete source", "error", err, "source_id", id)
 		return fmt.Errorf("error deleting source: %w", err)
