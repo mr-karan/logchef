@@ -83,7 +83,6 @@
         @update:value="handleEditorChange"
         class="h-full w-full"
         />
-      </div>
     </template>
 
     <!-- Error Message Display -->
