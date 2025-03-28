@@ -211,9 +211,13 @@ export class SQLParser {
       sql += "DISTINCT ";
     }
 
-    // Use backticks for table name
+    // Add columns
     sql += query.selectClause.columns.join(", ");
-    sql += `\nFROM \`${query.fromClause.table}\``;
+    
+    // Handle table name - don't add backticks if it contains dots (database.table format)
+    const tableName = query.fromClause.table;
+    const formattedTableName = tableName.includes('.') ? tableName : `\`${tableName}\``;
+    sql += `\nFROM ${formattedTableName}`;
 
     // Reconstruct WHERE clause
     if (query.whereClause) {
@@ -229,10 +233,16 @@ export class SQLParser {
       }
     }
 
-    // Use backticks for order by columns
+    // Use backticks for order by columns, but handle columns that might already have dots
     if (query.orderByClause) {
       const orderColumns = query.orderByClause.columns
-        .map((col) => `\`${col.column}\` ${col.direction}`) // Add backticks
+        .map((col) => {
+          // Don't add backticks if column already has dots or backticks
+          const formattedColumn = col.column.includes('.') || col.column.includes('`') 
+            ? col.column 
+            : `\`${col.column}\``;
+          return `${formattedColumn} ${col.direction}`;
+        })
         .join(", ");
       sql += `\nORDER BY ${orderColumns}`;
     }

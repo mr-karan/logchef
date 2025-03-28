@@ -49,8 +49,9 @@ export class QueryBuilder {
       const start = format(startDate, "yyyy-MM-dd HH:mm:ss");
       const end = format(endDate, "yyyy-MM-dd HH:mm:ss");
 
-      // Use backticks for the timestamp field
-      return `\`${tsField}\` BETWEEN toDateTime('${start}') AND toDateTime('${end}')`;
+      // Use backticks for the timestamp field, but don't use them if the field already contains backticks
+      const formattedTsField = tsField.includes('`') ? tsField : `\`${tsField}\``;
+      return `${formattedTsField} BETWEEN toDateTime('${start}') AND toDateTime('${end}')`;
     } catch (error: any) {
       console.error("Error formatting time condition:", error);
       throw new Error(`Failed to format time condition: ${error.message}`);
@@ -113,8 +114,14 @@ export class QueryBuilder {
 
     // --- Prepare base query components ---
     const selectClause = `SELECT *`;
-    const fromClause = `FROM \`${tableName}\``; // Use backticks for table name
-    const orderByClause = `ORDER BY \`${orderByField}\` ${orderByDirection}`; // Use backticks for order field
+    // Don't add backticks if the table name already contains them or has dots
+    const formattedTableName = tableName.includes('`') ? tableName : 
+                              (tableName.includes('.') ? tableName : `\`${tableName}\``);
+    const fromClause = `FROM ${formattedTableName}`; // Use table name as-is if it contains dots
+      
+    // Don't add backticks if the order field already contains them
+    const formattedOrderField = orderByField.includes('`') ? orderByField : `\`${orderByField}\``;
+    const orderByClause = `ORDER BY ${formattedOrderField} ${orderByDirection}`;
     const limitClause = `LIMIT ${limit}`;
 
     // --- Format Time Condition ---
@@ -247,9 +254,11 @@ export class QueryBuilder {
 
     const sql = [
       `SELECT *`,
-      `FROM \`${tableName}\``, // Use backticks
+      // Don't add backticks if the table name already contains dots
+      `FROM ${tableName.includes('.') ? tableName : `\`${tableName}\``}`,
       `WHERE ${whereClauseContent}`,
-      `ORDER BY \`${orderByField}\` ${orderByDirection}`, // Use backticks
+      // Don't add backticks if the order field already contains backticks
+      `ORDER BY ${orderByField.includes('`') ? orderByField : `\`${orderByField}\``} ${orderByDirection}`,
       `LIMIT ${limit}`
     ].join('\n');
 
