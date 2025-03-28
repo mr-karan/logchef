@@ -122,15 +122,10 @@ type EditorChangeEvent = { query: string; mode: EditorMode };
 const props = defineProps({
   sourceId: { type: Number, required: true },
   schema: { type: Object as () => Record<string, { type: string }>, required: true },
-  // Use CalendarDateTime for date props
-  startDateTime: { type: Object as () => CalendarDateTime | undefined, required: true },
-  endDateTime: { type: Object as () => CalendarDateTime | undefined, required: true },
-  initialValue: { type: String, default: "" },
-  activeMode: { type: String as () => EditorMode, required: true }, // Changed from initialTab to activeMode
+  activeMode: { type: String as () => EditorMode, required: true },
   placeholder: { type: String, default: "" },
   tsField: { type: String, default: "timestamp" },
   tableName: { type: String, required: true },
-  limit: { type: Number, default: 1000 },
   showFieldsPanel: { type: Boolean, default: false }
 });
 
@@ -152,7 +147,7 @@ const fieldNames = computed(() => Object.keys(props.schema ?? {}));
 const activeProviders = ref<monaco.IDisposable[]>([]); // Track completion providers
 
 // Centralized state for editor content managed via computed property
-const editorContent = ref(props.initialValue ?? "");
+const editorContent = ref("");
 
 // Reactive state for options to allow dynamic updates
 const monacoOptions = reactive(getDefaultMonacoOptions());
@@ -219,10 +214,7 @@ const handleMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
   editorRef.value = editor;
   editorModel.value = editor.getModel();
 
-  // Set initial content directly based on props and mode
-  const initialContent = props.initialValue ?? "";
-  // Use runProgrammaticUpdate to set initial content without triggering change events
-  runProgrammaticUpdate(initialContent);
+  // Initial content sync is now handled by watchEffect
 
   updateMonacoOptions(); // Apply initial options for the active mode
   registerCompletionProvider(); // Register for the initial mode
@@ -263,11 +255,12 @@ const handleEditorChange = (value: string | undefined) => {
   if (isProgrammaticChange.value) return;
 
   const currentQuery = value ?? "";
-  editorContent.value = currentQuery; // Update local ref immediately
+  // Avoid updating local editorContent directly here, let watchEffect handle it
 
   // Update the store based on the current mode
   if (props.activeMode === 'logchefql') {
-    exploreStore.setLogchefqlCode(currentQuery);
+    // Check if store value is different before setting to avoid redundant updates
+    if (exploreStore.logchefqlCode !== currentQuery) exploreStore.setLogchefqlCode(currentQuery);
   } else {
     exploreStore.setRawSql(currentQuery);
   }
@@ -286,7 +279,11 @@ const handleEditorChange = (value: string | undefined) => {
 };
 
 const runProgrammaticUpdate = (newValue: string) => {
+    if (!editorRef.value || isDisposing.value) return;
     isProgrammaticChange.value = true;
+    // Use editor's API to set value
+    editorRef.value.setValue(newValue);
+    // Update local ref *after* setting editor value
     editorContent.value = newValue;
     // Wait for editor to potentially update, then release the flag
     nextTick(() => {
@@ -295,19 +292,7 @@ const runProgrammaticUpdate = (newValue: string) => {
 };
 
 const syncEditorContentWithStore = (isInitialSync = false) => {
-    let storeValue: string | undefined;
-    if (props.activeMode === 'logchefql') {
-        storeValue = exploreStore.logchefqlCode;
-    } else {
-        storeValue = exploreStore.rawSql;
-    }
-
-    // On initial sync, props have higher priority if provided
-    const valueToSet = (isInitialSync && props.initialValue) ? props.initialValue : (storeValue ?? "");
-
-    if (editorContent.value !== valueToSet) {
-        runProgrammaticUpdate(valueToSet);
-    }
+    // This function is no longer needed, logic moved to watchEffect
 };
 
 // --- Mode Switching ---
@@ -962,6 +947,17 @@ const registerCompletionProvider = () => {
 // --- Watchers ---
 // Add watchers for mode and content synchronization
 watchEffect(() => {
+  const storeValue = props.activeMode === 'logchefql'
+    ? exploreStore.logchefqlCode
+    : exploreStore.rawSql;
+  const valueToSet = storeValue ?? "";
+
+  // Sync editor content if it differs from the store
+  if (editorContent.value !== valueToSet) {
+    runProgrammaticUpdate(valueToSet);
+  }
+
+  // Update editor options and language based on mode
   if (editorRef.value) {
     const model = editorRef.value.getModel();
     if (model) {
@@ -970,68 +966,11 @@ watchEffect(() => {
     updateMonacoOptions(); // Update folding, line numbers etc.
     registerCompletionProvider(); // Update syntax highlighting/completion
   }
-  // Sync content from store when mode changes
-  syncEditorContentWithStore();
 });
 
-// Watch initialValue prop (might be needed if parent loads data async)
-watch(() => props.initialValue, (newInitialValue) => {
-  // Only update if the editor content hasn't been manually changed yet
-  // or if the mode matches the initial value's intended mode
-  if (editorContent.value === "" || editorContent.value !== newInitialValue) {
-     syncEditorContentWithStore(); // Re-sync based on current mode and store
-  }
-});
+// initialValue watcher removed - content sync now handled by watchEffect
 
-// Watch for date changes to update SQL query
-watch([() => props.startDateTime, () => props.endDateTime], ([newStart, newEnd], [oldStart, oldEnd]) => {
-  // Only run if in SQL mode, dates are valid, and dates actually changed
-  if (
-    props.activeMode === 'clickhouse-sql' &&
-    newStart && newEnd &&
-    editorRef.value &&
-    !isProgrammaticChange.value && // Avoid loops
-    (newStart?.toString() !== oldStart?.toString() || newEnd?.toString() !== oldEnd?.toString())
-  ) {
-    console.log("QueryEditor: Date range changed, updating SQL query.");
-    const currentSql = editorContent.value;
-    const parsedQuery = SQLParser.parse(currentSql, props.tsField);
-
-    if (parsedQuery) {
-      try {
-        const updatedAst = SQLParser.applyTimeRange(parsedQuery, props.tsField, newStart, newEnd);
-        const newSql = SQLParser.toSQL(updatedAst);
-
-        // Update editor content programmatically
-        runProgrammaticUpdate(newSql);
-
-        // Also update the store's rawSql
-        exploreStore.setRawSql(newSql);
-
-      } catch (error) {
-        console.error("Error updating SQL query with new time range:", error);
-        // Optionally show a warning to the user
-      }
-    } else {
-      console.warn("Could not parse existing SQL to update time range.");
-      // Optionally try to generate a default query if parsing fails
-      if (props.tableName && props.tsField && newStart && newEnd) {
-         const defaultOptions: Omit<BuildSqlOptions, 'logchefqlQuery'> = {
-           tableName: props.tableName,
-           tsField: props.tsField,
-           startDateTime: newStart,
-           endDateTime: newEnd,
-           limit: props.limit
-         };
-         const defaultQuery = QueryBuilder.getDefaultSQLQuery(defaultOptions);
-         if (defaultQuery.success) {
-           runProgrammaticUpdate(defaultQuery.sql);
-           exploreStore.setRawSql(defaultQuery.sql);
-         }
-      }
-    }
-  }
-}, { deep: true }); // Use deep watch for objects
+// Date change watcher removed - SQL updates now handled by LogExplorer
 
 
 // Update placeholder when it changes
@@ -1083,7 +1022,7 @@ const submitQuery = () => {
     }
     
     // Trigger execution through store
-    emit('submit', { query: currentContent, finalSql: currentContent, mode: props.activeMode }); // Emit submit event
+    emit('submit', { query: currentContent, mode: props.activeMode }); // Emit submit event (no finalSql needed from editor)
     
   } catch (e: any) {
     console.error("Error preparing query:", e);
