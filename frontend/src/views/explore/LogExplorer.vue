@@ -1637,13 +1637,15 @@ onBeforeUnmount(() => {
         <!-- Query Editor Section -->
         <div class="p-3 pb-2">
           <div class="rounded-md border-t bg-card">
-            <QueryEditor ref="queryEditorRef" :sourceId="exploreStore.sourceId || 0"
+            <QueryEditor
+              ref="queryEditorRef"
+              :sourceId="exploreStore.sourceId || 0"
               :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
-              :startTimestamp="getTimestampFromCalendarDate(exploreStore.timeRange?.start)"
-              :endTimestamp="getTimestampFromCalendarDate(exploreStore.timeRange?.end)"
+              :startDateTime="exploreStore.timeRange?.start"
+              :endDateTime="exploreStore.timeRange?.end"
               :initialValue="exploreStore.activeMode === 'logchefql' ? exploreStore.logchefqlCode : exploreStore.rawSql"
               :initialTab="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
-              :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter LogchefQL query or leave empty to run SELECT * FROM table' : 'Enter SQL query or leave empty for default query'"
+              :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter LogchefQL query...' : 'Enter SQL query...'"
               :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
               :limit="exploreStore.limit" :showFieldsPanel="showFieldsPanel" @change="handleQueryChange"
               @submit="handleQuerySubmit" @toggle-fields="showFieldsPanel = !showFieldsPanel" />

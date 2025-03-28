@@ -1,16 +1,17 @@
 import { parseAndTranslateLogchefQL } from './logchefql/api';
-import { format } from 'date-fns'; // Using date-fns for reliable formatting
+import { format } from 'date-fns';
 import { Parser as LogchefQLParser } from './logchefql';
+import type { CalendarDateTime } from '@internationalized/date';
 
 // Interface for build options
 export interface BuildSqlOptions {
   tableName: string;
   tsField: string;
-  startTimestamp: number; // Unix timestamp in seconds
-  endTimestamp: number;   // Unix timestamp in seconds
+  startDateTime: CalendarDateTime;
+  endDateTime: CalendarDateTime;
   limit: number;
   logchefqlQuery?: string; // Optional LogchefQL query string
-  selectColumns?: string[]; // Default to '*'
+  selectColumns?: string[]; // Default to '*' // No longer used, always SELECT *
   orderByField?: string; // Default to tsField
   orderByDirection?: 'ASC' | 'DESC'; // Default to DESC
   whereClause?: string; // Additional WHERE conditions
@@ -36,21 +37,23 @@ export interface QueryResult {
 export class QueryBuilder {
 
   /**
-   * Formats a time condition for ClickHouse using toDateTime() for better readability.
+   * Formats a time condition for ClickHouse using CalendarDateTime objects.
    */
-  private static formatTimeCondition(tsField: string, startSeconds: number, endSeconds: number): string {
+  static formatTimeCondition(tsField: string, startDateTime: CalendarDateTime, endDateTime: CalendarDateTime): string {
     try {
-        const startDate = new Date(startSeconds * 1000);
-        const endDate = new Date(endSeconds * 1000);
-        
-        // Format to ClickHouse-readable datetime format
-        const start = format(startDate, "yyyy-MM-dd HH:mm:ss");
-        const end = format(endDate, "yyyy-MM-dd HH:mm:ss");
-        
-        return `${tsField} BETWEEN toDateTime('${start}') AND toDateTime('${end}')`;
+      // Convert CalendarDateTime to JS Date objects for formatting
+      const startDate = startDateTime.toDate('UTC'); // Assuming UTC for consistency, adjust if needed
+      const endDate = endDateTime.toDate('UTC');
+
+      // Format to ClickHouse-readable datetime format
+      const start = format(startDate, "yyyy-MM-dd HH:mm:ss");
+      const end = format(endDate, "yyyy-MM-dd HH:mm:ss");
+
+      // Use backticks for the timestamp field
+      return `\`${tsField}\` BETWEEN toDateTime('${start}') AND toDateTime('${end}')`;
     } catch (error: any) {
-        console.error("Error formatting time condition:", error);
-        throw new Error(`Failed to format time condition: ${error.message}`);
+      console.error("Error formatting time condition:", error);
+      throw new Error(`Failed to format time condition: ${error.message}`);
     }
   }
 
@@ -83,11 +86,11 @@ export class QueryBuilder {
     const {
       tableName,
       tsField,
-      startTimestamp,
-      endTimestamp,
+      startDateTime,
+      endDateTime,
       limit,
       logchefqlQuery,
-      selectColumns = ['*'], // Default to selecting all columns
+      // selectColumns = ['*'], // Removed, always SELECT *
       orderByField = tsField, // Default ordering by timestamp field
       orderByDirection = 'DESC', // Default to descending order
     } = options;
@@ -97,32 +100,30 @@ export class QueryBuilder {
       return { success: false, sql: "", error: "Table name is required." };
     }
     if (!tsField) {
-        return { success: false, sql: "", error: "Timestamp field name is required." };
+      return { success: false, sql: "", error: "Timestamp field name is required." };
     }
-    if (typeof startTimestamp !== 'number' || typeof endTimestamp !== 'number' || startTimestamp > endTimestamp) {
-        return { success: false, sql: "", error: "Invalid start or end timestamp." };
+    if (!startDateTime || !endDateTime) {
+      return { success: false, sql: "", error: "Invalid start or end date/time." };
     }
     if (typeof limit !== 'number' || limit <= 0) {
-        return { success: false, sql: "", error: "Invalid limit value." };
+      return { success: false, sql: "", error: "Invalid limit value." };
     }
     
     // No longer requiring namespace in query
 
+    // --- Prepare base query components ---
+    const selectClause = `SELECT *`;
+    const fromClause = `FROM \`${tableName}\``; // Use backticks for table name
+    const orderByClause = `ORDER BY \`${orderByField}\` ${orderByDirection}`; // Use backticks for order field
+    const limitClause = `LIMIT ${limit}`;
+
     // --- Format Time Condition ---
     let timeCondition: string;
     try {
-        timeCondition = QueryBuilder.formatTimeCondition(tsField, startTimestamp, endTimestamp);
+      timeCondition = QueryBuilder.formatTimeCondition(tsField, startDateTime, endDateTime);
     } catch (error: any) {
-        return { success: false, sql: "", error: error.message };
+      return { success: false, sql: "", error: error.message };
     }
-
-    // --- Prepare base query components ---
-    // Simplified select clause - just select all columns
-    const selectClause = `SELECT *`;
-    const fromClause = `FROM ${tableName}`;
-    const timeWhereClause = `WHERE ${timeCondition}`;
-    const orderByClause = `ORDER BY ${orderByField} ${orderByDirection}`;
-    const limitClause = `LIMIT ${limit}`;
 
     // --- Translate LogchefQL ---
     const warnings: string[] = [];
@@ -160,14 +161,16 @@ export class QueryBuilder {
     }
 
     // --- Combine WHERE conditions ---
-    let whereClause = timeWhereClause;
+    let whereClause = `WHERE ${timeCondition}`;
     if (logchefqlConditions) {
-      whereClause = `WHERE ${timeCondition} AND (${logchefqlConditions})`;
-      meta.operations.push('filter');
+      whereClause += ` AND (${logchefqlConditions})`;
+      if (!meta.operations.includes('filter')) {
+        meta.operations.push('filter');
+      }
     }
 
     // --- Assemble the final query string ---
-    const finalSql = [
+    const finalSqlParts = [
       selectClause,
       fromClause,
       whereClause,
@@ -190,70 +193,67 @@ export class QueryBuilder {
    * Returns a QueryResult with success status and metadata.
    */
   static getDefaultSQLQuery(options: Omit<BuildSqlOptions, 'logchefqlQuery'>): QueryResult {
-     const {
-       tableName,
-       tsField,
-       startTimestamp,
-       endTimestamp,
-       limit,
-       selectColumns = ['*'],
-       orderByField = tsField,
-       orderByDirection = 'DESC',
-     } = options;
+    const {
+      tableName,
+      tsField,
+      startDateTime,
+      endDateTime,
+      limit,
+      // selectColumns = ['*'], // Removed
+      orderByField = tsField,
+      orderByDirection = 'DESC',
+    } = options;
 
-     // Basic validation for default query generation
-     if (!tableName || !tsField) {
-         console.warn("Cannot generate default SQL: Missing tableName or tsField.");
-         return {
-           success: false,
-           sql: `SELECT *\nFROM your_table\nORDER BY timestamp_field DESC\nLIMIT 1000`,
-           error: "Missing table name or timestamp field",
-           warnings: ["Using placeholder query"]
-         };
-     }
-     
-     if (typeof startTimestamp !== 'number' || typeof endTimestamp !== 'number' || typeof limit !== 'number') {
-         console.warn("Cannot generate default SQL: Invalid timestamp or limit.");
-         return {
-           success: false,
-           sql: `SELECT *\nFROM \`${tableName}\`\n-- Invalid time range or limit provided\nORDER BY \`${tsField}\` DESC\nLIMIT 1000`,
-           error: "Invalid time range or limit parameters",
-           warnings: ["Using fallback query with default values"]
-         };
-     }
+    // Basic validation
+    if (!tableName || !tsField) {
+      console.warn("Cannot generate default SQL: Missing tableName or tsField.");
+      return {
+        success: false,
+        sql: `SELECT *\nFROM your_table\nORDER BY timestamp_field DESC\nLIMIT 100`, // Adjusted default limit
+        error: "Missing table name or timestamp field",
+        warnings: ["Using placeholder query"]
+      };
+    }
 
-     // Simplified select clause - just select all columns
-     const formattedSelect = ['*'];
+    if (!startDateTime || !endDateTime || typeof limit !== 'number') {
+      console.warn("Cannot generate default SQL: Invalid date/time or limit.");
+      return {
+        success: false,
+        sql: `SELECT *\nFROM \`${tableName}\`\n-- Invalid time range or limit provided\nORDER BY \`${tsField}\` DESC\nLIMIT 100`,
+        error: "Invalid time range or limit parameters",
+        warnings: ["Using fallback query with default values"]
+      };
+    }
 
-     // Format time condition
-     let timeCondition: string;
-     try {
-         timeCondition = QueryBuilder.formatTimeCondition(tsField, startTimestamp, endTimestamp);
-     } catch (error: any) {
-         console.warn("Cannot generate default SQL: Error formatting time condition.", error);
-         return {
-           success: false,
-           sql: `SELECT *\nFROM \`${tableName}\`\n-- Error formatting time range\nORDER BY \`${tsField}\` DESC\nLIMIT ${limit}`,
-           error: `Error formatting time condition: ${error.message}`,
-           warnings: ["Using fallback query due to time formatting error"]
-         };
-     }
+    // Format time condition
+    let timeCondition: string;
+    try {
+      timeCondition = QueryBuilder.formatTimeCondition(tsField, startDateTime, endDateTime);
+    } catch (error: any) {
+      console.warn("Cannot generate default SQL: Error formatting time condition.", error);
+      return {
+        success: false,
+        sql: `SELECT *\nFROM \`${tableName}\`\n-- Error formatting time range\nORDER BY \`${tsField}\` DESC\nLIMIT ${limit}`,
+        error: `Error formatting time condition: ${error.message}`,
+        warnings: ["Using fallback query due to time formatting error"]
+      };
+    }
 
-     // Combine conditions
-     let whereClause = timeCondition;
-     if (options.whereClause) {
-       whereClause += ` AND (${options.whereClause})`;
-     }
+    // Combine conditions
+    let whereClauseContent = timeCondition;
+    if (options.whereClause) {
+      whereClauseContent += ` AND (${options.whereClause})`;
+    }
 
-     const sql = [
-       `SELECT ${formattedSelect.join(', ')}`, // Should be SELECT *
-       `FROM ${tableName}`,
-       `WHERE ${whereClause}`,
-       `ORDER BY ${orderByField} ${orderByDirection}`,
-       `LIMIT ${limit}`
-     ].join('\n');
+    const sql = [
+      `SELECT *`,
+      `FROM \`${tableName}\``, // Use backticks
+      `WHERE ${whereClauseContent}`,
+      `ORDER BY \`${orderByField}\` ${orderByDirection}`, // Use backticks
+      `LIMIT ${limit}`
+    ].join('\n');
 
-     return {
+    return {
        success: true,
        sql,
        error: null,
