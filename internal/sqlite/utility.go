@@ -2,16 +2,16 @@ package sqlite
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/mattn/go-sqlite3"
+	// Import the SQLite driver
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// boolToInt converts a boolean to an integer (1 for true, 0 for false)
+// boolToInt converts a bool to int64 for SQLite storage
 func boolToInt(b bool) int64 {
 	if b {
 		return 1
@@ -43,45 +43,30 @@ func mapSourceRowToModel(row *sqlc.Source) *models.Source {
 	}
 }
 
-// checkRowsAffected checks if exactly one row was affected by a database operation
-func checkRowsAffected(result sql.Result, operation string) error {
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("error getting rows affected: %w", err)
-	}
-
-	if rowsAffected != 1 {
-		return fmt.Errorf("%s: expected 1 row to be affected, got %d", operation, rowsAffected)
-	}
-
-	return nil
-}
-
 // isUniqueConstraintError checks if an error is a SQLite unique constraint violation
 func isUniqueConstraintError(err error, table, column string) bool {
-	var sqliteErr sqlite3.Error
-	if errors.As(err, &sqliteErr) {
-		return sqliteErr.Code == sqlite3.ErrConstraint && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique
+	if err == nil {
+		return false
 	}
 
-	// Fallback to string matching for compatibility
-	constraintErr := fmt.Sprintf("UNIQUE constraint failed: %s.%s", table, column)
-	return err != nil && strings.Contains(err.Error(), constraintErr)
+	errMsg := err.Error()
+
+	// Simple string checks for SQLite constraint errors
+	if strings.Contains(errMsg, "UNIQUE constraint failed") {
+		if table != "" && column != "" {
+			constraint := fmt.Sprintf("%s.%s", table, column)
+			return strings.Contains(errMsg, constraint)
+		}
+		return true
+	}
+
+	return false
 }
 
-// handleNotFoundError checks if an error is sql.ErrNoRows and returns an appropriate error
-// to standardize handling of "not found" cases
-func handleNotFoundError(err error, message string) error {
-	if errors.Is(err, sql.ErrNoRows) {
-		// For session-related queries, return a specific error
-		if strings.Contains(message, "session") {
-			return fmt.Errorf("session not found")
-		}
-		// For other entities, return nil to indicate "not found"
-		return nil
+// handleNotFoundError returns a standardized error when a record is not found
+func handleNotFoundError(err error, prefix string) error {
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("%s: not found", prefix)
 	}
-	if err != nil {
-		return fmt.Errorf("%s: %w", message, err)
-	}
-	return nil
+	return fmt.Errorf("%s: %w", prefix, err)
 }

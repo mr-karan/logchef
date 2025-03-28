@@ -4,7 +4,6 @@ import { useExploreStore } from '@/stores/explore';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
 import { CalendarDateTime, now, getLocalTimeZone } from '@internationalized/date';
-import { debounce } from 'lodash-es'; // Using lodash debounce for URL updates
 
 export function useExploreUrlSync() {
   const route = useRoute();
@@ -191,18 +190,13 @@ export function useExploreUrlSync() {
       isInitializing.value = false;
       console.log("useExploreUrlSync: Initialization finished.");
       // Trigger initial URL sync *after* initialization is marked complete
-      updateUrlFromState();
+      syncUrlFromState();
     }
   }
 
   // --- URL Update Logic ---
 
-  const updateUrlFromState = debounce(() => {
-    if (isInitializing.value) {
-      console.log("useExploreUrlSync: Skipping URL update during initialization.");
-      return;
-    }
-
+  const syncUrlFromState = () => {
     const query: Record<string, string> = {};
 
     // Team
@@ -249,23 +243,16 @@ export function useExploreUrlSync() {
     } else {
         // console.log("useExploreUrlSync: URL state matches current state, no update needed.");
     }
-  }, 300); // Debounce URL updates by 300ms
+  };
 
   // --- Watchers ---
 
   // Watch relevant store state and trigger URL update
+  // Disabled automatic URL updates - now called explicitly
   watch(
-    [
-      () => teamsStore.currentTeamId,
-      () => exploreStore.sourceId,
-      () => exploreStore.limit,
-      () => exploreStore.timeRange,
-      () => exploreStore.activeMode,
-      () => exploreStore.logchefqlCode,
-      () => exploreStore.rawSql,
-    ],
-    updateUrlFromState,
-    { deep: true } // Deep watch needed for timeRange
+    [],
+    () => {},
+    { deep: true }
   );
 
   // Watch route changes to re-initialize if necessary (e.g., browser back/forward)
@@ -287,5 +274,6 @@ export function useExploreUrlSync() {
     isInitializing,
     initializationError,
     initializeFromUrl,
+    syncUrlFromState,
   };
 }
