@@ -114,6 +114,16 @@ const sqlQuery = ref('')
 const queryError = ref('')
 const queryEditorRef = ref()
 
+// UI state computed properties
+const showLoadingState = computed(() => isInitializing.value && !urlError.value)
+const showNoTeamsState = computed(() => !isInitializing.value && (!availableTeams.value || availableTeams.value.length === 0))
+const showNoSourcesState = computed(() => 
+  !isInitializing.value && 
+  !showNoTeamsState.value && 
+  currentTeamId.value > 0 && 
+  (!availableSources.value || availableSources.value.length === 0)
+)
+
 // Use source details from the store
 const activeSourceTableName = computed(() => sourcesStore.getCurrentSourceTableName || '');
 
@@ -182,6 +192,17 @@ watch(dateRange, (newTimeRange, oldTimeRange) => {
 })
 
 // Mode changes now handled by handleModeChange function
+
+// Handle editor query changes
+const handleQueryChange = (data: { query: string, mode: string }) => {
+  // Update local state for controlled components
+  if (data.mode === 'logchefql') {
+    logchefQuery.value = data.query;
+  } else {
+    sqlQuery.value = data.query;
+  }
+  // Store state is updated by two-way binding with computed properties
+}
 
 // Handle query submission from QueryEditor
 const handleQuerySubmit = async (data: { query: string, mode: string }) => {
@@ -517,8 +538,8 @@ onBeforeUnmount(() => {
           <SelectValue placeholder="Select source">{{ selectedSourceName }}</SelectValue>
         </SelectTrigger>
         <SelectContent>
-          <SelectItem v-if="!currentTeamId" value="" disabled>Select a team first</SelectItem>
-          <SelectItem v-else-if="availableSources.length === 0" value="" disabled>No sources available</SelectItem>
+          <SelectItem v-if="!currentTeamId" value="no-team" disabled>Select a team first</SelectItem>
+          <SelectItem v-else-if="availableSources.length === 0" value="no-sources" disabled>No sources available</SelectItem>
           <SelectItem v-for="source in availableSources" :key="source.id" :value="source.id.toString()">
             {{ formatSourceName(source) }}
           </SelectItem>
