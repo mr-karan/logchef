@@ -20,6 +20,15 @@
             <TabsTrigger value="clickhouse-sql">SQL</TabsTrigger>
           </TabsList>
         </Tabs>
+      
+        <!-- Saved Queries Dropdown (Integrated from LogExplorer) -->
+        <SavedQueriesDropdown 
+          :source-id="props.sourceId" 
+          :team-id="props.teamId" 
+          :use-current-team="props.useCurrentTeam"
+          @select="(query) => $emit('select-saved-query', query)" 
+          @save="$emit('save-query')"
+          class="h-8" />
       </div>
 
       <div class="flex items-center gap-2">
@@ -104,6 +113,7 @@ import { VueMonacoEditor } from "@guolao/vue-monaco-editor";
 import { HelpCircle, PanelRightOpen, PanelRightClose, AlertCircle, XCircle } from "lucide-vue-next";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import SavedQueriesDropdown from '@/components/saved-queries/SavedQueriesDropdown.vue';
 
 import { initMonacoSetup, getDefaultMonacoOptions } from "@/utils/monaco";
 import { Parser as LogchefQLParser, State as LogchefQLState, Operator as LogchefQLOperator, VALID_KEY_VALUE_OPERATORS as LogchefQLValidOperators, isNumeric } from "@/utils/logchefql";
@@ -131,7 +141,10 @@ const props = defineProps({
   placeholder: { type: String, default: "" },
   tsField: { type: String, default: "timestamp" },
   tableName: { type: String, required: true },
-  showFieldsPanel: { type: Boolean, default: false }
+  showFieldsPanel: { type: Boolean, default: false },
+  // SavedQueriesDropdown props
+  teamId: { type: Number, required: true },
+  useCurrentTeam: { type: Boolean, default: true }
 });
 
 const emit = defineEmits<{
@@ -139,6 +152,9 @@ const emit = defineEmits<{
   (e: "submit", value: EditorChangeEvent): void;
   (e: "update:activeMode", value: EditorMode): void;
   (e: "toggle-fields"): void;
+  // SavedQueries events
+  (e: "select-saved-query", query: any): void;
+  (e: "save-query"): void;
 }>();
 
 // --- Core State ---
