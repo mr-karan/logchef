@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -40,7 +41,7 @@ func (db *DB) GetTeam(ctx context.Context, teamID models.TeamID) (*models.Team, 
 	db.log.Debug("getting team", "team_id", teamID)
 
 	var team models.Team
-	err := db.queries.GetTeam.GetContext(ctx, &team, teamID)
+	err := db.queries.GetTeam(ctx, &team, teamID)
 	if err != nil {
 		return nil, handleNotFoundError(err, "error getting team")
 	}
