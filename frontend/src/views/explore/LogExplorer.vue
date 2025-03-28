@@ -582,12 +582,6 @@ onBeforeUnmount(() => {
       <div class="flex items-center space-x-2">
         <SavedQueriesDropdown :source-id="currentSourceId" :team-id="currentTeamId" :use-current-team="true"
           @select="loadSavedQuery" @save="handleSaveQueryClick" class="h-8" />
-        <Button variant="default" size="sm" class="h-8 px-3 flex items-center gap-1.5 transition-colors duration-200"
-          :class="{ 'bg-primary/80 hover:bg-primary/70': isDirty && !isExecutingQuery }"
-          :disabled="isExecutingQuery || !canExecuteQuery" @click="triggerQueryExecution">
-          <Play class="h-3.5 w-3.5" />
-          <span>{{ isExecutingQuery ? 'Running...' : (isDirty ? 'Run*' : 'Run') }}</span>
-        </Button>
       </div>
     </div>
 
@@ -620,6 +614,16 @@ onBeforeUnmount(() => {
               Error loading source details. Please try again.
             </div>
           </template>
+
+          <!-- Run Button -->
+          <div class="mt-2 flex justify-end" v-if="currentSourceId && hasValidSource && exploreStore.timeRange">
+            <Button variant="default" size="md" class="px-4 flex items-center gap-2 transition-colors duration-200"
+              :class="{ 'bg-primary/80 hover:bg-primary/70': isDirty && !isExecutingQuery }"
+              :disabled="isExecutingQuery || !canExecuteQuery" @click="triggerQueryExecution">
+              <Play class="h-4 w-4" />
+              <span>{{ isExecutingQuery ? 'Running...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>
+            </Button>
+          </div>
 
           <!-- Query Error -->
           <div v-if="displayError" class="mt-2 text-sm text-destructive bg-destructive/10 p-2 rounded">
