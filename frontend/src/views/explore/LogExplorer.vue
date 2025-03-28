@@ -1630,7 +1630,7 @@ onBeforeUnmount(() => {
 
         <!-- Compact action buttons -->
         <Button variant="default" size="sm" class="h-8 px-3 flex items-center gap-1"
-          :disabled="isExecutingQuery || !canExecuteQuery" @click="handleQuerySubmit(queryMode)">
+          :disabled="isExecutingQuery || !canExecuteQuery" @click="queryEditorRef?.submitQuery()">
           <Play class="h-3.5 w-3.5" />
           <span>{{ isExecutingQuery ? 'Running...' : 'Run' }}</span>
         </Button>
