@@ -411,8 +411,6 @@ func (db *DB) ListSourcesForUser(ctx context.Context, userID models.UserID) ([]*
 	return sources, nil
 }
 
-// Team query methods are implemented in team_queries.go
-
 // GetTeamByName retrieves a team by its name
 func (db *DB) GetTeamByName(ctx context.Context, name string) (*models.Team, error) {
 	db.log.Debug("getting team by name", "name", name)

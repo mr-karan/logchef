@@ -29,8 +29,8 @@ type Querier interface {
 	// Create a new team
 	CreateTeam(ctx context.Context, arg CreateTeamParams) (int64, error)
 	// Team Queries
-	// Create a new query for a team
-	CreateTeamQuery(ctx context.Context, arg CreateTeamQueryParams) (int64, error)
+	// Create a new query for a team and source
+	CreateTeamSourceQuery(ctx context.Context, arg CreateTeamSourceQueryParams) (int64, error)
 	// Users
 	// Create a new user
 	CreateUser(ctx context.Context, arg CreateUserParams) (int64, error)
@@ -40,8 +40,8 @@ type Querier interface {
 	DeleteSource(ctx context.Context, id int64) error
 	// Delete a team by ID
 	DeleteTeam(ctx context.Context, id int64) error
-	// Delete a query by ID
-	DeleteTeamQuery(ctx context.Context, id int64) error
+	// Delete a query by ID for a specific team and source
+	DeleteTeamSourceQuery(ctx context.Context, arg DeleteTeamSourceQueryParams) error
 	// Delete a user by ID
 	DeleteUser(ctx context.Context, id int64) error
 	// Delete all sessions for a user
@@ -58,24 +58,14 @@ type Querier interface {
 	GetTeamByName(ctx context.Context, name string) (Team, error)
 	// Get a team member
 	GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (TeamMember, error)
-	// Get a query by ID
-	GetTeamQuery(ctx context.Context, id int64) (TeamQuery, error)
-	// Get a team query by ID and check if the user has access to it
-	GetTeamQueryWithAccess(ctx context.Context, arg GetTeamQueryWithAccessParams) (TeamQuery, error)
+	// Get a query by ID for a specific team and source
+	GetTeamSourceQuery(ctx context.Context, arg GetTeamSourceQueryParams) (TeamQuery, error)
 	// Get a user by ID
 	GetUser(ctx context.Context, id int64) (User, error)
 	// Get a user by email
 	GetUserByEmail(ctx context.Context, email string) (User, error)
-	// List all queries for a specific source
-	ListQueriesBySource(ctx context.Context, sourceID int64) ([]TeamQuery, error)
 	// List all queries for a specific team and source
 	ListQueriesByTeamAndSource(ctx context.Context, arg ListQueriesByTeamAndSourceParams) ([]TeamQuery, error)
-	// List all queries that a user has access to across all their teams
-	ListQueriesForUser(ctx context.Context, userID int64) ([]TeamQuery, error)
-	// List all queries for a specific team that a user has access to
-	ListQueriesForUserAndTeam(ctx context.Context, arg ListQueriesForUserAndTeamParams) ([]TeamQuery, error)
-	// List all queries for a specific source that a user has access to
-	ListQueriesForUserBySource(ctx context.Context, arg ListQueriesForUserBySourceParams) ([]TeamQuery, error)
 	// List all teams a data source is a member of
 	ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, error)
 	// Get all sources ordered by creation date
@@ -86,8 +76,6 @@ type Querier interface {
 	ListTeamMembers(ctx context.Context, teamID int64) ([]TeamMember, error)
 	// List all members of a team with user details
 	ListTeamMembersWithDetails(ctx context.Context, teamID int64) ([]ListTeamMembersWithDetailsRow, error)
-	// List all queries in a team
-	ListTeamQueries(ctx context.Context, teamID int64) ([]TeamQuery, error)
 	// List all data sources in a team
 	ListTeamSources(ctx context.Context, teamID int64) ([]ListTeamSourcesRow, error)
 	// List all teams
@@ -111,8 +99,8 @@ type Querier interface {
 	UpdateTeam(ctx context.Context, arg UpdateTeamParams) error
 	// Update a team member's role
 	UpdateTeamMemberRole(ctx context.Context, arg UpdateTeamMemberRoleParams) error
-	// Update a query for a team
-	UpdateTeamQuery(ctx context.Context, arg UpdateTeamQueryParams) error
+	// Update a query for a team and source
+	UpdateTeamSourceQuery(ctx context.Context, arg UpdateTeamSourceQueryParams) error
 	// Update a user
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
 	// Check if a user has access to a source through any team

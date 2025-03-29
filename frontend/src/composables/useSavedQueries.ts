@@ -5,7 +5,7 @@ import { useSavedQueriesStore } from '@/stores/savedQueries'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { getErrorMessage } from '@/api/types'
-import type { SavedQueryFormData } from '@/views/explore/types'
+import type { SaveQueryFormData } from '@/views/explore/types'
 import type { SavedTeamQuery } from '@/api/savedQueries'
 
 export function useSavedQueries() {
@@ -56,7 +56,6 @@ export function useSavedQueries() {
       toast({
         title: 'Cannot Save',
         description: 'Query is empty. Please enter a query to save.',
-        variant: 'warning',
         duration: TOAST_DURATION.WARNING
       })
       return
@@ -68,7 +67,7 @@ export function useSavedQueries() {
       // We are editing an existing query - load the query details
       const teamId = route.query.team as string
       const sourceId = route.query.source as string
-      
+
       if (!teamId || !sourceId) {
         toast({
           title: 'Error',
@@ -78,20 +77,25 @@ export function useSavedQueries() {
         })
         return
       }
-      
+
       try {
         isLoadingQueryDetails.value = true
         // Fetch query details from the backend
-        const result = await savedQueriesStore.getQueryDetails(
+        const result = await savedQueriesStore.fetchTeamSourceQueries(
           parseInt(teamId),
-          parseInt(sourceId),
-          queryId.toString()
+          parseInt(sourceId)
         )
-        
-        if (result.success && result.data) {
-          // Set the editingQuery with the fetched data
-          editingQuery.value = result.data
-          showSaveQueryModal.value = true
+
+        if (result.success && savedQueriesStore.queries) {
+          // Find the specific query from the results (or maybe the store state?)
+          const foundQuery = savedQueriesStore.queries.find(q => q.id.toString() === queryId);
+          if (foundQuery) {
+             editingQuery.value = foundQuery;
+             showSaveQueryModal.value = true;
+          } else {
+             // If not found after fetch, maybe it was deleted? Or fetch didn't return it?
+             throw new Error(`Query details for ID ${queryId} not found after fetch.`);
+          }
         } else {
           throw new Error(result.error?.message || 'Failed to load query details')
         }
@@ -114,19 +118,19 @@ export function useSavedQueries() {
   }
 
   // Handle actual saving
-  async function handleSaveQuery(formData: SavedQueryFormData) {
+  async function handleSaveQuery(formData: SaveQueryFormData) {
     try {
       let response;
-      
+
       // Check if we're updating an existing query from the URL or editingQuery state
       const queryIdFromUrl = route.query.query_id as string | undefined;
-      
+
       if (editingQuery.value || queryIdFromUrl) {
         const queryId = editingQuery.value?.id.toString() || queryIdFromUrl;
         if (!queryId) {
           throw new Error('Missing query ID for update operation');
         }
-        
+
         // Update existing query
         response = await savedQueriesStore.updateQuery(
           formData.team_id,
@@ -140,23 +144,23 @@ export function useSavedQueries() {
           }
         )
         console.log('Updated query:', response);
-      } 
+      }
       // Check if a query with this name already exists (possible overwrite)
       else {
         // Get existing queries to check for duplicates
         const existingQueries = savedQueriesStore.data.queries || [];
-        const existingQuery = existingQueries.find(q => 
-          q.name === formData.name && 
+        const existingQuery = existingQueries.find(q =>
+          q.name === formData.name &&
           q.team_id === formData.team_id &&
           q.source_id === formData.source_id
         );
-        
+
         if (existingQuery) {
           // Ask for confirmation before overwriting
           const confirmOverwrite = window.confirm(
             `A query named "${formData.name}" already exists for this source. Do you want to overwrite it?`
           );
-          
+
           if (confirmOverwrite) {
             // Update the existing query
             response = await savedQueriesStore.updateQuery(
@@ -193,7 +197,7 @@ export function useSavedQueries() {
         showSaveQueryModal.value = false
         editingQuery.value = null  // Clear editing state
         await savedQueriesStore.fetchTeamQueries(formData.team_id)
-        
+
         // Show appropriate success message
         const isEdit = !!editingQuery.value || !!queryIdFromUrl;
         toast({
@@ -201,7 +205,7 @@ export function useSavedQueries() {
           description: isEdit ? 'Query updated successfully.' : 'Query saved successfully.',
           duration: TOAST_DURATION.SUCCESS
         })
-        
+
         // If we were editing from a query_id in the URL, redirect to the normal view
         // without the query_id to prevent accidental re-edits
         if (queryIdFromUrl) {
@@ -210,7 +214,7 @@ export function useSavedQueries() {
           router.replace({ query: currentQuery });
         }
       } else if (response) {
-        throw new Error(response.error || 'Failed to save query')
+        throw new Error(getErrorMessage(response.error) || 'Failed to save query')
       }
     } catch (error) {
       console.error("Error saving query:", error)
@@ -295,7 +299,7 @@ export function useSavedQueries() {
       if (query.source_id) {
         url += `&source=${query.source_id}`
       }
-      
+
       // Add query ID for editing
       url += `&query_id=${query.id}`
 
@@ -321,7 +325,7 @@ export function useSavedQueries() {
       return url
     } catch (error) {
       console.error('Error generating query URL:', error)
-      // Fallback URL with explicit mode parameter 
+      // Fallback URL with explicit mode parameter
       return `/logs/explore?team=${query.team_id}&source=${query.source_id}&mode=${query.query_type?.toLowerCase() === 'logchefql' ? 'logchefql' : 'sql'}`
     }
   }
@@ -368,7 +372,7 @@ export function useSavedQueries() {
           description: 'Query deleted successfully',
           duration: TOAST_DURATION.SUCCESS,
         })
-        
+
         return { success: true }
       } catch (error) {
         toast({
@@ -387,7 +391,7 @@ export function useSavedQueries() {
   async function loadSourceQueries(teamId: number, sourceId: number) {
     try {
       isLoading.value = true
-      
+
       // Reset search when loading new queries
       searchQuery.value = ''
 
@@ -437,29 +441,68 @@ export function useSavedQueries() {
     }
   }
 
-  // Get details for a specific query
+  // Local helper to fetch details, now using store action
   async function getQueryDetails(teamId: number, sourceId: number, queryId: string) {
-    try {
-      isLoadingQueryDetails.value = true
-      return await savedQueriesStore.getQueryDetails(teamId, sourceId, queryId)
-    } catch (error) {
-      console.error('Error getting query details:', error)
-      toast({
-        title: 'Error',
-        description: getErrorMessage(error),
-        variant: 'destructive',
-        duration: TOAST_DURATION.ERROR
-      })
-      return { success: false, error }
-    } finally {
-      isLoadingQueryDetails.value = false
-    }
+     console.warn("`getQueryDetails` function in useSavedQueries is deprecated. Use store action directly.");
+     return await savedQueriesStore.fetchTeamSourceQueries(teamId, sourceId);
+     // Note: This fetches *all* queries for the source, not a single one by ID.
+     // The store doesn't seem to have a dedicated action for one source query by ID.
+     // We might need to add one if `fetchTeamSourceQueries` returning a list is inefficient.
   }
 
   // Check if the current query is being edited (has query_id in URL)
   const isEditingExistingQuery = computed(() => {
     return !!route.query.query_id
   })
+
+  // Function to update an existing query
+  async function updateSavedQuery(
+    teamId: number,
+    sourceId: number,
+    queryId: string,
+    updateData: { // Define the expected update payload shape
+      name?: string;
+      description?: string;
+      query_content: string; // Content is required for update here
+      query_type: 'logchefql' | 'sql'; // Type is required
+    }
+  ) {
+     console.log(`useSavedQueries: Updating query ${queryId} for team ${teamId}, source ${sourceId}`);
+     isLoading.value = true;
+     try {
+       const payload = {
+          name: updateData.name, // Pass along if provided
+          description: updateData.description, // Pass along if provided
+          query_content: updateData.query_content,
+          query_type: updateData.query_type,
+       };
+
+       // Call the specific store action for updating a team-source query
+       const result = await savedQueriesStore.updateTeamSourceQuery(teamId, sourceId, queryId, payload);
+
+       if (result.success) {
+          console.log(`useSavedQueries: Query ${queryId} updated successfully.`);
+          // No need to manually update local 'queries' ref here,
+          // as the store action already updates the store's query list.
+          // The component using the store should react to the store change.
+          return { success: true, data: result.data };
+       } else {
+         throw new Error(result.error?.message || 'Failed to update query in store action');
+       }
+     } catch (error) {
+       console.error(`Error updating saved query ${queryId}:`, error);
+       toast({
+         title: 'Update Failed',
+         description: getErrorMessage(error),
+         variant: 'destructive',
+         duration: TOAST_DURATION.ERROR
+       });
+       // Rethrow or return error indicator
+       throw error; // Rethrow to allow caller to handle
+     } finally {
+       isLoading.value = false;
+     }
+  }
 
   return {
     // State
@@ -473,11 +516,12 @@ export function useSavedQueries() {
     totalQueryCount,
     searchQuery,
     isEditingExistingQuery,
-    
+
     // Functions
     handleSaveQueryClick,
     handleSaveQuery,
     loadSavedQuery,
+    updateSavedQuery,
     loadSourceQueries,
     getQueryUrl,
     openQuery,

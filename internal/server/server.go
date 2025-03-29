@@ -10,6 +10,7 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/identity"
 	"github.com/mr-karan/logchef/internal/logs"
+	"github.com/mr-karan/logchef/internal/saved_queries"
 	"github.com/mr-karan/logchef/internal/source"
 
 	"github.com/gofiber/fiber/v2"
@@ -19,15 +20,15 @@ import (
 
 // ServerOptions contains all dependencies needed to create a new Server
 type ServerOptions struct {
-	Config           *config.Config
-	SourceService    *source.Service
-	LogsService      *logs.Service
-	IdentityService  *identity.Service
-	TeamQueryService *logs.TeamQueryService
-	Auth             *auth.Service
-	FS               http.FileSystem
-	Logger           *slog.Logger
-	BuildInfo        string
+	Config            *config.Config
+	SourceService     *source.Service
+	LogsService       *logs.Service
+	IdentityService   *identity.Service
+	SavedQueryService *saved_queries.Service
+	Auth              *auth.Service
+	FS                http.FileSystem
+	Logger            *slog.Logger
+	BuildInfo         string
 }
 
 // Server represents the HTTP server
@@ -36,11 +37,11 @@ type Server struct {
 	config *config.Config
 
 	// Domain-specific services
-	sourceService    *source.Service
-	logsService      *logs.Service
-	identityService  *identity.Service
-	teamQueryService *logs.TeamQueryService
-	auth             *auth.Service
+	sourceService     *source.Service
+	logsService       *logs.Service
+	identityService   *identity.Service
+	savedQueryService *saved_queries.Service
+	auth              *auth.Service
 
 	fs  http.FileSystem
 	log *slog.Logger
@@ -79,16 +80,16 @@ func New(opts ServerOptions) *Server {
 
 	// Create server instance
 	s := &Server{
-		app:              app,
-		config:           opts.Config,
-		sourceService:    opts.SourceService,
-		logsService:      opts.LogsService,
-		identityService:  opts.IdentityService,
-		teamQueryService: opts.TeamQueryService,
-		auth:             opts.Auth,
-		fs:               opts.FS,
-		log:              opts.Logger,
-		buildInfo:        opts.BuildInfo,
+		app:               app,
+		config:            opts.Config,
+		sourceService:     opts.SourceService,
+		logsService:       opts.LogsService,
+		identityService:   opts.IdentityService,
+		savedQueryService: opts.SavedQueryService,
+		auth:              opts.Auth,
+		fs:                opts.FS,
+		log:               opts.Logger,
+		buildInfo:         opts.BuildInfo,
 	}
 
 	// Setup routes
@@ -99,102 +100,79 @@ func New(opts ServerOptions) *Server {
 
 // setupRoutes configures all API routes
 func (s *Server) setupRoutes() {
-	// Group API version 1 endpoints
+	// Base path for API version 1
 	api := s.app.Group("/api/v1")
 
-	// Public routes (no auth required)
+	// Public routes
 	api.Get("/health", s.handleHealth)
 
 	// Auth routes
-	auth := api.Group("/auth")
-	auth.Get("/login", s.handleLogin)
-	auth.Get("/callback", s.handleCallback)
-	auth.Post("/logout", s.handleLogout)
-	auth.Get("/session", s.handleGetSession)
+	api.Get("/auth/login", s.handleLogin)
+	api.Get("/auth/callback", s.handleCallback)
+	api.Post("/auth/logout", s.handleLogout)
+	api.Get("/auth/session", s.requireAuth, s.handleGetSession)
 
-	// Admin-only routes
-	admin := api.Group("/admin", s.requireAuth, s.requireAdmin)
-	{
-		// User management
-		admin.Get("/users", s.handleListUsers)
-		admin.Post("/users", s.handleCreateUser)
-		admin.Get("/users/:userID", s.handleGetUser)
-		admin.Put("/users/:userID", s.handleUpdateUser)
-		admin.Delete("/users/:userID", s.handleDeleteUser)
+	// --- Admin Routes ---
+	api.Get("/admin/users", s.requireAuth, s.requireAdmin, s.handleListUsers)
+	api.Post("/admin/users", s.requireAuth, s.requireAdmin, s.handleCreateUser)
+	api.Get("/admin/users/:userID", s.requireAuth, s.requireAdmin, s.handleGetUser)
+	api.Put("/admin/users/:userID", s.requireAuth, s.requireAdmin, s.handleUpdateUser)
+	api.Delete("/admin/users/:userID", s.requireAuth, s.requireAdmin, s.handleDeleteUser)
 
-		// Team management
-		admin.Get("/teams", s.handleListTeams)
-		admin.Post("/teams", s.handleCreateTeam)
-		admin.Put("/teams/:teamID", s.handleUpdateTeam)
-		admin.Delete("/teams/:teamID", s.handleDeleteTeam)
+	api.Get("/admin/teams", s.requireAuth, s.requireAdmin, s.handleListTeams)
+	api.Post("/admin/teams", s.requireAuth, s.requireAdmin, s.handleCreateTeam)
+	api.Put("/admin/teams/:teamID", s.requireAuth, s.requireAdmin, s.handleUpdateTeam)
+	api.Delete("/admin/teams/:teamID", s.requireAuth, s.requireAdmin, s.handleDeleteTeam)
 
-		// Source management
-		admin.Get("/sources", s.handleListSources)
-		admin.Get("/sources/:sourceID", s.handleGetSource)
-		admin.Post("/sources", s.handleCreateSource)
-		admin.Post("/sources/validate", s.handleValidateSourceConnection)
-		admin.Delete("/sources/:sourceID", s.handleDeleteSource)
-		admin.Get("/sources/:sourceID/stats", s.handleGetSourceStats)
-	}
+	api.Get("/admin/sources", s.requireAuth, s.requireAdmin, s.handleListSources)
+	api.Get("/admin/sources/:sourceID", s.requireAuth, s.requireAdmin, s.handleGetSource)
+	api.Post("/admin/sources", s.requireAuth, s.requireAdmin, s.handleCreateSource)
+	api.Post("/admin/sources/validate", s.requireAuth, s.requireAdmin, s.handleValidateSourceConnection)
+	api.Delete("/admin/sources/:sourceID", s.requireAuth, s.requireAdmin, s.handleDeleteSource)
+	api.Get("/admin/sources/:sourceID/stats", s.requireAuth, s.requireAdmin, s.handleGetSourceStats)
 
-	// Personal routes (authenticated user)
-	me := api.Group("/users/me", s.requireAuth)
-	{
-		me.Get("/teams", s.handleListUserTeams)
-		me.Get("/queries", s.handleListUserQueries)
-	}
+	// --- Personal Routes ---
+	api.Get("/users/me/teams", s.requireAuth, s.handleListUserTeams)
 
-	// Team-specific routes
-	teams := api.Group("/teams", s.requireAuth)
-	{
-		teams.Get("/:teamID", s.requireTeamMember, s.handleGetTeam)
+	// --- Team Routes ---
 
-		// Team members
-		teamMembers := teams.Group("/:teamID/members", s.requireTeamMember)
-		{
-			teamMembers.Get("/", s.handleListTeamMembers)
-			teamMembers.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamMember)
-			teamMembers.Delete("/:userID", s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamMember)
-		}
+	// Team Info
+	api.Get("/teams/:teamID", s.requireAuth, s.requireTeamMember, s.handleGetTeam)
 
-		// Team sources
-		teamSources := teams.Group("/:teamID/sources", s.requireTeamMember)
-		{
-			teamSources.Get("/", s.handleListTeamSources)
-			teamSources.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamSource)
-			teamSources.Delete("/:sourceID", s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamSource)
+	// Team Members
+	api.Get("/teams/:teamID/members", s.requireAuth, s.requireTeamMember, s.handleListTeamMembers)
+	api.Post("/teams/:teamID/members", s.requireAuth, s.requireTeamMember, s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamMember)
+	api.Delete("/teams/:teamID/members/:userID", s.requireAuth, s.requireTeamMember, s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamMember)
 
-			// Team source queries
-			teamSources.Get("/:sourceID", s.requireTeamSourceAccess, s.handleGetTeamSource)
-			teamSources.Post("/:sourceID/logs/query", s.requireTeamSourceAccess, s.handleQueryTeamSourceLogs)
-			teamSources.Get("/:sourceID/schema", s.requireTeamSourceAccess, s.handleGetTeamSourceSchema)
-			teamSources.Get("/:sourceID/queries", s.requireTeamSourceAccess, s.handleListTeamSourceQueries)
-			teamSources.Post("/:sourceID/queries", s.requireTeamSourceAccess, s.handleCreateTeamSourceQuery)
-		}
+	// Team Sources
+	api.Get("/teams/:teamID/sources", s.requireAuth, s.requireTeamMember, s.handleListTeamSources)
+	api.Post("/teams/:teamID/sources", s.requireAuth, s.requireTeamMember, s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamSource)
+	api.Delete("/teams/:teamID/sources/:sourceID", s.requireAuth, s.requireTeamMember, s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamSource)
 
-		// Team queries
-		teamQueries := teams.Group("/:teamID/queries", s.requireTeamMember)
-		{
-			teamQueries.Get("/", s.handleListTeamQueries)
-			teamQueries.Post("/", s.handleCreateTeamQuery)
-			teamQueries.Get("/:queryID", s.handleGetTeamQuery)
-			teamQueries.Put("/:queryID", s.handleUpdateTeamQuery)
-			teamQueries.Delete("/:queryID", s.handleDeleteTeamQuery)
-		}
-	}
+	// Team Source Details & Actions
+	api.Get("/teams/:teamID/sources/:sourceID", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleGetTeamSource)
+	api.Post("/teams/:teamID/sources/:sourceID/logs/query", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleQueryTeamSourceLogs)
+	api.Get("/teams/:teamID/sources/:sourceID/schema", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleGetTeamSourceSchema)
+
+	// Team Source Queries
+	api.Get("/teams/:teamID/sources/:sourceID/queries", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleListTeamSourceQueries)
+	api.Post("/teams/:teamID/sources/:sourceID/queries", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleCreateTeamSourceQuery)
+	api.Get("/teams/:teamID/sources/:sourceID/queries/:queryID", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleGetTeamSourceQuery)
+	api.Put("/teams/:teamID/sources/:sourceID/queries/:queryID", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleUpdateTeamSourceQuery)
+	api.Delete("/teams/:teamID/sources/:sourceID/queries/:queryID", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleDeleteTeamSourceQuery)
 
 	// Handle 404 for API routes
 	s.app.Use("/api/*", s.notFoundHandler)
 
-	// Asset handling with proper MIME types
+	// Asset handling
 	s.app.Use("/assets/*", filesystem.New(filesystem.Config{
 		Root:       s.fs,
 		PathPrefix: "assets",
 		Browse:     false,
-		MaxAge:     86400, // Cache assets for one day
+		MaxAge:     86400,
 	}))
 
-	// For all other routes, serve the SPA index.html
+	// SPA index.html handler
 	s.app.Use("/", filesystem.New(filesystem.Config{
 		Root:         s.fs,
 		Browse:       false,

@@ -221,6 +221,13 @@ export function useExploreUrlSync() {
   // --- URL Update Logic ---
 
   const syncUrlFromState = () => {
+    // Don't sync if we are still initializing from the URL
+    if (isInitializing.value) {
+       console.log("useExploreUrlSync: Skipping syncUrlFromState during initialization");
+       return;
+    }
+
+    console.log("useExploreUrlSync: Syncing URL from state...");
     const query: Record<string, string> = {};
 
     // Team
@@ -232,7 +239,7 @@ export function useExploreUrlSync() {
     if (exploreStore.sourceId > 0 && sourcesStore.teamSources.some(s => s.id === exploreStore.sourceId)) {
       query.source = exploreStore.sourceId.toString();
     }
-    
+
     // Preserve query_id if present (for editing mode)
     const currentQueryId = route.query.query_id;
     if (currentQueryId) {

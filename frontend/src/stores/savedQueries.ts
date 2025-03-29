@@ -75,7 +75,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   const selectedQuery = computed(() => state.data.value.selectedQuery);
   const teams = computed(() => state.data.value.teams);
   const selectedTeamId = computed(() => state.data.value.selectedTeamId);
-  
+
   const hasTeams = computed(() => (state.data.value.teams?.length || 0) > 0);
   const hasQueries = computed(() => (state.data.value.queries?.length || 0) > 0);
   const selectedTeam = computed(() => {
@@ -195,7 +195,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         query_type: queryContent.queryType || "sql",
         query_content: JSON.stringify(queryContent),
       };
-      
+
       return await state.callApi({
         apiCall: () => savedQueriesApi.createSourceQuery(teamId, sourceId, query),
         operationKey: `createSourceQuery-${teamId}-${sourceId}`,
@@ -237,6 +237,34 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     });
   }
 
+  // Action for updating a source-specific query
+  async function updateTeamSourceQuery(
+    teamId: number,
+    sourceId: number,
+    queryId: string,
+    query: Partial<Omit<SavedTeamQuery, "id" | "team_id" | "source_id" | "created_at" | "updated_at">>
+  ) {
+    return await state.withLoading(`updateTeamSourceQuery-${teamId}-${sourceId}-${queryId}`, async () => {
+      return await state.callApi({
+        apiCall: () => savedQueriesApi.updateTeamSourceQuery(teamId, sourceId, queryId, query),
+        operationKey: `updateTeamSourceQuery-${teamId}-${sourceId}-${queryId}`,
+        successMessage: "Query updated successfully",
+        onSuccess: (response) => {
+          const index = state.data.value.queries.findIndex(
+            (q) => String(q.id) === queryId
+          );
+          if (index >= 0) {
+            state.data.value.queries[index] = { ...state.data.value.queries[index], ...response }; // Merge updates
+          }
+          if (state.data.value.selectedQuery?.id === Number(queryId)) {
+             // Ensure selectedQuery has all fields, merge with response
+             state.data.value.selectedQuery = { ...state.data.value.selectedQuery, ...response };
+          }
+        }
+      });
+    });
+  }
+
   async function deleteQuery(teamId: number, queryId: string) {
     return await state.withLoading(`deleteQuery-${teamId}-${queryId}`, async () => {
       return await state.callApi({
@@ -270,7 +298,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     isLoading: state.isLoading,
     error: state.error,
     data: state.data.value, // Directly expose data for backward compatibility
-    
+
     // Computed properties
     queries,
     selectedQuery,
@@ -280,7 +308,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     hasTeams,
     hasQueries,
     selectedTeam,
-    
+
     // Actions
     fetchUserTeams,
     setSelectedTeam,
@@ -291,9 +319,10 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     createQuery,
     createSourceQuery,
     updateQuery,
+    updateTeamSourceQuery,
     deleteQuery,
     resetState,
-    
+
     // Loading state helpers
     isLoadingOperation: state.isLoadingOperation,
   };

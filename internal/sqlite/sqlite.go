@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 
@@ -221,6 +220,3 @@ func (db *DB) Close() error {
 
 	return nil
 }
-
-// Ensure DB implements auth.Store
-var _ auth.Store = (*DB)(nil)
