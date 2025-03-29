@@ -15,10 +15,11 @@ import {
     type ColumnSizing as TColumnSizing,
     type ColumnSizingState,
     type ColumnResizeMode,
+    type Header,
 } from '@tanstack/vue-table'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, type CSSProperties } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Copy, Search } from 'lucide-vue-next'
+import { Copy, Search, GripVertical } from 'lucide-vue-next'
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import DataTableColumnSelector from './data-table-column-selector.vue'
@@ -62,12 +63,19 @@ const columnSizing = ref<ColumnSizingState>({})
 const columnResizeMode = ref<ColumnResizeMode>('onChange')
 const isResizing = ref(false)
 const displayTimezone = ref<'local' | 'utc'>(localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local')
+const columnOrder = ref<string[]>(props.columns.map(c => c.id!))
+const draggingColumnId = ref<string | null>(null)
+const dragOverColumnId = ref<string | null>(null)
+
+// Watch props.columns to reset columnOrder if columns change fundamentally
+watch(() => props.columns, (newColumns) => {
+    columnOrder.value = newColumns.map(c => c.id!)
+}, { deep: true })
 
 // Save timezone preference whenever it changes
 watch(displayTimezone, (newValue) => {
     localStorage.setItem('logchef_timezone', newValue)
 })
-
 
 const { toast } = useToast()
 
@@ -82,21 +90,7 @@ function getColumnType(column: any): string | undefined {
     return column?.columnDef?.meta?.columnType;
 }
 
-// Make sure timestamp field is first in column order
-const sortedColumns = computed(() => {
-    // If no timestamp field specified, just return the columns as is
-    if (!timestampFieldName.value) return props.columns;
-
-    // Filter the columns to put timestamp first
-    const tsColumn = props.columns.find(col => col.id === timestampFieldName.value);
-    if (!tsColumn) return props.columns;
-
-    // Create a new array with timestamp column first, then all other columns
-    return [
-        tsColumn,
-        ...props.columns.filter(col => col.id !== timestampFieldName.value)
-    ];
-});
+// Column order is now managed by state, no need for sortedColumns computed
 
 // Define default column configurations
 const defaultColumn = {
@@ -121,76 +115,76 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
     if ('preventDefault' in e) {
         e.preventDefault();
     }
-    
+
     isResizing.value = true;
-    
+
     // Get current column size and position
     const startSize = header.getSize();
     let startX = 0;
-    
+
     if ('clientX' in e) {
         startX = e.clientX;
     } else if ('touches' in e && e.touches.length > 0) {
         startX = e.touches[0].clientX;
     }
-    
+
     // Create custom resize handlers
     const onMouseMove = (moveEvent: MouseEvent) => {
         // Calculate how far the mouse has moved
         const delta = moveEvent.clientX - startX;
-        
+
         // Calculate new size respecting min/max constraints
         const minSize = header.column.columnDef.minSize || defaultColumn.minSize;
         const maxSize = header.column.columnDef.maxSize || defaultColumn.maxSize;
         let newSize = Math.max(minSize, Math.min(maxSize, startSize + delta));
-        
+
         // Update column size in the state
         const newSizing = {
             ...columnSizing.value,
             [header.column.id]: newSize
         };
-        
+
         // Apply the new sizing
         columnSizing.value = newSizing;
-        
+
         // Apply directly to the table
         table.setColumnSizing(newSizing);
     };
-    
+
     const onTouchMove = (moveEvent: TouchEvent) => {
         if (moveEvent.touches.length === 0) return;
-        
+
         // Calculate how far the touch has moved
         const delta = moveEvent.touches[0].clientX - startX;
-        
+
         // Calculate new size respecting min/max constraints
         const minSize = header.column.columnDef.minSize || defaultColumn.minSize;
         const maxSize = header.column.columnDef.maxSize || defaultColumn.maxSize;
         let newSize = Math.max(minSize, Math.min(maxSize, startSize + delta));
-        
+
         // Update column size in the state
         const newSizing = {
             ...columnSizing.value,
             [header.column.id]: newSize
         };
-        
+
         // Apply the new sizing
         columnSizing.value = newSizing;
-        
+
         // Apply directly to the table
         table.setColumnSizing(newSizing);
     };
-    
+
     const onEnd = () => {
         isResizing.value = false;
-        
+
         // Clean up event listeners
         window.removeEventListener('mousemove', onMouseMove);
         window.removeEventListener('touchmove', onTouchMove);
         window.removeEventListener('mouseup', onEnd);
         window.removeEventListener('touchend', onEnd);
     };
-    
+
     // Add the event listeners
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('touchmove', onTouchMove);
@@ -198,13 +192,13 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
     window.addEventListener('touchend', onEnd, { once: true });
 }
 
-// Initialize table with column sizing
+// Initialize table with column sizing and ordering
 const table = useVueTable({
     get data() {
         return props.data
     },
     get columns() {
-        return sortedColumns.value
+        return props.columns
     },
     state: {
         get sorting() {
@@ -224,7 +218,10 @@ const table = useVueTable({
         },
         get columnSizing() {
             return columnSizing.value
-        }
+        },
+        get columnOrder() {
+            return columnOrder.value
+        },
     },
     onSortingChange: updaterOrValue => valueUpdater(updaterOrValue, sorting),
     onExpandedChange: updaterOrValue => valueUpdater(updaterOrValue, expanded),
@@ -232,6 +229,7 @@ const table = useVueTable({
     onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
     onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
     onColumnSizingChange: updaterOrValue => valueUpdater(updaterOrValue, columnSizing),
+    onColumnOrderChange: updater => valueUpdater(updater, columnOrder),
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
@@ -257,7 +255,6 @@ const handleRowClick = (row: Row<Record<string, any>>) => (e: MouseEvent) => {
     row.toggleExpanded();
 }
 
-
 // Add back the copyCell function since it's still needed for individual cells
 const copyCell = (value: any) => {
     const text = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)
@@ -273,7 +270,10 @@ const copyCell = (value: any) => {
 onMounted(() => {
     // Initialize default sort by timestamp if available
     if (timestampFieldName.value) {
-        sorting.value = [{ id: timestampFieldName.value, desc: true }]
+        // Make sure timestamp field exists in the current order before sorting
+        if (columnOrder.value.includes(timestampFieldName.value)) {
+            sorting.value = [{ id: timestampFieldName.value, desc: true }]
+        }
     }
 
     // Initialize column sizing with defaults from column definitions
@@ -294,7 +294,7 @@ onMounted(() => {
 
     const resizeObserver = new ResizeObserver(() => {
         // Force a layout update when container size changes
-        table.setColumnSizing({...columnSizing.value})
+        table.setColumnSizing({ ...columnSizing.value })
     })
 
     resizeObserver.observe(tableContainerRef.value)
@@ -349,12 +349,78 @@ watch(
     },
     { immediate: true }
 )
+
+// --- Native Drag and Drop Implementation ---
+
+// Utility function to move array element (needed for native DnD)
+function arrayMove<T>(arr: T[], fromIndex: number, toIndex: number): T[] {
+    const newArr = [...arr];
+    const element = newArr.splice(fromIndex, 1)[0];
+    newArr.splice(toIndex, 0, element);
+    return newArr;
+}
+
+const onDragStart = (event: DragEvent, columnId: string) => {
+    draggingColumnId.value = columnId;
+    if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        // Optional: Set drag image if needed
+        // event.dataTransfer.setData('text/plain', columnId); // Set data for compatibility
+    }
+    // Add a class to the body or table to indicate dragging state globally if needed
+    document.body.classList.add('dragging-column');
+}
+
+const onDragEnter = (event: DragEvent, columnId: string) => {
+    if (draggingColumnId.value && draggingColumnId.value !== columnId) {
+        dragOverColumnId.value = columnId;
+    }
+    event.preventDefault(); // Necessary to allow drop
+}
+
+const onDragOver = (event: DragEvent) => {
+    event.preventDefault(); // Necessary to allow drop
+    if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'move';
+    }
+}
+
+const onDragLeave = (event: DragEvent, columnId: string) => {
+    if (dragOverColumnId.value === columnId) {
+        dragOverColumnId.value = null;
+    }
+}
+
+const onDrop = (event: DragEvent, targetColumnId: string) => {
+    event.preventDefault();
+    if (draggingColumnId.value && draggingColumnId.value !== targetColumnId) {
+        const oldIndex = columnOrder.value.indexOf(draggingColumnId.value);
+        const newIndex = columnOrder.value.indexOf(targetColumnId);
+        if (oldIndex !== -1 && newIndex !== -1) {
+            const newOrder = arrayMove(columnOrder.value, oldIndex, newIndex);
+            table.setColumnOrder(newOrder); // Update table state via the handler
+        }
+    }
+    // Cleanup
+    draggingColumnId.value = null;
+    dragOverColumnId.value = null;
+    document.body.classList.remove('dragging-column');
+}
+
+const onDragEnd = (event: DragEvent) => {
+    // Cleanup in case drop didn't fire properly
+    draggingColumnId.value = null;
+    dragOverColumnId.value = null;
+    document.body.classList.remove('dragging-column');
+}
+
 </script>
 
 <template>
-    <div class="h-full flex flex-col w-full min-w-0 flex-1 overflow-hidden" :class="{ 'cursor-col-resize select-none': isResizing }">
+    <div class="h-full flex flex-col w-full min-w-0 flex-1 overflow-hidden"
+        :class="{ 'cursor-col-resize select-none': isResizing }">
         <!-- Subtle resize indicator - just a cursor change, no overlay -->
-    
+
         <!-- Results Header with Controls and Pagination -->
         <div class="flex items-center justify-between p-2 border-b flex-shrink-0">
             <!-- Left side - Empty now that stats have been moved to LogExplorer.vue -->
@@ -364,16 +430,12 @@ watch(
             <div class="flex items-center gap-3">
                 <!-- Timezone toggle -->
                 <div class="flex items-center space-x-1 mr-1">
-                    <Button variant="ghost" size="sm"
-                        class="h-8 px-2 text-xs"
-                        :class="{ 'bg-muted': displayTimezone === 'local' }"
-                        @click="displayTimezone = 'local'">
+                    <Button variant="ghost" size="sm" class="h-8 px-2 text-xs"
+                        :class="{ 'bg-muted': displayTimezone === 'local' }" @click="displayTimezone = 'local'">
                         Local Time
                     </Button>
-                    <Button variant="ghost" size="sm"
-                        class="h-8 px-2 text-xs"
-                        :class="{ 'bg-muted': displayTimezone === 'utc' }"
-                        @click="displayTimezone = 'utc'">
+                    <Button variant="ghost" size="sm" class="h-8 px-2 text-xs"
+                        :class="{ 'bg-muted': displayTimezone === 'utc' }" @click="displayTimezone = 'utc'">
                         UTC
                     </Button>
                 </div>
@@ -382,15 +444,14 @@ watch(
                 <DataTablePagination v-if="table.getRowModel().rows?.length > 0" :table="table" />
 
                 <!-- Column selector -->
-                <DataTableColumnSelector :table="table" />
+                <DataTableColumnSelector :table="table" :column-order="columnOrder"
+                    @update:column-order="table.setColumnOrder($event)" />
 
                 <!-- Search input -->
                 <div class="relative w-64">
                     <Search class="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input placeholder="Search across all columns..."
-                        aria-label="Search in all columns"
-                        v-model="globalFilter"
-                        class="pl-8 h-8 text-sm" />
+                    <Input placeholder="Search across all columns..." aria-label="Search in all columns"
+                        v-model="globalFilter" class="pl-8 h-8 text-sm" />
                 </div>
             </div>
         </div>
@@ -398,50 +459,57 @@ watch(
         <!-- Table Section with full-height scrolling -->
         <div class="flex-1 relative overflow-hidden" ref="tableContainerRef">
             <div v-if="table.getRowModel().rows?.length" class="absolute inset-0">
-                <div class="w-full h-full overflow-auto scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent">
-                    <table ref="tableRef" class="table-fixed border-separate border-spacing-0 text-sm shadow-sm" :data-resizing="isResizing">
+                <div
+                    class="w-full h-full overflow-auto scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent">
+                    <table ref="tableRef" class="table-fixed border-separate border-spacing-0 text-sm shadow-sm"
+                        :data-resizing="isResizing">
                         <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
-                            <tr class="border-b border-b-muted-foreground/10">
-                                <th v-for="header in table.getHeaderGroups()[0]?.headers"
-                                    :key="header.id"
-                                    scope="col"
+                            <tr v-if="table.getHeaderGroups()[0]" class="border-b border-b-muted-foreground/10">
+                                <th v-for="header in table.getHeaderGroups()[0].headers" :key="header.id" scope="col"
                                     class="group relative h-9 px-3 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden border-r border-muted/30"
                                     :class="[
                                         getColumnType(header.column) === 'timestamp' ? 'font-semibold' : '',
                                         getColumnType(header.column) === 'severity' ? 'font-semibold' : '',
-                                        header.column.getIsResizing() ? 'border-r-2 border-r-primary' : ''
-                                    ]"
-                                    :style="{
+                                        header.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
+                                        header.column.id === draggingColumnId ? 'opacity-50 bg-primary/10' : '', // Style for dragging column
+                                        header.column.id === dragOverColumnId ? 'border-l-2 border-l-primary' : '' // Style for drop target indicator
+                                    ]" :style="{
                                         width: `${header.getSize()}px`,
                                         minWidth: `${header.column.columnDef.minSize ?? defaultColumn.minSize}px`,
-                                        maxWidth: `${header.column.columnDef.maxSize ?? defaultColumn.maxSize}px`
-                                    }">
+                                        maxWidth: `${header.column.columnDef.maxSize ?? defaultColumn.maxSize}px`,
+                                    }" draggable="true" @dragstart="onDragStart($event, header.column.id)"
+                                    @dragenter="onDragEnter($event, header.column.id)" @dragover="onDragOver($event)"
+                                    @dragleave="onDragLeave($event, header.column.id)"
+                                    @drop="onDrop($event, header.column.id)" @dragend="onDragEnd($event)">
                                     <div class="flex items-center h-full">
-                                        <FlexRender
-                                            v-if="!header.isPlaceholder"
-                                            :render="header.column.columnDef.header"
-                                            :props="header.getContext()" />
+                                        <!-- Drag Handle (visual only now, drag initiated on whole th) -->
+                                        <span
+                                            class="flex items-center justify-center w-5 h-full mr-1 cursor-grab text-muted-foreground/50 group-hover:text-muted-foreground">
+                                            <GripVertical class="h-4 w-4" />
+                                        </span>
 
-                                        <!-- Column Resizer - More visible design -->
+                                        <!-- Column Header Content -->
+                                        <FlexRender v-if="!header.isPlaceholder"
+                                            :render="header.column.columnDef.header" :props="header.getContext()" />
+
+                                        <!-- Column Resizer -->
                                         <div v-if="header.column.getCanResize()"
-                                            class="absolute right-0 top-0 h-full w-5 cursor-col-resize select-none touch-none flex items-center justify-center hover:bg-muted/40 transition-colors"
-                                            @mousedown="(e) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                handleResize(e, header);
-                                            }"
-                                            @touchstart="(e) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                handleResize(e, header);
-                                            }"
+                                            class="absolute right-0 top-0 h-full w-5 cursor-col-resize select-none touch-none flex items-center justify-center hover:bg-muted/40 transition-colors z-10"
+                                            @mousedown="(e) => { e.preventDefault(); e.stopPropagation(); handleResize(e, header); }"
+                                            @touchstart="(e) => { e.preventDefault(); e.stopPropagation(); handleResize(e, header); }"
                                             @click.stop>
-                                            <!-- Enhanced resize handle with grip pattern -->
                                             <div class="h-full w-4 flex flex-col items-center justify-center">
-                                                <div class="resize-grip flex flex-col items-center justify-center gap-1">
-                                                    <div class="w-1 h-1 rounded-full bg-muted-foreground/60 group-hover:bg-primary"></div>
-                                                    <div class="w-1 h-1 rounded-full bg-muted-foreground/60 group-hover:bg-primary"></div>
-                                                    <div class="w-1 h-1 rounded-full bg-muted-foreground/60 group-hover:bg-primary"></div>
+                                                <div
+                                                    class="resize-grip flex flex-col items-center justify-center gap-1">
+                                                    <div
+                                                        class="w-1 h-1 rounded-full bg-muted-foreground/60 group-hover:bg-primary">
+                                                    </div>
+                                                    <div
+                                                        class="w-1 h-1 rounded-full bg-muted-foreground/60 group-hover:bg-primary">
+                                                    </div>
+                                                    <div
+                                                        class="w-1 h-1 rounded-full bg-muted-foreground/60 group-hover:bg-primary">
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
@@ -452,36 +520,28 @@ watch(
 
                         <tbody>
                             <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
-                                <tr class="group cursor-pointer border-b transition-colors"
-                                    :class="[
-                                        row.getIsExpanded() ? 'bg-primary/10' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
-                                    ]"
-                                    @click="handleRowClick(row)($event)">
-                                    <td v-for="cell in row.getVisibleCells()"
-                                        :key="cell.id"
+                                <tr class="group cursor-pointer border-b transition-colors" :class="[
+                                    row.getIsExpanded() ? 'bg-primary/10' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
+                                ]" @click="handleRowClick(row)($event)">
+                                    <td v-for="cell in row.getVisibleCells()" :key="cell.id"
                                         class="px-3 py-2 align-top font-mono text-xs leading-normal overflow-hidden border-r border-muted/20"
                                         :class="[
                                             cell.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
-                                        ]"
-                                        :style="{
+                                        ]" :style="{
                                             width: `${cell.column.getSize()}px`,
                                             minWidth: `${cell.column.columnDef.minSize ?? defaultColumn.minSize}px`,
                                             maxWidth: `${cell.column.columnDef.maxSize ?? defaultColumn.maxSize}px`
                                         }">
-                                        <!-- Cell Content -->
                                         <div class="flex items-center gap-1 w-full overflow-hidden">
-                                            <!-- Severity Field Cell -->
                                             <span
                                                 v-if="cell.column.id === severityFieldName && getSeverityClasses(cell.getValue(), cell.column.id)"
                                                 :class="getSeverityClasses(cell.getValue(), cell.column.id)"
                                                 class="shrink-0 mx-1">
                                                 {{ formatCellValue(cell.getValue()).toUpperCase() }}
                                             </span>
-                                            <!-- Regular Cell Content -->
                                             <template v-else>
                                                 <div class="whitespace-nowrap overflow-hidden text-ellipsis w-full">
-                                                    <FlexRender
-                                                        :render="cell.column.columnDef.cell"
+                                                    <FlexRender :render="cell.column.columnDef.cell"
                                                         :props="cell.getContext()" />
                                                 </div>
                                             </template>
@@ -489,14 +549,10 @@ watch(
                                     </td>
                                 </tr>
 
-                                <!-- Expanded Row -->
                                 <tr v-if="row.getIsExpanded()">
                                     <td :colspan="row.getVisibleCells().length" class="p-0">
                                         <div class="p-3 bg-muted/30 border-y border-y-primary/40">
-                                            <JsonViewer
-                                                :value="row.original"
-                                                :expanded="false"
-                                                class="text-xs" />
+                                            <JsonViewer :value="row.original" :expanded="false" class="text-xs" />
                                         </div>
                                     </td>
                                 </tr>
@@ -586,5 +642,31 @@ watch(
 
 .table-fixed tbody tr:nth-child(even) {
     background-color: transparent;
+}
+
+/* Add cursor styling for drag handle */
+.cursor-grab {
+    cursor: grab;
+}
+
+.cursor-grabbing {
+    cursor: grabbing;
+}
+
+/* Add global style for body when dragging */
+.dragging-column {
+    cursor: grabbing !important;
+    /* Force grabbing cursor */
+}
+
+/* Optional: Style for the drag feedback (e.g., slightly transparent) */
+.group[draggable="true"]:active {
+    /* opacity: 0.7; */
+    /* Browser might provide its own feedback */
+}
+
+/* Style for drop indicator */
+.border-l-primary {
+    border-left-color: hsl(var(--primary)) !important;
 }
 </style>

@@ -5,6 +5,7 @@ import { useTeamsStore } from '@/stores/teams'
 import { QueryBuilder } from '@/utils/query-builder'
 import { getErrorMessage } from '@/api/types'
 import type { QueryBuildOptions } from '@/views/explore/types'
+import type { CalendarDateTime } from '@internationalized/date'
 
 export function useQueryExecution() {
   const exploreStore = useExploreStore()
@@ -17,25 +18,36 @@ export function useQueryExecution() {
   // Check if we can execute the query
   const canExecuteQuery = computed(() => {
     return exploreStore.sourceId > 0 &&
-      teamsStore.currentTeamId > 0 &&
+      teamsStore.currentTeamId !== null && teamsStore.currentTeamId > 0 &&
       sourcesStore.hasValidCurrentSource
   })
 
   // Check if query state is dirty (needs execution)
   const isDirty = computed(() => {
-    const currentQuery = exploreStore.activeMode === 'logchefql'
+    const currentMode = exploreStore.activeMode;
+    const currentQueryRaw = currentMode === 'logchefql'
       ? exploreStore.logchefqlCode
       : exploreStore.rawSql
+    const currentQuery = currentQueryRaw || '' // Ensure string for comparison
 
-    const currentTimeRange = JSON.stringify(exploreStore.timeRange)
+    const currentTimeRangeObj = exploreStore.timeRange;
+    const currentTimeRange = JSON.stringify(currentTimeRangeObj);
     const currentLimit = exploreStore.limit
     const lastState = exploreStore.lastExecutedState
 
-    if (!lastState) return true
+    if (!lastState) {
+      return true // Always dirty if no query has run yet
+    }
 
-    return currentTimeRange !== lastState.timeRange ||
-      currentLimit !== lastState.limit ||
-      currentQuery !== lastState.query
+    const timeRangeChanged = currentTimeRange !== lastState.timeRange;
+    const limitChanged = currentLimit !== lastState.limit;
+    // Ensure lastState.query is treated as a string for comparison (using explicit typing and ternary)
+    const lastQuery: string = lastState.query !== undefined ? lastState.query : '';
+    const queryChanged = currentQuery !== lastQuery;
+
+    const dirtyResult = timeRangeChanged || limitChanged || queryChanged;
+
+    return dirtyResult;
   })
 
   // Execute query with proper error handling
@@ -47,21 +59,33 @@ export function useQueryExecution() {
     const mode = exploreStore.activeMode
     const query = mode === 'logchefql' ? exploreStore.logchefqlCode : exploreStore.rawSql
 
-    if (!query?.trim()) {
+    if (mode === 'sql' && !query?.trim()) {
       throw new Error(`Cannot execute empty ${mode} query`)
     }
 
     let sqlToExecute: string
     if (mode === 'sql') {
-      sqlToExecute = query
+      // Ensure query is a string, default to empty if undefined
+      sqlToExecute = query || ''
     } else {
+      const startDateTime = exploreStore.timeRange!.start as CalendarDateTime
+      const endDateTime = exploreStore.timeRange!.end as CalendarDateTime
+
+      // Explicitly handle potential undefined for tsField
+      let effectiveTsField: string;
+      if (sourcesStore.currentSourceDetails?._meta_ts_field) {
+        effectiveTsField = sourcesStore.currentSourceDetails._meta_ts_field;
+      } else {
+        effectiveTsField = 'timestamp';
+      }
+
       const buildOptions: QueryBuildOptions = {
         tableName: sourcesStore.getCurrentSourceTableName || '',
-        tsField: sourcesStore.currentSourceDetails?._meta_ts_field || 'timestamp',
-        startDateTime: exploreStore.timeRange!.start,
-        endDateTime: exploreStore.timeRange!.end,
+        tsField: effectiveTsField,
+        startDateTime: startDateTime,
+        endDateTime: endDateTime,
         limit: exploreStore.limit,
-        logchefqlQuery: query
+        logchefqlQuery: query || ''
       }
 
       const buildResult = QueryBuilder.buildSqlFromLogchefQL(buildOptions)
@@ -75,7 +99,7 @@ export function useQueryExecution() {
     exploreStore.setLastExecutedState({
       timeRange: JSON.stringify(exploreStore.timeRange),
       limit: exploreStore.limit,
-      query
+      query: query || ''
     })
 
     return await exploreStore.executeQuery(sqlToExecute)
