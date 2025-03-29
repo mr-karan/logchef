@@ -353,6 +353,14 @@ const saveDescription = 'Save your current query configuration for future use.'
             </div>
           </div>
         </div>
+        
+        <!-- Query Content Preview -->
+        <div class="border rounded-md p-3">
+          <div class="text-sm font-medium mb-2">
+            {{ exploreStore.activeMode === 'logchefql' ? 'LogchefQL' : 'SQL' }} Query
+          </div>
+          <pre class="text-xs bg-muted p-2 rounded overflow-auto max-h-[120px] whitespace-pre-wrap break-all">{{ exploreStore.activeMode === 'logchefql' ? exploreStore.logchefqlCode : exploreStore.rawSql }}</pre>
+        </div>
 
         <!-- Query Name -->
         <div class="grid gap-2">
