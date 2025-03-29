@@ -259,9 +259,20 @@ export function useSavedQueries() {
         exploreStore.setRawSql(queryToLoad)
       }
 
-      // Optional: Set other parameters from saved query
+      // Set limit if available
       if (content.limit) exploreStore.setLimit(content.limit)
-      if (content.timeRange) exploreStore.setTimeRange(content.timeRange)
+      
+      // Only set timeRange if it exists and contains valid start/end timestamps
+      if (content.timeRange && 
+          content.timeRange.absolute && 
+          content.timeRange.absolute.start && 
+          content.timeRange.absolute.end) {
+        console.log("Setting time range from saved query:", content.timeRange);
+        exploreStore.setTimeRange(content.timeRange)
+      } else {
+        console.log("Saved query has no valid time range, keeping current range");
+        // Keep existing time range from the store
+      }
 
       toast({
         title: 'Success',
