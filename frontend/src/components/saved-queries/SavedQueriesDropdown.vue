@@ -16,7 +16,8 @@ import { useTeamsStore } from '@/stores/teams';
 import { useToast } from '@/components/ui/toast';
 import { TOAST_DURATION } from '@/lib/constants';
 import { getErrorMessage } from '@/api/types';
-import { savedQueriesApi, type SavedTeamQuery } from '@/api/savedQueries';
+import { type SavedTeamQuery } from '@/api/savedQueries';
+import { useSavedQueriesStore } from '@/stores/savedQueries';
 
 const props = defineProps<{
   selectedTeamId?: number;
