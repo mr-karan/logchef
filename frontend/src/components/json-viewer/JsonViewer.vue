@@ -39,6 +39,17 @@ function formatJSON(data: any): string {
     }
 }
 
+// Prevent editing while allowing selection/copy shortcuts
+function handleKeydown(event: KeyboardEvent) {
+    // Allow meta keys (Cmd/Ctrl) for copy/paste/select all etc.
+    if (event.metaKey || event.ctrlKey) {
+        return true
+    }
+    // Prevent all other key presses
+    event.preventDefault()
+    return false
+}
+
 // Handle copy to clipboard with toast notification
 async function copyToClipboard() {
     const text = JSON.stringify(props.value, null, 2)
