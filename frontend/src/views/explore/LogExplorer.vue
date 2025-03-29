@@ -26,7 +26,7 @@ import { useExploreStore } from '@/stores/explore'
 import { useTeamsStore } from '@/stores/teams'
 import { useSourcesStore } from '@/stores/sources'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
-import { now, getLocalTimeZone } from '@internationalized/date'
+import { now, getLocalTimeZone, type CalendarDateTime } from '@internationalized/date'
 import { createColumns } from './table/columns'
 import DataTable from './table/data-table.vue'
 import { formatSourceName } from '@/utils/format'
@@ -42,6 +42,12 @@ import { useQueryExecution } from '@/composables/useQueryExecution'
 import { useSourceTeamManagement } from '@/composables/useSourceTeamManagement'
 import { useQueryMode } from '@/composables/useQueryMode'
 import { useSavedQueries } from '@/composables/useSavedQueries'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 // Router and stores
 const router = useRouter()
@@ -103,7 +109,7 @@ const showNoTeamsState = computed(() => !isInitializing.value && (!availableTeam
 const showNoSourcesState = computed(() =>
   !isInitializing.value &&
   !showNoTeamsState.value &&
-  currentTeamId.value > 0 &&
+  currentTeamId.value !== null && currentTeamId.value > 0 &&
   (!availableSources.value || availableSources.value.length === 0)
 )
 
@@ -226,11 +232,12 @@ watch(
           }, 50);
         } else {
           console.warn(`Source ${newSourceId} not found in current team's sources`);
-          sourceDetails.value = null;
+          // Do not assign directly to sourceDetails. It should update reactively when sourceId changes.
+          // sourceDetails.value = null;
         }
       } else if (newSourceId === 0) {
-        // Clear source details when source is reset
-        sourceDetails.value = null;
+        // Clear source details when source is reset - Handled reactively by sourceDetails computed/watch
+        // sourceDetails.value = null;
       }
     }
   }
@@ -243,13 +250,14 @@ watch(
     if (newTeamId !== oldTeamId && newTeamId) {
       console.log(`Team changed from ${oldTeamId} to ${newTeamId}, updating sources`)
 
-      // Load sources for the new team
-      const sourcesResult = await sourcesStore.loadTeamSources(newTeamId, true)
+      // Load sources for the new team (removed second argument)
+      const sourcesResult = await sourcesStore.loadTeamSources(newTeamId)
 
       // If no sources or sources failed to load, clear source selection
       if (!sourcesResult.success || !sourcesResult.data || sourcesResult.data.length === 0) {
         exploreStore.setSource(0)
-        sourceDetails.value = null
+        // Do not assign directly to sourceDetails. It should update reactively when sourceId changes to 0.
+        // sourceDetails.value = null
       } else {
         // Check if current source is valid for the new team
         const currentSourceExists = sourcesStore.teamSources.some(
@@ -311,8 +319,11 @@ watch(
 
     if (parsedQuery) {
       try {
+        // Assert CalendarDateTime type
+        const startDateTime = newTimeRange.start as CalendarDateTime
+        const endDateTime = newTimeRange.end as CalendarDateTime
         // Apply the new time range to the parsed AST
-        const updatedAst = SQLParser.applyTimeRange(parsedQuery, tsField, newTimeRange.start, newTimeRange.end);
+        const updatedAst = SQLParser.applyTimeRange(parsedQuery, tsField, startDateTime, endDateTime);
         const newSql = SQLParser.toSQL(updatedAst);
 
         // Update the store's rawSql - QueryEditor will react to this change
@@ -337,7 +348,7 @@ const copyUrlToClipboard = () => {
     toast({
       title: "URL Copied",
       description: "The shareable link has been copied to your clipboard.",
-      duration: TOAST_DURATION.SHORT
+      duration: TOAST_DURATION.INFO // Changed from SHORT to INFO (assuming INFO exists)
     });
   } catch (error) {
     console.error("Failed to copy URL: ", error);
@@ -369,6 +380,16 @@ onMounted(async () => {
     });
   }
 });
+
+// --- Event Handlers for QueryEditor --- START
+const updateLogchefqlValue = (newValue: string) => {
+  currentLogchefQuery.value = newValue;
+};
+
+const updateSqlValue = (newValue: string) => {
+  currentSqlQuery.value = newValue;
+};
+// --- Event Handlers for QueryEditor --- END
 
 onBeforeUnmount(() => {
   if (import.meta.env.MODE !== 'production') {
@@ -430,7 +451,7 @@ onBeforeUnmount(() => {
     <div v-if="urlError"
       class="absolute top-0 left-0 right-0 bg-destructive/15 text-destructive px-4 py-2 z-10 flex items-center justify-between">
       <span class="text-sm">{{ urlError }}</span>
-      <Button variant="ghost" size="sm" @click="initializationError = null" class="h-7 px-2">Dismiss</Button>
+      <Button variant="ghost" size="sm" @click="urlError = null" class="h-7 px-2">Dismiss</Button>
     </div>
 
     <!-- Filter Bar -->
@@ -494,10 +515,19 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Share Button -->
-      <Button variant="outline" size="sm" class="h-8 ml-2" @click="copyUrlToClipboard" v-tooltip="'Copy shareable link'">
-        <Share2 class="h-4 w-4 mr-1.5" />
-        Share
-      </Button>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button variant="outline" size="sm" class="h-8 ml-2" @click="copyUrlToClipboard">
+              <Share2 class="h-4 w-4 mr-1.5" />
+              Share
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Copy shareable link</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </div>
 
     <!-- Main Content Area -->
@@ -513,12 +543,12 @@ onBeforeUnmount(() => {
                 :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
                 :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
                 :logchefqlValue="currentLogchefQuery" :sqlValue="currentSqlQuery"
-                @update:logchefqlValue="currentLogchefQuery = $event" @update:sqlValue="currentSqlQuery = $event"
+                @update:logchefqlValue="updateLogchefqlValue" @update:sqlValue="updateSqlValue"
                 :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter LogchefQL query...' : 'Enter SQL query...'"
                 :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
                 :showFieldsPanel="showFieldsPanel" @change="handleQueryChange" @submit="triggerQueryExecution"
                 @update:activeMode="handleModeChange" @toggle-fields="showFieldsPanel = !showFieldsPanel"
-                :teamId="currentTeamId" :useCurrentTeam="true" @select-saved-query="loadSavedQuery"
+                :teamId="currentTeamId ?? 0" :useCurrentTeam="true" @select-saved-query="loadSavedQuery"
                 @save-query="handleSaveQueryClick" class="border-0 border-b" />
             </div>
           </template>
@@ -558,13 +588,10 @@ onBeforeUnmount(() => {
           <!-- Query Controls -->
           <div class="mt-3 flex items-center justify-between border-t pt-3"
             v-if="currentSourceId && hasValidSource && exploreStore.timeRange">
-            <Button variant="default"
-              class="h-9 px-4 flex items-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
-              :class="{
-                'opacity-90': !isDirty && !isExecutingQuery,
-                'bg-emerald-600 hover:bg-emerald-700': isDirty && !isExecutingQuery,
-                'bg-sky-500 hover:bg-sky-600': isExecutingQuery
-              }" :disabled="isExecutingQuery || !canExecuteQuery" @click="triggerQueryExecution">
+            <Button variant="default" class="h-9 px-4 flex items-center gap-2 shadow-sm" :class="{
+              'bg-amber-500 hover:bg-amber-600 text-amber-foreground': isDirty && !isExecutingQuery,
+              'bg-sky-500 hover:bg-sky-600 text-sky-foreground': isExecutingQuery
+            }" :disabled="isExecutingQuery || !canExecuteQuery" @click="triggerQueryExecution">
               <Play v-if="!isExecutingQuery" class="h-4 w-4" />
               <RefreshCw v-else class="h-4 w-4 animate-spin" />
               <span>{{ isExecutingQuery ? 'Running Query...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>
@@ -611,7 +638,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2)
-                    }}</strong>s
+                  }}</strong>s
                 </span>
               </span>
               <span v-if="exploreStore.queryStats?.bytes_read != null" class="flex items-center">
@@ -623,7 +650,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
-                    }}</strong> MB
+                  }}</strong> MB
                 </span>
               </span>
             </div>
@@ -838,5 +865,26 @@ onBeforeUnmount(() => {
 :deep(.severity-debug) {
   background-color: hsl(var(--muted)/0.5);
   color: hsl(var(--muted-foreground));
+}
+
+/* Subtle pulse animation for dirty button state */
+@keyframes subtle-pulse {
+
+  0%,
+  100% {
+    /* Assuming primary-foreground is light text on dark primary button */
+    /* Use a semi-transparent version of the primary button's text color for the glow */
+    /* Adjust RGBA values if your theme differs */
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.2);
+  }
+
+  50% {
+    box-shadow: 0 0 0 4px rgba(255, 255, 255, 0);
+  }
+}
+
+.animate-subtle-pulse {
+  /* Add animation to the button when dirty */
+  animation: subtle-pulse 1.5s infinite ease-in-out;
 }
 </style>
