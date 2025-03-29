@@ -88,10 +88,10 @@ export function createColumns(
       maxSize: widthConfig.maxWidth,
 
       // Accessor function for data
-      accessorFn: (row) => row[col.name],
+      accessorFn: (row: Record<string, any>) => row[col.name],
 
       // Header configuration with sorting
-      header: ({ column }) => {
+      header: ({ column }: { column: Column<Record<string, any>, unknown> }) => {
         return h(
           Button,
           {
@@ -107,8 +107,8 @@ export function createColumns(
       },
 
       // Cell configuration
-      cell: ({ row, column }) => {
-        const value = row.getValue(column.id);
+      cell: ({ row, column }: { row: Row<Record<string, any>>, column: Column<Record<string, any>, unknown> }) => {
+        const value = row.getValue<unknown>(column.id); // Use getValue<T> for type inference
 
         // Handle null/undefined values
         if (value === null || value === undefined) {
