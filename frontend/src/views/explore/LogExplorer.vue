@@ -598,9 +598,9 @@ onBeforeUnmount(() => {
             </Button>
 
             <!-- Query Stats Preview -->
-            <div class="text-xs text-muted-foreground flex items-center gap-3" v-if="exploreStore.lastExecutedState">
-              <span>Last run: {{ new Date().toLocaleTimeString() }}</span>
-              <span v-if="exploreStore.limit">Limit: {{ exploreStore.limit.toLocaleString() }}</span>
+            <div class="text-xs text-muted-foreground flex items-center gap-3"
+              v-if="exploreStore.lastExecutionTimestamp">
+              <span>Last successful run: {{ new Date(exploreStore.lastExecutionTimestamp).toLocaleTimeString() }}</span>
             </div>
           </div>
 
@@ -652,11 +652,6 @@ onBeforeUnmount(() => {
                   <strong class="font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
                   }}</strong> MB
                 </span>
-              </span>
-            </div>
-            <div>
-              <span class="text-xs text-muted-foreground/70">
-                {{ new Date().toLocaleString() }}
               </span>
             </div>
           </div>

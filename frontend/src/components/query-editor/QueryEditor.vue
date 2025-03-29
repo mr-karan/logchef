@@ -24,14 +24,10 @@
 
       <div class="flex items-center gap-2">
         <!-- Saved Queries Dropdown (Integrated from LogExplorer) -->
-        <SavedQueriesDropdown 
-          :source-id="props.sourceId" 
-          :team-id="props.teamId" 
-          :use-current-team="props.useCurrentTeam"
-          @select="(query) => $emit('select-saved-query', query)" 
-          @save="$emit('save-query')"
-          class="h-8" />
-      
+        <SavedQueriesDropdown :source-id="props.sourceId" :team-id="props.teamId"
+          :use-current-team="props.useCurrentTeam" @select="(query) => $emit('select-saved-query', query)"
+          @save="$emit('save-query')" class="h-8" />
+
         <!-- Table name indicator -->
         <div v-if="props.activeMode === 'clickhouse-sql'" class="text-xs text-muted-foreground mr-2">
           <template v-if="props.tableName">
@@ -91,8 +87,8 @@
       'is-empty': isEditorEmpty
     }" :style="{ height: `${editorHeight}px` }" :data-placeholder="currentPlaceholder">
       <!-- Monaco Editor Component -->
-      <vue-monaco-editor :key="props.activeMode" v-model:value="editorContent" :theme="theme"
-        :language="props.activeMode" :options="monacoOptions" @mount="handleMount" @update:value="handleEditorChange"
+      <vue-monaco-editor v-model:value="editorContent" :theme="theme" :language="props.activeMode"
+        :options="monacoOptions" @mount="handleMount" @update:value="handleEditorChange"
         class="h-full w-full absolute inset-0" />
     </div>
 
@@ -288,7 +284,7 @@ watchEffect(() => {
     registerCompletionProvider(); // Update syntax highlighting/completion
 
     // Refocus editor after mode change for better UX
-    focusEditor();
+    focusEditor(true);
   }
 });
 
