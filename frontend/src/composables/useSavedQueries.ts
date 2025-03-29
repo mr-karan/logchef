@@ -66,21 +66,43 @@ export function useSavedQueries() {
   // Handle actual saving
   async function handleSaveQuery(formData: SavedQueryFormData) {
     try {
-      const response = await savedQueriesStore.createQuery(formData.team_id, {
-        team_id: formData.team_id,
-        name: formData.name,
-        description: formData.description,
-        source_id: formData.source_id,
-        query_type: formData.query_type,
-        query_content: formData.query_content
-      })
+      let response;
+      
+      // Determine if this is an edit or a new query
+      if (editingQuery.value) {
+        // Update existing query
+        response = await savedQueriesStore.updateQuery(
+          formData.team_id,
+          editingQuery.value.id.toString(),
+          {
+            name: formData.name,
+            description: formData.description,
+            source_id: formData.source_id,
+            query_type: formData.query_type,
+            query_content: formData.query_content
+          }
+        )
+        console.log('Updated query:', response)
+      } else {
+        // Create new query
+        response = await savedQueriesStore.createQuery(formData.team_id, {
+          team_id: formData.team_id,
+          name: formData.name,
+          description: formData.description,
+          source_id: formData.source_id,
+          query_type: formData.query_type,
+          query_content: formData.query_content
+        })
+        console.log('Created new query:', response)
+      }
 
       if (response.success) {
         showSaveQueryModal.value = false
+        editingQuery.value = null  // Clear editing state
         await savedQueriesStore.fetchTeamQueries(formData.team_id)
         toast({
           title: 'Success',
-          description: 'Query saved successfully.',
+          description: editingQuery.value ? 'Query updated successfully.' : 'Query saved successfully.',
           duration: TOAST_DURATION.SUCCESS
         })
       } else {
@@ -211,8 +233,20 @@ export function useSavedQueries() {
 
   // Handle edit query
   function editQuery(query: SavedTeamQuery) {
-    editingQuery.value = query
-    showSaveQueryModal.value = true
+    try {
+      // Deep clone the query to avoid reference issues
+      editingQuery.value = JSON.parse(JSON.stringify(query))
+      console.log('Editing query:', editingQuery.value)
+      showSaveQueryModal.value = true
+    } catch (error) {
+      console.error('Error preparing query for edit:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to prepare query for editing. Please try again.',
+        variant: 'destructive',
+        duration: TOAST_DURATION.ERROR,
+      })
+    }
   }
 
   // Handle delete query
