@@ -1,17 +1,48 @@
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useExploreStore } from '@/stores/explore'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { getErrorMessage } from '@/api/types'
 import type { SavedQueryFormData } from '@/views/explore/types'
+import type { SavedTeamQuery } from '@/api/savedQueries'
 
 export function useSavedQueries() {
+  const router = useRouter()
   const exploreStore = useExploreStore()
   const savedQueriesStore = useSavedQueriesStore()
   const { toast } = useToast()
 
   const showSaveQueryModal = ref(false)
+  const editingQuery = ref<SavedTeamQuery | null>(null)
+  const isLoading = ref(false)
+  const queries = ref<SavedTeamQuery[]>([])
+  const searchQuery = ref('')
+
+  // Computed for filtered queries based on search
+  const filteredQueries = computed(() => {
+    if (!searchQuery.value.trim()) {
+      return queries.value
+    }
+
+    const search = searchQuery.value.toLowerCase()
+    return queries.value.filter(query =>
+      query.name.toLowerCase().includes(search) ||
+      (query.description && query.description.toLowerCase().includes(search))
+    )
+  })
+
+  // Has queries computed property
+  const hasQueries = computed(() => filteredQueries.value.length > 0)
+
+  // Total query count
+  const totalQueryCount = computed(() => queries.value.length)
+
+  // Clear search function
+  function clearSearch() {
+    searchQuery.value = ''
+  }
 
   // Save query modal trigger
   function handleSaveQueryClick() {
@@ -121,10 +152,164 @@ export function useSavedQueries() {
     }
   }
 
+  // Generate URL for a saved query
+  function getQueryUrl(query: SavedTeamQuery): string {
+    try {
+      // Get query type from the saved query
+      const queryType = query.query_type || 'sql'
+
+      // Parse the query content
+      const queryContent = JSON.parse(query.query_content)
+
+      // Build the URL with the appropriate parameters
+      let url = `/logs/explore?team=${query.team_id}`
+
+      // Add source ID if available
+      if (query.source_id) {
+        url += `&source=${query.source_id}`
+      }
+
+      // Add limit if available
+      if (queryContent.limit) {
+        url += `&limit=${queryContent.limit}`
+      }
+
+      // Add time range if available
+      if (queryContent.timeRange?.absolute) {
+        url += `&start_time=${queryContent.timeRange.absolute.start}`
+        url += `&end_time=${queryContent.timeRange.absolute.end}`
+      }
+
+      // Add mode parameter based on query type
+      url += `&mode=${queryType === 'logchefql' ? 'logchefql' : 'sql'}`
+
+      // Add the query content (actual query text)
+      if (queryContent.content) {
+        url += `&q=${encodeURIComponent(queryContent.content)}`
+      }
+
+      return url
+    } catch (error) {
+      console.error('Error generating query URL:', error)
+      // Fallback URL without query content
+      return `/logs/explore?team=${query.team_id}&source=${query.source_id}&mode=${query.query_type}`
+    }
+  }
+
+  // Handle opening query in explorer
+  function openQuery(query: SavedTeamQuery) {
+    const url = getQueryUrl(query)
+    router.push(url)
+  }
+
+  // Handle edit query
+  function editQuery(query: SavedTeamQuery) {
+    editingQuery.value = query
+    showSaveQueryModal.value = true
+  }
+
+  // Handle delete query
+  async function deleteQuery(query: SavedTeamQuery) {
+    if (window.confirm(`Are you sure you want to delete "${query.name}"? This action cannot be undone.`)) {
+      try {
+        await savedQueriesStore.deleteQuery(query.team_id, query.id.toString())
+
+        // Refresh the queries list - assuming loadSourceQueries will be called externally
+        toast({
+          title: 'Success',
+          description: 'Query deleted successfully',
+          duration: TOAST_DURATION.SUCCESS,
+        })
+        
+        return { success: true }
+      } catch (error) {
+        toast({
+          title: 'Error',
+          description: getErrorMessage(error),
+          variant: 'destructive',
+          duration: TOAST_DURATION.ERROR,
+        })
+        return { success: false, error }
+      }
+    }
+    return { success: false, canceled: true }
+  }
+
+  // Load queries for a team and source
+  async function loadSourceQueries(teamId: number, sourceId: number) {
+    try {
+      isLoading.value = true
+      
+      // Reset search when loading new queries
+      searchQuery.value = ''
+
+      if (!teamId || !sourceId) {
+        console.warn("No team or source ID provided for loading queries")
+        queries.value = []
+        return { success: false, error: 'No team or source ID provided' }
+      }
+
+      const result = await savedQueriesStore.fetchTeamSourceQueries(teamId, sourceId)
+
+      if (result.success) {
+        queries.value = result.data ?? []
+        return { success: true, data: result.data }
+      } else {
+        queries.value = []
+        if (result.error) {
+          toast({
+            title: 'Error',
+            description: result.error.message,
+            variant: 'destructive',
+            duration: TOAST_DURATION.ERROR,
+          })
+        }
+        return { success: false, error: result.error }
+      }
+    } catch (error) {
+      queries.value = []
+      toast({
+        title: 'Error',
+        description: getErrorMessage(error),
+        variant: 'destructive',
+        duration: TOAST_DURATION.ERROR,
+      })
+      return { success: false, error }
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  // Create a new query in the explorer
+  function createNewQuery(sourceId?: number) {
+    if (sourceId) {
+      router.push(`/logs/explore?source=${sourceId}`)
+    } else {
+      router.push('/logs/explore')
+    }
+  }
+
   return {
+    // State
     showSaveQueryModal,
+    editingQuery,
+    isLoading,
+    queries,
+    filteredQueries,
+    hasQueries,
+    totalQueryCount,
+    searchQuery,
+    
+    // Functions
     handleSaveQueryClick,
     handleSaveQuery,
-    loadSavedQuery
+    loadSavedQuery,
+    loadSourceQueries,
+    getQueryUrl,
+    openQuery,
+    editQuery,
+    deleteQuery,
+    createNewQuery,
+    clearSearch
   }
 }
