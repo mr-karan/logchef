@@ -12,7 +12,7 @@ import type {
   QueryErrorResponse,
   QuerySuccessResponse,
 } from "@/api/explore";
-import type { DateValue } from "@internationalized/date";
+import type { DateValue, CalendarDateTime } from "@internationalized/date";
 import { computed } from "vue";
 import { useSourcesStore } from "./sources";
 import { useTeamsStore } from "@/stores/teams";
@@ -89,6 +89,8 @@ export interface ExploreState {
     limit: number;
     query: string;
   };
+  // Add field for last successful execution timestamp
+  lastExecutionTimestamp?: number | null;
 }
 
 const DEFAULT_QUERY_STATS: QueryStats = {
@@ -110,6 +112,7 @@ export const useExploreStore = defineStore("explore", () => {
     rawSql: "",
     logchefqlCode: undefined,
     activeMode: "logchefql",
+    lastExecutionTimestamp: null,
   });
 
   // Getters
@@ -224,228 +227,160 @@ export const useExploreStore = defineStore("explore", () => {
       rawSql: "",
       logchefqlCode: state.data.value.logchefqlCode,
       activeMode: state.data.value.activeMode,
-      lastExecutedState: undefined, // Reset last executed state
+      lastExecutedState: undefined,
+      lastExecutionTimestamp: null,
     };
   }
 
   // Main query execution
   async function executeQuery(finalSql?: string) {
-    return await state.withLoading('executeQuery', async () => {
-      console.log('Explore store: Starting query execution:', {
-        currentTimeRange: JSON.stringify(state.data.value.timeRange),
-        currentLimit: state.data.value.limit,
-        currentQuery: state.data.value.activeMode === 'logchefql'
-          ? state.data.value.logchefqlCode
-          : state.data.value.rawSql,
-        lastExecutedState: state.data.value.lastExecutedState
-      });
+    // Reset timestamp at the start of execution attempt
+    state.data.value.lastExecutionTimestamp = null;
+    const operationKey = 'executeQuery'; // Define operation key for errors
+    return await state.withLoading(operationKey, async () => {
+      // Get current team ID
+      const currentTeamId = useTeamsStore().currentTeamId;
+      if (!currentTeamId) {
+        // Provide operationKey to handleError
+        return state.handleError({ status: "error", message: "No team selected", error_type: "ValidationError" }, operationKey);
+      }
 
-      // If finalSql is not provided, use the current mode to generate it
-      if (!finalSql) {
-        if (!canExecuteQuery.value) {
-          return state.handleError(
-            {
-              status: "error",
-              message: "Cannot execute query: Invalid source or time range",
-              error_type: "ValidationError"
-            } as APIErrorResponse,
-            'executeQuery'
-          );
-        }
+      let sqlToExecute: string;
 
-        // Always get fresh values from the store state
-        const currentMode = state.data.value.activeMode;
+      // --- Logic to determine sqlToExecute (largely restored) ---
+      if (finalSql) {
+        sqlToExecute = finalSql;
+      } else {
+        const mode = state.data.value.activeMode;
         const logchefqlQuery = state.data.value.logchefqlCode || "";
         const rawSql = state.data.value.rawSql || "";
 
-        // Generate final SQL based on current mode
         try {
-          if (currentMode === 'logchefql') {
-            // Get the source details for table name
+          if (mode === 'logchefql') {
             const sourcesStore = useSourcesStore();
-            const currentSource = sourcesStore.teamSources.find(
-              (s) => s.id === state.data.value.sourceId
-            ) || sourcesStore.sources.find(
-              (s) => s.id === state.data.value.sourceId
-            );
+            const timeRange = state.data.value.timeRange;
+            const tsField = sourcesStore.currentSourceDetails?._meta_ts_field || 'timestamp';
+            const tableName = sourcesStore.getCurrentSourceTableName || '';
 
-            if (!currentSource) {
-              throw new Error(`Source with ID ${state.data.value.sourceId} not found.`);
+            if (!timeRange?.start || !timeRange?.end) {
+              return state.handleError({ status: "error", message: "Invalid time range selected", error_type: "ValidationError" }, operationKey);
+            }
+            if (!tableName) {
+              return state.handleError({ status: "error", message: "Could not determine table name for source.", error_type: "ConfigurationError" }, operationKey);
             }
 
-            const tableName = getFormattedTableName(currentSource);
-            const timeField = currentSource._meta_ts_field || "timestamp";
-            const timestamps = getTimestamps();
-
-            const result = QueryBuilder.buildSqlFromLogchefQL({
-              tableName,
-              tsField: timeField,
-              startDateTime: state.data.value.timeRange?.start,
-              endDateTime: state.data.value.timeRange?.end,
+            // Assuming QueryBuildOptions is NOT exported, construct options directly if needed by QueryBuilder
+            const buildResult = QueryBuilder.buildSqlFromLogchefQL({
+              tableName: tableName,
+              tsField: tsField,
+              startDateTime: timeRange.start as CalendarDateTime,
+              endDateTime: timeRange.end as CalendarDateTime,
               limit: state.data.value.limit,
-              logchefqlQuery
+              logchefqlQuery: logchefqlQuery
             });
 
-            if (!result.success) throw new Error(result.error || "Query conversion failed");
-            finalSql = result.sql;
-          } else {
-            // In SQL mode, use the raw SQL directly
-            if (!rawSql.trim()) {
-              // If empty, generate default SQL
-              const sourcesStore = useSourcesStore();
-              const currentSource = sourcesStore.teamSources.find(
-                (s) => s.id === state.data.value.sourceId
-              ) || sourcesStore.sources.find(
-                (s) => s.id === state.data.value.sourceId
-              );
-
-              if (!currentSource) {
-                throw new Error(`Source with ID ${state.data.value.sourceId} not found.`);
-              }
-
-              const tableName = getFormattedTableName(currentSource);
-              const timeField = currentSource._meta_ts_field || "timestamp";
-
-              const result = QueryBuilder.getDefaultSQLQuery({
-                tableName,
-                tsField: timeField,
-                startDateTime: state.data.value.timeRange?.start,
-                endDateTime: state.data.value.timeRange?.end,
-                limit: state.data.value.limit
-              });
-
-              if (!result.success) throw new Error(result.error || "Failed to generate default SQL");
-              finalSql = result.sql;
-            } else {
-              finalSql = rawSql;
+            if (!buildResult.success) {
+                return state.handleError({ status: "error", message: buildResult.error || 'Failed to build SQL from LogchefQL', error_type: "BuildError" }, operationKey);
+            }
+            sqlToExecute = buildResult.sql;
+          } else { // SQL mode
+            sqlToExecute = rawSql;
+            // Basic validation for SQL mode query presence
+            if (!sqlToExecute.trim()) {
+                return state.handleError({ status: "error", message: `Cannot execute empty SQL query`, error_type: "ValidationError" }, operationKey);
             }
           }
         } catch (error: any) {
-          return state.handleError(
-            {
-              status: "error",
-              message: error.message || "Failed to prepare query",
-              error_type: "QueryError"
-            } as APIErrorResponse,
-            'executeQuery'
-          );
+            return state.handleError({ status: "error", message: error.message || "Failed to prepare query", error_type: "QueryError" }, operationKey);
         }
       }
-
-      // Validate the finalSql
-      if (!finalSql || !finalSql.trim()) {
-        return state.handleError(
-          {
-            status: "error",
-            message: "Cannot execute an empty query.",
-            error_type: "ValidationError"
-          } as APIErrorResponse,
-          'executeQuery'
-        );
-      }
-
-      // Reset state before executing query
-      state.data.value.logs = [];
-      state.data.value.queryStats = DEFAULT_QUERY_STATS;
-      state.data.value.columns = [];
-      state.data.value.queryId = null;
-      state.data.value.error = null;
+      // --- End logic to determine sqlToExecute ---
 
       // Store current state before execution
       const executionState = {
         timeRange: JSON.stringify(state.data.value.timeRange),
         limit: state.data.value.limit,
-        query: state.data.value.activeMode === 'logchefql'
-          ? state.data.value.logchefqlCode
-          : state.data.value.rawSql
+        query: (state.data.value.activeMode === 'logchefql' ? state.data.value.logchefqlCode : state.data.value.rawSql) || ''
       };
       console.log('Explore store: Setting last executed state:', executionState);
       state.data.value.lastExecutedState = executionState;
 
+      // Reset previous results
+      state.data.value.logs = [];
+      state.data.value.queryStats = DEFAULT_QUERY_STATS;
+      state.data.value.columns = [];
+      state.data.value.queryId = null;
+
+      // Prepare parameters for the correct API call (getLogs)
+      const timestamps = getTimestamps();
+      const params: QueryParams = {
+          raw_sql: sqlToExecute,
+          limit: state.data.value.limit,
+          start_timestamp: timestamps.start,
+          end_timestamp: timestamps.end,
+          query_type: state.data.value.activeMode
+      };
+
       // Use the centralized API calling mechanism from base store
-      return await state.callApi({
-        apiCall: async () => {
-          // Get time parameters
-          const timestamps = getTimestamps();
-
-          // Create API params
-          const params: QueryParams = {
-            raw_sql: finalSql,
-            limit: state.data.value.limit,
-            start_timestamp: timestamps.start,
-            end_timestamp: timestamps.end,
-            query_type: state.data.value.activeMode
-          };
-
-          console.log("Executing query with params:", params);
-
-          // Get the teams store
-          const teamsStore = useTeamsStore();
-          const currentTeamId = teamsStore.currentTeamId;
-
-          if (!currentTeamId) {
-            throw new Error(
-              "No team selected. Please select a team before executing a query."
-            );
-          }
-
-          // Execute the API call
-          return await exploreApi.getLogs(
-            state.data.value.sourceId,
-            params,
-            currentTeamId
-          );
-        },
-        // Provide success handler to update the state
-        onSuccess: (data: QuerySuccessResponse) => {
-          // Update state with results
-          state.data.value.logs = data.logs || [];
-          state.data.value.columns = data.columns || [];
-          state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
-
-          // Store query ID if available
-          if (data.params && "query_id" in data.params) {
-            state.data.value.queryId = data.params.query_id as string;
+      // This structure assumes callApi returns the API response directly or throws/handles errors
+      const response = await state.callApi({
+        apiCall: async () => exploreApi.getLogs(state.data.value.sourceId, params, currentTeamId),
+        // Modify onSuccess to handle potential null and use correct properties
+        onSuccess: (data: QuerySuccessResponse | null) => {
+          if (data) {
+              state.data.value.logs = data.logs || []; // Use data.logs
+              state.data.value.columns = data.columns || [];
+              state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
+              if (data.params && "query_id" in data.params) {
+                  state.data.value.queryId = data.params.query_id as string;
+              }
+              state.data.value.lastExecutionTimestamp = Date.now(); // Set timestamp on success
+          } else {
+              console.warn("Query successful but received null data.");
+              // Reset state even on null success data
+              state.data.value.logs = [];
+              state.data.value.columns = [];
+              state.data.value.queryStats = DEFAULT_QUERY_STATS;
+              state.data.value.queryId = null;
+              state.data.value.lastExecutionTimestamp = Date.now(); // Also set timestamp here
           }
         },
-        operationKey: 'executeQuery',
+        operationKey: operationKey,
       });
+
+      // IMPORTANT: Return structure expected by useQueryExecution
+      if (response.success) {
+          return { success: true, data: response.data };
+      } else {
+          // Assuming callApi handled the error state, return error structure
+          return { success: false, error: response.error };
+      }
     });
   }
 
   // Get log context
   async function getLogContext(sourceId: number, params: LogContextRequest) {
-    return await state.withLoading(`getLogContext-${sourceId}`, async () => {
+    const operationKey = `getLogContext-${sourceId}`;
+    return await state.withLoading(operationKey, async () => {
       if (!sourceId) {
         return state.handleError(
-          {
-            status: "error",
-            message: "Source ID is required for getting log context",
-            error_type: "ValidationError"
-          } as APIErrorResponse,
-          "getLogContext"
+          { status: "error", message: "Source ID is required", error_type: "ValidationError" },
+          operationKey
         );
       }
-
-      // Get the teams store
       const teamsStore = useTeamsStore();
       const currentTeamId = teamsStore.currentTeamId;
-
       if (!currentTeamId) {
         return state.handleError(
-          {
-            status: "error",
-            message: "No team selected. Please select a team before getting log context.",
-            error_type: "ValidationError"
-          } as APIErrorResponse,
-          "getLogContext"
+          { status: "error", message: "No team selected.", error_type: "ValidationError" },
+          operationKey
         );
       }
-
+      // Assuming callApi structure is similar
       return await state.callApi<LogContextResponse>({
         apiCall: () => exploreApi.getLogContext(sourceId, params, currentTeamId),
-        operationKey: `getLogContext-${sourceId}`,
-        showToast: false,
+        operationKey: operationKey,
+        showToast: false, // Typically don't toast for context fetches
       });
     });
   }
@@ -485,6 +420,7 @@ export const useExploreStore = defineStore("explore", () => {
     queryId: computed(() => state.data.value.queryId),
     stats: computed(() => state.data.value.stats),
     lastExecutedState: computed(() => state.data.value.lastExecutedState),
+    lastExecutionTimestamp: computed(() => state.data.value.lastExecutionTimestamp),
 
     // Loading state
     isLoading: state.isLoading,
