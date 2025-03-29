@@ -329,40 +329,7 @@ async function handleDeleteQuery(query: SavedTeamQuery) {
 }
 
 // Handle save query modal submission
-async function handleSaveQuery(formData: any) {
-  try {
-    if (editingQuery.value) {
-      await savedQueriesStore.updateQuery(
-        formData.team_id,
-        editingQuery.value.id.toString(),
-        {
-          name: formData.name,
-          description: formData.description,
-        }
-      );
-
-      // Refresh the source queries to update the UI
-      if (selectedSourceId.value) {
-        await fetchQueries();
-      }
-
-      toast({
-        title: 'Success',
-        description: 'Query updated successfully',
-        duration: TOAST_DURATION.SUCCESS,
-      });
-    }
-    showSaveQueryModal.value = false;
-    editingQuery.value = null;
-  } catch (error) {
-    toast({
-      title: 'Error',
-      description: getErrorMessage(error),
-      variant: 'destructive',
-      duration: TOAST_DURATION.ERROR,
-    });
-  }
-}
+// Now handled by the useSavedQueries composable
 
 // Get query type badge color
 function getQueryTypeBadgeVariant(type: string): "default" | "secondary" | "destructive" | "outline" {
@@ -563,6 +530,10 @@ function handleCreateNewQuery() {
                     <DropdownMenuItem @click="openQuery(query)">
                       <Eye class="mr-2 h-4 w-4" />
                       Open
+                    </DropdownMenuItem>
+                    <DropdownMenuItem @click="editQuery(query)">
+                      <Pencil class="mr-2 h-4 w-4" />
+                      Edit
                     </DropdownMenuItem>
                     <DropdownMenuItem @click="handleDeleteQuery(query)" class="text-destructive">
                       <Trash2 class="mr-2 h-4 w-4" />
