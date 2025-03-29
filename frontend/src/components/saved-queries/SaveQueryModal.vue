@@ -19,10 +19,13 @@ import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
 import { useExploreStore } from '@/stores/explore';
 import { useRoute } from 'vue-router';
+import { TOAST_DURATION } from '@/lib/constants';
+import { useToast } from '@/components/ui/toast';
 
 const props = defineProps<{
   isOpen: boolean;
-  initialData?: any;
+  initialData?: any; // For creating a new query
+  editData?: any;    // For editing an existing query
   queryContent?: string;
   isEditMode?: boolean;
 }>();
@@ -32,18 +35,22 @@ const route = useRoute();
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'save', data: any): void;
+  (e: 'update', queryId: string, data: any): void;
 }>();
 
 const savedQueriesStore = useSavedQueriesStore();
 const teamsStore = useTeamsStore();
 const sourcesStore = useSourcesStore();
 const exploreStore = useExploreStore();
+const { toast } = useToast();
 
 // Form state
-const name = ref(props.initialData?.name || '');
-const description = ref(props.initialData?.description || '');
+const name = ref('');
+const description = ref('');
 const saveTimestamp = ref(true);
 const isSubmitting = ref(false);
+const isEditing = computed(() => !!props.editData || (!!props.initialData && props.isEditMode));
+const queryId = ref('');
 
 // Get the current source ID
 const currentSourceId = computed(() => {
@@ -151,14 +158,30 @@ onMounted(async () => {
   }
 });
 
-// Watch for changes in initialData
-watch(() => props.initialData, (newData) => {
-  if (newData) {
-    name.value = newData.name || '';
-    description.value = newData.description || '';
+// Watch for changes in initialData or editData
+watch([() => props.initialData, () => props.editData], ([newInitialData, newEditData]) => {
+  if (newEditData) {
+    // Editing existing query takes precedence
+    name.value = newEditData.name || '';
+    description.value = newEditData.description || '';
+    queryId.value = newEditData.id?.toString() || '';
     
     try {
-      const content = JSON.parse(newData.query_content);
+      const content = JSON.parse(newEditData.query_content);
+      if (content.timeRange && content.timeRange.absolute) {
+        saveTimestamp.value = true;
+      }
+    } catch (e) {
+      console.error("Failed to parse query content from editData in watcher", e);
+    }
+  } else if (newInitialData) {
+    // Creating new query
+    name.value = newInitialData.name || '';
+    description.value = newInitialData.description || '';
+    queryId.value = '';
+    
+    try {
+      const content = JSON.parse(newInitialData.query_content);
       if (content.timeRange && content.timeRange.absolute) {
         saveTimestamp.value = true;
       }
@@ -327,7 +350,7 @@ async function handleSubmit(event: Event) {
       // Prepare the query content with the proper structure
       const preparedContent = prepareQueryContent(saveTimestamp.value);
 
-      // Create the payload
+      // Create the base payload
       const payload = {
         team_id: teamsStore.currentTeamId?.toString() || '',
         source_id: currentSourceId.value,
@@ -338,10 +361,23 @@ async function handleSubmit(event: Event) {
         save_timestamp: saveTimestamp.value
       };
 
-      emit('save', payload);
+      if (isEditing.value && queryId.value) {
+        // We're updating an existing query
+        console.log(`Updating existing query ID: ${queryId.value}`);
+        emit('update', queryId.value, payload);
+      } else {
+        // We're creating a new query
+        console.log('Creating new query');
+        emit('save', payload);
+      }
     } catch (contentError) {
       console.error('Error preparing query content:', contentError);
-      // Close the modal and show error in parent component
+      toast({
+        title: 'Error',
+        description: 'Failed to prepare query content',
+        variant: 'destructive',
+        duration: TOAST_DURATION.ERROR
+      });
       emit('close');
       throw contentError;
     }
@@ -368,7 +404,7 @@ const saveDescription = 'Save your current query configuration for future use.'
     <DialogContent class="sm:max-w-[475px]">
       <DialogHeader>
         <DialogTitle>
-          <span v-if="props.initialData || props.isEditMode || !!route.query.query_id" class="flex items-center">
+          <span v-if="isEditing" class="flex items-center">
             <Pencil class="h-4 w-4 mr-2" />
             Edit Saved Query
           </span>
@@ -378,7 +414,7 @@ const saveDescription = 'Save your current query configuration for future use.'
           </span>
         </DialogTitle>
         <DialogDescription>
-          {{ (props.initialData || props.isEditMode || !!route.query.query_id) ? editDescription : saveDescription }}
+          {{ isEditing ? editDescription : saveDescription }}
         </DialogDescription>
       </DialogHeader>
 
@@ -443,7 +479,7 @@ const saveDescription = 'Save your current query configuration for future use.'
           <Button type="submit" :disabled="isSubmitting || !isValid">
             <SaveIcon v-if="!isSubmitting" class="mr-2 h-4 w-4" />
             <Loader2 v-else class="mr-2 h-4 w-4 animate-spin" />
-            {{ (props.initialData || props.isEditMode || !!route.query.query_id) ? 'Update Query' : 'Save Query' }}
+            {{ isEditing ? 'Update Query' : 'Save Query' }}
           </Button>
         </div>
       </form>
