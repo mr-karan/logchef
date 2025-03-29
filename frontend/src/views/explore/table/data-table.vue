@@ -386,23 +386,20 @@ const copyCell = (value: any) => {
     })
 }
 
-// Initialize column sizing on mount
+// Initialize default sorting on mount
 onMounted(() => {
     // Initialize default sort by timestamp if available
     if (timestampFieldName.value) {
         // Make sure timestamp field exists in the current order before sorting
+        // The watch effect handles the initial columnOrder based on storage or defaults
         if (columnOrder.value.includes(timestampFieldName.value)) {
-            sorting.value = [{ id: timestampFieldName.value, desc: true }]
+            // Check if sorting is already set (e.g., by stored state if we persist it later)
+            if (!sorting.value || sorting.value.length === 0) {
+                 sorting.value = [{ id: timestampFieldName.value, desc: true }]
+            }
         }
     }
-
-    // Initialize column sizing with defaults from column definitions
-    const initialSizing: ColumnSizingState = {}
-    table.getAllLeafColumns().forEach(column => {
-        const size = column.columnDef.size || defaultColumn.size;
-        initialSizing[column.id] = size;
-    })
-    columnSizing.value = initialSizing;
+    // Column sizing is handled by the watch effect that reads from storedState or defaults
 })
 
 // Add refs for DOM elements
