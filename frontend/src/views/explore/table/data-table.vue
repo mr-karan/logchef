@@ -33,15 +33,24 @@ import { createColumns } from './columns'
 import { useExploreStore } from '@/stores/explore'
 import type { Source } from '@/api/sources'
 import { useSourcesStore } from '@/stores/sources'
+import { useStorage, type UseStorageOptions, type RemovableRef } from '@vueuse/core'
 
 interface Props {
     columns: ColumnDef<Record<string, any>>[]
     data: Record<string, any>[]
     stats: QueryStats
     sourceId: string
+    teamId: number | null
     timestampField?: string
     severityField?: string
     timezone?: 'local' | 'utc'
+}
+
+// Define the structure for storing state
+interface DataTableState {
+    columnOrder: string[];
+    columnSizing: ColumnSizingState;
+    // Add other state like columnVisibility, sorting later if needed
 }
 
 const props = defineProps<Props>()
@@ -63,14 +72,100 @@ const columnSizing = ref<ColumnSizingState>({})
 const columnResizeMode = ref<ColumnResizeMode>('onChange')
 const isResizing = ref(false)
 const displayTimezone = ref<'local' | 'utc'>(localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local')
-const columnOrder = ref<string[]>(props.columns.map(c => c.id!))
+const columnOrder = ref<string[]>([])
 const draggingColumnId = ref<string | null>(null)
 const dragOverColumnId = ref<string | null>(null)
 
-// Watch props.columns to reset columnOrder if columns change fundamentally
-watch(() => props.columns, (newColumns) => {
-    columnOrder.value = newColumns.map(c => c.id!)
-}, { deep: true })
+// --- Local Storage State Management ---
+const storageKey = computed(() => {
+    if (props.teamId == null || !props.sourceId) return null; // Check for null teamId explicitly
+    return `logchef-tableState-${props.teamId}-${props.sourceId}`;
+});
+
+// Conditionally create useStorage ref - initialize as null
+let storedState: RemovableRef<DataTableState | null> | null = null;
+
+// Use a watcher to create the useStorage instance *only* when the key is valid
+watch(storageKey, (newKey) => {
+    if (newKey) {
+        // Create the storage instance if the key is valid.
+        // useStorage handles reusing the instance internally if the key hasn't changed.
+        storedState = useStorage<DataTableState | null>(newKey, null, localStorage, {
+            serializer: {
+                read: (v: any) => (v ? JSON.parse(v) : null),
+                write: (v: any) => JSON.stringify(v),
+            },
+            onError: (error) => {
+                console.error("Error reading/writing table state from localStorage:", error);
+            }
+        });
+        console.log("DataTable: useStorage initialized/ensured for key:", newKey);
+    } else {
+        // If key becomes null, set our local variable to null.
+        storedState = null;
+        console.log("DataTable: storageKey became null, resetting storedState variable.");
+    }
+}, { immediate: true });
+
+// Refs for table state, initialized AFTER checking stored state
+const stateInitialized = ref(false);
+
+// Watch for changes in props.columns or the *key*
+watch([() => props.columns, storageKey], ([newColumns, currentKey], [oldColumns, oldKey]) => {
+    // Reset initialization flag if the storage key has actually changed
+    if (currentKey !== oldKey) {
+        console.log(`DataTable: Storage key changed from ${oldKey} to ${currentKey}. Resetting init flag.`);
+        stateInitialized.value = false;
+        columnOrder.value = [];
+        columnSizing.value = {};
+    }
+
+    if (!currentKey || stateInitialized.value || !storedState) {
+        // Bail out if key is invalid, already initialized, or storage isn't ready yet
+        return;
+    }
+
+    // Now we know storedState ref exists, but its value might still be null
+    const loadedStateValue = storedState.value;
+
+    console.log(`DataTable: Initializing/Reconciling state for key: ${currentKey}`);
+
+    const currentColumnIds = newColumns.map(c => c.id!).filter(Boolean);
+    let initialOrder: string[] = [];
+    let initialSizing: ColumnSizingState = {};
+
+    if (loadedStateValue) { // Check if the *value* exists
+        console.log("DataTable: Found stored state:", loadedStateValue);
+        const savedOrder = loadedStateValue.columnOrder || [];
+        const filteredSavedOrder = savedOrder.filter((id: string) => currentColumnIds.includes(id)); // Add type for id
+        const newColumnIds = currentColumnIds.filter((id: string) => !filteredSavedOrder.includes(id)); // Add type for id
+        initialOrder = [...filteredSavedOrder, ...newColumnIds];
+
+        const savedSizing = loadedStateValue.columnSizing || {};
+        currentColumnIds.forEach(id => {
+            if (savedSizing[id] !== undefined) {
+                initialSizing[id] = savedSizing[id];
+            } else {
+                const columnDef = newColumns.find(c => c.id === id);
+                initialSizing[id] = columnDef?.size ?? defaultColumn.size;
+            }
+        });
+    } else {
+        console.log("DataTable: No stored state value found, using defaults.");
+        initialOrder = currentColumnIds;
+        currentColumnIds.forEach(id => {
+            const columnDef = newColumns.find(c => c.id === id);
+            initialSizing[id] = columnDef?.size ?? defaultColumn.size;
+        });
+    }
+
+    columnOrder.value = initialOrder;
+    columnSizing.value = initialSizing;
+    stateInitialized.value = true;
+
+    console.log("DataTable: Initial state applied:", { order: initialOrder, sizing: initialSizing });
+
+}, { immediate: true, deep: false });
 
 // Save timezone preference whenever it changes
 watch(displayTimezone, (newValue) => {
@@ -192,13 +287,23 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
     window.addEventListener('touchend', onEnd, { once: true });
 }
 
-// Initialize table with column sizing and ordering
+// Memoize the resolved columns based on the current order and props
+const resolvedColumns = computed(() => {
+    const columnMap = new Map(props.columns.map(col => [col.id, col]));
+    return columnOrder.value
+        .map(id => columnMap.get(id))
+        .filter((col): col is ColumnDef<Record<string, any>> => !!col);
+});
+
+// Initialize table
 const table = useVueTable({
     get data() {
         return props.data
     },
+    // Use the memoized resolvedColumns
     get columns() {
-        return props.columns
+        // Ensure props.columns has been processed before passing to table
+        return stateInitialized.value ? resolvedColumns.value : [];
     },
     state: {
         get sorting() {
@@ -220,16 +325,33 @@ const table = useVueTable({
             return columnSizing.value
         },
         get columnOrder() {
+            // Important: Let the table read the order directly from the state ref
             return columnOrder.value
         },
     },
+    // Keep columnOrder handling separate using onColumnOrderChange
+    // Do NOT set initialState.columnOrder here as it might conflict with the reactive ref
     onSortingChange: updaterOrValue => valueUpdater(updaterOrValue, sorting),
     onExpandedChange: updaterOrValue => valueUpdater(updaterOrValue, expanded),
     onColumnVisibilityChange: updaterOrValue => valueUpdater(updaterOrValue, columnVisibility),
     onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
     onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
-    onColumnSizingChange: updaterOrValue => valueUpdater(updaterOrValue, columnSizing),
-    onColumnOrderChange: updater => valueUpdater(updater, columnOrder),
+    onColumnSizingChange: updaterOrValue => {
+        const newState = valueUpdater(updaterOrValue, columnSizing)
+        if (storedState?.value) {
+            storedState.value.columnSizing = newState;
+        } else if (storedState) {
+            storedState.value = { columnOrder: columnOrder.value, columnSizing: newState };
+        }
+    },
+    onColumnOrderChange: updaterOrValue => {
+        const newState = valueUpdater(updaterOrValue, columnOrder)
+        if (storedState?.value) {
+            storedState.value.columnOrder = newState;
+        } else if (storedState) {
+            storedState.value = { columnOrder: newState, columnSizing: columnSizing.value };
+        }
+    },
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
@@ -237,12 +359,9 @@ const table = useVueTable({
     getFilteredRowModel: getFilteredRowModel(),
     enableColumnResizing: true,
     columnResizeMode: columnResizeMode.value,
-    onColumnSizingInfoChange: (info) => {
-        // Update isResizing state based on columnSizingInfo
-        if (table.getState().columnSizingInfo?.isResizingColumn) {
-            isResizing.value = true;
-        }
-    },
+    // Let table derive column sizing info from the state ref
+    // Remove onColumnSizingInfoChange if not strictly needed for custom logic
+    // onColumnSizingInfoChange: (info) => { ... },
     defaultColumn,
 })
 

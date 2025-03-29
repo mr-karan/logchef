@@ -274,17 +274,21 @@ watchEffect(() => {
   // 2. Update editor options and language if editor instance exists
   const editor = editorRef.value;
   if (editor && !isDisposing.value) {
+    let languageChanged = false; // Flag to track if mode changed
     const model = editor.getModel();
     if (model && model.getLanguageId() !== props.activeMode) {
       monaco.editor.setModelLanguage(model, props.activeMode);
       console.log(`QueryEditor: Language set to ${props.activeMode}`);
+      languageChanged = true; // Set flag if language was updated
     }
 
     updateMonacoOptions(); // Update options like folding, line numbers, etc.
     registerCompletionProvider(); // Update syntax highlighting/completion
 
-    // Refocus editor after mode change for better UX
-    focusEditor(true);
+    // Refocus editor and move cursor *only* if the language actually changed
+    if (languageChanged) {
+      focusEditor(true);
+    }
   }
 });
 

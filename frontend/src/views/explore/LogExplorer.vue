@@ -638,7 +638,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2)
-                  }}</strong>s
+                    }}</strong>s
                 </span>
               </span>
               <span v-if="exploreStore.queryStats?.bytes_read != null" class="flex items-center">
@@ -650,7 +650,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
-                  }}</strong> MB
+                    }}</strong> MB
                 </span>
               </span>
             </div>
@@ -667,10 +667,12 @@ onBeforeUnmount(() => {
 
             <!-- Results Table -->
             <template v-if="!isExecutingQuery && exploreStore.logs?.length">
-              <DataTable class="absolute inset-0 h-full w-full" :columns="tableColumns" :data="exploreStore.logs"
-                :stats="exploreStore.queryStats" :source-id="currentSourceId?.toString() ?? ''"
-                :timestamp-field="sourceDetails?._meta_ts_field" :severity-field="sourceDetails?._meta_severity_field"
-                :timezone="displayTimezone" />
+              <DataTable v-if="exploreStore.logs.length > 0 && tableColumns.length > 0"
+                :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}`"
+                :columns="tableColumns" :data="exploreStore.logs" :stats="exploreStore.queryStats"
+                :source-id="String(exploreStore.sourceId)" :team-id="teamsStore.currentTeamId"
+                :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
+                :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field" :timezone="displayTimezone" />
             </template>
 
             <!-- No Results State -->
