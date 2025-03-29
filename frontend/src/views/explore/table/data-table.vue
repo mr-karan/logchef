@@ -644,7 +644,7 @@ const onDragEnd = (event: DragEvent) => {
 
                         <tbody>
                             <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
-                                <tr class="group cursor-pointer border-b transition-colors hover:bg-muted/20" :class="[
+                                <tr class="group cursor-pointer border-b transition-colors hover:bg-red-500/10" :class="[
                                     row.getIsExpanded() ? 'bg-primary/10' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
                                 ]" @click="handleRowClick(row)($event)">
                                     <td v-for="cell in row.getVisibleCells()" :key="cell.id"
