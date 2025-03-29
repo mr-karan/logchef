@@ -205,69 +205,34 @@ ORDER BY t.name;
 
 -- Team Queries
 
--- name: CreateTeamQuery :one
--- Create a new query for a team
-INSERT INTO team_queries (team_id, source_id, name, description, query_type, query_content)
-VALUES (?, ?, ?, ?, ?, ?)
+-- name: CreateTeamSourceQuery :one
+-- Create a new query for a team and source
+INSERT INTO team_queries (team_id, source_id, name, description, query_content)
+VALUES (?, ?, ?, ?, ?)
 RETURNING id;
 
--- name: GetTeamQuery :one
--- Get a query by ID
-SELECT * FROM team_queries WHERE id = ?;
+-- name: GetTeamSourceQuery :one
+-- Get a query by ID for a specific team and source
+SELECT * FROM team_queries
+WHERE id = ? AND team_id = ? AND source_id = ?;
 
--- name: UpdateTeamQuery :exec
--- Update a query for a team
+-- name: UpdateTeamSourceQuery :exec
+-- Update a query for a team and source
 UPDATE team_queries
 SET name = ?,
     description = ?,
-    source_id = ?,
-    query_type = ?,
     query_content = ?,
     updated_at = datetime('now')
-WHERE id = ?;
+WHERE id = ? AND team_id = ? AND source_id = ?;
 
--- name: DeleteTeamQuery :exec
--- Delete a query by ID
-DELETE FROM team_queries WHERE id = ?;
-
--- name: ListTeamQueries :many
--- List all queries in a team
-SELECT * FROM team_queries WHERE team_id = ? ORDER BY created_at DESC;
-
--- name: ListQueriesBySource :many
--- List all queries for a specific source
-SELECT * FROM team_queries WHERE source_id = ? ORDER BY created_at DESC;
+-- name: DeleteTeamSourceQuery :exec
+-- Delete a query by ID for a specific team and source
+DELETE FROM team_queries
+WHERE id = ? AND team_id = ? AND source_id = ?;
 
 -- name: ListQueriesByTeamAndSource :many
 -- List all queries for a specific team and source
 SELECT * FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY created_at DESC;
-
--- name: GetTeamQueryWithAccess :one
--- Get a team query by ID and check if the user has access to it
-SELECT tq.* FROM team_queries tq
-JOIN team_members tm ON tq.team_id = tm.team_id
-WHERE tq.id = ? AND tm.user_id = ?;
-
--- name: ListQueriesForUserAndTeam :many
--- List all queries for a specific team that a user has access to
-SELECT tq.* FROM team_queries tq
-JOIN team_members tm ON tq.team_id = tm.team_id
-WHERE tq.team_id = ? AND tm.user_id = ?
-ORDER BY tq.created_at DESC;
-
--- name: ListQueriesForUser :many
--- List all queries that a user has access to across all their teams
-SELECT tq.* FROM team_queries tq
-JOIN team_members tm ON tq.team_id = tm.team_id
-WHERE tm.user_id = ?
-ORDER BY tq.created_at DESC;
-
--- name: ListQueriesForUserBySource :many
--- List all queries for a specific source that a user has access to
-SELECT tq.* FROM team_queries tq
-JOIN team_members tm ON tq.team_id = tm.team_id
-WHERE tm.user_id = ? AND tq.source_id = ?
-ORDER BY tq.created_at DESC;
 
 -- Additional queries for user-source and team-source access
 

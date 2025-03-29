@@ -24,9 +24,10 @@
 
       <div class="flex items-center gap-2">
         <!-- Saved Queries Dropdown (Integrated from LogExplorer) -->
-        <SavedQueriesDropdown :source-id="props.sourceId" :team-id="props.teamId"
-          :use-current-team="props.useCurrentTeam" @select="(query) => $emit('select-saved-query', query)"
-          @save="$emit('save-query')" class="h-8" />
+        <SavedQueriesDropdown :selected-source-id="props.sourceId" :selected-team-id="props.teamId"
+          :use-current-team="props.useCurrentTeam"
+          @select="(query: SavedTeamQuery) => $emit('select-saved-query', query)" @save="$emit('save-query')"
+          class="h-8" />
 
         <!-- Table name indicator -->
         <div v-if="props.activeMode === 'clickhouse-sql'" class="text-xs text-muted-foreground mr-2">
@@ -110,6 +111,7 @@ import { HelpCircle, PanelRightOpen, PanelRightClose, AlertCircle, XCircle } fro
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import SavedQueriesDropdown from '@/components/saved-queries/SavedQueriesDropdown.vue';
+import type { SavedTeamQuery } from '@/api/savedQueries';
 
 import { initMonacoSetup, getDefaultMonacoOptions } from "@/utils/monaco";
 import { Parser as LogchefQLParser, State as LogchefQLState, Operator as LogchefQLOperator, VALID_KEY_VALUE_OPERATORS as LogchefQLValidOperators, isNumeric } from "@/utils/logchefql";
@@ -149,7 +151,7 @@ const emit = defineEmits<{
   (e: "update:activeMode", value: EditorMode): void;
   (e: "toggle-fields"): void;
   // SavedQueries events
-  (e: "select-saved-query", query: any): void;
+  (e: "select-saved-query", query: SavedTeamQuery): void;
   (e: "save-query"): void;
 }>();
 

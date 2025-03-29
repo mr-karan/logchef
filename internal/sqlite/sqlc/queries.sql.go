@@ -171,31 +171,29 @@ func (q *Queries) CreateTeam(ctx context.Context, arg CreateTeamParams) (int64, 
 	return id, err
 }
 
-const createTeamQuery = `-- name: CreateTeamQuery :one
+const createTeamSourceQuery = `-- name: CreateTeamSourceQuery :one
 
-INSERT INTO team_queries (team_id, source_id, name, description, query_type, query_content)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO team_queries (team_id, source_id, name, description, query_content)
+VALUES (?, ?, ?, ?, ?)
 RETURNING id
 `
 
-type CreateTeamQueryParams struct {
+type CreateTeamSourceQueryParams struct {
 	TeamID       int64          `json:"team_id"`
 	SourceID     int64          `json:"source_id"`
 	Name         string         `json:"name"`
 	Description  sql.NullString `json:"description"`
-	QueryType    string         `json:"query_type"`
 	QueryContent string         `json:"query_content"`
 }
 
 // Team Queries
-// Create a new query for a team
-func (q *Queries) CreateTeamQuery(ctx context.Context, arg CreateTeamQueryParams) (int64, error) {
-	row := q.queryRow(ctx, q.createTeamQueryStmt, createTeamQuery,
+// Create a new query for a team and source
+func (q *Queries) CreateTeamSourceQuery(ctx context.Context, arg CreateTeamSourceQueryParams) (int64, error) {
+	row := q.queryRow(ctx, q.createTeamSourceQueryStmt, createTeamSourceQuery,
 		arg.TeamID,
 		arg.SourceID,
 		arg.Name,
 		arg.Description,
-		arg.QueryType,
 		arg.QueryContent,
 	)
 	var id int64
@@ -263,13 +261,20 @@ func (q *Queries) DeleteTeam(ctx context.Context, id int64) error {
 	return err
 }
 
-const deleteTeamQuery = `-- name: DeleteTeamQuery :exec
-DELETE FROM team_queries WHERE id = ?
+const deleteTeamSourceQuery = `-- name: DeleteTeamSourceQuery :exec
+DELETE FROM team_queries
+WHERE id = ? AND team_id = ? AND source_id = ?
 `
 
-// Delete a query by ID
-func (q *Queries) DeleteTeamQuery(ctx context.Context, id int64) error {
-	_, err := q.exec(ctx, q.deleteTeamQueryStmt, deleteTeamQuery, id)
+type DeleteTeamSourceQueryParams struct {
+	ID       int64 `json:"id"`
+	TeamID   int64 `json:"team_id"`
+	SourceID int64 `json:"source_id"`
+}
+
+// Delete a query by ID for a specific team and source
+func (q *Queries) DeleteTeamSourceQuery(ctx context.Context, arg DeleteTeamSourceQueryParams) error {
+	_, err := q.exec(ctx, q.deleteTeamSourceQueryStmt, deleteTeamSourceQuery, arg.ID, arg.TeamID, arg.SourceID)
 	return err
 }
 
@@ -427,42 +432,20 @@ func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (T
 	return i, err
 }
 
-const getTeamQuery = `-- name: GetTeamQuery :one
-SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at FROM team_queries WHERE id = ?
+const getTeamSourceQuery = `-- name: GetTeamSourceQuery :one
+SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at FROM team_queries
+WHERE id = ? AND team_id = ? AND source_id = ?
 `
 
-// Get a query by ID
-func (q *Queries) GetTeamQuery(ctx context.Context, id int64) (TeamQuery, error) {
-	row := q.queryRow(ctx, q.getTeamQueryStmt, getTeamQuery, id)
-	var i TeamQuery
-	err := row.Scan(
-		&i.ID,
-		&i.TeamID,
-		&i.SourceID,
-		&i.Name,
-		&i.Description,
-		&i.QueryType,
-		&i.QueryContent,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+type GetTeamSourceQueryParams struct {
+	ID       int64 `json:"id"`
+	TeamID   int64 `json:"team_id"`
+	SourceID int64 `json:"source_id"`
 }
 
-const getTeamQueryWithAccess = `-- name: GetTeamQueryWithAccess :one
-SELECT tq.id, tq.team_id, tq.source_id, tq.name, tq.description, tq.query_type, tq.query_content, tq.created_at, tq.updated_at FROM team_queries tq
-JOIN team_members tm ON tq.team_id = tm.team_id
-WHERE tq.id = ? AND tm.user_id = ?
-`
-
-type GetTeamQueryWithAccessParams struct {
-	ID     int64 `json:"id"`
-	UserID int64 `json:"user_id"`
-}
-
-// Get a team query by ID and check if the user has access to it
-func (q *Queries) GetTeamQueryWithAccess(ctx context.Context, arg GetTeamQueryWithAccessParams) (TeamQuery, error) {
-	row := q.queryRow(ctx, q.getTeamQueryWithAccessStmt, getTeamQueryWithAccess, arg.ID, arg.UserID)
+// Get a query by ID for a specific team and source
+func (q *Queries) GetTeamSourceQuery(ctx context.Context, arg GetTeamSourceQueryParams) (TeamQuery, error) {
+	row := q.queryRow(ctx, q.getTeamSourceQueryStmt, getTeamSourceQuery, arg.ID, arg.TeamID, arg.SourceID)
 	var i TeamQuery
 	err := row.Scan(
 		&i.ID,
@@ -522,44 +505,6 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	return i, err
 }
 
-const listQueriesBySource = `-- name: ListQueriesBySource :many
-SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at FROM team_queries WHERE source_id = ? ORDER BY created_at DESC
-`
-
-// List all queries for a specific source
-func (q *Queries) ListQueriesBySource(ctx context.Context, sourceID int64) ([]TeamQuery, error) {
-	rows, err := q.query(ctx, q.listQueriesBySourceStmt, listQueriesBySource, sourceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []TeamQuery{}
-	for rows.Next() {
-		var i TeamQuery
-		if err := rows.Scan(
-			&i.ID,
-			&i.TeamID,
-			&i.SourceID,
-			&i.Name,
-			&i.Description,
-			&i.QueryType,
-			&i.QueryContent,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listQueriesByTeamAndSource = `-- name: ListQueriesByTeamAndSource :many
 SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY created_at DESC
 `
@@ -572,139 +517,6 @@ type ListQueriesByTeamAndSourceParams struct {
 // List all queries for a specific team and source
 func (q *Queries) ListQueriesByTeamAndSource(ctx context.Context, arg ListQueriesByTeamAndSourceParams) ([]TeamQuery, error) {
 	rows, err := q.query(ctx, q.listQueriesByTeamAndSourceStmt, listQueriesByTeamAndSource, arg.TeamID, arg.SourceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []TeamQuery{}
-	for rows.Next() {
-		var i TeamQuery
-		if err := rows.Scan(
-			&i.ID,
-			&i.TeamID,
-			&i.SourceID,
-			&i.Name,
-			&i.Description,
-			&i.QueryType,
-			&i.QueryContent,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listQueriesForUser = `-- name: ListQueriesForUser :many
-SELECT tq.id, tq.team_id, tq.source_id, tq.name, tq.description, tq.query_type, tq.query_content, tq.created_at, tq.updated_at FROM team_queries tq
-JOIN team_members tm ON tq.team_id = tm.team_id
-WHERE tm.user_id = ?
-ORDER BY tq.created_at DESC
-`
-
-// List all queries that a user has access to across all their teams
-func (q *Queries) ListQueriesForUser(ctx context.Context, userID int64) ([]TeamQuery, error) {
-	rows, err := q.query(ctx, q.listQueriesForUserStmt, listQueriesForUser, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []TeamQuery{}
-	for rows.Next() {
-		var i TeamQuery
-		if err := rows.Scan(
-			&i.ID,
-			&i.TeamID,
-			&i.SourceID,
-			&i.Name,
-			&i.Description,
-			&i.QueryType,
-			&i.QueryContent,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listQueriesForUserAndTeam = `-- name: ListQueriesForUserAndTeam :many
-SELECT tq.id, tq.team_id, tq.source_id, tq.name, tq.description, tq.query_type, tq.query_content, tq.created_at, tq.updated_at FROM team_queries tq
-JOIN team_members tm ON tq.team_id = tm.team_id
-WHERE tq.team_id = ? AND tm.user_id = ?
-ORDER BY tq.created_at DESC
-`
-
-type ListQueriesForUserAndTeamParams struct {
-	TeamID int64 `json:"team_id"`
-	UserID int64 `json:"user_id"`
-}
-
-// List all queries for a specific team that a user has access to
-func (q *Queries) ListQueriesForUserAndTeam(ctx context.Context, arg ListQueriesForUserAndTeamParams) ([]TeamQuery, error) {
-	rows, err := q.query(ctx, q.listQueriesForUserAndTeamStmt, listQueriesForUserAndTeam, arg.TeamID, arg.UserID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []TeamQuery{}
-	for rows.Next() {
-		var i TeamQuery
-		if err := rows.Scan(
-			&i.ID,
-			&i.TeamID,
-			&i.SourceID,
-			&i.Name,
-			&i.Description,
-			&i.QueryType,
-			&i.QueryContent,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listQueriesForUserBySource = `-- name: ListQueriesForUserBySource :many
-SELECT tq.id, tq.team_id, tq.source_id, tq.name, tq.description, tq.query_type, tq.query_content, tq.created_at, tq.updated_at FROM team_queries tq
-JOIN team_members tm ON tq.team_id = tm.team_id
-WHERE tm.user_id = ? AND tq.source_id = ?
-ORDER BY tq.created_at DESC
-`
-
-type ListQueriesForUserBySourceParams struct {
-	UserID   int64 `json:"user_id"`
-	SourceID int64 `json:"source_id"`
-}
-
-// List all queries for a specific source that a user has access to
-func (q *Queries) ListQueriesForUserBySource(ctx context.Context, arg ListQueriesForUserBySourceParams) ([]TeamQuery, error) {
-	rows, err := q.query(ctx, q.listQueriesForUserBySourceStmt, listQueriesForUserBySource, arg.UserID, arg.SourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -934,44 +746,6 @@ func (q *Queries) ListTeamMembersWithDetails(ctx context.Context, teamID int64) 
 			&i.CreatedAt,
 			&i.Email,
 			&i.FullName,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listTeamQueries = `-- name: ListTeamQueries :many
-SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at FROM team_queries WHERE team_id = ? ORDER BY created_at DESC
-`
-
-// List all queries in a team
-func (q *Queries) ListTeamQueries(ctx context.Context, teamID int64) ([]TeamQuery, error) {
-	rows, err := q.query(ctx, q.listTeamQueriesStmt, listTeamQueries, teamID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []TeamQuery{}
-	for rows.Next() {
-		var i TeamQuery
-		if err := rows.Scan(
-			&i.ID,
-			&i.TeamID,
-			&i.SourceID,
-			&i.Name,
-			&i.Description,
-			&i.QueryType,
-			&i.QueryContent,
-			&i.CreatedAt,
-			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1327,35 +1101,33 @@ func (q *Queries) UpdateTeamMemberRole(ctx context.Context, arg UpdateTeamMember
 	return err
 }
 
-const updateTeamQuery = `-- name: UpdateTeamQuery :exec
+const updateTeamSourceQuery = `-- name: UpdateTeamSourceQuery :exec
 UPDATE team_queries
 SET name = ?,
     description = ?,
-    source_id = ?,
-    query_type = ?,
     query_content = ?,
     updated_at = datetime('now')
-WHERE id = ?
+WHERE id = ? AND team_id = ? AND source_id = ?
 `
 
-type UpdateTeamQueryParams struct {
+type UpdateTeamSourceQueryParams struct {
 	Name         string         `json:"name"`
 	Description  sql.NullString `json:"description"`
-	SourceID     int64          `json:"source_id"`
-	QueryType    string         `json:"query_type"`
 	QueryContent string         `json:"query_content"`
 	ID           int64          `json:"id"`
+	TeamID       int64          `json:"team_id"`
+	SourceID     int64          `json:"source_id"`
 }
 
-// Update a query for a team
-func (q *Queries) UpdateTeamQuery(ctx context.Context, arg UpdateTeamQueryParams) error {
-	_, err := q.exec(ctx, q.updateTeamQueryStmt, updateTeamQuery,
+// Update a query for a team and source
+func (q *Queries) UpdateTeamSourceQuery(ctx context.Context, arg UpdateTeamSourceQueryParams) error {
+	_, err := q.exec(ctx, q.updateTeamSourceQueryStmt, updateTeamSourceQuery,
 		arg.Name,
 		arg.Description,
-		arg.SourceID,
-		arg.QueryType,
 		arg.QueryContent,
 		arg.ID,
+		arg.TeamID,
+		arg.SourceID,
 	)
 	return err
 }

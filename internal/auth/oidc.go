@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -18,7 +19,7 @@ import (
 // OIDCProvider handles OIDC authentication
 type OIDCProvider struct {
 	cfg       *config.Config
-	store     Store
+	db        *sqlite.DB
 	provider  *oidc.Provider
 	verifier  *oidc.IDTokenVerifier
 	oauthConf *oauth2.Config
@@ -26,7 +27,7 @@ type OIDCProvider struct {
 }
 
 // NewOIDCProvider creates a new OIDC provider
-func NewOIDCProvider(cfg *config.Config, store Store, log *slog.Logger) (*OIDCProvider, error) {
+func NewOIDCProvider(cfg *config.Config, db *sqlite.DB, log *slog.Logger) (*OIDCProvider, error) {
 	// Validate admin emails configuration
 	if len(cfg.Auth.AdminEmails) == 0 {
 		log.Error("no admin emails configured")
@@ -54,7 +55,7 @@ func NewOIDCProvider(cfg *config.Config, store Store, log *slog.Logger) (*OIDCPr
 
 	return &OIDCProvider{
 		cfg:       cfg,
-		store:     store,
+		db:        db,
 		provider:  provider,
 		verifier:  provider.Verifier(&oidc.Config{ClientID: cfg.OIDC.ClientID}),
 		oauthConf: oauthConf,
@@ -117,7 +118,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, code, state string) (
 	}
 
 	// Check if user exists
-	user, err := p.store.GetUserByEmail(ctx, claims.Email)
+	user, err := p.db.GetUserByEmail(ctx, claims.Email)
 	if err != nil {
 		p.log.Error("failed to lookup user by email",
 			"error", err,
@@ -147,7 +148,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, code, state string) (
 	// Update user's last login
 	now := time.Now()
 	user.LastLoginAt = &now
-	if err := p.store.UpdateUser(ctx, user); err != nil {
+	if err := p.db.UpdateUser(ctx, user); err != nil {
 		p.log.Error("failed to update user last login",
 			"error", err,
 			"user_id", user.ID,
@@ -156,7 +157,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, code, state string) (
 	}
 
 	// Check concurrent sessions
-	sessionCount, err := p.store.CountUserSessions(ctx, user.ID)
+	sessionCount, err := p.db.CountUserSessions(ctx, user.ID)
 	if err != nil {
 		p.log.Error("failed to count user sessions",
 			"error", err,
@@ -171,7 +172,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, code, state string) (
 			"max_sessions", p.cfg.Auth.MaxConcurrentSessions,
 		)
 		// Delete all existing sessions
-		if err := p.store.DeleteUserSessions(ctx, user.ID); err != nil {
+		if err := p.db.DeleteUserSessions(ctx, user.ID); err != nil {
 			p.log.Error("failed to delete user sessions",
 				"error", err,
 				"user_id", user.ID,
@@ -188,7 +189,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, code, state string) (
 		ExpiresAt: time.Now().Add(p.cfg.Auth.SessionDuration),
 	}
 
-	if err := p.store.CreateSession(ctx, session); err != nil {
+	if err := p.db.CreateSession(ctx, session); err != nil {
 		p.log.Error("failed to create session",
 			"error", err,
 			"user_id", user.ID,

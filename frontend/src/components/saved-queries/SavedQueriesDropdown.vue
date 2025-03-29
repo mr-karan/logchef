@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed } from 'vue';
 import { ChevronDown, Save, PlusCircle, ListTree, Pencil, Eye } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import {
@@ -12,189 +12,94 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useSavedQueriesStore } from '@/stores/savedQueries';
 import { useTeamsStore } from '@/stores/teams';
 import { useToast } from '@/components/ui/toast';
 import { TOAST_DURATION } from '@/lib/constants';
 import { getErrorMessage } from '@/api/types';
 import { useSavedQueries } from '@/composables/useSavedQueries';
+import type { SavedTeamQuery } from '@/api/savedQueries';
 
 const props = defineProps<{
   selectedTeamId?: number;
+  selectedSourceId?: number;
 }>();
 
 const emit = defineEmits<{
-  (e: 'select', queryId: string, queryData?: any): void;
   (e: 'save'): void;
-  (e: 'edit', query: any): void;
 }>();
 
 const router = useRouter();
-const savedQueriesStore = useSavedQueriesStore();
 const teamsStore = useTeamsStore();
 const { toast } = useToast();
 
-// Local state
+// Use state and actions from the composable
+const {
+  isLoading,         // Use composable's loading state
+  queries,           // Use composable's raw queries list
+  filteredQueries,   // Use composable's filtered list (if searching needed later)
+  hasQueries,        // Use composable's computed property
+  getQueryUrl,       // For navigation
+  openQuery,         // Use composable's open function
+  editQuery          // Use composable's edit function
+} = useSavedQueries();
+
+// Local UI state
 const isOpen = ref(false);
-const currentTeamId = computed(() => props.selectedTeamId || teamsStore.currentTeamId || savedQueriesStore.data.selectedTeamId);
-const isLoading = computed(() => savedQueriesStore.isLoading);
-const hasQueries = computed(() => savedQueriesStore.data.queries?.length > 0);
 
-// Load saved queries when the dropdown is opened
-async function onDropdownOpen() {
-  if (!currentTeamId.value) {
-    // Use the current team from teamsStore instead of fetching teams
-    if (teamsStore.currentTeamId) {
-      savedQueriesStore.setSelectedTeam(teamsStore.currentTeamId);
-    } else {
-      toast({
-        title: 'Error',
-        description: 'No team selected. Please select a team first.',
-        variant: 'destructive',
-        duration: TOAST_DURATION.ERROR,
-      });
-      return;
-    }
-  }
+// Computed properties based on props
+const currentTeamId = computed(() => props.selectedTeamId);
+const currentSourceId = computed(() => props.selectedSourceId);
 
-  if (!savedQueriesStore.data.queries || savedQueriesStore.data.queries.length === 0) {
-    try {
-      await loadTeamQueries();
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: getErrorMessage(error),
-        variant: 'destructive',
-        duration: TOAST_DURATION.ERROR,
-      });
-    }
-  }
-}
-
-// Load team queries
-async function loadTeamQueries() {
-  if (!currentTeamId.value) return;
-  return savedQueriesStore.fetchTeamQueries(currentTeamId.value, true);
-}
-
-// Import the composable for consistent URL generation and editing
-import { useSavedQueries } from '@/composables/useSavedQueries';
-const { getQueryUrl, editQuery } = useSavedQueries();
-
-// Handle query selection
-function selectQuery(queryId: number) {
-  // First check if we need to refresh the queries list
-  // This helps ensure we have the most up-to-date query data
-  const needsRefresh = !savedQueriesStore.data.lastFetchTime || 
-                      (Date.now() - savedQueriesStore.data.lastFetchTime > 30000); // 30 seconds
-
-  // Function to process the query selection with the current data
-  const processQuerySelection = () => {
-    const query = savedQueriesStore.data.queries?.find(q => q.id === queryId);
-    if (query) {
-      try {
-        // Generate URL for navigation using the same function as in SavedQueriesView
-        const url = getQueryUrl(query);
-        
-        // Navigate to the generated URL
-        router.push(url);
-        console.log(`Navigating to query ${queryId} via URL: ${url}`);
-      } catch (error) {
-        console.error('Error processing query selection:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to load the selected query. Please try again.',
-          variant: 'destructive',
-          duration: TOAST_DURATION.ERROR,
-        });
-      }
-    } else {
-      console.warn(`Query with ID ${queryId} not found in store`);
-      toast({
-        title: 'Error',
-        description: 'Query not found. It may have been deleted.',
-        variant: 'destructive',
-        duration: TOAST_DURATION.ERROR,
-      });
-    }
-    isOpen.value = false;
-  };
-  
-  // If we need a refresh and have a current team ID, fetch the latest queries first
-  if (needsRefresh && currentTeamId.value) {
-    savedQueriesStore.fetchTeamQueries(currentTeamId.value, true)
-      .then(() => {
-        console.log("Refreshed queries list before selection");
-        processQuerySelection();
-      })
-      .catch(error => {
-        console.error("Error refreshing queries:", error);
-        // Still try to process with existing data
-        processQuerySelection();
-      });
-  } else {
-    // Use existing data
-    processQuerySelection();
-  }
-}
-
-// Handle save action
-function handleSave() {
-  emit('save');
-  isOpen.value = false;
-}
-
-// Handle edit query 
-function handleEditQuery(query) {
+// Handle query selection using composable's function
+function selectQuery(query: SavedTeamQuery) {
   try {
-    console.log("Editing query from dropdown:", query);
-    // Make sure we're passing a properly typed query object
-    const typedQuery = {
-      id: query.id,
-      team_id: query.team_id,
-      source_id: query.source_id,
-      name: query.name,
-      description: query.description,
-      query_type: query.query_type,
-      query_content: query.query_content,
-      created_at: query.created_at,
-      updated_at: query.updated_at
-    };
-    
-    editQuery(typedQuery);
-    isOpen.value = false;
+    openQuery(query);
+    isOpen.value = false; // Close dropdown after selection
   } catch (error) {
-    console.error("Error preparing query for edit:", error);
+    console.error('Error selecting query:', error);
     toast({
       title: 'Error',
-      description: 'Failed to edit query. Please try again.',
+      description: 'Failed to open the selected query. Please try again.',
       variant: 'destructive',
       duration: TOAST_DURATION.ERROR,
     });
   }
 }
 
+// Handle save action (emit event)
+function handleSave() {
+  emit('save');
+  isOpen.value = false;
+}
+
+// Handle edit query using composable's function
+function handleEditQuery(query: SavedTeamQuery) {
+  try {
+    console.log("Editing query from dropdown:", query);
+    editQuery(query);
+    isOpen.value = false; // Close dropdown after edit trigger
+  } catch (error) {
+    // Error handling is within editQuery, but catch here if needed
+    console.error("Error triggering edit from dropdown:", error);
+  }
+}
+
 // Go to queries view
 function goToQueries() {
-  const query = currentTeamId.value ? { team: currentTeamId.value } : {};
+  const query: Record<string, string | number> = {};
+  if (currentTeamId.value) query.team = currentTeamId.value;
+  if (currentSourceId.value) query.source = currentSourceId.value; // Include source if available
+
   router.push({
     path: '/logs/saved',
     query
   });
   isOpen.value = false;
 }
-
-// Load teams on component mount if needed
-onMounted(async () => {
-  // Use the teams from teamsStore instead of making a separate API call
-  if (teamsStore.teams.length > 0) {
-    savedQueriesStore.data.teams = teamsStore.teams;
-  }
-});
 </script>
 
 <template>
-  <DropdownMenu v-model:open="isOpen" @update:open="onDropdownOpen">
+  <DropdownMenu v-model:open="isOpen">
     <DropdownMenuTrigger asChild>
       <Button variant="outline" class="w-full justify-between">
         <span class="flex items-center gap-1.5">
@@ -207,52 +112,46 @@ onMounted(async () => {
     <DropdownMenuContent align="start" class="w-[280px]">
       <DropdownMenuLabel>Saved Queries</DropdownMenuLabel>
 
-      <!-- Loading state -->
+      <!-- Loading state from composable -->
       <div v-if="isLoading" class="px-2 py-3 flex flex-col gap-2">
         <Skeleton v-for="i in 3" :key="i" class="h-5 w-full" />
       </div>
 
-      <!-- No queries state -->
-      <div v-else-if="!hasQueries" class="px-2 py-3 text-sm text-muted-foreground">
-        No saved queries found. Save a query to see it here.
+      <!-- State for missing team/source selection -->
+      <div v-else-if="!currentTeamId || !currentSourceId" class="px-2 py-3 text-sm text-muted-foreground">
+        Select a Team and Source first.
       </div>
 
-      <!-- Queries list -->
+      <!-- No queries state from composable -->
+      <div v-else-if="!hasQueries" class="px-2 py-3 text-sm text-muted-foreground">
+        No saved queries for this source. Save one to see it here.
+      </div>
+
+      <!-- Queries list from composable (using 'queries' for simplicity, can switch to filteredQueries if search added) -->
       <template v-else>
-        <div 
-          v-for="query in (savedQueriesStore.data.queries || []).slice(0, 5)" 
-          :key="query.id"
-          class="py-2 px-2 hover:bg-accent hover:text-accent-foreground flex items-center justify-between group"
-        >
-          <DropdownMenuItem 
-            @click="selectQuery(query.id)" 
-            class="cursor-pointer p-0 focus:bg-transparent"
-          >
-            <span class="font-medium">{{ query.name }}</span>
-          </DropdownMenuItem>
-          <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button 
-              class="rounded-sm h-6 w-6 flex items-center justify-center hover:bg-accent-foreground/10" 
-              @click="selectQuery(query.id)"
-              title="Open query"
-            >
+        <div v-for="query in queries.slice(0, 5)" :key="query.id"
+          class="py-2 px-2 hover:bg-accent hover:text-accent-foreground flex items-center justify-between group relative cursor-pointer"
+          @click.stop="selectQuery(query)">
+          <span class="font-medium flex-1 pr-2 truncate">{{ query.name }}</span>
+          <div
+            class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 top-1/2 -translate-y-1/2 bg-accent p-0.5 rounded"
+            @click.stop>
+            <button class="rounded-sm h-6 w-6 flex items-center justify-center hover:bg-accent-foreground/10"
+              @click.stop="selectQuery(query)" title="Open query">
               <Eye class="h-3.5 w-3.5" />
             </button>
-            <button 
-              class="rounded-sm h-6 w-6 flex items-center justify-center hover:bg-accent-foreground/10" 
-              @click="handleEditQuery(query)"
-              title="Edit query"
-            >
+            <button class="rounded-sm h-6 w-6 flex items-center justify-center hover:bg-accent-foreground/10"
+              @click.stop="handleEditQuery(query)" title="Edit query">
               <Pencil class="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
 
         <!-- Show "View All" option if there are more than 5 queries -->
-        <DropdownMenuSeparator v-if="savedQueriesStore.data.queries.length > 5" />
-        <DropdownMenuItem v-if="savedQueriesStore.data.queries.length > 5" @click="goToQueries">
+        <DropdownMenuSeparator v-if="queries.length > 5" />
+        <DropdownMenuItem v-if="queries.length > 5" @click="goToQueries" class="cursor-pointer">
           <ListTree class="mr-2 h-4 w-4" />
-          <span>View All Queries ({{ savedQueriesStore.data.queries.length }})</span>
+          <span>View All Queries ({{ queries.length }})</span>
         </DropdownMenuItem>
       </template>
 

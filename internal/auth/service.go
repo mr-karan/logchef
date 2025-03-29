@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -28,17 +29,17 @@ var (
 
 // Service handles authentication and authorization operations
 type Service struct {
-	cfg   *config.Config
-	store Store
-	oidc  *OIDCProvider
-	log   *slog.Logger
+	cfg  *config.Config
+	db   *sqlite.DB
+	oidc *OIDCProvider
+	log  *slog.Logger
 }
 
 // New creates a new authentication service
-func New(cfg *config.Config, store Store, logger *slog.Logger) (*Service, error) {
+func New(cfg *config.Config, db *sqlite.DB, logger *slog.Logger) (*Service, error) {
 	log := logger.With("component", "auth")
 
-	oidc, err := NewOIDCProvider(cfg, store, log)
+	oidc, err := NewOIDCProvider(cfg, db, log)
 	if err != nil {
 		log.Error("failed to create OIDC provider",
 			"error", err,
@@ -48,10 +49,10 @@ func New(cfg *config.Config, store Store, logger *slog.Logger) (*Service, error)
 	}
 
 	return &Service{
-		cfg:   cfg,
-		store: store,
-		oidc:  oidc,
-		log:   log,
+		cfg:  cfg,
+		db:   db,
+		oidc: oidc,
+		log:  log,
 	}, nil
 }
 
@@ -67,7 +68,7 @@ func (s *Service) HandleCallback(ctx context.Context, code, state string) (*mode
 
 // ValidateSession checks if a session is valid and not expired
 func (s *Service) ValidateSession(ctx context.Context, sessionID models.SessionID) (*models.Session, error) {
-	session, err := s.store.GetSession(ctx, sessionID)
+	session, err := s.db.GetSession(ctx, sessionID)
 	if err != nil {
 		s.log.Warn("session not found",
 			"error", err,
@@ -93,7 +94,7 @@ func (s *Service) ValidateSession(ctx context.Context, sessionID models.SessionI
 			"expires_at", session.ExpiresAt,
 		)
 		// Delete expired session
-		_ = s.store.DeleteSession(ctx, sessionID)
+		_ = s.db.DeleteSession(ctx, sessionID)
 		return nil, ErrSessionExpired
 	}
 
@@ -102,12 +103,12 @@ func (s *Service) ValidateSession(ctx context.Context, sessionID models.SessionI
 
 // RevokeSession deletes a session
 func (s *Service) RevokeSession(ctx context.Context, sessionID models.SessionID) error {
-	return s.store.DeleteSession(ctx, sessionID)
+	return s.db.DeleteSession(ctx, sessionID)
 }
 
 // GetUser retrieves a user by ID
 func (s *Service) GetUser(ctx context.Context, userID models.UserID) (*models.User, error) {
-	user, err := s.store.GetUser(ctx, userID)
+	user, err := s.db.GetUser(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("error getting user: %w", err)
 	}
@@ -125,12 +126,12 @@ func (s *Service) UpdateUser(ctx context.Context, user *models.User) error {
 		return fmt.Errorf("user cannot be nil")
 	}
 
-	return s.store.UpdateUser(ctx, user)
+	return s.db.UpdateUser(ctx, user)
 }
 
 // ListUsers returns all users
 func (s *Service) ListUsers(ctx context.Context) ([]*models.User, error) {
-	return s.store.ListUsers(ctx)
+	return s.db.ListUsers(ctx)
 }
 
 // CreateTeam creates a new team
@@ -139,12 +140,12 @@ func (s *Service) CreateTeam(ctx context.Context, team *models.Team) error {
 		return fmt.Errorf("team cannot be nil")
 	}
 
-	return s.store.CreateTeam(ctx, team)
+	return s.db.CreateTeam(ctx, team)
 }
 
 // GetTeam retrieves a team by ID
 func (s *Service) GetTeam(ctx context.Context, teamID int) (*models.Team, error) {
-	team, err := s.store.GetTeam(ctx, models.TeamID(teamID))
+	team, err := s.db.GetTeam(ctx, models.TeamID(teamID))
 	if err != nil {
 		return nil, fmt.Errorf("error getting team: %w", err)
 	}
@@ -162,7 +163,7 @@ func (s *Service) UpdateTeam(ctx context.Context, team *models.Team) error {
 		return fmt.Errorf("team cannot be nil")
 	}
 
-	return s.store.UpdateTeam(ctx, team)
+	return s.db.UpdateTeam(ctx, team)
 }
 
 // DeleteTeam deletes a team
@@ -171,12 +172,12 @@ func (s *Service) DeleteTeam(ctx context.Context, teamID int) error {
 		return fmt.Errorf("team ID must be positive")
 	}
 
-	return s.store.DeleteTeam(ctx, models.TeamID(teamID))
+	return s.db.DeleteTeam(ctx, models.TeamID(teamID))
 }
 
 // ListTeams returns all teams
 func (s *Service) ListTeams(ctx context.Context) ([]*models.Team, error) {
-	return s.store.ListTeams(ctx)
+	return s.db.ListTeams(ctx)
 }
 
 // AddTeamMember adds a user to a team with the specified role
@@ -185,7 +186,7 @@ func (s *Service) AddTeamMember(ctx context.Context, teamID models.TeamID, userI
 		return fmt.Errorf("team ID and user ID must be positive")
 	}
 
-	return s.store.AddTeamMember(ctx, teamID, userID, role)
+	return s.db.AddTeamMember(ctx, teamID, userID, role)
 }
 
 // RemoveTeamMember removes a user from a team
@@ -194,7 +195,7 @@ func (s *Service) RemoveTeamMember(ctx context.Context, teamID models.TeamID, us
 		return fmt.Errorf("team ID and user ID must be positive")
 	}
 
-	return s.store.RemoveTeamMember(ctx, teamID, userID)
+	return s.db.RemoveTeamMember(ctx, teamID, userID)
 }
 
 // ListTeamMembers returns all members of a team
@@ -203,7 +204,7 @@ func (s *Service) ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]
 		return nil, fmt.Errorf("team ID must be positive")
 	}
 
-	return s.store.ListTeamMembers(ctx, teamID)
+	return s.db.ListTeamMembers(ctx, teamID)
 }
 
 // ListUserTeams returns all teams a user is a member of
@@ -212,7 +213,7 @@ func (s *Service) ListUserTeams(ctx context.Context, userID models.UserID) ([]*m
 		return nil, fmt.Errorf("user ID must be positive")
 	}
 
-	return s.store.ListUserTeams(ctx, userID)
+	return s.db.ListUserTeams(ctx, userID)
 }
 
 // AddTeamSource adds a source to a team
@@ -221,7 +222,7 @@ func (s *Service) AddTeamSource(ctx context.Context, teamID models.TeamID, sourc
 		return fmt.Errorf("team ID and source ID must be positive")
 	}
 
-	return s.store.AddTeamSource(ctx, teamID, sourceID)
+	return s.db.AddTeamSource(ctx, teamID, sourceID)
 }
 
 // RemoveTeamSource removes a source from a team
@@ -230,7 +231,7 @@ func (s *Service) RemoveTeamSource(ctx context.Context, teamID models.TeamID, so
 		return fmt.Errorf("team ID and source ID must be positive")
 	}
 
-	return s.store.RemoveTeamSource(ctx, teamID, sourceID)
+	return s.db.RemoveTeamSource(ctx, teamID, sourceID)
 }
 
 // ListTeamSources returns all sources associated with a team
@@ -239,7 +240,7 @@ func (s *Service) ListTeamSources(ctx context.Context, teamID models.TeamID) ([]
 		return nil, fmt.Errorf("team ID must be positive")
 	}
 
-	return s.store.ListTeamSources(ctx, teamID)
+	return s.db.ListTeamSources(ctx, teamID)
 }
 
 // ListSourceTeams returns all teams that have access to a source
@@ -248,55 +249,5 @@ func (s *Service) ListSourceTeams(ctx context.Context, sourceID models.SourceID)
 		return nil, fmt.Errorf("source ID must be positive")
 	}
 
-	return s.store.ListSourceTeams(ctx, sourceID)
-}
-
-// CreateTeamQuery creates a new team query
-func (s *Service) CreateTeamQuery(ctx context.Context, query *models.TeamQuery) error {
-	if query == nil {
-		return fmt.Errorf("query cannot be nil")
-	}
-
-	return s.store.CreateTeamQuery(ctx, query)
-}
-
-// GetTeamQuery retrieves a team query by ID
-func (s *Service) GetTeamQuery(ctx context.Context, queryID int) (*models.TeamQuery, error) {
-	if queryID <= 0 {
-		return nil, fmt.Errorf("query ID must be positive")
-	}
-
-	query, err := s.store.GetTeamQuery(ctx, queryID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting team query: %w", err)
-	}
-
-	return query, nil
-}
-
-// UpdateTeamQuery updates a team query
-func (s *Service) UpdateTeamQuery(ctx context.Context, query *models.TeamQuery) error {
-	if query == nil {
-		return fmt.Errorf("query cannot be nil")
-	}
-
-	return s.store.UpdateTeamQuery(ctx, query)
-}
-
-// DeleteTeamQuery deletes a team query
-func (s *Service) DeleteTeamQuery(ctx context.Context, queryID int) error {
-	if queryID <= 0 {
-		return fmt.Errorf("query ID must be positive")
-	}
-
-	return s.store.DeleteTeamQuery(ctx, queryID)
-}
-
-// ListTeamQueries returns all queries for a team
-func (s *Service) ListTeamQueries(ctx context.Context, teamID models.TeamID) ([]*models.TeamQuery, error) {
-	if teamID <= 0 {
-		return nil, fmt.Errorf("team ID must be positive")
-	}
-
-	return s.store.ListTeamQueries(ctx, teamID)
+	return s.db.ListSourceTeams(ctx, sourceID)
 }
