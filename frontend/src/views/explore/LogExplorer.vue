@@ -122,6 +122,10 @@ const currentRoute = useRoute();
 // Track both query content and mode from URL
 const lastQueryParam = ref(currentRoute.query.q);
 const lastModeParam = ref(currentRoute.query.mode);
+  
+// Check if we're in edit mode (URL has query_id)
+const isEditingExistingQuery = computed(() => !!currentRoute.query.query_id);
+const queryIdFromUrl = computed(() => currentRoute.query.query_id as string | undefined);
 
 // Watch for URL query parameter changes
 watch(() => [currentRoute.query.q, currentRoute.query.mode], ([newQueryParam, newModeParam]) => {
@@ -632,6 +636,18 @@ onBeforeUnmount(() => {
               <Play v-if="!isExecutingQuery" class="h-4 w-4" />
               <RefreshCw v-else class="h-4 w-4 animate-spin" />
               <span>{{ isExecutingQuery ? 'Running Query...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>
+            </Button>
+
+            <!-- Save Button - Different text when editing -->
+            <Button 
+              v-if="currentSourceId && hasValidSource && exploreStore.timeRange"
+              variant="outline" 
+              size="sm" 
+              class="h-9 ml-2" 
+              @click="handleSaveQueryClick"
+            >
+              <SaveIcon class="h-4 w-4 mr-1.5" />
+              {{ isEditingExistingQuery ? 'Update Query' : 'Save Query' }}
             </Button>
 
             <!-- Query Stats Preview -->

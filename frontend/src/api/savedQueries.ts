@@ -66,6 +66,9 @@ export const savedQueriesApi = {
   
   getQuery: (teamId: number, queryId: string) => 
     apiClient.get<SavedTeamQuery>(`/teams/${teamId}/queries/${queryId}`),
+    
+  getTeamSourceQuery: (teamId: number, sourceId: number, queryId: string) =>
+    apiClient.get<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/queries/${queryId}`),
   
   createQuery: (teamId: number, query: Omit<SavedTeamQuery, "id" | "created_at" | "updated_at">) => 
     apiClient.post<SavedTeamQuery>(`/teams/${teamId}/queries`, query),
