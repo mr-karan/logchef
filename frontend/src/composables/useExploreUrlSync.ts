@@ -3,6 +3,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useExploreStore } from '@/stores/explore';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
+import { useSavedQueriesStore } from '@/stores/savedQueries';
 import {
   CalendarDateTime,
   now,
@@ -78,6 +79,12 @@ export function useExploreUrlSync() {
       }
       if (teamsStore.teams.length === 0) {
         throw new Error("No teams available or accessible.");
+      }
+
+      // Check if we have a query_id in the URL, which indicates we're editing a saved query
+      const queryId = route.query.query_id as string | undefined;
+      if (queryId) {
+        console.log(`useExploreUrlSync: Found query_id=${queryId} in URL, in edit mode`);
       }
 
       // 2. Set Team from URL or default
@@ -224,6 +231,12 @@ export function useExploreUrlSync() {
     // Source (only if valid and belongs to current team)
     if (exploreStore.sourceId > 0 && sourcesStore.teamSources.some(s => s.id === exploreStore.sourceId)) {
       query.source = exploreStore.sourceId.toString();
+    }
+    
+    // Preserve query_id if present (for editing mode)
+    const currentQueryId = route.query.query_id;
+    if (currentQueryId) {
+      query.query_id = currentQueryId as string;
     }
 
     // Limit
