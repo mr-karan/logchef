@@ -118,7 +118,6 @@ const activeSourceTableName = computed(() => sourcesStore.getCurrentSourceTableN
 
 // Better track when URL query params change
 const currentRoute = useRoute();
-const lastQueryParam = ref(currentRoute.query.q);
 
 // Track both query content and mode from URL
 const lastQueryParam = ref(currentRoute.query.q);
