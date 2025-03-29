@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
-import { Plus, Play, RefreshCw } from 'lucide-vue-next'
+import { Plus, Play, RefreshCw, Copy } from 'lucide-vue-next'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
@@ -330,6 +330,26 @@ watch(
   { deep: true } // Use deep watch for the timeRange object
 );
 
+// Function to copy current URL to clipboard
+const copyUrlToClipboard = () => {
+  try {
+    navigator.clipboard.writeText(window.location.href);
+    toast({
+      title: "URL Copied",
+      description: "The shareable link has been copied to your clipboard.",
+      duration: TOAST_DURATION.SHORT
+    });
+  } catch (error) {
+    console.error("Failed to copy URL: ", error);
+    toast({
+      title: "Copy Failed",
+      description: "Failed to copy URL to clipboard.",
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR
+    });
+  }
+}
+
 // Component lifecycle with improved initialization sequence
 onMounted(async () => {
   console.log("LogExplorer component mounting - Simplified");
@@ -472,6 +492,11 @@ onBeforeUnmount(() => {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <!-- Share Button -->
+      <Button variant="outline" size="sm" class="h-8 ml-2" @click="copyUrlToClipboard" v-tooltip="'Copy shareable link'">
+        <Copy class="h-4 w-4" />
+      </Button>
     </div>
 
     <!-- Main Content Area -->
