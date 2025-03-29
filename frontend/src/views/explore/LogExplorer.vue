@@ -216,6 +216,16 @@ watch(isInitializing, async (initializing, prevInitializing) => {
       }
     }
 
+    // Make sure we have a valid time range before executing the query
+    if (!exploreStore.timeRange || !exploreStore.timeRange.start || !exploreStore.timeRange.end) {
+      console.log("Setting default time range as none was provided in saved query");
+      // Set a default time range (last 24 hours)
+      exploreStore.setTimeRange({
+        start: now(getLocalTimeZone()).subtract({ hours: 24 }),
+        end: now(getLocalTimeZone())
+      });
+    }
+
     // Now check if we can execute the query (either the one from URL or the loaded saved one)
     if (canExecuteQuery.value && (exploreStore.logchefqlCode || exploreStore.rawSql)) {
       console.log("Running initial query...")
@@ -476,16 +486,23 @@ const handleSaveOrUpdateClick = async () => {
     const startTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.start);
     const endTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.end);
 
-    // Ensure timestamps are valid before proceeding
-    if (startTime === null || endTime === null) {
-      console.error("Cannot update query: Invalid time range.");
+    // Check if time range exists and is valid
+    if (!exploreStore.timeRange || !exploreStore.timeRange.start || !exploreStore.timeRange.end) {
+      console.log("Using current time since time range is invalid");
+      // Use current time instead of failing
+      startTime = Date.now() - 3600000; // 1 hour ago
+      endTime = Date.now();
+    } else if (startTime === null || endTime === null) {
+      console.error("Cannot update query: Invalid time range conversion.");
       toast({
         title: 'Update Failed',
-        description: 'Invalid time range selected.',
-        variant: 'destructive'
-        // duration?
+        description: 'Invalid time range selected. Using current time instead.',
+        variant: 'warning',
+        duration: TOAST_DURATION.WARNING
       });
-      return;
+      // Use current time instead of failing
+      startTime = Date.now() - 3600000; // 1 hour ago
+      endTime = Date.now();
     }
 
     try {
