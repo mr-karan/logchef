@@ -68,7 +68,7 @@ export function useSavedQueries() {
     try {
       let response;
       
-      // Determine if this is an edit or a new query
+      // Check if we're updating an existing query (explicit edit mode)
       if (editingQuery.value) {
         // Update existing query
         response = await savedQueriesStore.updateQuery(
@@ -83,29 +83,68 @@ export function useSavedQueries() {
           }
         )
         console.log('Updated query:', response)
-      } else {
-        // Create new query
-        response = await savedQueriesStore.createQuery(formData.team_id, {
-          team_id: formData.team_id,
-          name: formData.name,
-          description: formData.description,
-          source_id: formData.source_id,
-          query_type: formData.query_type,
-          query_content: formData.query_content
-        })
-        console.log('Created new query:', response)
+      } 
+      // Check if a query with this name already exists (possible overwrite)
+      else {
+        // Get existing queries to check for duplicates
+        const existingQueries = savedQueriesStore.data.queries || [];
+        const existingQuery = existingQueries.find(q => 
+          q.name === formData.name && 
+          q.team_id === formData.team_id &&
+          q.source_id === formData.source_id
+        );
+        
+        if (existingQuery) {
+          // Ask for confirmation before overwriting
+          const confirmOverwrite = window.confirm(
+            `A query named "${formData.name}" already exists for this source. Do you want to overwrite it?`
+          );
+          
+          if (confirmOverwrite) {
+            // Update the existing query
+            response = await savedQueriesStore.updateQuery(
+              formData.team_id,
+              existingQuery.id.toString(),
+              {
+                name: formData.name,
+                description: formData.description,
+                source_id: formData.source_id,
+                query_type: formData.query_type,
+                query_content: formData.query_content
+              }
+            )
+            console.log('Overwrote existing query:', response)
+          } else {
+            // User cancelled the overwrite
+            return;
+          }
+        } else {
+          // Create new query
+          response = await savedQueriesStore.createQuery(formData.team_id, {
+            team_id: formData.team_id,
+            name: formData.name,
+            description: formData.description,
+            source_id: formData.source_id,
+            query_type: formData.query_type,
+            query_content: formData.query_content
+          })
+          console.log('Created new query:', response)
+        }
       }
 
-      if (response.success) {
+      if (response && response.success) {
         showSaveQueryModal.value = false
         editingQuery.value = null  // Clear editing state
         await savedQueriesStore.fetchTeamQueries(formData.team_id)
+        
+        // Show appropriate success message
+        const actionVerb = editingQuery.value ? 'updated' : 'saved';
         toast({
           title: 'Success',
-          description: editingQuery.value ? 'Query updated successfully.' : 'Query saved successfully.',
+          description: `Query ${actionVerb} successfully.`,
           duration: TOAST_DURATION.SUCCESS
         })
-      } else {
+      } else if (response) {
         throw new Error(response.error || 'Failed to save query')
       }
     } catch (error) {
