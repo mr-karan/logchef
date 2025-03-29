@@ -601,22 +601,27 @@ const onDragEnd = (event: DragEvent) => {
                                     @dragleave="onDragLeave($event, header.column.id)"
                                     @drop="onDrop($event, header.column.id)" @dragend="onDragEnd($event)">
                                     <div class="flex items-center h-full">
-                                        <!-- Drag Handle (visual only now, drag initiated on whole th) -->
+                                        <!-- Drag Handle -->
                                         <span
-                                            class="flex items-center justify-center w-5 h-full mr-1 cursor-grab text-muted-foreground/50 group-hover:text-muted-foreground">
+                                            class="flex items-center justify-center flex-shrink-0 w-5 h-full mr-1.5 cursor-grab text-muted-foreground/50 group-hover:text-muted-foreground"
+                                            title="Drag to reorder column">
                                             <GripVertical class="h-4 w-4" />
                                         </span>
 
-                                        <!-- Column Header Content -->
-                                        <FlexRender v-if="!header.isPlaceholder"
-                                            :render="header.column.columnDef.header" :props="header.getContext()" />
+                                        <!-- Column Header Content (Title + Sort button from columns.ts) -->
+                                        <div class="flex-grow min-w-0 overflow-hidden mr-5">
+                                            <!-- FlexRender now renders the Button containing the title and sort icon -->
+                                            <FlexRender v-if="!header.isPlaceholder"
+                                                :render="header.column.columnDef.header" :props="header.getContext()" />
+                                        </div>
 
-                                        <!-- Column Resizer -->
+                                        <!-- Column Resizer (Absolute Positioned) -->
                                         <div v-if="header.column.getCanResize()"
                                             class="absolute right-0 top-0 h-full w-5 cursor-col-resize select-none touch-none flex items-center justify-center hover:bg-muted/40 transition-colors z-10"
                                             @mousedown="(e) => { e.preventDefault(); e.stopPropagation(); handleResize(e, header); }"
                                             @touchstart="(e) => { e.preventDefault(); e.stopPropagation(); handleResize(e, header); }"
-                                            @click.stop>
+                                            @click.stop title="Resize column">
+                                            <!-- Resize Grip Visual -->
                                             <div class="h-full w-4 flex flex-col items-center justify-center">
                                                 <div
                                                     class="resize-grip flex flex-col items-center justify-center gap-1">
@@ -639,7 +644,7 @@ const onDragEnd = (event: DragEvent) => {
 
                         <tbody>
                             <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
-                                <tr class="group cursor-pointer border-b transition-colors" :class="[
+                                <tr class="group cursor-pointer border-b transition-colors hover:bg-muted/10" :class="[
                                     row.getIsExpanded() ? 'bg-primary/10' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
                                 ]" @click="handleRowClick(row)($event)">
                                     <td v-for="cell in row.getVisibleCells()" :key="cell.id"
