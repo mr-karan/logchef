@@ -292,6 +292,7 @@ async function handleSubmit(event: Event) {
       // Create the payload
       const payload = {
         team_id: teamsStore.currentTeamId?.toString() || '',
+        source_id: currentSourceId.value,
         name: name.value,
         description: description.value,
         query_content: preparedContent,
