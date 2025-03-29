@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
-import { Plus, Play, RefreshCw, Share } from 'lucide-vue-next'
+import { Plus, Play, RefreshCw, Share2 } from 'lucide-vue-next'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
@@ -495,7 +495,7 @@ onBeforeUnmount(() => {
 
       <!-- Share Button -->
       <Button variant="outline" size="sm" class="h-8 ml-2" @click="copyUrlToClipboard" v-tooltip="'Copy shareable link'">
-        <Share class="h-4 w-4 mr-1.5" />
+        <Share2 class="h-4 w-4 mr-1.5" />
         Share
       </Button>
     </div>
