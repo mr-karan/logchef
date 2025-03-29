@@ -54,6 +54,7 @@ const router = useRouter()
 const exploreStore = useExploreStore()
 const teamsStore = useTeamsStore()
 const sourcesStore = useSourcesStore()
+const savedQueriesStore = useSavedQueriesStore()
 const { toast } = useToast()
 const { isInitializing, initializationError: urlError, initializeFromUrl, syncUrlFromState } = useExploreUrlSync(); // Use the composable
 
@@ -522,15 +523,14 @@ const handleSaveOrUpdateClick = async () => {
       // First, fetch the existing query to get its details
       isLoadingQuery.value = true;
       
-      // Call the saved queries API directly to get the query details
-      const response = await savedQueriesApi.getTeamSourceQuery(
+      // Use the store to fetch the query details
+      const result = await savedQueriesStore.fetchQuery(
         currentTeamId.value, 
-        currentSourceId.value,
         queryId
       );
       
-      if (response.status === "success" && response.data) {
-        const existingQuery = response.data;
+      if (result.success && savedQueriesStore.selectedQuery) {
+        const existingQuery = savedQueriesStore.selectedQuery;
         
         // Open the edit modal with the existing query's details
         showSaveQueryModal.value = true;
@@ -562,7 +562,6 @@ const handleSaveOrUpdateClick = async () => {
     editQueryData.value = null; // Reset edit data
     handleSaveQueryClick(); // Call original function to open modal
   }
-};
 };
 
 onBeforeUnmount(() => {
