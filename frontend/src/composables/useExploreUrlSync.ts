@@ -249,12 +249,14 @@ export function useExploreUrlSync() {
     // Limit
     query.limit = exploreStore.limit.toString();
 
-    // Time Range
+    // Time Range - Always include if available
     const startTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.start);
     const endTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.end);
     if (startTime !== null && endTime !== null) {
       query.start_time = startTime.toString();
       query.end_time = endTime.toString();
+    } else {
+      console.warn("useExploreUrlSync: Missing valid time range for URL sync");
     }
 
     // Mode

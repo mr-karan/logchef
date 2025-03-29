@@ -7,6 +7,7 @@ import { TOAST_DURATION } from '@/lib/constants'
 import { getErrorMessage } from '@/api/types'
 import type { SaveQueryFormData } from '@/views/explore/types'
 import type { SavedTeamQuery } from '@/api/savedQueries'
+import { CalendarDateTime } from '@internationalized/date'
 
 export function useSavedQueries() {
   const router = useRouter()
@@ -262,13 +263,49 @@ export function useSavedQueries() {
       // Set limit if available
       if (content.limit) exploreStore.setLimit(content.limit)
       
-      // Only set timeRange if it exists and contains valid start/end timestamps
+      // Set time range from saved query - this is crucial for recreating the exact query view
       if (content.timeRange && 
           content.timeRange.absolute && 
           content.timeRange.absolute.start && 
           content.timeRange.absolute.end) {
         console.log("Setting time range from saved query:", content.timeRange);
-        exploreStore.setTimeRange(content.timeRange)
+        
+        // Convert timestamps to CalendarDateTime objects
+        try {
+          const startDate = new Date(content.timeRange.absolute.start);
+          const endDate = new Date(content.timeRange.absolute.end);
+          
+          if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+            // Create CalendarDateTime objects
+            const startDateTime = new CalendarDateTime(
+              startDate.getFullYear(),
+              startDate.getMonth() + 1,
+              startDate.getDate(),
+              startDate.getHours(),
+              startDate.getMinutes(),
+              startDate.getSeconds()
+            );
+            
+            const endDateTime = new CalendarDateTime(
+              endDate.getFullYear(),
+              endDate.getMonth() + 1,
+              endDate.getDate(),
+              endDate.getHours(),
+              endDate.getMinutes(),
+              endDate.getSeconds()
+            );
+            
+            // Set the time range in the store
+            exploreStore.setTimeRange({
+              start: startDateTime,
+              end: endDateTime
+            });
+          } else {
+            console.warn("Invalid timestamp in saved query timeRange, keeping current range");
+          }
+        } catch (error) {
+          console.error("Error converting timestamps to CalendarDateTime:", error);
+        }
       } else {
         console.log("Saved query has no valid time range, keeping current range");
         // Keep existing time range from the store
@@ -319,13 +356,13 @@ export function useSavedQueries() {
         url += `&limit=${queryContent.limit}`
       }
 
-      // Add time range if available
-      if (queryContent.timeRange?.absolute) {
+      // Always add time range if available - this is crucial for query execution
+      if (queryContent.timeRange?.absolute?.start && queryContent.timeRange?.absolute?.end) {
         url += `&start_time=${queryContent.timeRange.absolute.start}`
         url += `&end_time=${queryContent.timeRange.absolute.end}`
       }
 
-      // Add mode parameter based on query type - always include this early in the URL
+      // Add mode parameter based on query type
       url += `&mode=${queryType}`
 
       // Add the query content (actual query text)
