@@ -17,9 +17,9 @@ import {
     type ColumnResizeMode,
     type Header,
 } from '@tanstack/vue-table'
-import { ref, computed, onMounted, watch, type CSSProperties } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Copy, Search, GripVertical } from 'lucide-vue-next'
+import { Search, GripVertical } from 'lucide-vue-next'
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import DataTableColumnSelector from './data-table-column-selector.vue'
@@ -82,76 +82,66 @@ const storageKey = computed(() => {
     return `logchef-tableState-${props.teamId}-${props.sourceId}`;
 });
 
-// Conditionally create useStorage ref - initialize as null
-let storedState: RemovableRef<DataTableState | null> | null = null;
+// Initialize useStorage directly. It will be null if storageKey is null initially.
+const storedState = useStorage<DataTableState | null>(
+    storageKey, // Pass the computed ref directly
+    null,       // Initial value if key is invalid or no data in storage
+    localStorage,
+    {
+        serializer: {
+            read: (v: any) => (v ? JSON.parse(v) : null),
+            write: (v: any) => JSON.stringify(v),
+        },
+        onError: (error) => {
+            console.error("Error reading/writing table state from localStorage:", error);
+        }
+    }
+);
 
-// Use a watcher to create the useStorage instance *only* when the key is valid
-watch(storageKey, (newKey) => {
-    if (newKey) {
-        // Create the storage instance if the key is valid.
-        // useStorage handles reusing the instance internally if the key hasn't changed.
-        storedState = useStorage<DataTableState | null>(newKey, null, localStorage, {
-            serializer: {
-                read: (v: any) => (v ? JSON.parse(v) : null),
-                write: (v: any) => JSON.stringify(v),
-            },
-            onError: (error) => {
-                console.error("Error reading/writing table state from localStorage:", error);
+// Watch for changes in props.columns and the stored state itself (which depends on storageKey)
+watch([() => props.columns, storedState], ([newColumns, currentStateValue], [oldColumns, oldStateValue]) => {
+    console.log("DataTable: State initialization watcher triggered.");
+
+    if (!storageKey.value) {
+        console.log("DataTable: storageKey is null, skipping state initialization.");
+        // Reset local state if key becomes invalid
+        columnOrder.value = newColumns.map(c => c.id!).filter(Boolean);
+        columnSizing.value = {};
+        newColumns.forEach(col => {
+            if (col.id) {
+                columnSizing.value[col.id] = col.size ?? defaultColumn.size;
             }
         });
-        console.log("DataTable: useStorage initialized/ensured for key:", newKey);
-    } else {
-        // If key becomes null, set our local variable to null.
-        storedState = null;
-        console.log("DataTable: storageKey became null, resetting storedState variable.");
-    }
-}, { immediate: true });
-
-// Refs for table state, initialized AFTER checking stored state
-const stateInitialized = ref(false);
-
-// Watch for changes in props.columns or the *key*
-watch([() => props.columns, storageKey], ([newColumns, currentKey], [oldColumns, oldKey]) => {
-    // Reset initialization flag if the storage key has actually changed
-    if (currentKey !== oldKey) {
-        console.log(`DataTable: Storage key changed from ${oldKey} to ${currentKey}. Resetting init flag.`);
-        stateInitialized.value = false;
-        columnOrder.value = [];
-        columnSizing.value = {};
-    }
-
-    if (!currentKey || stateInitialized.value || !storedState) {
-        // Bail out if key is invalid, already initialized, or storage isn't ready yet
         return;
     }
 
-    // Now we know storedState ref exists, but its value might still be null
-    const loadedStateValue = storedState.value;
-
-    console.log(`DataTable: Initializing/Reconciling state for key: ${currentKey}`);
-
+    console.log(`DataTable: Initializing/Reconciling state for key: ${storageKey.value}`);
     const currentColumnIds = newColumns.map(c => c.id!).filter(Boolean);
     let initialOrder: string[] = [];
     let initialSizing: ColumnSizingState = {};
 
-    if (loadedStateValue) { // Check if the *value* exists
-        console.log("DataTable: Found stored state:", loadedStateValue);
-        const savedOrder = loadedStateValue.columnOrder || [];
-        const filteredSavedOrder = savedOrder.filter((id: string) => currentColumnIds.includes(id)); // Add type for id
-        const newColumnIds = currentColumnIds.filter((id: string) => !filteredSavedOrder.includes(id)); // Add type for id
+    if (currentStateValue) {
+        console.log("DataTable: Found stored state:", currentStateValue);
+        const savedOrder = currentStateValue.columnOrder || [];
+        // Filter saved order to include only columns that still exist
+        const filteredSavedOrder = savedOrder.filter((id: string) => currentColumnIds.includes(id));
+        // Find columns that are new (not in the saved order)
+        const newColumnIds = currentColumnIds.filter((id: string) => !filteredSavedOrder.includes(id));
+        // Combine: existing ordered columns + new columns at the end
         initialOrder = [...filteredSavedOrder, ...newColumnIds];
 
-        const savedSizing = loadedStateValue.columnSizing || {};
+        const savedSizing = currentStateValue.columnSizing || {};
         currentColumnIds.forEach(id => {
             if (savedSizing[id] !== undefined) {
                 initialSizing[id] = savedSizing[id];
             } else {
+                // Use default size if not found in saved state
                 const columnDef = newColumns.find(c => c.id === id);
                 initialSizing[id] = columnDef?.size ?? defaultColumn.size;
             }
         });
     } else {
-        console.log("DataTable: No stored state value found, using defaults.");
+        console.log("DataTable: No stored state value found, using defaults based on props.columns.");
         initialOrder = currentColumnIds;
         currentColumnIds.forEach(id => {
             const columnDef = newColumns.find(c => c.id === id);
@@ -159,13 +149,18 @@ watch([() => props.columns, storageKey], ([newColumns, currentKey], [oldColumns,
         });
     }
 
-    columnOrder.value = initialOrder;
-    columnSizing.value = initialSizing;
-    stateInitialized.value = true;
+    // Update the local refs which the table uses
+    // Check if update is actually needed to prevent infinite loops if watch triggers unnecessarily
+    if (JSON.stringify(columnOrder.value) !== JSON.stringify(initialOrder)) {
+        columnOrder.value = initialOrder;
+    }
+    if (JSON.stringify(columnSizing.value) !== JSON.stringify(initialSizing)) {
+        columnSizing.value = initialSizing;
+    }
 
-    console.log("DataTable: Initial state applied:", { order: initialOrder, sizing: initialSizing });
+    console.log("DataTable: State applied:", { order: initialOrder, sizing: initialSizing });
 
-}, { immediate: true, deep: false });
+}, { immediate: true, deep: false }); // deep: false because we only care about the top-level refs changing
 
 // Save timezone preference whenever it changes
 watch(displayTimezone, (newValue) => {
@@ -300,10 +295,9 @@ const table = useVueTable({
     get data() {
         return props.data
     },
-    // Use the memoized resolvedColumns
+    // Use the memoized resolvedColumns directly
     get columns() {
-        // Ensure props.columns has been processed before passing to table
-        return stateInitialized.value ? resolvedColumns.value : [];
+        return resolvedColumns.value;
     },
     state: {
         get sorting() {
@@ -337,19 +331,25 @@ const table = useVueTable({
     onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
     onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
     onColumnSizingChange: updaterOrValue => {
-        const newState = valueUpdater(updaterOrValue, columnSizing)
-        if (storedState?.value) {
-            storedState.value.columnSizing = newState;
-        } else if (storedState) {
-            storedState.value = { columnOrder: columnOrder.value, columnSizing: newState };
+        const newSizingState = valueUpdater(updaterOrValue, columnSizing);
+        columnSizing.value = newSizingState; // Update local state first
+        // Update stored state if it exists
+        if (storedState.value) {
+            storedState.value = { ...storedState.value, columnSizing: newSizingState };
+        } else if (storageKey.value) { // Only create if key is valid
+             // If storedState was null but key is valid, create the object
+            storedState.value = { columnOrder: columnOrder.value, columnSizing: newSizingState };
         }
     },
     onColumnOrderChange: updaterOrValue => {
-        const newState = valueUpdater(updaterOrValue, columnOrder)
-        if (storedState?.value) {
-            storedState.value.columnOrder = newState;
-        } else if (storedState) {
-            storedState.value = { columnOrder: newState, columnSizing: columnSizing.value };
+        const newOrderState = valueUpdater(updaterOrValue, columnOrder);
+        columnOrder.value = newOrderState; // Update local state first
+        // Update stored state if it exists
+        if (storedState.value) {
+            storedState.value = { ...storedState.value, columnOrder: newOrderState };
+        } else if (storageKey.value) { // Only create if key is valid
+            // If storedState was null but key is valid, create the object
+            storedState.value = { columnOrder: newOrderState, columnSizing: columnSizing.value };
         }
     },
     getCoreRowModel: getCoreRowModel(),
@@ -372,12 +372,7 @@ const handleRowClick = (row: Row<Record<string, any>>) => (e: MouseEvent) => {
         return;
     }
     row.toggleExpanded();
-    
-    // Mark the row with a data attribute for styling
-    const rowElement = (e.currentTarget as HTMLElement);
-    if (rowElement) {
-        rowElement.dataset.expanded = String(row.getIsExpanded());
-    }
+    // No need to manually set dataset attribute, use :class binding in template
 }
 
 // Add back the copyCell function since it's still needed for individual cells
@@ -532,8 +527,8 @@ const onDrop = (event: DragEvent, targetColumnId: string) => {
     document.body.classList.remove('dragging-column');
 }
 
-const onDragEnd = (event: DragEvent) => {
-    // Cleanup in case drop didn't fire properly
+const onDragEnd = () => { // No need for event arg if not used
+    // Ensure cleanup happens regardless of drop success
     draggingColumnId.value = null;
     dragOverColumnId.value = null;
     document.body.classList.remove('dragging-column');
@@ -650,8 +645,9 @@ const onDragEnd = (event: DragEvent) => {
 
                         <tbody>
                             <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
+                                <!-- Bind expanded class directly -->
                                 <tr class="group cursor-pointer border-b transition-colors hover:bg-muted/30" :class="[
-                                    row.getIsExpanded() ? 'bg-primary/15' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
+                                    row.getIsExpanded() ? 'expanded-row bg-primary/15' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
                                 ]" @click="handleRowClick(row)($event)">
                                     <td v-for="cell in row.getVisibleCells()" :key="cell.id"
                                         class="px-3 py-2 align-top font-mono text-xs leading-normal overflow-hidden border-r border-muted/20"
@@ -698,7 +694,7 @@ const onDragEnd = (event: DragEvent) => {
     </div>
 </template>
 
-<style>
+<style scoped> /* Add scoped attribute */
 /* Table styling for log analytics */
 .table-fixed {
     table-layout: fixed;
@@ -808,8 +804,8 @@ const onDragEnd = (event: DragEvent) => {
 }
 
 /* Active/expanded row styling - using complementary colors */
-.table-fixed tbody tr.expanded-row,
-.table-fixed tbody tr[data-expanded="true"] {
+/* Use the class bound in the template */
+.table-fixed tbody tr.expanded-row {
     background-color: hsl(var(--primary) / 0.15) !important;
     border-top: 1px solid hsl(var(--primary) / 0.3);
     border-bottom: 1px solid hsl(var(--primary) / 0.3);
