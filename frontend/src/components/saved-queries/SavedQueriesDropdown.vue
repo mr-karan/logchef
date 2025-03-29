@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { ChevronDown, Save, PlusCircle, ListTree, Pencil, Eye } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import {
@@ -16,8 +16,7 @@ import { useTeamsStore } from '@/stores/teams';
 import { useToast } from '@/components/ui/toast';
 import { TOAST_DURATION } from '@/lib/constants';
 import { getErrorMessage } from '@/api/types';
-import { useSavedQueries } from '@/composables/useSavedQueries';
-import type { SavedTeamQuery } from '@/api/savedQueries';
+import { savedQueriesApi, type SavedTeamQuery } from '@/api/savedQueries';
 
 const props = defineProps<{
   selectedTeamId?: number;
@@ -26,69 +25,132 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'save'): void;
+  (e: 'select-saved-query', query: SavedTeamQuery): void;
 }>();
 
 const router = useRouter();
 const teamsStore = useTeamsStore();
 const { toast } = useToast();
 
-// Use state and actions from the composable
-const {
-  isLoading,         // Use composable's loading state
-  queries,           // Use composable's raw queries list
-  filteredQueries,   // Use composable's filtered list (if searching needed later)
-  hasQueries,        // Use composable's computed property
-  getQueryUrl,       // For navigation
-  openQuery,         // Use composable's open function
-  editQuery          // Use composable's edit function
-} = useSavedQueries();
-
-// Local UI state
+// Local state
 const isOpen = ref(false);
+const isLoading = ref(false);
+const queries = ref<SavedTeamQuery[]>([]);
 
-// Computed properties based on props
-const currentTeamId = computed(() => props.selectedTeamId);
-const currentSourceId = computed(() => props.selectedSourceId);
+// Watch for changes in team/source ID
+watch(
+  () => [props.selectedTeamId, props.selectedSourceId],
+  async ([teamId, sourceId]) => {
+    if (teamId && sourceId) {
+      await loadQueries(teamId, sourceId);
+    } else {
+      queries.value = [];
+    }
+  },
+  { immediate: true }
+);
 
-// Handle query selection using composable's function
+// Load queries when dropdown opens
+watch(isOpen, async (open) => {
+  if (open && props.selectedTeamId && props.selectedSourceId) {
+    await loadQueries(props.selectedTeamId, props.selectedSourceId);
+  }
+});
+
+// Load queries on mount as well
+onMounted(async () => {
+  if (props.selectedTeamId && props.selectedSourceId) {
+    await loadQueries(props.selectedTeamId, props.selectedSourceId);
+  }
+});
+
+// Function to load queries
+async function loadQueries(teamId: number, sourceId: number) {
+  if (!teamId || !sourceId) return;
+  
+  isLoading.value = true;
+  try {
+    const response = await savedQueriesApi.listTeamSourceQueries(teamId, sourceId);
+    if (response.data) {
+      queries.value = response.data;
+      console.log(`Loaded ${queries.value.length} queries for team ${teamId}, source ${sourceId}`);
+    }
+  } catch (error) {
+    console.error('Error loading queries:', error);
+    toast({
+      title: 'Error',
+      description: 'Failed to load saved queries',
+      variant: 'destructive',
+      duration: TOAST_DURATION.ERROR,
+    });
+    queries.value = [];
+  } finally {
+    isLoading.value = false;
+  }
+}
+
+// Handle query selection
 function selectQuery(query: SavedTeamQuery) {
   try {
-    openQuery(query);
-    isOpen.value = false; // Close dropdown after selection
+    emit('select-saved-query', query);
+    isOpen.value = false;
   } catch (error) {
     console.error('Error selecting query:', error);
     toast({
       title: 'Error',
-      description: 'Failed to open the selected query. Please try again.',
+      description: 'Failed to open the selected query',
       variant: 'destructive',
       duration: TOAST_DURATION.ERROR,
     });
   }
 }
 
-// Handle save action (emit event)
+// Handle save action
 function handleSave() {
   emit('save');
   isOpen.value = false;
 }
 
-// Handle edit query using composable's function
-function handleEditQuery(query: SavedTeamQuery) {
+// Generate URL for query exploration
+function getQueryUrl(query: SavedTeamQuery): string {
   try {
-    console.log("Editing query from dropdown:", query);
-    editQuery(query);
-    isOpen.value = false; // Close dropdown after edit trigger
+    const queryType = query.query_type?.toLowerCase() === 'logchefql' ? 'logchefql' : 'sql';
+    let url = `/logs/explore?team=${query.team_id}&source=${query.source_id}&query_id=${query.id}&mode=${queryType}`;
+    
+    try {
+      const queryContent = JSON.parse(query.query_content);
+      if (queryContent.content) {
+        url += `&q=${encodeURIComponent(queryContent.content)}`;
+      }
+      if (queryContent.limit) {
+        url += `&limit=${queryContent.limit}`;
+      }
+      if (queryContent.timeRange?.absolute) {
+        url += `&start_time=${queryContent.timeRange.absolute.start}&end_time=${queryContent.timeRange.absolute.end}`;
+      }
+    } catch (error) {
+      console.error('Error parsing query content:', error);
+    }
+    
+    return url;
   } catch (error) {
-    // Error handling is within editQuery, but catch here if needed
-    console.error("Error triggering edit from dropdown:", error);
+    console.error('Error generating query URL:', error);
+    return `/logs/explore?team=${query.team_id}&source=${query.source_id}&mode=${query.query_type}`;
   }
+}
+
+// Edit query - navigate to edit URL
+function handleEditQuery(query: SavedTeamQuery) {
+  const url = getQueryUrl(query);
+  router.push(url);
+  isOpen.value = false;
 }
 
 // Go to queries view
 function goToQueries() {
   const query: Record<string, string | number> = {};
-  if (currentTeamId.value) query.team = currentTeamId.value;
-  if (currentSourceId.value) query.source = currentSourceId.value; // Include source if available
+  if (props.selectedTeamId) query.team = props.selectedTeamId;
+  if (props.selectedSourceId) query.source = props.selectedSourceId;
 
   router.push({
     path: '/logs/saved',
@@ -112,22 +174,22 @@ function goToQueries() {
     <DropdownMenuContent align="start" class="w-[280px]">
       <DropdownMenuLabel>Saved Queries</DropdownMenuLabel>
 
-      <!-- Loading state from composable -->
+      <!-- Loading state -->
       <div v-if="isLoading" class="px-2 py-3 flex flex-col gap-2">
         <Skeleton v-for="i in 3" :key="i" class="h-5 w-full" />
       </div>
 
       <!-- State for missing team/source selection -->
-      <div v-else-if="!currentTeamId || !currentSourceId" class="px-2 py-3 text-sm text-muted-foreground">
+      <div v-else-if="!props.selectedTeamId || !props.selectedSourceId" class="px-2 py-3 text-sm text-muted-foreground">
         Select a Team and Source first.
       </div>
 
-      <!-- No queries state from composable -->
-      <div v-else-if="!hasQueries" class="px-2 py-3 text-sm text-muted-foreground">
+      <!-- No queries state -->
+      <div v-else-if="queries.length === 0" class="px-2 py-3 text-sm text-muted-foreground">
         No saved queries for this source. Save one to see it here.
       </div>
 
-      <!-- Queries list from composable (using 'queries' for simplicity, can switch to filteredQueries if search added) -->
+      <!-- Queries list -->
       <template v-else>
         <div v-for="query in queries.slice(0, 5)" :key="query.id"
           class="py-2 px-2 hover:bg-accent hover:text-accent-foreground flex items-center justify-between group relative cursor-pointer"

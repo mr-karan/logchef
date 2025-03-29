@@ -23,11 +23,14 @@
       </div>
 
       <div class="flex items-center gap-2">
-        <!-- Saved Queries Dropdown (Integrated from LogExplorer) -->
-        <SavedQueriesDropdown :selected-source-id="props.sourceId" :selected-team-id="props.teamId"
-          :use-current-team="props.useCurrentTeam"
-          @select="(query: SavedTeamQuery) => $emit('select-saved-query', query)" @save="$emit('save-query')"
-          class="h-8" />
+        <!-- Saved Queries Dropdown -->
+        <SavedQueriesDropdown 
+          :selected-source-id="props.sourceId" 
+          :selected-team-id="props.teamId"
+          @select-saved-query="(query) => $emit('select-saved-query', query)" 
+          @save="$emit('save-query')"
+          class="h-8" 
+        />
 
         <!-- Table name indicator -->
         <div v-if="props.activeMode === 'clickhouse-sql'" class="text-xs text-muted-foreground mr-2">
