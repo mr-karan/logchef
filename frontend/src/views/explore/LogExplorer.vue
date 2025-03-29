@@ -104,6 +104,8 @@ const logchefQuery = ref('')
 const sqlQuery = ref('')
 const queryError = ref('')
 const queryEditorRef = ref()
+const isLoadingQuery = ref(false)
+const editQueryData = ref<SavedTeamQuery | null>(null)
 
 // UI state computed properties
 const showLoadingState = computed(() => isInitializing.value && !urlError.value)
@@ -464,97 +466,66 @@ function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): nu
 // New handler for the Save/Update button
 const handleSaveOrUpdateClick = async () => {
   const queryId = queryIdFromUrl.value;
-  if (queryId && currentTeamId.value && currentSourceId.value) { // Ensure IDs are present
+  
+  // Check if we can save
+  if (!canSaveOrUpdateQuery.value) {
+    toast({
+      title: 'Cannot Save Query',
+      description: 'Missing required fields (Team, Source, Query).',
+      duration: TOAST_DURATION.WARNING
+    });
+    return;
+  }
+  
+  if (queryId && currentTeamId.value && currentSourceId.value) {
     // --- Update Existing Query Flow ---
     console.log(`Attempting to update saved query ${queryId}`);
-    if (!canSaveOrUpdateQuery.value) {
-      toast({
-        title: 'Cannot Update Query',
-        description: 'Missing required fields (Team, Source, Query).'
-        // Add duration/variant if needed
-      });
-      return;
-    }
-
-    // Get current query content and type from exploreStore
-    const currentQueryContent = (exploreStore.activeMode === 'logchefql'
-      ? exploreStore.logchefqlCode
-      : exploreStore.rawSql) || "";
-    const currentQueryType = exploreStore.activeMode;
-
-    // Convert time range to timestamps
-    const startTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.start);
-    const endTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.end);
-
-    // Check if time range exists and is valid
-    if (!exploreStore.timeRange || !exploreStore.timeRange.start || !exploreStore.timeRange.end) {
-      console.log("Using current time since time range is invalid");
-      // Use current time instead of failing
-      startTime = Date.now() - 3600000; // 1 hour ago
-      endTime = Date.now();
-    } else if (startTime === null || endTime === null) {
-      console.error("Cannot update query: Invalid time range conversion.");
-      toast({
-        title: 'Update Failed',
-        description: 'Invalid time range selected. Using current time instead.',
-        variant: 'warning',
-        duration: TOAST_DURATION.WARNING
-      });
-      // Use current time instead of failing
-      startTime = Date.now() - 3600000; // 1 hour ago
-      endTime = Date.now();
-    }
-
+    
     try {
-      const updatePayload = {
-        query_content: JSON.stringify({ // Stringify the content object
-          version: 1,
-          sourceId: currentSourceId.value,
-          timeRange: { // Use the converted timestamps
-            absolute: {
-              start: startTime,
-              end: endTime,
-            }
-          },
-          limit: exploreStore.limit,
-          content: currentQueryContent,
-        }),
-        query_type: currentQueryType,
-      };
-
-      // Call the update function from the composable
-      await updateSavedQuery(
-        currentTeamId.value,
+      // First, fetch the existing query to get its details
+      isLoadingQuery.value = true;
+      
+      // Call the saved queries API directly to get the query details
+      const response = await savedQueriesApi.getTeamSourceQuery(
+        currentTeamId.value, 
         currentSourceId.value,
-        queryId,
-        updatePayload
+        queryId
       );
-
+      
+      if (response.status === "success" && response.data) {
+        const existingQuery = response.data;
+        
+        // Open the edit modal with the existing query's details
+        showSaveQueryModal.value = true;
+        editQueryData.value = {
+          ...existingQuery,
+          // Add current content
+          currentContent: (exploreStore.activeMode === 'logchefql'
+            ? exploreStore.logchefqlCode
+            : exploreStore.rawSql) || "",
+          currentType: exploreStore.activeMode
+        };
+      } else {
+        throw new Error("Failed to load query details");
+      }
+    } catch (error) {
+      console.error(`Error loading query for edit:`, error);
       toast({
-        title: 'Query Updated',
-        description: `Saved query has been successfully updated.`,
-        duration: TOAST_DURATION.SUCCESS
+        title: 'Error',
+        description: 'Failed to load query details for editing.',
+        variant: 'destructive',
+        duration: TOAST_DURATION.ERROR
       });
-      // Maybe clear the 'dirty' state after successful update?
-      // isDirty.value = false; // If isDirty is exposed from useQueryExecution
-
-    } catch (error) { // Error handling is already inside updateSavedQuery, but catch here for component-specific actions if needed
-      console.error(`Error in handleSaveOrUpdateClick while updating saved query ${queryId}:`, error);
-      // Toast is already shown in the composable function
+    } finally {
+      isLoadingQuery.value = false;
     }
-
-  } else if (!queryId) {
+  } else {
     // --- Save New Query Flow ---
     console.log("Opening save new query modal...");
-    if (!canSaveOrUpdateQuery.value) {
-      toast({
-        title: 'Cannot Save Query',
-        description: 'Missing required fields (Team, Source, Query).'
-      });
-      return;
-    }
+    editQueryData.value = null; // Reset edit data
     handleSaveQueryClick(); // Call original function to open modal
   }
+};
 };
 
 onBeforeUnmount(() => {
@@ -911,12 +882,20 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Save Query Modal -->
-    <SaveQueryModal v-if="showSaveQueryModal" :is-open="showSaveQueryModal" :query-type="exploreStore.activeMode"
+    <SaveQueryModal 
+      v-if="showSaveQueryModal" 
+      :is-open="showSaveQueryModal" 
+      :query-type="exploreStore.activeMode"
+      :edit-data="editQueryData"
       :query-content="JSON.stringify({
         sourceId: currentSourceId,
         limit: exploreStore.limit,
         content: exploreStore.activeMode === 'logchefql' ? exploreStore.logchefqlCode : exploreStore.rawSql
-      })" @close="showSaveQueryModal = false" @save="handleSaveQuery" />
+      })" 
+      @close="showSaveQueryModal = false" 
+      @save="handleSaveQuery"
+      @update="handleUpdateQuery" 
+    />
   </div>
 </template>
 
