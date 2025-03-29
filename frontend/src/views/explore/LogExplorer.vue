@@ -116,6 +116,24 @@ const showNoSourcesState = computed(() =>
 // Use source details from the store
 const activeSourceTableName = computed(() => sourcesStore.getCurrentSourceTableName || '');
 
+// Better track when URL query params change
+const currentRoute = useRoute();
+const lastQueryParam = ref(currentRoute.query.q);
+
+// Watch for URL query parameter changes
+watch(() => currentRoute.query.q, (newQueryParam) => {
+  if (newQueryParam !== undefined && newQueryParam !== lastQueryParam.value) {
+    console.log('Query parameter changed in URL:', newQueryParam);
+    lastQueryParam.value = newQueryParam as string;
+    
+    // Update store based on mode
+    if (exploreStore.activeMode === 'logchefql') {
+      exploreStore.setLogchefqlCode(decodeURIComponent(newQueryParam as string));
+    } else {
+      exploreStore.setRawSql(decodeURIComponent(newQueryParam as string));
+    }
+  }
+}, { immediate: true });
 
 // Date range computed property
 const dateRange = computed({

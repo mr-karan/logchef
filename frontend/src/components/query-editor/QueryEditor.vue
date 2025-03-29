@@ -267,7 +267,9 @@ watchEffect(() => {
     : exploreStore.rawSql;
   const valueToSet = storeValue ?? "";
 
+  // Force update on edge cases
   if (editorContent.value !== valueToSet) {
+    console.log(`QueryEditor: Updating content from store, mode=${props.activeMode}`);
     runProgrammaticUpdate(valueToSet);
   }
 

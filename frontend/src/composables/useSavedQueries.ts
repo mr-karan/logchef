@@ -199,7 +199,13 @@ export function useSavedQueries() {
   // Handle opening query in explorer
   function openQuery(query: SavedTeamQuery) {
     const url = getQueryUrl(query)
-    router.push(url)
+    // Force reload component when navigating to the same route with different params
+    if (router.currentRoute.value.path === '/logs/explore') {
+      // If we're already on the explore page, replace instead of push to avoid navigation guards
+      router.replace(url)
+    } else {
+      router.push(url)
+    }
   }
 
   // Handle edit query
