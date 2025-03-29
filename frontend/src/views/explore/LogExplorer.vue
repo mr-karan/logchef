@@ -696,8 +696,10 @@ onBeforeUnmount(() => {
                 :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter LogchefQL query...' : 'Enter SQL query...'"
                 :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
                 :showFieldsPanel="showFieldsPanel" @submit="triggerQueryExecution" @update:activeMode="handleModeChange"
-                @toggle-fields="showFieldsPanel = !showFieldsPanel" :useCurrentTeam="true"
-                @select-saved-query="loadSavedQuery" @save-query="handleSaveOrUpdateClick" class="border-0 border-b" />
+                @toggle-fields="showFieldsPanel = !showFieldsPanel" 
+                @select-saved-query="loadSavedQuery" 
+                @save-query="handleSaveOrUpdateClick" 
+                class="border-0 border-b" />
             </div>
           </template>
           <template v-else-if="currentTeamId && !currentSourceId">
