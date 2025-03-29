@@ -133,8 +133,26 @@ onMounted(async () => {
     await Promise.all(promises);
   }
 
-  // Initialize form with initial data if provided
-  if (props.initialData) {
+  // Initialize form with data if provided
+  if (props.editData) {
+    // We're editing an existing query
+    name.value = props.editData.name || '';
+    description.value = props.editData.description || '';
+    queryId.value = props.editData.id?.toString() || '';
+    
+    // Attempt to parse the query content for better UX
+    try {
+      const content = JSON.parse(props.editData.query_content);
+      
+      // Set save timestamp based on whether timeRange exists in the data
+      if (content.timeRange && content.timeRange.absolute) {
+        saveTimestamp.value = true;
+      }
+    } catch (e) {
+      console.error("Failed to parse query content from editData", e);
+    }
+  } else if (props.initialData) {
+    // Creating new query with initial data
     name.value = props.initialData.name || '';
     description.value = props.initialData.description || '';
     
@@ -153,7 +171,7 @@ onMounted(async () => {
   
   // Also check URL parameters for editing existing query
   const queryId = route.query.query_id;
-  if (queryId && !props.initialData) {
+  if (queryId && !props.initialData && !props.editData) {
     console.log(`Editing query ID ${queryId} from URL parameters`);
   }
 });
