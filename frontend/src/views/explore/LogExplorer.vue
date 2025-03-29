@@ -97,6 +97,43 @@ const {
   loadSourceQueries
 } = useSavedQueries()
 
+// Handle updating an existing query
+async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
+  try {
+    // Update existing query
+    const response = await savedQueriesStore.updateQuery(
+      formData.team_id,
+      queryId,
+      {
+        name: formData.name,
+        description: formData.description,
+        source_id: formData.source_id,
+        query_type: formData.query_type,
+        query_content: formData.query_content
+      }
+    );
+    
+    if (response && response.success) {
+      showSaveQueryModal.value = false;
+      editQueryData.value = null; // Clear editing state
+      
+      toast({
+        title: 'Success',
+        description: 'Query updated successfully.',
+        duration: TOAST_DURATION.SUCCESS
+      });
+    }
+  } catch (error) {
+    console.error("Error updating query:", error);
+    toast({
+      title: 'Error',
+      description: getErrorMessage(error),
+      variant: 'destructive',
+      duration: TOAST_DURATION.ERROR
+    });
+  }
+}
+
 // Basic state
 const showFieldsPanel = ref(false)
 const tableColumns = ref<ColumnDef<Record<string, any>>[]>([])
