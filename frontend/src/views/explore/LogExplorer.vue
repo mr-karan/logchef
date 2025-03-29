@@ -120,17 +120,37 @@ const activeSourceTableName = computed(() => sourcesStore.getCurrentSourceTableN
 const currentRoute = useRoute();
 const lastQueryParam = ref(currentRoute.query.q);
 
+// Track both query content and mode from URL
+const lastQueryParam = ref(currentRoute.query.q);
+const lastModeParam = ref(currentRoute.query.mode);
+
 // Watch for URL query parameter changes
-watch(() => currentRoute.query.q, (newQueryParam) => {
+watch(() => [currentRoute.query.q, currentRoute.query.mode], ([newQueryParam, newModeParam]) => {
+  // Handle mode change from URL
+  if (newModeParam !== undefined && newModeParam !== lastModeParam.value) {
+    console.log('Mode parameter changed in URL:', newModeParam);
+    lastModeParam.value = newModeParam as string;
+    
+    // Update mode in store based on URL
+    const mode = (newModeParam as string).toLowerCase() === 'logchefql' ? 'logchefql' : 'sql';
+    if (exploreStore.activeMode !== mode) {
+      console.log(`Setting mode to ${mode} based on URL parameter`);
+      exploreStore.setActiveMode(mode);
+    }
+  }
+  
+  // Handle query content change from URL
   if (newQueryParam !== undefined && newQueryParam !== lastQueryParam.value) {
     console.log('Query parameter changed in URL:', newQueryParam);
     lastQueryParam.value = newQueryParam as string;
     
-    // Update store based on mode
+    const decodedQuery = decodeURIComponent(newQueryParam as string);
+    
+    // Update content based on current mode (which may have just changed)
     if (exploreStore.activeMode === 'logchefql') {
-      exploreStore.setLogchefqlCode(decodeURIComponent(newQueryParam as string));
+      exploreStore.setLogchefqlCode(decodedQuery);
     } else {
-      exploreStore.setRawSql(decodeURIComponent(newQueryParam as string));
+      exploreStore.setRawSql(decodedQuery);
     }
   }
 }, { immediate: true });

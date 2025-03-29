@@ -155,8 +155,9 @@ export function useSavedQueries() {
   // Generate URL for a saved query
   function getQueryUrl(query: SavedTeamQuery): string {
     try {
-      // Get query type from the saved query
-      const queryType = query.query_type || 'sql'
+      // Get query type from the saved query - ensure it's normalized
+      const queryType = query.query_type?.toLowerCase() === 'logchefql' ? 'logchefql' : 'sql'
+      console.log(`Building URL for query ${query.id} with type ${queryType}`)
 
       // Parse the query content
       const queryContent = JSON.parse(query.query_content)
@@ -180,8 +181,8 @@ export function useSavedQueries() {
         url += `&end_time=${queryContent.timeRange.absolute.end}`
       }
 
-      // Add mode parameter based on query type
-      url += `&mode=${queryType === 'logchefql' ? 'logchefql' : 'sql'}`
+      // Add mode parameter based on query type - always include this early in the URL
+      url += `&mode=${queryType}`
 
       // Add the query content (actual query text)
       if (queryContent.content) {
@@ -191,8 +192,8 @@ export function useSavedQueries() {
       return url
     } catch (error) {
       console.error('Error generating query URL:', error)
-      // Fallback URL without query content
-      return `/logs/explore?team=${query.team_id}&source=${query.source_id}&mode=${query.query_type}`
+      // Fallback URL with explicit mode parameter 
+      return `/logs/explore?team=${query.team_id}&source=${query.source_id}&mode=${query.query_type?.toLowerCase() === 'logchefql' ? 'logchefql' : 'sql'}`
     }
   }
 
