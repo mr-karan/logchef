@@ -146,8 +146,32 @@ function handleSave() {
 
 // Handle edit query 
 function handleEditQuery(query) {
-  editQuery(query);
-  isOpen.value = false;
+  try {
+    console.log("Editing query from dropdown:", query);
+    // Make sure we're passing a properly typed query object
+    const typedQuery = {
+      id: query.id,
+      team_id: query.team_id,
+      source_id: query.source_id,
+      name: query.name,
+      description: query.description,
+      query_type: query.query_type,
+      query_content: query.query_content,
+      created_at: query.created_at,
+      updated_at: query.updated_at
+    };
+    
+    editQuery(typedQuery);
+    isOpen.value = false;
+  } catch (error) {
+    console.error("Error preparing query for edit:", error);
+    toast({
+      title: 'Error',
+      description: 'Failed to edit query. Please try again.',
+      variant: 'destructive',
+      duration: TOAST_DURATION.ERROR,
+    });
+  }
 }
 
 // Go to queries view
