@@ -39,16 +39,7 @@ function formatJSON(data: any): string {
     }
 }
 
-// Prevent editing while allowing selection/copy shortcuts
-function handleKeydown(event: KeyboardEvent) {
-    // Allow meta keys (Cmd/Ctrl) for copy/paste/select all etc.
-    if (event.metaKey || event.ctrlKey) {
-        return true
-    }
-    // Prevent all other key presses
-    event.preventDefault()
-    return false
-}
+
 
 // Handle copy to clipboard with toast notification
 async function copyToClipboard() {
@@ -101,20 +92,15 @@ async function copyToClipboard() {
         </div>
 
         <!-- Highlighted JSON with self-contained scrollbar -->
+        <!-- todo: add contenteditable to the pre tag -->
         <div class="relative">
             <div class="border rounded-sm bg-muted/5 mt-0.5 relative w-full overflow-hidden">
                 <pre :class="{ 'max-h-[500px]': !isExpanded }"
                     class="text-xs font-mono pt-8 px-1.5 overflow-y-auto overflow-x-auto whitespace-pre"><code
                         v-html="formatJSON(value)"
                         class="whitespace-pre"
-                        spellcheck="false"
-                        contenteditable="true"
-                        @cut.prevent
-                        @paste.prevent
-                        @keydown="handleKeydown"
                     /></pre>
             </div>
-
             <!-- Expand/collapse overlay -->
             <div v-if="!isExpanded && formatJSON(value).split('\n').length > 20"
                 class="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-background to-transparent flex items-end justify-center pb-1">
