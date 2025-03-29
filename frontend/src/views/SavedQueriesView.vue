@@ -343,7 +343,7 @@ async function handleSaveQuery(formData: any) {
 
       // Refresh the source queries to update the UI
       if (selectedSourceId.value) {
-        await loadSourceQueries();
+        await fetchQueries();
       }
 
       toast({
