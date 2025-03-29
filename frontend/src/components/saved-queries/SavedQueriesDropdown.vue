@@ -75,6 +75,10 @@ async function loadTeamQueries() {
   return savedQueriesStore.fetchTeamQueries(currentTeamId.value, true);
 }
 
+// Import the composable for consistent URL generation
+import { useSavedQueries } from '@/composables/useSavedQueries';
+const { getQueryUrl } = useSavedQueries();
+
 // Handle query selection
 function selectQuery(queryId: number) {
   // First check if we need to refresh the queries list
@@ -87,46 +91,29 @@ function selectQuery(queryId: number) {
     const query = savedQueriesStore.data.queries?.find(q => q.id === queryId);
     if (query) {
       try {
-        // Parse the query content
-        const queryContent = JSON.parse(query.query_content);
-
-        // Debug the query type
-        console.log(`Loading query ${queryId} with query_type:`, query.query_type);
+        // Generate URL for navigation using the same function as in SavedQueriesView
+        const url = getQueryUrl(query);
         
-        // Enhanced normalization of query_type with more robust handling
-        // Default to 'sql' if not explicitly 'logchefql'
-        let normalizedQueryType = 'sql'; // Safe default
-        
-        if (query.query_type && typeof query.query_type === 'string') {
-          normalizedQueryType = query.query_type.toLowerCase() === 'logchefql' 
-            ? 'logchefql' 
-            : 'sql';
-        }
-        
-        console.log(`Normalized query_type: ${normalizedQueryType}`);
-
-        // Verify the query content has the expected format for the query type
-        if (!queryContent || typeof queryContent !== 'object') {
-          console.warn(`Invalid query content format for query ${queryId}, using empty object`);
-          queryContent = { content: '' };
-        }
-
-        // Emit the select event with the query ID and the parsed content
-        emit('select', String(queryId), {
-          query_type: normalizedQueryType,
-          content: queryContent
-        });
+        // Navigate to the generated URL
+        router.push(url);
+        console.log(`Navigating to query ${queryId} via URL: ${url}`);
       } catch (error) {
         console.error('Error processing query selection:', error);
-        // Use a safer fallback with explicit query type
-        emit('select', String(queryId), {
-          query_type: 'sql', // Safe default
-          content: { content: '' }
+        toast({
+          title: 'Error',
+          description: 'Failed to load the selected query. Please try again.',
+          variant: 'destructive',
+          duration: TOAST_DURATION.ERROR,
         });
       }
     } else {
       console.warn(`Query with ID ${queryId} not found in store`);
-      emit('select', String(queryId));
+      toast({
+        title: 'Error',
+        description: 'Query not found. It may have been deleted.',
+        variant: 'destructive',
+        duration: TOAST_DURATION.ERROR,
+      });
     }
     isOpen.value = false;
   };
