@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
-import { SaveIcon } from 'lucide-vue-next';
+import { ref, computed, onMounted, watch } from 'vue';
+import { SaveIcon, Pencil } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -18,6 +18,7 @@ import { useSavedQueriesStore } from '@/stores/savedQueries';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
 import { useExploreStore } from '@/stores/explore';
+import { useRoute } from 'vue-router';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -25,6 +26,8 @@ const props = defineProps<{
   queryContent?: string;
   isEditMode?: boolean;
 }>();
+
+const route = useRoute();
 
 const emit = defineEmits<{
   (e: 'close'): void;
@@ -127,8 +130,43 @@ onMounted(async () => {
   if (props.initialData) {
     name.value = props.initialData.name || '';
     description.value = props.initialData.description || '';
+    
+    // If we're editing, attempt to parse the query content for better UX
+    try {
+      const content = JSON.parse(props.initialData.query_content);
+      
+      // Set save timestamp based on whether timeRange exists in the data
+      if (content.timeRange && content.timeRange.absolute) {
+        saveTimestamp.value = true;
+      }
+    } catch (e) {
+      console.error("Failed to parse query content from initialData", e);
+    }
+  }
+  
+  // Also check URL parameters for editing existing query
+  const queryId = route.query.query_id;
+  if (queryId && !props.initialData) {
+    console.log(`Editing query ID ${queryId} from URL parameters`);
   }
 });
+
+// Watch for changes in initialData
+watch(() => props.initialData, (newData) => {
+  if (newData) {
+    name.value = newData.name || '';
+    description.value = newData.description || '';
+    
+    try {
+      const content = JSON.parse(newData.query_content);
+      if (content.timeRange && content.timeRange.absolute) {
+        saveTimestamp.value = true;
+      }
+    } catch (e) {
+      console.error("Failed to parse query content from initialData in watcher", e);
+    }
+  }
+}, { deep: true });
 
 // Prepare query content with proper structure
 function prepareQueryContent(saveTimestamp: boolean): string {
@@ -329,8 +367,19 @@ const saveDescription = 'Save your current query configuration for future use.'
   <Dialog :open="isOpen" @update:open="(val) => !val && handleClose()">
     <DialogContent class="sm:max-w-[475px]">
       <DialogHeader>
-        <DialogTitle>{{ isEditMode ? 'Edit Saved Query' : 'Save Query' }}</DialogTitle>
-        <DialogDescription>{{ isEditMode ? editDescription : saveDescription }}</DialogDescription>
+        <DialogTitle>
+          <span v-if="props.initialData || props.isEditMode || !!route.query.query_id" class="flex items-center">
+            <Pencil class="h-4 w-4 mr-2" />
+            Edit Saved Query
+          </span>
+          <span v-else class="flex items-center">
+            <SaveIcon class="h-4 w-4 mr-2" />
+            Save New Query
+          </span>
+        </DialogTitle>
+        <DialogDescription>
+          {{ (props.initialData || props.isEditMode || !!route.query.query_id) ? editDescription : saveDescription }}
+        </DialogDescription>
       </DialogHeader>
 
       <form @submit="handleSubmit" class="space-y-4">
@@ -394,7 +443,7 @@ const saveDescription = 'Save your current query configuration for future use.'
           <Button type="submit" :disabled="isSubmitting || !isValid">
             <SaveIcon v-if="!isSubmitting" class="mr-2 h-4 w-4" />
             <Loader2 v-else class="mr-2 h-4 w-4 animate-spin" />
-            {{ isEditMode ? 'Update' : 'Save' }}
+            {{ (props.initialData || props.isEditMode || !!route.query.query_id) ? 'Update Query' : 'Save Query' }}
           </Button>
         </div>
       </form>
