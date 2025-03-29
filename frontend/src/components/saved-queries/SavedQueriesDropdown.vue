@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { ChevronDown, Save, PlusCircle, ListTree } from 'lucide-vue-next';
+import { ChevronDown, Save, PlusCircle, ListTree, Pencil, Eye } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import {
   DropdownMenu,
@@ -17,6 +17,7 @@ import { useTeamsStore } from '@/stores/teams';
 import { useToast } from '@/components/ui/toast';
 import { TOAST_DURATION } from '@/lib/constants';
 import { getErrorMessage } from '@/api/types';
+import { useSavedQueries } from '@/composables/useSavedQueries';
 
 const props = defineProps<{
   selectedTeamId?: number;
@@ -25,6 +26,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'select', queryId: string, queryData?: any): void;
   (e: 'save'): void;
+  (e: 'edit', query: any): void;
 }>();
 
 const router = useRouter();
@@ -75,9 +77,9 @@ async function loadTeamQueries() {
   return savedQueriesStore.fetchTeamQueries(currentTeamId.value, true);
 }
 
-// Import the composable for consistent URL generation
+// Import the composable for consistent URL generation and editing
 import { useSavedQueries } from '@/composables/useSavedQueries';
-const { getQueryUrl } = useSavedQueries();
+const { getQueryUrl, editQuery } = useSavedQueries();
 
 // Handle query selection
 function selectQuery(queryId: number) {
@@ -142,6 +144,12 @@ function handleSave() {
   isOpen.value = false;
 }
 
+// Handle edit query 
+function handleEditQuery(query) {
+  editQuery(query);
+  isOpen.value = false;
+}
+
 // Go to queries view
 function goToQueries() {
   const query = currentTeamId.value ? { team: currentTeamId.value } : {};
@@ -187,14 +195,34 @@ onMounted(async () => {
 
       <!-- Queries list -->
       <template v-else>
-        <DropdownMenuItem 
+        <div 
           v-for="query in (savedQueriesStore.data.queries || []).slice(0, 5)" 
           :key="query.id"
-          @click="selectQuery(query.id)" 
-          class="cursor-pointer py-2"
+          class="py-2 px-2 hover:bg-accent hover:text-accent-foreground flex items-center justify-between group"
         >
-          <span class="font-medium">{{ query.name }}</span>
-        </DropdownMenuItem>
+          <DropdownMenuItem 
+            @click="selectQuery(query.id)" 
+            class="cursor-pointer p-0 focus:bg-transparent"
+          >
+            <span class="font-medium">{{ query.name }}</span>
+          </DropdownMenuItem>
+          <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button 
+              class="rounded-sm h-6 w-6 flex items-center justify-center hover:bg-accent-foreground/10" 
+              @click="selectQuery(query.id)"
+              title="Open query"
+            >
+              <Eye class="h-3.5 w-3.5" />
+            </button>
+            <button 
+              class="rounded-sm h-6 w-6 flex items-center justify-center hover:bg-accent-foreground/10" 
+              @click="handleEditQuery(query)"
+              title="Edit query"
+            >
+              <Pencil class="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
 
         <!-- Show "View All" option if there are more than 5 queries -->
         <DropdownMenuSeparator v-if="savedQueriesStore.data.queries.length > 5" />
