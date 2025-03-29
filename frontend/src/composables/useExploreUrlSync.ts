@@ -3,7 +3,13 @@ import { useRoute, useRouter } from 'vue-router';
 import { useExploreStore } from '@/stores/explore';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
-import { CalendarDateTime, now, getLocalTimeZone } from '@internationalized/date';
+import {
+  CalendarDateTime,
+  now,
+  getLocalTimeZone,
+  type DateValue,
+  toCalendarDateTime
+} from '@internationalized/date';
 
 export function useExploreUrlSync() {
   const route = useRoute();
@@ -27,15 +33,16 @@ export function useExploreUrlSync() {
     if (timestamp === null) return null;
     try {
       const date = new Date(timestamp);
-      // Ensure valid date object before creating CalendarDateTime
       if (isNaN(date.getTime())) return null;
+      // Construct CalendarDateTime directly from JS Date parts
       return new CalendarDateTime(
         date.getFullYear(),
-        date.getMonth() + 1,
+        date.getMonth() + 1, // JS month is 0-indexed
         date.getDate(),
         date.getHours(),
         date.getMinutes(),
-        date.getSeconds()
+        date.getSeconds(),
+        date.getMilliseconds()
       );
     } catch (e) {
       console.error("Error converting timestamp to CalendarDateTime:", e);
@@ -43,14 +50,14 @@ export function useExploreUrlSync() {
     }
   }
 
-  function calendarDateTimeToTimestamp(dateTime: CalendarDateTime | null | undefined): number | null {
+  function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): number | null {
     if (!dateTime) return null;
     try {
-      // Convert CalendarDateTime to JS Date object (assuming local timezone for URL representation)
+      // Convert any DateValue to JS Date object using the local timezone
       const date = dateTime.toDate(getLocalTimeZone());
       return date.getTime();
     } catch (e) {
-      console.error("Error converting CalendarDateTime to timestamp:", e);
+      console.error("Error converting DateValue to timestamp:", e);
       return null;
     }
   }
@@ -143,14 +150,24 @@ export function useExploreUrlSync() {
       // 6. Set Time Range from URL or default
       const urlStartTime = parseTimestamp(route.query.start_time as string | undefined);
       const urlEndTime = parseTimestamp(route.query.end_time as string | undefined);
-      let startDateTime = timestampToCalendarDateTime(urlStartTime);
-      let endDateTime = timestampToCalendarDateTime(urlEndTime);
+      let startDateTime: DateValue;
+      let endDateTime: DateValue;
 
-      if (!startDateTime || !endDateTime) {
+      const parsedStart = timestampToCalendarDateTime(urlStartTime);
+      const parsedEnd = timestampToCalendarDateTime(urlEndTime);
+
+      if (!parsedStart || !parsedEnd) {
         console.log("useExploreUrlSync: Using default time range.");
         const nowDt = now(getLocalTimeZone());
-        startDateTime = nowDt.subtract({ hours: 1 });
-        endDateTime = nowDt;
+        startDateTime = new CalendarDateTime(
+          nowDt.year, nowDt.month, nowDt.day, nowDt.hour, nowDt.minute, nowDt.second
+        ).subtract({ hours: 1 });
+        endDateTime = new CalendarDateTime(
+          nowDt.year, nowDt.month, nowDt.day, nowDt.hour, nowDt.minute, nowDt.second
+        );
+      } else {
+          startDateTime = parsedStart;
+          endDateTime = parsedEnd;
       }
       exploreStore.setTimeRange({ start: startDateTime, end: endDateTime });
       console.log(`useExploreUrlSync: Time range set.`);
@@ -248,11 +265,27 @@ export function useExploreUrlSync() {
   // --- Watchers ---
 
   // Watch relevant store state and trigger URL update
-  // Disabled automatic URL updates - now called explicitly
   watch(
-    [],
-    () => {},
-    { deep: true }
+    [
+      // Watch relevant state properties
+      () => teamsStore.currentTeamId,
+      () => exploreStore.sourceId,
+      () => exploreStore.limit,
+      () => exploreStore.timeRange,
+      () => exploreStore.activeMode,
+      () => exploreStore.logchefqlCode,
+      () => exploreStore.rawSql,
+    ],
+    () => {
+      // Avoid syncing during the initial setup phase
+      if (isInitializing.value) {
+        // console.log("useExploreUrlSync: Skipping URL sync during initialization.");
+        return;
+      }
+      // Debounce? Consider adding debounce later if updates are too frequent
+      syncUrlFromState();
+    },
+    { deep: true } // Use deep watch for objects like timeRange
   );
 
   // Watch route changes to re-initialize if necessary (e.g., browser back/forward)
