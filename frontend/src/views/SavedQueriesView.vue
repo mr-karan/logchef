@@ -386,27 +386,37 @@ function getQueryUrl(query: SavedTeamQuery): string {
     const queryContent = JSON.parse(query.query_content);
 
     // Build the URL with the appropriate parameters
-    let url = `/logs/explore?team=${query.team_id}&query_id=${query.id}`;
+    let url = `/logs/explore?team=${query.team_id}`;
 
     // Add source ID if available
     if (query.source_id) {
       url += `&source=${query.source_id}`;
     }
 
+    // Add limit if available
+    if (queryContent.limit) {
+      url += `&limit=${queryContent.limit}`;
+    }
+
+    // Add time range if available
+    if (queryContent.timeRange?.absolute) {
+      url += `&start_time=${queryContent.timeRange.absolute.start}`;
+      url += `&end_time=${queryContent.timeRange.absolute.end}`;
+    }
+
     // Add mode parameter based on query type
     url += `&mode=${queryType === 'logchefql' ? 'logchefql' : 'sql'}`;
 
-    // Add the appropriate query content based on type
-    if (queryType === 'logchefql' && queryContent.logchefqlContent) {
-      url += `&q=${encodeURIComponent(queryContent.logchefqlContent)}`;
-    } else if (queryType === 'sql' && queryContent.rawSql) {
-      url += `&q=${encodeURIComponent(queryContent.rawSql)}`;
+    // Add the query content (actual query text)
+    if (queryContent.content) {
+      url += `&q=${encodeURIComponent(queryContent.content)}`;
     }
 
     return url;
   } catch (error) {
     console.error('Error generating query URL:', error);
-    return `/logs/explore?team=${query.team_id}&query_id=${query.id}&source=${query.source_id}`;
+    // Fallback URL without query content
+    return `/logs/explore?team=${query.team_id}&source=${query.source_id}&mode=${query.query_type}`;
   }
 }
 
