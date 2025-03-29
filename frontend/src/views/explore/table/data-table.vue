@@ -372,6 +372,12 @@ const handleRowClick = (row: Row<Record<string, any>>) => (e: MouseEvent) => {
         return;
     }
     row.toggleExpanded();
+    
+    // Mark the row with a data attribute for styling
+    const rowElement = (e.currentTarget as HTMLElement);
+    if (rowElement) {
+        rowElement.dataset.expanded = String(row.getIsExpanded());
+    }
 }
 
 // Add back the copyCell function since it's still needed for individual cells
@@ -644,8 +650,8 @@ const onDragEnd = (event: DragEvent) => {
 
                         <tbody>
                             <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
-                                <tr class="group cursor-pointer border-b transition-colors hover:bg-red-500/10" :class="[
-                                    row.getIsExpanded() ? 'bg-primary/10' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
+                                <tr class="group cursor-pointer border-b transition-colors hover:bg-muted/30" :class="[
+                                    row.getIsExpanded() ? 'bg-primary/15' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
                                 ]" @click="handleRowClick(row)($event)">
                                     <td v-for="cell in row.getVisibleCells()" :key="cell.id"
                                         class="px-3 py-2 align-top font-mono text-xs leading-normal overflow-hidden border-r border-muted/20"
@@ -673,7 +679,7 @@ const onDragEnd = (event: DragEvent) => {
                                     </td>
                                 </tr>
 
-                                <tr v-if="row.getIsExpanded()">
+                                <tr v-if="row.getIsExpanded()" class="expanded-json-row">
                                     <td :colspan="row.getVisibleCells().length" class="p-0">
                                         <div class="p-3 bg-muted/30 border-y border-y-primary/40">
                                             <JsonViewer :value="row.original" :expanded="false" class="text-xs" />
@@ -792,5 +798,23 @@ const onDragEnd = (event: DragEvent) => {
 /* Style for drop indicator */
 .border-l-primary {
     border-left-color: hsl(var(--primary)) !important;
+}
+
+/* More prominent hover effect for table rows */
+.table-fixed tbody tr:hover:not([data-expanded="true"]) {
+    background-color: hsl(var(--muted) / 0.4) !important;
+    box-shadow: inset 0 0 0 1px hsl(var(--muted) / 0.5);
+    transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Active/expanded row styling - using complementary colors */
+.table-fixed tbody tr.expanded-row,
+.table-fixed tbody tr[data-expanded="true"] {
+    background-color: hsl(var(--primary) / 0.15) !important;
+    border-top: 1px solid hsl(var(--primary) / 0.3);
+    border-bottom: 1px solid hsl(var(--primary) / 0.3);
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.2);
+    position: relative;
+    z-index: 1; /* Ensures expanded rows appear above others */
 }
 </style>
