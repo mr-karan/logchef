@@ -26,43 +26,28 @@ import { useExploreStore } from '@/stores/explore'
 import { useTeamsStore } from '@/stores/teams'
 import { useSourcesStore } from '@/stores/sources'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
-import { now, getLocalTimeZone, CalendarDateTime } from '@internationalized/date'
+import { now, getLocalTimeZone } from '@internationalized/date'
 import { createColumns } from './table/columns'
 import DataTable from './table/data-table.vue'
 import { formatSourceName } from '@/utils/format'
-import SavedQueriesDropdown from '@/components/saved-queries/SavedQueriesDropdown.vue'
 import SaveQueryModal from '@/components/saved-queries/SaveQueryModal.vue'
 import QueryEditor from '@/components/query-editor/QueryEditor.vue'
 import { FieldSideBar } from '@/components/field-sidebar'
-import { translateToSQLConditions } from '@/utils/logchefql/api'
-import { Parser as LogchefQLParser } from '@/utils/logchefql'
 import { SQLParser } from '@/utils/clickhouse-sql/ast'; // Import SQLParser
 import { QueryBuilder } from '@/utils/query-builder'
 import { useExploreUrlSync } from '@/composables/useExploreUrlSync'; // Import the composable
 import type { ColumnDef } from '@tanstack/vue-table'
-import type { SavedQueryContent } from '@/api/savedQueries'
-import type { Source } from '@/api/sources'
 import { getErrorMessage } from '@/api/types'
 import { useQueryExecution } from '@/composables/useQueryExecution'
 import { useSourceTeamManagement } from '@/composables/useSourceTeamManagement'
 import { useQueryMode } from '@/composables/useQueryMode'
 import { useSavedQueries } from '@/composables/useSavedQueries'
 
-// Define field type for auto-completion
-interface FieldInfo {
-  name: string;
-  type: string;
-  isTimestamp?: boolean;
-  isSeverity?: boolean;
-}
-
 // Router and stores
 const router = useRouter()
-const route = useRoute()
 const exploreStore = useExploreStore()
 const teamsStore = useTeamsStore()
 const sourcesStore = useSourcesStore()
-const savedQueriesStore = useSavedQueriesStore()
 const { toast } = useToast()
 const { isInitializing, initializationError: urlError, initializeFromUrl, syncUrlFromState } = useExploreUrlSync(); // Use the composable
 
@@ -86,8 +71,6 @@ const {
   availableSources,
   selectedTeamName,
   selectedSourceName,
-  isFetchingTeams,
-  isFetchingSources,
   availableFields,
   handleTeamChange,
   handleSourceChange
@@ -117,19 +100,16 @@ const queryEditorRef = ref()
 // UI state computed properties
 const showLoadingState = computed(() => isInitializing.value && !urlError.value)
 const showNoTeamsState = computed(() => !isInitializing.value && (!availableTeams.value || availableTeams.value.length === 0))
-const showNoSourcesState = computed(() => 
-  !isInitializing.value && 
-  !showNoTeamsState.value && 
-  currentTeamId.value > 0 && 
+const showNoSourcesState = computed(() =>
+  !isInitializing.value &&
+  !showNoTeamsState.value &&
+  currentTeamId.value > 0 &&
   (!availableSources.value || availableSources.value.length === 0)
 )
 
 // Use source details from the store
 const activeSourceTableName = computed(() => sourcesStore.getCurrentSourceTableName || '');
 
-// Add loading states for better UX
-const isChangingTeam = ref(false)
-const isChangingSource = ref(false)
 
 // Date range computed property
 const dateRange = computed({
@@ -147,7 +127,6 @@ const displayTimezone = computed(() =>
   localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local'
 );
 
-const pendingEditorInit = ref(false)
 
 // Combined error display
 const displayError = computed(() => localQueryError.value || exploreStore.error?.message)
@@ -203,91 +182,6 @@ const handleQueryChange = (data: { query: string, mode: string }) => {
   }
   // Store state is updated by two-way binding with computed properties
 }
-
-// Handle query submission from QueryEditor
-const handleQuerySubmit = async (data: { query: string, mode: string }) => {
-  // Check if we have a valid source before proceeding
-  if (!hasValidSource.value) {
-    toast({
-      title: 'Source Not Ready',
-      description: 'Please wait for source details to load or select a valid source.',
-      variant: 'warning',
-      duration: TOAST_DURATION.WARNING,
-    });
-    return;
-  }
-
-  const { query, mode: editorMode } = data;
-
-  // Map the mode from editor to store format
-  const storeMode = editorMode === 'logchefql' ? 'logchefql' : 'sql';
-
-  // Update the store's active mode
-  exploreStore.setActiveMode(storeMode);
-
-  // Update the appropriate query state in the store
-  if (storeMode === 'logchefql') {
-    exploreStore.setLogchefqlCode(query);
-    // Ensure local state is also updated for consistency
-    logchefQuery.value = query;
-  } else {
-    // For SQL mode, just set the query as-is without any manipulation
-    if (query && query.trim()) {
-      exploreStore.setRawSql(query);
-      sqlQuery.value = query;
-    }
-  }
-
-  // Update URL with current parameters before executing the query
-  syncUrlFromState(); // Call the sync function here
-
-  // Clear any previous error
-  queryError.value = '';
-
-  try {
-    // Build the final SQL based on the *current* store state and mode
-    let sqlToExecute: string;
-    if (storeMode === 'sql') {
-      sqlToExecute = query;
-    } else {
-      const buildResult = QueryBuilder.buildSqlFromLogchefQL({
-        tableName: activeSourceTableName.value,
-        tsField: sourceDetails.value?._meta_ts_field || 'timestamp',
-        startDateTime: exploreStore.timeRange!.start,
-        endDateTime: exploreStore.timeRange!.end,
-        limit: exploreStore.limit,
-        logchefqlQuery: query
-      });
-      if (!buildResult.success) throw new Error(buildResult.error || "Failed to build query");
-      sqlToExecute = buildResult.sql;
-    }
-
-    console.log('Setting last executed state:', {
-      timeRange: JSON.stringify(exploreStore.timeRange),
-      limit: exploreStore.limit,
-      query: data.query
-    });
-
-    // Store current state before execution
-    exploreStore.setLastExecutedState({
-      timeRange: JSON.stringify(exploreStore.timeRange),
-      limit: exploreStore.limit,
-      query: data.query
-    });
-
-    // Execute the query with the determined final SQL
-    const result = await exploreStore.executeQuery(sqlToExecute);
-
-    if (!result.success && result.error) {
-      queryError.value = result.error.message || 'An error occurred';
-    } else {
-      console.log('Query executed successfully, lastExecutedState:', exploreStore.lastExecutedState);
-    }
-  } catch (error) {
-    console.error('Error executing query:', error);
-    queryError.value = getErrorMessage(error);
-  }
-};
 
 // Watch for changes in columns
 watch(
@@ -524,7 +418,7 @@ onBeforeUnmount(() => {
       <!-- Data Source Group -->
       <div class="flex items-center space-x-2 min-w-0">
         <!-- Team Selector -->
-        <Select :model-value="currentTeamId?.toString() ?? ''" @update:model-value="handleTeamChange" 
+        <Select :model-value="currentTeamId?.toString() ?? ''" @update:model-value="handleTeamChange"
           :disabled="isProcessingTeamChange">
           <SelectTrigger class="h-8 text-sm w-32">
             <SelectValue placeholder="Select team">{{ selectedTeamName }}</SelectValue>
@@ -544,7 +438,8 @@ onBeforeUnmount(() => {
           </SelectTrigger>
           <SelectContent>
             <SelectItem v-if="!currentTeamId" value="no-team" disabled>Select a team first</SelectItem>
-            <SelectItem v-else-if="availableSources.length === 0" value="no-sources" disabled>No sources available</SelectItem>
+            <SelectItem v-else-if="availableSources.length === 0" value="no-sources" disabled>No sources available
+            </SelectItem>
             <SelectItem v-for="source in availableSources" :key="source.id" :value="source.id.toString()">
               {{ formatSourceName(source) }}
             </SelectItem>
@@ -597,26 +492,37 @@ onBeforeUnmount(() => {
                 :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
                 :showFieldsPanel="showFieldsPanel" @change="handleQueryChange" @submit="triggerQueryExecution"
                 @update:activeMode="handleModeChange" @toggle-fields="showFieldsPanel = !showFieldsPanel"
-                :teamId="currentTeamId" :useCurrentTeam="true"
-                @select-saved-query="loadSavedQuery" @save-query="handleSaveQueryClick"
-                class="border-0 border-b" />
+                :teamId="currentTeamId" :useCurrentTeam="true" @select-saved-query="loadSavedQuery"
+                @save-query="handleSaveQueryClick" class="border-0 border-b" />
             </div>
           </template>
           <template v-else-if="currentTeamId && !currentSourceId">
             <div class="flex items-center justify-center text-muted-foreground p-6 border rounded-md bg-card shadow-sm">
               <div class="text-center">
                 <div class="mb-2 text-muted-foreground/70">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto mb-1"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                    class="mx-auto mb-1">
+                    <path
+                      d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
+                  </svg>
                 </div>
                 <p class="text-sm">Please select a log source to begin exploring.</p>
               </div>
             </div>
           </template>
           <template v-else-if="currentSourceId && !hasValidSource">
-            <div class="flex items-center justify-center text-destructive p-6 border border-destructive/30 rounded-md bg-destructive/5 shadow-sm">
+            <div
+              class="flex items-center justify-center text-destructive p-6 border border-destructive/30 rounded-md bg-destructive/5 shadow-sm">
               <div class="text-center">
                 <div class="mb-2 text-destructive/80">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto mb-1"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                    class="mx-auto mb-1">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" x2="12" y1="8" y2="12" />
+                    <line x1="12" x2="12.01" y1="16" y2="16" />
+                  </svg>
                 </div>
                 <p class="text-sm">Error loading source details. Please try again.</p>
               </div>
@@ -624,22 +530,20 @@ onBeforeUnmount(() => {
           </template>
 
           <!-- Query Controls -->
-          <div class="mt-3 flex items-center justify-between border-t pt-3" v-if="currentSourceId && hasValidSource && exploreStore.timeRange">
-            <Button 
-              variant="default" 
+          <div class="mt-3 flex items-center justify-between border-t pt-3"
+            v-if="currentSourceId && hasValidSource && exploreStore.timeRange">
+            <Button variant="default"
               class="h-9 px-4 flex items-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
-              :class="{ 
+              :class="{
                 'opacity-90': !isDirty && !isExecutingQuery,
                 'bg-emerald-600 hover:bg-emerald-700': isDirty && !isExecutingQuery,
                 'bg-sky-500 hover:bg-sky-600': isExecutingQuery
-              }"
-              :disabled="isExecutingQuery || !canExecuteQuery" 
-              @click="triggerQueryExecution">
+              }" :disabled="isExecutingQuery || !canExecuteQuery" @click="triggerQueryExecution">
               <Play v-if="!isExecutingQuery" class="h-4 w-4" />
               <RefreshCw v-else class="h-4 w-4 animate-spin" />
               <span>{{ isExecutingQuery ? 'Running Query...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>
             </Button>
-            
+
             <!-- Query Stats Preview -->
             <div class="text-xs text-muted-foreground flex items-center gap-3" v-if="exploreStore.lastExecutedState">
               <span>Last run: {{ new Date().toLocaleTimeString() }}</span>
@@ -660,21 +564,40 @@ onBeforeUnmount(() => {
             class="px-4 py-2 flex items-center justify-between bg-muted/30 text-xs text-muted-foreground flex-shrink-0 border-b">
             <div class="flex items-center gap-4">
               <span v-if="exploreStore.queryStats?.rows_read != null" class="flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5"><path d="M8 3H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.414A2 2 0 0 0 20.414 6L18 3.586A2 2 0 0 0 16.586 3H9"/><path d="M8 3v3a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V3"/><path d="M10 14h8"/><path d="M10 10h8"/><path d="M10 18h8"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
+                  <path
+                    d="M8 3H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.414A2 2 0 0 0 20.414 6L18 3.586A2 2 0 0 0 16.586 3H9" />
+                  <path d="M8 3v3a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V3" />
+                  <path d="M10 14h8" />
+                  <path d="M10 10h8" />
+                  <path d="M10 18h8" />
+                </svg>
                 <span>
                   <strong class="font-medium">{{ exploreStore.queryStats.rows_read.toLocaleString() }}</strong> rows
                 </span>
               </span>
               <span v-if="exploreStore.queryStats?.execution_time_ms != null" class="flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
                 <span>
-                  <strong class="font-medium">{{ (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2) }}</strong>s
+                  <strong class="font-medium">{{ (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2)
+                    }}</strong>s
                 </span>
               </span>
               <span v-if="exploreStore.queryStats?.bytes_read != null" class="flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" x2="12" y1="3" y2="15" />
+                </svg>
                 <span>
-                  <strong class="font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2) }}</strong> MB
+                  <strong class="font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
+                    }}</strong> MB
                 </span>
               </span>
             </div>
@@ -743,10 +666,7 @@ onBeforeUnmount(() => {
                 <p class="text-sm text-muted-foreground max-w-md mb-4">
                   Enter a query or use the default, then click 'Run' to see logs.
                 </p>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  @click="triggerQueryExecution" 
+                <Button variant="outline" size="sm" @click="triggerQueryExecution"
                   class="border-primary/20 text-primary hover:bg-primary/5 hover:text-primary hover:border-primary/30">
                   <Play class="h-3.5 w-3.5 mr-1.5" />
                   Run default query
