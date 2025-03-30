@@ -28,7 +28,7 @@ type Manager struct {
 
 // NewManager creates a new connection manager
 func NewManager(log *slog.Logger) *Manager {
-	return &Manager{
+	m := &Manager{
 		clients: make(map[models.SourceID]*Client),
 		logger:  log.With("component", "clickhouse_manager"),
 		health:  make(map[models.SourceID]models.SourceHealth),
