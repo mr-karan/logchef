@@ -30,6 +30,34 @@ func NewLogQueryHook(logger *slog.Logger, verbose bool) *LogQueryHook {
 	}
 }
 
+// StructuredQueryLoggerHook implements QueryHook to log query details in a structured format
+type StructuredQueryLoggerHook struct {
+	logger *slog.Logger
+}
+
+// NewStructuredQueryLoggerHook creates a new StructuredQueryLoggerHook
+func NewStructuredQueryLoggerHook(logger *slog.Logger) *StructuredQueryLoggerHook {
+	return &StructuredQueryLoggerHook{
+		logger: logger.With("hook", "structured_query_logger"),
+	}
+}
+
+// BeforeQuery logs the query details before execution using structured logging
+func (h *StructuredQueryLoggerHook) BeforeQuery(ctx context.Context, query string) (context.Context, error) {
+	h.logger.Debug("executing query",
+		slog.Group("query_details",
+			slog.String("sql", query),
+			// TODO: Add more context if available, e.g., user ID, request ID from context
+		),
+	)
+	return ctx, nil
+}
+
+// AfterQuery is a no-op for this hook as it only logs before execution
+func (h *StructuredQueryLoggerHook) AfterQuery(ctx context.Context, query string, err error, duration time.Duration) {
+	// No action needed after query execution for this specific hook
+}
+
 // BeforeQuery logs the query before execution
 func (h *LogQueryHook) BeforeQuery(ctx context.Context, query string) (context.Context, error) {
 	if h.Verbose {
