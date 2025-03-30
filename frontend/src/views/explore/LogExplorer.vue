@@ -33,9 +33,10 @@ import { formatSourceName } from '@/utils/format'
 import SaveQueryModal from '@/components/saved-queries/SaveQueryModal.vue'
 import QueryEditor from '@/components/query-editor/QueryEditor.vue'
 import { FieldSideBar } from '@/components/field-sidebar'
-import { SQLParser } from '@/utils/clickhouse-sql/ast'; // Import SQLParser
+import { SQLParser } from '@/utils/clickhouse-sql/ast'
+import { generateDefaultSqlQuery } from '@/utils/query-templates'
 import { QueryBuilder } from '@/utils/query-builder'
-import { useExploreUrlSync } from '@/composables/useExploreUrlSync'; // Import the composable
+import { useExploreUrlSync } from '@/composables/useExploreUrlSync'
 import type { ColumnDef } from '@tanstack/vue-table'
 import { getErrorMessage } from '@/api/types'
 import { useQueryExecution } from '@/composables/useQueryExecution'
@@ -48,6 +49,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import type { SaveQueryFormData } from '@/views/explore/types'
+import type { SavedTeamQuery } from '@/api/savedQueries'
 
 // Router and stores
 const router = useRouter()
@@ -56,7 +59,7 @@ const teamsStore = useTeamsStore()
 const sourcesStore = useSourcesStore()
 const savedQueriesStore = useSavedQueriesStore()
 const { toast } = useToast()
-const { isInitializing, initializationError: urlError, initializeFromUrl, syncUrlFromState } = useExploreUrlSync(); // Use the composable
+const { isInitializing, initializationError: urlError, initializeFromUrl, syncUrlFromState } = useExploreUrlSync();
 
 // Composables
 const {
@@ -100,29 +103,48 @@ const {
 
 // Handle updating an existing query
 async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
+  // Ensure we have the necessary IDs
+  if (!currentSourceId.value || !formData.team_id) {
+    toast({
+      title: 'Error',
+      description: 'Missing source or team ID for update.',
+      variant: 'destructive',
+      duration: TOAST_DURATION.ERROR
+    });
+    return;
+  }
+
   try {
-    // Update existing query
-    const response = await savedQueriesStore.updateQuery(
+    // Use the correct store action: updateTeamSourceQuery
+    const response = await savedQueriesStore.updateTeamSourceQuery(
       formData.team_id,
+      currentSourceId.value, // Pass the current source ID
       queryId,
       {
+        // Payload only includes fields allowed by updateTeamSourceQuery's type
         name: formData.name,
         description: formData.description,
-        source_id: formData.source_id,
         query_type: formData.query_type,
         query_content: formData.query_content
       }
     );
-    
+
     if (response && response.success) {
       showSaveQueryModal.value = false;
       editQueryData.value = null; // Clear editing state
-      
+
       toast({
         title: 'Success',
         description: 'Query updated successfully.',
         duration: TOAST_DURATION.SUCCESS
       });
+
+      // Optional: Refresh the list if needed, though store should be reactive
+      // await loadSourceQueries(currentTeamId.value, currentSourceId.value);
+
+    } else if (response) {
+      // Handle potential API error returned in response.error
+      throw new Error(getErrorMessage(response.error) || 'Failed to update query');
     }
   } catch (error) {
     console.error("Error updating query:", error);
@@ -237,14 +259,47 @@ watch(isInitializing, async (initializing, prevInitializing) => {
 
     if (queryId) {
       console.log(`Found query_id=${queryId} in URL. Attempting to load saved query...`);
+      if (!currentTeamId.value) {
+        console.error("Cannot load saved query: Team ID is missing.");
+        toast({
+          title: 'Error',
+          description: 'Cannot load saved query because the team context is missing.',
+          variant: 'destructive',
+          duration: TOAST_DURATION.ERROR
+        });
+        return; // Exit if no team ID
+      }
+
       try {
-        await loadSavedQuery(queryId); // Load the saved query state
-        console.log(`Successfully loaded saved query ${queryId}`);
-        // After loading, sync the URL again to ensure it reflects the loaded state
-        // (e.g., if the saved query had different time range/limit than initial URL)
-        syncUrlFromState();
+        // 1. Fetch the query details using the store
+        isLoadingQuery.value = true;
+        const fetchResult = await savedQueriesStore.fetchTeamSourceQueryDetails(
+          currentTeamId.value,
+          currentSourceId.value, // Pass the currentSourceId
+          queryId
+        );
+        isLoadingQuery.value = false;
+
+        if (fetchResult.success && savedQueriesStore.selectedQuery) {
+          // 2. Pass the fetched query object to loadSavedQuery
+          const loadResult = await loadSavedQuery(savedQueriesStore.selectedQuery);
+
+          if (loadResult) {
+            console.log(`Successfully loaded and applied saved query ${queryId}`);
+            // Sync URL after successful load and application
+            syncUrlFromState();
+          } else {
+            // loadSavedQuery failed internally (already showed toast)
+            console.error(`loadSavedQuery function failed for query ${queryId}`);
+            // Potentially clear query_id from URL here?
+          }
+        } else {
+          // Fetching the query from the store failed
+          throw new Error(fetchResult.error?.message || `Failed to fetch query details for ID ${queryId}`);
+        }
       } catch (error) {
-        console.error(`Failed to load saved query ${queryId}:`, error);
+        isLoadingQuery.value = false; // Ensure loading is false on error
+        console.error(`Failed to load or apply saved query ${queryId}:`, error);
         toast({
           title: 'Error Loading Saved Query',
           description: getErrorMessage(error),
@@ -252,7 +307,6 @@ watch(isInitializing, async (initializing, prevInitializing) => {
           duration: TOAST_DURATION.ERROR
         });
         // Decide how to handle failure - maybe clear query_id from URL?
-        // For now, just log the error and proceed.
       }
     }
 
@@ -387,6 +441,28 @@ watch(
   { immediate: true }
 )
 
+// Watch for changes in exploreStore.columns to update tableColumns
+watch(
+  () => exploreStore.columns,
+  (newColumns) => {
+    if (newColumns?.length > 0) {
+      console.log('LogExplorer: Creating table columns from API response:', newColumns);
+      // Get display preferences
+      const timezone = displayTimezone.value;
+      const tsField = sourceDetails.value?._meta_ts_field || 'timestamp';
+      const severityField = sourceDetails.value?._meta_severity_field || 'severity_text';
+
+      // Create columns using the columns utility function
+      tableColumns.value = createColumns(newColumns, tsField, timezone, severityField);
+      console.log('LogExplorer: Table columns created:', tableColumns.value.length);
+    } else {
+      console.log('LogExplorer: No columns available, clearing table columns');
+      tableColumns.value = [];
+    }
+  },
+  { immediate: true }
+);
+
 // Watch for time range changes to update SQL query reactively
 watch(
   () => exploreStore.timeRange,
@@ -419,6 +495,28 @@ watch(
         // Assert CalendarDateTime type
         const startDateTime = newTimeRange.start as CalendarDateTime
         const endDateTime = newTimeRange.end as CalendarDateTime
+
+        // IMPORTANT: Ensure we preserve the table name
+        // If the parsed query has an empty table name, set it from the source details
+        if (!parsedQuery.fromClause.table || parsedQuery.fromClause.table === '') {
+          console.log("SQL parser found empty table name, fixing with active source table name");
+
+          // Get the proper table name from source details
+          let tableName = activeSourceTableName.value;
+          if (!tableName && sourceDetails.value?.connection?.table_name) {
+            tableName = sourceDetails.value.connection.table_name;
+          }
+          if (!tableName && sourceDetails.value?.connection?.database) {
+            tableName = `${sourceDetails.value.connection.database}.vector_logs`;
+          }
+          if (!tableName) {
+            tableName = 'logs.vector_logs';
+          }
+
+          // Update the table name in the parsed query
+          parsedQuery.fromClause.table = tableName;
+        }
+
         // Apply the new time range to the parsed AST
         const updatedAst = SQLParser.applyTimeRange(parsedQuery, tsField, startDateTime, endDateTime);
         const newSql = SQLParser.toSQL(updatedAst);
@@ -431,8 +529,19 @@ watch(
         // Optionally show a warning toast
       }
     } else {
-      console.warn("Could not parse existing SQL to update time range display. Query will use correct range on execution.");
-      // Optional: Could generate default SQL here if parsing fails, but might overwrite user input unexpectedly.
+      console.warn("Could not parse existing SQL to update time range display. Generating default SQL instead.");
+
+      // If parsing fails, generate a new default SQL query with proper table name
+      const tableName = activeSourceTableName.value || 'logs.vector_logs';
+      const newSql = generateDefaultSqlQuery({
+        tableName,
+        timestampField: tsField,
+        timeRange: newTimeRange,
+        limit: exploreStore.limit
+      });
+
+      // Update the store's rawSql with the new default query
+      exploreStore.setRawSql(newSql);
     }
   },
   { deep: true } // Use deep watch for the timeRange object
@@ -504,7 +613,7 @@ function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): nu
 // New handler for the Save/Update button
 const handleSaveOrUpdateClick = async () => {
   const queryId = queryIdFromUrl.value;
-  
+
   // Check if we can save
   if (!canSaveOrUpdateQuery.value) {
     toast({
@@ -514,34 +623,27 @@ const handleSaveOrUpdateClick = async () => {
     });
     return;
   }
-  
+
   if (queryId && currentTeamId.value && currentSourceId.value) {
     // --- Update Existing Query Flow ---
     console.log(`Attempting to update saved query ${queryId}`);
-    
+
     try {
-      // First, fetch the existing query to get its details
       isLoadingQuery.value = true;
-      
-      // Use the store to fetch the query details
-      const result = await savedQueriesStore.fetchQuery(
-        currentTeamId.value, 
+      const result = await savedQueriesStore.fetchTeamSourceQueryDetails(
+        currentTeamId.value,
+        currentSourceId.value,
         queryId
       );
-      
+
       if (result.success && savedQueriesStore.selectedQuery) {
         const existingQuery = savedQueriesStore.selectedQuery;
-        
+
         // Open the edit modal with the existing query's details
         showSaveQueryModal.value = true;
-        editQueryData.value = {
-          ...existingQuery,
-          // Add current content
-          currentContent: (exploreStore.activeMode === 'logchefql'
-            ? exploreStore.logchefqlCode
-            : exploreStore.rawSql) || "",
-          currentType: exploreStore.activeMode
-        };
+        editQueryData.value = existingQuery; // Pass only the valid SavedTeamQuery object
+        // The modal component itself should handle getting the *current* editor content
+
       } else {
         throw new Error("Failed to load query details");
       }
@@ -720,10 +822,8 @@ onBeforeUnmount(() => {
                 :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter LogchefQL query...' : 'Enter SQL query...'"
                 :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
                 :showFieldsPanel="showFieldsPanel" @submit="triggerQueryExecution" @update:activeMode="handleModeChange"
-                @toggle-fields="showFieldsPanel = !showFieldsPanel" 
-                @select-saved-query="loadSavedQuery" 
-                @save-query="handleSaveOrUpdateClick" 
-                class="border-0 border-b" />
+                @toggle-fields="showFieldsPanel = !showFieldsPanel" @select-saved-query="loadSavedQuery"
+                @save-query="handleSaveOrUpdateClick" class="border-0 border-b" />
             </div>
           </template>
           <template v-else-if="currentTeamId && !currentSourceId">
@@ -771,21 +871,6 @@ onBeforeUnmount(() => {
               <span>{{ isExecutingQuery ? 'Running Query...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>
             </Button>
 
-            <!-- Save Query Button -->
-            <TooltipProvider :delay-duration="300">
-              <Tooltip>
-                <TooltipTrigger as-child>
-                  <Button variant="outline" @click="handleSaveOrUpdateClick" :disabled="!canSaveOrUpdateQuery"
-                    class="ml-2">
-                    Save Query
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>{{ isEditingExistingQuery ? 'Update the current saved query' : 'Save the current query' }}</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-
             <!-- Query Stats Preview -->
             <div class="text-xs text-muted-foreground flex items-center gap-3"
               v-if="exploreStore.lastExecutionTimestamp">
@@ -827,7 +912,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2)
-                    }}</strong>s
+                  }}</strong>s
                 </span>
               </span>
               <span v-if="exploreStore.queryStats?.bytes_read != null" class="flex items-center">
@@ -839,7 +924,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
-                    }}</strong> MB
+                  }}</strong> MB
                 </span>
               </span>
             </div>
@@ -918,20 +1003,12 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Save Query Modal -->
-    <SaveQueryModal 
-      v-if="showSaveQueryModal" 
-      :is-open="showSaveQueryModal" 
-      :query-type="exploreStore.activeMode"
-      :edit-data="editQueryData"
-      :query-content="JSON.stringify({
+    <SaveQueryModal v-if="showSaveQueryModal" :is-open="showSaveQueryModal" :query-type="exploreStore.activeMode"
+      :edit-data="editQueryData" :query-content="JSON.stringify({
         sourceId: currentSourceId,
         limit: exploreStore.limit,
         content: exploreStore.activeMode === 'logchefql' ? exploreStore.logchefqlCode : exploreStore.rawSql
-      })" 
-      @close="showSaveQueryModal = false" 
-      @save="handleSaveQuery"
-      @update="handleUpdateQuery" 
-    />
+      })" @close="showSaveQueryModal = false" @save="handleSaveQuery" @update="handleUpdateQuery" />
   </div>
 </template>
 

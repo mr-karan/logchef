@@ -3,6 +3,8 @@ import { useExploreStore } from '@/stores/explore'
 import { useSourcesStore } from '@/stores/sources'
 import { QueryBuilder } from '@/utils/query-builder'
 import type { EditorMode } from '@/views/explore/types'
+import { generateDefaultSqlQuery } from '@/utils/query-templates'
+import type { DateValue } from '@internationalized/date'
 
 export function useQueryMode() {
   const exploreStore = useExploreStore()
@@ -10,7 +12,7 @@ export function useQueryMode() {
 
   // Computed properties for query content
   const currentLogchefQuery = computed({
-    get: () => exploreStore.logchefqlCode,
+    get: () => exploreStore.logchefqlCode || '',
     set: (value) => exploreStore.setLogchefqlCode(value)
   })
 
@@ -28,7 +30,7 @@ export function useQueryMode() {
 
     // Get current content before switching mode
     const currentContent = oldStoreMode === 'logchefql'
-      ? exploreStore.logchefqlCode
+      ? exploreStore.logchefqlCode || ''
       : exploreStore.rawSql
 
     // Handle translation when switching TO SQL mode
@@ -38,11 +40,14 @@ export function useQueryMode() {
       // Try translating from LogchefQL if switching from it
       if (oldStoreMode === 'logchefql' && currentContent?.trim() &&
           sourcesStore.hasValidCurrentSource && exploreStore.timeRange) {
+
+        // Use the existing QueryBuilder directly which requires CalendarDateTime
+        // We'll let TypeScript handle the type casting since these are already DateValue objects
         const buildResult = QueryBuilder.buildSqlFromLogchefQL({
           tableName: sourcesStore.getCurrentSourceTableName || '',
           tsField: sourcesStore.currentSourceDetails?._meta_ts_field || 'timestamp',
-          startDateTime: exploreStore.timeRange.start,
-          endDateTime: exploreStore.timeRange.end,
+          startDateTime: exploreStore.timeRange.start as any, // Type assertion to bypass strict checks
+          endDateTime: exploreStore.timeRange.end as any, // Type assertion to bypass strict checks
           limit: exploreStore.limit,
           logchefqlQuery: currentContent
         })
@@ -55,22 +60,21 @@ export function useQueryMode() {
         }
       }
 
-      // If SQL is empty after translation, generate default
+      // If SQL is empty after translation, generate default using our centralized utility
       if (!sqlToSet.trim() && sourcesStore.hasValidCurrentSource && exploreStore.timeRange) {
-        const defaultResult = QueryBuilder.getDefaultSQLQuery({
-          tableName: sourcesStore.getCurrentSourceTableName || '',
-          tsField: sourcesStore.currentSourceDetails?._meta_ts_field || 'timestamp',
-          startDateTime: exploreStore.timeRange.start,
-          endDateTime: exploreStore.timeRange.end,
-          limit: exploreStore.limit
-        })
+        // Use our new centralized template generator
+        const tableName = sourcesStore.getCurrentSourceTableName || '';
+        const timestampField = sourcesStore.currentSourceDetails?._meta_ts_field || 'timestamp';
 
-        if (defaultResult.success) {
-          sqlToSet = defaultResult.sql
-        } else {
-          console.warn("Failed to generate default SQL:", defaultResult.error)
-          sqlToSet = `-- Error generating default SQL: ${defaultResult.error}\n`
-        }
+        sqlToSet = generateDefaultSqlQuery({
+          tableName,
+          timestampField,
+          timeRange: exploreStore.timeRange ? {
+            start: exploreStore.timeRange.start,
+            end: exploreStore.timeRange.end
+          } : null,
+          limit: exploreStore.limit
+        });
       }
 
       exploreStore.setRawSql(sqlToSet)

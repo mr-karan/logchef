@@ -7,13 +7,28 @@ import { TOAST_DURATION } from '@/lib/constants'
 import { getErrorMessage } from '@/api/types'
 import type { SaveQueryFormData } from '@/views/explore/types'
 import type { SavedTeamQuery } from '@/api/savedQueries'
-import { CalendarDateTime } from '@internationalized/date'
+import { CalendarDateTime, getLocalTimeZone, type DateValue } from '@internationalized/date'
+import { useExploreUrlSync } from './useExploreUrlSync'
+
+// Add this helper function before the useSavedQueries function definition
+function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): number | null {
+  if (!dateTime) return null;
+  try {
+    // Convert DateValue to JS Date object using the local timezone
+    const date = dateTime.toDate(getLocalTimeZone());
+    return date.getTime();
+  } catch (e) {
+    console.error("Error converting DateValue to timestamp:", e);
+    return null;
+  }
+}
 
 export function useSavedQueries() {
   const router = useRouter()
   const route = useRoute()
   const exploreStore = useExploreStore()
   const savedQueriesStore = useSavedQueriesStore()
+  const { syncUrlFromState } = useExploreUrlSync()
   const { toast } = useToast()
 
   const showSaveQueryModal = ref(false)
@@ -125,30 +140,44 @@ export function useSavedQueries() {
 
       // Check if we're updating an existing query from the URL or editingQuery state
       const queryIdFromUrl = route.query.query_id as string | undefined;
+      const isUpdate = !!editingQuery.value || !!queryIdFromUrl;
+      const queryId = editingQuery.value?.id.toString() || queryIdFromUrl;
 
-      if (editingQuery.value || queryIdFromUrl) {
-        const queryId = editingQuery.value?.id.toString() || queryIdFromUrl;
-        if (!queryId) {
-          throw new Error('Missing query ID for update operation');
+      // Ensure team ID is present
+      if (!formData.team_id) {
+        throw new Error("Missing team ID for save/update operation");
+      }
+
+      if (isUpdate && queryId) {
+         // Ensure source ID is present for update
+         if (!formData.source_id) {
+            throw new Error("Missing source ID for update operation");
+         }
+
+         // Use the correct store action for updates
+         console.log(`useSavedQueries.handleSaveQuery: Updating query ${queryId} for team ${formData.team_id}, source ${formData.source_id}`);
+         response = await savedQueriesStore.updateTeamSourceQuery(
+            formData.team_id,
+            formData.source_id, // Pass source ID
+            queryId,
+            {
+               // Payload includes only relevant fields for updateTeamSourceQuery
+               name: formData.name,
+               description: formData.description,
+               query_type: formData.query_type,
+               query_content: formData.query_content
+            }
+         );
+         console.log('Updated query via updateTeamSourceQuery:', response);
+
+      } else {
+        // --- Create or Overwrite Flow ---
+        // Ensure source ID is present for create/overwrite
+        if (!formData.source_id) {
+          throw new Error("Missing source ID for create/overwrite operation");
         }
 
-        // Update existing query
-        response = await savedQueriesStore.updateQuery(
-          formData.team_id,
-          queryId,
-          {
-            name: formData.name,
-            description: formData.description,
-            source_id: formData.source_id,
-            query_type: formData.query_type,
-            query_content: formData.query_content
-          }
-        )
-        console.log('Updated query:', response);
-      }
-      // Check if a query with this name already exists (possible overwrite)
-      else {
-        // Get existing queries to check for duplicates
+        // Check for existing query by name/team/source (potential overwrite)
         const existingQueries = savedQueriesStore.data.queries || [];
         const existingQuery = existingQueries.find(q =>
           q.name === formData.name &&
@@ -163,81 +192,106 @@ export function useSavedQueries() {
           );
 
           if (confirmOverwrite) {
-            // Update the existing query
-            response = await savedQueriesStore.updateQuery(
+            // Overwrite existing using updateTeamSourceQuery
+            console.log(`useSavedQueries.handleSaveQuery: Overwriting query ${existingQuery.id} for team ${formData.team_id}, source ${formData.source_id}`);
+            response = await savedQueriesStore.updateTeamSourceQuery(
               formData.team_id,
+              formData.source_id,
               existingQuery.id.toString(),
               {
                 name: formData.name,
                 description: formData.description,
-                source_id: formData.source_id,
                 query_type: formData.query_type,
                 query_content: formData.query_content
               }
-            )
-            console.log('Overwrote existing query:', response)
+            );
+            console.log('Overwrote existing query via updateTeamSourceQuery:', response);
           } else {
             // User cancelled the overwrite
-            return;
+            return { success: false, canceled: true }; // Return indication that nothing happened
           }
         } else {
-          // Create new query
-          response = await savedQueriesStore.createQuery(formData.team_id, {
-            team_id: formData.team_id,
-            name: formData.name,
-            description: formData.description,
-            source_id: formData.source_id,
-            query_type: formData.query_type,
-            query_content: formData.query_content
-          })
-          console.log('Created new query:', response)
+          // Create new query using createSourceQuery
+          console.log(`useSavedQueries.handleSaveQuery: Creating new query for team ${formData.team_id}, source ${formData.source_id}`);
+          // The createSourceQuery action internally stringifies the content
+          // We need to parse the formData.query_content first if it's a string here
+          let parsedContent;
+          try {
+              parsedContent = JSON.parse(formData.query_content);
+          } catch (e) {
+              console.error("Failed to parse formData.query_content before create:", e);
+              throw new Error("Invalid query content format for create operation");
+          }
+
+          response = await savedQueriesStore.createSourceQuery(
+            formData.team_id,
+            formData.source_id,
+            formData.name,
+            formData.description,
+            parsedContent, // Pass the parsed content object
+            formData.query_type // Add the query_type parameter
+          );
+          console.log('Created new query via createSourceQuery:', response);
         }
       }
 
       if (response && response.success) {
-        showSaveQueryModal.value = false
-        editingQuery.value = null  // Clear editing state
-        await savedQueriesStore.fetchTeamQueries(formData.team_id)
+        showSaveQueryModal.value = false;
+        editingQuery.value = null; // Clear editing state
 
-        // Show appropriate success message
-        const isEdit = !!editingQuery.value || !!queryIdFromUrl;
+        // Set the active query name for new or updated query
+        const savedQueryName = formData.name;
+        if (savedQueryName) {
+          exploreStore.setActiveSavedQueryName(savedQueryName);
+        }
+
+        // Ensure queries are refreshed for the current source
+        if (formData.team_id && formData.source_id) {
+           await loadSourceQueries(formData.team_id, formData.source_id);
+        }
+
         toast({
           title: 'Success',
-          description: isEdit ? 'Query updated successfully.' : 'Query saved successfully.',
+          description: isUpdate ? 'Query updated successfully.' : 'Query saved successfully.',
           duration: TOAST_DURATION.SUCCESS
-        })
+        });
 
-        // If we were editing from a query_id in the URL, redirect to the normal view
-        // without the query_id to prevent accidental re-edits
+        // If we were editing from a query_id in the URL, clear it
         if (queryIdFromUrl) {
           const currentQuery = { ...route.query };
           delete currentQuery.query_id;
           router.replace({ query: currentQuery });
         }
+        return { success: true, data: response.data }; // Return success state
       } else if (response) {
-        throw new Error(getErrorMessage(response.error) || 'Failed to save query')
+        // Handle failure from the store action
+        throw new Error(getErrorMessage(response.error) || 'Failed to save query');
+      } else {
+        // Handle case where no action was taken (e.g., overwrite cancelled)
+        return { success: false }; // Indicate no successful action occurred
       }
     } catch (error) {
-      console.error("Error saving query:", error)
+      console.error("Error saving query:", error);
       toast({
         title: 'Error',
         description: getErrorMessage(error),
         variant: 'destructive',
         duration: TOAST_DURATION.ERROR
-      })
+      });
+      return { success: false, error }; // Return error state
     }
   }
 
   // Load saved query
-  async function loadSavedQuery(queryData: any) {
-    if (!queryData?.query_content) {
+  async function loadSavedQuery(queryData: SavedTeamQuery) {
+    if (!queryData?.query_content || !queryData?.id) {
       toast({
         title: 'Error',
         description: 'Invalid saved query data.',
         variant: 'destructive',
         duration: TOAST_DURATION.ERROR
       })
-      return
+      return false
     }
 
     try {
@@ -246,11 +300,9 @@ export function useSavedQueries() {
       const queryToLoad = content.content || ''
 
       // Reset state
-      if (exploreStore.clearError) {
-        exploreStore.clearError()
-      }
+      exploreStore.clearError()
 
-      // Set mode
+      // Set the correct mode based on the saved query type
       exploreStore.setActiveMode(isLogchefQL ? 'logchefql' : 'sql')
 
       // Set content
@@ -262,19 +314,24 @@ export function useSavedQueries() {
 
       // Set limit if available
       if (content.limit) exploreStore.setLimit(content.limit)
-      
-      // Set time range from saved query - this is crucial for recreating the exact query view
-      if (content.timeRange && 
-          content.timeRange.absolute && 
-          content.timeRange.absolute.start && 
+
+      // Check if timeRange is explicitly null - this means to keep the current time range
+      if (content.timeRange === null) {
+        console.log("Saved query has timeRange explicitly set to null, keeping current range");
+        // Keep the current time range from the store
+      }
+      // Set time range from saved query if available and valid
+      else if (content.timeRange &&
+          content.timeRange.absolute &&
+          content.timeRange.absolute.start &&
           content.timeRange.absolute.end) {
         console.log("Setting time range from saved query:", content.timeRange);
-        
+
         // Convert timestamps to CalendarDateTime objects
         try {
           const startDate = new Date(content.timeRange.absolute.start);
           const endDate = new Date(content.timeRange.absolute.end);
-          
+
           if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
             // Create CalendarDateTime objects
             const startDateTime = new CalendarDateTime(
@@ -285,7 +342,7 @@ export function useSavedQueries() {
               startDate.getMinutes(),
               startDate.getSeconds()
             );
-            
+
             const endDateTime = new CalendarDateTime(
               endDate.getFullYear(),
               endDate.getMonth() + 1,
@@ -294,7 +351,7 @@ export function useSavedQueries() {
               endDate.getMinutes(),
               endDate.getSeconds()
             );
-            
+
             // Set the time range in the store
             exploreStore.setTimeRange({
               start: startDateTime,
@@ -307,19 +364,63 @@ export function useSavedQueries() {
           console.error("Error converting timestamps to CalendarDateTime:", error);
         }
       } else {
-        console.log("Saved query has no valid time range, keeping current range");
+        console.log("Saved query has no time range specified or it's invalid, keeping current range");
         // Keep existing time range from the store
       }
 
+      // Set the selected query ID in the store
+      exploreStore.setSelectedQueryId(queryData.id.toString());
+
+      // Set the active saved query name in the store
+      if (queryData.name) {
+        exploreStore.setActiveSavedQueryName(queryData.name);
+      }
+
+      // CENTRALIZED URL HANDLING: Create URL query parameters directly
+      // This ensures consistency between dropdown and saved queries view
+      const queryParams = { ...route.query }; // Start with current params
+
+      // Always include these critical parameters for proper state tracking
+      queryParams.team = queryData.team_id.toString();
+      queryParams.source = queryData.source_id.toString();
+      queryParams.query_id = queryData.id.toString(); // Most important - makes "New Query" button appear
+
+      // Set time range params from the current exploreStore state (after we've updated it)
+      const startTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.start);
+      const endTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.end);
+      if (startTime !== null && endTime !== null) {
+        queryParams.start_time = startTime.toString();
+        queryParams.end_time = endTime.toString();
+      }
+
+      // Set limit from current store state
+      queryParams.limit = exploreStore.limit.toString();
+
+      // Set mode and query content
+      queryParams.mode = isLogchefQL ? 'logchefql' : 'sql';
+      if (queryToLoad) {
+        queryParams.q = encodeURIComponent(queryToLoad);
+      }
+
+      // Update URL with complete state (replaces syncUrlFromState call)
+      console.log("Updating URL with saved query state, including query_id:", queryData.id.toString());
+      router.replace({ query: queryParams });
+
       toast({
         title: 'Success',
-        description: 'Query loaded successfully.',
+        description: `Query "${queryData.name}" loaded successfully.`,
         duration: TOAST_DURATION.SUCCESS
       })
+
+      // Don't call syncUrlFromState() since we're explicitly setting the URL
 
       return true
     } catch (error) {
       console.error('Error loading saved query:', error)
+      // Clear active saved query name on error
+      exploreStore.setActiveSavedQueryName(null);
+      exploreStore.setSelectedQueryId(null);
+
       toast({
         title: 'Error',
         description: getErrorMessage(error),
@@ -357,7 +458,9 @@ export function useSavedQueries() {
       }
 
       // Always add time range if available - this is crucial for query execution
-      if (queryContent.timeRange?.absolute?.start && queryContent.timeRange?.absolute?.end) {
+      if (queryContent.timeRange !== null &&
+          queryContent.timeRange?.absolute?.start &&
+          queryContent.timeRange?.absolute?.end) {
         url += `&start_time=${queryContent.timeRange.absolute.start}`
         url += `&end_time=${queryContent.timeRange.absolute.end}`
       }
@@ -412,7 +515,21 @@ export function useSavedQueries() {
   async function deleteQuery(query: SavedTeamQuery) {
     if (window.confirm(`Are you sure you want to delete "${query.name}"? This action cannot be undone.`)) {
       try {
-        await savedQueriesStore.deleteQuery(query.team_id, query.id.toString())
+        await savedQueriesStore.deleteQuery(query.team_id, query.source_id, query.id.toString())
+
+        // Check if the deleted query is the active one
+        if (exploreStore.selectedQueryId === query.id.toString()) {
+          // Clear the active query name and ID
+          exploreStore.setActiveSavedQueryName(null);
+          exploreStore.setSelectedQueryId(null);
+
+          // Remove query_id from URL if present
+          if (route.query.query_id) {
+            const currentQuery = { ...route.query };
+            delete currentQuery.query_id;
+            router.replace({ query: currentQuery });
+          }
+        }
 
         // Refresh the queries list - assuming loadSourceQueries will be called externally
         toast({
@@ -482,11 +599,54 @@ export function useSavedQueries() {
 
   // Create a new query in the explorer
   function createNewQuery(sourceId?: number) {
-    if (sourceId) {
-      router.push(`/logs/explore?source=${sourceId}`)
-    } else {
-      router.push('/logs/explore')
+    console.log("Creating new query in useSavedQueries...");
+
+    // Reset the query state to defaults
+    exploreStore.resetQueryStateToDefault();
+
+    // Build new query parameters without query_id
+    const newQuery: Record<string, string> = {};
+
+    // Keep the current team if available
+    if (route.query.team) {
+      newQuery.team = route.query.team as string;
     }
+
+    // Set source ID if provided, otherwise keep current
+    if (sourceId) {
+      newQuery.source = sourceId.toString();
+    } else if (route.query.source) {
+      newQuery.source = route.query.source as string;
+    }
+
+    // Set limit from current store state
+    newQuery.limit = exploreStore.limit.toString();
+
+    // Set time range from current store state
+    const startTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.start);
+    const endTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.end);
+    if (startTime !== null && endTime !== null) {
+      newQuery.start_time = startTime.toString();
+      newQuery.end_time = endTime.toString();
+    }
+
+    // Set mode from current store state
+    newQuery.mode = exploreStore.activeMode;
+
+    // Apply the new URL
+    router.replace({
+      path: '/logs/explore',
+      query: newQuery
+    }).then(() => {
+      // Focus the editor after navigation completes
+      setTimeout(() => {
+        // Try to find the QueryEditor component
+        const queryEditor = document.querySelector('.monaco-editor');
+        if (queryEditor) {
+          (queryEditor as HTMLElement).focus();
+        }
+      }, 50);
+    });
   }
 
   // Local helper to fetch details, now using store action

@@ -240,10 +240,9 @@ export function useExploreUrlSync() {
       query.source = exploreStore.sourceId.toString();
     }
 
-    // Preserve query_id if present (for editing mode)
-    const currentQueryId = route.query.query_id;
-    if (currentQueryId) {
-      query.query_id = currentQueryId as string;
+    // Only preserve query_id if store has a selectedQueryId - this respects manual deletion
+    if (exploreStore.selectedQueryId) {
+      query.query_id = exploreStore.selectedQueryId;
     }
 
     // Limit

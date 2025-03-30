@@ -28,6 +28,7 @@ const props = defineProps<{
   editData?: any;    // For editing an existing query
   queryContent?: string;
   isEditMode?: boolean;
+  queryType?: string; // Add the queryType prop
 }>();
 
 const route = useRoute();
@@ -139,11 +140,11 @@ onMounted(async () => {
     name.value = props.editData.name || '';
     description.value = props.editData.description || '';
     queryId.value = props.editData.id?.toString() || '';
-    
+
     // Attempt to parse the query content for better UX
     try {
       const content = JSON.parse(props.editData.query_content);
-      
+
       // Set save timestamp based on whether timeRange exists in the data
       if (content.timeRange && content.timeRange.absolute) {
         saveTimestamp.value = true;
@@ -155,11 +156,11 @@ onMounted(async () => {
     // Creating new query with initial data
     name.value = props.initialData.name || '';
     description.value = props.initialData.description || '';
-    
+
     // If we're editing, attempt to parse the query content for better UX
     try {
       const content = JSON.parse(props.initialData.query_content);
-      
+
       // Set save timestamp based on whether timeRange exists in the data
       if (content.timeRange && content.timeRange.absolute) {
         saveTimestamp.value = true;
@@ -168,11 +169,10 @@ onMounted(async () => {
       console.error("Failed to parse query content from initialData", e);
     }
   }
-  
+
   // Also check URL parameters for editing existing query
-  const queryId = route.query.query_id;
-  if (queryId && !props.initialData && !props.editData) {
-    console.log(`Editing query ID ${queryId} from URL parameters`);
+  if (route.query.query_id && !props.initialData && !props.editData) {
+    console.log(`Editing query ID ${route.query.query_id} from URL parameters (if modal state not already set)`);
   }
 });
 
@@ -183,7 +183,7 @@ watch([() => props.initialData, () => props.editData], ([newInitialData, newEdit
     name.value = newEditData.name || '';
     description.value = newEditData.description || '';
     queryId.value = newEditData.id?.toString() || '';
-    
+
     try {
       const content = JSON.parse(newEditData.query_content);
       if (content.timeRange && content.timeRange.absolute) {
@@ -197,7 +197,7 @@ watch([() => props.initialData, () => props.editData], ([newInitialData, newEdit
     name.value = newInitialData.name || '';
     description.value = newInitialData.description || '';
     queryId.value = '';
-    
+
     try {
       const content = JSON.parse(newInitialData.query_content);
       if (content.timeRange && content.timeRange.absolute) {
@@ -232,61 +232,25 @@ function prepareQueryContent(saveTimestamp: boolean): string {
     }
 
     // Get the query content based on mode
-    const queryContent = activeMode === 'logchefql' 
+    const queryContent = activeMode === 'logchefql'
       ? exploreStore.logchefqlCode || ''
       : exploreStore.rawSql || '';
-      
+
     // Validate query content
     if (!queryContent.trim()) {
       throw new Error(`${activeMode === 'logchefql' ? 'LogchefQL' : 'SQL'} content is required`);
-    }
-
-    // Time values setup
-    const currentTime = Date.now();
-    const oneHourAgo = currentTime - 3600000;
-    
-    // If saving timestamp, use the selected time range from explore store
-    // Otherwise, use a default 1-hour range
-    let timeRange = {
-      absolute: {
-        start: oneHourAgo,
-        end: currentTime
-      }
-    };
-
-    if (saveTimestamp && exploreStore.timeRange) {
-      try {
-        // Convert DateValue objects to timestamps
-        const startDate = new Date(
-          exploreStore.timeRange.start.year,
-          exploreStore.timeRange.start.month - 1,
-          exploreStore.timeRange.start.day,
-          'hour' in exploreStore.timeRange.start ? exploreStore.timeRange.start.hour : 0,
-          'minute' in exploreStore.timeRange.start ? exploreStore.timeRange.start.minute : 0,
-          'second' in exploreStore.timeRange.start ? exploreStore.timeRange.start.second : 0
-        );
-        
-        const endDate = new Date(
-          exploreStore.timeRange.end.year,
-          exploreStore.timeRange.end.month - 1,
-          exploreStore.timeRange.end.day,
-          'hour' in exploreStore.timeRange.end ? exploreStore.timeRange.end.hour : 0,
-          'minute' in exploreStore.timeRange.end ? exploreStore.timeRange.end.minute : 0,
-          'second' in exploreStore.timeRange.end ? exploreStore.timeRange.end.second : 0
-        );
-        
-        timeRange.absolute.start = startDate.getTime();
-        timeRange.absolute.end = endDate.getTime();
-      } catch (e) {
-        console.warn('Error parsing time range, using default:', e);
-      }
     }
 
     // Create simplified structure
     const simplifiedContent = {
       version: content.version || 1,
       sourceId: content.sourceId || currentSourceId.value,
-      timeRange: timeRange,
+      timeRange: saveTimestamp ? {
+        absolute: {
+          start: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.start) : Date.now() - 3600000,
+          end: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.end) : Date.now()
+        }
+      } : null, // Set timeRange to null if saveTimestamp is false
       limit: saveTimestamp ? exploreStore.limit : 100,
       content: queryContent,
     };
@@ -294,57 +258,62 @@ function prepareQueryContent(saveTimestamp: boolean): string {
     return JSON.stringify(simplifiedContent);
   } catch (error) {
     console.error('Error preparing query content:', error);
-    
+
     // Fallback to a minimal valid structure
     const currentTime = Date.now();
     const oneHourAgo = currentTime - 3600000;
-    
-    // Default values for timeRange
-    let timeRange = {
-      absolute: {
-        start: oneHourAgo,
-        end: currentTime
-      }
-    };
-    
-    // If saving timestamp and timeRange is available, use it
-    if (saveTimestamp && exploreStore.timeRange) {
-      try {
-        const startDate = new Date(
-          exploreStore.timeRange.start.year,
-          exploreStore.timeRange.start.month - 1,
-          exploreStore.timeRange.start.day,
-          'hour' in exploreStore.timeRange.start ? exploreStore.timeRange.start.hour : 0,
-          'minute' in exploreStore.timeRange.start ? exploreStore.timeRange.start.minute : 0,
-          'second' in exploreStore.timeRange.start ? exploreStore.timeRange.start.second : 0
-        );
-        
-        const endDate = new Date(
-          exploreStore.timeRange.end.year,
-          exploreStore.timeRange.end.month - 1,
-          exploreStore.timeRange.end.day,
-          'hour' in exploreStore.timeRange.end ? exploreStore.timeRange.end.hour : 0,
-          'minute' in exploreStore.timeRange.end ? exploreStore.timeRange.end.minute : 0,
-          'second' in exploreStore.timeRange.end ? exploreStore.timeRange.end.second : 0
-        );
-        
-        timeRange.absolute.start = startDate.getTime();
-        timeRange.absolute.end = endDate.getTime();
-      } catch (e) {
-        console.warn('Error parsing time range in fallback, using default:', e);
-      }
-    }
-    
+
+    // Create fallback structure with optional timeRange
     return JSON.stringify({
       version: 1,
       sourceId: currentSourceId.value,
-      timeRange: timeRange,
+      timeRange: saveTimestamp ? {
+        absolute: {
+          start: oneHourAgo,
+          end: currentTime
+        }
+      } : null, // Set timeRange to null if saveTimestamp is false
       limit: saveTimestamp ? exploreStore.limit : 100,
-      content: exploreStore.activeMode === 'logchefql' ? 
-        (exploreStore.logchefqlCode || '') : 
+      content: exploreStore.activeMode === 'logchefql' ?
+        (exploreStore.logchefqlCode || '') :
         (exploreStore.rawSql || ''),
     });
   }
+}
+
+// Helper function to convert DateValue to timestamp
+function getTimestampFromDateValue(dateValue: any): number {
+  if (!dateValue) return Date.now();
+
+  try {
+    // Handle CalendarDateTime objects
+    if (dateValue.year && dateValue.month && dateValue.day) {
+      const date = new Date(
+        dateValue.year,
+        dateValue.month - 1,
+        dateValue.day,
+        'hour' in dateValue ? dateValue.hour : 0,
+        'minute' in dateValue ? dateValue.minute : 0,
+        'second' in dateValue ? dateValue.second : 0
+      );
+      return date.getTime();
+    }
+
+    // Handle Date objects or timestamps
+    if (dateValue instanceof Date) {
+      return dateValue.getTime();
+    }
+
+    // Handle timestamp numbers
+    if (typeof dateValue === 'number') {
+      return dateValue;
+    }
+  } catch (e) {
+    console.error("Error converting date value to timestamp:", e);
+  }
+
+  // Fallback
+  return Date.now();
 }
 
 // Handle form submission
@@ -359,10 +328,9 @@ async function handleSubmit(event: Event) {
     isSubmitting.value = true;
 
     // Get the current active mode from the explore store for query_type
+    // Use the queryType prop if provided, otherwise fall back to the activeMode from the store
     const activeMode = exploreStore.activeMode || 'sql';
-
-    // Determine query type - this is separate from the content structure
-    const queryType = activeMode === 'logchefql' ? 'logchefql' : 'sql';
+    const queryType = props.queryType || (activeMode === 'logchefql' ? 'logchefql' : 'sql');
 
     try {
       // Prepare the query content with the proper structure
@@ -375,9 +343,12 @@ async function handleSubmit(event: Event) {
         name: name.value,
         description: description.value,
         query_content: preparedContent,
-        query_type: queryType,
+        query_type: queryType, // Use the queryType
         save_timestamp: saveTimestamp.value
       };
+
+      // For debugging
+      console.log('SaveQueryModal: sending payload with query_type:', queryType);
 
       if (isEditing.value && queryId.value) {
         // We're updating an existing query
@@ -457,13 +428,14 @@ const saveDescription = 'Save your current query configuration for future use.'
             </div>
           </div>
         </div>
-        
+
         <!-- Query Content Preview -->
         <div class="border rounded-md p-3">
           <div class="text-sm font-medium mb-2">
             {{ exploreStore.activeMode === 'logchefql' ? 'LogchefQL' : 'SQL' }} Query
           </div>
-          <pre class="text-xs bg-muted p-2 rounded overflow-auto max-h-[120px] whitespace-pre-wrap break-all">{{ exploreStore.activeMode === 'logchefql' ? exploreStore.logchefqlCode : exploreStore.rawSql }}</pre>
+          <pre
+            class="text-xs bg-muted p-2 rounded overflow-auto max-h-[120px] whitespace-pre-wrap break-all">{{ exploreStore.activeMode === 'logchefql' ? exploreStore.logchefqlCode : exploreStore.rawSql }}</pre>
         </div>
 
         <!-- Query Name -->

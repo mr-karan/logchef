@@ -5,8 +5,8 @@ import type { APIResponse } from "./types";
  * Generic API request function to reduce repetitive code
  */
 export async function apiRequest<T>(
-  method: "get" | "post" | "put" | "delete", 
-  url: string, 
+  method: "get" | "post" | "put" | "delete",
+  url: string,
   data?: any
 ): Promise<APIResponse<T>> {
   const response = await api[method]<APIResponse<T>>(url, data);

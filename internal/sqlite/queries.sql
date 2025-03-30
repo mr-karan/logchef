@@ -207,8 +207,8 @@ ORDER BY t.name;
 
 -- name: CreateTeamSourceQuery :one
 -- Create a new query for a team and source
-INSERT INTO team_queries (team_id, source_id, name, description, query_content)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO team_queries (team_id, source_id, name, description, query_type, query_content)
+VALUES (?, ?, ?, ?, ?, ?)
 RETURNING id;
 
 -- name: GetTeamSourceQuery :one
@@ -221,6 +221,7 @@ WHERE id = ? AND team_id = ? AND source_id = ?;
 UPDATE team_queries
 SET name = ?,
     description = ?,
+    query_type = ?,
     query_content = ?,
     updated_at = datetime('now')
 WHERE id = ? AND team_id = ? AND source_id = ?;

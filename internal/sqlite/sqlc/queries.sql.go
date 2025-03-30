@@ -173,8 +173,8 @@ func (q *Queries) CreateTeam(ctx context.Context, arg CreateTeamParams) (int64, 
 
 const createTeamSourceQuery = `-- name: CreateTeamSourceQuery :one
 
-INSERT INTO team_queries (team_id, source_id, name, description, query_content)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO team_queries (team_id, source_id, name, description, query_type, query_content)
+VALUES (?, ?, ?, ?, ?, ?)
 RETURNING id
 `
 
@@ -183,6 +183,7 @@ type CreateTeamSourceQueryParams struct {
 	SourceID     int64          `json:"source_id"`
 	Name         string         `json:"name"`
 	Description  sql.NullString `json:"description"`
+	QueryType    string         `json:"query_type"`
 	QueryContent string         `json:"query_content"`
 }
 
@@ -194,6 +195,7 @@ func (q *Queries) CreateTeamSourceQuery(ctx context.Context, arg CreateTeamSourc
 		arg.SourceID,
 		arg.Name,
 		arg.Description,
+		arg.QueryType,
 		arg.QueryContent,
 	)
 	var id int64
@@ -1105,6 +1107,7 @@ const updateTeamSourceQuery = `-- name: UpdateTeamSourceQuery :exec
 UPDATE team_queries
 SET name = ?,
     description = ?,
+    query_type = ?,
     query_content = ?,
     updated_at = datetime('now')
 WHERE id = ? AND team_id = ? AND source_id = ?
@@ -1113,6 +1116,7 @@ WHERE id = ? AND team_id = ? AND source_id = ?
 type UpdateTeamSourceQueryParams struct {
 	Name         string         `json:"name"`
 	Description  sql.NullString `json:"description"`
+	QueryType    string         `json:"query_type"`
 	QueryContent string         `json:"query_content"`
 	ID           int64          `json:"id"`
 	TeamID       int64          `json:"team_id"`
@@ -1124,6 +1128,7 @@ func (q *Queries) UpdateTeamSourceQuery(ctx context.Context, arg UpdateTeamSourc
 	_, err := q.exec(ctx, q.updateTeamSourceQueryStmt, updateTeamSourceQuery,
 		arg.Name,
 		arg.Description,
+		arg.QueryType,
 		arg.QueryContent,
 		arg.ID,
 		arg.TeamID,

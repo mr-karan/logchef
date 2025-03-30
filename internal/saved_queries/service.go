@@ -15,6 +15,9 @@ import (
 // ErrQueryNotFound is returned when a query is not found
 var ErrQueryNotFound = fmt.Errorf("saved query not found")
 
+// ErrQueryTypeRequired is returned when the query type is missing
+var ErrQueryTypeRequired = fmt.Errorf("query type is required")
+
 // Service handles operations on team queries
 type Service struct {
 	db  *sqlite.DB
@@ -31,6 +34,7 @@ func New(db *sqlite.DB, log *slog.Logger) *Service {
 
 // ValidateQueryContent validates the query content is well-formed
 func (s *Service) ValidateQueryContent(content string) error {
+	// Parse content
 	var queryContent models.SavedQueryContent
 	err := json.Unmarshal([]byte(content), &queryContent)
 	if err != nil {
@@ -47,15 +51,19 @@ func (s *Service) ValidateQueryContent(content string) error {
 		return fmt.Errorf("invalid query content: query content cannot be empty")
 	}
 
-	// Validate time range
-	if queryContent.TimeRange.Absolute.Start <= 0 {
-		return fmt.Errorf("invalid query content: start time must be positive")
-	}
-	if queryContent.TimeRange.Absolute.End <= 0 {
-		return fmt.Errorf("invalid query content: end time must be positive")
-	}
-	if queryContent.TimeRange.Absolute.End < queryContent.TimeRange.Absolute.Start {
-		return fmt.Errorf("invalid query content: end time must be after start time")
+	// Check if TimeRange is not null (when timeRange has values)
+	emptyTimeRange := models.SavedQueryTimeRange{}
+	if queryContent.TimeRange != emptyTimeRange {
+		// Validate time range
+		if queryContent.TimeRange.Absolute.Start <= 0 {
+			return fmt.Errorf("invalid query content: start time must be positive")
+		}
+		if queryContent.TimeRange.Absolute.End <= 0 {
+			return fmt.Errorf("invalid query content: end time must be positive")
+		}
+		if queryContent.TimeRange.Absolute.End < queryContent.TimeRange.Absolute.Start {
+			return fmt.Errorf("invalid query content: end time must be after start time")
+		}
 	}
 
 	// Validate limit
@@ -73,9 +81,19 @@ func (s *Service) ListQueriesForTeamAndSource(ctx context.Context, teamID models
 }
 
 // CreateTeamSourceQuery creates a new query for a team and source
-func (s *Service) CreateTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, name, description, queryContent string, createdBy models.UserID) (*models.SavedTeamQuery, error) {
+func (s *Service) CreateTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, name, description, queryContent, queryType string, createdBy models.UserID) (*models.SavedTeamQuery, error) {
+	// Validate query type is provided
+	if queryType == "" {
+		return nil, ErrQueryTypeRequired
+	}
+
 	if err := s.ValidateQueryContent(queryContent); err != nil {
 		return nil, err
+	}
+
+	// Validate query type
+	if queryType != string(models.SavedQueryTypeLogchefQL) && queryType != string(models.SavedQueryTypeSQL) {
+		return nil, fmt.Errorf("invalid query type: must be 'logchefql' or 'sql'")
 	}
 
 	// Create a TeamQuery object
@@ -85,6 +103,7 @@ func (s *Service) CreateTeamSourceQuery(ctx context.Context, teamID models.TeamI
 		Name:         name,
 		Description:  description,
 		QueryContent: queryContent,
+		QueryType:    models.SavedQueryType(queryType),
 		// CreatedBy:    createdBy,
 	}
 
@@ -100,6 +119,7 @@ func (s *Service) CreateTeamSourceQuery(ctx context.Context, teamID models.TeamI
 		SourceID:     sourceID,
 		Name:         name,
 		Description:  description,
+		QueryType:    models.SavedQueryType(queryType),
 		QueryContent: queryContent,
 		CreatedAt:    query.Timestamps.CreatedAt,
 		UpdatedAt:    query.Timestamps.UpdatedAt,
@@ -123,13 +143,19 @@ func (s *Service) GetTeamSourceQuery(ctx context.Context, teamID models.TeamID, 
 }
 
 // UpdateTeamSourceQuery updates a specific query for a team and source
-func (s *Service) UpdateTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int, name, description, queryContent string) (*models.SavedTeamQuery, error) {
+func (s *Service) UpdateTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int, name, description, queryContent, queryType string) (*models.SavedTeamQuery, error) {
 	s.log.Info("updating team source query", "teamID", teamID, "sourceID", sourceID, "queryID", queryID)
 	if err := s.ValidateQueryContent(queryContent); err != nil {
 		return nil, err
 	}
+
+	// Validate query type if provided
+	if queryType != "" && queryType != string(models.SavedQueryTypeLogchefQL) && queryType != string(models.SavedQueryTypeSQL) {
+		return nil, fmt.Errorf("invalid query type: must be 'logchefql' or 'sql'")
+	}
+
 	// Call the database method
-	err := s.db.UpdateTeamSourceQuery(ctx, teamID, sourceID, queryID, name, description, queryContent)
+	err := s.db.UpdateTeamSourceQuery(ctx, teamID, sourceID, queryID, name, description, queryType, queryContent)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrQueryNotFound

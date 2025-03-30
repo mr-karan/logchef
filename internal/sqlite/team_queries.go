@@ -21,11 +21,11 @@ func (db *DB) CreateTeamSourceQuery(ctx context.Context, query *models.TeamQuery
 
 	// Use the generated sqlc function and parameters
 	id, err := db.queries.CreateTeamSourceQuery(ctx, sqlc.CreateTeamSourceQueryParams{
-		TeamID:      int64(query.TeamID),
-		SourceID:    int64(query.SourceID),
-		Name:        query.Name,
-		Description: description,
-		// QueryType removed
+		TeamID:       int64(query.TeamID),
+		SourceID:     int64(query.SourceID),
+		Name:         query.Name,
+		Description:  description,
+		QueryType:    string(query.QueryType),
 		QueryContent: query.QueryContent,
 	})
 	if err != nil {
@@ -73,7 +73,7 @@ func (db *DB) GetTeamSourceQuery(ctx context.Context, teamID models.TeamID, sour
 }
 
 // UpdateTeamSourceQuery updates a query for a team and source
-func (db *DB) UpdateTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int, name, description, queryContent string) error {
+func (db *DB) UpdateTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int, name, description, queryType, queryContent string) error {
 	db.log.Debug("updating team source query", "team_id", teamID, "source_id", sourceID, "query_id", queryID)
 
 	desc := sql.NullString{}
@@ -85,6 +85,7 @@ func (db *DB) UpdateTeamSourceQuery(ctx context.Context, teamID models.TeamID, s
 	err := db.queries.UpdateTeamSourceQuery(ctx, sqlc.UpdateTeamSourceQueryParams{
 		Name:         name,
 		Description:  desc,
+		QueryType:    queryType,
 		QueryContent: queryContent,
 		ID:           int64(queryID),
 		TeamID:       int64(teamID),

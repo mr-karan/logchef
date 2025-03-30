@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { useBaseStore } from "./base";
+import { computed } from "vue";
 import { exploreApi } from "@/api/explore";
 import type {
   ColumnInfo,
@@ -12,11 +12,13 @@ import type {
   QueryErrorResponse,
   QuerySuccessResponse,
 } from "@/api/explore";
-import type { DateValue, CalendarDateTime } from "@internationalized/date";
-import { computed } from "vue";
+import type { DateValue } from "@internationalized/date";
+import { now, getLocalTimeZone, CalendarDateTime } from "@internationalized/date";
 import { useSourcesStore } from "./sources";
 import { useTeamsStore } from "@/stores/teams";
+import { useBaseStore } from "./base";
 import { QueryBuilder } from "@/utils/query-builder";
+import { generateDefaultSqlQuery, generateDefaultLogchefqlQuery } from "@/utils/query-templates";
 
 // Helper function to get formatted table name
 export function getFormattedTableName(source: any): string {
@@ -81,6 +83,10 @@ export interface ExploreState {
   error?: string | null;
   // Query ID for tracking
   queryId?: string | null;
+  // NEW: ID of the currently loaded saved query (if any)
+  selectedQueryId?: string | null;
+  // NEW: Name of the currently active saved query (if any)
+  activeSavedQueryName?: string | null;
   // Query stats
   stats?: any;
   // Last executed query state
@@ -113,6 +119,7 @@ export const useExploreStore = defineStore("explore", () => {
     logchefqlCode: undefined,
     activeMode: "logchefql",
     lastExecutionTimestamp: null,
+    selectedQueryId: null, // Initialize new state
   });
 
   // Getters
@@ -214,6 +221,83 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.logchefqlCode = code;
   }
 
+  // NEW: Action to set the selected saved query ID
+  function setSelectedQueryId(queryId: string | null) {
+    state.data.value.selectedQueryId = queryId;
+  }
+
+  // NEW: Action to set the active saved query name
+  function setActiveSavedQueryName(name: string | null) {
+    state.data.value.activeSavedQueryName = name;
+  }
+
+  // NEW: Action to reset the query state to defaults
+  function resetQueryStateToDefault() {
+    console.log("Explore store: Resetting query state to default");
+
+    // Create a default time range (last hour)
+    const nowDt = now(getLocalTimeZone());
+    const timeRange = {
+      start: new CalendarDateTime(
+        nowDt.year, nowDt.month, nowDt.day, nowDt.hour, nowDt.minute, nowDt.second
+      ).subtract({ hours: 1 }),
+      end: new CalendarDateTime(
+        nowDt.year, nowDt.month, nowDt.day, nowDt.hour, nowDt.minute, nowDt.second
+      )
+    };
+
+    // Set time range
+    state.data.value.timeRange = timeRange;
+
+    // Reset limit to default
+    state.data.value.limit = 100;
+
+    // Get current source details
+    const sourcesStore = useSourcesStore();
+
+    // Make sure we have a valid table name by checking multiple possible sources
+    let tableName = sourcesStore.getCurrentSourceTableName;
+    if (!tableName && sourcesStore.currentSourceDetails?.connection?.table_name) {
+      tableName = sourcesStore.currentSourceDetails.connection.table_name;
+    }
+    if (!tableName && sourcesStore.currentSourceDetails?.connection?.database) {
+      // Try to build a full table name from database and default table
+      tableName = `${sourcesStore.currentSourceDetails.connection.database}.vector_logs`;
+    }
+    // If still no table name, use a reasonable default
+    if (!tableName) {
+      tableName = 'logs.vector_logs';
+    }
+
+    // Get timestamp field with fallback
+    const timestampField = sourcesStore.currentSourceDetails?._meta_ts_field || 'timestamp';
+
+    // Generate default queries using the centralized utility
+    if (state.data.value.activeMode === 'sql') {
+      // Generate SQL using the template utility
+      state.data.value.rawSql = generateDefaultSqlQuery({
+        tableName,
+        timestampField,
+        timeRange,
+        limit: state.data.value.limit
+      });
+      state.data.value.logchefqlCode = ''; // Clear other mode
+    } else {
+      // For LogchefQL, we usually start with an empty query
+      state.data.value.logchefqlCode = generateDefaultLogchefqlQuery({
+        timeRange,
+        // Optionally add common field if needed
+        // commonField: 'level',
+        // commonValue: 'info'
+      });
+      state.data.value.rawSql = ''; // Clear other mode
+    }
+
+    // Clear active saved query information
+    state.data.value.selectedQueryId = null;
+    state.data.value.activeSavedQueryName = null;
+  }
+
   // Reset state
   function resetState() {
     state.data.value = {
@@ -229,6 +313,7 @@ export const useExploreStore = defineStore("explore", () => {
       activeMode: state.data.value.activeMode,
       lastExecutedState: undefined,
       lastExecutionTimestamp: null,
+      selectedQueryId: null, // Reset selectedQueryId
     };
   }
 
@@ -421,6 +506,8 @@ export const useExploreStore = defineStore("explore", () => {
     stats: computed(() => state.data.value.stats),
     lastExecutedState: computed(() => state.data.value.lastExecutedState),
     lastExecutionTimestamp: computed(() => state.data.value.lastExecutionTimestamp),
+    selectedQueryId: computed(() => state.data.value.selectedQueryId),
+    activeSavedQueryName: computed(() => state.data.value.activeSavedQueryName),
 
     // Loading state
     isLoading: state.isLoading,
@@ -436,6 +523,9 @@ export const useExploreStore = defineStore("explore", () => {
     setRawSql,
     setActiveMode,
     setLogchefqlCode,
+    setSelectedQueryId,
+    setActiveSavedQueryName,
+    resetQueryStateToDefault,
     setLastExecutedState,
     resetState,
     executeQuery,
