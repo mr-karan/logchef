@@ -30,10 +30,16 @@ type Manager struct {
 func NewManager(log *slog.Logger) *Manager {
 	return &Manager{
 		clients: make(map[models.SourceID]*Client),
-		logger:  log.With("component", "clickhouse_manager"),
-		health:  make(map[models.SourceID]models.SourceHealth),
-		hooks:   []QueryHook{},
+		logger: log.With("component", "clickhouse_manager"),
+		health: make(map[models.SourceID]models.SourceHealth),
+		hooks:  []QueryHook{}, // Initialize empty, hooks will be added below
 	}
+
+	// Add default hooks
+	m.AddQueryHook(NewLogQueryHook(log, false)) // Keep the basic error/completion logger
+	m.AddQueryHook(NewStructuredQueryLoggerHook(log)) // Add the new structured logger
+
+	return m
 }
 
 // AddSource creates and stores a new connection
