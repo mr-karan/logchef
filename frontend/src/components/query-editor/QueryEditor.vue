@@ -20,17 +20,34 @@
             <TabsTrigger value="clickhouse-sql">SQL</TabsTrigger>
           </TabsList>
         </Tabs>
+
+        <!-- New: Active Query Indicator -->
+        <div v-if="activeSavedQueryName"
+          class="flex items-center bg-primary/10 text-primary text-xs font-medium px-2 py-0.5 rounded-md">
+          <FileEdit class="h-3.5 w-3.5 mr-1.5" />
+          <span>{{ activeSavedQueryName }}</span>
+        </div>
       </div>
 
       <div class="flex items-center gap-2">
+        <!-- New: New Query Button - Only show when editing a saved query -->
+        <TooltipProvider v-if="isEditingExistingQuery">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" class="h-7 gap-1" @click="handleNewQueryClick">
+                <FilePlus2 class="h-3.5 w-3.5" />
+                <span class="text-xs">New</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>Create a new query</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
         <!-- Saved Queries Dropdown -->
-        <SavedQueriesDropdown 
-          :selected-source-id="props.sourceId" 
-          :selected-team-id="props.teamId"
-          @select-saved-query="(query) => $emit('select-saved-query', query)" 
-          @save="$emit('save-query')"
-          class="h-8" 
-        />
+        <SavedQueriesDropdown :selected-source-id="props.sourceId" :selected-team-id="props.teamId"
+          @select-saved-query="(query) => $emit('select-saved-query', query)" @save="$emit('save-query')" class="h-8" />
 
         <!-- Table name indicator -->
         <div v-if="props.activeMode === 'clickhouse-sql'" class="text-xs text-muted-foreground mr-2">
@@ -110,11 +127,14 @@ import { ref, computed, shallowRef, watch, onMounted, onBeforeUnmount, nextTick,
 import * as monaco from "monaco-editor";
 import { useDark } from "@vueuse/core";
 import { VueMonacoEditor } from "@guolao/vue-monaco-editor";
-import { HelpCircle, PanelRightOpen, PanelRightClose, AlertCircle, XCircle } from "lucide-vue-next";
+import { HelpCircle, PanelRightOpen, PanelRightClose, AlertCircle, XCircle, FileEdit, FilePlus2 } from "lucide-vue-next";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import SavedQueriesDropdown from '@/components/saved-queries/SavedQueriesDropdown.vue';
 import type { SavedTeamQuery } from '@/api/savedQueries';
+import { useRoute, useRouter } from 'vue-router';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 import { initMonacoSetup, getDefaultMonacoOptions } from "@/utils/monaco";
 import { Parser as LogchefQLParser, State as LogchefQLState, Operator as LogchefQLOperator, VALID_KEY_VALUE_OPERATORS as LogchefQLValidOperators, isNumeric } from "@/utils/logchefql";
@@ -312,6 +332,20 @@ watch(() => props.schema, () => {
 watch(() => exploreStore.isLoadingOperation('executeQuery'), (isLoading) => {
   if (editorRef.value && !isDisposing.value) {
     editorRef.value.updateOptions({ readOnly: isLoading });
+  }
+});
+
+// Add this watch effect after the existing watchEffect to position cursor when a saved query is loaded
+watch(() => exploreStore.selectedQueryId, (newQueryId, oldQueryId) => {
+  if (newQueryId && newQueryId !== oldQueryId) {
+    // When a new saved query is loaded, position cursor at the end of content and focus editor
+    console.log("QueryEditor: Saved query loaded, positioning cursor at end");
+    nextTick(() => {
+      // Add a slight delay to ensure content is fully updated
+      setTimeout(() => {
+        focusEditor(true); // true = position cursor at end
+      }, 100);
+    });
   }
 });
 
@@ -820,6 +854,50 @@ const asEditorMode = (value: string | number): EditorMode => {
   }
   console.warn(`Received unexpected value for editor mode: ${value}. Defaulting to logchefql.`);
   return 'logchefql';
+};
+
+// After the imports, add route and router
+const route = useRoute();
+const router = useRouter();
+
+// Add these computed properties after other computed properties
+const activeSavedQueryName = computed(() => exploreStore.activeSavedQueryName);
+const isEditingExistingQuery = computed(() => !!route.query.query_id);
+
+// Add handler for New Query button
+const handleNewQueryClick = () => {
+  console.log("Creating new query state...");
+
+  // First, copy the current query parameters
+  const currentQuery = { ...route.query };
+
+  // Remove query_id from URL
+  delete currentQuery.query_id;
+
+  // Use the centralized reset function in the store
+  exploreStore.resetQueryStateToDefault();
+
+  // Wait for the state reset to complete
+  nextTick(() => {
+    // Explicitly remove the query_id parameter again to ensure it's gone
+    const finalQuery = { ...currentQuery };
+    delete finalQuery.query_id;
+
+    // Replace URL with new parameters in router, disabling any redirect
+    // This is important to prevent the URL sync from adding back query_id
+    router.replace({ query: finalQuery })
+      .then(() => {
+        // Focus the editor and position cursor at the end after URL change is complete
+        setTimeout(() => {
+          focusEditor(true); // true = position cursor at end
+        }, 50);
+      })
+      .catch(err => {
+        console.error("Error updating URL:", err);
+        // Still try to focus even if URL update fails
+        focusEditor(true);
+      });
+  });
 };
 
 </script>

@@ -12,10 +12,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useTeamsStore } from '@/stores/teams';
 import { useToast } from '@/components/ui/toast';
 import { TOAST_DURATION } from '@/lib/constants';
-import { getErrorMessage } from '@/api/types';
 import { type SavedTeamQuery } from '@/api/savedQueries';
 import { useSavedQueriesStore } from '@/stores/savedQueries';
 
@@ -30,13 +28,18 @@ const emit = defineEmits<{
 }>();
 
 const router = useRouter();
-const teamsStore = useTeamsStore();
 const { toast } = useToast();
+const savedQueriesStore = useSavedQueriesStore();
 
 // Local state
 const isOpen = ref(false);
-const isLoading = ref(false);
-const queries = ref<SavedTeamQuery[]>([]);
+
+// Computed properties from store
+const isLoadingQueries = computed(() => {
+  if (!props.selectedTeamId || !props.selectedSourceId) return false;
+  return savedQueriesStore.isLoadingOperation(`fetchTeamSourceQueries-${props.selectedTeamId}-${props.selectedSourceId}`);
+});
+const queries = computed(() => savedQueriesStore.queries);
 
 // Watch for changes in team/source ID
 watch(
@@ -45,7 +48,9 @@ watch(
     if (teamId && sourceId) {
       await loadQueries(teamId, sourceId);
     } else {
-      queries.value = [];
+      // Optionally clear store queries if team/source deselects, or let the store handle it
+      // savedQueriesStore.resetQueries() // Assuming a reset action exists if needed
+      // For now, the dropdown will just show 'select team/source' based on template logic
     }
   },
   { immediate: true }
@@ -53,40 +58,28 @@ watch(
 
 // Load queries when dropdown opens
 watch(isOpen, async (open) => {
-  if (open && props.selectedTeamId && props.selectedSourceId) {
+  if (open && props.selectedTeamId && props.selectedSourceId && !queries.value.length) {
     await loadQueries(props.selectedTeamId, props.selectedSourceId);
   }
 });
 
-// Load queries on mount as well
-onMounted(async () => {
-  if (props.selectedTeamId && props.selectedSourceId) {
-    await loadQueries(props.selectedTeamId, props.selectedSourceId);
-  }
-});
+// Load queries on mount as well (covered by immediate watch)
 
-// Function to load queries
+// Function to load queries using the store
 async function loadQueries(teamId: number, sourceId: number) {
   if (!teamId || !sourceId) return;
-  
-  isLoading.value = true;
+
   try {
-    const response = await savedQueriesApi.listTeamSourceQueries(teamId, sourceId);
-    if (response.data) {
-      queries.value = response.data;
-      console.log(`Loaded ${queries.value.length} queries for team ${teamId}, source ${sourceId}`);
-    }
+    await savedQueriesStore.fetchTeamSourceQueries(teamId, sourceId);
+
   } catch (error) {
-    console.error('Error loading queries:', error);
+    console.error('Error triggering query load from store:', error);
     toast({
       title: 'Error',
-      description: 'Failed to load saved queries',
+      description: 'Failed to initiate loading saved queries.',
       variant: 'destructive',
       duration: TOAST_DURATION.ERROR,
     });
-    queries.value = [];
-  } finally {
-    isLoading.value = false;
   }
 }
 
@@ -117,7 +110,7 @@ function getQueryUrl(query: SavedTeamQuery): string {
   try {
     const queryType = query.query_type?.toLowerCase() === 'logchefql' ? 'logchefql' : 'sql';
     let url = `/logs/explore?team=${query.team_id}&source=${query.source_id}&query_id=${query.id}&mode=${queryType}`;
-    
+
     try {
       const queryContent = JSON.parse(query.query_content);
       if (queryContent.content) {
@@ -132,7 +125,7 @@ function getQueryUrl(query: SavedTeamQuery): string {
     } catch (error) {
       console.error('Error parsing query content:', error);
     }
-    
+
     return url;
   } catch (error) {
     console.error('Error generating query URL:', error);
@@ -176,7 +169,7 @@ function goToQueries() {
       <DropdownMenuLabel>Saved Queries</DropdownMenuLabel>
 
       <!-- Loading state -->
-      <div v-if="isLoading" class="px-2 py-3 flex flex-col gap-2">
+      <div v-if="isLoadingQueries" class="px-2 py-3 flex flex-col gap-2">
         <Skeleton v-for="i in 3" :key="i" class="h-5 w-full" />
       </div>
 

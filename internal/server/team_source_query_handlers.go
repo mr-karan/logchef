@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"log/slog"
 	"strconv"
 
 	"github.com/mr-karan/logchef/pkg/models"
@@ -67,6 +68,7 @@ func (s *Server) handleCreateTeamSourceQuery(c *fiber.Ctx) error {
 	var req struct {
 		Name         string `json:"name"`
 		Description  string `json:"description"`
+		QueryType    string `json:"query_type"`
 		QueryContent string `json:"query_content"`
 	}
 	if err := c.BodyParser(&req); err != nil {
@@ -84,9 +86,19 @@ func (s *Server) handleCreateTeamSourceQuery(c *fiber.Ctx) error {
 		req.Name,
 		req.Description,
 		req.QueryContent,
+		req.QueryType,
 		user.ID,
 	)
 	if err != nil {
+		// Log the actual error
+		s.log.Error("failed to create team source query", slog.Any("error", err), slog.Int("teamID", int(teamID)), slog.Int("sourceID", int(sourceID)))
+
+		// Check for specific validation error
+		if errors.Is(err, saved_queries.ErrQueryTypeRequired) {
+			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		}
+
+		// Return generic server error for other issues
 		return SendError(c, fiber.StatusInternalServerError, "Failed to create query")
 	}
 
@@ -167,6 +179,7 @@ func (s *Server) handleUpdateTeamSourceQuery(c *fiber.Ctx) error {
 	var req struct {
 		Name         string `json:"name"`
 		Description  string `json:"description"`
+		QueryType    string `json:"query_type"`
 		QueryContent string `json:"query_content"`
 	}
 	if err := c.BodyParser(&req); err != nil {
@@ -185,6 +198,7 @@ func (s *Server) handleUpdateTeamSourceQuery(c *fiber.Ctx) error {
 		req.Name,
 		req.Description,
 		req.QueryContent,
+		req.QueryType,
 		// user.ID, // Pass user ID if needed for authorization in service layer
 	)
 	if err != nil {

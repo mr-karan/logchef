@@ -5,13 +5,13 @@ import { apiClient } from "./apiUtils";
  */
 export interface SavedQueryContent {
   version: number;
-  sourceId: number;
+  sourceId: number | string;
   timeRange: {
     absolute: {
       start: number;
       end: number;
     };
-  };
+  } | null;
   limit: number;
   content: string; // The content of the query (either LogchefQL or SQL)
 }
@@ -25,7 +25,7 @@ export interface SavedTeamQuery {
   source_id: number;
   name: string;
   description: string;
-  query_type: "logchefql" | "sql";
+  query_type: string;
   query_content: string; // JSON string of SavedQueryContent
   created_at: string;
   updated_at: string;
@@ -91,8 +91,8 @@ export const savedQueriesApi = {
   ) =>
     apiClient.put<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/queries/${queryId}`, query),
 
-  deleteQuery: (teamId: number, queryId: string) =>
-    apiClient.delete<{ success: boolean }>(`/teams/${teamId}/queries/${queryId}`),
+  deleteQuery: (teamId: number, sourceId: number, queryId: string) =>
+    apiClient.delete<{ success: boolean }>(`/teams/${teamId}/sources/${sourceId}/queries/${queryId}`),
 
   getUserTeams: () => apiClient.get<Team[]>("/users/me/teams")
 };
