@@ -1143,9 +1143,6 @@ onBeforeUnmount(() => {
 
   0%,
   100% {
-    /* Assuming primary-foreground is light text on dark primary button */
-    /* Use a semi-transparent version of the primary button's text color for the glow */
-    /* Adjust RGBA values if your theme differs */
     box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.2);
   }
 
@@ -1155,7 +1152,6 @@ onBeforeUnmount(() => {
 }
 
 .animate-subtle-pulse {
-  /* Add animation to the button when dirty */
   animation: subtle-pulse 1.5s infinite ease-in-out;
 }
 </style>
