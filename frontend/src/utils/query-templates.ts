@@ -34,8 +34,10 @@ export function generateDefaultSqlQuery(params: {
 }): string {
   const { tableName, timestampField, timeRange, limit = 100 } = params;
 
-  // Use backticks for table/field names to handle special characters
-  const tableRef = tableName ? `\`${tableName}\`` : "logs";
+  // Use backticks for table/field names to handle special characters, unless it contains a dot
+  const tableRef = tableName
+    ? (tableName.includes('.') ? tableName : `\`${tableName}\``)
+    : "logs"; // Default if no table name provided
   const tsField = `\`${timestampField || "timestamp"}\``;
 
   // Format time range with proper SQL functions
