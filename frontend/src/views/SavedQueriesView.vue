@@ -22,7 +22,6 @@ import {
 } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { useSavedQueriesStore } from '@/stores/savedQueries';
 import { TOAST_DURATION } from '@/lib/constants';
 import SaveQueryModal from '@/components/saved-queries/SaveQueryModal.vue';
 import { getErrorMessage } from '@/api/types';
@@ -31,15 +30,15 @@ import { formatSourceName } from '@/utils/format';
 import type { SavedTeamQuery } from '@/api/savedQueries';
 import { useTeamsStore } from '@/stores/teams';
 import { Badge } from '@/components/ui/badge';
+import { useSavedQueries } from '@/composables/useSavedQueries';
 
 // Initialize router and services with better error handling
 const router = useRouter();
 const { toast } = useToast();
 
 // Initialize stores with error handling
-let savedQueriesStore, sourcesStore, teamsStore;
+let sourcesStore, teamsStore;
 try {
-  savedQueriesStore = useSavedQueriesStore();
   sourcesStore = useSourcesStore();
   teamsStore = useTeamsStore();
 } catch (error) {
@@ -47,13 +46,6 @@ try {
 }
 
 // Create fallback objects if stores fail to initialize
-if (!savedQueriesStore) {
-  console.error("Saved queries store failed to initialize!");
-  savedQueriesStore = {
-    fetchTeamSourceQueries: async () => ({ success: false, error: { message: "Store initialization failed" } }),
-  };
-}
-
 if (!sourcesStore) {
   console.error("Sources store failed to initialize!");
   sourcesStore = {
@@ -74,13 +66,27 @@ if (!teamsStore) {
   };
 }
 
+// Get saved queries composable
+const { 
+  showSaveQueryModal, 
+  editingQuery, 
+  isLoading,
+  queries,
+  filteredQueries,
+  hasQueries,
+  totalQueryCount,
+  searchQuery,
+  getQueryUrl,
+  openQuery,
+  editQuery,
+  deleteQuery,
+  createNewQuery,
+  clearSearch,
+  loadSourceQueries
+} = useSavedQueries();
+
 // Local UI state
-const isLoading = ref(false);
-const showSaveQueryModal = ref(false);
-const editingQuery = ref<SavedTeamQuery | null>(null);
 const selectedSourceId = ref<string>('');
-const searchQuery = ref('');
-const queries = ref<SavedTeamQuery[]>([]);
 const isChangingTeam = ref(false);
 const isChangingSource = ref(false);
 const urlError = ref<string | null>(null);
@@ -108,30 +114,6 @@ const selectedSourceName = computed(() => {
   if (!selectedSourceId.value) return 'Select a source';
   const source = sourcesStore.teamSources?.find(s => s.id === parseInt(selectedSourceId.value));
   return source ? formatSourceName(source) : 'Select a source';
-});
-
-// Filtered queries based on search
-const filteredQueries = computed(() => {
-  if (!searchQuery.value.trim()) {
-    return queries.value;
-  }
-
-  const search = searchQuery.value.toLowerCase();
-
-  return queries.value.filter(query =>
-    query.name.toLowerCase().includes(search) ||
-    (query.description && query.description.toLowerCase().includes(search))
-  );
-});
-
-// Check if we have any queries to display
-const hasQueries = computed((): boolean => {
-  return filteredQueries.value.length > 0;
-});
-
-// Total query count
-const totalQueryCount = computed((): number => {
-  return queries.value.length;
 });
 
 // Load sources and queries on mount
@@ -194,7 +176,7 @@ watch(
   ],
   async ([newSourceId, currentTeamId]) => {
     if (newSourceId && currentTeamId) {
-      await loadSourceQueries();
+      await fetchQueries();
       // Mark initial load as complete after first load
       isInitialLoad.value = false;
     }
@@ -243,7 +225,7 @@ async function handleTeamChange(teamId: string) {
         }
       });
 
-      await loadSourceQueries();
+      await fetchQueries();
     } else {
       // No sources in this team
       selectedSourceId.value = '';
@@ -305,7 +287,7 @@ async function handleSourceChange(sourceId: string) {
       }
     });
 
-    await loadSourceQueries();
+    await fetchQueries();
 
   } catch (error) {
     console.error('Error changing source:', error);
@@ -321,54 +303,16 @@ async function handleSourceChange(sourceId: string) {
   }
 }
 
-async function loadSourceQueries() {
-  try {
-    isLoading.value = true;
-
-    // Reset search when changing source
-    searchQuery.value = '';
-
-    // Safe check for teamsStore and currentTeamId
-    const currentTeamId = teamsStore?.currentTeamId;
-    
-    if (!currentTeamId || !selectedSourceId.value) {
-      console.warn("No team or source selected, cannot load queries");
-      queries.value = [];
-      return;
-    }
-
-    // Use the new store pattern with proper null handling
-    const result = await savedQueriesStore.fetchTeamSourceQueries(
-      currentTeamId,
-      parseInt(selectedSourceId.value)
-    );
-
-    // Handle both success and error cases properly
-    if (result.success) {
-      // Directly use the result data which is already null-safe
-      queries.value = result.data ?? [];
-    } else {
-      queries.value = [];
-      if (result.error) {
-        toast({
-          title: 'Error',
-          description: result.error.message,
-          variant: 'destructive',
-          duration: TOAST_DURATION.ERROR,
-        });
-      }
-    }
-  } catch (error) {
-    queries.value = [];
-    toast({
-      title: 'Error',
-      description: getErrorMessage(error),
-      variant: 'destructive',
-      duration: TOAST_DURATION.ERROR,
-    });
-  } finally {
-    isLoading.value = false;
+async function fetchQueries() {
+  if (!teamsStore?.currentTeamId || !selectedSourceId.value) {
+    console.warn("No team or source selected, cannot load queries");
+    return;
   }
+  
+  await loadSourceQueries(
+    teamsStore.currentTeamId,
+    parseInt(selectedSourceId.value)
+  );
 }
 
 // Format time using the formatDate utility
@@ -376,132 +320,25 @@ function formatTime(dateStr: string): string {
   return formatDate(dateStr);
 }
 
-// Generate URL for a saved query
-function getQueryUrl(query: SavedTeamQuery): string {
-  try {
-    // Get query type from the saved query
-    const queryType = query.query_type || 'sql';
-
-    // Parse the query content
-    const queryContent = JSON.parse(query.query_content);
-
-    // Build the URL with the appropriate parameters
-    let url = `/logs/explore?team=${query.team_id}&query_id=${query.id}`;
-
-    // Add source ID if available
-    if (query.source_id) {
-      url += `&source=${query.source_id}`;
-    }
-
-    // Add mode parameter based on query type
-    url += `&mode=${queryType === 'logchefql' ? 'logchefql' : 'sql'}`;
-
-    // Add the appropriate query content based on type
-    if (queryType === 'logchefql' && queryContent.logchefqlContent) {
-      url += `&q=${encodeURIComponent(queryContent.logchefqlContent)}`;
-    } else if (queryType === 'sql' && queryContent.rawSql) {
-      url += `&q=${encodeURIComponent(queryContent.rawSql)}`;
-    }
-
-    return url;
-  } catch (error) {
-    console.error('Error generating query URL:', error);
-    return `/logs/explore?team=${query.team_id}&query_id=${query.id}&source=${query.source_id}`;
-  }
-}
-
-// Handle opening query in explorer
-function openQuery(query: SavedTeamQuery) {
-  const url = getQueryUrl(query);
-  router.push(url);
-}
-
-// Handle edit query
-function editQuery(query: SavedTeamQuery) {
-  editingQuery.value = query;
-  showSaveQueryModal.value = true;
-}
-
-// Handle delete query
-async function deleteQuery(query: SavedTeamQuery) {
-  if (window.confirm(`Are you sure you want to delete "${query.name}"? This action cannot be undone.`)) {
-    try {
-      await savedQueriesStore.deleteQuery(query.team_id, query.id.toString());
-
-      // Refresh the source queries to update the UI
-      if (selectedSourceId.value) {
-        await loadSourceQueries();
-      }
-
-      toast({
-        title: 'Success',
-        description: 'Query deleted successfully',
-        duration: TOAST_DURATION.SUCCESS,
-      });
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: getErrorMessage(error),
-        variant: 'destructive',
-        duration: TOAST_DURATION.ERROR,
-      });
-    }
+// Handle delete query with refresh
+async function handleDeleteQuery(query: SavedTeamQuery) {
+  const result = await deleteQuery(query);
+  if (result.success && selectedSourceId.value) {
+    await fetchQueries();
   }
 }
 
 // Handle save query modal submission
-async function handleSaveQuery(formData: any) {
-  try {
-    if (editingQuery.value) {
-      await savedQueriesStore.updateQuery(
-        formData.team_id,
-        editingQuery.value.id.toString(),
-        {
-          name: formData.name,
-          description: formData.description,
-        }
-      );
-
-      // Refresh the source queries to update the UI
-      if (selectedSourceId.value) {
-        await loadSourceQueries();
-      }
-
-      toast({
-        title: 'Success',
-        description: 'Query updated successfully',
-        duration: TOAST_DURATION.SUCCESS,
-      });
-    }
-    showSaveQueryModal.value = false;
-    editingQuery.value = null;
-  } catch (error) {
-    toast({
-      title: 'Error',
-      description: getErrorMessage(error),
-      variant: 'destructive',
-      duration: TOAST_DURATION.ERROR,
-    });
-  }
-}
+// Now handled by the useSavedQueries composable
 
 // Get query type badge color
 function getQueryTypeBadgeVariant(type: string): "default" | "secondary" | "destructive" | "outline" {
   return type === 'logchefql' ? 'default' : 'secondary';
 }
 
-// Create a new query in the explorer
-function createNewQuery() {
-  if (selectedSourceId.value) {
-    router.push(`/logs/explore?source=${selectedSourceId.value}`);
-  } else {
-    router.push('/logs/explore');
-  }
-}
-
-// Clear search
-function clearSearch() {
-  searchQuery.value = '';
+// Create a new query with current source
+function handleCreateNewQuery() {
+  createNewQuery(selectedSourceId.value ? parseInt(selectedSourceId.value) : undefined);
 }
 </script>
 
@@ -509,7 +346,7 @@ function clearSearch() {
   <div class="container py-6 space-y-6">
     <div class="flex justify-between items-center">
       <h1 class="text-2xl font-bold tracking-tight">Saved Queries</h1>
-      <Button @click="createNewQuery">Create New Query</Button>
+      <Button @click="handleCreateNewQuery">Create New Query</Button>
     </div>
 
     <!-- Error Alert -->
@@ -643,7 +480,7 @@ function clearSearch() {
           <Button v-if="searchQuery" variant="outline" @click="clearSearch">
             Clear Search
           </Button>
-          <Button v-else @click="createNewQuery">
+          <Button v-else @click="handleCreateNewQuery">
             Create New Query
           </Button>
         </div>
@@ -694,7 +531,11 @@ function clearSearch() {
                       <Eye class="mr-2 h-4 w-4" />
                       Open
                     </DropdownMenuItem>
-                    <DropdownMenuItem @click="deleteQuery(query)" class="text-destructive">
+                    <DropdownMenuItem @click="editQuery(query)">
+                      <Pencil class="mr-2 h-4 w-4" />
+                      Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem @click="handleDeleteQuery(query)" class="text-destructive">
                       <Trash2 class="mr-2 h-4 w-4" />
                       Delete
                     </DropdownMenuItem>

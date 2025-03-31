@@ -2,13 +2,14 @@
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { AlertCircle } from 'lucide-vue-next'
+import { AlertCircle, Loader2 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute } from 'vue-router'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 const route = useRoute()
 const authStore = useAuthStore()
+const isLoggingIn = ref(false)
 
 // Error message mapping
 const errorMessages: Record<string, string> = {
@@ -25,10 +26,18 @@ const errorMessage = computed(() => {
   return code ? (errorMessages[code] || 'An unexpected error occurred') : null
 })
 
-function handleLogin() {
-  // Get redirect path from query if available
-  const redirectPath = route.query.redirect as string | undefined
-  authStore.startLogin(redirectPath)
+async function handleLogin() {
+  try {
+    isLoggingIn.value = true
+    // Get redirect path from query if available
+    const redirectPath = route.query.redirect as string | undefined
+    await authStore.startLogin(redirectPath)
+  } catch (error) {
+    console.error('Login initiation failed:', error)
+  } finally {
+    // This may not run if redirection happens immediately
+    isLoggingIn.value = false
+  }
 }
 </script>
 
@@ -55,7 +64,12 @@ function handleLogin() {
           </div>
         </Alert>
 
-        <Button @click="handleLogin" class="w-full">
+        <Button 
+          @click="handleLogin" 
+          class="w-full" 
+          :disabled="isLoggingIn"
+        >
+          <Loader2 v-if="isLoggingIn" class="mr-2 h-4 w-4 animate-spin" />
           Sign in with SSO
         </Button>
       </CardContent>

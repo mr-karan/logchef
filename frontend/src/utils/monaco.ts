@@ -4,74 +4,85 @@ import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import { tokenTypes as logchefqlTokenTypes, Parser as LogchefQLParser } from "./logchefql";
 import { tokenTypes as clickhouseTokenTypes, Parser as ClickHouseSQLParser } from "./clickhouse-sql";
 
-export function getDefaultMonacoOptions() {
+export function getDefaultMonacoOptions(): monaco.editor.IStandaloneEditorConstructionOptions {
   return {
     readOnly: false,
-    fontSize: 13,
-    padding: {
-      top: 6,
-      bottom: 6,
-    },
+    fontSize: 14, // Slightly larger default
+    lineHeight: 21, // Explicit line height
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+    padding: { top: 8, bottom: 8 }, // Consistent padding
     contextmenu: false,
     tabCompletion: "on",
     overviewRulerLanes: 0,
-    lineNumbersMinChars: 0,
     scrollBeyondLastLine: false,
-    scrollbarVisibility: "hidden",
-    scrollbar: {
-      horizontal: "hidden",
-      vertical: "hidden",
+    scrollbar: { // Explicit visibility settings
+      vertical: "auto",
+      horizontal: "auto",
       alwaysConsumeMouseWheel: false,
       useShadows: false,
+      verticalScrollbarSize: 8, // Thinner scrollbars
+      horizontalScrollbarSize: 8,
     },
-    occurrencesHighlight: false,
+    occurrencesHighlight: false, // Consider 'multi' if needed later
     find: {
       addExtraSpaceOnTop: false,
       autoFindInSelection: "never",
-      seedSearchStringFromSelection: false,
+      seedSearchStringFromSelection: "never", // Usually better defaults
     },
-    wordBasedSuggestions: "off",
-    lineDecorationsWidth: 0,
-    hideCursorInOverviewRuler: true,
-    glyphMargin: false,
-    scrollBeyondLastColumn: 0,
-    automaticLayout: true,
-    minimap: {
-      enabled: false,
-    },
-    folding: false,
-    lineNumbers: false,
+    wordBasedSuggestions: false, // Explicitly false
     renderLineHighlight: "none",
     matchBrackets: "always",
     "semanticHighlighting.enabled": true,
+    automaticLayout: true, // Essential for responsive containers
+    minimap: { enabled: false },
+    folding: false, // Keep folding off for LogchefQL default
+    lineNumbers: "off", // Keep line numbers off for LogchefQL default
+    glyphMargin: false,
+    lineDecorationsWidth: 0,
+    lineNumbersMinChars: 0, // Not needed if lineNumbers is off
+    hideCursorInOverviewRuler: true,
+    fixedOverflowWidgets: true, // Important for suggestion widgets
+    wordWrap: "off", // Default to off, enable per language if needed
+    // Force cursor options to be visible
+    cursorBlinking: "phase",  // Use phase for a smoother blink
+    cursorStyle: "line",       // Ensure line style for visibility
+    cursorWidth: 2,            // Make cursor slightly thicker
+    cursorSmoothCaretAnimation: "on", // Smooth transitions when moving cursor
+    renderWhitespace: "none",  // Don't show whitespace by default
+    // Enable placeholder support
+    'placeholder': '', // Default empty, will be set by component
   };
 }
 
 export function initMonacoSetup() {
-  // Configure Monaco worker setup
-  window.MonacoEnvironment = {
-    getWorker: () => new EditorWorker(),
-  };
+  // Configure Monaco worker setup (ensure this runs only once)
+  if (!window.MonacoEnvironment) {
+     window.MonacoEnvironment = {
+       getWorker: () => new EditorWorker(),
+     };
+     // Load Monaco configuration
+     loader.config({ monaco });
+  }
 
-  // Load Monaco configuration
-  loader.config({ monaco });
 
-  // Define themes
+  // Define themes - Adjusted rules based on refined tokens
   monaco.editor.defineTheme("logchef-light", {
     base: "vs",
     inherit: true,
-    colors: {},
+    colors: {}, // Keep empty unless specific background/foreground needed
     rules: [
-      { token: "logchefqlKey", foreground: "0451a5" },
-      { token: "logchefqlOperator", foreground: "0089ab" },
-      { token: "logchefqlValue", foreground: "8b0000" },
+      { token: "logchefqlKey", foreground: "0451a5" }, // Same as identifier usually
+      { token: "logchefqlOperator", foreground: "000000" }, // Simple black for = != etc.
+      // logchefqlValue is intermediate, use NUMBER and STRING
       { token: "number", foreground: "098658" },
       { token: "string", foreground: "a31515" },
-      { token: "keyword", foreground: "0000ff" },
-      { token: "identifier", foreground: "001080" },
-      { token: "operator", foreground: "0089ab" },
+      { token: "punctuation", foreground: "000000" }, // Brackets, quotes
+      // ClickHouse specific (or general SQL)
+      { token: "keyword", foreground: "0000ff" }, // SELECT, FROM, WHERE
+      { token: "identifier", foreground: "001080" }, // Table/column names
+      { token: "operator", foreground: "000000" }, // SQL operators like AND, OR
       { token: "comment", foreground: "008000" },
-      { token: "punctuation", foreground: "000000" },
+      // { token: "type", foreground: "267f99" }, // Data types if needed
     ],
   });
 
@@ -80,92 +91,124 @@ export function initMonacoSetup() {
     inherit: true,
     colors: {},
     rules: [
-      { token: "logchefqlKey", foreground: "6e9fff" },
-      { token: "logchefqlOperator", foreground: "0089ab" },
-      { token: "logchefqlValue", foreground: "d16969" },
+      { token: "logchefqlKey", foreground: "9cdcfe" }, // Same as identifier
+      { token: "logchefqlOperator", foreground: "d4d4d4" }, // White/grey for = !=
       { token: "number", foreground: "b5cea8" },
       { token: "string", foreground: "ce9178" },
-      { token: "keyword", foreground: "569cd6" },
-      { token: "identifier", foreground: "9cdcfe" },
-      { token: "operator", foreground: "d4d4d4" },
+      { token: "punctuation", foreground: "d4d4d4" }, // Brackets, quotes
+      // ClickHouse specific (or general SQL)
+      { token: "keyword", foreground: "569cd6" }, // SELECT, FROM, WHERE
+      { token: "identifier", foreground: "9cdcfe" }, // Table/column names
+      { token: "operator", foreground: "d4d4d4" }, // SQL operators like AND, OR
       { token: "comment", foreground: "6a9955" },
-      { token: "punctuation", foreground: "d4d4d4" },
+      // { token: "type", foreground: "4ec9b0" }, // Data types if needed
     ],
   });
 
-  // Register languages
-  registerLogchefQL();
-  registerClickhouseSQL();
+  // Register languages (ensure this runs only once)
+  if (!monaco.languages.getLanguages().some(lang => lang.id === 'logchefql')) {
+    registerLogchefQL();
+  }
+  if (!monaco.languages.getLanguages().some(lang => lang.id === 'clickhouse-sql')) {
+    registerClickhouseSQL();
+  }
 }
 
 function registerLogchefQL() {
-  // Register LogchefQL language
-  monaco.languages.register({ id: "logchefql" });
-  monaco.languages.setLanguageConfiguration("logchefql", {
+  const LANGUAGE_ID = "logchefql";
+
+  monaco.languages.register({ id: LANGUAGE_ID });
+
+  monaco.languages.setLanguageConfiguration(LANGUAGE_ID, {
     autoClosingPairs: [
       { open: "(", close: ")" },
       { open: '"', close: '"' },
       { open: "'", close: "'" },
     ],
-    wordPattern:
-      /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
+    // More robust word pattern needed? Default might be okay with semantic tokens.
+    // wordPattern: /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
+    brackets: [
+        ['(', ')'],
+    ],
+    comments: {
+        // Add if LogchefQL supports comments, e.g., lineComment: '//'
+    }
   });
 
   // Register semantic tokens provider
-  monaco.languages.registerDocumentSemanticTokensProvider("logchefql", {
+  monaco.languages.registerDocumentSemanticTokensProvider(LANGUAGE_ID, {
     getLegend: () => ({
       tokenTypes: logchefqlTokenTypes,
-      tokenModifiers: [],
+      tokenModifiers: [], // No modifiers used currently
     }),
-    provideDocumentSemanticTokens: (model) => {
-      const parser = new LogchefQLParser();
-      parser.parse(model.getValue());
-
-      const data = parser.generateMonacoTokens();
-
-      return {
-        data: new Uint32Array(data),
-        resultId: null,
-      };
+    provideDocumentSemanticTokens: (model, _token) => {
+      // console.time(`SemanticTokens ${LANGUAGE_ID}`); // Perf check
+      try {
+        const parser = new LogchefQLParser();
+        parser.parse(model.getValue()); // Don't raise errors here, let highlighting fail gracefully
+        const data = parser.generateMonacoTokens();
+        // console.timeEnd(`SemanticTokens ${LANGUAGE_ID}`);
+        return {
+          data: new Uint32Array(data),
+          // resultId: null, // Optional: Caching strategy not implemented here
+        };
+      } catch (error) {
+        console.warn(`Error providing semantic tokens for ${LANGUAGE_ID}:`, error);
+        return { data: new Uint32Array() }; // Return empty on error
+      }
     },
-    releaseDocumentSemanticTokens: () => {},
+    releaseDocumentSemanticTokens: (_resultId) => {}, // No-op if not using resultId
   });
 }
 
 function registerClickhouseSQL() {
-  // Register ClickHouse SQL language
-  monaco.languages.register({ id: "clickhouse-sql" });
-  monaco.languages.setLanguageConfiguration("clickhouse-sql", {
-    autoClosingPairs: [
-      { open: "(", close: ")" },
-      { open: '"', close: '"' },
-      { open: "'", close: "'" },
-    ],
-    wordPattern:
-      /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
+  const LANGUAGE_ID = "clickhouse-sql";
+
+  monaco.languages.register({ id: LANGUAGE_ID });
+
+  // Set language configuration directly for ClickHouse SQL
+  monaco.languages.setLanguageConfiguration(LANGUAGE_ID, {
+     autoClosingPairs: [
+       { open: "(", close: ")" },
+       { open: '"', close: '"' }, // Keep if CH uses double quotes for identifiers
+       { open: "'", close: "'" },
+       { open: "`", close: "`" }, // Add backticks if used
+     ],
+     brackets: [
+        ['(', ')'],
+        ['[', ']'], // If CH uses array brackets
+        ['{', '}'] // If CH uses map brackets
+     ],
+     comments: {
+        lineComment: "--",
+        blockComment: ["/*", "*/"]
+     },
+     // Add specific ClickHouse keywords/functions to wordPattern if necessary
+     // Or rely on completion provider and semantic tokens primarily.
   });
 
-  // Register semantic tokens provider
-  monaco.languages.registerDocumentSemanticTokensProvider("clickhouse-sql", {
+  // Register semantic tokens provider for ClickHouse SQL
+  monaco.languages.registerDocumentSemanticTokensProvider(LANGUAGE_ID, {
     getLegend: () => ({
-      tokenTypes: clickhouseTokenTypes,
+      tokenTypes: clickhouseTokenTypes, // Use the imported token types
       tokenModifiers: [],
     }),
-    provideDocumentSemanticTokens: (model) => {
+    provideDocumentSemanticTokens: (model, _token) => {
+      // console.time(`SemanticTokens ${LANGUAGE_ID}`);
       try {
-        const parser = new ClickHouseSQLParser();
+        const parser = new ClickHouseSQLParser(); // Use the specific CH parser
+        const tokensData = parser.parse(model.getValue()); // Assuming parser returns the Uint32Array data directly
+        // console.timeEnd(`SemanticTokens ${LANGUAGE_ID}`);
         return {
-          data: new Uint32Array(parser.parse(model.getValue())),
-          resultId: null,
+          data: new Uint32Array(tokensData),
+          // resultId: null,
         };
       } catch (error) {
-        // Return empty data on parsing error
-        return {
-          data: new Uint32Array(),
-          resultId: null
-        };
+        console.warn(`Error providing semantic tokens for ${LANGUAGE_ID}:`, error);
+        // Return empty data on parsing error to avoid breaking highlighting
+        return { data: new Uint32Array() };
       }
     },
-    releaseDocumentSemanticTokens: () => {},
+    releaseDocumentSemanticTokens: (_resultId) => {},
   });
 }

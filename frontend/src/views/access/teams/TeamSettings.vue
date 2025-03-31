@@ -44,63 +44,30 @@ import { formatDate, formatSourceName } from '@/utils/format'
 const route = useRoute()
 const { toast } = useToast()
 
-// Initialize stores with error handling
-let usersStore, sourcesStore, teamsStore;
-try {
-  usersStore = useUsersStore();
-  sourcesStore = useSourcesStore();
-  teamsStore = useTeamsStore();
-} catch (error) {
-  console.error("Error initializing stores:", error);
-}
+// Initialize stores with proper Pinia pattern
+const usersStore = useUsersStore()
+const sourcesStore = useSourcesStore()
+const teamsStore = useTeamsStore()
 
-// Create fallback objects if stores fail to initialize
-if (!teamsStore) {
-  console.error("Teams store failed to initialize!");
-  teamsStore = {
-    getTeam: async () => ({ success: false }),
-    listTeamMembers: async () => ({ success: false }),
-    listTeamSources: async () => ({ success: false }),
-    isLoading: false,
-    error: null,
-    loadingStates: {},
-    isLoadingOperation: () => false,
-  };
-}
-
-if (!usersStore) {
-  console.error("Users store failed to initialize!");
-  usersStore = {
-    loadUsers: async () => {},
-    getUsersNotInTeam: () => [],
-    users: []
-  };
-}
-
-if (!sourcesStore) {
-  console.error("Sources store failed to initialize!");
-  sourcesStore = {
-    loadSources: async () => {},
-    getSourcesNotInTeam: () => [],
-    sources: []
-  };
-}
-
-const team = ref<Team | null>(null)
-const members = ref<TeamMember[]>([])
+// Get reactive state from the stores
 const { isLoading, error: teamError } = storeToRefs(teamsStore)
+
+// Computed properties for cleaner store access
+const team = computed(() => teamsStore.getTeamById(Number(route.params.id)))
+const members = computed(() => teamsStore.getTeamMembersByTeamId(Number(route.params.id)) || [])
+const teamSources = computed(() => teamsStore.getTeamSourcesByTeamId(Number(route.params.id)) || [])
+
+// Combined loading state
 const isSaving = computed(() => {
-  if (!teamsStore || typeof teamsStore.isLoadingOperation !== 'function') {
-    return false;
-  }
-  return teamsStore.isLoadingOperation('updateTeam-' + route.params.id) ||
-         teamsStore.isLoadingOperation('addTeamMember-' + route.params.id) ||
-         teamsStore.isLoadingOperation('removeTeamMember-' + route.params.id) ||
-         teamsStore.isLoadingOperation('addTeamSource-' + route.params.id) ||
-         teamsStore.isLoadingOperation('removeTeamSource-' + route.params.id);
+  const teamId = Number(route.params.id)
+  return teamsStore.isLoadingOperation('updateTeam-' + teamId) ||
+         teamsStore.isLoadingOperation('addTeamMember-' + teamId) ||
+         teamsStore.isLoadingOperation('removeTeamMember-' + teamId) ||
+         teamsStore.isLoadingOperation('addTeamSource-' + teamId) ||
+         teamsStore.isLoadingOperation('removeTeamSource-' + teamId);
 })
 
-// Form state
+// Form state - use team data when available
 const name = ref('')
 const description = ref('')
 
@@ -109,9 +76,21 @@ const activeTab = ref('members')
 const showAddMemberDialog = ref(false)
 const newMemberRole = ref('member')
 const selectedUserId = ref('')
-const teamSources = ref<Source[]>([])
 const showAddSourceDialog = ref(false)
 const selectedSourceId = ref('')
+
+// Sync form data when team changes
+watch(() => team.value, (newTeam) => {
+  if (newTeam) {
+    name.value = newTeam.name || ''
+    description.value = newTeam.description || ''
+  }
+}, { immediate: true })
+
+// Function to refresh teams list
+const refreshTeams = async () => {
+  await teamsStore.loadTeams(true) // Force reload
+}
 
 // Compute available users (users not in team)
 const availableUsers = computed(() => {
@@ -139,140 +118,74 @@ watch(showAddSourceDialog, async (isOpen) => {
     }
 })
 
+// Simplified loading functions that rely on the store
 const loadTeam = async () => {
-    const teamId = Number(route.params.id);
-    console.log("TeamSettings - Loading team with ID:", teamId, "Route params:", route.params);
+    const teamId = Number(route.params.id)
     
     if (isNaN(teamId) || teamId <= 0) {
-        console.error("Invalid team ID:", teamId);
-        return null;
-    }
-    
-    // First check if the team is already in the store
-    let existingTeam = teamsStore.getTeamById(teamId);
-    if (existingTeam) {
-        console.log("TeamSettings - Team found in store:", existingTeam);
-        team.value = existingTeam;
-        name.value = existingTeam.name || '';
-        description.value = existingTeam.description || '';
-        return existingTeam;
-    }
-    
-    // If not in store, fetch from API
-    const result = await teamsStore.getTeam(teamId);
-    console.log("TeamSettings - getTeam result:", result);
-    
-    if (result.success && result.data) {
-        team.value = result.data;
-        name.value = team.value.name || '';
-        description.value = team.value.description || '';
-        console.log("TeamSettings - Team loaded successfully:", team.value);
-        return result.data;
-    } else {
-        console.error("Failed to load team:", result.error);
         toast({
             title: 'Error',
-            description: 'Failed to load team details',
+            description: 'Invalid team ID',
             variant: 'destructive',
-        });
-        return null;
+        })
+        return
     }
+    
+    await teamsStore.getTeam(teamId)
+    // Store automatically handles errors and success
 }
 
 const loadTeamMembers = async () => {
-    // Get team ID from route if team object not yet available
-    const teamId = team.value?.id || Number(route.params.id);
+    const teamId = Number(route.params.id)
     
-    if (!teamId || isNaN(teamId)) {
-        console.warn("Cannot load team members: No team or invalid team ID");
-        return;
-    }
-
-    console.log("TeamSettings - Loading members for team ID:", teamId);
+    if (isNaN(teamId) || teamId <= 0) return
     
-    const result = await teamsStore.listTeamMembers(teamId);
-    console.log("TeamSettings - listTeamMembers result:", result);
-    
-    if (result.success && result.data) {
-        // Ensure we're assigning the array of members, not the entire response object
-        members.value = Array.isArray(result.data) ? result.data : [];
-        console.log("TeamSettings - Members loaded successfully:", members.value.length, "members");
-    } else {
-        members.value = []; // Initialize with empty array on error
-        console.error("Failed to load team members:", result.error);
-    }
+    await teamsStore.listTeamMembers(teamId)
+    // Store automatically handles errors and success
 }
 
 const loadTeamSources = async () => {
-    // Get team ID from route if team object not yet available
-    const teamId = team.value?.id || Number(route.params.id);
+    const teamId = Number(route.params.id)
     
-    if (!teamId || isNaN(teamId)) {
-        console.warn("Cannot load team sources: No team or invalid team ID");
-        return;
-    }
-
-    console.log("TeamSettings - Loading sources for team ID:", teamId);
+    if (isNaN(teamId) || teamId <= 0) return
     
-    const result = await teamsStore.listTeamSources(teamId);
-    console.log("TeamSettings - listTeamSources result:", result);
-    
-    if (result.success && result.data) {
-        // Ensure we're assigning the array of sources, not the entire response object
-        teamSources.value = Array.isArray(result.data) ? result.data : [];
-        console.log("TeamSettings - Sources loaded successfully:", teamSources.value.length, "sources");
-    } else {
-        teamSources.value = []; // Initialize with empty array on error
-        console.error("Failed to load team sources:", result.error);
-    }
+    await teamsStore.listTeamSources(teamId)
+    // Store automatically handles errors and success
 }
 
 const handleSubmit = async () => {
     if (!team.value) return
 
     // Basic validation
-    if (!name.value) {
-        // Let store handle the error toast
-        return
-    }
+    if (!name.value) return
 
-    const result = await teamsStore.updateTeam(team.value.id, {
+    await teamsStore.updateTeam(team.value.id, {
         name: name.value,
         description: description.value || '',
     })
-    
-    if (result.success) {
-        loadTeam()
-    }
+    // Store handles success/error states
 }
 
 const handleAddMember = async () => {
     if (!team.value || !selectedUserId.value) return
 
-    const result = await teamsStore.addTeamMember(team.value.id, {
+    await teamsStore.addTeamMember(team.value.id, {
         user_id: Number(selectedUserId.value),
         role: newMemberRole.value as 'admin' | 'member',
     })
     
-    if (result.success) {
-        // Reset form
-        selectedUserId.value = ''
-        newMemberRole.value = 'member'
-        showAddMemberDialog.value = false
-
-        // Reload members
-        loadTeamMembers()
-    }
+    // Reset form
+    selectedUserId.value = ''
+    newMemberRole.value = 'member'
+    showAddMemberDialog.value = false
+    // Store automatically updates the members list
 }
 
 const handleRemoveMember = async (userId: string | number) => {
     if (!team.value) return
 
-    const result = await teamsStore.removeTeamMember(team.value.id, Number(userId))
-    
-    if (result.success) {
-        loadTeamMembers()
-    }
+    await teamsStore.removeTeamMember(team.value.id, Number(userId))
+    // Store automatically updates the members list
 }
 
 const handleAddSource = async () => {
@@ -281,16 +194,12 @@ const handleAddSource = async () => {
     // Make sure we're on the sources tab
     activeTab.value = 'sources'
     
-    const result = await teamsStore.addTeamSource(team.value.id, Number(selectedSourceId.value))
+    await teamsStore.addTeamSource(team.value.id, Number(selectedSourceId.value))
     
-    if (result.success) {
-        // Reset form
-        selectedSourceId.value = ''
-        showAddSourceDialog.value = false
-
-        // Reload sources
-        loadTeamSources()
-    }
+    // Reset form
+    selectedSourceId.value = ''
+    showAddSourceDialog.value = false
+    // Store automatically updates the sources list
 }
 
 const handleRemoveSource = async (sourceId: string | number) => {
@@ -299,50 +208,38 @@ const handleRemoveSource = async (sourceId: string | number) => {
     // Make sure we're on the sources tab
     activeTab.value = 'sources'
     
-    const result = await teamsStore.removeTeamSource(team.value.id, Number(sourceId))
-    
-    if (result.success) {
-        loadTeamSources()
-    }
+    await teamsStore.removeTeamSource(team.value.id, Number(sourceId))
+    // Store automatically updates the sources list
 }
 
 onMounted(async () => {
-    // Make sure we have a valid team ID from route
-    const teamId = Number(route.params.id);
-    console.log("TeamSettings - Component mounted. Team ID from route:", teamId);
+    const teamId = Number(route.params.id)
     
     if (isNaN(teamId) || teamId <= 0) {
-        console.error("Invalid team ID in route:", route.params.id);
         toast({
             title: 'Error',
             description: `Invalid team ID: ${route.params.id}`,
             variant: 'destructive',
-        });
-        return;
+        })
+        return
     }
     
     try {
-        // Load all data in parallel for better performance, but process results sequentially
-        const [usersPromise, teamPromise] = await Promise.all([
+        // Load all data in parallel for better performance
+        await Promise.all([
             usersStore.loadUsers(),
-            loadTeam()
-        ]);
-        
-        // Load members and sources regardless of team object status
-        // Our enhanced functions will use route param if team not available
-        const [membersPromise, sourcesPromise] = await Promise.all([
+            sourcesStore.loadSources(),
+            loadTeam(),
             loadTeamMembers(),
             loadTeamSources()
-        ]);
-        
-        console.log("TeamSettings - All data loaded");
+        ])
     } catch (error) {
-        console.error("Error in TeamSettings onMounted:", error);
+        // Store handles individual API errors automatically
         toast({
             title: 'Error',
             description: 'An error occurred while loading team data',
             variant: 'destructive',
-        });
+        })
     }
 })
 </script>

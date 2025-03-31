@@ -29,8 +29,8 @@
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
                         <Label for="role" class="text-right">Role</Label>
-                        <div class="col-span-3">
-                            <Select v-model="formData.role">
+                        <div class="col-span-3 w-full">
+                            <Select v-model="formData.role" class="w-full">
                                 <SelectTrigger class="w-full">
                                     <SelectValue placeholder="Select role" />
                                 </SelectTrigger>
@@ -43,8 +43,8 @@
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
                         <Label for="status" class="text-right">Status</Label>
-                        <div class="col-span-3">
-                            <Select v-model="formData.status">
+                        <div class="col-span-3 w-full">
+                            <Select v-model="formData.status" class="w-full">
                                 <SelectTrigger class="w-full">
                                     <SelectValue placeholder="Select status" />
                                 </SelectTrigger>
@@ -67,7 +67,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import {
@@ -109,20 +109,23 @@ const formData = ref<FormData>({
 
 const { isLoading, error: formError } = storeToRefs(usersStore)
 
+const isFormValid = computed(() => {
+    return formData.value.email && formData.value.full_name
+})
+
 async function handleSubmit() {
-    // Validation should be handled by the form, but we can do basic checks
-    if (!formData.value.email || !formData.value.full_name) {
-        return // Let the store handle validation errors
-    }
+    if (!isFormValid.value) return
     
-    const result = await usersStore.createUser({
+    await usersStore.createUser({
         email: formData.value.email,
         full_name: formData.value.full_name,
         role: formData.value.role,
-    });
+    })
     
-    if (result.success) {
-        // Reset form
+    // Store handles success/failure states
+    
+    // Reset form on success - check if store operation succeeded
+    if (!usersStore.error?.createUser) {
         formData.value = {
             email: '',
             full_name: '',
@@ -130,9 +133,6 @@ async function handleSubmit() {
             status: 'active',
         }
         showDialog.value = false
-        
-        // Reload users from API to ensure our store has the most up-to-date data
-        await usersStore.loadUsers(true);
     }
 }
 </script>
