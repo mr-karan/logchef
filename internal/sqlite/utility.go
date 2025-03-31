@@ -4,41 +4,69 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	// Import the SQLite driver
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// checkRowsAffected checks if exactly one row was affected by a database operation
-func checkRowsAffected(result sql.Result, operation string) error {
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("error getting rows affected: %w", err)
+// boolToInt converts a bool to int64 for SQLite storage
+func boolToInt(b bool) int64 {
+	if b {
+		return 1
 	}
+	return 0
+}
 
-	if rowsAffected != 1 {
-		return fmt.Errorf("%s: expected 1 row to be affected, got %d", operation, rowsAffected)
+// mapSourceRowToModel maps a sqlc.Source to a models.Source
+func mapSourceRowToModel(row *sqlc.Source) *models.Source {
+	return &models.Source{
+		ID:                models.SourceID(row.ID),
+		Name:              row.Name,
+		MetaIsAutoCreated: row.MetaIsAutoCreated == 1,
+		MetaTSField:       row.MetaTsField,
+		MetaSeverityField: row.MetaSeverityField.String,
+		Description:       row.Description.String,
+		TTLDays:           int(row.TtlDays),
+		Connection: models.ConnectionInfo{
+			Host:      row.Host,
+			Username:  row.Username,
+			Password:  row.Password,
+			Database:  row.Database,
+			TableName: row.TableName,
+		},
+		Timestamps: models.Timestamps{
+			CreatedAt: row.CreatedAt,
+			UpdatedAt: row.UpdatedAt,
+		},
 	}
-
-	return nil
 }
 
 // isUniqueConstraintError checks if an error is a SQLite unique constraint violation
 func isUniqueConstraintError(err error, table, column string) bool {
-	constraintErr := fmt.Sprintf("UNIQUE constraint failed: %s.%s", table, column)
-	return err != nil && strings.Contains(err.Error(), constraintErr)
+	if err == nil {
+		return false
+	}
+
+	errMsg := err.Error()
+
+	// Simple string checks for SQLite constraint errors
+	if strings.Contains(errMsg, "UNIQUE constraint failed") {
+		if table != "" && column != "" {
+			constraint := fmt.Sprintf("%s.%s", table, column)
+			return strings.Contains(errMsg, constraint)
+		}
+		return true
+	}
+
+	return false
 }
 
-// handleNotFoundError checks if an error is sql.ErrNoRows and returns an appropriate error
-// to standardize handling of "not found" cases
-func handleNotFoundError(err error, message string) error {
+// handleNotFoundError returns a standardized error when a record is not found
+func handleNotFoundError(err error, prefix string) error {
 	if err == sql.ErrNoRows {
-		// For session-related queries, return a specific error
-		if strings.Contains(message, "session") {
-			return fmt.Errorf("session not found")
-		}
-		// For other entities, return nil to indicate "not found"
-		return nil
+		return fmt.Errorf("%s: not found", prefix)
 	}
-	if err != nil {
-		return fmt.Errorf("%s: %w", message, err)
-	}
-	return nil
+	return fmt.Errorf("%s: %w", prefix, err)
 }

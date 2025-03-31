@@ -1,5 +1,4 @@
-import { api } from "./config";
-import type { APIResponse } from "./types";
+import { apiClient } from "./apiUtils";
 
 // Keep these for the UI filter builder
 export interface FilterCondition {
@@ -36,6 +35,8 @@ export interface QueryParams {
     field: string;
     order: "ASC" | "DESC";
   };
+  original_query?: string; // Original LogchefQL query if applicable
+  query_type?: string; // 'logchefql' or 'sql'
 }
 
 export interface QueryStats {
@@ -76,35 +77,23 @@ export interface LogContextResponse {
 }
 
 export const exploreApi = {
-  async getLogs(
-    sourceId: number,
-    params: QueryParams,
-    teamId: number
-  ): Promise<APIResponse<QueryResponse>> {
+  getLogs: (sourceId: number, params: QueryParams, teamId: number) => {
     if (!teamId) {
       throw new Error("Team ID is required for querying logs");
     }
-
-    const response = await api.post<APIResponse<QueryResponse>>(
+    return apiClient.post<QueryResponse>(
       `/teams/${teamId}/sources/${sourceId}/logs/query`,
       params
     );
-    return response.data;
   },
 
-  async getLogContext(
-    sourceId: number,
-    params: LogContextRequest,
-    teamId: number
-  ): Promise<APIResponse<LogContextResponse>> {
+  getLogContext: (sourceId: number, params: LogContextRequest, teamId: number) => {
     if (!teamId) {
       throw new Error("Team ID is required for getting log context");
     }
-
-    const response = await api.post<APIResponse<LogContextResponse>>(
-      `/${teamId}/sources/${sourceId}/logs/context`,
+    return apiClient.post<LogContextResponse>(
+      `/teams/${teamId}/sources/${sourceId}/logs/context`,
       params
     );
-    return response.data;
-  },
+  }
 };

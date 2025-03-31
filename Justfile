@@ -16,6 +16,9 @@ bin := "bin/logchef.bin"
 # Config file - can be overridden with 'just CONFIG=other.toml target'
 config := env_var_or_default('CONFIG', 'config.toml')
 
+# sqlc command
+sqlc_cmd := "sqlc"
+
 # Default recipe (runs when just is called with no arguments)
 default:
     @just --list
@@ -23,8 +26,13 @@ default:
 # Build both backend and frontend
 build: build-ui build-backend
 
+# Generate sqlc code
+sqlc-generate:
+    @echo "Generating sqlc code..."
+    {{sqlc_cmd}} generate
+
 # Build only the backend
-build-backend:
+build-backend: sqlc-generate
     @echo "Building backend..."
     CGO_ENABLED=0 go build -o {{bin}} -ldflags "{{ldflags}}" ./cmd/server
 
@@ -94,7 +102,7 @@ tidy:
     go mod tidy
 
 # Run all checks
-check: fmt vet lint test
+check: fmt vet lint sqlc-generate test
 
 # Run frontend, backend, and infrastructure in dev mode (requires tmux)
 # dev:

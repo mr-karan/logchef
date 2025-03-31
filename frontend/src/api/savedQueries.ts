@@ -1,18 +1,17 @@
-import { api } from "./config";
-import type { APIResponse } from "./types";
+import { apiClient } from "./apiUtils";
 
 /**
  * Saved query content structure
  */
 export interface SavedQueryContent {
   version: number;
-  sourceId: number;
+  sourceId: number | string;
   timeRange: {
     absolute: {
       start: number;
       end: number;
     };
-  };
+  } | null;
   limit: number;
   content: string; // The content of the query (either LogchefQL or SQL)
 }
@@ -26,7 +25,7 @@ export interface SavedTeamQuery {
   source_id: number;
   name: string;
   description: string;
-  query_type: "logchefql" | "sql";
+  query_type: string;
   query_content: string; // JSON string of SavedQueryContent
   created_at: string;
   updated_at: string;
@@ -54,124 +53,46 @@ export interface TeamGroupedQuery {
  * Saved Queries API client
  */
 export const savedQueriesApi = {
-  /**
-   * List queries for a team
-   */
-  async listQueries(teamId: number): Promise<APIResponse<SavedTeamQuery[]>> {
-    const response = await api.get<APIResponse<SavedTeamQuery[]>>(
-      `/teams/${teamId}/queries`
-    );
-    return response.data;
-  },
+  listQueries: (teamId: number) =>
+    apiClient.get<SavedTeamQuery[]>(`/teams/${teamId}/queries`),
 
-  /**
-   * List queries for a source, optionally filtered by team
-   */
-  async listSourceQueries(
-    sourceId: number,
-    teamId?: number
-  ): Promise<APIResponse<SavedTeamQuery[]>> {
-    let url = `/sources/${sourceId}/queries`;
-    if (teamId) {
-      url += `?team_id=${teamId}`;
-    }
-    const response = await api.get<APIResponse<SavedTeamQuery[]>>(url);
-    return response.data;
-  },
+  listSourceQueries: (sourceId: number, teamId?: number) =>
+    apiClient.get<SavedTeamQuery[]>(
+      `/sources/${sourceId}/queries${teamId ? `?team_id=${teamId}` : ''}`
+    ),
 
-  /**
-   * List queries for a team's source
-   */
-  async listTeamSourceQueries(
-    teamId: number,
-    sourceId: number
-  ): Promise<APIResponse<SavedTeamQuery[]>> {
-    const response = await api.get<APIResponse<SavedTeamQuery[]>>(
-      `/teams/${teamId}/sources/${sourceId}/queries`
-    );
-    return response.data;
-  },
+  listTeamSourceQueries: (teamId: number, sourceId: number) =>
+    apiClient.get<SavedTeamQuery[]>(`/teams/${teamId}/sources/${sourceId}/queries`),
 
-  /**
-   * Get a single query
-   */
-  async getQuery(
-    teamId: number,
-    queryId: string
-  ): Promise<APIResponse<SavedTeamQuery>> {
-    const response = await api.get<APIResponse<SavedTeamQuery>>(
-      `/teams/${teamId}/queries/${queryId}`
-    );
-    return response.data;
-  },
+  getQuery: (teamId: number, queryId: string) =>
+    apiClient.get<SavedTeamQuery>(`/teams/${teamId}/queries/${queryId}`),
 
-  /**
-   * Create a new query
-   */
-  async createQuery(
-    teamId: number,
-    query: Omit<SavedTeamQuery, "id" | "created_at" | "updated_at">
-  ): Promise<APIResponse<SavedTeamQuery>> {
-    const response = await api.post<APIResponse<SavedTeamQuery>>(
-      `/teams/${teamId}/queries`,
-      query
-    );
-    return response.data;
-  },
+  getTeamSourceQuery: (teamId: number, sourceId: number, queryId: string) =>
+    apiClient.get<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/queries/${queryId}`),
 
-  /**
-   * Create a new source query
-   */
-  async createSourceQuery(
+  createQuery: (teamId: number, query: Omit<SavedTeamQuery, "id" | "created_at" | "updated_at">) =>
+    apiClient.post<SavedTeamQuery>(`/teams/${teamId}/queries`, query),
+
+  createSourceQuery: (teamId: number, sourceId: number, query: {
+    name: string;
+    description: string;
+    query_type: string;
+    query_content: string;
+  }) => apiClient.post<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/queries`, query),
+
+  updateQuery: (teamId: number, queryId: string, query: Partial<SavedTeamQuery>) =>
+    apiClient.put<SavedTeamQuery>(`/teams/${teamId}/queries/${queryId}`, query),
+
+  updateTeamSourceQuery: (
     teamId: number,
     sourceId: number,
-    query: {
-      name: string;
-      description: string;
-      query_type: string;
-      query_content: string;
-    }
-  ): Promise<APIResponse<SavedTeamQuery>> {
-    const response = await api.post<APIResponse<SavedTeamQuery>>(
-      `/teams/${teamId}/sources/${sourceId}/queries`,
-      query
-    );
-    return response.data;
-  },
-
-  /**
-   * Update an existing query
-   */
-  async updateQuery(
-    teamId: number,
     queryId: string,
-    query: Partial<SavedTeamQuery>
-  ): Promise<APIResponse<SavedTeamQuery>> {
-    const response = await api.put<APIResponse<SavedTeamQuery>>(
-      `/teams/${teamId}/queries/${queryId}`,
-      query
-    );
-    return response.data;
-  },
+    query: Partial<Omit<SavedTeamQuery, "id" | "team_id" | "source_id" | "created_at" | "updated_at">>
+  ) =>
+    apiClient.put<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/queries/${queryId}`, query),
 
-  /**
-   * Delete a query
-   */
-  async deleteQuery(
-    teamId: number,
-    queryId: string
-  ): Promise<APIResponse<{ success: boolean }>> {
-    const response = await api.delete<APIResponse<{ success: boolean }>>(
-      `/teams/${teamId}/queries/${queryId}`
-    );
-    return response.data;
-  },
+  deleteQuery: (teamId: number, sourceId: number, queryId: string) =>
+    apiClient.delete<{ success: boolean }>(`/teams/${teamId}/sources/${sourceId}/queries/${queryId}`),
 
-  /**
-   * Get user teams for saved queries
-   */
-  async getUserTeams(): Promise<APIResponse<Team[]>> {
-    const response = await api.get<APIResponse<Team[]>>("/users/me/teams");
-    return response.data;
-  },
+  getUserTeams: () => apiClient.get<Team[]>("/users/me/teams")
 };

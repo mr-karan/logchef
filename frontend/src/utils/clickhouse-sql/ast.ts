@@ -1,3 +1,6 @@
+import type { CalendarDateTime } from '@internationalized/date';
+import { QueryBuilder } from '../query-builder'; // Import QueryBuilder for formatTimeCondition
+
 // Simple AST for SQL queries to help with dynamic updates
 export interface SQLNode {
   type: string;
@@ -26,8 +29,10 @@ export interface FromClause extends SQLNode {
 
 export interface WhereClause extends SQLNode {
   type: "where";
-  conditions: string;
-  hasTimestampFilter: boolean;
+  /** Conditions excluding the primary timestamp filter */
+  otherConditions: string;
+  /** The full timestamp condition string (e.g., `ts BETWEEN ...`) */
+  timestampCondition?: string;
 }
 
 export interface OrderByClause extends SQLNode {
@@ -84,19 +89,31 @@ export class SQLParser {
         query.fromClause.table = fromMatch[1].trim();
       }
 
-      // Extract WHERE clause
-      const whereMatch = normalizedSql.match(
-        /WHERE\s+(.+?)(?:\s+ORDER\s+BY|\s+LIMIT|$)/i
-      );
+      // Extract WHERE clause and separate timestamp condition
+      const whereMatch = normalizedSql.match(/WHERE\s+(.+?)(?:\s+ORDER\s+BY|\s+LIMIT|$)/i);
       if (whereMatch) {
-        const hasTimestampFilter = new RegExp(
-          `${tsField}\\s+BETWEEN`,
+        let conditions = whereMatch[1].trim();
+        let timestampCondition: string | undefined = undefined;
+
+        // Regex to find the timestamp condition (more robust)
+        // Assumes format: `tsField` BETWEEN toDateTime(...) AND toDateTime(...)
+        // Handles potential backticks around tsField
+        const tsRegex = new RegExp(
+          `(\`?${tsField}\`?\\s+BETWEEN\\s+toDateTime\\('[^']+'\\)\\s+AND\\s+toDateTime\\('[^']+'\\))`,
           "i"
-        ).test(whereMatch[1]);
+        );
+        const tsMatch = conditions.match(tsRegex);
+
+        if (tsMatch) {
+          timestampCondition = tsMatch[0];
+          // Remove the timestamp condition and surrounding AND if present
+          conditions = conditions.replace(tsRegex, '').replace(/^\s*AND\s*/i, '').replace(/\s*AND\s*$/i, '').trim();
+        }
+
         query.whereClause = {
           type: "where",
-          conditions: whereMatch[1].trim(),
-          hasTimestampFilter,
+          otherConditions: conditions,
+          timestampCondition: timestampCondition,
         };
       }
 
@@ -154,6 +171,37 @@ export class SQLParser {
   }
 
   /**
+   * Applies a new time range condition to a parsed SQL query AST.
+   * @param query The query AST.
+   * @param tsField The name of the timestamp field.
+   * @param startDateTime The start date/time.
+   * @param endDateTime The end date/time.
+   * @returns The modified query AST.
+   */
+  static applyTimeRange(
+    query: SQLQuery,
+    tsField: string,
+    startDateTime: CalendarDateTime,
+    endDateTime: CalendarDateTime
+  ): SQLQuery {
+    const newTimeCondition = QueryBuilder.formatTimeCondition(tsField, startDateTime, endDateTime);
+
+    if (query.whereClause) {
+      // Update existing where clause
+      query.whereClause.timestampCondition = newTimeCondition;
+    } else {
+      // Create a new where clause
+      query.whereClause = {
+        type: "where",
+        otherConditions: "",
+        timestampCondition: newTimeCondition,
+      };
+    }
+    return query;
+  }
+
+
+  /**
    * Convert a query AST back to SQL
    */
   static toSQL(query: SQLQuery): string {
@@ -163,16 +211,38 @@ export class SQLParser {
       sql += "DISTINCT ";
     }
 
+    // Add columns
     sql += query.selectClause.columns.join(", ");
-    sql += `\nFROM ${query.fromClause.table}`;
+    
+    // Handle table name - don't add backticks if it contains dots (database.table format)
+    const tableName = query.fromClause.table;
+    const formattedTableName = tableName.includes('.') ? tableName : `\`${tableName}\``;
+    sql += `\nFROM ${formattedTableName}`;
 
+    // Reconstruct WHERE clause
     if (query.whereClause) {
-      sql += `\nWHERE ${query.whereClause.conditions}`;
+      const conditions: string[] = [];
+      if (query.whereClause.timestampCondition) {
+        conditions.push(query.whereClause.timestampCondition);
+      }
+      if (query.whereClause.otherConditions) {
+        conditions.push(query.whereClause.otherConditions);
+      }
+      if (conditions.length > 0) {
+        sql += `\nWHERE ${conditions.join(" AND ")}`;
+      }
     }
 
+    // Use backticks for order by columns, but handle columns that might already have dots
     if (query.orderByClause) {
       const orderColumns = query.orderByClause.columns
-        .map((col) => `${col.column} ${col.direction}`)
+        .map((col) => {
+          // Don't add backticks if column already has dots or backticks
+          const formattedColumn = col.column.includes('.') || col.column.includes('`') 
+            ? col.column 
+            : `\`${col.column}\``;
+          return `${formattedColumn} ${col.direction}`;
+        })
         .join(", ");
       sql += `\nORDER BY ${orderColumns}`;
     }

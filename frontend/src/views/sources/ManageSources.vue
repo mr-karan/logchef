@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
+import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
-import { useApiQuery } from '@/composables/useApiQuery'
 import ErrorAlert from '@/components/ui/ErrorAlert.vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -30,10 +30,10 @@ import { useSourcesStore } from '@/stores/sources'
 
 const router = useRouter()
 const sourcesStore = useSourcesStore()
-const { execute } = useApiQuery()
+const { error } = storeToRefs(sourcesStore)
 const showDeleteDialog = ref(false)
 const sourceToDelete = ref<Source | null>(null)
-const loadingError = computed(() => sourcesStore.error?.value)
+const loadingError = computed(() => error.value?.loadSources)
 
 const handleDelete = (source: Source) => {
     sourceToDelete.value = source
@@ -41,18 +41,17 @@ const handleDelete = (source: Source) => {
 }
 
 const retryLoading = async () => {
-    await sourcesStore.loadSources();
+    await sourcesStore.loadSources()
 }
 
 const confirmDelete = async () => {
     if (!sourceToDelete.value) return
 
-    const result = await sourcesStore.deleteSource(sourceToDelete.value.id)
-    
-    if (result.success) {
-        showDeleteDialog.value = false
-        sourceToDelete.value = null
-    }
+    await sourcesStore.deleteSource(sourceToDelete.value.id)
+
+    // Reset UI state - store handles success/error
+    showDeleteDialog.value = false
+    sourceToDelete.value = null
 }
 
 onMounted(async () => {
@@ -60,9 +59,8 @@ onMounted(async () => {
     await sourcesStore.hydrate()
 })
 
-const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString()
-}
+// Import formatDate from utils
+import { formatDate } from '@/utils/format'
 </script>
 
 <template>
@@ -86,12 +84,8 @@ const formatDate = (dateString: string) => {
                 <div v-if="sourcesStore.isLoadingOperation('loadSources')" class="text-center py-4">
                     Loading sources...
                 </div>
-                <ErrorAlert 
-                    v-else-if="loadingError"
-                    :error="loadingError"
-                    title="Failed to load sources"
-                    @retry="retryLoading"
-                />
+                <ErrorAlert v-else-if="loadingError" :error="loadingError" title="Failed to load sources"
+                    @retry="retryLoading" />
                 <div v-else-if="sourcesStore.sources.length === 0" class="rounded-lg border p-4 text-center">
                     <p class="text-muted-foreground mb-4">No sources configured yet</p>
                     <Button @click="router.push({ name: 'NewSource' })">
@@ -116,11 +110,9 @@ const formatDate = (dateString: string) => {
                         <TableBody>
                             <TableRow v-for="source in sourcesStore.sources" :key="source.id">
                                 <TableCell class="font-medium">
-                                    <a 
-                                      @click="router.push({ name: 'SourceStats', query: { sourceId: source.id } })" 
-                                      class="hover:underline cursor-pointer"
-                                    >
-                                      {{ source.name }}
+                                    <a @click="router.push({ name: 'SourceStats', query: { sourceId: source.id } })"
+                                        class="hover:underline cursor-pointer">
+                                        {{ source.name }}
                                     </a>
                                     <div v-if="source.description" class="text-sm text-muted-foreground">
                                         {{ source.description }}

@@ -9,63 +9,57 @@ export interface APIErrorResponse {
   data?: any;
 }
 
+// Error type mapping
+const ERROR_TITLES: Record<string, string> = {
+  ValidationError: "Validation Error",
+  AuthenticationError: "Authentication Error",
+  AuthorizationError: "Authorization Error",
+  NotFoundError: "Not Found",
+  RateLimitError: "Rate Limit Exceeded",
+  GeneralError: "Error",
+  GeneralException: "System Error",
+};
+
 /**
  * Formats an error message from various error types
  */
 export function formatErrorMessage(error: unknown): string {
-  // If it's an API error response object
+  // API error response object
   if (error && typeof error === "object" && "status" in error) {
     const response = error as APIErrorResponse;
-    if (response.status === "error") {
-      return response.message;
-    }
+    if (response.status === "error") return response.message;
   }
 
-  // If it's an Axios error
+  // Axios error
   if (error && typeof error === "object" && "isAxiosError" in error) {
     const axiosError = error as AxiosError<APIErrorResponse>;
-
-    // Network error (no response received)
+    
+    // Network error (no response)
     if (!axiosError.response) {
       return "Network error: Unable to connect to the server";
     }
-
-    // Server responded with error
-    if (
-      axiosError.response.data &&
-      axiosError.response.data.status === "error"
-    ) {
+    
+    // Server error with proper format
+    if (axiosError.response.data?.status === "error") {
       return axiosError.response.data.message;
     }
-
+    
     // Fallback to status text
     return `Server error: ${axiosError.response.statusText || "Unknown error"}`;
   }
 
-  // For any other type of error
-  if (error instanceof Error) {
-    return error.message;
-  }
+  // Standard Error object
+  if (error instanceof Error) return error.message;
 
+  // Unknown error type
   return "An unexpected error occurred";
-}
-
-/**
- * Parse error to get both title and message
- */
-export function parseError(error: unknown): { title: string; message: string } {
-  const errorType = getErrorType(error);
-  const title = formatErrorTypeToTitle(errorType);
-  const message = formatErrorMessage(error);
-  
-  return { title, message };
 }
 
 /**
  * Gets the error type from an error object
  */
 export function getErrorType(error: unknown): string {
-  // If it's an API error response object
+  // API error response
   if (error && typeof error === "object" && "status" in error) {
     const response = error as APIErrorResponse;
     if (response.status === "error" && response.error_type) {
@@ -73,7 +67,7 @@ export function getErrorType(error: unknown): string {
     }
   }
 
-  // If it's an Axios error with API error response
+  // Axios error
   if (error && typeof error === "object" && "isAxiosError" in error) {
     const axiosError = error as AxiosError<APIErrorResponse>;
     if (axiosError.response?.data?.error_type) {
@@ -88,30 +82,25 @@ export function getErrorType(error: unknown): string {
  * Format error type to a readable title
  */
 export function formatErrorTypeToTitle(errorType: string): string {
-  // Handle common error types
-  switch (errorType) {
-    case "ValidationError":
-      return "Validation Error";
-    case "AuthenticationError":
-      return "Authentication Error";
-    case "AuthorizationError":
-      return "Authorization Error";
-    case "NotFoundError":
-      return "Not Found";
-    case "RateLimitError":
-      return "Rate Limit Exceeded";
-    case "GeneralError":
-      return "Error";
-    case "GeneralException":
-      return "System Error";
-    default:
-      // Format camelCase or snake_case to Title Case
-      return errorType
-        .replace(/([A-Z])/g, " $1") // Insert space before capital letters
-        .replace(/_/g, " ") // Replace underscores with spaces
-        .replace(/^./, (str) => str.toUpperCase()) // Capitalize first letter
-        .trim();
-  }
+  // Use predefined title if available
+  if (errorType in ERROR_TITLES) return ERROR_TITLES[errorType];
+  
+  // Format camelCase or snake_case to Title Case
+  return errorType
+    .replace(/([A-Z])/g, " $1") // Add space before capital letters
+    .replace(/_/g, " ")         // Replace underscores with spaces
+    .replace(/^./, str => str.toUpperCase()) // Capitalize first letter
+    .trim();
+}
+
+/**
+ * Parse error to get both title and message
+ */
+export function parseError(error: unknown): { title: string; message: string } {
+  return {
+    title: formatErrorTypeToTitle(getErrorType(error)),
+    message: formatErrorMessage(error)
+  };
 }
 
 /**
@@ -119,18 +108,14 @@ export function formatErrorTypeToTitle(errorType: string): string {
  */
 export function showErrorToast(error: unknown, customMessage?: string): void {
   const { toast } = useToast();
+  const { title } = parseError(error);
   const message = customMessage || formatErrorMessage(error);
-  const errorType = getErrorType(error);
-
-  // Use error_type as the title, with proper formatting
-  let title = formatErrorTypeToTitle(errorType);
-  let duration = TOAST_DURATION.ERROR;
-
+  
   toast({
     title,
     description: message,
     variant: "destructive",
-    duration,
+    duration: TOAST_DURATION.ERROR
   });
 }
 
@@ -139,10 +124,9 @@ export function showErrorToast(error: unknown, customMessage?: string): void {
  */
 export function showSuccessToast(message: string): void {
   const { toast } = useToast();
-
   toast({
     title: "Success",
     description: message,
-    duration: TOAST_DURATION.SUCCESS,
+    duration: TOAST_DURATION.SUCCESS
   });
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ColumnDef } from '@tanstack/vue-table'
+import type { ColumnDef, ColumnMeta, Row } from '@tanstack/vue-table'
 import {
     FlexRender,
     getCoreRowModel,
@@ -12,13 +12,14 @@ import {
     type ExpandedState,
     type VisibilityState,
     type PaginationState,
-    type ColumnSizing,
+    type ColumnSizing as TColumnSizing,
     type ColumnSizingState,
     type ColumnResizeMode,
+    type Header,
 } from '@tanstack/vue-table'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Copy, Search } from 'lucide-vue-next'
+import { Search, GripVertical } from 'lucide-vue-next'
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import DataTableColumnSelector from './data-table-column-selector.vue'
@@ -28,15 +29,28 @@ import { TOAST_DURATION } from '@/lib/constants'
 import type { QueryStats } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
+import { createColumns } from './columns'
+import { useExploreStore } from '@/stores/explore'
+import type { Source } from '@/api/sources'
+import { useSourcesStore } from '@/stores/sources'
+import { useStorage, type UseStorageOptions, type RemovableRef } from '@vueuse/core'
 
 interface Props {
     columns: ColumnDef<Record<string, any>>[]
     data: Record<string, any>[]
     stats: QueryStats
     sourceId: string
+    teamId: number | null
     timestampField?: string
     severityField?: string
     timezone?: 'local' | 'utc'
+}
+
+// Define the structure for storing state
+interface DataTableState {
+    columnOrder: string[];
+    columnSizing: ColumnSizingState;
+    // Add other state like columnVisibility, sorting later if needed
 }
 
 const props = defineProps<Props>()
@@ -56,13 +70,102 @@ const pagination = ref<PaginationState>({
 const globalFilter = ref('')
 const columnSizing = ref<ColumnSizingState>({})
 const columnResizeMode = ref<ColumnResizeMode>('onChange')
+const isResizing = ref(false)
 const displayTimezone = ref<'local' | 'utc'>(localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local')
+const columnOrder = ref<string[]>([])
+const draggingColumnId = ref<string | null>(null)
+const dragOverColumnId = ref<string | null>(null)
+
+// --- Local Storage State Management ---
+const storageKey = computed(() => {
+    if (props.teamId == null || !props.sourceId) return null; // Check for null teamId explicitly
+    return `logchef-tableState-${props.teamId}-${props.sourceId}`;
+});
+
+// Initialize useStorage directly. It will be null if storageKey is null initially.
+const storedState = useStorage<DataTableState | null>(
+    storageKey, // Pass the computed ref directly
+    null,       // Initial value if key is invalid or no data in storage
+    localStorage,
+    {
+        serializer: {
+            read: (v: any) => (v ? JSON.parse(v) : null),
+            write: (v: any) => JSON.stringify(v),
+        },
+        onError: (error) => {
+            console.error("Error reading/writing table state from localStorage:", error);
+        }
+    }
+);
+
+// Watch for changes in props.columns and the stored state itself (which depends on storageKey)
+watch([() => props.columns, storedState], ([newColumns, currentStateValue], [oldColumns, oldStateValue]) => {
+    console.log("DataTable: State initialization watcher triggered.");
+
+    if (!storageKey.value) {
+        console.log("DataTable: storageKey is null, skipping state initialization.");
+        // Reset local state if key becomes invalid
+        columnOrder.value = newColumns.map(c => c.id!).filter(Boolean);
+        columnSizing.value = {};
+        newColumns.forEach(col => {
+            if (col.id) {
+                columnSizing.value[col.id] = col.size ?? defaultColumn.size;
+            }
+        });
+        return;
+    }
+
+    console.log(`DataTable: Initializing/Reconciling state for key: ${storageKey.value}`);
+    const currentColumnIds = newColumns.map(c => c.id!).filter(Boolean);
+    let initialOrder: string[] = [];
+    let initialSizing: ColumnSizingState = {};
+
+    if (currentStateValue) {
+        console.log("DataTable: Found stored state:", currentStateValue);
+        const savedOrder = currentStateValue.columnOrder || [];
+        // Filter saved order to include only columns that still exist
+        const filteredSavedOrder = savedOrder.filter((id: string) => currentColumnIds.includes(id));
+        // Find columns that are new (not in the saved order)
+        const newColumnIds = currentColumnIds.filter((id: string) => !filteredSavedOrder.includes(id));
+        // Combine: existing ordered columns + new columns at the end
+        initialOrder = [...filteredSavedOrder, ...newColumnIds];
+
+        const savedSizing = currentStateValue.columnSizing || {};
+        currentColumnIds.forEach(id => {
+            if (savedSizing[id] !== undefined) {
+                initialSizing[id] = savedSizing[id];
+            } else {
+                // Use default size if not found in saved state
+                const columnDef = newColumns.find(c => c.id === id);
+                initialSizing[id] = columnDef?.size ?? defaultColumn.size;
+            }
+        });
+    } else {
+        console.log("DataTable: No stored state value found, using defaults based on props.columns.");
+        initialOrder = currentColumnIds;
+        currentColumnIds.forEach(id => {
+            const columnDef = newColumns.find(c => c.id === id);
+            initialSizing[id] = columnDef?.size ?? defaultColumn.size;
+        });
+    }
+
+    // Update the local refs which the table uses
+    // Check if update is actually needed to prevent infinite loops if watch triggers unnecessarily
+    if (JSON.stringify(columnOrder.value) !== JSON.stringify(initialOrder)) {
+        columnOrder.value = initialOrder;
+    }
+    if (JSON.stringify(columnSizing.value) !== JSON.stringify(initialSizing)) {
+        columnSizing.value = initialSizing;
+    }
+
+    console.log("DataTable: State applied:", { order: initialOrder, sizing: initialSizing });
+
+}, { immediate: true, deep: false }); // deep: false because we only care about the top-level refs changing
 
 // Save timezone preference whenever it changes
 watch(displayTimezone, (newValue) => {
     localStorage.setItem('logchef_timezone', newValue)
 })
-
 
 const { toast } = useToast()
 
@@ -72,42 +175,129 @@ function formatCellValue(value: any): string {
     return String(value);
 }
 
-// Check if a column is the timestamp or severity column
-function isSpecialColumn(columnId: string): boolean {
-    return columnId === timestampFieldName.value || columnId === severityFieldName.value;
+// Get column type from meta data
+function getColumnType(column: any): string | undefined {
+    return column?.columnDef?.meta?.columnType;
 }
 
-// Make sure timestamp field is first in column order
-const sortedColumns = computed(() => {
-    // If no timestamp field specified, just return the columns as is
-    if (!timestampFieldName.value) return props.columns;
-
-    // Filter the columns to put timestamp first
-    const tsColumn = props.columns.find(col => col.id === timestampFieldName.value);
-    if (!tsColumn) return props.columns;
-
-    // Create a new array with timestamp column first, then all other columns
-    return [
-        tsColumn,
-        ...props.columns.filter(col => col.id !== timestampFieldName.value)
-    ];
-});
+// Column order is now managed by state, no need for sortedColumns computed
 
 // Define default column configurations
 const defaultColumn = {
-    minSize: 100,
+    minSize: 50,
     size: 150,
-    maxSize: 1500,
-    enableResizing: true, // Enable resizing for all columns by default
+    maxSize: 1000,
+    enableResizing: true,
 }
 
-// Initialize table with explicit column sizing configurations
+// Memoized column widths using CSS variables for better performance
+const columnSizingVars = computed(() => {
+    const styles: Record<string, string> = {}
+    table.getAllLeafColumns().forEach(column => {
+        styles[`--col-${column.id}-width`] = `${column.getSize()}px`
+    })
+    return styles
+})
+
+// Handle column resizing with a clean custom implementation
+function handleResize(e: MouseEvent | TouchEvent, header: any) {
+    // Prevent default behavior
+    if ('preventDefault' in e) {
+        e.preventDefault();
+    }
+
+    isResizing.value = true;
+
+    // Get current column size and position
+    const startSize = header.getSize();
+    let startX = 0;
+
+    if ('clientX' in e) {
+        startX = e.clientX;
+    } else if ('touches' in e && e.touches.length > 0) {
+        startX = e.touches[0].clientX;
+    }
+
+    // Create custom resize handlers
+    const onMouseMove = (moveEvent: MouseEvent) => {
+        // Calculate how far the mouse has moved
+        const delta = moveEvent.clientX - startX;
+
+        // Calculate new size respecting min/max constraints
+        const minSize = header.column.columnDef.minSize || defaultColumn.minSize;
+        const maxSize = header.column.columnDef.maxSize || defaultColumn.maxSize;
+        let newSize = Math.max(minSize, Math.min(maxSize, startSize + delta));
+
+        // Update column size in the state
+        const newSizing = {
+            ...columnSizing.value,
+            [header.column.id]: newSize
+        };
+
+        // Apply the new sizing
+        columnSizing.value = newSizing;
+
+        // Apply directly to the table
+        table.setColumnSizing(newSizing);
+    };
+
+    const onTouchMove = (moveEvent: TouchEvent) => {
+        if (moveEvent.touches.length === 0) return;
+
+        // Calculate how far the touch has moved
+        const delta = moveEvent.touches[0].clientX - startX;
+
+        // Calculate new size respecting min/max constraints
+        const minSize = header.column.columnDef.minSize || defaultColumn.minSize;
+        const maxSize = header.column.columnDef.maxSize || defaultColumn.maxSize;
+        let newSize = Math.max(minSize, Math.min(maxSize, startSize + delta));
+
+        // Update column size in the state
+        const newSizing = {
+            ...columnSizing.value,
+            [header.column.id]: newSize
+        };
+
+        // Apply the new sizing
+        columnSizing.value = newSizing;
+
+        // Apply directly to the table
+        table.setColumnSizing(newSizing);
+    };
+
+    const onEnd = () => {
+        isResizing.value = false;
+
+        // Clean up event listeners
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('touchmove', onTouchMove);
+        window.removeEventListener('mouseup', onEnd);
+        window.removeEventListener('touchend', onEnd);
+    };
+
+    // Add the event listeners
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('touchmove', onTouchMove);
+    window.addEventListener('mouseup', onEnd, { once: true });
+    window.addEventListener('touchend', onEnd, { once: true });
+}
+
+// Memoize the resolved columns based on the current order and props
+const resolvedColumns = computed(() => {
+    const columnMap = new Map(props.columns.map(col => [col.id, col]));
+    return columnOrder.value
+        .map(id => columnMap.get(id))
+        .filter((col): col is ColumnDef<Record<string, any>> => !!col);
+});
+
+// Initialize table
 const table = useVueTable({
     get data() {
         return props.data
     },
+    // Use the memoized resolvedColumns directly
     get columns() {
-        return sortedColumns.value
+        return resolvedColumns.value;
     },
     state: {
         get sorting() {
@@ -128,34 +318,61 @@ const table = useVueTable({
         get columnSizing() {
             return columnSizing.value
         },
+        get columnOrder() {
+            // Important: Let the table read the order directly from the state ref
+            return columnOrder.value
+        },
     },
+    // Keep columnOrder handling separate using onColumnOrderChange
+    // Do NOT set initialState.columnOrder here as it might conflict with the reactive ref
     onSortingChange: updaterOrValue => valueUpdater(updaterOrValue, sorting),
     onExpandedChange: updaterOrValue => valueUpdater(updaterOrValue, expanded),
     onColumnVisibilityChange: updaterOrValue => valueUpdater(updaterOrValue, columnVisibility),
     onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
     onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
-    onColumnSizingChange: updaterOrValue => valueUpdater(updaterOrValue, columnSizing),
+    onColumnSizingChange: updaterOrValue => {
+        const newSizingState = valueUpdater(updaterOrValue, columnSizing);
+        columnSizing.value = newSizingState; // Update local state first
+        // Update stored state if it exists
+        if (storedState.value) {
+            storedState.value = { ...storedState.value, columnSizing: newSizingState };
+        } else if (storageKey.value) { // Only create if key is valid
+             // If storedState was null but key is valid, create the object
+            storedState.value = { columnOrder: columnOrder.value, columnSizing: newSizingState };
+        }
+    },
+    onColumnOrderChange: updaterOrValue => {
+        const newOrderState = valueUpdater(updaterOrValue, columnOrder);
+        columnOrder.value = newOrderState; // Update local state first
+        // Update stored state if it exists
+        if (storedState.value) {
+            storedState.value = { ...storedState.value, columnOrder: newOrderState };
+        } else if (storageKey.value) { // Only create if key is valid
+            // If storedState was null but key is valid, create the object
+            storedState.value = { columnOrder: newOrderState, columnSizing: columnSizing.value };
+        }
+    },
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    // Enable fuzzy search for better matching
-    globalFilterFn: 'includesString',
-    // Enable column resizing with explicit settings
     enableColumnResizing: true,
     columnResizeMode: columnResizeMode.value,
-    defaultColumn: defaultColumn,
-    columnResizeDirection: 'ltr',
+    // Let table derive column sizing info from the state ref
+    // Remove onColumnSizingInfoChange if not strictly needed for custom logic
+    // onColumnSizingInfoChange: (info) => { ... },
+    defaultColumn,
 })
 
-// Handle row click for expansion
-const handleRowClick = (e: MouseEvent, row: any) => {
-    // Don't expand if clicking on the dropdown
-    if ((e.target as HTMLElement).closest('.actions-dropdown')) {
-        return
+// Simplified row expansion handler
+const handleRowClick = (row: Row<Record<string, any>>) => (e: MouseEvent) => {
+    // Don't expand if clicking on an interactive element
+    if ((e.target as HTMLElement).closest('.actions-dropdown, button, a, input, select')) {
+        return;
     }
-    row.toggleExpanded()
+    row.toggleExpanded();
+    // No need to manually set dataset attribute, use :class binding in template
 }
 
 // Add back the copyCell function since it's still needed for individual cells
@@ -169,51 +386,158 @@ const copyCell = (value: any) => {
     })
 }
 
-// Ensure timestamp field is always first when component mounts
+// Initialize default sorting on mount
 onMounted(() => {
     // Initialize default sort by timestamp if available
     if (timestampFieldName.value) {
-        sorting.value = [
-            {
-                id: timestampFieldName.value,
-                desc: true // Sort newest first by default
+        // Make sure timestamp field exists in the current order before sorting
+        // The watch effect handles the initial columnOrder based on storage or defaults
+        if (columnOrder.value.includes(timestampFieldName.value)) {
+            // Check if sorting is already set (e.g., by stored state if we persist it later)
+            if (!sorting.value || sorting.value.length === 0) {
+                 sorting.value = [{ id: timestampFieldName.value, desc: true }]
             }
-        ]
-    }
-
-    // Set initial column sizing mode
-    columnResizeMode.value = 'onChange'
-
-    // Set explicit column sizes for better horizontal scrolling
-    const initialSizes: ColumnSizing = {}
-
-    props.columns.forEach(column => {
-        const columnId = column.id || ''
-        if (columnId === timestampFieldName.value) {
-            initialSizes[columnId] = 200 // timestamps need more space
-        } else if (columnId === severityFieldName.value) {
-            initialSizes[columnId] = 100 // severity is usually short
-        } else if (columnId === 'message' || columnId === 'msg' || columnId === 'log') {
-            initialSizes[columnId] = 500 // message fields get more space
-        } else if (columnId.includes('time') || columnId.includes('date')) {
-            initialSizes[columnId] = 180 // date/time fields
-        } else if (columnId.includes('id')) {
-            initialSizes[columnId] = 120 // id fields
-        } else {
-            initialSizes[columnId] = 200 // default size for other columns
         }
+    }
+    // Column sizing is handled by the watch effect that reads from storedState or defaults
+})
+
+// Add refs for DOM elements
+const tableContainerRef = ref<HTMLElement | null>(null)
+const tableRef = ref<HTMLElement | null>(null)
+
+onMounted(() => {
+    if (!tableContainerRef.value) return
+
+    const resizeObserver = new ResizeObserver(() => {
+        // Force a layout update when container size changes
+        table.setColumnSizing({ ...columnSizing.value })
     })
 
-    // Apply the initial sizes - update the state with an object to trigger reactivity
-    columnSizing.value = { ...initialSizes }
+    resizeObserver.observe(tableContainerRef.value)
 
-    // Watch for column size changes to adjust table layout as needed
-    watch(columnSizing, () => { }, { deep: true })
+    return () => {
+        resizeObserver.disconnect()
+    }
 })
+
+const exploreStore = useExploreStore()
+const sourcesStore = useSourcesStore()
+
+// Add type for column meta
+interface CustomColumnMeta extends ColumnMeta<Record<string, any>, unknown> {
+    className?: string;
+}
+
+// Add type for column definition with custom meta
+type CustomColumnDef = ColumnDef<Record<string, any>> & {
+    meta?: CustomColumnMeta;
+}
+
+// Update refs with proper types
+const tableColumns = ref<CustomColumnDef[]>([])
+const sourceDetails = ref<Source | null>(null)
+
+// Watch for source details changes
+watch(
+    () => exploreStore.sourceId,
+    async (newSourceId) => {
+        if (newSourceId) {
+            const result = await sourcesStore.getSource(newSourceId)
+            if (result.success && result.data) {
+                sourceDetails.value = result.data as Source
+            }
+        }
+    },
+    { immediate: true }
+)
+
+watch(
+    () => exploreStore.columns,
+    (newColumns) => {
+        if (newColumns) {
+            tableColumns.value = createColumns(
+                newColumns,
+                sourceDetails.value?._meta_ts_field || 'timestamp',
+                localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local',
+                sourceDetails.value?._meta_severity_field || 'severity_text'
+            )
+        }
+    },
+    { immediate: true }
+)
+
+// --- Native Drag and Drop Implementation ---
+
+// Utility function to move array element (needed for native DnD)
+function arrayMove<T>(arr: T[], fromIndex: number, toIndex: number): T[] {
+    const newArr = [...arr];
+    const element = newArr.splice(fromIndex, 1)[0];
+    newArr.splice(toIndex, 0, element);
+    return newArr;
+}
+
+const onDragStart = (event: DragEvent, columnId: string) => {
+    draggingColumnId.value = columnId;
+    if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        // Optional: Set drag image if needed
+        // event.dataTransfer.setData('text/plain', columnId); // Set data for compatibility
+    }
+    // Add a class to the body or table to indicate dragging state globally if needed
+    document.body.classList.add('dragging-column');
+}
+
+const onDragEnter = (event: DragEvent, columnId: string) => {
+    if (draggingColumnId.value && draggingColumnId.value !== columnId) {
+        dragOverColumnId.value = columnId;
+    }
+    event.preventDefault(); // Necessary to allow drop
+}
+
+const onDragOver = (event: DragEvent) => {
+    event.preventDefault(); // Necessary to allow drop
+    if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'move';
+    }
+}
+
+const onDragLeave = (event: DragEvent, columnId: string) => {
+    if (dragOverColumnId.value === columnId) {
+        dragOverColumnId.value = null;
+    }
+}
+
+const onDrop = (event: DragEvent, targetColumnId: string) => {
+    event.preventDefault();
+    if (draggingColumnId.value && draggingColumnId.value !== targetColumnId) {
+        const oldIndex = columnOrder.value.indexOf(draggingColumnId.value);
+        const newIndex = columnOrder.value.indexOf(targetColumnId);
+        if (oldIndex !== -1 && newIndex !== -1) {
+            const newOrder = arrayMove(columnOrder.value, oldIndex, newIndex);
+            table.setColumnOrder(newOrder); // Update table state via the handler
+        }
+    }
+    // Cleanup
+    draggingColumnId.value = null;
+    dragOverColumnId.value = null;
+    document.body.classList.remove('dragging-column');
+}
+
+const onDragEnd = () => { // No need for event arg if not used
+    // Ensure cleanup happens regardless of drop success
+    draggingColumnId.value = null;
+    dragOverColumnId.value = null;
+    document.body.classList.remove('dragging-column');
+}
+
 </script>
 
 <template>
-    <div class="h-full flex flex-col w-full min-w-0 flex-1 overflow-hidden log-data-table">
+    <div class="h-full flex flex-col w-full min-w-0 flex-1 overflow-hidden"
+        :class="{ 'cursor-col-resize select-none': isResizing }">
+        <!-- Subtle resize indicator - just a cursor change, no overlay -->
+
         <!-- Results Header with Controls and Pagination -->
         <div class="flex items-center justify-between p-2 border-b flex-shrink-0">
             <!-- Left side - Empty now that stats have been moved to LogExplorer.vue -->
@@ -237,7 +561,8 @@ onMounted(() => {
                 <DataTablePagination v-if="table.getRowModel().rows?.length > 0" :table="table" />
 
                 <!-- Column selector -->
-                <DataTableColumnSelector :table="table" />
+                <DataTableColumnSelector :table="table" :column-order="columnOrder"
+                    @update:column-order="table.setColumnOrder($event)" />
 
                 <!-- Search input -->
                 <div class="relative w-64">
@@ -249,99 +574,114 @@ onMounted(() => {
         </div>
 
         <!-- Table Section with full-height scrolling -->
-        <div class="flex-1 relative overflow-hidden">
+        <div class="flex-1 relative overflow-hidden" ref="tableContainerRef">
             <div v-if="table.getRowModel().rows?.length" class="absolute inset-0">
-                <div class="w-full h-full overflow-auto custom-scrollbar">
-                    <div style="min-width: max-content; width: auto;">
-                        <table class="caption-bottom text-sm border-separate border-spacing-0 relative"
-                            style="width: auto; table-layout: fixed;">
-                            <!-- Enhanced header styling -->
-                            <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
-                                <tr class="border-b border-b-muted-foreground/10">
-                                    <th v-for="header in table.getHeaderGroups()[0]?.headers || []" :key="header.id"
-                                        class="h-8 px-3 text-xs font-medium text-left align-middle bg-muted/30 whitespace-nowrap relative sticky top-0 z-20 overflow-hidden"
-                                        :class="[
-                                            { 'font-semibold': header.id === timestampFieldName || header.id === severityFieldName },
-                                            { 'resizing': header.column.getIsResizing() },
-                                            header.column.columnDef.meta?.className
-                                        ]" :style="{
-                                        width: header.column.getSize() ? `${header.column.getSize()}px` : '200px',
-                                        minWidth: '100px'
-                                    }">
-                                        <FlexRender v-if="!header.isPlaceholder"
-                                            :render="header.column.columnDef.header" :props="header.getContext()" />
+                <div
+                    class="w-full h-full overflow-auto scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent">
+                    <table ref="tableRef" class="table-fixed border-separate border-spacing-0 text-sm shadow-sm"
+                        :data-resizing="isResizing">
+                        <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
+                            <tr v-if="table.getHeaderGroups()[0]" class="border-b border-b-muted-foreground/10">
+                                <th v-for="header in table.getHeaderGroups()[0].headers" :key="header.id" scope="col"
+                                    class="group relative h-9 px-3 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden border-r border-muted/30"
+                                    :class="[
+                                        getColumnType(header.column) === 'timestamp' ? 'font-semibold' : '',
+                                        getColumnType(header.column) === 'severity' ? 'font-semibold' : '',
+                                        header.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
+                                        header.column.id === draggingColumnId ? 'opacity-50 bg-primary/10' : '', // Style for dragging column
+                                        header.column.id === dragOverColumnId ? 'border-l-2 border-l-primary' : '' // Style for drop target indicator
+                                    ]" :style="{
+                                        width: `${header.getSize()}px`,
+                                        minWidth: `${header.column.columnDef.minSize ?? defaultColumn.minSize}px`,
+                                        maxWidth: `${header.column.columnDef.maxSize ?? defaultColumn.maxSize}px`,
+                                    }" draggable="true" @dragstart="onDragStart($event, header.column.id)"
+                                    @dragenter="onDragEnter($event, header.column.id)" @dragover="onDragOver($event)"
+                                    @dragleave="onDragLeave($event, header.column.id)"
+                                    @drop="onDrop($event, header.column.id)" @dragend="onDragEnd($event)">
+                                    <div class="flex items-center h-full">
+                                        <!-- Drag Handle -->
+                                        <span
+                                            class="flex items-center justify-center flex-shrink-0 w-5 h-full mr-1.5 cursor-grab text-muted-foreground/50 group-hover:text-muted-foreground"
+                                            title="Drag to reorder column">
+                                            <GripVertical class="h-4 w-4" />
+                                        </span>
 
-                                        <div v-if="header.column.getCanResize()" :class="[
-                                            'resizer',
-                                            { 'isResizing': header.column.getIsResizing() }
-                                        ]" @mousedown="(e) => {
-                                            try {
-                                                // Get and execute the resize handler
-                                                const handler = header.getResizeHandler();
-                                                handler(e);
-                                            } catch (error) {
-                                                console.error('Error in resize handler:', error);
-                                            }
+                                        <!-- Column Header Content (Title + Sort button from columns.ts) -->
+                                        <div class="flex-grow min-w-0 overflow-hidden mr-5">
+                                            <!-- FlexRender now renders the Button containing the title and sort icon -->
+                                            <FlexRender v-if="!header.isPlaceholder"
+                                                :render="header.column.columnDef.header" :props="header.getContext()" />
+                                        </div>
 
-                                            // Prevent the event from bubbling
-                                            e.stopPropagation();
-                                        }" @touchstart="header.getResizeHandler()" @click.stop></div>
-                                    </th>
-                                </tr>
-                            </thead>
-
-                            <!-- Improved table body styling -->
-                            <tbody class="[&_tr:last-child]:border-0">
-                                <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
-                                    <!-- Main Row -->
-                                    <tr :data-state="row.getIsSelected() ? 'selected' : undefined"
-                                        @click="(e) => handleRowClick(e, row)" :class="[
-                                            'cursor-pointer hover:bg-muted/50 border-b border-b-muted-foreground/10 transition-colors w-full',
-                                            index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5',
-                                            row.getIsExpanded() ? 'bg-primary/5 hover:bg-primary/10 border-primary/10' : ''
-                                        ]">
-                                        <td v-for="cell in row.getVisibleCells()" :key="cell.id"
-                                            class="h-auto px-3 py-1.5 align-top group overflow-hidden whitespace-nowrap text-ellipsis font-mono text-[11px] leading-tight"
-                                            :data-column-id="cell.column.id" :class="[
-                                                cell.column.columnDef.meta?.className,
-                                                { 'resizing': cell.column.getIsResizing() }
-                                            ]" :style="{
-                                            width: cell.column.getSize() ? `${cell.column.getSize()}px` : '200px',
-                                            minWidth: '100px',
-                                            maxWidth: cell.column.getSize() ? `${cell.column.getSize()}px` : '200px',
-                                            overflow: 'hidden'
-                                        }">
-                                            <div class="flex items-center gap-1 w-full overflow-hidden">
-                                                <!-- Cell Content with improved typography -->
-                                                <span
-                                                    v-if="cell.column.id === severityFieldName && getSeverityClasses(cell.getValue(), cell.column.id)"
-                                                    :class="getSeverityClasses(cell.getValue(), cell.column.id)"
-                                                    class="font-medium px-1.5 py-0.5 rounded text-xs shrink-0">
-                                                    {{ cell.getValue() }}
-                                                </span>
-                                                <template v-else>
-                                                    <div class="whitespace-nowrap overflow-hidden text-ellipsis w-full">
-                                                        <FlexRender :render="cell.column.columnDef.cell"
-                                                            :props="cell.getContext()" />
+                                        <!-- Column Resizer (Absolute Positioned) -->
+                                        <div v-if="header.column.getCanResize()"
+                                            class="absolute right-0 top-0 h-full w-5 cursor-col-resize select-none touch-none flex items-center justify-center hover:bg-muted/40 transition-colors z-10"
+                                            @mousedown="(e) => { e.preventDefault(); e.stopPropagation(); handleResize(e, header); }"
+                                            @touchstart="(e) => { e.preventDefault(); e.stopPropagation(); handleResize(e, header); }"
+                                            @click.stop title="Resize column">
+                                            <!-- Resize Grip Visual -->
+                                            <div class="h-full w-4 flex flex-col items-center justify-center">
+                                                <div
+                                                    class="resize-grip flex flex-col items-center justify-center gap-1">
+                                                    <div
+                                                        class="w-1 h-1 rounded-full bg-muted-foreground/60 group-hover:bg-primary">
                                                     </div>
-                                                </template>
-
+                                                    <div
+                                                        class="w-1 h-1 rounded-full bg-muted-foreground/60 group-hover:bg-primary">
+                                                    </div>
+                                                    <div
+                                                        class="w-1 h-1 rounded-full bg-muted-foreground/60 group-hover:bg-primary">
+                                                    </div>
+                                                </div>
                                             </div>
-                                        </td>
-                                    </tr>
+                                        </div>
+                                    </div>
+                                </th>
+                            </tr>
+                        </thead>
 
-                                    <!-- Expanded Row with improved JSON viewer styling -->
-                                    <tr v-if="row.getIsExpanded()">
-                                        <td :colspan="row.getVisibleCells().length" class="p-0">
-                                            <div class="p-1 bg-muted/30 border-y border-primary/10 overflow-hidden">
-                                                <JsonViewer :value="row.original" :expanded="false" class="text-xs" />
-                                            </div>
-                                        </td>
-                                    </tr>
-                                </template>
-                            </tbody>
-                        </table>
-                    </div>
+                        <tbody>
+                            <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
+                                <!-- Bind expanded class directly -->
+                                <tr class="group cursor-pointer border-b transition-colors hover:bg-muted/30" :class="[
+                                    row.getIsExpanded() ? 'expanded-row bg-primary/15' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
+                                ]" @click="handleRowClick(row)($event)">
+                                    <td v-for="cell in row.getVisibleCells()" :key="cell.id"
+                                        class="px-3 py-2 align-top font-mono text-xs leading-normal overflow-hidden border-r border-muted/20"
+                                        :class="[
+                                            cell.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
+                                        ]" :style="{
+                                            width: `${cell.column.getSize()}px`,
+                                            minWidth: `${cell.column.columnDef.minSize ?? defaultColumn.minSize}px`,
+                                            maxWidth: `${cell.column.columnDef.maxSize ?? defaultColumn.maxSize}px`
+                                        }">
+                                        <div class="flex items-center gap-1 w-full overflow-hidden">
+                                            <span
+                                                v-if="cell.column.id === severityFieldName && getSeverityClasses(cell.getValue(), cell.column.id)"
+                                                :class="getSeverityClasses(cell.getValue(), cell.column.id)"
+                                                class="shrink-0 mx-1">
+                                                {{ formatCellValue(cell.getValue()).toUpperCase() }}
+                                            </span>
+                                            <template v-else>
+                                                <div class="whitespace-nowrap overflow-hidden text-ellipsis w-full">
+                                                    <FlexRender :render="cell.column.columnDef.cell"
+                                                        :props="cell.getContext()" />
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </td>
+                                </tr>
+
+                                <tr v-if="row.getIsExpanded()" class="expanded-json-row">
+                                    <td :colspan="row.getVisibleCells().length" class="p-0">
+                                        <div class="p-3 bg-muted/30 border-y border-y-primary/40">
+                                            <JsonViewer :value="row.original" :expanded="false" class="text-xs" />
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
                 </div>
             </div>
             <div v-else class="h-full">
@@ -351,114 +691,123 @@ onMounted(() => {
     </div>
 </template>
 
-<style scoped>
-/* Custom scrollbar styles scoped to this component only */
-.log-data-table .custom-scrollbar::-webkit-scrollbar {
-    width: 10px !important;
-    height: 10px !important;
-    display: block !important;
-}
-
-.log-data-table .custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.log-data-table .custom-scrollbar::-webkit-scrollbar-thumb {
-    background-color: rgba(155, 155, 155, 0.5);
-    border-radius: 4px;
-    min-height: 40px;
-    min-width: 40px;
-}
-
-.log-data-table .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(155, 155, 155, 0.8);
-}
-
-.log-data-table .custom-scrollbar::-webkit-scrollbar-corner {
-    background: transparent;
-}
-
-/* Firefox scrollbar */
-.log-data-table .custom-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(155, 155, 155, 0.5) transparent;
-    overflow-x: scroll !important;
-    overflow-y: auto !important;
-    -webkit-overflow-scrolling: touch;
-    height: 100% !important;
-    max-height: 100% !important;
-    width: 100% !important;
-}
-
-/* Resizer styles - scoped to this component only */
-.log-data-table .resizer {
-    position: absolute;
-    right: 0;
-    top: 0;
-    height: 100%;
-    width: 4px;
-    cursor: col-resize !important;
-    user-select: none;
-    touch-action: none;
-    z-index: 50;
-    transition: background-color 0.1s ease;
-    background-color: rgba(0, 0, 0, 0.05);
-}
-
-.log-data-table .resizer:hover {
-    background-color: rgba(0, 0, 0, 0.3);
-    width: 8px;
-    right: -3px;
-}
-
-.log-data-table .resizer.isResizing {
-    background-color: rgba(0, 0, 0, 0.5);
-    opacity: 1;
-    width: 8px;
-}
-
-/* Class for column being resized */
-.log-data-table th.resizing,
-.log-data-table td.resizing {
-    border-right: 2px dashed rgba(0, 0, 0, 0.2);
-    user-select: none;
-}
-
-/* Column width presets - with specific widths for log viewing */
-.log-data-table .timestamp-column {
-    min-width: 200px;
-    width: 200px;
-}
-
-.log-data-table .severity-column {
-    min-width: 100px;
-    width: 100px;
-}
-
-.log-data-table .message-column {
-    min-width: 500px;
-    width: 500px;
-}
-
-.log-data-table .default-column {
-    min-width: 200px;
-    width: 200px;
-}
-
-/* Special content styling */
-:deep(.log-data-table .json-content) {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding: 2px 0;
-    background-color: rgba(0, 0, 0, 0.01);
-    border-radius: 2px;
-}
-
-
-:deep(.log-data-table .flex-render-content) {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 11px;
+<style scoped> /* Add scoped attribute */
+/* Table styling for log analytics */
+.table-fixed {
+    table-layout: fixed;
     width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+/* Add clear borders to create a grid-like structure */
+.table-fixed th:last-child,
+.table-fixed td:last-child {
+    border-right: none;
+}
+
+/* Resize handle and cursor styling */
+.cursor-col-resize {
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    touch-action: none;
+    cursor: col-resize !important;
+}
+
+/* Ensure resize cursor and prevent text selection during resizing */
+[data-resizing="true"] * {
+    cursor: col-resize !important;
+    user-select: none !important;
+}
+
+/* Highlight column being resized */
+[data-resizing="true"] th.border-r-primary,
+[data-resizing="true"] td.border-r-primary {
+    border-right-width: 2px;
+    border-right-color: hsl(var(--primary)) !important;
+}
+
+/* Style for resize grip */
+.resize-grip {
+    height: 16px;
+    transition: transform 0.15s ease;
+}
+
+.group:hover .resize-grip {
+    transform: scale(1.2);
+}
+
+.group:hover .w-1 {
+    background-color: hsl(var(--primary));
+}
+
+/* Better visibility for cell borders */
+.border-muted\/20 {
+    border-color: hsl(var(--muted) / 0.2);
+}
+
+.border-muted\/30 {
+    border-color: hsl(var(--muted) / 0.3);
+}
+
+/* Add visual marker for column boundaries */
+.table-fixed th,
+.table-fixed td {
+    position: relative;
+}
+
+/* Make table row alternating colors more visible */
+.table-fixed tbody tr:nth-child(odd) {
+    background-color: hsl(var(--muted) / 0.03);
+}
+
+.table-fixed tbody tr:nth-child(even) {
+    background-color: transparent;
+}
+
+/* Add cursor styling for drag handle */
+.cursor-grab {
+    cursor: grab;
+}
+
+.cursor-grabbing {
+    cursor: grabbing;
+}
+
+/* Add global style for body when dragging */
+.dragging-column {
+    cursor: grabbing !important;
+    /* Force grabbing cursor */
+}
+
+/* Optional: Style for the drag feedback (e.g., slightly transparent) */
+.group[draggable="true"]:active {
+    /* opacity: 0.7; */
+    /* Browser might provide its own feedback */
+}
+
+/* Style for drop indicator */
+.border-l-primary {
+    border-left-color: hsl(var(--primary)) !important;
+}
+
+/* More prominent hover effect for table rows */
+.table-fixed tbody tr:hover:not([data-expanded="true"]) {
+    background-color: hsl(var(--muted) / 0.4) !important;
+    box-shadow: inset 0 0 0 1px hsl(var(--muted) / 0.5);
+    transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Active/expanded row styling - using complementary colors */
+/* Use the class bound in the template */
+.table-fixed tbody tr.expanded-row {
+    background-color: hsl(var(--primary) / 0.15) !important;
+    border-top: 1px solid hsl(var(--primary) / 0.3);
+    border-bottom: 1px solid hsl(var(--primary) / 0.3);
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.2);
+    position: relative;
+    z-index: 1; /* Ensures expanded rows appear above others */
 }
 </style>

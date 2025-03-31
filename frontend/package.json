@@ -10,6 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@guolao/vue-monaco-editor": "^1.5.4",
     "@tanstack/vue-table": "^8.20.5",
     "@types/lodash": "^4.17.15",
@@ -30,6 +33,7 @@
     "radix-vue": "^1.9.13",
     "reka-ui": "^2.0.2",
     "tailwind-merge": "^3.0.2",
+    "tailwind-scrollbar": "^4.0.1",
     "tailwindcss-animate": "^1.0.7",
     "vaul-vue": "^0.3.0",
     "vee-validate": "^4.15.0",

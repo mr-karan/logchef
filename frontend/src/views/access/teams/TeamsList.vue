@@ -34,14 +34,7 @@ const router = useRouter()
 const teamsStore = useTeamsStore()
 const { isLoading, error: teamsError } = storeToRefs(teamsStore)
 const teams = computed(() => {
-    const storeTeams = teamsStore.teams || [];
-    // Ensure each team has a name for display
-    return storeTeams.map(team => ({
-        ...team,
-        name: team.name || `Team ${team.id}`,
-        description: team.description || '',
-        memberCount: team.memberCount || 0
-    }));
+    return teamsStore.getTeamsWithDefaults();
 });
 const showDeleteDialog = ref(false)
 const teamToDelete = ref<Team | null>(null)
@@ -51,43 +44,22 @@ const handleDelete = (team: Team) => {
     showDeleteDialog.value = true
 }
 
-// Function to refresh teams list
-const refreshTeams = async () => {
-    await teamsStore.loadTeams(true) // Force reload
-}
-
 const confirmDelete = async () => {
     if (!teamToDelete.value) return
     
-    const result = await teamsStore.deleteTeam(teamToDelete.value.id)
+    await teamsStore.deleteTeam(teamToDelete.value.id)
     
-    if (result.success) {
-        showDeleteDialog.value = false
-        teamToDelete.value = null
-        refreshTeams()
-    }
+    // Reset UI state
+    showDeleteDialog.value = false
+    teamToDelete.value = null
 }
 
 onMounted(() => {
     teamsStore.loadTeams()
 })
 
-const formatDate = (dateString: string | undefined) => {
-    if (!dateString) return 'N/A';
-    
-    try {
-        // Ensure dateString is valid before creating a Date object
-        if (isNaN(Date.parse(dateString))) {
-            return 'Invalid date';
-        }
-        
-        const date = new Date(dateString);
-        return format(date, 'PPp'); // Format like "Feb 17, 2025, 3:17 PM"
-    } catch (error) {
-        console.error('Error formatting date:', error);
-        return 'Invalid date';
-    }
-}
+// Import formatDate from utils
+import { formatDate } from '@/utils/format'
 </script>
 
 <template>
@@ -101,7 +73,7 @@ const formatDate = (dateString: string | undefined) => {
                             Groups of users that have common dashboard and permission needs
                         </CardDescription>
                     </div>
-                    <AddTeam @team-created="refreshTeams" />
+                    <AddTeam @team-created="teamsStore.loadTeams(true)" />
                 </div>
             </CardHeader>
             <CardContent>
@@ -117,7 +89,7 @@ const formatDate = (dateString: string | undefined) => {
                     </div>
                     <div v-else-if="teams.length === 0" class="rounded-lg border p-4 text-center">
                         <p class="text-muted-foreground mb-4">No teams found</p>
-                        <AddTeam @team-created="refreshTeams">
+                        <AddTeam @team-created="teamsStore.loadTeams(true)">
                             <Button>
                                 <Plus class="mr-2 h-4 w-4" />
                                 Create Your First Team

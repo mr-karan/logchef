@@ -12,6 +12,7 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/identity"
 	"github.com/mr-karan/logchef/internal/logs"
+	"github.com/mr-karan/logchef/internal/saved_queries"
 	"github.com/mr-karan/logchef/internal/server"
 	"github.com/mr-karan/logchef/internal/source"
 	"github.com/mr-karan/logchef/internal/sqlite"
@@ -26,11 +27,11 @@ type App struct {
 	sqliteDB *sqlite.DB
 
 	// Domain services
-	authService      *auth.Service
-	sourceService    *source.Service
-	logsService      *logs.Service
-	identityService  *identity.Service
-	teamQueryService *logs.TeamQueryService
+	authService       *auth.Service
+	sourceService     *source.Service
+	logsService       *logs.Service
+	identityService   *identity.Service
+	savedQueryService *saved_queries.Service
 
 	// HTTP server
 	server *server.Server
@@ -101,9 +102,9 @@ func (a *App) Initialize(ctx context.Context) error {
 	a.logsService = logs.New(a.sqliteDB, clickhouseManager, a.log)
 	a.identityService = identity.New(a.sqliteDB, a.log)
 
-	// Initialize team query service
-	a.log.Info("initializing team query service")
-	a.teamQueryService = logs.NewTeamQueryService(a.sqliteDB, a.log)
+	// Initialize saved query service
+	a.log.Info("initializing saved query service")
+	a.savedQueryService = saved_queries.New(a.sqliteDB, a.log)
 
 	// Ensure admin user exists
 	a.log.Info("ensuring admin users")
@@ -140,15 +141,15 @@ func (a *App) Initialize(ctx context.Context) error {
 	// Initialize HTTP server
 	a.log.Info("initializing http server")
 	a.server = server.New(server.ServerOptions{
-		Config:           a.cfg,
-		SourceService:    a.sourceService,
-		LogsService:      a.logsService,
-		IdentityService:  a.identityService,
-		TeamQueryService: a.teamQueryService,
-		Auth:             a.authService,
-		FS:               a.webFS,
-		Logger:           a.log,
-		BuildInfo:        a.buildInfo,
+		Config:            a.cfg,
+		SourceService:     a.sourceService,
+		LogsService:       a.logsService,
+		IdentityService:   a.identityService,
+		SavedQueryService: a.savedQueryService,
+		Auth:              a.authService,
+		FS:                a.webFS,
+		Logger:            a.log,
+		BuildInfo:         a.buildInfo,
 	})
 
 	return nil
