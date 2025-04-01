@@ -80,7 +80,7 @@ export const useTeamsStore = defineStore("teams", () => {
           return { success: true, data: state.data.value.teams };
         }
 
-        const response = await teamsApi.listUserTeams();
+        const response = await teamsApi.listAllTeams();
         // Directly access the data array from successful response
         const teamsData = response.status === 'success' ? response.data || [] : [];
 
@@ -122,12 +122,16 @@ export const useTeamsStore = defineStore("teams", () => {
         apiCall: () => teamsApi.createTeam(data),
         successMessage: "Team created successfully",
         operationKey: 'createTeam',
-        onSuccess: (response) => {
+        onSuccess: (response: Team | null) => {
           if (response) {
             // Add the new team to the local state
-            const newTeam = {
+            const newTeam: TeamWithMemberCount = {
               ...response,
-              memberCount: 0
+              memberCount: 0,
+              member_count: 0,
+              created_by: response.created_by || '',
+              created_at: response.created_at || '',
+              updated_at: response.updated_at || ''
             };
             state.data.value.teams.push(newTeam);
 
@@ -135,9 +139,9 @@ export const useTeamsStore = defineStore("teams", () => {
             if (
               state.data.value.teams.length > 0 &&
               !state.data.value.currentTeamId &&
-              response.id
+              newTeam.id
             ) {
-              setCurrentTeam(response.id);
+              setCurrentTeam(newTeam.id);
             }
           }
         }
@@ -385,10 +389,10 @@ export const useTeamsStore = defineStore("teams", () => {
         const response = await teamsApi.listTeamSources(teamId);
 
         // Cache the sources
-        if (response) {
+        if (response.status === 'success' && response.data) {
           state.data.value.teamSourcesMap = {
             ...state.data.value.teamSourcesMap,
-            [teamId]: response
+            [teamId]: response.data
           };
         }
 
@@ -398,8 +402,8 @@ export const useTeamsStore = defineStore("teams", () => {
       }
     });
 
-    if (result.success && result.data) {
-      return result.data.map((source) => source.id);
+    if (result.success && result.data?.status === 'success' && result.data.data) {
+      return result.data.data.map((source: Source) => source.id);
     }
 
     return [];

@@ -41,26 +41,27 @@ export interface TeamWithMemberCount extends Team {
 
 export const teamsApi = {
   listUserTeams: () => apiClient.get<TeamWithMemberCount[]>("/users/me/teams"),
+  listAllTeams: () => apiClient.get<TeamWithMemberCount[]>("/admin/teams"),
   getTeam: (id: number) => apiClient.get<Team>(`/teams/${id}`),
   createTeam: (data: CreateTeamRequest) => apiClient.post<Team>("/admin/teams", data),
-  updateTeam: (id: number, data: UpdateTeamRequest) => 
+  updateTeam: (id: number, data: UpdateTeamRequest) =>
     apiClient.put<Team>(`/admin/teams/${id}`, data),
-  deleteTeam: (id: number) => 
+  deleteTeam: (id: number) =>
     apiClient.delete<{ message: string }>(`/admin/teams/${id}`),
-  
+
   // Team members
-  listTeamMembers: (teamId: number) => 
+  listTeamMembers: (teamId: number) =>
     apiClient.get<TeamMember[]>(`/teams/${teamId}/members`),
-  addTeamMember: (teamId: number, data: AddTeamMemberRequest) => 
+  addTeamMember: (teamId: number, data: AddTeamMemberRequest) =>
     apiClient.post<{ message: string }>(`/teams/${teamId}/members`, data),
-  removeTeamMember: (teamId: number, userId: number) => 
+  removeTeamMember: (teamId: number, userId: number) =>
     apiClient.delete<{ message: string }>(`/teams/${teamId}/members/${userId}`),
-  
+
   // Team sources
-  listTeamSources: (teamId: number) => 
+  listTeamSources: (teamId: number) =>
     apiClient.get<Source[]>(`/teams/${teamId}/sources`),
-  addTeamSource: (teamId: number, sourceId: number) => 
+  addTeamSource: (teamId: number, sourceId: number) =>
     apiClient.post<{ message: string }>(`/teams/${teamId}/sources`, { source_id: sourceId }),
-  removeTeamSource: (teamId: number, sourceId: number) => 
+  removeTeamSource: (teamId: number, sourceId: number) =>
     apiClient.delete<{ message: string }>(`/teams/${teamId}/sources/${sourceId}`)
 };
