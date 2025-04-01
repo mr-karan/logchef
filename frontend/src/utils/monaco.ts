@@ -2,7 +2,12 @@ import * as monaco from "monaco-editor";
 import { loader } from "@guolao/vue-monaco-editor";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import { tokenTypes as logchefqlTokenTypes, Parser as LogchefQLParser } from "./logchefql";
-import { tokenTypes as clickhouseTokenTypes, Parser as ClickHouseSQLParser } from "./clickhouse-sql";
+import {
+  SQL_KEYWORDS,
+  CLICKHOUSE_FUNCTIONS,
+  SQL_TYPES,
+  CharType
+} from "./clickhouse-sql/language";
 
 export function getDefaultMonacoOptions(): monaco.editor.IStandaloneEditorConstructionOptions {
   return {
@@ -23,13 +28,13 @@ export function getDefaultMonacoOptions(): monaco.editor.IStandaloneEditorConstr
       verticalScrollbarSize: 8, // Thinner scrollbars
       horizontalScrollbarSize: 8,
     },
-    occurrencesHighlight: false, // Consider 'multi' if needed later
+    occurrencesHighlight: "off", // Fix type error - was false
     find: {
       addExtraSpaceOnTop: false,
       autoFindInSelection: "never",
       seedSearchStringFromSelection: "never", // Usually better defaults
     },
-    wordBasedSuggestions: false, // Explicitly false
+    wordBasedSuggestions: "off", // Fix type error - was false
     renderLineHighlight: "none",
     matchBrackets: "always",
     "semanticHighlighting.enabled": true,
@@ -82,7 +87,8 @@ export function initMonacoSetup() {
       { token: "identifier", foreground: "001080" }, // Table/column names
       { token: "operator", foreground: "000000" }, // SQL operators like AND, OR
       { token: "comment", foreground: "008000" },
-      // { token: "type", foreground: "267f99" }, // Data types if needed
+      { token: "function", foreground: "795E26" }, // Add function token style
+      { token: "type", foreground: "267f99" }, // Data types
     ],
   });
 
@@ -101,7 +107,8 @@ export function initMonacoSetup() {
       { token: "identifier", foreground: "9cdcfe" }, // Table/column names
       { token: "operator", foreground: "d4d4d4" }, // SQL operators like AND, OR
       { token: "comment", foreground: "6a9955" },
-      // { token: "type", foreground: "4ec9b0" }, // Data types if needed
+      { token: "function", foreground: "dcdcaa" }, // Add function token style
+      { token: "type", foreground: "4ec9b0" }, // Data types
     ],
   });
 
@@ -166,49 +173,193 @@ function registerClickhouseSQL() {
 
   monaco.languages.register({ id: LANGUAGE_ID });
 
-  // Set language configuration directly for ClickHouse SQL
-  monaco.languages.setLanguageConfiguration(LANGUAGE_ID, {
-     autoClosingPairs: [
-       { open: "(", close: ")" },
-       { open: '"', close: '"' }, // Keep if CH uses double quotes for identifiers
-       { open: "'", close: "'" },
-       { open: "`", close: "`" }, // Add backticks if used
-     ],
-     brackets: [
-        ['(', ')'],
-        ['[', ']'], // If CH uses array brackets
-        ['{', '}'] // If CH uses map brackets
-     ],
-     comments: {
-        lineComment: "--",
-        blockComment: ["/*", "*/"]
-     },
-     // Add specific ClickHouse keywords/functions to wordPattern if necessary
-     // Or rely on completion provider and semantic tokens primarily.
+  // Register a tokens provider for the language
+  monaco.languages.setMonarchTokensProvider(LANGUAGE_ID, {
+    defaultToken: 'invalid',
+    tokenPostfix: '.sql',
+    ignoreCase: true,
+
+    // Basic tokenizing rules
+    tokenizer: {
+      root: [
+        // Comments
+        [/--.*$/, 'comment'],
+        [/\/\*/, { token: 'comment.quote', next: '@comment' }],
+
+        // Strings
+        [/'/, { token: 'string', next: '@string' }],
+        [/"/, { token: 'string.double', next: '@stringDouble' }],
+        [/`/, { token: 'identifier.quote', next: '@quotedIdentifier' }],
+
+        // Numbers
+        [/\d+/, 'number'],
+        [/\d*\.\d+([eE][-+]?\d+)?/, 'number.float'],
+        [/0[xX][0-9a-fA-F]+/, 'number.hex'],
+
+        // Keywords
+        [new RegExp('\\b(' + SQL_KEYWORDS.join('|') + ')\\b', 'i'), 'keyword'],
+
+        // Functions
+        [new RegExp('\\b(' + CLICKHOUSE_FUNCTIONS.join('|') + ')\\b', 'i'), 'function'],
+
+        // Data types
+        [new RegExp('\\b(' + SQL_TYPES.join('|') + ')\\b', 'i'), 'type'],
+
+        // Identifiers
+        [/[a-zA-Z_][a-zA-Z0-9_]*/, 'identifier'],
+
+        // Operators
+        [/[+\-*/%&|^!=<>]+/, 'operator'],
+
+        // Punctuation
+        [/[;,.()]/, 'delimiter'],
+      ],
+
+      string: [
+        [/[^']+/, 'string'],
+        [/''/, 'string'],
+        [/'/, { token: 'string', next: '@pop' }],
+      ],
+
+      stringDouble: [
+        [/[^"]+/, 'string.double'],
+        [/""/, 'string.double'],
+        [/"/, { token: 'string.double', next: '@pop' }],
+      ],
+
+      quotedIdentifier: [
+        [/[^`]+/, 'identifier'],
+        [/``/, 'identifier'],
+        [/`/, { token: 'identifier.quote', next: '@pop' }],
+      ],
+
+      comment: [
+        [/[^/*]+/, 'comment'],
+        [/\*\//, { token: 'comment.quote', next: '@pop' }],
+        [/./, 'comment'],
+      ],
+    }
   });
 
-  // Register semantic tokens provider for ClickHouse SQL
-  monaco.languages.registerDocumentSemanticTokensProvider(LANGUAGE_ID, {
-    getLegend: () => ({
-      tokenTypes: clickhouseTokenTypes, // Use the imported token types
-      tokenModifiers: [],
-    }),
-    provideDocumentSemanticTokens: (model, _token) => {
-      // console.time(`SemanticTokens ${LANGUAGE_ID}`);
-      try {
-        const parser = new ClickHouseSQLParser(); // Use the specific CH parser
-        const tokensData = parser.parse(model.getValue()); // Assuming parser returns the Uint32Array data directly
-        // console.timeEnd(`SemanticTokens ${LANGUAGE_ID}`);
-        return {
-          data: new Uint32Array(tokensData),
-          // resultId: null,
-        };
-      } catch (error) {
-        console.warn(`Error providing semantic tokens for ${LANGUAGE_ID}:`, error);
-        // Return empty data on parsing error to avoid breaking highlighting
-        return { data: new Uint32Array() };
-      }
+  // Configure the language with autocomplete, formatting, etc.
+  monaco.languages.setLanguageConfiguration(LANGUAGE_ID, {
+    comments: {
+      lineComment: '--',
+      blockComment: ['/*', '*/'],
     },
-    releaseDocumentSemanticTokens: (_resultId) => {},
+    brackets: [
+      ['{', '}'],
+      ['[', ']'],
+      ['(', ')'],
+    ],
+    autoClosingPairs: [
+      { open: '{', close: '}' },
+      { open: '[', close: ']' },
+      { open: '(', close: ')' },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+      { open: '`', close: '`' },
+    ],
+    surroundingPairs: [
+      { open: '{', close: '}' },
+      { open: '[', close: ']' },
+      { open: '(', close: ')' },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+      { open: '`', close: '`' },
+    ],
+  });
+
+  // Define completions for SQL keywords, functions, etc.
+  monaco.languages.registerCompletionItemProvider(LANGUAGE_ID, {
+    provideCompletionItems: (model, position, context, token) => {
+      const wordInfo = model.getWordUntilPosition(position);
+      const wordRange = new monaco.Range(
+        position.lineNumber,
+        wordInfo.startColumn,
+        position.lineNumber,
+        wordInfo.endColumn
+      );
+
+      // Create completion items for keywords
+      const keywordItems = SQL_KEYWORDS.map((keyword: string) => ({
+        label: keyword.toUpperCase(),
+        kind: monaco.languages.CompletionItemKind.Keyword,
+        insertText: keyword.toUpperCase(),
+        detail: 'Keyword',
+        range: wordRange
+      }));
+
+      // Create completion items for functions
+      const functionItems = CLICKHOUSE_FUNCTIONS.map((func: string) => ({
+        label: func,
+        kind: monaco.languages.CompletionItemKind.Function,
+        insertText: func,
+        detail: 'Function',
+        documentation: `ClickHouse function: ${func}()`,
+        range: wordRange
+      }));
+
+      // Create completion items for data types
+      const typeItems = SQL_TYPES.map((type: string) => ({
+        label: type,
+        kind: monaco.languages.CompletionItemKind.TypeParameter,
+        insertText: type,
+        detail: 'Data Type',
+        range: wordRange
+      }));
+
+      // Combine all items
+      return {
+        suggestions: [
+          ...keywordItems,
+          ...functionItems,
+          ...typeItems,
+        ]
+      };
+    }
+  });
+
+  // Register basic hover provider
+  monaco.languages.registerHoverProvider(LANGUAGE_ID, {
+    provideHover: (model, position) => {
+      // Get the word at the current position
+      const wordInfo = model.getWordAtPosition(position);
+      if (!wordInfo) return null;
+
+      const word = wordInfo.word.toLowerCase();
+
+      // Display documentation for keywords
+      if (SQL_KEYWORDS.some((k: string) => k.toLowerCase() === word)) {
+        return {
+          contents: [
+            { value: `**${word.toUpperCase()}**` },
+            { value: `SQL keyword used in ClickHouse queries.` }
+          ]
+        };
+      }
+
+      // Display documentation for functions
+      if (CLICKHOUSE_FUNCTIONS.some((f: string) => f.toLowerCase() === word)) {
+        return {
+          contents: [
+            { value: `**${word}()**` },
+            { value: `ClickHouse SQL function. For detailed documentation, visit the [ClickHouse docs](https://clickhouse.com/docs/en/sql-reference/functions).` }
+          ]
+        };
+      }
+
+      // Display documentation for data types
+      if (SQL_TYPES.some((t: string) => t.toLowerCase() === word)) {
+        return {
+          contents: [
+            { value: `**${word}**` },
+            { value: `ClickHouse data type. For detailed documentation, visit the [ClickHouse docs](https://clickhouse.com/docs/en/sql-reference/data-types).` }
+          ]
+        };
+      }
+
+      return null;
+    }
   });
 }
