@@ -638,7 +638,7 @@ onBeforeUnmount(() => {
       <div class="flex items-center space-x-3">
         <Select :model-value="currentTeamId?.toString() ?? ''" @update:model-value="handleTeamChange"
           :disabled="isProcessingTeamChange">
-          <SelectTrigger class="h-8 text-sm w-32">
+          <SelectTrigger class="h-8 text-sm w-48">
             <SelectValue placeholder="Select team">{{ selectedTeamName }}</SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -678,7 +678,7 @@ onBeforeUnmount(() => {
         <!-- Team Selector -->
         <Select :model-value="currentTeamId?.toString() ?? ''" @update:model-value="handleTeamChange"
           :disabled="isProcessingTeamChange">
-          <SelectTrigger class="h-8 text-sm w-32">
+          <SelectTrigger class="h-8 text-sm w-48">
             <SelectValue placeholder="Select team">{{ selectedTeamName }}</SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -691,7 +691,7 @@ onBeforeUnmount(() => {
         <!-- Source Selector -->
         <Select :model-value="currentSourceId?.toString() ?? ''" @update:model-value="handleSourceChange"
           :disabled="isProcessingSourceChange || !currentTeamId || availableSources.length === 0">
-          <SelectTrigger class="h-8 text-sm w-40">
+          <SelectTrigger class="h-8 text-sm w-64">
             <SelectValue placeholder="Select source">{{ selectedSourceName }}</SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -855,7 +855,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2)
-                    }}</strong>s
+                  }}</strong>s
                 </span>
               </span>
               <span v-if="exploreStore.queryStats?.bytes_read != null" class="flex items-center">
@@ -867,7 +867,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
-                    }}</strong> MB
+                  }}</strong> MB
                 </span>
               </span>
             </div>
