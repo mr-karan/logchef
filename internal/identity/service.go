@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/pkg/models"
@@ -178,8 +179,15 @@ func (s *Service) InitAdminUsers(ctx context.Context, adminEmails []string) erro
 		// Check if user already exists
 		existing, err := s.db.GetUserByEmail(ctx, email)
 		if err != nil {
-			s.log.Error("failed to check existing admin user", "email", email, "error", err)
-			return fmt.Errorf("error checking existing admin user: %w", err)
+			// If the error contains "not found", treat it as a non-existing user, not an error
+			if strings.Contains(err.Error(), "not found") {
+				// User doesn't exist, will create below
+				existing = nil
+			} else {
+				// This is a real error, like DB connection issue
+				s.log.Error("failed to check existing admin user", "email", email, "error", err)
+				return fmt.Errorf("error checking existing admin user: %w", err)
+			}
 		}
 
 		if existing != nil {
