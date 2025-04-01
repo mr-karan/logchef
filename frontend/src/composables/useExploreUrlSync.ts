@@ -74,7 +74,7 @@ export function useExploreUrlSync() {
       // 1. Ensure Teams are loaded (wait if necessary)
       if (!teamsStore.teams || teamsStore.teams.length === 0) {
         console.log("useExploreUrlSync: Waiting for teams to load...");
-        await teamsStore.loadTeams();
+        await teamsStore.loadTeams(false, false); // Explicitly use user teams endpoint
         console.log("useExploreUrlSync: Teams loaded.");
       }
       if (teamsStore.teams.length === 0) {

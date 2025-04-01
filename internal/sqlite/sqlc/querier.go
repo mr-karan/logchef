@@ -79,7 +79,7 @@ type Querier interface {
 	// List all data sources in a team
 	ListTeamSources(ctx context.Context, teamID int64) ([]ListTeamSourcesRow, error)
 	// List all teams
-	ListTeams(ctx context.Context) ([]Team, error)
+	ListTeams(ctx context.Context) ([]ListTeamsRow, error)
 	// List all teams a user is a member of
 	ListTeamsForUser(ctx context.Context, userID int64) ([]Team, error)
 	// List all teams a user is a member of

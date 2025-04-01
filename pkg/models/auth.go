@@ -78,6 +78,7 @@ type Team struct {
 	ID          TeamID `db:"id" json:"id"`
 	Name        string `db:"name" json:"name"`
 	Description string `db:"description" json:"description"`
+	MemberCount int    `db:"-" json:"member_count"`
 	Timestamps
 }
 

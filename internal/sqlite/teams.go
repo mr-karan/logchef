@@ -117,6 +117,7 @@ func (db *DB) ListTeams(ctx context.Context) ([]*models.Team, error) {
 			ID:          models.TeamID(row.ID),
 			Name:        row.Name,
 			Description: row.Description.String,
+			MemberCount: int(row.MemberCount),
 			Timestamps: models.Timestamps{
 				CreatedAt: row.CreatedAt,
 				UpdatedAt: row.UpdatedAt,

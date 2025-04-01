@@ -90,6 +90,8 @@ export function useSourceTeamManagement() {
       sourcesStore.clearCurrentSourceDetails()
       exploreStore.setSource(0)
 
+      // Ensure we use the user teams endpoint
+      await teamsStore.loadTeams(false, false)
       const sourcesResult = await sourcesStore.loadTeamSources(teamId)
 
       if (sourcesResult.success && sourcesResult.data?.length) {

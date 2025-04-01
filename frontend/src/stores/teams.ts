@@ -72,7 +72,7 @@ export const useTeamsStore = defineStore("teams", () => {
     )[0];
   });
 
-  async function loadTeams(forceReload = false) {
+  async function loadTeams(forceReload = false, useAdminEndpoint = false) {
     return await state.withLoading('loadTeams', async () => {
       try {
         // Skip loading if we already have teams and not forcing reload
@@ -80,7 +80,8 @@ export const useTeamsStore = defineStore("teams", () => {
           return { success: true, data: state.data.value.teams };
         }
 
-        const response = await teamsApi.listAllTeams();
+        // Use the appropriate endpoint based on the context
+        const response = await (useAdminEndpoint ? teamsApi.listAllTeams() : teamsApi.listUserTeams());
         // Directly access the data array from successful response
         const teamsData = response.status === 'success' ? response.data || [] : [];
 

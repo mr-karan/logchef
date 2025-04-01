@@ -46,16 +46,16 @@ const handleDelete = (team: Team) => {
 
 const confirmDelete = async () => {
     if (!teamToDelete.value) return
-    
+
     await teamsStore.deleteTeam(teamToDelete.value.id)
-    
+
     // Reset UI state
     showDeleteDialog.value = false
     teamToDelete.value = null
 }
 
 onMounted(() => {
-    teamsStore.loadTeams()
+    teamsStore.loadTeams(false, true)
 })
 
 // Import formatDate from utils
