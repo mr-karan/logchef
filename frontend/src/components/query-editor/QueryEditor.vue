@@ -106,14 +106,14 @@
     </div>
 
     <!-- Monaco Editor Container -->
-    <div class="editor-container border rounded-b-md overflow-hidden relative" :class="{
-      'ring-1 ring-primary/50 border-primary/50': editorFocused,
-      'is-empty': isEditorEmpty
-    }" :style="{ height: `${editorHeight}px` }" :data-placeholder="currentPlaceholder">
-      <!-- Monaco Editor Component -->
-      <vue-monaco-editor v-model:value="editorContent" :theme="theme" :language="props.activeMode"
-        :options="monacoOptions" @mount="handleMount" @update:value="handleEditorChange"
-        class="h-full w-full absolute inset-0" />
+    <div class="editor-wrapper" :class="{ 'is-focused': editorFocused }">
+      <div class="editor-container" :class="{
+        'is-empty': isEditorEmpty
+      }" :style="{ height: `${editorHeight}px` }" :data-placeholder="currentPlaceholder" :data-mode="props.activeMode">
+        <!-- Monaco Editor Component -->
+        <vue-monaco-editor v-model:value="editorContent" :theme="theme" :language="props.activeMode"
+          :options="monacoOptions" @mount="handleMount" @update:value="handleEditorChange" class="h-full w-full" />
+      </div>
     </div>
 
     <!-- Error Message Display -->
@@ -296,14 +296,20 @@ watchEffect(() => {
     : exploreStore.rawSql;
   const valueToSet = storeValue ?? "";
 
+  // Save cursor position before making changes
+  const editor = editorRef.value;
+  let savedPosition = editor?.getPosition() || null;
+  let savedSelection = editor?.getSelection() || null;
+  let shouldRestoreCursor = false;
+
   // Force update on edge cases
   if (editorContent.value !== valueToSet) {
     console.log(`QueryEditor: Updating content from store, mode=${props.activeMode}`);
     runProgrammaticUpdate(valueToSet);
+    shouldRestoreCursor = true;
   }
 
   // 2. Update editor options and language if editor instance exists
-  const editor = editorRef.value;
   if (editor && !isDisposing.value) {
     let languageChanged = false; // Flag to track if mode changed
     const model = editor.getModel();
@@ -311,22 +317,61 @@ watchEffect(() => {
       monaco.editor.setModelLanguage(model, props.activeMode);
       console.log(`QueryEditor: Language set to ${props.activeMode}`);
       languageChanged = true; // Set flag if language was updated
+
+      // Only re-register completion provider when language changes or on initial load
+      registerCompletionProvider(); // Update syntax highlighting/completion
     }
 
-    updateMonacoOptions(); // Update options like folding, line numbers, etc.
-    registerCompletionProvider(); // Update syntax highlighting/completion
+    // Apply mode-specific options
+    const options = {
+      ...getDefaultMonacoOptions(),
+      lineNumbers: props.activeMode === 'clickhouse-sql' ? 'on' as const : 'off' as const,
+      lineDecorationsWidth: props.activeMode === 'logchefql' ? 16 : 24,
+      fontSize: 13,
+      lineHeight: 20,
+      padding: { top: 8, bottom: 8 },
+      scrollbar: {
+        vertical: 'auto' as const,
+        horizontal: 'auto' as const,
+        useShadows: false,
+        verticalScrollbarSize: 8,
+        horizontalScrollbarSize: 8
+      },
+      minimap: { enabled: false }
+    };
+    editor.updateOptions(options);
 
     // Refocus editor and move cursor *only* if the language actually changed
     if (languageChanged) {
       focusEditor(true);
     }
+    // Otherwise, restore cursor position if we made content changes
+    else if (shouldRestoreCursor && savedPosition) {
+      nextTick(() => {
+        if (editor && !isDisposing.value) {
+          editor.setPosition(savedPosition);
+          if (savedSelection) {
+            editor.setSelection(savedSelection);
+          }
+          editor.revealPositionInCenterIfOutsideViewport(savedPosition);
+        }
+      });
+    }
   }
 });
 
 // Watch for schema changes to update completion providers
-watch(() => props.schema, () => {
+let lastSchemaHash = '';
+watch(() => props.schema, (newSchema) => {
+  // Generate a simple hash to determine if schema has meaningfully changed
+  const schemaKeys = Object.keys(newSchema || {}).sort().join(',');
+  if (schemaKeys === lastSchemaHash) {
+    return; // Skip if schema hasn't actually changed
+  }
+  lastSchemaHash = schemaKeys;
+
   if (editorRef.value && !isDisposing.value) {
-    console.log("QueryEditor: Schema changed, re-registering completions.");
+    console.log("QueryEditor: Schema actually changed, re-registering completions.");
     registerCompletionProvider();
   }
 }, { deep: true });
@@ -354,41 +399,43 @@ watch(() => exploreStore.selectedQueryId, (newQueryId, oldQueryId) => {
 });
 
 // --- Monaco Options Update ---
-const updateMonacoOptions = () => {
-  const editor = editorRef.value;
-  if (!editor || isDisposing.value) return;
-
-  const isSqlMode = props.activeMode === 'clickhouse-sql';
-
-  // Update reactive options object
-  Object.assign(monacoOptions, {
-    ...getDefaultMonacoOptions(), // Start with base defaults
-    folding: isSqlMode,
-    lineNumbers: isSqlMode ? "on" : "off",
-    wordWrap: isSqlMode ? "on" : "off", // Enable word wrap for SQL
-    glyphMargin: isSqlMode,
-    lineDecorationsWidth: isSqlMode ? 10 : 0,
-    lineNumbersMinChars: isSqlMode ? 3 : 0,
-    padding: { top: isSqlMode ? 6 : 8, bottom: isSqlMode ? 6 : 8 },
-    // Placeholder is now handled by CSS, remove from options
-    // 'placeholder': currentPlaceholder.value, // NO LONGER NEEDED HERE
-  });
-
-  // Apply the updated options to the editor instance
-  // Use nextTick to ensure model changes (like language) are potentially processed
+watch(() => props.activeMode, (newMode) => {
   nextTick(() => {
-    if (editor === editorRef.value && !isDisposing.value) {
-      editor.updateOptions(monacoOptions);
-      // Force layout recalculation in case options affect dimensions
+    if (editorRef.value) {
+      // Apply options based on mode
+      const editor = editorRef.value;
+      const options = {
+        ...getDefaultMonacoOptions(),
+        lineNumbers: newMode === 'clickhouse-sql' ? 'on' as const : 'off' as const,
+        lineDecorationsWidth: newMode === 'logchefql' ? 16 : 24,
+        fontSize: 13,
+        lineHeight: 20,
+        padding: { top: 8, bottom: 8 },
+        scrollbar: {
+          vertical: 'auto' as const,
+          horizontal: 'auto' as const,
+          useShadows: false,
+          verticalScrollbarSize: 8,
+          horizontalScrollbarSize: 8
+        },
+        minimap: { enabled: false }
+      };
+
+      editor.updateOptions(options);
       editor.layout();
     }
   });
-};
+});
 
 // --- Completion Providers ---
 const activeCompletionProvider = ref<MonacoDisposable | null>(null);
 
 const registerCompletionProvider = () => {
+  // Save cursor position before making changes
+  const editor = editorRef.value;
+  let savedPosition = editor?.getPosition() || null;
+  let savedSelection = editor?.getSelection() || null;
+
   // Dispose previous provider if it exists
   if (activeCompletionProvider.value) {
     activeCompletionProvider.value.dispose();
@@ -408,6 +455,16 @@ const registerCompletionProvider = () => {
     // to avoid disposing it with general listeners on unmount if not needed.
     // It will be disposed when the mode changes or on final unmount.
   }
+
+  // Restore cursor position and selection after completion provider is registered
+  nextTick(() => {
+    if (editor && savedPosition && !isDisposing.value) {
+      editor.setPosition(savedPosition);
+      if (savedSelection) {
+        editor.setSelection(savedSelection);
+      }
+    }
+  });
 };
 
 // --- Actions ---
@@ -570,6 +627,10 @@ const registerLogchefQLCompletionProvider = (): MonacoDisposable | null => {
   return monaco.languages.registerCompletionItemProvider("logchefql", {
     provideCompletionItems: async (model, position) => {
       const wordInfo = model.getWordUntilPosition(position);
+
+      // Save cursor position for reliable restoration
+      const currentPosition = position.clone();
+
       const range: MonacoRange = {
         startLineNumber: position.lineNumber,
         endLineNumber: position.lineNumber,
@@ -590,6 +651,13 @@ const registerLogchefQLCompletionProvider = (): MonacoDisposable | null => {
 
       let suggestions: MonacoCompletionItem[] = [];
       let incomplete = false;
+
+      // Handle "and" operator specifically
+      if (textBeforeCursor.trim().endsWith('and')) {
+        // Don't trigger completion after 'and' unless there's at least one more character
+        // This helps prevent cursor position issues
+        return { suggestions: [], incomplete: false };
+      }
 
       if (parser.state === LogchefQLState.KEY ||
         parser.state === LogchefQLState.INITIAL ||
@@ -621,6 +689,7 @@ const registerLogchefQLCompletionProvider = (): MonacoDisposable | null => {
 
       return { suggestions, incomplete };
     },
+    // Control trigger characters more precisely
     triggerCharacters: ["=", "!", ">", "<", "~", " ", ".", '"', "'", "("]
   });
 };
@@ -910,68 +979,73 @@ const handleNewQueryClick = () => {
 
 <style scoped>
 .query-editor {
-  display: flex;
-  flex-direction: column;
-}
-
-.editor-container {
-  background-color: hsl(var(--card));
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-  min-height: 45px;
-  /* Default min height */
   position: relative;
-  /* Crucial for ::before positioning */
+  height: 100%;
+  width: 100%;
 }
 
-/* NEW: CSS Placeholder Implementation */
-.editor-container.is-empty::before {
-  content: attr(data-placeholder);
-  /* Read placeholder text from data attribute */
-  position: absolute;
-  top: 8px;
-  /* Adjust to match editor's top padding */
-  left: 5px;
-  /* Adjust to match Monaco's text starting position */
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  /* Match editor font */
-  font-size: 14px;
-  /* Match editor font size */
-  color: hsl(var(--muted-foreground));
-  opacity: 0.6;
-  pointer-events: none;
-  /* Allow clicks to pass through */
-  white-space: pre-wrap;
-  /* Allow multiline placeholders */
-  padding-right: 10px;
-  /* Prevent text overlapping with cursor */
-  z-index: 1;
-  /* Ensure it's above the editor background but below text */
-  max-width: calc(100% - 10px);
-  /* Prevent overflow */
+/* Wrapper to handle border-radius and overflow together */
+.editor-wrapper {
+  position: relative;
+  border-radius: 0 0 6px 6px;
+  border: 1px solid hsl(var(--border));
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  overflow: hidden;
 }
 
-/* Ensure editor itself is positioned correctly within container */
-.editor-container> :deep(.monaco-editor-container) {
-  position: absolute;
-  inset: 0;
+.editor-wrapper:hover:not(.is-focused) {
+  border-color: hsl(var(--border-hover));
+}
+
+/* Focus state - use box-shadow for a cleaner look that doesn't conflict */
+.editor-wrapper.is-focused {
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.3);
+}
+
+/* Clean editor container styling */
+.editor-container {
+  position: relative;
   width: 100%;
   height: 100%;
+  background-color: hsl(var(--card));
 }
 
-/* Ensure cursor visibility (especially when empty) */
-:deep(.monaco-editor .cursor) {
-  visibility: visible !important;
-  /* You might need blink animation if default doesn't work */
+/* Basic placeholder implementation */
+.editor-container.is-empty::before {
+  content: attr(data-placeholder);
+  color: hsl(var(--muted-foreground) / 0.8);
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  font-size: 13px;
+  pointer-events: none;
+  z-index: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-/* Shadcn focus styling */
-button:focus-visible {
-  outline: 2px solid hsl(var(--ring));
-  outline-offset: 2px;
-  border-radius: var(--radius);
+/* Adjust placeholder position in SQL mode with line numbers */
+.editor-container.is-empty[data-mode="clickhouse-sql"]::before {
+  left: 40px;
 }
 
-code {
-  font-family: inherit;
+/* Override Monaco's internal borders if any */
+:deep(.monaco-editor),
+:deep(.monaco-editor .overflow-guard) {
+  border: none !important;
+  outline: none !important;
+}
+
+/* Style just the margin/gutter */
+:deep(.monaco-editor .margin) {
+  border-radius: 0 0 0 5px;
+  padding-right: 8px;
+  background-color: hsl(var(--muted) / 0.05);
+}
+
+/* Make line numbers more visible */
+:deep(.monaco-editor .line-numbers) {
+  color: hsl(var(--muted-foreground) / 0.6);
+  font-size: 12px;
 }
 </style>

@@ -40,14 +40,14 @@ export function getDefaultMonacoOptions(): monaco.editor.IStandaloneEditorConstr
     "semanticHighlighting.enabled": true,
     automaticLayout: true, // Essential for responsive containers
     minimap: { enabled: false },
-    folding: false, // Keep folding off for LogchefQL default
-    lineNumbers: "off", // Keep line numbers off for LogchefQL default
+    folding: false, // Keep folding off for both modes
+    lineNumbers: "off", // Keep line numbers off for both modes
     glyphMargin: false,
     lineDecorationsWidth: 0,
     lineNumbersMinChars: 0, // Not needed if lineNumbers is off
     hideCursorInOverviewRuler: true,
     fixedOverflowWidgets: true, // Important for suggestion widgets
-    wordWrap: "off", // Default to off, enable per language if needed
+    wordWrap: "off", // Default to off for both modes
     // Force cursor options to be visible
     cursorBlinking: "phase",  // Use phase for a smoother blink
     cursorStyle: "line",       // Ensure line style for visibility
@@ -70,45 +70,44 @@ export function initMonacoSetup() {
   }
 
 
-  // Define themes - Adjusted rules based on refined tokens
+  // Define themes - Simplified to avoid styling issues
   monaco.editor.defineTheme("logchef-light", {
     base: "vs",
     inherit: true,
-    colors: {}, // Keep empty unless specific background/foreground needed
+    colors: {}, // Use default VS colors
     rules: [
-      { token: "logchefqlKey", foreground: "0451a5" }, // Same as identifier usually
-      { token: "logchefqlOperator", foreground: "000000" }, // Simple black for = != etc.
-      // logchefqlValue is intermediate, use NUMBER and STRING
+      { token: "logchefqlKey", foreground: "0451a5" },
+      { token: "logchefqlOperator", foreground: "000000" },
       { token: "number", foreground: "098658" },
       { token: "string", foreground: "a31515" },
-      { token: "punctuation", foreground: "000000" }, // Brackets, quotes
+      { token: "punctuation", foreground: "000000" },
       // ClickHouse specific (or general SQL)
-      { token: "keyword", foreground: "0000ff" }, // SELECT, FROM, WHERE
-      { token: "identifier", foreground: "001080" }, // Table/column names
-      { token: "operator", foreground: "000000" }, // SQL operators like AND, OR
+      { token: "keyword", foreground: "0000ff" },
+      { token: "identifier", foreground: "001080" },
+      { token: "operator", foreground: "000000" },
       { token: "comment", foreground: "008000" },
-      { token: "function", foreground: "795E26" }, // Add function token style
-      { token: "type", foreground: "267f99" }, // Data types
+      { token: "function", foreground: "795E26" },
+      { token: "type", foreground: "267f99" },
     ],
   });
 
   monaco.editor.defineTheme("logchef-dark", {
     base: "vs-dark",
     inherit: true,
-    colors: {},
+    colors: {}, // Use default VS Dark colors
     rules: [
-      { token: "logchefqlKey", foreground: "9cdcfe" }, // Same as identifier
-      { token: "logchefqlOperator", foreground: "d4d4d4" }, // White/grey for = !=
+      { token: "logchefqlKey", foreground: "9cdcfe" },
+      { token: "logchefqlOperator", foreground: "d4d4d4" },
       { token: "number", foreground: "b5cea8" },
       { token: "string", foreground: "ce9178" },
-      { token: "punctuation", foreground: "d4d4d4" }, // Brackets, quotes
+      { token: "punctuation", foreground: "d4d4d4" },
       // ClickHouse specific (or general SQL)
-      { token: "keyword", foreground: "569cd6" }, // SELECT, FROM, WHERE
-      { token: "identifier", foreground: "9cdcfe" }, // Table/column names
-      { token: "operator", foreground: "d4d4d4" }, // SQL operators like AND, OR
+      { token: "keyword", foreground: "569cd6" },
+      { token: "identifier", foreground: "9cdcfe" },
+      { token: "operator", foreground: "d4d4d4" },
       { token: "comment", foreground: "6a9955" },
-      { token: "function", foreground: "dcdcaa" }, // Add function token style
-      { token: "type", foreground: "4ec9b0" }, // Data types
+      { token: "function", foreground: "dcdcaa" },
+      { token: "type", foreground: "4ec9b0" },
     ],
   });
 
