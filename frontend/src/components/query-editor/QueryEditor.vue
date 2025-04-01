@@ -15,9 +15,19 @@
         <Tabs :model-value="props.activeMode"
           @update:model-value="(value: string | number) => $emit('update:activeMode', asEditorMode(value))"
           class="w-auto">
-          <TabsList class="h-8">
-            <TabsTrigger value="logchefql">LogchefQL</TabsTrigger>
-            <TabsTrigger value="clickhouse-sql">SQL</TabsTrigger>
+          <TabsList class="grid grid-cols-2 w-fit">
+            <TabsTrigger value="logchefql">
+              <div class="flex-fix">
+                <Search class="w-4 h-4" />
+                <span>Search</span>
+              </div>
+            </TabsTrigger>
+            <TabsTrigger value="clickhouse-sql">
+              <div class="flex-fix">
+                <Code2 class="w-4 h-4" />
+                <span>SQL</span>
+              </div>
+            </TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -130,7 +140,7 @@ import { ref, computed, shallowRef, watch, onMounted, onBeforeUnmount, nextTick,
 import * as monaco from "monaco-editor";
 import { useDark } from "@vueuse/core";
 import { VueMonacoEditor } from "@guolao/vue-monaco-editor";
-import { HelpCircle, PanelRightOpen, PanelRightClose, AlertCircle, XCircle, FileEdit, FilePlus2 } from "lucide-vue-next";
+import { HelpCircle, PanelRightOpen, PanelRightClose, AlertCircle, XCircle, FileEdit, FilePlus2, Search, Code2 } from "lucide-vue-next";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import SavedQueriesDropdown from '@/components/saved-queries/SavedQueriesDropdown.vue';
@@ -1047,5 +1057,32 @@ const handleNewQueryClick = () => {
 :deep(.monaco-editor .line-numbers) {
   color: hsl(var(--muted-foreground) / 0.6);
   font-size: 12px;
+}
+
+/* Force flex layout for tab triggers */
+:deep(.TabsTrigger) {
+  display: flex !important;
+  align-items: center !important;
+}
+
+.flex-fix {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  width: 100%;
+  justify-content: center;
+}
+
+.flex-fix svg {
+  margin-right: 6px;
+}
+
+/* Force flex layout for tab triggers */
+:deep(.tab) {
+  display: block !important;
+}
+
+:deep([role="tab"]) {
+  padding: 6px 12px !important;
 }
 </style>
