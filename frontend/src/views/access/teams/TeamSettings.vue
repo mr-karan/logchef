@@ -59,12 +59,12 @@ const teamSources = computed(() => teamsStore.getTeamSourcesByTeamId(Number(rout
 
 // Combined loading state
 const isSaving = computed(() => {
-  const teamId = Number(route.params.id)
-  return teamsStore.isLoadingOperation('updateTeam-' + teamId) ||
-         teamsStore.isLoadingOperation('addTeamMember-' + teamId) ||
-         teamsStore.isLoadingOperation('removeTeamMember-' + teamId) ||
-         teamsStore.isLoadingOperation('addTeamSource-' + teamId) ||
-         teamsStore.isLoadingOperation('removeTeamSource-' + teamId);
+    const teamId = Number(route.params.id)
+    return teamsStore.isLoadingOperation('updateTeam-' + teamId) ||
+        teamsStore.isLoadingOperation('addTeamMember-' + teamId) ||
+        teamsStore.isLoadingOperation('removeTeamMember-' + teamId) ||
+        teamsStore.isLoadingOperation('addTeamSource-' + teamId) ||
+        teamsStore.isLoadingOperation('removeTeamSource-' + teamId);
 })
 
 // Form state - use team data when available
@@ -81,15 +81,15 @@ const selectedSourceId = ref('')
 
 // Sync form data when team changes
 watch(() => team.value, (newTeam) => {
-  if (newTeam) {
-    name.value = newTeam.name || ''
-    description.value = newTeam.description || ''
-  }
+    if (newTeam) {
+        name.value = newTeam.name || ''
+        description.value = newTeam.description || ''
+    }
 }, { immediate: true })
 
 // Function to refresh teams list
 const refreshTeams = async () => {
-  await teamsStore.loadTeams(true) // Force reload
+    await teamsStore.loadTeams(true) // Force reload
 }
 
 // Compute available users (users not in team)
@@ -121,7 +121,7 @@ watch(showAddSourceDialog, async (isOpen) => {
 // Simplified loading functions that rely on the store
 const loadTeam = async () => {
     const teamId = Number(route.params.id)
-    
+
     if (isNaN(teamId) || teamId <= 0) {
         toast({
             title: 'Error',
@@ -130,25 +130,25 @@ const loadTeam = async () => {
         })
         return
     }
-    
+
     await teamsStore.getTeam(teamId)
     // Store automatically handles errors and success
 }
 
 const loadTeamMembers = async () => {
     const teamId = Number(route.params.id)
-    
+
     if (isNaN(teamId) || teamId <= 0) return
-    
+
     await teamsStore.listTeamMembers(teamId)
     // Store automatically handles errors and success
 }
 
 const loadTeamSources = async () => {
     const teamId = Number(route.params.id)
-    
+
     if (isNaN(teamId) || teamId <= 0) return
-    
+
     await teamsStore.listTeamSources(teamId)
     // Store automatically handles errors and success
 }
@@ -173,7 +173,7 @@ const handleAddMember = async () => {
         user_id: Number(selectedUserId.value),
         role: newMemberRole.value as 'admin' | 'member',
     })
-    
+
     // Reset form
     selectedUserId.value = ''
     newMemberRole.value = 'member'
@@ -193,9 +193,9 @@ const handleAddSource = async () => {
 
     // Make sure we're on the sources tab
     activeTab.value = 'sources'
-    
+
     await teamsStore.addTeamSource(team.value.id, Number(selectedSourceId.value))
-    
+
     // Reset form
     selectedSourceId.value = ''
     showAddSourceDialog.value = false
@@ -207,14 +207,14 @@ const handleRemoveSource = async (sourceId: string | number) => {
 
     // Make sure we're on the sources tab
     activeTab.value = 'sources'
-    
+
     await teamsStore.removeTeamSource(team.value.id, Number(sourceId))
     // Store automatically updates the sources list
 }
 
 onMounted(async () => {
     const teamId = Number(route.params.id)
-    
+
     if (isNaN(teamId) || teamId <= 0) {
         toast({
             title: 'Error',
@@ -223,15 +223,15 @@ onMounted(async () => {
         })
         return
     }
-    
+
     try {
-        // Load all data in parallel for better performance
+        // Load all data in parallel for performance
         await Promise.all([
             usersStore.loadUsers(),
             sourcesStore.loadSources(),
-            loadTeam(),
-            loadTeamMembers(),
-            loadTeamSources()
+            teamsStore.getTeam(teamId),
+            teamsStore.listTeamMembers(teamId),
+            teamsStore.listTeamSources(teamId)
         ])
     } catch (error) {
         // Store handles individual API errors automatically
@@ -352,7 +352,7 @@ onMounted(async () => {
                                             <div class="flex flex-col">
                                                 <span>{{ member.email }}</span>
                                                 <span class="text-sm text-muted-foreground">{{ member.full_name
-                                                    }}</span>
+                                                }}</span>
                                             </div>
                                         </TableCell>
                                         <TableCell class="capitalize">{{ member.role }}</TableCell>

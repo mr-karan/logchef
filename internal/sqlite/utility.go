@@ -66,7 +66,15 @@ func isUniqueConstraintError(err error, table, column string) bool {
 // handleNotFoundError returns a standardized error when a record is not found
 func handleNotFoundError(err error, prefix string) error {
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("%s: not found", prefix)
+		// Return the appropriate error type based on the prefix
+		switch {
+		case strings.Contains(prefix, "user"):
+			return models.ErrUserNotFound
+		case strings.Contains(prefix, "team"):
+			return models.ErrTeamNotFound
+		default:
+			return fmt.Errorf("%s: not found", prefix)
+		}
 	}
 	return fmt.Errorf("%s: %w", prefix, err)
 }

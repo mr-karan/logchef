@@ -1,5 +1,7 @@
 package models
 
+import "errors"
+
 // ErrorType represents the type of error that occurred
 type ErrorType string
 
@@ -42,3 +44,13 @@ func NewErrorResponse(message string, errorType ErrorType, details any) ErrorRes
 		Details: details,
 	}
 }
+
+// Error definitions
+var (
+	// ErrUserNotFound is returned when a user is not found
+	ErrUserNotFound = errors.New("user not found")
+	// ErrTeamNotFound is returned when a team is not found
+	ErrTeamNotFound = errors.New("team not found")
+	// ErrNotFound is returned when a resource is not found
+	ErrNotFound = errors.New("not found")
+)

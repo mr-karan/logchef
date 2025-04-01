@@ -41,6 +41,18 @@ func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
 	// Set the auto-generated ID
 	source.ID = models.SourceID(id)
 
+	// Get the source to fetch the timestamps
+	sourceRow, err := db.queries.GetSource(ctx, int64(id))
+	if err != nil {
+		db.log.Error("failed to get created source", "error", err)
+		return fmt.Errorf("error getting created source: %w", err)
+	}
+
+	// Update the source with the database values
+	newSource := mapSourceRowToModel(&sourceRow)
+	source.CreatedAt = newSource.CreatedAt
+	source.UpdatedAt = newSource.UpdatedAt
+
 	db.log.Debug("source created", "source_id", source.ID, "name", source.Name)
 	return nil
 }
@@ -67,7 +79,11 @@ func (db *DB) GetSourceByName(ctx context.Context, database, tableName string) (
 		TableName: tableName,
 	})
 	if err != nil {
-		return nil, handleNotFoundError(err, "error getting source by name")
+		if err == sql.ErrNoRows {
+			return nil, models.ErrNotFound
+		}
+		db.log.Error("failed to get source by name", "error", err, "database", database, "table", tableName)
+		return nil, fmt.Errorf("error getting source by name: %w", err)
 	}
 
 	source := mapSourceRowToModel(&sourceRow)
