@@ -119,22 +119,32 @@ export function useQuery() {
     const currentMode = activeMode.value;
     if (newMode === currentMode) return;
 
-    // When switching TO SQL from LogchefQL, try to translate
+    // When switching TO SQL from LogchefQL
     if (newMode === 'sql' && currentMode === 'logchefql') {
-      if (logchefQuery.value) {
-        // If there's LogchefQL content, try to translate it
+      // Store original SQL query before potentially overwriting it
+      const originalSql = sqlQuery.value;
+
+      // Check if we have LogchefQL content that can be translated
+      if (logchefQuery.value.trim()) {
+        // If there's LogchefQL content, always translate it
         const result = translateLogchefQLToSQL(logchefQuery.value);
 
         if (result.success) {
+          // Always set SQL when logchefQL exists and translation succeeds
           sqlQuery.value = result.sql;
+          console.log('Translated LogchefQL to SQL:', result.sql);
         } else {
-          // If translation fails, generate default SQL
-          generateAndSetDefaultSQL();
+          // If translation fails, fall back to original SQL or default
+          console.warn('Failed to translate LogchefQL:', result.error);
+          if (!originalSql) {
+            generateAndSetDefaultSQL();
+          }
         }
-      } else {
-        // No LogchefQL content, generate default SQL
+      } else if (!originalSql) {
+        // No LogchefQL content AND no original SQL, generate default
         generateAndSetDefaultSQL();
       }
+      // If LogchefQL is empty but we have originalSql, keep the existing SQL
     }
 
     // Update mode in store
