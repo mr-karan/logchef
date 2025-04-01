@@ -129,7 +129,11 @@ DELETE FROM teams WHERE id = ?;
 
 -- name: ListTeams :many
 -- List all teams
-SELECT * FROM teams ORDER BY created_at DESC;
+SELECT t.*, COUNT(tm.user_id) as member_count
+FROM teams t
+LEFT JOIN team_members tm ON t.id = tm.team_id
+GROUP BY t.id
+ORDER BY t.created_at DESC;
 
 -- Team Members
 
