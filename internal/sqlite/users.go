@@ -48,6 +48,18 @@ func (db *DB) CreateUser(ctx context.Context, user *models.User) error {
 	// Set the auto-generated ID
 	user.ID = models.UserID(id)
 
+	// Get the user to fetch the timestamps
+	userRow, err := db.queries.GetUser(ctx, int64(id))
+	if err != nil {
+		db.log.Error("failed to get created user", "error", err)
+		return fmt.Errorf("error getting created user: %w", err)
+	}
+
+	// Update the user with the database values
+	newUser := mapUserRowToModel(userRow)
+	user.CreatedAt = newUser.CreatedAt
+	user.UpdatedAt = newUser.UpdatedAt
+
 	return nil
 }
 
@@ -186,5 +198,9 @@ func mapUserRowToModel(row sqlc.User) *models.User {
 		Status:       models.UserStatus(row.Status),
 		LastLoginAt:  lastLoginAt,
 		LastActiveAt: lastActiveAt,
+		Timestamps: models.Timestamps{
+			CreatedAt: row.CreatedAt,
+			UpdatedAt: row.UpdatedAt,
+		},
 	}
 }

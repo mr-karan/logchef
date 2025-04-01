@@ -388,3 +388,24 @@ func isValidSourceName(name string) bool {
 func isAllowedInSourceName(r rune) bool {
 	return isLetter(r) || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == ' '
 }
+
+// ValidateSourceConfig validates the source configuration by checking if the source exists
+// and if it has the required fields
+func (s *Service) ValidateSourceConfig(ctx context.Context, source *models.Source) error {
+	// Check if source already exists
+	existingSource, err := s.db.GetSourceByName(ctx, source.Connection.Database, source.Connection.TableName)
+	if err != nil {
+		// If source doesn't exist, that's fine for validation
+		if err == models.ErrNotFound {
+			return nil
+		}
+		return fmt.Errorf("error getting source by name: %w", err)
+	}
+
+	// If source exists and we're not in auto-create mode, return error
+	if existingSource != nil && !source.MetaIsAutoCreated {
+		return fmt.Errorf("source with database %s and table %s already exists", source.Connection.Database, source.Connection.TableName)
+	}
+
+	return nil
+}

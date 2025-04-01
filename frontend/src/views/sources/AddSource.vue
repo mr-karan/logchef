@@ -446,11 +446,6 @@ const submitForm = async () => {
                                                         :placeholder="generateSchema()" class="font-mono text-sm"
                                                         rows="20" />
                                                 </div>
-
-                                                <DialogFooter>
-                                                    <Button variant="outline"
-                                                        @click="isEditingSchema = false">Close</Button>
-                                                </DialogFooter>
                                             </DialogContent>
                                         </Dialog>
                                     </CardContent>

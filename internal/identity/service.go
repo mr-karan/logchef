@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/pkg/models"
@@ -22,6 +21,11 @@ var (
 	// ErrTeamNotFound is returned when a team is not found
 	ErrTeamNotFound = errors.New("team not found")
 )
+
+// IsNotFoundError checks if the error is a not found error
+func IsNotFoundError(err error) bool {
+	return errors.Is(err, models.ErrUserNotFound) || errors.Is(err, models.ErrTeamNotFound) || errors.Is(err, sql.ErrNoRows)
+}
 
 // Service handles operations related to users and teams
 type Service struct {
@@ -55,7 +59,7 @@ func (s *Service) GetUser(ctx context.Context, id models.UserID) (*models.User, 
 func (s *Service) CreateUser(ctx context.Context, email, fullName string, role models.UserRole) (*models.User, error) {
 	// Check if user already exists
 	existingUser, err := s.db.GetUserByEmail(ctx, email)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !IsNotFoundError(err) {
 		s.log.Error("error checking if user exists", "error", err)
 		return nil, fmt.Errorf("error checking if user exists: %w", err)
 	}
@@ -178,16 +182,9 @@ func (s *Service) InitAdminUsers(ctx context.Context, adminEmails []string) erro
 	for _, email := range adminEmails {
 		// Check if user already exists
 		existing, err := s.db.GetUserByEmail(ctx, email)
-		if err != nil {
-			// If the error contains "not found", treat it as a non-existing user, not an error
-			if strings.Contains(err.Error(), "not found") {
-				// User doesn't exist, will create below
-				existing = nil
-			} else {
-				// This is a real error, like DB connection issue
-				s.log.Error("failed to check existing admin user", "email", email, "error", err)
-				return fmt.Errorf("error checking existing admin user: %w", err)
-			}
+		if err != nil && !IsNotFoundError(err) {
+			s.log.Error("failed to check existing admin user", "email", email, "error", err)
+			return fmt.Errorf("error checking existing admin user: %w", err)
 		}
 
 		if existing != nil {
@@ -257,7 +254,7 @@ func (s *Service) GetTeam(ctx context.Context, id models.TeamID) (*models.Team, 
 func (s *Service) CreateTeam(ctx context.Context, name, description string) (*models.Team, error) {
 	// Check if team already exists
 	existingTeam, err := s.db.GetTeamByName(ctx, name)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !IsNotFoundError(err) {
 		s.log.Error("error checking if team exists", "error", err)
 		return nil, fmt.Errorf("error checking if team exists: %w", err)
 	}
@@ -335,24 +332,13 @@ func (s *Service) DeleteTeam(ctx context.Context, teamID models.TeamID) error {
 
 // Team Members
 
-// ListTeamMembers returns all members of a team
+// ListTeamMembers lists all members of a team
 func (s *Service) ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error) {
-	// Validate team exists
-	team, err := s.db.GetTeam(ctx, teamID)
+	// Get team members with details
+	members, err := s.db.ListTeamMembersWithDetails(ctx, teamID)
 	if err != nil {
-		return nil, fmt.Errorf("error getting team: %w", err)
-	}
-	if team == nil {
-		return nil, ErrTeamNotFound
-	}
-
-	// Get team members
-	members, err := s.db.ListTeamMembers(ctx, teamID)
-	if err != nil {
-		s.log.Error("failed to list team members", "team_id", teamID, "error", err)
 		return nil, fmt.Errorf("error listing team members: %w", err)
 	}
-
 	return members, nil
 }
 
@@ -406,26 +392,26 @@ func (s *Service) AddTeamMember(ctx context.Context, teamID models.TeamID, userI
 	}
 
 	// Validate team exists
-	team, err := s.db.GetTeam(ctx, models.TeamID(teamID))
+	_, err := s.db.GetTeam(ctx, models.TeamID(teamID))
 	if err != nil {
+		if IsNotFoundError(err) {
+			return models.ErrTeamNotFound
+		}
 		return fmt.Errorf("error getting team: %w", err)
-	}
-	if team == nil {
-		return ErrTeamNotFound
 	}
 
 	// Validate user exists
-	user, err := s.db.GetUser(ctx, userID)
+	_, err = s.db.GetUser(ctx, userID)
 	if err != nil {
+		if IsNotFoundError(err) {
+			return models.ErrUserNotFound
+		}
 		return fmt.Errorf("error getting user: %w", err)
-	}
-	if user == nil {
-		return ErrUserNotFound
 	}
 
 	// Check if user is already a member
 	member, err := s.db.GetTeamMember(ctx, teamID, userID)
-	if err != nil {
+	if err != nil && !IsNotFoundError(err) {
 		s.log.Error("failed to check team member", "team_id", teamID, "user_id", userID, "error", err)
 		return fmt.Errorf("error checking team member: %w", err)
 	}
