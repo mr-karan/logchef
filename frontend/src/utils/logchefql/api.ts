@@ -130,8 +130,8 @@ export function validateLogchefQL(query: string): boolean {
  * @param query The LogchefQL query string
  * @returns Object with validation result and error details
  */
-export function validateLogchefQLWithDetails(query: string): { 
-  valid: boolean; 
+export function validateLogchefQLWithDetails(query: string): {
+  valid: boolean;
   error?: string;
   errorPosition?: { line: number; column: number };
 } {
@@ -139,33 +139,34 @@ export function validateLogchefQLWithDetails(query: string): {
   if (!query || query.trim() === "") {
     return { valid: true };
   }
-  
+
+  const parser = new LogchefQLParser();
+
   try {
-    const parser = new LogchefQLParser();
     // Use raiseError=true to catch parsing issues
     parser.parse(query, true);
-    
+
     // Additional check: ensure the parser produced a root node if the query wasn't empty
     if (!parser.root && query.trim() !== "") {
-      return { 
-        valid: false, 
+      return {
+        valid: false,
         error: "Query parsed but did not produce a valid expression tree"
       };
     }
-    
+
     return { valid: true };
   } catch (error: any) {
     // Extract position information if available
     let errorPosition;
-    if (error.errno && parser.char) {
+    if (typeof error === 'object' && error !== null && 'errno' in error && parser && parser.char) {
       errorPosition = {
         line: parser.char.line,
         column: parser.char.linePos
       };
     }
-    
-    return { 
-      valid: false, 
+
+    return {
+      valid: false,
       error: error.message || "Invalid LogchefQL syntax",
       errorPosition
     };
@@ -178,7 +179,15 @@ export function validateLogchefQLWithDetails(query: string): {
  * @param query The LogchefQL query string.
  * @returns Object containing success status, SQL conditions, or an error message.
  */
-export function parseAndTranslateLogchefQL(query: string): { success: boolean; sql?: string; error?: string } {
+export function parseAndTranslateLogchefQL(query: string): {
+  success: boolean;
+  sql?: string;
+  error?: string;
+  meta?: {
+    fieldsUsed: string[];
+    operations?: ('filter' | 'sort' | 'limit')[];
+  };
+} {
   // Handle empty query explicitly
   if (!query || query.trim() === "") {
     return { success: true, sql: "" };
@@ -195,8 +204,27 @@ export function parseAndTranslateLogchefQL(query: string): { success: boolean; s
       return { success: true, sql: "" };
     }
 
+    // Extract fieldsUsed from the parser
+    const fieldsUsed: string[] = [];
+
+    // Check if parser has typedChars property before accessing it
+    if (Array.isArray(parser.typedChars)) {
+      parser.typedChars.forEach(([char, type]) => {
+        if (type === 'logchefqlKey' && char && char.value && !fieldsUsed.includes(char.value)) {
+          fieldsUsed.push(char.value);
+        }
+      });
+    }
+
     const sqlConditions = translateToSQLConditions(parser.root);
-    return { success: true, sql: sqlConditions };
+    return {
+      success: true,
+      sql: sqlConditions,
+      meta: {
+        fieldsUsed,
+        operations: sqlConditions ? ['filter'] : []
+      }
+    };
   } catch (error: any) {
     console.error("Error parsing or translating LogchefQL:", error);
     return { success: false, error: error?.message || "Failed to parse LogchefQL" };

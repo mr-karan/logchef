@@ -95,6 +95,9 @@
                 <div><code class="bg-muted px-1 rounded">GROUP BY user ORDER BY count() DESC</code></div>
                 <div class="pt-1"><em>Time range & limit applied if not specified. Use standard ClickHouse SQL.</em>
                 </div>
+                <div class="pt-1 text-xs text-amber-500/80"><em>Note: Custom/complex SQL queries won't auto-update with
+                    time
+                    range changes.</em></div>
               </div>
             </div>
           </HoverCardContent>
@@ -141,6 +144,7 @@ import { Parser as LogchefQLParser, State as LogchefQLState, Operator as Logchef
 import { validateLogchefQL } from "@/utils/logchefql/api"; // Simpler validation import
 import { validateSQL, SQL_KEYWORDS, CLICKHOUSE_FUNCTIONS, SQL_TYPES } from "@/utils/clickhouse-sql";
 import { useExploreStore } from '@/stores/explore';
+import { QueryService } from '@/services/QueryService';
 // Keep other necessary imports like types...
 // --- Types ---
 type EditorMode = "logchefql" | "clickhouse-sql";
@@ -418,7 +422,7 @@ const submitQuery = () => {
         isValid = validateLogchefQL(currentContent);
         if (!isValid) validationError.value = "Invalid LogchefQL syntax.";
       } else {
-        isValid = validateSQL(currentContent); // Assuming validateSQL returns boolean
+        isValid = QueryService.validateSQL(currentContent);
         if (!isValid) validationError.value = "Invalid SQL syntax (e.g., missing SELECT/FROM or unbalanced parentheses).";
       }
     }
@@ -641,6 +645,7 @@ const registerSQLCompletionProvider = (): MonacoDisposable | null => {
       const textBeforeCursor = model.getValueInRange(lineStartToPosition);
       let suggestions: MonacoCompletionItem[] = [];
 
+      // Add table name suggestion after FROM
       if (/\bFROM\s+$/i.test(textBeforeCursor) && props.tableName) {
         suggestions.push({
           label: props.tableName,
@@ -651,8 +656,8 @@ const registerSQLCompletionProvider = (): MonacoDisposable | null => {
         });
       }
 
-      if (fieldNames.value.length > 0 &&
-        (/\bSELECT\s+(?:[\w,\s*]+\s+)?$|\bWHERE\s+(?:.+?\s+)?$/i.test(textBeforeCursor))) {
+      // Always add field name suggestions for SQL queries
+      if (fieldNames.value.length > 0) {
         suggestions = suggestions.concat(
           fieldNames.value.map(field => ({
             label: field,
@@ -676,7 +681,8 @@ const registerSQLCompletionProvider = (): MonacoDisposable | null => {
 
       return { suggestions };
     },
-    triggerCharacters: [" ", "\n", ".", "(", ","]
+    // Include more trigger characters for better responsiveness
+    triggerCharacters: [" ", "\n", ".", "(", ",", "=", ">", "<", "!"]
   });
 };
 

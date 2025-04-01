@@ -70,6 +70,19 @@ export const SQL_KEYWORDS = [
   "TOP",
   "SAMPLE",
   "USING",
+  "FORMAT",
+  "JSON",
+  "TabSeparated",
+  "CSV",
+  "TSV",
+  "INSERT",
+  "VALUES",
+  "UPDATE",
+  "DELETE",
+  "CREATE",
+  "DROP",
+  "ALTER",
+  "TABLE",
 ];
 
 // Common ClickHouse data types
@@ -89,18 +102,29 @@ export const SQL_TYPES = [
   "Float32",
   "Float64",
   "Decimal",
+  "Decimal32",
+  "Decimal64",
+  "Decimal128",
+  "Decimal256",
+  "Bool",
   "String",
   "FixedString",
   "UUID",
   "Date",
+  "Date32",
   "DateTime",
   "DateTime64",
-  "IPv4",
-  "IPv6",
+  "Enum",
+  "Enum8",
+  "Enum16",
   "Array",
   "Tuple",
+  "Nested",
+  "Nullable",
+  "LowCardinality",
   "Map",
-  "Enum",
+  "Object",
+  "JSON"
 ];
 
 // Common ClickHouse functions for log analytics
@@ -163,6 +187,9 @@ export const CLICKHOUSE_FUNCTIONS = [
   "toRelativeDayNum",
   "toRelativeWeekNum",
   "toRelativeMonthNum",
+  "toMonday",
+  "toStartOfMinute",
+  "toStartOfFiveMinute",
 
   // String functions
   "position",
@@ -229,6 +256,22 @@ export const CLICKHOUSE_FUNCTIONS = [
   "arrayDistinct",
   "arrayEnumerate",
   "arrayUniq",
+  "tuple",
+
+  // Conversion functions
+  "toInt8",
+  "toInt16",
+  "toInt32",
+  "toInt64",
+  "toUInt8",
+  "toUInt16",
+  "toUInt32",
+  "toUInt64",
+  "toFloat32",
+  "toFloat64",
+  "toString",
+  "toYYYYMM",
+  "toYYYYMMDD",
 
   // Window functions
   "row_number",
@@ -249,36 +292,12 @@ export const CLICKHOUSE_FUNCTIONS = [
   "greatest",
   "least",
 
-  // Type conversion
-  "toInt8",
-  "toInt16",
-  "toInt32",
-  "toInt64",
-  "toInt128",
-  "toInt256",
-  "toUInt8",
-  "toUInt16",
-  "toUInt32",
-  "toUInt64",
-  "toUInt128",
-  "toUInt256",
-  "toFloat32",
-  "toFloat64",
-  "toDecimal32",
-  "toDecimal64",
-  "toDecimal128",
-  "toString",
-  "toFixedString",
-  "toDate32",
-  "toUUID",
-
-  // Formatting and display
-  "formatReadableSize",
-  "formatReadableTimeDelta",
-  "formatRow",
-  "formatBytes",
-  "bitmaskToList",
-  "formatDateTime",
+  // Dictionary functions
+  "dictGet",
+  "dictGetOrDefault",
+  "dictHas",
+  "dictGetHierarchy",
+  "dictIsIn",
 ];
 
 // Operators

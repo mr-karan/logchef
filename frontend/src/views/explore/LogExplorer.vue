@@ -33,15 +33,9 @@ import { formatSourceName } from '@/utils/format'
 import SaveQueryModal from '@/components/saved-queries/SaveQueryModal.vue'
 import QueryEditor from '@/components/query-editor/QueryEditor.vue'
 import { FieldSideBar } from '@/components/field-sidebar'
-import { SQLParser } from '@/utils/clickhouse-sql/ast'
-import { generateDefaultSqlQuery } from '@/utils/query-templates'
-import { QueryBuilder } from '@/utils/query-builder'
-import { useExploreUrlSync } from '@/composables/useExploreUrlSync'
 import type { ColumnDef } from '@tanstack/vue-table'
 import { getErrorMessage } from '@/api/types'
-import { useQueryExecution } from '@/composables/useQueryExecution'
 import { useSourceTeamManagement } from '@/composables/useSourceTeamManagement'
-import { useQueryMode } from '@/composables/useQueryMode'
 import { useSavedQueries } from '@/composables/useSavedQueries'
 import {
   Tooltip,
@@ -51,6 +45,9 @@ import {
 } from '@/components/ui/tooltip'
 import type { SaveQueryFormData } from '@/views/explore/types'
 import type { SavedTeamQuery } from '@/api/savedQueries'
+import { useExploreUrlSync } from '@/composables/useExploreUrlSync'
+import { useQuery } from '@/composables/useQuery'
+import type { EditorMode } from '@/views/explore/types'
 
 // Router and stores
 const router = useRouter()
@@ -63,12 +60,24 @@ const { isInitializing, initializationError: urlError, initializeFromUrl, syncUr
 
 // Composables
 const {
-  localQueryError,
+  // Query content
+  logchefQuery,
+  sqlQuery,
+  activeMode,
+
+  // State
+  queryError,
+  sqlWarnings,
+  isDirty,
   isExecutingQuery,
   canExecuteQuery,
-  isDirty,
-  triggerQueryExecution
-} = useQueryExecution()
+
+  // Actions
+  changeMode,
+  executeQuery,
+  handleTimeRangeUpdate,
+  handleLimitUpdate
+} = useQuery()
 
 const {
   isProcessingTeamChange,
@@ -85,12 +94,6 @@ const {
   handleTeamChange,
   handleSourceChange
 } = useSourceTeamManagement()
-
-const {
-  currentLogchefQuery,
-  currentSqlQuery,
-  handleModeChange
-} = useQueryMode()
 
 const {
   showSaveQueryModal,
@@ -160,9 +163,6 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
 // Basic state
 const showFieldsPanel = ref(false)
 const tableColumns = ref<ColumnDef<Record<string, any>>[]>([])
-const logchefQuery = ref('')
-const sqlQuery = ref('')
-const queryError = ref('')
 const queryEditorRef = ref()
 const isLoadingQuery = ref(false)
 const editQueryData = ref<SavedTeamQuery | null>(null)
@@ -248,7 +248,7 @@ const displayTimezone = computed(() =>
 
 
 // Combined error display
-const displayError = computed(() => localQueryError.value || exploreStore.error?.message)
+const displayError = computed(() => queryError.value || exploreStore.error?.message)
 
 // Watch for initialization completion to run initial query
 watch(isInitializing, async (initializing, prevInitializing) => {
@@ -323,7 +323,7 @@ watch(isInitializing, async (initializing, prevInitializing) => {
     // Now check if we can execute the query (either the one from URL or the loaded saved one)
     if (canExecuteQuery.value && (exploreStore.logchefqlCode || exploreStore.rawSql)) {
       console.log("Running initial query...")
-      await triggerQueryExecution()
+      await executeQuery()
     } else {
       console.log("Skipping initial query (missing requirements or no query content)")
     }
@@ -463,88 +463,30 @@ watch(
   { immediate: true }
 );
 
-// Watch for time range changes to update SQL query reactively
+// Watch time range changes and update query dirty state
 watch(
   () => exploreStore.timeRange,
-  (newTimeRange, oldTimeRange) => {
-    // Skip during initialization or if mode is not SQL
-    if (isInitializing.value || exploreStore.activeMode !== 'sql') {
-      return;
-    }
+  (newRange, oldRange) => {
+    if (!newRange || !oldRange) return;
+    if (JSON.stringify(newRange) === JSON.stringify(oldRange)) return;
 
-    // Ensure time range is valid and actually changed
-    if (!newTimeRange || !newTimeRange.start || !newTimeRange.end || !sourceDetails.value) {
-      console.warn("Skipping SQL time update: Invalid time range or missing source details.");
-      return;
-    }
-
-    // Simple check if dates changed (more robust check might be needed if CalendarDateTime objects are complex)
-    if (JSON.stringify(newTimeRange) === JSON.stringify(oldTimeRange)) {
-      return;
-    }
-
-    console.log("LogExplorer: Time range changed, updating SQL query display.");
-    const currentSql = exploreStore.rawSql;
-    const tsField = sourceDetails.value._meta_ts_field || 'timestamp';
-
-    // Attempt to parse the current SQL
-    const parsedQuery = SQLParser.parse(currentSql, tsField);
-
-    if (parsedQuery) {
-      try {
-        // Assert CalendarDateTime type
-        const startDateTime = newTimeRange.start as CalendarDateTime
-        const endDateTime = newTimeRange.end as CalendarDateTime
-
-        // IMPORTANT: Ensure we preserve the table name
-        // If the parsed query has an empty table name, set it from the source details
-        if (!parsedQuery.fromClause.table || parsedQuery.fromClause.table === '') {
-          console.log("SQL parser found empty table name, fixing with active source table name");
-
-          // Get the proper table name from source details
-          let tableName = activeSourceTableName.value;
-          if (!tableName && sourceDetails.value?.connection?.table_name) {
-            tableName = sourceDetails.value.connection.table_name;
-          }
-          if (!tableName && sourceDetails.value?.connection?.database) {
-            tableName = `${sourceDetails.value.connection.database}.vector_logs`;
-          }
-          if (!tableName) {
-            tableName = 'logs.vector_logs';
-          }
-
-          // Update the table name in the parsed query
-          parsedQuery.fromClause.table = tableName;
-        }
-
-        // Apply the new time range to the parsed AST
-        const updatedAst = SQLParser.applyTimeRange(parsedQuery, tsField, startDateTime, endDateTime);
-        const newSql = SQLParser.toSQL(updatedAst);
-
-        // Update the store's rawSql - QueryEditor will react to this change
-        exploreStore.setRawSql(newSql);
-
-      } catch (error) {
-        console.error("Error updating SQL query with new time range:", error);
-        // Optionally show a warning toast
-      }
-    } else {
-      console.warn("Could not parse existing SQL to update time range display. Generating default SQL instead.");
-
-      // If parsing fails, generate a new default SQL query with proper table name
-      const tableName = activeSourceTableName.value || 'logs.vector_logs';
-      const newSql = generateDefaultSqlQuery({
-        tableName,
-        timestampField: tsField,
-        timeRange: newTimeRange,
-        limit: exploreStore.limit
-      });
-
-      // Update the store's rawSql with the new default query
-      exploreStore.setRawSql(newSql);
-    }
+    // Use the query builder's handler for time range updates
+    // This will set isDirty and show a notification instead of updating SQL directly
+    handleTimeRangeUpdate();
   },
-  { deep: true } // Use deep watch for the timeRange object
+  { deep: true }
+);
+
+// Watch limit changes and update query dirty state
+watch(
+  () => exploreStore.limit,
+  (newLimit, oldLimit) => {
+    if (newLimit === oldLimit) return;
+
+    // Use the query builder's handler for limit updates
+    // This will set isDirty and show a notification instead of updating SQL directly
+    handleLimitUpdate();
+  }
 );
 
 // Function to copy current URL to clipboard
@@ -589,11 +531,11 @@ onMounted(async () => {
 
 // --- Event Handlers for QueryEditor --- START
 const updateLogchefqlValue = (newValue: string) => {
-  currentLogchefQuery.value = newValue;
+  logchefQuery.value = newValue;
 };
 
 const updateSqlValue = (newValue: string) => {
-  currentSqlQuery.value = newValue;
+  sqlQuery.value = newValue;
 };
 // --- Event Handlers for QueryEditor --- END
 
@@ -814,14 +756,15 @@ onBeforeUnmount(() => {
         <div class="px-4 py-3">
           <template v-if="currentSourceId && hasValidSource && exploreStore.timeRange">
             <div class="bg-card shadow-sm rounded-md overflow-hidden">
-              <QueryEditor ref="queryEditorRef" :source-id="currentSourceId" :team-id="currentTeamId ?? 0"
+              <QueryEditor ref="queryEditorRef" :sourceId="currentSourceId" :teamId="currentTeamId ?? 0"
                 :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
                 :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
-                :logchefqlValue="currentLogchefQuery" :sqlValue="currentSqlQuery"
-                @update:logchefqlValue="updateLogchefqlValue" @update:sqlValue="updateSqlValue"
+                :logchefqlValue="logchefQuery" :sqlValue="sqlQuery" @update:logchefqlValue="updateLogchefqlValue"
+                @update:sqlValue="updateSqlValue"
                 :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter LogchefQL query...' : 'Enter SQL query...'"
                 :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
-                :showFieldsPanel="showFieldsPanel" @submit="triggerQueryExecution" @update:activeMode="handleModeChange"
+                :showFieldsPanel="showFieldsPanel" @submit="executeQuery"
+                @update:activeMode="(mode) => changeMode(mode === 'logchefql' ? 'logchefql' : 'sql')"
                 @toggle-fields="showFieldsPanel = !showFieldsPanel" @select-saved-query="loadSavedQuery"
                 @save-query="handleSaveOrUpdateClick" class="border-0 border-b" />
             </div>
@@ -865,7 +808,7 @@ onBeforeUnmount(() => {
             <Button variant="default" class="h-9 px-4 flex items-center gap-2 shadow-sm" :class="{
               'bg-amber-500 hover:bg-amber-600 text-amber-foreground': isDirty && !isExecutingQuery,
               'bg-sky-500 hover:bg-sky-600 text-sky-foreground': isExecutingQuery
-            }" :disabled="isExecutingQuery || !canExecuteQuery" @click="triggerQueryExecution">
+            }" :disabled="isExecutingQuery || !canExecuteQuery" @click="executeQuery">
               <Play v-if="!isExecutingQuery" class="h-4 w-4" />
               <RefreshCw v-else class="h-4 w-4 animate-spin" />
               <span>{{ isExecutingQuery ? 'Running Query...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>
@@ -912,7 +855,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2)
-                  }}</strong>s
+                    }}</strong>s
                 </span>
               </span>
               <span v-if="exploreStore.queryStats?.bytes_read != null" class="flex items-center">
@@ -924,7 +867,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
-                  }}</strong> MB
+                    }}</strong> MB
                 </span>
               </span>
             </div>
@@ -990,7 +933,7 @@ onBeforeUnmount(() => {
                 <p class="text-sm text-muted-foreground max-w-md mb-4">
                   Enter a query or use the default, then click 'Run' to see logs.
                 </p>
-                <Button variant="outline" size="sm" @click="triggerQueryExecution"
+                <Button variant="outline" size="sm" @click="executeQuery"
                   class="border-primary/20 text-primary hover:bg-primary/5 hover:text-primary hover:border-primary/30">
                   <Play class="h-3.5 w-3.5 mr-1.5" />
                   Run default query

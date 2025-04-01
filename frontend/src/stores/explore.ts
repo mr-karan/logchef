@@ -17,8 +17,7 @@ import { now, getLocalTimeZone, CalendarDateTime } from "@internationalized/date
 import { useSourcesStore } from "./sources";
 import { useTeamsStore } from "@/stores/teams";
 import { useBaseStore } from "./base";
-import { QueryBuilder } from "@/utils/query-builder";
-import { generateDefaultSqlQuery, generateDefaultLogchefqlQuery } from "@/utils/query-templates";
+import { QueryService } from '@/services/QueryService'
 
 // Helper function to get formatted table name
 export function getFormattedTableName(source: any): string {
@@ -272,24 +271,30 @@ export const useExploreStore = defineStore("explore", () => {
     // Get timestamp field with fallback
     const timestampField = sourcesStore.currentSourceDetails?._meta_ts_field || 'timestamp';
 
-    // Generate default queries using the centralized utility
+    // Generate default queries using the QueryService
     if (state.data.value.activeMode === 'sql') {
-      // Generate SQL using the template utility
-      state.data.value.rawSql = generateDefaultSqlQuery({
+      // Generate default SQL
+      const result = QueryService.generateDefaultSQL({
         tableName,
-        timestampField,
+        tsField: timestampField,
         timeRange,
         limit: state.data.value.limit
       });
+
+      state.data.value.rawSql = result.success ? result.sql : '';
       state.data.value.logchefqlCode = ''; // Clear other mode
     } else {
-      // For LogchefQL, we usually start with an empty query
-      state.data.value.logchefqlCode = generateDefaultLogchefqlQuery({
+      // For LogchefQL, we start with an empty query
+      state.data.value.logchefqlCode = '';
+
+      // But generate a default SQL for the other mode
+      const result = QueryService.generateDefaultSQL({
+        tableName,
+        tsField: timestampField,
         timeRange,
-        // Optionally add common field if needed
-        // commonField: 'level',
-        // commonValue: 'info'
+        limit: state.data.value.limit
       });
+
       state.data.value.rawSql = ''; // Clear other mode
     }
 
@@ -354,25 +359,41 @@ export const useExploreStore = defineStore("explore", () => {
               return state.handleError({ status: "error", message: "Could not determine table name for source.", error_type: "ConfigurationError" }, operationKey);
             }
 
-            // Assuming QueryBuildOptions is NOT exported, construct options directly if needed by QueryBuilder
-            const buildResult = QueryBuilder.buildSqlFromLogchefQL({
+            // Use the new QueryService to prepare the query
+            const result = QueryService.translateLogchefQLToSQL({
               tableName: tableName,
               tsField: tsField,
-              startDateTime: timeRange.start as CalendarDateTime,
-              endDateTime: timeRange.end as CalendarDateTime,
+              timeRange: timeRange,
               limit: state.data.value.limit,
               logchefqlQuery: logchefqlQuery
             });
 
-            if (!buildResult.success) {
-                return state.handleError({ status: "error", message: buildResult.error || 'Failed to build SQL from LogchefQL', error_type: "BuildError" }, operationKey);
+            if (!result.success) {
+              return state.handleError({
+                status: "error",
+                message: result.error || 'Failed to build SQL from LogchefQL',
+                error_type: "BuildError"
+              }, operationKey);
             }
-            sqlToExecute = buildResult.sql;
+            sqlToExecute = result.sql;
           } else { // SQL mode
             sqlToExecute = rawSql;
             // Basic validation for SQL mode query presence
             if (!sqlToExecute.trim()) {
-                return state.handleError({ status: "error", message: `Cannot execute empty SQL query`, error_type: "ValidationError" }, operationKey);
+              return state.handleError({
+                status: "error",
+                message: `Cannot execute empty SQL query`,
+                error_type: "ValidationError"
+              }, operationKey);
+            }
+
+            // Optionally validate the SQL
+            if (!QueryService.validateSQL(sqlToExecute)) {
+              return state.handleError({
+                status: "error",
+                message: "Invalid SQL syntax",
+                error_type: "ValidationError"
+              }, operationKey);
             }
           }
         } catch (error: any) {
