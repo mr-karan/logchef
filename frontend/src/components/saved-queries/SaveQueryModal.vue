@@ -245,7 +245,7 @@ function prepareQueryContent(saveTimestamp: boolean): string {
     const simplifiedContent = {
       version: content.version || 1,
       sourceId: content.sourceId || currentSourceId.value,
-      timeRange: saveTimestamp.value ? { // Use .value here
+      timeRange: saveTimestamp ? { // Use the function parameter here
         absolute: {
           start: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.start) : Date.now() - 3600000,
           end: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.end) : Date.now()
