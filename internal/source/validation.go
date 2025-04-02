@@ -276,7 +276,7 @@ func (v *Validator) ValidateColumnTypes(ctx context.Context, client *clickhouse.
 		}
 	}
 
-	// If severity field is provided, check its type
+	// If severity field is provided (not empty), check its type
 	if severityField != "" {
 		sevQuery := fmt.Sprintf(`
 			SELECT type
