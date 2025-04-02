@@ -455,7 +455,7 @@ const saveDescription = 'Save your current query configuration for future use.'
 
         <!-- Save Timestamp Checkbox -->
         <div class="flex items-start space-x-3 space-y-0 rounded-md border p-4">
-          <Checkbox id="save_timestamp" v-model="saveTimestamp" />
+          <Checkbox id="save_timestamp" v-model:checked="saveTimestamp" />
           <div class="space-y-1 leading-none">
             <Label for="save_timestamp">Save current timestamp</Label>
             <p class="text-sm text-muted-foreground">
