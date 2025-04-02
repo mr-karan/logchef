@@ -245,13 +245,13 @@ function prepareQueryContent(saveTimestamp: boolean): string {
     const simplifiedContent = {
       version: content.version || 1,
       sourceId: content.sourceId || currentSourceId.value,
-      timeRange: saveTimestamp ? {
+      timeRange: saveTimestamp.value ? { // Use .value here
         absolute: {
           start: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.start) : Date.now() - 3600000,
           end: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.end) : Date.now()
         }
       } : null, // Set timeRange to null if saveTimestamp is false
-      limit: saveTimestamp ? exploreStore.limit : 100,
+      limit: exploreStore.limit, // Always save the current limit regardless of timestamp setting
       content: queryContent,
     };
 
