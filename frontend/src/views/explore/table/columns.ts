@@ -1,4 +1,4 @@
-import type { ColumnDef, Column } from "@tanstack/vue-table";
+import type { ColumnDef, Column, Row } from "@tanstack/vue-table";
 import { formatTimestamp } from "@/lib/utils";
 import { h } from "vue";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ interface ColumnWidthConfig {
 
 // Width configurations for each column type
 const COLUMN_WIDTH_CONFIG: Record<ColumnType, ColumnWidthConfig> = {
-  timestamp: { defaultWidth: 260, minWidth: 200, maxWidth: 400 },
+  timestamp: { defaultWidth: 260, minWidth: 160, maxWidth: 400 },
   severity: { defaultWidth: 120, minWidth: 80, maxWidth: 200 },
   message: { defaultWidth: 500, minWidth: 200, maxWidth: 1200 },
   default: { defaultWidth: 180, minWidth: 100, maxWidth: 600 }

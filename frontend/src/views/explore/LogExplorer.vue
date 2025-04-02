@@ -9,7 +9,9 @@ import { TOAST_DURATION } from '@/lib/constants'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -139,7 +141,8 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
       toast({
         title: 'Success',
         description: 'Query updated successfully.',
-        duration: TOAST_DURATION.SUCCESS
+        duration: TOAST_DURATION.SUCCESS,
+        variant: 'success'
       });
 
       // Optional: Refresh the list if needed, though store should be reactive
@@ -496,7 +499,8 @@ const copyUrlToClipboard = () => {
     toast({
       title: "URL Copied",
       description: "The shareable link has been copied to your clipboard.",
-      duration: TOAST_DURATION.INFO // Changed from SHORT to INFO (assuming INFO exists)
+      duration: TOAST_DURATION.INFO,
+      variant: "success"
     });
   } catch (error) {
     console.error("Failed to copy URL: ", error);
@@ -560,6 +564,7 @@ const handleSaveOrUpdateClick = async () => {
   if (!canSaveOrUpdateQuery.value) {
     toast({
       title: 'Cannot Save Query',
+      variant: 'destructive',
       description: 'Missing required fields (Team, Source, Query).',
       duration: TOAST_DURATION.WARNING
     });
@@ -642,9 +647,12 @@ onBeforeUnmount(() => {
             <SelectValue placeholder="Select team">{{ selectedTeamName }}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem v-for="team in availableTeams" :key="team.id" :value="team.id.toString()">
-              {{ team.name }}
-            </SelectItem>
+            <SelectGroup>
+              <SelectLabel>Teams</SelectLabel>
+              <SelectItem v-for="team in availableTeams" :key="team.id" :value="team.id.toString()">
+                {{ team.name }}
+              </SelectItem>
+            </SelectGroup>
           </SelectContent>
         </Select>
         <span class="text-sm text-muted-foreground italic">No sources in this team.</span>
@@ -682,9 +690,12 @@ onBeforeUnmount(() => {
             <SelectValue placeholder="Select team">{{ selectedTeamName }}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem v-for="team in availableTeams" :key="team.id" :value="team.id.toString()">
-              {{ team.name }}
-            </SelectItem>
+            <SelectGroup>
+              <SelectLabel>Teams</SelectLabel>
+              <SelectItem v-for="team in availableTeams" :key="team.id" :value="team.id.toString()">
+                {{ team.name }}
+              </SelectItem>
+            </SelectGroup>
           </SelectContent>
         </Select>
 
@@ -695,12 +706,15 @@ onBeforeUnmount(() => {
             <SelectValue placeholder="Select source">{{ selectedSourceName }}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem v-if="!currentTeamId" value="no-team" disabled>Select a team first</SelectItem>
-            <SelectItem v-else-if="availableSources.length === 0" value="no-sources" disabled>No sources available
-            </SelectItem>
-            <SelectItem v-for="source in availableSources" :key="source.id" :value="source.id.toString()">
-              {{ formatSourceName(source) }}
-            </SelectItem>
+            <SelectGroup>
+              <SelectLabel>Log Sources</SelectLabel>
+              <SelectItem v-if="!currentTeamId" value="no-team" disabled>Select a team first</SelectItem>
+              <SelectItem v-else-if="availableSources.length === 0" value="no-sources" disabled>No sources available
+              </SelectItem>
+              <SelectItem v-for="source in availableSources" :key="source.id" :value="source.id.toString()">
+                {{ formatSourceName(source) }}
+              </SelectItem>
+            </SelectGroup>
           </SelectContent>
         </Select>
       </div>
@@ -894,7 +908,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2)
-                    }}</strong>s
+                  }}</strong>s
                 </span>
               </span>
               <span v-if="exploreStore.queryStats?.bytes_read != null" class="flex items-center">
@@ -906,7 +920,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
-                    }}</strong> MB
+                  }}</strong> MB
                 </span>
               </span>
             </div>
