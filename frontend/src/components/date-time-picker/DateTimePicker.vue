@@ -8,13 +8,18 @@ import { Calendar } from '@/components/ui/calendar'
 import { CalendarIcon, Clock } from 'lucide-vue-next'
 import type { DateRange } from 'radix-vue'
 import { getLocalTimeZone, now, ZonedDateTime, toZoned, CalendarDateTime, type DateValue } from '@internationalized/date'
+import { cn } from '@/lib/utils'
 
 interface Props {
     modelValue?: DateRange | null
+    class?: string
+    disabled?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
-    modelValue: null
+    modelValue: null,
+    class: '',
+    disabled: false
 })
 
 const emit = defineEmits<{
@@ -280,118 +285,122 @@ const durationText = computed(() => {
 </script>
 
 <template>
-    <Popover v-model:open="showDatePicker">
-        <PopoverTrigger as-child>
-            <Button variant="outline" :class="[
-                'min-w-[200px] max-w-[420px]',
-                selectedQuickRange ? 'w-[200px]' : 'w-auto'
-            ]">
-                <div class="flex items-center">
-                    <CalendarIcon class="mr-2 h-4 w-4 flex-shrink-0" />
-                    <span>{{ selectedRangeText }}</span>
-                </div>
-            </Button>
-        </PopoverTrigger>
-        <PopoverContent class="w-[400px] p-4" align="start" side="bottom">
-            <div class="space-y-4">
-                <!-- Date/Time Inputs -->
+    <div :class="cn('flex transition-all', props.class)">
+        <Popover v-model:open="showDatePicker">
+            <PopoverTrigger as-child>
+                <Button variant="outline" :class="[
+                    'min-w-[200px] max-w-[420px]',
+                    selectedQuickRange ? 'w-[200px]' : 'w-auto',
+                    props.disabled ? 'opacity-50 cursor-not-allowed' : ''
+                ]" :disabled="props.disabled">
+                    <div class="flex items-center">
+                        <CalendarIcon class="mr-2 h-4 w-4 flex-shrink-0" />
+                        <span>{{ selectedRangeText }}</span>
+                    </div>
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent v-if="!props.disabled" class="w-[400px] p-4" align="start" side="bottom">
                 <div class="space-y-4">
-                    <!-- From -->
-                    <div class="space-y-2">
-                        <Label class="text-sm font-medium">From</Label>
-                        <div class="flex gap-2">
-                            <div class="relative flex-1">
-                                <Input v-model="draftState.start.date" class="pr-10 font-mono text-sm h-9"
-                                    placeholder="YYYY-MM-DD" @keydown="handleKeyDown" />
-                                <Popover v-model:open="showFromCalendar">
-                                    <PopoverTrigger as-child>
-                                        <Button variant="ghost" size="icon"
-                                            class="absolute right-0 top-0 h-full w-9 px-0 hover:bg-accent">
-                                            <CalendarIcon class="h-4 w-4" />
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent class="w-auto p-0" :side="'bottom'" :align="'end'">
-                                        <Calendar
-                                            :selected-date="dateRange.start !== undefined ? dateRange.start : null"
-                                            class="rounded-md border"
-                                            @update:model-value="date => handleCalendarUpdate('start', date)" />
-                                    </PopoverContent>
-                                </Popover>
+                    <!-- Date/Time Inputs -->
+                    <div class="space-y-4">
+                        <!-- From -->
+                        <div class="space-y-2">
+                            <Label class="text-sm font-medium">From</Label>
+                            <div class="flex gap-2">
+                                <div class="relative flex-1">
+                                    <Input v-model="draftState.start.date" class="pr-10 font-mono text-sm h-9"
+                                        placeholder="YYYY-MM-DD" @keydown="handleKeyDown" />
+                                    <Popover v-model:open="showFromCalendar">
+                                        <PopoverTrigger as-child>
+                                            <Button variant="ghost" size="icon"
+                                                class="absolute right-0 top-0 h-full w-9 px-0 hover:bg-accent">
+                                                <CalendarIcon class="h-4 w-4" />
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent class="w-auto p-0" :side="'bottom'" :align="'end'">
+                                            <Calendar
+                                                :selected-date="dateRange.start !== undefined ? dateRange.start : null"
+                                                class="rounded-md border"
+                                                @update:model-value="date => handleCalendarUpdate('start', date)" />
+                                        </PopoverContent>
+                                    </Popover>
+                                </div>
+                                <div class="relative w-[120px]">
+                                    <Input v-model="draftState.start.time" class="font-mono text-sm h-9"
+                                        placeholder="HH:mm:ss" @keydown="handleKeyDown" />
+                                    <Button variant="ghost" size="icon"
+                                        class="absolute right-0 top-0 h-full w-9 px-0 hover:bg-accent pointer-events-none">
+                                        <Clock class="h-4 w-4" />
+                                    </Button>
+                                </div>
                             </div>
-                            <div class="relative w-[120px]">
-                                <Input v-model="draftState.start.time" class="font-mono text-sm h-9"
-                                    placeholder="HH:mm:ss" @keydown="handleKeyDown" />
-                                <Button variant="ghost" size="icon"
-                                    class="absolute right-0 top-0 h-full w-9 px-0 hover:bg-accent pointer-events-none">
-                                    <Clock class="h-4 w-4" />
-                                </Button>
+                        </div>
+                        <!-- To -->
+                        <div class="space-y-2">
+                            <Label class="text-sm font-medium">To</Label>
+                            <div class="flex gap-2">
+                                <div class="relative flex-1">
+                                    <Input v-model="draftState.end.date" class="pr-10 font-mono text-sm h-9"
+                                        placeholder="YYYY-MM-DD" @keydown="handleKeyDown" />
+                                    <Popover v-model:open="showToCalendar">
+                                        <PopoverTrigger as-child>
+                                            <Button variant="ghost" size="icon"
+                                                class="absolute right-0 top-0 h-full w-9 px-0 hover:bg-accent">
+                                                <CalendarIcon class="h-4 w-4" />
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent class="w-auto p-0" :side="'bottom'" :align="'end'">
+                                            <Calendar
+                                                :selected-date="dateRange.end !== undefined ? dateRange.end : null"
+                                                class="rounded-md border"
+                                                @update:model-value="date => handleCalendarUpdate('end', date)" />
+                                        </PopoverContent>
+                                    </Popover>
+                                </div>
+                                <div class="relative w-[120px]">
+                                    <Input v-model="draftState.end.time" class="font-mono text-sm h-9"
+                                        placeholder="HH:mm:ss" @keydown="handleKeyDown" />
+                                    <Button variant="ghost" size="icon"
+                                        class="absolute right-0 top-0 h-full w-9 px-0 hover:bg-accent pointer-events-none">
+                                        <Clock class="h-4 w-4" />
+                                    </Button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                    <!-- To -->
+
+                    <!-- Duration -->
+                    <div class="text-sm text-muted-foreground">
+                        {{ durationText }}
+                    </div>
+
+                    <!-- Error message -->
+                    <div v-if="errorMessage" class="text-sm text-destructive">
+                        {{ errorMessage }}
+                    </div>
+
+                    <!-- Quick Ranges -->
                     <div class="space-y-2">
-                        <Label class="text-sm font-medium">To</Label>
-                        <div class="flex gap-2">
-                            <div class="relative flex-1">
-                                <Input v-model="draftState.end.date" class="pr-10 font-mono text-sm h-9"
-                                    placeholder="YYYY-MM-DD" @keydown="handleKeyDown" />
-                                <Popover v-model:open="showToCalendar">
-                                    <PopoverTrigger as-child>
-                                        <Button variant="ghost" size="icon"
-                                            class="absolute right-0 top-0 h-full w-9 px-0 hover:bg-accent">
-                                            <CalendarIcon class="h-4 w-4" />
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent class="w-auto p-0" :side="'bottom'" :align="'end'">
-                                        <Calendar :selected-date="dateRange.end !== undefined ? dateRange.end : null"
-                                            class="rounded-md border"
-                                            @update:model-value="date => handleCalendarUpdate('end', date)" />
-                                    </PopoverContent>
-                                </Popover>
-                            </div>
-                            <div class="relative w-[120px]">
-                                <Input v-model="draftState.end.time" class="font-mono text-sm h-9"
-                                    placeholder="HH:mm:ss" @keydown="handleKeyDown" />
-                                <Button variant="ghost" size="icon"
-                                    class="absolute right-0 top-0 h-full w-9 px-0 hover:bg-accent pointer-events-none">
-                                    <Clock class="h-4 w-4" />
-                                </Button>
-                            </div>
+                        <Label class="text-sm font-medium">Quick Ranges</Label>
+                        <div class="grid grid-cols-4 gap-2">
+                            <Button v-for="range in quickRanges" :key="range.label" variant="outline" size="sm" :class="[
+                                'h-8',
+                                selectedQuickRange === range.label && 'bg-accent text-accent-foreground'
+                            ]" @click="applyQuickRange(range)">
+                                {{ range.label }}
+                            </Button>
                         </div>
                     </div>
-                </div>
 
-                <!-- Duration -->
-                <div class="text-sm text-muted-foreground">
-                    {{ durationText }}
-                </div>
-
-                <!-- Error message -->
-                <div v-if="errorMessage" class="text-sm text-destructive">
-                    {{ errorMessage }}
-                </div>
-
-                <!-- Quick Ranges -->
-                <div class="space-y-2">
-                    <Label class="text-sm font-medium">Quick Ranges</Label>
-                    <div class="grid grid-cols-4 gap-2">
-                        <Button v-for="range in quickRanges" :key="range.label" variant="outline" size="sm" :class="[
-                            'h-8',
-                            selectedQuickRange === range.label && 'bg-accent text-accent-foreground'
-                        ]" @click="applyQuickRange(range)">
-                            {{ range.label }}
-                        </Button>
+                    <!-- Action buttons -->
+                    <div class="flex justify-end space-x-2 pt-2">
+                        <Button variant="outline" @click="handleCancel">Cancel</Button>
+                        <Button @click="handleApply">Apply</Button>
                     </div>
                 </div>
-
-                <!-- Action buttons -->
-                <div class="flex justify-end space-x-2 pt-2">
-                    <Button variant="outline" @click="handleCancel">Cancel</Button>
-                    <Button @click="handleApply">Apply</Button>
-                </div>
-            </div>
-        </PopoverContent>
-    </Popover>
+            </PopoverContent>
+        </Popover>
+    </div>
 </template>
 
 <style scoped>

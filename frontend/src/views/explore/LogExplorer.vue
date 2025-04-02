@@ -711,10 +711,49 @@ onBeforeUnmount(() => {
       <!-- Time Controls Group -->
       <div class="flex items-center space-x-2 flex-grow">
         <!-- Date/Time Picker -->
-        <DateTimePicker v-model="dateRange" class="h-8" />
+        <TooltipProvider v-if="activeMode === 'sql'">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <DateTimePicker v-model="dateRange" class="h-8" :disabled="activeMode === 'sql'" />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Time range is not configurable in SQL mode. Use time filters in your query.</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <DateTimePicker v-else v-model="dateRange" class="h-8" />
 
         <!-- Limit Dropdown -->
-        <DropdownMenu>
+        <TooltipProvider v-if="activeMode === 'sql'">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" class="h-8 text-sm justify-between px-2 min-w-[90px]"
+                      :disabled="activeMode === 'sql'">
+                      <span>Limit:</span> {{ exploreStore.limit.toLocaleString() }}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuLabel>Results Limit</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem v-for="limit in [100, 500, 1000, 2000, 5000, 10000]" :key="limit"
+                      @click="exploreStore.setLimit(limit)" :disabled="exploreStore.limit === limit">
+                      {{ limit.toLocaleString() }} rows
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Limit is not configurable in SQL mode. Use LIMIT in your query.</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <DropdownMenu v-else>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" class="h-8 text-sm justify-between px-2 min-w-[90px]">
               <span>Limit:</span> {{ exploreStore.limit.toLocaleString() }}
@@ -855,7 +894,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2)
-                  }}</strong>s
+                    }}</strong>s
                 </span>
               </span>
               <span v-if="exploreStore.queryStats?.bytes_read != null" class="flex items-center">
@@ -867,7 +906,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
-                  }}</strong> MB
+                    }}</strong> MB
                 </span>
               </span>
             </div>
