@@ -71,6 +71,7 @@ export function useSavedQueries() {
     if (!query?.trim()) {
       toast({
         title: 'Cannot Save',
+        variant: 'destructive',
         description: 'Query is empty. Please enter a query to save.',
         duration: TOAST_DURATION.WARNING
       })
