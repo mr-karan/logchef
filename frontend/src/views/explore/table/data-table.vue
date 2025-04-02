@@ -50,7 +50,7 @@ interface Props {
 interface DataTableState {
     columnOrder: string[];
     columnSizing: ColumnSizingState;
-    // Add other state like columnVisibility, sorting later if needed
+    columnVisibility: VisibilityState;
 }
 
 const props = defineProps<Props>()
@@ -82,85 +82,116 @@ const storageKey = computed(() => {
     return `logchef-tableState-${props.teamId}-${props.sourceId}`;
 });
 
-// Initialize useStorage directly. It will be null if storageKey is null initially.
-const storedState = useStorage<DataTableState | null>(
-    storageKey, // Pass the computed ref directly
-    null,       // Initial value if key is invalid or no data in storage
-    localStorage,
-    {
-        serializer: {
-            read: (v: any) => (v ? JSON.parse(v) : null),
-            write: (v: any) => JSON.stringify(v),
-        },
-        onError: (error) => {
-            console.error("Error reading/writing table state from localStorage:", error);
-        }
+// Load state from localStorage
+function loadStateFromStorage(): DataTableState | null {
+    if (!storageKey.value) return null;
+
+    try {
+        const storedData = localStorage.getItem(storageKey.value);
+        if (!storedData) return null;
+
+        return JSON.parse(storedData) as DataTableState;
+    } catch (error) {
+        console.error("Error loading table state from localStorage:", error);
+        return null;
     }
-);
+}
 
-// Watch for changes in props.columns and the stored state itself (which depends on storageKey)
-watch([() => props.columns, storedState], ([newColumns, currentStateValue], [oldColumns, oldStateValue]) => {
-    console.log("DataTable: State initialization watcher triggered.");
+// Save state to localStorage
+function saveStateToStorage(state: DataTableState) {
+    if (!storageKey.value) return;
 
-    if (!storageKey.value) {
-        console.log("DataTable: storageKey is null, skipping state initialization.");
-        // Reset local state if key becomes invalid
-        columnOrder.value = newColumns.map(c => c.id!).filter(Boolean);
-        columnSizing.value = {};
-        newColumns.forEach(col => {
-            if (col.id) {
-                columnSizing.value[col.id] = col.size ?? defaultColumn.size;
-            }
-        });
-        return;
+    try {
+        localStorage.setItem(storageKey.value, JSON.stringify(state));
+    } catch (error) {
+        console.error("Error saving table state to localStorage:", error);
     }
+}
 
-    console.log(`DataTable: Initializing/Reconciling state for key: ${storageKey.value}`);
-    const currentColumnIds = newColumns.map(c => c.id!).filter(Boolean);
+// Initialize state from localStorage or defaults
+function initializeState(columns: ColumnDef<Record<string, any>>[]) {
+    const currentColumnIds = columns.map(c => c.id!).filter(Boolean);
     let initialOrder: string[] = [];
     let initialSizing: ColumnSizingState = {};
+    let initialVisibility: VisibilityState = {};
 
-    if (currentStateValue) {
-        console.log("DataTable: Found stored state:", currentStateValue);
-        const savedOrder = currentStateValue.columnOrder || [];
-        // Filter saved order to include only columns that still exist
-        const filteredSavedOrder = savedOrder.filter((id: string) => currentColumnIds.includes(id));
-        // Find columns that are new (not in the saved order)
-        const newColumnIds = currentColumnIds.filter((id: string) => !filteredSavedOrder.includes(id));
-        // Combine: existing ordered columns + new columns at the end
+    // Try to load from storage
+    const savedState = loadStateFromStorage();
+
+    if (savedState) {
+        console.log("DataTable: Found stored state:", savedState);
+
+        // Process column order
+        const savedOrder = savedState.columnOrder || [];
+        const filteredSavedOrder = savedOrder.filter(id => currentColumnIds.includes(id));
+        const newColumnIds = currentColumnIds.filter(id => !filteredSavedOrder.includes(id));
         initialOrder = [...filteredSavedOrder, ...newColumnIds];
 
-        const savedSizing = currentStateValue.columnSizing || {};
+        // Process column sizing and visibility
+        const savedSizing = savedState.columnSizing || {};
+        const savedVisibility = savedState.columnVisibility || {};
+
         currentColumnIds.forEach(id => {
+            // Handle sizing
             if (savedSizing[id] !== undefined) {
                 initialSizing[id] = savedSizing[id];
             } else {
-                // Use default size if not found in saved state
-                const columnDef = newColumns.find(c => c.id === id);
+                const columnDef = columns.find(c => c.id === id);
                 initialSizing[id] = columnDef?.size ?? defaultColumn.size;
             }
+
+            // Handle visibility
+            initialVisibility[id] = savedVisibility[id] !== undefined ? savedVisibility[id] : true;
         });
     } else {
-        console.log("DataTable: No stored state value found, using defaults based on props.columns.");
+        console.log("DataTable: No stored state found, using defaults");
         initialOrder = currentColumnIds;
+
         currentColumnIds.forEach(id => {
-            const columnDef = newColumns.find(c => c.id === id);
+            const columnDef = columns.find(c => c.id === id);
             initialSizing[id] = columnDef?.size ?? defaultColumn.size;
+            initialVisibility[id] = true; // Default all columns to visible
         });
     }
 
-    // Update the local refs which the table uses
-    // Check if update is actually needed to prevent infinite loops if watch triggers unnecessarily
+    return { initialOrder, initialSizing, initialVisibility };
+}
+
+// Watch for changes in columns
+watch(() => props.columns, (newColumns) => {
+    if (!newColumns || newColumns.length === 0) return;
+
+    console.log("DataTable: Columns changed, initializing state");
+    const { initialOrder, initialSizing, initialVisibility } = initializeState(newColumns);
+
+    // Only update if different to prevent infinite loops
     if (JSON.stringify(columnOrder.value) !== JSON.stringify(initialOrder)) {
         columnOrder.value = initialOrder;
     }
+
     if (JSON.stringify(columnSizing.value) !== JSON.stringify(initialSizing)) {
         columnSizing.value = initialSizing;
     }
 
-    console.log("DataTable: State applied:", { order: initialOrder, sizing: initialSizing });
+    if (JSON.stringify(columnVisibility.value) !== JSON.stringify(initialVisibility)) {
+        columnVisibility.value = initialVisibility;
+    }
+}, { immediate: true });
 
-}, { immediate: true, deep: false }); // deep: false because we only care about the top-level refs changing
+// Save state whenever relevant parts change
+watch([columnOrder, columnSizing, columnVisibility], () => {
+    if (!storageKey.value) return;
+
+    // Make sure we have columns loaded before saving
+    if (props.columns && props.columns.length > 0) {
+        console.log("DataTable: Saving state to localStorage");
+        saveStateToStorage({
+            columnOrder: columnOrder.value,
+            columnSizing: columnSizing.value,
+            columnVisibility: columnVisibility.value
+        });
+    }
+}, { deep: true });
 
 // Save timezone preference whenever it changes
 watch(displayTimezone, (newValue) => {
@@ -330,28 +361,8 @@ const table = useVueTable({
     onColumnVisibilityChange: updaterOrValue => valueUpdater(updaterOrValue, columnVisibility),
     onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
     onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
-    onColumnSizingChange: updaterOrValue => {
-        const newSizingState = valueUpdater(updaterOrValue, columnSizing);
-        columnSizing.value = newSizingState; // Update local state first
-        // Update stored state if it exists
-        if (storedState.value) {
-            storedState.value = { ...storedState.value, columnSizing: newSizingState };
-        } else if (storageKey.value) { // Only create if key is valid
-             // If storedState was null but key is valid, create the object
-            storedState.value = { columnOrder: columnOrder.value, columnSizing: newSizingState };
-        }
-    },
-    onColumnOrderChange: updaterOrValue => {
-        const newOrderState = valueUpdater(updaterOrValue, columnOrder);
-        columnOrder.value = newOrderState; // Update local state first
-        // Update stored state if it exists
-        if (storedState.value) {
-            storedState.value = { ...storedState.value, columnOrder: newOrderState };
-        } else if (storageKey.value) { // Only create if key is valid
-            // If storedState was null but key is valid, create the object
-            storedState.value = { columnOrder: newOrderState, columnSizing: columnSizing.value };
-        }
-    },
+    onColumnSizingChange: updaterOrValue => valueUpdater(updaterOrValue, columnSizing),
+    onColumnOrderChange: updaterOrValue => valueUpdater(updaterOrValue, columnOrder),
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
@@ -395,7 +406,7 @@ onMounted(() => {
         if (columnOrder.value.includes(timestampFieldName.value)) {
             // Check if sorting is already set (e.g., by stored state if we persist it later)
             if (!sorting.value || sorting.value.length === 0) {
-                 sorting.value = [{ id: timestampFieldName.value, desc: true }]
+                sorting.value = [{ id: timestampFieldName.value, desc: true }]
             }
         }
     }
@@ -524,7 +535,7 @@ const onDrop = (event: DragEvent, targetColumnId: string) => {
     document.body.classList.remove('dragging-column');
 }
 
-const onDragEnd = () => { // No need for event arg if not used
+const onDragEnd = () => { // No event parameter
     // Ensure cleanup happens regardless of drop success
     draggingColumnId.value = null;
     dragOverColumnId.value = null;
@@ -597,7 +608,7 @@ const onDragEnd = () => { // No need for event arg if not used
                                     }" draggable="true" @dragstart="onDragStart($event, header.column.id)"
                                     @dragenter="onDragEnter($event, header.column.id)" @dragover="onDragOver($event)"
                                     @dragleave="onDragLeave($event, header.column.id)"
-                                    @drop="onDrop($event, header.column.id)" @dragend="onDragEnd($event)">
+                                    @drop="onDrop($event, header.column.id)" @dragend="onDragEnd">
                                     <div class="flex items-center h-full">
                                         <!-- Drag Handle -->
                                         <span
@@ -691,7 +702,8 @@ const onDragEnd = () => { // No need for event arg if not used
     </div>
 </template>
 
-<style scoped> /* Add scoped attribute */
+<style scoped>
+/* Add scoped attribute */
 /* Table styling for log analytics */
 .table-fixed {
     table-layout: fixed;
@@ -808,6 +820,7 @@ const onDragEnd = () => { // No need for event arg if not used
     border-bottom: 1px solid hsl(var(--primary) / 0.3);
     box-shadow: 0 0 0 1px hsl(var(--primary) / 0.2);
     position: relative;
-    z-index: 1; /* Ensures expanded rows appear above others */
+    z-index: 1;
+    /* Ensures expanded rows appear above others */
 }
 </style>
