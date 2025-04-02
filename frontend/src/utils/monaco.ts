@@ -35,6 +35,7 @@ export function getDefaultMonacoOptions(): monaco.editor.IStandaloneEditorConstr
       seedSearchStringFromSelection: "never",
     },
     wordBasedSuggestions: "off",
+    renderLineHighlight: "none", // Explicitly disable line highlighting
     matchBrackets: "always",
     "semanticHighlighting.enabled": true,
     automaticLayout: true, // Essential for responsive containers
