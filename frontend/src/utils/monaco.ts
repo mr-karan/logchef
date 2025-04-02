@@ -12,10 +12,10 @@ import {
 export function getDefaultMonacoOptions(): monaco.editor.IStandaloneEditorConstructionOptions {
   return {
     readOnly: false,
-    fontSize: 14, // Slightly larger default
-    lineHeight: 21, // Explicit line height
+    fontSize: 13, // Adjusted for a slightly more compact look
+    lineHeight: 20, // Adjusted for new font size
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-    padding: { top: 8, bottom: 8 }, // Consistent padding
+    padding: { top: 8, bottom: 8 },
     contextmenu: false,
     tabCompletion: "on",
     overviewRulerLanes: 0,
@@ -32,10 +32,10 @@ export function getDefaultMonacoOptions(): monaco.editor.IStandaloneEditorConstr
     find: {
       addExtraSpaceOnTop: false,
       autoFindInSelection: "never",
-      seedSearchStringFromSelection: "never", // Usually better defaults
+      seedSearchStringFromSelection: "never",
     },
-    wordBasedSuggestions: "off", // Fix type error - was false
-    renderLineHighlight: "none",
+    wordBasedSuggestions: "off",
+    renderLineHighlight: "line", // Highlight the current line
     matchBrackets: "always",
     "semanticHighlighting.enabled": true,
     automaticLayout: true, // Essential for responsive containers
@@ -46,16 +46,19 @@ export function getDefaultMonacoOptions(): monaco.editor.IStandaloneEditorConstr
     lineDecorationsWidth: 0,
     lineNumbersMinChars: 0, // Not needed if lineNumbers is off
     hideCursorInOverviewRuler: true,
-    fixedOverflowWidgets: true, // Important for suggestion widgets
-    wordWrap: "off", // Default to off for both modes
-    // Force cursor options to be visible
-    cursorBlinking: "phase",  // Use phase for a smoother blink
-    cursorStyle: "line",       // Ensure line style for visibility
-    cursorWidth: 2,            // Make cursor slightly thicker
-    cursorSmoothCaretAnimation: "on", // Smooth transitions when moving cursor
-    renderWhitespace: "none",  // Don't show whitespace by default
+    fixedOverflowWidgets: true,
+    wordWrap: "off",
+    // Standard cursor behavior
+    cursorBlinking: "blink", // Standard blinking
+    cursorStyle: "line",
+    cursorWidth: 2,
+    cursorSmoothCaretAnimation: "off", // Standard movement
+    renderWhitespace: "none",
     // Enable placeholder support
-    'placeholder': '', // Default empty, will be set by component
+    'placeholder': '',
+    // Additional professional touches
+    roundedSelection: false, // Use sharp selections
+    quickSuggestions: { other: true, comments: false, strings: false }, // Enable quick suggestions
   };
 }
 
