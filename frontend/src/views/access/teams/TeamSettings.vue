@@ -164,16 +164,19 @@ const handleSubmit = async () => {
 const handleAddMember = async () => {
     if (!team.value || !selectedUserId.value) return
 
-    await teamsStore.addTeamMember(team.value.id, {
+    const result = await teamsStore.addTeamMember(team.value.id, {
         user_id: Number(selectedUserId.value),
         role: newMemberRole.value as 'admin' | 'member',
     })
 
-    // Reset form
-    selectedUserId.value = ''
-    newMemberRole.value = 'member'
-    showAddMemberDialog.value = false
-    // Store automatically updates the members list
+    if (result.success) {
+        // Reset form
+        selectedUserId.value = ''
+        newMemberRole.value = 'member'
+        showAddMemberDialog.value = false
+        // Explicitly refresh the list
+        await teamsStore.listTeamMembers(team.value.id);
+    }
 }
 
 const handleRemoveMember = async (userId: string | number) => {
@@ -189,12 +192,15 @@ const handleAddSource = async () => {
     // Make sure we're on the sources tab
     activeTab.value = 'sources'
 
-    await teamsStore.addTeamSource(team.value.id, Number(selectedSourceId.value))
+    const result = await teamsStore.addTeamSource(team.value.id, Number(selectedSourceId.value))
 
-    // Reset form
-    selectedSourceId.value = ''
-    showAddSourceDialog.value = false
-    // Store automatically updates the sources list
+    if (result.success) {
+        // Reset form
+        selectedSourceId.value = ''
+        showAddSourceDialog.value = false
+        // Explicitly refresh the list
+        await teamsStore.listTeamSources(team.value.id);
+    }
 }
 
 const handleRemoveSource = async (sourceId: string | number) => {
