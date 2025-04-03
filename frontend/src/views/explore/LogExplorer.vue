@@ -206,20 +206,17 @@ const canSaveOrUpdateQuery = computed(() => {
 watch(() => [currentRoute.query.q, currentRoute.query.mode], ([newQueryParam, newModeParam]) => {
   // Handle mode change from URL
   if (newModeParam !== undefined && newModeParam !== lastModeParam.value) {
-    console.log('Mode parameter changed in URL:', newModeParam);
     lastModeParam.value = newModeParam as string;
 
     // Update mode in store based on URL
     const mode = (newModeParam as string).toLowerCase() === 'logchefql' ? 'logchefql' : 'sql';
     if (exploreStore.activeMode !== mode) {
-      console.log(`Setting mode to ${mode} based on URL parameter`);
       exploreStore.setActiveMode(mode);
     }
   }
 
   // Handle query content change from URL
   if (newQueryParam !== undefined && newQueryParam !== lastQueryParam.value) {
-    console.log('Query parameter changed in URL:', newQueryParam);
     lastQueryParam.value = newQueryParam as string;
 
     const decodedQuery = decodeURIComponent(newQueryParam as string);
@@ -256,14 +253,10 @@ const displayError = computed(() => queryError.value || exploreStore.error?.mess
 // Watch for initialization completion to run initial query
 watch(isInitializing, async (initializing, prevInitializing) => {
   if (prevInitializing && !initializing) {
-    console.log("Initialization complete. Checking for saved query ID and if initial query should run.");
-
     const queryId = queryIdFromUrl.value; // Get query ID from computed property
 
     if (queryId) {
-      console.log(`Found query_id=${queryId} in URL. Attempting to load saved query...`);
       if (!currentTeamId.value) {
-        console.error("Cannot load saved query: Team ID is missing.");
         toast({
           title: 'Error',
           description: 'Cannot load saved query because the team context is missing.',
@@ -288,13 +281,8 @@ watch(isInitializing, async (initializing, prevInitializing) => {
           const loadResult = await loadSavedQuery(savedQueriesStore.selectedQuery);
 
           if (loadResult) {
-            console.log(`Successfully loaded and applied saved query ${queryId}`);
             // Sync URL after successful load and application
             syncUrlFromState();
-          } else {
-            // loadSavedQuery failed internally (already showed toast)
-            console.error(`loadSavedQuery function failed for query ${queryId}`);
-            // Potentially clear query_id from URL here?
           }
         } else {
           // Fetching the query from the store failed
@@ -302,20 +290,17 @@ watch(isInitializing, async (initializing, prevInitializing) => {
         }
       } catch (error) {
         isLoadingQuery.value = false; // Ensure loading is false on error
-        console.error(`Failed to load or apply saved query ${queryId}:`, error);
         toast({
           title: 'Error Loading Saved Query',
           description: getErrorMessage(error),
           variant: 'destructive',
           duration: TOAST_DURATION.ERROR
         });
-        // Decide how to handle failure - maybe clear query_id from URL?
       }
     }
 
     // Make sure we have a valid time range before executing the query
     if (!exploreStore.timeRange || !exploreStore.timeRange.start || !exploreStore.timeRange.end) {
-      console.log("Setting default time range as none was provided in saved query");
       // Set a default time range (last 24 hours)
       exploreStore.setTimeRange({
         start: now(getLocalTimeZone()).subtract({ hours: 24 }),
@@ -325,29 +310,10 @@ watch(isInitializing, async (initializing, prevInitializing) => {
 
     // Now check if we can execute the query (either the one from URL or the loaded saved one)
     if (canExecuteQuery.value) {
-      console.log("Running initial query automatically after initialization...")
-      await executeQuery()
-    } else {
-      console.log("Cannot run initial query automatically. Current state:", {
-        canExecuteQuery: canExecuteQuery.value,
-        currentTeamId: currentTeamId.value,
-        currentSourceId: currentSourceId.value,
-        hasValidSource: hasValidSource.value,
-        sourceDetails: !!sourceDetails.value,
-        timeRange: !!exploreStore.timeRange,
-        queryContent: {
-          logchefql: !!exploreStore.logchefqlCode,
-          sql: !!exploreStore.rawSql
-        }
-      });
-
-      // If we have team and source but not source details, they might be loading
-      if (currentTeamId.value && currentSourceId.value && !sourceDetails.value) {
-        console.log("Source details not loaded yet. They should load soon and the query will execute automatically.");
-      }
+      await executeQuery();
     }
   }
-}, { immediate: false })
+}, { immediate: false });
 
 // Watch for source changes to fetch details AND saved queries
 watch(
@@ -355,14 +321,12 @@ watch(
   async (newSourceId, oldSourceId) => {
     // Skip during initialization to prevent redundant calls
     if (isInitializing.value) {
-      console.log(`LogExplorer: Skipping source details/queries update during initialization phase`);
       return;
     }
 
     if (newSourceId !== oldSourceId) {
       // Fetch Source Details (existing logic)
       if (newSourceId && newSourceId > 0) {
-        console.log(`LogExplorer: Source changed to ${newSourceId}, fetching details and saved queries...`);
         // Verify source existence (using teamSources from useSourceTeamManagement)
         const sourceExists = availableSources.value.some(source => source.id === newSourceId);
         if (sourceExists) {
@@ -376,29 +340,18 @@ watch(
           // Fetch Saved Queries (no debounce needed?)
           if (currentTeamId.value) { // Ensure team ID is available
             await loadSourceQueries(currentTeamId.value, newSourceId);
-          } else {
-            console.warn("LogExplorer: Cannot load saved queries, team ID is missing.");
           }
-        } else {
-          console.warn(`LogExplorer: Source ${newSourceId} not found in current team's sources`);
         }
       } else {
         // Clear saved queries if source is deselected
-        // (useSavedQueries composable handles clearing its internal state if needed)
         if (currentTeamId.value) {
-          console.log("LogExplorer: Source cleared, attempting to clear/load empty queries for team.");
-          // Call load with invalid source ID (or maybe add a dedicated clear function to composable?)
-          // For now, loading with 0 might not work as intended depending on composable logic.
-          // Let's assume the composable handles the empty/invalid source case gracefully.
-          await loadSourceQueries(currentTeamId.value, 0); // Or handle clearing explicitly
-        } else {
-          console.warn("LogExplorer: Cannot clear saved queries, team ID is missing.");
+          await loadSourceQueries(currentTeamId.value, 0);
         }
       }
     }
   },
   { immediate: false } // Don't run immediately, wait for initialization
-)
+);
 
 // Watch for changes in currentTeamId to update sources AND saved queries
 watch(
@@ -406,24 +359,21 @@ watch(
   async (newTeamId, oldTeamId) => {
     // Skip during initialization
     if (isInitializing.value) {
-      console.log(`LogExplorer: Skipping team change actions during initialization.`);
       return;
     }
 
     if (newTeamId !== oldTeamId && newTeamId) {
-      console.log(`LogExplorer: Team changed to ${newTeamId}, updating sources and potentially saved queries...`)
-
       // Load sources for the new team (existing logic)
-      const sourcesResult = await sourcesStore.loadTeamSources(newTeamId)
+      const sourcesResult = await sourcesStore.loadTeamSources(newTeamId);
       let newSourceIdToLoadQueries: number | null = null;
 
       if (!sourcesResult.success || !sourcesResult.data || sourcesResult.data.length === 0) {
-        exploreStore.setSource(0)
+        exploreStore.setSource(0);
         newSourceIdToLoadQueries = 0; // Signal to load empty queries
       } else {
         const currentSourceExists = sourcesStore.teamSources.some(
           source => source.id === exploreStore.sourceId
-        )
+        );
         if (!currentSourceExists && sourcesStore.teamSources.length > 0) {
           const firstSourceId = sourcesStore.teamSources[0].id;
           exploreStore.setSource(firstSourceId);
@@ -437,53 +387,37 @@ watch(
 
       // Load Saved Queries for the new team/source combination
       if (newSourceIdToLoadQueries !== null) {
-        console.log(`LogExplorer: Loading saved queries for team ${newTeamId}, source ${newSourceIdToLoadQueries}`);
         await loadSourceQueries(newTeamId, newSourceIdToLoadQueries);
-      } else {
-        console.warn("LogExplorer: Could not determine source ID after team change, skipping saved queries load.");
       }
     }
   },
   { immediate: false } // Don't run immediately
-)
+);
 
 // Watch for changes in sourceDetails from the store
 watch(
   () => sourceDetails.value,
   (newSourceDetails, oldSourceDetails) => {
     if (newSourceDetails?.id !== oldSourceDetails?.id) {
-      console.log('Source details changed in store, availableFields will update.');
-
       // If this is the first time loading a valid source and initialization is complete,
       // execute the query automatically after a short delay to ensure everything is ready
       if (newSourceDetails && !oldSourceDetails && !isInitializing.value && canExecuteQuery.value) {
-        console.log('First valid source loaded, executing initial query automatically...');
         setTimeout(() => {
           if (canExecuteQuery.value) {
-            console.log('Executing delayed initial query after source details loaded');
             executeQuery();
-          } else {
-            console.log('Cannot execute query after delay:', {
-              isInitializing: isInitializing.value,
-              currentTeamId: currentTeamId.value,
-              currentSourceId: currentSourceId.value,
-              hasValidSource: hasValidSource.value,
-              timeRange: !!exploreStore.timeRange
-            });
           }
         }, 100);
       }
     }
   },
   { immediate: true }
-)
+);
 
 // Watch for changes in exploreStore.columns to update tableColumns
 watch(
   () => exploreStore.columns,
   (newColumns) => {
     if (newColumns?.length > 0) {
-      console.log('LogExplorer: Creating table columns from API response:', newColumns);
       // Get display preferences
       const timezone = displayTimezone.value;
       const tsField = sourceDetails.value?._meta_ts_field || 'timestamp';
@@ -491,9 +425,7 @@ watch(
 
       // Create columns using the columns utility function
       tableColumns.value = createColumns(newColumns, tsField, timezone, severityField);
-      console.log('LogExplorer: Table columns created:', tableColumns.value.length);
     } else {
-      console.log('LogExplorer: No columns available, clearing table columns');
       tableColumns.value = [];
     }
   },
@@ -549,12 +481,17 @@ const copyUrlToClipboard = () => {
 
 // Component lifecycle with improved initialization sequence
 onMounted(async () => {
-  console.log("LogExplorer component mounting - Simplified");
   try {
     // Call the initialization function from the composable
     await initializeFromUrl();
 
-    // Initial query execution moved to a watch effect for better reliability
+    // Reset admin teams and load user teams to ensure we have the correct context
+    teamsStore.resetAdminTeams();
+
+    // If we don't have user teams loaded yet, load them
+    if (teamsStore.userTeams.length === 0) {
+      await teamsStore.loadUserTeams(true);
+    }
 
   } catch (error) {
     console.error("Error during LogExplorer mount:", error);
@@ -607,8 +544,6 @@ const handleSaveOrUpdateClick = async () => {
 
   if (queryId && currentTeamId.value && currentSourceId.value) {
     // --- Update Existing Query Flow ---
-    console.log(`Attempting to update saved query ${queryId}`);
-
     try {
       isLoadingQuery.value = true;
       const result = await savedQueriesStore.fetchTeamSourceQueryDetails(
@@ -641,17 +576,17 @@ const handleSaveOrUpdateClick = async () => {
     }
   } else {
     // --- Save New Query Flow ---
-    console.log("Opening save new query modal...");
     editQueryData.value = null; // Reset edit data
     handleSaveQueryClick(); // Call original function to open modal
   }
 };
 
 onBeforeUnmount(() => {
+  // Keep this conditional console.log for non-production environments
   if (import.meta.env.MODE !== 'production') {
-    console.log("LogExplorer unmounted")
+    console.log("LogExplorer unmounted");
   }
-})
+});
 </script>
 
 <template>

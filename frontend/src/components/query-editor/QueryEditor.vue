@@ -236,7 +236,6 @@ const monacoOptions = reactive(getDefaultMonacoOptions());
 const handleMount = (editor: MonacoEditor) => {
   if (isDisposing.value) return; // Prevent setup if disposing
 
-  console.log("QueryEditor: Mounting Monaco instance");
   editorRef.value = editor;
   initMonacoSetup(); // Ensure themes/languages are registered (runs once internally)
 
@@ -314,7 +313,6 @@ watchEffect(() => {
 
   // Force update on edge cases
   if (editorContent.value !== valueToSet) {
-    console.log(`QueryEditor: Updating content from store, mode=${props.activeMode}`);
     runProgrammaticUpdate(valueToSet);
     shouldRestoreCursor = true;
   }
@@ -325,7 +323,6 @@ watchEffect(() => {
     const model = editor.getModel();
     if (model && model.getLanguageId() !== props.activeMode) {
       monaco.editor.setModelLanguage(model, props.activeMode);
-      console.log(`QueryEditor: Language set to ${props.activeMode}`);
       languageChanged = true; // Set flag if language was updated
 
       // Only re-register completion provider when language changes or on initial load
