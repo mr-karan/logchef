@@ -119,8 +119,6 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
     const savedState = loadStateFromStorage();
 
     if (savedState) {
-        console.log("DataTable: Found stored state:", savedState);
-
         // Process column order
         const savedOrder = savedState.columnOrder || [];
         const filteredSavedOrder = savedOrder.filter(id => currentColumnIds.includes(id));
@@ -144,7 +142,6 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
             initialVisibility[id] = savedVisibility[id] !== undefined ? savedVisibility[id] : true;
         });
     } else {
-        console.log("DataTable: No stored state found, using defaults");
         initialOrder = currentColumnIds;
 
         currentColumnIds.forEach(id => {
@@ -161,7 +158,6 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
 watch(() => props.columns, (newColumns) => {
     if (!newColumns || newColumns.length === 0) return;
 
-    console.log("DataTable: Columns changed, initializing state");
     const { initialOrder, initialSizing, initialVisibility } = initializeState(newColumns);
 
     // Only update if different to prevent infinite loops
@@ -184,7 +180,6 @@ watch([columnOrder, columnSizing, columnVisibility], () => {
 
     // Make sure we have columns loaded before saving
     if (props.columns && props.columns.length > 0) {
-        console.log("DataTable: Saving state to localStorage");
         saveStateToStorage({
             columnOrder: columnOrder.value,
             columnSizing: columnSizing.value,

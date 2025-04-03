@@ -132,10 +132,8 @@ export function useQuery() {
         if (result.success) {
           // Always set SQL when logchefQL exists and translation succeeds
           sqlQuery.value = result.sql;
-          console.log('Translated LogchefQL to SQL:', result.sql);
         } else {
           // If translation fails, fall back to original SQL or default
-          console.warn('Failed to translate LogchefQL:', result.error);
           if (!originalSql) {
             generateAndSetDefaultSQL();
           }
@@ -153,12 +151,9 @@ export function useQuery() {
 
   // Helper function to generate and set default SQL
   const generateAndSetDefaultSQL = () => {
-    console.log('Generating default SQL query');
     const defaultResult = generateDefaultSQL();
     if (defaultResult.success) {
       sqlQuery.value = defaultResult.sql;
-    } else {
-      console.error('Failed to generate default SQL:', defaultResult.error);
     }
   };
 
@@ -169,15 +164,11 @@ export function useQuery() {
 
   // Handle time/limit changes
   const handleTimeRangeUpdate = () => {
-    if (hasRunQuery.value) {
-      console.info('Time range changed. Run the query to apply the new time range.');
-    }
+    // Silent in production
   };
 
   const handleLimitUpdate = () => {
-    if (hasRunQuery.value) {
-      console.info('Query limit changed. Run the query to apply the new limit.');
-    }
+    // Silent in production
   };
 
   // Prepare the query for execution
