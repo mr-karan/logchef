@@ -102,7 +102,6 @@ import { formatDate } from '@/utils/format'
                                 <TableHead class="w-[150px]">Timestamp Column</TableHead>
                                 <TableHead class="w-[300px]">Connection</TableHead>
                                 <TableHead class="w-[100px]">Status</TableHead>
-                                <TableHead class="w-[100px]">TTL</TableHead>
                                 <TableHead class="w-[100px]">Created At</TableHead>
                                 <TableHead class="w-[70px] text-right">Actions</TableHead>
                             </TableRow>
@@ -149,9 +148,6 @@ import { formatDate } from '@/utils/format'
                                         class="whitespace-nowrap">
                                         {{ source.is_connected ? 'Connected' : 'Disconnected' }}
                                     </Badge>
-                                </TableCell>
-                                <TableCell>
-                                    {{ source.ttl_days === -1 ? 'Disabled' : `${source.ttl_days} days` }}
                                 </TableCell>
                                 <TableCell>{{ formatDate(source.created_at) }}</TableCell>
                                 <TableCell class="text-right">
