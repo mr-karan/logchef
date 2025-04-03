@@ -84,6 +84,7 @@ const {
 const {
   isProcessingTeamChange,
   isProcessingSourceChange,
+  isChangingContext, // <-- Destructure the new property
   currentTeamId,
   currentSourceId,
   sourceDetails,
@@ -774,11 +775,21 @@ onBeforeUnmount(() => {
       <FieldSideBar v-model:expanded="showFieldsPanel" :fields="availableFields" />
 
       <div class="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
-        <!-- Query Editor -->
+        <!-- Query Editor Section -->
         <div class="px-4 py-3">
-          <template v-if="currentSourceId && hasValidSource && exploreStore.timeRange">
+          <!-- NEW: Loading State for Team/Source Change -->
+          <template v-if="isChangingContext">
+            <div class="flex items-center justify-center text-muted-foreground p-6 border rounded-md bg-card shadow-sm animate-pulse">
+              Loading context data...
+            </div>
+          </template>
+
+          <!-- Query Editor (only if NOT changing context and source is valid) -->
+          <template v-else-if="currentSourceId && hasValidSource && exploreStore.timeRange">
             <div class="bg-card shadow-sm rounded-md overflow-hidden">
-              <QueryEditor ref="queryEditorRef" :sourceId="currentSourceId" :teamId="currentTeamId ?? 0"
+              <QueryEditor ref="queryEditorRef"
+                :sourceId="currentSourceId"
+                :teamId="currentTeamId ?? 0"
                 :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
                 :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
                 :logchefqlValue="logchefQuery" :sqlValue="sqlQuery" @update:logchefqlValue="updateLogchefqlValue"
@@ -788,10 +799,13 @@ onBeforeUnmount(() => {
                 :showFieldsPanel="showFieldsPanel" @submit="executeQuery"
                 @update:activeMode="(mode) => changeMode(mode === 'logchefql' ? 'logchefql' : 'sql')"
                 @toggle-fields="showFieldsPanel = !showFieldsPanel" @select-saved-query="loadSavedQuery"
-                @save-query="handleSaveOrUpdateClick" class="border-0 border-b" />
+                @save-query="handleSaveOrUpdateClick"
+                class="border-0 border-b" />
             </div>
           </template>
-          <template v-else-if="currentTeamId && !currentSourceId">
+
+          <!-- Select Source Prompt (only if NOT changing context and no source selected) -->
+          <template v-else-if="currentTeamId && !currentSourceId && !isChangingContext">
             <div class="flex items-center justify-center text-muted-foreground p-6 border rounded-md bg-card shadow-sm">
               <div class="text-center">
                 <div class="mb-2 text-muted-foreground/70">
@@ -806,10 +820,10 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </template>
-          <template
-            v-else-if="currentSourceId && !hasValidSource && !isProcessingTeamChange && !isProcessingSourceChange">
-            <div
-              class="flex items-center justify-center text-destructive p-6 border border-destructive/30 rounded-md bg-destructive/5 shadow-sm">
+
+          <!-- Error Loading Source (only if NOT changing context and source is invalid) -->
+          <template v-else-if="currentSourceId && !hasValidSource && !isChangingContext">
+            <div class="flex items-center justify-center text-destructive p-6 border border-destructive/30 rounded-md bg-destructive/5 shadow-sm">
               <div class="text-center">
                 <div class="mb-2 text-destructive/80">
                   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
@@ -825,9 +839,8 @@ onBeforeUnmount(() => {
             </div>
           </template>
 
-          <!-- Query Controls -->
-          <div class="mt-3 flex items-center justify-between border-t pt-3"
-            v-if="currentSourceId && hasValidSource && exploreStore.timeRange">
+          <!-- Query Controls (only if NOT changing context and source is valid) -->
+          <div class="mt-3 flex items-center justify-between border-t pt-3" v-if="!isChangingContext && currentSourceId && hasValidSource && exploreStore.timeRange">
             <Button variant="default" class="h-9 px-4 flex items-center gap-2 shadow-sm" :class="{
               'bg-amber-500 hover:bg-amber-600 text-amber-foreground': isDirty && !isExecutingQuery,
               'bg-sky-500 hover:bg-sky-600 text-sky-foreground': isExecutingQuery
