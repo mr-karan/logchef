@@ -365,6 +365,10 @@ func (db *DB) ListTeamSources(ctx context.Context, teamID models.TeamID) ([]*mod
 				TableName: row.TableName,
 			},
 			Description: row.Description.String,
+			Timestamps: models.Timestamps{
+				CreatedAt: row.CreatedAt,
+				UpdatedAt: row.UpdatedAt,
+			},
 		}
 	}
 
@@ -388,6 +392,10 @@ func (db *DB) ListSourceTeams(ctx context.Context, sourceID models.SourceID) ([]
 			ID:          models.TeamID(row.ID),
 			Name:        row.Name,
 			Description: row.Description.String,
+			Timestamps: models.Timestamps{
+				CreatedAt: row.CreatedAt,
+				UpdatedAt: row.UpdatedAt,
+			},
 		}
 	}
 
@@ -426,6 +434,10 @@ func (db *DB) ListSourcesForUser(ctx context.Context, userID models.UserID) ([]*
 				Password:  row.Password,
 				Database:  row.Database,
 				TableName: row.TableName,
+			},
+			Timestamps: models.Timestamps{
+				CreatedAt: row.CreatedAt,
+				UpdatedAt: row.UpdatedAt,
 			},
 		}
 	}
@@ -503,6 +515,10 @@ func (db *DB) ListTeamsForUser(ctx context.Context, userID models.UserID) ([]*mo
 			ID:          models.TeamID(row.ID),
 			Name:        row.Name,
 			Description: row.Description.String,
+			Timestamps: models.Timestamps{
+				CreatedAt: row.CreatedAt,
+				UpdatedAt: row.UpdatedAt,
+			},
 		}
 	}
 
