@@ -225,23 +225,24 @@ onMounted(async () => {
         return
     }
 
-    // Clear existing team data to prevent stale data issues
-    teamsStore.clearState()
+    // No need to clear state here, just load the necessary data
 
     try {
         // Load all data in parallel for performance
         await Promise.all([
-            usersStore.loadUsers(),
-            sourcesStore.loadSources(),
-            teamsStore.getTeam(teamId),
-            teamsStore.listTeamMembers(teamId),
-            teamsStore.listTeamSources(teamId)
+            usersStore.loadUsers(), // Load all users for the add member dialog
+            sourcesStore.loadSources(), // Load all sources for the add source dialog
+            teamsStore.loadAdminTeams(), // <-- ADD THIS: Ensure the full list of admin-accessible teams is loaded
+            teamsStore.getTeam(teamId), // Load details for the specific team being viewed
+            teamsStore.listTeamMembers(teamId), // Load members for this specific team
+            teamsStore.listTeamSources(teamId) // Load sources for this specific team
         ])
     } catch (error) {
-        // Store handles individual API errors automatically
+        // Store handles individual API errors automatically, but catch potential Promise.all rejection
+        console.error("Error loading team settings data:", error); // Log the specific error
         toast({
             title: 'Error',
-            description: 'An error occurred while loading team data',
+            description: 'An error occurred while loading team data. Some information might be missing.',
             variant: 'destructive',
         })
     }
