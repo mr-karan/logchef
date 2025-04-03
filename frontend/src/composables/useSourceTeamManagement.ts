@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { useExploreStore } from '@/stores/explore'
 import { useSourcesStore } from '@/stores/sources'
 import { useTeamsStore } from '@/stores/teams'
@@ -107,7 +107,10 @@ export function useSourceTeamManagement() {
     } catch (error) {
       console.error('Error changing team:', error)
     } finally {
-      isProcessingTeamChange.value = false
+      // Use nextTick to ensure state updates propagate before resetting the flag
+      nextTick(() => {
+        isProcessingTeamChange.value = false;
+      });
     }
   }
 
@@ -136,7 +139,10 @@ export function useSourceTeamManagement() {
     } catch (error) {
       console.error('Error changing source:', error)
     } finally {
-      isProcessingSourceChange.value = false
+      // Use nextTick for consistency
+      nextTick(() => {
+        isProcessingSourceChange.value = false;
+      });
     }
   }
 
