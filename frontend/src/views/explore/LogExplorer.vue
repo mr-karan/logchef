@@ -806,7 +806,8 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </template>
-          <template v-else-if="currentSourceId && !hasValidSource">
+          <template
+            v-else-if="currentSourceId && !hasValidSource && !isProcessingTeamChange && !isProcessingSourceChange">
             <div
               class="flex items-center justify-center text-destructive p-6 border border-destructive/30 rounded-md bg-destructive/5 shadow-sm">
               <div class="text-center">
@@ -877,7 +878,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2)
-                  }}</strong>s
+                    }}</strong>s
                 </span>
               </span>
               <span v-if="exploreStore.queryStats?.bytes_read != null" class="flex items-center">
@@ -889,7 +890,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
-                  }}</strong> MB
+                    }}</strong> MB
                 </span>
               </span>
             </div>
