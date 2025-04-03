@@ -487,29 +487,14 @@ export const useTeamsStore = defineStore("teams", () => {
     return await state.withLoading(`addTeamSource-${teamId}-${sourceId}`, async () => {
       return await state.callApi({
         apiCall: () => teamsApi.addTeamSource(teamId, sourceId),
-        successMessage: "Source added successfully",
-        operationKey: `addTeamSource-${teamId}-${sourceId}`,
-        onSuccess: async (response) => {
-          // If we get back the actual source info, add it directly to our sources map
-          if (response) {
-            const currentSources = teamSourcesMap.get(teamId) || [];
-            // Only add if not already in the list
-            if (!currentSources.find(s => s.id === sourceId)) {
-              const updatedSources = [...currentSources, response];
-              teamSourcesMap.set(teamId, updatedSources);
-
-              // Update the old cache too for backward compatibility
-              state.data.value.teamSourcesMap = {
-                ...state.data.value.teamSourcesMap,
-                [teamId]: updatedSources
-              };
-            }
-          } else {
-            // Otherwise refresh team sources list
-            await listTeamSources(teamId);
-          }
-        }
-      });
+       successMessage: "Source added successfully",
+       operationKey: `addTeamSource-${teamId}-${sourceId}`,
+       onSuccess: async (response) => {
+         // Always refresh the list after successfully adding a source
+         // to ensure we have the complete source object with connection details.
+         await listTeamSources(teamId);
+       }
+     });
     });
   }
 
