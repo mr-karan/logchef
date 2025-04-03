@@ -86,31 +86,33 @@ export function useSourceTeamManagement() {
     }
 
     try {
+      // Set immediately to avoid FOUC
       teamsStore.setCurrentTeam(teamId)
+      
+      // Clear source details BEFORE changing sourceId to prevent flicker
       sourcesStore.clearCurrentSourceDetails()
       exploreStore.setSource(0)
 
-      // Ensure we use the user teams endpoint
-      await teamsStore.loadTeams(false, false)
+      // Load team sources
       const sourcesResult = await sourcesStore.loadTeamSources(teamId)
 
+      // Only after we have sources loaded, set the first source as active
       if (sourcesResult.success && sourcesResult.data?.length) {
-        const previousSourceId = currentSourceId.value
-        const sourceExists = sourcesResult.data.some(s => s.id === previousSourceId)
-
-        if (!sourceExists) {
-          exploreStore.setSource(sourcesResult.data[0].id)
-        } else {
-          await sourcesStore.loadSourceDetails(previousSourceId)
-        }
+        // Always set the first available source when changing teams
+        const firstSourceId = sourcesResult.data[0].id
+        exploreStore.setSource(firstSourceId)
+        
+        // Load source details AFTER setting source ID
+        await sourcesStore.loadSourceDetails(firstSourceId)
       }
     } catch (error) {
       console.error('Error changing team:', error)
     } finally {
       // Use nextTick to ensure state updates propagate before resetting the flag
-      nextTick(() => {
-        isProcessingTeamChange.value = false;
-      });
+      // This gives a smoother transition between states
+      setTimeout(() => {
+        isProcessingTeamChange.value = false
+      }, 50) // Short delay to ensure state transitions properly
     }
   }
 
@@ -121,9 +123,14 @@ export function useSourceTeamManagement() {
 
     const sourceId = parseInt(sourceIdStr)
     if (isNaN(sourceId) || sourceId <= 0) {
-      exploreStore.setSource(0)
+      // First clear source details to avoid showing old source info
       sourcesStore.clearCurrentSourceDetails()
-      isProcessingSourceChange.value = false
+      exploreStore.setSource(0)
+      
+      // Use setTimeout instead of nextTick for consistent timing
+      setTimeout(() => {
+        isProcessingSourceChange.value = false
+      }, 50)
       return
     }
 
@@ -134,24 +141,34 @@ export function useSourceTeamManagement() {
     }
 
     try {
+      // Clear source details BEFORE setting source ID to prevent flickering
+      sourcesStore.clearCurrentSourceDetails()
+      
+      // Then set source ID (this will trigger UI changes)
       exploreStore.setSource(sourceId)
+      
+      // Load source details
       await sourcesStore.loadSourceDetails(sourceId)
     } catch (error) {
       console.error('Error changing source:', error)
     } finally {
-      // Use nextTick for consistency
-      nextTick(() => {
-        isProcessingSourceChange.value = false;
-      });
+      // Use setTimeout for consistent timing
+      setTimeout(() => {
+        isProcessingSourceChange.value = false
+      }, 50) // Short delay to ensure state transitions properly
     }
   }
 
 // Add computed property for source details loading
-const isLoadingSourceDetails = computed(() => sourcesStore.isLoadingCurrentSourceDetails);
+const isLoadingSourceDetails = computed(() => {
+  if (!currentSourceId.value) return false;
+  return sourcesStore.isLoadingSourceDetails(currentSourceId.value);
+});
 
-// Create a combined loading state
+// Create a combined loading state - specifically for major context changes
+// We separate this from source details loading to allow different UX treatments
 const isChangingContext = computed(() => {
-  // True if either handler is running
+  // True if either team or source selection is being processed
   if (isProcessingTeamChange.value || isProcessingSourceChange.value) {
     return true;
   }
@@ -159,10 +176,8 @@ const isChangingContext = computed(() => {
   if (currentTeamId.value && sourcesStore.isLoadingTeamSources(currentTeamId.value)) {
     return true;
   }
-  // True if details are being fetched for the current source
-  if (currentSourceId.value && isLoadingSourceDetails.value) {
-     return true;
-  }
+  // We don't include isLoadingSourceDetails here, as it's a different type of loading
+  // that happens after initial context is established
   return false;
 });
 
@@ -174,8 +189,8 @@ const isChangingContext = computed(() => {
     currentSourceId,
     sourceDetails,
     hasValidSource,
-    isChangingContext, // <-- Add this
-    isLoadingSourceDetails, // <-- Add this (optional, but good for clarity)
+    isChangingContext,
+    isLoadingSourceDetails,
 
     // Lists and names
     availableTeams,

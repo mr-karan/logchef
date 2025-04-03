@@ -84,7 +84,8 @@ const {
 const {
   isProcessingTeamChange,
   isProcessingSourceChange,
-  isChangingContext, // <-- Destructure the new property
+  isChangingContext,
+  isLoadingSourceDetails,
   currentTeamId,
   currentSourceId,
   sourceDetails,
@@ -777,14 +778,21 @@ onBeforeUnmount(() => {
       <div class="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
         <!-- Query Editor Section -->
         <div class="px-4 py-3">
-          <!-- NEW: Loading State for Team/Source Change -->
-          <template v-if="isChangingContext">
+          <!-- Loading States and UI Components -->
+          <template v-if="isChangingContext || (currentSourceId && isLoadingSourceDetails)">
+            <!-- Loading indicator - shown during all loading states -->
             <div class="flex items-center justify-center text-muted-foreground p-6 border rounded-md bg-card shadow-sm animate-pulse">
-              Loading context data...
+              <div class="flex items-center space-x-2">
+                <svg class="animate-spin h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>{{ isChangingContext ? 'Loading context data...' : 'Loading source details...' }}</span>
+              </div>
             </div>
           </template>
-
-          <!-- Query Editor (only if NOT changing context and source is valid) -->
+          
+          <!-- Query Editor - only show when we have valid source and time range -->
           <template v-else-if="currentSourceId && hasValidSource && exploreStore.timeRange">
             <div class="bg-card shadow-sm rounded-md overflow-hidden">
               <QueryEditor ref="queryEditorRef"
@@ -803,9 +811,9 @@ onBeforeUnmount(() => {
                 class="border-0 border-b" />
             </div>
           </template>
-
-          <!-- Select Source Prompt (only if NOT changing context and no source selected) -->
-          <template v-else-if="currentTeamId && !currentSourceId && !isChangingContext">
+          
+          <!-- "Select source" message - only when no source selected -->
+          <template v-else-if="currentTeamId && !currentSourceId">
             <div class="flex items-center justify-center text-muted-foreground p-6 border rounded-md bg-card shadow-sm">
               <div class="text-center">
                 <div class="mb-2 text-muted-foreground/70">
@@ -820,21 +828,12 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </template>
-
-          <!-- Error Loading Source (only if NOT changing context and source is invalid) -->
-          <template v-else-if="currentSourceId && !hasValidSource && !isChangingContext">
-            <div class="flex items-center justify-center text-destructive p-6 border border-destructive/30 rounded-md bg-destructive/5 shadow-sm">
+          
+          <!-- Loading fallback - for any other state -->
+          <template v-else>
+            <div class="flex items-center justify-center p-6 border rounded-md bg-card shadow-sm">
               <div class="text-center">
-                <div class="mb-2 text-destructive/80">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                    class="mx-auto mb-1">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="12" x2="12" y1="8" y2="12" />
-                    <line x1="12" x2="12.01" y1="16" y2="16" />
-                  </svg>
-                </div>
-                <p class="text-sm">Error loading source details. Please try again.</p>
+                <p class="text-sm text-muted-foreground">Loading explorer...</p>
               </div>
             </div>
           </template>

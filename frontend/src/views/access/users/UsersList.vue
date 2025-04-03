@@ -84,7 +84,7 @@ const confirmDelete = async () => {
 
     await usersStore.deleteUser(userToDelete.value.id);
     // Store automatically handles errors and success
-    
+
     // Reset UI state
     showDeleteDialog.value = false;
     userToDelete.value = null;
@@ -120,7 +120,7 @@ const confirmEdit = async () => {
         email: editForm.value.email,
         role: editForm.value.role
     });
-    
+
     // Reset UI state
     showEditDialog.value = false;
     userToEdit.value = null;
@@ -192,7 +192,7 @@ onMounted(() => {
                                     </TableCell>
                                     <TableCell>
                                         <div class="flex items-center space-x-2">
-                                            <Switch :checked="user.status === 'active'" 
+                                            <Switch :checked="user.status === 'active'"
                                                 @update:checked="toggleUserStatus(user)" />
                                             <span class="capitalize">{{ user.status }}</span>
                                         </div>
@@ -261,15 +261,17 @@ onMounted(() => {
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
                         <Label for="role" class="text-right">Role</Label>
-                        <Select v-model="editForm.role" class="col-span-3">
-                            <SelectTrigger>
-                                <SelectValue placeholder="Select a role" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="admin">Admin</SelectItem>
-                                <SelectItem value="member">Member</SelectItem>
-                            </SelectContent>
-                        </Select>
+                        <div class="col-span-3 w-full">
+                            <Select v-model="editForm.role">
+                                <SelectTrigger class="w-full">
+                                    <SelectValue placeholder="Select a role" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="admin">Admin</SelectItem>
+                                    <SelectItem value="member">Member</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
                     </div>
                 </div>
                 <DialogFooter>
