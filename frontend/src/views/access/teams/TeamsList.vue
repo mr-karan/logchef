@@ -33,8 +33,15 @@ import { useTeamsStore } from '@/stores/teams'
 const router = useRouter()
 const teamsStore = useTeamsStore()
 const { isLoading, error: teamsError } = storeToRefs(teamsStore)
+// Directly use adminTeams for this admin-specific view
 const teams = computed(() => {
-    return teamsStore.getTeamsWithDefaults();
+    // Map adminTeams to include defaults if needed, similar to getTeamsWithDefaults
+    return teamsStore.adminTeams.map(team => ({
+      ...team,
+      name: team.name || `Team ${team.id}`,
+      description: team.description || '',
+      memberCount: team.member_count || 0 // Use member_count from API response
+    }));
 });
 const showDeleteDialog = ref(false)
 const teamToDelete = ref<Team | null>(null)
