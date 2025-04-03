@@ -324,11 +324,27 @@ watch(isInitializing, async (initializing, prevInitializing) => {
     }
 
     // Now check if we can execute the query (either the one from URL or the loaded saved one)
-    if (canExecuteQuery.value && (exploreStore.logchefqlCode || exploreStore.rawSql)) {
-      console.log("Running initial query...")
+    if (canExecuteQuery.value) {
+      console.log("Running initial query automatically after initialization...")
       await executeQuery()
     } else {
-      console.log("Skipping initial query (missing requirements or no query content)")
+      console.log("Cannot run initial query automatically. Current state:", {
+        canExecuteQuery: canExecuteQuery.value,
+        currentTeamId: currentTeamId.value,
+        currentSourceId: currentSourceId.value,
+        hasValidSource: hasValidSource.value,
+        sourceDetails: !!sourceDetails.value,
+        timeRange: !!exploreStore.timeRange,
+        queryContent: {
+          logchefql: !!exploreStore.logchefqlCode,
+          sql: !!exploreStore.rawSql
+        }
+      });
+
+      // If we have team and source but not source details, they might be loading
+      if (currentTeamId.value && currentSourceId.value && !sourceDetails.value) {
+        console.log("Source details not loaded yet. They should load soon and the query will execute automatically.");
+      }
     }
   }
 }, { immediate: false })
@@ -437,8 +453,26 @@ watch(
   (newSourceDetails, oldSourceDetails) => {
     if (newSourceDetails?.id !== oldSourceDetails?.id) {
       console.log('Source details changed in store, availableFields will update.');
-      // Handle pending SQL restoration if needed (logic might move to store or be simplified)
-      // Consider if pendingRawSql is still necessary with better store sync
+
+      // If this is the first time loading a valid source and initialization is complete,
+      // execute the query automatically after a short delay to ensure everything is ready
+      if (newSourceDetails && !oldSourceDetails && !isInitializing.value && canExecuteQuery.value) {
+        console.log('First valid source loaded, executing initial query automatically...');
+        setTimeout(() => {
+          if (canExecuteQuery.value) {
+            console.log('Executing delayed initial query after source details loaded');
+            executeQuery();
+          } else {
+            console.log('Cannot execute query after delay:', {
+              isInitializing: isInitializing.value,
+              currentTeamId: currentTeamId.value,
+              currentSourceId: currentSourceId.value,
+              hasValidSource: hasValidSource.value,
+              timeRange: !!exploreStore.timeRange
+            });
+          }
+        }, 100);
+      }
     }
   },
   { immediate: true }
