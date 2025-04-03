@@ -33,17 +33,17 @@ export function formatErrorMessage(error: unknown): string {
   // Axios error
   if (error && typeof error === "object" && "isAxiosError" in error) {
     const axiosError = error as AxiosError<APIErrorResponse>;
-    
+
     // Network error (no response)
     if (!axiosError.response) {
       return "Network error: Unable to connect to the server";
     }
-    
+
     // Server error with proper format
     if (axiosError.response.data?.status === "error") {
       return axiosError.response.data.message;
     }
-    
+
     // Fallback to status text
     return `Server error: ${axiosError.response.statusText || "Unknown error"}`;
   }
@@ -84,7 +84,7 @@ export function getErrorType(error: unknown): string {
 export function formatErrorTypeToTitle(errorType: string): string {
   // Use predefined title if available
   if (errorType in ERROR_TITLES) return ERROR_TITLES[errorType];
-  
+
   // Format camelCase or snake_case to Title Case
   return errorType
     .replace(/([A-Z])/g, " $1") // Add space before capital letters
@@ -110,7 +110,7 @@ export function showErrorToast(error: unknown, customMessage?: string): void {
   const { toast } = useToast();
   const { title } = parseError(error);
   const message = customMessage || formatErrorMessage(error);
-  
+
   toast({
     title,
     description: message,
@@ -127,6 +127,7 @@ export function showSuccessToast(message: string): void {
   toast({
     title: "Success",
     description: message,
+    variant: "success",
     duration: TOAST_DURATION.SUCCESS
   });
 }
