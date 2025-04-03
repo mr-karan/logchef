@@ -146,6 +146,26 @@ export function useSourceTeamManagement() {
     }
   }
 
+// Add computed property for source details loading
+const isLoadingSourceDetails = computed(() => sourcesStore.isLoadingCurrentSourceDetails);
+
+// Create a combined loading state
+const isChangingContext = computed(() => {
+  // True if either handler is running
+  if (isProcessingTeamChange.value || isProcessingSourceChange.value) {
+    return true;
+  }
+  // True if team sources are being fetched for the current team
+  if (currentTeamId.value && sourcesStore.isLoadingTeamSources(currentTeamId.value)) {
+    return true;
+  }
+  // True if details are being fetched for the current source
+  if (currentSourceId.value && isLoadingSourceDetails.value) {
+     return true;
+  }
+  return false;
+});
+
   return {
     // State
     isProcessingTeamChange,
@@ -154,6 +174,8 @@ export function useSourceTeamManagement() {
     currentSourceId,
     sourceDetails,
     hasValidSource,
+    isChangingContext, // <-- Add this
+    isLoadingSourceDetails, // <-- Add this (optional, but good for clarity)
 
     // Lists and names
     availableTeams,
