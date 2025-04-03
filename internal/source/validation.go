@@ -99,10 +99,10 @@ func (v *Validator) ValidateSourceCreation(name string, conn models.ConnectionIn
 		}
 	}
 
-	if len(description) > 50 {
+	if len(description) > 500 {
 		return &ValidationError{
 			Field:   "Description",
-			Message: "description must not exceed 50 characters",
+			Message: "description must not exceed 500 characters",
 		}
 	}
 
@@ -147,10 +147,10 @@ func (v *Validator) ValidateSourceUpdate(description string, ttlDays int) error 
 		}
 	}
 
-	if len(description) > 50 {
+	if len(description) > 500 {
 		return &ValidationError{
 			Field:   "Description",
-			Message: "description must not exceed 50 characters",
+			Message: "description must not exceed 500 characters",
 		}
 	}
 

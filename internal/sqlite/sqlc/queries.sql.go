@@ -763,7 +763,7 @@ func (q *Queries) ListTeamMembersWithDetails(ctx context.Context, teamID int64) 
 }
 
 const listTeamSources = `-- name: ListTeamSources :many
-SELECT s.id, s.name, s.database, s.table_name, s.description, s.created_at
+SELECT s.id, s.name, s.database, s.table_name, s.description, s.created_at, s.updated_at
 FROM sources s
 JOIN team_sources ts ON s.id = ts.source_id
 WHERE ts.team_id = ?
@@ -777,6 +777,7 @@ type ListTeamSourcesRow struct {
 	TableName   string         `json:"table_name"`
 	Description sql.NullString `json:"description"`
 	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
 }
 
 // List all data sources in a team
@@ -796,6 +797,7 @@ func (q *Queries) ListTeamSources(ctx context.Context, teamID int64) ([]ListTeam
 			&i.TableName,
 			&i.Description,
 			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
