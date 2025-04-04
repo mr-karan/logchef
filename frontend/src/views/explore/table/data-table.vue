@@ -697,8 +697,8 @@ const onDragEnd = () => { // No event parameter
     </div>
 </template>
 
-<style scoped>
-/* Add scoped attribute */
+<style>
+/* Removed scoped attribute */
 /* Table styling for log analytics */
 .table-fixed {
     table-layout: fixed;
