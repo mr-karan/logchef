@@ -124,10 +124,11 @@ export function createColumns(
           return h(
             "span",
             {
-              class: "flex-render-content font-mono text-[13px]",
-              title: value as string
+              class: "flex-render-content font-mono text-[13px]", // Base class
+              title: value as string // Keep the original value as title
             },
-            formatTimestamp(value as string, timezone)
+            // First format for timezone, then format for coloring
+            formatLogContent(formatTimestamp(value as string, timezone))
           );
         }
 
