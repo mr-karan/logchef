@@ -113,8 +113,10 @@ const selectedSourceName = computed(() => {
 });
 
 // Add this computed property near the other computed properties
-const noQueriesMessage = computed(() =>
-  searchQuery.value ? 'No queries match your search.' : 'Create a query in the Explorer and save it to access it here.'
+const emptyStateMessage = computed(() =>
+  searchQuery.value
+    ? 'No queries match your search.'
+    : 'Create a query in the Explorer and save it to your collection.'
 );
 
 // Load sources and queries on mount
@@ -379,8 +381,11 @@ function handleCreateNewQuery() {
 <template>
   <div class="container py-6 space-y-6">
     <div class="flex justify-between items-center">
-      <h1 class="text-2xl font-bold tracking-tight">Saved Queries</h1>
-      <Button @click="handleCreateNewQuery">Create New Query</Button>
+      <h1 class="text-2xl font-bold tracking-tight">Collections</h1>
+      <Button @click="handleCreateNewQuery">
+        <Plus class="mr-2 h-4 w-4" />
+        Add to Collection
+      </Button>
     </div>
 
     <!-- Error Alert -->
@@ -446,40 +451,46 @@ function handleCreateNewQuery() {
       <!-- Team and Source selectors -->
       <div class="border-b pb-3 mb-2">
         <div class="flex items-center justify-between">
-          <div class="flex items-center space-x-2 text-sm">
-            <Select :model-value="teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : ''"
-              @update:model-value="handleTeamChange" class="h-8 min-w-[160px]" :disabled="isChangingTeam">
-              <SelectTrigger>
-                <SelectValue placeholder="Select a team">
-                  <span v-if="isChangingTeam">Loading...</span>
-                  <span v-else>{{ selectedTeamName }}</span>
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id.toString()">
-                  {{ team.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+          <div class="flex items-center space-x-4 text-sm">
+            <div class="flex flex-col space-y-1.5">
+              <label class="text-sm font-medium leading-none">Team</label>
+              <Select :model-value="teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : ''"
+                @update:model-value="handleTeamChange" class="h-8 min-w-[160px]" :disabled="isChangingTeam">
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a team">
+                    <span v-if="isChangingTeam">Loading...</span>
+                    <span v-else>{{ selectedTeamName }}</span>
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id.toString()">
+                    {{ team.name }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-            <span class="text-muted-foreground">→</span>
+            <span class="text-muted-foreground mt-6">→</span>
 
-            <Select :model-value="selectedSourceId" @update:model-value="handleSourceChange"
-              :disabled="isChangingSource || !teamsStore.currentTeamId || (sourcesStore.teamSources || []).length === 0"
-              class="h-8 min-w-[200px]">
-              <SelectTrigger>
-                <SelectValue placeholder="Select a source">
-                  <span v-if="isChangingSource">Loading...</span>
-                  <span v-else>{{ selectedSourceName }}</span>
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="source in sourcesStore.teamSources || []" :key="source.id"
-                  :value="String(source.id)">
-                  {{ formatSourceName(source) }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <div class="flex flex-col space-y-1.5">
+              <label class="text-sm font-medium leading-none">Source</label>
+              <Select :model-value="selectedSourceId" @update:model-value="handleSourceChange"
+                :disabled="isChangingSource || !teamsStore.currentTeamId || (sourcesStore.teamSources || []).length === 0"
+                class="h-8 min-w-[200px]">
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a source">
+                    <span v-if="isChangingSource">Loading...</span>
+                    <span v-else>{{ selectedSourceName }}</span>
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="source in sourcesStore.teamSources || []" :key="source.id"
+                    :value="String(source.id)">
+                    {{ formatSourceName(source) }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
       </div>
@@ -488,7 +499,8 @@ function handleCreateNewQuery() {
       <div class="my-4">
         <div class="relative">
           <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input v-model="searchQuery" type="search" placeholder="Search by name or description..." class="pl-8" />
+          <Input v-model="searchQuery" type="search" placeholder="Search collection by name or description..."
+            class="pl-8" />
           <Button v-if="searchQuery" variant="outline" size="sm" class="absolute right-2 top-1.5" @click="clearSearch">
             Clear
           </Button>
@@ -498,7 +510,7 @@ function handleCreateNewQuery() {
       <!-- Loading state -->
       <div v-if="isLoading" class="flex justify-center items-center py-8">
         <Loader2 class="h-8 w-8 animate-spin text-primary" />
-        <p class="ml-2 text-muted-foreground">Loading saved queries...</p>
+        <p class="ml-2 text-muted-foreground">Loading collection...</p>
       </div>
 
       <!-- Empty state - no queries -->
@@ -506,14 +518,14 @@ function handleCreateNewQuery() {
         <div class="rounded-full bg-muted p-3">
           <Search class="h-6 w-6 text-muted-foreground" />
         </div>
-        <p class="text-xl text-muted-foreground">No saved queries found</p>
-        <p class="text-muted-foreground">{{ noQueriesMessage }}</p>
+        <p class="text-xl text-muted-foreground">Collection is empty</p>
+        <p class="text-muted-foreground">{{ emptyStateMessage }}</p>
         <div class="flex gap-3">
           <Button v-if="searchQuery" variant="outline" @click="clearSearch">
             Clear Search
           </Button>
           <Button v-else @click="handleCreateNewQuery">
-            Create New Query
+            Add to Collection
           </Button>
         </div>
       </div>
@@ -521,7 +533,7 @@ function handleCreateNewQuery() {
       <!-- Queries table -->
       <div v-else>
         <div class="text-sm text-muted-foreground mb-2">
-          {{ totalQueryCount }} {{ totalQueryCount === 1 ? 'query' : 'queries' }} found
+          {{ totalQueryCount }} {{ totalQueryCount === 1 ? 'query' : 'queries' }} in collection
         </div>
 
         <Table class="font-sans">

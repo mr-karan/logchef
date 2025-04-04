@@ -101,7 +101,7 @@ const mainNavItems = [
     url: '/logs/explore',
   },
   {
-    title: 'Saved Queries',
+    title: 'Collections',
     icon: ClipboardList,
     url: '/logs/saved',
   },
