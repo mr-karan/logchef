@@ -19,7 +19,7 @@ import {
 } from '@tanstack/vue-table'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Search, GripVertical } from 'lucide-vue-next'
+import { Search, GripVertical, Download } from 'lucide-vue-next'
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import DataTableColumnSelector from './data-table-column-selector.vue'
@@ -34,6 +34,13 @@ import { useExploreStore } from '@/stores/explore'
 import type { Source } from '@/api/sources'
 import { useSourcesStore } from '@/stores/sources'
 import { useStorage, type UseStorageOptions, type RemovableRef } from '@vueuse/core'
+import { exportTableData } from './export'
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 
 interface Props {
     columns: ColumnDef<Record<string, any>>[]
@@ -573,6 +580,44 @@ function formatExecutionTime(ms: number): string {
 
             <!-- Right side controls with pagination moved to top -->
             <div class="flex items-center gap-3">
+                <!-- Export CSV Button with Dropdown -->
+                <DropdownMenu v-if="table && table.getRowModel().rows?.length > 0">
+                    <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" class="h-8 flex items-center gap-1"
+                            title="Export table data">
+                            <Download class="h-4 w-4 mr-1" />
+                            Export
+                        </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" class="w-48">
+                        <DropdownMenuItem @click="exportTableData(table, {
+                            fileName: `logchef-export-all-${new Date().toISOString().slice(0, 10)}`,
+                            exportType: 'all',
+                            includeHiddenColumns: true
+                        })">
+                            Export All Data
+                        </DropdownMenuItem>
+                        <DropdownMenuItem @click="exportTableData(table, {
+                            fileName: `logchef-export-${new Date().toISOString().slice(0, 10)}`,
+                            exportType: 'visible'
+                        })">
+                            Export Visible Rows
+                        </DropdownMenuItem>
+                        <DropdownMenuItem @click="exportTableData(table, {
+                            fileName: `logchef-export-filtered-${new Date().toISOString().slice(0, 10)}`,
+                            exportType: 'filtered'
+                        })">
+                            Export All Filtered Rows
+                        </DropdownMenuItem>
+                        <DropdownMenuItem @click="exportTableData(table, {
+                            fileName: `logchef-export-page-${new Date().toISOString().slice(0, 10)}`,
+                            exportType: 'page'
+                        })">
+                            Export Current Page
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+
                 <!-- Timezone toggle -->
                 <div class="flex items-center space-x-1 mr-1">
                     <Button variant="ghost" size="sm" class="h-8 px-2 text-xs"
