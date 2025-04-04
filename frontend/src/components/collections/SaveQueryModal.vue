@@ -347,8 +347,6 @@ async function handleSubmit(event: Event) {
         save_timestamp: saveTimestamp.value
       };
 
-      // For debugging
-      console.log('SaveQueryModal: sending payload with query_type:', queryType);
 
       if (isEditing.value && queryId.value) {
         // We're updating an existing query
@@ -371,7 +369,6 @@ async function handleSubmit(event: Event) {
       throw contentError;
     }
   } catch (error) {
-    console.error('SaveQueryModal: Error in handleSubmit:', error);
     // The parent component will handle showing the error toast
   } finally {
     isSubmitting.value = false;

@@ -23,7 +23,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { TOAST_DURATION } from '@/lib/constants';
-import SaveQueryModal from '@/components/saved-queries/SaveQueryModal.vue';
+import SaveQueryModal from '@/components/collections/SaveQueryModal.vue';
 import { getErrorMessage } from '@/api/types';
 import { useSourcesStore } from '@/stores/sources';
 import { formatSourceName } from '@/utils/format';
@@ -31,7 +31,6 @@ import type { SavedTeamQuery } from '@/api/savedQueries';
 import { useTeamsStore } from '@/stores/teams';
 import { Badge } from '@/components/ui/badge';
 import { useSavedQueries } from '@/composables/useSavedQueries';
-import type { ReturnType } from '@vue/runtime-core';
 
 // Initialize router and services with better error handling
 const router = useRouter();
@@ -226,7 +225,7 @@ async function handleTeamChange(teamId: string) {
     });
 
     // Load sources for the selected team
-    const sourcesResult = await sourcesStore.loadTeamSources(currentTeamId, true);
+    const sourcesResult = await sourcesStore.loadTeamSources(currentTeamId);
 
     // Handle case where team has no sources
     if (!sourcesResult.success || !sourcesResult.data || sourcesResult.data.length === 0) {

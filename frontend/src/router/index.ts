@@ -65,7 +65,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: "saved",
         name: "SavedQueries",
-        component: () => import("@/views/SavedQueriesView.vue").catch(err => {
+        component: () => import("@/views/collections/SavedQueriesView.vue").catch(err => {
           error("Router", "Failed to load SavedQueriesView component", err);
           return { default: ComponentLoadError };
         }),

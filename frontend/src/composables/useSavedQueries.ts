@@ -28,7 +28,6 @@ export function useSavedQueries() {
   const route = useRoute()
   const exploreStore = useExploreStore()
   const savedQueriesStore = useSavedQueriesStore()
-  const { syncUrlFromState } = useExploreUrlSync()
   const { toast } = useToast()
 
   const showSaveQueryModal = ref(false)

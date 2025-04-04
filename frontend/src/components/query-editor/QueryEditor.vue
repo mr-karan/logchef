@@ -143,7 +143,7 @@ import { VueMonacoEditor } from "@guolao/vue-monaco-editor";
 import { HelpCircle, PanelRightOpen, PanelRightClose, AlertCircle, XCircle, FileEdit, FilePlus2, Search, Code2 } from "lucide-vue-next";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import SavedQueriesDropdown from '@/components/saved-queries/SavedQueriesDropdown.vue';
+import SavedQueriesDropdown from '@/components/collections/SavedQueriesDropdown.vue';
 import type { SavedTeamQuery } from '@/api/savedQueries';
 import { useRoute, useRouter } from 'vue-router';
 import { Button } from '@/components/ui/button';
