@@ -29,13 +29,11 @@ import { useTeamsStore } from '@/stores/teams'
 import { useSourcesStore } from '@/stores/sources'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
 import { now, getLocalTimeZone, type CalendarDateTime, type DateValue, toCalendarDateTime } from '@internationalized/date'
-import { createColumns } from './table/columns'
 import DataTable from './table/data-table.vue'
 import { formatSourceName } from '@/utils/format'
 import SaveQueryModal from '@/components/saved-queries/SaveQueryModal.vue'
 import QueryEditor from '@/components/query-editor/QueryEditor.vue'
 import { FieldSideBar } from '@/components/field-sidebar'
-import type { ColumnDef } from '@tanstack/vue-table'
 import { getErrorMessage } from '@/api/types'
 import { useSourceTeamManagement } from '@/composables/useSourceTeamManagement'
 import { useSavedQueries } from '@/composables/useSavedQueries'
@@ -183,7 +181,6 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
 
 // Basic state
 const showFieldsPanel = ref(false)
-const tableColumns = ref<ColumnDef<Record<string, any>>[]>([])
 const queryEditorRef = ref()
 const isLoadingQuery = ref(false)
 const editQueryData = ref<SavedTeamQuery | null>(null)
@@ -431,24 +428,6 @@ watch(
   { immediate: true }
 );
 
-// Watch for changes in exploreStore.columns to update tableColumns
-watch(
-  () => exploreStore.columns,
-  (newColumns) => {
-    if (newColumns?.length > 0) {
-      // Get display preferences
-      const timezone = displayTimezone.value;
-      const tsField = sourceDetails.value?._meta_ts_field || 'timestamp';
-      const severityField = sourceDetails.value?._meta_severity_field || 'severity_text';
-
-      // Create columns using the columns utility function
-      tableColumns.value = createColumns(newColumns, tsField, timezone, severityField);
-    } else {
-      tableColumns.value = [];
-    }
-  },
-  { immediate: true }
-);
 
 // Watch time range changes and update query dirty state
 watch(
@@ -937,9 +916,9 @@ onBeforeUnmount(() => {
 
             <!-- Results Table -->
             <template v-if="!isExecutingQuery && exploreStore.logs?.length">
-              <DataTable v-if="exploreStore.logs.length > 0 && tableColumns.length > 0"
+              <DataTable v-if="exploreStore.logs.length > 0 && exploreStore.columns?.length > 0"
                 :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}`"
-                :columns="tableColumns" :data="exploreStore.logs" :stats="exploreStore.queryStats"
+                :columns="exploreStore.columns" :data="exploreStore.logs" :stats="exploreStore.queryStats"
                 :source-id="String(exploreStore.sourceId)" :team-id="teamsStore.currentTeamId"
                 :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
                 :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field" :timezone="displayTimezone"
