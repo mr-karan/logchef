@@ -206,7 +206,7 @@ const lastQueryParam = ref(currentRoute.query.q);
 const lastModeParam = ref(currentRoute.query.mode);
 
 // Check if we're in edit mode (URL has query_id)
-const isEditingExistingQuery = computed(() => !!currentRoute.query.query_id);
+const isEditingExistingQuery = computed(() => !!currentRoute.query.query_id || !!exploreStore.selectedQueryId);
 const queryIdFromUrl = computed(() => currentRoute.query.query_id as string | undefined);
 
 // Computed property to determine if the query is savable/updatable
@@ -526,7 +526,8 @@ function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): nu
 
 // New handler for the Save/Update button
 const handleSaveOrUpdateClick = async () => {
-  const queryId = queryIdFromUrl.value;
+  // Check if we have a query_id in the URL or in the exploreStore
+  const queryId = queryIdFromUrl.value || exploreStore.selectedQueryId;
 
   // Check if we can save
   if (!canSaveOrUpdateQuery.value) {
