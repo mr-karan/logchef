@@ -980,6 +980,94 @@ td>.flex>.whitespace-pre {
     /* indigo-800 */
 }
 
+/* Status Code Styling */
+:deep(.status-code) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 35px;
+    height: 20px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 11px;
+    line-height: 1.4;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    transition: transform 0.1s ease-in-out;
+    white-space: nowrap;
+    cursor: help;
+}
+
+:deep(.status-code:hover) {
+    transform: scale(1.05);
+}
+
+/* Status Code Types */
+:deep(.status-info) {
+    background-color: #e0f2fe;
+    /* light blue */
+    color: #075985;
+    border: 1px solid #7dd3fc;
+}
+
+.dark :deep(.status-info) {
+    background-color: #0c4a6e;
+    color: #bae6fd;
+    border: 1px solid #0284c7;
+}
+
+:deep(.status-success) {
+    background-color: #dcfce7;
+    /* light green */
+    color: #166534;
+    border: 1px solid #86efac;
+}
+
+.dark :deep(.status-success) {
+    background-color: #14532d;
+    color: #bbf7d0;
+    border: 1px solid #16a34a;
+}
+
+:deep(.status-redirect) {
+    background-color: #fef9c3;
+    /* light yellow */
+    color: #854d0e;
+    border: 1px solid #fde047;
+}
+
+.dark :deep(.status-redirect) {
+    background-color: #713f12;
+    color: #fef08a;
+    border: 1px solid #ca8a04;
+}
+
+:deep(.status-error) {
+    background-color: #fee2e2;
+    /* light red */
+    color: #b91c1c;
+    border: 1px solid #fca5a5;
+}
+
+.dark :deep(.status-error) {
+    background-color: #7f1d1d;
+    color: #fecaca;
+    border: 1px solid #ef4444;
+}
+
+:deep(.status-server) {
+    background-color: #ffe4e6;
+    /* light pink */
+    color: #be123c;
+    border: 1px solid #fda4af;
+}
+
+.dark :deep(.status-server) {
+    background-color: #881337;
+    color: #fecdd3;
+    border: 1px solid #e11d48;
+}
+
 /* Timestamp Formatting */
 :deep(.timestamp) {
     /* Optional: Add a subtle background or border if needed */
