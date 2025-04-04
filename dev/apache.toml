@@ -1,36 +1,33 @@
-[sources.generate_syslog]
+[sources.generate_apache]
 type = "demo_logs"
-format = "syslog"
+format = "apache_common"
 interval = 0.01
 
-[transforms.remap_syslog]
-inputs = ["generate_syslog"]
+[transforms.remap_apache]
+inputs = ["generate_apache"]
 type = "remap"
 source = '''
-  structured = parse_syslog!(.message)
+  # For Apache Common Log Format, the message is already parsed by Vector
+  # into structured fields like host, user, method, path, etc.
 
-  # Timestamp handling
-  .timestamp = format_timestamp!(structured.timestamp, format: "%Y-%m-%d %H:%M:%S.%f")
+  # Timestamp handling - Apache logs have timestamp in a specific format
+  .timestamp = format_timestamp!(parse_timestamp!(.timestamp, format: "%d/%b/%Y:%H:%M:%S %z"), format: "%Y-%m-%d %H:%M:%S.%f")
 
   # Required fields from schema
   .trace_id = uuid_v4()
   .span_id = uuid_v4()
   .trace_flags = 0
-  .service_name = structured.appname
-  .namespace = "syslog"
-  .body = structured.message
+  .service_name = "apache"
+  .namespace = "apache"
+  .body = .message
 
-  # Map severity
-  .severity_text = if includes(["emerg", "err", "crit", "alert"], structured.severity) {
+  # Set severity based on HTTP status code
+  .severity_text = if .status >= 500 {
     "ERROR"
-  } else if structured.severity == "warning" {
-    "WARN"
-  } else if structured.severity == "debug" {
-    "DEBUG"
-  } else if includes(["info", "notice"], structured.severity) {
-    "INFO"
+  } else if .status >= 400 {
+    "WARN" 
   } else {
-    structured.severity
+    "INFO"
   }
 
   # Convert severity to number
@@ -38,28 +35,35 @@ source = '''
     17
   } else if .severity_text == "WARN" {
     13
-  } else if .severity_text == "DEBUG" {
-    5
   } else {
     9  # INFO
   }
 
-  # Store syslog-specific fields in log_attributes
+  # Store apache-specific fields in log_attributes
   .log_attributes = {
-    "syslog.procid": structured.procid,
-    "syslog.facility": structured.facility,
-    "syslog.version": structured.version,
-    "syslog.hostname": structured.hostname
+    "http.request.method": .method,
+    "http.response.status_code": .status,
+    "http.request.body.size": .size,
+    "url.path": .path,
+    "client.address": .host,
+    "user.id": .user
   }
 
   # Cleanup
   del(.message)
   del(.source_type)
+  del(.method)
+  del(.path)
+  del(.protocol)
+  del(.host)
+  del(.user)
+  del(.status)
+  del(.size)
 '''
 
 [sinks.clickhouse]
 type = "clickhouse"
-inputs = ["remap_syslog"]
+inputs = ["remap_apache"]
 endpoint = "http://localhost:8123"
 database = "logs"
 table = "vector_logs"
@@ -69,5 +73,5 @@ table = "vector_logs"
 
 # [sinks.console]
 # type = "console"
-# inputs = ["generate_syslog"]
+# inputs = ["generate_apache"]
 # encoding.codec = "json"
