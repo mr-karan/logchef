@@ -95,5 +95,6 @@ source = '''
 
 [sinks.console]
 type = "console"
-inputs = ["generate_apache"]
+# Switch input to the remapped logs to see the result
+inputs = ["remap_apache"]
 encoding.codec = "json"
