@@ -673,7 +673,6 @@ function formatExecutionTime(ms: number): string {
 
                         <tbody>
                             <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
-                                <!-- Bind expanded class directly -->
                                 <tr class="group cursor-pointer border-b transition-colors hover:bg-muted/30" :class="[
                                     row.getIsExpanded() ? 'expanded-row bg-primary/15' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
                                 ]" @click="handleRowClick(row)($event)">
@@ -687,9 +686,8 @@ function formatExecutionTime(ms: number): string {
                                             maxWidth: `${cell.column.columnDef.maxSize ?? defaultColumn.maxSize}px`
                                         }">
                                         <div class="flex items-center gap-1 w-full overflow-hidden">
-                                            <div class="whitespace-pre w-full overflow-hidden">
-                                                <!-- Prevent wrapping, single line only -->
-                                                <!-- Check cell.column.columnDef.cell exists -->
+                                            <div class="whitespace-pre w-full overflow-hidden"
+                                                :title="formatCellValue(cell.getValue())">
                                                 <FlexRender v-if="cell.column.columnDef.cell"
                                                     :render="cell.column.columnDef.cell" :props="cell.getContext()" />
                                             </div>
@@ -895,9 +893,9 @@ td>.flex>.whitespace-pre {
     display: inline-block;
     padding: 1px 6px;
     border-radius: 4px;
-    font-weight: 600;
-    font-size: 11px;
-    /* Slightly smaller */
+    font-weight: 400;
+    font-size: 0.6875rem;
+    /* 11px */
     line-height: 1.4;
     margin: 0 2px;
     border: 1px solid transparent;
@@ -1027,8 +1025,9 @@ td>.flex>.whitespace-pre {
     height: 20px;
     padding: 1px 6px;
     border-radius: 10px;
-    font-weight: 600;
-    font-size: 11px;
+    font-weight: 400;
+    font-size: 0.6875rem;
+    /* 11px */
     line-height: 1.4;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     transition: transform 0.1s ease-in-out;
@@ -1141,10 +1140,9 @@ td>.flex>.whitespace-pre {
 
 :deep(.timestamp-offset) {
     color: hsl(var(--muted-foreground) / 0.6);
-    /* Dimmer offset, similar to separator */
     margin-left: 2px;
-    font-size: 90%;
-    /* Slightly smaller */
+    font-size: 0.5625rem;
+    /* 90% of base */
 }
 
 .dark :deep(.timestamp-offset) {
