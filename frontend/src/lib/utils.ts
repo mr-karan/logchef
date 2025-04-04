@@ -157,8 +157,8 @@ export function getSeverityClasses(
 const httpMethodRegex = /\b(GET|POST|PUT|DELETE|HEAD|PATCH|OPTIONS)\b/gi;
 
 // Regex for ISO-like timestamps (YYYY-MM-DDTHH:MM:SS.sss followed by optional Z or +/-HH:MM offset)
-// Captures date and time parts separately.
-const timestampRegex = /(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2}(\.\d+)?)(?:Z|[+-]\d{2}:\d{2})?/g;
+// Captures date, time (with optional ms), and timezone offset parts separately
+const timestampRegex = /(\d{4}-\d{2}-\d{2})([T ])(\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)(Z|[+-]\d{2}:\d{2})?/g;
 
 // Get status code class for styling
 function getStatusCodeClass(code: string): string {
@@ -217,7 +217,7 @@ export function formatLogContent(value: string, isStatusColumn: boolean = false)
         length: match[0].length,
         type: 'timestamp',
         value: match[0],
-        groups: [match[1], match[2]] // [date, time]
+        groups: [match[1], match[2], match[3], match[4]] // [date, separator, time, offset]
       });
     }
   }
@@ -250,31 +250,35 @@ export function formatLogContent(value: string, isStatusColumn: boolean = false)
     if (currentMatch.type === 'http') {
       const method = currentMatch.value.toUpperCase();
       const methodClass = ['PATCH', 'OPTIONS'].includes(method)
-        ? 'http-method http-method-utility' // Grey background for utility methods
-        : `http-method http-method-${method.toLowerCase()}`; // Existing styling for other methods
+        ? 'http-method http-method-utility'
+        : `http-method http-method-${method.toLowerCase()}`;
       results.push(
         h('span', { class: methodClass }, method)
       );
-    } else if (currentMatch.type === 'timestamp' && currentMatch.groups) {
-      const fullMatch = currentMatch.value;
-      const datePart = currentMatch.groups![0];
-      const timePart = currentMatch.groups![1];
-      const separator = value[currentMatch.index + datePart.length]; // T or space
-      // Calculate the offset part based on the full match length minus date, separator, and time
-      const offsetPart = fullMatch.substring(datePart.length + 1 + timePart.length);
+    } else if (currentMatch.type === 'timestamp' || timestampRegex.test(value)) {
+      // If it's a timestamp match or the entire value is a timestamp
+      const match = currentMatch.type === 'timestamp' ? currentMatch : {
+        value,
+        groups: timestampRegex.exec(value)?.slice(1)
+      };
 
-      const children = [
-        h('span', { class: 'timestamp-date' }, datePart),
-        h('span', { class: 'timestamp-separator' }, separator),
-        h('span', { class: 'timestamp-time' }, timePart),
-      ];
+      if (match.groups) {
+        const [datePart, separator, timePart, offsetPart = ''] = match.groups;
 
-      // Add the offset part if it exists
-      if (offsetPart) {
-        children.push(h('span', { class: 'timestamp-offset' }, offsetPart));
+        const children = [
+          h('span', { class: 'timestamp-date' }, datePart),
+          h('span', { class: 'timestamp-separator' }, separator),
+          h('span', { class: 'timestamp-time' }, timePart),
+        ];
+
+        if (offsetPart) {
+          children.push(h('span', { class: 'timestamp-offset' }, offsetPart));
+        }
+
+        results.push(h('span', { class: 'timestamp' }, children));
+      } else {
+        results.push(value);
       }
-
-      results.push(h('span', { class: 'timestamp' }, children));
     } else if (currentMatch.type === 'status') {
       const code = currentMatch.value;
       results.push(
@@ -288,6 +292,26 @@ export function formatLogContent(value: string, isStatusColumn: boolean = false)
   // Add any remaining text after the last match
   if (lastIndex < value.length) {
     results.push(value.substring(lastIndex));
+  }
+
+  // If no matches were found and the entire string is a timestamp, format it
+  if (results.length === 0 && timestampRegex.test(value)) {
+    const match = timestampRegex.exec(value);
+    if (match) {
+      const [_, datePart, separator, timePart, offsetPart = ''] = match;
+
+      const children = [
+        h('span', { class: 'timestamp-date' }, datePart),
+        h('span', { class: 'timestamp-separator' }, separator),
+        h('span', { class: 'timestamp-time' }, timePart),
+      ];
+
+      if (offsetPart) {
+        children.push(h('span', { class: 'timestamp-offset' }, offsetPart));
+      }
+
+      return [h('span', { class: 'timestamp' }, children)];
+    }
   }
 
   // If no matches were found, return the original string wrapped in an array
