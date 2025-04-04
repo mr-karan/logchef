@@ -544,6 +544,14 @@ const onDragEnd = () => { // No event parameter
     document.body.classList.remove('dragging-column');
 }
 
+// Helper function to format execution time
+function formatExecutionTime(ms: number): string {
+    if (ms >= 1000) {
+        return `${(ms / 1000).toFixed(2)}s`;
+    }
+    return `${Math.round(ms)}ms`;
+}
+
 </script>
 
 <template>
@@ -553,8 +561,15 @@ const onDragEnd = () => { // No event parameter
 
         <!-- Results Header with Controls and Pagination -->
         <div class="flex items-center justify-between p-2 border-b flex-shrink-0">
-            <!-- Left side - Empty now that stats have been moved to LogExplorer.vue -->
-            <div class="flex-1"></div>
+            <!-- Left side - Query stats -->
+            <div class="flex-1 text-sm text-muted-foreground">
+                <span v-if="stats && stats.execution_time_ms !== undefined" class="text-sm">
+                    Query time: <span class="font-medium">{{ formatExecutionTime(stats.execution_time_ms) }}</span>
+                </span>
+                <span v-if="stats && stats.rows_read !== undefined" class="ml-3 text-sm">
+                    Rows: <span class="font-medium">{{ stats.rows_read.toLocaleString() }}</span>
+                </span>
+            </div>
 
             <!-- Right side controls with pagination moved to top -->
             <div class="flex items-center gap-3">

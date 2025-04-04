@@ -148,7 +148,7 @@ export function useExploreUrlSync() {
         const nowDt = now(getLocalTimeZone());
         startDateTime = new CalendarDateTime(
           nowDt.year, nowDt.month, nowDt.day, nowDt.hour, nowDt.minute, nowDt.second
-        ).subtract({ hours: 1 });
+        ).subtract({ minutes: 5 });
         endDateTime = new CalendarDateTime(
           nowDt.year, nowDt.month, nowDt.day, nowDt.hour, nowDt.minute, nowDt.second
         );
