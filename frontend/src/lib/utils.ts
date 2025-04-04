@@ -1,5 +1,6 @@
 import type { Updater } from "@tanstack/vue-table";
-import type { Ref } from "vue";
+import type { Ref, VNode } from "vue";
+import { h } from 'vue';
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -147,4 +148,176 @@ export function getSeverityClasses(
     severityColorMap.get(normalizedValue) ||
     defaultSeverityStyle
   );
+}
+
+
+// --- Log Content Formatting ---
+
+// Regex for HTTP methods (case-insensitive, word boundaries)
+const httpMethodRegex = /\b(GET|POST|PUT|DELETE|HEAD|PATCH|OPTIONS)\b/gi;
+
+// Regex for ISO-like timestamps (YYYY-MM-DDTHH:MM:SS.sss followed by optional Z or +/-HH:MM offset)
+// Captures date, time (with optional ms), and timezone offset parts separately
+const timestampRegex = /(\d{4}-\d{2}-\d{2})([T ])(\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)(Z|[+-]\d{2}:\d{2})?/g;
+
+// Get status code class for styling
+function getStatusCodeClass(code: string): string {
+  const firstDigit = code.charAt(0);
+  switch (firstDigit) {
+    case '1': return 'status-info';     // Informational
+    case '2': return 'status-success';  // Success
+    case '3': return 'status-redirect'; // Redirection
+    case '4': return 'status-error';    // Client Error
+    case '5': return 'status-server';   // Server Error
+    default:  return 'status-unknown';  // Unknown
+  }
+}
+
+interface MatchResult {
+  index: number;
+  length: number;
+  type: 'http' | 'timestamp' | 'status';
+  value: string; // Full match
+  groups?: string[]; // Captured groups (e.g., date, time)
+}
+
+/**
+ * Formats log content string with special styling for HTTP methods and timestamps.
+ * Uses a single pass approach for better performance.
+ *
+ * @param value The raw string content.
+ * @param isStatusColumn Whether this column contains status codes (for more aggressive matching)
+ * @returns An array of VNodes or strings.
+ */
+export function formatLogContent(value: string, isStatusColumn: boolean = false): (VNode | string)[] {
+  const results: (VNode | string)[] = [];
+  let lastIndex = 0;
+  const matches: MatchResult[] = [];
+
+  // Find all HTTP method matches
+  let match;
+  while ((match = httpMethodRegex.exec(value)) !== null) {
+    matches.push({
+      index: match.index,
+      length: match[0].length,
+      type: 'http',
+      value: match[0],
+    });
+  }
+
+  // Find all timestamp matches
+  while ((match = timestampRegex.exec(value)) !== null) {
+    // Ensure timestamp matches don't overlap with already found HTTP methods
+    const overlaps = matches.some(m =>
+      (match!.index < m.index + m.length && match!.index + match![0].length > m.index)
+    );
+    if (!overlaps) {
+      matches.push({
+        index: match.index,
+        length: match[0].length,
+        type: 'timestamp',
+        value: match[0],
+        groups: [match[1], match[2], match[3], match[4]] // [date, separator, time, offset]
+      });
+    }
+  }
+
+  // Only look for status codes in status columns
+  if (isStatusColumn) {
+    const statusValue = value.trim();
+    // Must be exactly 3 digits and start with 1-5
+    if (/^[1-5][0-9]{2}$/.test(statusValue)) {
+      matches.push({
+        index: value.indexOf(statusValue),
+        length: statusValue.length,
+        type: 'status',
+        value: statusValue,
+      });
+    }
+  }
+
+  // Sort matches by their starting index
+  matches.sort((a, b) => a.index - b.index);
+
+  // Process the string and build the VNode array
+  for (const currentMatch of matches) {
+    // Add text node for content before the current match
+    if (currentMatch.index > lastIndex) {
+      results.push(value.substring(lastIndex, currentMatch.index));
+    }
+
+    // Add styled VNode for the current match
+    if (currentMatch.type === 'http') {
+      const method = currentMatch.value.toUpperCase();
+      const methodClass = ['PATCH', 'OPTIONS'].includes(method)
+        ? 'http-method http-method-utility'
+        : `http-method http-method-${method.toLowerCase()}`;
+      results.push(
+        h('span', { class: methodClass }, method)
+      );
+    } else if (currentMatch.type === 'timestamp' || timestampRegex.test(value)) {
+      // If it's a timestamp match or the entire value is a timestamp
+      const match = currentMatch.type === 'timestamp' ? currentMatch : {
+        value,
+        groups: timestampRegex.exec(value)?.slice(1)
+      };
+
+      if (match.groups) {
+        const [datePart, separator, timePart, offsetPart = ''] = match.groups;
+
+        const children = [
+          h('span', { class: 'timestamp-date' }, datePart),
+          h('span', { class: 'timestamp-separator' }, separator),
+          h('span', { class: 'timestamp-time' }, timePart),
+        ];
+
+        if (offsetPart) {
+          children.push(h('span', { class: 'timestamp-offset' }, offsetPart));
+        }
+
+        results.push(h('span', { class: 'timestamp' }, children));
+      } else {
+        results.push(value);
+      }
+    } else if (currentMatch.type === 'status') {
+      const code = currentMatch.value;
+      results.push(
+        h('span', { class: `status-code ${getStatusCodeClass(code)}` }, code)
+      );
+    }
+
+    lastIndex = currentMatch.index + currentMatch.length;
+  }
+
+  // Add any remaining text after the last match
+  if (lastIndex < value.length) {
+    results.push(value.substring(lastIndex));
+  }
+
+  // If no matches were found and the entire string is a timestamp, format it
+  if (results.length === 0 && timestampRegex.test(value)) {
+    const match = timestampRegex.exec(value);
+    if (match) {
+      const [_, datePart, separator, timePart, offsetPart = ''] = match;
+
+      const children = [
+        h('span', { class: 'timestamp-date' }, datePart),
+        h('span', { class: 'timestamp-separator' }, separator),
+        h('span', { class: 'timestamp-time' }, timePart),
+      ];
+
+      if (offsetPart) {
+        children.push(h('span', { class: 'timestamp-offset' }, offsetPart));
+      }
+
+      return [h('span', { class: 'timestamp' }, children)];
+    }
+  }
+
+  // If no matches were found, return the original string wrapped in an array
+  if (results.length === 0 && value.length > 0) {
+    return [value];
+  }
+
+  return results;
 }

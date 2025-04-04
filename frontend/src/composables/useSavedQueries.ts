@@ -28,7 +28,6 @@ export function useSavedQueries() {
   const route = useRoute()
   const exploreStore = useExploreStore()
   const savedQueriesStore = useSavedQueriesStore()
-  const { syncUrlFromState } = useExploreUrlSync()
   const { toast } = useToast()
 
   const showSaveQueryModal = ref(false)
@@ -246,6 +245,17 @@ export function useSavedQueries() {
           exploreStore.setActiveSavedQueryName(savedQueryName);
         }
 
+        // Add this: Set the selectedQueryId in the store
+        if (response.data && response.data.id) {
+          // Save the query ID to the store
+          exploreStore.setSelectedQueryId(response.data.id.toString());
+
+          // Update URL with the new query_id
+          const currentQuery = { ...route.query };
+          currentQuery.query_id = response.data.id.toString();
+          router.replace({ query: currentQuery });
+        }
+
         // Ensure queries are refreshed for the current source
         if (formData.team_id && formData.source_id) {
            await loadSourceQueries(formData.team_id, formData.source_id);
@@ -257,10 +267,12 @@ export function useSavedQueries() {
           duration: TOAST_DURATION.SUCCESS
         });
 
-        // If we were editing from a query_id in the URL, clear it
-        if (queryIdFromUrl) {
+        // Only clear query_id from URL if we were editing and now want to create a new one
+        // NOT when we just created a new query
+        if (queryIdFromUrl && response.data && response.data.id && queryIdFromUrl !== response.data.id.toString()) {
           const currentQuery = { ...route.query };
-          delete currentQuery.query_id;
+          // Update to the new query_id instead of deleting it
+          currentQuery.query_id = response.data.id.toString();
           router.replace({ query: currentQuery });
         }
         return { success: true, data: response.data }; // Return success state
