@@ -150,69 +150,64 @@ export function createColumns(
           );
         }
 
-        // Handle objects
+        // Define base classes once for consistency
+        const baseClasses = "flex-render-content font-mono text-[13px]";
+        
+        // --- Process Objects and Strings Consistently for Highlighting ---
+        let textValue: string;
+        let isJsonObject = false;
+
+        // Convert objects to string first
         if (typeof value === "object") {
           try {
-            const jsonString = JSON.stringify(value, null, 2);
-            return h(
-              "span",
-              {
-                class: "flex-render-content json-content font-mono text-[13px]"
-              },
-              jsonString
-            );
+            textValue = JSON.stringify(value, null, 2); // Stringify the object
+            isJsonObject = true;
           } catch (err) {
-            return h(
-              "span",
-              {
-                class: "flex-render-content"
-              },
-              String(value)
-            );
+            textValue = String(value); // Fallback to basic string conversion
           }
+        } else {
+          textValue = String(value); // Use value directly if already string/number/etc.
         }
 
-        // Default string representation with highlighting
-        const textValue = String(value);
-        const baseClasses = "flex-render-content font-mono text-[13px] whitespace-pre-wrap break-words";
+        // Determine final classes (add JSON specific if needed)
+        const finalClasses = `${baseClasses} ${isJsonObject ? 'json-content' : ''}`;
 
-        // Apply highlighting if regex exists and value is a string
-        if (highlightRegex && typeof value === 'string' && value.trim() !== '') {
+        // Apply highlighting if regex exists and textValue is not empty
+        if (highlightRegex && textValue.trim() !== '') {
           const parts = textValue.split(highlightRegex);
-          const nodes: VNode[] = parts.map(part => {
-            // Check if the part matches any of the search terms (case-insensitive)
-            if (highlightRegex.test(part)) {
-              // Apply formatLogContent to the highlighted part as well
-              const formattedPart = formatLogContent(part);
-              // Return VNodes created by formatLogContent, wrapped in a mark tag
-              if (Array.isArray(formattedPart)) {
-                 // If formatLogContent returns an array of VNodes (e.g., for timestamps)
-                 // wrap each node. This might need adjustment based on formatLogContent's output.
-                 // For simplicity, let's assume formatLogContent returns VNode or string for highlighted parts
-                 // If it returns complex VNodes, highlighting might need refinement.
-                 // Let's assume it returns a single VNode or string for now.
-                 const contentNode = typeof formattedPart === 'string' ? formattedPart : formattedPart;
-                 return h('mark', { class: 'search-highlight' }, contentNode);
-              } else {
-                 // If formatLogContent returns a single VNode or string
-                 return h('mark', { class: 'search-highlight' }, formattedPart);
-              }
-            } else {
-              // Apply formatLogContent to non-highlighted parts
-              return formatLogContent(part);
-            }
-          }).filter(node => node !== ''); // Filter out empty strings resulting from split
+          // Filter out empty strings that can result from split if the match is at the start/end
+          const filteredParts = parts.filter(part => part !== '');
 
-          // If nodes were created, return them wrapped in a span
-          if (nodes.length > 0) {
-            return h("span", { class: baseClasses }, nodes);
+          // Only proceed if splitting resulted in multiple parts or a single part that needs formatting
+          if (filteredParts.length > 0) {
+            const nodes: (VNode | string)[] = filteredParts.map(part => {
+              // Check if the part matches any of the search terms (case-insensitive)
+              if (highlightRegex.test(part)) {
+                // Apply formatLogContent to the highlighted part
+                const formattedPart = formatLogContent(part);
+                // Wrap the formatted part (which could be VNode or string) in a mark tag
+                return h('mark', { class: 'search-highlight' }, formattedPart);
+              } else {
+                // Apply formatLogContent to non-highlighted parts
+                return formatLogContent(part);
+              }
+            });
+
+            // If nodes were created, return them wrapped in a span
+            // Filter out any potential null/empty nodes from formatLogContent
+            const validNodes = nodes.filter(n => n !== null && n !== '');
+            if (validNodes.length > 0) {
+              return h("span", { class: finalClasses }, validNodes);
+            }
           }
         }
 
         // Fallback: Render without highlighting but with formatting
+        // This handles cases where highlightRegex is null, textValue is empty,
+        // or splitting didn't produce highlightable parts.
         return h(
           "span",
-          { class: baseClasses },
+          { class: finalClasses },
           formatLogContent(textValue) // Use the formatter here
         );
       },

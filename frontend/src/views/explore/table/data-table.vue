@@ -671,7 +671,7 @@ const onDragEnd = () => { // No event parameter
                                             maxWidth: `${cell.column.columnDef.maxSize ?? defaultColumn.maxSize}px`
                                         }">
                                         <div class="flex items-center gap-1 w-full overflow-hidden">
-                                            <div class="whitespace-pre-wrap break-words w-full overflow-hidden"> <!-- Ensure wrapping and breaking -->
+                                            <div class="whitespace-pre w-full overflow-hidden"> <!-- Prevent wrapping, single line only -->
                                                 <!-- Check cell.column.columnDef.cell exists -->
                                                 <FlexRender v-if="cell.column.columnDef.cell" :render="cell.column.columnDef.cell"
                                                     :props="cell.getContext()" />
@@ -798,10 +798,11 @@ const onDragEnd = () => { // No event parameter
    box-shadow: 0 0 0 1px hsl(var(--highlight, 60 90% 55%) / 0.7);
 }
 
-/* Ensure proper rendering inside table cells */
-:deep(td .whitespace-pre-wrap) {
-    white-space: pre-wrap !important;
-    word-break: break-all !important; /* Allow breaking long words/strings */
+/* Ensure proper rendering inside table cells - single line with no wrapping */
+td > .flex > .whitespace-pre {
+    white-space: pre !important; /* Prevent wrapping */
+    overflow: hidden !important; /* Hide overflow within the cell's inner div */
+    text-overflow: ellipsis !important; /* Add ellipsis for hidden text */
 }
 
 /* Add cursor styling for drag handle */
