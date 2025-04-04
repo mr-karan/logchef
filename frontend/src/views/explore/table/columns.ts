@@ -32,10 +32,20 @@ const COLUMN_WIDTH_CONFIG: Record<ColumnType, ColumnWidthConfig> = {
 function getColumnType(columnName: string, timestampField: string, severityField: string): ColumnType {
   const lowerColumnName = columnName.toLowerCase();
 
-  // Check both exact match and columns containing 'timestamp'
-  if (columnName === timestampField || lowerColumnName.includes('timestamp')) {
+  // First check for exact match with the metadata timestamp field
+  if (columnName === timestampField) {
     return 'timestamp';
   }
+
+  // Then check if name contains timestamp or ends with _ts, _time, _at
+  if (lowerColumnName.includes('timestamp') ||
+      lowerColumnName.endsWith('_ts') ||
+      lowerColumnName.endsWith('_time') ||
+      lowerColumnName.endsWith('_at') ||  // common for created_at, updated_at
+      lowerColumnName.match(/\d{4}[-_]\d{2}[-_]\d{2}/)) { // Contains date pattern
+    return 'timestamp';
+  }
+
   if (columnName === severityField) {
     return 'severity';
   }
@@ -65,30 +75,49 @@ export function createColumns(
   searchTerms: string[] = [] // Add searchTerms parameter
 ): ColumnDef<Record<string, any>>[] {
   // Create a new array with the columns in the desired order
-  // First, let's sort out the timestamp field to be first if it exists
   let sortedColumns = [...columns];
 
   // Create a regex for highlighting, case-insensitive, joining all non-empty terms
   const highlightRegex = searchTerms && searchTerms.filter(term => term.trim() !== '').length > 0
     ? new RegExp(`(${searchTerms.filter(term => term.trim() !== '').map(term => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi')
     : null;
-  const tsColumnIndex = sortedColumns.findIndex(
+
+  // First, prioritize the metadata timestamp field (from _meta_ts_field)
+  const metaTsColumnIndex = sortedColumns.findIndex(
     (col) => col.name === timestampField
   );
 
-  // Move the timestamp field to the beginning if it exists
-  if (tsColumnIndex > 0) {
-    const tsColumn = sortedColumns.splice(tsColumnIndex, 1)[0];
-    sortedColumns.unshift(tsColumn);
+  // Move the metadata timestamp field to the beginning if it exists
+  if (metaTsColumnIndex >= 0) {
+    const metaTsColumn = sortedColumns.splice(metaTsColumnIndex, 1)[0];
+    sortedColumns.unshift(metaTsColumn);
   }
 
-  // Move severity field to be second if it exists
+  // Next, find all other timestamp-like columns and sort them after the primary one
+  const timestampColumns: ColumnInfo[] = [];
+  sortedColumns = sortedColumns.filter(col => {
+    // Skip the primary timestamp field which we already handled
+    if (col.name === timestampField) return true;
+
+    // Check if column should be treated as a timestamp
+    const columnType = getColumnType(col.name, timestampField, severityField);
+    if (columnType === 'timestamp') {
+      timestampColumns.push(col);
+      return false; // Remove from original array
+    }
+    return true; // Keep in original array
+  });
+
+  // Insert timestamp columns after the primary timestamp
+  sortedColumns.splice(1, 0, ...timestampColumns);
+
+  // Move severity field to be after the timestamp fields if it exists
   const severityColumnIndex = sortedColumns.findIndex(
     (col) => col.name === severityField
   );
   if (severityColumnIndex > 0) {
     const severityColumn = sortedColumns.splice(severityColumnIndex, 1)[0];
-    sortedColumns.splice(1, 0, severityColumn);
+    sortedColumns.splice(1 + timestampColumns.length, 0, severityColumn);
   }
 
   return sortedColumns.map((col) => {
@@ -150,13 +179,27 @@ export function createColumns(
         }
 
         // Special handling for timestamp column
-        if (id === timestampField || col.name === timestampField) {
+        if (id === timestampField || col.name === timestampField || columnType === 'timestamp') {
           const formattedTime = formatTimestamp(value as string, timezone);
           return h(
             "span",
             {
               class: "flex-render-content font-mono text-[13px]", // Base class
               title: value as string // Keep the original value as title
+            },
+            formatLogContent(formattedTime, false)
+          );
+        }
+
+        // Check if the value looks like a timestamp regardless of column type
+        // This is to catch timestamp values in columns that aren't explicitly identified as timestamps
+        if (typeof value === 'string' && value.match(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/)) {
+          const formattedTime = formatTimestamp(value, timezone);
+          return h(
+            "span",
+            {
+              class: "flex-render-content font-mono text-[13px]", // Base class
+              title: value // Keep the original value as title
             },
             formatLogContent(formattedTime, false)
           );
