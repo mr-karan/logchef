@@ -29,13 +29,11 @@ import { useTeamsStore } from '@/stores/teams'
 import { useSourcesStore } from '@/stores/sources'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
 import { now, getLocalTimeZone, type CalendarDateTime, type DateValue, toCalendarDateTime } from '@internationalized/date'
-import { createColumns } from './table/columns'
 import DataTable from './table/data-table.vue'
 import { formatSourceName } from '@/utils/format'
-import SaveQueryModal from '@/components/saved-queries/SaveQueryModal.vue'
+import SaveQueryModal from '@/components/collections/SaveQueryModal.vue'
 import QueryEditor from '@/components/query-editor/QueryEditor.vue'
 import { FieldSideBar } from '@/components/field-sidebar'
-import type { ColumnDef } from '@tanstack/vue-table'
 import { getErrorMessage } from '@/api/types'
 import { useSourceTeamManagement } from '@/composables/useSourceTeamManagement'
 import { useSavedQueries } from '@/composables/useSavedQueries'
@@ -80,6 +78,22 @@ const {
   handleTimeRangeUpdate,
   handleLimitUpdate
 } = useQuery()
+
+// --- Add computed property to extract search terms ---
+const searchTermsToHighlight = computed(() => {
+  if (activeMode.value !== 'logchefql' || !logchefQuery.value) {
+    return [];
+  }
+  // Simple regex to extract quoted strings (single or double)
+  const regex = /["']([^"']+)["']/g;
+  const matches = logchefQuery.value.matchAll(regex);
+  const terms = Array.from(matches, match => match[1]);
+  // Optional: Add simple unquoted terms if needed, but start with quoted ones
+  // Example: Add terms separated by space not part of key=value
+  // const potentialUnquoted = logchefQuery.value.split(/\s+/).filter(term => !term.includes('=') && !term.includes('"') && !term.includes("'"));
+  // return [...new Set([...terms, ...potentialUnquoted])]; // Combine and deduplicate
+  return [...new Set(terms)]; // Deduplicate quoted terms
+});
 
 const {
   isProcessingTeamChange,
@@ -167,7 +181,6 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
 
 // Basic state
 const showFieldsPanel = ref(false)
-const tableColumns = ref<ColumnDef<Record<string, any>>[]>([])
 const queryEditorRef = ref()
 const isLoadingQuery = ref(false)
 const editQueryData = ref<SavedTeamQuery | null>(null)
@@ -193,7 +206,7 @@ const lastQueryParam = ref(currentRoute.query.q);
 const lastModeParam = ref(currentRoute.query.mode);
 
 // Check if we're in edit mode (URL has query_id)
-const isEditingExistingQuery = computed(() => !!currentRoute.query.query_id);
+const isEditingExistingQuery = computed(() => !!currentRoute.query.query_id || !!exploreStore.selectedQueryId);
 const queryIdFromUrl = computed(() => currentRoute.query.query_id as string | undefined);
 
 // Computed property to determine if the query is savable/updatable
@@ -303,9 +316,9 @@ watch(isInitializing, async (initializing, prevInitializing) => {
 
     // Make sure we have a valid time range before executing the query
     if (!exploreStore.timeRange || !exploreStore.timeRange.start || !exploreStore.timeRange.end) {
-      // Set a default time range (last 24 hours)
+      // Set a default time range (last 5 minutes)
       exploreStore.setTimeRange({
-        start: now(getLocalTimeZone()).subtract({ hours: 24 }),
+        start: now(getLocalTimeZone()).subtract({ minutes: 5 }),
         end: now(getLocalTimeZone())
       });
     }
@@ -415,24 +428,6 @@ watch(
   { immediate: true }
 );
 
-// Watch for changes in exploreStore.columns to update tableColumns
-watch(
-  () => exploreStore.columns,
-  (newColumns) => {
-    if (newColumns?.length > 0) {
-      // Get display preferences
-      const timezone = displayTimezone.value;
-      const tsField = sourceDetails.value?._meta_ts_field || 'timestamp';
-      const severityField = sourceDetails.value?._meta_severity_field || 'severity_text';
-
-      // Create columns using the columns utility function
-      tableColumns.value = createColumns(newColumns, tsField, timezone, severityField);
-    } else {
-      tableColumns.value = [];
-    }
-  },
-  { immediate: true }
-);
 
 // Watch time range changes and update query dirty state
 watch(
@@ -531,7 +526,8 @@ function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): nu
 
 // New handler for the Save/Update button
 const handleSaveOrUpdateClick = async () => {
-  const queryId = queryIdFromUrl.value;
+  // Check if we have a query_id in the URL or in the exploreStore
+  const queryId = queryIdFromUrl.value || exploreStore.selectedQueryId;
 
   // Check if we can save
   if (!canSaveOrUpdateQuery.value) {
@@ -781,37 +777,38 @@ onBeforeUnmount(() => {
           <!-- Loading States and UI Components -->
           <template v-if="isChangingContext || (currentSourceId && isLoadingSourceDetails)">
             <!-- Loading indicator - shown during all loading states -->
-            <div class="flex items-center justify-center text-muted-foreground p-6 border rounded-md bg-card shadow-sm animate-pulse">
+            <div
+              class="flex items-center justify-center text-muted-foreground p-6 border rounded-md bg-card shadow-sm animate-pulse">
               <div class="flex items-center space-x-2">
-                <svg class="animate-spin h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <svg class="animate-spin h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none"
+                  viewBox="0 0 24 24">
                   <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  <path class="opacity-75" fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                  </path>
                 </svg>
                 <span>{{ isChangingContext ? 'Loading context data...' : 'Loading source details...' }}</span>
               </div>
             </div>
           </template>
-          
+
           <!-- Query Editor - only show when we have valid source and time range -->
           <template v-else-if="currentSourceId && hasValidSource && exploreStore.timeRange">
             <div class="bg-card shadow-sm rounded-md overflow-hidden">
-              <QueryEditor ref="queryEditorRef"
-                :sourceId="currentSourceId"
-                :teamId="currentTeamId ?? 0"
+              <QueryEditor ref="queryEditorRef" :sourceId="currentSourceId" :teamId="currentTeamId ?? 0"
                 :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
                 :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
                 :logchefqlValue="logchefQuery" :sqlValue="sqlQuery" @update:logchefqlValue="updateLogchefqlValue"
                 @update:sqlValue="updateSqlValue"
-                :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter LogchefQL query...' : 'Enter SQL query...'"
+                :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter search criteria (e.g., level=\'error\' and status>400)' : 'Enter SQL query...'"
                 :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
                 :showFieldsPanel="showFieldsPanel" @submit="executeQuery"
                 @update:activeMode="(mode) => changeMode(mode === 'logchefql' ? 'logchefql' : 'sql')"
                 @toggle-fields="showFieldsPanel = !showFieldsPanel" @select-saved-query="loadSavedQuery"
-                @save-query="handleSaveOrUpdateClick"
-                class="border-0 border-b" />
+                @save-query="handleSaveOrUpdateClick" class="border-0 border-b" />
             </div>
           </template>
-          
+
           <!-- "Select source" message - only when no source selected -->
           <template v-else-if="currentTeamId && !currentSourceId">
             <div class="flex items-center justify-center text-muted-foreground p-6 border rounded-md bg-card shadow-sm">
@@ -828,7 +825,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </template>
-          
+
           <!-- Loading fallback - for any other state -->
           <template v-else>
             <div class="flex items-center justify-center p-6 border rounded-md bg-card shadow-sm">
@@ -839,7 +836,8 @@ onBeforeUnmount(() => {
           </template>
 
           <!-- Query Controls (only if NOT changing context and source is valid) -->
-          <div class="mt-3 flex items-center justify-between border-t pt-3" v-if="!isChangingContext && currentSourceId && hasValidSource && exploreStore.timeRange">
+          <div class="mt-3 flex items-center justify-between border-t pt-3"
+            v-if="!isChangingContext && currentSourceId && hasValidSource && exploreStore.timeRange">
             <Button variant="default" class="h-9 px-4 flex items-center gap-2 shadow-sm" :class="{
               'bg-amber-500 hover:bg-amber-600 text-amber-foreground': isDirty && !isExecutingQuery,
               'bg-sky-500 hover:bg-sky-600 text-sky-foreground': isExecutingQuery
@@ -864,50 +862,6 @@ onBeforeUnmount(() => {
 
         <!-- Results Section -->
         <div class="flex-1 overflow-hidden flex flex-col border-t mt-2">
-          <!-- Stats Header -->
-          <div v-if="exploreStore.queryStats && !isExecutingQuery"
-            class="px-4 py-2 flex items-center justify-between bg-muted/30 text-xs text-muted-foreground flex-shrink-0 border-b">
-            <div class="flex items-center gap-4">
-              <span v-if="exploreStore.queryStats?.rows_read != null" class="flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
-                  <path
-                    d="M8 3H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.414A2 2 0 0 0 20.414 6L18 3.586A2 2 0 0 0 16.586 3H9" />
-                  <path d="M8 3v3a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V3" />
-                  <path d="M10 14h8" />
-                  <path d="M10 10h8" />
-                  <path d="M10 18h8" />
-                </svg>
-                <span>
-                  <strong class="font-medium">{{ exploreStore.queryStats.rows_read.toLocaleString() }}</strong> rows
-                </span>
-              </span>
-              <span v-if="exploreStore.queryStats?.execution_time_ms != null" class="flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
-                </svg>
-                <span>
-                  <strong class="font-medium">{{ (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2)
-                    }}</strong>s
-                </span>
-              </span>
-              <span v-if="exploreStore.queryStats?.bytes_read != null" class="flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="17 8 12 3 7 8" />
-                  <line x1="12" x2="12" y1="3" y2="15" />
-                </svg>
-                <span>
-                  <strong class="font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
-                    }}</strong> MB
-                </span>
-              </span>
-            </div>
-          </div>
-
           <!-- Results Area -->
           <div class="flex-1 overflow-hidden relative bg-background">
             <!-- Loading State -->
@@ -919,12 +873,13 @@ onBeforeUnmount(() => {
 
             <!-- Results Table -->
             <template v-if="!isExecutingQuery && exploreStore.logs?.length">
-              <DataTable v-if="exploreStore.logs.length > 0 && tableColumns.length > 0"
+              <DataTable v-if="exploreStore.logs.length > 0 && exploreStore.columns?.length > 0"
                 :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}`"
-                :columns="tableColumns" :data="exploreStore.logs" :stats="exploreStore.queryStats"
+                :columns="exploreStore.columns" :data="exploreStore.logs" :stats="exploreStore.queryStats"
                 :source-id="String(exploreStore.sourceId)" :team-id="teamsStore.currentTeamId"
                 :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
-                :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field" :timezone="displayTimezone" />
+                :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field" :timezone="displayTimezone"
+                :search-terms="searchTermsToHighlight" /> <!-- Pass the computed terms -->
             </template>
 
             <!-- No Results State -->
@@ -943,10 +898,10 @@ onBeforeUnmount(() => {
                   Your query returned no results for the selected time range. Try adjusting the query or time.
                 </p>
                 <Button variant="outline" size="sm" class="mt-4 h-8" @click="exploreStore.setTimeRange({
-                  start: now(getLocalTimeZone()).subtract({ hours: 24 }),
+                  start: now(getLocalTimeZone()).subtract({ minutes: 5 }),
                   end: now(getLocalTimeZone())
                 })">
-                  Try Last 24 Hours
+                  Try Last 5 Minutes
                 </Button>
               </div>
             </template>

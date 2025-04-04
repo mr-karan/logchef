@@ -143,7 +143,7 @@ import { VueMonacoEditor } from "@guolao/vue-monaco-editor";
 import { HelpCircle, PanelRightOpen, PanelRightClose, AlertCircle, XCircle, FileEdit, FilePlus2, Search, Code2 } from "lucide-vue-next";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import SavedQueriesDropdown from '@/components/saved-queries/SavedQueriesDropdown.vue';
+import SavedQueriesDropdown from '@/components/collections/SavedQueriesDropdown.vue';
 import type { SavedTeamQuery } from '@/api/savedQueries';
 import { useRoute, useRouter } from 'vue-router';
 import { Button } from '@/components/ui/button';
@@ -213,7 +213,7 @@ const currentPlaceholder = computed(() => {
   if (props.placeholder) return props.placeholder;
 
   return props.activeMode === 'logchefql'
-    ? 'Enter LogchefQL query (e.g., level="error" and status>400)'
+    ? 'Enter search criteria (e.g., level=\'error\' and status>400)'
     : `Enter ClickHouse SQL query (e.g., SELECT * FROM ${props.tableName || 'your_table'} WHERE ...)`;
 });
 
@@ -332,7 +332,6 @@ watchEffect(() => {
     // Apply mode-specific options
     const options = {
       ...getDefaultMonacoOptions(),
-      lineNumbers: props.activeMode === 'clickhouse-sql' ? 'on' as const : 'off' as const,
       lineDecorationsWidth: props.activeMode === 'logchefql' ? 16 : 24,
       fontSize: 13,
       lineHeight: 20,
@@ -344,7 +343,21 @@ watchEffect(() => {
         verticalScrollbarSize: 8,
         horizontalScrollbarSize: 8
       },
-      minimap: { enabled: false }
+      minimap: { enabled: false },
+      // Add mode-specific options for LogchefQL
+      ...(props.activeMode === 'logchefql' ? {
+        // Single line configuration
+        lineNumbers: 'off' as const,
+        wordWrap: 'off' as const,
+        folding: false,
+        // Disable extra newlines
+        acceptSuggestionOnEnter: 'on' as const
+      } : {
+        // SQL-specific configuration
+        lineNumbers: 'on' as const,
+        wordWrap: 'on' as const,
+        folding: true
+      })
     };
     editor.updateOptions(options);
 
@@ -413,8 +426,7 @@ watch(() => props.activeMode, (newMode) => {
       const editor = editorRef.value;
       const options = {
         ...getDefaultMonacoOptions(),
-        lineNumbers: newMode === 'clickhouse-sql' ? 'on' as const : 'off' as const,
-        lineDecorationsWidth: newMode === 'logchefql' ? 16 : 24,
+        lineDecorationsWidth: newMode === 'clickhouse-sql' ? 16 : 24,
         fontSize: 13,
         lineHeight: 20,
         padding: { top: 8, bottom: 8 },
@@ -689,6 +701,7 @@ const registerLogchefQLCompletionProvider = (): MonacoDisposable | null => {
           startColumn: wordInfo.startColumn,
           endColumn: wordInfo.endColumn
         };
+        // Standard value suggestions - let user add quotes manually
         const valueResult = await getValueSuggestions(parser.key, parser.value, valueRange);
         suggestions = valueResult.suggestions;
         incomplete = valueResult.incomplete;
@@ -895,15 +908,16 @@ const getValueSuggestions = async (
 };
 
 const getOperatorsSuggestions = (key: string, range: MonacoRange): MonacoCompletionItem[] => {
+  // Organize operators in the desired order: =, !=, ~, !~, >=, <=, >, <
   const operators = [
-    { label: '=', insertText: '=' },
-    { label: '!=', insertText: '!=' },
-    { label: '>', insertText: '>' },
-    { label: '<', insertText: '<' },
-    { label: '>=', insertText: '>=' },
-    { label: '<=', insertText: '<=' },
-    { label: '~', insertText: '~' },
-    { label: '!~', insertText: '!~' }
+    { label: '=', insertText: '=', sortText: '1=' },
+    { label: '!=', insertText: '!=', sortText: '2!=' },
+    { label: '~', insertText: '~', sortText: '3~' },
+    { label: '!~', insertText: '!~', sortText: '4!~' },
+    { label: '>=', insertText: '>=', sortText: '5>=' },
+    { label: '<=', insertText: '<=', sortText: '6<=' },
+    { label: '>', insertText: '>', sortText: '7>' },
+    { label: '<', insertText: '<', sortText: '8<' }
   ];
 
   // Filter operators based on field type if needed
@@ -920,7 +934,7 @@ const getOperatorsSuggestions = (key: string, range: MonacoRange): MonacoComplet
   return getSuggestionsFromList({
     items: filteredOperators.map(op => ({
       ...op,
-      insertText: op.insertText + ' ', // Add space after operator
+      insertText: op.insertText + ' ', // Just add a space after operator, no quote
       documentation: `${key} ${op.label} value`
     })),
     kind: monaco.languages.CompletionItemKind.Operator,
@@ -958,6 +972,12 @@ const handleNewQueryClick = () => {
 
   // Use the centralized reset function in the store
   exploreStore.resetQueryStateToDefault();
+
+  // Explicitly clear the selectedQueryId in the store
+  exploreStore.setSelectedQueryId(null);
+
+  // Explicitly clear active saved query name
+  exploreStore.setActiveSavedQueryName(null);
 
   // Wait for the state reset to complete
   nextTick(() => {

@@ -1,0 +1,31 @@
+[sources.generate_http]
+type = "demo_logs"
+format = "json"
+interval = 0.1
+
+[transforms.remap_http]
+type = "remap"
+inputs = ["generate_http"]
+source = '''
+ts = .timestamp
+.=parse_json!(.message)
+.timestamp = format_timestamp!(ts, format: "%Y-%m-%d %H:%M:%S.%f")
+'''
+
+[sinks.clickhouse]
+date_time_best_effort=true
+auth.strategy="basic"
+auth.user="default"
+auth.password=""
+type = "clickhouse"
+inputs = ["remap_http"]
+endpoint = "http://localhost:8123"
+database = "logs"
+table = "http_logs"
+skip_unknown_fields = true
+
+# [sinks.console]
+# type = "console"
+# # Switch input to the remapped logs to see the result
+# inputs = ["remap_http"]
+# encoding.codec = "json"
