@@ -134,39 +134,102 @@ function registerLogchefQL() {
       { open: '"', close: '"' },
       { open: "'", close: "'" },
     ],
-    // More robust word pattern needed? Default might be okay with semantic tokens.
-    // wordPattern: /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
     brackets: [
         ['(', ')'],
     ],
-    comments: {
-        // Add if LogchefQL supports comments, e.g., lineComment: '//'
+    // The word pattern is critical for proper cursor behavior when editing
+    wordPattern: /(-?\d*\.\d\w*)|([a-zA-Z][\w._-]*)|(\b(and|or)\b)/,
+    comments: {}
+  });
+
+  // Use Monarch syntax highlighting as the primary mechanism
+  monaco.languages.setMonarchTokensProvider(LANGUAGE_ID, {
+    ignoreCase: true,
+    defaultToken: 'text',
+
+    // Operators
+    operators: [
+      '=', '!=', '>', '<', '>=', '<=', '~', '!~'
+    ],
+
+    // Keywords (boolean operators)
+    keywords: ['and', 'or'],
+
+    // The main tokenizer
+    tokenizer: {
+      root: [
+        // Identifiers - field names
+        [/[a-zA-Z][\w._-]*/, {
+          cases: {
+            '@keywords': 'keyword',
+            '@default': {
+              token: 'logchefqlKey',
+            }
+          }
+        }],
+
+        // Operators
+        [/(=|!=|>=|<=|>|<|~|!~)/, 'logchefqlOperator'],
+
+        // Strings
+        [/"([^"\\]|\\.)*$/, 'string.invalid'], // non-terminated string
+        [/'([^'\\]|\\.)*$/, 'string.invalid'], // non-terminated string
+        [/"/, { token: 'string.quote', bracket: '@open', next: '@string_double' }],
+        [/'/, { token: 'string.quote', bracket: '@open', next: '@string_single' }],
+
+        // Parentheses
+        [/\(/, { token: 'delimiter.parenthesis', bracket: '@open' }],
+        [/\)/, { token: 'delimiter.parenthesis', bracket: '@close' }],
+
+        // Numbers
+        [/\b\d+\b/, 'number'],
+
+        // Whitespace
+        [/\s+/, '']
+      ],
+
+      string_double: [
+        [/[^\\"]+/, 'string'],
+        [/\\./, 'string.escape'],
+        [/"/, { token: 'string.quote', bracket: '@close', next: '@pop' }]
+      ],
+
+      string_single: [
+        [/[^\\']+/, 'string'],
+        [/\\./, 'string.escape'],
+        [/'/, { token: 'string.quote', bracket: '@close', next: '@pop' }]
+      ]
     }
   });
 
-  // Register semantic tokens provider
-  monaco.languages.registerDocumentSemanticTokensProvider(LANGUAGE_ID, {
-    getLegend: () => ({
-      tokenTypes: logchefqlTokenTypes,
-      tokenModifiers: [], // No modifiers used currently
-    }),
-    provideDocumentSemanticTokens: (model, _token) => {
-      // console.time(`SemanticTokens ${LANGUAGE_ID}`); // Perf check
-      try {
-        const parser = new LogchefQLParser();
-        parser.parse(model.getValue()); // Don't raise errors here, let highlighting fail gracefully
-        const data = parser.generateMonacoTokens();
-        // console.timeEnd(`SemanticTokens ${LANGUAGE_ID}`);
-        return {
-          data: new Uint32Array(data),
-          // resultId: null, // Optional: Caching strategy not implemented here
-        };
-      } catch (error) {
-        console.warn(`Error providing semantic tokens for ${LANGUAGE_ID}:`, error);
-        return { data: new Uint32Array() }; // Return empty on error
-      }
-    },
-    releaseDocumentSemanticTokens: (_resultId) => {}, // No-op if not using resultId
+  // Add a completion provider for autocompletion
+  monaco.languages.registerCompletionItemProvider(LANGUAGE_ID, {
+    provideCompletionItems: (model, position) => {
+      const wordInfo = model.getWordUntilPosition(position);
+      const range = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: wordInfo.startColumn,
+        endColumn: wordInfo.endColumn
+      };
+
+      const suggestions = [
+        {
+          label: 'and',
+          kind: monaco.languages.CompletionItemKind.Keyword,
+          insertText: 'and ',
+          range: range
+        },
+        {
+          label: 'or',
+          kind: monaco.languages.CompletionItemKind.Keyword,
+          insertText: 'or ',
+          range: range
+        }
+      ];
+
+      return { suggestions };
+    }
   });
 }
 

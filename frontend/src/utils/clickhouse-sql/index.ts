@@ -1,5 +1,5 @@
 // Export key elements from language.ts
-export { CharType, tokenTypes, SQL_KEYWORDS, CLICKHOUSE_FUNCTIONS, SQL_TYPES } from './language';
+export { CharType, tokenTypes, SQL_KEYWORDS, CLICKHOUSE_FUNCTIONS, SQL_TYPES, isNumeric } from './language';
 
 /**
  * Validates a ClickHouse SQL query with basic syntax checking
