@@ -22,12 +22,16 @@ source = '''
   .body = .message
 
   # Set severity based on HTTP status code
-  .severity_text = if .status >= 500 {
-    "ERROR"
-  } else if .status >= 400 {
-    "WARN"
+  .severity_text = if exists(.status) && is_integer(.status) {
+    if .status >= 500 {
+      "ERROR"
+    } else if .status >= 400 {
+      "WARN" 
+    } else {
+      "INFO"
+    }
   } else {
-    "INFO"
+    "INFO"  # Default to INFO if status is missing or not an integer
   }
 
   # Convert severity to number
