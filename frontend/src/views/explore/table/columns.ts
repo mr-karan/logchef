@@ -32,7 +32,8 @@ const COLUMN_WIDTH_CONFIG: Record<ColumnType, ColumnWidthConfig> = {
 function getColumnType(columnName: string, timestampField: string, severityField: string): ColumnType {
   const lowerColumnName = columnName.toLowerCase();
 
-  if (columnName === timestampField) {
+  // Check both exact match and columns containing 'timestamp'
+  if (columnName === timestampField || lowerColumnName.includes('timestamp')) {
     return 'timestamp';
   }
   if (columnName === severityField) {
@@ -150,14 +151,14 @@ export function createColumns(
 
         // Special handling for timestamp column
         if (id === timestampField || col.name === timestampField) {
+          const formattedTime = formatTimestamp(value as string, timezone);
           return h(
             "span",
             {
               class: "flex-render-content font-mono text-[13px]", // Base class
               title: value as string // Keep the original value as title
             },
-            // First format for timezone, then format for coloring
-            formatLogContent(formatTimestamp(value as string, timezone), false)
+            formatLogContent(formattedTime, false)
           );
         }
 
