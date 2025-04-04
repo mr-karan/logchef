@@ -28,6 +28,8 @@ go.work.sum
 .aider*
 # Cursor rules
 .cursorrules
+.cursor/
+CLAUDE.md
 
 # Local dev files
 *.db*
