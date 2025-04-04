@@ -316,9 +316,9 @@ watch(isInitializing, async (initializing, prevInitializing) => {
 
     // Make sure we have a valid time range before executing the query
     if (!exploreStore.timeRange || !exploreStore.timeRange.start || !exploreStore.timeRange.end) {
-      // Set a default time range (last 24 hours)
+      // Set a default time range (last 5 minutes)
       exploreStore.setTimeRange({
-        start: now(getLocalTimeZone()).subtract({ hours: 24 }),
+        start: now(getLocalTimeZone()).subtract({ minutes: 5 }),
         end: now(getLocalTimeZone())
       });
     }
@@ -861,50 +861,6 @@ onBeforeUnmount(() => {
 
         <!-- Results Section -->
         <div class="flex-1 overflow-hidden flex flex-col border-t mt-2">
-          <!-- Stats Header -->
-          <div v-if="exploreStore.queryStats && !isExecutingQuery"
-            class="px-4 py-2 flex items-center justify-between bg-muted/30 text-xs text-muted-foreground flex-shrink-0 border-b">
-            <div class="flex items-center gap-4">
-              <span v-if="exploreStore.queryStats?.rows_read != null" class="flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
-                  <path
-                    d="M8 3H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.414A2 2 0 0 0 20.414 6L18 3.586A2 2 0 0 0 16.586 3H9" />
-                  <path d="M8 3v3a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V3" />
-                  <path d="M10 14h8" />
-                  <path d="M10 10h8" />
-                  <path d="M10 18h8" />
-                </svg>
-                <span>
-                  <strong class="font-medium">{{ exploreStore.queryStats.rows_read.toLocaleString() }}</strong> rows
-                </span>
-              </span>
-              <span v-if="exploreStore.queryStats?.execution_time_ms != null" class="flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
-                </svg>
-                <span>
-                  <strong class="font-medium">{{ (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2)
-                  }}</strong>s
-                </span>
-              </span>
-              <span v-if="exploreStore.queryStats?.bytes_read != null" class="flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="17 8 12 3 7 8" />
-                  <line x1="12" x2="12" y1="3" y2="15" />
-                </svg>
-                <span>
-                  <strong class="font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
-                  }}</strong> MB
-                </span>
-              </span>
-            </div>
-          </div>
-
           <!-- Results Area -->
           <div class="flex-1 overflow-hidden relative bg-background">
             <!-- Loading State -->
@@ -941,10 +897,10 @@ onBeforeUnmount(() => {
                   Your query returned no results for the selected time range. Try adjusting the query or time.
                 </p>
                 <Button variant="outline" size="sm" class="mt-4 h-8" @click="exploreStore.setTimeRange({
-                  start: now(getLocalTimeZone()).subtract({ hours: 24 }),
+                  start: now(getLocalTimeZone()).subtract({ minutes: 5 }),
                   end: now(getLocalTimeZone())
                 })">
-                  Try Last 24 Hours
+                  Try Last 5 Minutes
                 </Button>
               </div>
             </template>
