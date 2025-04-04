@@ -781,37 +781,38 @@ onBeforeUnmount(() => {
           <!-- Loading States and UI Components -->
           <template v-if="isChangingContext || (currentSourceId && isLoadingSourceDetails)">
             <!-- Loading indicator - shown during all loading states -->
-            <div class="flex items-center justify-center text-muted-foreground p-6 border rounded-md bg-card shadow-sm animate-pulse">
+            <div
+              class="flex items-center justify-center text-muted-foreground p-6 border rounded-md bg-card shadow-sm animate-pulse">
               <div class="flex items-center space-x-2">
-                <svg class="animate-spin h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <svg class="animate-spin h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none"
+                  viewBox="0 0 24 24">
                   <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  <path class="opacity-75" fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                  </path>
                 </svg>
                 <span>{{ isChangingContext ? 'Loading context data...' : 'Loading source details...' }}</span>
               </div>
             </div>
           </template>
-          
+
           <!-- Query Editor - only show when we have valid source and time range -->
           <template v-else-if="currentSourceId && hasValidSource && exploreStore.timeRange">
             <div class="bg-card shadow-sm rounded-md overflow-hidden">
-              <QueryEditor ref="queryEditorRef"
-                :sourceId="currentSourceId"
-                :teamId="currentTeamId ?? 0"
+              <QueryEditor ref="queryEditorRef" :sourceId="currentSourceId" :teamId="currentTeamId ?? 0"
                 :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
                 :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
                 :logchefqlValue="logchefQuery" :sqlValue="sqlQuery" @update:logchefqlValue="updateLogchefqlValue"
                 @update:sqlValue="updateSqlValue"
-                :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter LogchefQL query...' : 'Enter SQL query...'"
+                :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter search criteria (e.g., level=\'error\' and status>400)' : 'Enter SQL query...'"
                 :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
                 :showFieldsPanel="showFieldsPanel" @submit="executeQuery"
                 @update:activeMode="(mode) => changeMode(mode === 'logchefql' ? 'logchefql' : 'sql')"
                 @toggle-fields="showFieldsPanel = !showFieldsPanel" @select-saved-query="loadSavedQuery"
-                @save-query="handleSaveOrUpdateClick"
-                class="border-0 border-b" />
+                @save-query="handleSaveOrUpdateClick" class="border-0 border-b" />
             </div>
           </template>
-          
+
           <!-- "Select source" message - only when no source selected -->
           <template v-else-if="currentTeamId && !currentSourceId">
             <div class="flex items-center justify-center text-muted-foreground p-6 border rounded-md bg-card shadow-sm">
@@ -828,7 +829,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </template>
-          
+
           <!-- Loading fallback - for any other state -->
           <template v-else>
             <div class="flex items-center justify-center p-6 border rounded-md bg-card shadow-sm">
@@ -839,7 +840,8 @@ onBeforeUnmount(() => {
           </template>
 
           <!-- Query Controls (only if NOT changing context and source is valid) -->
-          <div class="mt-3 flex items-center justify-between border-t pt-3" v-if="!isChangingContext && currentSourceId && hasValidSource && exploreStore.timeRange">
+          <div class="mt-3 flex items-center justify-between border-t pt-3"
+            v-if="!isChangingContext && currentSourceId && hasValidSource && exploreStore.timeRange">
             <Button variant="default" class="h-9 px-4 flex items-center gap-2 shadow-sm" :class="{
               'bg-amber-500 hover:bg-amber-600 text-amber-foreground': isDirty && !isExecutingQuery,
               'bg-sky-500 hover:bg-sky-600 text-sky-foreground': isExecutingQuery
@@ -890,7 +892,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2)
-                    }}</strong>s
+                  }}</strong>s
                 </span>
               </span>
               <span v-if="exploreStore.queryStats?.bytes_read != null" class="flex items-center">
@@ -902,7 +904,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <span>
                   <strong class="font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
-                    }}</strong> MB
+                  }}</strong> MB
                 </span>
               </span>
             </div>
