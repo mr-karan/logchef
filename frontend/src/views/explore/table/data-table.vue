@@ -44,6 +44,7 @@ interface Props {
     timestampField?: string
     severityField?: string
     timezone?: 'local' | 'utc'
+    searchTerms?: string[] // Add new prop
 }
 
 // Define the structure for storing state
@@ -53,7 +54,12 @@ interface DataTableState {
     columnVisibility: VisibilityState;
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  timestampField: 'timestamp',
+  severityField: 'severity_text',
+  timezone: 'local',
+  searchTerms: () => [] // Default to empty array
+})
 
 // Get the actual field names to use with fallbacks
 const timestampFieldName = computed(() => props.timestampField || 'timestamp')
@@ -154,25 +160,40 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
     return { initialOrder, initialSizing, initialVisibility };
 }
 
-// Watch for changes in columns
-watch(() => props.columns, (newColumns) => {
-    if (!newColumns || newColumns.length === 0) return;
+// Watch for changes in columns OR search terms to regenerate table columns
+watch(
+    () => [props.columns, props.searchTerms], // Watch both columns and search terms
+    ([newColumns, newSearchTerms]) => {
+        if (!newColumns || newColumns.length === 0) {
+            tableColumns.value = []; // Clear columns if input is empty
+            return;
+        }
 
-    const { initialOrder, initialSizing, initialVisibility } = initializeState(newColumns);
+        // Regenerate columns with the current search terms
+        tableColumns.value = createColumns(
+            newColumns as ColumnInfo[], // Cast if necessary, ensure type compatibility
+            timestampFieldName.value,
+            displayTimezone.value,
+            severityFieldName.value,
+            newSearchTerms // Pass the search terms here
+        );
 
-    // Only update if different to prevent infinite loops
-    if (JSON.stringify(columnOrder.value) !== JSON.stringify(initialOrder)) {
-        columnOrder.value = initialOrder;
-    }
+        // Re-initialize state based on the potentially new columns
+        const { initialOrder, initialSizing, initialVisibility } = initializeState(tableColumns.value);
 
-    if (JSON.stringify(columnSizing.value) !== JSON.stringify(initialSizing)) {
-        columnSizing.value = initialSizing;
-    }
-
-    if (JSON.stringify(columnVisibility.value) !== JSON.stringify(initialVisibility)) {
-        columnVisibility.value = initialVisibility;
-    }
-}, { immediate: true });
+        // Only update if different to prevent infinite loops
+        if (JSON.stringify(columnOrder.value) !== JSON.stringify(initialOrder)) {
+            columnOrder.value = initialOrder;
+        }
+        if (JSON.stringify(columnSizing.value) !== JSON.stringify(initialSizing)) {
+            columnSizing.value = initialSizing;
+        }
+        if (JSON.stringify(columnVisibility.value) !== JSON.stringify(initialVisibility)) {
+            columnVisibility.value = initialVisibility;
+        }
+    },
+    { immediate: true, deep: true } // Use deep watch for searchTerms array changes
+);
 
 // Save state whenever relevant parts change
 watch([columnOrder, columnSizing, columnVisibility], () => {
@@ -310,7 +331,8 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
 
 // Memoize the resolved columns based on the current order and props
 const resolvedColumns = computed(() => {
-    const columnMap = new Map(props.columns.map(col => [col.id, col]));
+    // Use tableColumns.value which is now reactive to search term changes
+    const columnMap = new Map(tableColumns.value.map(col => [col.id, col]));
     return columnOrder.value
         .map(id => columnMap.get(id))
         .filter((col): col is ColumnDef<Record<string, any>> => !!col);
@@ -458,20 +480,7 @@ watch(
     { immediate: true }
 )
 
-watch(
-    () => exploreStore.columns,
-    (newColumns) => {
-        if (newColumns) {
-            tableColumns.value = createColumns(
-                newColumns,
-                sourceDetails.value?._meta_ts_field || 'timestamp',
-                localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local',
-                sourceDetails.value?._meta_severity_field || 'severity_text'
-            )
-        }
-    },
-    { immediate: true }
-)
+// This watch is now redundant as we handle column creation in the combined watch above
 
 // --- Native Drag and Drop Implementation ---
 
@@ -662,18 +671,10 @@ const onDragEnd = () => { // No event parameter
                                             maxWidth: `${cell.column.columnDef.maxSize ?? defaultColumn.maxSize}px`
                                         }">
                                         <div class="flex items-center gap-1 w-full overflow-hidden">
-                                            <span
-                                                v-if="cell.column.id === severityFieldName && getSeverityClasses(cell.getValue(), cell.column.id)"
-                                                :class="getSeverityClasses(cell.getValue(), cell.column.id)"
-                                                class="shrink-0 mx-1">
-                                                {{ formatCellValue(cell.getValue()).toUpperCase() }}
-                                            </span>
-                                            <template v-else>
-                                                <div class="whitespace-nowrap overflow-hidden text-ellipsis w-full">
-                                                    <FlexRender :render="cell.column.columnDef.cell"
-                                                        :props="cell.getContext()" />
-                                                </div>
-                                            </template>
+                                            <div class="whitespace-pre-wrap break-words w-full overflow-hidden"> <!-- Ensure wrapping and breaking -->
+                                                <FlexRender :render="cell.column.columnDef.cell"
+                                                    :props="cell.getContext()" />
+                                            </div>
                                         </div>
                                     </td>
                                 </tr>
@@ -772,6 +773,29 @@ const onDragEnd = () => { // No event parameter
 
 .table-fixed tbody tr:nth-child(even) {
     background-color: transparent;
+}
+
+/* Add highlight style */
+:deep(.search-highlight) {
+  background-color: hsl(var(--highlight, 60 100% 75%)); /* Use theme variable with fallback */
+  color: hsl(var(--highlight-foreground, 0 0% 0%)); /* Use theme variable with fallback */
+  padding: 0 1px;
+  margin: 0 -1px; /* Prevent layout shift */
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px hsl(var(--highlight, 60 100% 75%) / 0.5); /* Subtle outline */
+}
+
+/* Ensure highlight works well in dark mode if theme variables are set */
+.dark :deep(.search-highlight) {
+   background-color: hsl(var(--highlight, 60 90% 55%));
+   color: hsl(var(--highlight-foreground, 0 0% 0%));
+   box-shadow: 0 0 0 1px hsl(var(--highlight, 60 90% 55%) / 0.7);
+}
+
+/* Ensure proper rendering inside table cells */
+:deep(td .whitespace-pre-wrap) {
+    white-space: pre-wrap !important;
+    word-break: break-all !important; /* Allow breaking long words/strings */
 }
 
 /* Add cursor styling for drag handle */

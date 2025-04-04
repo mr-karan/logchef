@@ -1,6 +1,6 @@
 import type { ColumnDef, Column, Row } from "@tanstack/vue-table";
 import { formatTimestamp, formatLogContent } from "@/lib/utils"; // Import formatLogContent
-import { h } from "vue";
+import { h, type VNode } from "vue"; // Import VNode
 import { Button } from "@/components/ui/button";
 import { ArrowUpDown } from "lucide-vue-next";
 import type { ColumnInfo } from "@/api/explore";
@@ -45,11 +45,17 @@ export function createColumns(
   columns: ColumnInfo[],
   timestampField: string = "timestamp",
   timezone: 'local' | 'utc' = 'local',
-  severityField: string = "severity_text"
+  severityField: string = "severity_text",
+  searchTerms: string[] = [] // Add searchTerms parameter
 ): ColumnDef<Record<string, any>>[] {
   // Create a new array with the columns in the desired order
   // First, let's sort out the timestamp field to be first if it exists
   let sortedColumns = [...columns];
+  
+  // Create a regex for highlighting, case-insensitive, joining all non-empty terms
+  const highlightRegex = searchTerms && searchTerms.filter(term => term.trim() !== '').length > 0
+    ? new RegExp(`(${searchTerms.filter(term => term.trim() !== '').map(term => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi')
+    : null;
   const tsColumnIndex = sortedColumns.findIndex(
     (col) => col.name === timestampField
   );
@@ -166,13 +172,48 @@ export function createColumns(
           }
         }
 
-        // Default string representation
+        // Default string representation with highlighting
+        const textValue = String(value);
+        const baseClasses = "flex-render-content font-mono text-[13px] whitespace-pre-wrap break-words";
+
+        // Apply highlighting if regex exists and value is a string
+        if (highlightRegex && typeof value === 'string' && value.trim() !== '') {
+          const parts = textValue.split(highlightRegex);
+          const nodes: VNode[] = parts.map(part => {
+            // Check if the part matches any of the search terms (case-insensitive)
+            if (highlightRegex.test(part)) {
+              // Apply formatLogContent to the highlighted part as well
+              const formattedPart = formatLogContent(part);
+              // Return VNodes created by formatLogContent, wrapped in a mark tag
+              if (Array.isArray(formattedPart)) {
+                 // If formatLogContent returns an array of VNodes (e.g., for timestamps)
+                 // wrap each node. This might need adjustment based on formatLogContent's output.
+                 // For simplicity, let's assume formatLogContent returns VNode or string for highlighted parts
+                 // If it returns complex VNodes, highlighting might need refinement.
+                 // Let's assume it returns a single VNode or string for now.
+                 const contentNode = typeof formattedPart === 'string' ? formattedPart : formattedPart;
+                 return h('mark', { class: 'search-highlight' }, contentNode);
+              } else {
+                 // If formatLogContent returns a single VNode or string
+                 return h('mark', { class: 'search-highlight' }, formattedPart);
+              }
+            } else {
+              // Apply formatLogContent to non-highlighted parts
+              return formatLogContent(part);
+            }
+          }).filter(node => node !== ''); // Filter out empty strings resulting from split
+
+          // If nodes were created, return them wrapped in a span
+          if (nodes.length > 0) {
+            return h("span", { class: baseClasses }, nodes);
+          }
+        }
+
+        // Fallback: Render without highlighting but with formatting
         return h(
           "span",
-          {
-            class: "flex-render-content font-mono text-[13px] whitespace-pre-wrap break-words" // Allow wrapping
-          },
-          formatLogContent(String(value)) // Use the formatter here
+          { class: baseClasses },
+          formatLogContent(textValue) // Use the formatter here
         );
       },
 
