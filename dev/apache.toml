@@ -7,62 +7,80 @@ interval = 0.01
 inputs = ["generate_apache"]
 type = "remap"
 source = '''
-  # For Apache Common Log Format, the message is already parsed by Vector
-  # into structured fields like host, user, method, path, etc.
+  # Parse the Apache Common Log format from the message field
+  parsed, err = parse_apache_log(.message, "common")
+  if err != null {
+    log("Failed to parse Apache log: " + err, level: "error")
+    # Keep original message in body if parsing fails
+    .body = .message
+  } else {
+    # Use parsed fields
+    .apache = parsed
 
-  # Timestamp handling - Apache logs have timestamp in a specific format
-  .timestamp = format_timestamp!(parse_timestamp!(.timestamp, format: "%d/%b/%Y:%H:%M:%S %z"), format: "%Y-%m-%d %H:%M:%S.%f")
+    # Timestamp handling - Apache logs have timestamp in a specific format
+    # Use the parsed timestamp field
+    ts, err = parse_timestamp(.apache.timestamp, format: "%d/%b/%Y:%H:%M:%S %z")
+    if err == null {
+      .timestamp = format_timestamp(ts, format: "%Y-%m-%d %H:%M:%S.%f") ?? .timestamp # Keep original if formatting fails
+    } else {
+      log("Failed to parse timestamp: " + err, level: "warn")
+      # Keep original vector timestamp if parsing fails
+    }
 
-  # Required fields from schema
+    # Set severity based on HTTP status code (ensure status exists and is integer)
+    status_code = get_field(.apache, "status") ?? 0 # Default to 0 if not found
+    if is_integer(status_code) {
+       if status_code >= 500 {
+         .severity_text = "ERROR"
+       } else if status_code >= 400 {
+         .severity_text = "WARN"
+       } else {
+         .severity_text = "INFO"
+       }
+    } else {
+       .severity_text = "INFO" # Default if status is not an integer
+    }
+
+    # Convert severity to number
+    .severity_number = if .severity_text == "ERROR" {
+      17
+    } else if .severity_text == "WARN" {
+      13
+    } else {
+      9  # INFO
+    }
+
+    # Store apache-specific fields in log_attributes
+    .log_attributes = {
+      "http.request.method": .apache.method,
+      "http.response.status_code": status_code, # Use the safe variable
+      "http.request.body.size": .apache.size,
+      "url.path": .apache.path,
+      "client.address": .apache.host,
+      "user.id": .apache.user,
+      "http.protocol.version": .apache.protocol # Added protocol
+    }
+
+    # Set body to the original message for context
+    .body = .message
+
+    # Cleanup parsed fields container
+    del(.apache)
+  }
+
+  # Required fields from schema (outside the else block to ensure they are always set)
   .trace_id = uuid_v4()
   .span_id = uuid_v4()
   .trace_flags = 0
   .service_name = "apache"
   .namespace = "apache"
-  .body = .message
 
-  # Set severity based on HTTP status code
-  .severity_text = if exists(.status) && is_integer(.status) {
-    if .status >= 500 {
-      "ERROR"
-    } else if .status >= 400 {
-      "WARN"
-    } else {
-      "INFO"
-    }
-  } else {
-    "INFO"  # Default to INFO if status is missing or not an integer
-  }
-
-  # Convert severity to number
-  .severity_number = if .severity_text == "ERROR" {
-    17
-  } else if .severity_text == "WARN" {
-    13
-  } else {
-    9  # INFO
-  }
-
-  # Store apache-specific fields in log_attributes
-  .log_attributes = {
-    "http.request.method": .method,
-    "http.response.status_code": .status,
-    "http.request.body.size": .size,
-    "url.path": .path,
-    "client.address": .host,
-    "user.id": .user
-  }
-
-  # Cleanup
+  # General Cleanup
   del(.message)
   del(.source_type)
-  del(.method)
-  del(.path)
-  del(.protocol)
+  # Remove original host field from demo_logs if it exists, keep client.address
   del(.host)
-  del(.user)
-  del(.status)
-  del(.size)
+
 '''
 
 # [sinks.clickhouse]
