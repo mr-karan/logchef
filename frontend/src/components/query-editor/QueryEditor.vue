@@ -973,6 +973,12 @@ const handleNewQueryClick = () => {
   // Use the centralized reset function in the store
   exploreStore.resetQueryStateToDefault();
 
+  // Explicitly clear the selectedQueryId in the store
+  exploreStore.setSelectedQueryId(null);
+
+  // Explicitly clear active saved query name
+  exploreStore.setActiveSavedQueryName(null);
+
   // Wait for the state reset to complete
   nextTick(() => {
     // Explicitly remove the query_id parameter again to ensure it's gone
