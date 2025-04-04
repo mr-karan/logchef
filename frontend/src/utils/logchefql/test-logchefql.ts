@@ -1,5 +1,5 @@
 // Simple test script for the modernized LogchefQL implementation
-import { parseToSQL, validateQuery } from './frontend/src/utils/logchefql';
+import { parseToSQL, validateQuery } from './index'; // Corrected import path
 
 // Test queries
 const testQueries = [
