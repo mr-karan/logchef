@@ -4,6 +4,7 @@ import { h, type VNode } from "vue"; // Import VNode
 import { Button } from "@/components/ui/button";
 import { ArrowUpDown } from "lucide-vue-next";
 import type { ColumnInfo } from "@/api/explore";
+import { getSeverityClasses } from "@/lib/utils"; // Import getSeverityClasses
 
 /**
  * Column type definitions with consistent size handling
@@ -162,13 +163,13 @@ export function createColumns(
 
         // Special handling for severity column
         if (id === severityField || col.name === severityField) {
+          const severityValue = String(value);
           return h(
             "span",
             {
-              class: "flex-render-content font-mono text-[13px] px-1.5 py-0.5 rounded-sm",
-              title: value as string
+              class: `flex-render-content font-mono text-[13px] px-1.5 py-0.5 rounded-sm ${getSeverityClasses(severityValue, id || col.name)}`
             },
-            () => value
+            severityValue
           );
         }
 
@@ -178,25 +179,26 @@ export function createColumns(
         // Check if this is a status column for better status code detection
         const isStatusColumn = columnType === 'status';
 
-        // --- Process Objects and Strings Consistently for Highlighting ---
+        // Convert value to string for processing
         let textValue: string;
         let isJsonObject = false;
-
-        // Convert objects to string first
         if (typeof value === "object") {
           try {
-            // Use compact JSON string (no indentation) to avoid line breaks in cells
-            textValue = JSON.stringify(value); // Remove indentation for single-line display
+            textValue = JSON.stringify(value); // Compact JSON string
             isJsonObject = true;
           } catch (err) {
-            textValue = String(value); // Fallback to basic string conversion
+            textValue = String(value);
           }
         } else {
-          textValue = String(value); // Use value directly if already string/number/etc.
+          textValue = String(value);
         }
 
         // Determine final classes (add JSON specific if needed)
         const finalClasses = `${baseClasses} ${isJsonObject ? 'json-content' : ''}`;
+
+        // Check if the content contains HTTP methods or is a status column
+        const hasHttpMethod = /\b(GET|POST|PUT|DELETE|HEAD|PATCH|OPTIONS)\b/i.test(textValue);
+        const needsFormatting = isStatusColumn || hasHttpMethod;
 
         // Apply highlighting if regex exists and textValue is not empty
         if (highlightRegex && textValue.trim() !== '') {
@@ -208,34 +210,42 @@ export function createColumns(
           if (filteredParts.length > 0) {
             const nodes: (string | VNode)[] = [];
 
-            // Process each part individually and flatten the results
+            // Process each part individually
             filteredParts.forEach(part => {
               if (highlightRegex.test(part)) {
-                // Apply formatLogContent to the highlighted part
-                const formattedPart = formatLogContent(part, isStatusColumn);
-                // Wrap the formatted content in a mark tag
-                nodes.push(h('mark', { class: 'search-highlight' }, formattedPart));
+                // For highlighted parts, apply both highlight and any special formatting
+                const formattedContent = needsFormatting ? formatLogContent(part, isStatusColumn) : [part];
+                nodes.push(h('mark', { class: 'search-highlight' }, formattedContent));
               } else {
-                // Apply formatLogContent to non-highlighted parts and flatten the results
-                const formattedContent = formatLogContent(part, isStatusColumn);
-                formattedContent.forEach(item => nodes.push(item));
+                // For non-highlighted parts, only apply special formatting if needed
+                if (needsFormatting) {
+                  const formattedContent = formatLogContent(part, isStatusColumn);
+                  nodes.push(...formattedContent);
+                } else {
+                  nodes.push(part);
+                }
               }
             });
 
-            // If nodes were created, return them wrapped in a span
-            if (nodes.length > 0) {
-              return h("span", { class: finalClasses }, nodes);
-            }
+            // Return the highlighted and formatted content
+            return h("span", { class: finalClasses }, nodes);
           }
         }
 
-        // Fallback: Render without highlighting but with formatting
-        // This handles cases where highlightRegex is null, textValue is empty,
-        // or splitting didn't produce highlightable parts.
+        // If no highlighting needed but special formatting is required
+        if (needsFormatting) {
+          return h(
+            "span",
+            { class: finalClasses },
+            formatLogContent(textValue, isStatusColumn)
+          );
+        }
+
+        // For all other cases, render without special formatting
         return h(
           "span",
           { class: finalClasses },
-          formatLogContent(textValue, isStatusColumn) // Use the formatter here with status flag
+          textValue
         );
       },
 

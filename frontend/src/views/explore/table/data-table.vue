@@ -889,7 +889,26 @@ td>.flex>.whitespace-pre {
     white-space: nowrap;
 }
 
-/* Specific HTTP Method Colors */
+/* Utility HTTP Methods (PATCH, OPTIONS) */
+:deep(.http-method-utility) {
+    background-color: #f3f4f6;
+    /* gray-100 */
+    color: #4b5563;
+    /* gray-600 */
+    border: 1px solid #e5e7eb;
+    /* gray-200 */
+}
+
+.dark :deep(.http-method-utility) {
+    background-color: #374151;
+    /* gray-700 */
+    color: #d1d5db;
+    /* gray-300 */
+    border: 1px solid #4b5563;
+    /* gray-600 */
+}
+
+/* GET - Success Green */
 :deep(.http-method-get) {
     background-color: #ecfccb;
     /* lime-100 */
@@ -908,6 +927,7 @@ td>.flex>.whitespace-pre {
     /* lime-800 */
 }
 
+/* POST - Cyan */
 :deep(.http-method-post) {
     background-color: #cffafe;
     /* cyan-100 */
@@ -926,6 +946,7 @@ td>.flex>.whitespace-pre {
     /* cyan-800 */
 }
 
+/* PUT - Amber */
 :deep(.http-method-put) {
     background-color: #fef3c7;
     /* amber-100 */
@@ -944,6 +965,7 @@ td>.flex>.whitespace-pre {
     /* amber-800 */
 }
 
+/* DELETE - Red */
 :deep(.http-method-delete) {
     background-color: #fee2e2;
     /* red-100 */
@@ -962,6 +984,7 @@ td>.flex>.whitespace-pre {
     /* red-800 */
 }
 
+/* HEAD - Indigo */
 :deep(.http-method-head) {
     background-color: #e0e7ff;
     /* indigo-100 */
@@ -1112,4 +1135,49 @@ td>.flex>.whitespace-pre {
 .dark :deep(.timestamp-offset) {
     color: hsl(var(--muted-foreground) / 0.5);
 }
+
+/* HTTP Method Colors */
+:deep(.http-method) {
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-weight: 500;
+}
+
+:deep(.http-method-utility) {
+    background-color: #f3f4f6;
+    /* gray-100 */
+    color: #4b5563;
+    /* gray-600 */
+    border: 1px solid #e5e7eb;
+    /* gray-200 */
+}
+
+.dark :deep(.http-method-utility) {
+    background-color: #374151;
+    /* gray-700 */
+    color: #d1d5db;
+    /* gray-300 */
+    border: 1px solid #4b5563;
+    /* gray-600 */
+}
+
+:deep(.http-method-get) {
+    background-color: #ecfccb;
+    /* lime-100 */
+    color: #4d7c0f;
+    /* lime-800 */
+    border-color: #a3e635;
+    /* lime-400 */
+}
+
+.dark :deep(.http-method-get) {
+    background-color: #365314;
+    /* lime-950 */
+    color: #d9f99d;
+    /* lime-300 */
+    border-color: #4d7c0f;
+    /* lime-800 */
+}
+
+/* Remove all severity styling as it's handled in utils.ts */
 </style>
