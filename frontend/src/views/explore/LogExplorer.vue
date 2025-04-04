@@ -81,6 +81,22 @@ const {
   handleLimitUpdate
 } = useQuery()
 
+// --- Add computed property to extract search terms ---
+const searchTermsToHighlight = computed(() => {
+  if (activeMode.value !== 'logchefql' || !logchefQuery.value) {
+    return [];
+  }
+  // Simple regex to extract quoted strings (single or double)
+  const regex = /["']([^"']+)["']/g;
+  const matches = logchefQuery.value.matchAll(regex);
+  const terms = Array.from(matches, match => match[1]);
+  // Optional: Add simple unquoted terms if needed, but start with quoted ones
+  // Example: Add terms separated by space not part of key=value
+  // const potentialUnquoted = logchefQuery.value.split(/\s+/).filter(term => !term.includes('=') && !term.includes('"') && !term.includes("'"));
+  // return [...new Set([...terms, ...potentialUnquoted])]; // Combine and deduplicate
+  return [...new Set(terms)]; // Deduplicate quoted terms
+});
+
 const {
   isProcessingTeamChange,
   isProcessingSourceChange,
@@ -926,7 +942,8 @@ onBeforeUnmount(() => {
                 :columns="tableColumns" :data="exploreStore.logs" :stats="exploreStore.queryStats"
                 :source-id="String(exploreStore.sourceId)" :team-id="teamsStore.currentTeamId"
                 :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
-                :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field" :timezone="displayTimezone" />
+                :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field" :timezone="displayTimezone"
+                :search-terms="searchTermsToHighlight" /> <!-- Pass the computed terms -->
             </template>
 
             <!-- No Results State -->
