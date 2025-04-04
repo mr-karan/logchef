@@ -818,4 +818,98 @@ const onDragEnd = () => { // No event parameter
     z-index: 1;
     /* Ensures expanded rows appear above others */
 }
+
+/* --- Heuristic Formatting Styles --- */
+
+/* Base HTTP Method Tag Style */
+.http-method {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 11px; /* Slightly smaller */
+  line-height: 1.4;
+  margin: 0 2px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+/* Specific HTTP Method Colors (using Tailwind-like color shades) */
+.http-method-get {
+  background-color: #ecfccb; /* lime-100 */
+  color: #4d7c0f; /* lime-800 */
+  border-color: #a3e635; /* lime-400 */
+}
+.dark .http-method-get {
+  background-color: #365314; /* lime-950 */
+  color: #d9f99d; /* lime-300 */
+  border-color: #4d7c0f; /* lime-800 */
+}
+
+.http-method-post {
+  background-color: #cffafe; /* cyan-100 */
+  color: #155e75; /* cyan-800 */
+  border-color: #67e8f9; /* cyan-300 */
+}
+.dark .http-method-post {
+  background-color: #164e63; /* cyan-950 */
+  color: #a5f3fc; /* cyan-200 */
+  border-color: #155e75; /* cyan-800 */
+}
+
+.http-method-put {
+  background-color: #fef3c7; /* amber-100 */
+  color: #92400e; /* amber-800 */
+  border-color: #fcd34d; /* amber-300 */
+}
+.dark .http-method-put {
+  background-color: #78350f; /* amber-950 */
+  color: #fde68a; /* amber-200 */
+  border-color: #92400e; /* amber-800 */
+}
+
+.http-method-delete {
+  background-color: #fee2e2; /* red-100 */
+  color: #991b1b; /* red-800 */
+  border-color: #fca5a5; /* red-300 */
+}
+.dark .http-method-delete {
+  background-color: #7f1d1d; /* red-950 */
+  color: #fecaca; /* red-200 */
+  border-color: #991b1b; /* red-800 */
+}
+
+.http-method-head {
+  background-color: #e0e7ff; /* indigo-100 */
+  color: #3730a3; /* indigo-800 */
+  border-color: #a5b4fc; /* indigo-300 */
+}
+.dark .http-method-head {
+  background-color: #312e81; /* indigo-950 */
+  color: #c7d2fe; /* indigo-200 */
+  border-color: #3730a3; /* indigo-800 */
+}
+
+/* Timestamp Formatting */
+.timestamp {
+  /* Optional: Add a subtle background or border if needed */
+}
+.timestamp-date {
+  color: hsl(var(--foreground) / 0.85); /* Slightly dimmer date */
+}
+.dark .timestamp-date {
+  color: hsl(var(--foreground) / 0.75);
+}
+.timestamp-separator {
+  color: hsl(var(--muted-foreground) / 0.6); /* Very subtle separator */
+  margin: 0 1px;
+}
+.timestamp-time {
+  color: hsl(var(--foreground)); /* Normal time */
+  font-weight: 500; /* Slightly bolder time */
+}
+.dark .timestamp-time {
+  color: hsl(var(--foreground));
+  font-weight: 500;
+}
 </style>

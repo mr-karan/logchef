@@ -1,5 +1,6 @@
 import type { Updater } from "@tanstack/vue-table";
-import type { Ref } from "vue";
+import type { Ref, VNode } from "vue";
+import { h } from 'vue';
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -147,4 +148,105 @@ export function getSeverityClasses(
     severityColorMap.get(normalizedValue) ||
     defaultSeverityStyle
   );
+}
+
+
+// --- Log Content Formatting ---
+
+// Regex for HTTP methods (case-insensitive, word boundaries)
+const httpMethodRegex = /\b(GET|POST|PUT|DELETE|HEAD)\b/gi;
+
+// Regex for ISO-like timestamps (YYYY-MM-DDTHH:MM:SS.sssZ or +/-offset)
+// Simplified to capture date and time parts separately within common formats
+const timestampRegex = /(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2}(\.\d+)?)/g;
+
+interface MatchResult {
+  index: number;
+  length: number;
+  type: 'http' | 'timestamp';
+  value: string; // Full match
+  groups?: string[]; // Captured groups (e.g., date, time)
+}
+
+/**
+ * Formats log content string with special styling for HTTP methods and timestamps.
+ * Uses a single pass approach for better performance.
+ *
+ * @param value The raw string content.
+ * @returns An array of VNodes or strings.
+ */
+export function formatLogContent(value: string): (VNode | string)[] {
+  const results: (VNode | string)[] = [];
+  let lastIndex = 0;
+  const matches: MatchResult[] = [];
+
+  // Find all HTTP method matches
+  let match;
+  while ((match = httpMethodRegex.exec(value)) !== null) {
+    matches.push({
+      index: match.index,
+      length: match[0].length,
+      type: 'http',
+      value: match[0],
+    });
+  }
+
+  // Find all timestamp matches
+  while ((match = timestampRegex.exec(value)) !== null) {
+    // Ensure timestamp matches don't overlap with already found HTTP methods
+    const overlaps = matches.some(m =>
+      (match!.index < m.index + m.length && match!.index + match![0].length > m.index)
+    );
+    if (!overlaps) {
+      matches.push({
+        index: match.index,
+        length: match[0].length,
+        type: 'timestamp',
+        value: match[0],
+        groups: [match[1], match[2]] // [date, time]
+      });
+    }
+  }
+
+  // Sort matches by their starting index
+  matches.sort((a, b) => a.index - b.index);
+
+  // Process the string and build the VNode array
+  for (const currentMatch of matches) {
+    // Add text node for content before the current match
+    if (currentMatch.index > lastIndex) {
+      results.push(value.substring(lastIndex, currentMatch.index));
+    }
+
+    // Add styled VNode for the current match
+    if (currentMatch.type === 'http') {
+      const method = currentMatch.value.toUpperCase();
+      results.push(
+        h('span', { class: `http-method http-method-${method.toLowerCase()}` }, currentMatch.value)
+      );
+    } else if (currentMatch.type === 'timestamp' && currentMatch.groups) {
+      const [datePart, timePart] = currentMatch.groups;
+      results.push(
+        h('span', { class: 'timestamp' }, [
+          h('span', { class: 'timestamp-date' }, datePart),
+          h('span', { class: 'timestamp-separator' }, value[currentMatch.index + datePart.length]), // T or space
+          h('span', { class: 'timestamp-time' }, timePart),
+        ])
+      );
+    }
+
+    lastIndex = currentMatch.index + currentMatch.length;
+  }
+
+  // Add any remaining text after the last match
+  if (lastIndex < value.length) {
+    results.push(value.substring(lastIndex));
+  }
+
+  // If no matches were found, return the original string wrapped in an array
+  if (results.length === 0 && value.length > 0) {
+    return [value];
+  }
+
+  return results;
 }

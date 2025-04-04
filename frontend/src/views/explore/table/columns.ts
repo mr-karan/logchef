@@ -1,5 +1,5 @@
 import type { ColumnDef, Column, Row } from "@tanstack/vue-table";
-import { formatTimestamp } from "@/lib/utils";
+import { formatTimestamp, formatLogContent } from "@/lib/utils"; // Import formatLogContent
 import { h } from "vue";
 import { Button } from "@/components/ui/button";
 import { ArrowUpDown } from "lucide-vue-next";
@@ -169,9 +169,9 @@ export function createColumns(
         return h(
           "span",
           {
-            class: "flex-render-content font-mono text-[13px]"
+            class: "flex-render-content font-mono text-[13px] whitespace-pre-wrap break-words" // Allow wrapping
           },
-          String(value)
+          formatLogContent(String(value)) // Use the formatter here
         );
       },
 
