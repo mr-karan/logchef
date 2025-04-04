@@ -51,7 +51,7 @@ export function createColumns(
   // Create a new array with the columns in the desired order
   // First, let's sort out the timestamp field to be first if it exists
   let sortedColumns = [...columns];
-  
+
   // Create a regex for highlighting, case-insensitive, joining all non-empty terms
   const highlightRegex = searchTerms && searchTerms.filter(term => term.trim() !== '').length > 0
     ? new RegExp(`(${searchTerms.filter(term => term.trim() !== '').map(term => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi')
@@ -79,8 +79,11 @@ export function createColumns(
     const columnType = getColumnType(col.name, timestampField, severityField);
     const widthConfig = COLUMN_WIDTH_CONFIG[columnType];
 
+    // Make sure we have a valid id, but avoid adding accessorKey
+    const id = col.name || `col_${Math.random().toString(36).substr(2, 9)}`;
+
     return {
-      id: col.name,
+      id: id, // Set the id explicitly
       // Store column type in meta for easy access
       meta: {
         columnType,
@@ -94,7 +97,10 @@ export function createColumns(
       maxSize: widthConfig.maxWidth,
 
       // Accessor function for data
-      accessorFn: (row: Record<string, any>) => row[col.name],
+      accessorFn: (row: Record<string, any>) => {
+        // Try accessing by ID first, fall back to original column name if different
+        return row[id] !== undefined ? row[id] : (col.name && id !== col.name ? row[col.name] : undefined);
+      },
 
       // Header configuration with sorting
       header: ({ column }: { column: Column<Record<string, any>, unknown> }) => {
@@ -106,7 +112,8 @@ export function createColumns(
             onClick: () => column.toggleSorting(column.getIsSorted() === "asc"),
           },
           () => [
-            col.name,
+            // Display the original column name in the header
+            col.name || id,
             h(ArrowUpDown, { class: "ml-2 h-3 w-3 text-muted-foreground" }),
           ]
         );
@@ -114,7 +121,8 @@ export function createColumns(
 
       // Cell configuration
       cell: ({ row, column }: { row: Row<Record<string, any>>, column: Column<Record<string, any>, unknown> }) => {
-        const value = row.getValue<unknown>(column.id); // Use getValue<T> for type inference
+        // Use getValue to get the processed value via the accessorFn
+        const value = row.getValue<unknown>(column.id);
 
         // Handle null/undefined values
         if (value === null || value === undefined) {
@@ -126,7 +134,7 @@ export function createColumns(
         }
 
         // Special handling for timestamp column
-        if (col.name === timestampField) {
+        if (id === timestampField || col.name === timestampField) {
           return h(
             "span",
             {
@@ -139,7 +147,7 @@ export function createColumns(
         }
 
         // Special handling for severity column
-        if (col.name === severityField) {
+        if (id === severityField || col.name === severityField) {
           return h(
             "span",
             {
@@ -152,7 +160,7 @@ export function createColumns(
 
         // Define base classes once for consistency
         const baseClasses = "flex-render-content font-mono text-[13px]";
-        
+
         // --- Process Objects and Strings Consistently for Highlighting ---
         let textValue: string;
         let isJsonObject = false;
@@ -160,7 +168,8 @@ export function createColumns(
         // Convert objects to string first
         if (typeof value === "object") {
           try {
-            textValue = JSON.stringify(value, null, 2); // Stringify the object
+            // Use compact JSON string (no indentation) to avoid line breaks in cells
+            textValue = JSON.stringify(value); // Remove indentation for single-line display
             isJsonObject = true;
           } catch (err) {
             textValue = String(value); // Fallback to basic string conversion
@@ -180,24 +189,25 @@ export function createColumns(
 
           // Only proceed if splitting resulted in multiple parts or a single part that needs formatting
           if (filteredParts.length > 0) {
-            const nodes: (VNode | string)[] = filteredParts.map(part => {
-              // Check if the part matches any of the search terms (case-insensitive)
+            const nodes: (string | VNode)[] = [];
+
+            // Process each part individually and flatten the results
+            filteredParts.forEach(part => {
               if (highlightRegex.test(part)) {
                 // Apply formatLogContent to the highlighted part
                 const formattedPart = formatLogContent(part);
-                // Wrap the formatted part (which could be VNode or string) in a mark tag
-                return h('mark', { class: 'search-highlight' }, formattedPart);
+                // Wrap the formatted content in a mark tag
+                nodes.push(h('mark', { class: 'search-highlight' }, formattedPart));
               } else {
-                // Apply formatLogContent to non-highlighted parts
-                return formatLogContent(part);
+                // Apply formatLogContent to non-highlighted parts and flatten the results
+                const formattedContent = formatLogContent(part);
+                formattedContent.forEach(item => nodes.push(item));
               }
             });
 
             // If nodes were created, return them wrapped in a span
-            // Filter out any potential null/empty nodes from formatLogContent
-            const validNodes = nodes.filter(n => n !== null && n !== '');
-            if (validNodes.length > 0) {
-              return h("span", { class: finalClasses }, validNodes);
+            if (nodes.length > 0) {
+              return h("span", { class: finalClasses }, nodes);
             }
           }
         }

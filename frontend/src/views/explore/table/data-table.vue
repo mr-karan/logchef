@@ -26,7 +26,7 @@ import DataTableColumnSelector from './data-table-column-selector.vue'
 import DataTablePagination from './data-table-pagination.vue'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
-import type { QueryStats } from '@/api/explore'
+import type { QueryStats, ColumnInfo } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
 import { createColumns } from './columns'
@@ -55,10 +55,10 @@ interface DataTableState {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  timestampField: 'timestamp',
-  severityField: 'severity_text',
-  timezone: 'local',
-  searchTerms: () => [] // Default to empty array
+    timestampField: 'timestamp',
+    severityField: 'severity_text',
+    timezone: 'local',
+    searchTerms: () => [] // Default to empty array
 })
 
 // Get the actual field names to use with fallbacks
@@ -178,11 +178,11 @@ watch(
 
         // Regenerate columns with the current search terms and timezone
         tableColumns.value = createColumns(
-            newColumns as ColumnInfo[], // Cast if necessary, ensure type compatibility
+            newColumns as any, // Use the columns directly as was working before
             timestampFieldName.value,
-            newTimezone, // Use reactive timezone value
+            newTimezone as 'local' | 'utc',
             severityFieldName.value,
-            newSearchTerms // Pass the search terms here
+            props.searchTerms
         );
 
         // Re-initialize state based on the potentially new columns
@@ -596,7 +596,8 @@ const onDragEnd = () => { // No event parameter
                         :data-resizing="isResizing">
                         <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
                             <!-- Check table.getHeaderGroups() exists -->
-                            <tr v-if="table.getHeaderGroups().length > 0 && table.getHeaderGroups()[0]" class="border-b border-b-muted-foreground/10">
+                            <tr v-if="table.getHeaderGroups().length > 0 && table.getHeaderGroups()[0]"
+                                class="border-b border-b-muted-foreground/10">
                                 <th v-for="header in table.getHeaderGroups()[0].headers" :key="header.id" scope="col"
                                     class="group relative h-9 px-3 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden border-r border-muted/30"
                                     :class="[
@@ -671,10 +672,11 @@ const onDragEnd = () => { // No event parameter
                                             maxWidth: `${cell.column.columnDef.maxSize ?? defaultColumn.maxSize}px`
                                         }">
                                         <div class="flex items-center gap-1 w-full overflow-hidden">
-                                            <div class="whitespace-pre w-full overflow-hidden"> <!-- Prevent wrapping, single line only -->
+                                            <div class="whitespace-pre w-full overflow-hidden">
+                                                <!-- Prevent wrapping, single line only -->
                                                 <!-- Check cell.column.columnDef.cell exists -->
-                                                <FlexRender v-if="cell.column.columnDef.cell" :render="cell.column.columnDef.cell"
-                                                    :props="cell.getContext()" />
+                                                <FlexRender v-if="cell.column.columnDef.cell"
+                                                    :render="cell.column.columnDef.cell" :props="cell.getContext()" />
                                             </div>
                                         </div>
                                     </td>
@@ -783,26 +785,47 @@ const onDragEnd = () => { // No event parameter
 
 /* Add highlight style */
 :deep(.search-highlight) {
-  background-color: hsl(var(--highlight, 60 100% 75%)); /* Use theme variable with fallback */
-  color: hsl(var(--highlight-foreground, 0 0% 0%)); /* Use theme variable with fallback */
-  padding: 0 1px;
-  margin: 0 -1px; /* Prevent layout shift */
-  border-radius: 2px;
-  box-shadow: 0 0 0 1px hsl(var(--highlight, 60 100% 75%) / 0.5); /* Subtle outline */
+    background-color: hsl(var(--highlight, 60 100% 75%));
+    /* Use theme variable with fallback */
+    color: hsl(var(--highlight-foreground, 0 0% 0%));
+    /* Use theme variable with fallback */
+    padding: 0 1px;
+    margin: 0 -1px;
+    /* Prevent layout shift */
+    border-radius: 2px;
+    box-shadow: 0 0 0 1px hsl(var(--highlight, 60 100% 75%) / 0.5);
+    /* Subtle outline */
 }
 
 /* Ensure highlight works well in dark mode if theme variables are set */
 .dark :deep(.search-highlight) {
-   background-color: hsl(var(--highlight, 60 90% 55%));
-   color: hsl(var(--highlight-foreground, 0 0% 0%));
-   box-shadow: 0 0 0 1px hsl(var(--highlight, 60 90% 55%) / 0.7);
+    background-color: hsl(var(--highlight, 60 90% 55%));
+    color: hsl(var(--highlight-foreground, 0 0% 0%));
+    box-shadow: 0 0 0 1px hsl(var(--highlight, 60 90% 55%) / 0.7);
 }
 
 /* Ensure proper rendering inside table cells - single line with no wrapping */
-td > .flex > .whitespace-pre {
-    white-space: pre !important; /* Prevent wrapping */
-    overflow: hidden !important; /* Hide overflow within the cell's inner div */
-    text-overflow: ellipsis !important; /* Add ellipsis for hidden text */
+td>.flex>.whitespace-pre {
+    white-space: pre !important;
+    /* Prevent wrapping */
+    overflow: hidden !important;
+    /* Hide overflow within the cell's inner div */
+    text-overflow: ellipsis !important;
+    /* Add ellipsis for hidden text */
+}
+
+/* Ensure JSON objects don't wrap in table cells */
+:deep(.json-content) {
+    white-space: nowrap !important;
+    /* Prevent wrapping for JSON content */
+    overflow: hidden !important;
+    /* Hide overflow */
+    text-overflow: ellipsis !important;
+    /* Add ellipsis for hidden text */
+    display: inline-block !important;
+    /* Keep it as inline block */
+    max-width: 100% !important;
+    /* Limit width to cell size */
 }
 
 /* Add cursor styling for drag handle */
@@ -854,102 +877,151 @@ td > .flex > .whitespace-pre {
 
 /* Base HTTP Method Tag Style */
 :deep(.http-method) {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-weight: 600;
-  font-size: 11px; /* Slightly smaller */
-  line-height: 1.4;
-  margin: 0 2px;
-  border: 1px solid transparent;
-  white-space: nowrap;
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 11px;
+    /* Slightly smaller */
+    line-height: 1.4;
+    margin: 0 2px;
+    border: 1px solid transparent;
+    white-space: nowrap;
 }
 
 /* Specific HTTP Method Colors */
 :deep(.http-method-get) {
-  background-color: #ecfccb; /* lime-100 */
-  color: #4d7c0f; /* lime-800 */
-  border-color: #a3e635; /* lime-400 */
+    background-color: #ecfccb;
+    /* lime-100 */
+    color: #4d7c0f;
+    /* lime-800 */
+    border-color: #a3e635;
+    /* lime-400 */
 }
+
 .dark :deep(.http-method-get) {
-  background-color: #365314; /* lime-950 */
-  color: #d9f99d; /* lime-300 */
-  border-color: #4d7c0f; /* lime-800 */
+    background-color: #365314;
+    /* lime-950 */
+    color: #d9f99d;
+    /* lime-300 */
+    border-color: #4d7c0f;
+    /* lime-800 */
 }
 
 :deep(.http-method-post) {
-  background-color: #cffafe; /* cyan-100 */
-  color: #155e75; /* cyan-800 */
-  border-color: #67e8f9; /* cyan-300 */
+    background-color: #cffafe;
+    /* cyan-100 */
+    color: #155e75;
+    /* cyan-800 */
+    border-color: #67e8f9;
+    /* cyan-300 */
 }
+
 .dark :deep(.http-method-post) {
-  background-color: #164e63; /* cyan-950 */
-  color: #a5f3fc; /* cyan-200 */
-  border-color: #155e75; /* cyan-800 */
+    background-color: #164e63;
+    /* cyan-950 */
+    color: #a5f3fc;
+    /* cyan-200 */
+    border-color: #155e75;
+    /* cyan-800 */
 }
 
 :deep(.http-method-put) {
-  background-color: #fef3c7; /* amber-100 */
-  color: #92400e; /* amber-800 */
-  border-color: #fcd34d; /* amber-300 */
+    background-color: #fef3c7;
+    /* amber-100 */
+    color: #92400e;
+    /* amber-800 */
+    border-color: #fcd34d;
+    /* amber-300 */
 }
+
 .dark :deep(.http-method-put) {
-  background-color: #78350f; /* amber-950 */
-  color: #fde68a; /* amber-200 */
-  border-color: #92400e; /* amber-800 */
+    background-color: #78350f;
+    /* amber-950 */
+    color: #fde68a;
+    /* amber-200 */
+    border-color: #92400e;
+    /* amber-800 */
 }
 
 :deep(.http-method-delete) {
-  background-color: #fee2e2; /* red-100 */
-  color: #991b1b; /* red-800 */
-  border-color: #fca5a5; /* red-300 */
+    background-color: #fee2e2;
+    /* red-100 */
+    color: #991b1b;
+    /* red-800 */
+    border-color: #fca5a5;
+    /* red-300 */
 }
+
 .dark :deep(.http-method-delete) {
-  background-color: #7f1d1d; /* red-950 */
-  color: #fecaca; /* red-200 */
-  border-color: #991b1b; /* red-800 */
+    background-color: #7f1d1d;
+    /* red-950 */
+    color: #fecaca;
+    /* red-200 */
+    border-color: #991b1b;
+    /* red-800 */
 }
 
 :deep(.http-method-head) {
-  background-color: #e0e7ff; /* indigo-100 */
-  color: #3730a3; /* indigo-800 */
-  border-color: #a5b4fc; /* indigo-300 */
+    background-color: #e0e7ff;
+    /* indigo-100 */
+    color: #3730a3;
+    /* indigo-800 */
+    border-color: #a5b4fc;
+    /* indigo-300 */
 }
+
 .dark :deep(.http-method-head) {
-  background-color: #312e81; /* indigo-950 */
-  color: #c7d2fe; /* indigo-200 */
-  border-color: #3730a3; /* indigo-800 */
+    background-color: #312e81;
+    /* indigo-950 */
+    color: #c7d2fe;
+    /* indigo-200 */
+    border-color: #3730a3;
+    /* indigo-800 */
 }
 
 /* Timestamp Formatting */
 :deep(.timestamp) {
-  /* Optional: Add a subtle background or border if needed */
+    /* Optional: Add a subtle background or border if needed */
 }
+
 /* Refined Timestamp Colors for better distinction */
 :deep(.timestamp-date) {
-  color: hsl(var(--foreground) / 0.75); /* More distinct dimming for date */
+    color: hsl(var(--foreground) / 0.75);
+    /* More distinct dimming for date */
 }
+
 .dark :deep(.timestamp-date) {
-  color: hsl(var(--foreground) / 0.65);
+    color: hsl(var(--foreground) / 0.65);
 }
+
 :deep(.timestamp-separator) {
-  color: hsl(var(--muted-foreground) / 0.5); /* Even more subtle separator */
-  margin: 0 1px;
+    color: hsl(var(--muted-foreground) / 0.5);
+    /* Even more subtle separator */
+    margin: 0 1px;
 }
+
 :deep(.timestamp-time) {
-  color: hsl(var(--foreground)); /* Keep time prominent */
-  font-weight: 500; /* Keep slightly bolder */
+    color: hsl(var(--foreground));
+    /* Keep time prominent */
+    font-weight: 500;
+    /* Keep slightly bolder */
 }
+
 .dark :deep(.timestamp-time) {
-  color: hsl(var(--foreground));
-  font-weight: 500;
+    color: hsl(var(--foreground));
+    font-weight: 500;
 }
+
 :deep(.timestamp-offset) {
-  color: hsl(var(--muted-foreground) / 0.6); /* Dimmer offset, similar to separator */
-  margin-left: 2px;
-  font-size: 90%; /* Slightly smaller */
+    color: hsl(var(--muted-foreground) / 0.6);
+    /* Dimmer offset, similar to separator */
+    margin-left: 2px;
+    font-size: 90%;
+    /* Slightly smaller */
 }
+
 .dark :deep(.timestamp-offset) {
-  color: hsl(var(--muted-foreground) / 0.5);
+    color: hsl(var(--muted-foreground) / 0.5);
 }
 </style>
