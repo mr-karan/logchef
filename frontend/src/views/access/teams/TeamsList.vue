@@ -33,8 +33,15 @@ import { useTeamsStore } from '@/stores/teams'
 const router = useRouter()
 const teamsStore = useTeamsStore()
 const { isLoading, error: teamsError } = storeToRefs(teamsStore)
+// Directly use adminTeams for this admin-specific view
 const teams = computed(() => {
-    return teamsStore.getTeamsWithDefaults();
+    // Map adminTeams to include defaults if needed, similar to getTeamsWithDefaults
+    return teamsStore.adminTeams.map(team => ({
+      ...team,
+      name: team.name || `Team ${team.id}`,
+      description: team.description || '',
+      memberCount: team.member_count || 0 // Use member_count from API response
+    }));
 });
 const showDeleteDialog = ref(false)
 const teamToDelete = ref<Team | null>(null)
@@ -46,16 +53,22 @@ const handleDelete = (team: Team) => {
 
 const confirmDelete = async () => {
     if (!teamToDelete.value) return
-    
+
     await teamsStore.deleteTeam(teamToDelete.value.id)
-    
+
     // Reset UI state
     showDeleteDialog.value = false
     teamToDelete.value = null
 }
 
+const handleTeamCreated = () => {
+    // No need to manually reload - the store already adds the new team
+    console.log('Team created successfully');
+}
+
 onMounted(() => {
-    teamsStore.loadTeams()
+    // Use loadAdminTeams for admin view
+    teamsStore.loadAdminTeams(true)
 })
 
 // Import formatDate from utils
@@ -73,7 +86,7 @@ import { formatDate } from '@/utils/format'
                             Groups of users that have common dashboard and permission needs
                         </CardDescription>
                     </div>
-                    <AddTeam @team-created="teamsStore.loadTeams(true)" />
+                    <AddTeam @team-created="handleTeamCreated" />
                 </div>
             </CardHeader>
             <CardContent>
@@ -89,7 +102,7 @@ import { formatDate } from '@/utils/format'
                     </div>
                     <div v-else-if="teams.length === 0" class="rounded-lg border p-4 text-center">
                         <p class="text-muted-foreground mb-4">No teams found</p>
-                        <AddTeam @team-created="teamsStore.loadTeams(true)">
+                        <AddTeam @team-created="handleTeamCreated">
                             <Button>
                                 <Plus class="mr-2 h-4 w-4" />
                                 Create Your First Team

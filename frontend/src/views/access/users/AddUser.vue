@@ -29,9 +29,9 @@
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
                         <Label for="role" class="text-right">Role</Label>
-                        <div class="col-span-3 w-full">
-                            <Select v-model="formData.role" class="w-full">
-                                <SelectTrigger class="w-full">
+                        <div class="col-span-3">
+                            <Select v-model="formData.role">
+                                <SelectTrigger>
                                     <SelectValue placeholder="Select role" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -43,9 +43,9 @@
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
                         <Label for="status" class="text-right">Status</Label>
-                        <div class="col-span-3 w-full">
-                            <Select v-model="formData.status" class="w-full">
-                                <SelectTrigger class="w-full">
+                        <div class="col-span-3">
+                            <Select v-model="formData.status">
+                                <SelectTrigger>
                                     <SelectValue placeholder="Select status" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -115,17 +115,17 @@ const isFormValid = computed(() => {
 
 async function handleSubmit() {
     if (!isFormValid.value) return
-    
+
     await usersStore.createUser({
         email: formData.value.email,
         full_name: formData.value.full_name,
         role: formData.value.role,
     })
-    
+
     // Store handles success/failure states
-    
+
     // Reset form on success - check if store operation succeeded
-    if (!usersStore.error?.createUser) {
+    if (!usersStore.error) {
         formData.value = {
             email: '',
             full_name: '',

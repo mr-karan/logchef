@@ -31,6 +31,17 @@ func (db *DB) CreateTeam(ctx context.Context, team *models.Team) error {
 	// Set the auto-generated ID
 	team.ID = models.TeamID(id)
 
+	// Get the team to fetch the timestamps
+	teamRow, err := db.queries.GetTeam(ctx, int64(id))
+	if err != nil {
+		db.log.Error("failed to get created team", "error", err)
+		return fmt.Errorf("error getting created team: %w", err)
+	}
+
+	// Set the timestamps from the database
+	team.CreatedAt = teamRow.CreatedAt
+	team.UpdatedAt = teamRow.UpdatedAt
+
 	db.log.Debug("team created", "team_id", team.ID)
 	return nil
 }
@@ -48,6 +59,10 @@ func (db *DB) GetTeam(ctx context.Context, teamID models.TeamID) (*models.Team, 
 		ID:          models.TeamID(teamRow.ID),
 		Name:        teamRow.Name,
 		Description: teamRow.Description.String,
+		Timestamps: models.Timestamps{
+			CreatedAt: teamRow.CreatedAt,
+			UpdatedAt: teamRow.UpdatedAt,
+		},
 	}
 	return team, nil
 }
@@ -102,6 +117,11 @@ func (db *DB) ListTeams(ctx context.Context) ([]*models.Team, error) {
 			ID:          models.TeamID(row.ID),
 			Name:        row.Name,
 			Description: row.Description.String,
+			MemberCount: int(row.MemberCount),
+			Timestamps: models.Timestamps{
+				CreatedAt: row.CreatedAt,
+				UpdatedAt: row.UpdatedAt,
+			},
 		}
 	}
 
@@ -239,9 +259,12 @@ func (db *DB) ListTeamMembersWithDetails(ctx context.Context, teamID models.Team
 	members := make([]*models.TeamMember, len(memberRows))
 	for i, row := range memberRows {
 		members[i] = &models.TeamMember{
-			TeamID: models.TeamID(row.TeamID),
-			UserID: models.UserID(row.UserID),
-			Role:   models.TeamRole(row.Role),
+			TeamID:    models.TeamID(row.TeamID),
+			UserID:    models.UserID(row.UserID),
+			Role:      models.TeamRole(row.Role),
+			Email:     row.Email,
+			FullName:  row.FullName,
+			CreatedAt: row.CreatedAt,
 		}
 	}
 
@@ -342,6 +365,10 @@ func (db *DB) ListTeamSources(ctx context.Context, teamID models.TeamID) ([]*mod
 				TableName: row.TableName,
 			},
 			Description: row.Description.String,
+			Timestamps: models.Timestamps{
+				CreatedAt: row.CreatedAt,
+				UpdatedAt: row.UpdatedAt,
+			},
 		}
 	}
 
@@ -365,6 +392,10 @@ func (db *DB) ListSourceTeams(ctx context.Context, sourceID models.SourceID) ([]
 			ID:          models.TeamID(row.ID),
 			Name:        row.Name,
 			Description: row.Description.String,
+			Timestamps: models.Timestamps{
+				CreatedAt: row.CreatedAt,
+				UpdatedAt: row.UpdatedAt,
+			},
 		}
 	}
 
@@ -404,6 +435,10 @@ func (db *DB) ListSourcesForUser(ctx context.Context, userID models.UserID) ([]*
 				Database:  row.Database,
 				TableName: row.TableName,
 			},
+			Timestamps: models.Timestamps{
+				CreatedAt: row.CreatedAt,
+				UpdatedAt: row.UpdatedAt,
+			},
 		}
 	}
 
@@ -411,19 +446,23 @@ func (db *DB) ListSourcesForUser(ctx context.Context, userID models.UserID) ([]*
 	return sources, nil
 }
 
-// GetTeamByName retrieves a team by its name
+// GetTeamByName gets a team by name
 func (db *DB) GetTeamByName(ctx context.Context, name string) (*models.Team, error) {
 	db.log.Debug("getting team by name", "name", name)
 
 	teamRow, err := db.queries.GetTeamByName(ctx, name)
 	if err != nil {
-		return nil, handleNotFoundError(err, "error getting team by name")
+		return nil, handleNotFoundError(err, "failed to get team by name")
 	}
 
 	team := &models.Team{
 		ID:          models.TeamID(teamRow.ID),
 		Name:        teamRow.Name,
 		Description: teamRow.Description.String,
+		Timestamps: models.Timestamps{
+			CreatedAt: teamRow.CreatedAt,
+			UpdatedAt: teamRow.UpdatedAt,
+		},
 	}
 	return team, nil
 }
@@ -476,6 +515,10 @@ func (db *DB) ListTeamsForUser(ctx context.Context, userID models.UserID) ([]*mo
 			ID:          models.TeamID(row.ID),
 			Name:        row.Name,
 			Description: row.Description.String,
+			Timestamps: models.Timestamps{
+				CreatedAt: row.CreatedAt,
+				UpdatedAt: row.UpdatedAt,
+			},
 		}
 	}
 

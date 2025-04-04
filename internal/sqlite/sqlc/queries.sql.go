@@ -763,7 +763,7 @@ func (q *Queries) ListTeamMembersWithDetails(ctx context.Context, teamID int64) 
 }
 
 const listTeamSources = `-- name: ListTeamSources :many
-SELECT s.id, s.name, s.database, s.table_name, s.description, s.created_at
+SELECT s.id, s.name, s.database, s.table_name, s.description, s.created_at, s.updated_at
 FROM sources s
 JOIN team_sources ts ON s.id = ts.source_id
 WHERE ts.team_id = ?
@@ -777,6 +777,7 @@ type ListTeamSourcesRow struct {
 	TableName   string         `json:"table_name"`
 	Description sql.NullString `json:"description"`
 	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
 }
 
 // List all data sources in a team
@@ -796,6 +797,7 @@ func (q *Queries) ListTeamSources(ctx context.Context, teamID int64) ([]ListTeam
 			&i.TableName,
 			&i.Description,
 			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -811,25 +813,39 @@ func (q *Queries) ListTeamSources(ctx context.Context, teamID int64) ([]ListTeam
 }
 
 const listTeams = `-- name: ListTeams :many
-SELECT id, name, description, created_at, updated_at FROM teams ORDER BY created_at DESC
+SELECT t.id, t.name, t.description, t.created_at, t.updated_at, COUNT(tm.user_id) as member_count
+FROM teams t
+LEFT JOIN team_members tm ON t.id = tm.team_id
+GROUP BY t.id
+ORDER BY t.created_at DESC
 `
 
+type ListTeamsRow struct {
+	ID          int64          `json:"id"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	MemberCount int64          `json:"member_count"`
+}
+
 // List all teams
-func (q *Queries) ListTeams(ctx context.Context) ([]Team, error) {
+func (q *Queries) ListTeams(ctx context.Context) ([]ListTeamsRow, error) {
 	rows, err := q.query(ctx, q.listTeamsStmt, listTeams)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Team{}
+	items := []ListTeamsRow{}
 	for rows.Next() {
-		var i Team
+		var i ListTeamsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MemberCount,
 		); err != nil {
 			return nil, err
 		}

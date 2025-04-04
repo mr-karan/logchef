@@ -26,7 +26,7 @@ import DataTableColumnSelector from './data-table-column-selector.vue'
 import DataTablePagination from './data-table-pagination.vue'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
-import type { QueryStats } from '@/api/explore'
+import type { QueryStats, ColumnInfo } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
 import { createColumns } from './columns'
@@ -44,20 +44,29 @@ interface Props {
     timestampField?: string
     severityField?: string
     timezone?: 'local' | 'utc'
+    searchTerms?: string[] // Add new prop
 }
 
 // Define the structure for storing state
 interface DataTableState {
     columnOrder: string[];
     columnSizing: ColumnSizingState;
-    // Add other state like columnVisibility, sorting later if needed
+    columnVisibility: VisibilityState;
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+    timestampField: 'timestamp',
+    severityField: 'severity_text',
+    timezone: 'local',
+    searchTerms: () => [] // Default to empty array
+})
 
 // Get the actual field names to use with fallbacks
 const timestampFieldName = computed(() => props.timestampField || 'timestamp')
 const severityFieldName = computed(() => props.severityField || 'severity_text')
+
+// Move tableColumns declaration near the top
+const tableColumns = ref<CustomColumnDef[]>([])
 
 // Table state
 const sorting = ref<SortingState>([])
@@ -82,85 +91,130 @@ const storageKey = computed(() => {
     return `logchef-tableState-${props.teamId}-${props.sourceId}`;
 });
 
-// Initialize useStorage directly. It will be null if storageKey is null initially.
-const storedState = useStorage<DataTableState | null>(
-    storageKey, // Pass the computed ref directly
-    null,       // Initial value if key is invalid or no data in storage
-    localStorage,
-    {
-        serializer: {
-            read: (v: any) => (v ? JSON.parse(v) : null),
-            write: (v: any) => JSON.stringify(v),
-        },
-        onError: (error) => {
-            console.error("Error reading/writing table state from localStorage:", error);
-        }
+// Load state from localStorage
+function loadStateFromStorage(): DataTableState | null {
+    if (!storageKey.value) return null;
+
+    try {
+        const storedData = localStorage.getItem(storageKey.value);
+        if (!storedData) return null;
+
+        return JSON.parse(storedData) as DataTableState;
+    } catch (error) {
+        console.error("Error loading table state from localStorage:", error);
+        return null;
     }
-);
+}
 
-// Watch for changes in props.columns and the stored state itself (which depends on storageKey)
-watch([() => props.columns, storedState], ([newColumns, currentStateValue], [oldColumns, oldStateValue]) => {
-    console.log("DataTable: State initialization watcher triggered.");
+// Save state to localStorage
+function saveStateToStorage(state: DataTableState) {
+    if (!storageKey.value) return;
 
-    if (!storageKey.value) {
-        console.log("DataTable: storageKey is null, skipping state initialization.");
-        // Reset local state if key becomes invalid
-        columnOrder.value = newColumns.map(c => c.id!).filter(Boolean);
-        columnSizing.value = {};
-        newColumns.forEach(col => {
-            if (col.id) {
-                columnSizing.value[col.id] = col.size ?? defaultColumn.size;
-            }
-        });
-        return;
+    try {
+        localStorage.setItem(storageKey.value, JSON.stringify(state));
+    } catch (error) {
+        console.error("Error saving table state to localStorage:", error);
     }
+}
 
-    console.log(`DataTable: Initializing/Reconciling state for key: ${storageKey.value}`);
-    const currentColumnIds = newColumns.map(c => c.id!).filter(Boolean);
+// Initialize state from localStorage or defaults
+function initializeState(columns: ColumnDef<Record<string, any>>[]) {
+    const currentColumnIds = columns.map(c => c.id!).filter(Boolean);
     let initialOrder: string[] = [];
     let initialSizing: ColumnSizingState = {};
+    let initialVisibility: VisibilityState = {};
 
-    if (currentStateValue) {
-        console.log("DataTable: Found stored state:", currentStateValue);
-        const savedOrder = currentStateValue.columnOrder || [];
-        // Filter saved order to include only columns that still exist
-        const filteredSavedOrder = savedOrder.filter((id: string) => currentColumnIds.includes(id));
-        // Find columns that are new (not in the saved order)
-        const newColumnIds = currentColumnIds.filter((id: string) => !filteredSavedOrder.includes(id));
-        // Combine: existing ordered columns + new columns at the end
+    // Try to load from storage
+    const savedState = loadStateFromStorage();
+
+    if (savedState) {
+        // Process column order
+        const savedOrder = savedState.columnOrder || [];
+        const filteredSavedOrder = savedOrder.filter(id => currentColumnIds.includes(id));
+        const newColumnIds = currentColumnIds.filter(id => !filteredSavedOrder.includes(id));
         initialOrder = [...filteredSavedOrder, ...newColumnIds];
 
-        const savedSizing = currentStateValue.columnSizing || {};
+        // Process column sizing and visibility
+        const savedSizing = savedState.columnSizing || {};
+        const savedVisibility = savedState.columnVisibility || {};
+
         currentColumnIds.forEach(id => {
+            // Handle sizing
             if (savedSizing[id] !== undefined) {
                 initialSizing[id] = savedSizing[id];
             } else {
-                // Use default size if not found in saved state
-                const columnDef = newColumns.find(c => c.id === id);
+                const columnDef = columns.find(c => c.id === id);
                 initialSizing[id] = columnDef?.size ?? defaultColumn.size;
             }
+
+            // Handle visibility
+            initialVisibility[id] = savedVisibility[id] !== undefined ? savedVisibility[id] : true;
         });
     } else {
-        console.log("DataTable: No stored state value found, using defaults based on props.columns.");
         initialOrder = currentColumnIds;
+
         currentColumnIds.forEach(id => {
-            const columnDef = newColumns.find(c => c.id === id);
+            const columnDef = columns.find(c => c.id === id);
             initialSizing[id] = columnDef?.size ?? defaultColumn.size;
+            initialVisibility[id] = true; // Default all columns to visible
         });
     }
 
-    // Update the local refs which the table uses
-    // Check if update is actually needed to prevent infinite loops if watch triggers unnecessarily
-    if (JSON.stringify(columnOrder.value) !== JSON.stringify(initialOrder)) {
-        columnOrder.value = initialOrder;
-    }
-    if (JSON.stringify(columnSizing.value) !== JSON.stringify(initialSizing)) {
-        columnSizing.value = initialSizing;
-    }
+    return { initialOrder, initialSizing, initialVisibility };
+}
 
-    console.log("DataTable: State applied:", { order: initialOrder, sizing: initialSizing });
+// Watch for changes in columns OR search terms to regenerate table columns
+watch(
+    () => [props.columns, props.searchTerms, displayTimezone.value], // Also watch timezone for createColumns
+    ([newColumns, newSearchTerms, newTimezone]) => {
+        if (!newColumns || newColumns.length === 0) {
+            tableColumns.value = []; // Clear columns if input is empty
+            // Reset dependent state if columns are cleared
+            columnOrder.value = [];
+            columnSizing.value = {};
+            columnVisibility.value = {};
+            return;
+        }
 
-}, { immediate: true, deep: false }); // deep: false because we only care about the top-level refs changing
+        // Regenerate columns with the current search terms and timezone
+        tableColumns.value = createColumns(
+            newColumns as any, // Use the columns directly as was working before
+            timestampFieldName.value,
+            newTimezone as 'local' | 'utc',
+            severityFieldName.value,
+            props.searchTerms
+        );
+
+        // Re-initialize state based on the potentially new columns
+        const { initialOrder, initialSizing, initialVisibility } = initializeState(tableColumns.value);
+
+        // Only update if different to prevent infinite loops or unnecessary updates
+        if (JSON.stringify(columnOrder.value) !== JSON.stringify(initialOrder)) {
+            columnOrder.value = initialOrder;
+        }
+        if (JSON.stringify(columnSizing.value) !== JSON.stringify(initialSizing)) {
+            columnSizing.value = initialSizing;
+        }
+        if (JSON.stringify(columnVisibility.value) !== JSON.stringify(initialVisibility)) {
+            columnVisibility.value = initialVisibility;
+        }
+    },
+    { immediate: true, deep: true } // Use deep watch for searchTerms array changes
+);
+
+// Save state whenever relevant parts change
+watch([columnOrder, columnSizing, columnVisibility], () => {
+    if (!storageKey.value) return;
+
+    // Make sure we have columns loaded before saving
+    if (props.columns && props.columns.length > 0) {
+        saveStateToStorage({
+            columnOrder: columnOrder.value,
+            columnSizing: columnSizing.value,
+            columnVisibility: columnVisibility.value
+        });
+    }
+}, { deep: true });
 
 // Save timezone preference whenever it changes
 watch(displayTimezone, (newValue) => {
@@ -282,22 +336,14 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
     window.addEventListener('touchend', onEnd, { once: true });
 }
 
-// Memoize the resolved columns based on the current order and props
-const resolvedColumns = computed(() => {
-    const columnMap = new Map(props.columns.map(col => [col.id, col]));
-    return columnOrder.value
-        .map(id => columnMap.get(id))
-        .filter((col): col is ColumnDef<Record<string, any>> => !!col);
-});
-
 // Initialize table
 const table = useVueTable({
     get data() {
         return props.data
     },
-    // Use the memoized resolvedColumns directly
+    // Use tableColumns directly
     get columns() {
-        return resolvedColumns.value;
+        return tableColumns.value;
     },
     state: {
         get sorting() {
@@ -330,28 +376,8 @@ const table = useVueTable({
     onColumnVisibilityChange: updaterOrValue => valueUpdater(updaterOrValue, columnVisibility),
     onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
     onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
-    onColumnSizingChange: updaterOrValue => {
-        const newSizingState = valueUpdater(updaterOrValue, columnSizing);
-        columnSizing.value = newSizingState; // Update local state first
-        // Update stored state if it exists
-        if (storedState.value) {
-            storedState.value = { ...storedState.value, columnSizing: newSizingState };
-        } else if (storageKey.value) { // Only create if key is valid
-             // If storedState was null but key is valid, create the object
-            storedState.value = { columnOrder: columnOrder.value, columnSizing: newSizingState };
-        }
-    },
-    onColumnOrderChange: updaterOrValue => {
-        const newOrderState = valueUpdater(updaterOrValue, columnOrder);
-        columnOrder.value = newOrderState; // Update local state first
-        // Update stored state if it exists
-        if (storedState.value) {
-            storedState.value = { ...storedState.value, columnOrder: newOrderState };
-        } else if (storageKey.value) { // Only create if key is valid
-            // If storedState was null but key is valid, create the object
-            storedState.value = { columnOrder: newOrderState, columnSizing: columnSizing.value };
-        }
-    },
+    onColumnSizingChange: updaterOrValue => valueUpdater(updaterOrValue, columnSizing),
+    onColumnOrderChange: updaterOrValue => valueUpdater(updaterOrValue, columnOrder),
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
@@ -390,16 +416,13 @@ const copyCell = (value: any) => {
 onMounted(() => {
     // Initialize default sort by timestamp if available
     if (timestampFieldName.value) {
-        // Make sure timestamp field exists in the current order before sorting
-        // The watch effect handles the initial columnOrder based on storage or defaults
+        // Check if the column exists in the initial order derived from state/defaults
         if (columnOrder.value.includes(timestampFieldName.value)) {
-            // Check if sorting is already set (e.g., by stored state if we persist it later)
             if (!sorting.value || sorting.value.length === 0) {
-                 sorting.value = [{ id: timestampFieldName.value, desc: true }]
+                sorting.value = [{ id: timestampFieldName.value, desc: true }]
             }
         }
     }
-    // Column sizing is handled by the watch effect that reads from storedState or defaults
 })
 
 // Add refs for DOM elements
@@ -434,8 +457,7 @@ type CustomColumnDef = ColumnDef<Record<string, any>> & {
     meta?: CustomColumnMeta;
 }
 
-// Update refs with proper types
-const tableColumns = ref<CustomColumnDef[]>([])
+// sourceDetails ref is already declared at the top
 const sourceDetails = ref<Source | null>(null)
 
 // Watch for source details changes
@@ -446,26 +468,17 @@ watch(
             const result = await sourcesStore.getSource(newSourceId)
             if (result.success && result.data) {
                 sourceDetails.value = result.data as Source
+            } else {
+                sourceDetails.value = null; // Clear if fetch fails or no data
             }
+        } else {
+            sourceDetails.value = null; // Clear if sourceId is null/0
         }
     },
     { immediate: true }
 )
 
-watch(
-    () => exploreStore.columns,
-    (newColumns) => {
-        if (newColumns) {
-            tableColumns.value = createColumns(
-                newColumns,
-                sourceDetails.value?._meta_ts_field || 'timestamp',
-                localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local',
-                sourceDetails.value?._meta_severity_field || 'severity_text'
-            )
-        }
-    },
-    { immediate: true }
-)
+// This watch is now redundant as we handle column creation in the combined watch above
 
 // --- Native Drag and Drop Implementation ---
 
@@ -524,11 +537,19 @@ const onDrop = (event: DragEvent, targetColumnId: string) => {
     document.body.classList.remove('dragging-column');
 }
 
-const onDragEnd = () => { // No need for event arg if not used
+const onDragEnd = () => { // No event parameter
     // Ensure cleanup happens regardless of drop success
     draggingColumnId.value = null;
     dragOverColumnId.value = null;
     document.body.classList.remove('dragging-column');
+}
+
+// Helper function to format execution time
+function formatExecutionTime(ms: number): string {
+    if (ms >= 1000) {
+        return `${(ms / 1000).toFixed(2)}s`;
+    }
+    return `${Math.round(ms)}ms`;
 }
 
 </script>
@@ -540,8 +561,15 @@ const onDragEnd = () => { // No need for event arg if not used
 
         <!-- Results Header with Controls and Pagination -->
         <div class="flex items-center justify-between p-2 border-b flex-shrink-0">
-            <!-- Left side - Empty now that stats have been moved to LogExplorer.vue -->
-            <div class="flex-1"></div>
+            <!-- Left side - Query stats -->
+            <div class="flex-1 text-sm text-muted-foreground">
+                <span v-if="stats && stats.execution_time_ms !== undefined" class="text-sm">
+                    Query time: <span class="font-medium">{{ formatExecutionTime(stats.execution_time_ms) }}</span>
+                </span>
+                <span v-if="stats && stats.rows_read !== undefined" class="ml-3 text-sm">
+                    Rows: <span class="font-medium">{{ stats.rows_read.toLocaleString() }}</span>
+                </span>
+            </div>
 
             <!-- Right side controls with pagination moved to top -->
             <div class="flex items-center gap-3">
@@ -558,10 +586,10 @@ const onDragEnd = () => { // No need for event arg if not used
                 </div>
 
                 <!-- Pagination moved to top -->
-                <DataTablePagination v-if="table.getRowModel().rows?.length > 0" :table="table" />
+                <DataTablePagination v-if="table && table.getRowModel().rows?.length > 0" :table="table" />
 
                 <!-- Column selector -->
-                <DataTableColumnSelector :table="table" :column-order="columnOrder"
+                <DataTableColumnSelector v-if="table" :table="table" :column-order="columnOrder"
                     @update:column-order="table.setColumnOrder($event)" />
 
                 <!-- Search input -->
@@ -575,13 +603,16 @@ const onDragEnd = () => { // No need for event arg if not used
 
         <!-- Table Section with full-height scrolling -->
         <div class="flex-1 relative overflow-hidden" ref="tableContainerRef">
-            <div v-if="table.getRowModel().rows?.length" class="absolute inset-0">
+            <!-- Add v-if="table" here -->
+            <div v-if="table && table.getRowModel().rows?.length" class="absolute inset-0">
                 <div
                     class="w-full h-full overflow-auto scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent">
                     <table ref="tableRef" class="table-fixed border-separate border-spacing-0 text-sm shadow-sm"
                         :data-resizing="isResizing">
                         <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
-                            <tr v-if="table.getHeaderGroups()[0]" class="border-b border-b-muted-foreground/10">
+                            <!-- Check table.getHeaderGroups() exists -->
+                            <tr v-if="table.getHeaderGroups().length > 0 && table.getHeaderGroups()[0]"
+                                class="border-b border-b-muted-foreground/10">
                                 <th v-for="header in table.getHeaderGroups()[0].headers" :key="header.id" scope="col"
                                     class="group relative h-9 px-3 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden border-r border-muted/30"
                                     :class="[
@@ -597,7 +628,7 @@ const onDragEnd = () => { // No need for event arg if not used
                                     }" draggable="true" @dragstart="onDragStart($event, header.column.id)"
                                     @dragenter="onDragEnter($event, header.column.id)" @dragover="onDragOver($event)"
                                     @dragleave="onDragLeave($event, header.column.id)"
-                                    @drop="onDrop($event, header.column.id)" @dragend="onDragEnd($event)">
+                                    @drop="onDrop($event, header.column.id)" @dragend="onDragEnd">
                                     <div class="flex items-center h-full">
                                         <!-- Drag Handle -->
                                         <span
@@ -608,8 +639,8 @@ const onDragEnd = () => { // No need for event arg if not used
 
                                         <!-- Column Header Content (Title + Sort button from columns.ts) -->
                                         <div class="flex-grow min-w-0 overflow-hidden mr-5">
-                                            <!-- FlexRender now renders the Button containing the title and sort icon -->
-                                            <FlexRender v-if="!header.isPlaceholder"
+                                            <!-- Check header.column.columnDef.header exists -->
+                                            <FlexRender v-if="!header.isPlaceholder && header.column.columnDef.header"
                                                 :render="header.column.columnDef.header" :props="header.getContext()" />
                                         </div>
 
@@ -656,18 +687,12 @@ const onDragEnd = () => { // No need for event arg if not used
                                             maxWidth: `${cell.column.columnDef.maxSize ?? defaultColumn.maxSize}px`
                                         }">
                                         <div class="flex items-center gap-1 w-full overflow-hidden">
-                                            <span
-                                                v-if="cell.column.id === severityFieldName && getSeverityClasses(cell.getValue(), cell.column.id)"
-                                                :class="getSeverityClasses(cell.getValue(), cell.column.id)"
-                                                class="shrink-0 mx-1">
-                                                {{ formatCellValue(cell.getValue()).toUpperCase() }}
-                                            </span>
-                                            <template v-else>
-                                                <div class="whitespace-nowrap overflow-hidden text-ellipsis w-full">
-                                                    <FlexRender :render="cell.column.columnDef.cell"
-                                                        :props="cell.getContext()" />
-                                                </div>
-                                            </template>
+                                            <div class="whitespace-pre w-full overflow-hidden">
+                                                <!-- Prevent wrapping, single line only -->
+                                                <!-- Check cell.column.columnDef.cell exists -->
+                                                <FlexRender v-if="cell.column.columnDef.cell"
+                                                    :render="cell.column.columnDef.cell" :props="cell.getContext()" />
+                                            </div>
                                         </div>
                                     </td>
                                 </tr>
@@ -684,14 +709,20 @@ const onDragEnd = () => { // No need for event arg if not used
                     </table>
                 </div>
             </div>
-            <div v-else class="h-full">
+            <!-- Check table exists for empty state -->
+            <div v-else-if="table" class="h-full">
                 <EmptyState />
+            </div>
+            <!-- Optional: Add a loading indicator if table is not yet defined -->
+            <div v-else class="h-full flex items-center justify-center">
+                <p class="text-muted-foreground">Initializing table...</p>
             </div>
         </div>
     </div>
 </template>
 
-<style scoped> /* Add scoped attribute */
+<style scoped>
+/* Add scoped attribute back */
 /* Table styling for log analytics */
 .table-fixed {
     table-layout: fixed;
@@ -767,6 +798,51 @@ const onDragEnd = () => { // No need for event arg if not used
     background-color: transparent;
 }
 
+/* Add highlight style */
+:deep(.search-highlight) {
+    background-color: hsl(var(--highlight, 60 100% 75%));
+    /* Use theme variable with fallback */
+    color: hsl(var(--highlight-foreground, 0 0% 0%));
+    /* Use theme variable with fallback */
+    padding: 0 1px;
+    margin: 0 -1px;
+    /* Prevent layout shift */
+    border-radius: 2px;
+    box-shadow: 0 0 0 1px hsl(var(--highlight, 60 100% 75%) / 0.5);
+    /* Subtle outline */
+}
+
+/* Ensure highlight works well in dark mode if theme variables are set */
+.dark :deep(.search-highlight) {
+    background-color: hsl(var(--highlight, 60 90% 55%));
+    color: hsl(var(--highlight-foreground, 0 0% 0%));
+    box-shadow: 0 0 0 1px hsl(var(--highlight, 60 90% 55%) / 0.7);
+}
+
+/* Ensure proper rendering inside table cells - single line with no wrapping */
+td>.flex>.whitespace-pre {
+    white-space: pre !important;
+    /* Prevent wrapping */
+    overflow: hidden !important;
+    /* Hide overflow within the cell's inner div */
+    text-overflow: ellipsis !important;
+    /* Add ellipsis for hidden text */
+}
+
+/* Ensure JSON objects don't wrap in table cells */
+:deep(.json-content) {
+    white-space: nowrap !important;
+    /* Prevent wrapping for JSON content */
+    overflow: hidden !important;
+    /* Hide overflow */
+    text-overflow: ellipsis !important;
+    /* Add ellipsis for hidden text */
+    display: inline-block !important;
+    /* Keep it as inline block */
+    max-width: 100% !important;
+    /* Limit width to cell size */
+}
+
 /* Add cursor styling for drag handle */
 .cursor-grab {
     cursor: grab;
@@ -808,6 +884,315 @@ const onDragEnd = () => { // No need for event arg if not used
     border-bottom: 1px solid hsl(var(--primary) / 0.3);
     box-shadow: 0 0 0 1px hsl(var(--primary) / 0.2);
     position: relative;
-    z-index: 1; /* Ensures expanded rows appear above others */
+    z-index: 1;
+    /* Ensures expanded rows appear above others */
 }
+
+/* --- Heuristic Formatting Styles (using :deep to target dynamic content) --- */
+
+/* Base HTTP Method Tag Style */
+:deep(.http-method) {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 11px;
+    /* Slightly smaller */
+    line-height: 1.4;
+    margin: 0 2px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+
+/* Utility HTTP Methods (PATCH, OPTIONS) */
+:deep(.http-method-utility) {
+    background-color: #f3f4f6;
+    /* gray-100 */
+    color: #4b5563;
+    /* gray-600 */
+    border: 1px solid #e5e7eb;
+    /* gray-200 */
+}
+
+.dark :deep(.http-method-utility) {
+    background-color: #374151;
+    /* gray-700 */
+    color: #d1d5db;
+    /* gray-300 */
+    border: 1px solid #4b5563;
+    /* gray-600 */
+}
+
+/* GET - Success Green */
+:deep(.http-method-get) {
+    background-color: #ecfccb;
+    /* lime-100 */
+    color: #4d7c0f;
+    /* lime-800 */
+    border-color: #a3e635;
+    /* lime-400 */
+}
+
+.dark :deep(.http-method-get) {
+    background-color: #365314;
+    /* lime-950 */
+    color: #d9f99d;
+    /* lime-300 */
+    border-color: #4d7c0f;
+    /* lime-800 */
+}
+
+/* POST - Cyan */
+:deep(.http-method-post) {
+    background-color: #cffafe;
+    /* cyan-100 */
+    color: #155e75;
+    /* cyan-800 */
+    border-color: #67e8f9;
+    /* cyan-300 */
+}
+
+.dark :deep(.http-method-post) {
+    background-color: #164e63;
+    /* cyan-950 */
+    color: #a5f3fc;
+    /* cyan-200 */
+    border-color: #155e75;
+    /* cyan-800 */
+}
+
+/* PUT - Amber */
+:deep(.http-method-put) {
+    background-color: #fef3c7;
+    /* amber-100 */
+    color: #92400e;
+    /* amber-800 */
+    border-color: #fcd34d;
+    /* amber-300 */
+}
+
+.dark :deep(.http-method-put) {
+    background-color: #78350f;
+    /* amber-950 */
+    color: #fde68a;
+    /* amber-200 */
+    border-color: #92400e;
+    /* amber-800 */
+}
+
+/* DELETE - Red */
+:deep(.http-method-delete) {
+    background-color: #fee2e2;
+    /* red-100 */
+    color: #991b1b;
+    /* red-800 */
+    border-color: #fca5a5;
+    /* red-300 */
+}
+
+.dark :deep(.http-method-delete) {
+    background-color: #7f1d1d;
+    /* red-950 */
+    color: #fecaca;
+    /* red-200 */
+    border-color: #991b1b;
+    /* red-800 */
+}
+
+/* HEAD - Indigo */
+:deep(.http-method-head) {
+    background-color: #e0e7ff;
+    /* indigo-100 */
+    color: #3730a3;
+    /* indigo-800 */
+    border-color: #a5b4fc;
+    /* indigo-300 */
+}
+
+.dark :deep(.http-method-head) {
+    background-color: #312e81;
+    /* indigo-950 */
+    color: #c7d2fe;
+    /* indigo-200 */
+    border-color: #3730a3;
+    /* indigo-800 */
+}
+
+/* Status Code Styling */
+:deep(.status-code) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 35px;
+    height: 20px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 11px;
+    line-height: 1.4;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    transition: transform 0.1s ease-in-out;
+    white-space: nowrap;
+    cursor: help;
+}
+
+:deep(.status-code:hover) {
+    transform: scale(1.05);
+}
+
+/* Status Code Types */
+:deep(.status-info) {
+    background-color: #e0f2fe;
+    /* light blue */
+    color: #075985;
+    border: 1px solid #7dd3fc;
+}
+
+.dark :deep(.status-info) {
+    background-color: #0c4a6e;
+    color: #bae6fd;
+    border: 1px solid #0284c7;
+}
+
+:deep(.status-success) {
+    background-color: #dcfce7;
+    /* light green */
+    color: #166534;
+    border: 1px solid #86efac;
+}
+
+.dark :deep(.status-success) {
+    background-color: #14532d;
+    color: #bbf7d0;
+    border: 1px solid #16a34a;
+}
+
+:deep(.status-redirect) {
+    background-color: #fef9c3;
+    /* light yellow */
+    color: #854d0e;
+    border: 1px solid #fde047;
+}
+
+.dark :deep(.status-redirect) {
+    background-color: #713f12;
+    color: #fef08a;
+    border: 1px solid #ca8a04;
+}
+
+:deep(.status-error) {
+    background-color: #fee2e2;
+    /* light red */
+    color: #b91c1c;
+    border: 1px solid #fca5a5;
+}
+
+.dark :deep(.status-error) {
+    background-color: #7f1d1d;
+    color: #fecaca;
+    border: 1px solid #ef4444;
+}
+
+:deep(.status-server) {
+    background-color: #ffe4e6;
+    /* light pink */
+    color: #be123c;
+    border: 1px solid #fda4af;
+}
+
+.dark :deep(.status-server) {
+    background-color: #881337;
+    color: #fecdd3;
+    border: 1px solid #e11d48;
+}
+
+/* Timestamp Formatting */
+:deep(.timestamp) {
+    /* Optional: Add a subtle background or border if needed */
+}
+
+/* Refined Timestamp Colors for better distinction */
+:deep(.timestamp-date) {
+    color: hsl(var(--foreground) / 0.75);
+    /* More distinct dimming for date */
+}
+
+.dark :deep(.timestamp-date) {
+    color: hsl(var(--foreground) / 0.65);
+}
+
+:deep(.timestamp-separator) {
+    color: hsl(var(--muted-foreground) / 0.5);
+    /* Even more subtle separator */
+    margin: 0 1px;
+}
+
+:deep(.timestamp-time) {
+    color: hsl(var(--foreground));
+    /* Keep time prominent */
+    font-weight: 500;
+    /* Keep slightly bolder */
+}
+
+.dark :deep(.timestamp-time) {
+    color: hsl(var(--foreground));
+    font-weight: 500;
+}
+
+:deep(.timestamp-offset) {
+    color: hsl(var(--muted-foreground) / 0.6);
+    /* Dimmer offset, similar to separator */
+    margin-left: 2px;
+    font-size: 90%;
+    /* Slightly smaller */
+}
+
+.dark :deep(.timestamp-offset) {
+    color: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* HTTP Method Colors */
+:deep(.http-method) {
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-weight: 500;
+}
+
+:deep(.http-method-utility) {
+    background-color: #f3f4f6;
+    /* gray-100 */
+    color: #4b5563;
+    /* gray-600 */
+    border: 1px solid #e5e7eb;
+    /* gray-200 */
+}
+
+.dark :deep(.http-method-utility) {
+    background-color: #374151;
+    /* gray-700 */
+    color: #d1d5db;
+    /* gray-300 */
+    border: 1px solid #4b5563;
+    /* gray-600 */
+}
+
+:deep(.http-method-get) {
+    background-color: #ecfccb;
+    /* lime-100 */
+    color: #4d7c0f;
+    /* lime-800 */
+    border-color: #a3e635;
+    /* lime-400 */
+}
+
+.dark :deep(.http-method-get) {
+    background-color: #365314;
+    /* lime-950 */
+    color: #d9f99d;
+    /* lime-300 */
+    border-color: #4d7c0f;
+    /* lime-800 */
+}
+
+/* Remove all severity styling as it's handled in utils.ts */
 </style>

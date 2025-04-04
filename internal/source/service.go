@@ -139,7 +139,7 @@ func (s *Service) CreateSource(ctx context.Context, name string, autoCreateTable
 
 	// Check if source already exists
 	existing, err := s.db.GetSourceByName(ctx, source.Connection.Database, source.Connection.TableName)
-	if err != nil {
+	if err != nil && err != models.ErrNotFound {
 		s.log.Error("failed to check existing source",
 			"error", err,
 			"database", source.Connection.Database,
@@ -546,4 +546,23 @@ func (s *Service) GetSourceStats(ctx context.Context, source *models.Source) (*S
 	)
 
 	return stats, nil
+}
+
+// ValidateSource validates a source configuration
+func (s *Service) ValidateSource(ctx context.Context, source *models.Source) error {
+	// First validate the source configuration
+	if err := s.ValidateSourceConfig(ctx, source); err != nil {
+		// If source doesn't exist, that's fine for validation
+		if err == models.ErrNotFound {
+			return nil
+		}
+		return fmt.Errorf("Failed to validate source configuration: %w", err)
+	}
+
+	// Then validate the connection
+	if _, err := s.ValidateConnection(ctx, source.Connection); err != nil {
+		return fmt.Errorf("Failed to validate source connection: %w", err)
+	}
+
+	return nil
 }

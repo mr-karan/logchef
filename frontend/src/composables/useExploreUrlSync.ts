@@ -68,14 +68,11 @@ export function useExploreUrlSync() {
   async function initializeFromUrl() {
     isInitializing.value = true;
     initializationError.value = null;
-    console.log("useExploreUrlSync: Initializing state from URL", route.query);
 
     try {
       // 1. Ensure Teams are loaded (wait if necessary)
       if (!teamsStore.teams || teamsStore.teams.length === 0) {
-        console.log("useExploreUrlSync: Waiting for teams to load...");
-        await teamsStore.loadTeams();
-        console.log("useExploreUrlSync: Teams loaded.");
+        await teamsStore.loadTeams(false, false); // Explicitly use user teams endpoint
       }
       if (teamsStore.teams.length === 0) {
         throw new Error("No teams available or accessible.");
@@ -83,9 +80,6 @@ export function useExploreUrlSync() {
 
       // Check if we have a query_id in the URL, which indicates we're editing a saved query
       const queryId = route.query.query_id as string | undefined;
-      if (queryId) {
-        console.log(`useExploreUrlSync: Found query_id=${queryId} in URL, in edit mode`);
-      }
 
       // 2. Set Team from URL or default
       let teamId: number | null = null;
@@ -96,7 +90,6 @@ export function useExploreUrlSync() {
           teamId = parsedTeamId;
         } else {
           initializationError.value = `Invalid or inaccessible team ID: ${urlTeamIdStr}. Falling back to default.`;
-          console.warn(initializationError.value);
         }
       }
       if (!teamId) {
@@ -106,14 +99,9 @@ export function useExploreUrlSync() {
       if (teamsStore.currentTeamId !== teamId) {
          teamsStore.setCurrentTeam(teamId);
       }
-      console.log(`useExploreUrlSync: Current team set to ${teamId}`);
-
 
       // 3. Load Sources for the selected team (wait if necessary)
-      console.log(`useExploreUrlSync: Loading sources for team ${teamId}...`);
       await sourcesStore.loadTeamSources(teamId);
-      console.log("useExploreUrlSync: Sources loaded.");
-
 
       // 4. Set Source from URL or default (validate against loaded sources)
       let sourceId: number | null = null;
@@ -124,7 +112,6 @@ export function useExploreUrlSync() {
           sourceId = parsedSourceId;
         } else {
           initializationError.value = `Invalid or inaccessible source ID: ${urlSourceIdStr} for team ${teamId}. Falling back to default.`;
-          console.warn(initializationError.value);
         }
       }
       if (!sourceId && sourcesStore.teamSources.length > 0) {
@@ -136,23 +123,17 @@ export function useExploreUrlSync() {
          if (exploreStore.sourceId !== sourceId) {
             exploreStore.setSource(sourceId);
          }
-         console.log(`useExploreUrlSync: Current source set to ${sourceId}. Loading details...`);
          await sourcesStore.loadSourceDetails(sourceId); // Wait for details
-         console.log("useExploreUrlSync: Source details loaded.");
       } else {
          exploreStore.setSource(0); // Explicitly set to 0 if no valid source
          sourcesStore.clearCurrentSourceDetails();
-         console.log("useExploreUrlSync: No valid source found for team.");
          initializationError.value = `No sources available for team ${teamId}.`;
       }
-
 
       // 5. Set Limit from URL or default
       const urlLimitStr = route.query.limit as string | undefined;
       const limit = urlLimitStr ? parseInt(urlLimitStr) : 100;
       exploreStore.setLimit(!isNaN(limit) && limit > 0 && limit <= 10000 ? limit : 100);
-      console.log(`useExploreUrlSync: Limit set to ${exploreStore.limit}`);
-
 
       // 6. Set Time Range from URL or default
       const urlStartTime = parseTimestamp(route.query.start_time as string | undefined);
@@ -164,11 +145,10 @@ export function useExploreUrlSync() {
       const parsedEnd = timestampToCalendarDateTime(urlEndTime);
 
       if (!parsedStart || !parsedEnd) {
-        console.log("useExploreUrlSync: Using default time range.");
         const nowDt = now(getLocalTimeZone());
         startDateTime = new CalendarDateTime(
           nowDt.year, nowDt.month, nowDt.day, nowDt.hour, nowDt.minute, nowDt.second
-        ).subtract({ hours: 1 });
+        ).subtract({ minutes: 5 });
         endDateTime = new CalendarDateTime(
           nowDt.year, nowDt.month, nowDt.day, nowDt.hour, nowDt.minute, nowDt.second
         );
@@ -177,15 +157,11 @@ export function useExploreUrlSync() {
           endDateTime = parsedEnd;
       }
       exploreStore.setTimeRange({ start: startDateTime, end: endDateTime });
-      console.log(`useExploreUrlSync: Time range set.`);
-
 
       // 7. Set Mode from URL or default
       const urlMode = route.query.mode as string | undefined;
       const mode = (urlMode === 'sql' ? 'sql' : 'logchefql') as 'logchefql' | 'sql';
       exploreStore.setActiveMode(mode);
-      console.log(`useExploreUrlSync: Mode set to ${mode}`);
-
 
       // 8. Set Query Content from URL
       const urlQuery = route.query.q as string | undefined;
@@ -197,7 +173,6 @@ export function useExploreUrlSync() {
         exploreStore.setRawSql(queryContent);
         exploreStore.setLogchefqlCode(""); // Clear other mode
       }
-      console.log(`useExploreUrlSync: Query content set.`);
 
       // 9. Saved Query Check (LogExplorer still handles loading the data)
       // This composable only sets the initial state from basic params.
@@ -212,7 +187,6 @@ export function useExploreUrlSync() {
       // before allowing watchers to update the URL.
       await nextTick();
       isInitializing.value = false;
-      console.log("useExploreUrlSync: Initialization finished.");
       // Trigger initial URL sync *after* initialization is marked complete
       syncUrlFromState();
     }
@@ -223,11 +197,9 @@ export function useExploreUrlSync() {
   const syncUrlFromState = () => {
     // Don't sync if we are still initializing from the URL
     if (isInitializing.value) {
-       console.log("useExploreUrlSync: Skipping syncUrlFromState during initialization");
        return;
     }
 
-    console.log("useExploreUrlSync: Syncing URL from state...");
     const query: Record<string, string> = {};
 
     // Team
@@ -254,8 +226,6 @@ export function useExploreUrlSync() {
     if (startTime !== null && endTime !== null) {
       query.start_time = startTime.toString();
       query.end_time = endTime.toString();
-    } else {
-      console.warn("useExploreUrlSync: Missing valid time range for URL sync");
     }
 
     // Mode
@@ -271,15 +241,12 @@ export function useExploreUrlSync() {
 
     // Only update if the query params actually changed
     if (JSON.stringify(query) !== JSON.stringify(route.query)) {
-        console.log("useExploreUrlSync: Updating URL with new state:", query);
         router.replace({ query }).catch(err => {
             // Ignore navigation duplicated errors which can happen with rapid updates
             if (err.name !== 'NavigationDuplicated') {
                 console.error("useExploreUrlSync: Error updating URL:", err);
             }
         });
-    } else {
-        // console.log("useExploreUrlSync: URL state matches current state, no update needed.");
     }
   };
 
@@ -300,7 +267,6 @@ export function useExploreUrlSync() {
     () => {
       // Avoid syncing during the initial setup phase
       if (isInitializing.value) {
-        // console.log("useExploreUrlSync: Skipping URL sync during initialization.");
         return;
       }
       // Debounce? Consider adding debounce later if updates are too frequent
@@ -317,7 +283,6 @@ export function useExploreUrlSync() {
       // Avoid re-init on minor changes if updateUrlFromState handles them.
       // A simple check for now: re-init if path changes.
       if (newPath !== oldPath && !isInitializing.value) {
-          console.log("useExploreUrlSync: Route changed, re-initializing...");
           // Re-run initialization logic when route changes
           // initializeFromUrl(); // Potentially re-enable if back/forward needs full re-init
       }

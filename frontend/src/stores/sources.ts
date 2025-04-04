@@ -514,6 +514,10 @@ export const useSourcesStore = defineStore("sources", () => {
       state.isLoadingOperation(`getSource-${sourceId}`),
     isLoadingTeamSources: (teamId: number) =>
       state.isLoadingOperation(`loadTeamSources-${teamId}`),
+    isLoadingSourceDetails: (id: number) => {
+      if (!id) return false;
+      return state.isLoadingOperation(`loadSourceDetails-${id}`);
+    },
 
     // Getters
     getSourceById,

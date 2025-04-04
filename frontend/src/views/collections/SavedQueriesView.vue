@@ -23,7 +23,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { TOAST_DURATION } from '@/lib/constants';
-import SaveQueryModal from '@/components/saved-queries/SaveQueryModal.vue';
+import SaveQueryModal from '@/components/collections/SaveQueryModal.vue';
 import { getErrorMessage } from '@/api/types';
 import { useSourcesStore } from '@/stores/sources';
 import { formatSourceName } from '@/utils/format';
@@ -37,39 +37,35 @@ const router = useRouter();
 const { toast } = useToast();
 
 // Initialize stores with error handling
-let sourcesStore, teamsStore;
+let sourcesStore = useSourcesStore();
+let teamsStore = useTeamsStore();
+
 try {
   sourcesStore = useSourcesStore();
   teamsStore = useTeamsStore();
 } catch (error) {
   console.error("Error initializing stores:", error);
-}
-
-// Create fallback objects if stores fail to initialize
-if (!sourcesStore) {
-  console.error("Sources store failed to initialize!");
+  // Create fallback objects with proper typing
   sourcesStore = {
     loadTeamSources: async () => ({ success: false }),
     teamSources: [],
     isLoading: false
-  };
-}
+  } as any; // Fallback to any for error case
 
-if (!teamsStore) {
-  console.error("Teams store failed to initialize!");
   teamsStore = {
-    loadTeams: async () => {},
-    setCurrentTeam: () => {},
+    loadTeams: async () => { },
+    setCurrentTeam: () => { },
     currentTeamId: null,
     currentTeam: null,
-    teams: []
-  };
+    teams: [],
+    resetAdminTeams: () => { }
+  } as any; // Fallback to any for error case
 }
 
 // Get saved queries composable
-const { 
-  showSaveQueryModal, 
-  editingQuery, 
+const {
+  showSaveQueryModal,
+  editingQuery,
   isLoading,
   queries,
   filteredQueries,
@@ -116,11 +112,19 @@ const selectedSourceName = computed(() => {
   return source ? formatSourceName(source) : 'Select a source';
 });
 
+// Add this computed property near the other computed properties
+const noQueriesMessage = computed(() =>
+  searchQuery.value ? 'No queries match your search.' : 'Create a query in the Explorer and save it to access it here.'
+);
+
 // Load sources and queries on mount
 onMounted(async () => {
   try {
-    // Load teams first
-    await teamsStore.loadTeams();
+    // Reset admin teams and load user teams to ensure we have the correct context
+    teamsStore.resetAdminTeams();
+
+    // Load teams first (explicitly use user teams endpoint)
+    await teamsStore.loadTeams(true);
 
     // Check if team ID is specified in the URL query
     const teamIdFromUrl = router.currentRoute.value.query.team;
@@ -153,7 +157,7 @@ onMounted(async () => {
         selectedSourceId.value = String(sourcesStore.teamSources[0].id);
       }
 
-      // Don't explicitly call loadSourceQueries here, 
+      // Don't explicitly call loadSourceQueries here,
       // the watcher on selectedSourceId will handle it
     }
   } catch (error) {
@@ -171,14 +175,33 @@ onMounted(async () => {
 // Watch for source selection changes and team changes with safer access
 watch(
   [
-    () => selectedSourceId.value, 
+    () => selectedSourceId.value,
     () => teamsStore && teamsStore.currentTeamId ? teamsStore.currentTeamId : null
   ],
-  async ([newSourceId, currentTeamId]) => {
-    if (newSourceId && currentTeamId) {
-      await fetchQueries();
-      // Mark initial load as complete after first load
-      isInitialLoad.value = false;
+  async ([newSourceId, newTeamId], [oldSourceId, oldTeamId]) => {
+    // Skip fetching if either:
+    // 1. We're in the middle of a team change
+    // 2. We're in the middle of a source change
+    if (isChangingTeam.value || isChangingSource.value) {
+      return;
+    }
+
+    // If team changed, don't fetch queries yet - wait for handleTeamChange to set appropriate source
+    if (newTeamId !== oldTeamId) {
+      return;
+    }
+
+    // Only proceed if we have both a valid team and source ID
+    if (newSourceId && newTeamId) {
+      // Verify source exists in current team before fetching
+      const sourceId = parseInt(newSourceId);
+      const sourceExists = sourcesStore.teamSources.some(source => source.id === sourceId);
+
+      if (sourceExists) {
+        await fetchQueries();
+        // Mark initial load as complete after first load
+        isInitialLoad.value = false;
+      }
     }
   },
   { immediate: true } // This will trigger immediately when component mounts
@@ -192,7 +215,7 @@ async function handleTeamChange(teamId: string) {
 
     // Use the improved setCurrentTeam that handles string IDs
     teamsStore.setCurrentTeam(teamId);
-    
+
     const currentTeamId = parseInt(teamId);
 
     // Update URL to reflect the team change
@@ -202,7 +225,7 @@ async function handleTeamChange(teamId: string) {
     });
 
     // Load sources for the selected team
-    const sourcesResult = await sourcesStore.loadTeamSources(currentTeamId, true);
+    const sourcesResult = await sourcesStore.loadTeamSources(currentTeamId);
 
     // Handle case where team has no sources
     if (!sourcesResult.success || !sourcesResult.data || sourcesResult.data.length === 0) {
@@ -219,12 +242,13 @@ async function handleTeamChange(teamId: string) {
       // Update URL with the new source - use currentTeamId for safety
       router.replace({
         path: '/logs/saved',
-        query: { 
-          team: teamId, 
-          source: selectedSourceId.value 
+        query: {
+          team: teamId,
+          source: selectedSourceId.value
         }
       });
 
+      // Only fetch queries after we've properly set the selectedSourceId
       await fetchQueries();
     } else {
       // No sources in this team
@@ -308,10 +332,20 @@ async function fetchQueries() {
     console.warn("No team or source selected, cannot load queries");
     return;
   }
-  
+
+  const sourceId = parseInt(selectedSourceId.value);
+
+  // Double check that this source exists for the current team before making API call
+  const sourceExists = sourcesStore.teamSources.some(source => source.id === sourceId);
+
+  if (!sourceExists) {
+    console.warn(`Source ID ${sourceId} does not exist for team ${teamsStore.currentTeamId}, skipping query fetch`);
+    return;
+  }
+
   await loadSourceQueries(
     teamsStore.currentTeamId,
-    parseInt(selectedSourceId.value)
+    sourceId
   );
 }
 
@@ -473,9 +507,7 @@ function handleCreateNewQuery() {
           <Search class="h-6 w-6 text-muted-foreground" />
         </div>
         <p class="text-xl text-muted-foreground">No saved queries found</p>
-        <p class="text-muted-foreground">
-          {{ searchQuery ? 'No queries match your search.' : 'Create a query in the Explorer and save it to access it here.' }}
-        </p>
+        <p class="text-muted-foreground">{{ noQueriesMessage }}</p>
         <div class="flex gap-3">
           <Button v-if="searchQuery" variant="outline" @click="clearSearch">
             Clear Search

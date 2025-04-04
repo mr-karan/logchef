@@ -99,10 +99,10 @@ func (v *Validator) ValidateSourceCreation(name string, conn models.ConnectionIn
 		}
 	}
 
-	if len(description) > 50 {
+	if len(description) > 500 {
 		return &ValidationError{
 			Field:   "Description",
-			Message: "description must not exceed 50 characters",
+			Message: "description must not exceed 500 characters",
 		}
 	}
 
@@ -147,10 +147,10 @@ func (v *Validator) ValidateSourceUpdate(description string, ttlDays int) error 
 		}
 	}
 
-	if len(description) > 50 {
+	if len(description) > 500 {
 		return &ValidationError{
 			Field:   "Description",
-			Message: "description must not exceed 50 characters",
+			Message: "description must not exceed 500 characters",
 		}
 	}
 
@@ -276,7 +276,7 @@ func (v *Validator) ValidateColumnTypes(ctx context.Context, client *clickhouse.
 		}
 	}
 
-	// If severity field is provided, check its type
+	// If severity field is provided (not empty), check its type
 	if severityField != "" {
 		sevQuery := fmt.Sprintf(`
 			SELECT type
@@ -387,4 +387,25 @@ func isValidSourceName(name string) bool {
 // isAllowedInSourceName checks if a character is allowed in source names
 func isAllowedInSourceName(r rune) bool {
 	return isLetter(r) || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == ' '
+}
+
+// ValidateSourceConfig validates the source configuration by checking if the source exists
+// and if it has the required fields
+func (s *Service) ValidateSourceConfig(ctx context.Context, source *models.Source) error {
+	// Check if source already exists
+	existingSource, err := s.db.GetSourceByName(ctx, source.Connection.Database, source.Connection.TableName)
+	if err != nil {
+		// If source doesn't exist, that's fine for validation
+		if err == models.ErrNotFound {
+			return nil
+		}
+		return fmt.Errorf("error getting source by name: %w", err)
+	}
+
+	// If source exists and we're not in auto-create mode, return error
+	if existingSource != nil && !source.MetaIsAutoCreated {
+		return fmt.Errorf("source with database %s and table %s already exists", source.Connection.Database, source.Connection.TableName)
+	}
+
+	return nil
 }

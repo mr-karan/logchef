@@ -9,7 +9,9 @@ import { TOAST_DURATION } from '@/lib/constants'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -27,21 +29,13 @@ import { useTeamsStore } from '@/stores/teams'
 import { useSourcesStore } from '@/stores/sources'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
 import { now, getLocalTimeZone, type CalendarDateTime, type DateValue, toCalendarDateTime } from '@internationalized/date'
-import { createColumns } from './table/columns'
 import DataTable from './table/data-table.vue'
 import { formatSourceName } from '@/utils/format'
-import SaveQueryModal from '@/components/saved-queries/SaveQueryModal.vue'
+import SaveQueryModal from '@/components/collections/SaveQueryModal.vue'
 import QueryEditor from '@/components/query-editor/QueryEditor.vue'
 import { FieldSideBar } from '@/components/field-sidebar'
-import { SQLParser } from '@/utils/clickhouse-sql/ast'
-import { generateDefaultSqlQuery } from '@/utils/query-templates'
-import { QueryBuilder } from '@/utils/query-builder'
-import { useExploreUrlSync } from '@/composables/useExploreUrlSync'
-import type { ColumnDef } from '@tanstack/vue-table'
 import { getErrorMessage } from '@/api/types'
-import { useQueryExecution } from '@/composables/useQueryExecution'
 import { useSourceTeamManagement } from '@/composables/useSourceTeamManagement'
-import { useQueryMode } from '@/composables/useQueryMode'
 import { useSavedQueries } from '@/composables/useSavedQueries'
 import {
   Tooltip,
@@ -51,6 +45,9 @@ import {
 } from '@/components/ui/tooltip'
 import type { SaveQueryFormData } from '@/views/explore/types'
 import type { SavedTeamQuery } from '@/api/savedQueries'
+import { useExploreUrlSync } from '@/composables/useExploreUrlSync'
+import { useQuery } from '@/composables/useQuery'
+import type { EditorMode } from '@/views/explore/types'
 
 // Router and stores
 const router = useRouter()
@@ -63,16 +60,46 @@ const { isInitializing, initializationError: urlError, initializeFromUrl, syncUr
 
 // Composables
 const {
-  localQueryError,
+  // Query content
+  logchefQuery,
+  sqlQuery,
+  activeMode,
+
+  // State
+  queryError,
+  sqlWarnings,
+  isDirty,
   isExecutingQuery,
   canExecuteQuery,
-  isDirty,
-  triggerQueryExecution
-} = useQueryExecution()
+
+  // Actions
+  changeMode,
+  executeQuery,
+  handleTimeRangeUpdate,
+  handleLimitUpdate
+} = useQuery()
+
+// --- Add computed property to extract search terms ---
+const searchTermsToHighlight = computed(() => {
+  if (activeMode.value !== 'logchefql' || !logchefQuery.value) {
+    return [];
+  }
+  // Simple regex to extract quoted strings (single or double)
+  const regex = /["']([^"']+)["']/g;
+  const matches = logchefQuery.value.matchAll(regex);
+  const terms = Array.from(matches, match => match[1]);
+  // Optional: Add simple unquoted terms if needed, but start with quoted ones
+  // Example: Add terms separated by space not part of key=value
+  // const potentialUnquoted = logchefQuery.value.split(/\s+/).filter(term => !term.includes('=') && !term.includes('"') && !term.includes("'"));
+  // return [...new Set([...terms, ...potentialUnquoted])]; // Combine and deduplicate
+  return [...new Set(terms)]; // Deduplicate quoted terms
+});
 
 const {
   isProcessingTeamChange,
   isProcessingSourceChange,
+  isChangingContext,
+  isLoadingSourceDetails,
   currentTeamId,
   currentSourceId,
   sourceDetails,
@@ -85,12 +112,6 @@ const {
   handleTeamChange,
   handleSourceChange
 } = useSourceTeamManagement()
-
-const {
-  currentLogchefQuery,
-  currentSqlQuery,
-  handleModeChange
-} = useQueryMode()
 
 const {
   showSaveQueryModal,
@@ -136,7 +157,8 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
       toast({
         title: 'Success',
         description: 'Query updated successfully.',
-        duration: TOAST_DURATION.SUCCESS
+        duration: TOAST_DURATION.SUCCESS,
+        variant: 'success'
       });
 
       // Optional: Refresh the list if needed, though store should be reactive
@@ -159,10 +181,6 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
 
 // Basic state
 const showFieldsPanel = ref(false)
-const tableColumns = ref<ColumnDef<Record<string, any>>[]>([])
-const logchefQuery = ref('')
-const sqlQuery = ref('')
-const queryError = ref('')
 const queryEditorRef = ref()
 const isLoadingQuery = ref(false)
 const editQueryData = ref<SavedTeamQuery | null>(null)
@@ -188,7 +206,7 @@ const lastQueryParam = ref(currentRoute.query.q);
 const lastModeParam = ref(currentRoute.query.mode);
 
 // Check if we're in edit mode (URL has query_id)
-const isEditingExistingQuery = computed(() => !!currentRoute.query.query_id);
+const isEditingExistingQuery = computed(() => !!currentRoute.query.query_id || !!exploreStore.selectedQueryId);
 const queryIdFromUrl = computed(() => currentRoute.query.query_id as string | undefined);
 
 // Computed property to determine if the query is savable/updatable
@@ -203,20 +221,17 @@ const canSaveOrUpdateQuery = computed(() => {
 watch(() => [currentRoute.query.q, currentRoute.query.mode], ([newQueryParam, newModeParam]) => {
   // Handle mode change from URL
   if (newModeParam !== undefined && newModeParam !== lastModeParam.value) {
-    console.log('Mode parameter changed in URL:', newModeParam);
     lastModeParam.value = newModeParam as string;
 
     // Update mode in store based on URL
     const mode = (newModeParam as string).toLowerCase() === 'logchefql' ? 'logchefql' : 'sql';
     if (exploreStore.activeMode !== mode) {
-      console.log(`Setting mode to ${mode} based on URL parameter`);
       exploreStore.setActiveMode(mode);
     }
   }
 
   // Handle query content change from URL
   if (newQueryParam !== undefined && newQueryParam !== lastQueryParam.value) {
-    console.log('Query parameter changed in URL:', newQueryParam);
     lastQueryParam.value = newQueryParam as string;
 
     const decodedQuery = decodeURIComponent(newQueryParam as string);
@@ -248,19 +263,15 @@ const displayTimezone = computed(() =>
 
 
 // Combined error display
-const displayError = computed(() => localQueryError.value || exploreStore.error?.message)
+const displayError = computed(() => queryError.value || exploreStore.error?.message)
 
 // Watch for initialization completion to run initial query
 watch(isInitializing, async (initializing, prevInitializing) => {
   if (prevInitializing && !initializing) {
-    console.log("Initialization complete. Checking for saved query ID and if initial query should run.");
-
     const queryId = queryIdFromUrl.value; // Get query ID from computed property
 
     if (queryId) {
-      console.log(`Found query_id=${queryId} in URL. Attempting to load saved query...`);
       if (!currentTeamId.value) {
-        console.error("Cannot load saved query: Team ID is missing.");
         toast({
           title: 'Error',
           description: 'Cannot load saved query because the team context is missing.',
@@ -285,13 +296,8 @@ watch(isInitializing, async (initializing, prevInitializing) => {
           const loadResult = await loadSavedQuery(savedQueriesStore.selectedQuery);
 
           if (loadResult) {
-            console.log(`Successfully loaded and applied saved query ${queryId}`);
             // Sync URL after successful load and application
             syncUrlFromState();
-          } else {
-            // loadSavedQuery failed internally (already showed toast)
-            console.error(`loadSavedQuery function failed for query ${queryId}`);
-            // Potentially clear query_id from URL here?
           }
         } else {
           // Fetching the query from the store failed
@@ -299,36 +305,30 @@ watch(isInitializing, async (initializing, prevInitializing) => {
         }
       } catch (error) {
         isLoadingQuery.value = false; // Ensure loading is false on error
-        console.error(`Failed to load or apply saved query ${queryId}:`, error);
         toast({
           title: 'Error Loading Saved Query',
           description: getErrorMessage(error),
           variant: 'destructive',
           duration: TOAST_DURATION.ERROR
         });
-        // Decide how to handle failure - maybe clear query_id from URL?
       }
     }
 
     // Make sure we have a valid time range before executing the query
     if (!exploreStore.timeRange || !exploreStore.timeRange.start || !exploreStore.timeRange.end) {
-      console.log("Setting default time range as none was provided in saved query");
-      // Set a default time range (last 24 hours)
+      // Set a default time range (last 5 minutes)
       exploreStore.setTimeRange({
-        start: now(getLocalTimeZone()).subtract({ hours: 24 }),
+        start: now(getLocalTimeZone()).subtract({ minutes: 5 }),
         end: now(getLocalTimeZone())
       });
     }
 
     // Now check if we can execute the query (either the one from URL or the loaded saved one)
-    if (canExecuteQuery.value && (exploreStore.logchefqlCode || exploreStore.rawSql)) {
-      console.log("Running initial query...")
-      await triggerQueryExecution()
-    } else {
-      console.log("Skipping initial query (missing requirements or no query content)")
+    if (canExecuteQuery.value) {
+      await executeQuery();
     }
   }
-}, { immediate: false })
+}, { immediate: false });
 
 // Watch for source changes to fetch details AND saved queries
 watch(
@@ -336,14 +336,12 @@ watch(
   async (newSourceId, oldSourceId) => {
     // Skip during initialization to prevent redundant calls
     if (isInitializing.value) {
-      console.log(`LogExplorer: Skipping source details/queries update during initialization phase`);
       return;
     }
 
     if (newSourceId !== oldSourceId) {
       // Fetch Source Details (existing logic)
       if (newSourceId && newSourceId > 0) {
-        console.log(`LogExplorer: Source changed to ${newSourceId}, fetching details and saved queries...`);
         // Verify source existence (using teamSources from useSourceTeamManagement)
         const sourceExists = availableSources.value.some(source => source.id === newSourceId);
         if (sourceExists) {
@@ -357,29 +355,18 @@ watch(
           // Fetch Saved Queries (no debounce needed?)
           if (currentTeamId.value) { // Ensure team ID is available
             await loadSourceQueries(currentTeamId.value, newSourceId);
-          } else {
-            console.warn("LogExplorer: Cannot load saved queries, team ID is missing.");
           }
-        } else {
-          console.warn(`LogExplorer: Source ${newSourceId} not found in current team's sources`);
         }
       } else {
         // Clear saved queries if source is deselected
-        // (useSavedQueries composable handles clearing its internal state if needed)
         if (currentTeamId.value) {
-          console.log("LogExplorer: Source cleared, attempting to clear/load empty queries for team.");
-          // Call load with invalid source ID (or maybe add a dedicated clear function to composable?)
-          // For now, loading with 0 might not work as intended depending on composable logic.
-          // Let's assume the composable handles the empty/invalid source case gracefully.
-          await loadSourceQueries(currentTeamId.value, 0); // Or handle clearing explicitly
-        } else {
-          console.warn("LogExplorer: Cannot clear saved queries, team ID is missing.");
+          await loadSourceQueries(currentTeamId.value, 0);
         }
       }
     }
   },
   { immediate: false } // Don't run immediately, wait for initialization
-)
+);
 
 // Watch for changes in currentTeamId to update sources AND saved queries
 watch(
@@ -387,24 +374,21 @@ watch(
   async (newTeamId, oldTeamId) => {
     // Skip during initialization
     if (isInitializing.value) {
-      console.log(`LogExplorer: Skipping team change actions during initialization.`);
       return;
     }
 
     if (newTeamId !== oldTeamId && newTeamId) {
-      console.log(`LogExplorer: Team changed to ${newTeamId}, updating sources and potentially saved queries...`)
-
       // Load sources for the new team (existing logic)
-      const sourcesResult = await sourcesStore.loadTeamSources(newTeamId)
+      const sourcesResult = await sourcesStore.loadTeamSources(newTeamId);
       let newSourceIdToLoadQueries: number | null = null;
 
       if (!sourcesResult.success || !sourcesResult.data || sourcesResult.data.length === 0) {
-        exploreStore.setSource(0)
+        exploreStore.setSource(0);
         newSourceIdToLoadQueries = 0; // Signal to load empty queries
       } else {
         const currentSourceExists = sourcesStore.teamSources.some(
           source => source.id === exploreStore.sourceId
-        )
+        );
         if (!currentSourceExists && sourcesStore.teamSources.length > 0) {
           const firstSourceId = sourcesStore.teamSources[0].id;
           exploreStore.setSource(firstSourceId);
@@ -418,133 +402,57 @@ watch(
 
       // Load Saved Queries for the new team/source combination
       if (newSourceIdToLoadQueries !== null) {
-        console.log(`LogExplorer: Loading saved queries for team ${newTeamId}, source ${newSourceIdToLoadQueries}`);
         await loadSourceQueries(newTeamId, newSourceIdToLoadQueries);
-      } else {
-        console.warn("LogExplorer: Could not determine source ID after team change, skipping saved queries load.");
       }
     }
   },
   { immediate: false } // Don't run immediately
-)
+);
 
 // Watch for changes in sourceDetails from the store
 watch(
   () => sourceDetails.value,
   (newSourceDetails, oldSourceDetails) => {
     if (newSourceDetails?.id !== oldSourceDetails?.id) {
-      console.log('Source details changed in store, availableFields will update.');
-      // Handle pending SQL restoration if needed (logic might move to store or be simplified)
-      // Consider if pendingRawSql is still necessary with better store sync
-    }
-  },
-  { immediate: true }
-)
-
-// Watch for changes in exploreStore.columns to update tableColumns
-watch(
-  () => exploreStore.columns,
-  (newColumns) => {
-    if (newColumns?.length > 0) {
-      console.log('LogExplorer: Creating table columns from API response:', newColumns);
-      // Get display preferences
-      const timezone = displayTimezone.value;
-      const tsField = sourceDetails.value?._meta_ts_field || 'timestamp';
-      const severityField = sourceDetails.value?._meta_severity_field || 'severity_text';
-
-      // Create columns using the columns utility function
-      tableColumns.value = createColumns(newColumns, tsField, timezone, severityField);
-      console.log('LogExplorer: Table columns created:', tableColumns.value.length);
-    } else {
-      console.log('LogExplorer: No columns available, clearing table columns');
-      tableColumns.value = [];
+      // If this is the first time loading a valid source and initialization is complete,
+      // execute the query automatically after a short delay to ensure everything is ready
+      if (newSourceDetails && !oldSourceDetails && !isInitializing.value && canExecuteQuery.value) {
+        setTimeout(() => {
+          if (canExecuteQuery.value) {
+            executeQuery();
+          }
+        }, 100);
+      }
     }
   },
   { immediate: true }
 );
 
-// Watch for time range changes to update SQL query reactively
+
+// Watch time range changes and update query dirty state
 watch(
   () => exploreStore.timeRange,
-  (newTimeRange, oldTimeRange) => {
-    // Skip during initialization or if mode is not SQL
-    if (isInitializing.value || exploreStore.activeMode !== 'sql') {
-      return;
-    }
+  (newRange, oldRange) => {
+    if (!newRange || !oldRange) return;
+    if (JSON.stringify(newRange) === JSON.stringify(oldRange)) return;
 
-    // Ensure time range is valid and actually changed
-    if (!newTimeRange || !newTimeRange.start || !newTimeRange.end || !sourceDetails.value) {
-      console.warn("Skipping SQL time update: Invalid time range or missing source details.");
-      return;
-    }
-
-    // Simple check if dates changed (more robust check might be needed if CalendarDateTime objects are complex)
-    if (JSON.stringify(newTimeRange) === JSON.stringify(oldTimeRange)) {
-      return;
-    }
-
-    console.log("LogExplorer: Time range changed, updating SQL query display.");
-    const currentSql = exploreStore.rawSql;
-    const tsField = sourceDetails.value._meta_ts_field || 'timestamp';
-
-    // Attempt to parse the current SQL
-    const parsedQuery = SQLParser.parse(currentSql, tsField);
-
-    if (parsedQuery) {
-      try {
-        // Assert CalendarDateTime type
-        const startDateTime = newTimeRange.start as CalendarDateTime
-        const endDateTime = newTimeRange.end as CalendarDateTime
-
-        // IMPORTANT: Ensure we preserve the table name
-        // If the parsed query has an empty table name, set it from the source details
-        if (!parsedQuery.fromClause.table || parsedQuery.fromClause.table === '') {
-          console.log("SQL parser found empty table name, fixing with active source table name");
-
-          // Get the proper table name from source details
-          let tableName = activeSourceTableName.value;
-          if (!tableName && sourceDetails.value?.connection?.table_name) {
-            tableName = sourceDetails.value.connection.table_name;
-          }
-          if (!tableName && sourceDetails.value?.connection?.database) {
-            tableName = `${sourceDetails.value.connection.database}.vector_logs`;
-          }
-          if (!tableName) {
-            tableName = 'logs.vector_logs';
-          }
-
-          // Update the table name in the parsed query
-          parsedQuery.fromClause.table = tableName;
-        }
-
-        // Apply the new time range to the parsed AST
-        const updatedAst = SQLParser.applyTimeRange(parsedQuery, tsField, startDateTime, endDateTime);
-        const newSql = SQLParser.toSQL(updatedAst);
-
-        // Update the store's rawSql - QueryEditor will react to this change
-        exploreStore.setRawSql(newSql);
-
-      } catch (error) {
-        console.error("Error updating SQL query with new time range:", error);
-        // Optionally show a warning toast
-      }
-    } else {
-      console.warn("Could not parse existing SQL to update time range display. Generating default SQL instead.");
-
-      // If parsing fails, generate a new default SQL query with proper table name
-      const tableName = activeSourceTableName.value || 'logs.vector_logs';
-      const newSql = generateDefaultSqlQuery({
-        tableName,
-        timestampField: tsField,
-        timeRange: newTimeRange,
-        limit: exploreStore.limit
-      });
-
-      // Update the store's rawSql with the new default query
-      exploreStore.setRawSql(newSql);
-    }
+    // Use the query builder's handler for time range updates
+    // This will set isDirty and show a notification instead of updating SQL directly
+    handleTimeRangeUpdate();
   },
-  { deep: true } // Use deep watch for the timeRange object
+  { deep: true }
+);
+
+// Watch limit changes and update query dirty state
+watch(
+  () => exploreStore.limit,
+  (newLimit, oldLimit) => {
+    if (newLimit === oldLimit) return;
+
+    // Use the query builder's handler for limit updates
+    // This will set isDirty and show a notification instead of updating SQL directly
+    handleLimitUpdate();
+  }
 );
 
 // Function to copy current URL to clipboard
@@ -554,7 +462,8 @@ const copyUrlToClipboard = () => {
     toast({
       title: "URL Copied",
       description: "The shareable link has been copied to your clipboard.",
-      duration: TOAST_DURATION.INFO // Changed from SHORT to INFO (assuming INFO exists)
+      duration: TOAST_DURATION.INFO,
+      variant: "success"
     });
   } catch (error) {
     console.error("Failed to copy URL: ", error);
@@ -569,12 +478,17 @@ const copyUrlToClipboard = () => {
 
 // Component lifecycle with improved initialization sequence
 onMounted(async () => {
-  console.log("LogExplorer component mounting - Simplified");
   try {
     // Call the initialization function from the composable
     await initializeFromUrl();
 
-    // Initial query execution moved to a watch effect for better reliability
+    // Reset admin teams and load user teams to ensure we have the correct context
+    teamsStore.resetAdminTeams();
+
+    // If we don't have user teams loaded yet, load them
+    if (teamsStore.userTeams.length === 0) {
+      await teamsStore.loadUserTeams(true);
+    }
 
   } catch (error) {
     console.error("Error during LogExplorer mount:", error);
@@ -589,11 +503,11 @@ onMounted(async () => {
 
 // --- Event Handlers for QueryEditor --- START
 const updateLogchefqlValue = (newValue: string) => {
-  currentLogchefQuery.value = newValue;
+  logchefQuery.value = newValue;
 };
 
 const updateSqlValue = (newValue: string) => {
-  currentSqlQuery.value = newValue;
+  sqlQuery.value = newValue;
 };
 // --- Event Handlers for QueryEditor --- END
 
@@ -612,12 +526,14 @@ function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): nu
 
 // New handler for the Save/Update button
 const handleSaveOrUpdateClick = async () => {
-  const queryId = queryIdFromUrl.value;
+  // Check if we have a query_id in the URL or in the exploreStore
+  const queryId = queryIdFromUrl.value || exploreStore.selectedQueryId;
 
   // Check if we can save
   if (!canSaveOrUpdateQuery.value) {
     toast({
       title: 'Cannot Save Query',
+      variant: 'destructive',
       description: 'Missing required fields (Team, Source, Query).',
       duration: TOAST_DURATION.WARNING
     });
@@ -626,8 +542,6 @@ const handleSaveOrUpdateClick = async () => {
 
   if (queryId && currentTeamId.value && currentSourceId.value) {
     // --- Update Existing Query Flow ---
-    console.log(`Attempting to update saved query ${queryId}`);
-
     try {
       isLoadingQuery.value = true;
       const result = await savedQueriesStore.fetchTeamSourceQueryDetails(
@@ -660,17 +574,17 @@ const handleSaveOrUpdateClick = async () => {
     }
   } else {
     // --- Save New Query Flow ---
-    console.log("Opening save new query modal...");
     editQueryData.value = null; // Reset edit data
     handleSaveQueryClick(); // Call original function to open modal
   }
 };
 
 onBeforeUnmount(() => {
+  // Keep this conditional console.log for non-production environments
   if (import.meta.env.MODE !== 'production') {
-    console.log("LogExplorer unmounted")
+    console.log("LogExplorer unmounted");
   }
-})
+});
 </script>
 
 <template>
@@ -696,13 +610,16 @@ onBeforeUnmount(() => {
       <div class="flex items-center space-x-3">
         <Select :model-value="currentTeamId?.toString() ?? ''" @update:model-value="handleTeamChange"
           :disabled="isProcessingTeamChange">
-          <SelectTrigger class="h-8 text-sm w-32">
+          <SelectTrigger class="h-8 text-sm w-48">
             <SelectValue placeholder="Select team">{{ selectedTeamName }}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem v-for="team in availableTeams" :key="team.id" :value="team.id.toString()">
-              {{ team.name }}
-            </SelectItem>
+            <SelectGroup>
+              <SelectLabel>Teams</SelectLabel>
+              <SelectItem v-for="team in availableTeams" :key="team.id" :value="team.id.toString()">
+                {{ team.name }}
+              </SelectItem>
+            </SelectGroup>
           </SelectContent>
         </Select>
         <span class="text-sm text-muted-foreground italic">No sources in this team.</span>
@@ -736,29 +653,35 @@ onBeforeUnmount(() => {
         <!-- Team Selector -->
         <Select :model-value="currentTeamId?.toString() ?? ''" @update:model-value="handleTeamChange"
           :disabled="isProcessingTeamChange">
-          <SelectTrigger class="h-8 text-sm w-32">
+          <SelectTrigger class="h-8 text-sm w-48">
             <SelectValue placeholder="Select team">{{ selectedTeamName }}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem v-for="team in availableTeams" :key="team.id" :value="team.id.toString()">
-              {{ team.name }}
-            </SelectItem>
+            <SelectGroup>
+              <SelectLabel>Teams</SelectLabel>
+              <SelectItem v-for="team in availableTeams" :key="team.id" :value="team.id.toString()">
+                {{ team.name }}
+              </SelectItem>
+            </SelectGroup>
           </SelectContent>
         </Select>
 
         <!-- Source Selector -->
         <Select :model-value="currentSourceId?.toString() ?? ''" @update:model-value="handleSourceChange"
           :disabled="isProcessingSourceChange || !currentTeamId || availableSources.length === 0">
-          <SelectTrigger class="h-8 text-sm w-40">
+          <SelectTrigger class="h-8 text-sm w-64">
             <SelectValue placeholder="Select source">{{ selectedSourceName }}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem v-if="!currentTeamId" value="no-team" disabled>Select a team first</SelectItem>
-            <SelectItem v-else-if="availableSources.length === 0" value="no-sources" disabled>No sources available
-            </SelectItem>
-            <SelectItem v-for="source in availableSources" :key="source.id" :value="source.id.toString()">
-              {{ formatSourceName(source) }}
-            </SelectItem>
+            <SelectGroup>
+              <SelectLabel>Log Sources</SelectLabel>
+              <SelectItem v-if="!currentTeamId" value="no-team" disabled>Select a team first</SelectItem>
+              <SelectItem v-else-if="availableSources.length === 0" value="no-sources" disabled>No sources available
+              </SelectItem>
+              <SelectItem v-for="source in availableSources" :key="source.id" :value="source.id.toString()">
+                {{ formatSourceName(source) }}
+              </SelectItem>
+            </SelectGroup>
           </SelectContent>
         </Select>
       </div>
@@ -769,10 +692,49 @@ onBeforeUnmount(() => {
       <!-- Time Controls Group -->
       <div class="flex items-center space-x-2 flex-grow">
         <!-- Date/Time Picker -->
-        <DateTimePicker v-model="dateRange" class="h-8" />
+        <TooltipProvider v-if="activeMode === 'sql'">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <DateTimePicker v-model="dateRange" class="h-8" :disabled="activeMode === 'sql'" />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Time range is not configurable in SQL mode. Use time filters in your query.</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <DateTimePicker v-else v-model="dateRange" class="h-8" />
 
         <!-- Limit Dropdown -->
-        <DropdownMenu>
+        <TooltipProvider v-if="activeMode === 'sql'">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" class="h-8 text-sm justify-between px-2 min-w-[90px]"
+                      :disabled="activeMode === 'sql'">
+                      <span>Limit:</span> {{ exploreStore.limit.toLocaleString() }}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuLabel>Results Limit</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem v-for="limit in [100, 500, 1000, 2000, 5000, 10000]" :key="limit"
+                      @click="exploreStore.setLimit(limit)" :disabled="exploreStore.limit === limit">
+                      {{ limit.toLocaleString() }} rows
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Limit is not configurable in SQL mode. Use LIMIT in your query.</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <DropdownMenu v-else>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" class="h-8 text-sm justify-between px-2 min-w-[90px]">
               <span>Limit:</span> {{ exploreStore.limit.toLocaleString() }}
@@ -810,22 +772,44 @@ onBeforeUnmount(() => {
       <FieldSideBar v-model:expanded="showFieldsPanel" :fields="availableFields" />
 
       <div class="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
-        <!-- Query Editor -->
+        <!-- Query Editor Section -->
         <div class="px-4 py-3">
-          <template v-if="currentSourceId && hasValidSource && exploreStore.timeRange">
+          <!-- Loading States and UI Components -->
+          <template v-if="isChangingContext || (currentSourceId && isLoadingSourceDetails)">
+            <!-- Loading indicator - shown during all loading states -->
+            <div
+              class="flex items-center justify-center text-muted-foreground p-6 border rounded-md bg-card shadow-sm animate-pulse">
+              <div class="flex items-center space-x-2">
+                <svg class="animate-spin h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none"
+                  viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                  </path>
+                </svg>
+                <span>{{ isChangingContext ? 'Loading context data...' : 'Loading source details...' }}</span>
+              </div>
+            </div>
+          </template>
+
+          <!-- Query Editor - only show when we have valid source and time range -->
+          <template v-else-if="currentSourceId && hasValidSource && exploreStore.timeRange">
             <div class="bg-card shadow-sm rounded-md overflow-hidden">
-              <QueryEditor ref="queryEditorRef" :source-id="currentSourceId" :team-id="currentTeamId ?? 0"
+              <QueryEditor ref="queryEditorRef" :sourceId="currentSourceId" :teamId="currentTeamId ?? 0"
                 :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
                 :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
-                :logchefqlValue="currentLogchefQuery" :sqlValue="currentSqlQuery"
-                @update:logchefqlValue="updateLogchefqlValue" @update:sqlValue="updateSqlValue"
-                :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter LogchefQL query...' : 'Enter SQL query...'"
+                :logchefqlValue="logchefQuery" :sqlValue="sqlQuery" @update:logchefqlValue="updateLogchefqlValue"
+                @update:sqlValue="updateSqlValue"
+                :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter search criteria (e.g., level=\'error\' and status>400)' : 'Enter SQL query...'"
                 :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
-                :showFieldsPanel="showFieldsPanel" @submit="triggerQueryExecution" @update:activeMode="handleModeChange"
+                :showFieldsPanel="showFieldsPanel" @submit="executeQuery"
+                @update:activeMode="(mode) => changeMode(mode === 'logchefql' ? 'logchefql' : 'sql')"
                 @toggle-fields="showFieldsPanel = !showFieldsPanel" @select-saved-query="loadSavedQuery"
                 @save-query="handleSaveOrUpdateClick" class="border-0 border-b" />
             </div>
           </template>
+
+          <!-- "Select source" message - only when no source selected -->
           <template v-else-if="currentTeamId && !currentSourceId">
             <div class="flex items-center justify-center text-muted-foreground p-6 border rounded-md bg-card shadow-sm">
               <div class="text-center">
@@ -841,31 +825,23 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </template>
-          <template v-else-if="currentSourceId && !hasValidSource">
-            <div
-              class="flex items-center justify-center text-destructive p-6 border border-destructive/30 rounded-md bg-destructive/5 shadow-sm">
+
+          <!-- Loading fallback - for any other state -->
+          <template v-else>
+            <div class="flex items-center justify-center p-6 border rounded-md bg-card shadow-sm">
               <div class="text-center">
-                <div class="mb-2 text-destructive/80">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                    class="mx-auto mb-1">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="12" x2="12" y1="8" y2="12" />
-                    <line x1="12" x2="12.01" y1="16" y2="16" />
-                  </svg>
-                </div>
-                <p class="text-sm">Error loading source details. Please try again.</p>
+                <p class="text-sm text-muted-foreground">Loading explorer...</p>
               </div>
             </div>
           </template>
 
-          <!-- Query Controls -->
+          <!-- Query Controls (only if NOT changing context and source is valid) -->
           <div class="mt-3 flex items-center justify-between border-t pt-3"
-            v-if="currentSourceId && hasValidSource && exploreStore.timeRange">
+            v-if="!isChangingContext && currentSourceId && hasValidSource && exploreStore.timeRange">
             <Button variant="default" class="h-9 px-4 flex items-center gap-2 shadow-sm" :class="{
               'bg-amber-500 hover:bg-amber-600 text-amber-foreground': isDirty && !isExecutingQuery,
               'bg-sky-500 hover:bg-sky-600 text-sky-foreground': isExecutingQuery
-            }" :disabled="isExecutingQuery || !canExecuteQuery" @click="triggerQueryExecution">
+            }" :disabled="isExecutingQuery || !canExecuteQuery" @click="executeQuery">
               <Play v-if="!isExecutingQuery" class="h-4 w-4" />
               <RefreshCw v-else class="h-4 w-4 animate-spin" />
               <span>{{ isExecutingQuery ? 'Running Query...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>
@@ -886,50 +862,6 @@ onBeforeUnmount(() => {
 
         <!-- Results Section -->
         <div class="flex-1 overflow-hidden flex flex-col border-t mt-2">
-          <!-- Stats Header -->
-          <div v-if="exploreStore.queryStats && !isExecutingQuery"
-            class="px-4 py-2 flex items-center justify-between bg-muted/30 text-xs text-muted-foreground flex-shrink-0 border-b">
-            <div class="flex items-center gap-4">
-              <span v-if="exploreStore.queryStats?.rows_read != null" class="flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
-                  <path
-                    d="M8 3H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.414A2 2 0 0 0 20.414 6L18 3.586A2 2 0 0 0 16.586 3H9" />
-                  <path d="M8 3v3a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V3" />
-                  <path d="M10 14h8" />
-                  <path d="M10 10h8" />
-                  <path d="M10 18h8" />
-                </svg>
-                <span>
-                  <strong class="font-medium">{{ exploreStore.queryStats.rows_read.toLocaleString() }}</strong> rows
-                </span>
-              </span>
-              <span v-if="exploreStore.queryStats?.execution_time_ms != null" class="flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
-                </svg>
-                <span>
-                  <strong class="font-medium">{{ (exploreStore.queryStats.execution_time_ms / 1000).toFixed(2)
-                  }}</strong>s
-                </span>
-              </span>
-              <span v-if="exploreStore.queryStats?.bytes_read != null" class="flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="17 8 12 3 7 8" />
-                  <line x1="12" x2="12" y1="3" y2="15" />
-                </svg>
-                <span>
-                  <strong class="font-medium">{{ (exploreStore.queryStats.bytes_read / 1024 / 1024).toFixed(2)
-                  }}</strong> MB
-                </span>
-              </span>
-            </div>
-          </div>
-
           <!-- Results Area -->
           <div class="flex-1 overflow-hidden relative bg-background">
             <!-- Loading State -->
@@ -941,12 +873,13 @@ onBeforeUnmount(() => {
 
             <!-- Results Table -->
             <template v-if="!isExecutingQuery && exploreStore.logs?.length">
-              <DataTable v-if="exploreStore.logs.length > 0 && tableColumns.length > 0"
+              <DataTable v-if="exploreStore.logs.length > 0 && exploreStore.columns?.length > 0"
                 :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}`"
-                :columns="tableColumns" :data="exploreStore.logs" :stats="exploreStore.queryStats"
+                :columns="exploreStore.columns" :data="exploreStore.logs" :stats="exploreStore.queryStats"
                 :source-id="String(exploreStore.sourceId)" :team-id="teamsStore.currentTeamId"
                 :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
-                :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field" :timezone="displayTimezone" />
+                :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field" :timezone="displayTimezone"
+                :search-terms="searchTermsToHighlight" /> <!-- Pass the computed terms -->
             </template>
 
             <!-- No Results State -->
@@ -965,10 +898,10 @@ onBeforeUnmount(() => {
                   Your query returned no results for the selected time range. Try adjusting the query or time.
                 </p>
                 <Button variant="outline" size="sm" class="mt-4 h-8" @click="exploreStore.setTimeRange({
-                  start: now(getLocalTimeZone()).subtract({ hours: 24 }),
+                  start: now(getLocalTimeZone()).subtract({ minutes: 5 }),
                   end: now(getLocalTimeZone())
                 })">
-                  Try Last 24 Hours
+                  Try Last 5 Minutes
                 </Button>
               </div>
             </template>
@@ -990,7 +923,7 @@ onBeforeUnmount(() => {
                 <p class="text-sm text-muted-foreground max-w-md mb-4">
                   Enter a query or use the default, then click 'Run' to see logs.
                 </p>
-                <Button variant="outline" size="sm" @click="triggerQueryExecution"
+                <Button variant="outline" size="sm" @click="executeQuery"
                   class="border-primary/20 text-primary hover:bg-primary/5 hover:text-primary hover:border-primary/30">
                   <Play class="h-3.5 w-3.5 mr-1.5" />
                   Run default query

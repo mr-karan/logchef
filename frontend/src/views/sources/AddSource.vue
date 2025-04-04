@@ -281,7 +281,8 @@ const submitForm = async () => {
                             <div class="grid gap-2">
                                 <Label for="description">Description</Label>
                                 <Textarea id="description" v-model="description"
-                                    placeholder="Optional description of what this source contains" rows="2" />
+                                    placeholder="Optional description of what this source contains" rows="2"
+                                    maxlength="500" />
                                 <p class="text-sm text-muted-foreground">
                                     Optional: Add details about what kind of logs this source will contain
                                 </p>
@@ -446,11 +447,6 @@ const submitForm = async () => {
                                                         :placeholder="generateSchema()" class="font-mono text-sm"
                                                         rows="20" />
                                                 </div>
-
-                                                <DialogFooter>
-                                                    <Button variant="outline"
-                                                        @click="isEditingSchema = false">Close</Button>
-                                                </DialogFooter>
                                             </DialogContent>
                                         </Dialog>
                                     </CardContent>

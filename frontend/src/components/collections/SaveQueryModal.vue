@@ -245,13 +245,13 @@ function prepareQueryContent(saveTimestamp: boolean): string {
     const simplifiedContent = {
       version: content.version || 1,
       sourceId: content.sourceId || currentSourceId.value,
-      timeRange: saveTimestamp ? {
+      timeRange: saveTimestamp ? { // Use the function parameter here
         absolute: {
           start: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.start) : Date.now() - 3600000,
           end: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.end) : Date.now()
         }
       } : null, // Set timeRange to null if saveTimestamp is false
-      limit: saveTimestamp ? exploreStore.limit : 100,
+      limit: exploreStore.limit, // Always save the current limit regardless of timestamp setting
       content: queryContent,
     };
 
@@ -347,8 +347,6 @@ async function handleSubmit(event: Event) {
         save_timestamp: saveTimestamp.value
       };
 
-      // For debugging
-      console.log('SaveQueryModal: sending payload with query_type:', queryType);
 
       if (isEditing.value && queryId.value) {
         // We're updating an existing query
@@ -371,7 +369,6 @@ async function handleSubmit(event: Event) {
       throw contentError;
     }
   } catch (error) {
-    console.error('SaveQueryModal: Error in handleSubmit:', error);
     // The parent component will handle showing the error toast
   } finally {
     isSubmitting.value = false;
@@ -455,7 +452,7 @@ const saveDescription = 'Save your current query configuration for future use.'
 
         <!-- Save Timestamp Checkbox -->
         <div class="flex items-start space-x-3 space-y-0 rounded-md border p-4">
-          <Checkbox id="save_timestamp" v-model="saveTimestamp" />
+          <Checkbox id="save_timestamp" v-model:checked="saveTimestamp" />
           <div class="space-y-1 leading-none">
             <Label for="save_timestamp">Save current timestamp</Label>
             <p class="text-sm text-muted-foreground">

@@ -65,10 +65,8 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 		req.MetaTSField = "timestamp" // Default timestamp field
 	}
 
-	// Set default severity field if not provided
-	if req.MetaSeverityField == "" {
-		req.MetaSeverityField = "severity_text" // Default severity field
-	}
+	// We no longer set a default for MetaSeverityField
+	// This allows empty string to indicate "no severity field"
 
 	created, err := s.sourceService.CreateSource(c.Context(), req.Name, req.MetaIsAutoCreated, req.Connection, req.Description, req.TTLDays, req.MetaTSField, req.MetaSeverityField, req.Schema)
 	if err != nil {

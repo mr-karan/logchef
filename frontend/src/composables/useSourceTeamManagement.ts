@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { useExploreStore } from '@/stores/explore'
 import { useSourcesStore } from '@/stores/sources'
 import { useTeamsStore } from '@/stores/teams'
@@ -86,26 +86,33 @@ export function useSourceTeamManagement() {
     }
 
     try {
+      // Set immediately to avoid FOUC
       teamsStore.setCurrentTeam(teamId)
+      
+      // Clear source details BEFORE changing sourceId to prevent flicker
       sourcesStore.clearCurrentSourceDetails()
       exploreStore.setSource(0)
 
+      // Load team sources
       const sourcesResult = await sourcesStore.loadTeamSources(teamId)
 
+      // Only after we have sources loaded, set the first source as active
       if (sourcesResult.success && sourcesResult.data?.length) {
-        const previousSourceId = currentSourceId.value
-        const sourceExists = sourcesResult.data.some(s => s.id === previousSourceId)
-
-        if (!sourceExists) {
-          exploreStore.setSource(sourcesResult.data[0].id)
-        } else {
-          await sourcesStore.loadSourceDetails(previousSourceId)
-        }
+        // Always set the first available source when changing teams
+        const firstSourceId = sourcesResult.data[0].id
+        exploreStore.setSource(firstSourceId)
+        
+        // Load source details AFTER setting source ID
+        await sourcesStore.loadSourceDetails(firstSourceId)
       }
     } catch (error) {
       console.error('Error changing team:', error)
     } finally {
-      isProcessingTeamChange.value = false
+      // Use nextTick to ensure state updates propagate before resetting the flag
+      // This gives a smoother transition between states
+      setTimeout(() => {
+        isProcessingTeamChange.value = false
+      }, 50) // Short delay to ensure state transitions properly
     }
   }
 
@@ -116,9 +123,14 @@ export function useSourceTeamManagement() {
 
     const sourceId = parseInt(sourceIdStr)
     if (isNaN(sourceId) || sourceId <= 0) {
-      exploreStore.setSource(0)
+      // First clear source details to avoid showing old source info
       sourcesStore.clearCurrentSourceDetails()
-      isProcessingSourceChange.value = false
+      exploreStore.setSource(0)
+      
+      // Use setTimeout instead of nextTick for consistent timing
+      setTimeout(() => {
+        isProcessingSourceChange.value = false
+      }, 50)
       return
     }
 
@@ -129,14 +141,45 @@ export function useSourceTeamManagement() {
     }
 
     try {
+      // Clear source details BEFORE setting source ID to prevent flickering
+      sourcesStore.clearCurrentSourceDetails()
+      
+      // Then set source ID (this will trigger UI changes)
       exploreStore.setSource(sourceId)
+      
+      // Load source details
       await sourcesStore.loadSourceDetails(sourceId)
     } catch (error) {
       console.error('Error changing source:', error)
     } finally {
-      isProcessingSourceChange.value = false
+      // Use setTimeout for consistent timing
+      setTimeout(() => {
+        isProcessingSourceChange.value = false
+      }, 50) // Short delay to ensure state transitions properly
     }
   }
+
+// Add computed property for source details loading
+const isLoadingSourceDetails = computed(() => {
+  if (!currentSourceId.value) return false;
+  return sourcesStore.isLoadingSourceDetails(currentSourceId.value);
+});
+
+// Create a combined loading state - specifically for major context changes
+// We separate this from source details loading to allow different UX treatments
+const isChangingContext = computed(() => {
+  // True if either team or source selection is being processed
+  if (isProcessingTeamChange.value || isProcessingSourceChange.value) {
+    return true;
+  }
+  // True if team sources are being fetched for the current team
+  if (currentTeamId.value && sourcesStore.isLoadingTeamSources(currentTeamId.value)) {
+    return true;
+  }
+  // We don't include isLoadingSourceDetails here, as it's a different type of loading
+  // that happens after initial context is established
+  return false;
+});
 
   return {
     // State
@@ -146,6 +189,8 @@ export function useSourceTeamManagement() {
     currentSourceId,
     sourceDetails,
     hasValidSource,
+    isChangingContext,
+    isLoadingSourceDetails,
 
     // Lists and names
     availableTeams,

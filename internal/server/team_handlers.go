@@ -55,18 +55,10 @@ func (s *Server) handleCreateTeam(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Name is required", models.ValidationErrorType)
 	}
 
-	// Get user from context
-	user := c.Locals("user").(*models.User)
-
 	// Create team
 	team, err := s.identityService.CreateTeam(c.Context(), req.Name, req.Description)
 	if err != nil {
 		return SendError(c, fiber.StatusInternalServerError, "error creating team: "+err.Error())
-	}
-
-	// Add creator as admin
-	if err := s.identityService.AddTeamMember(c.Context(), team.ID, user.ID, "admin"); err != nil {
-		return SendError(c, fiber.StatusInternalServerError, "error adding team member: "+err.Error())
 	}
 
 	return SendSuccess(c, fiber.StatusCreated, team)
