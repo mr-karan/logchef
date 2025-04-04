@@ -154,54 +154,11 @@ export function getSeverityClasses(
 // --- Log Content Formatting ---
 
 // Regex for HTTP methods (case-insensitive, word boundaries)
-const httpMethodRegex = /\b(GET|POST|PUT|DELETE|HEAD)\b/gi;
+const httpMethodRegex = /\b(GET|POST|PUT|DELETE|HEAD|PATCH|OPTIONS)\b/gi;
 
 // Regex for ISO-like timestamps (YYYY-MM-DDTHH:MM:SS.sss followed by optional Z or +/-HH:MM offset)
 // Captures date and time parts separately.
 const timestampRegex = /(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2}(\.\d+)?)(?:Z|[+-]\d{2}:\d{2})?/g;
-
-// Regex for HTTP status codes (must be just 3 digits with word boundaries)
-const statusCodeRegex = /\b([1-5][0-9]{2})\b/g;
-
-// Common status code meanings for tooltips
-const statusCodeMeanings: Record<string, string> = {
-  // 1xx - Informational
-  "100": "Continue",
-  "101": "Switching Protocols",
-  "102": "Processing",
-  "103": "Early Hints",
-  // 2xx - Success
-  "200": "OK",
-  "201": "Created",
-  "202": "Accepted",
-  "204": "No Content",
-  "206": "Partial Content",
-  // 3xx - Redirection
-  "300": "Multiple Choices",
-  "301": "Moved Permanently",
-  "302": "Found",
-  "303": "See Other",
-  "304": "Not Modified",
-  "307": "Temporary Redirect",
-  "308": "Permanent Redirect",
-  // 4xx - Client Error
-  "400": "Bad Request",
-  "401": "Unauthorized",
-  "403": "Forbidden",
-  "404": "Not Found",
-  "405": "Method Not Allowed",
-  "408": "Request Timeout",
-  "409": "Conflict",
-  "413": "Payload Too Large",
-  "418": "I'm a teapot",
-  "429": "Too Many Requests",
-  // 5xx - Server Error
-  "500": "Internal Server Error",
-  "501": "Not Implemented",
-  "502": "Bad Gateway",
-  "503": "Service Unavailable",
-  "504": "Gateway Timeout",
-};
 
 // Get status code class for styling
 function getStatusCodeClass(code: string): string {
@@ -214,12 +171,6 @@ function getStatusCodeClass(code: string): string {
     case '5': return 'status-server';   // Server Error
     default:  return 'status-unknown';  // Unknown
   }
-}
-
-// Helper function to check if a string is likely a status code
-function isLikelyStatusCode(value: string): boolean {
-  // Must be exactly 3 digits and start with 1-5
-  return /^[1-5][0-9]{2}$/.test(value);
 }
 
 interface MatchResult {
@@ -271,22 +222,11 @@ export function formatLogContent(value: string, isStatusColumn: boolean = false)
     }
   }
 
-  // Find all status code matches - only in status columns or when value is clearly a status code
+  // Only look for status codes in status columns
   if (isStatusColumn) {
-    // For status columns, be more aggressive with matching
     const statusValue = value.trim();
-    if (isLikelyStatusCode(statusValue)) {
-      matches.push({
-        index: value.indexOf(statusValue),
-        length: statusValue.length,
-        type: 'status',
-        value: statusValue,
-      });
-    }
-  } else if (value.length <= 5) {
-    // For short values in other columns, only match if it's clearly a status code
-    const statusValue = value.trim();
-    if (isLikelyStatusCode(statusValue)) {
+    // Must be exactly 3 digits and start with 1-5
+    if (/^[1-5][0-9]{2}$/.test(statusValue)) {
       matches.push({
         index: value.indexOf(statusValue),
         length: statusValue.length,
@@ -295,7 +235,6 @@ export function formatLogContent(value: string, isStatusColumn: boolean = false)
       });
     }
   }
-  // We no longer do status code detection in non-status columns for longer values
 
   // Sort matches by their starting index
   matches.sort((a, b) => a.index - b.index);
@@ -310,8 +249,11 @@ export function formatLogContent(value: string, isStatusColumn: boolean = false)
     // Add styled VNode for the current match
     if (currentMatch.type === 'http') {
       const method = currentMatch.value.toUpperCase();
+      const methodClass = ['PATCH', 'OPTIONS'].includes(method)
+        ? 'http-method http-method-utility' // Grey background for utility methods
+        : `http-method http-method-${method.toLowerCase()}`; // Existing styling for other methods
       results.push(
-        h('span', { class: `http-method http-method-${method.toLowerCase()}` }, currentMatch.value)
+        h('span', { class: methodClass }, method)
       );
     } else if (currentMatch.type === 'timestamp' && currentMatch.groups) {
       const fullMatch = currentMatch.value;
@@ -335,12 +277,8 @@ export function formatLogContent(value: string, isStatusColumn: boolean = false)
       results.push(h('span', { class: 'timestamp' }, children));
     } else if (currentMatch.type === 'status') {
       const code = currentMatch.value;
-      const statusClass = getStatusCodeClass(code);
-
       results.push(
-        h('span', {
-          class: `status-code ${statusClass}`,
-        }, code)
+        h('span', { class: `status-code ${getStatusCodeClass(code)}` }, code)
       );
     }
 
