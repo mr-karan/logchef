@@ -65,6 +65,9 @@ const props = withDefaults(defineProps<Props>(), {
 const timestampFieldName = computed(() => props.timestampField || 'timestamp')
 const severityFieldName = computed(() => props.severityField || 'severity_text')
 
+// Move tableColumns declaration near the top
+const tableColumns = ref<CustomColumnDef[]>([])
+
 // Table state
 const sorting = ref<SortingState>([])
 const expanded = ref<ExpandedState>({})
@@ -162,18 +165,22 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
 
 // Watch for changes in columns OR search terms to regenerate table columns
 watch(
-    () => [props.columns, props.searchTerms], // Watch both columns and search terms
-    ([newColumns, newSearchTerms]) => {
+    () => [props.columns, props.searchTerms, displayTimezone.value], // Also watch timezone for createColumns
+    ([newColumns, newSearchTerms, newTimezone]) => {
         if (!newColumns || newColumns.length === 0) {
             tableColumns.value = []; // Clear columns if input is empty
+            // Reset dependent state if columns are cleared
+            columnOrder.value = [];
+            columnSizing.value = {};
+            columnVisibility.value = {};
             return;
         }
 
-        // Regenerate columns with the current search terms
+        // Regenerate columns with the current search terms and timezone
         tableColumns.value = createColumns(
             newColumns as ColumnInfo[], // Cast if necessary, ensure type compatibility
             timestampFieldName.value,
-            displayTimezone.value,
+            newTimezone, // Use reactive timezone value
             severityFieldName.value,
             newSearchTerms // Pass the search terms here
         );
@@ -181,7 +188,7 @@ watch(
         // Re-initialize state based on the potentially new columns
         const { initialOrder, initialSizing, initialVisibility } = initializeState(tableColumns.value);
 
-        // Only update if different to prevent infinite loops
+        // Only update if different to prevent infinite loops or unnecessary updates
         if (JSON.stringify(columnOrder.value) !== JSON.stringify(initialOrder)) {
             columnOrder.value = initialOrder;
         }
@@ -329,23 +336,14 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
     window.addEventListener('touchend', onEnd, { once: true });
 }
 
-// Memoize the resolved columns based on the current order and props
-const resolvedColumns = computed(() => {
-    // Use tableColumns.value which is now reactive to search term changes
-    const columnMap = new Map(tableColumns.value.map(col => [col.id, col]));
-    return columnOrder.value
-        .map(id => columnMap.get(id))
-        .filter((col): col is ColumnDef<Record<string, any>> => !!col);
-});
-
 // Initialize table
 const table = useVueTable({
     get data() {
         return props.data
     },
-    // Use the memoized resolvedColumns directly
+    // Use tableColumns directly
     get columns() {
-        return resolvedColumns.value;
+        return tableColumns.value;
     },
     state: {
         get sorting() {
@@ -418,16 +416,13 @@ const copyCell = (value: any) => {
 onMounted(() => {
     // Initialize default sort by timestamp if available
     if (timestampFieldName.value) {
-        // Make sure timestamp field exists in the current order before sorting
-        // The watch effect handles the initial columnOrder based on storage or defaults
+        // Check if the column exists in the initial order derived from state/defaults
         if (columnOrder.value.includes(timestampFieldName.value)) {
-            // Check if sorting is already set (e.g., by stored state if we persist it later)
             if (!sorting.value || sorting.value.length === 0) {
                 sorting.value = [{ id: timestampFieldName.value, desc: true }]
             }
         }
     }
-    // Column sizing is handled by the watch effect that reads from storedState or defaults
 })
 
 // Add refs for DOM elements
@@ -462,8 +457,7 @@ type CustomColumnDef = ColumnDef<Record<string, any>> & {
     meta?: CustomColumnMeta;
 }
 
-// Update refs with proper types
-const tableColumns = ref<CustomColumnDef[]>([])
+// sourceDetails ref is already declared at the top
 const sourceDetails = ref<Source | null>(null)
 
 // Watch for source details changes
@@ -474,7 +468,11 @@ watch(
             const result = await sourcesStore.getSource(newSourceId)
             if (result.success && result.data) {
                 sourceDetails.value = result.data as Source
+            } else {
+                sourceDetails.value = null; // Clear if fetch fails or no data
             }
+        } else {
+            sourceDetails.value = null; // Clear if sourceId is null/0
         }
     },
     { immediate: true }
@@ -573,10 +571,10 @@ const onDragEnd = () => { // No event parameter
                 </div>
 
                 <!-- Pagination moved to top -->
-                <DataTablePagination v-if="table.getRowModel().rows?.length > 0" :table="table" />
+                <DataTablePagination v-if="table && table.getRowModel().rows?.length > 0" :table="table" />
 
                 <!-- Column selector -->
-                <DataTableColumnSelector :table="table" :column-order="columnOrder"
+                <DataTableColumnSelector v-if="table" :table="table" :column-order="columnOrder"
                     @update:column-order="table.setColumnOrder($event)" />
 
                 <!-- Search input -->
@@ -590,13 +588,15 @@ const onDragEnd = () => { // No event parameter
 
         <!-- Table Section with full-height scrolling -->
         <div class="flex-1 relative overflow-hidden" ref="tableContainerRef">
-            <div v-if="table.getRowModel().rows?.length" class="absolute inset-0">
+            <!-- Add v-if="table" here -->
+            <div v-if="table && table.getRowModel().rows?.length" class="absolute inset-0">
                 <div
                     class="w-full h-full overflow-auto scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent">
                     <table ref="tableRef" class="table-fixed border-separate border-spacing-0 text-sm shadow-sm"
                         :data-resizing="isResizing">
                         <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
-                            <tr v-if="table.getHeaderGroups()[0]" class="border-b border-b-muted-foreground/10">
+                            <!-- Check table.getHeaderGroups() exists -->
+                            <tr v-if="table.getHeaderGroups().length > 0 && table.getHeaderGroups()[0]" class="border-b border-b-muted-foreground/10">
                                 <th v-for="header in table.getHeaderGroups()[0].headers" :key="header.id" scope="col"
                                     class="group relative h-9 px-3 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden border-r border-muted/30"
                                     :class="[
@@ -623,8 +623,8 @@ const onDragEnd = () => { // No event parameter
 
                                         <!-- Column Header Content (Title + Sort button from columns.ts) -->
                                         <div class="flex-grow min-w-0 overflow-hidden mr-5">
-                                            <!-- FlexRender now renders the Button containing the title and sort icon -->
-                                            <FlexRender v-if="!header.isPlaceholder"
+                                            <!-- Check header.column.columnDef.header exists -->
+                                            <FlexRender v-if="!header.isPlaceholder && header.column.columnDef.header"
                                                 :render="header.column.columnDef.header" :props="header.getContext()" />
                                         </div>
 
@@ -672,7 +672,8 @@ const onDragEnd = () => { // No event parameter
                                         }">
                                         <div class="flex items-center gap-1 w-full overflow-hidden">
                                             <div class="whitespace-pre-wrap break-words w-full overflow-hidden"> <!-- Ensure wrapping and breaking -->
-                                                <FlexRender :render="cell.column.columnDef.cell"
+                                                <!-- Check cell.column.columnDef.cell exists -->
+                                                <FlexRender v-if="cell.column.columnDef.cell" :render="cell.column.columnDef.cell"
                                                     :props="cell.getContext()" />
                                             </div>
                                         </div>
@@ -691,8 +692,13 @@ const onDragEnd = () => { // No event parameter
                     </table>
                 </div>
             </div>
-            <div v-else class="h-full">
+            <!-- Check table exists for empty state -->
+            <div v-else-if="table" class="h-full">
                 <EmptyState />
+            </div>
+            <!-- Optional: Add a loading indicator if table is not yet defined -->
+            <div v-else class="h-full flex items-center justify-center">
+                <p class="text-muted-foreground">Initializing table...</p>
             </div>
         </div>
     </div>
