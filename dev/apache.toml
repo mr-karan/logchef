@@ -25,7 +25,7 @@ source = '''
   .severity_text = if .status >= 500 {
     "ERROR"
   } else if .status >= 400 {
-    "WARN" 
+    "WARN"
   } else {
     "INFO"
   }
@@ -61,17 +61,17 @@ source = '''
   del(.size)
 '''
 
-[sinks.clickhouse]
-type = "clickhouse"
-inputs = ["remap_apache"]
-endpoint = "http://localhost:8123"
-database = "logs"
-table = "vector_logs"
+# [sinks.clickhouse]
+# type = "clickhouse"
+# inputs = ["remap_apache"]
+# endpoint = "http://localhost:8123"
+# database = "logs"
+# table = "vector_logs"
 # # auth.strategy = "basic"
 # # auth.user = "default"
 # # auth.password = ""
 
-# [sinks.console]
-# type = "console"
-# inputs = ["generate_apache"]
-# encoding.codec = "json"
+[sinks.console]
+type = "console"
+inputs = ["generate_apache"]
+encoding.codec = "json"
