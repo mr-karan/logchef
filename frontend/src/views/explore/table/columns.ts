@@ -9,7 +9,7 @@ import type { ColumnInfo } from "@/api/explore";
  * Column type definitions with consistent size handling
  */
 // Common column types for width settings
-type ColumnType = 'timestamp' | 'severity' | 'message' | 'default';
+type ColumnType = 'timestamp' | 'severity' | 'message' | 'default' | 'status';
 
 // Column width configuration
 interface ColumnWidthConfig {
@@ -23,19 +23,33 @@ const COLUMN_WIDTH_CONFIG: Record<ColumnType, ColumnWidthConfig> = {
   timestamp: { defaultWidth: 260, minWidth: 160, maxWidth: 400 },
   severity: { defaultWidth: 120, minWidth: 80, maxWidth: 200 },
   message: { defaultWidth: 500, minWidth: 200, maxWidth: 1200 },
-  default: { defaultWidth: 180, minWidth: 100, maxWidth: 600 }
+  default: { defaultWidth: 180, minWidth: 100, maxWidth: 600 },
+  status: { defaultWidth: 120, minWidth: 80, maxWidth: 200 }
 };
 
 // Determine column type based on field name
 function getColumnType(columnName: string, timestampField: string, severityField: string): ColumnType {
+  const lowerColumnName = columnName.toLowerCase();
+
   if (columnName === timestampField) {
     return 'timestamp';
   }
   if (columnName === severityField) {
     return 'severity';
   }
-  if (['message', 'log', 'msg', 'body', 'content'].includes(columnName)) {
+  if (['message', 'log', 'msg', 'body', 'content'].includes(lowerColumnName)) {
     return 'message';
+  }
+  // More specific status code column detection
+  if ([
+    'status',
+    'status_code',
+    'http_status',
+    'response_status',
+    'statuscode',
+    'response_code'
+  ].some(statusName => lowerColumnName === statusName || lowerColumnName.endsWith('_' + statusName))) {
+    return 'status';
   }
   return 'default';
 }
@@ -142,7 +156,7 @@ export function createColumns(
               title: value as string // Keep the original value as title
             },
             // First format for timezone, then format for coloring
-            formatLogContent(formatTimestamp(value as string, timezone))
+            formatLogContent(formatTimestamp(value as string, timezone), false)
           );
         }
 
@@ -160,6 +174,9 @@ export function createColumns(
 
         // Define base classes once for consistency
         const baseClasses = "flex-render-content font-mono text-[13px]";
+
+        // Check if this is a status column for better status code detection
+        const isStatusColumn = columnType === 'status';
 
         // --- Process Objects and Strings Consistently for Highlighting ---
         let textValue: string;
@@ -195,12 +212,12 @@ export function createColumns(
             filteredParts.forEach(part => {
               if (highlightRegex.test(part)) {
                 // Apply formatLogContent to the highlighted part
-                const formattedPart = formatLogContent(part);
+                const formattedPart = formatLogContent(part, isStatusColumn);
                 // Wrap the formatted content in a mark tag
                 nodes.push(h('mark', { class: 'search-highlight' }, formattedPart));
               } else {
                 // Apply formatLogContent to non-highlighted parts and flatten the results
-                const formattedContent = formatLogContent(part);
+                const formattedContent = formatLogContent(part, isStatusColumn);
                 formattedContent.forEach(item => nodes.push(item));
               }
             });
@@ -218,7 +235,7 @@ export function createColumns(
         return h(
           "span",
           { class: finalClasses },
-          formatLogContent(textValue) // Use the formatter here
+          formatLogContent(textValue, isStatusColumn) // Use the formatter here with status flag
         );
       },
 
