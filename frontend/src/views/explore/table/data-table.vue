@@ -697,8 +697,8 @@ const onDragEnd = () => { // No event parameter
     </div>
 </template>
 
-<style>
-/* Removed scoped attribute */
+<style scoped>
+/* Add scoped attribute back */
 /* Table styling for log analytics */
 .table-fixed {
     table-layout: fixed;
@@ -819,10 +819,10 @@ const onDragEnd = () => { // No event parameter
     /* Ensures expanded rows appear above others */
 }
 
-/* --- Heuristic Formatting Styles --- */
+/* --- Heuristic Formatting Styles (using :deep to target dynamic content) --- */
 
 /* Base HTTP Method Tag Style */
-.http-method {
+:deep(.http-method) {
   display: inline-block;
   padding: 1px 6px;
   border-radius: 4px;
@@ -834,90 +834,91 @@ const onDragEnd = () => { // No event parameter
   white-space: nowrap;
 }
 
-/* Specific HTTP Method Colors (using Tailwind-like color shades) */
-.http-method-get {
+/* Specific HTTP Method Colors */
+:deep(.http-method-get) {
   background-color: #ecfccb; /* lime-100 */
   color: #4d7c0f; /* lime-800 */
   border-color: #a3e635; /* lime-400 */
 }
-.dark .http-method-get {
+.dark :deep(.http-method-get) {
   background-color: #365314; /* lime-950 */
   color: #d9f99d; /* lime-300 */
   border-color: #4d7c0f; /* lime-800 */
 }
 
-.http-method-post {
+:deep(.http-method-post) {
   background-color: #cffafe; /* cyan-100 */
   color: #155e75; /* cyan-800 */
   border-color: #67e8f9; /* cyan-300 */
 }
-.dark .http-method-post {
+.dark :deep(.http-method-post) {
   background-color: #164e63; /* cyan-950 */
   color: #a5f3fc; /* cyan-200 */
   border-color: #155e75; /* cyan-800 */
 }
 
-.http-method-put {
+:deep(.http-method-put) {
   background-color: #fef3c7; /* amber-100 */
   color: #92400e; /* amber-800 */
   border-color: #fcd34d; /* amber-300 */
 }
-.dark .http-method-put {
+.dark :deep(.http-method-put) {
   background-color: #78350f; /* amber-950 */
   color: #fde68a; /* amber-200 */
   border-color: #92400e; /* amber-800 */
 }
 
-.http-method-delete {
+:deep(.http-method-delete) {
   background-color: #fee2e2; /* red-100 */
   color: #991b1b; /* red-800 */
   border-color: #fca5a5; /* red-300 */
 }
-.dark .http-method-delete {
+.dark :deep(.http-method-delete) {
   background-color: #7f1d1d; /* red-950 */
   color: #fecaca; /* red-200 */
   border-color: #991b1b; /* red-800 */
 }
 
-.http-method-head {
+:deep(.http-method-head) {
   background-color: #e0e7ff; /* indigo-100 */
   color: #3730a3; /* indigo-800 */
   border-color: #a5b4fc; /* indigo-300 */
 }
-.dark .http-method-head {
+.dark :deep(.http-method-head) {
   background-color: #312e81; /* indigo-950 */
   color: #c7d2fe; /* indigo-200 */
   border-color: #3730a3; /* indigo-800 */
 }
 
 /* Timestamp Formatting */
-.timestamp {
+:deep(.timestamp) {
   /* Optional: Add a subtle background or border if needed */
 }
-.timestamp-date {
-  color: hsl(var(--foreground) / 0.85); /* Slightly dimmer date */
+/* Refined Timestamp Colors for better distinction */
+:deep(.timestamp-date) {
+  color: hsl(var(--foreground) / 0.75); /* More distinct dimming for date */
 }
-.dark .timestamp-date {
-  color: hsl(var(--foreground) / 0.75);
+.dark :deep(.timestamp-date) {
+  color: hsl(var(--foreground) / 0.65);
 }
-.timestamp-separator {
-  color: hsl(var(--muted-foreground) / 0.6); /* Very subtle separator */
+:deep(.timestamp-separator) {
+  color: hsl(var(--muted-foreground) / 0.5); /* Even more subtle separator */
   margin: 0 1px;
 }
-.timestamp-time {
-  color: hsl(var(--foreground)); /* Normal time */
-  font-weight: 500; /* Slightly bolder time */
+:deep(.timestamp-time) {
+  color: hsl(var(--foreground)); /* Keep time prominent */
+  font-weight: 500; /* Keep slightly bolder */
 }
-.dark .timestamp-time {
+.dark :deep(.timestamp-time) {
   color: hsl(var(--foreground));
   font-weight: 500;
 }
-.timestamp-offset {
-  color: hsl(var(--muted-foreground) / 0.7); /* Dimmer offset */
+:deep(.timestamp-offset) {
+  color: hsl(var(--muted-foreground) / 0.6); /* Dimmer offset, similar to separator */
   margin-left: 2px;
   font-size: 90%; /* Slightly smaller */
 }
-.dark .timestamp-offset {
-  color: hsl(var(--muted-foreground) / 0.6);
+.dark :deep(.timestamp-offset) {
+  color: hsl(var(--muted-foreground) / 0.5);
 }
 </style>
