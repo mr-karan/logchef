@@ -912,4 +912,12 @@ const onDragEnd = () => { // No event parameter
   color: hsl(var(--foreground));
   font-weight: 500;
 }
+.timestamp-offset {
+  color: hsl(var(--muted-foreground) / 0.7); /* Dimmer offset */
+  margin-left: 2px;
+  font-size: 90%; /* Slightly smaller */
+}
+.dark .timestamp-offset {
+  color: hsl(var(--muted-foreground) / 0.6);
+}
 </style>

@@ -156,9 +156,9 @@ export function getSeverityClasses(
 // Regex for HTTP methods (case-insensitive, word boundaries)
 const httpMethodRegex = /\b(GET|POST|PUT|DELETE|HEAD)\b/gi;
 
-// Regex for ISO-like timestamps (YYYY-MM-DDTHH:MM:SS.sssZ or +/-offset)
-// Simplified to capture date and time parts separately within common formats
-const timestampRegex = /(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2}(\.\d+)?)/g;
+// Regex for ISO-like timestamps (YYYY-MM-DDTHH:MM:SS.sss followed by optional Z or +/-HH:MM offset)
+// Captures date and time parts separately.
+const timestampRegex = /(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2}(\.\d+)?)(?:Z|[+-]\d{2}:\d{2})?/g;
 
 interface MatchResult {
   index: number;
@@ -226,13 +226,25 @@ export function formatLogContent(value: string): (VNode | string)[] {
       );
     } else if (currentMatch.type === 'timestamp' && currentMatch.groups) {
       const [datePart, timePart] = currentMatch.groups;
-      results.push(
-        h('span', { class: 'timestamp' }, [
-          h('span', { class: 'timestamp-date' }, datePart),
-          h('span', { class: 'timestamp-separator' }, value[currentMatch.index + datePart.length]), // T or space
-          h('span', { class: 'timestamp-time' }, timePart),
-        ])
-      );
+      const fullMatch = currentMatch.value;
+      const datePart = currentMatch.groups![0];
+      const timePart = currentMatch.groups![1];
+      const separator = value[currentMatch.index + datePart.length]; // T or space
+      // Calculate the offset part based on the full match length minus date, separator, and time
+      const offsetPart = fullMatch.substring(datePart.length + 1 + timePart.length);
+
+      const children = [
+        h('span', { class: 'timestamp-date' }, datePart),
+        h('span', { class: 'timestamp-separator' }, separator),
+        h('span', { class: 'timestamp-time' }, timePart),
+      ];
+
+      // Add the offset part if it exists
+      if (offsetPart) {
+        children.push(h('span', { class: 'timestamp-offset' }, offsetPart));
+      }
+
+      results.push(h('span', { class: 'timestamp' }, children));
     }
 
     lastIndex = currentMatch.index + currentMatch.length;
