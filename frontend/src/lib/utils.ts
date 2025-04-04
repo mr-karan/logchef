@@ -225,7 +225,7 @@ export function formatLogContent(value: string): (VNode | string)[] {
         h('span', { class: `http-method http-method-${method.toLowerCase()}` }, currentMatch.value)
       );
     } else if (currentMatch.type === 'timestamp' && currentMatch.groups) {
-      const [datePart, timePart] = currentMatch.groups;
+      // const [datePart, timePart] = currentMatch.groups; // Removed duplicate declaration
       const fullMatch = currentMatch.value;
       const datePart = currentMatch.groups![0];
       const timePart = currentMatch.groups![1];
