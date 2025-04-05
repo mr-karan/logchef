@@ -7,12 +7,12 @@ WORKDIR /app/frontend
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-COPY --link frontend/pnpm-lock.yaml ./
-COPY --link frontend/package.json ./
+COPY frontend/pnpm-lock.yaml ./
+COPY frontend/package.json ./
 RUN --mount=type=cache,target=/root/.pnpm-store \
     pnpm install --frozen-lockfile --silent
 
-COPY --link frontend/ ./
+COPY frontend/ ./
 RUN --mount=type=cache,target=/root/.pnpm-store \
     pnpm build
 
@@ -28,7 +28,7 @@ COPY go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
-COPY --link . .
+COPY . .
 
 # Embed the frontend build into the backend
 RUN mkdir -p ./cmd/server/ui && \
