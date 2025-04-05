@@ -7,7 +7,8 @@ WORKDIR /app/frontend
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-COPY --link frontend/pnpm-lock.yaml frontend/package.json ./
+COPY --link frontend/pnpm-lock.yaml ./
+COPY --link frontend/package.json ./
 RUN --mount=type=cache,target=/root/.pnpm-store \
     pnpm install --frozen-lockfile --silent
 
@@ -22,7 +23,8 @@ WORKDIR /app
 
 RUN apk add --no-cache git
 
-COPY --link go.mod go.sum ./
+COPY go.mod ./
+COPY go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
