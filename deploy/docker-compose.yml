@@ -1,34 +1,47 @@
 services:
-    clickhouse:
-        image: clickhouse/clickhouse-server:24.8.4
-        user: '101:101'
-        container_name: clickhouse
-        hostname: clickhouse
-        restart: on-failure
-        ports:
-            - '0.0.0.0:8123:8123'
-            - '0.0.0.0:9000:9000'
-        volumes:
-            - ./config.xml:/etc/clickhouse-server/config.d/logchef.xml
-            - ./users.xml:/etc/clickhouse-server/users.d/logchef.xml
-            - clickhouse-data:/var/lib/clickhouse
-            - clickhouse-logs:/var/log/clickhouse-server
-        ulimits:
-            nproc: 65535
-            nofile:
-                soft: 262144
-                hard: 262144
-        cap_add:
-            - SYS_NICE
-            - IPC_LOCK
-    dex:
-        image: dexidp/dex:v2.35.3
-        ports:
-        - "5556:5556"
-        volumes:
-        - ./dex/config.yaml:/etc/dex/config.yaml
-        command: [ "dex", "serve", "/etc/dex/config.yaml" ]
+  logchef:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      - clickhouse
+      - dex
+    volumes:
+      - ../config.toml:/app/config.toml
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8.4
+    user: "101:101"
+    container_name: clickhouse
+    hostname: clickhouse
+    restart: on-failure
+    ports:
+      - "0.0.0.0:8123:8123"
+      - "0.0.0.0:9000:9000"
+    volumes:
+      - ./config.xml:/etc/clickhouse-server/config.d/logchef.xml
+      - ./users.xml:/etc/clickhouse-server/users.d/logchef.xml
+      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-logs:/var/log/clickhouse-server
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 262144
+        hard: 262144
+    cap_add:
+      - SYS_NICE
+      - IPC_LOCK
+  dex:
+    image: dexidp/dex:v2.35.3
+    ports:
+      - "5556:5556"
+    volumes:
+      - ./dex/config.yaml:/etc/dex/config.yaml
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
 
 volumes:
-    clickhouse-data:
-    clickhouse-logs:
+  clickhouse-data:
+  clickhouse-logs:

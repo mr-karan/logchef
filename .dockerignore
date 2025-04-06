@@ -1,0 +1,28 @@
+# Git files
+.git
+
+# Node modules
+node_modules
+frontend/node_modules
+
+# Build artifacts
+bin
+coverage
+frontend/dist
+
+# Local config / secrets
+*.local
+.env
+
+# IDE / Editor specific
+.vscode/
+.idea/
+.cursor/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Other cache/temp files
+.aider.*
+local.db

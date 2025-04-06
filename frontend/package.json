@@ -14,6 +14,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@guolao/vue-monaco-editor": "^1.5.4",
+    "@internationalized/date": "^3.7.0",
     "@tanstack/vue-table": "^8.20.5",
     "@types/lodash": "^4.17.15",
     "@types/nearley": "^2.11.5",

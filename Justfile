@@ -1,14 +1,15 @@
 # Just commands for LogChef Vue3 + Golang project
 
 # Build variables
-last_commit := `git rev-parse --short HEAD`
-last_commit_date := `git show -s --format=%ci HEAD`
 version := `git describe --tags --always`
-build_time := `date +"%Y-%m-%d %H:%M:%S %z"`
-build_info := version + " (Commit: " + last_commit_date + " (" + last_commit + "), Build: " + build_time + ")"
+last_commit := `git rev-parse --short HEAD`
+# Use UTC timestamp for consistency
+build_time := `date -u +%Y%m%dT%H%M%SZ`
+# Build info string for embedding
+build_info := version + '-commit-' + last_commit + '-build-' + build_time
 
-# Build flags
-ldflags := "-s -w -X 'main.buildString=" + build_info + "'"
+# Build flags - use build info
+ldflags := "-s -w -X 'main.buildString={{build_info}}'"
 
 # Binary output
 bin := "bin/logchef.bin"
@@ -34,6 +35,7 @@ sqlc-generate:
 # Build only the backend
 build-backend: sqlc-generate
     @echo "Building backend..."
+    # LDFLAGS uses the build info
     CGO_ENABLED=0 go build -o {{bin}} -ldflags "{{ldflags}}" ./cmd/server
 
 # Build only the frontend
@@ -103,6 +105,22 @@ tidy:
 
 # Run all checks
 check: fmt vet lint sqlc-generate test
+
+# === Docker ===
+docker-image := "mr-karan/logchef"
+docker-tag := version # Use the simple git describe output for the tag
+
+docker-build:
+    @echo "Building Docker image {{docker-image}}:{{docker-tag}} for linux/amd64..."
+    @echo "Embedding build string: {{build_info}}"
+    docker build \
+        --build-arg APP_VERSION="{{build_info}}" \
+        --build-arg TARGETOS=linux \
+        --build-arg TARGETARCH=amd64 \
+        --tag "{{docker-image}}:{{docker-tag}}" \
+        --tag "{{docker-image}}:latest" \
+        --file Dockerfile \
+        .
 
 # Run frontend, backend, and infrastructure in dev mode (requires tmux)
 # dev:
