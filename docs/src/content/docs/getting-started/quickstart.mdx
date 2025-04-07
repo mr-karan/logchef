@@ -1,0 +1,83 @@
+---
+title: Quick Start Guide
+description: Get started with Logchef in minutes
+---
+
+# Quick Start Guide
+
+This guide will help you get Logchef up and running quickly. We'll cover installation, basic setup, and your first log query.
+
+## Prerequisites
+
+- Docker (recommended) or ability to run Linux binaries
+- A Clickhouse instance (included in Docker setup)
+- Vector for log collection (optional)
+
+## Installation
+
+### Using Docker (Recommended)
+
+```bash
+# Download the compose file
+curl -LO https://github.com/mr-karan/logchef/raw/master/docker-compose.yml
+
+# Start the services
+docker compose up -d
+```
+
+### Using Binary
+
+```bash
+# Download the latest release
+curl -LO https://github.com/mr-karan/logchef/releases/latest/download/logchef_linux_amd64
+
+# Make it executable
+chmod +x logchef_linux_amd64
+
+# Run Logchef
+./logchef_linux_amd64
+```
+
+## First Steps
+
+1. Visit `http://localhost:8125` in your browser
+2. Log in with the default credentials:
+   - Username: `admin`
+   - Password: `admin`
+3. Change your password when prompted
+
+## Configure Your First Data Source
+
+1. Navigate to Settings > Data Sources
+2. Click "Add Data Source"
+3. Enter your Clickhouse connection details:
+   ```yaml
+   host: localhost
+   port: 9000
+   database: default
+   table: logs
+   ```
+4. Test the connection and save
+
+## Write Your First Query
+
+1. Go to the Query Interface
+2. Try a simple query:
+   ```sql
+   SELECT
+     timestamp,
+     level,
+     message
+   FROM logs
+   WHERE timestamp >= now() - INTERVAL 1 HOUR
+   ORDER BY timestamp DESC
+   LIMIT 100
+   ```
+3. Click "Run Query" to see your results
+
+## Next Steps
+
+- Learn about [Query Interface](/docs/user-guide/query-interface)
+- Set up [Vector Integration](/docs/integration/vector)
+- Configure [User Management](/docs/admin/user-management)
+- Create [Dashboards](/docs/user-guide/dashboards)

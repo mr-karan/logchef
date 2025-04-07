@@ -1,0 +1,167 @@
+---
+title: Query Interface
+description: Learn how to use Logchef's powerful query interface
+---
+
+# Query Interface
+
+Logchef provides a powerful query interface that combines the flexibility of SQL with an intuitive visual builder. This guide will help you master log querying in Logchef.
+
+## Query Builder
+
+The query builder consists of three main components:
+
+1. Visual Query Builder
+2. SQL Editor
+3. Results View
+
+### Visual Query Builder
+
+The visual builder lets you construct queries without writing SQL:
+
+- **Time Range**: Select predefined ranges or specify custom intervals
+- **Fields**: Choose which log fields to display
+- **Filters**: Add conditions to filter your logs
+- **Group By**: Aggregate logs by specific fields
+- **Sort**: Order results by timestamp or other fields
+- **Limit**: Control the number of results returned
+
+### SQL Editor
+
+For advanced users, the SQL editor provides full access to Clickhouse's SQL capabilities:
+
+```sql
+SELECT
+  toStartOfInterval(timestamp, INTERVAL 5 MINUTE) as time_bucket,
+  level,
+  count() as count
+FROM logs
+WHERE
+  timestamp >= now() - INTERVAL 1 HOUR
+  AND level IN ('error', 'warning')
+GROUP BY
+  time_bucket,
+  level
+ORDER BY
+  time_bucket DESC
+```
+
+### Results View
+
+Results can be viewed in multiple formats:
+
+- **Table View**: Traditional tabular format
+- **JSON View**: Raw JSON format
+- **Time Series**: Visualize time-based data
+- **Logs View**: Optimized for log reading with syntax highlighting
+
+## Common Query Patterns
+
+### Error Analysis
+
+Find error patterns in your logs:
+
+```sql
+SELECT
+  error_type,
+  count() as error_count,
+  arrayJoin(groupArray(message)) as sample_messages
+FROM logs
+WHERE
+  level = 'error'
+  AND timestamp >= now() - INTERVAL 24 HOUR
+GROUP BY
+  error_type
+ORDER BY
+  error_count DESC
+LIMIT 10
+```
+
+### Response Time Analysis
+
+Analyze API response times:
+
+```sql
+SELECT
+  path,
+  count() as requests,
+  avg(response_time) as avg_response_time,
+  quantile(0.95)(response_time) as p95_response_time
+FROM logs
+WHERE
+  timestamp >= now() - INTERVAL 1 HOUR
+  AND type = 'access_log'
+GROUP BY
+  path
+HAVING
+  requests > 100
+ORDER BY
+  avg_response_time DESC
+```
+
+### Log Volume Analysis
+
+Monitor log volume trends:
+
+```sql
+SELECT
+  toStartOfHour(timestamp) as hour,
+  service,
+  count() as log_count
+FROM logs
+WHERE
+  timestamp >= now() - INTERVAL 24 HOUR
+GROUP BY
+  hour,
+  service
+ORDER BY
+  hour DESC,
+  log_count DESC
+```
+
+## Advanced Features
+
+### Saved Queries
+
+Save frequently used queries:
+
+1. Write your query
+2. Click "Save Query"
+3. Give it a name and description
+4. Optionally share with team members
+
+### Query Variables
+
+Use variables in your queries:
+
+```sql
+SELECT
+  *
+FROM logs
+WHERE
+  timestamp >= {start_time}
+  AND timestamp <= {end_time}
+  AND service = {service_name:String}
+```
+
+### Query Scheduling
+
+Schedule queries to run periodically:
+
+1. Save your query
+2. Click "Schedule"
+3. Set interval (hourly, daily, etc.)
+4. Configure notifications
+
+## Performance Tips
+
+1. **Use Time Filters**: Always include timestamp filters
+2. **Limit Results**: Use LIMIT clause for large queries
+3. **Optimize Joins**: Prefer pre-aggregation when possible
+4. **Use Materialized Views**: For common query patterns
+
+## Next Steps
+
+- Learn about [Dashboards](/docs/user-guide/dashboards)
+- Set up [Alerts](/docs/user-guide/alerts)
+- Explore [Advanced SQL Features](/docs/user-guide/advanced-sql)

@@ -1,0 +1,118 @@
+---
+title: Logchef
+description: Modern, high-performance log analytics platform
+hero:
+  tagline: Purpose-built log analytics UI for Clickhouse
+  actions:
+    - text: Quick Start
+      link: /docs/getting-started/quickstart
+      icon: right-arrow
+      variant: primary
+    - text: Try Demo
+      link: https://logchef.app
+      icon: external
+      variant: secondary
+    - text: View on GitHub
+      link: https://github.com/mr-karan/logchef
+      icon: github
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## Why Logchef?
+
+Logchef is a modern log analytics platform that provides a powerful visualization and query layer for Clickhouse. It's designed to make log exploration intuitive and efficient, whether you're using our optimized OTEL schema or connecting to your existing Clickhouse tables.
+
+<CardGrid stagger>
+  <Card title="Universal Clickhouse UI" icon="document">
+    Connect to any Clickhouse table and start analyzing logs immediately. No
+    rigid schemas, no migrations, just connect and query.
+  </Card>
+  <Card title="Dual Query Modes" icon="open-book">
+    Simple search syntax for quick exploration, full SQL power when you need it.
+    Built for both beginners and power users.
+  </Card>
+  <Card title="Team-Centric" icon="user">
+    Multi-tenant by design with Teams and Sources. Control who sees what with
+    granular access controls.
+  </Card>
+  <Card title="Clickhouse-Powered" icon="rocket">
+    Leverage Clickhouse's incredible performance for lightning-fast queries over
+    massive log volumes.
+  </Card>
+</CardGrid>
+
+## Key Features
+
+### Query Your Way
+
+- **Simple Search Syntax**: `status=200`, `level="error" AND service="payment-api"`
+- **Full SQL Power**: Write raw Clickhouse SQL for complex analysis
+- **Query History**: Track and reuse your previous queries
+- **Smart Suggestions**: Field and value autocompletion
+
+### Team Management
+
+- **Multi-tenant Support**: Organize users into Teams
+- **Source Management**: Control access to log sources per team
+- **Granular Permissions**: Define who can query what
+
+### Flexible Integration
+
+- **Any Log Source**: Application logs, HTTP logs, system logs - you name it
+- **Multiple Collectors**: Works with Vector, Fluentbit, or any tool that can write to Clickhouse
+- **Schema Freedom**: Use our optimized OTEL schema or your existing table structure
+
+### Built for Scale
+
+- **Clickhouse Performance**: Lightning-fast queries over terabytes of logs
+- **Resource Efficient**: Minimal overhead on top of your Clickhouse instance
+- **Production Ready**: Used by teams handling millions of log entries daily
+
+## Getting Started
+
+1. **Connect Your Source**
+
+   ```sql
+   -- Create a new table with our optimized schema
+   CREATE TABLE logs (
+     timestamp DateTime,
+     level String,
+     message String,
+     ...
+   ) ENGINE = MergeTree()
+   ```
+
+2. **Start Exploring**
+
+   ```bash
+   # Quick search for errors
+   level = "error"
+
+   # Find slow requests
+   type = "access_log" AND response_time > 1000
+
+   # Complex analysis with SQL
+   SELECT
+     toStartOfHour(timestamp) as hour,
+     service,
+     count() as error_count
+   FROM logs
+   WHERE level = 'error'
+   GROUP BY hour, service
+   ```
+
+## Try It Out
+
+Visit our [demo instance](https://logchef.app) to explore Logchef's features:
+
+1. Choose your Team
+2. Select a Log Source
+3. Start querying with Search or SQL mode
+
+## Open Source
+
+Logchef is open source software licensed under AGPLv3. We welcome contributions from the community!
+
+[View on GitHub](https://github.com/mr-karan/logchef) • [Read Documentation](/docs/getting-started/quickstart) • [Join Discord](https://discord.gg/your-invite-link)

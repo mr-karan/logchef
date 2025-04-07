@@ -1,0 +1,153 @@
+---
+title: Vector Integration
+description: Set up Vector to collect and forward logs to Logchef
+---
+
+# Vector Integration
+
+[Vector](https://vector.dev) is the recommended log collection agent for Logchef. This guide will help you set up Vector to collect logs from various sources and forward them to your Clickhouse instance.
+
+## Installation
+
+First, install Vector following the [official installation guide](https://vector.dev/docs/setup/installation/).
+
+## Basic Configuration
+
+Create a new Vector configuration file (`vector.toml`):
+
+```toml
+[sources.file_logs]
+type = "file"
+include = ["/var/log/**/*.log"]  # Adjust paths as needed
+read_from = "beginning"
+
+[sources.docker_logs]
+type = "docker_logs"
+include_containers = ["*"]       # Collect from all containers
+
+[transforms.add_metadata]
+type = "remap"
+inputs = ["file_logs", "docker_logs"]
+source = '''
+. = merge(., {
+  "hostname": get_env_var("HOSTNAME"),
+  "environment": get_env_var("ENV", "production")
+})
+'''
+
+[sinks.clickhouse_logs]
+type = "clickhouse"
+inputs = ["add_metadata"]
+endpoint = "http://localhost:8123"
+database = "default"
+table = "logs"
+compression = "gzip"
+
+# Recommended schema for Logchef
+[sinks.clickhouse_logs.schema]
+timestamp = "datetime"
+message = "string"
+level = "string"
+source = "string"
+hostname = "string"
+environment = "string"
+```
+
+## Advanced Configuration
+
+### Custom Fields
+
+Add custom fields to your logs:
+
+```toml
+[transforms.enrich_logs]
+type = "remap"
+inputs = ["add_metadata"]
+source = '''
+# Add custom fields
+.service_name = get_env_var("SERVICE_NAME", "unknown")
+.version = get_env_var("APP_VERSION", "unknown")
+'''
+
+[sinks.clickhouse_logs]
+inputs = ["enrich_logs"]
+# ... rest of sink config
+```
+
+### Multiple Sources
+
+Configure multiple log sources:
+
+```toml
+[sources.kubernetes_logs]
+type = "kubernetes_logs"
+annotation_fields.enabled = true
+extra_field_selector = "metadata.namespace=production"
+
+[sources.syslog]
+type = "syslog"
+mode = "tcp"
+address = "0.0.0.0:514"
+
+[sources.journald]
+type = "journald"
+```
+
+### High Availability
+
+For production environments:
+
+```toml
+[sinks.clickhouse_logs]
+type = "clickhouse"
+inputs = ["enrich_logs"]
+endpoint = ["http://clickhouse1:8123", "http://clickhouse2:8123"]
+database = "default"
+table = "logs"
+compression = "gzip"
+batch.max_bytes = 10485760  # 10MB
+request.retry_attempts = 3
+```
+
+## Monitoring Vector
+
+Enable the API endpoint to monitor Vector:
+
+```toml
+[api]
+enabled = true
+address = "127.0.0.1:8686"
+```
+
+## Troubleshooting
+
+1. Check Vector status:
+
+   ```bash
+   vector validate /etc/vector/vector.toml
+   vector top
+   ```
+
+2. Enable debug logging:
+
+   ```toml
+   [log_schema]
+   host_key = "host"
+   message_key = "message"
+   timestamp_key = "timestamp"
+
+   [api.logs]
+   level = "debug"
+   ```
+
+3. Common issues:
+   - Ensure Clickhouse is accessible from Vector
+   - Check file permissions for log files
+   - Verify schema compatibility
+   - Monitor disk usage for buffer files
+
+## Next Steps
+
+- Learn about [Schema Design](/docs/integration/schema-design)
+- Set up [Alerts](/docs/user-guide/alerts)
+- Configure [Retention Policies](/docs/admin/retention)

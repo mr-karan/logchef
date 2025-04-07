@@ -36,3 +36,7 @@ CLAUDE.md
 .vscode/
 bin/
 cmd/server/ui/
+
+# Docs
+docs/dist/*
+docs/node_modules/*

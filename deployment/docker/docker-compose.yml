@@ -1,0 +1,71 @@
+version: "3.8"
+
+services:
+  logchef:
+    image: mr-karan/logchef:latest
+    container_name: logchef
+    restart: on-failure
+    ports:
+      - "8125:8125"
+    volumes:
+      - ./logchef/config.toml:/app/config.toml
+    depends_on:
+      - clickhouse
+      - dex
+    networks:
+      - logchef_net
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8.4
+    container_name: clickhouse
+    restart: on-failure
+    user: "101:101"
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - ./clickhouse/config.xml:/etc/clickhouse-server/config.d/logchef.xml
+      - ./clickhouse/users.xml:/etc/clickhouse-server/users.d/logchef.xml
+      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-logs:/var/log/clickhouse-server
+    cap_add:
+      - SYS_NICE
+      - IPC_LOCK
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - logchef_net
+
+  dex:
+    image: dexidp/dex:v2.35.3
+    container_name: dex
+    restart: on-failure
+    ports:
+      - "5556:5556"
+    volumes:
+      - ./dex/config.yaml:/etc/dex/config.yaml
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    networks:
+      - logchef_net
+
+  vector:
+    image: docker.io/timberio/vector:0.45.X-distroless-libc
+    volumes:
+      - ./vector/vector.toml:/etc/vector/vector.toml:ro
+    depends_on: [logchef]
+    ports:
+      - "8686:8686"
+    user: root
+    networks:
+      - logchef_net
+
+volumes:
+  clickhouse-data:
+  clickhouse-logs:
+
+networks:
+  logchef_net:
+    name: logchef_net
