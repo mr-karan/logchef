@@ -67,22 +67,35 @@ func (s *Service) GetSource(ctx context.Context, id models.SourceID) (*models.So
 	health := s.chDB.GetHealth(source.ID)
 	source.IsConnected = health.Status == models.HealthStatusHealthy
 
-	// Additional check - verify table existence if basic connection is healthy
+	// Additional check - verify database and table existence if basic connection is healthy
 	if source.IsConnected && source.Connection.TableName != "" {
 		client, err := s.chDB.GetClient(source.ID)
 		if err == nil {
-			// Check if table exists with a simple SELECT 1 query
-			query := fmt.Sprintf("SELECT 1 FROM %s.%s LIMIT 1", 
-				source.Connection.Database, source.Connection.TableName)
-			_, err := client.Query(ctx, query)
-			if err != nil {
-				// Table doesn't exist - mark source as disconnected
+			// First check if database exists
+			dbQuery := fmt.Sprintf("SELECT 1 FROM system.databases WHERE name = '%s'", 
+				source.Connection.Database)
+			dbResult, err := client.Query(ctx, dbQuery)
+			if err != nil || len(dbResult.Logs) == 0 {
+				// Database doesn't exist - mark source as disconnected
 				source.IsConnected = false
-				s.log.Warn("source marked as unhealthy - table does not exist",
+				s.log.Warn("source marked as unhealthy - database does not exist",
 					"source_id", source.ID,
 					"database", source.Connection.Database,
-					"table", source.Connection.TableName,
 					"error", err)
+			} else {
+				// Database exists, now check if table exists
+				tableQuery := fmt.Sprintf("SELECT 1 FROM system.tables WHERE database = '%s' AND name = '%s'", 
+					source.Connection.Database, source.Connection.TableName)
+				tableResult, err := client.Query(ctx, tableQuery)
+				if err != nil || len(tableResult.Logs) == 0 {
+					// Table doesn't exist - mark source as disconnected
+					source.IsConnected = false
+					s.log.Warn("source marked as unhealthy - table does not exist",
+						"source_id", source.ID,
+						"database", source.Connection.Database,
+						"table", source.Connection.TableName,
+						"error", err)
+				}
 			}
 		}
 	}
