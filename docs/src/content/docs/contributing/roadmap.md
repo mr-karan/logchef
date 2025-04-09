@@ -44,8 +44,8 @@ LogChef currently provides:
 - JSON field operations
 - Advanced comparison operators
 - Query templates
-- Saved searches
-- Query sharing between team members
+- Smart value suggestions for fields
+- Advanced filtering and aggregations
 
 #### Integrations
 

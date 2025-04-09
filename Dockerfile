@@ -9,6 +9,7 @@ ARG TARGETARCH=amd64
 # Install Node.js, pnpm, and sqlc prerequisites
 ENV NODE_VERSION=23.11.0
 ENV PNPM_VERSION=10.7.1
+ENV SQLC_VERSION=v1.28.0
 RUN apt-get update && apt-get install -y curl wget xz-utils libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -22,7 +23,7 @@ ENV PATH="/usr/local/lib/nodejs/bin:$PATH"
 RUN npm install -g pnpm@$PNPM_VERSION
 
 # Install sqlc (pin version for caching)
-RUN go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.28.0
+RUN go install github.com/sqlc-dev/sqlc/cmd/sqlc@${SQLC_VERSION}
 
 # Set working directory
 WORKDIR /app
@@ -69,7 +70,7 @@ COPY --from=builder /app/bin/logchef.bin .
 COPY --from=builder /app/config.toml .
 
 # Expose the application port (update if necessary based on config.toml)
-EXPOSE 8080
+EXPOSE 8125
 
 # Run the binary
 ENTRYPOINT ["/app/logchef.bin"]

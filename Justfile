@@ -110,7 +110,7 @@ check: fmt vet lint sqlc-generate test
 docker-image := "mr-karan/logchef"
 docker-tag := version # Use the simple git describe output for the tag
 
-docker-build:
+build-docker:
     @echo "Building Docker image {{docker-image}}:{{docker-tag}} for linux/amd64..."
     @echo "Embedding build string: {{build_info}}"
     docker build \

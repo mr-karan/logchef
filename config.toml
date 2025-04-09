@@ -14,8 +14,12 @@ path = "local.db"
 
 # OpenID Connect configuration
 [oidc]
-# URL of the OIDC provider
+# URL of the OIDC provider for discovery
 provider_url = "http://localhost:5556/dex"
+# Authentication endpoint URL
+auth_url = "http://localhost:5556/dex/auth"
+# Token endpoint URL
+token_url = "http://localhost:5556/dex/token"
 # Client ID for OIDC authentication
 client_id = "logchef"
 # Client secret for OIDC authentication

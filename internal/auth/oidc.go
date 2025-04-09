@@ -36,28 +36,72 @@ func NewOIDCProvider(cfg *config.Config, db *sqlite.DB, log *slog.Logger) (*OIDC
 
 	ctx := context.Background()
 
-	provider, err := oidc.NewProvider(ctx, cfg.OIDC.ProviderURL)
-	if err != nil {
-		log.Error("failed to create OIDC provider",
-			"error", err,
+	var provider *oidc.Provider
+	var err error
+	var endpoint oauth2.Endpoint
+
+	// Check if explicit endpoints are configured
+	if cfg.OIDC.AuthURL != "" && cfg.OIDC.TokenURL != "" {
+		log.Info("using explicit OIDC endpoints",
+			"auth_url", cfg.OIDC.AuthURL,
+			"token_url", cfg.OIDC.TokenURL,
+		)
+
+		// Use custom endpoints
+		endpoint = oauth2.Endpoint{
+			AuthURL:  cfg.OIDC.AuthURL,
+			TokenURL: cfg.OIDC.TokenURL,
+		}
+
+		// Use provider URL for discovery - explicitly require this field
+		if cfg.OIDC.ProviderURL == "" {
+			log.Error("provider_url is required for OIDC discovery")
+			return nil, fmt.Errorf("%w: provider_url is required", ErrOIDCProviderNotConfigured)
+		}
+
+		log.Info("using provider URL for OIDC discovery",
 			"provider_url", cfg.OIDC.ProviderURL,
 		)
-		return nil, fmt.Errorf("%w: %v", ErrOIDCProviderNotConfigured, err)
+
+		// Create provider using discovery
+		provider, err = oidc.NewProvider(ctx, cfg.OIDC.ProviderURL)
+		if err != nil {
+			log.Error("failed to create OIDC provider for verification",
+				"error", err,
+				"provider_url", cfg.OIDC.ProviderURL,
+			)
+			return nil, fmt.Errorf("%w: %v", ErrOIDCProviderNotConfigured, err)
+		}
+	} else {
+		// Require explicit OIDC endpoints
+		log.Error("missing required OIDC configuration",
+			"auth_url", cfg.OIDC.AuthURL,
+			"token_url", cfg.OIDC.TokenURL,
+		)
+		return nil, ErrOIDCProviderNotConfigured
 	}
 
 	oauthConf := &oauth2.Config{
 		ClientID:     cfg.OIDC.ClientID,
 		ClientSecret: cfg.OIDC.ClientSecret,
 		RedirectURL:  cfg.OIDC.RedirectURL,
-		Endpoint:     provider.Endpoint(),
+		Endpoint:     endpoint,
 		Scopes:       cfg.OIDC.Scopes,
 	}
+
+	// Configure ID token verification
+	verifier := provider.Verifier(&oidc.Config{
+		ClientID:          cfg.OIDC.ClientID,
+		SkipClientIDCheck: true,
+		SkipExpiryCheck:   false,
+		SkipIssuerCheck:   true, // Skip issuer validation to allow different URLs
+	})
 
 	return &OIDCProvider{
 		cfg:       cfg,
 		db:        db,
 		provider:  provider,
-		verifier:  provider.Verifier(&oidc.Config{ClientID: cfg.OIDC.ClientID}),
+		verifier:  verifier,
 		oauthConf: oauthConf,
 		log:       log,
 	}, nil

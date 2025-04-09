@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   logchef:
     image: mr-karan/logchef:latest
@@ -7,25 +5,41 @@ services:
     restart: on-failure
     ports:
       - "8125:8125"
-    volumes:
-      - ./logchef/config.toml:/app/config.toml
+    configs:
+      - source: logchef_config
+        target: /app/config.toml
+        mode: 0444
     depends_on:
-      - clickhouse
-      - dex
+      clickhouse:
+        condition: service_healthy
+      dex:
+        condition: service_healthy
     networks:
       - logchef_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8125/api/v1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.8.4
     container_name: clickhouse
     restart: on-failure
     user: "101:101"
-    ports:
-      - "8123:8123"
-      - "9000:9000"
+    configs:
+      - source: clickhouse_config
+        target: /etc/clickhouse-server/config.d/logchef.xml
+        uid: "101"
+        gid: "101"
+        mode: 0444
+      - source: clickhouse_users
+        target: /etc/clickhouse-server/users.d/logchef.xml
+        uid: "101"
+        gid: "101"
+        mode: 0444
     volumes:
-      - ./clickhouse/config.xml:/etc/clickhouse-server/config.d/logchef.xml
-      - ./clickhouse/users.xml:/etc/clickhouse-server/users.d/logchef.xml
       - clickhouse-data:/var/lib/clickhouse
       - clickhouse-logs:/var/log/clickhouse-server
     cap_add:
@@ -38,6 +52,12 @@ services:
         hard: 262144
     networks:
       - logchef_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 
   dex:
     image: dexidp/dex:v2.35.3
@@ -45,20 +65,32 @@ services:
     restart: on-failure
     ports:
       - "5556:5556"
-    volumes:
-      - ./dex/config.yaml:/etc/dex/config.yaml
+    configs:
+      - source: dex_config
+        target: /etc/dex/config.yaml
+        mode: 0444
     command: ["dex", "serve", "/etc/dex/config.yaml"]
     networks:
       - logchef_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5556/dex/.well-known/openid-configuration"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 
   vector:
     image: docker.io/timberio/vector:0.45.X-distroless-libc
-    volumes:
-      - ./vector/vector.toml:/etc/vector/vector.toml:ro
-    depends_on: [logchef]
+    configs:
+      - source: vector_config
+        target: /etc/vector/vector.toml
+        mode: 0444
+    depends_on:
+      logchef:
+        condition: service_healthy
     ports:
       - "8686:8686"
-    user: root
+    command: ["-c", "/etc/vector/vector.toml"]
     networks:
       - logchef_net
 
@@ -69,3 +101,204 @@ volumes:
 networks:
   logchef_net:
     name: logchef_net
+
+configs:
+  logchef_config:
+    content: |
+      [server]
+      port = 8125
+      host = "0.0.0.0"
+
+      [sqlite]
+      path = "local.db"
+
+      [oidc]
+      # Use explicit URLs for each endpoint instead of discovery
+      # Provider URL for OIDC discovery - use service name for container-to-container communication
+      provider_url = "http://dex:5556/dex"
+      # Browser-facing auth URL - must match the domain/issuer used by DEX for browser communication
+      auth_url = "http://localhost:5556/dex/auth"
+      # Internal container-to-container token URL
+      token_url = "http://dex:5556/dex/token"
+
+      client_id = "logchef"
+      client_secret = "logchef-secret"
+      # Browser-facing redirect URL
+      redirect_url = "http://localhost:8125/api/v1/auth/callback"
+      scopes = ["openid", "email", "profile"]
+
+      [auth]
+      admin_emails = ["admin@logchef.internal"]
+      session_duration = "8h"
+      max_concurrent_sessions = 1
+
+      [logging]
+      level = "debug"
+
+  dex_config:
+    content: |
+      # Use internal service name as issuer - this must match the provider_url
+      issuer: http://dex:5556/dex
+
+      # Also provide a public issuer endpoint for browsers
+      issuerRotation:
+        # Keep old issuer id for existing token validation
+        - issuer: http://localhost:5556/dex
+
+      storage:
+        type: sqlite3
+        config:
+          file: /var/dex/dex.db
+
+      web:
+        http: 0.0.0.0:5556
+        allowedOrigins: ['*']
+
+      staticClients:
+        - id: logchef
+          redirectURIs:
+            - "http://localhost:8125/api/v1/auth/callback"
+          name: "LogChef"
+          secret: logchef-secret
+
+      oauth2:
+        skipApprovalScreen: true
+
+      enablePasswordDB: true
+
+      staticPasswords:
+        - email: "admin@logchef.internal"
+          hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+          username: "admin"
+          userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+
+        - email: "demo@logchef.internal"
+          hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+          username: "demo-user"
+          userID: "08a8684b-db88-4b73-90a9-3cd1661f5467"
+
+  vector_config:
+    content: |
+      [sources.generate_syslog]
+      type = "demo_logs"
+      format = "syslog"
+      interval = 0.5
+
+      [transforms.remap_syslog]
+      inputs = ["generate_syslog"]
+      type = "remap"
+      source = '''
+        structured = parse_syslog!(.message)
+
+        # Timestamp handling
+        .timestamp = format_timestamp!(structured.timestamp, format: "%Y-%m-%d %H:%M:%S.%f")
+
+        .service_name = structured.appname
+        .namespace = "syslog"
+        .body = structured.message
+
+        # Map severity
+        .severity_text = if includes(["emerg", "err", "crit", "alert"], structured.severity) {
+          "ERROR"
+        } else if structured.severity == "warning" {
+          "WARN"
+        } else if structured.severity == "debug" {
+          "DEBUG"
+        } else if includes(["info", "notice"], structured.severity) {
+          "INFO"
+        } else {
+          structured.severity
+        }
+
+        # Convert severity to number
+        .severity_number = if .severity_text == "ERROR" {
+          17
+        } else if .severity_text == "WARN" {
+          13
+        } else if .severity_text == "DEBUG" {
+          5
+        } else {
+          9  # INFO
+        }
+
+        # Store syslog-specific fields in log_attributes
+        .log_attributes = {
+          "syslog.procid": structured.procid,
+          "syslog.facility": structured.facility,
+          "syslog.version": structured.version,
+          "syslog.hostname": structured.hostname
+        }
+
+        # Cleanup
+        del(.message)
+        del(.source_type)
+      '''
+
+      [sinks.console]
+      type = "console"
+      inputs = ["remap_syslog"]
+      encoding.codec = "json"
+
+  clickhouse_config:
+    content: |
+      <clickhouse replace="true">
+          <logger>
+              <level>debug</level>
+              <log>/var/log/clickhouse-server/clickhouse-server.log</log>
+              <errorlog>/var/log/clickhouse-server/clickhouse-server.err.log</errorlog>
+              <size>1000M</size>
+              <count>3</count>
+          </logger>
+          <display_name>logchef</display_name>
+          <listen_host>0.0.0.0</listen_host>
+          <http_port>8123</http_port>
+          <tcp_port>9000</tcp_port>
+          <user_directories>
+              <users_xml>
+                  <path>users.xml</path>
+              </users_xml>
+              <local_directory>
+                  <path>/var/lib/clickhouse/access/</path>
+              </local_directory>
+          </user_directories>
+      </clickhouse>
+
+  clickhouse_users:
+    content: |
+      <?xml version="1.0"?>
+      <clickhouse replace="true">
+          <profiles>
+              <default>
+                  <max_memory_usage>10000000000</max_memory_usage>
+                  <use_uncompressed_cache>0</use_uncompressed_cache>
+                  <load_balancing>in_order</load_balancing>
+                  <log_queries>1</log_queries>
+              </default>
+          </profiles>
+          <users>
+              <default>
+                  <access_management>1</access_management>
+                  <profile>default</profile>
+                  <networks>
+                      <ip>::/0</ip>
+                  </networks>
+                  <quota>default</quota>
+                  <access_management>1</access_management>
+                  <named_collection_control>1</named_collection_control>
+                  <show_named_collections>1</show_named_collections>
+                  <show_named_collections_secrets>1</show_named_collections_secrets>
+              </default>
+          </users>
+          <quotas>
+              <default>
+                  <interval>
+                      <duration>3600</duration>
+                      <queries>0</queries>
+                      <errors>0</errors>
+                      <result_rows>0</result_rows>
+                      <read_rows>0</read_rows>
+                      <execution_time>0</execution_time>
+                  </interval>
+              </default>
+          </quotas>
+      </clickhouse>

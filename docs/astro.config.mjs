@@ -22,7 +22,6 @@ export default defineConfig({
           label: "Getting Started",
           items: [
             { label: "Quick Start", link: "/getting-started/quickstart" },
-            { label: "Installation", link: "/getting-started/installation" },
             { label: "Configuration", link: "/getting-started/configuration" },
           ],
         },

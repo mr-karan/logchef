@@ -43,7 +43,12 @@ type ClickhouseConfig struct {
 
 // OIDCConfig contains OpenID Connect settings
 type OIDCConfig struct {
-	ProviderURL  string   `koanf:"provider_url"`
+	// Provider URL for OIDC discovery
+	ProviderURL string `koanf:"provider_url"` // Base URL for OIDC provider discovery
+	// Different endpoints for OIDC flow
+	AuthURL  string `koanf:"auth_url"`  // URL for browser auth redirects
+	TokenURL string `koanf:"token_url"` // URL for token exchange (server-to-server)
+
 	ClientID     string   `koanf:"client_id"`
 	ClientSecret string   `koanf:"client_secret"`
 	RedirectURL  string   `koanf:"redirect_url"`
@@ -81,6 +86,23 @@ func Load(path string) (*Config, error) {
 	// Validate required configurations
 	if len(cfg.Auth.AdminEmails) == 0 {
 		return nil, fmt.Errorf("admin_emails is required in auth configuration")
+	}
+
+	// Validate OIDC configuration
+	if cfg.OIDC.ProviderURL == "" {
+		return nil, fmt.Errorf("provider_url is required in OIDC configuration")
+	}
+	if cfg.OIDC.AuthURL == "" {
+		return nil, fmt.Errorf("auth_url is required in OIDC configuration")
+	}
+	if cfg.OIDC.TokenURL == "" {
+		return nil, fmt.Errorf("token_url is required in OIDC configuration")
+	}
+	if cfg.OIDC.ClientID == "" {
+		return nil, fmt.Errorf("client_id is required in OIDC configuration")
+	}
+	if cfg.OIDC.RedirectURL == "" {
+		return nil, fmt.Errorf("redirect_url is required in OIDC configuration")
 	}
 
 	return &cfg, nil

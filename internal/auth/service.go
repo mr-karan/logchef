@@ -43,7 +43,8 @@ func New(cfg *config.Config, db *sqlite.DB, logger *slog.Logger) (*Service, erro
 	if err != nil {
 		log.Error("failed to create OIDC provider",
 			"error", err,
-			"provider_url", cfg.OIDC.ProviderURL,
+			"auth_url", cfg.OIDC.AuthURL,
+			"token_url", cfg.OIDC.TokenURL,
 		)
 		return nil, err
 	}

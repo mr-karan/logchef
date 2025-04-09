@@ -3,14 +3,13 @@ title: Quick Start Guide
 description: Get started with Logchef in minutes
 ---
 
-# Quick Start Guide
-
 This guide will help you get Logchef up and running quickly. We'll cover installation, basic setup, and your first log query.
 
 ## Prerequisites
 
 - Docker (recommended) or ability to run Linux binaries
 - A Clickhouse instance (included in Docker setup)
+- An SSO Provider (Dex included in Docker setup)
 - Vector for log collection (optional)
 
 ## Installation
@@ -24,6 +23,13 @@ curl -LO https://github.com/mr-karan/logchef/raw/master/docker-compose.yml
 # Start the services
 docker compose up -d
 ```
+
+This will start:
+
+- Logchef UI on port 8125
+- Clickhouse on ports 8123 (HTTP) and 9000 (Native)
+- Dex (SSO Provider) on port 5556 (accessible at http://dex:5556)
+- Vector on port 8686
 
 ### Using Binary
 
@@ -41,10 +47,10 @@ chmod +x logchef_linux_amd64
 ## First Steps
 
 1. Visit `http://localhost:8125` in your browser
-2. Log in with the default credentials:
-   - Username: `admin`
-   - Password: `admin`
-3. Change your password when prompted
+2. You'll be redirected to Dex SSO login
+3. Use the default credentials:
+   - Email: `admin@example.com`
+   - Password: `password`
 
 ## Configure Your First Data Source
 
