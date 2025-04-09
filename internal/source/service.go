@@ -67,6 +67,26 @@ func (s *Service) GetSource(ctx context.Context, id models.SourceID) (*models.So
 	health := s.chDB.GetHealth(source.ID)
 	source.IsConnected = health.Status == models.HealthStatusHealthy
 
+	// Additional check - verify table existence if basic connection is healthy
+	if source.IsConnected && source.Connection.TableName != "" {
+		client, err := s.chDB.GetClient(source.ID)
+		if err == nil {
+			// Check if table exists with a simple SELECT 1 query
+			query := fmt.Sprintf("SELECT 1 FROM %s.%s LIMIT 1", 
+				source.Connection.Database, source.Connection.TableName)
+			_, err := client.Query(ctx, query)
+			if err != nil {
+				// Table doesn't exist - mark source as disconnected
+				source.IsConnected = false
+				s.log.Warn("source marked as unhealthy - table does not exist",
+					"source_id", source.ID,
+					"database", source.Connection.Database,
+					"table", source.Connection.TableName,
+					"error", err)
+			}
+		}
+	}
+
 	// Fetch the table schema if the source is connected
 	if source.IsConnected {
 		client, err := s.chDB.GetClient(source.ID)
