@@ -45,8 +45,149 @@ func (s *Service) ListSources(ctx context.Context) ([]*models.Source, error) {
 
 	// Enrich with connection status
 	for _, source := range sources {
+		s.log.Info("checking source health for ListSources", 
+			"source_id", source.ID,
+			"name", source.Name,
+			"database", source.Connection.Database,
+			"table", source.Connection.TableName)
+			
 		health := s.chDB.GetHealth(source.ID)
+		s.log.Info("basic health check result", 
+			"source_id", source.ID,
+			"health_status", health.Status,
+			"error", health.Error)
+			
 		source.IsConnected = health.Status == models.HealthStatusHealthy
+		
+		// Verify database and table existence
+		if source.IsConnected {
+			s.log.Info("source shows healthy initially, checking database and table existence", 
+				"source_id", source.ID)
+			
+			client, err := s.chDB.GetClient(source.ID)
+			if err != nil {
+				s.log.Warn("failed to get client for source", 
+					"source_id", source.ID,
+					"error", err)
+				source.IsConnected = false
+				continue
+			}
+			
+			// Check if database exists
+			dbQuery := fmt.Sprintf("SELECT count() > 0 as exists FROM system.databases WHERE name = '%s'", 
+				source.Connection.Database)
+			dbResult, err := client.Query(ctx, dbQuery)
+			s.log.Info("database existence check", 
+				"source_id", source.ID,
+				"database", source.Connection.Database,
+				"query", dbQuery,
+				"error", err,
+				"result", fmt.Sprintf("%+v", dbResult))
+				
+			dbExists := false
+			if err == nil && len(dbResult.Logs) > 0 {
+				if exists, ok := dbResult.Logs[0]["exists"]; ok {
+					s.log.Info("database exists check result",
+						"source_id", source.ID,
+						"database", source.Connection.Database,
+						"exists_value", exists,
+						"type", fmt.Sprintf("%T", exists))
+						
+					// Try to convert to boolean based on the type
+					switch v := exists.(type) {
+					case uint8:
+						dbExists = v != 0
+					case int:
+						dbExists = v != 0
+					case int64:
+						dbExists = v != 0
+					case string:
+						dbExists = v == "1" || v == "true"
+					case bool:
+						dbExists = v
+					default:
+						s.log.Warn("unexpected type for exists field", 
+							"type", fmt.Sprintf("%T", exists),
+							"value", exists)
+					}
+				}
+			}
+			
+			s.log.Info("database existence result", 
+				"source_id", source.ID,
+				"database", source.Connection.Database, 
+				"exists", dbExists)
+				
+			if !dbExists {
+				s.log.Warn("database does not exist, marking source as disconnected", 
+					"source_id", source.ID,
+					"database", source.Connection.Database)
+				source.IsConnected = false
+				continue
+			}
+			
+			// Check if table exists
+			tableQuery := fmt.Sprintf("SELECT count() > 0 as exists FROM system.tables WHERE database = '%s' AND name = '%s'", 
+				source.Connection.Database, source.Connection.TableName)
+			tableResult, err := client.Query(ctx, tableQuery)
+			s.log.Info("table existence check", 
+				"source_id", source.ID,
+				"database", source.Connection.Database,
+				"table", source.Connection.TableName,
+				"query", tableQuery,
+				"error", err,
+				"result", fmt.Sprintf("%+v", tableResult))
+				
+			tableExists := false
+			if err == nil && len(tableResult.Logs) > 0 {
+				if exists, ok := tableResult.Logs[0]["exists"]; ok {
+					s.log.Info("table exists check result",
+						"source_id", source.ID,
+						"table", source.Connection.TableName,
+						"exists_value", exists,
+						"type", fmt.Sprintf("%T", exists))
+						
+					// Try to convert to boolean based on the type
+					switch v := exists.(type) {
+					case uint8:
+						tableExists = v != 0
+					case int:
+						tableExists = v != 0
+					case int64:
+						tableExists = v != 0
+					case string:
+						tableExists = v == "1" || v == "true"
+					case bool:
+						tableExists = v
+					default:
+						s.log.Warn("unexpected type for exists field", 
+							"type", fmt.Sprintf("%T", exists),
+							"value", exists)
+					}
+				}
+			}
+			
+			s.log.Info("table existence result", 
+				"source_id", source.ID,
+				"database", source.Connection.Database,
+				"table", source.Connection.TableName, 
+				"exists", tableExists)
+				
+			if !tableExists {
+				s.log.Warn("table does not exist, marking source as disconnected", 
+					"source_id", source.ID,
+					"database", source.Connection.Database,
+					"table", source.Connection.TableName)
+				source.IsConnected = false
+				continue
+			}
+			
+			// If we got here, both database and table exist
+			s.log.Info("source verified as connected", 
+				"source_id", source.ID,
+				"database", source.Connection.Database,
+				"table", source.Connection.TableName)
+		}
 	}
 
 	return sources, nil
@@ -77,12 +218,13 @@ func (s *Service) GetSource(ctx context.Context, id models.SourceID) (*models.So
 			dbResult, err := client.Query(ctx, dbQuery)
 			
 			// Detailed logging for debugging
-			s.log.Debug("database existence check", 
+			s.log.Info("GetSource - database existence check", 
 				"source_id", source.ID,
 				"database", source.Connection.Database,
+				"query", dbQuery,
 				"query_error", err,
 				"result_size", len(dbResult.Logs),
-				"result", fmt.Sprintf("%+v", dbResult.Logs))
+				"raw_result", fmt.Sprintf("%+v", dbResult.Logs))
 			
 			dbExists := false
 			if err == nil && len(dbResult.Logs) > 0 {
@@ -122,13 +264,14 @@ func (s *Service) GetSource(ctx context.Context, id models.SourceID) (*models.So
 				tableResult, err := client.Query(ctx, tableQuery)
 				
 				// Detailed logging for debugging
-				s.log.Debug("table existence check", 
+				s.log.Info("GetSource - table existence check", 
 					"source_id", source.ID,
 					"database", source.Connection.Database,
 					"table", source.Connection.TableName,
+					"query", tableQuery,
 					"query_error", err,
 					"result_size", len(tableResult.Logs),
-					"result", fmt.Sprintf("%+v", tableResult.Logs))
+					"raw_result", fmt.Sprintf("%+v", tableResult.Logs))
 				
 				tableExists := false
 				if err == nil && len(tableResult.Logs) > 0 {

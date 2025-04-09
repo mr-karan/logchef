@@ -14,15 +14,33 @@ import (
 
 // handleListSources handles GET /api/v1/admin/sources
 func (s *Server) handleListSources(c *fiber.Ctx) error {
+	s.log.Info("listing sources - before service call")
+	
 	sources, err := s.sourceService.ListSources(c.Context())
 	if err != nil {
 		return SendError(c, fiber.StatusInternalServerError, "error listing sources: "+err.Error())
+	}
+
+	s.log.Info("sources retrieved", "count", len(sources))
+	
+	// Log connection status of each source
+	for _, src := range sources {
+		s.log.Info("source connection status", 
+			"source_id", src.ID,
+			"name", src.Name,
+			"database", src.Connection.Database,
+			"table", src.Connection.TableName,
+			"is_connected", src.IsConnected)
 	}
 
 	// Convert sources to response objects to avoid exposing sensitive information
 	sourceResponses := make([]*models.SourceResponse, len(sources))
 	for i, src := range sources {
 		sourceResponses[i] = src.ToResponse()
+		s.log.Info("source response", 
+			"source_id", src.ID,
+			"name", src.Name,
+			"is_connected", sourceResponses[i].IsConnected)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, sourceResponses)
