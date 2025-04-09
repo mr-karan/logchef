@@ -10,10 +10,10 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.6
 	github.com/golang-migrate/migrate/v4 v4.18.2
 	github.com/google/uuid v1.6.0
-	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/knadh/koanf/parsers/toml v0.1.0
 	github.com/knadh/koanf/providers/file v1.1.2
 	github.com/knadh/koanf/v2 v2.1.2
+	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/stretchr/testify v1.10.0
 	github.com/xwb1989/sqlparser v0.0.0-20180606152119-120387863bf2
 	golang.org/x/oauth2 v0.28.0
@@ -21,6 +21,7 @@ require (
 )
 
 require (
+	github.com/AfterShip/clickhouse-sql-parser v0.4.5 // indirect
 	github.com/ClickHouse/ch-go v0.65.1 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -38,7 +39,6 @@ require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
-	github.com/mattn/go-sqlite3 v1.14.24 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect

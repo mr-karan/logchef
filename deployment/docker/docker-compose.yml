@@ -39,6 +39,11 @@ services:
         uid: "101"
         gid: "101"
         mode: 0444
+      - source: clickhouse_init
+        target: /docker-entrypoint-initdb.d/init-db.sh
+        uid: "101"
+        gid: "101"
+        mode: 0555
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - clickhouse-logs:/var/log/clickhouse-server
@@ -190,12 +195,18 @@ configs:
       source = '''
         structured = parse_syslog!(.message)
 
-        # Timestamp handling
+        # OpenTelemetry required fields
         .timestamp = format_timestamp!(structured.timestamp, format: "%Y-%m-%d %H:%M:%S.%f")
+        .trace_id = ""
+        .span_id = ""
+        .trace_flags = 0
 
+        # Map message to body
+        .body = structured.message
+
+        # Service information
         .service_name = structured.appname
         .namespace = "syslog"
-        .body = structured.message
 
         # Map severity
         .severity_text = if includes(["emerg", "err", "crit", "alert"], structured.severity) {
@@ -210,15 +221,16 @@ configs:
           structured.severity
         }
 
-        # Convert severity to number
+        # Convert severity to number according to OpenTelemetry spec
+        # https://opentelemetry.io/docs/specs/otel/logs/data-model/#severity-fields
         .severity_number = if .severity_text == "ERROR" {
-          17
+          17  # ERROR
         } else if .severity_text == "WARN" {
-          13
+          13  # WARN
         } else if .severity_text == "DEBUG" {
-          5
+          5   # DEBUG
         } else {
-          9  # INFO
+          9   # INFO
         }
 
         # Store syslog-specific fields in log_attributes
@@ -234,10 +246,18 @@ configs:
         del(.source_type)
       '''
 
-      [sinks.console]
-      type = "console"
+      [sinks.clickhouse]
+      type = "clickhouse"
       inputs = ["remap_syslog"]
-      encoding.codec = "json"
+      endpoint = "http://clickhouse:8123"
+      database = "default"
+      table = "logs"
+      compression = "gzip"
+      healthcheck.enabled = false
+      # Skip on error to prevent vector from crashing if clickhouse is down
+      skip_unknown_fields = true
+      # # Ensure all OTEL fields are available
+      # encoding.timestamp_format = "rfc3339"
 
   clickhouse_config:
     content: |
@@ -302,3 +322,35 @@ configs:
               </default>
           </quotas>
       </clickhouse>
+
+  clickhouse_init:
+    content: |
+      #!/bin/bash
+      clickhouse client -n <<-EOSQL
+        CREATE DATABASE IF NOT EXISTS default;
+
+        CREATE TABLE IF NOT EXISTS default.logs
+        (
+            timestamp DateTime64(3) CODEC(DoubleDelta, LZ4),
+            trace_id String CODEC(ZSTD(1)),
+            span_id String CODEC(ZSTD(1)),
+            trace_flags UInt32 CODEC(ZSTD(1)),
+            severity_text LowCardinality(String) CODEC(ZSTD(1)),
+            severity_number Int32 CODEC(ZSTD(1)),
+            service_name LowCardinality(String) CODEC(ZSTD(1)),
+            namespace LowCardinality(String) CODEC(ZSTD(1)),
+            body String CODEC(ZSTD(1)),
+            log_attributes Map(LowCardinality(String), String) CODEC(ZSTD(1)),
+
+            INDEX idx_trace_id trace_id TYPE bloom_filter(0.001) GRANULARITY 1,
+            INDEX idx_severity_text severity_text TYPE set(100) GRANULARITY 4,
+            INDEX idx_log_attributes_keys mapKeys(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
+            INDEX idx_log_attributes_values mapValues(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
+            INDEX idx_body body TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1
+        )
+        ENGINE = MergeTree()
+        PARTITION BY toDate(timestamp)
+        ORDER BY (namespace, service_name, timestamp)
+        TTL toDateTime(timestamp) + INTERVAL 30 DAY
+        SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
+      EOSQL
