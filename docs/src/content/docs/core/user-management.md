@@ -3,8 +3,6 @@ title: User Management
 description: Understanding Sources, Teams, and access control in LogChef
 ---
 
-# User Management in LogChef
-
 LogChef implements a team-based access control system that helps organize and secure your log data. This guide explains the core concepts of user management and how to effectively use them.
 
 ## Sources

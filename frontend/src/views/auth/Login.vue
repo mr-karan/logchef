@@ -64,11 +64,7 @@ async function handleLogin() {
           </div>
         </Alert>
 
-        <Button 
-          @click="handleLogin" 
-          class="w-full" 
-          :disabled="isLoggingIn"
-        >
+        <Button @click="handleLogin" class="w-full" :disabled="isLoggingIn">
           <Loader2 v-if="isLoggingIn" class="mr-2 h-4 w-4 animate-spin" />
           Sign in with SSO
         </Button>

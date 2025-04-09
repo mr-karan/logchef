@@ -3,8 +3,6 @@ title: Query Examples
 description: Practical examples for common log analytics scenarios
 ---
 
-# Query Examples
-
 This guide provides practical examples for common log analytics scenarios. Each example shows both the simple search syntax and the equivalent SQL query.
 
 ## Error Analysis

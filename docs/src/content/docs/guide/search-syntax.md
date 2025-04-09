@@ -3,8 +3,6 @@ title: Search Syntax
 description: Learn how to use LogChef's simple yet powerful search syntax
 ---
 
-# Search Syntax
-
 LogChef provides a simple yet powerful search syntax that makes it easy to find exactly what you're looking for in your logs.
 
 ## Basic Syntax

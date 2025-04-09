@@ -3,8 +3,6 @@ title: Schema Design
 description: Understanding LogChef's log schema design and optimization
 ---
 
-# Schema Design
-
 LogChef provides optimized schemas for different types of logs while maintaining the flexibility to work with any Clickhouse table structure.
 
 ## OpenTelemetry Schema

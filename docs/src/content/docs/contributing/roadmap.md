@@ -1,121 +1,51 @@
 ---
 title: Roadmap
-description: Future plans and upcoming features for LogChef
+description: Upcoming features and future plans for LogChef
 ---
 
-# Project Roadmap
+# Roadmap
 
-LogChef is actively evolving, and we have exciting plans for its future. This roadmap outlines our vision and upcoming features.
+Here's what we're planning to add to LogChef in upcoming releases:
 
-## Current Status
+## Integration Features
 
-LogChef currently provides:
+### HTTP API
 
-- ✅ Powerful log querying interface
-- ✅ Team-based access control
-- ✅ Optimized OTEL schema support
-- ✅ Flexible source management
-- ✅ Simple search syntax
-- ✅ Full SQL query capabilities
+- REST API for managing sources
+- Query execution endpoints
+- User and team management
+- Authentication and access control
+- Detailed request/response examples
 
-## Upcoming Features
+### Client Libraries
 
-### Q2 2024
+- Go client library
+- Python client library
+- JavaScript/TypeScript client (for browser and Node.js)
+- Type-safe API clients with query builders
+- Authentication helpers
 
-#### Visualizations
+## Analytics Features
 
-- Interactive time-series charts
-- Custom dashboard creation
-- Shareable dashboard templates
-- Real-time data updates
-- Export capabilities
+### Visualizations
 
-#### Alerts
+- Time series analytics for error rates and metrics
+- Interactive dashboards
+- Rich chart types (line, bar, heat maps)
+- Dynamic filtering and drill-down capabilities
 
-- Threshold-based alerting
-- Pattern detection
-- Multiple notification channels
-- Alert history and analytics
+### Alerting System
 
-### Q3 2024
+- Flexible alert rules with pattern matching
+- Multiple notification channels (email, webhooks)
+- Alert grouping and deduplication
+- Team-specific alert routing
+- Maintenance windows
 
-#### Enhanced Query Features
+## Get Involved
 
-- JSON field operations
-- Advanced comparison operators
-- Query templates
-- Smart value suggestions for fields
-- Advanced filtering and aggregations
+We welcome community feedback and contributions! If you're interested in any of these features:
 
-#### Integrations
-
-- More log collectors support
-- Additional authentication providers
-- External metrics system integration
-- APM tool integration
-
-### Future Plans
-
-#### Analytics
-
-- Log pattern analysis
-- Anomaly detection
-- Trend analysis
-- Usage statistics
-
-#### Advanced Features
-
-- Machine learning for log analysis
-- Automated error grouping
-- Custom retention policies
-- Advanced role-based access control
-
-## Contributing
-
-We welcome contributions in all areas:
-
-1. **Core Features**
-
-   - Performance optimizations
-   - Query engine improvements
-   - UI/UX enhancements
-
-2. **Documentation**
-
-   - Usage examples
-   - Integration guides
-   - Best practices
-
-3. **Testing**
-   - Unit tests
-   - Integration tests
-   - Performance benchmarks
-
-## Feature Requests
-
-Have an idea for LogChef? We'd love to hear it!
-
-1. Check our [GitHub Issues](https://github.com/mr-karan/logchef/issues) to see if it's already been suggested
-2. Open a new issue with the `feature request` label
-3. Provide as much detail as possible about your use case
-
-## Release Schedule
-
-We follow a predictable release schedule:
-
-- Patch releases: As needed for bug fixes
-- Minor releases: Every 2-4 weeks
-- Major releases: Every 3-4 months
-
-Each release is thoroughly tested and documented before being made available.
-
-## Getting Involved
-
-Want to help shape LogChef's future?
-
-1. Join our [Discord community](https://discord.gg/your-invite-link)
-2. Star and watch the [GitHub repository](https://github.com/mr-karan/logchef)
-3. Follow project updates on social media
-4. Contribute to discussions in GitHub issues
-
-We believe in building in public and value community feedback in prioritizing our roadmap.
+1. Star our [GitHub repository](https://github.com/mr-karan/logchef)
+2. Open issues with feature requests or suggestions
+3. Join discussions about implementation details
