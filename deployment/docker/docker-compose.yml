@@ -85,7 +85,7 @@ services:
       start_period: 10s
 
   vector:
-    image: docker.io/timberio/vector:0.45.X-distroless-libc
+    image: docker.io/timberio/vector:0.45.0-debian
     configs:
       - source: vector_config
         target: /etc/vector/vector.toml
@@ -184,6 +184,8 @@ configs:
 
   vector_config:
     content: |
+      [api]
+      enabled = true
       [sources.generate_syslog]
       type = "demo_logs"
       format = "syslog"
@@ -197,9 +199,6 @@ configs:
 
         # OpenTelemetry required fields
         .timestamp = format_timestamp!(structured.timestamp, format: "%Y-%m-%d %H:%M:%S.%f")
-        .trace_id = ""
-        .span_id = ""
-        .trace_flags = 0
 
         # Map message to body
         .body = structured.message
@@ -332,9 +331,6 @@ configs:
         CREATE TABLE IF NOT EXISTS default.logs
         (
             timestamp DateTime64(3) CODEC(DoubleDelta, LZ4),
-            trace_id String CODEC(ZSTD(1)),
-            span_id String CODEC(ZSTD(1)),
-            trace_flags UInt32 CODEC(ZSTD(1)),
             severity_text LowCardinality(String) CODEC(ZSTD(1)),
             severity_number Int32 CODEC(ZSTD(1)),
             service_name LowCardinality(String) CODEC(ZSTD(1)),
@@ -342,7 +338,6 @@ configs:
             body String CODEC(ZSTD(1)),
             log_attributes Map(LowCardinality(String), String) CODEC(ZSTD(1)),
 
-            INDEX idx_trace_id trace_id TYPE bloom_filter(0.001) GRANULARITY 1,
             INDEX idx_severity_text severity_text TYPE set(100) GRANULARITY 4,
             INDEX idx_log_attributes_keys mapKeys(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
             INDEX idx_log_attributes_values mapValues(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,

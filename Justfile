@@ -113,7 +113,7 @@ docker-tag := version # Use the simple git describe output for the tag
 build-docker:
     @echo "Building Docker image {{docker-image}}:{{docker-tag}} for linux/amd64..."
     @echo "Embedding build string: {{build_info}}"
-    docker build \
+    DOCKER_BUILDKIT=1 docker build \
         --build-arg APP_VERSION="{{build_info}}" \
         --build-arg TARGETOS=linux \
         --build-arg TARGETARCH=amd64 \
