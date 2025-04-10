@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
-import { Plus, Play, RefreshCw, Share2 } from 'lucide-vue-next'
+import { Plus, Play, RefreshCw, Share2, Keyboard } from 'lucide-vue-next'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
@@ -622,8 +622,7 @@ const clearQueryEditor = () => {
     exploreStore.setRawSql("");
   }
   // Clear any validation errors in the store or locally if needed
-  // exploreStore.setError(null); // Example if error is in store
-  queryError.value = null; // Clear local query error
+  queryError.value = ''; // Clear local query error
 
   // Focus the editor using the ref after clearing
   nextTick(() => {
@@ -978,15 +977,20 @@ const clearQueryEditor = () => {
                 <Play v-if="!isExecutingQuery" class="h-4 w-4" />
                 <RefreshCw v-else class="h-4 w-4 animate-spin" />
                 <span>{{ isExecutingQuery ? 'Running Query...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>
-                <span class="text-xs text-muted-foreground/70 ml-1.5">(Ctrl+Enter)</span>
+                <div class="flex flex-col items-start ml-1 border-l border-current/20 pl-2 text-xs text-current">
+                  <div class="flex items-center gap-1">
+                    <Keyboard class="h-3 w-3" />
+                    <span>Ctrl+Enter</span>
+                  </div>
+                </div>
               </Button>
               <!-- New Clear Button -->
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="outline" size="sm" class="h-9 px-3" @click="clearQueryEditor"
-                      :disabled="isExecutingQuery" aria-label="Clear query editor">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                    <Button variant="outline" size="sm" class="h-9 px-3 flex items-center gap-1.5"
+                      @click="clearQueryEditor" :disabled="isExecutingQuery" aria-label="Clear query editor">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
                         class="lucide lucide-eraser">
                         <path
@@ -994,6 +998,7 @@ const clearQueryEditor = () => {
                         <path d="M22 21H7" />
                         <path d="m5 11 9 9" />
                       </svg>
+                      <span>Clear</span>
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom">

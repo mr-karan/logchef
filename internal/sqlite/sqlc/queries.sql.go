@@ -763,39 +763,36 @@ func (q *Queries) ListTeamMembersWithDetails(ctx context.Context, teamID int64) 
 }
 
 const listTeamSources = `-- name: ListTeamSources :many
-SELECT s.id, s.name, s.database, s.table_name, s.description, s.created_at, s.updated_at
+SELECT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.host, s.username, s.password, s."database", s.table_name, s.description, s.ttl_days, s.created_at, s.updated_at
 FROM sources s
 JOIN team_sources ts ON s.id = ts.source_id
 WHERE ts.team_id = ?
 ORDER BY s.created_at DESC
 `
 
-type ListTeamSourcesRow struct {
-	ID          int64          `json:"id"`
-	Name        string         `json:"name"`
-	Database    string         `json:"database"`
-	TableName   string         `json:"table_name"`
-	Description sql.NullString `json:"description"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-}
-
 // List all data sources in a team
-func (q *Queries) ListTeamSources(ctx context.Context, teamID int64) ([]ListTeamSourcesRow, error) {
+func (q *Queries) ListTeamSources(ctx context.Context, teamID int64) ([]Source, error) {
 	rows, err := q.query(ctx, q.listTeamSourcesStmt, listTeamSources, teamID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListTeamSourcesRow{}
+	items := []Source{}
 	for rows.Next() {
-		var i ListTeamSourcesRow
+		var i Source
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
+			&i.MetaIsAutoCreated,
+			&i.MetaTsField,
+			&i.MetaSeverityField,
+			&i.Host,
+			&i.Username,
+			&i.Password,
 			&i.Database,
 			&i.TableName,
 			&i.Description,
+			&i.TtlDays,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {

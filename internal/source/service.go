@@ -45,7 +45,7 @@ func (s *Service) ListSources(ctx context.Context) ([]*models.Source, error) {
 
 	// Enrich with connection status
 	for _, source := range sources {
-		s.log.Info("checking source health for ListSources", 
+		s.log.Info("checking source health for ListSources",
 			"source_id", source.ID,
 			"name", source.Name,
 			"database", source.Connection.Database,
@@ -105,13 +105,19 @@ func (s *Service) GetSource(ctx context.Context, id models.SourceID) (*models.So
 		"table", source.Connection.TableName,
 		"is_connected", source.IsConnected)
 
-
 	// Fetch the table schema and CREATE statement only if the source is connected
 	if source.IsConnected && client != nil { // Ensure client is not nil
 		// Get the table schema (column information)
 		columns, err := client.GetTableSchema(ctx, source.Connection.Database, source.Connection.TableName)
 		if err != nil {
 			s.log.Warn("failed to get table schema",
+				"source_id", source.ID,
+				"column_count", len(columns),
+			)
+		} else {
+			// Store columns in the source object
+			source.Columns = columns
+			s.log.Debug("retrieved table columns",
 				"source_id", source.ID,
 				"column_count", len(columns),
 			)

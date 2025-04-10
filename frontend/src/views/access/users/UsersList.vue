@@ -149,7 +149,7 @@ onMounted(() => {
                 <div v-if="isLoading" class="text-center py-4">
                     Loading users...
                 </div>
-                <div v-else-if="filteredUsers.length === 0" class="rounded-lg border p-4 text-center">
+                <div v-else-if="users.length === 0" class="rounded-lg border p-4 text-center">
                     <p class="text-muted-foreground mb-4">No users found</p>
                     <AddUser>
                         <Button>
@@ -165,7 +165,13 @@ onMounted(() => {
                             <Input placeholder="Search users by name or email..." class="pl-8" v-model="searchQuery" />
                         </div>
                     </div>
-                    <div class="rounded-md border">
+
+                    <div v-if="filteredUsers.length === 0" class="rounded-lg border p-4 text-center">
+                        <p class="text-muted-foreground">No results found for "<span class="font-medium">{{ searchQuery
+                        }}</span>"</p>
+                    </div>
+
+                    <div v-else class="rounded-md border">
                         <Table>
                             <TableHeader>
                                 <TableRow>

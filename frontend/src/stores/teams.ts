@@ -207,7 +207,7 @@ export const useTeamsStore = defineStore("teams", () => {
         operationKey: 'createTeam',
         onSuccess: (response) => {
           if (response) {
-            // Add the new team to both team lists
+            // Create the team object with proper defaults
             const newTeam: TeamWithMemberCount = {
               ...response,
               id: response.id,
@@ -220,14 +220,15 @@ export const useTeamsStore = defineStore("teams", () => {
               member_count: 0
             };
 
-            // Add to admin teams
+            // Add to admin teams only
             state.data.value.adminTeams.push(newTeam);
 
-            // Also add to user teams since the creator is automatically a member
-            state.data.value.userTeams.push(newTeam);
+            // IMPORTANT: Do NOT add to userTeams here
+            // This ensures only teams the user is actually a member of
+            // will appear in the teams dropdown in LogExplorer
 
-            // If we have teams and no current team is selected, select the newly created one
-            if (!state.data.value.currentTeamId && newTeam.id) {
+            // If we're in admin view and no team is selected, select the newly created one
+            if (!state.data.value.currentTeamId && state.data.value.adminTeams.length > 0) {
               setCurrentTeam(newTeam.id);
             }
           }

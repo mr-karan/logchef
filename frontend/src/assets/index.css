@@ -5,155 +5,62 @@
 @layer base {
   :root {
     --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
+    --foreground: 20 14.3% 4.1%;
 
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
+    --card-foreground: 20 14.3% 4.1%;
 
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 20 14.3% 4.1%;
 
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
+    --primary: 24.6 95% 53.1%;
+    --primary-foreground: 60 9.1% 97.8%;
 
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
+    --secondary: 60 4.8% 95.9%;
+    --secondary-foreground: 24 9.8% 10%;
 
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
+    --muted: 60 4.8% 95.9%;
+    --muted-foreground: 25 5.3% 44.7%;
+
+    --accent: 60 4.8% 95.9%;
+    --accent-foreground: 24 9.8% 10%;
 
     --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
+    --destructive-foreground: 60 9.1% 97.8%;
 
-    --ring: 0 0% 3.9%;
-
+    --border:20 5.9% 90%;
+    --input:20 5.9% 90%;
+    --ring:24.6 95% 53.1%;
     --radius: 0.5rem;
-
-    --chart-1: 12 76% 61%;
-
-    --chart-2: 173 58% 39%;
-
-    --chart-3: 197 37% 24%;
-
-    --chart-4: 43 74% 66%;
-
-    --chart-5: 27 87% 67%;
-
-    /* Tab specific variables */
-    --tab-background: 0 0% 96.1%;
-    --tab-active-background: 0 0% 9%;
-    --tab-active-background-alpha: 0 0% 9% / 0.1;
-    --tab-active-border: 0 0% 9%;
   }
 
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
+    --background:20 14.3% 4.1%;
+    --foreground:60 9.1% 97.8%;
 
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
+    --card:20 14.3% 4.1%;
+    --card-foreground:60 9.1% 97.8%;
 
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
+    --popover:20 14.3% 4.1%;
+    --popover-foreground:60 9.1% 97.8%;
 
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
+    --primary:20.5 90.2% 48.2%;
+    --primary-foreground:60 9.1% 97.8%;
 
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
+    --secondary:12 6.5% 15.1%;
+    --secondary-foreground:60 9.1% 97.8%;
 
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
+    --muted:12 6.5% 15.1%;
+    --muted-foreground:24 5.4% 63.9%;
 
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
+    --accent:12 6.5% 15.1%;
+    --accent-foreground:60 9.1% 97.8%;
 
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
+    --destructive:0 72.2% 50.6%;
+    --destructive-foreground:60 9.1% 97.8%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-
-    --ring: 0 0% 83.1%;
-
-    --chart-1: 220 70% 50%;
-
-    --chart-2: 160 60% 45%;
-
-    --chart-3: 30 80% 55%;
-
-    --chart-4: 280 65% 60%;
-
-    --chart-5: 340 75% 55%;
-
-    /* Tab specific variables for dark mode */
-    --tab-background: 0 0% 14.9%;
-    --tab-active-background: 0 0% 98%;
-    --tab-active-background-alpha: 0 0% 98% / 0.1;
-    --tab-active-border: 0 0% 98%;
-  }
-}
-
-@layer base {
-  * {
-    @apply border-border;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
-}
-
-/* Custom component styles */
-@layer components {
-  /* Tab styling */
-  .tabs-trigger {
-    @apply transition-all relative;
-  }
-
-  .tabs-trigger[data-state="active"] {
-    @apply text-primary border-b-2 border-primary bg-primary/10 font-medium;
-  }
-
-  .tabs-trigger[data-state="inactive"] {
-    @apply text-muted-foreground hover:text-foreground hover:bg-muted/50;
-  }
-
-  .tabs-list {
-    @apply bg-muted/30 rounded-t-md border-b;
-  }
-}
-
-.sidebar {
-  background-color: hsl(var(--sidebar-background));
-  color: hsl(var(--sidebar-foreground));
-}
-
-@layer base {
-  :root {
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
- }
-
-  .dark {
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --border:12 6.5% 15.1%;
+    --input:12 6.5% 15.1%;
+    --ring:20.5 90.2% 48.2%;
   }
 }
