@@ -31,8 +31,8 @@
           </TabsList>
         </Tabs>
 
-        <!-- Table name indicator (Moved) -->
-        <div v-if="props.activeMode === 'clickhouse-sql'" class="text-xs text-muted-foreground ml-3">
+        <!-- Table name indicator (Moved & Always Visible) -->
+        <div class="text-xs text-muted-foreground ml-3">
           <template v-if="props.tableName">
             <span class="mr-1">Table:</span>
             <code class="bg-muted px-1.5 py-0.5 rounded text-xs">{{ props.tableName }}</code>
