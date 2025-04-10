@@ -235,12 +235,20 @@ func (s *Server) handleListTeamSources(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "Failed to list team sources")
 	}
 
-	// Enrich sources with live connection status
-	sourceResponses := make([]*models.SourceResponse, len(sources))
-	for i, src := range sources {
-		// Check connection status using the source service
-		src.IsConnected = s.sourceService.CheckSourceConnectionStatus(c.Context(), src)
-		sourceResponses[i] = src.ToResponse() // Convert to response object *after* checking status
+	// Fetch full details for each source, including columns and connection status
+	sourceResponses := make([]*models.SourceResponse, 0, len(sources))
+	for _, basicSrcInfo := range sources {
+		fullSrc, err := s.sourceService.GetSource(c.Context(), basicSrcInfo.ID)
+		if err != nil {
+			// Log the error but continue processing other sources
+			s.log.Error("failed to get full source details for team list",
+				"team_id", id,
+				"source_id", basicSrcInfo.ID,
+				"error", err)
+			continue // Skip this source if we can't get its full details
+		}
+		// GetSource already populates IsConnected and Columns (if available)
+		sourceResponses = append(sourceResponses, fullSrc.ToResponse())
 	}
 
 	return SendSuccess(c, fiber.StatusOK, sourceResponses)
