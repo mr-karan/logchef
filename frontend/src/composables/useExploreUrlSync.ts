@@ -95,6 +95,7 @@ export function useExploreUrlSync() {
       if (!teamId) {
         teamId = teamsStore.teams[0].id; // Default to first team
       }
+
       // Set team *before* loading sources
       if (teamsStore.currentTeamId !== teamId) {
          teamsStore.setCurrentTeam(teamId);
@@ -106,8 +107,10 @@ export function useExploreUrlSync() {
       // 4. Set Source from URL or default (validate against loaded sources)
       let sourceId: number | null = null;
       const urlSourceIdStr = route.query.source as string | undefined;
+
       if (urlSourceIdStr) {
         const parsedSourceId = parseInt(urlSourceIdStr);
+
         if (!isNaN(parsedSourceId) && sourcesStore.teamSources.some(s => s.id === parsedSourceId)) {
           sourceId = parsedSourceId;
         } else {

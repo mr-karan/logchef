@@ -60,7 +60,7 @@ run-frontend:
     cd frontend && pnpm dev
 
 dev-docker:
-    cd deploy && docker compose up
+    cd dev && docker compose up
 
 # Clean build artifacts
 clean:
