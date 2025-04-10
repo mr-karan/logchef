@@ -31,9 +31,18 @@
           </TabsList>
         </Tabs>
 
+        <!-- Table name indicator (Moved) -->
+        <div v-if="props.activeMode === 'clickhouse-sql'" class="text-xs text-muted-foreground ml-3">
+          <template v-if="props.tableName">
+            <span class="mr-1">Table:</span>
+            <code class="bg-muted px-1.5 py-0.5 rounded text-xs">{{ props.tableName }}</code>
+          </template>
+          <span v-else class="italic text-orange-500">No table selected</span>
+        </div>
+
         <!-- New: Active Query Indicator -->
         <div v-if="activeSavedQueryName"
-          class="flex items-center bg-primary/10 text-primary text-xs font-medium px-2 py-0.5 rounded-md">
+          class="flex items-center bg-primary/10 text-primary text-xs font-medium px-2 py-0.5 rounded-md ml-3">
           <FileEdit class="h-3.5 w-3.5 mr-1.5" />
           <span>{{ activeSavedQueryName }}</span>
         </div>
@@ -58,15 +67,6 @@
         <!-- Saved Queries Dropdown -->
         <SavedQueriesDropdown :selected-source-id="props.sourceId" :selected-team-id="props.teamId"
           @select-saved-query="(query) => $emit('select-saved-query', query)" @save="$emit('save-query')" class="h-8" />
-
-        <!-- Table name indicator -->
-        <div v-if="props.activeMode === 'clickhouse-sql'" class="text-xs text-muted-foreground mr-2">
-          <template v-if="props.tableName">
-            <span class="mr-1">Table:</span>
-            <code class="bg-muted px-1.5 py-0.5 rounded text-xs">{{ props.tableName }}</code>
-          </template>
-          <span v-else class="italic text-orange-500">No table selected</span>
-        </div>
 
         <!-- Clear button -->
         <button class="p-1 text-muted-foreground hover:text-destructive flex items-center text-xs gap-1"
