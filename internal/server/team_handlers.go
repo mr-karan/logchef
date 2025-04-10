@@ -235,7 +235,15 @@ func (s *Server) handleListTeamSources(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "Failed to list team sources")
 	}
 
-	return SendSuccess(c, fiber.StatusOK, sources)
+	// Enrich sources with live connection status
+	sourceResponses := make([]*models.SourceResponse, len(sources))
+	for i, src := range sources {
+		// Check connection status using the source service
+		src.IsConnected = s.sourceService.CheckSourceConnectionStatus(c.Context(), src)
+		sourceResponses[i] = src.ToResponse() // Convert to response object *after* checking status
+	}
+
+	return SendSuccess(c, fiber.StatusOK, sourceResponses)
 }
 
 // handleAddTeamSource handles POST /api/v1/teams/:teamID/sources

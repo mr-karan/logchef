@@ -331,6 +331,22 @@ func (s *Service) DeleteSource(ctx context.Context, id models.SourceID) error {
 	return nil
 }
 
+// CheckSourceConnectionStatus checks the connection status for a given source.
+// It returns true if the source is connected and the table is queryable, false otherwise.
+func (s *Service) CheckSourceConnectionStatus(ctx context.Context, source *models.Source) bool {
+	if source == nil {
+		return false
+	}
+	client, err := s.chDB.GetClient(source.ID)
+	if err != nil {
+		s.log.Debug("failed to get client for source status check",
+			"source_id", source.ID,
+			"error", err)
+		return false
+	}
+	return s.checkTableExists(ctx, client, source.Connection.Database, source.Connection.TableName)
+}
+
 // checkTableExists attempts a simple query to verify connectivity and table existence.
 func (s *Service) checkTableExists(ctx context.Context, client *clickhouse.Client, database, table string) bool {
 	if client == nil || database == "" || table == "" {
