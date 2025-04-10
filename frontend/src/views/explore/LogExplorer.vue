@@ -978,6 +978,7 @@ const clearQueryEditor = () => {
                 <Play v-if="!isExecutingQuery" class="h-4 w-4" />
                 <RefreshCw v-else class="h-4 w-4 animate-spin" />
                 <span>{{ isExecutingQuery ? 'Running Query...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>
+                <span class="text-xs text-muted-foreground/70 ml-1.5">(Ctrl+Enter)</span>
               </Button>
               <!-- New Clear Button -->
               <TooltipProvider>
