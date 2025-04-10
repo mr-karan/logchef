@@ -48,6 +48,7 @@ import type { SavedTeamQuery } from '@/api/savedQueries'
 import { useExploreUrlSync } from '@/composables/useExploreUrlSync'
 import { useQuery } from '@/composables/useQuery'
 import type { EditorMode } from '@/views/explore/types'
+import type { ComponentPublicInstance } from 'vue'; // Import ComponentPublicInstance
 
 // Router and stores
 const router = useRouter()
@@ -181,7 +182,11 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
 
 // Basic state
 const showFieldsPanel = ref(false)
-const queryEditorRef = ref()
+// Define the type for the queryEditorRef
+const queryEditorRef = ref<ComponentPublicInstance<{
+  focus: (revealLastPosition?: boolean) => void;
+  // Add other exposed methods/props if needed
+}> | null>(null);
 const isLoadingQuery = ref(false)
 const editQueryData = ref<SavedTeamQuery | null>(null)
 
@@ -607,6 +612,24 @@ onBeforeUnmount(() => {
 watch(() => currentRoute.fullPath, (newPath, oldPath) => {
   // No logging needed here
 }, { immediate: true });
+
+// Function to clear the query editor content
+const clearQueryEditor = () => {
+  // Update the store directly
+  if (exploreStore.activeMode === 'logchefql') {
+    exploreStore.setLogchefqlCode("");
+  } else {
+    exploreStore.setRawSql("");
+  }
+  // Clear any validation errors in the store or locally if needed
+  // exploreStore.setError(null); // Example if error is in store
+  queryError.value = null; // Clear local query error
+
+  // Focus the editor using the ref after clearing
+  nextTick(() => {
+    queryEditorRef.value?.focus();
+  });
+};
 </script>
 
 <template>
@@ -947,10 +970,41 @@ watch(() => currentRoute.fullPath, (newPath, oldPath) => {
           <!-- Query Controls (only if NOT changing context and source is valid) -->
           <div class="mt-3 flex items-center justify-between border-t pt-3"
             v-if="!isChangingContext && currentSourceId && hasValidSource && exploreStore.timeRange">
-            <Button variant="default" class="h-9 px-4 flex items-center gap-2 shadow-sm" :class="{
-              'bg-amber-500 hover:bg-amber-600 text-amber-foreground': isDirty && !isExecutingQuery,
-              'bg-sky-500 hover:bg-sky-600 text-sky-foreground': isExecutingQuery
-            }" :disabled="isExecutingQuery || !canExecuteQuery" @click="executeQuery">
+            <div class="flex items-center gap-2">
+              <Button variant="default" class="h-9 px-4 flex items-center gap-2 shadow-sm" :class="{
+                'bg-amber-500 hover:bg-amber-600 text-amber-foreground': isDirty && !isExecutingQuery,
+                'bg-sky-500 hover:bg-sky-600 text-sky-foreground': isExecutingQuery
+              }" :disabled="isExecutingQuery || !canExecuteQuery" @click="executeQuery">
+                <Play v-if="!isExecutingQuery" class="h-4 w-4" />
+                <RefreshCw v-else class="h-4 w-4 animate-spin" />
+                <span>{{ isExecutingQuery ? 'Running Query...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>
+              </Button>
+              <!-- New Clear Button -->
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="outline" size="sm" class="h-9 px-3" @click="clearQueryEditor"
+                      :disabled="isExecutingQuery" aria-label="Clear query editor">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                        class="lucide lucide-eraser">
+                        <path
+                          d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
+                        <path d="M22 21H7" />
+                        <path d="m5 11 9 9" />
+                      </svg>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p>Clear Query</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+
+            <!-- Query Stats Preview -->
+            <div class="text-xs text-muted-foreground flex items-center gap-3"
+              v-if="exploreStore.lastExecutionTimestamp">
               <Play v-if="!isExecutingQuery" class="h-4 w-4" />
               <RefreshCw v-else class="h-4 w-4 animate-spin" />
               <span>{{ isExecutingQuery ? 'Running Query...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>

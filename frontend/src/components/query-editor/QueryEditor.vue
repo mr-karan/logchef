@@ -68,13 +68,6 @@
         <SavedQueriesDropdown :selected-source-id="props.sourceId" :selected-team-id="props.teamId"
           @select-saved-query="(query) => $emit('select-saved-query', query)" @save="$emit('save-query')" class="h-8" />
 
-        <!-- Clear button -->
-        <button class="p-1 text-muted-foreground hover:text-destructive flex items-center text-xs gap-1"
-          @click="clearEditor" title="Clear editor content" aria-label="Clear editor content">
-          <span>Clear</span>
-          <XCircle class="h-3 w-3" />
-        </button>
-
         <!-- Help Icon -->
         <HoverCard :open-delay="200">
           <HoverCardTrigger as-child>
@@ -523,19 +516,6 @@ const submitQuery = () => {
   }
 };
 
-const clearEditor = () => {
-  // Update the store, which will trigger watchEffect to update the editor
-  if (props.activeMode === 'logchefql') {
-    exploreStore.setLogchefqlCode("");
-  } else {
-    exploreStore.setRawSql("");
-  }
-  validationError.value = null;
-
-  // Focus the editor after clearing
-  focusEditor();
-};
-
 const focusEditor = (revealLastPosition = false) => {
   nextTick(() => {
     // Add a slight delay to allow Monaco to fully process updates after :key change / options update
@@ -633,7 +613,7 @@ onBeforeUnmount(() => {
 // --- Expose ---
 defineExpose({
   submitQuery,
-  clearEditor,
+  // clearEditor is now handled by the parent
   focus: focusEditor, // Expose focus method
   code: computed(() => editorContent.value)
 });
