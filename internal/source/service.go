@@ -314,43 +314,26 @@ func (s *Service) GetSource(ctx context.Context, id models.SourceID) (*models.So
 		client, err := s.chDB.GetClient(source.ID)
 		if err != nil {
 			s.log.Warn("failed to get client for schema retrieval",
+				"source_id", source.ID,
+				"column_count", len(columns),
+			)
+		}
+
+		// Get the CREATE TABLE statement
+		createStatement, err := client.GetTableCreateStatement(ctx, source.Connection.Database, source.Connection.TableName)
+		if err != nil {
+			s.log.Warn("failed to get CREATE TABLE statement",
 				"error", err,
 				"source_id", source.ID,
+				"database", source.Connection.Database,
+				"table", source.Connection.TableName,
 			)
 		} else {
-			// Get the table schema (column information)
-			columns, err := client.GetTableSchema(ctx, source.Connection.Database, source.Connection.TableName)
-			if err != nil {
-				s.log.Warn("failed to get table schema",
-					"error", err,
-					"source_id", source.ID,
-					"database", source.Connection.Database,
-					"table", source.Connection.TableName,
-				)
-			} else {
-				source.Columns = columns
-				s.log.Debug("retrieved table schema",
-					"source_id", source.ID,
-					"column_count", len(columns),
-				)
-			}
-
-			// Get the CREATE TABLE statement
-			createStatement, err := client.GetTableCreateStatement(ctx, source.Connection.Database, source.Connection.TableName)
-			if err != nil {
-				s.log.Warn("failed to get CREATE TABLE statement",
-					"error", err,
-					"source_id", source.ID,
-					"database", source.Connection.Database,
-					"table", source.Connection.TableName,
-				)
-			} else {
-				source.Schema = createStatement
-				s.log.Debug("retrieved CREATE TABLE statement",
-					"source_id", source.ID,
-					"schema_length", len(createStatement),
-				)
-			}
+			source.Schema = createStatement
+			s.log.Debug("retrieved CREATE TABLE statement",
+				"source_id", source.ID,
+				"schema_length", len(createStatement),
+			)
 		}
 	}
 
@@ -548,6 +531,31 @@ func (s *Service) DeleteSource(ctx context.Context, id models.SourceID) error {
 	}
 
 	return nil
+}
+
+// checkTableExists attempts a simple query to verify connectivity and table existence.
+func (s *Service) checkTableExists(ctx context.Context, client *clickhouse.Client, database, table string) bool {
+	if client == nil || database == "" || table == "" {
+		return false
+	}
+
+	// Use a short timeout for this check
+	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second) // 3-second timeout for the check
+	defer cancel()
+
+	query := fmt.Sprintf("SELECT 1 FROM `%s`.`%s` LIMIT 1", database, table)
+	_, err := client.Query(checkCtx, query)
+	if err != nil {
+		// Log the error for debugging, but don't treat it as a service failure here.
+		s.log.Debug("table existence check failed",
+			"database", database,
+			"table", table,
+			"query", query,
+			"error", err.Error(), // Use Error() for concise logging
+		)
+		return false
+	}
+	return true
 }
 
 // GetSourceHealth retrieves the health status of a source
