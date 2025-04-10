@@ -73,16 +73,12 @@ export const useSourcesStore = defineStore("sources", () => {
     return map;
   });
 
-  // Check if current source is valid for querying
+  // Check if current source is valid for querying (connected according to the backend check)
   const hasValidCurrentSource = computed(() => {
     const details = state.data.value.currentSourceDetails;
-    // Define what constitutes a "valid" source for querying
-    // e.g., must have connection info, be connected, and have columns
-    return !!(details &&
-              details.connection &&
-              details.is_connected === true &&
-              details.columns &&
-              details.columns.length > 0);
+    // A source is considered valid for querying if the backend check marked it as connected.
+    // We still need the details object to exist.
+    return !!(details && details.is_connected === true);
   });
 
   // Get formatted table name from current source details

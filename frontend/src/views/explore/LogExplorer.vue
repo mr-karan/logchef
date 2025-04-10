@@ -197,15 +197,20 @@ const showNoSourcesState = computed(() =>
   (!availableSources.value || availableSources.value.length === 0)
 )
 
-// Add a new computed property for source not connected state
-const showSourceNotConnectedState = computed(() =>
-  !isInitializing.value &&
-  !showNoTeamsState.value &&
-  !showNoSourcesState.value &&
-  currentSourceId.value !== null &&
-  currentSourceId.value > 0 &&
-  !sourcesStore.hasValidCurrentSource
-);
+// Computed property to show the "Source Not Connected" state.
+// This should only be true AFTER details have loaded and the source is confirmed disconnected.
+const showSourceNotConnectedState = computed(() => {
+  // Don't show during init, if no teams/sources, or no source selected
+  if (isInitializing.value || showNoTeamsState.value || showNoSourcesState.value || !currentSourceId.value) {
+    return false;
+  }
+  // Don't show while details for the *current* source are loading
+  if (sourcesStore.isLoadingSourceDetails(currentSourceId.value)) {
+    return false;
+  }
+  // Show only if details *have* loaded (details exist and match current ID) AND the source is invalid/disconnected
+  return sourcesStore.currentSourceDetails?.id === currentSourceId.value && !sourcesStore.hasValidCurrentSource;
+});
 
 // Use source details from the store
 const activeSourceTableName = computed(() => sourcesStore.getCurrentSourceTableName || '');
