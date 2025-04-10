@@ -1,3 +1,5 @@
+import { type QueryCondition } from '@/utils/logchefql/api';
+
 import type { DateValue, CalendarDateTime } from '@internationalized/date';
 
 /**
@@ -52,6 +54,7 @@ export interface QueryResult {
   meta?: {
     fieldsUsed: string[];
     operations: ('filter' | 'sort' | 'limit')[];
+    conditions?: QueryCondition[];
   };
 }
 

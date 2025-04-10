@@ -51,7 +51,8 @@ interface Props {
     timestampField?: string
     severityField?: string
     timezone?: 'local' | 'utc'
-    searchTerms?: string[] // Add new prop
+    queryFields?: string[] // Fields used in the query for column indicators
+    regexHighlights?: Record<string, { pattern: string, isNegated: boolean }> // Column-specific regex patterns
 }
 
 // Define the structure for storing state
@@ -65,7 +66,8 @@ const props = withDefaults(defineProps<Props>(), {
     timestampField: 'timestamp',
     severityField: 'severity_text',
     timezone: 'local',
-    searchTerms: () => [] // Default to empty array
+    queryFields: () => [],
+    regexHighlights: () => ({})
 })
 
 // Get the actual field names to use with fallbacks
@@ -172,8 +174,8 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
 
 // Watch for changes in columns OR search terms to regenerate table columns
 watch(
-    () => [props.columns, props.searchTerms, displayTimezone.value], // Also watch timezone for createColumns
-    ([newColumns, newSearchTerms, newTimezone]) => {
+    () => [props.columns, displayTimezone.value], // Also watch timezone for createColumns
+    ([newColumns, newTimezone]) => {
         if (!newColumns || newColumns.length === 0) {
             tableColumns.value = []; // Clear columns if input is empty
             // Reset dependent state if columns are cleared
@@ -183,13 +185,14 @@ watch(
             return;
         }
 
-        // Regenerate columns with the current search terms and timezone
+        // Regenerate columns with the current timezone
         tableColumns.value = createColumns(
             newColumns as any, // Use the columns directly as was working before
             timestampFieldName.value,
             newTimezone as 'local' | 'utc',
             severityFieldName.value,
-            props.searchTerms
+            props.queryFields,
+            props.regexHighlights
         );
 
         // Re-initialize state based on the potentially new columns

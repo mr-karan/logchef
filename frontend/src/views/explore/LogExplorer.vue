@@ -49,6 +49,8 @@ import { useExploreUrlSync } from '@/composables/useExploreUrlSync'
 import { useQuery } from '@/composables/useQuery'
 import type { EditorMode } from '@/views/explore/types'
 import type { ComponentPublicInstance } from 'vue'; // Import ComponentPublicInstance
+import { type QueryCondition, parseAndTranslateLogchefQL } from '@/utils/logchefql/api';
+import { QueryService } from '@/services/QueryService';
 
 // Router and stores
 const router = useRouter()
@@ -80,20 +82,91 @@ const {
   handleLimitUpdate
 } = useQuery()
 
-// --- Add computed property to extract search terms ---
-const searchTermsToHighlight = computed(() => {
-  if (activeMode.value !== 'logchefql' || !logchefQuery.value) {
-    return [];
+// Create default empty parsed query state
+const EMPTY_PARSED_QUERY = { success: false, meta: { fieldsUsed: [], conditions: [] } };
+
+// Parse the query after execution to highlight columns used in search
+const lastParsedQuery = ref<{
+  success: boolean;
+  meta?: {
+    fieldsUsed: string[];
+    conditions: QueryCondition[];
   }
-  // Simple regex to extract quoted strings (single or double)
-  const regex = /["']([^"']+)["']/g;
-  const matches = logchefQuery.value.matchAll(regex);
-  const terms = Array.from(matches, match => match[1]);
-  // Optional: Add simple unquoted terms if needed, but start with quoted ones
-  // Example: Add terms separated by space not part of key=value
-  // const potentialUnquoted = logchefQuery.value.split(/\s+/).filter(term => !term.includes('=') && !term.includes('"') && !term.includes("'"));
-  // return [...new Set([...terms, ...potentialUnquoted])]; // Combine and deduplicate
-  return [...new Set(terms)]; // Deduplicate quoted terms
+}>(EMPTY_PARSED_QUERY);
+
+// Update the parsed query whenever a new query is executed
+watch(() => exploreStore.lastExecutedState, (newState) => {
+  if (!newState) {
+    // Reset state if execution state is cleared
+    lastParsedQuery.value = EMPTY_PARSED_QUERY;
+    return;
+  }
+
+  if (activeMode.value === 'logchefql') {
+    // Check if query is empty
+    if (!logchefQuery.value || logchefQuery.value.trim() === '') {
+      // Clear highlights for empty queries
+      lastParsedQuery.value = EMPTY_PARSED_QUERY;
+    } else {
+      // Parse the query using LogchefQL parser
+      const result = parseAndTranslateLogchefQL(logchefQuery.value);
+      lastParsedQuery.value = result;
+    }
+  } else {
+    // Reset when in SQL mode
+    lastParsedQuery.value = EMPTY_PARSED_QUERY;
+  }
+}, { immediate: true });
+
+// Also handle mode changes properly
+watch(() => activeMode.value, (newMode) => {
+  if (newMode !== 'logchefql') {
+    // Reset when switching away from LogchefQL
+    lastParsedQuery.value = EMPTY_PARSED_QUERY;
+  } else if (newMode === 'logchefql' && logchefQuery.value) {
+    // Re-parse when switching back to LogchefQL and there's a query
+    const result = parseAndTranslateLogchefQL(logchefQuery.value);
+    lastParsedQuery.value = result;
+  }
+});
+
+// Add computed property to get parsed query structure
+const parsedQuery = computed(() => {
+  return lastParsedQuery.value;
+});
+
+// Use structured data for query fields
+const queryFields = computed(() => {
+  if (!parsedQuery.value.success) return [];
+  return parsedQuery.value.meta?.fieldsUsed || [];
+});
+
+// Use structured data for regex patterns
+const regexHighlights = computed(() => {
+  const highlights: Record<string, { pattern: string, isNegated: boolean }> = {};
+
+  if (!parsedQuery.value.success) return highlights;
+
+  // Extract only regex conditions
+  const regexConditions = (parsedQuery.value.meta?.conditions || [])
+    .filter((cond: QueryCondition) => cond.isRegex);
+
+  // Process each regex condition
+  regexConditions.forEach((cond: QueryCondition) => {
+    let pattern = cond.value;
+    // Remove quotes if they exist
+    if ((pattern.startsWith('"') && pattern.endsWith('"')) ||
+      (pattern.startsWith("'") && pattern.endsWith("'"))) {
+      pattern = pattern.slice(1, -1);
+    }
+
+    highlights[cond.field] = {
+      pattern,
+      isNegated: cond.operator === '!~'
+    };
+  });
+
+  return highlights;
 });
 
 const {
@@ -1040,7 +1113,7 @@ const clearQueryEditor = () => {
                 :source-id="String(exploreStore.sourceId)" :team-id="teamsStore.currentTeamId"
                 :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
                 :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field" :timezone="displayTimezone"
-                :search-terms="searchTermsToHighlight" /> <!-- Pass the computed terms -->
+                :query-fields="queryFields" :regex-highlights="regexHighlights" />
             </template>
 
             <!-- No Results State -->

@@ -3,6 +3,17 @@ import { validateSQL } from '@/utils/clickhouse-sql';
 import { createTimeRangeCondition, timeRangeToCalendarDateTime, formatDateForSQL } from '@/utils/time-utils';
 import type { QueryOptions, QueryResult, TimeRange } from '@/types/query';
 
+// Enhance the QueryResult meta type to support our conditions
+declare module '@/types/query' {
+  interface QueryResult {
+    meta?: {
+      fieldsUsed: string[];
+      operations: ('filter' | 'sort' | 'limit')[];
+      conditions?: QueryCondition[];
+    };
+  }
+}
+
 /**
  * Central service for all query generation and manipulation operations
  */
@@ -54,7 +65,7 @@ export class QueryService {
     // --- Translate LogchefQL ---
     const warnings: string[] = [];
     let logchefqlConditions = '';
-    const meta: QueryResult['meta'] = {
+    const meta: NonNullable<QueryResult['meta']> = {
       fieldsUsed: [],
       operations: ['sort', 'limit'] // Base operations
     };
@@ -78,6 +89,11 @@ export class QueryService {
           // If translationResult has meta and fieldsUsed, add them to our meta
           if (translationResult.meta && Array.isArray(translationResult.meta.fieldsUsed)) {
             meta.fieldsUsed = [...translationResult.meta.fieldsUsed];
+          }
+
+          // Add conditions if available from the enhanced translation
+          if (translationResult.meta && Array.isArray(translationResult.meta.conditions)) {
+            meta.conditions = [...translationResult.meta.conditions];
           }
         }
       } catch (error: any) {
