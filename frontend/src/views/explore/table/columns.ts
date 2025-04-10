@@ -2,7 +2,7 @@ import type { ColumnDef, Column, Row } from "@tanstack/vue-table";
 import { formatTimestamp, formatLogContent } from "@/lib/utils"; // Import formatLogContent
 import { h, type VNode } from "vue"; // Import VNode
 import { Button } from "@/components/ui/button";
-import { ArrowUpDown } from "lucide-vue-next";
+import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-vue-next"; // Import new icons
 import type { ColumnInfo } from "@/api/explore";
 import { getSeverityClasses } from "@/lib/utils"; // Import getSeverityClasses
 
@@ -153,14 +153,23 @@ export function createColumns(
           Button,
           {
             variant: "ghost",
-            class: "h-8 px-2 hover:bg-muted/20",
+            class: "h-8 px-2 hover:bg-muted/20 flex items-center", // Ensure flex alignment
             onClick: () => column.toggleSorting(column.getIsSorted() === "asc"),
           },
-          () => [
-            // Display the original column name in the header
-            col.name || id,
-            h(ArrowUpDown, { class: "ml-2 h-3 w-3 text-muted-foreground" }),
-          ]
+          () => {
+            const children = [col.name || id]; // Start with column name
+            const sortState = column.getIsSorted();
+            const iconClass = "ml-2 h-3 w-3 text-muted-foreground flex-shrink-0"; // Keep icon style
+
+            if (sortState === 'asc') {
+              children.push(h(ArrowUp, { class: iconClass }));
+            } else if (sortState === 'desc') {
+              children.push(h(ArrowDown, { class: iconClass }));
+            }
+            // No icon if sortState is false
+
+            return children;
+          }
         );
       },
 

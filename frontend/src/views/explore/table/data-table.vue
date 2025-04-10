@@ -19,7 +19,7 @@ import {
 } from '@tanstack/vue-table'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Search, GripVertical, Download } from 'lucide-vue-next'
+import { Search, GripVertical, Download, Copy, Timer, Rows4 } from 'lucide-vue-next'
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import DataTableColumnSelector from './data-table-column-selector.vue'
@@ -569,12 +569,17 @@ function formatExecutionTime(ms: number): string {
         <!-- Results Header with Controls and Pagination -->
         <div class="flex items-center justify-between p-2 border-b flex-shrink-0">
             <!-- Left side - Query stats -->
-            <div class="flex-1 text-sm text-muted-foreground">
-                <span v-if="stats && stats.execution_time_ms !== undefined" class="text-sm">
-                    Query time: <span class="font-medium">{{ formatExecutionTime(stats.execution_time_ms) }}</span>
+            <div class="flex items-center gap-3 text-sm text-muted-foreground">
+                <span v-if="stats && stats.execution_time_ms !== undefined" class="inline-flex items-center">
+                    <Timer class="h-3.5 w-3.5 mr-1.5 text-muted-foreground/80" />
+                    Query time:
+                    <span class="ml-1 font-medium text-foreground/90">{{ formatExecutionTime(stats.execution_time_ms)
+                    }}</span>
                 </span>
-                <span v-if="stats && stats.rows_read !== undefined" class="ml-3 text-sm">
-                    Rows: <span class="font-medium">{{ stats.rows_read.toLocaleString() }}</span>
+                <span v-if="stats && stats.rows_read !== undefined" class="inline-flex items-center">
+                    <Rows4 class="h-3.5 w-3.5 mr-1.5 text-muted-foreground/80" />
+                    Rows:
+                    <span class="ml-1 font-medium text-foreground/90">{{ stats.rows_read.toLocaleString() }}</span>
                 </span>
             </div>
 
@@ -677,7 +682,7 @@ function formatExecutionTime(ms: number): string {
                                     <div class="flex items-center h-full">
                                         <!-- Drag Handle -->
                                         <span
-                                            class="flex items-center justify-center flex-shrink-0 w-5 h-full mr-1.5 cursor-grab text-muted-foreground/50 group-hover:text-muted-foreground"
+                                            class="flex items-center justify-center flex-shrink-0 w-5 h-full mr-1.5 cursor-grab text-muted-foreground/50 group-hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                                             title="Drag to reorder column">
                                             <GripVertical class="h-4 w-4" />
                                         </span>
@@ -691,7 +696,7 @@ function formatExecutionTime(ms: number): string {
 
                                         <!-- Column Resizer (Absolute Positioned) -->
                                         <div v-if="header.column.getCanResize()"
-                                            class="absolute right-0 top-0 h-full w-5 cursor-col-resize select-none touch-none flex items-center justify-center hover:bg-muted/40 transition-colors z-10"
+                                            class="absolute right-0 top-0 h-full w-5 cursor-col-resize select-none touch-none flex items-center justify-center hover:bg-muted/40 transition-colors z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                                             @mousedown="(e) => { e.preventDefault(); e.stopPropagation(); handleResize(e, header); }"
                                             @touchstart="(e) => { e.preventDefault(); e.stopPropagation(); handleResize(e, header); }"
                                             @click.stop title="Resize column">
@@ -722,7 +727,7 @@ function formatExecutionTime(ms: number): string {
                                     row.getIsExpanded() ? 'expanded-row bg-primary/15' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
                                 ]" @click="handleRowClick(row)($event)">
                                     <td v-for="cell in row.getVisibleCells()" :key="cell.id"
-                                        class="px-3 py-2 align-top font-mono text-xs leading-normal overflow-hidden border-r border-muted/20"
+                                        class="px-3 py-2 align-top font-mono text-xs leading-normal overflow-hidden border-r border-muted/20 relative"
                                         :class="[
                                             cell.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
                                         ]" :style="{
@@ -730,12 +735,19 @@ function formatExecutionTime(ms: number): string {
                                             minWidth: `${cell.column.columnDef.minSize ?? defaultColumn.minSize}px`,
                                             maxWidth: `${cell.column.columnDef.maxSize ?? defaultColumn.maxSize}px`
                                         }">
-                                        <div class="flex items-center gap-1 w-full overflow-hidden">
-                                            <div class="whitespace-pre w-full overflow-hidden"
+                                        <div class="flex items-center justify-between gap-1 w-full overflow-hidden">
+                                            <div class="whitespace-pre flex-grow min-w-0 overflow-hidden"
                                                 :title="formatCellValue(cell.getValue())">
                                                 <FlexRender v-if="cell.column.columnDef.cell"
                                                     :render="cell.column.columnDef.cell" :props="cell.getContext()" />
                                             </div>
+                                            <!-- Copy Button -->
+                                            <Button variant="ghost" size="icon"
+                                                class="h-5 w-5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150 focus:opacity-100"
+                                                @click.stop="copyCell(cell.getValue())" title="Copy cell value"
+                                                aria-label="Copy cell value">
+                                                <Copy class="h-3 w-3" />
+                                            </Button>
                                         </div>
                                     </td>
                                 </tr>
@@ -1157,12 +1169,13 @@ td>.flex>.whitespace-pre {
 
 /* Refined Timestamp Colors for better distinction */
 :deep(.timestamp-date) {
-    color: hsl(var(--foreground) / 0.75);
-    /* More distinct dimming for date */
+    color: hsl(var(--foreground) / 0.60);
+    /* Even lighter */
 }
 
 .dark :deep(.timestamp-date) {
-    color: hsl(var(--foreground) / 0.65);
+    color: hsl(var(--foreground) / 0.50);
+    /* Even lighter */
 }
 
 :deep(.timestamp-separator) {
@@ -1173,9 +1186,7 @@ td>.flex>.whitespace-pre {
 
 :deep(.timestamp-time) {
     color: hsl(var(--foreground));
-    /* Keep time prominent */
     font-weight: 500;
-    /* Keep slightly bolder */
 }
 
 .dark :deep(.timestamp-time) {
