@@ -187,13 +187,25 @@ const editQueryData = ref<SavedTeamQuery | null>(null)
 
 // UI state computed properties
 const showLoadingState = computed(() => isInitializing.value && !urlError.value)
+
 const showNoTeamsState = computed(() => !isInitializing.value && (!availableTeams.value || availableTeams.value.length === 0))
+
 const showNoSourcesState = computed(() =>
   !isInitializing.value &&
   !showNoTeamsState.value &&
   currentTeamId.value !== null && currentTeamId.value > 0 &&
   (!availableSources.value || availableSources.value.length === 0)
 )
+
+// Add a new computed property for source not connected state
+const showSourceNotConnectedState = computed(() =>
+  !isInitializing.value &&
+  !showNoTeamsState.value &&
+  !showNoSourcesState.value &&
+  currentSourceId.value !== null &&
+  currentSourceId.value > 0 &&
+  !sourcesStore.hasValidCurrentSource
+);
 
 // Use source details from the store
 const activeSourceTableName = computed(() => sourcesStore.getCurrentSourceTableName || '');
@@ -580,11 +592,16 @@ const handleSaveOrUpdateClick = async () => {
 };
 
 onBeforeUnmount(() => {
-  // Keep this conditional console.log for non-production environments
+  // Logging for dev troubleshooting can be enabled in development mode only
   if (import.meta.env.MODE !== 'production') {
     console.log("LogExplorer unmounted");
   }
 });
+
+// Additional debug for route changes
+watch(() => currentRoute.fullPath, (newPath, oldPath) => {
+  // No logging needed here
+}, { immediate: true });
 </script>
 
 <template>
@@ -637,6 +654,85 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
+  <!-- Source Not Connected State -->
+  <div v-else-if="showSourceNotConnectedState" class="flex flex-col h-screen overflow-hidden">
+    <!-- Filter Bar with Team/Source Selection (similar to main explorer) -->
+    <div class="border-b bg-background py-2 px-4 flex items-center h-12 shadow-sm">
+      <!-- Data Source Group -->
+      <div class="flex items-center space-x-2 min-w-0">
+        <!-- Team Selector -->
+        <Select :model-value="currentTeamId?.toString() ?? ''" @update:model-value="handleTeamChange"
+          :disabled="isProcessingTeamChange">
+          <SelectTrigger class="h-8 text-sm w-48">
+            <SelectValue placeholder="Select team">{{ selectedTeamName }}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectLabel>Teams</SelectLabel>
+              <SelectItem v-for="team in availableTeams" :key="team.id" :value="team.id.toString()">
+                {{ team.name }}
+              </SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+
+        <!-- Source Selector - Modified to show connection status -->
+        <Select :model-value="currentSourceId?.toString() ?? ''" @update:model-value="handleSourceChange"
+          :disabled="isProcessingSourceChange || !currentTeamId || availableSources.length === 0">
+          <SelectTrigger class="h-8 text-sm w-64">
+            <SelectValue placeholder="Select source">{{ selectedSourceName }}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectLabel>Log Sources</SelectLabel>
+              <SelectItem v-if="!currentTeamId" value="no-team" disabled>Select a team first</SelectItem>
+              <SelectItem v-else-if="availableSources.length === 0" value="no-sources" disabled>No sources available
+              </SelectItem>
+              <template v-for="source in availableSources" :key="source.id">
+                <SelectItem :value="source.id.toString()">
+                  <div class="flex items-center gap-2">
+                    <span>{{ formatSourceName(source) }}</span>
+                    <span v-if="!source.is_connected"
+                      class="inline-flex items-center text-xs bg-destructive/15 text-destructive px-1.5 py-0.5 rounded">
+                      Disconnected
+                    </span>
+                  </div>
+                </SelectItem>
+              </template>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+
+    <!-- Source Not Connected Message -->
+    <div class="flex-1 flex flex-col items-center justify-center p-8">
+      <div class="max-w-xl w-full bg-destructive/10 border border-destructive/20 rounded-lg p-6 text-center">
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+          class="mx-auto mb-4 text-destructive">
+          <path d="M18 6 6 18"></path>
+          <path d="m6 6 12 12"></path>
+        </svg>
+        <h2 class="text-xl font-semibold mb-2">Source Not Connected</h2>
+        <p class="text-muted-foreground mb-4">
+          The selected source "{{ selectedSourceName }}" is not properly connected to the database.
+          Please check the source configuration or select a different source.
+        </p>
+
+        <div class="flex items-center justify-center gap-3">
+          <Button variant="outline"
+            @click="router.push({ name: 'SourceSettings', params: { sourceId: currentSourceId } })">
+            Configure Source
+          </Button>
+          <Button variant="default" @click="router.push({ name: 'NewSource' })">
+            Add New Source
+          </Button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Main Explorer View -->
   <div v-else class="flex flex-col h-screen overflow-hidden">
     <!-- URL Error -->
@@ -678,9 +774,17 @@ onBeforeUnmount(() => {
               <SelectItem v-if="!currentTeamId" value="no-team" disabled>Select a team first</SelectItem>
               <SelectItem v-else-if="availableSources.length === 0" value="no-sources" disabled>No sources available
               </SelectItem>
-              <SelectItem v-for="source in availableSources" :key="source.id" :value="source.id.toString()">
-                {{ formatSourceName(source) }}
-              </SelectItem>
+              <template v-for="source in availableSources" :key="source.id">
+                <SelectItem :value="source.id.toString()">
+                  <div class="flex items-center gap-2">
+                    <span>{{ formatSourceName(source) }}</span>
+                    <span v-if="!source.is_connected"
+                      class="inline-flex items-center text-xs bg-destructive/15 text-destructive px-1.5 py-0.5 rounded">
+                      Disconnected
+                    </span>
+                  </div>
+                </SelectItem>
+              </template>
             </SelectGroup>
           </SelectContent>
         </Select>
@@ -875,7 +979,7 @@ onBeforeUnmount(() => {
             <template v-if="!isExecutingQuery && exploreStore.logs?.length">
               <DataTable v-if="exploreStore.logs.length > 0 && exploreStore.columns?.length > 0"
                 :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}`"
-                :columns="exploreStore.columns" :data="exploreStore.logs" :stats="exploreStore.queryStats"
+                :columns="exploreStore.columns as any" :data="exploreStore.logs" :stats="exploreStore.queryStats"
                 :source-id="String(exploreStore.sourceId)" :team-id="teamsStore.currentTeamId"
                 :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
                 :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field" :timezone="displayTimezone"

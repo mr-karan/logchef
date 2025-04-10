@@ -36,29 +36,29 @@ export const useSourcesStore = defineStore("sources", () => {
   const sourceQueries = computed(() => state.data.value.sourceQueries);
   const sourceStats = computed(() => state.data.value.sourceStats);
   const currentSourceDetails = computed(() => state.data.value.currentSourceDetails);
-  
+
   // Filtered sources
-  const visibleSources = computed(() => 
+  const visibleSources = computed(() =>
     sources.value.filter(source => !source.archived)
   );
-  
+
   // Source getters
-  const getSourceById = computed(() => (id: number) => 
+  const getSourceById = computed(() => (id: number) =>
     sources.value.find(source => source.id === id)
   );
-  
+
   const getTeamSourceById = computed(() => (id: number) =>
     teamSources.value.find(source => source.id === id)
   );
-  
+
   // Source stats getter
   const getSourceStatsById = computed(() => (id: number) =>
     sourceStats.value[id.toString()]
   );
-  
+
   // Track validated connections
   const validatedConnections = reactive(new Set<string>());
-  
+
   // Hydration state
   const isHydrated = ref(false);
 
@@ -72,15 +72,19 @@ export const useSourcesStore = defineStore("sources", () => {
     }
     return map;
   });
-  
+
   // Check if current source is valid for querying
   const hasValidCurrentSource = computed(() => {
     const details = state.data.value.currentSourceDetails;
     // Define what constitutes a "valid" source for querying
-    // e.g., must have connection info and columns
-    return !!(details && details.connection && details.columns && details.columns.length > 0);
+    // e.g., must have connection info, be connected, and have columns
+    return !!(details &&
+              details.connection &&
+              details.is_connected === true &&
+              details.columns &&
+              details.columns.length > 0);
   });
-  
+
   // Get formatted table name from current source details
   const getCurrentSourceTableName = computed(() => {
     const details = state.data.value.currentSourceDetails;
@@ -105,7 +109,7 @@ export const useSourcesStore = defineStore("sources", () => {
       });
     });
   }
-  
+
   // Hydrate the store
   async function hydrate() {
     if (!isHydrated.value && sources.value.length === 0) {
@@ -138,11 +142,11 @@ export const useSourcesStore = defineStore("sources", () => {
 
       if (!currentTeamId) {
         return state.handleError(
-          { 
+          {
             status: "error",
-            message: "No team selected", 
-            error_type: "ValidationError" 
-          } as APIErrorResponse, 
+            message: "No team selected",
+            error_type: "ValidationError"
+          } as APIErrorResponse,
           `loadSourceQueries-${id}`
         );
       }
@@ -209,7 +213,7 @@ export const useSourcesStore = defineStore("sources", () => {
     query: Omit<CreateTeamQueryRequest, "team_id">
   ) {
     const key = `${teamId}-${sourceId}`;
-    
+
     const result = await state.withLoading(`createTeamSourceQuery-${key}`, async () => {
       return await state.callApi({
         apiCall: () => sourcesApi.createTeamSourceQuery(teamId, sourceId, query),
@@ -314,11 +318,11 @@ export const useSourcesStore = defineStore("sources", () => {
 
     if (!currentTeamId) {
       return state.handleError(
-        { 
+        {
           status: "error",
-          message: "No team selected", 
-          error_type: "ValidationError" 
-        } as APIErrorResponse, 
+          message: "No team selected",
+          error_type: "ValidationError"
+        } as APIErrorResponse,
         `getSource-${sourceId}`
       );
     }
@@ -341,21 +345,17 @@ export const useSourcesStore = defineStore("sources", () => {
       });
     });
   }
-  
+
   async function loadSourceDetails(sourceId: number) {
     // Use a unique loading key
     const loadingKey = `loadSourceDetails-${sourceId}`;
-    console.log(`sourcesStore: Loading details for source ${sourceId}`);
 
     // Check cache first (optional but recommended)
     const cachedSource = state.data.value.teamSources.find(s => s.id === sourceId);
     if (cachedSource && cachedSource.columns && cachedSource.columns.length > 0) {
        // Check if current details are already set to this source to avoid redundant updates
        if (state.data.value.currentSourceDetails?.id !== sourceId) {
-          console.log(`sourcesStore: Using cached details for source ${sourceId}`);
           state.data.value.currentSourceDetails = cachedSource;
-       } else {
-          console.log(`sourcesStore: Details for source ${sourceId} already loaded and match cache.`);
        }
        // Return success immediately if cached
        return { success: true, data: cachedSource };
@@ -370,19 +370,16 @@ export const useSourcesStore = defineStore("sources", () => {
       // Use the existing getSource function which seems to handle team context
       const currentTeamId = teamsStore.currentTeamId;
       if (!currentTeamId) {
-        console.error(`sourcesStore: Cannot load source details - no team selected.`);
         return state.handleError(
           { status: "error", message: "No team selected", error_type: "ValidationError" } as APIErrorResponse,
           loadingKey
         );
       }
 
-      console.log(`sourcesStore: Fetching details via API for source ${sourceId} in team ${currentTeamId}`);
       return await state.callApi<Source>({
         // Use getTeamSource API call as it seems to be the one implemented
         apiCall: () => sourcesApi.getTeamSource(currentTeamId, sourceId),
         onSuccess: (data) => {
-          console.log(`sourcesStore: Successfully loaded details for source ${sourceId}`, data);
           state.data.value.currentSourceDetails = data;
           // Update the source in teamSources as well (like the existing getSource does)
           const index = state.data.value.teamSources.findIndex((s) => s.id === sourceId);
@@ -393,7 +390,6 @@ export const useSourcesStore = defineStore("sources", () => {
           }
         },
         onError: (error) => {
-          console.error(`sourcesStore: Error loading details for source ${sourceId}`, error);
           state.data.value.currentSourceDetails = null; // Clear on error
         },
         operationKey: loadingKey,
@@ -412,7 +408,7 @@ export const useSourcesStore = defineStore("sources", () => {
     severity_field?: string;
   }) {
     const connectionKey = `${connectionInfo.host}-${connectionInfo.database}-${connectionInfo.table_name}`;
-    
+
     return await state.withLoading("validateSourceConnection", async () => {
       return await state.callApi({
         apiCall: () => sourcesApi.validateSourceConnection(connectionInfo),
@@ -424,12 +420,12 @@ export const useSourcesStore = defineStore("sources", () => {
       });
     });
   }
-  
+
   function isConnectionValidated(host: string, database: string, tableName: string): boolean {
     const connectionKey = `${host}-${database}-${tableName}`;
     return validatedConnections.has(connectionKey);
   }
-  
+
   function invalidateSourceCache(sourceId: number) {
     state.data.value.sources = state.data.value.sources.filter(
       s => s.id !== sourceId
@@ -437,23 +433,22 @@ export const useSourcesStore = defineStore("sources", () => {
     state.data.value.teamSources = state.data.value.teamSources.filter(
       s => s.id !== sourceId
     );
-    
+
     // Also clear any stats for this source
     delete state.data.value.sourceStats[sourceId.toString()];
-    
+
     // Clear current source details if it matches this source
     if (state.data.value.currentSourceDetails?.id === sourceId) {
       state.data.value.currentSourceDetails = null;
     }
   }
-  
+
   function clearCurrentSourceDetails() {
-    console.log("sourcesStore: Clearing current source details");
     state.data.value.currentSourceDetails = null;
   }
-  
+
   // Use the centralized error handler from base store
-  
+
   // Update source
   async function updateSource(id: number, payload: Partial<Source>) {
     return await state.withLoading(`updateSource-${id}`, async () => {
@@ -472,7 +467,7 @@ export const useSourcesStore = defineStore("sources", () => {
               ...sources.value.slice(index + 1)
             ];
           }
-          
+
           // Also update in team sources if present
           const teamIndex = teamSources.value.findIndex(s => s.id === id);
           if (teamIndex >= 0) {
@@ -483,7 +478,7 @@ export const useSourcesStore = defineStore("sources", () => {
               ...teamSources.value.slice(teamIndex + 1)
             ];
           }
-          
+
           // Invalidate cache for this source
           invalidateSourceCache(id);
         }
