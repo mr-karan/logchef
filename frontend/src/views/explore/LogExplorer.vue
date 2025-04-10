@@ -1005,14 +1005,6 @@ const clearQueryEditor = () => {
             <!-- Query Stats Preview -->
             <div class="text-xs text-muted-foreground flex items-center gap-3"
               v-if="exploreStore.lastExecutionTimestamp">
-              <Play v-if="!isExecutingQuery" class="h-4 w-4" />
-              <RefreshCw v-else class="h-4 w-4 animate-spin" />
-              <span>{{ isExecutingQuery ? 'Running Query...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>
-            </Button>
-
-            <!-- Query Stats Preview -->
-            <div class="text-xs text-muted-foreground flex items-center gap-3"
-              v-if="exploreStore.lastExecutionTimestamp">
               <span>Last successful run: {{ new Date(exploreStore.lastExecutionTimestamp).toLocaleTimeString() }}</span>
             </div>
           </div>
