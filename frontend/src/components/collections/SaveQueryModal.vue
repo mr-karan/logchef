@@ -381,8 +381,8 @@ function handleClose() {
 }
 
 // Add computed properties for the descriptions
-const editDescription = 'Update details for this saved query.'
-const saveDescription = 'Save your current query configuration for future use.'
+const editDescription = 'Update details for this collection item.'
+const saveDescription = 'Save your current query to your collection for future use.'
 </script>
 
 <template>
@@ -392,11 +392,11 @@ const saveDescription = 'Save your current query configuration for future use.'
         <DialogTitle>
           <span v-if="isEditing" class="flex items-center">
             <Pencil class="h-4 w-4 mr-2" />
-            Edit Saved Query
+            Edit Collection Item
           </span>
           <span v-else class="flex items-center">
             <SaveIcon class="h-4 w-4 mr-2" />
-            Save New Query
+            Add to Collection
           </span>
         </DialogTitle>
         <DialogDescription>

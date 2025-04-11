@@ -69,7 +69,7 @@ const routes: RouteRecordRaw[] = [
           error("Router", "Failed to load SavedQueriesView component", err);
           return { default: ComponentLoadError };
         }),
-        meta: { title: "Saved Queries" },
+        meta: { title: "Collections" },
       },
     ],
   },

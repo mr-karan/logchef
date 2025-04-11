@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
-import { ChevronDown, Save, PlusCircle, ListTree, Pencil, Eye } from 'lucide-vue-next';
+import { ChevronDown, Save, PlusCircle, ListTree, Pencil, Eye, Search, X } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import {
   DropdownMenu,
@@ -16,6 +16,7 @@ import { useToast } from '@/components/ui/toast';
 import { TOAST_DURATION } from '@/lib/constants';
 import { type SavedTeamQuery } from '@/api/savedQueries';
 import { useSavedQueriesStore } from '@/stores/savedQueries';
+import { Input } from '@/components/ui/input';
 
 const props = defineProps<{
   selectedTeamId?: number;
@@ -33,6 +34,7 @@ const savedQueriesStore = useSavedQueriesStore();
 
 // Local state
 const isOpen = ref(false);
+const searchQuery = ref('');
 
 // Computed properties from store
 const isLoadingQueries = computed(() => {
@@ -40,6 +42,19 @@ const isLoadingQueries = computed(() => {
   return savedQueriesStore.isLoadingOperation(`fetchTeamSourceQueries-${props.selectedTeamId}-${props.selectedSourceId}`);
 });
 const queries = computed(() => savedQueriesStore.queries);
+
+// Filtered queries based on search term
+const filteredQueries = computed(() => {
+  if (!searchQuery.value.trim()) {
+    return queries.value;
+  }
+
+  const search = searchQuery.value.toLowerCase();
+  return queries.value.filter(query =>
+    query.name.toLowerCase().includes(search) ||
+    (query.description && query.description.toLowerCase().includes(search))
+  );
+});
 
 // Watch for changes in team/source ID
 watch(
@@ -61,9 +76,12 @@ watch(isOpen, async (open) => {
   if (open && props.selectedTeamId && props.selectedSourceId && !queries.value.length) {
     await loadQueries(props.selectedTeamId, props.selectedSourceId);
   }
-});
 
-// Load queries on mount as well (covered by immediate watch)
+  // Clear search when dropdown is closed
+  if (!open) {
+    searchQuery.value = '';
+  }
+});
 
 // Function to load queries using the store
 async function loadQueries(teamId: number, sourceId: number) {
@@ -81,6 +99,11 @@ async function loadQueries(teamId: number, sourceId: number) {
       duration: TOAST_DURATION.ERROR,
     });
   }
+}
+
+// Clear search function
+function clearSearch() {
+  searchQuery.value = '';
 }
 
 // Handle query selection
@@ -160,13 +183,26 @@ function goToQueries() {
       <Button variant="outline" class="w-full justify-between">
         <span class="flex items-center gap-1.5">
           <Save class="h-4 w-4 opacity-70" />
-          <span>Saved Queries</span>
+          <span>Collections</span>
         </span>
         <ChevronDown class="h-4 w-4 opacity-70" />
       </Button>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="start" class="w-[280px]">
-      <DropdownMenuLabel>Saved Queries</DropdownMenuLabel>
+      <DropdownMenuLabel>Collections</DropdownMenuLabel>
+
+      <!-- Search Input (New) -->
+      <div v-if="queries.length > 0" class="px-2 pt-2 pb-1">
+        <div class="relative">
+          <Search class="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+          <Input v-model="searchQuery" type="search" placeholder="Search collection..." class="pl-7 h-8 text-xs"
+            @click.stop />
+          <button v-if="searchQuery" @click.stop="clearSearch"
+            class="absolute right-2 top-2 text-muted-foreground hover:text-foreground">
+            <X class="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
 
       <!-- Loading state -->
       <div v-if="isLoadingQueries" class="px-2 py-3 flex flex-col gap-2">
@@ -183,9 +219,15 @@ function goToQueries() {
         No saved queries for this source. Save one to see it here.
       </div>
 
+      <!-- No search results state -->
+      <div v-else-if="filteredQueries.length === 0" class="px-2 py-3 text-sm text-muted-foreground">
+        No queries match your search.
+        <button @click="clearSearch" class="text-primary hover:underline block mt-1">Clear search</button>
+      </div>
+
       <!-- Queries list -->
       <template v-else>
-        <div v-for="query in queries.slice(0, 5)" :key="query.id"
+        <div v-for="query in searchQuery ? filteredQueries : filteredQueries.slice(0, 5)" :key="query.id"
           class="py-2 px-2 hover:bg-accent hover:text-accent-foreground flex items-center justify-between group relative cursor-pointer"
           @click.stop="selectQuery(query)">
           <span class="font-medium flex-1 pr-2 truncate">{{ query.name }}</span>
@@ -203,9 +245,9 @@ function goToQueries() {
           </div>
         </div>
 
-        <!-- Show "View All" option if there are more than 5 queries -->
-        <DropdownMenuSeparator v-if="queries.length > 5" />
-        <DropdownMenuItem v-if="queries.length > 5" @click="goToQueries" class="cursor-pointer">
+        <!-- Show "View All" option if there are more than 5 queries and not searching -->
+        <DropdownMenuSeparator v-if="!searchQuery && filteredQueries.length > 5" />
+        <DropdownMenuItem v-if="!searchQuery && filteredQueries.length > 5" @click="goToQueries" class="cursor-pointer">
           <ListTree class="mr-2 h-4 w-4" />
           <span>View All Queries ({{ queries.length }})</span>
         </DropdownMenuItem>
@@ -222,7 +264,7 @@ function goToQueries() {
       <!-- Go to all queries -->
       <DropdownMenuItem @click="goToQueries" class="cursor-pointer">
         <ListTree class="mr-2 h-4 w-4" />
-        <span>Manage Saved Queries</span>
+        <span>Manage Collections</span>
       </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>

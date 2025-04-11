@@ -69,7 +69,7 @@ export function useSavedQueries() {
 
     if (!query?.trim()) {
       toast({
-        title: 'Cannot Save',
+        title: 'Cannot Add to Collection',
         variant: 'destructive',
         description: 'Query is empty. Please enter a query to save.',
         duration: TOAST_DURATION.WARNING

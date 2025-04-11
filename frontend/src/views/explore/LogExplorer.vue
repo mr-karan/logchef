@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
-import { Plus, Play, RefreshCw, Share2, Keyboard } from 'lucide-vue-next'
+import { Plus, Play, RefreshCw, Share2, Keyboard, Save } from 'lucide-vue-next'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
@@ -699,7 +699,7 @@ const clearQueryEditor = () => {
 
   // Focus the editor using the ref after clearing
   nextTick(() => {
-    queryEditorRef.value?.focus();
+    queryEditorRef.value?.focus(true);
   });
 };
 
@@ -752,9 +752,9 @@ const handleDrillDown = (data: { column: string, value: any }) => {
   // Update the query
   logchefQuery.value = currentQuery;
 
-  // Focus the editor
+  // Focus the editor and move cursor to the end of the query
   nextTick(() => {
-    queryEditorRef.value?.focus();
+    queryEditorRef.value?.focus(true);
   });
 
   // Optionally, execute the query automatically
