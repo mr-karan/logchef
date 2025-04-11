@@ -132,6 +132,12 @@ watch(() => activeMode.value, (newMode, oldMode) => {
 
   // Auto-execution logic when mode changes
   if (newMode !== oldMode) {
+    // If switching to SQL mode, ensure the table name is correct
+    if (newMode === 'sql' && activeSourceTableName.value) {
+      // Update SQL query with the current table name
+      updateSqlTableReference(activeSourceTableName.value);
+    }
+
     // After changing mode, check if we have content that could be executed
     const hasContent = newMode === 'logchefql'
       ? (logchefQuery.value?.trim() || '') !== ''
@@ -460,6 +466,11 @@ watch(
           setTimeout(async () => {
             if (currentSourceId.value === newSourceId) { // Check if still the same after timeout
               await sourcesStore.loadSourceDetails(newSourceId);
+
+              // If we're in SQL mode, ensure the table name is correct
+              if (activeMode.value === 'sql' && sourcesStore.getCurrentSourceTableName) {
+                updateSqlTableReference(sourcesStore.getCurrentSourceTableName);
+              }
             }
           }, 50);
 
@@ -891,6 +902,59 @@ const handleLimitChange = (newLimit: number) => {
   // Call the original limit update handler from useQuery
   handleLimitUpdate();
 };
+
+// Add a watch for table name changes to update SQL queries when the source changes
+watch(
+  () => activeSourceTableName.value,
+  (newTableName, oldTableName) => {
+    // Skip if either name is missing or if they're the same
+    if (!newTableName || !oldTableName || newTableName === oldTableName) {
+      return;
+    }
+
+    // Only update SQL queries - LogchefQL doesn't reference tables directly
+    if (activeMode.value === 'sql') {
+      const currentSql = sqlQuery.value || '';
+
+      // Skip if there's no SQL query
+      if (!currentSql.trim()) {
+        return;
+      }
+
+      // Simple search/replace of the table name
+      const updatedSql = currentSql.replace(oldTableName, newTableName);
+
+      // Only update if changed
+      if (updatedSql !== currentSql) {
+        sqlQuery.value = updatedSql;
+        exploreStore.setRawSql(updatedSql);
+      }
+    }
+  }
+);
+
+// Helper function to update the table reference in SQL queries
+function updateSqlTableReference(tableName: string) {
+  if (!tableName) return;
+
+  const currentSql = sqlQuery.value?.trim() || '';
+  if (!currentSql) return;
+
+  // Check if query has a FROM clause
+  const fromMatch = /\bFROM\s+(`?[\w.]+`?)/i.exec(currentSql);
+  if (fromMatch) {
+    // Replace old table name with new one, preserving backticks if present
+    const oldRef = fromMatch[1];
+    const hasBackticks = oldRef.startsWith('`') && oldRef.endsWith('`');
+    const newRef = hasBackticks ? `\`${tableName}\`` : tableName;
+
+    const updatedSql = currentSql.replace(oldRef, newRef);
+    if (updatedSql !== currentSql) {
+      sqlQuery.value = updatedSql;
+      exploreStore.setRawSql(updatedSql);
+    }
+  }
+}
 </script>
 
 <template>
