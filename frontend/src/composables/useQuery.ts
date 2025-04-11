@@ -5,6 +5,7 @@ import { useTeamsStore } from '@/stores/teams';
 import { QueryService } from '@/services/QueryService';
 import { getErrorMessage } from '@/api/types';
 import type { TimeRange, QueryResult } from '@/types/query';
+import { validateLogchefQLWithDetails } from '@/utils/logchefql/api';
 
 // Define the valid editor modes
 type EditorMode = 'logchefql' | 'sql';
@@ -126,6 +127,16 @@ export function useQuery() {
 
       // Check if we have LogchefQL content that can be translated
       if (logchefQuery.value.trim()) {
+        // Validate LogchefQL before translating
+        const validation = validateLogchefQLWithDetails(logchefQuery.value);
+        if (!validation.valid) {
+          // Show error when switching modes with invalid LogchefQL
+          queryError.value = `Invalid LogchefQL syntax: ${validation.error}`;
+
+          // Don't switch modes if LogchefQL is invalid
+          return;
+        }
+
         // If there's LogchefQL content, always translate it
         const result = translateLogchefQLToSQL(logchefQuery.value);
 
@@ -177,6 +188,19 @@ export function useQuery() {
       const params = getCommonQueryParams();
       const mode = activeMode.value;
       const query = mode === 'logchefql' ? logchefQuery.value : sqlQuery.value;
+
+      // Validate LogchefQL query before execution
+      if (mode === 'logchefql' && query.trim()) {
+        const validation = validateLogchefQLWithDetails(query);
+        if (!validation.valid) {
+          queryError.value = validation.error || 'Invalid LogchefQL syntax';
+          return {
+            success: false,
+            sql: '',
+            error: validation.error || 'Invalid LogchefQL syntax'
+          };
+        }
+      }
 
       // Translate the mode to what QueryService expects
       const queryServiceMode = mode === 'logchefql' ? 'logchefql' : 'clickhouse-sql';

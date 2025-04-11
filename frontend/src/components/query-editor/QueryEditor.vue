@@ -123,7 +123,13 @@
     <div v-if="validationError"
       class="mt-2 p-2 text-sm text-destructive bg-destructive/10 rounded flex items-center gap-2">
       <AlertCircle class="h-4 w-4 flex-shrink-0" />
-      <span>{{ validationError }}</span>
+      <span>
+        <span class="font-medium">Validation Error: </span>
+        {{ validationError }}
+        <span v-if="validationError.includes('Missing boolean operator')" class="block mt-1 text-xs">
+          Hint: Use <code class="bg-muted px-1 rounded">and</code> or <code class="bg-muted px-1 rounded">or</code> between conditions. Example: <code class="bg-muted px-1 rounded">field1="value" and field2="value"</code>
+        </span>
+      </span>
     </div>
   </div>
 </template>
@@ -144,7 +150,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 
 import { initMonacoSetup, getDefaultMonacoOptions, getSingleLineModeOptions } from "@/utils/monaco";
 import { Parser as LogchefQLParser, State as LogchefQLState, Operator as LogchefQLOperator, VALID_KEY_VALUE_OPERATORS as LogchefQLValidOperators, isNumeric } from "@/utils/logchefql";
-import { validateLogchefQL } from "@/utils/logchefql/api"; // Simpler validation import
+import { validateLogchefQLWithDetails } from "@/utils/logchefql/api"; // Import detailed validation
 import { validateSQL, SQL_KEYWORDS, CLICKHOUSE_FUNCTIONS, SQL_TYPES } from "@/utils/clickhouse-sql";
 import { useExploreStore } from '@/stores/explore';
 import { QueryService } from '@/services/QueryService';
@@ -518,8 +524,13 @@ const submitQuery = () => {
     let isValid = true;
     if (currentContent.trim()) { // Only validate non-empty queries
       if (props.activeMode === 'logchefql') {
-        isValid = validateLogchefQL(currentContent);
-        if (!isValid) validationError.value = "Invalid LogchefQL syntax.";
+        // Use detailed validation to get specific error messages
+        const validation = validateLogchefQLWithDetails(currentContent);
+        isValid = validation.valid;
+        if (!isValid) {
+          // Display the specific error message instead of generic one
+          validationError.value = validation.error || "Invalid LogchefQL syntax.";
+        }
       } else {
         isValid = QueryService.validateSQL(currentContent);
         if (!isValid) validationError.value = "Invalid SQL syntax (e.g., missing SELECT/FROM or unbalanced parentheses).";

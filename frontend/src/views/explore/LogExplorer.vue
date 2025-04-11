@@ -49,7 +49,7 @@ import { useExploreUrlSync } from '@/composables/useExploreUrlSync'
 import { useQuery } from '@/composables/useQuery'
 import type { EditorMode } from '@/views/explore/types'
 import type { ComponentPublicInstance } from 'vue'; // Import ComponentPublicInstance
-import { type QueryCondition, parseAndTranslateLogchefQL } from '@/utils/logchefql/api';
+import { type QueryCondition, parseAndTranslateLogchefQL, validateLogchefQLWithDetails } from '@/utils/logchefql/api';
 import { QueryService } from '@/services/QueryService';
 
 // Router and stores
@@ -1148,7 +1148,16 @@ const handleDrillDown = (data: { column: string, value: any }) => {
 
           <!-- Query Error -->
           <div v-if="displayError" class="mt-2 text-sm text-destructive bg-destructive/10 p-2 rounded">
-            {{ displayError }}
+            <div class="font-medium">Query Error:</div>
+            <div>{{ displayError }}</div>
+            <div v-if="displayError.includes('Missing boolean operator')"
+              class="mt-1.5 pt-1.5 border-t border-destructive/20 text-xs">
+              <div class="font-medium">Hint:</div>
+              <div>Use <code class="bg-muted px-1 rounded">and</code> or <code class="bg-muted px-1 rounded">or</code>
+                between conditions.</div>
+              <div class="mt-1">Example: <code class="bg-muted px-1 rounded">level="error" and
+                service_name="api-gateway"</code></div>
+            </div>
           </div>
         </div>
 

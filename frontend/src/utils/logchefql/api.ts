@@ -121,12 +121,39 @@ export function parseAndTranslateLogchefQL(query: string): {
 }
 
 /**
- * Validate a LogchefQL query to check if it's syntactically correct.
- * @param query The LogchefQL query string.
- * @returns Whether the query is valid.
+ * Detects missing boolean operators between conditions in LogchefQL query.
+ * Specifically checks for patterns like: key=value key=value (without and/or between them)
+ *
+ * @param query The LogchefQL query string to validate
+ * @returns Error message if missing operators found, null otherwise
  */
-export function validateLogchefQL(query: string): boolean {
-  return validateQuery(query);
+function detectMissingBooleanOperators(query: string): string | null {
+  if (!query || query.trim() === '') {
+    return null;
+  }
+
+  const { tokens, errors } = tokenize(query);
+  if (errors.length > 0) {
+    return null; // Other errors will be caught by the main validator
+  }
+
+  for (let i = 0; i < tokens.length - 3; i++) {
+    // Look for pattern: key -> operator -> value -> key
+    // This indicates a missing boolean operator between conditions
+    if (
+      tokens[i]?.type === 'key' &&
+      tokens[i+1]?.type === 'operator' &&
+      (tokens[i+2]?.type === 'value' || tokens[i+2]?.type === 'key') &&
+      tokens[i+3]?.type === 'key'
+    ) {
+      // Build a more helpful error message
+      const firstKey = tokens[i].value;
+      const secondKey = tokens[i+3].value;
+      return `Missing boolean operator (and/or) between conditions: '${firstKey}' and '${secondKey}'`;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -139,5 +166,31 @@ export function validateLogchefQLWithDetails(query: string): {
   error?: string;
   errorPosition?: { line: number; column: number };
 } {
+  // First check for missing boolean operators
+  const missingOperatorError = detectMissingBooleanOperators(query);
+  if (missingOperatorError) {
+    return {
+      valid: false,
+      error: missingOperatorError,
+      // Position set to the last token for display purposes
+      errorPosition: { line: 1, column: query.length }
+    };
+  }
+
+  // Then do the standard validation
   return validateQueryWithDetails(query);
+}
+
+/**
+ * Validate a LogchefQL query to check if it's syntactically correct.
+ * This validation includes checks for:
+ * 1. Missing boolean operators between conditions (e.g., "field1=value field2=value")
+ * 2. Valid syntax (parentheses, operators, etc.)
+ * 3. Well-formed expressions
+ *
+ * @param query The LogchefQL query string.
+ * @returns Whether the query is valid.
+ */
+export function validateLogchefQL(query: string): boolean {
+  return validateLogchefQLWithDetails(query).valid;
 }

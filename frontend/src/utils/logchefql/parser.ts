@@ -87,6 +87,30 @@ export class QueryParser {
       }
     }
 
+    // Check if there's more content after this expression but no boolean operator
+    // This would indicate a potential missing boolean operator between conditions
+    if (this.peek() && this.peek()?.type === 'key') {
+      const nextToken = this.peek()!;
+      this.errors.push({
+        code: 'PARSE_ERROR',
+        message: `Missing boolean operator (and/or) before '${nextToken.value}'`,
+        position: nextToken.position
+      });
+
+      // Continue parsing to give the best effort result
+      const right = this.parsePrimary();
+      // Assume an AND operator to give a best-effort parse
+      if (left.type === 'logical' && left.operator === BoolOperator.AND) {
+        left.children.push(right);
+      } else {
+        left = {
+          type: 'logical',
+          operator: BoolOperator.AND,
+          children: [left, right]
+        };
+      }
+    }
+
     return left;
   }
 
