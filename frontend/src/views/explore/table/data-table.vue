@@ -19,7 +19,7 @@ import {
 } from '@tanstack/vue-table'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Search, GripVertical, Download, Copy, Timer, Rows4 } from 'lucide-vue-next'
+import { Search, GripVertical, Download, Copy, Timer, Rows4, ZoomIn } from 'lucide-vue-next'
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import DataTableColumnSelector from './data-table-column-selector.vue'
@@ -53,6 +53,7 @@ interface Props {
     timezone?: 'local' | 'utc'
     queryFields?: string[] // Fields used in the query for column indicators
     regexHighlights?: Record<string, { pattern: string, isNegated: boolean }> // Column-specific regex patterns
+    activeMode?: 'logchefql' | 'clickhouse-sql' | 'sql' // Current query mode
 }
 
 // Define the structure for storing state
@@ -67,7 +68,8 @@ const props = withDefaults(defineProps<Props>(), {
     severityField: 'severity_text',
     timezone: 'local',
     queryFields: () => [],
-    regexHighlights: () => ({})
+    regexHighlights: () => ({}),
+    activeMode: 'logchefql'
 })
 
 // Get the actual field names to use with fallbacks
@@ -562,6 +564,18 @@ function formatExecutionTime(ms: number): string {
     return `${Math.round(ms)}ms`;
 }
 
+// Define emits
+const emit = defineEmits<{
+    (e: 'drill-down', value: { column: string, value: any }): void
+}>();
+
+// Function to handle drill-down action
+const handleDrillDown = (columnName: string, value: any) => {
+    if (props.activeMode !== 'logchefql') return;
+
+    emit('drill-down', { column: columnName, value });
+};
+
 </script>
 
 <template>
@@ -730,7 +744,7 @@ function formatExecutionTime(ms: number): string {
                                     row.getIsExpanded() ? 'expanded-row bg-primary/15' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
                                 ]" @click="handleRowClick(row)($event)">
                                     <td v-for="cell in row.getVisibleCells()" :key="cell.id"
-                                        class="px-3 py-2 align-top font-mono text-xs leading-normal overflow-hidden border-r border-muted/20 relative"
+                                        class="px-3 py-2 align-top font-mono text-xs leading-normal overflow-hidden border-r border-muted/20 relative cell-hover-target"
                                         :class="[
                                             cell.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
                                         ]" :style="{
@@ -744,13 +758,24 @@ function formatExecutionTime(ms: number): string {
                                                 <FlexRender v-if="cell.column.columnDef.cell"
                                                     :render="cell.column.columnDef.cell" :props="cell.getContext()" />
                                             </div>
-                                            <!-- Copy Button -->
-                                            <Button variant="ghost" size="icon"
-                                                class="h-5 w-5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150 focus:opacity-100"
-                                                @click.stop="copyCell(cell.getValue())" title="Copy cell value"
-                                                aria-label="Copy cell value">
-                                                <Copy class="h-3 w-3" />
-                                            </Button>
+                                            <!-- Action buttons container -->
+                                            <div class="flex items-center">
+                                                <!-- Drill-down button - only in logchefQL mode -->
+                                                <Button v-if="props.activeMode === 'logchefql'" variant="ghost"
+                                                    size="icon"
+                                                    class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100 mr-1"
+                                                    @click.stop="handleDrillDown(cell.column.id, cell.getValue())"
+                                                    title="Filter by this value" aria-label="Filter by this value">
+                                                    <ZoomIn class="h-3 w-3" />
+                                                </Button>
+                                                <!-- Copy Button - show only when THIS cell is hovered -->
+                                                <Button variant="ghost" size="icon"
+                                                    class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100"
+                                                    @click.stop="copyCell(cell.getValue())" title="Copy cell value"
+                                                    aria-label="Copy cell value">
+                                                    <Copy class="h-3 w-3" />
+                                                </Button>
+                                            </div>
                                         </div>
                                     </td>
                                 </tr>
@@ -920,6 +945,21 @@ td>.flex>.whitespace-pre {
 .group[draggable="true"]:active {
     /* opacity: 0.7; */
     /* Browser might provide its own feedback */
+}
+
+/* Cell-specific hover effect for action buttons */
+.cell-hover-target {
+    position: relative;
+    /* Ensure positioning context for action buttons */
+}
+
+.cell-hover-target:hover .cell-action-button {
+    opacity: 1;
+}
+
+/* All action buttons are hidden by default and shown only on cell hover */
+.cell-action-button {
+    opacity: 0;
 }
 
 /* Style for drop indicator */

@@ -702,6 +702,64 @@ const clearQueryEditor = () => {
     queryEditorRef.value?.focus();
   });
 };
+
+// Function to handle drill-down from DataTable to add a filter condition
+const handleDrillDown = (data: { column: string, value: any }) => {
+  // Only handle in LogchefQL mode
+  if (activeMode.value !== 'logchefql') return;
+
+  const { column, value } = data;
+
+  // Create a new condition based on the column and value
+  let newCondition = '';
+  let formattedValue = '';
+
+  // Format value appropriately
+  if (value === null || value === undefined) {
+    formattedValue = 'null';
+  } else if (typeof value === 'string') {
+    // Escape quotes in the string value
+    const escapedValue = value.replace(/"/g, '\\"');
+    formattedValue = `"${escapedValue}"`;
+  } else if (typeof value === 'number' || typeof value === 'boolean') {
+    formattedValue = String(value);
+  } else {
+    // Convert objects to string representation
+    try {
+      formattedValue = `"${JSON.stringify(value).replace(/"/g, '\\"')}"`;
+    } catch (e) {
+      formattedValue = `"${String(value).replace(/"/g, '\\"')}"`;
+    }
+  }
+
+  // Create the condition
+  newCondition = `${column}=${formattedValue}`;
+
+  // Get the current query
+  let currentQuery = logchefQuery.value?.trim() || '';
+
+  // If there's already a query, append the new condition with "and"
+  if (currentQuery) {
+    // Check if we need to wrap existing query in parentheses
+    if (currentQuery.includes(' or ') && !currentQuery.startsWith('(')) {
+      currentQuery = `(${currentQuery})`;
+    }
+    currentQuery = `${currentQuery} and ${newCondition}`;
+  } else {
+    currentQuery = newCondition;
+  }
+
+  // Update the query
+  logchefQuery.value = currentQuery;
+
+  // Focus the editor
+  nextTick(() => {
+    queryEditorRef.value?.focus();
+  });
+
+  // Optionally, execute the query automatically
+  // executeQuery();
+};
 </script>
 
 <template>
@@ -1113,7 +1171,8 @@ const clearQueryEditor = () => {
                 :source-id="String(exploreStore.sourceId)" :team-id="teamsStore.currentTeamId"
                 :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
                 :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field" :timezone="displayTimezone"
-                :query-fields="queryFields" :regex-highlights="regexHighlights" />
+                :query-fields="queryFields" :regex-highlights="regexHighlights" :active-mode="activeMode.value"
+                @drill-down="handleDrillDown" />
             </template>
 
             <!-- No Results State -->
