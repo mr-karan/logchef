@@ -19,6 +19,7 @@ export function formatDateForSQL(dateTime: DateValue | null | undefined, addQuot
     // Format as YYYY-MM-DD HH:MM:SS
     const formatted = format(jsDate, 'yyyy-MM-dd HH:mm:ss');
 
+    // Use standard SQL escaping (double single quotes)
     return addQuotes ? `'${formatted}'` : formatted;
   } catch (error) {
     console.error("Error formatting date for SQL:", error);

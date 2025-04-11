@@ -1171,7 +1171,7 @@ const handleDrillDown = (data: { column: string, value: any }) => {
                 :source-id="String(exploreStore.sourceId)" :team-id="teamsStore.currentTeamId"
                 :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
                 :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field" :timezone="displayTimezone"
-                :query-fields="queryFields" :regex-highlights="regexHighlights" :active-mode="activeMode.value"
+                :query-fields="queryFields" :regex-highlights="regexHighlights" :active-mode="activeMode"
                 @drill-down="handleDrillDown" />
             </template>
 

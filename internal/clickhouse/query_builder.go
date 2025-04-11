@@ -21,8 +21,13 @@ func NewQueryBuilder(tableName string) *QueryBuilder {
 
 // BuildRawQuery builds and validates a raw SQL query
 func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) {
+	// Preprocess SQL: The parser doesn't handle standard SQL escaped quotes properly
+	// Convert doubled single quotes ('') to a placeholder
+	const placeholder = "___ESCAPED_QUOTE___"
+	processedSQL := strings.ReplaceAll(rawSQL, "''", placeholder)
+
 	// Parse the SQL using the ClickHouse parser
-	parser := clickhouseparser.NewParser(rawSQL)
+	parser := clickhouseparser.NewParser(processedSQL)
 	stmts, err := parser.ParseStmts()
 	if err != nil {
 		return "", fmt.Errorf("invalid SQL syntax: %w", err)
@@ -63,7 +68,12 @@ func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) 
 	}
 
 	// Convert back to SQL string
-	return stmt.String(), nil
+	result := stmt.String()
+
+	// Convert the placeholder back to standard SQL escaped quotes
+	result = strings.ReplaceAll(result, placeholder, "''")
+
+	return result, nil
 }
 
 // validateTableReference ensures the table reference is valid

@@ -24,9 +24,11 @@ export function validateSQL(query: string): boolean {
       return false;
     }
 
-    // Check for unbalanced quotes (single or double)
-    const singleQuotes = (query.match(/'/g) || []).length;
-    const doubleQuotes = (query.match(/"/g) || []).length;
+    // Check for unbalanced quotes (single or double), accounting for escaped quotes
+    // First, remove escaped quotes from consideration
+    const processedQuery = query.replace(/\\'/g, '').replace(/\\"/g, '');
+    const singleQuotes = (processedQuery.match(/'/g) || []).length;
+    const doubleQuotes = (processedQuery.match(/"/g) || []).length;
     if (singleQuotes % 2 !== 0 || doubleQuotes % 2 !== 0) {
       return false;
     }

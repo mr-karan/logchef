@@ -32,7 +32,12 @@ export class SQLVisitor {
 
   private visitExpression(node: ASTNode & { type: 'expression' }): string {
     const column = this.escapeIdentifier(node.key);
-    const value = this.formatValue(node.value);
+
+    // For regex operations, always handle the value as a string
+    // regardless of its original type
+    const value = node.operator === Operator.REGEX || node.operator === Operator.NOT_REGEX
+      ? this.formatStringValue(node.value)
+      : this.formatValue(node.value);
 
     switch (node.operator) {
       case Operator.REGEX:
@@ -125,7 +130,26 @@ export class SQLVisitor {
       return value.toString();
     }
 
-    // String value - escape and quote
-    return `'${String(value).replace(/'/g, "''")}'`;
+    // String value - properly escape using proper SQL escaping (replace single quotes with two single quotes)
+    return this.formatStringValue(value);
+  }
+
+  // Added helper method to ensure consistent string formatting
+  private formatStringValue(value: unknown): string {
+    if (this.parameterized) {
+      this.params.push(value);
+      return '?';
+    }
+
+    // Handle null/undefined cases
+    if (value === null || value === undefined) {
+      return 'NULL';
+    }
+
+    // Ensure the value is treated as a string and properly escaped
+    // for SQL - use standard SQL escaping (double single quotes)
+    const stringValue = String(value);
+    const escapedValue = stringValue.replace(/'/g, "''");
+    return `'${escapedValue}'`;
   }
 }
