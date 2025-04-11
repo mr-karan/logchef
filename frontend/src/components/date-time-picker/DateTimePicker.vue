@@ -282,6 +282,16 @@ const durationText = computed(() => {
     if (diffHours > 0) return `Duration: ${diffHours}h ${diffMinutes}m`
     return `Duration: ${diffMinutes}m`
 })
+
+// Function to open the date picker programmatically
+function openDatePicker() {
+    showDatePicker.value = true
+}
+
+// Expose methods to parent component
+defineExpose({
+    openDatePicker
+})
 </script>
 
 <template>
@@ -318,9 +328,7 @@ const durationText = computed(() => {
                                             </Button>
                                         </PopoverTrigger>
                                         <PopoverContent class="w-auto p-0" :side="'bottom'" :align="'end'">
-                                            <Calendar
-                                                :selected-date="dateRange.start !== undefined ? dateRange.start : null"
-                                                class="rounded-md border"
+                                            <Calendar :selected-date="dateRange.start" class="rounded-md border"
                                                 @update:model-value="date => handleCalendarUpdate('start', date)" />
                                         </PopoverContent>
                                     </Popover>
@@ -350,9 +358,7 @@ const durationText = computed(() => {
                                             </Button>
                                         </PopoverTrigger>
                                         <PopoverContent class="w-auto p-0" :side="'bottom'" :align="'end'">
-                                            <Calendar
-                                                :selected-date="dateRange.end !== undefined ? dateRange.end : null"
-                                                class="rounded-md border"
+                                            <Calendar :selected-date="dateRange.end" class="rounded-md border"
                                                 @update:model-value="date => handleCalendarUpdate('end', date)" />
                                         </PopoverContent>
                                     </Popover>

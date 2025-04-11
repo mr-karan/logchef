@@ -10,7 +10,7 @@ import type { ColumnInfo } from '@/api/explore';
  * Column type definitions with consistent size handling
  */
 // Common column types for width settings
-type ColumnType = 'timestamp' | 'severity' | 'message' | 'default' | 'status';
+type ColumnType = 'timestamp' | 'severity' | 'message' | 'default' | 'status' | 'flags' | 'wide' | 'extraWide';
 
 // Column width configuration
 interface ColumnWidthConfig {
@@ -22,25 +22,38 @@ interface ColumnWidthConfig {
 // Width configurations for each column type
 const COLUMN_WIDTH_CONFIG: Record<string, { minWidth: number, defaultWidth: number, maxWidth: number }> = {
   timestamp: {
-    minWidth: 160,
-    defaultWidth: 180,
+    minWidth: 170,
+    defaultWidth: 190,
     maxWidth: 300,
   },
   severity: {
-    minWidth: 80,
-    defaultWidth: 100,
-    maxWidth: 130,
+    minWidth: 90,
+    defaultWidth: 110,
+    maxWidth: 150,
   },
   status: {
-    minWidth: 60,
-    defaultWidth: 80,
+    minWidth: 70,
+    defaultWidth: 90,
     maxWidth: 120,
   },
+  // Default widths should be generous enough for most column types
   default: {
-    minWidth: 100,
-    defaultWidth: 150,
+    minWidth: 120,
+    defaultWidth: 160,
     maxWidth: 500,
   },
+  // Smart width for columns with longer names
+  wide: {
+    minWidth: 150,
+    defaultWidth: 200,
+    maxWidth: 500,
+  },
+  // Extra width for columns with very long names
+  extraWide: {
+    minWidth: 180,
+    defaultWidth: 250,
+    maxWidth: 600,
+  }
 };
 
 // Helper function to determine column type based on name or position
@@ -49,7 +62,7 @@ function getColumnType(
   timestampField: string,
   severityField: string
 ): string {
-  // Exact match checks
+  // Keep exact match checks
   if (columnName === timestampField) {
     return "timestamp";
   }
@@ -57,25 +70,31 @@ function getColumnType(
     return "severity";
   }
 
-  // Pattern checks for status code columns
-  if (
-    /\b(status|code|statuscode|status_code|http_status)\b/i.test(columnName)
-  ) {
+  // Keep pattern checks for common log formats
+  if (/\b(status|code|statuscode|status_code|http_status)\b/i.test(columnName)) {
     return "status";
   }
 
-  // Pattern checks for timestamp-like columns
-  if (
-    /\b(time|date|timestamp|created|modified|updated|logged)\b/i.test(columnName)
-  ) {
+  if (/\b(time|date|timestamp|created|modified|updated|logged)\b/i.test(columnName)) {
     return "timestamp";
   }
 
-  // Pattern checks for severity-like columns
-  if (
-    /\b(severity|level|priority|type|log_level)\b/i.test(columnName)
-  ) {
+  if (/\b(severity|level|priority|type|log_level)\b/i.test(columnName)) {
     return "severity";
+  }
+
+  // Instead of hard-coding specific column patterns like 'flags',
+  // use a more generic approach based on column name length
+  const nameLength = columnName.length;
+
+  // For very long column names, use extra wide defaults
+  if (nameLength > 20) {
+    return "extraWide";
+  }
+
+  // For longer column names, use wider defaults
+  if (nameLength > 12) {
+    return "wide";
   }
 
   // Default column type
@@ -103,6 +122,8 @@ export function createColumns(
   if (metaTsColumnIndex >= 0) {
     const metaTsColumn = sortedColumns.splice(metaTsColumnIndex, 1)[0];
     sortedColumns.unshift(metaTsColumn);
+  } else {
+    console.warn(`Timestamp field '${timestampField}' not found in columns. Using default column order.`);
   }
 
   // Next, find all other timestamp-like columns and sort them after the primary one
@@ -170,47 +191,37 @@ export function createColumns(
       // Header configuration with sorting
       header: ({ column }: { column: Column<Record<string, any>, unknown> }) => {
         return h(
-          Button,
+          "div",
           {
-            variant: "ghost",
-            class: "h-8 px-2 hover:bg-muted/20 flex items-center", // Ensure flex alignment
+            class: "w-full flex items-center space-x-1 px-1 cursor-pointer select-none",
             onClick: () => column.toggleSorting(column.getIsSorted() === "asc"),
+            title: col.name || id,
           },
-          () => {
-            const children = []; // Start with empty array
+          [
+            // Query indicator
+            isFieldInQuery && h('span', {
+              class: 'w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0',
+              title: 'This column is referenced in your query'
+            }),
 
-            // Add query indicator before the name if column is used in query
-            if (isFieldInQuery) {
-              children.push(h('span', {
-                class: 'w-2 h-2 rounded-full bg-emerald-500 mr-1.5 flex-shrink-0',
-                title: 'This column is referenced in your query'
-              }));
-            }
+            // Text label with proper truncation
+            h('span', {
+              class: 'truncate flex-grow text-left font-medium',
+              style: 'word-break: normal; white-space: nowrap;'
+            }, col.name || id),
 
-            // Add the column name
-            children.push(col.name || id);
+            // Regex indicator
+            hasRegexHighlight && h('span', {
+              class: 'text-xs text-amber-500 font-mono flex-shrink-0 opacity-80 ml-1',
+              title: `Regex pattern: ${regexHighlights[col.name]?.pattern}${regexHighlights[col.name]?.isNegated ? ' (negated)' : ''}`
+            }, '~'),
 
-            // Add regex indicator if applicable
-            if (hasRegexHighlight) {
-              children.push(h('span', {
-                class: 'ml-1.5 text-xs text-amber-500 font-mono flex-shrink-0 opacity-80',
-                title: `Regex pattern: ${regexHighlights[col.name].pattern}${regexHighlights[col.name].isNegated ? ' (negated)' : ''}`
-              }, '~'));
-            }
-
-            // Add sort indicator
-            const sortState = column.getIsSorted();
-            const iconClass = "ml-2 h-3 w-3 text-muted-foreground flex-shrink-0"; // Keep icon style
-
-            if (sortState === 'asc') {
-              children.push(h(ArrowUp, { class: iconClass }));
-            } else if (sortState === 'desc') {
-              children.push(h(ArrowDown, { class: iconClass }));
-            }
-            // No icon if sortState is false
-
-            return children;
-          }
+            // Sort indicator (with spacing)
+            column.getIsSorted() && h(
+              column.getIsSorted() === 'asc' ? ArrowUp : ArrowDown,
+              { class: "h-3 w-3 text-muted-foreground flex-shrink-0 ml-1" }
+            )
+          ].filter(Boolean)
         );
       },
 

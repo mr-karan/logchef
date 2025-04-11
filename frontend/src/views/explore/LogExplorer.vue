@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
-import { Plus, Play, RefreshCw, Share2, Keyboard, Save } from 'lucide-vue-next'
+import { Plus, Play, RefreshCw, Share2, Keyboard, Save, CalendarIcon } from 'lucide-vue-next'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
@@ -130,25 +130,10 @@ watch(() => activeMode.value, (newMode, oldMode) => {
     lastParsedQuery.value = result;
   }
 
-  // Auto-execution logic when mode changes
-  if (newMode !== oldMode) {
-    // If switching to SQL mode, ensure the table name is correct
-    if (newMode === 'sql' && activeSourceTableName.value) {
-      // Update SQL query with the current table name
-      updateSqlTableReference(activeSourceTableName.value);
-    }
-
-    // After changing mode, check if we have content that could be executed
-    const hasContent = newMode === 'logchefql'
-      ? (logchefQuery.value?.trim() || '') !== ''
-      : (sqlQuery.value?.trim() || '') !== '';
-
-    if (hasContent && canExecuteQuery.value && !isExecutingQuery.value) {
-      // Execute after a short delay to allow everything to settle
-      setTimeout(() => {
-        executeQuery();
-      }, 100);
-    }
+  // If switching to SQL mode, ensure the table name is correct
+  if (newMode !== oldMode && newMode === 'sql' && activeSourceTableName.value) {
+    // Update SQL query with the current table name
+    updateSqlTableReference(activeSourceTableName.value);
   }
 });
 
@@ -955,6 +940,16 @@ function updateSqlTableReference(tableName: string) {
     }
   }
 }
+
+// Add a ref for the DateTimePicker
+const dateTimePickerRef = ref<InstanceType<typeof DateTimePicker> | null>(null);
+
+// Function to open the date time picker programmatically
+const openDatePicker = () => {
+  if (dateTimePickerRef.value) {
+    dateTimePickerRef.value.openDatePicker();
+  }
+};
 </script>
 
 <template>
@@ -1148,8 +1143,8 @@ function updateSqlTableReference(tableName: string) {
 
       <!-- Time Controls Group -->
       <div class="flex items-center space-x-2 flex-grow">
-        <!-- Date/Time Picker -->
-        <DateTimePicker v-model="dateRange" class="h-8" />
+        <!-- Date/Time Picker with ref -->
+        <DateTimePicker ref="dateTimePickerRef" v-model="dateRange" class="h-8" />
 
         <!-- Limit Dropdown -->
         <DropdownMenu>
@@ -1222,7 +1217,7 @@ function updateSqlTableReference(tableName: string) {
                 :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter search criteria (e.g., level=\'error\' and status>400)' : 'Enter SQL query...'"
                 :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
                 :showFieldsPanel="showFieldsPanel" @submit="executeQuery"
-                @update:activeMode="(mode) => changeMode(mode === 'logchefql' ? 'logchefql' : 'sql')"
+                @update:activeMode="(mode, isModeSwitchOnly) => changeMode(mode === 'logchefql' ? 'logchefql' : 'sql', isModeSwitchOnly)"
                 @toggle-fields="showFieldsPanel = !showFieldsPanel" @select-saved-query="loadSavedQuery"
                 @save-query="handleSaveOrUpdateClick" class="border-0 border-b" />
             </div>
@@ -1356,11 +1351,9 @@ function updateSqlTableReference(tableName: string) {
                 <p class="text-sm text-muted-foreground max-w-md">
                   Your query returned no results for the selected time range. Try adjusting the query or time.
                 </p>
-                <Button variant="outline" size="sm" class="mt-4 h-8" @click="exploreStore.setTimeRange({
-                  start: now(getLocalTimeZone()).subtract({ minutes: 5 }),
-                  end: now(getLocalTimeZone())
-                })">
-                  Try Last 5 Minutes
+                <Button variant="outline" size="sm" class="mt-4 h-8" @click="openDatePicker">
+                  <CalendarIcon class="h-3.5 w-3.5 mr-2" />
+                  Adjust Timerange
                 </Button>
               </div>
             </template>

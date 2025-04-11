@@ -73,7 +73,10 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 // Get the actual field names to use with fallbacks
-const timestampFieldName = computed(() => props.timestampField || 'timestamp')
+const timestampFieldName = computed(() => {
+    // Ensure we prioritize the timestampField prop, which should contain the _meta_ts_field value
+    return props.timestampField || 'timestamp';
+})
 const severityFieldName = computed(() => props.severityField || 'severity_text')
 
 // Move tableColumns declaration near the top
@@ -176,7 +179,7 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
 
 // Watch for changes in columns OR search terms to regenerate table columns
 watch(
-    () => [props.columns, displayTimezone.value], // Also watch timezone for createColumns
+    () => [props.columns, displayTimezone.value, props.timestampField], // Also watch timestampField changes
     ([newColumns, newTimezone]) => {
         if (!newColumns || newColumns.length === 0) {
             tableColumns.value = []; // Clear columns if input is empty
@@ -681,13 +684,13 @@ const handleDrillDown = (columnName: string, value: any) => {
                             <tr v-if="table.getHeaderGroups().length > 0 && table.getHeaderGroups()[0]"
                                 class="border-b border-b-muted-foreground/10">
                                 <th v-for="header in table.getHeaderGroups()[0].headers" :key="header.id" scope="col"
-                                    class="group relative h-9 px-3 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden border-r border-muted/30"
+                                    class="group relative h-9 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden border-r border-muted/30 p-0"
                                     :class="[
                                         getColumnType(header.column) === 'timestamp' ? 'font-semibold' : '',
                                         getColumnType(header.column) === 'severity' ? 'font-semibold' : '',
                                         header.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
-                                        header.column.id === draggingColumnId ? 'opacity-50 bg-primary/10' : '', // Style for dragging column
-                                        header.column.id === dragOverColumnId ? 'border-l-2 border-l-primary' : '' // Style for drop target indicator
+                                        header.column.id === draggingColumnId ? 'opacity-50 bg-primary/10' : '',
+                                        header.column.id === dragOverColumnId ? 'border-l-2 border-l-primary' : ''
                                     ]" :style="{
                                         width: `${header.getSize()}px`,
                                         minWidth: `${header.column.columnDef.minSize ?? defaultColumn.minSize}px`,
@@ -696,16 +699,16 @@ const handleDrillDown = (columnName: string, value: any) => {
                                     @dragenter="onDragEnter($event, header.column.id)" @dragover="onDragOver($event)"
                                     @dragleave="onDragLeave($event, header.column.id)"
                                     @drop="onDrop($event, header.column.id)" @dragend="onDragEnd">
-                                    <div class="flex items-center h-full">
+                                    <div class="flex items-center h-full px-3">
                                         <!-- Drag Handle -->
                                         <span
-                                            class="flex items-center justify-center flex-shrink-0 w-5 h-full mr-1.5 cursor-grab text-muted-foreground/50 group-hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                                            class="flex items-center justify-center flex-shrink-0 w-5 h-full mr-1 cursor-grab text-muted-foreground/50 group-hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                                             title="Drag to reorder column">
                                             <GripVertical class="h-4 w-4" />
                                         </span>
 
                                         <!-- Column Header Content (Title + Sort button from columns.ts) -->
-                                        <div class="flex-grow min-w-0 overflow-hidden mr-5">
+                                        <div class="flex-grow min-w-0 overflow-hidden">
                                             <!-- Check header.column.columnDef.header exists -->
                                             <FlexRender v-if="!header.isPlaceholder && header.column.columnDef.header"
                                                 :render="header.column.columnDef.header" :props="header.getContext()" />
@@ -881,6 +884,45 @@ const handleDrillDown = (columnName: string, value: any) => {
     background-color: transparent;
 }
 
+/* Improved header styling for consistent appearance */
+.table-fixed th {
+    padding: 0 !important;
+    font-weight: 500;
+    background-color: hsl(var(--muted) / 0.3);
+    border-bottom: 1px solid hsl(var(--border) / 0.7);
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+/* Ensure column headers show text properly */
+.table-fixed th :deep(.truncate) {
+    max-width: 100%;
+    display: inline-block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    /* Required for flex truncation to work */
+}
+
+/* Refined header text display to work with any column name */
+.table-fixed th :deep(.flex-grow) {
+    flex: 1 1 auto;
+    min-width: 0;
+    /* Critical for text-overflow to work in flex containers */
+    max-width: calc(100% - 25px);
+    /* Leave room for icons */
+}
+
+/* Add better spacing for header content */
+.table-fixed th>div> :deep(.w-full) {
+    padding: 0 2px;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    /* Required for flexbox text truncation */
+}
+
 /* Add highlight style */
 :deep(.search-highlight) {
     background-color: hsl(var(--highlight, 60 100% 75%));
@@ -939,12 +981,6 @@ td>.flex>.whitespace-pre {
 .dragging-column {
     cursor: grabbing !important;
     /* Force grabbing cursor */
-}
-
-/* Optional: Style for the drag feedback (e.g., slightly transparent) */
-.group[draggable="true"]:active {
-    /* opacity: 0.7; */
-    /* Browser might provide its own feedback */
 }
 
 /* Cell-specific hover effect for action buttons */
@@ -1292,4 +1328,14 @@ td>.flex>.whitespace-pre {
 }
 
 /* Remove all severity styling as it's handled in utils.ts */
+
+/* Better render of header contents */
+.table-fixed th>div {
+    height: 100%;
+    width: 100%;
+    padding: 4px 8px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
 </style>

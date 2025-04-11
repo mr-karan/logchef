@@ -91,11 +91,20 @@ export function useQuery() {
     // Check if the mode has changed
     const modeChanged = lastState.mode && lastState.mode !== activeMode.value;
 
-    // If mode has changed but neither query has content, not dirty
-    if (modeChanged &&
-        (!logchefQuery.value || logchefQuery.value.trim() === '') &&
-        (!sqlQuery.value || sqlQuery.value.trim() === '')) {
-      return false;
+    // If mode has changed, handle special cases
+    if (modeChanged) {
+      // If switching with empty queries, not dirty
+      if ((!logchefQuery.value || logchefQuery.value.trim() === '') &&
+          (!sqlQuery.value || sqlQuery.value.trim() === '')) {
+        return false;
+      }
+
+      // Special case: empty LogchefQL to default SQL is not dirty
+      if (lastState.mode === 'logchefql' &&
+          activeMode.value === 'sql' &&
+          (!lastState.logchefqlQuery || lastState.logchefqlQuery.trim() === '')) {
+        return false;
+      }
     }
 
     // Compare with appropriate last query depending on current mode
@@ -168,7 +177,7 @@ export function useQuery() {
   };
 
   // Change query mode with automatic translation
-  const changeMode = (newMode: EditorMode) => {
+  const changeMode = (newMode: EditorMode, isModeSwitchOnly: boolean = false) => {
     const currentMode = activeMode.value;
     if (newMode === currentMode) return;
 
@@ -176,9 +185,10 @@ export function useQuery() {
     if (newMode === 'sql' && currentMode === 'logchefql') {
       // Store original SQL query before potentially overwriting it
       const originalSql = sqlQuery.value;
+      const isEmptyLogchefQL = !logchefQuery.value?.trim();
 
       // Check if we have LogchefQL content that can be translated
-      if (logchefQuery.value.trim()) {
+      if (!isEmptyLogchefQL) {
         // Validate LogchefQL before translating
         const validation = validateLogchefQLWithDetails(logchefQuery.value);
         if (!validation.valid) {
@@ -195,18 +205,25 @@ export function useQuery() {
         if (result.success) {
           // Always set SQL when logchefQL exists and translation succeeds
           sqlQuery.value = result.sql;
-          isFromUrl.value = false; // Mark as user-generated content
+          // Only mark as user-generated content if not just a mode switch
+          if (!isModeSwitchOnly) {
+            isFromUrl.value = false;
+          }
         } else {
           // If translation fails, fall back to original SQL or default
           if (!originalSql) {
             generateAndSetDefaultSQL();
-            isFromUrl.value = false; // Mark as generated content
+            // Only mark as user-generated content if not just a mode switch
+            if (!isModeSwitchOnly) {
+              isFromUrl.value = false;
+            }
           }
         }
       } else if (!originalSql) {
-        // No LogchefQL content AND no original SQL, generate default
+        // Empty LogchefQL query AND no original SQL, generate default SQL without marking dirty
         generateAndSetDefaultSQL();
-        isFromUrl.value = false; // Mark as generated content
+        // Empty LogchefQL to default SQL shouldn't be considered user-generated content
+        // This prevents marking as dirty
       }
       // If LogchefQL is empty but we have originalSql, keep the existing SQL
     }
