@@ -142,7 +142,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
-import { initMonacoSetup, getDefaultMonacoOptions } from "@/utils/monaco";
+import { initMonacoSetup, getDefaultMonacoOptions, getSingleLineModeOptions } from "@/utils/monaco";
 import { Parser as LogchefQLParser, State as LogchefQLState, Operator as LogchefQLOperator, VALID_KEY_VALUE_OPERATORS as LogchefQLValidOperators, isNumeric } from "@/utils/logchefql";
 import { validateLogchefQL } from "@/utils/logchefql/api"; // Simpler validation import
 import { validateSQL, SQL_KEYWORDS, CLICKHOUSE_FUNCTIONS, SQL_TYPES } from "@/utils/clickhouse-sql";
@@ -248,6 +248,40 @@ const handleMount = (editor: MonacoEditor) => {
     })
   );
 
+  // Add minimal keyboard event listener that only prevents new lines in LogchefQL mode
+  // without executing the query or interfering with autocomplete
+  const domNode = editor.getDomNode();
+  if (domNode) {
+    const keyHandler = (e: KeyboardEvent) => {
+      // Only prevent default when:
+      // 1. It's a bare Enter keypress (no modifier keys)
+      // 2. We're in LogchefQL mode
+      // 3. No suggestion widget is visible (to allow autocomplete acceptance)
+      if (e.key === 'Enter' &&
+        !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey &&
+        props.activeMode === 'logchefql') {
+
+        // Check if suggestion widget is visible by looking at DOM
+        const suggestWidgetVisible = document.querySelector('.suggest-widget.visible') !== null;
+
+        // Only prevent new line if no suggestion widget is visible
+        if (!suggestWidgetVisible) {
+          e.preventDefault();
+          // Don't execute query, just prevent the newline
+        }
+      }
+    };
+
+    domNode.addEventListener('keydown', keyHandler);
+
+    // Add disposal for the event listener
+    activeDisposables.value.push({
+      dispose: () => {
+        domNode.removeEventListener('keydown', keyHandler);
+      }
+    });
+  }
+
   // Initial setup is handled by watchEffect which runs immediately
 
   // Attempt initial focus
@@ -338,19 +372,15 @@ watchEffect(() => {
       },
       minimap: { enabled: false },
       // Add mode-specific options for LogchefQL
-      ...(props.activeMode === 'logchefql' ? {
-        // Single line configuration
-        lineNumbers: 'off' as const,
-        wordWrap: 'off' as const,
-        folding: false,
-        // Disable extra newlines
-        acceptSuggestionOnEnter: 'on' as const
-      } : {
-        // SQL-specific configuration
-        lineNumbers: 'on' as const,
-        wordWrap: 'on' as const,
-        folding: true
-      })
+      ...(props.activeMode === 'logchefql'
+        ? getSingleLineModeOptions()
+        : {
+          // SQL-specific configuration
+          lineNumbers: 'on' as const,
+          wordWrap: 'on' as const,
+          folding: true,
+          scrollBeyondLastLine: false
+        })
     };
     editor.updateOptions(options);
 

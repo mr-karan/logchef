@@ -62,6 +62,21 @@ export function getDefaultMonacoOptions(): monaco.editor.IStandaloneEditorConstr
   };
 }
 
+// Helper function for single-line mode options
+export function getSingleLineModeOptions(): Partial<monaco.editor.IStandaloneEditorConstructionOptions> {
+  return {
+    lineNumbers: "off",
+    folding: false,
+    wordWrap: "off",
+    scrollBeyondLastLine: false,
+    // These help prevent newlines
+    acceptSuggestionOnEnter: "on",
+    lineDecorationsWidth: 0,
+    glyphMargin: false,
+    minimap: { enabled: false }
+  };
+}
+
 export function initMonacoSetup() {
   // Configure Monaco worker setup (ensure this runs only once)
   if (!window.MonacoEnvironment) {
@@ -139,7 +154,9 @@ function registerLogchefQL() {
     ],
     // The word pattern is critical for proper cursor behavior when editing
     wordPattern: /(-?\d*\.\d\w*)|([a-zA-Z][\w._-]*)|(\b(and|or)\b)/,
-    comments: {}
+    comments: {},
+    // Empty onEnterRules to prevent automatic new lines in the editor
+    onEnterRules: []
   });
 
   // Use Monarch syntax highlighting as the primary mechanism
