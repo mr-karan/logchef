@@ -127,7 +127,9 @@
         <span class="font-medium">Validation Error: </span>
         {{ validationError }}
         <span v-if="validationError.includes('Missing boolean operator')" class="block mt-1 text-xs">
-          Hint: Use <code class="bg-muted px-1 rounded">and</code> or <code class="bg-muted px-1 rounded">or</code> between conditions. Example: <code class="bg-muted px-1 rounded">field1="value" and field2="value"</code>
+          Hint: Use <code class="bg-muted px-1 rounded">and</code> or <code class="bg-muted px-1 rounded">or</code>
+          between
+          conditions. Example: <code class="bg-muted px-1 rounded">field1="value" and field2="value"</code>
         </span>
       </span>
     </div>
@@ -151,7 +153,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { initMonacoSetup, getDefaultMonacoOptions, getSingleLineModeOptions } from "@/utils/monaco";
 import { Parser as LogchefQLParser, State as LogchefQLState, Operator as LogchefQLOperator, VALID_KEY_VALUE_OPERATORS as LogchefQLValidOperators, isNumeric } from "@/utils/logchefql";
 import { validateLogchefQLWithDetails } from "@/utils/logchefql/api"; // Import detailed validation
-import { validateSQL, SQL_KEYWORDS, CLICKHOUSE_FUNCTIONS, SQL_TYPES } from "@/utils/clickhouse-sql";
+import { validateSQLWithDetails, SQL_KEYWORDS, CLICKHOUSE_FUNCTIONS, SQL_TYPES } from "@/utils/clickhouse-sql";
 import { useExploreStore } from '@/stores/explore';
 import { QueryService } from '@/services/QueryService';
 // Keep other necessary imports like types...
@@ -365,7 +367,6 @@ watchEffect(() => {
     // Apply mode-specific options
     const options = {
       ...getDefaultMonacoOptions(),
-      lineDecorationsWidth: props.activeMode === 'logchefql' ? 16 : 24,
       fontSize: 13,
       lineHeight: 20,
       padding: { top: 8, bottom: 8 },
@@ -379,10 +380,12 @@ watchEffect(() => {
       minimap: { enabled: false },
       // Add mode-specific options for LogchefQL
       ...(props.activeMode === 'logchefql'
-        ? getSingleLineModeOptions()
+        ? {
+          ...getSingleLineModeOptions(),
+        }
         : {
-          // SQL-specific configuration
-          lineNumbers: 'on' as const,
+          // SQL-specific configuration - keep line numbers off
+          lineNumbers: 'off' as const,
           wordWrap: 'on' as const,
           folding: true,
           scrollBeyondLastLine: false
@@ -455,7 +458,6 @@ watch(() => props.activeMode, (newMode) => {
       const editor = editorRef.value;
       const options = {
         ...getDefaultMonacoOptions(),
-        lineDecorationsWidth: newMode === 'clickhouse-sql' ? 16 : 24,
         fontSize: 13,
         lineHeight: 20,
         padding: { top: 8, bottom: 8 },
@@ -532,8 +534,12 @@ const submitQuery = () => {
           validationError.value = validation.error || "Invalid LogchefQL syntax.";
         }
       } else {
-        isValid = QueryService.validateSQL(currentContent);
-        if (!isValid) validationError.value = "Invalid SQL syntax (e.g., missing SELECT/FROM or unbalanced parentheses).";
+        // Use the enhanced SQL validation with detailed errors
+        const validation = validateSQLWithDetails(currentContent);
+        isValid = validation.valid;
+        if (!isValid) {
+          validationError.value = validation.error || "Invalid SQL syntax.";
+        }
       }
     }
 
@@ -1057,6 +1063,8 @@ const handleNewQueryClick = () => {
   width: 100%;
   height: 100%;
   background-color: hsl(var(--card));
+  padding-left: 16px;
+  /* Add padding to container to position cursor */
 }
 
 /* Basic placeholder implementation */
@@ -1072,9 +1080,9 @@ const handleNewQueryClick = () => {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-/* Adjust placeholder position in SQL mode with line numbers */
+/* Adjust placeholder position - keep it consistent in both modes */
 .editor-container.is-empty[data-mode="clickhouse-sql"]::before {
-  left: 40px;
+  left: 16px;
 }
 
 /* Override Monaco's internal borders if any */
@@ -1087,14 +1095,19 @@ const handleNewQueryClick = () => {
 /* Style just the margin/gutter */
 :deep(.monaco-editor .margin) {
   border-radius: 0 0 0 5px;
-  padding-right: 8px;
-  background-color: hsl(var(--muted) / 0.05);
+  padding-right: 0 !important;
+  background-color: transparent !important;
+  width: 0 !important;
 }
 
-/* Make line numbers more visible */
-:deep(.monaco-editor .line-numbers) {
-  color: hsl(var(--muted-foreground) / 0.6);
-  font-size: 12px;
+/* Ensure consistent content position */
+:deep(.monaco-editor .monaco-scrollable-element) {
+  left: 0 !important;
+}
+
+/* Reset any padding/margins that might interfere */
+:deep(.monaco-editor .view-line) {
+  margin-left: 0 !important;
 }
 
 /* Force flex layout for tab triggers */

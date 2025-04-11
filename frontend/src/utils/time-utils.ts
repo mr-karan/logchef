@@ -4,6 +4,24 @@ import type { DateValue, CalendarDateTime } from '@internationalized/date';
 import type { TimeRange } from '@/types/query';
 
 /**
+ * Get the user's local timezone
+ * @returns The local timezone string (e.g., 'America/New_York')
+ */
+export function getUserTimezone(): string {
+  return getLocalTimeZone();
+}
+
+/**
+ * Format timezone string for use in SQL queries
+ * @param timezone The timezone string
+ * @returns The formatted timezone string for ClickHouse
+ */
+export function formatTimezoneForSQL(timezone: string = getUserTimezone()): string {
+  // Escape any single quotes in the timezone name
+  return timezone.replace(/'/g, "''");
+}
+
+/**
  * Formats a DateValue for SQL display with consistent format and quotes
  * @param dateTime The DateValue to format
  * @param addQuotes Whether to add quotes around the date string
@@ -31,9 +49,14 @@ export function formatDateForSQL(dateTime: DateValue | null | undefined, addQuot
  * Creates a SQL time condition between two dates for a given timestamp field
  * @param tsField The timestamp field name
  * @param timeRange The time range object
+ * @param includeTimezone Whether to include timezone information in the query
  * @returns SQL condition string for the WHERE clause
  */
-export function createTimeRangeCondition(tsField: string, timeRange: TimeRange): string {
+export function createTimeRangeCondition(
+  tsField: string,
+  timeRange: TimeRange,
+  includeTimezone: boolean = true
+): string {
   if (!timeRange.start || !timeRange.end) {
     throw new Error('Invalid time range: start and end dates are required');
   }
@@ -45,7 +68,16 @@ export function createTimeRangeCondition(tsField: string, timeRange: TimeRange):
   const startFormatted = formatDateForSQL(timeRange.start);
   const endFormatted = formatDateForSQL(timeRange.end);
 
-  return `${formattedField} BETWEEN toDateTime(${startFormatted}) AND toDateTime(${endFormatted})`;
+  if (includeTimezone) {
+    // Get user's timezone
+    const timezone = formatTimezoneForSQL(getUserTimezone());
+
+    // Create simplified timezone-aware condition with single toDateTime call
+    return `${formattedField} BETWEEN toDateTime(${startFormatted}, '${timezone}') AND toDateTime(${endFormatted}, '${timezone}')`;
+  } else {
+    // Create standard condition without timezone
+    return `${formattedField} BETWEEN toDateTime(${startFormatted}) AND toDateTime(${endFormatted})`;
+  }
 }
 
 /**

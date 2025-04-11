@@ -6,6 +6,7 @@ import { QueryService } from '@/services/QueryService';
 import { getErrorMessage } from '@/api/types';
 import type { TimeRange, QueryResult } from '@/types/query';
 import { validateLogchefQLWithDetails } from '@/utils/logchefql/api';
+import { validateSQLWithDetails } from '@/utils/clickhouse-sql';
 
 // Define the valid editor modes
 type EditorMode = 'logchefql' | 'sql';
@@ -173,13 +174,57 @@ export function useQuery() {
     return QueryService.validateSQL(sql);
   };
 
+  // New method to get detailed SQL validation results
+  const validateSQLWithErrorDetails = (sql: string) => {
+    return validateSQLWithDetails(sql);
+  };
+
   // Handle time/limit changes
   const handleTimeRangeUpdate = () => {
-    // Silent in production
+    // In SQL mode, we might want to update the time range in the query
+    // but this is now handled in LogExplorer.vue with more comprehensive patterns
+    // This function now just acts as a notification handler for dirty state
   };
 
   const handleLimitUpdate = () => {
-    // Silent in production
+    // In SQL mode, we should attempt to update the LIMIT clause in the query
+    if (activeMode.value === 'sql') {
+      const currentSql = sqlQuery.value?.trim() || '';
+      if (!currentSql) return;
+
+      try {
+        // Use the parser to analyze the current query
+        const analysis = validateSQLWithDetails(currentSql);
+
+        if (analysis.valid && analysis.ast) {
+          // Get the current limit from the store
+          const newLimit = exploreStore.limit;
+
+          // Get query analysis to check for existing LIMIT
+          const queryAnalysis = QueryService.analyzeQuery(currentSql);
+
+          if (queryAnalysis) {
+            let updatedSql = currentSql;
+
+            if (queryAnalysis.hasLimit) {
+              // Replace existing LIMIT clause
+              updatedSql = updatedSql.replace(/LIMIT\s+\d+/i, `LIMIT ${newLimit}`);
+            } else {
+              // Add LIMIT clause at the end if not present
+              updatedSql = `${updatedSql}\nLIMIT ${newLimit}`;
+            }
+
+            // Only update if changed
+            if (updatedSql !== currentSql) {
+              sqlQuery.value = updatedSql;
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error updating LIMIT in SQL query:", error);
+        // Don't modify the query if we can't safely parse it
+      }
+    }
   };
 
   // Prepare the query for execution
@@ -198,6 +243,18 @@ export function useQuery() {
             success: false,
             sql: '',
             error: validation.error || 'Invalid LogchefQL syntax'
+          };
+        }
+      }
+      // Validate SQL query before execution
+      else if (mode === 'sql' && query.trim()) {
+        const validation = validateSQLWithDetails(query);
+        if (!validation.valid) {
+          queryError.value = validation.error || 'Invalid SQL syntax';
+          return {
+            success: false,
+            sql: query,
+            error: validation.error || 'Invalid SQL syntax'
           };
         }
       }
@@ -288,6 +345,7 @@ export function useQuery() {
     // Actions
     changeMode,
     validateSQL,
+    validateSQLWithErrorDetails,
     handleTimeRangeUpdate,
     handleLimitUpdate,
     generateDefaultSQL,

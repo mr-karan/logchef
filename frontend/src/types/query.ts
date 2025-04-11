@@ -55,7 +55,30 @@ export interface QueryResult {
     fieldsUsed: string[];
     operations: ('filter' | 'sort' | 'limit')[];
     conditions?: QueryCondition[];
+    /** SQL query analysis results from parser */
+    queryAnalysis?: {
+      type: string;
+      tables: string[];
+      columns: string[];
+      hasTimeFilter: boolean;
+      hasLimit: boolean;
+      limitValue?: number;
+      timeRangeInfo?: TimeRangeInfo;
+    };
+    /** Direct access to time range information if available */
+    timeRangeInfo?: TimeRangeInfo;
   };
+}
+
+/**
+ * Time range information extracted from queries
+ */
+export interface TimeRangeInfo {
+  field: string;
+  startTime: string;
+  endTime: string;
+  timezone?: string;
+  isTimezoneAware: boolean;
 }
 
 /**

@@ -1,17 +1,20 @@
 import { parseAndTranslateLogchefQL } from '@/utils/logchefql/api';
-import { validateSQL } from '@/utils/clickhouse-sql';
-import { createTimeRangeCondition, timeRangeToCalendarDateTime, formatDateForSQL } from '@/utils/time-utils';
-import type { QueryOptions, QueryResult, TimeRange } from '@/types/query';
+import { validateSQL, validateSQLWithDetails, analyzeQuery } from '@/utils/clickhouse-sql';
+import {
+  createTimeRangeCondition,
+  timeRangeToCalendarDateTime,
+  formatDateForSQL,
+  getUserTimezone,
+  formatTimezoneForSQL
+} from '@/utils/time-utils';
+import type { QueryOptions, QueryResult, TimeRange, TimeRangeInfo } from '@/types/query';
 
-// Enhance the QueryResult meta type to support our conditions
-declare module '@/types/query' {
-  interface QueryResult {
-    meta?: {
-      fieldsUsed: string[];
-      operations: ('filter' | 'sort' | 'limit')[];
-      conditions?: QueryCondition[];
-    };
-  }
+// Define the QueryCondition type used in meta
+export interface QueryCondition {
+  field: string;
+  operator: string;
+  value: string | number | boolean;
+  type?: string;
 }
 
 /**
@@ -59,7 +62,9 @@ export class QueryService {
 
     const formattedTsField = tsField.includes('`') ? tsField : `\`${tsField}\``;
     const orderByClause = `ORDER BY ${formattedTsField} DESC`;
-    const timeCondition = createTimeRangeCondition(tsField, timeRange);
+
+    // Create timezone-aware time condition
+    const timeCondition = createTimeRangeCondition(tsField, timeRange, true);
     const limitClause = `LIMIT ${limit}`;
 
     // --- Translate LogchefQL ---
@@ -117,6 +122,16 @@ export class QueryService {
       limitClause
     ].join('\n');
 
+    // Add timezone metadata
+    const userTimezone = getUserTimezone();
+    meta.timeRangeInfo = {
+      field: tsField,
+      startTime: formatDateForSQL(timeRange.start, false),
+      endTime: formatDateForSQL(timeRange.end, false),
+      timezone: userTimezone,
+      isTimezoneAware: true
+    };
+
     return {
       success: true,
       sql: finalSqlParts,
@@ -170,8 +185,8 @@ export class QueryService {
       // Format timestamp field
       const formattedTsField = tsField.includes('`') ? tsField : `\`${tsField}\``;
 
-      // Create time condition
-      const timeCondition = createTimeRangeCondition(tsField, timeRange);
+      // Create timezone-aware time condition
+      const timeCondition = createTimeRangeCondition(tsField, timeRange, true);
 
       // Set order by
       const orderByField = orderBy ?
@@ -188,14 +203,25 @@ export class QueryService {
         `LIMIT ${limit}`
       ].join('\n');
 
+      // Add timezone metadata
+      const userTimezone = getUserTimezone();
+      const meta: NonNullable<QueryResult['meta']> = {
+        fieldsUsed: [],
+        operations: ['sort', 'limit'] as ('sort' | 'limit')[],
+        timeRangeInfo: {
+          field: tsField,
+          startTime: formatDateForSQL(timeRange.start, false),
+          endTime: formatDateForSQL(timeRange.end, false),
+          timezone: userTimezone,
+          isTimezoneAware: true
+        }
+      };
+
       return {
         success: true,
         sql,
         error: null,
-        meta: {
-          fieldsUsed: [],
-          operations: ['sort', 'limit']
-        }
+        meta
       };
     } catch (error: any) {
       console.error("Error generating default SQL:", error);
@@ -214,8 +240,32 @@ export class QueryService {
    * @returns Whether the query is valid
    */
   static validateSQL(sql: string): boolean {
-    // Leverage the existing validation function
+    // Leverage the enhanced validation function
     return validateSQL(sql);
+  }
+
+  /**
+   * Validates a SQL query and returns detailed information
+   * @param sql SQL query to validate
+   * @returns Detailed validation result
+   */
+  static validateSQLWithDetails(sql: string): {
+    valid: boolean;
+    error?: string;
+    ast?: any;
+    tables?: string[];
+    columns?: string[];
+  } {
+    return validateSQLWithDetails(sql);
+  }
+
+  /**
+   * Analyzes a SQL query for structure and components
+   * @param sql SQL query to analyze
+   * @returns Analysis results or null if parsing fails
+   */
+  static analyzeQuery(sql: string) {
+    return analyzeQuery(sql);
   }
 
   /**
@@ -239,20 +289,38 @@ export class QueryService {
         return this.generateDefaultSQL({ tableName, tsField, timeRange, limit });
       }
 
-      // Validate the SQL query
-      if (!this.validateSQL(query)) {
+      // Enhanced validation with detailed information
+      const validationResult = this.validateSQLWithDetails(query);
+      if (!validationResult.valid) {
         return {
           success: false,
           sql: query,
-          error: "Invalid SQL syntax"
+          error: validationResult.error || "Invalid SQL syntax"
         };
       }
 
-      // The query is valid, return it as-is
+      // Analyze the query for additional information
+      const queryAnalysis = this.analyzeQuery(query);
+
+      // Final SQL to be executed - might be modified with automatic limit
+      let finalSql = query;
+
+      // Automatically add LIMIT if not present in the query
+      if (queryAnalysis && !queryAnalysis.hasLimit) {
+        finalSql = `${finalSql}\nLIMIT ${limit}`;
+      }
+
+      // The query is valid, return it with enhanced metadata
       return {
         success: true,
-        sql: query,
-        error: null
+        sql: finalSql,
+        error: null,
+        meta: {
+          fieldsUsed: validationResult.columns || [],
+          operations: ['filter', 'sort'], // Assume these operations exist in most queries
+          queryAnalysis: queryAnalysis || undefined,
+          ...(queryAnalysis?.timeRangeInfo && { timeRangeInfo: queryAnalysis.timeRangeInfo })
+        }
       };
     } else {
       // For LogchefQL, always translate to SQL

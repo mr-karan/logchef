@@ -41,9 +41,9 @@ export function getDefaultMonacoOptions(): monaco.editor.IStandaloneEditorConstr
     automaticLayout: true, // Essential for responsive containers
     minimap: { enabled: false },
     folding: false, // Keep folding off for both modes
-    lineNumbers: "off", // Keep line numbers off for both modes
+    lineNumbers: "off", // Always keep line numbers off
     glyphMargin: false,
-    lineDecorationsWidth: 0,
+    lineDecorationsWidth: 0, // Set to 0 to prevent shifting when editing
     lineNumbersMinChars: 0, // Not needed if lineNumbers is off
     hideCursorInOverviewRuler: true,
     fixedOverflowWidgets: true,
@@ -59,6 +59,10 @@ export function getDefaultMonacoOptions(): monaco.editor.IStandaloneEditorConstr
     // Additional professional touches
     roundedSelection: false, // Use sharp selections
     quickSuggestions: { other: true, comments: false, strings: false }, // Enable quick suggestions
+    // Add padding to the content area for consistent cursor positioning
+    'padding.top': 8,
+    'padding.bottom': 8,
+    'padding.left': 16 // This ensures consistent padding for cursor and content
   };
 }
 
@@ -71,7 +75,7 @@ export function getSingleLineModeOptions(): Partial<monaco.editor.IStandaloneEdi
     scrollBeyondLastLine: false,
     // These help prevent newlines
     acceptSuggestionOnEnter: "on",
-    lineDecorationsWidth: 0,
+    lineDecorationsWidth: 0, // Set to 0 to prevent shifting when editing
     glyphMargin: false,
     minimap: { enabled: false }
   };

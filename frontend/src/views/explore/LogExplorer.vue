@@ -531,6 +531,69 @@ watch(
     if (!newRange || !oldRange) return;
     if (JSON.stringify(newRange) === JSON.stringify(oldRange)) return;
 
+    // If we're in SQL mode, check if we have a standard time range pattern we can update
+    if (activeMode.value === 'sql') {
+      const currentSql = sqlQuery.value?.trim() || '';
+      if (!currentSql) {
+        handleTimeRangeUpdate();
+        return;
+      }
+
+      // Format dates for SQL
+      const formatSqlDateTime = (date: DateValue): string => {
+        try {
+          const zonedDate = toCalendarDateTime(date);
+          const isoString = zonedDate.toString();
+          // Format as 'YYYY-MM-DD HH:MM:SS'
+          return isoString.replace('T', ' ').substring(0, 19);
+        } catch (e) {
+          console.error("Error formatting date for SQL:", e);
+          return '';
+        }
+      };
+
+      const startDateStr = formatSqlDateTime(newRange.start);
+      const endDateStr = formatSqlDateTime(newRange.end);
+
+      // Get the user's timezone for new queries or when updating timezone-aware queries
+      const userTimezone = getLocalTimeZone();
+
+      // Pattern to detect: Timezone-aware time range - single toDateTime call with timezone
+      const tzTimeRangePattern = /WHERE\s+`?(\w+)`?\s+BETWEEN\s+toDateTime\(['"](.+?)['"],\s*['"]([^'"]+)['"]\)(.*?)AND\s+toDateTime\(['"](.+?)['"],\s*['"]([^'"]+)['"]\)(.*?)(\s|$)/i;
+
+      // Pattern to detect: Standard time range pattern
+      const basicTimeRangePattern = /WHERE\s+`?(\w+)`?\s+BETWEEN\s+toDateTime\(['"](.+?)[']\)(.*?)AND\s+toDateTime\(['"](.+?)[']\)(.*?)(\s|$)/i;
+
+      if (tzTimeRangePattern.test(currentSql)) {
+        // Update timezone-aware time range
+        const updatedSql = currentSql.replace(
+          tzTimeRangePattern,
+          `WHERE \`$1\` BETWEEN toDateTime('${startDateStr}', '$3')$4AND toDateTime('${endDateStr}', '$6')$7$8`
+        );
+
+        if (updatedSql !== currentSql) {
+          // Only update if the SQL actually changed
+          sqlQuery.value = updatedSql;
+          // Don't call handleTimeRangeUpdate() as we've already updated the SQL
+          return;
+        }
+      }
+      else if (basicTimeRangePattern.test(currentSql)) {
+        // Convert basic time range to timezone-aware
+        const updatedSql = currentSql.replace(
+          basicTimeRangePattern,
+          `WHERE \`$1\` BETWEEN toDateTime('${startDateStr}', '${userTimezone}')$3AND toDateTime('${endDateStr}', '${userTimezone}')$5$6`
+        );
+
+        if (updatedSql !== currentSql) {
+          // Only update if the SQL actually changed
+          sqlQuery.value = updatedSql;
+          // Don't call handleTimeRangeUpdate() as we've already updated the SQL
+          return;
+        }
+      }
+    }
+
     // Use the query builder's handler for time range updates
     // This will set isDirty and show a notification instead of updating SQL directly
     handleTimeRangeUpdate();
@@ -760,6 +823,46 @@ const handleDrillDown = (data: { column: string, value: any }) => {
   // Optionally, execute the query automatically
   // executeQuery();
 };
+
+// Function to handle limit changes and update SQL query accordingly
+const handleLimitChange = (newLimit: number) => {
+  // Update the store limit
+  exploreStore.setLimit(newLimit);
+
+  // In SQL mode, we also need to update the SQL query with the new limit
+  if (activeMode.value === 'sql') {
+    const currentSql = sqlQuery.value?.trim() || '';
+    if (!currentSql) return;
+
+    try {
+      // Use the parser to analyze the current query
+      const analysis = QueryService.analyzeQuery(currentSql);
+
+      if (analysis) {
+        let updatedSql = currentSql;
+
+        if (analysis.hasLimit) {
+          // Replace existing LIMIT clause
+          updatedSql = updatedSql.replace(/LIMIT\s+\d+/i, `LIMIT ${newLimit}`);
+        } else {
+          // Add LIMIT clause at the end if not present
+          updatedSql = `${updatedSql}\nLIMIT ${newLimit}`;
+        }
+
+        // Only update if changed
+        if (updatedSql !== currentSql) {
+          sqlQuery.value = updatedSql;
+        }
+      }
+    } catch (error) {
+      console.error("Error updating LIMIT in SQL query:", error);
+      // Don't modify the query if we can't safely parse it
+    }
+  }
+
+  // Call the original limit update handler from useQuery
+  handleLimitUpdate();
+};
 </script>
 
 <template>
@@ -954,49 +1057,10 @@ const handleDrillDown = (data: { column: string, value: any }) => {
       <!-- Time Controls Group -->
       <div class="flex items-center space-x-2 flex-grow">
         <!-- Date/Time Picker -->
-        <TooltipProvider v-if="activeMode === 'sql'">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div>
-                <DateTimePicker v-model="dateRange" class="h-8" :disabled="activeMode === 'sql'" />
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Time range is not configurable in SQL mode. Use time filters in your query.</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-        <DateTimePicker v-else v-model="dateRange" class="h-8" />
+        <DateTimePicker v-model="dateRange" class="h-8" />
 
         <!-- Limit Dropdown -->
-        <TooltipProvider v-if="activeMode === 'sql'">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" class="h-8 text-sm justify-between px-2 min-w-[90px]"
-                      :disabled="activeMode === 'sql'">
-                      <span>Limit:</span> {{ exploreStore.limit.toLocaleString() }}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuLabel>Results Limit</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem v-for="limit in [100, 500, 1000, 2000, 5000, 10000]" :key="limit"
-                      @click="exploreStore.setLimit(limit)" :disabled="exploreStore.limit === limit">
-                      {{ limit.toLocaleString() }} rows
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Limit is not configurable in SQL mode. Use LIMIT in your query.</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-        <DropdownMenu v-else>
+        <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" class="h-8 text-sm justify-between px-2 min-w-[90px]">
               <span>Limit:</span> {{ exploreStore.limit.toLocaleString() }}
@@ -1006,7 +1070,7 @@ const handleDrillDown = (data: { column: string, value: any }) => {
             <DropdownMenuLabel>Results Limit</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem v-for="limit in [100, 500, 1000, 2000, 5000, 10000]" :key="limit"
-              @click="exploreStore.setLimit(limit)" :disabled="exploreStore.limit === limit">
+              @click="handleLimitChange(limit)" :disabled="exploreStore.limit === limit">
               {{ limit.toLocaleString() }} rows
             </DropdownMenuItem>
           </DropdownMenuContent>

@@ -30,6 +30,7 @@
     "monaco-editor": "^0.52.2",
     "moo": "^0.5.2",
     "nearley": "^2.20.1",
+    "node-sql-parser": "^5.3.8",
     "pinia": "^3.0.0",
     "radix-vue": "^1.9.13",
     "reka-ui": "^2.0.2",
