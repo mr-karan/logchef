@@ -25,16 +25,29 @@ export function useQuery() {
   const queryError = ref<string>('');
   const sqlWarnings = ref<string[]>([]);
   const hasRunQuery = ref(false);
+  const isFromUrl = ref(true); // Track if current content came from URL
 
   // Computed query content
   const logchefQuery = computed({
     get: () => exploreStore.logchefqlCode || '',
-    set: (value) => exploreStore.setLogchefqlCode(value)
+    set: (value) => {
+      exploreStore.setLogchefqlCode(value);
+      // User changed content if they set it programmatically
+      if (value !== exploreStore.logchefqlCode) {
+        isFromUrl.value = false;
+      }
+    }
   });
 
   const sqlQuery = computed({
     get: () => exploreStore.rawSql,
-    set: (value) => exploreStore.setRawSql(value)
+    set: (value) => {
+      exploreStore.setRawSql(value);
+      // User changed content if they set it programmatically
+      if (value !== exploreStore.rawSql) {
+        isFromUrl.value = false;
+      }
+    }
   });
 
   // Store active mode with type safety
@@ -61,12 +74,50 @@ export function useQuery() {
   // Check if query state is dirty (needs execution)
   const isDirty = computed(() => {
     const lastState = exploreStore.lastExecutedState;
-    if (!lastState) return true;
+    if (!lastState) {
+      // If no previous state, only consider dirty if there's actually query content
+      // AND it was not loaded from URL
+      return ((logchefQuery.value && logchefQuery.value.trim() !== '') ||
+             (sqlQuery.value && sqlQuery.value.trim() !== '')) &&
+             !isFromUrl.value;
+    }
 
+    // Determine if time range changed
     const timeRangeChanged = JSON.stringify(exploreStore.timeRange) !== lastState.timeRange;
-    const limitChanged = exploreStore.limit !== lastState.limit;
-    const queryChanged = currentQuery.value !== (lastState.query || '');
 
+    // Determine if limit changed
+    const limitChanged = exploreStore.limit !== lastState.limit;
+
+    // Check if the mode has changed
+    const modeChanged = lastState.mode && lastState.mode !== activeMode.value;
+
+    // If mode has changed but neither query has content, not dirty
+    if (modeChanged &&
+        (!logchefQuery.value || logchefQuery.value.trim() === '') &&
+        (!sqlQuery.value || sqlQuery.value.trim() === '')) {
+      return false;
+    }
+
+    // Compare with appropriate last query depending on current mode
+    let queryChanged = false;
+
+    if (activeMode.value === 'logchefql') {
+      // Compare current logchefQL with last executed logchefQL
+      const currentContent = logchefQuery.value?.trim() || '';
+      const lastContent = lastState.logchefqlQuery?.trim() || '';
+
+      queryChanged = currentContent !== lastContent &&
+                    (currentContent !== '' || lastContent !== '');
+    } else {
+      // Compare current SQL with last executed SQL
+      const currentContent = sqlQuery.value?.trim() || '';
+      const lastContent = lastState.sqlQuery?.trim() || '';
+
+      queryChanged = currentContent !== lastContent &&
+                    (currentContent !== '' || lastContent !== '');
+    }
+
+    // Consider dirty if any parameter changed
     return timeRangeChanged || limitChanged || queryChanged;
   });
 
@@ -144,15 +195,18 @@ export function useQuery() {
         if (result.success) {
           // Always set SQL when logchefQL exists and translation succeeds
           sqlQuery.value = result.sql;
+          isFromUrl.value = false; // Mark as user-generated content
         } else {
           // If translation fails, fall back to original SQL or default
           if (!originalSql) {
             generateAndSetDefaultSQL();
+            isFromUrl.value = false; // Mark as generated content
           }
         }
       } else if (!originalSql) {
         // No LogchefQL content AND no original SQL, generate default
         generateAndSetDefaultSQL();
+        isFromUrl.value = false; // Mark as generated content
       }
       // If LogchefQL is empty but we have originalSql, keep the existing SQL
     }
@@ -305,8 +359,14 @@ export function useQuery() {
       exploreStore.setLastExecutedState({
         timeRange: JSON.stringify(exploreStore.timeRange),
         limit: exploreStore.limit,
-        query: currentQuery.value
+        query: currentQuery.value,
+        mode: activeMode.value,
+        logchefqlQuery: logchefQuery.value,
+        sqlQuery: sqlQuery.value
       });
+
+      // After execution, content is no longer considered from URL
+      isFromUrl.value = false;
 
       // Execute the query via store
       const execResult = await exploreStore.executeQuery(result.sql);

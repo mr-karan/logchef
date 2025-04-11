@@ -93,6 +93,9 @@ export interface ExploreState {
     timeRange: string;
     limit: number;
     query: string;
+    mode?: "logchefql" | "sql";
+    logchefqlQuery?: string;
+    sqlQuery?: string;
   };
   // Add field for last successful execution timestamp
   lastExecutionTimestamp?: number | null;
@@ -406,7 +409,10 @@ export const useExploreStore = defineStore("explore", () => {
       const executionState = {
         timeRange: JSON.stringify(state.data.value.timeRange),
         limit: state.data.value.limit,
-        query: (state.data.value.activeMode === 'logchefql' ? state.data.value.logchefqlCode : state.data.value.rawSql) || ''
+        query: (state.data.value.activeMode === 'logchefql' ? state.data.value.logchefqlCode : state.data.value.rawSql) || '',
+        mode: state.data.value.activeMode,
+        logchefqlQuery: state.data.value.logchefqlCode,
+        sqlQuery: state.data.value.rawSql
       };
       console.log('Explore store: Setting last executed state:', executionState);
       state.data.value.lastExecutedState = executionState;

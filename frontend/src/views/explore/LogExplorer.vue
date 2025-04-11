@@ -119,7 +119,8 @@ watch(() => exploreStore.lastExecutedState, (newState) => {
 }, { immediate: true });
 
 // Also handle mode changes properly
-watch(() => activeMode.value, (newMode) => {
+watch(() => activeMode.value, (newMode, oldMode) => {
+  // Original parsing logic
   if (newMode !== 'logchefql') {
     // Reset when switching away from LogchefQL
     lastParsedQuery.value = EMPTY_PARSED_QUERY;
@@ -127,6 +128,21 @@ watch(() => activeMode.value, (newMode) => {
     // Re-parse when switching back to LogchefQL and there's a query
     const result = parseAndTranslateLogchefQL(logchefQuery.value);
     lastParsedQuery.value = result;
+  }
+
+  // Auto-execution logic when mode changes
+  if (newMode !== oldMode) {
+    // After changing mode, check if we have content that could be executed
+    const hasContent = newMode === 'logchefql'
+      ? (logchefQuery.value?.trim() || '') !== ''
+      : (sqlQuery.value?.trim() || '') !== '';
+
+    if (hasContent && canExecuteQuery.value && !isExecutingQuery.value) {
+      // Execute after a short delay to allow everything to settle
+      setTimeout(() => {
+        executeQuery();
+      }, 100);
+    }
   }
 });
 
@@ -660,12 +676,24 @@ onMounted(async () => {
 });
 
 // --- Event Handlers for QueryEditor --- START
-const updateLogchefqlValue = (newValue: string) => {
-  logchefQuery.value = newValue;
+const updateLogchefqlValue = (newValue: string, isUserInput = false) => {
+  // If this is from user input, update using the setter which marks it as not from URL
+  if (isUserInput) {
+    logchefQuery.value = newValue;
+  } else {
+    // Direct store update for programmatic/URL changes
+    exploreStore.setLogchefqlCode(newValue);
+  }
 };
 
-const updateSqlValue = (newValue: string) => {
-  sqlQuery.value = newValue;
+const updateSqlValue = (newValue: string, isUserInput = false) => {
+  // If this is from user input, update using the setter which marks it as not from URL
+  if (isUserInput) {
+    sqlQuery.value = newValue;
+  } else {
+    // Direct store update for programmatic/URL changes
+    exploreStore.setRawSql(newValue);
+  }
 };
 // --- Event Handlers for QueryEditor --- END
 
@@ -1124,8 +1152,9 @@ const handleLimitChange = (newLimit: number) => {
               <QueryEditor ref="queryEditorRef" :sourceId="currentSourceId" :teamId="currentTeamId ?? 0"
                 :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
                 :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
-                :logchefqlValue="logchefQuery" :sqlValue="sqlQuery" @update:logchefqlValue="updateLogchefqlValue"
-                @update:sqlValue="updateSqlValue"
+                :value="exploreStore.activeMode === 'logchefql' ? logchefQuery : sqlQuery" @change="(event) => event.mode === 'logchefql' ?
+                  updateLogchefqlValue(event.query, event.isUserInput) :
+                  updateSqlValue(event.query, event.isUserInput)"
                 :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter search criteria (e.g., level=\'error\' and status>400)' : 'Enter SQL query...'"
                 :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
                 :showFieldsPanel="showFieldsPanel" @submit="executeQuery"

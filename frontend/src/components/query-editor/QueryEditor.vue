@@ -159,7 +159,7 @@ import { QueryService } from '@/services/QueryService';
 // Keep other necessary imports like types...
 // --- Types ---
 type EditorMode = "logchefql" | "clickhouse-sql";
-type EditorChangeEvent = { query: string; mode: EditorMode };
+type EditorChangeEvent = { query: string; mode: EditorMode; isUserInput?: boolean };
 // Monaco type aliases for clarity
 type MonacoEditor = monaco.editor.IStandaloneCodeEditor;
 type MonacoModel = monaco.editor.ITextModel;
@@ -174,6 +174,7 @@ const props = defineProps({
   sourceId: { type: Number, required: true },
   schema: { type: Object as () => Record<string, { type: string }>, required: true },
   activeMode: { type: String as () => EditorMode, required: true },
+  value: { type: String, default: "" },
   placeholder: { type: String, default: "" },
   tsField: { type: String, default: "timestamp" },
   tableName: { type: String, required: true },
@@ -197,7 +198,7 @@ const emit = defineEmits<{
 const isDark = useDark();
 const exploreStore = useExploreStore();
 const editorRef = shallowRef<MonacoEditor | null>(null);
-const editorContent = ref(""); // Internal state for editor value
+const editorContent = ref(props.value || ""); // Initialize with prop value
 const editorFocused = ref(false);
 const validationError = ref<string | null>(null);
 const isProgrammaticChange = ref(false); // Flag to prevent update loops
@@ -314,8 +315,8 @@ const handleEditorChange = (value: string | undefined) => {
   // Clear validation errors on manual input
   validationError.value = null;
 
-  // Emit change event
-  emit("change", { query: currentQuery, mode: props.activeMode });
+  // Emit change event - this was manual user input, not URL loading
+  emit("change", { query: currentQuery, mode: props.activeMode, isUserInput: true });
 };
 
 // Function to programmatically update editor content (e.g., from store or clear)
@@ -329,8 +330,17 @@ const runProgrammaticUpdate = (newValue: string) => {
   // Release the flag after the update is likely processed
   nextTick(() => {
     isProgrammaticChange.value = false;
+    // Emit change event marked as NOT user input (programmatic update)
+    emit("change", { query: newValue, mode: props.activeMode, isUserInput: false });
   });
 };
+
+// Watch for prop value changes to update editor content
+watch(() => props.value, (newValue) => {
+  if (newValue !== editorContent.value) {
+    runProgrammaticUpdate(newValue || "");
+  }
+});
 
 // --- Synchronization and Option Updates ---
 watchEffect(() => {
@@ -555,7 +565,7 @@ const submitQuery = () => {
     }
 
     // Emit submit event
-    emit('submit', { query: currentContent, mode: props.activeMode });
+    emit('submit', { query: currentContent, mode: props.activeMode, isUserInput: true });
 
   } catch (e: any) {
     console.error("Error validating or submitting query:", e);

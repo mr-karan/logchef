@@ -169,6 +169,11 @@ export function useExploreUrlSync() {
       // 8. Set Query Content from URL
       const urlQuery = route.query.q as string | undefined;
       const queryContent = urlQuery ? decodeURIComponent(urlQuery) : "";
+
+      // Note: isFromUrl flag is handled in the useQuery composable
+      // We don't need to set anything specifically here since initial state
+      // is already considered to be from URL
+
       if (mode === 'logchefql') {
         exploreStore.setLogchefqlCode(queryContent);
         exploreStore.setRawSql(""); // Clear other mode
