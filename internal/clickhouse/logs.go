@@ -144,12 +144,14 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName string, timesta
 		// We expect a single SELECT statement
 		if len(stmts) == 1 {
 			if selectStmt, ok := stmts[0].(*clickhouseparser.SelectQuery); ok {
-				if selectStmt.Where != nil {
-					// Convert the WHERE clause AST back to string
-					whereClauseStr = selectStmt.Where.String()
+				// Check if a WHERE clause exists in the parsed statement
+				if selectStmt.Where != nil && selectStmt.Where.Expr != nil {
+					// Convert the WHERE clause *expression* AST back to string
+					// This avoids including the "WHERE" keyword itself.
+					whereClauseStr = selectStmt.Where.Expr.String()
 					// Convert the placeholder back to standard SQL escaped quotes
 					whereClauseStr = strings.ReplaceAll(whereClauseStr, placeholder, "''")
-					c.logger.Debug("extracted WHERE clause for histogram", "where_clause", whereClauseStr)
+					c.logger.Debug("extracted WHERE clause conditions for histogram", "conditions", whereClauseStr)
 				}
 			} else {
 				c.logger.Warn("parsed SQL is not a SELECT statement, ignoring potential WHERE clause for histogram", "query", params.Query)
