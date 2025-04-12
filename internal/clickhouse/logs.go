@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	clickhouseparser "github.com/AfterShip/clickhouse-sql-parser/parser"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -124,23 +125,53 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName string, timesta
 	// Determine interval value and unit based on window
 	intervalValue, intervalUnit := getIntervalFromWindow(params.Window)
 
-	// Extract WHERE clause from the raw SQL query
-	// This would typically extract conditions from a query like:
-	// SELECT * FROM table WHERE condition1 AND condition2 ORDER BY col LIMIT 100
-	whereClause := extractWhereClause(params.Query)
+	// Parse the raw SQL query to extract the WHERE clause conditions
+	var whereClauseStr string
+	if params.Query != "" {
+		// Preprocess SQL: The parser doesn't handle standard SQL escaped quotes properly
+		// Convert doubled single quotes ('') to a placeholder
+		const placeholder = "___ESCAPED_QUOTE___"
+		processedSQL := strings.ReplaceAll(params.Query, "''", placeholder)
 
-	// Build the time filter
+		parser := clickhouseparser.NewParser(processedSQL)
+		stmts, err := parser.ParseStmts()
+		if err != nil {
+			c.logger.Warn("failed to parse raw SQL for histogram WHERE clause extraction", "error", err, "query", params.Query)
+			// Return an error as we cannot reliably apply user filters
+			return nil, fmt.Errorf("failed to parse raw SQL query '%s': %w", params.Query, err)
+		}
+
+		// We expect a single SELECT statement
+		if len(stmts) == 1 {
+			if selectStmt, ok := stmts[0].(*clickhouseparser.SelectQuery); ok {
+				if selectStmt.Where != nil {
+					// Convert the WHERE clause AST back to string
+					whereClauseStr = selectStmt.Where.String()
+					// Convert the placeholder back to standard SQL escaped quotes
+					whereClauseStr = strings.ReplaceAll(whereClauseStr, placeholder, "''")
+					c.logger.Debug("extracted WHERE clause for histogram", "where_clause", whereClauseStr)
+				}
+			} else {
+				c.logger.Warn("parsed SQL is not a SELECT statement, ignoring potential WHERE clause for histogram", "query", params.Query)
+			}
+		} else if len(stmts) > 1 {
+			c.logger.Warn("multiple SQL statements found, cannot reliably extract WHERE clause for histogram", "query", params.Query)
+		}
+		// If len(stmts) == 0, whereClauseStr remains empty.
+	}
+
+	// Build the time filter using the correct timestamp field
 	timeFilter := fmt.Sprintf("`%s` >= toDateTime('%s') AND `%s` <= toDateTime('%s')",
 		timestampField, params.StartTime.Format("2006-01-02 15:04:05"),
 		timestampField, params.EndTime.Format("2006-01-02 15:04:05"))
 
-	// Combine time filter with user query conditions
+	// Combine the mandatory time filter with the extracted user query conditions (if any)
 	combinedWhereClause := timeFilter
-	if whereClause != "" && whereClause != params.Query {
-		combinedWhereClause = timeFilter + " AND (" + whereClause + ")"
+	if whereClauseStr != "" {
+		combinedWhereClause = fmt.Sprintf("%s AND (%s)", timeFilter, whereClauseStr)
 	}
 
-	// Build the histogram query using the bucket aggregation
+	// Build the final histogram query
 	query := fmt.Sprintf(`
 		SELECT
 			toStartOfInterval(%s, INTERVAL %d %s) AS bucket,
@@ -210,61 +241,4 @@ func getIntervalFromWindow(window TimeWindow) (int, string) {
 		// Default to 1 hour if window is not recognized
 		return 1, "hour"
 	}
-}
-
-// Helper function to extract WHERE clause conditions from a full SQL query string.
-// It aims to isolate the part between WHERE and clauses like GROUP BY, ORDER BY, LIMIT etc.
-func extractWhereClause(sqlQuery string) string {
-	if sqlQuery == "" {
-		return ""
-	}
-
-	// Normalize whitespace and convert to uppercase for easier searching
-	normalizedSQL := strings.Join(strings.Fields(sqlQuery), " ")
-	upperSQL := strings.ToUpper(normalizedSQL)
-
-	// Find the start of the WHERE clause
-	whereIndex := strings.Index(upperSQL, " WHERE ")
-	if whereIndex == -1 {
-		return "" // No WHERE clause found
-	}
-
-	// Start searching for conditions after " WHERE "
-	startIndex := whereIndex + len(" WHERE ")
-
-	// Find the end of the WHERE conditions by looking for subsequent clauses
-	endIndex := len(normalizedSQL) // Default to end of string
-
-	// Keywords that typically terminate a WHERE clause
-	terminatingKeywords := []string{
-		" GROUP BY ", " HAVING ", " ORDER BY ", " LIMIT ", " OFFSET ",
-		" UNION ", " EXCEPT ", " INTERSECT ", " WINDOW ", " SETTINGS ",
-	}
-
-	for _, keyword := range terminatingKeywords {
-		idx := strings.Index(upperSQL[startIndex:], keyword)
-		if idx != -1 {
-			// Found a terminating keyword, adjust endIndex if this keyword appears earlier
-			potentialEndIndex := startIndex + idx
-			if potentialEndIndex < endIndex {
-				endIndex = potentialEndIndex
-			}
-		}
-	}
-
-	// Extract the conditions
-	if startIndex >= endIndex {
-		return "" // Should not happen if WHERE was found, but safety check
-	}
-
-	conditions := normalizedSQL[startIndex:endIndex]
-
-	// Basic check for balanced parentheses - this is not foolproof but helps catch simple errors
-	if strings.Count(conditions, "(") != strings.Count(conditions, ")") {
-		// Fallback or log warning: The extracted clause might be incomplete due to complex structure
-		// For now, we'll return what we found, but ideally, a proper parser is needed.
-		// Consider logging a warning here if logging is available.
-	}
-
-	return strings.TrimSpace(conditions)
 }
