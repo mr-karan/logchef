@@ -268,10 +268,3 @@ func extractWhereClause(sqlQuery string) string {
 
 	return strings.TrimSpace(conditions)
 }
-
-// Placeholder for LogChefQL to SQL conversion
-func (c *Client) convertLogChefQLToSQL(logchefQL string) (string, error) {
-	// This would use your existing LogChefQL parser and converter
-	// For now, return the query as is assuming it's already in SQL-like format
-	return logchefQL, nil
-}
