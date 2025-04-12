@@ -212,40 +212,61 @@ func getIntervalFromWindow(window TimeWindow) (int, string) {
 	}
 }
 
-// Helper function to extract WHERE clause from a SQL query
-// This implementation attempts to extract just the conditions from a SQL query
+// Helper function to extract WHERE clause conditions from a full SQL query string.
+// It aims to isolate the part between WHERE and clauses like GROUP BY, ORDER BY, LIMIT etc.
 func extractWhereClause(sqlQuery string) string {
 	if sqlQuery == "" {
 		return ""
 	}
 
-	// Very basic implementation - in a production system you'd want a proper SQL parser
-	sqlQuery = strings.TrimSpace(sqlQuery)
-	upperSQL := strings.ToUpper(sqlQuery)
+	// Normalize whitespace and convert to uppercase for easier searching
+	normalizedSQL := strings.Join(strings.Fields(sqlQuery), " ")
+	upperSQL := strings.ToUpper(normalizedSQL)
 
-	// Find the WHERE clause
-	whereIndex := strings.Index(upperSQL, "WHERE")
+	// Find the start of the WHERE clause
+	whereIndex := strings.Index(upperSQL, " WHERE ")
 	if whereIndex == -1 {
 		return "" // No WHERE clause found
 	}
 
-	// Extract everything after WHERE
-	clause := sqlQuery[whereIndex+5:] // Skip "WHERE"
+	// Start searching for conditions after " WHERE "
+	startIndex := whereIndex + len(" WHERE ")
 
-	// Find other clauses that might come after the WHERE conditions
-	endKeywords := []string{"ORDER BY", "GROUP BY", "LIMIT", "HAVING", "UNION", "EXCEPT", "INTERSECT"}
+	// Find the end of the WHERE conditions by looking for subsequent clauses
+	endIndex := len(normalizedSQL) // Default to end of string
 
-	// Find the first occurrence of any ending keyword
-	endIndex := len(clause)
-	for _, keyword := range endKeywords {
-		idx := strings.Index(strings.ToUpper(clause), keyword)
-		if idx != -1 && idx < endIndex {
-			endIndex = idx
+	// Keywords that typically terminate a WHERE clause
+	terminatingKeywords := []string{
+		" GROUP BY ", " HAVING ", " ORDER BY ", " LIMIT ", " OFFSET ",
+		" UNION ", " EXCEPT ", " INTERSECT ", " WINDOW ", " SETTINGS ",
+	}
+
+	for _, keyword := range terminatingKeywords {
+		idx := strings.Index(upperSQL[startIndex:], keyword)
+		if idx != -1 {
+			// Found a terminating keyword, adjust endIndex if this keyword appears earlier
+			potentialEndIndex := startIndex + idx
+			if potentialEndIndex < endIndex {
+				endIndex = potentialEndIndex
+			}
 		}
 	}
 
-	// Extract just the WHERE conditions
-	return strings.TrimSpace(clause[:endIndex])
+	// Extract the conditions
+	if startIndex >= endIndex {
+		return "" // Should not happen if WHERE was found, but safety check
+	}
+
+	conditions := normalizedSQL[startIndex:endIndex]
+
+	// Basic check for balanced parentheses - this is not foolproof but helps catch simple errors
+	if strings.Count(conditions, "(") != strings.Count(conditions, ")") {
+		// Fallback or log warning: The extracted clause might be incomplete due to complex structure
+		// For now, we'll return what we found, but ideally, a proper parser is needed.
+		// Consider logging a warning here if logging is available.
+	}
+
+	return strings.TrimSpace(conditions)
 }
 
 // Placeholder for LogChefQL to SQL conversion

@@ -167,8 +167,9 @@ type HistogramResponse struct {
 	Data        []clickhouse.HistogramData `json:"data"`
 }
 
-// GetHistogramData fetches histogram data for a specific source and time range
+// GetHistogramData fetches histogram data for a specific source and time range, using the source's configured timestamp field.
 func (s *Service) GetHistogramData(ctx context.Context, sourceID models.SourceID, params HistogramParams) (*HistogramResponse, error) {
+	s.log.Debug("getting histogram data", "source_id", sourceID, "start_time", params.StartTime, "end_time", params.EndTime, "window", params.Window)
 	// Get the source from the database
 	source, err := s.db.GetSource(ctx, sourceID)
 	if err != nil {
@@ -181,8 +182,16 @@ func (s *Service) GetHistogramData(ctx context.Context, sourceID models.SourceID
 	// Get the ClickHouse client
 	client, err := s.manager.GetConnection(sourceID)
 	if err != nil {
+		s.log.Error("failed to get clickhouse client for histogram", "source_id", sourceID, "error", err)
 		return nil, fmt.Errorf("error getting clickhouse client: %w", err)
 	}
+
+	// Ensure MetaTSField is not empty
+	if source.MetaTSField == "" {
+		s.log.Error("source MetaTSField is empty, cannot generate histogram", "source_id", sourceID)
+		return nil, fmt.Errorf("source %d does not have a timestamp field configured", sourceID)
+	}
+	s.log.Debug("using timestamp field for histogram", "source_id", sourceID, "timestamp_field", source.MetaTSField)
 
 	// Set up clickhouse params
 	chParams := clickhouse.HistogramParams{
@@ -192,16 +201,19 @@ func (s *Service) GetHistogramData(ctx context.Context, sourceID models.SourceID
 		Query:     params.RawSQL,
 	}
 
-	// Get the histogram data
+	// Get the histogram data using the correct timestamp field
 	histogramData, err := client.GetHistogramData(
 		ctx,
-		source.GetFullTableName(),
-		source.MetaTSField,
-		chParams,
+		source.GetFullTableName(), // e.g., "default.vector_logs"
+		source.MetaTSField,       // e.g., "timestamp"
+		chParams,                 // Contains time range, window, and raw query
 	)
 	if err != nil {
+		s.log.Error("failed to get histogram data from clickhouse", "source_id", sourceID, "error", err)
 		return nil, fmt.Errorf("error getting histogram data: %w", err)
 	}
+
+	s.log.Debug("successfully retrieved histogram data", "source_id", sourceID, "bucket_count", len(histogramData.Data))
 
 	// Return the response
 	return &HistogramResponse{
