@@ -160,16 +160,19 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName string, timesta
 		// If len(stmts) == 0, whereClauseStr remains empty.
 	}
 
-	// Build the time filter using the correct timestamp field
-	timeFilter := fmt.Sprintf("`%s` >= toDateTime('%s') AND `%s` <= toDateTime('%s')",
-		timestampField, params.StartTime.Format("2006-01-02 15:04:05"),
-		timestampField, params.EndTime.Format("2006-01-02 15:04:05"))
-
-	// Combine the mandatory time filter with the extracted user query conditions (if any)
-	combinedWhereClause := timeFilter
-	if whereClauseStr != "" {
-		combinedWhereClause = fmt.Sprintf("%s AND (%s)", timeFilter, whereClauseStr)
+	// Use the extracted WHERE clause if available, otherwise generate a time filter.
+	combinedWhereClause := whereClauseStr
+	if combinedWhereClause == "" {
+		c.logger.Warn("no WHERE clause extracted from raw SQL, generating default time filter for histogram", "query", params.Query)
+		// Build the time filter using the correct timestamp field and request parameters
+		combinedWhereClause = fmt.Sprintf("`%s` >= toDateTime('%s') AND `%s` <= toDateTime('%s')",
+			timestampField, params.StartTime.Format("2006-01-02 15:04:05"),
+			timestampField, params.EndTime.Format("2006-01-02 15:04:05"))
+	} else {
+		// Wrap the extracted clause in parentheses for safety, although it might already be complex
+		combinedWhereClause = fmt.Sprintf("(%s)", whereClauseStr)
 	}
+
 
 	// Build the final histogram query
 	query := fmt.Sprintf(`
