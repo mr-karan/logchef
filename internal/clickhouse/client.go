@@ -319,56 +319,6 @@ func getIntervalUnit(window TimeWindow) string {
 	}
 }
 
-// GetLogContext retrieves logs before and after a specific timestamp
-func (c *Client) GetLogContext(ctx context.Context, params LogContextParams, tableName string) (*LogContextResult, error) {
-	start := time.Now()
-	defer func() {
-		c.logger.Debug("log context query completed",
-			"duration_ms", time.Since(start).Milliseconds(),
-		)
-	}()
-
-	// Build queries using QueryBuilder
-	qb := NewQueryBuilder(tableName)
-	beforeQuery, targetQuery, afterQuery := qb.BuildLogContextQueries(
-		params.TargetTime.Unix(),
-		params.BeforeLimit,
-		params.AfterLimit,
-	)
-
-	// Execute queries
-	beforeResult, err := c.Query(ctx, beforeQuery)
-	if err != nil {
-		return nil, fmt.Errorf("querying before logs: %w", err)
-	}
-
-	targetResult, err := c.Query(ctx, targetQuery)
-	if err != nil {
-		return nil, fmt.Errorf("querying target logs: %w", err)
-	}
-
-	afterResult, err := c.Query(ctx, afterQuery)
-	if err != nil {
-		return nil, fmt.Errorf("querying after logs: %w", err)
-	}
-
-	// Reverse the before logs to get chronological order
-	beforeLogs := beforeResult.Logs
-	for i, j := 0, len(beforeLogs)-1; i < j; i, j = i+1, j-1 {
-		beforeLogs[i], beforeLogs[j] = beforeLogs[j], beforeLogs[i]
-	}
-
-	return &LogContextResult{
-		BeforeLogs: beforeLogs,
-		TargetLogs: targetResult.Logs,
-		AfterLogs:  afterResult.Logs,
-		Stats: models.QueryStats{
-			RowsRead:        len(beforeLogs) + len(targetResult.Logs) + len(afterResult.Logs),
-			ExecutionTimeMs: float64(time.Since(start).Milliseconds()),
-		},
-	}, nil
-}
-
 // GetTableSchema retrieves the schema (column names and types) for a ClickHouse table
 func (c *Client) GetTableSchema(ctx context.Context, database, table string) ([]models.ColumnInfo, error) {
 	start := time.Now()

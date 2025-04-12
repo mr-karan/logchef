@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Calendar } from '@/components/ui/calendar'
 import { CalendarIcon, Clock } from 'lucide-vue-next'
 import type { DateRange } from 'radix-vue'
-import { getLocalTimeZone, now, ZonedDateTime, toZoned, CalendarDateTime, type DateValue } from '@internationalized/date'
+import { getLocalTimeZone, now, ZonedDateTime, toZoned, CalendarDateTime, type DateValue, parseDateTime } from '@internationalized/date'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -136,7 +136,7 @@ function formatTime(date: ZonedDateTime | null | undefined): string {
     }
 }
 
-function parseDateTime(date: string, time: string): ZonedDateTime | null {
+function parseDateTimeInput(date: string, time: string): ZonedDateTime | null {
     if (!date || !time) return null
     try {
         const [year, month, day] = date.split('-').map(Number)
@@ -155,8 +155,12 @@ function parseDateTime(date: string, time: string): ZonedDateTime | null {
         }
 
         try {
-            const calendarDate = new CalendarDateTime(year, month, day, hour, minute, second)
-            return toZoned(calendarDate, getLocalTimeZone())
+            // Create an ISO string and parse it with parseDateTime
+            const dateString = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}T${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')}`;
+            // Call parseDateTime with a single argument - the ISO string
+            const calendarDate = parseDateTime(dateString);
+            // Convert the CalendarDateTime to a ZonedDateTime
+            return toZoned(calendarDate, getLocalTimeZone());
         } catch (e) {
             console.error('Error creating ZonedDateTime:', e)
             errorMessage.value = 'Invalid date/time values'
@@ -192,8 +196,8 @@ function formatDisplayText() {
 function handleApply() {
     errorMessage.value = ''
 
-    const start = parseDateTime(draftState.value.start.date, draftState.value.start.time)
-    const end = parseDateTime(draftState.value.end.date, draftState.value.end.time)
+    const start = parseDateTimeInput(draftState.value.start.date, draftState.value.start.time)
+    const end = parseDateTimeInput(draftState.value.end.date, draftState.value.end.time)
 
     if (!start || !end) return
 

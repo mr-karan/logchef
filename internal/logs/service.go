@@ -62,55 +62,6 @@ func (s *Service) QueryLogs(ctx context.Context, sourceID models.SourceID, param
 	return client.Query(ctx, builtQuery)
 }
 
-// GetTimeSeries retrieves time series data for log counts
-func (s *Service) GetTimeSeries(ctx context.Context, sourceID models.SourceID, params clickhouse.TimeSeriesParams) (*clickhouse.TimeSeriesResult, error) {
-	// Get source from SQLite
-	source, err := s.db.GetSource(ctx, sourceID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting source: %w", err)
-	}
-	if source == nil {
-		return nil, ErrSourceNotFound
-	}
-
-	// Execute the time series query
-	return s.manager.GetTimeSeries(ctx, sourceID, source, params)
-}
-
-// GetLogContext retrieves logs before and after a specific timestamp
-func (s *Service) GetLogContext(ctx context.Context, req *models.LogContextRequest) (*models.LogContextResponse, error) {
-	// Get source from SQLite
-	source, err := s.db.GetSource(ctx, req.SourceID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting source: %w", err)
-	}
-	if source == nil {
-		return nil, ErrSourceNotFound
-	}
-
-	// Prepare parameters
-	params := clickhouse.LogContextParams{
-		TargetTime:  time.UnixMilli(req.Timestamp),
-		BeforeLimit: req.BeforeLimit,
-		AfterLimit:  req.AfterLimit,
-	}
-
-	// Execute the context query
-	result, err := s.manager.GetLogContext(ctx, req.SourceID, source, params)
-	if err != nil {
-		return nil, fmt.Errorf("error getting log context: %w", err)
-	}
-
-	// Convert to response format
-	return &models.LogContextResponse{
-		TargetTimestamp: req.Timestamp,
-		BeforeLogs:      result.BeforeLogs,
-		TargetLogs:      result.TargetLogs,
-		AfterLogs:       result.AfterLogs,
-		Stats:           result.Stats,
-	}, nil
-}
-
 // GetSourceStats retrieves statistics for a specific source
 func (s *Service) GetSourceStats(ctx context.Context, sourceID models.SourceID) (map[string]interface{}, error) {
 	// Get source from SQLite
@@ -205,8 +156,8 @@ func (s *Service) GetHistogramData(ctx context.Context, sourceID models.SourceID
 	histogramData, err := client.GetHistogramData(
 		ctx,
 		source.GetFullTableName(), // e.g., "default.vector_logs"
-		source.MetaTSField,       // e.g., "timestamp"
-		chParams,                 // Contains time range, window, and raw query
+		source.MetaTSField,        // e.g., "timestamp"
+		chParams,                  // Contains time range, window, and raw query
 	)
 	if err != nil {
 		s.log.Error("failed to get histogram data from clickhouse", "source_id", sourceID, "error", err)

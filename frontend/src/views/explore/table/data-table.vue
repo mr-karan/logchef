@@ -815,12 +815,29 @@ const handleDrillDown = (columnName: string, value: any) => {
     width: 100%;
     border-collapse: separate;
     border-spacing: 0;
+    border: 1px solid hsl(var(--border) / 0.7);
+    /* Add subtle outer border */
+    border-radius: 6px;
+    overflow: hidden;
+    /* Keep rounded corners */
 }
 
-/* Add clear borders to create a grid-like structure */
+/* Add proper cell borders */
+.table-fixed th,
+.table-fixed td {
+    border-right: 1px solid hsl(var(--border) / 0.4);
+    border-bottom: 1px solid hsl(var(--border) / 0.4);
+}
+
+/* Remove right border from last column */
 .table-fixed th:last-child,
 .table-fixed td:last-child {
     border-right: none;
+}
+
+/* Remove bottom border from last row */
+.table-fixed tbody tr:last-child td {
+    border-bottom: none;
 }
 
 /* Resize handle and cursor styling */
@@ -875,73 +892,34 @@ const handleDrillDown = (columnName: string, value: any) => {
     position: relative;
 }
 
+/* Improved header styling for consistent appearance */
+.table-fixed th {
+    padding: 0 !important;
+    font-weight: 500;
+    background-color: hsl(var(--muted) / 0.4);
+    /* Slightly darker header background */
+    border-bottom: 1px solid hsl(var(--border) / 0.8);
+    /* More prominent bottom border */
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
 /* Make table row alternating colors more visible */
 .table-fixed tbody tr:nth-child(odd) {
-    background-color: hsl(var(--muted) / 0.03);
+    background-color: hsl(var(--muted) / 0.05);
+    /* Very slight background */
 }
 
 .table-fixed tbody tr:nth-child(even) {
     background-color: transparent;
 }
 
-/* Improved header styling for consistent appearance */
-.table-fixed th {
-    padding: 0 !important;
-    font-weight: 500;
-    background-color: hsl(var(--muted) / 0.3);
-    border-bottom: 1px solid hsl(var(--border) / 0.7);
-    text-overflow: ellipsis;
-    overflow: hidden;
-}
-
-/* Ensure column headers show text properly */
-.table-fixed th :deep(.truncate) {
-    max-width: 100%;
-    display: inline-block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-    /* Required for flex truncation to work */
-}
-
-/* Refined header text display to work with any column name */
-.table-fixed th :deep(.flex-grow) {
-    flex: 1 1 auto;
-    min-width: 0;
-    /* Critical for text-overflow to work in flex containers */
-    max-width: calc(100% - 25px);
-    /* Leave room for icons */
-}
-
-/* Add better spacing for header content */
-.table-fixed th>div> :deep(.w-full) {
-    padding: 0 2px;
-    display: flex;
-    align-items: center;
-    min-width: 0;
-    /* Required for flexbox text truncation */
-}
-
-/* Add highlight style */
-:deep(.search-highlight) {
-    background-color: hsl(var(--highlight, 60 100% 75%));
-    /* Use theme variable with fallback */
-    color: hsl(var(--highlight-foreground, 0 0% 0%));
-    /* Use theme variable with fallback */
-    padding: 0 1px;
-    margin: 0 -1px;
-    /* Prevent layout shift */
-    border-radius: 2px;
-    box-shadow: 0 0 0 1px hsl(var(--highlight, 60 100% 75%) / 0.5);
-    /* Subtle outline */
-}
-
-/* Ensure highlight works well in dark mode if theme variables are set */
-.dark :deep(.search-highlight) {
-    background-color: hsl(var(--highlight, 60 90% 55%));
-    color: hsl(var(--highlight-foreground, 0 0% 0%));
-    box-shadow: 0 0 0 1px hsl(var(--highlight, 60 90% 55%) / 0.7);
+/* More prominent hover effect for table rows */
+.table-fixed tbody tr:hover:not([data-expanded="true"]) {
+    background-color: hsl(var(--muted) / 0.25) !important;
+    position: relative;
+    z-index: 1;
+    /* Ensure hover appears above other rows */
 }
 
 /* Ensure proper rendering inside table cells - single line with no wrapping */
@@ -1001,13 +979,6 @@ td>.flex>.whitespace-pre {
 /* Style for drop indicator */
 .border-l-primary {
     border-left-color: hsl(var(--primary)) !important;
-}
-
-/* More prominent hover effect for table rows */
-.table-fixed tbody tr:hover:not([data-expanded="true"]) {
-    background-color: hsl(var(--muted) / 0.4) !important;
-    box-shadow: inset 0 0 0 1px hsl(var(--muted) / 0.5);
-    transition: background-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 /* Active/expanded row styling - using complementary colors */
@@ -1337,5 +1308,55 @@ td>.flex>.whitespace-pre {
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
+}
+
+/* Ensure column headers show text properly */
+.table-fixed th :deep(.truncate) {
+    max-width: 100%;
+    display: inline-block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    /* Required for flex truncation to work */
+}
+
+/* Refined header text display to work with any column name */
+.table-fixed th :deep(.flex-grow) {
+    flex: 1 1 auto;
+    min-width: 0;
+    /* Critical for text-overflow to work in flex containers */
+    max-width: calc(100% - 25px);
+    /* Leave room for icons */
+}
+
+/* Add better spacing for header content */
+.table-fixed th>div> :deep(.w-full) {
+    padding: 0 2px;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    /* Required for flexbox text truncation */
+}
+
+/* Add highlight style */
+:deep(.search-highlight) {
+    background-color: hsl(var(--highlight, 60 100% 75%));
+    /* Use theme variable with fallback */
+    color: hsl(var(--highlight-foreground, 0 0% 0%));
+    /* Use theme variable with fallback */
+    padding: 0 1px;
+    margin: 0 -1px;
+    /* Prevent layout shift */
+    border-radius: 2px;
+    box-shadow: 0 0 0 1px hsl(var(--highlight, 60 100% 75%) / 0.5);
+    /* Subtle outline */
+}
+
+/* Ensure highlight works well in dark mode if theme variables are set */
+.dark :deep(.search-highlight) {
+    background-color: hsl(var(--highlight, 60 90% 55%));
+    color: hsl(var(--highlight-foreground, 0 0% 0%));
+    box-shadow: 0 0 0 1px hsl(var(--highlight, 60 90% 55%) / 0.7);
 }
 </style>

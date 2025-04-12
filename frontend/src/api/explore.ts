@@ -1,4 +1,8 @@
 import { apiClient } from "./apiUtils";
+import type { DateValue } from "@internationalized/date";
+import { useSourcesStore } from "@/stores/sources";
+import { QueryService } from "@/services/QueryService";
+import type { TimeRange } from "@/types/query";
 
 // Keep these for the UI filter builder
 export interface FilterCondition {
@@ -76,6 +80,41 @@ export interface LogContextResponse {
   stats: QueryStats;
 }
 
+// Histogram data types
+export interface HistogramDataPoint {
+  bucket: string;
+  log_count: number;
+}
+
+export interface HistogramResponse {
+  granularity: string;
+  data: HistogramDataPoint[];
+}
+
+/**
+ * Helper function to prepare query parameters with proper SQL based on mode
+ * This ensures we use a consistent approach for both logs and histogram queries
+ */
+export function prepareQueryParams(params: {
+  query: string;
+  queryType: string;
+  startTimestamp: number;
+  endTimestamp: number;
+  limit?: number;
+  timeRange?: TimeRange;
+}): QueryParams {
+  const { query, queryType, startTimestamp, endTimestamp, limit = 100 } = params;
+
+  // Use the raw SQL value as is - SQL transformation should happen before calling this function
+  return {
+    raw_sql: query,
+    limit,
+    start_timestamp: startTimestamp,
+    end_timestamp: endTimestamp,
+    query_type: queryType
+  };
+}
+
 export const exploreApi = {
   getLogs: (sourceId: number, params: QueryParams, teamId: number) => {
     if (!teamId) {
@@ -93,6 +132,16 @@ export const exploreApi = {
     }
     return apiClient.post<LogContextResponse>(
       `/teams/${teamId}/sources/${sourceId}/logs/context`,
+      params
+    );
+  },
+
+  getHistogramData: (sourceId: number, params: QueryParams, teamId: number, window: string = '1m') => {
+    if (!teamId) {
+      throw new Error("Team ID is required for getting histogram data");
+    }
+    return apiClient.post<HistogramResponse>(
+      `/teams/${teamId}/sources/${sourceId}/logs/histogram?window=${window}`,
       params
     );
   }

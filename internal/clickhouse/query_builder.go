@@ -241,39 +241,3 @@ func (qb *QueryBuilder) BuildLogContextQueries(targetTime int64, beforeLimit, af
 
 	return before, target, after
 }
-
-// BuildContextQuery builds a unified context query that returns logs before and after a timestamp
-func (qb *QueryBuilder) BuildContextQuery(targetTime int64, beforeLimit, afterLimit int) string {
-	return fmt.Sprintf(`
-		WITH target_timestamp AS (
-			SELECT %d as ts_millis
-		)
-		SELECT * FROM (
-			SELECT *
-			FROM %s
-			WHERE timestamp < fromUnixTimestamp64Milli((SELECT ts_millis FROM target_timestamp))
-			ORDER BY timestamp DESC
-			LIMIT %d
-
-			UNION ALL
-
-			SELECT *
-			FROM %s
-			WHERE timestamp = fromUnixTimestamp64Milli((SELECT ts_millis FROM target_timestamp))
-
-			UNION ALL
-
-			SELECT *
-			FROM %s
-			WHERE timestamp > fromUnixTimestamp64Milli((SELECT ts_millis FROM target_timestamp))
-			ORDER BY timestamp ASC
-			LIMIT %d
-		) ORDER BY timestamp ASC`,
-		targetTime,
-		qb.tableName,
-		beforeLimit,
-		qb.tableName,
-		qb.tableName,
-		afterLimit,
-	)
-}

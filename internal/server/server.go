@@ -153,6 +153,7 @@ func (s *Server) setupRoutes() {
 	api.Get("/teams/:teamID/sources/:sourceID", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleGetTeamSource)
 	api.Post("/teams/:teamID/sources/:sourceID/logs/query", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleQueryTeamSourceLogs)
 	api.Get("/teams/:teamID/sources/:sourceID/schema", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleGetTeamSourceSchema)
+	api.Post("/teams/:teamID/sources/:sourceID/logs/histogram", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleGetTeamSourceHistogram)
 
 	// Team Source Queries
 	api.Get("/teams/:teamID/sources/:sourceID/queries", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleListTeamSourceQueries)

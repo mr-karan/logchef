@@ -90,36 +90,6 @@ type HistogramResult struct {
 	Data        []HistogramData `json:"data"`
 }
 
-// GetTimeSeries retrieves time series data for log counts
-func (m *Manager) GetTimeSeries(ctx context.Context, sourceID models.SourceID, source *models.Source, params TimeSeriesParams) (*TimeSeriesResult, error) {
-	// Get client for the source
-	client, err := m.GetConnection(sourceID)
-	if err != nil {
-		return nil, fmt.Errorf("getting connection for source %d: %w", sourceID, err)
-	}
-
-	// Get table name from source
-	tableName := fmt.Sprintf("%s.%s", source.Connection.Database, source.Connection.TableName)
-
-	// Execute the time series query
-	return client.GetTimeSeries(ctx, params, tableName)
-}
-
-// GetLogContext retrieves logs before and after a specific timestamp
-func (m *Manager) GetLogContext(ctx context.Context, sourceID models.SourceID, source *models.Source, params LogContextParams) (*LogContextResult, error) {
-	// Get client for the source
-	client, err := m.GetConnection(sourceID)
-	if err != nil {
-		return nil, fmt.Errorf("getting connection for source %d: %w", sourceID, err)
-	}
-
-	// Get table name from source
-	tableName := fmt.Sprintf("%s.%s", source.Connection.Database, source.Connection.TableName)
-
-	// Execute the context query
-	return client.GetLogContext(ctx, params, tableName)
-}
-
 // GetHistogramData returns histogram data for a specific source and time range
 func (c *Client) GetHistogramData(ctx context.Context, tableName string, timestampField string, params HistogramParams) (*HistogramResult, error) {
 	// Determine interval value and unit based on window
@@ -174,7 +144,6 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName string, timesta
 		// Wrap the extracted clause in parentheses for safety, although it might already be complex
 		combinedWhereClause = fmt.Sprintf("(%s)", whereClauseStr)
 	}
-
 
 	// Build the final histogram query
 	query := fmt.Sprintf(`

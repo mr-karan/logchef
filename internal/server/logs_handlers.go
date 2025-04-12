@@ -99,118 +99,66 @@ func (s *Server) handleGetTeamSourceSchema(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, schema)
 }
 
-// // handleGetTimeSeries handles GET /api/v1/sources/:id/logs/timeseries
-// func (s *Server) handleGetTimeSeries(c *fiber.Ctx) error {
-// 	id := c.Params("id")
-// 	if id == "" {
-// 		return SendError(c, fiber.StatusBadRequest, "source ID is required")
-// 	}
+// handleGetTeamSourceHistogram handles POST /api/v1/teams/:teamId/sources/:sourceId/logs/histogram
+func (s *Server) handleGetTeamSourceHistogram(c *fiber.Ctx) error {
+	teamID := c.Params("teamId")
+	sourceIDStr := c.Params("sourceId")
 
-// 	// Convert string to int for SourceID
-// 	idInt, err := strconv.Atoi(id)
-// 	if err != nil {
-// 		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
-// 	}
-// 	sourceID := models.SourceID(idInt)
+	if teamID == "" || sourceIDStr == "" {
+		return SendError(c, fiber.StatusBadRequest, "team ID and source ID are required")
+	}
 
-// 	// Parse query parameters
-// 	startTimeStr := c.Query("start_time")
-// 	endTimeStr := c.Query("end_time")
-// 	window := c.Query("window", "1h")
+	// Convert string to int for SourceID
+	sourceIDInt, err := strconv.Atoi(sourceIDStr)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
+	}
+	sourceID := models.SourceID(sourceIDInt)
 
-// 	if startTimeStr == "" || endTimeStr == "" {
-// 		return SendError(c, fiber.StatusBadRequest, "start_time and end_time are required")
-// 	}
+	// Parse request body (same structure as log query)
+	var req models.LogQueryRequest
+	if err := c.BodyParser(&req); err != nil {
+		return SendError(c, fiber.StatusBadRequest, "invalid request body")
+	}
 
-// 	startTime, err := strconv.ParseInt(startTimeStr, 10, 64)
-// 	if err != nil {
-// 		return SendError(c, fiber.StatusBadRequest, "invalid start_time")
-// 	}
+	// Set default window
+	window := "1m" // Default to 1 minute window instead of 1 hour for more granular data
+	if windowParam := c.Query("window"); windowParam != "" {
+		// Validate window parameter
+		validWindows := map[string]bool{
+			"1m":  true,
+			"5m":  true,
+			"15m": true,
+			"1h":  true,
+			"6h":  true,
+			"24h": true,
+		}
+		if validWindows[windowParam] {
+			window = windowParam
+		}
+	}
 
-// 	endTime, err := strconv.ParseInt(endTimeStr, 10, 64)
-// 	if err != nil {
-// 		return SendError(c, fiber.StatusBadRequest, "invalid end_time")
-// 	}
+	// Set defaults for limit if needed
+	if req.Limit <= 0 {
+		req.Limit = 100
+	}
 
-// 	// Convert window to TimeWindow
-// 	var timeWindow clickhouse.TimeWindow
-// 	switch window {
-// 	case "1m":
-// 		timeWindow = clickhouse.TimeWindow1m
-// 	case "5m":
-// 		timeWindow = clickhouse.TimeWindow5m
-// 	case "15m":
-// 		timeWindow = clickhouse.TimeWindow15m
-// 	case "1h":
-// 		timeWindow = clickhouse.TimeWindow1h
-// 	case "6h":
-// 		timeWindow = clickhouse.TimeWindow6h
-// 	case "24h":
-// 		timeWindow = clickhouse.TimeWindow24h
-// 	default:
-// 		timeWindow = clickhouse.TimeWindow1h
-// 	}
+	// Create histogram params
+	params := logs.HistogramParams{
+		StartTime: time.UnixMilli(req.StartTimestamp),
+		EndTime:   time.UnixMilli(req.EndTimestamp),
+		Window:    window,
+		RawSQL:    req.RawSQL,
+	}
 
-// 	params := clickhouse.TimeSeriesParams{
-// 		StartTime: time.UnixMilli(startTime),
-// 		EndTime:   time.UnixMilli(endTime),
-// 		Window:    timeWindow,
-// 	}
+	// Execute histogram query - authorization already checked by middleware
+	result, err := s.logsService.GetHistogramData(c.Context(), sourceID, params)
+	if err != nil {
+		if errors.Is(err, logs.ErrSourceNotFound) {
+			return SendError(c, fiber.StatusNotFound, "source not found")
+		}
+		return fmt.Errorf("error getting histogram data: %w", err)
+	}
 
-// 	result, err := s.logsService.GetTimeSeries(c.Context(), sourceID, params)
-// 	if err != nil {
-// 		if errors.Is(err, logs.ErrSourceNotFound) {
-// 			return SendError(c, fiber.StatusNotFound, "source not found")
-// 		}
-// 		return fmt.Errorf("error getting time series: %w", err)
-// 	}
-
-// 	return SendSuccess(c, fiber.StatusOK, result)
-// }
-
-// // handleGetLogContext handles POST /api/v1/sources/:id/logs/context
-// func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
-// 	id := c.Params("id")
-// 	if id == "" {
-// 		return SendError(c, fiber.StatusBadRequest, "source ID is required")
-// 	}
-
-// 	// Convert string to int for SourceID
-// 	idInt, err := strconv.Atoi(id)
-// 	if err != nil {
-// 		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
-// 	}
-// 	sourceID := models.SourceID(idInt)
-
-// 	var req models.LogContextRequest
-// 	if err := c.BodyParser(&req); err != nil {
-// 		return SendError(c, fiber.StatusBadRequest, "invalid request body")
-// 	}
-
-// 	// Set source ID from path
-// 	req.SourceID = sourceID
-
-// 	// Set defaults
-// 	if req.BeforeLimit <= 0 {
-// 		req.BeforeLimit = 5
-// 	}
-// 	if req.AfterLimit <= 0 {
-// 		req.AfterLimit = 5
-// 	}
-
-// 	// Validate request
-// 	validator := logs.NewValidator()
-// 	if err := validator.ValidateLogContextRequest(&req); err != nil {
-// 		return SendError(c, fiber.StatusBadRequest, err.Error())
-// 	}
-
-// 	resp, err := s.logsService.GetLogContext(c.Context(), &req)
-// 	if err != nil {
-// 		if errors.Is(err, logs.ErrSourceNotFound) {
-// 			return SendError(c, fiber.StatusNotFound, "source not found")
-// 		}
-// 		return fmt.Errorf("error getting log context: %w", err)
-// 	}
-
-// 	return SendSuccess(c, fiber.StatusOK, resp)
-// }
+	return SendSuccess(c, fiber.StatusOK, result)
+}

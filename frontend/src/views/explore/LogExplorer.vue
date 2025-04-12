@@ -28,7 +28,7 @@ import { useExploreStore } from '@/stores/explore'
 import { useTeamsStore } from '@/stores/teams'
 import { useSourcesStore } from '@/stores/sources'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
-import { now, getLocalTimeZone, type CalendarDateTime, type DateValue, toCalendarDateTime } from '@internationalized/date'
+import { now, getLocalTimeZone, type CalendarDateTime, type DateValue, toCalendarDateTime, parseDate, parseDateTime, fromDate } from '@internationalized/date'
 import DataTable from './table/data-table.vue'
 import { formatSourceName } from '@/utils/format'
 import SaveQueryModal from '@/components/collections/SaveQueryModal.vue'
@@ -51,6 +51,7 @@ import type { EditorMode } from '@/views/explore/types'
 import type { ComponentPublicInstance } from 'vue'; // Import ComponentPublicInstance
 import { type QueryCondition, parseAndTranslateLogchefQL, validateLogchefQLWithDetails } from '@/utils/logchefql/api';
 import { QueryService } from '@/services/QueryService';
+import LogHistogram from '@/components/visualizations/LogHistogram.vue';
 
 // Router and stores
 const router = useRouter()
@@ -950,6 +951,38 @@ const openDatePicker = () => {
     dateTimePickerRef.value.openDatePicker();
   }
 };
+
+// Handle histogram time range zooming
+function handleHistogramTimeRangeZoom(range: any) {
+  if (!range || !range.start || !range.end) return;
+
+  try {
+    console.log('Handling time range zoom:', range);
+
+    // Use fromDate instead of parseDateTime to convert JS Date objects directly
+    // This properly handles the timezone information
+    const start = fromDate(range.start, getLocalTimeZone());
+    const end = fromDate(range.end, getLocalTimeZone());
+
+    console.log(`Setting new time range: ${start.toString()} to ${end.toString()}`);
+
+    // Update the time range in the store
+    exploreStore.setTimeRange({ start, end });
+
+    // Optionally re-execute the query with the new time range
+    if (canExecuteQuery.value) {
+      executeQuery();
+    }
+  } catch (e) {
+    console.error('Error handling histogram time range:', e);
+    toast({
+      title: 'Time Range Error',
+      description: 'There was an error updating the time range from chart selection.',
+      variant: 'destructive',
+      duration: TOAST_DURATION.ERROR
+    });
+  }
+}
 </script>
 
 <template>
@@ -1311,6 +1344,12 @@ const openDatePicker = () => {
                 service_name="api-gateway"</code></div>
             </div>
           </div>
+        </div>
+
+        <!-- Log Histogram Visualization -->
+        <div class="px-4 pb-3" v-if="!isChangingContext && currentSourceId && hasValidSource && exploreStore.timeRange">
+          <LogHistogram :time-range="exploreStore.timeRange" :is-loading="isExecutingQuery"
+            @zoom-time-range="handleHistogramTimeRangeZoom" />
         </div>
 
         <!-- Results Section -->
