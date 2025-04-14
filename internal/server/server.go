@@ -21,7 +21,6 @@ import (
 // ServerOptions contains all dependencies needed to create a new Server
 type ServerOptions struct {
 	Config            *config.Config
-	SourceService     *source.Service
 	LogsService       *logs.Service
 	IdentityService   *identity.Service
 	SavedQueryService *saved_queries.Service
@@ -37,7 +36,6 @@ type Server struct {
 	config *config.Config
 
 	// Domain-specific services
-	sourceService     *source.Service
 	logsService       *logs.Service
 	identityService   *identity.Service
 	savedQueryService *saved_queries.Service

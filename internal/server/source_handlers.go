@@ -7,16 +7,13 @@ import (
 
 	"github.com/mr-karan/logchef/pkg/models"
 
-	"github.com/mr-karan/logchef/internal/source"
 
 	"github.com/gofiber/fiber/v2"
 )
 
 // handleListSources handles GET /api/v1/admin/sources
 func (s *Server) handleListSources(c *fiber.Ctx) error {
-	s.log.Info("listing sources - before service call")
-	
-	sources, err := s.sourceService.ListSources(c.Context())
+	sources, err := s.sqlite.ListSources(c.Context())
 	if err != nil {
 		return SendError(c, fiber.StatusInternalServerError, "error listing sources: "+err.Error())
 	}
@@ -59,9 +56,9 @@ func (s *Server) handleGetSource(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
 	}
 
-	src, err := s.sourceService.GetSource(c.Context(), models.SourceID(sourceID))
+	src, err := s.sqlite.GetSource(c.Context(), models.SourceID(sourceID))
 	if err != nil {
-		if errors.Is(err, source.ErrSourceNotFound) {
+		if errors.Is(err, models.ErrNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error getting source: "+err.Error(), models.DatabaseErrorType)
@@ -86,7 +83,19 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 	// We no longer set a default for MetaSeverityField
 	// This allows empty string to indicate "no severity field"
 
-	created, err := s.sourceService.CreateSource(c.Context(), req.Name, req.MetaIsAutoCreated, req.Connection, req.Description, req.TTLDays, req.MetaTSField, req.MetaSeverityField, req.Schema)
+	// Create source directly
+	source := &models.Source{
+		Name:              req.Name,
+		MetaIsAutoCreated: req.MetaIsAutoCreated,
+		MetaTSField:       req.MetaTSField,
+		MetaSeverityField: req.MetaSeverityField,
+		Connection:        req.Connection,
+		Description:       req.Description,
+		TTLDays:           req.TTLDays,
+		Schema:            req.Schema,
+	}
+	
+	if err := s.sqlite.CreateSource(c.Context(), source); err != nil {
 	if err != nil {
 		var validationErr *source.ValidationError
 		if errors.As(err, &validationErr) {
