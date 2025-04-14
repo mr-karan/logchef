@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
-import { Plus, Play, RefreshCw, Share2, Keyboard, Save, CalendarIcon } from 'lucide-vue-next'
+import { Plus, Play, RefreshCw, Share2, Keyboard, Save, CalendarIcon, Info, HelpCircle, Eraser } from 'lucide-vue-next'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
@@ -427,9 +427,9 @@ watch(isInitializing, async (initializing, prevInitializing) => {
 
     // Make sure we have a valid time range before executing the query
     if (!exploreStore.timeRange || !exploreStore.timeRange.start || !exploreStore.timeRange.end) {
-      // Set a default time range (last 5 minutes)
+      // Set a default time range (last 1 hour)
       exploreStore.setTimeRange({
-        start: now(getLocalTimeZone()).subtract({ minutes: 5 }),
+        start: now(getLocalTimeZone()).subtract({ hours: 1 }),
         end: now(getLocalTimeZone())
       });
     }
@@ -1008,6 +1008,21 @@ function handleHistogramTimeRangeZoom(range: any) {
     });
   }
 }
+
+// Helper function to create example query with sort keys
+const createExampleQueryWithSortKeys = (sortKeys: string[] = []) => {
+  if (!sortKeys || sortKeys.length === 0) return '';
+
+  // Create a simple example query using the first 2 sort keys
+  const keysToUse = sortKeys.slice(0, 2);
+
+  if (activeMode.value === 'logchefql') {
+    return keysToUse.map(key => `${key}="example"`).join(' and ');
+  } else {
+    // SQL example with first two keys
+    return `SELECT * FROM ${activeSourceTableName.value} WHERE ${keysToUse.map(key => `${key} = 'example'`).join(' AND ')} LIMIT 100`;
+  }
+};
 </script>
 
 <template>
@@ -1278,6 +1293,43 @@ function handleHistogramTimeRangeZoom(range: any) {
                 @update:activeMode="(mode, isModeSwitchOnly) => changeMode(mode === 'logchefql' ? 'logchefql' : 'sql', isModeSwitchOnly)"
                 @toggle-fields="showFieldsPanel = !showFieldsPanel" @select-saved-query="loadSavedQuery"
                 @save-query="handleSaveOrUpdateClick" class="border-0 border-b" />
+
+              <!-- Sort Key Optimization Hint -->
+              <div v-if="sourceDetails?.sort_keys?.length"
+                class="px-3 py-1.5 text-xs bg-blue-50 dark:bg-blue-950/40 border-t flex items-center">
+                <Info class="text-blue-600 dark:text-blue-400 h-4 w-4 mr-2" />
+                <div>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger class="flex items-center gap-1 text-blue-700 dark:text-blue-300 font-medium">
+                        ClickHouse performance tip:
+                        <span v-for="(key, index) in sourceDetails.sort_keys" :key="key" class="inline-flex">
+                          <code class="px-1 bg-blue-100 dark:bg-blue-900 rounded font-mono">{{ key }}</code>
+                          <span v-if="index < sourceDetails.sort_keys.length - 1" class="px-0.5">,</span>
+                        </span>
+                        <HelpCircle class="h-3.5 w-3.5 ml-1" />
+                      </TooltipTrigger>
+                      <TooltipContent class="max-w-md">
+                        <div class="space-y-2">
+                          <p class="font-medium">Why this matters:</p>
+                          <p>ClickHouse works best when queries filter by the table's sort keys in the same order.
+                            Including these fields in your filters can dramatically improve query performance.</p>
+                          <p class="text-sm text-muted-foreground italic">
+                            For optimal performance, filter by
+                            <span v-for="(key, index) in sourceDetails.sort_keys" :key="key">
+                              <code class="px-1 bg-primary/10 rounded">{{ key }}</code>
+                              <span v-if="index < sourceDetails.sort_keys.length - 1"> then </span>
+                            </span>
+                          </p>
+                          <p class="text-xs border-t border-border pt-1 mt-1">Example query: <code
+                              class="bg-muted p-0.5 rounded">{{ createExampleQueryWithSortKeys(sourceDetails.sort_keys) }}</code>
+                          </p>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              </div>
             </div>
           </template>
 
@@ -1331,14 +1383,7 @@ function handleHistogramTimeRangeZoom(range: any) {
                   <TooltipTrigger asChild>
                     <Button variant="outline" size="sm" class="h-9 px-3 flex items-center gap-1.5"
                       @click="clearQueryEditor" :disabled="isExecutingQuery" aria-label="Clear query editor">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                        class="lucide lucide-eraser">
-                        <path
-                          d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
-                        <path d="M22 21H7" />
-                        <path d="m5 11 9 9" />
-                      </svg>
+                      <Eraser class="h-3.5 w-3.5" />
                       <span>Clear</span>
                     </Button>
                   </TooltipTrigger>

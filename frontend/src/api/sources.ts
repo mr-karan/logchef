@@ -29,6 +29,10 @@ export interface Source {
   is_connected: boolean;
   schema?: string;
   columns?: ColumnInfo[];
+  // ClickHouse specific properties
+  engine?: string;
+  engine_params?: string[];
+  sort_keys?: string[];
 }
 
 export interface ColumnInfo {

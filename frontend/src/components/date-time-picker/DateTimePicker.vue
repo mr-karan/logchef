@@ -35,7 +35,7 @@ const errorMessage = ref('')
 // Date state
 const currentTime = now(getLocalTimeZone())
 const dateRange = ref<{ start: DateValue; end: DateValue }>({
-    start: currentTime.subtract({ minutes: 5 }),
+    start: currentTime.subtract({ hours: 1 }),
     end: currentTime
 })
 
