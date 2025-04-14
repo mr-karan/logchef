@@ -552,6 +552,16 @@ watch(
     if (!newRange || !oldRange) return;
     if (JSON.stringify(newRange) === JSON.stringify(oldRange)) return;
 
+    // If time range changed significantly, trigger a query execution
+    if (newRange && oldRange && 
+        (newRange.start.toString() !== oldRange.start.toString() || 
+         newRange.end.toString() !== oldRange.end.toString())) {
+      // Only auto-execute if we're not in the middle of changing the query
+      if (!isDirty.value) {
+        executeQuery();
+      }
+    }
+
     // If we're in SQL mode, check if we have a standard time range pattern we can update
     if (activeMode.value === 'sql') {
       const currentSql = sqlQuery.value?.trim() || '';
@@ -980,13 +990,16 @@ const openDatePicker = () => {
 // Handle histogram time range zooming
 function handleHistogramTimeRangeZoom(range: { start: Date; end: Date }) {
   try {
-    // Convert to CalendarDateTime in local timezone
-    const start = fromDate(range.start, getLocalTimeZone());
-    const end = fromDate(range.end, getLocalTimeZone());
-
+    // Convert native Dates directly to CalendarDateTime
+    const start = toCalendarDateTime(fromDate(range.start, getLocalTimeZone()));
+    const end = toCalendarDateTime(fromDate(range.end, getLocalTimeZone()));
+    
     // Update both the store's time range and force a query execution
     exploreStore.setTimeRange({ start, end });
     executeQuery();
+    
+    // Update URL state
+    syncUrlFromState();
   } catch (e) {
     console.error('Error handling histogram time range:', e);
     toast({

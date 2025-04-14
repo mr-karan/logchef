@@ -79,8 +79,10 @@ if (!props.modelValue?.start || !props.modelValue?.end) {
 // Sync internal state with external value
 watch(() => props.modelValue, (newValue) => {
     if (newValue?.start && newValue?.end) {
-        const start = toZoned(newValue.start as CalendarDateTime, getLocalTimeZone())
-        const end = toZoned(newValue.end as CalendarDateTime, getLocalTimeZone())
+        const start = newValue.start instanceof ZonedDateTime ? 
+            newValue.start : toZoned(newValue.start as CalendarDateTime, getLocalTimeZone());
+        const end = newValue.end instanceof ZonedDateTime ? 
+            newValue.end : toZoned(newValue.end as CalendarDateTime, getLocalTimeZone());
 
         dateRange.value = {
             start: newValue.start,
@@ -97,7 +99,7 @@ watch(() => props.modelValue, (newValue) => {
             }
         }
     }
-}, { immediate: true })
+}, { immediate: true, deep: true })
 
 const quickRanges = [
     { label: 'Last 5m', duration: { minutes: 5 } },

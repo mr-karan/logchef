@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue';
+import { toCalendarDateTime } from '@internationalized/date';
 import * as echarts from 'echarts';
 import { debounce } from 'lodash-es';
 import { useExploreStore } from '@/stores/explore';
@@ -390,9 +391,9 @@ const setupChartEvents = () => {
                 // Direct mapping to the histogram data
                 const totalPoints = histogramData.value.length;
 
-                // Convert percentages to indices directly in the histogram data array
-                const histoStartIdx = Math.min(Math.max(0, Math.floor(totalPoints * batch.start / 100)), totalPoints - 1);
-                const histoEndIdx = Math.min(Math.max(histoStartIdx, Math.floor(totalPoints * batch.end / 100)), totalPoints - 1);
+                // Convert percentages to indices using startValue/endValue instead of start/end
+                const histoStartIdx = Math.min(Math.max(0, Math.floor(totalPoints * batch.startValue / 100)), totalPoints - 1);
+                const histoEndIdx = Math.min(Math.max(histoStartIdx, Math.floor(totalPoints * batch.endValue / 100)), totalPoints - 1);
 
                 console.log('Calculated indices:', {
                     histoStartIdx,
