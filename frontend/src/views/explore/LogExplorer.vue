@@ -994,14 +994,11 @@ function handleHistogramTimeRangeZoom(range: { start: Date; end: Date }) {
     // Update the store's time range
     exploreStore.setTimeRange({ start, end });
 
-    // The isDirty computed property in useQuery will automatically
-    // detect that the time range has changed compared to lastExecutedState
+    // Execute query immediately with new time range
+    executeQuery();
 
     // Update URL state
     syncUrlFromState();
-
-    // No toast notification - users will see the time picker update
-    // and the "Run Query" button change to show the dirty state
   } catch (e) {
     console.error('Error handling histogram time range:', e);
     toast({

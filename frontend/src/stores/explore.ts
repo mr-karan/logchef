@@ -460,6 +460,12 @@ export const useExploreStore = defineStore("explore", () => {
         operationKey: operationKey,
       });
 
+      // Ensure lastExecutionTimestamp is set even if there was an error
+      // This helps the histogram know when to refresh
+      if (!response.success && state.data.value.lastExecutionTimestamp === null) {
+          state.data.value.lastExecutionTimestamp = Date.now();
+      }
+
       // IMPORTANT: Return structure expected by useQueryExecution
       if (response.success) {
           return { success: true, data: response.data };

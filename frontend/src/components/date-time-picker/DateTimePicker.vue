@@ -98,6 +98,10 @@ watch(() => props.modelValue, (newValue) => {
                 time: formatTime(end)
             }
         }
+        
+        // Update selected quick range to null when time range is updated externally
+        // This ensures the display shows the actual time range rather than a quick range label
+        selectedQuickRange.value = null;
     }
 }, { immediate: true, deep: true })
 

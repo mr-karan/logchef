@@ -585,7 +585,8 @@ watch(
             console.warn('Skipping histogram data fetch for disconnected source');
             histogramData.value = [];
         }
-    }
+    },
+    { immediate: true } // Add immediate option to ensure it runs on component mount
 );
 
 // Add a separate deep watcher specifically for time range changes
