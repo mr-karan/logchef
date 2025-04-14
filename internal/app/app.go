@@ -19,26 +19,12 @@ import (
 	"github.com/mr-karan/logchef/pkg/logger"
 )
 
-// App represents the application and its components
+// App represents the core application context
 type App struct {
-	// Core components
-	cfg      *config.Config
-	log      *slog.Logger
-	sqliteDB *sqlite.DB
-
-	// Domain services
-	authService       *auth.Service
-	sourceService     *source.Service
-	logsService       *logs.Service
-	identityService   *identity.Service
-	savedQueryService *saved_queries.Service
-
-	// HTTP server
-	server *server.Server
-	webFS  http.FileSystem
-
-	// Build information
-	buildInfo string
+	Config     *config.Config
+	SQLite     *sqlite.DB
+	ClickHouse *clickhouse.Manager
+	Logger     *slog.Logger
 }
 
 // Options contains configuration for creating a new App
@@ -59,98 +45,45 @@ func New(opts Options) (*App, error) {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	log := logger.New(cfg.Logging.Level == "debug")
-
-	// Create app instance
+	// Initialize core application
 	app := &App{
-		cfg:       cfg,
-		log:       log,
-		webFS:     opts.WebFS,
-		buildInfo: opts.BuildInfo,
+		Config: cfg,
+		Logger: logger.New(cfg.Logging.Level == "debug"),
 	}
 
 	return app, nil
 }
 
-// Initialize sets up all application components
+// Initialize sets up core application components
 func (a *App) Initialize(ctx context.Context) error {
-	// Initialize SQLite database
-	a.log.Info("initializing sqlite database")
 	var err error
-	a.sqliteDB, err = sqlite.New(sqlite.Options{
-		Config: a.cfg.SQLite,
-		Logger: a.log,
-	})
+	
+	// Initialize SQLite database
+	a.SQLite, err = sqlite.New(a.Config.SQLite, a.Logger)
 	if err != nil {
 		return fmt.Errorf("failed to initialize sqlite: %w", err)
 	}
 
-	// Initialize auth service
-	a.log.Info("initializing authentication service")
-	a.authService, err = auth.New(a.cfg, a.sqliteDB, a.log)
-	if err != nil {
-		return fmt.Errorf("failed to initialize authentication service: %w", err)
-	}
+	// Initialize ClickHouse manager
+	a.ClickHouse = clickhouse.NewManager(a.Logger)
 
-	// Create Clickhouse manager
-	a.log.Info("initializing clickhouse manager")
-	clickhouseManager := clickhouse.NewManager(a.log)
-
-	// Initialize domain-specific services
-	a.log.Info("initializing domain services")
-	a.sourceService = source.New(a.sqliteDB, clickhouseManager, a.log)
-	a.logsService = logs.New(a.sqliteDB, clickhouseManager, a.log)
-	a.identityService = identity.New(a.sqliteDB, a.log)
-
-	// Initialize saved query service
-	a.log.Info("initializing saved query service")
-	a.savedQueryService = saved_queries.New(a.sqliteDB, a.log)
-
-	// Ensure admin user exists
-	a.log.Info("ensuring admin users")
-	if err := a.identityService.InitAdminUsers(ctx, a.cfg.Auth.AdminEmails); err != nil {
-		return fmt.Errorf("failed to ensure admin user: %w", err)
-	}
-
-	// Initialize clickhouse connections for existing sources
-	a.log.Info("initializing clickhouse connections")
-	sources, err := a.sqliteDB.ListSources(ctx)
+	// Load existing sources into ClickHouse
+	sources, err := a.SQLite.ListSources(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list sources: %w", err)
 	}
 
-	if len(sources) == 0 {
-		a.log.Warn("no sources found in the database")
-	}
-
-	// Initialize sources
-	healthySources := 0
 	for _, source := range sources {
-		a.log.Info("initializing source", "source_id", source.ID, "table", source.Connection.TableName)
-
-		// Initialize with source service
-		if err := a.sourceService.InitializeSource(ctx, source); err != nil {
-			a.log.Warn("failed to initialize source", "source", source.ID, "error", err)
-			continue
+		a.Logger.Info("initializing source connection", 
+			"source_id", source.ID, 
+			"table", source.Connection.TableName)
+			
+		if err := a.ClickHouse.AddSource(source); err != nil {
+			a.Logger.Warn("failed to initialize source",
+				"source_id", source.ID,
+				"error", err)
 		}
-
-		healthySources++
 	}
-	a.log.Info("source initialization completed", "healthy_sources", healthySources, "total_sources", len(sources))
-
-	// Initialize HTTP server
-	a.log.Info("initializing http server")
-	a.server = server.New(server.ServerOptions{
-		Config:            a.cfg,
-		SourceService:     a.sourceService,
-		LogsService:       a.logsService,
-		IdentityService:   a.identityService,
-		SavedQueryService: a.savedQueryService,
-		Auth:              a.authService,
-		FS:                a.webFS,
-		Logger:            a.log,
-		BuildInfo:         a.buildInfo,
-	})
 
 	return nil
 }
