@@ -449,8 +449,11 @@ const setupChartEvents = () => {
                     endDate = new Date(nextBucket);
                 }
 
-                console.log('Emitting zoom time range:', { start: startDate, end: endDate });
-                emit('zoom-time-range', { start: startDate, end: endDate });
+                // Convert to native Date objects for easier handling in parent
+                emit('zoom-time-range', { 
+                  start: new Date(startDate), 
+                  end: new Date(endDate) 
+                });
             } catch (e) {
                 console.error('Error handling zoom event:', e);
 

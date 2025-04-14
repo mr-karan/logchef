@@ -817,7 +817,7 @@ const clearQueryEditor = () => {
 };
 
 // Function to handle drill-down from DataTable to add a filter condition
-const handleDrillDown = (data: { column: string, value: any }) => {
+const handleDrillDown = (data: { column: string; value: any }) => {
   // Only handle in LogchefQL mode
   if (activeMode.value !== 'logchefql') return;
 
@@ -978,26 +978,15 @@ const openDatePicker = () => {
 };
 
 // Handle histogram time range zooming
-function handleHistogramTimeRangeZoom(range: any) {
-  if (!range || !range.start || !range.end) return;
-
+function handleHistogramTimeRangeZoom(range: { start: Date; end: Date }) {
   try {
-    console.log('Handling time range zoom:', range);
-
-    // Use fromDate instead of parseDateTime to convert JS Date objects directly
-    // This properly handles the timezone information
+    // Convert to CalendarDateTime in local timezone
     const start = fromDate(range.start, getLocalTimeZone());
     const end = fromDate(range.end, getLocalTimeZone());
 
-    console.log(`Setting new time range: ${start.toString()} to ${end.toString()}`);
-
-    // Update the time range in the store
+    // Update both the store's time range and force a query execution
     exploreStore.setTimeRange({ start, end });
-
-    // Optionally re-execute the query with the new time range
-    if (canExecuteQuery.value) {
-      executeQuery();
-    }
+    executeQuery();
   } catch (e) {
     console.error('Error handling histogram time range:', e);
     toast({
