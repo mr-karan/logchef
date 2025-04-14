@@ -994,8 +994,13 @@ function handleHistogramTimeRangeZoom(range: { start: Date; end: Date }) {
     const start = toCalendarDateTime(fromDate(range.start, getLocalTimeZone()));
     const end = toCalendarDateTime(fromDate(range.end, getLocalTimeZone()));
     
-    // Update both the store's time range and force a query execution
+    // Update the store's time range
     exploreStore.setTimeRange({ start, end });
+    
+    // Force a timestamp update to trigger histogram refresh
+    exploreStore.setLastExecutionTimestamp(Date.now());
+    
+    // Force query execution
     executeQuery();
     
     // Update URL state

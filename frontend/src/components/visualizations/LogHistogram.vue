@@ -588,6 +588,27 @@ watch(
     { deep: true }
 );
 
+// Add a separate deep watcher specifically for time range changes
+watch(
+    () => props.timeRange,
+    (newRange, oldRange) => {
+        // Skip if we're already loading
+        if (isChartLoading.value) return;
+        
+        // Skip if no valid source
+        if (!hasValidSource.value || !currentSourceId.value) return;
+        
+        // Only trigger if time range actually changed
+        if (newRange && oldRange && 
+            (newRange.start?.toString() !== oldRange.start?.toString() || 
+             newRange.end?.toString() !== oldRange.end?.toString())) {
+            // Force a refresh of histogram data with the new time range
+            debouncedFetchHistogramData();
+        }
+    },
+    { deep: true }
+);
+
 // Watch for height changes to resize chart
 watch(() => props.height, async () => {
     try {
