@@ -552,82 +552,79 @@ watch(
     if (!newRange || !oldRange) return;
     if (JSON.stringify(newRange) === JSON.stringify(oldRange)) return;
 
-    // If time range changed significantly, trigger a query execution
-    if (newRange && oldRange && 
-        (newRange.start.toString() !== oldRange.start.toString() || 
-         newRange.end.toString() !== oldRange.end.toString())) {
-      // Only auto-execute if we're not in the middle of changing the query
-      if (!isDirty.value) {
-        executeQuery();
-      }
-    }
+    // If time range changed significantly, don't auto-execute query
+    // Just update SQL and mark as dirty
+    if (newRange && oldRange &&
+      (newRange.start.toString() !== oldRange.start.toString() ||
+        newRange.end.toString() !== oldRange.end.toString())) {
 
-    // If we're in SQL mode, check if we have a standard time range pattern we can update
-    if (activeMode.value === 'sql') {
-      const currentSql = sqlQuery.value?.trim() || '';
-      if (!currentSql) {
-        handleTimeRangeUpdate();
-        return;
-      }
-
-      // Format dates for SQL
-      const formatSqlDateTime = (date: DateValue): string => {
-        try {
-          const zonedDate = toCalendarDateTime(date);
-          const isoString = zonedDate.toString();
-          // Format as 'YYYY-MM-DD HH:MM:SS'
-          return isoString.replace('T', ' ').substring(0, 19);
-        } catch (e) {
-          console.error("Error formatting date for SQL:", e);
-          return '';
-        }
-      };
-
-      const startDateStr = formatSqlDateTime(newRange.start);
-      const endDateStr = formatSqlDateTime(newRange.end);
-
-      // Get the user's timezone for new queries or when updating timezone-aware queries
-      const userTimezone = getLocalTimeZone();
-
-      // Pattern to detect: Timezone-aware time range - single toDateTime call with timezone
-      const tzTimeRangePattern = /WHERE\s+`?(\w+)`?\s+BETWEEN\s+toDateTime\(['"](.+?)['"],\s*['"]([^'"]+)['"]\)(.*?)AND\s+toDateTime\(['"](.+?)['"],\s*['"]([^'"]+)['"]\)(.*?)(\s|$)/i;
-
-      // Pattern to detect: Standard time range pattern
-      const basicTimeRangePattern = /WHERE\s+`?(\w+)`?\s+BETWEEN\s+toDateTime\(['"](.+?)[']\)(.*?)AND\s+toDateTime\(['"](.+?)[']\)(.*?)(\s|$)/i;
-
-      if (tzTimeRangePattern.test(currentSql)) {
-        // Update timezone-aware time range
-        const updatedSql = currentSql.replace(
-          tzTimeRangePattern,
-          `WHERE \`$1\` BETWEEN toDateTime('${startDateStr}', '$3')$4AND toDateTime('${endDateStr}', '$6')$7$8`
-        );
-
-        if (updatedSql !== currentSql) {
-          // Only update if the SQL actually changed
-          sqlQuery.value = updatedSql;
-          // Don't call handleTimeRangeUpdate() as we've already updated the SQL
+      // Update SQL if we're in SQL mode and have a standard pattern
+      if (activeMode.value === 'sql') {
+        const currentSql = sqlQuery.value?.trim() || '';
+        if (!currentSql) {
+          handleTimeRangeUpdate();
           return;
         }
-      }
-      else if (basicTimeRangePattern.test(currentSql)) {
-        // Convert basic time range to timezone-aware
-        const updatedSql = currentSql.replace(
-          basicTimeRangePattern,
-          `WHERE \`$1\` BETWEEN toDateTime('${startDateStr}', '${userTimezone}')$3AND toDateTime('${endDateStr}', '${userTimezone}')$5$6`
-        );
 
-        if (updatedSql !== currentSql) {
-          // Only update if the SQL actually changed
-          sqlQuery.value = updatedSql;
-          // Don't call handleTimeRangeUpdate() as we've already updated the SQL
-          return;
+        // Format dates for SQL
+        const formatSqlDateTime = (date: DateValue): string => {
+          try {
+            const zonedDate = toCalendarDateTime(date);
+            const isoString = zonedDate.toString();
+            // Format as 'YYYY-MM-DD HH:MM:SS'
+            return isoString.replace('T', ' ').substring(0, 19);
+          } catch (e) {
+            console.error("Error formatting date for SQL:", e);
+            return '';
+          }
+        };
+
+        const startDateStr = formatSqlDateTime(newRange.start);
+        const endDateStr = formatSqlDateTime(newRange.end);
+
+        // Get the user's timezone for new queries or when updating timezone-aware queries
+        const userTimezone = getLocalTimeZone();
+
+        // Pattern to detect: Timezone-aware time range - single toDateTime call with timezone
+        const tzTimeRangePattern = /WHERE\s+`?(\w+)`?\s+BETWEEN\s+toDateTime\(['"](.+?)['"],\s*['"]([^'"]+)['"]\)(.*?)AND\s+toDateTime\(['"](.+?)['"],\s*['"]([^'"]+)['"]\)(.*?)(\s|$)/i;
+
+        // Pattern to detect: Standard time range pattern
+        const basicTimeRangePattern = /WHERE\s+`?(\w+)`?\s+BETWEEN\s+toDateTime\(['"](.+?)[']\)(.*?)AND\s+toDateTime\(['"](.+?)[']\)(.*?)(\s|$)/i;
+
+        if (tzTimeRangePattern.test(currentSql)) {
+          // Update timezone-aware time range
+          const updatedSql = currentSql.replace(
+            tzTimeRangePattern,
+            `WHERE \`$1\` BETWEEN toDateTime('${startDateStr}', '$3')$4AND toDateTime('${endDateStr}', '$6')$7$8`
+          );
+
+          if (updatedSql !== currentSql) {
+            // Only update if the SQL actually changed
+            sqlQuery.value = updatedSql;
+            // Don't call handleTimeRangeUpdate() as we've already updated the SQL
+            return;
+          }
+        }
+        else if (basicTimeRangePattern.test(currentSql)) {
+          // Convert basic time range to timezone-aware
+          const updatedSql = currentSql.replace(
+            basicTimeRangePattern,
+            `WHERE \`$1\` BETWEEN toDateTime('${startDateStr}', '${userTimezone}')$3AND toDateTime('${endDateStr}', '${userTimezone}')$5$6`
+          );
+
+          if (updatedSql !== currentSql) {
+            // Only update if the SQL actually changed
+            sqlQuery.value = updatedSql;
+            // Don't call handleTimeRangeUpdate() as we've already updated the SQL
+            return;
+          }
         }
       }
-    }
 
-    // Use the query builder's handler for time range updates
-    // This will set isDirty and show a notification instead of updating SQL directly
-    handleTimeRangeUpdate();
+      // Use the query builder's handler for time range updates
+      // This will set isDirty and show a notification instead of updating SQL directly
+      handleTimeRangeUpdate();
+    }
   },
   { deep: true }
 );
@@ -993,18 +990,18 @@ function handleHistogramTimeRangeZoom(range: { start: Date; end: Date }) {
     // Convert native Dates directly to CalendarDateTime
     const start = toCalendarDateTime(fromDate(range.start, getLocalTimeZone()));
     const end = toCalendarDateTime(fromDate(range.end, getLocalTimeZone()));
-    
+
     // Update the store's time range
     exploreStore.setTimeRange({ start, end });
-    
-    // Force a timestamp update to trigger histogram refresh
-    exploreStore.setLastExecutionTimestamp(Date.now());
-    
-    // Force query execution
-    executeQuery();
-    
+
+    // The isDirty computed property in useQuery will automatically
+    // detect that the time range has changed compared to lastExecutedState
+
     // Update URL state
     syncUrlFromState();
+
+    // No toast notification - users will see the time picker update
+    // and the "Run Query" button change to show the dirty state
   } catch (e) {
     console.error('Error handling histogram time range:', e);
     toast({

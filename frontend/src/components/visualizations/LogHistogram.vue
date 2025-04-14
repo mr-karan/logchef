@@ -451,9 +451,9 @@ const setupChartEvents = () => {
                 }
 
                 // Convert to native Date objects for easier handling in parent
-                emit('zoom-time-range', { 
-                  start: new Date(startDate), 
-                  end: new Date(endDate) 
+                emit('zoom-time-range', {
+                    start: new Date(startDate),
+                    end: new Date(endDate)
                 });
             } catch (e) {
                 console.error('Error handling zoom event:', e);
@@ -560,50 +560,69 @@ watch(() => [props.isLoading, histogramData.value], () => {
     updateChartOptions();
 }, { deep: true });
 
-// Watch for changes that should trigger data reload
+// Watch for changes that should trigger data reload - but ONLY react to lastExecutionTimestamp changes
 watch(
-    () => [currentSourceId.value, activeMode.value, exploreStore.lastExecutionTimestamp, props.timeRange],
-    (newVals, oldVals) => {
-        // Skip initial trigger
-        if (!oldVals) return;
-
+    () => exploreStore.lastExecutionTimestamp,
+    (newTimestamp, oldTimestamp) => {
         // Skip if we're already loading
         if (isChartLoading.value) return;
 
-        // Check if execution timestamp hasn't changed to avoid duplicate calls
-        const currentTimestamp = exploreStore.lastExecutionTimestamp || null;
-        if (currentTimestamp && currentTimestamp === lastProcessedTimestamp.value) return;
+        // Handle undefined/null timestamps
+        const safeNewTimestamp = newTimestamp || null;
+        const safeOldTimestamp = oldTimestamp || null;
+
+        // Skip if timestamp hasn't changed or if it's the same one we already processed
+        if (safeNewTimestamp === safeOldTimestamp || safeNewTimestamp === lastProcessedTimestamp.value) return;
 
         // Update the last processed timestamp
-        lastProcessedTimestamp.value = currentTimestamp;
+        lastProcessedTimestamp.value = safeNewTimestamp;
 
-        // Fetch new data if we have a valid source
+        // Fetch new data if we have a valid source (this should happen when query is executed)
         if (hasValidSource.value && currentSourceId.value) {
+            console.log('Histogram fetching data due to lastExecutionTimestamp change:', safeNewTimestamp);
             debouncedFetchHistogramData();
         } else if (currentSourceId.value) {
             console.warn('Skipping histogram data fetch for disconnected source');
             histogramData.value = [];
         }
-    },
-    { deep: true }
+    }
 );
 
 // Add a separate deep watcher specifically for time range changes
 watch(
     () => props.timeRange,
     (newRange, oldRange) => {
-        // Skip if we're already loading
-        if (isChartLoading.value) return;
-        
+        // Never fetch histogram data when time range changes
+        // Only clear data if completely outside current range
+
         // Skip if no valid source
         if (!hasValidSource.value || !currentSourceId.value) return;
-        
+
         // Only trigger if time range actually changed
-        if (newRange && oldRange && 
-            (newRange.start?.toString() !== oldRange.start?.toString() || 
-             newRange.end?.toString() !== oldRange.end?.toString())) {
-            // Force a refresh of histogram data with the new time range
-            debouncedFetchHistogramData();
+        if (newRange && oldRange &&
+            (newRange.start?.toString() !== oldRange.start?.toString() ||
+                newRange.end?.toString() !== oldRange.end?.toString())) {
+
+            // Only clear data if this is a completely different time range
+            // This prevents showing outdated data
+            if (histogramData.value.length > 0) {
+                const firstBucketTime = new Date(histogramData.value[0].bucket).getTime();
+                const lastBucketTime = new Date(histogramData.value[histogramData.value.length - 1].bucket).getTime();
+
+                // Convert new range to timestamps for comparison
+                const newStartTime = newRange.start?.toDate ?
+                    newRange.start.toDate(getLocalTimeZone()).getTime() : 0;
+                const newEndTime = newRange.end?.toDate ?
+                    newRange.end.toDate(getLocalTimeZone()).getTime() : 0;
+
+                // Check if new range is completely outside the current data range
+                const isDisjoint = newEndTime < firstBucketTime || newStartTime > lastBucketTime;
+
+                if (isDisjoint) {
+                    // Clear histogram data as it's completely irrelevant for the new range
+                    histogramData.value = [];
+                }
+            }
         }
     },
     { deep: true }
@@ -619,6 +638,23 @@ watch(() => props.height, async () => {
     }
 });
 
+// Add a separate watcher for source changes - we should refresh data when source changes
+watch(
+    () => currentSourceId.value,
+    (newSourceId, oldSourceId) => {
+        // Skip if source hasn't changed
+        if (newSourceId === oldSourceId) return;
+
+        // If we have a valid source and an execution has already happened,
+        // fetch histogram data for the new source
+        if (newSourceId && hasValidSource.value && exploreStore.lastExecutionTimestamp) {
+            console.log('Histogram source changed, fetching data for new source');
+            lastProcessedTimestamp.value = exploreStore.lastExecutionTimestamp;
+            debouncedFetchHistogramData();
+        }
+    }
+);
+
 // Component lifecycle
 onMounted(async () => {
     // Wait for multiple ticks to ensure DOM is fully rendered
@@ -629,9 +665,12 @@ onMounted(async () => {
     // Initialize chart
     await initChart();
 
-    // Load data if we have a valid source
-    if (hasValidSource.value && currentSourceId.value) {
-        lastProcessedTimestamp.value = exploreStore.lastExecutionTimestamp || null;
+    // Load data if:
+    // 1. We have a valid source
+    // 2. A query has already been executed (lastExecutionTimestamp exists)
+    if (hasValidSource.value && currentSourceId.value && exploreStore.lastExecutionTimestamp) {
+        console.log('Histogram loading initial data on mount');
+        lastProcessedTimestamp.value = exploreStore.lastExecutionTimestamp;
         debouncedFetchHistogramData();
     }
 });

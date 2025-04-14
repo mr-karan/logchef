@@ -506,6 +506,12 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.lastExecutedState = executedState;
   }
 
+  // Add helper to update the execution timestamp
+  function updateExecutionTimestamp() {
+    console.log('Explore store: Updating execution timestamp');
+    state.data.value.lastExecutionTimestamp = Date.now();
+  }
+
   // Clear error helper
   function clearError() {
     state.error.value = null;
@@ -554,6 +560,7 @@ export const useExploreStore = defineStore("explore", () => {
     setActiveSavedQueryName,
     resetQueryStateToDefault,
     setLastExecutedState,
+    updateExecutionTimestamp,
     resetState,
     executeQuery,
     getLogContext,
