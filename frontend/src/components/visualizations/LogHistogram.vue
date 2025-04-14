@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue';
+const isMounted = ref(true);
 import { toCalendarDateTime } from '@internationalized/date';
 import * as echarts from 'echarts';
 import { debounce } from 'lodash-es';
@@ -164,9 +165,13 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 type: 'shadow'
             },
             formatter: function (params: any) {
-                if (!params || !params[0]) return '';
-
+                // Add null checks for DOM element existence
+                if (!params || !params[0] || params[0].dataIndex === undefined) return '';
+                
                 const index = params[0].dataIndex;
+                // Add bounds checking for data arrays
+                if (index < 0 || index >= valueData.length) return '';
+                
                 // Check for padding points
                 if (valueData.length === 3 && buckets.length === 1) {
                     if (index === 0 || index === 2) return '';
@@ -175,10 +180,8 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 const value = params[0].data;
                 const timeStr = params[0].axisValue;
 
-                return `<div style="font-size: 12px; line-height: 1.4">
-                    <div style="font-weight: bold; margin-bottom: 3px">${timeStr}</div>
-                    <div><span>Log count: </span><span style="font-weight: bold">${value.toLocaleString()}</span></div>
-                </div>`;
+                // Return simple text instead of HTML to avoid DOM manipulation issues
+                return `Time: ${timeStr}\nLog Count: ${value.toLocaleString()}`;
             }
         },
         xAxis: {
@@ -283,7 +286,7 @@ const debouncedFetchHistogramData = debounce(async (forceGranularity?: string) =
 
 // Fetch histogram data from the backend
 const fetchHistogramData = async (forceGranularity?: string) => {
-    if (!hasValidSource.value || !currentSourceId.value || !currentTeamId.value) {
+    if (!isMounted.value || !hasValidSource.value || !currentSourceId.value || !currentTeamId.value) {
         histogramData.value = [];
         return;
     }
@@ -354,8 +357,16 @@ const restoreChart = () => {
 const setupChartEvents = () => {
     if (!chart) return;
 
+    // Create safe handler wrapper to check component is still mounted
+    const safeHandler = (handler: Function) => {
+        return (...args: any[]) => {
+            if (!isMounted.value || !chart) return;
+            handler(...args);
+        };
+    };
+
     // Handle chart zoom events
-    chart.on('datazoom', (params: any) => {
+    chart.on('datazoom', safeHandler((params: any) => {
         if (params?.batch && params.batch.length > 0) {
             // For the inside zoom and slider
             const batch = params.batch[0];
@@ -473,10 +484,10 @@ const setupChartEvents = () => {
                 }
             }
         }
-    });
+    }));
 
     // Restore event
-    chart.on('restore', () => {
+    chart.on('restore', safeHandler(() => {
         try {
             // Reset to full time range
             if (props.timeRange?.start && props.timeRange?.end) {
@@ -491,7 +502,7 @@ const setupChartEvents = () => {
         } catch (e) {
             console.error('Error handling restore event:', e);
         }
-    });
+    }));
 
     // Handle window resize
     window.addEventListener('resize', windowResizeEventCallback);
@@ -499,12 +510,17 @@ const setupChartEvents = () => {
 
 // Initialize chart
 const initChart = async () => {
-    if (!chartRef.value) return;
+    if (!chartRef.value || !isMounted.value) return;
 
     try {
         // Wait for DOM to be ready
         await nextTick();
 
+        // Clear any existing chart instance
+        if (chart) {
+            chart.dispose();
+        }
+        
         // Create chart instance
         chart = echarts.init(chartRef.value);
 
@@ -658,6 +674,8 @@ watch(
 
 // Component lifecycle
 onMounted(async () => {
+    isMounted.value = true;
+    
     // Wait for multiple ticks to ensure DOM is fully rendered
     for (let i = 0; i < 5; i++) {
         await nextTick();
@@ -677,10 +695,17 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+    // Mark component as unmounted
+    isMounted.value = false;
+    
     // Clean up resources
     window.removeEventListener('resize', windowResizeEventCallback);
 
     if (chart) {
+        // Remove event listeners first
+        chart.off('datazoom');
+        chart.off('restore');
+        // Then dispose the chart
         chart.dispose();
         chart = null;
     }
