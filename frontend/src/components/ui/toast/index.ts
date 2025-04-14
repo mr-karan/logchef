@@ -18,11 +18,11 @@ export const toastVariants = cva(
   {
     variants: {
       variant: {
-        default: 'border bg-background text-foreground shadow-md',
-        destructive: 'border-destructive/30 bg-destructive/15 text-destructive dark:border-destructive/30 dark:bg-destructive/20 dark:text-destructive-foreground shadow-md',
-        success: 'border-green-600/30 bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 shadow-md',
-        warning: 'border-orange-600/30 bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 shadow-md',
-        info: 'border-blue-600/30 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 shadow-md',
+        default: 'border-l-4 bg-white dark:bg-gray-800 text-foreground shadow-md',
+        destructive: 'border-l-4 border-l-destructive bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 shadow-md',
+        success: 'border-l-4 border-l-green-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 shadow-md',
+        warning: 'border-l-4 border-l-orange-500 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 shadow-md',
+        info: 'border-l-4 border-l-blue-500 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 shadow-md',
       },
     },
     defaultVariants: {

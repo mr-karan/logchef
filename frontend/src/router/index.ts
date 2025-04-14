@@ -131,6 +131,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: "sources",
         redirect: "sources/list",
+        meta: { requiresAdmin: true },
       },
       {
         path: "sources/list",
@@ -139,7 +140,7 @@ const routes: RouteRecordRaw[] = [
           error("Router", "Failed to load ManageSources component", err);
           return { default: ComponentLoadError };
         }),
-        meta: { title: "Sources" },
+        meta: { title: "Sources", requiresAdmin: true },
       },
       {
         path: "sources/new",
@@ -148,7 +149,7 @@ const routes: RouteRecordRaw[] = [
           error("Router", "Failed to load AddSource component", err);
           return { default: ComponentLoadError };
         }),
-        meta: { title: "New Source" },
+        meta: { title: "New Source", requiresAdmin: true },
       },
       {
         path: "sources/stats",
@@ -157,7 +158,7 @@ const routes: RouteRecordRaw[] = [
           error("Router", "Failed to load SourceStats component", err);
           return { default: ComponentLoadError };
         }),
-        meta: { title: "Source Stats" },
+        meta: { title: "Source Stats", requiresAdmin: true },
       },
     ],
   },

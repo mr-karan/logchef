@@ -1,46 +1,83 @@
 package server
 
 import (
+	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
+
+	"errors"
 
 	"github.com/gofiber/fiber/v2"
 )
 
-// requireAuth middleware ensures the request is authenticated
+// getUserIDFromContext extracts the user ID from the context
+func getUserIDFromContext(c *fiber.Ctx) models.UserID {
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil {
+		return 0
+	}
+	return user.ID
+}
+
+// isUserAdmin checks if the user in context has admin role
+func isUserAdmin(c *fiber.Ctx) bool {
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil {
+		return false
+	}
+	return user.Role == models.UserRoleAdmin
+}
+
+// requireAuth is middleware that ensures the request includes a valid, non-expired session cookie.
+// It validates the session using core logic, retrieves the associated user, and stores
+// both the user and session information in the request context (c.Locals) for subsequent handlers.
 func (s *Server) requireAuth(c *fiber.Ctx) error {
-	// Get session ID from cookie
-	sessionIDStr := c.Cookies("session_id")
+	// Retrieve session ID from cookie.
+	sessionIDStr := c.Cookies(sessionCookieName)
 	if sessionIDStr == "" {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Authentication required", models.AuthenticationErrorType)
 	}
-
-	// Validate session
 	sessionID := models.SessionID(sessionIDStr)
-	session, err := s.auth.ValidateSession(c.Context(), sessionID)
+
+	// Validate the session exists and is not expired.
+	session, err := core.ValidateSession(c.Context(), s.sqlite, s.log, sessionID)
 	if err != nil {
-		return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthenticationErrorType)
+		// Handle specific session errors by returning 403.
+		if errors.Is(err, core.ErrSessionNotFound) || errors.Is(err, core.ErrSessionExpired) {
+			return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthenticationErrorType)
+		}
+		// Log unexpected errors during validation.
+		s.log.Error("error validating session via core function", "error", err, "session_id", sessionID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error validating session", models.GeneralErrorType)
 	}
 
-	// Get user info
-	user, err := s.auth.GetUser(c.Context(), session.UserID)
+	// Retrieve associated user information.
+	user, err := core.GetUser(c.Context(), s.sqlite, session.UserID)
 	if err != nil {
-		return SendErrorWithType(c, fiber.StatusForbidden, "User not found", models.NotFoundErrorType)
+		// If user not found for a valid session, treat as an auth issue or internal error.
+		if errors.Is(err, core.ErrUserNotFound) {
+			return SendErrorWithType(c, fiber.StatusForbidden, "User associated with session not found", models.AuthenticationErrorType)
+		}
+		s.log.Error("error getting user for session via core function", "error", err, "user_id", session.UserID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error retrieving user data", models.GeneralErrorType)
 	}
 
-	// Store user and session in context
+	// Store user and session in request context for downstream handlers.
 	c.Locals("user", user)
 	c.Locals("session", session)
 
 	return c.Next()
 }
 
-// requireAdmin middleware ensures the user is an admin
+// requireAdmin is middleware that ensures the authenticated user has the global 'admin' role.
+// It assumes requireAuth has already run and placed the user in the context.
 func (s *Server) requireAdmin(c *fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil {
+		s.log.Error("user not found in context for admin check")
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
+	}
 
-	// Log user role for debugging
 	s.log.Debug("requireAdmin check", "user_id", user.ID, "user_role", user.Role)
-
 	if user.Role != models.UserRoleAdmin {
 		s.log.Debug("Admin access denied", "user_id", user.ID)
 		return SendErrorWithType(c, fiber.StatusForbidden, "Admin access required", models.AuthorizationErrorType)
@@ -49,129 +86,121 @@ func (s *Server) requireAdmin(c *fiber.Ctx) error {
 	return c.Next()
 }
 
-// requireTeamMember middleware ensures the user is a member of the requested team
+// requireTeamMember is middleware that ensures the authenticated user is a member of the team
+// specified by the ':teamID' path parameter, or is a global admin.
+// It assumes requireAuth has already run.
 func (s *Server) requireTeamMember(c *fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
-	teamID := c.Params("teamID")
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil {
+		s.log.Error("user not found in context for team member check")
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
+	}
+	teamIDStr := c.Params("teamID")
 
-	// Log user role and team ID for debugging
-	s.log.Debug("requireTeamMember check", "user_id", user.ID, "user_role", user.Role, "team_id", teamID)
+	s.log.Debug("requireTeamMember check", "user_id", user.ID, "user_role", user.Role, "team_id", teamIDStr)
 
-	// Admin users bypass team membership check
+	// Global admins bypass specific team membership checks.
 	if user.Role == models.UserRoleAdmin {
-		s.log.Debug("Global admin access granted", "user_id", user.ID)
+		s.log.Debug("Global admin granting team member access", "user_id", user.ID, "team_id", teamIDStr)
 		c.Locals("isGlobalAdmin", true)
-		c.Locals("isTeamMember", true) // Global admins are considered team members for all teams
+		c.Locals("isTeamMember", true)
 		return c.Next()
 	}
 
-	// Check if user is a team member
-	isMember, err := s.identityService.IsTeamMember(c.Context(), teamID, user.ID)
+	teamID, err := core.ParseTeamID(teamIDStr)
 	if err != nil {
-		s.log.Error("Failed to verify team membership", "error", err)
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
+	}
+
+	// Check membership using core function.
+	isMember, err := core.IsTeamMember(c.Context(), s.sqlite, teamID, user.ID)
+	if err != nil {
+		s.log.Error("failed to verify team membership", "error", err, "team_id", teamID, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team membership")
 	}
 
-	// Store the membership status in context for handlers to use
+	// Store status for potential use in handlers (though check ensures access).
 	c.Locals("isGlobalAdmin", false)
 	c.Locals("isTeamMember", isMember)
 
 	if !isMember {
-		s.log.Debug("Team membership denied", "user_id", user.ID, "team_id", teamID)
+		s.log.Warn("Team membership denied", "user_id", user.ID, "team_id", teamID)
 		return SendErrorWithType(c, fiber.StatusForbidden, "Team membership required", models.AuthorizationErrorType)
 	}
 
 	return c.Next()
 }
 
-// requireTeamSourceAccess middleware ensures the team has access to the requested source
-func (s *Server) requireTeamSourceAccess(c *fiber.Ctx) error {
-	teamID := c.Params("teamID")
-	sourceID := c.Params("sourceID")
+// requireTeamAdminOrGlobalAdmin checks if a user is either an admin of the requested team or a global admin
+func (s *Server) requireTeamAdminOrGlobalAdmin(c *fiber.Ctx) error {
+	userID := getUserIDFromContext(c)
+	if userID == 0 {
+		return SendError(c, fiber.StatusUnauthorized, "User not authenticated")
+	}
 
-	// Check if team has access to this source
-	hasAccess, err := s.identityService.TeamHasSourceAccess(c.Context(), teamID, sourceID)
+	// Get the team ID from the request parameters
+	teamIDStr := c.Params("teamID")
+	teamID, err := core.ParseTeamID(teamIDStr)
 	if err != nil {
-		s.log.Error("Failed to verify source access", "error", err)
-		return SendError(c, fiber.StatusInternalServerError, "Failed to verify source access")
+		return SendError(c, fiber.StatusBadRequest, "Invalid team ID: "+err.Error())
+	}
+
+	// Check if the user is a global admin
+	if isUserAdmin(c) {
+		return c.Next() // Allow global admins unconditionally
+	}
+
+	// Check if the user is a team admin
+	isTeamAdmin, err := core.IsTeamAdmin(c.Context(), s.sqlite, teamID, userID)
+	if err != nil {
+		s.log.Error("Error checking team admin status", "error", err, "team_id", teamID, "user_id", userID)
+		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team admin status")
+	}
+
+	if !isTeamAdmin {
+		s.log.Warn("User is not a team admin", "team_id", teamID, "user_id", userID)
+		return SendError(c, fiber.StatusForbidden, "Admin team privileges required")
+	}
+
+	// User is a team admin, continue with the request
+	return c.Next()
+}
+
+// requireTeamHasSource is a middleware that verifies if the requested team has access to the specified source.
+// This must be used after requireTeamMember to ensure team membership is already verified.
+func (s *Server) requireTeamHasSource(c *fiber.Ctx) error {
+	// Extract path parameters
+	teamIDStr := c.Params("teamID")
+	sourceIDStr := c.Params("sourceID")
+
+	// Parse IDs
+	teamID, err := core.ParseTeamID(teamIDStr)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid team ID: "+err.Error())
+	}
+
+	sourceID, err := core.ParseSourceID(sourceIDStr)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid source ID: "+err.Error())
+	}
+
+	// Check if the team has access to the source
+	hasAccess, err := core.TeamHasSourceAccess(c.Context(), s.sqlite, teamID, sourceID)
+	if err != nil {
+		s.log.Error("Error checking team-source access", "error", err, "team_id", teamID, "source_id", sourceID)
+		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team source access")
 	}
 
 	if !hasAccess {
-		return SendErrorWithType(c, fiber.StatusForbidden, "Team does not have access to this source", models.AuthorizationErrorType)
+		s.log.Warn("Team does not have access to source", "team_id", teamID, "source_id", sourceID)
+		return SendError(c, fiber.StatusForbidden, "Team does not have access to this source")
 	}
 
+	// Team has access to the source, continue with the request
 	return c.Next()
 }
 
-// requireTeamAdmin middleware ensures the user is an admin of the specified team
-func (s *Server) requireTeamAdmin(c *fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
-	teamID := c.Params("teamID")
-
-	// Log user role and team ID for debugging
-	s.log.Debug("requireTeamAdmin check", "user_id", user.ID, "user_role", user.Role, "team_id", teamID)
-
-	// System admins bypass team admin check
-	if user.Role == models.UserRoleAdmin {
-		s.log.Debug("Global admin access granted", "user_id", user.ID)
-		return c.Next()
-	}
-
-	// Check if user is a team admin
-	isAdmin, err := s.identityService.IsTeamAdmin(c.Context(), teamID, user.ID)
-	if err != nil {
-		s.log.Error("Failed to verify team admin status", "error", err)
-		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team admin status")
-	}
-
-	if !isAdmin {
-		s.log.Debug("Team admin access denied", "user_id", user.ID, "team_id", teamID)
-		return SendErrorWithType(c, fiber.StatusForbidden, "Team admin access required", models.AuthorizationErrorType)
-	}
-
-	return c.Next()
-}
-
-// requireTeamAdminOrGlobalAdmin is a helper middleware that stores the team admin status in context
-// This allows handlers to know if the user is a team admin or a global admin without duplicating checks
-func (s *Server) requireTeamAdminOrGlobalAdmin(c *fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
-	teamID := c.Params("teamID")
-
-	// Log user role and team ID for debugging
-	s.log.Debug("requireTeamAdminOrGlobalAdmin check", "user_id", user.ID, "user_role", user.Role, "team_id", teamID)
-
-	// If user is a global admin, store that information and continue
-	if user.Role == models.UserRoleAdmin {
-		s.log.Debug("Global admin access granted", "user_id", user.ID)
-		c.Locals("isGlobalAdmin", true)
-		c.Locals("isTeamAdmin", true) // Global admins are considered team admins for all teams
-		return c.Next()
-	}
-
-	// Otherwise, check if user is a team admin
-	isAdmin, err := s.identityService.IsTeamAdmin(c.Context(), teamID, user.ID)
-	if err != nil {
-		s.log.Error("Failed to verify team admin status", "error", err)
-		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team admin status")
-	}
-
-	// Store the admin status in context for handlers to use
-	c.Locals("isGlobalAdmin", false)
-	c.Locals("isTeamAdmin", isAdmin)
-
-	if !isAdmin {
-		s.log.Debug("Team admin access denied", "user_id", user.ID, "team_id", teamID)
-		return SendError(c, fiber.StatusForbidden, fiber.Map{
-			"error": "Team admin access required",
-			"code":  "insufficient_permissions",
-		})
-	}
-
-	return c.Next()
-}
-
-// notFoundHandler handles 404 for API routes
+// notFoundHandler returns a standardized 404 Not Found error for API routes.
 func (s *Server) notFoundHandler(c *fiber.Ctx) error {
 	return SendErrorWithType(c, fiber.StatusNotFound, "API route not found", models.NotFoundErrorType)
 }

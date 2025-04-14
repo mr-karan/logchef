@@ -18,8 +18,8 @@ export const usersApi = {
   listUsers: () => apiClient.get<User[]>("/admin/users"),
   getUser: (id: string) => apiClient.get<{ user: User }>(`/admin/users/${id}`),
   createUser: (data: CreateUserRequest) => apiClient.post<User>("/admin/users", data),
-  updateUser: (id: string, data: UpdateUserRequest) => 
+  updateUser: (id: string, data: UpdateUserRequest) =>
     apiClient.put<{ user: User }>(`/admin/users/${id}`, data),
-  deleteUser: (id: string) => 
+  deleteUser: (id: string) =>
     apiClient.delete<{ message: string }>(`/admin/users/${id}`)
 };

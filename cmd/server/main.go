@@ -4,29 +4,26 @@ import (
 	"flag"
 	"os"
 
-	"github.com/mr-karan/logchef/pkg/logger"
-
 	"github.com/mr-karan/logchef/internal/app"
+	"github.com/mr-karan/logchef/pkg/logger"
 )
 
 var (
-	// Build information, set by linker flags
+	// buildString is the build version information, set by linker flags during build.
 	buildString = "unknown"
 )
 
 func main() {
-	// Parse command line flags
 	configPath := flag.String("config", "config.toml", "path to config file")
 	flag.Parse()
 
-	// Initialize global logger with default configuration
-	// This will be reconfigured with the proper level once the app loads its config
+	// Initialize logger before config is loaded.
+	// It will be reconfigured with the correct level once the app loads its config.
 	log := logger.New(false)
 
-	// Log startup information
 	log.Info("starting logchef", "buildInfo", buildString)
 
-	// Run the application with the initialized logger
+	// Run the application.
 	if err := app.Run(app.Options{
 		ConfigPath: *configPath,
 		WebFS:      getWebFS(),

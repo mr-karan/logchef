@@ -74,8 +74,18 @@ export function useExploreUrlSync() {
       if (!teamsStore.teams || teamsStore.teams.length === 0) {
         await teamsStore.loadTeams(false, false); // Explicitly use user teams endpoint
       }
+
+      // Handle the case where no teams are available more gracefully
       if (teamsStore.teams.length === 0) {
-        throw new Error("No teams available or accessible.");
+        // Set initialization error without throwing
+        initializationError.value = "No teams available or accessible.";
+
+        // Clear any existing data for consistency
+        exploreStore.setSource(0);
+        sourcesStore.clearCurrentSourceDetails();
+
+        // Exit early but don't throw - allow the component to handle this state
+        return;
       }
 
       // Check if we have a query_id in the URL, which indicates we're editing a saved query
@@ -98,7 +108,7 @@ export function useExploreUrlSync() {
 
       // Set team *before* loading sources
       if (teamsStore.currentTeamId !== teamId) {
-         teamsStore.setCurrentTeam(teamId);
+        teamsStore.setCurrentTeam(teamId);
       }
 
       // 3. Load Sources for the selected team (wait if necessary)
@@ -121,12 +131,12 @@ export function useExploreUrlSync() {
         sourceId = sourcesStore.teamSources[0].id; // Default to first source
       }
 
-      // Set source and load details *only if* sourceId is valid
+      // Set source ID only (the watcher in LogExplorer will handle loading details)
       if (sourceId) {
          if (exploreStore.sourceId !== sourceId) {
             exploreStore.setSource(sourceId);
          }
-         await sourcesStore.loadSourceDetails(sourceId); // Wait for details
+         // Don't load source details here - LogExplorer watcher will handle it
       } else {
          exploreStore.setSource(0); // Explicitly set to 0 if no valid source
          sourcesStore.clearCurrentSourceDetails();

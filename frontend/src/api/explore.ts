@@ -126,16 +126,6 @@ export const exploreApi = {
     );
   },
 
-  getLogContext: (sourceId: number, params: LogContextRequest, teamId: number) => {
-    if (!teamId) {
-      throw new Error("Team ID is required for getting log context");
-    }
-    return apiClient.post<LogContextResponse>(
-      `/teams/${teamId}/sources/${sourceId}/logs/context`,
-      params
-    );
-  },
-
   getHistogramData: (sourceId: number, params: QueryParams, teamId: number, window: string = '1m') => {
     if (!teamId) {
       throw new Error("Team ID is required for getting histogram data");

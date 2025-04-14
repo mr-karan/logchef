@@ -472,28 +472,30 @@ type CustomColumnDef = ColumnDef<Record<string, any>> & {
     meta?: CustomColumnMeta;
 }
 
-// sourceDetails ref is already declared at the top
-const sourceDetails = ref<Source | null>(null)
+// Source details ref
+const sourceDetails = ref<Source | null>(null);
 
-// Watch for source details changes
+// Use a computed property to get source details from the store instead of making API calls
+const storeSourceDetails = computed(() => sourcesStore.currentSourceDetails);
+
+// Watch for source details changes in the store
 watch(
-    () => exploreStore.sourceId,
-    async (newSourceId) => {
-        if (newSourceId) {
-            const result = await sourcesStore.getSource(newSourceId)
-            if (result.success && result.data) {
-                sourceDetails.value = result.data as Source
-            } else {
-                sourceDetails.value = null; // Clear if fetch fails or no data
-            }
-        } else {
-            sourceDetails.value = null; // Clear if sourceId is null/0
-        }
+    storeSourceDetails,
+    (newSourceDetails) => {
+        sourceDetails.value = newSourceDetails;
     },
     { immediate: true }
 )
 
-// This watch is now redundant as we handle column creation in the combined watch above
+// Watch for source ID changes and clear details when there's no source
+watch(
+    () => exploreStore.sourceId,
+    (newSourceId) => {
+        if (!newSourceId) {
+            sourceDetails.value = null; // Clear if sourceId is null/0
+        }
+    }
+)
 
 // --- Native Drag and Drop Implementation ---
 

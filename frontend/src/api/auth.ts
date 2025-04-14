@@ -11,7 +11,7 @@ export const authApi = {
   /**
    * Get current session information
    */
-  getSession: () => apiClient.get<SessionResponse>("/auth/session"),
+  getSession: () => apiClient.get<SessionResponse>("/me"),
 
   /**
    * Get login URL for OIDC authentication

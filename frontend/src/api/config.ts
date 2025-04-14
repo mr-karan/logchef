@@ -47,18 +47,18 @@ api.interceptors.response.use(
       await authStore.clearState();
 
       // Get current path for redirect, including hash if present
-      const currentPath = window.location.pathname + window.location.search + 
+      const currentPath = window.location.pathname + window.location.search +
         (window.location.hash ? window.location.hash : '');
 
       // Check if we're already on the login page (including /auth/login pattern)
-      const isOnLoginPage = window.location.pathname.includes("/auth/login") || 
-                          window.location.pathname.includes("/login") || 
+      const isOnLoginPage = window.location.pathname.includes("/auth/login") ||
+                          window.location.pathname.includes("/login") ||
                           router.currentRoute.value.name === "Login";
-      
+
       // Check if this is the initial session check or a later API call
-      const isInitialSessionCheck = error.config?.url === "/auth/session" && 
+      const isInitialSessionCheck = error.config?.url === "/me" &&
                                   !sessionStorage.getItem("hadPreviousSession");
-      
+
       // Only show the toast if:
       // 1. We're not on the login page already
       // 2. This isn't the first session check when the app loads
@@ -89,7 +89,7 @@ api.interceptors.response.use(
         message: "You don't have permission to access this resource.",
         error_type: "AuthorizationError",
       };
-      
+
       // Only show toast if not a CSRF error (which is handled separately)
       if (error.response?.data?.code !== "CSRF_TOKEN_MISMATCH") {
         showErrorToast(forbiddenError);

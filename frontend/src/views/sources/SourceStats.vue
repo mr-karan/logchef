@@ -19,21 +19,22 @@ const selectedSourceId = ref<string>('')
 const { loadingStates, error: storeError } = storeToRefs(sourcesStore)
 
 // Computed properties to reactively access store state
-const isLoadingStats = computed(() => 
+const isLoadingStats = computed(() =>
   sourcesStore.isLoadingOperation(`getSourceStats-${selectedSourceId.value}`)
 )
 
 const statsError = computed(() => {
-  if (storeError.value && selectedSourceId.value) {
-    return storeError.value.getSourceStats?.[selectedSourceId.value] || null
+  // Just check if there's any error in the store when we're not loading
+  if (!isLoadingStats.value && storeError.value && selectedSourceId.value) {
+    return 'Failed to load source statistics. Please try again.';
   }
-  return null
+  return null;
 })
 
 // Computed properties for stats data
 const stats = computed(() => {
   if (!selectedSourceId.value) return { tableStats: null, columnStats: null }
-  
+
   const sourceStats = sourcesStore.getSourceStatsById(parseInt(selectedSourceId.value))
   return {
     tableStats: sourceStats?.table_stats || null,
@@ -45,7 +46,7 @@ const stats = computed(() => {
 onMounted(async () => {
   // Hydrate the store
   await sourcesStore.hydrate()
-  
+
   // Check if sourceId is provided in the URL query parameters
   const sourceIdFromQuery = route.query.sourceId as string
   if (sourceIdFromQuery) {
@@ -74,6 +75,8 @@ const fetchSourceStats = async () => {
     return
   }
 
+  // For the admin view, we don't need a team context (admin route)
+  // This is why this component is only accessible to admins in the router config
   await sourcesStore.getSourceStats(parseInt(selectedSourceId.value))
 }
 </script>
@@ -176,13 +179,8 @@ const fetchSourceStats = async () => {
           </CardContent>
         </Card>
 
-        <ErrorAlert 
-          v-if="statsError"
-          :error="statsError"
-          title="Failed to load statistics"
-          @retry="fetchSourceStats"
-          class="mb-6"
-        />
+        <ErrorAlert v-if="statsError" :error="statsError" title="Failed to load statistics" @retry="fetchSourceStats"
+          class="mb-6" />
 
         <div v-if="!stats.tableStats && !isLoadingStats && !statsError" class="text-center py-6 text-muted-foreground">
           Select a source and click "Get Stats" to view statistics

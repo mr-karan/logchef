@@ -6,31 +6,34 @@ import (
 	"math"
 )
 
-// TableColumnStat represents statistics for a single column in a ClickHouse table
+// TableColumnStat represents statistics for a single column in a ClickHouse table,
+// typically retrieved from system.parts_columns.
 type TableColumnStat struct {
 	Database     string  `json:"database"`
 	Table        string  `json:"table"`
 	Column       string  `json:"column"`
-	Compressed   string  `json:"compressed"`
-	Uncompressed string  `json:"uncompressed"`
-	ComprRatio   float64 `json:"compr_ratio"`
-	RowsCount    uint64  `json:"rows_count"`
-	AvgRowSize   float64 `json:"avg_row_size"`
+	Compressed   string  `json:"compressed"`   // Size on disk (human-readable).
+	Uncompressed string  `json:"uncompressed"` // Original size (human-readable).
+	ComprRatio   float64 `json:"compr_ratio"`  // Compression ratio.
+	RowsCount    uint64  `json:"rows_count"`   // Number of rows in the column chunk.
+	AvgRowSize   float64 `json:"avg_row_size"` // Average row size in bytes.
 }
 
-// TableStat represents statistics for a ClickHouse table
+// TableStat represents overall statistics for a ClickHouse table,
+// typically retrieved from system.parts.
 type TableStat struct {
 	Database     string  `json:"database"`
 	Table        string  `json:"table"`
-	Compressed   string  `json:"compressed"`
-	Uncompressed string  `json:"uncompressed"`
-	ComprRate    float64 `json:"compr_rate"`
-	Rows         uint64  `json:"rows"`
-	PartCount    uint64  `json:"part_count"`
+	Compressed   string  `json:"compressed"`   // Total size on disk (human-readable).
+	Uncompressed string  `json:"uncompressed"` // Total original size (human-readable).
+	ComprRate    float64 `json:"compr_rate"`   // Overall compression rate.
+	Rows         uint64  `json:"rows"`         // Total rows in the table partition/part.
+	PartCount    uint64  `json:"part_count"`   // Number of data parts.
 }
 
-// GetTableColumnStats retrieves column statistics for a specific table
+// GetTableColumnStats retrieves detailed statistics for each column of a specific table.
 func (c *Client) GetTableColumnStats(ctx context.Context, database, table string) ([]TableColumnStat, error) {
+	// Query system.parts_columns for statistics on active parts.
 	query := fmt.Sprintf(`
 		SELECT
 			database,
@@ -72,7 +75,7 @@ func (c *Client) GetTableColumnStats(ctx context.Context, database, table string
 			return nil, fmt.Errorf("error scanning column stats row: %w", err)
 		}
 
-		// Check for NaN values and replace them with 0
+		// Replace NaN values resulting from division by zero with 0.
 		if math.IsNaN(stat.ComprRatio) {
 			stat.ComprRatio = 0
 		}
@@ -90,8 +93,9 @@ func (c *Client) GetTableColumnStats(ctx context.Context, database, table string
 	return stats, nil
 }
 
-// GetTableStats retrieves overall statistics for a specific table
+// GetTableStats retrieves overall statistics for a specific table from active parts.
 func (c *Client) GetTableStats(ctx context.Context, database, table string) (*TableStat, error) {
+	// Query system.parts for aggregated table statistics.
 	query := fmt.Sprintf(`
 		SELECT
 			database,
@@ -107,7 +111,7 @@ func (c *Client) GetTableStats(ctx context.Context, database, table string) (*Ta
 			database,
 			table
 		ORDER BY size DESC
-	`, database, table)
+	`, database, table) // Note: ORDER BY might not be necessary if only one row is expected.
 
 	rows, err := c.conn.Query(ctx, query)
 	if err != nil {
@@ -115,7 +119,7 @@ func (c *Client) GetTableStats(ctx context.Context, database, table string) (*Ta
 	}
 	defer rows.Close()
 
-	var stats []TableStat
+	var stats []TableStat // Use a slice in case query returns multiple rows unexpectedly.
 	for rows.Next() {
 		var stat TableStat
 		if err := rows.Scan(
@@ -130,7 +134,7 @@ func (c *Client) GetTableStats(ctx context.Context, database, table string) (*Ta
 			return nil, fmt.Errorf("error scanning table stats row: %w", err)
 		}
 
-		// Check for NaN values and replace them with 0
+		// Replace NaN resulting from division by zero with 0.
 		if math.IsNaN(stat.ComprRate) {
 			stat.ComprRate = 0
 		}
@@ -142,7 +146,7 @@ func (c *Client) GetTableStats(ctx context.Context, database, table string) (*Ta
 		return nil, fmt.Errorf("error iterating table stats rows: %w", err)
 	}
 
-	// Return default empty stats if no data found
+	// If no active parts found, return default empty stats.
 	if len(stats) == 0 {
 		return &TableStat{
 			Database:     database,
@@ -155,5 +159,6 @@ func (c *Client) GetTableStats(ctx context.Context, database, table string) (*Ta
 		}, nil
 	}
 
+	// Return the first row (should be the only one).
 	return &stats[0], nil
 }

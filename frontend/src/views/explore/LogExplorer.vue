@@ -60,7 +60,7 @@ const teamsStore = useTeamsStore()
 const sourcesStore = useSourcesStore()
 const savedQueriesStore = useSavedQueriesStore()
 const { toast } = useToast()
-const { isInitializing, initializationError: urlError, initializeFromUrl, syncUrlFromState } = useExploreUrlSync();
+const { isInitializing, initializationError, initializeFromUrl, syncUrlFromState } = useExploreUrlSync();
 
 // Composables
 const {
@@ -272,7 +272,7 @@ const isLoadingQuery = ref(false)
 const editQueryData = ref<SavedTeamQuery | null>(null)
 
 // UI state computed properties
-const showLoadingState = computed(() => isInitializing.value && !urlError.value)
+const showLoadingState = computed(() => isInitializing.value && !initializationError.value)
 
 const showNoTeamsState = computed(() => !isInitializing.value && (!availableTeams.value || availableTeams.value.length === 0))
 
@@ -368,9 +368,17 @@ const displayTimezone = computed(() =>
 // Combined error display
 const displayError = computed(() => queryError.value || exploreStore.error?.message)
 
-// Watch for initialization completion to run initial query
+// Watch for initialization completion to run initial query and load source details
 watch(isInitializing, async (initializing, prevInitializing) => {
   if (prevInitializing && !initializing) {
+    // If we have a valid source ID after initialization, load its details
+    if (currentSourceId.value && currentSourceId.value > 0) {
+      const sourceExists = availableSources.value.some(source => source.id === currentSourceId.value);
+      if (sourceExists) {
+        await sourcesStore.loadSourceDetails(currentSourceId.value);
+      }
+    }
+
     const queryId = queryIdFromUrl.value; // Get query ID from computed property
 
     if (queryId) {
@@ -442,7 +450,7 @@ watch(
       return;
     }
 
-    if (newSourceId !== oldSourceId) {
+    if (newSourceId !== oldSourceId || (!oldSourceId && newSourceId)) {
       // Fetch Source Details (existing logic)
       if (newSourceId && newSourceId > 0) {
         // Verify source existence (using teamSources from useSourceTeamManagement)
@@ -650,17 +658,34 @@ const copyUrlToClipboard = () => {
 // Component lifecycle with improved initialization sequence
 onMounted(async () => {
   try {
-    // Call the initialization function from the composable
-    await initializeFromUrl();
-
     // Reset admin teams and load user teams to ensure we have the correct context
     teamsStore.resetAdminTeams();
 
-    // If we don't have user teams loaded yet, load them
-    if (teamsStore.userTeams.length === 0) {
-      await teamsStore.loadUserTeams(true);
-    }
+    // Call the initialization function from the composable
+    // This will now handle empty teams gracefully
+    await initializeFromUrl();
 
+    // Always force a reload of user teams to ensure we have the latest membership data
+    await teamsStore.loadUserTeams(true);
+
+    // Skip validation if there's an initialization error - it's already handled
+    if (!initializationError.value) {
+      // After loading teams, verify the current teamId is still valid
+      // This handles cases where team membership changed elsewhere
+      if (currentTeamId.value && !teamsStore.userBelongsToTeam(currentTeamId.value)) {
+        console.log(`Current team ${currentTeamId.value} is no longer accessible, resetting selection`);
+
+        // Select the first available team instead
+        if (teamsStore.userTeams.length > 0) {
+          exploreStore.setSource(0); // First clear the source
+          teamsStore.setCurrentTeam(teamsStore.userTeams[0].id);
+        } else {
+          exploreStore.setSource(0);
+          // Clear the current team by using 0, which will be internally converted to null
+          teamsStore.setCurrentTeam(0);
+        }
+      }
+    }
   } catch (error) {
     console.error("Error during LogExplorer mount:", error);
     toast({
@@ -1117,10 +1142,10 @@ function handleHistogramTimeRangeZoom(range: any) {
   <!-- Main Explorer View -->
   <div v-else class="flex flex-col h-screen overflow-hidden">
     <!-- URL Error -->
-    <div v-if="urlError"
+    <div v-if="initializationError"
       class="absolute top-0 left-0 right-0 bg-destructive/15 text-destructive px-4 py-2 z-10 flex items-center justify-between">
-      <span class="text-sm">{{ urlError }}</span>
-      <Button variant="ghost" size="sm" @click="urlError = null" class="h-7 px-2">Dismiss</Button>
+      <span class="text-sm">{{ initializationError }}</span>
+      <Button variant="ghost" size="sm" @click="initializationError = null" class="h-7 px-2">Dismiss</Button>
     </div>
 
     <!-- Filter Bar -->

@@ -93,40 +93,36 @@ export interface SourceStats {
 
 export const sourcesApi = {
   // Source management
-  listSources: () => 
+  listAllSourcesForAdmin: () =>
     apiClient.get<Source[]>("/admin/sources"),
-  listTeamSources: (teamId: number) => 
+  listTeamSources: (teamId: number) =>
     apiClient.get<Source[]>(`/teams/${teamId}/sources`),
-  getTeamSource: (teamId: number, sourceId: number) => 
+  getTeamSource: (teamId: number, sourceId: number) =>
     apiClient.get<Source>(`/teams/${teamId}/sources/${sourceId}`),
-  createSource: (payload: CreateSourcePayload) => 
+  createSource: (payload: CreateSourcePayload) =>
     apiClient.post<Source>("/admin/sources", payload),
-  deleteSource: (id: number) => 
+  updateSource: (id: number, payload: Partial<Source>) =>
+    apiClient.put<Source>(`/admin/sources/${id}`, payload),
+  deleteSource: (id: number) =>
     apiClient.delete<{ message: string }>(`/admin/sources/${id}`),
-  
-  // Source stats and schema
-  getSourceStats: (sourceId: number) => 
+
+  // Source stats and schema (admin and team-scoped versions)
+  getAdminSourceStats: (sourceId: number) =>
     apiClient.get<SourceStats>(`/admin/sources/${sourceId}/stats`),
-  getTeamSourceStats: (teamId: number, sourceId: number) => 
+  getTeamSourceStats: (teamId: number, sourceId: number) =>
     apiClient.get<SourceStats>(`/teams/${teamId}/sources/${sourceId}/stats`),
-  getTeamSourceSchema: (teamId: number, sourceId: number) => 
+  getTeamSourceSchema: (teamId: number, sourceId: number) =>
     apiClient.get<string>(`/teams/${teamId}/sources/${sourceId}/schema`),
-  
-  // Source queries
-  listSourceQueries: (sourceId: number, groupByTeam: boolean = true) => 
-    apiClient.get<TeamGroupedQuery[] | SavedTeamQuery[]>(
-      `/admin/sources/${sourceId}/queries${groupByTeam ? "?group_by_team=true" : ""}`
-    ),
-  listTeamSourceQueries: (teamId: number, sourceId: number) => 
+
+  // Team-scoped source queries
+  listTeamSourceQueries: (teamId: number, sourceId: number) =>
     apiClient.get<SavedTeamQuery[]>(`/teams/${teamId}/sources/${sourceId}/queries`),
-  createSourceQuery: (sourceId: number, payload: CreateTeamQueryRequest) => 
-    apiClient.post<SavedTeamQuery>(`/admin/sources/${sourceId}/queries`, payload),
-  createTeamSourceQuery: (teamId: number, sourceId: number, payload: Omit<CreateTeamQueryRequest, "team_id">) => 
+  createTeamSourceQuery: (teamId: number, sourceId: number, payload: Omit<CreateTeamQueryRequest, "team_id">) =>
     apiClient.post<SavedTeamQuery>(
       `/teams/${teamId}/sources/${sourceId}/queries`,
       { ...payload, team_id: teamId }
     ),
-  
+
   // Validation
   validateSourceConnection: (connectionInfo: ConnectionRequestInfo & {
     timestamp_field?: string;

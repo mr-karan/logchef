@@ -2,57 +2,50 @@ package server
 
 import (
 	"errors"
-	"fmt"
-	"strconv"
+	"log/slog"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/clickhouse"
+	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 
-	"github.com/mr-karan/logchef/internal/clickhouse"
-	"github.com/mr-karan/logchef/internal/logs"
+	// "github.com/mr-karan/logchef/internal/logs" // Removed
 
 	"github.com/gofiber/fiber/v2"
 )
 
-// TimeSeriesRequest represents the request parameters for time series data
-type TimeSeriesRequest struct {
-	StartTimestamp int64                 `query:"start_timestamp"`
-	EndTimestamp   int64                 `query:"end_timestamp"`
-	Window         clickhouse.TimeWindow `query:"window"`
-}
+// TimeSeriesRequest - consider if this is still needed or replaced by core/handler specific structs
+// type TimeSeriesRequest struct {
+// 	StartTimestamp int64                 `query:"start_timestamp"`
+// 	EndTimestamp   int64                 `query:"end_timestamp"`
+// 	Window         clickhouse.TimeWindow `query:"window"`
+// }
 
-// handleQueryTeamSourceLogs handles POST /api/v1/teams/:teamId/sources/:sourceId/logs/query
-func (s *Server) handleQueryTeamSourceLogs(c *fiber.Ctx) error {
-	teamID := c.Params("teamId")
-	sourceIDStr := c.Params("sourceId")
-	if teamID == "" || sourceIDStr == "" {
-		return SendError(c, fiber.StatusBadRequest, "team ID and source ID are required")
-	}
-
-	// Convert string to int for SourceID
-	sourceIDInt, err := strconv.Atoi(sourceIDStr)
+// handleQueryLogs handles requests to query logs for a specific source.
+// It expects start/end timestamps, limit, and a raw SQL query in the request body.
+// Access is controlled by the requireSourceAccess middleware.
+func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
+	sourceIDStr := c.Params("sourceID")
+	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
 	}
-	sourceID := models.SourceID(sourceIDInt)
 
 	var req models.LogQueryRequest
 	if err := c.BodyParser(&req); err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid request body")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Set defaults
+	// Apply default limit if not specified.
 	if req.Limit <= 0 {
-		req.Limit = 100
+		req.Limit = 100 // Consider making this configurable.
 	}
 
-	// Convert to ClickHouse params
+	// Prepare parameters for the core query function.
 	params := clickhouse.LogQueryParams{
 		RawSQL: req.RawSQL,
 		Limit:  req.Limit,
 	}
-
-	// If time range is provided, add it to params
 	if req.StartTimestamp > 0 {
 		params.StartTime = time.UnixMilli(req.StartTimestamp)
 	}
@@ -60,104 +53,80 @@ func (s *Server) handleQueryTeamSourceLogs(c *fiber.Ctx) error {
 		params.EndTime = time.UnixMilli(req.EndTimestamp)
 	}
 
-	// Execute query - authorization already checked by middleware
-	result, err := s.logsService.QueryLogs(c.Context(), sourceID, params)
+	// Execute query via core function.
+	result, err := core.QueryLogs(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID, params)
 	if err != nil {
-		if errors.Is(err, logs.ErrSourceNotFound) {
-			return SendError(c, fiber.StatusNotFound, "source not found")
+		if errors.Is(err, core.ErrSourceNotFound) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
-		return fmt.Errorf("error querying logs: %w", err)
+		// Handle invalid query syntax errors specifically if core.QueryLogs returns them.
+		// if errors.Is(err, core.ErrInvalidQuery) ...
+		s.log.Error("failed to query logs via core function", slog.Any("error", err), "source_id", sourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to query logs", models.GeneralErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)
 }
 
-// handleGetTeamSourceSchema handles GET /api/v1/teams/:teamId/sources/:sourceId/schema
-func (s *Server) handleGetTeamSourceSchema(c *fiber.Ctx) error {
-	teamID := c.Params("teamId")
-	sourceIDStr := c.Params("sourceId")
-	if teamID == "" || sourceIDStr == "" {
-		return SendError(c, fiber.StatusBadRequest, "team ID and source ID are required")
+// handleGetSourceSchema retrieves the schema (column names and types) for a specific source.
+// Access is controlled by the requireSourceAccess middleware.
+func (s *Server) handleGetSourceSchema(c *fiber.Ctx) error {
+	sourceIDStr := c.Params("sourceID")
+	sourceID, err := core.ParseSourceID(sourceIDStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
 	}
 
-	// Convert string to int for SourceID
-	sourceIDInt, err := strconv.Atoi(sourceIDStr)
+	// Get schema via core function.
+	schema, err := core.GetSourceSchema(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
-	}
-	sourceID := models.SourceID(sourceIDInt)
-
-	// Get source schema - authorization already checked by middleware
-	schema, err := s.logsService.GetSourceSchema(c.Context(), sourceID)
-	if err != nil {
-		if errors.Is(err, logs.ErrSourceNotFound) {
-			return SendError(c, fiber.StatusNotFound, "source not found")
+		if errors.Is(err, core.ErrSourceNotFound) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
-		return fmt.Errorf("error getting source schema: %w", err)
+		s.log.Error("failed to get source schema via core function", slog.Any("error", err), "source_id", sourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to retrieve source schema", models.GeneralErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, schema)
 }
 
-// handleGetTeamSourceHistogram handles POST /api/v1/teams/:teamId/sources/:sourceId/logs/histogram
-func (s *Server) handleGetTeamSourceHistogram(c *fiber.Ctx) error {
-	teamID := c.Params("teamId")
-	sourceIDStr := c.Params("sourceId")
-
-	if teamID == "" || sourceIDStr == "" {
-		return SendError(c, fiber.StatusBadRequest, "team ID and source ID are required")
-	}
-
-	// Convert string to int for SourceID
-	sourceIDInt, err := strconv.Atoi(sourceIDStr)
+// handleGetHistogram generates histogram data (log counts over time intervals) for a specific source.
+// It accepts time range and optional filter query parameters.
+// Access is controlled by the requireSourceAccess middleware.
+func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
+	sourceIDStr := c.Params("sourceID")
+	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
 	}
-	sourceID := models.SourceID(sourceIDInt)
 
-	// Parse request body (same structure as log query)
-	var req models.LogQueryRequest
+	// Parse time range and optional filter query from request body.
+	var req models.LogQueryRequest // Re-use LogQueryRequest for convenience
 	if err := c.BodyParser(&req); err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid request body")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Set default window
-	window := "1m" // Default to 1 minute window instead of 1 hour for more granular data
-	if windowParam := c.Query("window"); windowParam != "" {
-		// Validate window parameter
-		validWindows := map[string]bool{
-			"1m":  true,
-			"5m":  true,
-			"15m": true,
-			"1h":  true,
-			"6h":  true,
-			"24h": true,
-		}
-		if validWindows[windowParam] {
-			window = windowParam
-		}
-	}
+	// Get time window granularity from query parameter.
+	window := c.Query("window", "1m") // Default to 1 minute.
+	// TODO: Validate window parameter value against allowed values.
 
-	// Set defaults for limit if needed
-	if req.Limit <= 0 {
-		req.Limit = 100
-	}
-
-	// Create histogram params
-	params := logs.HistogramParams{
+	// Prepare parameters for the core histogram function.
+	params := core.HistogramParams{
 		StartTime: time.UnixMilli(req.StartTimestamp),
 		EndTime:   time.UnixMilli(req.EndTimestamp),
 		Window:    window,
-		RawSQL:    req.RawSQL,
+		Query:     req.RawSQL, // Pass potential filter query (WHERE clause).
 	}
 
-	// Execute histogram query - authorization already checked by middleware
-	result, err := s.logsService.GetHistogramData(c.Context(), sourceID, params)
+	// Execute histogram query via core function.
+	result, err := core.GetHistogramData(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID, params)
 	if err != nil {
-		if errors.Is(err, logs.ErrSourceNotFound) {
-			return SendError(c, fiber.StatusNotFound, "source not found")
+		if errors.Is(err, core.ErrSourceNotFound) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
-		return fmt.Errorf("error getting histogram data: %w", err)
+		// Handle specific errors like missing timestamp field if core returns them.
+		s.log.Error("failed to get histogram data via core function", slog.Any("error", err), "source_id", sourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to generate histogram data", models.GeneralErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)
