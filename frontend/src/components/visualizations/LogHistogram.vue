@@ -19,12 +19,14 @@ interface Props {
     };
     isLoading?: boolean;
     height?: string;
+    groupBy?: string;
 }
 
 // Define props with defaults
 const props = withDefaults(defineProps<Props>(), {
     height: '180px',
     isLoading: false,
+    groupBy: '',
 });
 
 const emit = defineEmits<{
@@ -39,6 +41,7 @@ const histogramData = ref<HistogramData[]>([]);
 const isChartLoading = ref(false);
 const initialDataLoaded = ref(false);
 const lastProcessedTimestamp = ref<number | null>(null);
+const currentGroupBy = ref<string>('');
 
 // Access stores
 const exploreStore = useExploreStore();
@@ -67,6 +70,20 @@ const windowResizeEventCallback = debounce(async () => {
         console.error('Error during chart resize:', e);
     }
 }, 100);
+
+// Color palette for grouped data
+const colorPalette = [
+    '#4a90e2', // Blue
+    '#e74c3c', // Red
+    '#2ecc71', // Green
+    '#f39c12', // Orange
+    '#9b59b6', // Purple
+    '#1abc9c', // Turquoise
+    '#d35400', // Dark Orange
+    '#3498db', // Light Blue
+    '#e67e22', // Carrot
+    '#7f8c8d'  // Gray
+];
 
 // Convert the histogram data to chart options with Kibana-like styling
 const convertHistogramData = (buckets: HistogramData[]) => {
@@ -132,36 +149,111 @@ const convertHistogramData = (buckets: HistogramData[]) => {
         };
     }
 
+    // Check if data is grouped
+    const isGrouped = buckets.some(item => item.group_value && item.group_value !== '');
+
     // Format data for echart
     const categoryData: string[] = [];
-    const valueData: number[] = [];
     const timestamps: number[] = []; // Store actual timestamps for calculation
+    let seriesData: any[] = [];
 
-    // Format the dates for x-axis
-    buckets.forEach(item => {
-        const date = new Date(item.bucket);
-        timestamps.push(date.getTime());
-        const formatDate = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
-        categoryData.push(formatDate);
-        valueData.push(item.log_count);
-    });
+    if (isGrouped) {
+        // Group data by bucket and group_value
+        const groupedByBucket: Record<string, Record<string, number>> = {};
+        const uniqueGroups: string[] = [];
 
-    // Handle single data point case
-    if (categoryData.length === 1) {
-        const date = new Date(buckets[0].bucket);
+        buckets.forEach(item => {
+            const date = new Date(item.bucket);
+            const bucketKey = date.toISOString();
+            if (!groupedByBucket[bucketKey]) {
+                groupedByBucket[bucketKey] = {};
+                categoryData.push(`${date.toLocaleDateString()} ${date.toLocaleTimeString()}`);
+                timestamps.push(date.getTime());
+            }
+            const groupVal = item.group_value || 'Other';
+            if (!uniqueGroups.includes(groupVal)) {
+                uniqueGroups.push(groupVal);
+            }
+            groupedByBucket[bucketKey][groupVal] = item.log_count;
+        });
 
-        // Add points before and after
-        const oneMinBefore = new Date(date.getTime() - 60000);
-        const oneMinAfter = new Date(date.getTime() + 60000);
+        // Create series for each group
+        seriesData = uniqueGroups.map((group, index) => {
+            const dataValues = Object.values(groupedByBucket).map(bucketData => bucketData[group] || 0);
+            return {
+                name: group,
+                type: 'bar',
+                stack: 'group',
+                data: dataValues,
+                barMaxWidth: '80%',
+                barMinWidth: 2,
+                large: true,
+                largeThreshold: 100,
+                itemStyle: {
+                    color: colorPalette[index % colorPalette.length],
+                    borderRadius: [2, 2, 0, 0],
+                    opacity: 0.85
+                },
+                emphasis: {
+                    itemStyle: {
+                        color: colorPalette[index % colorPalette.length],
+                        opacity: 1,
+                        shadowBlur: 4,
+                        shadowColor: 'rgba(0, 0, 0, 0.2)'
+                    }
+                }
+            };
+        });
+    } else {
+        const valueData: number[] = [];
+        buckets.forEach(item => {
+            const date = new Date(item.bucket);
+            timestamps.push(date.getTime());
+            const formatDate = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+            categoryData.push(formatDate);
+            valueData.push(item.log_count);
+        });
 
-        categoryData.unshift(`${oneMinBefore.toLocaleDateString()} ${oneMinBefore.toLocaleTimeString()}`);
-        categoryData.push(`${oneMinAfter.toLocaleDateString()} ${oneMinAfter.toLocaleTimeString()}`);
+        // Handle single data point case
+        if (categoryData.length === 1) {
+            const date = new Date(buckets[0].bucket);
 
-        valueData.unshift(0);
-        valueData.push(0);
+            // Add points before and after
+            const oneMinBefore = new Date(date.getTime() - 60000);
+            const oneMinAfter = new Date(date.getTime() + 60000);
 
-        timestamps.unshift(oneMinBefore.getTime());
-        timestamps.push(oneMinAfter.getTime());
+            categoryData.unshift(`${oneMinBefore.toLocaleDateString()} ${oneMinBefore.toLocaleTimeString()}`);
+            categoryData.push(`${oneMinAfter.toLocaleDateString()} ${oneMinAfter.toLocaleTimeString()}`);
+
+            valueData.unshift(0);
+            valueData.push(0);
+
+            timestamps.unshift(oneMinBefore.getTime());
+            timestamps.push(oneMinAfter.getTime());
+        }
+
+        seriesData = [{
+            name: 'Log Count',
+            type: 'bar',
+            barMaxWidth: '80%',
+            barMinWidth: 2,
+            data: valueData,
+            large: true,
+            largeThreshold: 100,
+            itemStyle: {
+                color: '#4a90e2', // A pleasant, Kibana-like blue for log analytics
+                borderRadius: [2, 2, 0, 0],
+                opacity: 0.85
+            },
+            emphasis: {
+                itemStyle: {
+                    color: '#357abd', // Slightly darker blue for hover/selection
+                    opacity: 1,
+                    shadowBlur: 4,
+                    shadowColor: 'rgba(0, 0, 0, 0.2)'
+                }
+            }
+        }];
     }
 
     return {
@@ -201,28 +293,39 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             },
             formatter: function (params: any) {
                 // Add null checks for DOM element existence
-                if (!params || !params[0] || params[0].dataIndex === undefined) return '';
+                if (!params || !params.length || params[0].dataIndex === undefined) return '';
 
                 const index = params[0].dataIndex;
                 // Add bounds checking for data arrays
-                if (index < 0 || index >= valueData.length) return '';
+                if (index < 0 || index >= categoryData.length) return '';
 
-                // Check for padding points
-                if (valueData.length === 3 && buckets.length === 1) {
-                    if (index === 0 || index === 2) return '';
-                }
-
-                const value = params[0].data;
-                const timeStr = params[0].axisValue;
+                const timeStr = categoryData[index];
+                let total = 0;
+                const details = params.map((p: any) => {
+                    const value = p.data || 0;
+                    total += value;
+                    return `<div style="display: flex; align-items: center; margin-bottom: 4px;">
+                        <span style="display: inline-block; width: 10px; height: 10px; background-color: ${p.color}; margin-right: 6px; border-radius: 2px;"></span>
+                        <span>${p.seriesName}: <strong>${value.toLocaleString()}</strong></span>
+                    </div>`;
+                }).join('');
 
                 return `<div style="font-size: 12px;">
                     <div style="font-weight: 500; margin-bottom: 4px;">${timeStr}</div>
-                    <div style="display: flex; align-items: center;">
-                        <span style="display: inline-block; width: 10px; height: 10px; background-color: #4a90e2; margin-right: 6px; border-radius: 2px;"></span>
-                        <span>Log Count: <strong>${value.toLocaleString()}</strong></span>
-                    </div>
+                    <div style="margin-bottom: 4px;">Total: <strong>${total.toLocaleString()}</strong></div>
+                    ${details}
                 </div>`;
             }
+        },
+        legend: isGrouped ? {
+            show: true,
+            bottom: 0,
+            textStyle: {
+                color: 'hsl(var(--foreground))',
+                fontSize: 11
+            }
+        } : {
+            show: false
         },
         xAxis: {
             type: 'category',
@@ -342,30 +445,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 moveOnMouseWheel: true
             }
         ],
-        series: [
-            {
-                name: 'Log Count',
-                type: 'bar',
-                barMaxWidth: '80%',
-                barMinWidth: 2,
-                data: valueData,
-                large: true,
-                largeThreshold: 100,
-                itemStyle: {
-                    color: '#4a90e2', // A pleasant, Kibana-like blue for log analytics
-                    borderRadius: [2, 2, 0, 0],
-                    opacity: 0.85
-                },
-                emphasis: {
-                    itemStyle: {
-                        color: '#357abd', // Slightly darker blue for hover/selection
-                        opacity: 1,
-                        shadowBlur: 4,
-                        shadowColor: 'rgba(0, 0, 0, 0.2)'
-                    }
-                }
-            }
-        ],
+        series: seriesData,
         animation: true,
         animationDuration: 800,
         animationEasing: 'cubicOut'
@@ -416,6 +496,7 @@ const fetchHistogramData = async (forceGranularity?: string) => {
             query: queryResult.sql,
             queryType: activeMode.value,
             granularity: forceGranularity,
+            groupBy: props.groupBy
         });
 
         if (response.success && response.data) {
@@ -660,6 +741,19 @@ watch(
         // fetch histogram data for the new source
         if (newSourceId && hasValidSource.value && exploreStore.lastExecutionTimestamp) {
             console.log('Histogram source changed, fetching data for new source');
+            lastProcessedTimestamp.value = exploreStore.lastExecutionTimestamp;
+            debouncedFetchHistogramData();
+        }
+    }
+);
+
+// Watch for changes in groupBy prop to refresh data
+watch(
+    () => props.groupBy,
+    (newGroupBy, oldGroupBy) => {
+        if (newGroupBy !== oldGroupBy && hasValidSource.value && exploreStore.lastExecutionTimestamp) {
+            console.log('Histogram group by field changed, fetching data with new grouping');
+            currentGroupBy.value = newGroupBy;
             lastProcessedTimestamp.value = exploreStore.lastExecutionTimestamp;
             debouncedFetchHistogramData();
         }

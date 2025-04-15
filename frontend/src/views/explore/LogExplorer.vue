@@ -270,6 +270,7 @@ const queryEditorRef = ref<ComponentPublicInstance<{
 }> | null>(null);
 const isLoadingQuery = ref(false)
 const editQueryData = ref<SavedTeamQuery | null>(null)
+const groupByField = ref<string>('')
 
 // UI state computed properties
 const showLoadingState = computed(() => isInitializing.value && !initializationError.value)
@@ -1482,9 +1483,23 @@ function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValu
           </div>
         </div>
 
-        <!-- Log Histogram Visualization -->
+        <!-- Log Histogram Visualization with Group By Selection -->
         <div class="px-4 pb-3" v-if="!isChangingContext && currentSourceId && hasValidSource && exploreStore.timeRange">
-          <LogHistogram :time-range="exploreStore.timeRange" :is-loading="isExecutingQuery"
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-sm text-muted-foreground">Group By:</label>
+            <Select v-model="groupByField" class="w-48 h-8">
+              <SelectTrigger>
+                <SelectValue placeholder="No Grouping">{{ groupByField || 'No Grouping' }}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">No Grouping</SelectItem>
+                <SelectItem v-for="field in availableFields" :key="field.name" :value="field.name">
+                  {{ field.name }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <LogHistogram :time-range="exploreStore.timeRange" :is-loading="isExecutingQuery" :group-by="groupByField"
             @zoom-time-range="handleHistogramTimeRangeZoom" @update:timeRange="handleHistogramTimeRangeUpdate" />
         </div>
 

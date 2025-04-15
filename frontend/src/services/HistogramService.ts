@@ -17,6 +17,7 @@ export interface HistogramParams {
   query: string;  // Already prepared SQL query
   queryType: 'logchefql' | 'sql';
   granularity?: string; // '1m', '10m', '1h', '1d', etc.
+  groupBy?: string; // Optional field to group by
 }
 
 export class HistogramService {
@@ -122,7 +123,8 @@ export class HistogramService {
         params.sourceId,
         queryParams,
         params.teamId,
-        granularity
+        granularity,
+        params.groupBy
       );
 
       if (isErrorResponse(response)) {
