@@ -29,11 +29,26 @@ type LogQueryResult struct {
 type TimeWindow string
 
 const (
+	// Second-based windows
+	TimeWindow1s  TimeWindow = "1s"  // 1 second
+	TimeWindow5s  TimeWindow = "5s"  // 5 seconds
+	TimeWindow10s TimeWindow = "10s" // 10 seconds
+	TimeWindow15s TimeWindow = "15s" // 15 seconds
+	TimeWindow30s TimeWindow = "30s" // 30 seconds
+
+	// Minute-based windows
 	TimeWindow1m  TimeWindow = "1m"  // 1 minute
 	TimeWindow5m  TimeWindow = "5m"  // 5 minutes
+	TimeWindow10m TimeWindow = "10m" // 10 minutes
 	TimeWindow15m TimeWindow = "15m" // 15 minutes
+	TimeWindow30m TimeWindow = "30m" // 30 minutes
+
+	// Hour-based windows
 	TimeWindow1h  TimeWindow = "1h"  // 1 hour
+	TimeWindow2h  TimeWindow = "2h"  // 2 hours
+	TimeWindow3h  TimeWindow = "3h"  // 3 hours
 	TimeWindow6h  TimeWindow = "6h"  // 6 hours
+	TimeWindow12h TimeWindow = "12h" // 12 hours
 	TimeWindow24h TimeWindow = "24h" // 24 hours
 )
 
@@ -75,7 +90,10 @@ type HistogramResult struct {
 // GetHistogramData generates histogram data by grouping log counts into time buckets.
 // It applies the time range and an optional WHERE clause filter provided in params.Query.
 func (c *Client) GetHistogramData(ctx context.Context, tableName string, timestampField string, params HistogramParams) (*HistogramResult, error) {
-	intervalValue, intervalUnit := getIntervalFromWindow(params.Window)
+	intervalValue, intervalUnit, err := getIntervalFromWindow(params.Window)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get interval from window: %w", err)
+	}
 
 	// Attempt to parse the optional user-provided query to extract WHERE conditions.
 	var whereClauseStr string
@@ -177,23 +195,48 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName string, timesta
 }
 
 // getIntervalFromWindow converts a TimeWindow constant into a numeric value and unit string
-// suitable for ClickHouse INTERVAL clauses.
-func getIntervalFromWindow(window TimeWindow) (int, string) {
+// suitable for ClickHouse INTERVAL clauses. Returns error if window value is unsupported.
+func getIntervalFromWindow(window TimeWindow) (int, string, error) {
 	switch window {
+	// Second-based intervals
+	case TimeWindow1s:
+		return 1, "second", nil
+	case TimeWindow5s:
+		return 5, "second", nil
+	case TimeWindow10s:
+		return 10, "second", nil
+	case TimeWindow15s:
+		return 15, "second", nil
+	case TimeWindow30s:
+		return 30, "second", nil
+
+	// Minute-based intervals
 	case TimeWindow1m:
-		return 1, "minute"
+		return 1, "minute", nil
 	case TimeWindow5m:
-		return 5, "minute"
+		return 5, "minute", nil
+	case TimeWindow10m:
+		return 10, "minute", nil
 	case TimeWindow15m:
-		return 15, "minute"
+		return 15, "minute", nil
+	case TimeWindow30m:
+		return 30, "minute", nil
+
+	// Hour-based intervals
 	case TimeWindow1h:
-		return 1, "hour"
+		return 1, "hour", nil
+	case TimeWindow2h:
+		return 2, "hour", nil
+	case TimeWindow3h:
+		return 3, "hour", nil
 	case TimeWindow6h:
-		return 6, "hour"
+		return 6, "hour", nil
+	case TimeWindow12h:
+		return 12, "hour", nil
 	case TimeWindow24h:
-		return 24, "hour" // Or return 1, "day"? Consistency needed.
+		return 24, "hour", nil
 	default:
-		// Default to 1 hour if window is unrecognized.
-		return 1, "hour"
+		// Return a proper error instead of panicking
+		return 0, "", fmt.Errorf("unsupported time window value: %s", window)
 	}
 }

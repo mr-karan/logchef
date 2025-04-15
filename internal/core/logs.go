@@ -154,22 +154,47 @@ func GetHistogramData(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manag
 	// Validate and convert window string to clickhouse.TimeWindow
 	var chWindow clickhouse.TimeWindow
 	switch params.Window {
+	// Second-based intervals
+	case "1s":
+		chWindow = clickhouse.TimeWindow1s
+	case "5s":
+		chWindow = clickhouse.TimeWindow5s
+	case "10s":
+		chWindow = clickhouse.TimeWindow10s
+	case "15s":
+		chWindow = clickhouse.TimeWindow15s
+	case "30s":
+		chWindow = clickhouse.TimeWindow30s
+
+	// Minute-based intervals
 	case "1m":
 		chWindow = clickhouse.TimeWindow1m
 	case "5m":
 		chWindow = clickhouse.TimeWindow5m
+	case "10m":
+		chWindow = clickhouse.TimeWindow10m
 	case "15m":
 		chWindow = clickhouse.TimeWindow15m
+	case "30m":
+		chWindow = clickhouse.TimeWindow30m
+
+	// Hour-based intervals
 	case "1h":
 		chWindow = clickhouse.TimeWindow1h
+	case "2h":
+		chWindow = clickhouse.TimeWindow2h
+	case "3h":
+		chWindow = clickhouse.TimeWindow3h
 	case "6h":
 		chWindow = clickhouse.TimeWindow6h
+	case "12h":
+		chWindow = clickhouse.TimeWindow12h
 	case "24h", "1d": // Allow "1d" as alias for 24h
 		chWindow = clickhouse.TimeWindow24h
 	default:
-		log.Warn("invalid histogram window specified, defaulting to 1h", "source_id", sourceID, "invalid_window", params.Window)
-		chWindow = clickhouse.TimeWindow1h // Default or return error
-		// return nil, fmt.Errorf("invalid histogram window: %s", params.Window)
+		// Log the invalid window and return an explicit error
+		log.Error("invalid histogram window specified", "source_id", sourceID, "invalid_window", params.Window)
+		return nil, fmt.Errorf("invalid histogram window: %s. Supported values are 1s, 5s, 10s, 15s, 30s, 1m, 5m, 10m, 15m, 30m, 1h, 2h, 3h, 6h, 12h, 24h/1d", params.Window)
 	}
 
 	chParams := clickhouse.HistogramParams{
@@ -200,6 +225,3 @@ func GetHistogramData(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manag
 		Data:        histogramData.Data,
 	}, nil
 }
-
-// Note: GetSourceStats was part of the logs service but seems more related to source management.
-// It has been moved to internal/core/source.go.

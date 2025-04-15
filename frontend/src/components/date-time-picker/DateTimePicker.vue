@@ -39,6 +39,9 @@ const dateRange = ref<{ start: DateValue; end: DateValue }>({
     end: currentTime
 })
 
+// Get the currently selected range text
+const selectedQuickRange = ref<string | null>(null)
+
 // Computed DateRange for v-model binding
 const calendarDateRange = computed({
     get: () => ({
@@ -79,9 +82,9 @@ if (!props.modelValue?.start || !props.modelValue?.end) {
 // Sync internal state with external value
 watch(() => props.modelValue, (newValue) => {
     if (newValue?.start && newValue?.end) {
-        const start = newValue.start instanceof ZonedDateTime ? 
+        const start = newValue.start instanceof ZonedDateTime ?
             newValue.start : toZoned(newValue.start as CalendarDateTime, getLocalTimeZone());
-        const end = newValue.end instanceof ZonedDateTime ? 
+        const end = newValue.end instanceof ZonedDateTime ?
             newValue.end : toZoned(newValue.end as CalendarDateTime, getLocalTimeZone());
 
         dateRange.value = {
@@ -98,7 +101,7 @@ watch(() => props.modelValue, (newValue) => {
                 time: formatTime(end)
             }
         }
-        
+
         // Update selected quick range to null when time range is updated externally
         // This ensures the display shows the actual time range rather than a quick range label
         selectedQuickRange.value = null;
@@ -268,9 +271,6 @@ function emitUpdate() {
         emit('update:modelValue', calendarDateRange.value)
     }
 }
-
-// Get the currently selected range text
-const selectedQuickRange = ref<string | null>(null)
 
 const selectedRangeText = computed(() => {
     if (!dateRange.value?.start || !dateRange.value?.end) return 'Select time range'

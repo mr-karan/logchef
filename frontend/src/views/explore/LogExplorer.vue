@@ -1010,6 +1010,38 @@ function handleHistogramTimeRangeZoom(range: { start: Date; end: Date }) {
   }
 }
 
+// New function to handle the update:timeRange event from LogHistogram
+function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValue }) {
+  try {
+    console.log('Updating time range from histogram selection:', range);
+
+    // Update the dateRange computed property which will update the store
+    dateRange.value = range;
+
+    // Also trigger the date picker to update its visual state
+    if (dateTimePickerRef.value) {
+      // This signals the DateTimePicker component to update its UI
+      nextTick(() => {
+        executeQuery();
+      });
+    } else {
+      // If we can't get the date picker ref, still execute the query
+      executeQuery();
+    }
+
+    // Update URL state
+    syncUrlFromState();
+  } catch (e) {
+    console.error('Error handling histogram time range update:', e);
+    toast({
+      title: 'Time Range Update Error',
+      description: 'There was an error updating the date picker with the selected time range.',
+      variant: 'destructive',
+      duration: TOAST_DURATION.ERROR
+    });
+  }
+}
+
 // Helper function to create example query with sort keys
 const createExampleQueryWithSortKeys = (sortKeys: string[] = []) => {
   if (!sortKeys || sortKeys.length === 0) return '';
@@ -1420,7 +1452,7 @@ const createExampleQueryWithSortKeys = (sortKeys: string[] = []) => {
         <!-- Log Histogram Visualization -->
         <div class="px-4 pb-3" v-if="!isChangingContext && currentSourceId && hasValidSource && exploreStore.timeRange">
           <LogHistogram :time-range="exploreStore.timeRange" :is-loading="isExecutingQuery"
-            @zoom-time-range="handleHistogramTimeRangeZoom" />
+            @zoom-time-range="handleHistogramTimeRangeZoom" @update:timeRange="handleHistogramTimeRangeUpdate" />
         </div>
 
         <!-- Results Section -->

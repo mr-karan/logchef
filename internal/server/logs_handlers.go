@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
@@ -108,7 +109,6 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 
 	// Get time window granularity from query parameter.
 	window := c.Query("window", "1m") // Default to 1 minute.
-	// TODO: Validate window parameter value against allowed values.
 
 	// Prepare parameters for the core histogram function.
 	params := core.HistogramParams{
@@ -124,7 +124,13 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
-		// Handle specific errors like missing timestamp field if core returns them.
+
+		// Check if the error is related to an invalid window parameter
+		if strings.Contains(err.Error(), "invalid histogram window") {
+			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		}
+
+		// Handle other errors
 		s.log.Error("failed to get histogram data via core function", slog.Any("error", err), "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to generate histogram data", models.GeneralErrorType)
 	}

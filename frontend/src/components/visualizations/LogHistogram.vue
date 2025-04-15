@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue';
 const isMounted = ref(true);
-import { toCalendarDateTime } from '@internationalized/date';
+import { toCalendarDateTime, CalendarDateTime } from '@internationalized/date';
 import * as echarts from 'echarts';
 import { debounce } from 'lodash-es';
 import { useExploreStore } from '@/stores/explore';
@@ -29,6 +29,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
     (e: 'zoom-time-range', range: { start: Date, end: Date }): void;
+    (e: 'update:timeRange', range: { start: DateValue, end: DateValue }): void;
 }>();
 
 // Component state
@@ -84,7 +85,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 containLabel: true,
                 left: 20,
                 right: 20,
-                bottom: 40,
+                bottom: 20,
                 top: 30
             },
             xAxis: {
@@ -114,10 +115,12 @@ const convertHistogramData = (buckets: HistogramData[]) => {
     // Format data for echart
     const categoryData: string[] = [];
     const valueData: number[] = [];
+    const timestamps: number[] = []; // Store actual timestamps for calculation
 
     // Format the dates for x-axis
     buckets.forEach(item => {
         const date = new Date(item.bucket);
+        timestamps.push(date.getTime());
         const formatDate = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
         categoryData.push(formatDate);
         valueData.push(item.log_count);
@@ -136,6 +139,9 @@ const convertHistogramData = (buckets: HistogramData[]) => {
 
         valueData.unshift(0);
         valueData.push(0);
+
+        timestamps.unshift(oneMinBefore.getTime());
+        timestamps.push(oneMinAfter.getTime());
     }
 
     return {
@@ -152,7 +158,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             containLabel: true,
             left: 20,
             right: 20,
-            bottom: 40,
+            bottom: 20,
             top: 30
         },
         tooltip: {
@@ -167,11 +173,11 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             formatter: function (params: any) {
                 // Add null checks for DOM element existence
                 if (!params || !params[0] || params[0].dataIndex === undefined) return '';
-                
+
                 const index = params[0].dataIndex;
                 // Add bounds checking for data arrays
                 if (index < 0 || index >= valueData.length) return '';
-                
+
                 // Check for padding points
                 if (valueData.length === 3 && buckets.length === 1) {
                     if (index === 0 || index === 2) return '';
@@ -244,15 +250,6 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 xAxisIndex: 0,
                 start: 0,
                 end: 100
-            },
-            {
-                type: 'slider',
-                xAxisIndex: 0,
-                start: 0,
-                end: 100,
-                height: 20,
-                bottom: 5,
-                handleSize: 20
             }
         ],
         series: [
@@ -367,122 +364,14 @@ const setupChartEvents = () => {
 
     // Handle chart zoom events
     chart.on('datazoom', safeHandler((params: any) => {
+        // Either handle batch or direct parameters
         if (params?.batch && params.batch.length > 0) {
-            // For the inside zoom and slider
+            // For the inside zoom with batch
             const batch = params.batch[0];
-
-            if (histogramData.value.length === 0) return;
-
-            try {
-                console.log('DataZoom triggered with batch:', batch, 'Histogram data length:', histogramData.value.length);
-
-                // Special case: Very small datasets (1-3 points)
-                if (histogramData.value.length <= 3) {
-                    // Just use the original time range from the data
-                    const startDate = new Date(histogramData.value[0].bucket);
-
-                    // For the end date, use the last bucket plus a small increment
-                    const lastIndex = histogramData.value.length - 1;
-                    const lastBucketTime = new Date(histogramData.value[lastIndex].bucket).getTime();
-                    // Add 1 minute if only one bucket, or use bucket width if more than one
-                    const increment = lastIndex > 0
-                        ? (lastBucketTime - new Date(histogramData.value[0].bucket).getTime())
-                        : 60000; // 1 minute default
-
-                    const endDate = new Date(lastBucketTime + increment);
-
-                    console.log('Small dataset zoom: Using full range', { startDate, endDate });
-                    emit('zoom-time-range', { start: startDate, end: endDate });
-                    return;
-                }
-
-                // Get the selected range from the chart
-                const options = chart?.getOption();
-
-                // Direct mapping to the histogram data
-                const totalPoints = histogramData.value.length;
-
-                // Convert percentages to indices using startValue/endValue instead of start/end
-                const histoStartIdx = Math.min(Math.max(0, Math.floor(totalPoints * batch.startValue / 100)), totalPoints - 1);
-                const histoEndIdx = Math.min(Math.max(histoStartIdx, Math.floor(totalPoints * batch.endValue / 100)), totalPoints - 1);
-
-                console.log('Calculated indices:', {
-                    histoStartIdx,
-                    histoEndIdx,
-                    totalPoints,
-                    startPercent: batch.start,
-                    endPercent: batch.end
-                });
-
-                // Safety check
-                if (histoStartIdx < 0 || histoStartIdx >= totalPoints ||
-                    histoEndIdx < 0 || histoEndIdx >= totalPoints) {
-                    console.warn('Invalid histogram indices', { histoStartIdx, histoEndIdx, totalPoints });
-                    return;
-                }
-
-                // Get dates from histogram data with safety checks
-                const startBucket = histogramData.value[histoStartIdx]?.bucket;
-                if (!startBucket) {
-                    console.error('Start bucket not found at index', histoStartIdx);
-                    return;
-                }
-                const startDate = new Date(startBucket);
-
-                // For the end date
-                let endDate: Date;
-
-                if (histoEndIdx >= totalPoints - 1) {
-                    // If at the end, add a small time increment
-                    const endBucket = histogramData.value[histoEndIdx]?.bucket;
-                    if (!endBucket) {
-                        console.error('End bucket not found at index', histoEndIdx);
-                        return;
-                    }
-                    const lastTime = new Date(endBucket).getTime();
-
-                    // Calculate a reasonable increment based on data
-                    let increment = 60000; // Default 1 minute
-                    if (totalPoints > 1) {
-                        // Use the average bucket width
-                        const firstTime = new Date(histogramData.value[0].bucket).getTime();
-                        const lastBucketTime = new Date(histogramData.value[totalPoints - 1].bucket).getTime();
-                        increment = (lastBucketTime - firstTime) / (totalPoints - 1);
-                    }
-
-                    endDate = new Date(lastTime + increment);
-                } else {
-                    // Use the next bucket time as the end
-                    const nextBucket = histogramData.value[histoEndIdx + 1]?.bucket;
-                    if (!nextBucket) {
-                        console.error('Next bucket not found at index', histoEndIdx + 1);
-                        return;
-                    }
-                    endDate = new Date(nextBucket);
-                }
-
-                // Convert to native Date objects for easier handling in parent
-                emit('zoom-time-range', {
-                    start: new Date(startDate),
-                    end: new Date(endDate)
-                });
-            } catch (e) {
-                console.error('Error handling zoom event:', e);
-
-                // Fallback to using the full range
-                if (histogramData.value.length > 0) {
-                    try {
-                        const startDate = new Date(histogramData.value[0].bucket);
-                        const lastBucket = histogramData.value[histogramData.value.length - 1].bucket;
-                        const endDate = new Date(new Date(lastBucket).getTime() + 60000);
-
-                        console.log('Fallback: Using full time range after error');
-                        emit('zoom-time-range', { start: startDate, end: endDate });
-                    } catch (fallbackError) {
-                        console.error('Even fallback failed:', fallbackError);
-                    }
-                }
-            }
+            handleZoomAction(batch);
+        } else if (params?.startValue !== undefined && params?.endValue !== undefined) {
+            // For direct toolbox dataZoom
+            handleZoomAction(params);
         }
     }));
 
@@ -494,10 +383,13 @@ const setupChartEvents = () => {
                 const startDate = props.timeRange.start.toDate(getLocalTimeZone());
                 const endDate = props.timeRange.end.toDate(getLocalTimeZone());
 
+                // Emit native Date event (original behavior)
                 emit('zoom-time-range', {
                     start: startDate,
                     end: endDate
                 });
+
+                // No need to emit update:timeRange here since we're restoring to the original timeRange
             }
         } catch (e) {
             console.error('Error handling restore event:', e);
@@ -520,7 +412,7 @@ const initChart = async () => {
         if (chart) {
             chart.dispose();
         }
-        
+
         // Create chart instance
         chart = echarts.init(chartRef.value);
 
@@ -672,10 +564,171 @@ watch(
     }
 );
 
+// Helper function to convert native Date to CalendarDateTime and emit update
+function updateTimeRangeForDatePicker(startDate: Date, endDate: Date) {
+    // Convert native Date objects to CalendarDateTime objects
+    const startDateTime = new CalendarDateTime(
+        startDate.getFullYear(),
+        startDate.getMonth() + 1,
+        startDate.getDate(),
+        startDate.getHours(),
+        startDate.getMinutes(),
+        startDate.getSeconds()
+    );
+
+    const endDateTime = new CalendarDateTime(
+        endDate.getFullYear(),
+        endDate.getMonth() + 1,
+        endDate.getDate(),
+        endDate.getHours(),
+        endDate.getMinutes(),
+        endDate.getSeconds()
+    );
+
+    // Emit event to update the DateTimePicker
+    emit('update:timeRange', {
+        start: startDateTime,
+        end: endDateTime
+    });
+
+    console.log('Emitted updated time range for DateTimePicker:', {
+        start: startDateTime,
+        end: endDateTime
+    });
+}
+
+// Helper function to handle zoom action uniformly
+function handleZoomAction(zoomParams: any) {
+    if (histogramData.value.length === 0) return;
+
+    try {
+        console.log('DataZoom triggered with params:', zoomParams, 'Histogram data length:', histogramData.value.length);
+
+        // Special case: Very small datasets (1-3 points)
+        if (histogramData.value.length <= 3) {
+            // Just use the original time range from the data
+            const startDate = new Date(histogramData.value[0].bucket);
+
+            // For the end date, use the last bucket plus a small increment
+            const lastIndex = histogramData.value.length - 1;
+            const lastBucketTime = new Date(histogramData.value[lastIndex].bucket).getTime();
+            // Add 1 minute if only one bucket, or use bucket width if more than one
+            const increment = lastIndex > 0
+                ? (lastBucketTime - new Date(histogramData.value[0].bucket).getTime())
+                : 60000; // 1 minute default
+
+            const endDate = new Date(lastBucketTime + increment);
+
+            console.log('Small dataset zoom: Using full range', { startDate, endDate });
+
+            // Emit native Date event
+            emit('zoom-time-range', { start: startDate, end: endDate });
+
+            // Also emit DateValue event for DateTimePicker
+            updateTimeRangeForDatePicker(startDate, endDate);
+
+            return;
+        }
+
+        const totalPoints = histogramData.value.length;
+        let startIndex: number;
+        let endIndex: number;
+
+        // Handle different zoom parameter formats
+        if (zoomParams.startValue !== undefined && zoomParams.endValue !== undefined) {
+            // Direct index values from toolbox dataZoom
+            startIndex = Math.max(0, Math.min(parseInt(zoomParams.startValue), totalPoints - 1));
+            endIndex = Math.max(startIndex, Math.min(parseInt(zoomParams.endValue), totalPoints - 1));
+
+            console.log('Using direct index values:', { startIndex, endIndex });
+        } else if (zoomParams.start !== undefined && zoomParams.end !== undefined) {
+            // Percentage values from inside zoom
+            const startPercent = zoomParams.start || 0;
+            const endPercent = zoomParams.end || 100;
+
+            // Calculate indices based on percentages
+            startIndex = Math.floor(totalPoints * startPercent / 100);
+            endIndex = Math.ceil(totalPoints * endPercent / 100) - 1;
+
+            console.log('Using percentage values:', { startPercent, endPercent, startIndex, endIndex });
+        } else {
+            console.error('Invalid zoom parameters:', zoomParams);
+            return;
+        }
+
+        // Ensure indices are within bounds
+        const validStartIndex = Math.max(0, Math.min(startIndex, totalPoints - 1));
+        const validEndIndex = Math.max(validStartIndex, Math.min(endIndex, totalPoints - 1));
+
+        // Get the actual timestamps from the data
+        const startDate = new Date(histogramData.value[validStartIndex].bucket);
+
+        // For the end date, we need to include the entire bucket
+        // Calculate the bucket width (assume uniform width)
+        let endDate: Date;
+
+        if (validEndIndex >= totalPoints - 1) {
+            // If at the end of the data, add a bucket width to include the entire last bucket
+            const lastBucketTime = new Date(histogramData.value[validEndIndex].bucket).getTime();
+
+            // Calculate bucket width if possible
+            let bucketWidth = 60000; // Default 1 minute
+            if (totalPoints > 1) {
+                // Get average bucket width
+                const firstTime = new Date(histogramData.value[0].bucket).getTime();
+                const lastTime = new Date(histogramData.value[totalPoints - 1].bucket).getTime();
+                bucketWidth = (lastTime - firstTime) / (totalPoints - 1);
+            }
+
+            endDate = new Date(lastBucketTime + bucketWidth);
+        } else {
+            // Use next bucket's start time as the end time
+            endDate = new Date(histogramData.value[validEndIndex + 1].bucket);
+        }
+
+        console.log('Selected time range:', {
+            startDate,
+            endDate,
+            startIndex: validStartIndex,
+            endIndex: validEndIndex
+        });
+
+        // Emit native Date event (original behavior)
+        emit('zoom-time-range', {
+            start: startDate,
+            end: endDate
+        });
+
+        // Also emit DateValue event for DateTimePicker
+        updateTimeRangeForDatePicker(startDate, endDate);
+    } catch (e) {
+        console.error('Error handling zoom event:', e);
+
+        // Fallback to using the full range
+        if (histogramData.value.length > 0) {
+            try {
+                const startDate = new Date(histogramData.value[0].bucket);
+                const lastBucket = histogramData.value[histogramData.value.length - 1].bucket;
+                const endDate = new Date(new Date(lastBucket).getTime() + 60000);
+
+                console.log('Fallback: Using full time range after error');
+
+                // Emit native Date event (original behavior)
+                emit('zoom-time-range', { start: startDate, end: endDate });
+
+                // Also emit DateValue event for DateTimePicker
+                updateTimeRangeForDatePicker(startDate, endDate);
+            } catch (fallbackError) {
+                console.error('Even fallback failed:', fallbackError);
+            }
+        }
+    }
+}
+
 // Component lifecycle
 onMounted(async () => {
     isMounted.value = true;
-    
+
     // Wait for multiple ticks to ensure DOM is fully rendered
     for (let i = 0; i < 5; i++) {
         await nextTick();
@@ -697,7 +750,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
     // Mark component as unmounted
     isMounted.value = false;
-    
+
     // Clean up resources
     window.removeEventListener('resize', windowResizeEventCallback);
 

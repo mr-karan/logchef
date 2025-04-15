@@ -387,10 +387,10 @@ export function useQuery() {
 
       // Execute the query via store
       const execResult = await exploreStore.executeQuery(result.sql);
-      
+
       // Always update last execution timestamp even if query fails
-      exploreStore.setLastExecutionTimestamp(Date.now());
-      
+      exploreStore.updateExecutionTimestamp();
+
       if (!execResult.success) {
         queryError.value = execResult.error?.message || 'Query execution failed';
       }
@@ -401,8 +401,8 @@ export function useQuery() {
       return execResult;
     } catch (error) {
       // Still update timestamp on error
-      exploreStore.setLastExecutionTimestamp(Date.now());
-      
+      exploreStore.updateExecutionTimestamp();
+
       const errorMessage = error instanceof Error ? error.message : getErrorMessage(error);
       queryError.value = errorMessage;
       console.error('Query execution error:', errorMessage);
