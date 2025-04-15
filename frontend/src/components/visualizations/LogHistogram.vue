@@ -598,8 +598,7 @@ watch(
 watch(
     () => props.timeRange,
     (newRange, oldRange) => {
-        // Never fetch histogram data when time range changes
-        // Only clear data if completely outside current range
+        // Show loading state and fetch data when time range changes significantly
 
         // Skip if no valid source
         if (!hasValidSource.value || !currentSourceId.value) return;
@@ -608,6 +607,9 @@ watch(
         if (newRange && oldRange &&
             (newRange.start?.toString() !== oldRange.start?.toString() ||
                 newRange.end?.toString() !== oldRange.end?.toString())) {
+
+            // Show loading state immediately to cover the data fetch delay
+            isChartLoading.value = true;
 
             // Only clear data if this is a completely different time range
             // This prevents showing outdated data
@@ -629,6 +631,9 @@ watch(
                     histogramData.value = [];
                 }
             }
+
+            // Fetch new data for the updated time range
+            debouncedFetchHistogramData();
         }
     },
     { deep: true }
