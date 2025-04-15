@@ -7,172 +7,209 @@ import (
 	"net/http"
 
 	"github.com/mr-karan/logchef/internal/auth"
+	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
-	"github.com/mr-karan/logchef/internal/identity"
-	"github.com/mr-karan/logchef/internal/logs"
-	"github.com/mr-karan/logchef/internal/saved_queries"
-	"github.com/mr-karan/logchef/internal/source"
+	"github.com/mr-karan/logchef/internal/sqlite"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gofiber/swagger" // Swagger handler
+
+	// Import generated docs (will be created after running swag init)
+	_ "github.com/mr-karan/logchef/docs"
 )
 
-// ServerOptions contains all dependencies needed to create a new Server
+// ServerOptions holds the dependencies required to create a new Server instance.
+// This structure reflects the refactored approach using direct dependencies instead of services.
 type ServerOptions struct {
-	Config            *config.Config
-	SourceService     *source.Service
-	LogsService       *logs.Service
-	IdentityService   *identity.Service
-	SavedQueryService *saved_queries.Service
-	Auth              *auth.Service
-	FS                http.FileSystem
-	Logger            *slog.Logger
-	BuildInfo         string
+	Config       *config.Config
+	SQLite       *sqlite.DB
+	ClickHouse   *clickhouse.Manager
+	OIDCProvider *auth.OIDCProvider // OIDC provider for authentication flows.
+	FS           http.FileSystem    // Filesystem for serving static assets (frontend).
+	Logger       *slog.Logger
+	BuildInfo    string
 }
 
-// Server represents the HTTP server
+// Server represents the core HTTP server, encapsulating the Fiber app instance
+// and necessary dependencies like database connections and configuration.
 type Server struct {
-	app    *fiber.App
-	config *config.Config
-
-	// Domain-specific services
-	sourceService     *source.Service
-	logsService       *logs.Service
-	identityService   *identity.Service
-	savedQueryService *saved_queries.Service
-	auth              *auth.Service
-
-	fs  http.FileSystem
-	log *slog.Logger
-
-	// Build information
-	buildInfo string
+	app          *fiber.App
+	config       *config.Config
+	sqlite       *sqlite.DB
+	clickhouse   *clickhouse.Manager
+	oidcProvider *auth.OIDCProvider // Handles OIDC authentication logic.
+	fs           http.FileSystem
+	log          *slog.Logger
+	buildInfo    string
 }
 
-// New creates a new HTTP server
+// @title LogChef API
+// @version 1.0
+// @description Log analytics and exploration platform for collecting, querying, and visualizing log data
+// @termsOfService http://example.com/terms/
+// @contact.name API Support
+// @contact.url https://github.com/mr-karan/logchef
+// @contact.email your-email@example.com
+// @license.name MIT
+// @license.url https://opensource.org/licenses/MIT
+// @host localhost:8080
+// @BasePath /api/v1
+// @schemes http https
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+
+// New creates, configures, and returns a new Server instance.
+// It initializes the Fiber application, sets up middleware, injects dependencies,
+// and registers all application routes.
 func New(opts ServerOptions) *Server {
 	log := opts.Logger.With("component", "server")
 
-	// Initialize Fiber app with configuration
+	// Initialize Fiber app with custom error handler.
 	app := fiber.New(fiber.Config{
 		AppName:               "LogChef API v1",
-		DisableStartupMessage: true,
+		DisableStartupMessage: true, // Avoid default Fiber banner.
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
-			// Default 500 status code
 			code := fiber.StatusInternalServerError
-
-			// Check if it's a Fiber error
 			if e, ok := err.(*fiber.Error); ok {
-				code = e.Code
+				code = e.Code // Use Fiber's error code if available.
 			}
-
-			// Log the error
+			// Log the internal error details.
 			log.Error("request error", "path", c.Path(), "method", c.Method(), "error", err.Error())
-
-			// Return JSON error response
-			return SendError(c, code, err.Error())
+			// Return a standardized JSON error response to the client.
+			return SendError(c, code, err.Error()) // Assumes SendError is defined elsewhere.
 		},
 	})
 
-	// Add middleware
-	app.Use(recover.New())
+	// Add essential middleware.
+	app.Use(recover.New()) // Recover from panics.
 
-	// Create server instance
+	// Create the Server instance, injecting dependencies.
 	s := &Server{
-		app:               app,
-		config:            opts.Config,
-		sourceService:     opts.SourceService,
-		logsService:       opts.LogsService,
-		identityService:   opts.IdentityService,
-		savedQueryService: opts.SavedQueryService,
-		auth:              opts.Auth,
-		fs:                opts.FS,
-		log:               opts.Logger,
-		buildInfo:         opts.BuildInfo,
+		app:          app,
+		config:       opts.Config,
+		sqlite:       opts.SQLite,
+		clickhouse:   opts.ClickHouse,
+		oidcProvider: opts.OIDCProvider,
+		fs:           opts.FS,
+		log:          opts.Logger,
+		buildInfo:    opts.BuildInfo,
 	}
 
-	// Setup routes
+	// Register all application routes.
 	s.setupRoutes()
 
 	return s
 }
 
-// setupRoutes configures all API routes
+// setupRoutes configures all API endpoints, applying necessary middleware.
 func (s *Server) setupRoutes() {
-	// Base path for API version 1
+	// Swagger documentation route
+	s.app.Get("/swagger/*", swagger.HandlerDefault)
+
 	api := s.app.Group("/api/v1")
 
-	// Public routes
+	// --- Public Routes ---
 	api.Get("/health", s.handleHealth)
 
-	// Auth routes
+	// --- Authentication Routes ---
 	api.Get("/auth/login", s.handleLogin)
 	api.Get("/auth/callback", s.handleCallback)
 	api.Post("/auth/logout", s.handleLogout)
-	api.Get("/auth/session", s.requireAuth, s.handleGetSession)
+
+	// --- Current User ("Me") Routes ---
+	api.Get("/me", s.requireAuth, s.handleGetCurrentUser)
+	api.Get("/me/teams", s.requireAuth, s.handleListCurrentUserTeams)
 
 	// --- Admin Routes ---
-	api.Get("/admin/users", s.requireAuth, s.requireAdmin, s.handleListUsers)
-	api.Post("/admin/users", s.requireAuth, s.requireAdmin, s.handleCreateUser)
-	api.Get("/admin/users/:userID", s.requireAuth, s.requireAdmin, s.handleGetUser)
-	api.Put("/admin/users/:userID", s.requireAuth, s.requireAdmin, s.handleUpdateUser)
-	api.Delete("/admin/users/:userID", s.requireAuth, s.requireAdmin, s.handleDeleteUser)
+	// These endpoints are only accessible to admin users for global management
+	admin := api.Group("/admin", s.requireAuth, s.requireAdmin)
+	{
+		// User Management
+		admin.Get("/users", s.handleListUsers)
+		admin.Post("/users", s.handleCreateUser)
+		admin.Get("/users/:userID", s.handleGetUser)
+		admin.Put("/users/:userID", s.handleUpdateUser)
+		admin.Delete("/users/:userID", s.handleDeleteUser)
 
-	api.Get("/admin/teams", s.requireAuth, s.requireAdmin, s.handleListTeams)
-	api.Post("/admin/teams", s.requireAuth, s.requireAdmin, s.handleCreateTeam)
-	api.Put("/admin/teams/:teamID", s.requireAuth, s.requireAdmin, s.handleUpdateTeam)
-	api.Delete("/admin/teams/:teamID", s.requireAuth, s.requireAdmin, s.handleDeleteTeam)
+		// Global Team Management
+		admin.Get("/teams", s.handleListTeams)
+		admin.Post("/teams", s.handleCreateTeam)
+		admin.Delete("/teams/:teamID", s.handleDeleteTeam)
 
-	api.Get("/admin/sources", s.requireAuth, s.requireAdmin, s.handleListSources)
-	api.Get("/admin/sources/:sourceID", s.requireAuth, s.requireAdmin, s.handleGetSource)
-	api.Post("/admin/sources", s.requireAuth, s.requireAdmin, s.handleCreateSource)
-	api.Post("/admin/sources/validate", s.requireAuth, s.requireAdmin, s.handleValidateSourceConnection)
-	api.Delete("/admin/sources/:sourceID", s.requireAuth, s.requireAdmin, s.handleDeleteSource)
-	api.Get("/admin/sources/:sourceID/stats", s.requireAuth, s.requireAdmin, s.handleGetSourceStats)
+		// Global Source Management
+		admin.Get("/sources", s.handleListSources) // Admin endpoint for listing all sources
+		admin.Post("/sources", s.handleCreateSource)
+		admin.Post("/sources/validate", s.handleValidateSourceConnection)
+		admin.Delete("/sources/:sourceID", s.handleDeleteSource)
+		admin.Get("/sources/:sourceID/stats", s.handleGetSourceStats) // Admin-only source stats
+	}
 
-	// --- Personal Routes ---
-	api.Get("/users/me/teams", s.requireAuth, s.handleListUserTeams)
+	// --- Team Routes (Access controlled by team membership) ---
+	// Regular users can view teams they belong to, team admins can manage membership and linked sources
 
-	// --- Team Routes ---
-
-	// Team Info
+	// Team details and members (requires team membership)
 	api.Get("/teams/:teamID", s.requireAuth, s.requireTeamMember, s.handleGetTeam)
 
-	// Team Members
-	api.Get("/teams/:teamID/members", s.requireAuth, s.requireTeamMember, s.handleListTeamMembers)
-	api.Post("/teams/:teamID/members", s.requireAuth, s.requireTeamMember, s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamMember)
-	api.Delete("/teams/:teamID/members/:userID", s.requireAuth, s.requireTeamMember, s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamMember)
+	// Team member management (requires team admin or global admin)
+	teamMembers := api.Group("/teams/:teamID/members", s.requireAuth, s.requireTeamMember)
+	{
+		teamMembers.Get("/", s.handleListTeamMembers) // Any team member can view
+		// Only team admins can add/remove members
+		teamMembers.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamMember)
+		teamMembers.Delete("/:userID", s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamMember)
+	}
 
-	// Team Sources
-	api.Get("/teams/:teamID/sources", s.requireAuth, s.requireTeamMember, s.handleListTeamSources)
-	api.Post("/teams/:teamID/sources", s.requireAuth, s.requireTeamMember, s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamSource)
-	api.Delete("/teams/:teamID/sources/:sourceID", s.requireAuth, s.requireTeamMember, s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamSource)
+	// Team settings (requires team admin or global admin)
+	api.Put("/teams/:teamID", s.requireAuth, s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeam)
 
-	// Team Source Details & Actions
-	api.Get("/teams/:teamID/sources/:sourceID", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleGetTeamSource)
-	api.Post("/teams/:teamID/sources/:sourceID/logs/query", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleQueryTeamSourceLogs)
-	api.Get("/teams/:teamID/sources/:sourceID/schema", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleGetTeamSourceSchema)
+	// Team Source Management (linking/unlinking)
+	teamSources := api.Group("/teams/:teamID/sources", s.requireAuth, s.requireTeamMember)
+	{
+		teamSources.Get("/", s.handleListTeamSources) // Any team member can view team sources (basic info)
 
-	// Team Source Queries
-	api.Get("/teams/:teamID/sources/:sourceID/queries", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleListTeamSourceQueries)
-	api.Post("/teams/:teamID/sources/:sourceID/queries", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleCreateTeamSourceQuery)
-	api.Get("/teams/:teamID/sources/:sourceID/queries/:queryID", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleGetTeamSourceQuery)
-	api.Put("/teams/:teamID/sources/:sourceID/queries/:queryID", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleUpdateTeamSourceQuery)
-	api.Delete("/teams/:teamID/sources/:sourceID/queries/:queryID", s.requireAuth, s.requireTeamMember, s.requireTeamSourceAccess, s.handleDeleteTeamSourceQuery)
+		// Only team admins can link/unlink sources
+		teamSources.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleLinkSourceToTeam)
+		teamSources.Delete("/:sourceID", s.requireTeamAdminOrGlobalAdmin, s.handleUnlinkSourceFromTeam)
+	}
 
-	// Handle 404 for API routes
-	s.app.Use("/api/*", s.notFoundHandler)
+	// --- Team Source Operations (requires team membership) ---
+	// These endpoints allow team members to interact with a specific source linked to their team
+	teamSourceOps := api.Group("/teams/:teamID/sources/:sourceID", s.requireAuth, s.requireTeamMember, s.requireTeamHasSource)
+	{
+		// Get detailed source info including connection status and schema
+		teamSourceOps.Get("/", s.handleGetTeamSource)
+		teamSourceOps.Get("/stats", s.handleGetTeamSourceStats)
 
-	// Asset handling
-	s.app.Use("/assets/*", filesystem.New(filesystem.Config{
+		// Query and explore logs
+		teamSourceOps.Post("/logs/query", s.handleQueryLogs)
+		teamSourceOps.Get("/schema", s.handleGetSourceSchema)
+		teamSourceOps.Post("/logs/histogram", s.handleGetHistogram)
+
+		// Collections (Saved Queries) scoped to Team & Source
+		// Regular team members can view and use collections
+		collections := teamSourceOps.Group("/collections")
+		{
+			collections.Get("/", s.handleListTeamSourceCollections)
+			collections.Get("/:collectionID", s.handleGetTeamSourceCollection)
+
+			// Only team admins can manage collections
+			collections.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleCreateTeamSourceCollection)
+			collections.Put("/:collectionID", s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeamSourceCollection)
+			collections.Delete("/:collectionID", s.requireTeamAdminOrGlobalAdmin, s.handleDeleteTeamSourceCollection)
+		}
+	}
+
+	// --- Static Asset and SPA Handling ---
+	s.app.Use("/api/*", s.notFoundHandler) // Catch-all for API 404s
+	s.app.Use("/assets", filesystem.New(filesystem.Config{
 		Root:       s.fs,
 		PathPrefix: "assets",
 		Browse:     false,
 		MaxAge:     86400,
 	}))
-
-	// SPA index.html handler
 	s.app.Use("/", filesystem.New(filesystem.Config{
 		Root:         s.fs,
 		Browse:       false,
@@ -181,14 +218,14 @@ func (s *Server) setupRoutes() {
 	}))
 }
 
-// Start starts the HTTP server
+// Start binds the server to the configured host and port and begins listening.
 func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Server.Port)
 	s.log.Info("starting http server", "address", addr)
 	return s.app.Listen(addr)
 }
 
-// Shutdown gracefully shuts down the server
+// Shutdown gracefully shuts down the Fiber server within the given context timeout.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.log.Info("shutting down http server")
 	return s.app.ShutdownWithContext(ctx)

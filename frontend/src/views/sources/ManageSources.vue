@@ -29,11 +29,23 @@ import { Badge } from '@/components/ui/badge'
 import { useSourcesStore } from '@/stores/sources'
 
 const router = useRouter()
+// This route is only accessible by admins
 const sourcesStore = useSourcesStore()
+
 const { error } = storeToRefs(sourcesStore)
 const showDeleteDialog = ref(false)
 const sourceToDelete = ref<Source | null>(null)
-const loadingError = computed(() => error.value?.loadSources)
+
+// Check for loading errors
+const loadingError = computed(() => {
+    if (error.value && typeof error.value === 'object') {
+        // Check if the error object has the property as a string key
+        return error.value && 'loadAllSourcesForAdmin' in error.value
+            ? (error.value as Record<string, any>).loadAllSourcesForAdmin
+            : null
+    }
+    return null
+})
 
 const handleDelete = (source: Source) => {
     sourceToDelete.value = source
@@ -41,7 +53,18 @@ const handleDelete = (source: Source) => {
 }
 
 const retryLoading = async () => {
-    await sourcesStore.loadSources()
+    await loadSources()
+}
+
+// Load sources for admin view
+const loadSources = async () => {
+    // Reset any previous error
+    if (error.value) {
+        error.value = null
+    }
+
+    // Since this is an admin-only route, directly use the admin function
+    await sourcesStore.loadAllSourcesForAdmin()
 }
 
 const confirmDelete = async () => {
@@ -55,8 +78,8 @@ const confirmDelete = async () => {
 }
 
 onMounted(async () => {
-    // Hydrate the store
-    await sourcesStore.hydrate()
+    // Load admin sources
+    await loadSources()
 })
 
 // Import formatDate from utils
@@ -71,7 +94,7 @@ import { formatDate } from '@/utils/format'
                     <div>
                         <CardTitle>Manage Sources</CardTitle>
                         <CardDescription>
-                            View and manage your log sources
+                            View and manage all log sources
                         </CardDescription>
                     </div>
                     <Button @click="router.push({ name: 'NewSource' })">
@@ -81,7 +104,7 @@ import { formatDate } from '@/utils/format'
                 </div>
             </CardHeader>
             <CardContent>
-                <div v-if="sourcesStore.isLoadingOperation('loadSources')" class="text-center py-4">
+                <div v-if="sourcesStore.isLoadingOperation('loadAllSourcesForAdmin')" class="text-center py-4">
                     Loading sources...
                 </div>
                 <ErrorAlert v-else-if="loadingError" :error="loadingError" title="Failed to load sources"

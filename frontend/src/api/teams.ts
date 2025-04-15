@@ -42,12 +42,12 @@ export interface TeamWithMemberCount extends Team {
 }
 
 export const teamsApi = {
-  listUserTeams: () => apiClient.get<APIResponse<TeamWithMemberCount[]>>("/users/me/teams"),
+  listUserTeams: () => apiClient.get<APIResponse<TeamWithMemberCount[]>>("/me/teams"),
   listAllTeams: () => apiClient.get<APIResponse<TeamWithMemberCount[]>>("/admin/teams"),
   getTeam: (id: number) => apiClient.get<APIResponse<Team>>(`/teams/${id}`),
   createTeam: (data: CreateTeamRequest) => apiClient.post<APIResponse<Team>>("/admin/teams", data),
   updateTeam: (id: number, data: UpdateTeamRequest) =>
-    apiClient.put<APIResponse<Team>>(`/admin/teams/${id}`, data),
+    apiClient.put<APIResponse<Team>>(`/teams/${id}`, data),
   deleteTeam: (id: number) =>
     apiClient.delete<APIResponse<{ message: string }>>(`/admin/teams/${id}`),
 

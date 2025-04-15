@@ -2,97 +2,115 @@ package server
 
 import (
 	"errors"
-	"strconv"
 
+	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 
-	"github.com/mr-karan/logchef/internal/identity"
+	// "github.com/mr-karan/logchef/internal/identity" // Removed
 
 	"github.com/gofiber/fiber/v2"
 )
 
-// handleListUsers handles GET /api/v1/users
-func (s *Server) handleListUsers(c *fiber.Ctx) error {
-	users, err := s.identityService.ListUsers(c.Context())
-	if err != nil {
-		s.log.Error("Failed to list users", "error", err)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list users", models.DatabaseErrorType)
-	}
+// --- Admin User Management Handlers ---
 
+// handleListUsers lists all users in the system.
+// URL: GET /api/v1/admin/users
+// Requires: Admin privileges (requireAdmin middleware)
+func (s *Server) handleListUsers(c *fiber.Ctx) error {
+	users, err := core.ListUsers(c.Context(), s.sqlite)
+	if err != nil {
+		s.log.Error("failed to list users", "error", err)
+		return SendError(c, fiber.StatusInternalServerError, "Error listing users")
+	}
 	return SendSuccess(c, fiber.StatusOK, users)
 }
 
-// handleGetUser handles GET /api/v1/admin/users/:userID
+// handleGetUser gets a specific user by ID.
+// URL: GET /api/v1/admin/users/:userID
+// Requires: Admin privileges (requireAdmin middleware)
 func (s *Server) handleGetUser(c *fiber.Ctx) error {
-	// Get user ID from params
-	id := c.Params("userID")
-	if id == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "User ID is required", models.ValidationErrorType)
+	userIDStr := c.Params("userID")
+	if userIDStr == "" {
+		return SendError(c, fiber.StatusBadRequest, "User ID is required")
 	}
 
-	// Convert to integer
-	userID, err := strconv.Atoi(id)
+	userID, err := core.ParseUserID(userIDStr)
 	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid user ID", models.ValidationErrorType)
+		return SendError(c, fiber.StatusBadRequest, "Invalid user ID format")
 	}
 
-	// Get user from database
-	user, err := s.identityService.GetUser(c.Context(), models.UserID(userID))
+	user, err := core.GetUser(c.Context(), s.sqlite, userID)
 	if err != nil {
-		return SendErrorWithType(c, fiber.StatusNotFound, "User not found", models.NotFoundErrorType)
+		if errors.Is(err, core.ErrUserNotFound) {
+			return SendError(c, fiber.StatusNotFound, "User not found")
+		}
+		s.log.Error("failed to get user", "error", err)
+		return SendError(c, fiber.StatusInternalServerError, "Error getting user")
 	}
 
 	return SendSuccess(c, fiber.StatusOK, user)
 }
 
-// handleCreateUser handles POST /api/v1/users
+// handleCreateUser creates a new user in the system.
+// URL: POST /api/v1/admin/users
+// Requires: Admin privileges (requireAdmin middleware)
 func (s *Server) handleCreateUser(c *fiber.Ctx) error {
-	var req models.CreateUserRequest
+	var req struct {
+		Email    string `json:"email"`
+		FullName string `json:"full_name"`
+		Role     string `json:"role"`
+		Status   string `json:"status"`
+	}
+
 	if err := c.BodyParser(&req); err != nil {
-		s.log.Error("Failed to parse request body", "error", err)
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
+		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	// Validate request
-	if req.Email == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Email is required", models.ValidationErrorType)
-	}
-	if req.FullName == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Name is required", models.ValidationErrorType)
+	// Convert string values to proper enum types
+	role := models.UserRole(req.Role)
+	if role == "" {
+		role = models.UserRoleMember // Default role
 	}
 
-	// Create new user
-	user, err := s.identityService.CreateUser(c.Context(), req.Email, req.FullName, req.Role)
+	status := models.UserStatus(req.Status)
+	if status == "" {
+		status = models.UserStatusActive // Default status
+	}
+
+	user, err := core.CreateUser(c.Context(), s.sqlite, s.log, req.Email, req.FullName, role, status)
 	if err != nil {
-		var validationErr *identity.ValidationError
-		if errors.As(err, &validationErr) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
+		// Handle specific error types from core
+		if errors.Is(err, core.ErrUserAlreadyExists) {
+			return SendError(c, fiber.StatusConflict, err.Error())
 		}
-		s.log.Error("Failed to create user", "error", err, "email", req.Email)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create user", models.DatabaseErrorType)
+		if valErr, ok := err.(*core.ValidationError); ok {
+			return SendError(c, fiber.StatusBadRequest, valErr.Error())
+		}
+
+		s.log.Error("failed to create user", "error", err)
+		return SendError(c, fiber.StatusInternalServerError, "Error creating user")
 	}
 
 	return SendSuccess(c, fiber.StatusCreated, user)
 }
 
-// handleUpdateUser handles PUT /api/v1/admin/users/:userID
+// handleUpdateUser updates an existing user.
+// URL: PUT /api/v1/admin/users/:userID
+// Requires: Admin privileges (requireAdmin middleware)
 func (s *Server) handleUpdateUser(c *fiber.Ctx) error {
-	// Get user ID from params
-	id := c.Params("userID")
-	if id == "" {
+	userIDStr := c.Params("userID")
+	if userIDStr == "" {
 		return SendError(c, fiber.StatusBadRequest, "User ID is required")
 	}
 
-	// Convert to integer
-	userID, err := strconv.Atoi(id)
+	userID, err := core.ParseUserID(userIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid user ID")
+		return SendError(c, fiber.StatusBadRequest, "Invalid user ID format")
 	}
 
-	// Parse request body
 	var req struct {
-		FullName *string `json:"full_name"`
 		Email    *string `json:"email"`
+		FullName *string `json:"full_name"`
 		Role     *string `json:"role"`
 		Status   *string `json:"status"`
 	}
@@ -101,95 +119,93 @@ func (s *Server) handleUpdateUser(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	// Get user from database
-	user, err := s.identityService.GetUser(c.Context(), models.UserID(userID))
-	if err != nil {
-		return SendError(c, fiber.StatusNotFound, "User not found")
-	}
-
-	// Update user fields if provided
-	if req.FullName != nil {
-		user.FullName = *req.FullName
-	}
-
+	// Construct update DTO
+	updateData := models.User{}
 	if req.Email != nil {
-		// Validate email format
-		if *req.Email == "" {
-			return SendError(c, fiber.StatusBadRequest, "Email cannot be empty")
-		}
-		user.Email = *req.Email
+		updateData.Email = *req.Email
 	}
-
+	if req.FullName != nil {
+		updateData.FullName = *req.FullName
+	}
 	if req.Role != nil {
-		role := models.UserRole(*req.Role)
-		// Validate role
-		if role != models.UserRoleAdmin && role != models.UserRoleMember {
-			return SendError(c, fiber.StatusBadRequest, "Invalid role")
-		}
-		user.Role = role
+		updateData.Role = models.UserRole(*req.Role)
 	}
-
 	if req.Status != nil {
-		status := models.UserStatus(*req.Status)
-		// Validate status
-		if status != models.UserStatusActive && status != models.UserStatusInactive {
-			return SendError(c, fiber.StatusBadRequest, "Invalid status")
-		}
-		user.Status = status
+		updateData.Status = models.UserStatus(*req.Status)
 	}
 
-	// Update user in database
-	if err := s.identityService.UpdateUser(c.Context(), user); err != nil {
-		var validationErr *identity.ValidationError
-		if errors.As(err, &validationErr) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
+	if err := core.UpdateUser(c.Context(), s.sqlite, s.log, userID, updateData); err != nil {
+		// Handle specific error types from core
+		if errors.Is(err, core.ErrUserNotFound) {
+			return SendError(c, fiber.StatusNotFound, "User not found")
 		}
-		s.log.Error("Failed to update user", "error", err, "user_id", user.ID)
-		return SendError(c, fiber.StatusInternalServerError, "Failed to update user")
+		if errors.Is(err, core.ErrUserAlreadyExists) {
+			return SendError(c, fiber.StatusConflict, err.Error())
+		}
+		if valErr, ok := err.(*core.ValidationError); ok {
+			return SendError(c, fiber.StatusBadRequest, valErr.Error())
+		}
+
+		s.log.Error("failed to update user", "error", err, "user_id", userID)
+		return SendError(c, fiber.StatusInternalServerError, "Error updating user")
 	}
 
-	return SendSuccess(c, fiber.StatusOK, user)
+	// Fetch updated user
+	updatedUser, err := core.GetUser(c.Context(), s.sqlite, userID)
+	if err != nil {
+		s.log.Error("failed to get updated user", "error", err, "user_id", userID)
+		return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "User updated successfully, but failed to fetch result"})
+	}
+
+	return SendSuccess(c, fiber.StatusOK, updatedUser)
 }
 
-// handleDeleteUser handles DELETE /api/v1/admin/users/:userID
+// handleDeleteUser deletes a user.
+// URL: DELETE /api/v1/admin/users/:userID
+// Requires: Admin privileges (requireAdmin middleware)
 func (s *Server) handleDeleteUser(c *fiber.Ctx) error {
-	// Get user ID from params
-	id := c.Params("userID")
-	if id == "" {
+	userIDStr := c.Params("userID")
+	if userIDStr == "" {
 		return SendError(c, fiber.StatusBadRequest, "User ID is required")
 	}
 
-	// Convert to integer
-	userID, err := strconv.Atoi(id)
+	userID, err := core.ParseUserID(userIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid user ID")
+		return SendError(c, fiber.StatusBadRequest, "Invalid user ID format")
 	}
 
-	// Delete user from database
-	if err := s.identityService.DeleteUser(c.Context(), models.UserID(userID)); err != nil {
-		if validationErr, ok := err.(*identity.ValidationError); ok {
-			return SendError(c, fiber.StatusBadRequest, validationErr.Message)
+	if err := core.DeleteUser(c.Context(), s.sqlite, s.log, userID); err != nil {
+		if errors.Is(err, core.ErrUserNotFound) {
+			return SendError(c, fiber.StatusNotFound, "User not found")
 		}
-		return SendError(c, fiber.StatusInternalServerError, "Failed to delete user")
+		s.log.Error("failed to delete user", "error", err, "user_id", userID)
+		return SendError(c, fiber.StatusInternalServerError, "Error deleting user")
 	}
 
-	return SendSuccess(c, fiber.StatusOK, fiber.Map{
-		"message": "User deleted successfully",
-	})
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "User deleted successfully"})
 }
 
-// handleListUserTeams handles GET /api/v1/users/me/teams
-func (s *Server) handleListUserTeams(c *fiber.Ctx) error {
-	// Get user from context
-	user := c.Locals("user").(*models.User)
+// --- Current User Team Handlers ---
 
-	// Get teams for user
-	teams, err := s.identityService.ListTeamsForUser(c.Context(), user.ID)
-	if err != nil {
-		return SendError(c, fiber.StatusInternalServerError, "Failed to list teams")
+// handleListCurrentUserTeams lists teams that the authenticated user belongs to.
+// URL: GET /api/v1/me/teams
+// Requires: User authentication (requireAuth middleware)
+func (s *Server) handleListCurrentUserTeams(c *fiber.Ctx) error {
+	// User should be in context from auth middleware
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil {
+		s.log.Error("user not found in context despite requireAuth middleware")
+		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
 
-	// For each team, get additional information like member count
+	// Get teams user belongs to
+	teams, err := core.ListTeamsForUser(c.Context(), s.sqlite, user.ID)
+	if err != nil {
+		s.log.Error("failed to list teams for user", "error", err, "user_id", user.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Error listing user teams")
+	}
+
+	// Enhanced response with additional info for each team
 	type TeamResponse struct {
 		*models.Team
 		MemberCount int  `json:"member_count"`
@@ -198,20 +214,18 @@ func (s *Server) handleListUserTeams(c *fiber.Ctx) error {
 
 	teamResponses := make([]TeamResponse, 0, len(teams))
 	for _, team := range teams {
-		// Get team members to count them
-		members, err := s.identityService.ListTeamMembers(c.Context(), team.ID)
+		// Get member count
+		members, err := core.ListTeamMembers(c.Context(), s.sqlite, team.ID)
 		if err != nil {
-			s.log.Error("Failed to get team members", "team_id", team.ID, "error", err)
+			s.log.Warn("failed to get member count for team", "error", err, "team_id", team.ID)
 			continue
 		}
 
 		// Check if user is admin of this team
-		isAdmin := false
-		for _, member := range members {
-			if member.UserID == user.ID && member.Role == models.TeamRoleAdmin {
-				isAdmin = true
-				break
-			}
+		isAdmin, err := core.IsTeamAdmin(c.Context(), s.sqlite, team.ID, user.ID)
+		if err != nil {
+			s.log.Warn("failed to check if user is team admin", "error", err, "team_id", team.ID, "user_id", user.ID)
+			continue
 		}
 
 		teamResponses = append(teamResponses, TeamResponse{
@@ -222,28 +236,4 @@ func (s *Server) handleListUserTeams(c *fiber.Ctx) error {
 	}
 
 	return SendSuccess(c, fiber.StatusOK, teamResponses)
-}
-
-// handleGetTeamSource handles GET /api/v1/teams/:teamID/sources/:sourceID
-func (s *Server) handleGetTeamSource(c *fiber.Ctx) error {
-	// Get team ID and source ID from params
-	teamID := c.Params("teamID")
-	sourceIDStr := c.Params("sourceID")
-	if teamID == "" || sourceIDStr == "" {
-		return SendError(c, fiber.StatusBadRequest, "Team ID and Source ID are required")
-	}
-
-	// Convert source ID to integer
-	sourceID, err := strconv.Atoi(sourceIDStr)
-	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid source ID")
-	}
-
-	// Get source (middleware already checked team membership and source access)
-	source, err := s.sourceService.GetSource(c.Context(), models.SourceID(sourceID))
-	if err != nil {
-		return SendError(c, fiber.StatusNotFound, "Source not found")
-	}
-
-	return SendSuccess(c, fiber.StatusOK, source)
 }

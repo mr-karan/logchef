@@ -28,6 +28,10 @@ type Source struct {
 	IsConnected bool         `db:"-" json:"is_connected"`
 	Schema      string       `db:"-" json:"schema,omitempty"`
 	Columns     []ColumnInfo `db:"-" json:"columns,omitempty"`
+	// Enhanced schema information
+	Engine       string   `db:"-" json:"engine,omitempty"`
+	EngineParams []string `db:"-" json:"engine_params,omitempty"`
+	SortKeys     []string `db:"-" json:"sort_keys,omitempty"`
 }
 
 // ConnectionInfoResponse represents the connection details for API responses, omitting sensitive fields
@@ -52,6 +56,10 @@ type SourceResponse struct {
 	IsConnected       bool                   `json:"is_connected"`
 	Schema            string                 `json:"schema,omitempty"`
 	Columns           []ColumnInfo           `json:"columns,omitempty"`
+	// Enhanced schema information
+	Engine       string   `json:"engine,omitempty"`
+	EngineParams []string `json:"engine_params,omitempty"`
+	SortKeys     []string `json:"sort_keys,omitempty"`
 }
 
 // ToResponse converts a Source to a SourceResponse, removing sensitive information
@@ -67,13 +75,16 @@ func (s *Source) ToResponse() *SourceResponse {
 			Database:  s.Connection.Database,
 			TableName: s.Connection.TableName,
 		},
-		Description: s.Description,
-		TTLDays:     s.TTLDays,
-		CreatedAt:   s.CreatedAt,
-		UpdatedAt:   s.UpdatedAt,
-		IsConnected: s.IsConnected,
-		Schema:      s.Schema,
-		Columns:     s.Columns,
+		Description:  s.Description,
+		TTLDays:      s.TTLDays,
+		CreatedAt:    s.CreatedAt,
+		UpdatedAt:    s.UpdatedAt,
+		IsConnected:  s.IsConnected,
+		Schema:       s.Schema,
+		Columns:      s.Columns,
+		Engine:       s.Engine,
+		EngineParams: s.EngineParams,
+		SortKeys:     s.SortKeys,
 	}
 }
 

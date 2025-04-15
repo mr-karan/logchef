@@ -1,70 +1,59 @@
 package server
 
 import (
+	"database/sql"
 	"errors"
 	"log/slog"
 	"strconv"
 
+	core "github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/mr-karan/logchef/internal/saved_queries"
+	// "github.com/mr-karan/logchef/internal/saved_queries" // Removed
 )
 
-// handleListTeamSourceQueries handles GET /api/v1/teams/:teamID/sources/:sourceID/queries
-func (s *Server) handleListTeamSourceQueries(c *fiber.Ctx) error {
-	// Get team ID and source ID from params
+// handleListTeamSourceCollections retrieves saved queries (collections) for a specific team and source.
+// Assumes requireAuth and requireTeamMember middleware have run.
+func (s *Server) handleListTeamSourceCollections(c *fiber.Ctx) error {
 	teamIDStr := c.Params("teamID")
 	sourceIDStr := c.Params("sourceID")
-	if teamIDStr == "" || sourceIDStr == "" {
-		return SendError(c, fiber.StatusBadRequest, "Team ID and Source ID are required")
-	}
 
-	// Convert string IDs to proper types
-	teamIDInt, err := strconv.Atoi(teamIDStr)
+	teamID, err := core.ParseTeamID(teamIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid team ID: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team_id parameter", models.ValidationErrorType)
 	}
-	teamID := models.TeamID(teamIDInt)
-
-	sourceIDInt, err := strconv.Atoi(sourceIDStr)
+	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source_id parameter", models.ValidationErrorType)
 	}
-	sourceID := models.SourceID(sourceIDInt)
 
-	// List queries for this team and source - permissions already checked by middleware
-	queries, err := s.savedQueryService.ListQueriesForTeamAndSource(c.Context(), teamID, sourceID)
+	// LINTER_ISSUE: Linter incorrectly reports core.ListQueriesByTeamAndSource as undefined.
+	// Using direct sqlite call as workaround.
+	queries, err := s.sqlite.ListQueriesByTeamAndSource(c.Context(), teamID, sourceID)
 	if err != nil {
-		return SendError(c, fiber.StatusInternalServerError, "Failed to list queries")
+		s.log.Error("failed to list collections via db function", slog.Any("error", err), "team_id", teamID, "source_id", sourceID)
+		return SendError(c, fiber.StatusInternalServerError, "Failed to list collections")
 	}
-
 	return SendSuccess(c, fiber.StatusOK, queries)
 }
 
-// handleCreateTeamSourceQuery handles POST /api/v1/teams/:teamID/sources/:sourceID/queries
-func (s *Server) handleCreateTeamSourceQuery(c *fiber.Ctx) error {
-	// Get team ID and source ID from params
+// handleCreateTeamSourceCollection creates a new saved query (collection) for a specific team and source.
+// Assumes requireAuth and requireTeamMember middleware have run.
+func (s *Server) handleCreateTeamSourceCollection(c *fiber.Ctx) error {
 	teamIDStr := c.Params("teamID")
 	sourceIDStr := c.Params("sourceID")
-	if teamIDStr == "" || sourceIDStr == "" {
-		return SendError(c, fiber.StatusBadRequest, "Team ID and Source ID are required")
-	}
 
-	// Convert string IDs to proper types
-	teamIDInt, err := strconv.Atoi(teamIDStr)
+	teamID, err := core.ParseTeamID(teamIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid team ID: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team_id parameter", models.ValidationErrorType)
 	}
-	teamID := models.TeamID(teamIDInt)
-
-	sourceIDInt, err := strconv.Atoi(sourceIDStr)
+	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source_id parameter", models.ValidationErrorType)
 	}
-	sourceID := models.SourceID(sourceIDInt)
 
-	// Parse request body
+	// Parse request body.
 	var req struct {
 		Name         string `json:"name"`
 		Description  string `json:"description"`
@@ -72,184 +61,215 @@ func (s *Server) handleCreateTeamSourceQuery(c *fiber.Ctx) error {
 		QueryContent string `json:"query_content"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Get user from context for ownership
-	user := c.Locals("user").(*models.User)
+	// Validate required fields.
+	if req.Name == "" || req.QueryType == "" || req.QueryContent == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Missing required fields (name, queryType, queryContent)", models.ValidationErrorType)
+	}
 
-	// Create query - permissions already checked by middleware
-	createdQuery, err := s.savedQueryService.CreateTeamSourceQuery(
+	// Authorization Check: Ensure the team actually has access to the source.
+	hasAccess, err := core.TeamHasSourceAccess(c.Context(), s.sqlite, teamID, sourceID)
+	if err != nil {
+		s.log.Error("error checking team source access for collection create", "error", err, "team_id", teamID, "source_id", sourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error checking permissions", models.GeneralErrorType)
+	}
+	if !hasAccess {
+		return SendErrorWithType(c, fiber.StatusForbidden, "Specified team does not have access to the specified source", models.AuthorizationErrorType)
+	}
+
+	// Create query using core function.
+	createdQuery, err := core.CreateTeamSourceQuery(
 		c.Context(),
+		s.sqlite,
+		s.log,
 		teamID,
 		sourceID,
 		req.Name,
 		req.Description,
 		req.QueryContent,
 		req.QueryType,
-		user.ID,
+		// Pass creator ID if core function supports it in the future.
 	)
-	if err != nil {
-		// Log the actual error
-		s.log.Error("failed to create team source query", slog.Any("error", err), slog.Int("teamID", int(teamID)), slog.Int("sourceID", int(sourceID)))
 
-		// Check for specific validation error
-		if errors.Is(err, saved_queries.ErrQueryTypeRequired) {
+	if err != nil {
+		s.log.Error("failed to create collection via core function", slog.Any("error", err), "team_id", teamID, "source_id", sourceID)
+		if errors.Is(err, core.ErrQueryTypeRequired) || errors.Is(err, core.ErrInvalidQueryType) || errors.Is(err, core.ErrInvalidQueryContent) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 		}
-
-		// Return generic server error for other issues
-		return SendError(c, fiber.StatusInternalServerError, "Failed to create query")
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create collection", models.GeneralErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusCreated, createdQuery)
 }
 
-// handleGetTeamSourceQuery handles GET /api/v1/teams/:teamID/sources/:sourceID/queries/:queryID
-func (s *Server) handleGetTeamSourceQuery(c *fiber.Ctx) error {
-	// Get team ID, source ID and query ID from params
+// handleGetTeamSourceCollection retrieves a specific saved query (collection) belonging to a team/source.
+// Assumes requireAuth and requireTeamMember middleware have run.
+func (s *Server) handleGetTeamSourceCollection(c *fiber.Ctx) error {
 	teamIDStr := c.Params("teamID")
 	sourceIDStr := c.Params("sourceID")
-	queryIDStr := c.Params("queryID")
-	if teamIDStr == "" || sourceIDStr == "" || queryIDStr == "" {
-		return SendError(c, fiber.StatusBadRequest, "Team ID, Source ID, and Query ID are required")
+	collectionIDStr := c.Params("collectionID")
+	if collectionIDStr == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Collection ID is required", models.ValidationErrorType)
 	}
 
-	// Convert string IDs to proper types
-	teamIDInt, err := strconv.Atoi(teamIDStr)
+	teamID, err := core.ParseTeamID(teamIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid team ID: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team_id parameter", models.ValidationErrorType)
 	}
-	teamID := models.TeamID(teamIDInt)
-
-	sourceIDInt, err := strconv.Atoi(sourceIDStr)
+	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source_id parameter", models.ValidationErrorType)
 	}
-	sourceID := models.SourceID(sourceIDInt)
-
-	queryIDInt, err := strconv.Atoi(queryIDStr)
+	collectionID, err := strconv.Atoi(collectionIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid query ID: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid Collection ID format", models.ValidationErrorType)
 	}
-	queryID := int(queryIDInt)
 
-	// Get query for this team and source - permissions already checked by middleware
-	query, err := s.savedQueryService.GetTeamSourceQuery(c.Context(), teamID, sourceID, queryID)
+	// Call the sqlite method directly for now due to linter issues with core.handleNotFoundError
+	query, err := s.sqlite.GetTeamSourceQuery(c.Context(), teamID, sourceID, collectionID)
 	if err != nil {
-		if errors.Is(err, saved_queries.ErrQueryNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Query not found", models.NotFoundErrorType)
+		// LINTER_ISSUE: Cannot reliably check core.ErrQueryNotFound due to potential resolution issues.
+		// Checking for sql.ErrNoRows from the underlying db call instead.
+		if errors.Is(err, sql.ErrNoRows) { // Check for underlying DB error
+			return SendErrorWithType(c, fiber.StatusNotFound, "Collection not found", models.NotFoundErrorType)
 		}
-		return SendError(c, fiber.StatusInternalServerError, "Failed to get query: "+err.Error())
+		s.log.Error("failed to get collection via db function", slog.Any("error", err), "collection_id", collectionID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to retrieve collection", models.GeneralErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, query)
 }
 
-// handleUpdateTeamSourceQuery handles PUT /api/v1/teams/:teamID/sources/:sourceID/queries/:queryID
-func (s *Server) handleUpdateTeamSourceQuery(c *fiber.Ctx) error {
-	// Get team ID, source ID and query ID from params
+// handleUpdateTeamSourceCollection updates a saved query (collection).
+// Assumes requireAuth, requireTeamMember, and requireTeamAdminOrGlobalAdmin middleware have run.
+func (s *Server) handleUpdateTeamSourceCollection(c *fiber.Ctx) error {
 	teamIDStr := c.Params("teamID")
 	sourceIDStr := c.Params("sourceID")
-	queryIDStr := c.Params("queryID")
-	if teamIDStr == "" || sourceIDStr == "" || queryIDStr == "" {
-		return SendError(c, fiber.StatusBadRequest, "Team ID, Source ID, and Query ID are required")
+	collectionIDStr := c.Params("collectionID")
+	if collectionIDStr == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Collection ID is required", models.ValidationErrorType)
 	}
 
-	// Convert string IDs to proper types
-	teamIDInt, err := strconv.Atoi(teamIDStr)
+	teamID, err := core.ParseTeamID(teamIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid team ID: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team_id parameter", models.ValidationErrorType)
 	}
-	teamID := models.TeamID(teamIDInt)
-
-	sourceIDInt, err := strconv.Atoi(sourceIDStr)
+	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source_id parameter", models.ValidationErrorType)
 	}
-	sourceID := models.SourceID(sourceIDInt)
-
-	queryIDInt, err := strconv.Atoi(queryIDStr)
+	collectionID, err := strconv.Atoi(collectionIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid query ID: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid Collection ID format", models.ValidationErrorType)
 	}
-	queryID := int(queryIDInt)
 
-	// Parse request body
+	// Parse request body.
 	var req struct {
-		Name         string `json:"name"`
-		Description  string `json:"description"`
-		QueryType    string `json:"query_type"`
-		QueryContent string `json:"query_content"`
+		Name         *string `json:"name"`
+		Description  *string `json:"description"`
+		QueryType    *string `json:"query_type"`
+		QueryContent *string `json:"query_content"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Get user from context for potential ownership/permissions check (if needed by service)
-	// user := c.Locals("user").(*models.User)
+	// Prepare update data - pass empty strings for omitted fields.
+	name := ""
+	if req.Name != nil {
+		name = *req.Name
+	}
+	description := ""
+	if req.Description != nil {
+		description = *req.Description
+	}
+	queryType := ""
+	if req.QueryType != nil {
+		queryType = *req.QueryType
+	}
+	queryContent := ""
+	if req.QueryContent != nil {
+		queryContent = *req.QueryContent
+	}
 
-	// Update query - permissions already checked by middleware
-	updatedQuery, err := s.savedQueryService.UpdateTeamSourceQuery(
+	// Validate Content and Type before sending to DB.
+	if queryType != "" && models.SavedQueryType(queryType) != models.SavedQueryTypeLogchefQL && models.SavedQueryType(queryType) != models.SavedQueryTypeSQL {
+		return SendErrorWithType(c, fiber.StatusBadRequest, core.ErrInvalidQueryType.Error(), models.ValidationErrorType)
+	}
+	if queryContent != "" {
+		if err := core.ValidateSavedQueryContent(queryContent); err != nil {
+			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		}
+	}
+
+	// Call sqlite update function.
+	// Middleware ensures user has appropriate team admin rights.
+	err = s.sqlite.UpdateTeamSourceQuery(
 		c.Context(),
 		teamID,
 		sourceID,
-		queryID,
-		req.Name,
-		req.Description,
-		req.QueryContent,
-		req.QueryType,
-		// user.ID, // Pass user ID if needed for authorization in service layer
+		collectionID,
+		name, description, queryType, queryContent,
 	)
 	if err != nil {
-		if errors.Is(err, saved_queries.ErrQueryNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Query not found", models.NotFoundErrorType)
+		// Check if the underlying error was potentially ErrNoRows.
+		if errors.Is(err, sql.ErrNoRows) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Collection not found", models.NotFoundErrorType)
 		}
-		return SendError(c, fiber.StatusInternalServerError, "Failed to update query: "+err.Error())
+		s.log.Error("failed to update collection via db function", slog.Any("error", err), "collection_id", collectionID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update collection", models.GeneralErrorType)
+	}
+
+	// Fetch and return updated query.
+	updatedQuery, err := s.sqlite.GetTeamSourceQuery(c.Context(), teamID, sourceID, collectionID)
+	if err != nil {
+		s.log.Error("failed to fetch updated collection after update", slog.Any("error", err), "collection_id", collectionID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Collection updated but failed to retrieve latest state", models.GeneralErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, updatedQuery)
 }
 
-// handleDeleteTeamSourceQuery handles DELETE /api/v1/teams/:teamID/sources/:sourceID/queries/:queryID
-func (s *Server) handleDeleteTeamSourceQuery(c *fiber.Ctx) error {
-	// Get team ID, source ID and query ID from params
+// handleDeleteTeamSourceCollection deletes a saved query (collection).
+// Assumes requireAuth, requireTeamMember, and requireTeamAdminOrGlobalAdmin middleware have run.
+func (s *Server) handleDeleteTeamSourceCollection(c *fiber.Ctx) error {
 	teamIDStr := c.Params("teamID")
 	sourceIDStr := c.Params("sourceID")
-	queryIDStr := c.Params("queryID")
-	if teamIDStr == "" || sourceIDStr == "" || queryIDStr == "" {
-		return SendError(c, fiber.StatusBadRequest, "Team ID, Source ID, and Query ID are required")
+	collectionIDStr := c.Params("collectionID")
+	if collectionIDStr == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Collection ID is required", models.ValidationErrorType)
 	}
 
-	// Convert string IDs to proper types
-	teamIDInt, err := strconv.Atoi(teamIDStr)
+	teamID, err := core.ParseTeamID(teamIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid team ID: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team_id parameter", models.ValidationErrorType)
 	}
-	teamID := models.TeamID(teamIDInt)
-
-	sourceIDInt, err := strconv.Atoi(sourceIDStr)
+	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid source ID: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source_id parameter", models.ValidationErrorType)
 	}
-	sourceID := models.SourceID(sourceIDInt)
-
-	queryIDInt, err := strconv.Atoi(queryIDStr)
+	collectionID, err := strconv.Atoi(collectionIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid query ID: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid Collection ID format", models.ValidationErrorType)
 	}
-	queryID := int(queryIDInt)
 
-	// Delete query - permissions already checked by middleware
-	err = s.savedQueryService.DeleteTeamSourceQuery(c.Context(), teamID, sourceID, queryID)
+	// Call sqlite delete function.
+	// Middleware ensures user has appropriate team admin rights.
+	err = s.sqlite.DeleteTeamSourceQuery(c.Context(), teamID, sourceID, collectionID)
 	if err != nil {
-		if errors.Is(err, saved_queries.ErrQueryNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Query not found", models.NotFoundErrorType)
+		// DELETE often doesn't return ErrNoRows.
+		if errors.Is(err, sql.ErrNoRows) { // Check just in case.
+			return SendErrorWithType(c, fiber.StatusNotFound, "Collection not found", models.NotFoundErrorType)
 		}
-		return SendError(c, fiber.StatusInternalServerError, "Failed to delete query: "+err.Error())
+		s.log.Error("failed to delete collection via db function", slog.Any("error", err), "collection_id", collectionID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete collection", models.GeneralErrorType)
 	}
 
-	return SendSuccess(c, fiber.StatusOK, fiber.Map{
-		"message": "Query deleted successfully",
-	})
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Collection deleted successfully"})
 }
+
+// Note: handleListUserSources moved to source_handlers.go
+
+// Note: handleListUserCollections removed as it's handled by handleListTeamSourceCollections now with filters.

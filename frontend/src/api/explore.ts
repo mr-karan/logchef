@@ -1,4 +1,8 @@
 import { apiClient } from "./apiUtils";
+import type { DateValue } from "@internationalized/date";
+import { useSourcesStore } from "@/stores/sources";
+import { QueryService } from "@/services/QueryService";
+import type { TimeRange } from "@/types/query";
 
 // Keep these for the UI filter builder
 export interface FilterCondition {
@@ -37,6 +41,8 @@ export interface QueryParams {
   };
   original_query?: string; // Original LogchefQL query if applicable
   query_type?: string; // 'logchefql' or 'sql'
+  window?: string;
+  group_by?: string;
 }
 
 export interface QueryStats {
@@ -76,6 +82,46 @@ export interface LogContextResponse {
   stats: QueryStats;
 }
 
+// Histogram data types
+export interface HistogramDataPoint {
+  bucket: string;
+  log_count: number;
+  group_value?: string; // Optional field for grouped data
+}
+
+export interface HistogramResponse {
+  granularity: string;
+  data: HistogramDataPoint[];
+}
+
+/**
+ * Helper function to prepare query parameters with proper SQL based on mode
+ * This ensures we use a consistent approach for both logs and histogram queries
+ */
+export function prepareQueryParams(params: {
+  query: string;
+  queryType: string;
+  startTimestamp: number;
+  endTimestamp: number;
+  limit?: number;
+  timeRange?: TimeRange;
+  window?: string;
+  groupBy?: string;
+}): QueryParams {
+  const { query, queryType, startTimestamp, endTimestamp, limit = 100, window, groupBy } = params;
+
+  // Use the raw SQL value as is - SQL transformation should happen before calling this function
+  return {
+    raw_sql: query,
+    limit,
+    start_timestamp: startTimestamp,
+    end_timestamp: endTimestamp,
+    query_type: queryType,
+    window,
+    group_by: groupBy
+  };
+}
+
 export const exploreApi = {
   getLogs: (sourceId: number, params: QueryParams, teamId: number) => {
     if (!teamId) {
@@ -87,13 +133,25 @@ export const exploreApi = {
     );
   },
 
-  getLogContext: (sourceId: number, params: LogContextRequest, teamId: number) => {
+  getHistogramData: (sourceId: number, params: QueryParams, teamId: number) => {
     if (!teamId) {
-      throw new Error("Team ID is required for getting log context");
+      throw new Error("Team ID is required for getting histogram data");
     }
-    return apiClient.post<LogContextResponse>(
-      `/teams/${teamId}/sources/${sourceId}/logs/context`,
-      params
+
+    // Clean up params to ensure group_by is only included when it has a meaningful value
+    const histogramParams = {
+      ...params
+    };
+
+    // Let the body-level params come through as they are,
+    // but don't add an empty string for group_by if it's not meaningful
+    if (histogramParams.group_by === '') {
+      delete histogramParams.group_by;
+    }
+
+    return apiClient.post<HistogramResponse>(
+      `/teams/${teamId}/sources/${sourceId}/logs/histogram`,
+      histogramParams
     );
   }
 };

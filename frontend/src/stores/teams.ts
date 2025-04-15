@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, watch } from "vue";
+import { computed, watch, inject } from "vue";
 import { useBaseStore } from "./base";
 import {
   teamsApi,
@@ -16,6 +16,7 @@ import type {
   APIResponse
 } from "@/api/types";
 import { useToast } from "@/components/ui/toast/use-toast";
+import { useAuthStore } from "./auth";
 
 export interface TeamWithMemberCount extends Team {
   memberCount: number;
@@ -35,6 +36,9 @@ export const useTeamsStore = defineStore("teams", () => {
     currentTeamId: null,
     teamSourcesMap: {},
   });
+
+  // Access auth store for current user ID
+  const authStore = useAuthStore();
 
   // Computed properties
   const userTeams = computed(() => state.data.value.userTeams);
@@ -411,6 +415,13 @@ export const useTeamsStore = defineStore("teams", () => {
           if (!response) {
             await listTeamMembers(teamId);
           }
+
+          // Check if the current user is the one being added to the team
+          // If so, refresh the user's teams list to update the UI
+          const currentUserId = authStore.user?.id;
+          if (currentUserId && data.user_id === Number(currentUserId)) {
+            await loadUserTeams(true); // Force reload user teams
+          }
         }
       });
     });
@@ -428,6 +439,10 @@ export const useTeamsStore = defineStore("teams", () => {
         `removeTeamMember-${teamId}-${userId}`
       );
     }
+
+    // Store currentUser ID to check after successful removal
+    const currentUserId = authStore.user?.id;
+    const isCurrentUser = currentUserId && userId === Number(currentUserId);
 
     return await state.withLoading(`removeTeamMember-${teamId}-${userId}`, async () => {
       return await state.callApi({
@@ -455,6 +470,23 @@ export const useTeamsStore = defineStore("teams", () => {
 
           const adminTeam = state.data.value.adminTeams.find(t => t.id === teamId);
           if (adminTeam) updateMemberCount(adminTeam);
+
+          // If the current user was removed, update userTeams list immediately
+          // This is especially important for the LogExplorer view
+          if (isCurrentUser) {
+            // First remove the team from userTeams list directly
+            state.data.value.userTeams = state.data.value.userTeams.filter(t => t.id !== teamId);
+
+            // Then handle selecting a new current team if needed
+            if (state.data.value.currentTeamId === teamId) {
+              state.data.value.currentTeamId = state.data.value.userTeams.length > 0
+                ? state.data.value.userTeams[0].id
+                : null;
+            }
+
+            // Also reload to ensure consistency
+            await loadUserTeams(true);
+          }
         }
       });
     });
@@ -574,6 +606,11 @@ export const useTeamsStore = defineStore("teams", () => {
     return [] as Source[]; // Implement or delegate to sources store
   }
 
+  // Add a new method to check if the current user belongs to a specific team
+  function userBelongsToTeam(teamId: number): boolean {
+    return state.data.value.userTeams.some(team => team.id === teamId);
+  }
+
   return {
     // State
     userTeams,
@@ -602,6 +639,7 @@ export const useTeamsStore = defineStore("teams", () => {
     getTeamsWithDefaults: () => getTeamsWithDefaults.value,
     getLastCreatedTeam: () => getLastCreatedTeam.value,
     getSourcesNotInTeam,
+    userBelongsToTeam,
 
     // State Management
     clearState,

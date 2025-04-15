@@ -7,273 +7,198 @@ import (
 	clickhouseparser "github.com/AfterShip/clickhouse-sql-parser/parser"
 )
 
-// QueryBuilder provides methods to build ClickHouse queries
+// QueryBuilder assists in building and validating ClickHouse SQL queries.
 type QueryBuilder struct {
+	// tableName is the fully qualified table name (e.g., "database.table")
+	// used for validation and as the default target in generated queries.
 	tableName string
 }
 
-// NewQueryBuilder creates a new query builder for a specific table
+// NewQueryBuilder creates a new QueryBuilder for a specific table.
 func NewQueryBuilder(tableName string) *QueryBuilder {
 	return &QueryBuilder{
 		tableName: tableName,
 	}
 }
 
-// BuildRawQuery builds and validates a raw SQL query
+// BuildRawQuery parses, validates, potentially modifies (adds LIMIT),
+// and reconstructs a raw SQL query string.
 func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) {
-	// Preprocess SQL: The parser doesn't handle standard SQL escaped quotes properly
-	// Convert doubled single quotes ('') to a placeholder
+	// Preprocess SQL to handle escaped single quotes ('') which the parser might misinterpret.
+	// Replace them with a temporary placeholder.
 	const placeholder = "___ESCAPED_QUOTE___"
 	processedSQL := strings.ReplaceAll(rawSQL, "''", placeholder)
 
-	// Parse the SQL using the ClickHouse parser
 	parser := clickhouseparser.NewParser(processedSQL)
 	stmts, err := parser.ParseStmts()
 	if err != nil {
+		// Return a user-friendly error for syntax issues.
 		return "", fmt.Errorf("invalid SQL syntax: %w", err)
 	}
 
 	if len(stmts) == 0 {
 		return "", fmt.Errorf("no SQL statements found")
 	}
-
-	// We only support single statements
 	if len(stmts) > 1 {
-		return "", fmt.Errorf("multiple SQL statements not supported")
+		return "", fmt.Errorf("multiple SQL statements are not supported")
 	}
 
 	stmt := stmts[0]
-
-	// Check if it's a SELECT statement
 	selectQuery, ok := stmt.(*clickhouseparser.SelectQuery)
 	if !ok {
-		return "", ErrInvalidQuery
+		// Currently, only SELECT queries are supported through this builder.
+		return "", fmt.Errorf("only SELECT queries are supported: %w", ErrInvalidQuery)
 	}
 
-	// Validate table reference if tableName is provided
+	// Validate that the query targets the expected table, if one was set.
 	if qb.tableName != "" {
 		if err := qb.validateTableReference(selectQuery); err != nil {
 			return "", err
 		}
 	}
 
-	// Validate for dangerous operations
+	// Perform checks for potentially disallowed operations (e.g., subqueries, joins).
 	if err := qb.checkDangerousOperations(selectQuery); err != nil {
 		return "", err
 	}
 
-	// Add LIMIT clause if not present and limit is specified
+	// Ensure a LIMIT clause exists if a positive limit is provided.
 	if limit > 0 {
 		qb.ensureLimit(selectQuery, limit)
 	}
 
-	// Convert back to SQL string
+	// Convert the potentially modified AST back to a SQL string.
 	result := stmt.String()
 
-	// Convert the placeholder back to standard SQL escaped quotes
+	// Restore the standard SQL escaped quotes.
 	result = strings.ReplaceAll(result, placeholder, "''")
 
 	return result, nil
 }
 
-// validateTableReference ensures the table reference is valid
+// validateTableReference checks if the FROM clause of a SELECT query
+// references the table associated with the QueryBuilder.
 func (qb *QueryBuilder) validateTableReference(stmt *clickhouseparser.SelectQuery) error {
 	// If there's no FROM clause, return error
 	if stmt.From == nil || stmt.From.Expr == nil {
-		return fmt.Errorf("missing FROM clause")
+		return fmt.Errorf("query validation failed: missing FROM clause")
 	}
 
-	// Extract expected database and table from qb.tableName
+	// Extract expected database and table name if qualified name was provided.
 	expectedDB, expectedTable := "", qb.tableName
 	if parts := strings.Split(qb.tableName, "."); len(parts) == 2 {
 		expectedDB, expectedTable = parts[0], parts[1]
 	}
 
+	// The parser structure for FROM clauses can be nested.
+	// We need to find the underlying TableIdentifier.
+	var tableID *clickhouseparser.TableIdentifier
+
 	// Check based on the type of the FromClause.Expr
 	switch expr := stmt.From.Expr.(type) {
-	case *clickhouseparser.TableExpr: // This case might be unreachable now due to parser changes
+	case *clickhouseparser.JoinTableExpr: // Common case for single table (maybe w/ FINAL/SAMPLE)
 		// Simple table reference, potentially parsed differently now.
-		if expr == nil || expr.Expr == nil {
-			return fmt.Errorf("empty table reference in unexpected TableExpr")
+		if expr.Table == nil || expr.Table.Expr == nil {
+			return fmt.Errorf("query validation failed: invalid table expression in FROM clause")
 		}
-		tableID, ok := expr.Expr.(*clickhouseparser.TableIdentifier)
-		if !ok {
-			return fmt.Errorf("unsupported table expression type in FromClause.TableExpr: %T", expr.Expr)
-		}
-		return qb.validateTableIdentifier(tableID, expectedDB, expectedTable)
-
-	case *clickhouseparser.JoinTableExpr:
-		// This represents a single table source (possibly with SAMPLE or FINAL)
-		if expr.Table == nil {
-			return fmt.Errorf("empty Table field in JoinTableExpr")
-		}
-		if expr.Table.Expr == nil {
-			return fmt.Errorf("empty Expr field in JoinTableExpr.Table")
-		}
-
-		// Check the underlying expression type within TableExpr
-		tableID, ok := expr.Table.Expr.(*clickhouseparser.TableIdentifier)
-		if !ok {
-			// Could also be AliasExpr wrapping a TableIdentifier
-			if aliasExpr, isAlias := expr.Table.Expr.(*clickhouseparser.AliasExpr); isAlias {
-				tableID, ok = aliasExpr.Expr.(*clickhouseparser.TableIdentifier)
-				if !ok {
-					return fmt.Errorf("unsupported expression type inside AliasExpr in JoinTableExpr: %T", aliasExpr.Expr)
-				}
-			} else {
-				return fmt.Errorf("unsupported expression type in JoinTableExpr.Table.Expr: %T", expr.Table.Expr)
+		// The actual table might be directly identified or wrapped in an alias.
+		if tid, ok := expr.Table.Expr.(*clickhouseparser.TableIdentifier); ok {
+			tableID = tid
+		} else if aliasExpr, ok := expr.Table.Expr.(*clickhouseparser.AliasExpr); ok {
+			if tid, ok := aliasExpr.Expr.(*clickhouseparser.TableIdentifier); ok {
+				tableID = tid
 			}
 		}
-		// Now validate the extracted TableIdentifier
-		return qb.validateTableIdentifier(tableID, expectedDB, expectedTable)
+	case *clickhouseparser.TableExpr: // Less common based on current parser behavior?
+		if expr.Expr == nil {
+			return fmt.Errorf("query validation failed: invalid table expression in FROM clause")
+		}
+		if tid, ok := expr.Expr.(*clickhouseparser.TableIdentifier); ok {
+			tableID = tid
+		}
 
 	case *clickhouseparser.JoinExpr:
-		// This represents an actual JOIN operation, which we don't allow.
-		return fmt.Errorf("joins are not allowed")
+		// Explicit JOINs are disallowed for safety/simplicity.
+		return fmt.Errorf("query validation failed: JOIN clauses are not allowed")
 
 	default:
 		// Catch any other unexpected types
-		return fmt.Errorf("unsupported FROM clause expression type: %T", expr)
+		return fmt.Errorf("query validation failed: unsupported FROM clause type: %T", expr)
 	}
+
+	// If we couldn't extract a valid TableIdentifier.
+	if tableID == nil {
+		return fmt.Errorf("query validation failed: could not identify table in FROM clause")
+	}
+
+	// Validate the extracted TableIdentifier against expectations.
+	return qb.validateTableIdentifier(tableID, expectedDB, expectedTable)
 }
 
-// validateTableIdentifier checks if a TableIdentifier matches the expected database and table.
+// validateTableIdentifier checks if a specific TableIdentifier matches the expected database/table.
 func (qb *QueryBuilder) validateTableIdentifier(tableID *clickhouseparser.TableIdentifier, expectedDB, expectedTable string) error {
 	if tableID.Table == nil {
-		return fmt.Errorf("missing table name")
+		return fmt.Errorf("query validation failed: invalid table identifier")
 	}
-
-	// Get the table name
 	tableName := tableID.Table.String()
 
-	// If there's a database qualifier, check it
+	// Check database qualifier if present.
 	if tableID.Database != nil {
 		dbName := tableID.Database.String()
-
-		// If we expected a specific database, check it
+		// If QueryBuilder is scoped to a specific DB, enforce it.
 		if expectedDB != "" && dbName != expectedDB {
-			return fmt.Errorf("invalid database reference: %s (expected %s)",
+			return fmt.Errorf("query validation failed: invalid database reference '%s' (expected '%s')",
 				dbName, expectedDB)
 		}
-
-		// Check the table name
+		// Check table name with database qualifier.
 		if tableName != expectedTable {
-			return fmt.Errorf("invalid table reference: %s.%s (expected %s.%s)",
+			return fmt.Errorf("query validation failed: invalid table reference '%s.%s' (expected '%s.%s')",
 				dbName, tableName, expectedDB, expectedTable)
 		}
 	} else {
-		// No database qualifier, just check the table name
+		// No database qualifier present, just check table name.
+		// If QueryBuilder expected a specific DB, this is also arguably an error,
+		// but for now, we only enforce if the query *specifies* a different DB.
 		if tableName != expectedTable {
-			return fmt.Errorf("invalid table reference: %s (expected %s)",
-				tableName, expectedTable)
+			expectedFullName := expectedTable
+			if expectedDB != "" {
+				expectedFullName = expectedDB + "." + expectedTable
+			}
+			return fmt.Errorf("query validation failed: invalid table reference '%s' (expected '%s')",
+				tableName, expectedFullName)
 		}
 	}
 	return nil
 }
 
-// checkDangerousOperations checks for potentially dangerous SQL operations
+// checkDangerousOperations performs basic checks for disallowed SQL constructs.
 func (qb *QueryBuilder) checkDangerousOperations(stmt *clickhouseparser.SelectQuery) error {
-	// Check for subqueries, which we don't allow
+	// Basic check for subqueries (placeholder - needs proper AST traversal).
 	if containsSubqueries(stmt) {
-		return fmt.Errorf("subqueries are not allowed")
+		return fmt.Errorf("query validation failed: subqueries are not allowed")
 	}
-
+	// Basic check for disallowed functions (placeholder).
+	// if containsDisallowedFunctions(stmt) {
+	// 	 return fmt.Errorf("query validation failed: disallowed function used")
+	// }
 	return nil
 }
 
-// containsSubqueries checks if a SELECT statement contains subqueries
+// containsSubqueries checks if a SELECT statement contains subqueries.
+// FIXME: This requires recursive traversal of the AST, currently a no-op placeholder.
 func containsSubqueries(stmt *clickhouseparser.SelectQuery) bool {
-	// This is a simplified version. A full implementation would need to
-	// recursively check the entire AST
+	// Placeholder: Needs recursive AST walk to check SELECT clauses, WHERE, etc.
 	return false
 }
 
-// ensureLimit ensures the SELECT statement has a LIMIT clause
+// ensureLimit adds or replaces the LIMIT clause on a SelectQuery AST node.
 func (qb *QueryBuilder) ensureLimit(stmt *clickhouseparser.SelectQuery, limit int) {
-	if stmt.Limit == nil {
-		// Create a new limit clause
-		numberLiteral := &clickhouseparser.NumberLiteral{
-			Literal: fmt.Sprintf("%d", limit),
-		}
-		stmt.Limit = &clickhouseparser.LimitClause{
-			Limit: numberLiteral,
-		}
+	// Create the number literal for the limit value.
+	numberLiteral := &clickhouseparser.NumberLiteral{
+		Literal: fmt.Sprintf("%d", limit),
 	}
-}
-
-// BuildTimeSeriesQuery builds a query for time series data
-func (qb *QueryBuilder) BuildTimeSeriesQuery(startTime, endTime int64, interval string) string {
-	return fmt.Sprintf(`
-		SELECT
-			toUnixTimestamp(toStartOf%s(timestamp)) * 1000 as ts,
-			count() as count
-		FROM %s
-		WHERE timestamp >= toDateTime(%d) AND timestamp <= toDateTime(%d)
-		GROUP BY ts
-		ORDER BY ts ASC
-	`, interval, qb.tableName, startTime, endTime)
-}
-
-// BuildLogContextQueries builds queries for log context
-func (qb *QueryBuilder) BuildLogContextQueries(targetTime int64, beforeLimit, afterLimit int) (before, target, after string) {
-	before = fmt.Sprintf(`
-		SELECT *
-		FROM %s
-		WHERE timestamp < toDateTime(%d)
-		ORDER BY timestamp DESC
-		LIMIT %d
-	`, qb.tableName, targetTime, beforeLimit)
-
-	target = fmt.Sprintf(`
-		SELECT *
-		FROM %s
-		WHERE timestamp = toDateTime(%d)
-		ORDER BY timestamp ASC
-	`, qb.tableName, targetTime)
-
-	after = fmt.Sprintf(`
-		SELECT *
-		FROM %s
-		WHERE timestamp > toDateTime(%d)
-		ORDER BY timestamp ASC
-		LIMIT %d
-	`, qb.tableName, targetTime, afterLimit)
-
-	return before, target, after
-}
-
-// BuildContextQuery builds a unified context query that returns logs before and after a timestamp
-func (qb *QueryBuilder) BuildContextQuery(targetTime int64, beforeLimit, afterLimit int) string {
-	return fmt.Sprintf(`
-		WITH target_timestamp AS (
-			SELECT %d as ts_millis
-		)
-		SELECT * FROM (
-			SELECT *
-			FROM %s
-			WHERE timestamp < fromUnixTimestamp64Milli((SELECT ts_millis FROM target_timestamp))
-			ORDER BY timestamp DESC
-			LIMIT %d
-
-			UNION ALL
-
-			SELECT *
-			FROM %s
-			WHERE timestamp = fromUnixTimestamp64Milli((SELECT ts_millis FROM target_timestamp))
-
-			UNION ALL
-
-			SELECT *
-			FROM %s
-			WHERE timestamp > fromUnixTimestamp64Milli((SELECT ts_millis FROM target_timestamp))
-			ORDER BY timestamp ASC
-			LIMIT %d
-		) ORDER BY timestamp ASC`,
-		targetTime,
-		qb.tableName,
-		beforeLimit,
-		qb.tableName,
-		qb.tableName,
-		afterLimit,
-	)
+	// Always set/overwrite the limit clause.
+	stmt.Limit = &clickhouseparser.LimitClause{
+		Limit: numberLiteral,
+	}
 }

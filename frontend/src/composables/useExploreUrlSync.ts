@@ -74,8 +74,18 @@ export function useExploreUrlSync() {
       if (!teamsStore.teams || teamsStore.teams.length === 0) {
         await teamsStore.loadTeams(false, false); // Explicitly use user teams endpoint
       }
+
+      // Handle the case where no teams are available more gracefully
       if (teamsStore.teams.length === 0) {
-        throw new Error("No teams available or accessible.");
+        // Set initialization error without throwing
+        initializationError.value = "No teams available or accessible.";
+
+        // Clear any existing data for consistency
+        exploreStore.setSource(0);
+        sourcesStore.clearCurrentSourceDetails();
+
+        // Exit early but don't throw - allow the component to handle this state
+        return;
       }
 
       // Check if we have a query_id in the URL, which indicates we're editing a saved query
@@ -98,7 +108,7 @@ export function useExploreUrlSync() {
 
       // Set team *before* loading sources
       if (teamsStore.currentTeamId !== teamId) {
-         teamsStore.setCurrentTeam(teamId);
+        teamsStore.setCurrentTeam(teamId);
       }
 
       // 3. Load Sources for the selected team (wait if necessary)
@@ -121,12 +131,12 @@ export function useExploreUrlSync() {
         sourceId = sourcesStore.teamSources[0].id; // Default to first source
       }
 
-      // Set source and load details *only if* sourceId is valid
+      // Set source ID only (the watcher in LogExplorer will handle loading details)
       if (sourceId) {
          if (exploreStore.sourceId !== sourceId) {
             exploreStore.setSource(sourceId);
          }
-         await sourcesStore.loadSourceDetails(sourceId); // Wait for details
+         // Don't load source details here - LogExplorer watcher will handle it
       } else {
          exploreStore.setSource(0); // Explicitly set to 0 if no valid source
          sourcesStore.clearCurrentSourceDetails();
@@ -151,7 +161,7 @@ export function useExploreUrlSync() {
         const nowDt = now(getLocalTimeZone());
         startDateTime = new CalendarDateTime(
           nowDt.year, nowDt.month, nowDt.day, nowDt.hour, nowDt.minute, nowDt.second
-        ).subtract({ minutes: 5 });
+        ).subtract({ hours: 1 });
         endDateTime = new CalendarDateTime(
           nowDt.year, nowDt.month, nowDt.day, nowDt.hour, nowDt.minute, nowDt.second
         );
@@ -168,7 +178,18 @@ export function useExploreUrlSync() {
 
       // 8. Set Query Content from URL
       const urlQuery = route.query.q as string | undefined;
-      const queryContent = urlQuery ? decodeURIComponent(urlQuery) : "";
+      let queryContent = "";
+
+      if (urlQuery) {
+        try {
+          // Safely decode the URL parameter, handling double-encoded characters
+          queryContent = decodeURIComponent(urlQuery);
+        } catch (decodeError) {
+          // If decoding fails, use the raw value
+          console.error("Error decoding URL query parameter:", decodeError);
+          queryContent = urlQuery;
+        }
+      }
 
       // Note: isFromUrl flag is handled in the useQuery composable
       // We don't need to set anything specifically here since initial state
@@ -239,12 +260,16 @@ export function useExploreUrlSync() {
     // Mode
     query.mode = exploreStore.activeMode;
 
-    // Query Content
+    // Query Content - prevent double-encoding of URL characters
     const queryContent = exploreStore.activeMode === 'logchefql'
       ? exploreStore.logchefqlCode?.trim()
       : exploreStore.rawSql?.trim();
     if (queryContent) {
-      query.q = encodeURIComponent(queryContent);
+      // Encode but avoid double-encoding special characters
+      // First decode the content in case it contains encoded characters
+      const decodedContent = decodeURIComponent(queryContent);
+      // Then safely encode it
+      query.q = encodeURIComponent(decodedContent);
     }
 
     // Only update if the query params actually changed
@@ -256,6 +281,57 @@ export function useExploreUrlSync() {
             }
         });
     }
+  };
+
+  // New method to push a history entry when a query is executed
+  const pushQueryHistoryEntry = () => {
+    // Don't push if we are still initializing from the URL
+    if (isInitializing.value) {
+      return;
+    }
+
+    const query: Record<string, string> = {};
+
+    // Include the same parameters as syncUrlFromState
+    if (teamsStore.currentTeamId) {
+      query.team = teamsStore.currentTeamId.toString();
+    }
+
+    if (exploreStore.sourceId > 0 && sourcesStore.teamSources.some(s => s.id === exploreStore.sourceId)) {
+      query.source = exploreStore.sourceId.toString();
+    }
+
+    if (exploreStore.selectedQueryId) {
+      query.query_id = exploreStore.selectedQueryId;
+    }
+
+    query.limit = exploreStore.limit.toString();
+
+    const startTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.start);
+    const endTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.end);
+    if (startTime !== null && endTime !== null) {
+      query.start_time = startTime.toString();
+      query.end_time = endTime.toString();
+    }
+
+    query.mode = exploreStore.activeMode;
+
+    const queryContent = exploreStore.activeMode === 'logchefql'
+      ? exploreStore.logchefqlCode?.trim()
+      : exploreStore.rawSql?.trim();
+    if (queryContent) {
+      // Ensure consistent encoding of query content to avoid double-encoding
+      const decodedContent = decodeURIComponent(queryContent);
+      query.q = encodeURIComponent(decodedContent);
+    }
+
+    // Use router.push instead of router.replace to create a new history entry
+    router.push({ query }).catch(err => {
+      // Ignore navigation duplicated errors
+      if (err.name !== 'NavigationDuplicated') {
+        console.error("useExploreUrlSync: Error pushing query history:", err);
+      }
+    });
   };
 
   // --- Watchers ---
@@ -302,5 +378,6 @@ export function useExploreUrlSync() {
     initializationError,
     initializeFromUrl,
     syncUrlFromState,
+    pushQueryHistoryEntry,
   };
 }

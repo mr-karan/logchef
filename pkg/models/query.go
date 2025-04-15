@@ -82,6 +82,8 @@ type LogQueryRequest struct {
 	Limit          int          `json:"limit"`
 	RawSQL         string       `json:"raw_sql"`
 	Sort           *SortOptions `json:"sort,omitempty"`
+	Window         string       `json:"window,omitempty"`   // For histogram queries: time window size like "1m", "5m", "1h"
+	GroupBy        string       `json:"group_by,omitempty"` // For histogram queries: field to group by
 }
 
 // LogQueryResult represents the result of a log query

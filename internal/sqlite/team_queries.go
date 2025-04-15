@@ -9,80 +9,78 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// CreateTeamSourceQuery creates a new query for a team and source
+// CreateTeamSourceQuery inserts a new saved query record associated with a team and source.
+// It populates the ID field on the input query model upon success.
 func (db *DB) CreateTeamSourceQuery(ctx context.Context, query *models.TeamQuery) error {
-	db.log.Debug("creating team source query", "team_id", query.TeamID, "source_id", query.SourceID)
+	db.log.Debug("creating team source query record", "team_id", query.TeamID, "source_id", query.SourceID, "name", query.Name)
 
-	description := sql.NullString{}
-	if query.Description != "" {
-		description.String = query.Description
-		description.Valid = true
-	}
-
-	// Use the generated sqlc function and parameters
-	id, err := db.queries.CreateTeamSourceQuery(ctx, sqlc.CreateTeamSourceQueryParams{
+	// Map domain model to sqlc parameters.
+	description := sql.NullString{String: query.Description, Valid: query.Description != ""}
+	params := sqlc.CreateTeamSourceQueryParams{
 		TeamID:       int64(query.TeamID),
 		SourceID:     int64(query.SourceID),
 		Name:         query.Name,
 		Description:  description,
 		QueryType:    string(query.QueryType),
 		QueryContent: query.QueryContent,
-	})
+	}
+
+	id, err := db.queries.CreateTeamSourceQuery(ctx, params)
 	if err != nil {
-		db.log.Error("failed to create team source query", "error", err, "team_id", query.TeamID, "source_id", query.SourceID)
+		// Consider checking for specific constraint errors (e.g., FK violations if team/source don't exist).
+		db.log.Error("failed to create team source query record in db", "error", err, "team_id", query.TeamID, "source_id", query.SourceID)
 		return fmt.Errorf("error creating team source query: %w", err)
 	}
 
-	// Set the auto-generated ID
+	// Set auto-generated ID on the input model.
 	query.ID = int(id)
+	// Timestamps are handled by DB; caller doesn't need them updated here.
 
-	db.log.Debug("team source query created", "query_id", query.ID)
+	db.log.Debug("team source query record created", "query_id", query.ID)
 	return nil
 }
 
-// GetTeamSourceQuery retrieves a query by ID for a specific team and source
+// GetTeamSourceQuery retrieves a specific saved query by its ID, scoped to a team and source.
+// Returns core.ErrQueryNotFound if not found.
 func (db *DB) GetTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int) (*models.SavedTeamQuery, error) {
-	db.log.Debug("getting team source query", "team_id", teamID, "source_id", sourceID, "query_id", queryID)
+	db.log.Debug("getting team source query record", "query_id", queryID, "team_id", teamID, "source_id", sourceID)
 
-	sqlcQuery, err := db.queries.GetTeamSourceQuery(ctx, sqlc.GetTeamSourceQueryParams{
+	params := sqlc.GetTeamSourceQueryParams{
 		ID:       int64(queryID),
 		TeamID:   int64(teamID),
 		SourceID: int64(sourceID),
-	})
+	}
+	sqlcQuery, err := db.queries.GetTeamSourceQuery(ctx, params)
 	if err != nil {
-		return nil, handleNotFoundError(err, "error getting team source query")
+		// Use handleNotFoundError, although a specific core.ErrQueryNotFound might be defined.
+		return nil, handleNotFoundError(err, fmt.Sprintf("getting team query id %d", queryID))
 	}
 
-	description := ""
-	if sqlcQuery.Description.Valid {
-		description = sqlcQuery.Description.String
-	}
-
-	// Convert sqlc.TeamQuery to models.SavedTeamQuery (assuming this is the desired return type)
+	// Map sqlc result to the SavedTeamQuery domain model.
 	return &models.SavedTeamQuery{
 		ID:           int(sqlcQuery.ID),
 		TeamID:       models.TeamID(sqlcQuery.TeamID),
 		SourceID:     models.SourceID(sqlcQuery.SourceID),
 		Name:         sqlcQuery.Name,
-		Description:  description,
-		QueryType:    models.SavedQueryType(sqlcQuery.QueryType), // Keep QueryType if still present in model
+		Description:  sqlcQuery.Description.String, // Handle NULL string
+		QueryType:    models.SavedQueryType(sqlcQuery.QueryType),
 		QueryContent: sqlcQuery.QueryContent,
 		CreatedAt:    sqlcQuery.CreatedAt,
 		UpdatedAt:    sqlcQuery.UpdatedAt,
+		// CreatedByUserID is not present in the sqlc model/query.
 	}, nil
 }
 
-// UpdateTeamSourceQuery updates a query for a team and source
+// UpdateTeamSourceQuery updates an existing saved query record.
+// Only non-empty fields in the input arguments are intended to be updated (though the current SQL updates all).
+// The `updated_at` timestamp is automatically set by the query.
 func (db *DB) UpdateTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int, name, description, queryType, queryContent string) error {
-	db.log.Debug("updating team source query", "team_id", teamID, "source_id", sourceID, "query_id", queryID)
+	db.log.Debug("updating team source query record", "query_id", queryID, "team_id", teamID, "source_id", sourceID)
 
-	desc := sql.NullString{}
-	if description != "" {
-		desc.String = description
-		desc.Valid = true
-	}
-
-	err := db.queries.UpdateTeamSourceQuery(ctx, sqlc.UpdateTeamSourceQueryParams{
+	// Prepare parameters, handling potentially empty update values.
+	// The SQL query updates all specified fields; partial updates would require a different query or dynamic SQL.
+	desc := sql.NullString{String: description, Valid: description != ""} // Handle empty description correctly.
+	params := sqlc.UpdateTeamSourceQueryParams{
 		Name:         name,
 		Description:  desc,
 		QueryType:    queryType,
@@ -90,63 +88,67 @@ func (db *DB) UpdateTeamSourceQuery(ctx context.Context, teamID models.TeamID, s
 		ID:           int64(queryID),
 		TeamID:       int64(teamID),
 		SourceID:     int64(sourceID),
-	})
+	}
+
+	err := db.queries.UpdateTeamSourceQuery(ctx, params)
 	if err != nil {
-		db.log.Error("failed to update team source query", "error", err, "query_id", queryID, "team_id", teamID, "source_id", sourceID)
+		// sqlc Update typically doesn't return ErrNoRows. Check for other errors.
+		db.log.Error("failed to update team source query record in db", "error", err, "query_id", queryID)
 		return fmt.Errorf("error updating team source query: %w", err)
 	}
 
+	db.log.Debug("team source query record updated successfully", "query_id", queryID)
 	return nil
 }
 
-// DeleteTeamSourceQuery deletes a query by ID for a specific team and source
+// DeleteTeamSourceQuery removes a specific saved query record.
 func (db *DB) DeleteTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int) error {
-	db.log.Debug("deleting team source query", "team_id", teamID, "source_id", sourceID, "query_id", queryID)
+	db.log.Debug("deleting team source query record", "query_id", queryID, "team_id", teamID, "source_id", sourceID)
 
-	err := db.queries.DeleteTeamSourceQuery(ctx, sqlc.DeleteTeamSourceQueryParams{
+	params := sqlc.DeleteTeamSourceQueryParams{
 		ID:       int64(queryID),
 		TeamID:   int64(teamID),
 		SourceID: int64(sourceID),
-	})
+	}
+	err := db.queries.DeleteTeamSourceQuery(ctx, params)
 	if err != nil {
-		db.log.Error("failed to delete team source query", "error", err, "query_id", queryID, "team_id", teamID, "source_id", sourceID)
+		// sqlc Delete typically doesn't return ErrNoRows.
+		db.log.Error("failed to delete team source query record from db", "error", err, "query_id", queryID)
 		return fmt.Errorf("error deleting team source query: %w", err)
 	}
 
+	db.log.Debug("team source query record deleted successfully", "query_id", queryID)
 	return nil
 }
 
-// ListQueriesByTeamAndSource lists all queries for a specific team and source
+// ListQueriesByTeamAndSource retrieves all saved queries for a specific team and source, ordered by creation date.
 func (db *DB) ListQueriesByTeamAndSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) ([]*models.SavedTeamQuery, error) {
 	db.log.Debug("listing queries for team and source", "team_id", teamID, "source_id", sourceID)
 
-	sqlcQueries, err := db.queries.ListQueriesByTeamAndSource(ctx, sqlc.ListQueriesByTeamAndSourceParams{
+	params := sqlc.ListQueriesByTeamAndSourceParams{
 		TeamID:   int64(teamID),
 		SourceID: int64(sourceID),
-	})
+	}
+	sqlcQueries, err := db.queries.ListQueriesByTeamAndSource(ctx, params)
 	if err != nil {
-		db.log.Error("failed to list queries for team and source", "error", err, "team_id", teamID, "source_id", sourceID)
+		db.log.Error("failed to list queries for team and source from db", "error", err, "team_id", teamID, "source_id", sourceID)
 		return nil, fmt.Errorf("error listing queries for team and source: %w", err)
 	}
 
-	queries := make([]*models.SavedTeamQuery, len(sqlcQueries))
-	for i, sq := range sqlcQueries {
-		description := ""
-		if sq.Description.Valid {
-			description = sq.Description.String
-		}
-
-		queries[i] = &models.SavedTeamQuery{
+	// Map results to domain model slice.
+	queries := make([]*models.SavedTeamQuery, 0, len(sqlcQueries))
+	for _, sq := range sqlcQueries {
+		queries = append(queries, &models.SavedTeamQuery{
 			ID:           int(sq.ID),
 			TeamID:       models.TeamID(sq.TeamID),
 			SourceID:     models.SourceID(sq.SourceID),
 			Name:         sq.Name,
-			Description:  description,
-			QueryType:    models.SavedQueryType(sq.QueryType), // Keep QueryType if still present in model
+			Description:  sq.Description.String, // Handle NULL string
+			QueryType:    models.SavedQueryType(sq.QueryType),
 			QueryContent: sq.QueryContent,
 			CreatedAt:    sq.CreatedAt,
 			UpdatedAt:    sq.UpdatedAt,
-		}
+		})
 	}
 
 	db.log.Debug("team and source queries listed", "team_id", teamID, "source_id", sourceID, "count", len(queries))

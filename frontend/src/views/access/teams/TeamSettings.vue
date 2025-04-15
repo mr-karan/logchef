@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -39,15 +39,18 @@ import {
 import { useUsersStore } from "@/stores/users"
 import { useSourcesStore } from "@/stores/sources"
 import { useTeamsStore } from "@/stores/teams"
+import { useAuthStore } from "@/stores/auth"
 import { formatDate, formatSourceName } from '@/utils/format'
 
 const route = useRoute()
+const router = useRouter()
 const { toast } = useToast()
 
 // Initialize stores with proper Pinia pattern
 const usersStore = useUsersStore()
 const sourcesStore = useSourcesStore()
 const teamsStore = useTeamsStore()
+const authStore = useAuthStore()
 
 // Get reactive state from the stores
 const { isLoading, error: teamError } = storeToRefs(teamsStore)
@@ -180,10 +183,41 @@ const handleAddMember = async () => {
 }
 
 const handleRemoveMember = async (userId: string | number) => {
-    if (!team.value) return
+    if (!team.value) return;
 
-    await teamsStore.removeTeamMember(team.value.id, Number(userId))
-    // Store automatically updates the members list
+    // Check if user is removing themselves
+    const currentUserId = authStore.user?.id;
+    const isSelf = currentUserId && userId.toString() === currentUserId.toString();
+
+    // Confirmation for self-removal
+    if (isSelf) {
+        const confirm = window.confirm('Are you sure you want to remove yourself from this team? You will lose access to this team and all its sources immediately.');
+        if (!confirm) return;
+    }
+
+    try {
+        await teamsStore.removeTeamMember(team.value.id, Number(userId));
+
+        if (isSelf) {
+            // Redirect to teams list or first available team if removing self
+            toast({
+                title: 'Left Team',
+                description: `You have removed yourself from team ${team.value.name}`,
+                variant: 'default',
+            });
+
+            // Navigate away from this page since user no longer has access
+            router.push({ name: 'Home' });
+        }
+        // Store automatically updates the members list
+    } catch (error) {
+        console.error('Error removing team member:', error);
+        toast({
+            title: 'Error',
+            description: 'Failed to remove team member',
+            variant: 'destructive',
+        });
+    }
 }
 
 const handleAddSource = async () => {
@@ -357,7 +391,7 @@ onMounted(async () => {
                                             <div class="flex flex-col">
                                                 <span>{{ member.email }}</span>
                                                 <span class="text-sm text-muted-foreground">{{ member.full_name
-                                                }}</span>
+                                                    }}</span>
                                             </div>
                                         </TableCell>
                                         <TableCell class="capitalize">{{ member.role }}</TableCell>

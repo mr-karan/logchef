@@ -311,7 +311,7 @@ const submitForm = async () => {
                             <div class="grid grid-cols-2 gap-4">
                                 <div class="grid gap-2">
                                     <Label for="database" class="required">Database</Label>
-                                    <Input id="database" v-model="database" placeholder="logs" required />
+                                    <Input id="database" v-model="database" placeholder="default" required />
                                 </div>
 
                                 <div class="grid gap-2">

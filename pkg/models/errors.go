@@ -19,6 +19,9 @@ const (
 	// AuthorizationErrorType indicates an authorization error
 	AuthorizationErrorType ErrorType = "AuthorizationError"
 
+	// ConflictErrorType indicates a resource conflict (e.g., already exists)
+	ConflictErrorType ErrorType = "ConflictError"
+
 	// DatabaseErrorType indicates a database error
 	DatabaseErrorType ErrorType = "DatabaseError"
 

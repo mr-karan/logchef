@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
-import { Plus, Play, RefreshCw, Share2, Keyboard, Save } from 'lucide-vue-next'
+import { Plus, Play, RefreshCw, Share2, Keyboard, Save, CalendarIcon, Info, HelpCircle, Eraser } from 'lucide-vue-next'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
@@ -28,7 +28,7 @@ import { useExploreStore } from '@/stores/explore'
 import { useTeamsStore } from '@/stores/teams'
 import { useSourcesStore } from '@/stores/sources'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
-import { now, getLocalTimeZone, type CalendarDateTime, type DateValue, toCalendarDateTime } from '@internationalized/date'
+import { now, getLocalTimeZone, type CalendarDateTime, type DateValue, toCalendarDateTime, parseDate, parseDateTime, fromDate } from '@internationalized/date'
 import DataTable from './table/data-table.vue'
 import { formatSourceName } from '@/utils/format'
 import SaveQueryModal from '@/components/collections/SaveQueryModal.vue'
@@ -51,6 +51,7 @@ import type { EditorMode } from '@/views/explore/types'
 import type { ComponentPublicInstance } from 'vue'; // Import ComponentPublicInstance
 import { type QueryCondition, parseAndTranslateLogchefQL, validateLogchefQLWithDetails } from '@/utils/logchefql/api';
 import { QueryService } from '@/services/QueryService';
+import LogHistogram from '@/components/visualizations/LogHistogram.vue';
 
 // Router and stores
 const router = useRouter()
@@ -59,7 +60,7 @@ const teamsStore = useTeamsStore()
 const sourcesStore = useSourcesStore()
 const savedQueriesStore = useSavedQueriesStore()
 const { toast } = useToast()
-const { isInitializing, initializationError: urlError, initializeFromUrl, syncUrlFromState } = useExploreUrlSync();
+const { isInitializing, initializationError, initializeFromUrl, syncUrlFromState } = useExploreUrlSync();
 
 // Composables
 const {
@@ -130,25 +131,10 @@ watch(() => activeMode.value, (newMode, oldMode) => {
     lastParsedQuery.value = result;
   }
 
-  // Auto-execution logic when mode changes
-  if (newMode !== oldMode) {
-    // If switching to SQL mode, ensure the table name is correct
-    if (newMode === 'sql' && activeSourceTableName.value) {
-      // Update SQL query with the current table name
-      updateSqlTableReference(activeSourceTableName.value);
-    }
-
-    // After changing mode, check if we have content that could be executed
-    const hasContent = newMode === 'logchefql'
-      ? (logchefQuery.value?.trim() || '') !== ''
-      : (sqlQuery.value?.trim() || '') !== '';
-
-    if (hasContent && canExecuteQuery.value && !isExecutingQuery.value) {
-      // Execute after a short delay to allow everything to settle
-      setTimeout(() => {
-        executeQuery();
-      }, 100);
-    }
+  // If switching to SQL mode, ensure the table name is correct
+  if (newMode !== oldMode && newMode === 'sql' && activeSourceTableName.value) {
+    // Update SQL query with the current table name
+    updateSqlTableReference(activeSourceTableName.value);
   }
 });
 
@@ -285,8 +271,23 @@ const queryEditorRef = ref<ComponentPublicInstance<{
 const isLoadingQuery = ref(false)
 const editQueryData = ref<SavedTeamQuery | null>(null)
 
+// Group by field with computed default value based on severity field
+const groupByField = computed({
+  get() {
+    // Return the stored value or compute default
+    return exploreStore.groupByField ||
+      // Use severity field as default if available
+      (sourcesStore.currentSourceDetails?._meta_severity_field ?
+        sourcesStore.currentSourceDetails._meta_severity_field :
+        '__none__');
+  },
+  set(value) {
+    exploreStore.setGroupByField(value);
+  }
+});
+
 // UI state computed properties
-const showLoadingState = computed(() => isInitializing.value && !urlError.value)
+const showLoadingState = computed(() => isInitializing.value && !initializationError.value)
 
 const showNoTeamsState = computed(() => !isInitializing.value && (!availableTeams.value || availableTeams.value.length === 0))
 
@@ -382,9 +383,17 @@ const displayTimezone = computed(() =>
 // Combined error display
 const displayError = computed(() => queryError.value || exploreStore.error?.message)
 
-// Watch for initialization completion to run initial query
+// Watch for initialization completion to run initial query and load source details
 watch(isInitializing, async (initializing, prevInitializing) => {
   if (prevInitializing && !initializing) {
+    // If we have a valid source ID after initialization, load its details
+    if (currentSourceId.value && currentSourceId.value > 0) {
+      const sourceExists = availableSources.value.some(source => source.id === currentSourceId.value);
+      if (sourceExists) {
+        await sourcesStore.loadSourceDetails(currentSourceId.value);
+      }
+    }
+
     const queryId = queryIdFromUrl.value; // Get query ID from computed property
 
     if (queryId) {
@@ -433,9 +442,9 @@ watch(isInitializing, async (initializing, prevInitializing) => {
 
     // Make sure we have a valid time range before executing the query
     if (!exploreStore.timeRange || !exploreStore.timeRange.start || !exploreStore.timeRange.end) {
-      // Set a default time range (last 5 minutes)
+      // Set a default time range (last 1 hour)
       exploreStore.setTimeRange({
-        start: now(getLocalTimeZone()).subtract({ minutes: 5 }),
+        start: now(getLocalTimeZone()).subtract({ hours: 1 }),
         end: now(getLocalTimeZone())
       });
     }
@@ -456,7 +465,7 @@ watch(
       return;
     }
 
-    if (newSourceId !== oldSourceId) {
+    if (newSourceId !== oldSourceId || (!oldSourceId && newSourceId)) {
       // Fetch Source Details (existing logic)
       if (newSourceId && newSourceId > 0) {
         // Verify source existence (using teamSources from useSourceTeamManagement)
@@ -558,72 +567,79 @@ watch(
     if (!newRange || !oldRange) return;
     if (JSON.stringify(newRange) === JSON.stringify(oldRange)) return;
 
-    // If we're in SQL mode, check if we have a standard time range pattern we can update
-    if (activeMode.value === 'sql') {
-      const currentSql = sqlQuery.value?.trim() || '';
-      if (!currentSql) {
-        handleTimeRangeUpdate();
-        return;
-      }
+    // If time range changed significantly, don't auto-execute query
+    // Just update SQL and mark as dirty
+    if (newRange && oldRange &&
+      (newRange.start.toString() !== oldRange.start.toString() ||
+        newRange.end.toString() !== oldRange.end.toString())) {
 
-      // Format dates for SQL
-      const formatSqlDateTime = (date: DateValue): string => {
-        try {
-          const zonedDate = toCalendarDateTime(date);
-          const isoString = zonedDate.toString();
-          // Format as 'YYYY-MM-DD HH:MM:SS'
-          return isoString.replace('T', ' ').substring(0, 19);
-        } catch (e) {
-          console.error("Error formatting date for SQL:", e);
-          return '';
-        }
-      };
-
-      const startDateStr = formatSqlDateTime(newRange.start);
-      const endDateStr = formatSqlDateTime(newRange.end);
-
-      // Get the user's timezone for new queries or when updating timezone-aware queries
-      const userTimezone = getLocalTimeZone();
-
-      // Pattern to detect: Timezone-aware time range - single toDateTime call with timezone
-      const tzTimeRangePattern = /WHERE\s+`?(\w+)`?\s+BETWEEN\s+toDateTime\(['"](.+?)['"],\s*['"]([^'"]+)['"]\)(.*?)AND\s+toDateTime\(['"](.+?)['"],\s*['"]([^'"]+)['"]\)(.*?)(\s|$)/i;
-
-      // Pattern to detect: Standard time range pattern
-      const basicTimeRangePattern = /WHERE\s+`?(\w+)`?\s+BETWEEN\s+toDateTime\(['"](.+?)[']\)(.*?)AND\s+toDateTime\(['"](.+?)[']\)(.*?)(\s|$)/i;
-
-      if (tzTimeRangePattern.test(currentSql)) {
-        // Update timezone-aware time range
-        const updatedSql = currentSql.replace(
-          tzTimeRangePattern,
-          `WHERE \`$1\` BETWEEN toDateTime('${startDateStr}', '$3')$4AND toDateTime('${endDateStr}', '$6')$7$8`
-        );
-
-        if (updatedSql !== currentSql) {
-          // Only update if the SQL actually changed
-          sqlQuery.value = updatedSql;
-          // Don't call handleTimeRangeUpdate() as we've already updated the SQL
+      // Update SQL if we're in SQL mode and have a standard pattern
+      if (activeMode.value === 'sql') {
+        const currentSql = sqlQuery.value?.trim() || '';
+        if (!currentSql) {
+          handleTimeRangeUpdate();
           return;
         }
-      }
-      else if (basicTimeRangePattern.test(currentSql)) {
-        // Convert basic time range to timezone-aware
-        const updatedSql = currentSql.replace(
-          basicTimeRangePattern,
-          `WHERE \`$1\` BETWEEN toDateTime('${startDateStr}', '${userTimezone}')$3AND toDateTime('${endDateStr}', '${userTimezone}')$5$6`
-        );
 
-        if (updatedSql !== currentSql) {
-          // Only update if the SQL actually changed
-          sqlQuery.value = updatedSql;
-          // Don't call handleTimeRangeUpdate() as we've already updated the SQL
-          return;
+        // Format dates for SQL
+        const formatSqlDateTime = (date: DateValue): string => {
+          try {
+            const zonedDate = toCalendarDateTime(date);
+            const isoString = zonedDate.toString();
+            // Format as 'YYYY-MM-DD HH:MM:SS'
+            return isoString.replace('T', ' ').substring(0, 19);
+          } catch (e) {
+            console.error("Error formatting date for SQL:", e);
+            return '';
+          }
+        };
+
+        const startDateStr = formatSqlDateTime(newRange.start);
+        const endDateStr = formatSqlDateTime(newRange.end);
+
+        // Get the user's timezone for new queries or when updating timezone-aware queries
+        const userTimezone = getLocalTimeZone();
+
+        // Pattern to detect: Timezone-aware time range - single toDateTime call with timezone
+        const tzTimeRangePattern = /WHERE\s+`?(\w+)`?\s+BETWEEN\s+toDateTime\(['"](.+?)['"],\s*['"]([^'"]+)['"]\)(.*?)AND\s+toDateTime\(['"](.+?)['"],\s*['"]([^'"]+)['"]\)(.*?)(\s|$)/i;
+
+        // Pattern to detect: Standard time range pattern
+        const basicTimeRangePattern = /WHERE\s+`?(\w+)`?\s+BETWEEN\s+toDateTime\(['"](.+?)[']\)(.*?)AND\s+toDateTime\(['"](.+?)[']\)(.*?)(\s|$)/i;
+
+        if (tzTimeRangePattern.test(currentSql)) {
+          // Update timezone-aware time range
+          const updatedSql = currentSql.replace(
+            tzTimeRangePattern,
+            `WHERE \`$1\` BETWEEN toDateTime('${startDateStr}', '$3')$4AND toDateTime('${endDateStr}', '$6')$7$8`
+          );
+
+          if (updatedSql !== currentSql) {
+            // Only update if the SQL actually changed
+            sqlQuery.value = updatedSql;
+            // Don't call handleTimeRangeUpdate() as we've already updated the SQL
+            return;
+          }
+        }
+        else if (basicTimeRangePattern.test(currentSql)) {
+          // Convert basic time range to timezone-aware
+          const updatedSql = currentSql.replace(
+            basicTimeRangePattern,
+            `WHERE \`$1\` BETWEEN toDateTime('${startDateStr}', '${userTimezone}')$3AND toDateTime('${endDateStr}', '${userTimezone}')$5$6`
+          );
+
+          if (updatedSql !== currentSql) {
+            // Only update if the SQL actually changed
+            sqlQuery.value = updatedSql;
+            // Don't call handleTimeRangeUpdate() as we've already updated the SQL
+            return;
+          }
         }
       }
+
+      // Use the query builder's handler for time range updates
+      // This will set isDirty and show a notification instead of updating SQL directly
+      handleTimeRangeUpdate();
     }
-
-    // Use the query builder's handler for time range updates
-    // This will set isDirty and show a notification instead of updating SQL directly
-    handleTimeRangeUpdate();
   },
   { deep: true }
 );
@@ -664,17 +680,34 @@ const copyUrlToClipboard = () => {
 // Component lifecycle with improved initialization sequence
 onMounted(async () => {
   try {
-    // Call the initialization function from the composable
-    await initializeFromUrl();
-
     // Reset admin teams and load user teams to ensure we have the correct context
     teamsStore.resetAdminTeams();
 
-    // If we don't have user teams loaded yet, load them
-    if (teamsStore.userTeams.length === 0) {
-      await teamsStore.loadUserTeams(true);
-    }
+    // Call the initialization function from the composable
+    // This will now handle empty teams gracefully
+    await initializeFromUrl();
 
+    // Always force a reload of user teams to ensure we have the latest membership data
+    await teamsStore.loadUserTeams(true);
+
+    // Skip validation if there's an initialization error - it's already handled
+    if (!initializationError.value) {
+      // After loading teams, verify the current teamId is still valid
+      // This handles cases where team membership changed elsewhere
+      if (currentTeamId.value && !teamsStore.userBelongsToTeam(currentTeamId.value)) {
+        console.log(`Current team ${currentTeamId.value} is no longer accessible, resetting selection`);
+
+        // Select the first available team instead
+        if (teamsStore.userTeams.length > 0) {
+          exploreStore.setSource(0); // First clear the source
+          teamsStore.setCurrentTeam(teamsStore.userTeams[0].id);
+        } else {
+          exploreStore.setSource(0);
+          // Clear the current team by using 0, which will be internally converted to null
+          teamsStore.setCurrentTeam(0);
+        }
+      }
+    }
   } catch (error) {
     console.error("Error during LogExplorer mount:", error);
     toast({
@@ -806,11 +839,11 @@ const clearQueryEditor = () => {
 };
 
 // Function to handle drill-down from DataTable to add a filter condition
-const handleDrillDown = (data: { column: string, value: any }) => {
+const handleDrillDown = (data: { column: string; value: any; operator: string }) => {
   // Only handle in LogchefQL mode
   if (activeMode.value !== 'logchefql') return;
 
-  const { column, value } = data;
+  const { column, value, operator } = data;
 
   // Create a new condition based on the column and value
   let newCondition = '';
@@ -834,8 +867,8 @@ const handleDrillDown = (data: { column: string, value: any }) => {
     }
   }
 
-  // Create the condition
-  newCondition = `${column}=${formattedValue}`;
+  // Create the condition based on the operator
+  newCondition = `${column}${operator}${formattedValue}`;
 
   // Get the current query
   let currentQuery = logchefQuery.value?.trim() || '';
@@ -955,6 +988,112 @@ function updateSqlTableReference(tableName: string) {
     }
   }
 }
+
+// Add a ref for the DateTimePicker
+const dateTimePickerRef = ref<InstanceType<typeof DateTimePicker> | null>(null);
+
+// Function to open the date time picker programmatically
+const openDatePicker = () => {
+  if (dateTimePickerRef.value) {
+    dateTimePickerRef.value.openDatePicker();
+  }
+};
+
+// Handle histogram time range zooming
+function handleHistogramTimeRangeZoom(range: { start: Date; end: Date }) {
+  try {
+    // Convert native Dates directly to CalendarDateTime
+    const start = toCalendarDateTime(fromDate(range.start, getLocalTimeZone()));
+    const end = toCalendarDateTime(fromDate(range.end, getLocalTimeZone()));
+
+    // Update the store's time range
+    exploreStore.setTimeRange({ start, end });
+
+    // Execute query immediately with new time range
+    executeQuery();
+
+    // Update URL state
+    syncUrlFromState();
+  } catch (e) {
+    console.error('Error handling histogram time range:', e);
+    toast({
+      title: 'Time Range Error',
+      description: 'There was an error updating the time range from chart selection.',
+      variant: 'destructive',
+      duration: TOAST_DURATION.ERROR
+    });
+  }
+}
+
+// New function to handle the update:timeRange event from LogHistogram
+function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValue }) {
+  try {
+    console.log('Updating time range from histogram selection:', range);
+
+    // Update the dateRange computed property which will update the store
+    dateRange.value = range;
+
+    // Also trigger the date picker to update its visual state
+    if (dateTimePickerRef.value) {
+      // This signals the DateTimePicker component to update its UI
+      nextTick(() => {
+        executeQuery();
+      });
+    } else {
+      // If we can't get the date picker ref, still execute the query
+      executeQuery();
+    }
+
+    // Update URL state
+    syncUrlFromState();
+  } catch (e) {
+    console.error('Error handling histogram time range update:', e);
+    toast({
+      title: 'Time Range Update Error',
+      description: 'There was an error updating the date picker with the selected time range.',
+      variant: 'destructive',
+      duration: TOAST_DURATION.ERROR
+    });
+  }
+}
+
+// Helper function to create example query with sort keys
+const createExampleQueryWithSortKeys = (sortKeys: string[] = []) => {
+  if (!sortKeys || sortKeys.length === 0) return '';
+
+  // Filter out the timestamp field
+  const tsField = sourceDetails.value?._meta_ts_field || '';
+  const filteredKeys = sortKeys.filter(key => key !== tsField);
+
+  // Create a simple example query using the first 2 non-timestamp sort keys
+  const keysToUse = filteredKeys.slice(0, 2);
+
+  if (keysToUse.length === 0) return '';
+
+  if (activeMode.value === 'logchefql') {
+    return keysToUse.map(key => `${key}="example"`).join(' and ');
+  } else {
+    // SQL example with first two non-timestamp keys
+    return `SELECT * FROM ${activeSourceTableName.value} WHERE ${keysToUse.map(key => `\`${key}\` = 'example'`).join(' AND ')} LIMIT 100`;
+  }
+};
+
+// Function to insert example query into editor
+const showPerformanceTip = ref(false);
+
+const insertExampleQuery = (sortKeys: string[] = []) => {
+  const exampleQuery = createExampleQueryWithSortKeys(sortKeys);
+  if (exampleQuery) {
+    if (activeMode.value === 'logchefql') {
+      logchefQuery.value = exampleQuery;
+    } else {
+      sqlQuery.value = exampleQuery;
+    }
+    nextTick(() => {
+      queryEditorRef.value?.focus(true);
+    });
+  }
+};
 </script>
 
 <template>
@@ -1089,10 +1228,10 @@ function updateSqlTableReference(tableName: string) {
   <!-- Main Explorer View -->
   <div v-else class="flex flex-col h-screen overflow-hidden">
     <!-- URL Error -->
-    <div v-if="urlError"
+    <div v-if="initializationError"
       class="absolute top-0 left-0 right-0 bg-destructive/15 text-destructive px-4 py-2 z-10 flex items-center justify-between">
-      <span class="text-sm">{{ urlError }}</span>
-      <Button variant="ghost" size="sm" @click="urlError = null" class="h-7 px-2">Dismiss</Button>
+      <span class="text-sm">{{ initializationError }}</span>
+      <Button variant="ghost" size="sm" @click="initializationError = null" class="h-7 px-2">Dismiss</Button>
     </div>
 
     <!-- Filter Bar -->
@@ -1148,8 +1287,8 @@ function updateSqlTableReference(tableName: string) {
 
       <!-- Time Controls Group -->
       <div class="flex items-center space-x-2 flex-grow">
-        <!-- Date/Time Picker -->
-        <DateTimePicker v-model="dateRange" class="h-8" />
+        <!-- Date/Time Picker with ref -->
+        <DateTimePicker ref="dateTimePickerRef" v-model="dateRange" class="h-8" />
 
         <!-- Limit Dropdown -->
         <DropdownMenu>
@@ -1219,12 +1358,66 @@ function updateSqlTableReference(tableName: string) {
                 :value="exploreStore.activeMode === 'logchefql' ? logchefQuery : sqlQuery" @change="(event) => event.mode === 'logchefql' ?
                   updateLogchefqlValue(event.query, event.isUserInput) :
                   updateSqlValue(event.query, event.isUserInput)"
-                :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter search criteria (e.g., level=\'error\' and status>400)' : 'Enter SQL query...'"
+                :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter search criteria (e.g., level=&quot;error&quot; and status>400)' : 'Enter SQL query...'"
                 :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
                 :showFieldsPanel="showFieldsPanel" @submit="executeQuery"
-                @update:activeMode="(mode) => changeMode(mode === 'logchefql' ? 'logchefql' : 'sql')"
+                @update:activeMode="(mode, isModeSwitchOnly) => changeMode(mode === 'logchefql' ? 'logchefql' : 'sql', isModeSwitchOnly)"
                 @toggle-fields="showFieldsPanel = !showFieldsPanel" @select-saved-query="loadSavedQuery"
                 @save-query="handleSaveOrUpdateClick" class="border-0 border-b" />
+
+              <!-- Sort Key Optimization Hint (Collapsible) -->
+              <div
+                v-if="sourceDetails?.sort_keys && (sourceDetails.sort_keys.length > 1 || (sourceDetails.sort_keys.length === 1 && sourceDetails.sort_keys[0] !== sourceDetails?._meta_ts_field))"
+                class="border-t bg-blue-50 dark:bg-blue-950/20">
+                <button
+                  class="w-full px-3 py-1.5 text-xs flex items-center justify-between text-blue-700 dark:text-blue-300 font-medium hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+                  @click="showPerformanceTip = !showPerformanceTip">
+                  <div class="flex items-center">
+                    <Info class="text-blue-600 dark:text-blue-400 h-4 w-4 mr-2" />
+                    <span>ClickHouse Performance Tip: Filter by
+                      <span v-for="(key, index) in sourceDetails?.sort_keys || []" :key="key" class="inline-flex">
+                        <code class="px-1 bg-blue-100 dark:bg-blue-900 rounded font-mono">{{ key }}</code>
+                        <span v-if="index < (sourceDetails?.sort_keys?.length || 0) - 1" class="px-0.5">,</span>
+                      </span>
+                    </span>
+                  </div>
+                  <svg class="h-4 w-4 transition-transform" :class="{ 'rotate-180': showPerformanceTip }"
+                    xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                <div v-if="showPerformanceTip"
+                  class="px-3 pb-3 pt-0 text-xs text-blue-800 dark:text-blue-200 space-y-2">
+                  <div class="flex items-center justify-between">
+                    <p>Sort Keys:
+                      <span v-for="(key, index) in sourceDetails?.sort_keys || []" :key="key" class="inline-flex">
+                        <code class="px-1 bg-blue-100 dark:bg-blue-900 rounded font-mono">{{ key }}</code>
+                        <span v-if="index < (sourceDetails?.sort_keys?.length || 0) - 1" class="px-0.5">,</span>
+                      </span>
+                    </p>
+                    <Button variant="outline" size="sm"
+                      class="h-6 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700 px-2"
+                      @click="insertExampleQuery(sourceDetails?.sort_keys || [])">
+                      <Plus class="h-3 w-3 mr-1" />
+                      Use Example
+                    </Button>
+                  </div>
+
+                  <div class="border-l-2 border-blue-300 dark:border-blue-700 pl-3 space-y-1.5">
+                    <p class="font-medium">Why this matters:</p>
+                    <p class="text-blue-700 dark:text-blue-300">ClickHouse performs best when queries filter by sort
+                      keys in order. This can significantly boost query speed.</p>
+                    <p class="text-blue-600 dark:text-blue-400 italic text-xs">
+                      Optimal filtering:
+                      <span v-for="(key, index) in sourceDetails?.sort_keys || []" :key="key">
+                        <code class="px-1 bg-blue-100 dark:bg-blue-900/50 rounded">{{ key }}</code>
+                        <span v-if="index < (sourceDetails?.sort_keys?.length || 0) - 1"> then </span>
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           </template>
 
@@ -1260,11 +1453,11 @@ function updateSqlTableReference(tableName: string) {
             <div class="flex items-center gap-2">
               <Button variant="default" class="h-9 px-4 flex items-center gap-2 shadow-sm" :class="{
                 'bg-amber-500 hover:bg-amber-600 text-amber-foreground': isDirty && !isExecutingQuery,
-                'bg-sky-500 hover:bg-sky-600 text-sky-foreground': isExecutingQuery
+                'bg-primary hover:bg-primary/90 text-primary-foreground': isExecutingQuery
               }" :disabled="isExecutingQuery || !canExecuteQuery" @click="executeQuery">
                 <Play v-if="!isExecutingQuery" class="h-4 w-4" />
                 <RefreshCw v-else class="h-4 w-4 animate-spin" />
-                <span>{{ isExecutingQuery ? 'Running Query...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>
+                <span>{{ isDirty ? 'Run Query*' : 'Run Query' }}</span>
                 <div class="flex flex-col items-start ml-1 border-l border-current/20 pl-2 text-xs text-current">
                   <div class="flex items-center gap-1">
                     <Keyboard class="h-3 w-3" />
@@ -1278,14 +1471,7 @@ function updateSqlTableReference(tableName: string) {
                   <TooltipTrigger asChild>
                     <Button variant="outline" size="sm" class="h-9 px-3 flex items-center gap-1.5"
                       @click="clearQueryEditor" :disabled="isExecutingQuery" aria-label="Clear query editor">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                        class="lucide lucide-eraser">
-                        <path
-                          d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
-                        <path d="M22 21H7" />
-                        <path d="m5 11 9 9" />
-                      </svg>
+                      <Eraser class="h-3.5 w-3.5" />
                       <span>Clear</span>
                     </Button>
                   </TooltipTrigger>
@@ -1294,11 +1480,28 @@ function updateSqlTableReference(tableName: string) {
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
+
+              <!-- Group By Selector - Moved here -->
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-muted-foreground whitespace-nowrap">Group By:</label>
+                <Select v-model="groupByField" class="max-w-[140px] h-8">
+                  <SelectTrigger class="h-8 text-xs">
+                    <SelectValue placeholder="No Grouping">
+                      {{ groupByField === '__none__' ? 'No Grouping' : groupByField }}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No Grouping</SelectItem>
+                    <SelectItem v-for="field in availableFields" :key="field.name" :value="field.name">
+                      {{ field.name }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <!-- Query Stats Preview -->
-            <div class="text-xs text-muted-foreground flex items-center gap-3"
-              v-if="exploreStore.lastExecutionTimestamp">
+            <div class="text-xs text-muted-foreground flex items-center" v-if="exploreStore.lastExecutionTimestamp">
               <span>Last successful run: {{ new Date(exploreStore.lastExecutionTimestamp).toLocaleTimeString() }}</span>
             </div>
           </div>
@@ -1316,6 +1519,13 @@ function updateSqlTableReference(tableName: string) {
                 service_name="api-gateway"</code></div>
             </div>
           </div>
+        </div>
+
+        <!-- Log Histogram Visualization -->
+        <div class="px-4 pb-3" v-if="!isChangingContext && currentSourceId && hasValidSource && exploreStore.timeRange">
+          <LogHistogram :time-range="exploreStore.timeRange" :is-loading="isExecutingQuery"
+            :group-by="groupByField === '__none__' ? undefined : groupByField"
+            @zoom-time-range="handleHistogramTimeRangeZoom" @update:timeRange="handleHistogramTimeRangeUpdate" />
         </div>
 
         <!-- Results Section -->
@@ -1356,11 +1566,9 @@ function updateSqlTableReference(tableName: string) {
                 <p class="text-sm text-muted-foreground max-w-md">
                   Your query returned no results for the selected time range. Try adjusting the query or time.
                 </p>
-                <Button variant="outline" size="sm" class="mt-4 h-8" @click="exploreStore.setTimeRange({
-                  start: now(getLocalTimeZone()).subtract({ minutes: 5 }),
-                  end: now(getLocalTimeZone())
-                })">
-                  Try Last 5 Minutes
+                <Button variant="outline" size="sm" class="mt-4 h-8" @click="openDatePicker">
+                  <CalendarIcon class="h-3.5 w-3.5 mr-2" />
+                  Adjust Timerange
                 </Button>
               </div>
             </template>

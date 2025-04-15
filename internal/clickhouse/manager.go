@@ -16,35 +16,39 @@ const (
 	HealthCheckTimeout = 5 * time.Second
 )
 
-// Manager manages multiple ClickHouse connections
+// Manager handles pooling and management of multiple ClickHouse client connections,
+// one per data source. It also manages query hooks applied to clients.
 type Manager struct {
 	clients    map[models.SourceID]*Client
-	clientsMux sync.RWMutex
+	clientsMux sync.RWMutex // Protects the clients map.
 	logger     *slog.Logger
 	health     map[models.SourceID]models.SourceHealth
-	mu         sync.RWMutex
-	hooks      []QueryHook // Store hooks to apply to new clients
+	mu         sync.RWMutex // Protects the health map.
+	hooks      []QueryHook  // Hooks applied to all managed clients.
 }
 
-// NewManager creates a new connection manager
+// NewManager creates a new ClickHouse connection manager.
 func NewManager(log *slog.Logger) *Manager {
 	m := &Manager{
 		clients: make(map[models.SourceID]*Client),
 		logger:  log.With("component", "clickhouse_manager"),
 		health:  make(map[models.SourceID]models.SourceHealth),
-		hooks:   []QueryHook{}, // Initialize empty, hooks will be added below
+		hooks:   []QueryHook{}, // Initialize empty slice.
 	}
 
-	// Add default hooks
-	m.AddQueryHook(NewLogQueryHook(log, false))       // Keep the basic error/completion logger
-	m.AddQueryHook(NewStructuredQueryLoggerHook(log)) // Add the new structured logger
+	// Apply default hooks for basic logging.
+	m.AddQueryHook(NewLogQueryHook(log, false))
+	m.AddQueryHook(NewStructuredQueryLoggerHook(log))
 
 	return m
 }
 
-// AddSource creates and stores a new connection
+// AddSource creates a new ClickHouse client connection based on the source details,
+// applies existing hooks, and stores it in the manager pool.
 func (m *Manager) AddSource(source *models.Source) error {
-	m.mu.Lock()
+	m.clientsMux.Lock() // Lock clients map for writing.
+	defer m.clientsMux.Unlock()
+	m.mu.Lock() // Lock health map for writing.
 	defer m.mu.Unlock()
 
 	m.logger.Info("adding source to manager",
@@ -53,7 +57,14 @@ func (m *Manager) AddSource(source *models.Source) error {
 		"table", source.Connection.TableName,
 	)
 
-	// Create new client
+	// Check if client already exists to prevent overwriting.
+	if _, exists := m.clients[source.ID]; exists {
+		m.logger.Warn("source already exists in manager, skipping add", "source_id", source.ID)
+		// Optionally update health status here if needed.
+		return nil // Not an error, already managed.
+	}
+
+	// Create new client.
 	client, err := NewClient(ClientOptions{
 		Host:     source.Connection.Host,
 		Database: source.Connection.Database,
@@ -64,49 +75,55 @@ func (m *Manager) AddSource(source *models.Source) error {
 		return fmt.Errorf("creating client: %w", err)
 	}
 
-	// Apply any existing hooks to the new client
-	m.clientsMux.Lock()
+	// Apply any existing hooks to the newly created client.
 	for _, hook := range m.hooks {
 		client.AddQueryHook(hook)
 	}
-	m.clientsMux.Unlock()
 
-	// Store the client
-	m.clientsMux.Lock()
+	// Store the client.
 	m.clients[source.ID] = client
-	m.clientsMux.Unlock()
 
-	// Initialize health status
+	// Initialize health status.
 	m.health[source.ID] = models.SourceHealth{
 		SourceID:    source.ID,
-		Status:      models.HealthStatusHealthy,
+		Status:      models.HealthStatusHealthy, // Assume healthy on add; health check verifies later.
 		LastChecked: time.Now(),
 	}
 
 	return nil
 }
 
-// RemoveSource removes a source connection
+// RemoveSource closes the connection for the given source ID and removes it from the manager.
 func (m *Manager) RemoveSource(sourceID models.SourceID) error {
 	m.logger.Info("removing source from manager", "source_id", sourceID)
 
 	m.clientsMux.Lock()
-	defer m.clientsMux.Unlock()
+	client, exists := m.clients[sourceID]
+	delete(m.clients, sourceID) // Remove from map regardless of close success.
+	m.clientsMux.Unlock()
 
-	if client, exists := m.clients[sourceID]; exists {
+	m.mu.Lock()
+	delete(m.health, sourceID) // Remove health status.
+	m.mu.Unlock()
+
+	if exists && client != nil {
 		if err := client.Close(); err != nil {
-			m.logger.Error("error closing client",
+			m.logger.Error("error closing client during removal",
 				"source_id", sourceID,
 				"error", err,
 			)
+			// Return the close error if needed, otherwise just log.
+			// return err
 		}
-		delete(m.clients, sourceID)
+	} else {
+		m.logger.Warn("attempted to remove source not found in manager", "source_id", sourceID)
 	}
 
 	return nil
 }
 
-// GetConnection returns a connection for immediate use
+// GetConnection returns the managed client connection for a given source ID.
+// Returns ErrSourceNotConnected if the source is not currently managed.
 func (m *Manager) GetConnection(sourceID models.SourceID) (*Client, error) {
 	m.clientsMux.RLock()
 	defer m.clientsMux.RUnlock()
@@ -119,56 +136,30 @@ func (m *Manager) GetConnection(sourceID models.SourceID) (*Client, error) {
 	return client, nil
 }
 
-// GetClient returns a client for a given source ID (alias for GetConnection for backward compatibility)
+// GetClient is an alias for GetConnection for potential backward compatibility.
 func (m *Manager) GetClient(sourceID models.SourceID) (*Client, error) {
 	return m.GetConnection(sourceID)
 }
 
-// QueryLogs executes a log query against a specific source
-func (m *Manager) QueryLogs(ctx context.Context, sourceID models.SourceID, source *models.Source, params LogQueryParams) (*models.QueryResult, error) {
-	// Get client
-	client, err := m.GetClient(sourceID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting client for source %d: %w", sourceID, err)
-	}
-
-	// Validate query parameters
-	if params.RawSQL == "" {
-		return nil, ErrInvalidQuery
-	}
-
-	if params.Limit <= 0 {
-		params.Limit = DefaultQueryLimit
-	}
-
-	// Get table name from source
-	tableName := fmt.Sprintf("%s.%s", source.Connection.Database, source.Connection.TableName)
-
-	// Build the query using QueryBuilder
-	qb := NewQueryBuilder(tableName)
-	query, err := qb.BuildRawQuery(params.RawSQL, params.Limit)
-	if err != nil {
-		return nil, fmt.Errorf("building query: %w", err)
-	}
-
-	// Execute the query
-	return client.Query(ctx, query)
-}
-
-// GetHealth returns the health status for a given source
+// GetHealth checks the connectivity of a specific source and returns its health status.
 func (m *Manager) GetHealth(sourceID models.SourceID) models.SourceHealth {
+	m.mu.Lock() // Lock health map for update.
+	defer m.mu.Unlock()
+
 	health := models.SourceHealth{
 		SourceID:    sourceID,
-		LastChecked: time.Now(),
+		LastChecked: time.Now(), // Update check time regardless of outcome.
 	}
 
-	client, err := m.GetConnection(sourceID)
+	client, err := m.GetConnection(sourceID) // GetConnection uses RLock on clientsMux.
 	if err != nil {
 		health.Status = models.HealthStatusUnhealthy
 		health.Error = err.Error()
+		m.health[sourceID] = health // Store updated unhealthy status.
 		return health
 	}
 
+	// Perform the actual health check.
 	ctx, cancel := context.WithTimeout(context.Background(), HealthCheckTimeout)
 	defer cancel()
 
@@ -176,16 +167,18 @@ func (m *Manager) GetHealth(sourceID models.SourceID) models.SourceHealth {
 	if err != nil {
 		health.Status = models.HealthStatusUnhealthy
 		health.Error = err.Error()
-		return health
+	} else {
+		health.Status = models.HealthStatusHealthy
 	}
 
-	health.Status = models.HealthStatusHealthy
+	m.health[sourceID] = health // Store updated health status.
 	return health
 }
 
-// Close closes all connections
+// Close iterates through all managed client connections and closes them.
+// It returns the last error encountered during closing, if any.
 func (m *Manager) Close() error {
-	m.logger.Info("closing all connections")
+	m.logger.Info("closing all managed clickhouse connections")
 
 	m.clientsMux.Lock()
 	defer m.clientsMux.Unlock()
@@ -197,22 +190,30 @@ func (m *Manager) Close() error {
 				"source_id", id,
 				"error", err,
 			)
-			lastErr = err
+			lastErr = err // Keep track of the last error.
 		}
+		// Remove closed client from map? Or rely on RemoveSource?
+		// delete(m.clients, id) // Optional: Clear map after closing.
 	}
+	m.clients = make(map[models.SourceID]*Client) // Reset map after closing all.
+
+	m.mu.Lock()
+	m.health = make(map[models.SourceID]models.SourceHealth) // Clear health map.
+	m.mu.Unlock()
 
 	return lastErr
 }
 
-// CreateTemporaryClient creates a temporary client for connection validation
-// This client is not stored in the manager and should be closed by the caller
+// CreateTemporaryClient creates a new, unmanaged ClickHouse client instance,
+// typically used for validating connection details before adding a source.
+// The caller is responsible for closing the returned client.
 func (m *Manager) CreateTemporaryClient(source *models.Source) (*Client, error) {
 	m.logger.Info("creating temporary client for validation",
 		"host", source.Connection.Host,
 		"database", source.Connection.Database,
 	)
 
-	// Create new client
+	// Create new client with a specific logger attribute for validation context.
 	client, err := NewClient(ClientOptions{
 		Host:     source.Connection.Host,
 		Database: source.Connection.Database,
@@ -222,21 +223,23 @@ func (m *Manager) CreateTemporaryClient(source *models.Source) (*Client, error) 
 
 	if err != nil {
 		m.logger.Error("failed to create temporary client", "error", err)
-		return nil, fmt.Errorf("error creating client: %w", err)
+		return nil, fmt.Errorf("error creating temporary client: %w", err)
 	}
 
 	return client, nil
 }
 
-// AddQueryHook adds a query hook to all clients
+// AddQueryHook adds a query hook to the manager's list.
+// The hook will be applied to all currently managed clients and any
+// subsequently added clients via AddSource.
 func (m *Manager) AddQueryHook(hook QueryHook) {
-	m.clientsMux.Lock()
+	m.clientsMux.Lock() // Lock for both hooks slice and iterating clients map.
 	defer m.clientsMux.Unlock()
 
-	// Store the hook for future clients
+	// Store the hook for future clients.
 	m.hooks = append(m.hooks, hook)
 
-	// Add hook to all existing clients
+	// Add hook to all existing clients.
 	for _, client := range m.clients {
 		client.AddQueryHook(hook)
 	}

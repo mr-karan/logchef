@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Calendar } from '@/components/ui/calendar'
 import { CalendarIcon, Clock } from 'lucide-vue-next'
 import type { DateRange } from 'radix-vue'
-import { getLocalTimeZone, now, ZonedDateTime, toZoned, CalendarDateTime, type DateValue } from '@internationalized/date'
+import { getLocalTimeZone, now, ZonedDateTime, toZoned, CalendarDateTime, type DateValue, parseDateTime } from '@internationalized/date'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -35,9 +35,12 @@ const errorMessage = ref('')
 // Date state
 const currentTime = now(getLocalTimeZone())
 const dateRange = ref<{ start: DateValue; end: DateValue }>({
-    start: currentTime.subtract({ minutes: 5 }),
+    start: currentTime.subtract({ hours: 1 }),
     end: currentTime
 })
+
+// Get the currently selected range text
+const selectedQuickRange = ref<string | null>(null)
 
 // Computed DateRange for v-model binding
 const calendarDateRange = computed({
@@ -79,8 +82,10 @@ if (!props.modelValue?.start || !props.modelValue?.end) {
 // Sync internal state with external value
 watch(() => props.modelValue, (newValue) => {
     if (newValue?.start && newValue?.end) {
-        const start = toZoned(newValue.start as CalendarDateTime, getLocalTimeZone())
-        const end = toZoned(newValue.end as CalendarDateTime, getLocalTimeZone())
+        const start = newValue.start instanceof ZonedDateTime ?
+            newValue.start : toZoned(newValue.start as CalendarDateTime, getLocalTimeZone());
+        const end = newValue.end instanceof ZonedDateTime ?
+            newValue.end : toZoned(newValue.end as CalendarDateTime, getLocalTimeZone());
 
         dateRange.value = {
             start: newValue.start,
@@ -96,8 +101,12 @@ watch(() => props.modelValue, (newValue) => {
                 time: formatTime(end)
             }
         }
+
+        // Update selected quick range to null when time range is updated externally
+        // This ensures the display shows the actual time range rather than a quick range label
+        selectedQuickRange.value = null;
     }
-}, { immediate: true })
+}, { immediate: true, deep: true })
 
 const quickRanges = [
     { label: 'Last 5m', duration: { minutes: 5 } },
@@ -136,7 +145,7 @@ function formatTime(date: ZonedDateTime | null | undefined): string {
     }
 }
 
-function parseDateTime(date: string, time: string): ZonedDateTime | null {
+function parseDateTimeInput(date: string, time: string): ZonedDateTime | null {
     if (!date || !time) return null
     try {
         const [year, month, day] = date.split('-').map(Number)
@@ -155,8 +164,12 @@ function parseDateTime(date: string, time: string): ZonedDateTime | null {
         }
 
         try {
-            const calendarDate = new CalendarDateTime(year, month, day, hour, minute, second)
-            return toZoned(calendarDate, getLocalTimeZone())
+            // Create an ISO string and parse it with parseDateTime
+            const dateString = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}T${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')}`;
+            // Call parseDateTime with a single argument - the ISO string
+            const calendarDate = parseDateTime(dateString);
+            // Convert the CalendarDateTime to a ZonedDateTime
+            return toZoned(calendarDate, getLocalTimeZone());
         } catch (e) {
             console.error('Error creating ZonedDateTime:', e)
             errorMessage.value = 'Invalid date/time values'
@@ -192,8 +205,8 @@ function formatDisplayText() {
 function handleApply() {
     errorMessage.value = ''
 
-    const start = parseDateTime(draftState.value.start.date, draftState.value.start.time)
-    const end = parseDateTime(draftState.value.end.date, draftState.value.end.time)
+    const start = parseDateTimeInput(draftState.value.start.date, draftState.value.start.time)
+    const end = parseDateTimeInput(draftState.value.end.date, draftState.value.end.time)
 
     if (!start || !end) return
 
@@ -259,9 +272,6 @@ function emitUpdate() {
     }
 }
 
-// Get the currently selected range text
-const selectedQuickRange = ref<string | null>(null)
-
 const selectedRangeText = computed(() => {
     if (!dateRange.value?.start || !dateRange.value?.end) return 'Select time range'
     if (selectedQuickRange.value) return selectedQuickRange.value
@@ -281,6 +291,16 @@ const durationText = computed(() => {
     if (diffDays > 0) return `Duration: ${diffDays}d ${diffHours}h ${diffMinutes}m`
     if (diffHours > 0) return `Duration: ${diffHours}h ${diffMinutes}m`
     return `Duration: ${diffMinutes}m`
+})
+
+// Function to open the date picker programmatically
+function openDatePicker() {
+    showDatePicker.value = true
+}
+
+// Expose methods to parent component
+defineExpose({
+    openDatePicker
 })
 </script>
 
@@ -318,9 +338,7 @@ const durationText = computed(() => {
                                             </Button>
                                         </PopoverTrigger>
                                         <PopoverContent class="w-auto p-0" :side="'bottom'" :align="'end'">
-                                            <Calendar
-                                                :selected-date="dateRange.start !== undefined ? dateRange.start : null"
-                                                class="rounded-md border"
+                                            <Calendar :selected-date="dateRange.start" class="rounded-md border"
                                                 @update:model-value="date => handleCalendarUpdate('start', date)" />
                                         </PopoverContent>
                                     </Popover>
@@ -350,9 +368,7 @@ const durationText = computed(() => {
                                             </Button>
                                         </PopoverTrigger>
                                         <PopoverContent class="w-auto p-0" :side="'bottom'" :align="'end'">
-                                            <Calendar
-                                                :selected-date="dateRange.end !== undefined ? dateRange.end : null"
-                                                class="rounded-md border"
+                                            <Calendar :selected-date="dateRange.end" class="rounded-md border"
                                                 @update:model-value="date => handleCalendarUpdate('end', date)" />
                                         </PopoverContent>
                                     </Popover>

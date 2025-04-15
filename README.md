@@ -14,6 +14,7 @@ Logchef combines the power of Clickhouse for high-speed log storage with an intu
 - **User Management** - Multi-tenant with roles and permissions
 - **Real-time Visualizations** - Dashboards, charts, and graphs. (_Coming Soon!_)
 - **Alert System** - Configure alerts based on log conditions (_Coming Soon!_)
+- **API Documentation** - Complete Swagger/OpenAPI documentation for all endpoints
 
 ## Demo
 
@@ -37,6 +38,20 @@ Visit `http://localhost:8125`
 
 - Download the [latest release](https://github.com/mr-karan/logchef/releases) and extract the binary
 - Run `./logchef` and visit `http://localhost:8125`
+
+## API Documentation
+
+Logchef provides comprehensive API documentation using Swagger/OpenAPI.
+
+Once the server is running, you can access the Swagger UI at:
+
+```
+http://localhost:8125/swagger/
+```
+
+The API documentation includes all available endpoints, authentication requirements, request/response schemas, and example usage.
+
+If you're developing against the API, this documentation is the most up-to-date reference.
 
 ## Log Ingestion
 
@@ -70,6 +85,16 @@ Logchef is open source software. If you're interested in contributing:
 1. Clone the repository
 2. Set up your development environment with Go and Node.js
 3. Run `make dev` to start the development server
+
+### Generating API Documentation
+
+To update the Swagger/OpenAPI documentation after making changes to the API:
+
+```shell
+just swagger-gen
+```
+
+This will parse the API annotations in the code and regenerate the Swagger documentation.
 
 ## License
 

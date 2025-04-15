@@ -12,12 +12,12 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Server     ServerConfig       `koanf:"server"`
-	SQLite     SQLiteConfig       `koanf:"sqlite"`
-	Clickhouse []ClickhouseConfig `koanf:"clickhouse"`
-	OIDC       OIDCConfig         `koanf:"oidc"`
-	Auth       AuthConfig         `koanf:"auth"`
-	Logging    LoggingConfig      `koanf:"logging"`
+	Server     ServerConfig     `koanf:"server"`
+	SQLite     SQLiteConfig     `koanf:"sqlite"`
+	Clickhouse ClickhouseConfig `koanf:"clickhouse"`
+	OIDC       OIDCConfig       `koanf:"oidc"`
+	Auth       AuthConfig       `koanf:"auth"`
+	Logging    LoggingConfig    `koanf:"logging"`
 }
 
 // ServerConfig contains HTTP server settings

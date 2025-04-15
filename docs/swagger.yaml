@@ -1,0 +1,41 @@
+basePath: /api/v1
+host: localhost:8080
+info:
+  contact:
+    email: your-email@example.com
+    name: API Support
+    url: https://github.com/mr-karan/logchef
+  description: Log analytics and exploration platform for collecting, querying, and
+    visualizing log data
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://example.com/terms/
+  title: LogChef API
+  version: "1.0"
+paths:
+  /health:
+    get:
+      consumes:
+      - application/json
+      description: Returns the current status of the server along with build information
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Server status information
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Health check endpoint
+      tags:
+      - health
+schemes:
+- http
+- https
+securityDefinitions:
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

@@ -19,7 +19,7 @@ import {
 } from '@tanstack/vue-table'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Search, GripVertical, Download, Copy, Timer, Rows4, ZoomIn } from 'lucide-vue-next'
+import { Search, GripVertical, Download, Copy, Timer, Rows4, Equal, EqualNot } from 'lucide-vue-next'
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import DataTableColumnSelector from './data-table-column-selector.vue'
@@ -73,7 +73,10 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 // Get the actual field names to use with fallbacks
-const timestampFieldName = computed(() => props.timestampField || 'timestamp')
+const timestampFieldName = computed(() => {
+    // Ensure we prioritize the timestampField prop, which should contain the _meta_ts_field value
+    return props.timestampField || 'timestamp';
+})
 const severityFieldName = computed(() => props.severityField || 'severity_text')
 
 // Move tableColumns declaration near the top
@@ -176,7 +179,7 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
 
 // Watch for changes in columns OR search terms to regenerate table columns
 watch(
-    () => [props.columns, displayTimezone.value], // Also watch timezone for createColumns
+    () => [props.columns, displayTimezone.value, props.timestampField], // Also watch timestampField changes
     ([newColumns, newTimezone]) => {
         if (!newColumns || newColumns.length === 0) {
             tableColumns.value = []; // Clear columns if input is empty
@@ -469,28 +472,30 @@ type CustomColumnDef = ColumnDef<Record<string, any>> & {
     meta?: CustomColumnMeta;
 }
 
-// sourceDetails ref is already declared at the top
-const sourceDetails = ref<Source | null>(null)
+// Source details ref
+const sourceDetails = ref<Source | null>(null);
 
-// Watch for source details changes
+// Use a computed property to get source details from the store instead of making API calls
+const storeSourceDetails = computed(() => sourcesStore.currentSourceDetails);
+
+// Watch for source details changes in the store
 watch(
-    () => exploreStore.sourceId,
-    async (newSourceId) => {
-        if (newSourceId) {
-            const result = await sourcesStore.getSource(newSourceId)
-            if (result.success && result.data) {
-                sourceDetails.value = result.data as Source
-            } else {
-                sourceDetails.value = null; // Clear if fetch fails or no data
-            }
-        } else {
-            sourceDetails.value = null; // Clear if sourceId is null/0
-        }
+    storeSourceDetails,
+    (newSourceDetails) => {
+        sourceDetails.value = newSourceDetails;
     },
     { immediate: true }
 )
 
-// This watch is now redundant as we handle column creation in the combined watch above
+// Watch for source ID changes and clear details when there's no source
+watch(
+    () => exploreStore.sourceId,
+    (newSourceId) => {
+        if (!newSourceId) {
+            sourceDetails.value = null; // Clear if sourceId is null/0
+        }
+    }
+)
 
 // --- Native Drag and Drop Implementation ---
 
@@ -566,14 +571,14 @@ function formatExecutionTime(ms: number): string {
 
 // Define emits
 const emit = defineEmits<{
-    (e: 'drill-down', value: { column: string, value: any }): void
+    (e: 'drill-down', value: { column: string, value: any, operator: string }): void
 }>();
 
-// Function to handle drill-down action
-const handleDrillDown = (columnName: string, value: any) => {
+// Function to handle drill-down action with different operators
+const handleDrillDown = (columnName: string, value: any, operator: string = '=') => {
     if (props.activeMode !== 'logchefql') return;
 
-    emit('drill-down', { column: columnName, value });
+    emit('drill-down', { column: columnName, value, operator });
 };
 
 </script>
@@ -681,13 +686,13 @@ const handleDrillDown = (columnName: string, value: any) => {
                             <tr v-if="table.getHeaderGroups().length > 0 && table.getHeaderGroups()[0]"
                                 class="border-b border-b-muted-foreground/10">
                                 <th v-for="header in table.getHeaderGroups()[0].headers" :key="header.id" scope="col"
-                                    class="group relative h-9 px-3 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden border-r border-muted/30"
+                                    class="group relative h-9 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden border-r border-muted/30 p-0"
                                     :class="[
                                         getColumnType(header.column) === 'timestamp' ? 'font-semibold' : '',
                                         getColumnType(header.column) === 'severity' ? 'font-semibold' : '',
                                         header.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
-                                        header.column.id === draggingColumnId ? 'opacity-50 bg-primary/10' : '', // Style for dragging column
-                                        header.column.id === dragOverColumnId ? 'border-l-2 border-l-primary' : '' // Style for drop target indicator
+                                        header.column.id === draggingColumnId ? 'opacity-50 bg-primary/10' : '',
+                                        header.column.id === dragOverColumnId ? 'border-l-2 border-l-primary' : ''
                                     ]" :style="{
                                         width: `${header.getSize()}px`,
                                         minWidth: `${header.column.columnDef.minSize ?? defaultColumn.minSize}px`,
@@ -696,16 +701,16 @@ const handleDrillDown = (columnName: string, value: any) => {
                                     @dragenter="onDragEnter($event, header.column.id)" @dragover="onDragOver($event)"
                                     @dragleave="onDragLeave($event, header.column.id)"
                                     @drop="onDrop($event, header.column.id)" @dragend="onDragEnd">
-                                    <div class="flex items-center h-full">
+                                    <div class="flex items-center h-full px-3">
                                         <!-- Drag Handle -->
                                         <span
-                                            class="flex items-center justify-center flex-shrink-0 w-5 h-full mr-1.5 cursor-grab text-muted-foreground/50 group-hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                                            class="flex items-center justify-center flex-shrink-0 w-5 h-full mr-1 cursor-grab text-muted-foreground/50 group-hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                                             title="Drag to reorder column">
                                             <GripVertical class="h-4 w-4" />
                                         </span>
 
                                         <!-- Column Header Content (Title + Sort button from columns.ts) -->
-                                        <div class="flex-grow min-w-0 overflow-hidden mr-5">
+                                        <div class="flex-grow min-w-0 overflow-hidden">
                                             <!-- Check header.column.columnDef.header exists -->
                                             <FlexRender v-if="!header.isPlaceholder && header.column.columnDef.header"
                                                 :render="header.column.columnDef.header" :props="header.getContext()" />
@@ -760,14 +765,21 @@ const handleDrillDown = (columnName: string, value: any) => {
                                             </div>
                                             <!-- Action buttons container -->
                                             <div class="flex items-center">
-                                                <!-- Drill-down button - only in logchefQL mode -->
-                                                <Button v-if="props.activeMode === 'logchefql'" variant="ghost"
-                                                    size="icon"
-                                                    class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100 mr-1"
-                                                    @click.stop="handleDrillDown(cell.column.id, cell.getValue())"
-                                                    title="Filter by this value" aria-label="Filter by this value">
-                                                    <ZoomIn class="h-3 w-3" />
-                                                </Button>
+                                                <!-- Drill-down buttons - only in logchefQL mode -->
+                                                <template v-if="props.activeMode === 'logchefql'">
+                                                    <Button variant="ghost" size="icon"
+                                                        class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100 mr-0.5"
+                                                        @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '=')"
+                                                        title="Filter equals this value" aria-label="Filter equals this value">
+                                                        <Equal class="h-3 w-3" />
+                                                    </Button>
+                                                    <Button variant="ghost" size="icon"
+                                                        class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100 mr-1"
+                                                        @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '!=')"
+                                                        title="Filter not equals this value" aria-label="Filter not equals this value">
+                                                        <EqualNot class="h-3 w-3" />
+                                                    </Button>
+                                                </template>
                                                 <!-- Copy Button - show only when THIS cell is hovered -->
                                                 <Button variant="ghost" size="icon"
                                                     class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100"
@@ -812,12 +824,29 @@ const handleDrillDown = (columnName: string, value: any) => {
     width: 100%;
     border-collapse: separate;
     border-spacing: 0;
+    border: 1px solid hsl(var(--border) / 0.7);
+    /* Add subtle outer border */
+    border-radius: 6px;
+    overflow: hidden;
+    /* Keep rounded corners */
 }
 
-/* Add clear borders to create a grid-like structure */
+/* Add proper cell borders */
+.table-fixed th,
+.table-fixed td {
+    border-right: 1px solid hsl(var(--border) / 0.4);
+    border-bottom: 1px solid hsl(var(--border) / 0.4);
+}
+
+/* Remove right border from last column */
 .table-fixed th:last-child,
 .table-fixed td:last-child {
     border-right: none;
+}
+
+/* Remove bottom border from last row */
+.table-fixed tbody tr:last-child td {
+    border-bottom: none;
 }
 
 /* Resize handle and cursor styling */
@@ -872,34 +901,34 @@ const handleDrillDown = (columnName: string, value: any) => {
     position: relative;
 }
 
+/* Improved header styling for consistent appearance */
+.table-fixed th {
+    padding: 0 !important;
+    font-weight: 500;
+    background-color: hsl(var(--muted) / 0.4);
+    /* Slightly darker header background */
+    border-bottom: 1px solid hsl(var(--border) / 0.8);
+    /* More prominent bottom border */
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
 /* Make table row alternating colors more visible */
 .table-fixed tbody tr:nth-child(odd) {
-    background-color: hsl(var(--muted) / 0.03);
+    background-color: hsl(var(--muted) / 0.05);
+    /* Very slight background */
 }
 
 .table-fixed tbody tr:nth-child(even) {
     background-color: transparent;
 }
 
-/* Add highlight style */
-:deep(.search-highlight) {
-    background-color: hsl(var(--highlight, 60 100% 75%));
-    /* Use theme variable with fallback */
-    color: hsl(var(--highlight-foreground, 0 0% 0%));
-    /* Use theme variable with fallback */
-    padding: 0 1px;
-    margin: 0 -1px;
-    /* Prevent layout shift */
-    border-radius: 2px;
-    box-shadow: 0 0 0 1px hsl(var(--highlight, 60 100% 75%) / 0.5);
-    /* Subtle outline */
-}
-
-/* Ensure highlight works well in dark mode if theme variables are set */
-.dark :deep(.search-highlight) {
-    background-color: hsl(var(--highlight, 60 90% 55%));
-    color: hsl(var(--highlight-foreground, 0 0% 0%));
-    box-shadow: 0 0 0 1px hsl(var(--highlight, 60 90% 55%) / 0.7);
+/* More prominent hover effect for table rows */
+.table-fixed tbody tr:hover:not([data-expanded="true"]) {
+    background-color: hsl(var(--muted) / 0.25) !important;
+    position: relative;
+    z-index: 1;
+    /* Ensure hover appears above other rows */
 }
 
 /* Ensure proper rendering inside table cells - single line with no wrapping */
@@ -941,12 +970,6 @@ td>.flex>.whitespace-pre {
     /* Force grabbing cursor */
 }
 
-/* Optional: Style for the drag feedback (e.g., slightly transparent) */
-.group[draggable="true"]:active {
-    /* opacity: 0.7; */
-    /* Browser might provide its own feedback */
-}
-
 /* Cell-specific hover effect for action buttons */
 .cell-hover-target {
     position: relative;
@@ -965,13 +988,6 @@ td>.flex>.whitespace-pre {
 /* Style for drop indicator */
 .border-l-primary {
     border-left-color: hsl(var(--primary)) !important;
-}
-
-/* More prominent hover effect for table rows */
-.table-fixed tbody tr:hover:not([data-expanded="true"]) {
-    background-color: hsl(var(--muted) / 0.4) !important;
-    box-shadow: inset 0 0 0 1px hsl(var(--muted) / 0.5);
-    transition: background-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 /* Active/expanded row styling - using complementary colors */
@@ -1292,4 +1308,64 @@ td>.flex>.whitespace-pre {
 }
 
 /* Remove all severity styling as it's handled in utils.ts */
+
+/* Better render of header contents */
+.table-fixed th>div {
+    height: 100%;
+    width: 100%;
+    padding: 4px 8px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+/* Ensure column headers show text properly */
+.table-fixed th :deep(.truncate) {
+    max-width: 100%;
+    display: inline-block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    /* Required for flex truncation to work */
+}
+
+/* Refined header text display to work with any column name */
+.table-fixed th :deep(.flex-grow) {
+    flex: 1 1 auto;
+    min-width: 0;
+    /* Critical for text-overflow to work in flex containers */
+    max-width: calc(100% - 25px);
+    /* Leave room for icons */
+}
+
+/* Add better spacing for header content */
+.table-fixed th>div> :deep(.w-full) {
+    padding: 0 2px;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    /* Required for flexbox text truncation */
+}
+
+/* Add highlight style */
+:deep(.search-highlight) {
+    background-color: hsl(var(--highlight, 60 100% 75%));
+    /* Use theme variable with fallback */
+    color: hsl(var(--highlight-foreground, 0 0% 0%));
+    /* Use theme variable with fallback */
+    padding: 0 1px;
+    margin: 0 -1px;
+    /* Prevent layout shift */
+    border-radius: 2px;
+    box-shadow: 0 0 0 1px hsl(var(--highlight, 60 100% 75%) / 0.5);
+    /* Subtle outline */
+}
+
+/* Ensure highlight works well in dark mode if theme variables are set */
+.dark :deep(.search-highlight) {
+    background-color: hsl(var(--highlight, 60 90% 55%));
+    color: hsl(var(--highlight-foreground, 0 0% 0%));
+    box-shadow: 0 0 0 1px hsl(var(--highlight, 60 90% 55%) / 0.7);
+}
 </style>

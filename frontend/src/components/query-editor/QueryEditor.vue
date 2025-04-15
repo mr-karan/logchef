@@ -13,7 +13,7 @@
 
         <!-- Tabs for Mode Switching -->
         <Tabs :model-value="props.activeMode"
-          @update:model-value="(value: string | number) => $emit('update:activeMode', asEditorMode(value))"
+          @update:model-value="(value: string | number) => $emit('update:activeMode', asEditorMode(value), true)"
           class="w-auto">
           <TabsList class="grid grid-cols-2 w-fit">
             <TabsTrigger value="logchefql">
@@ -87,9 +87,7 @@
                 <div><code class="bg-muted px-1 rounded">field!~"pattern"</code> - Regex exclusion</div>
                 <div><code class="bg-muted px-1 rounded">field>100</code> - Comparison</div>
                 <div><code class="bg-muted px-1 rounded">(c1 and c2) or c3</code> - Grouping</div>
-                <div class="pt-1"><em>Example: <code
-                      class="bg-muted px-1 rounded">level="error" and status>=500</code></em>
-                </div>
+                <div class="pt-1"><em>Example: <code class="bg-muted px-1 rounded">level="error" and status>=500</code></em></div>
               </div>
               <div v-else class="text-xs space-y-1.5">
                 <div><code class="bg-muted px-1 rounded">SELECT count() FROM {{ tableName || 'table' }}</code></div>
@@ -113,9 +111,10 @@
       <div class="editor-container" :class="{
         'is-empty': isEditorEmpty
       }" :style="{ height: `${editorHeight}px` }" :data-placeholder="currentPlaceholder" :data-mode="props.activeMode">
-        <!-- Monaco Editor Component -->
-        <vue-monaco-editor v-model:value="editorContent" :theme="theme" :language="props.activeMode"
-          :options="monacoOptions" @mount="handleMount" @update:value="handleEditorChange" class="h-full w-full" />
+        <!-- Monaco Editor Component with stable key to prevent remounting -->
+        <vue-monaco-editor key="monaco-editor-instance" v-model:value="editorContent" :theme="theme"
+          :language="props.activeMode" :options="monacoOptions" @mount="handleMount" @update:value="handleEditorChange"
+          class="h-full w-full" />
       </div>
     </div>
 
@@ -126,9 +125,8 @@
       <span>
         <span class="font-medium">Validation Error: </span>
         {{ validationError }}
-        <span v-if="validationError.includes('Missing boolean operator')" class="block mt-1 text-xs">
-          Hint: Use <code class="bg-muted px-1 rounded">and</code> or <code class="bg-muted px-1 rounded">or</code>
-          between
+        <span v-if="validationError?.includes('Missing boolean operator')" class="block mt-1 text-xs">
+          Hint: Use <code class="bg-muted px-1 rounded">and</code> or <code class="bg-muted px-1 rounded">or</code> between
           conditions. Example: <code class="bg-muted px-1 rounded">field1="value" and field2="value"</code>
         </span>
       </span>
@@ -187,7 +185,7 @@ const props = defineProps({
 const emit = defineEmits<{
   (e: "change", value: EditorChangeEvent): void;
   (e: "submit", value: EditorChangeEvent): void;
-  (e: "update:activeMode", value: EditorMode): void;
+  (e: "update:activeMode", value: EditorMode, isModeSwitchOnly?: boolean): void;
   (e: "toggle-fields"): void;
   // SavedQueries events
   (e: "select-saved-query", query: SavedTeamQuery): void;
@@ -215,7 +213,7 @@ const currentPlaceholder = computed(() => {
   if (props.placeholder) return props.placeholder;
 
   return props.activeMode === 'logchefql'
-    ? 'Enter search criteria (e.g., level=\'error\' and status>400)'
+    ? 'Enter search criteria (e.g., level="error" and status>400)'
     : `Enter ClickHouse SQL query (e.g., SELECT * FROM ${props.tableName || 'your_table'} WHERE ...)`;
 });
 
@@ -240,6 +238,12 @@ const handleMount = (editor: MonacoEditor) => {
 
   editorRef.value = editor;
   initMonacoSetup(); // Ensure themes/languages are registered (runs once internally)
+
+  // Check if we should be in read-only mode
+  const isLoading = exploreStore.isLoadingOperation('executeQuery');
+  if (isLoading) {
+    editor.updateOptions({ readOnly: true });
+  }
 
   // Add Focus/Blur Listeners
   activeDisposables.value.push(
@@ -367,19 +371,26 @@ watchEffect(() => {
     let languageChanged = false; // Flag to track if mode changed
     const model = editor.getModel();
     if (model && model.getLanguageId() !== props.activeMode) {
+      // Only change the language model - don't recreate the editor
       monaco.editor.setModelLanguage(model, props.activeMode);
       languageChanged = true; // Set flag if language was updated
 
-      // Only re-register completion provider when language changes or on initial load
-      registerCompletionProvider(); // Update syntax highlighting/completion
+      // Register completion provider only once per language
+      if (!activeCompletionProvider.value || languageChanged) {
+        registerCompletionProvider(); // Update syntax highlighting/completion
+      }
     }
 
-    // Apply mode-specific options
+    // Get current loading state to ensure read-only flag is consistent
+    const isLoading = exploreStore.isLoadingOperation('executeQuery');
+
+    // Apply mode-specific options without recreating the editor
     const options = {
       ...getDefaultMonacoOptions(),
       fontSize: 13,
       lineHeight: 20,
       padding: { top: 8, bottom: 8 },
+      readOnly: isLoading, // Ensure read-only state is correctly synchronized
       scrollbar: {
         vertical: 'auto' as const,
         horizontal: 'auto' as const,
@@ -442,7 +453,19 @@ watch(() => props.schema, (newSchema) => {
 // Watch for loading state to make editor read-only
 watch(() => exploreStore.isLoadingOperation('executeQuery'), (isLoading) => {
   if (editorRef.value && !isDisposing.value) {
+    // Set read-only state when query is executing
     editorRef.value.updateOptions({ readOnly: isLoading });
+
+    // If loading is complete but editor still appears to be read-only,
+    // force a refresh of the editor options
+    if (!isLoading) {
+      setTimeout(() => {
+        if (editorRef.value && !isDisposing.value) {
+          // Ensure read-only is properly reset
+          editorRef.value.updateOptions({ readOnly: false });
+        }
+      }, 50);
+    }
   }
 });
 
@@ -649,8 +672,9 @@ const safelyDisposeEditor = () => {
       try {
         const model = editor.getModel();
         if (model && !model.isDisposed()) {
-          // Detach model - might help prevent leaks but often not strictly necessary if editor is disposed
-          // editor.setModel(null);
+          // Detach model before disposing editor
+          editor.setModel(null);
+          model.dispose();
         }
         editor.dispose(); // Dispose the editor instance itself
         console.log('QueryEditor: Editor instance disposed.');
@@ -658,8 +682,6 @@ const safelyDisposeEditor = () => {
         console.error("Error during editor instance disposal:", e);
       }
     }
-    // Optionally reset isDisposing flag after a delay if needed for complex re-mount scenarios
-    // setTimeout(() => { isDisposing.value = false; }, 100);
   }, 50); // Small delay
 };
 

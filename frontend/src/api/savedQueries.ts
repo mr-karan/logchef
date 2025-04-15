@@ -53,46 +53,30 @@ export interface TeamGroupedQuery {
  * Saved Queries API client
  */
 export const savedQueriesApi = {
-  listQueries: (teamId: number) =>
-    apiClient.get<SavedTeamQuery[]>(`/teams/${teamId}/queries`),
-
-  listSourceQueries: (sourceId: number, teamId?: number) =>
-    apiClient.get<SavedTeamQuery[]>(
-      `/sources/${sourceId}/queries${teamId ? `?team_id=${teamId}` : ''}`
-    ),
-
   listTeamSourceQueries: (teamId: number, sourceId: number) =>
-    apiClient.get<SavedTeamQuery[]>(`/teams/${teamId}/sources/${sourceId}/queries`),
+    apiClient.get<SavedTeamQuery[]>(`/teams/${teamId}/sources/${sourceId}/collections`),
 
-  getQuery: (teamId: number, queryId: string) =>
-    apiClient.get<SavedTeamQuery>(`/teams/${teamId}/queries/${queryId}`),
+  getTeamSourceQuery: (teamId: number, sourceId: number, collectionId: string) =>
+    apiClient.get<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}`),
 
-  getTeamSourceQuery: (teamId: number, sourceId: number, queryId: string) =>
-    apiClient.get<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/queries/${queryId}`),
-
-  createQuery: (teamId: number, query: Omit<SavedTeamQuery, "id" | "created_at" | "updated_at">) =>
-    apiClient.post<SavedTeamQuery>(`/teams/${teamId}/queries`, query),
-
-  createSourceQuery: (teamId: number, sourceId: number, query: {
+  createTeamSourceQuery: (teamId: number, sourceId: number, query: {
     name: string;
     description: string;
     query_type: string;
     query_content: string;
-  }) => apiClient.post<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/queries`, query),
-
-  updateQuery: (teamId: number, queryId: string, query: Partial<SavedTeamQuery>) =>
-    apiClient.put<SavedTeamQuery>(`/teams/${teamId}/queries/${queryId}`, query),
+  }) => apiClient.post<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections`, query),
 
   updateTeamSourceQuery: (
     teamId: number,
     sourceId: number,
-    queryId: string,
+    collectionId: string,
     query: Partial<Omit<SavedTeamQuery, "id" | "team_id" | "source_id" | "created_at" | "updated_at">>
   ) =>
-    apiClient.put<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/queries/${queryId}`, query),
+    apiClient.put<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}`, query),
 
-  deleteQuery: (teamId: number, sourceId: number, queryId: string) =>
-    apiClient.delete<{ success: boolean }>(`/teams/${teamId}/sources/${sourceId}/queries/${queryId}`),
+  deleteTeamSourceQuery: (teamId: number, sourceId: number, collectionId: string) =>
+    apiClient.delete<{ success: boolean }>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}`),
 
-  getUserTeams: () => apiClient.get<Team[]>("/users/me/teams")
+  // For retrieving user teams
+  getUserTeams: () => apiClient.get<Team[]>("/me/teams")
 };
