@@ -270,7 +270,7 @@ const queryEditorRef = ref<ComponentPublicInstance<{
 }> | null>(null);
 const isLoadingQuery = ref(false)
 const editQueryData = ref<SavedTeamQuery | null>(null)
-const groupByField = ref<string>('')
+const groupByField = ref<string>('__none__')
 
 // UI state computed properties
 const showLoadingState = computed(() => isInitializing.value && !initializationError.value)
@@ -1489,17 +1489,17 @@ function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValu
             <label class="text-sm text-muted-foreground">Group By:</label>
             <Select v-model="groupByField" class="w-48 h-8">
               <SelectTrigger>
-                <SelectValue placeholder="No Grouping">{{ groupByField || 'No Grouping' }}</SelectValue>
+                <SelectValue placeholder="No Grouping">{{ groupByField === '__none__' ? 'No Grouping' : groupByField }}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">No Grouping</SelectItem>
+                <SelectItem value="__none__">No Grouping</SelectItem>
                 <SelectItem v-for="field in availableFields" :key="field.name" :value="field.name">
                   {{ field.name }}
                 </SelectItem>
               </SelectContent>
             </Select>
           </div>
-          <LogHistogram :time-range="exploreStore.timeRange" :is-loading="isExecutingQuery" :group-by="groupByField"
+          <LogHistogram :time-range="exploreStore.timeRange" :is-loading="isExecutingQuery" :group-by="groupByField === '__none__' ? '' : groupByField"
             @zoom-time-range="handleHistogramTimeRangeZoom" @update:timeRange="handleHistogramTimeRangeUpdate" />
         </div>
 
