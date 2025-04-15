@@ -68,7 +68,7 @@ const windowResizeEventCallback = debounce(async () => {
     }
 }, 100);
 
-// Convert the histogram data to chart options
+// Convert the histogram data to chart options with Kibana-like styling
 const convertHistogramData = (buckets: HistogramData[]) => {
     if (!buckets || buckets.length === 0) {
         return {
@@ -76,37 +76,57 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 text: 'Log Distribution',
                 left: 'center',
                 textStyle: {
-                    fontSize: 12,
-                    fontWeight: 'normal'
+                    fontSize: 14,
+                    fontWeight: '500',
+                    color: 'hsl(var(--foreground))'
                 }
             },
             backgroundColor: 'transparent',
             grid: {
                 containLabel: true,
-                left: 20,
-                right: 20,
+                left: 25,
+                right: 25,
                 bottom: 20,
-                top: 30
+                top: 35
             },
             xAxis: {
                 type: 'category',
                 data: [],
                 silent: false,
-                splitLine: { show: false }
+                splitLine: { show: false },
+                axisLine: {
+                    lineStyle: {
+                        color: 'hsl(var(--border))'
+                    }
+                },
+                axisTick: {
+                    lineStyle: {
+                        color: 'hsl(var(--border))'
+                    }
+                }
             },
             yAxis: {
                 type: 'value',
-                axisLine: { show: true },
+                axisLine: { show: false },
                 splitLine: {
                     show: true,
-                    lineStyle: { type: 'dashed' }
+                    lineStyle: { 
+                        type: 'dashed',
+                        color: 'hsl(var(--border))',
+                        opacity: 0.5
+                    }
+                },
+                axisTick: { show: false },
+                axisLabel: {
+                    color: 'hsl(var(--muted-foreground))',
+                    fontSize: 11
                 }
             },
             series: [{
                 type: 'bar',
                 data: [],
                 itemStyle: {
-                    color: '#7A80C2'
+                    color: 'hsl(var(--primary))'
                 }
             }]
         };
@@ -149,26 +169,35 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             text: `${buckets.length.toLocaleString()} Log Records`,
             left: 'center',
             textStyle: {
-                fontSize: 12,
-                fontWeight: 'normal'
+                fontSize: 14,
+                fontWeight: '500',
+                color: 'hsl(var(--foreground))'
             }
         },
         backgroundColor: 'transparent',
         grid: {
             containLabel: true,
-            left: 20,
-            right: 20,
+            left: 25,
+            right: 25,
             bottom: 20,
-            top: 30
+            top: 35
         },
         tooltip: {
             show: true,
             trigger: 'axis',
+            backgroundColor: 'hsl(var(--popover))',
+            borderColor: 'hsl(var(--border))',
+            borderWidth: 1,
+            padding: 10,
             textStyle: {
-                fontSize: 12
+                fontSize: 12,
+                color: 'hsl(var(--popover-foreground))'
             },
             axisPointer: {
-                type: 'shadow'
+                type: 'shadow',
+                shadowStyle: {
+                    color: 'rgba(0, 0, 0, 0.1)'
+                }
             },
             formatter: function (params: any) {
                 // Add null checks for DOM element existence
@@ -186,8 +215,13 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 const value = params[0].data;
                 const timeStr = params[0].axisValue;
 
-                // Return simple text instead of HTML to avoid DOM manipulation issues
-                return `Time: ${timeStr}\nLog Count: ${value.toLocaleString()}`;
+                return `<div style="font-size: 12px;">
+                    <div style="font-weight: 500; margin-bottom: 4px;">${timeStr}</div>
+                    <div style="display: flex; align-items: center;">
+                        <span style="display: inline-block; width: 10px; height: 10px; background-color: hsl(var(--primary)); margin-right: 6px; border-radius: 2px;"></span>
+                        <span>Log Count: <strong>${value.toLocaleString()}</strong></span>
+                    </div>
+                </div>`;
             }
         },
         xAxis: {
@@ -200,32 +234,57 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                     return index % Math.max(Math.ceil(categoryData.length / 15), 1) === 0;
                 },
                 formatter: function (value: string) {
-                    // Only show time part in the labels for cleaner appearance
-                    return value.split(' ')[1];
+                    // Show date and time in a compact format
+                    const parts = value.split(' ');
+                    if (parts.length >= 2) {
+                        return `${parts[0].split('/')[0]}/${parts[0].split('/')[1]} ${parts[1].substring(0, 5)}`;
+                    }
+                    return value;
                 },
-                fontSize: 10
+                fontSize: 11,
+                color: 'hsl(var(--muted-foreground))',
+                margin: 10
+            },
+            axisLine: {
+                lineStyle: {
+                    color: 'hsl(var(--border))'
+                }
+            },
+            axisTick: {
+                alignWithLabel: true,
+                lineStyle: {
+                    color: 'hsl(var(--border))'
+                }
             },
             splitLine: { show: false }
         },
         yAxis: {
             type: 'value',
-            axisLine: { show: true },
+            axisLine: { show: false },
+            axisTick: { show: false },
             axisPointer: {
                 label: { precision: 0 }
             },
             splitLine: {
                 show: true,
-                lineStyle: { type: 'dashed' }
+                lineStyle: { 
+                    type: 'dashed',
+                    color: 'hsl(var(--border))',
+                    opacity: 0.5
+                }
             },
             axisLabel: {
-                formatter: (value: number) => Math.round(value).toLocaleString()
+                formatter: (value: number) => Math.round(value).toLocaleString(),
+                color: 'hsl(var(--muted-foreground))',
+                fontSize: 11,
+                margin: 12
             }
         },
         toolbox: {
             orient: 'horizontal',
             show: true,
             showTitle: true,
-            itemSize: 15,
+            itemSize: 14,
             right: 15,
             top: 5,
             feature: {
@@ -235,12 +294,30 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                     title: {
                         zoom: 'Area Zoom',
                         back: 'Reset Zoom'
+                    },
+                    iconStyle: {
+                        borderColor: 'hsl(var(--muted-foreground))',
+                        borderWidth: 1
+                    },
+                    emphasis: {
+                        iconStyle: {
+                            borderColor: 'hsl(var(--primary))'
+                        }
                     }
                 },
                 saveAsImage: {
                     show: true,
                     title: 'Save',
-                    pixelRatio: 2
+                    pixelRatio: 2,
+                    iconStyle: {
+                        borderColor: 'hsl(var(--muted-foreground))',
+                        borderWidth: 1
+                    },
+                    emphasis: {
+                        iconStyle: {
+                            borderColor: 'hsl(var(--primary))'
+                        }
+                    }
                 }
             }
         },
@@ -249,29 +326,39 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 type: 'inside',
                 xAxisIndex: 0,
                 start: 0,
-                end: 100
+                end: 100,
+                zoomOnMouseWheel: true,
+                moveOnMouseMove: true,
+                moveOnMouseWheel: true
             }
         ],
         series: [
             {
                 name: 'Log Count',
                 type: 'bar',
-                barMaxWidth: 40,
+                barMaxWidth: '80%',
+                barMinWidth: 2,
                 data: valueData,
                 large: true,
                 largeThreshold: 100,
                 itemStyle: {
-                    color: '#7A80C2',
-                    borderRadius: [2, 2, 0, 0]
+                    color: 'hsl(var(--primary))',
+                    borderRadius: [2, 2, 0, 0],
+                    opacity: 0.85
                 },
                 emphasis: {
                     itemStyle: {
-                        color: '#5b63b7'
+                        color: 'hsl(var(--primary))',
+                        opacity: 1,
+                        shadowBlur: 4,
+                        shadowColor: 'rgba(0, 0, 0, 0.2)'
                     }
                 }
             }
         ],
-        animation: false
+        animation: true,
+        animationDuration: 800,
+        animationEasing: 'cubicOut'
     };
 };
 
@@ -788,18 +875,18 @@ onBeforeUnmount(() => {
 .log-histogram {
     position: relative;
     width: 100%;
-    border-radius: 0.375rem;
+    border-radius: 0.5rem;
     background-color: hsl(var(--card));
     border: 1px solid hsl(var(--border));
-    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
     overflow: hidden;
-    margin-bottom: 0.5rem;
+    margin-bottom: 1rem;
 }
 
 .chart-container {
     width: 100%;
-    min-height: 150px;
-    padding: 0.25rem;
+    min-height: 180px;
+    padding: 0.5rem 0.25rem;
 }
 
 .histogram-loading-overlay {
@@ -812,20 +899,21 @@ onBeforeUnmount(() => {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    background-color: rgba(255, 255, 255, 0.85);
+    background-color: hsl(var(--card) / 0.9);
     z-index: 10;
-    gap: 0.5rem;
+    gap: 0.75rem;
     font-size: 0.875rem;
     color: hsl(var(--muted-foreground));
+    backdrop-filter: blur(2px);
 }
 
 .loading-spinner {
-    width: 1.5rem;
-    height: 1.5rem;
-    border: 2px solid hsl(var(--muted));
+    width: 1.75rem;
+    height: 1.75rem;
+    border: 3px solid hsl(var(--muted));
     border-top-color: hsl(var(--primary));
     border-radius: 50%;
-    animation: spinner 0.8s linear infinite;
+    animation: spinner 0.9s ease-in-out infinite;
 }
 
 .histogram-empty-state {
@@ -841,10 +929,15 @@ onBeforeUnmount(() => {
     color: hsl(var(--muted-foreground));
     font-size: 0.875rem;
     background-color: hsl(var(--card));
+    gap: 0.5rem;
+    opacity: 0.7;
 }
 
 @keyframes spinner {
-    to {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
         transform: rotate(360deg);
     }
 }
