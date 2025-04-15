@@ -84,6 +84,7 @@ export interface LogContextResponse {
 export interface HistogramDataPoint {
   bucket: string;
   log_count: number;
+  group_value?: string; // Optional field for grouped data
 }
 
 export interface HistogramResponse {
