@@ -4,7 +4,7 @@ import autoprefixer from "autoprefixer";
 import tailwind from "tailwindcss";
 import { defineConfig, loadEnv } from "vite";
 import { resolve } from "path";
-import { compression } from 'vite-plugin-compression';
+import compression from 'vite-plugin-compression';
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
