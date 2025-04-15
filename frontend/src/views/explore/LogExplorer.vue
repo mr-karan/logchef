@@ -1046,13 +1046,19 @@ function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValu
   const createExampleQueryWithSortKeys = (sortKeys: string[] = []) => {
     if (!sortKeys || sortKeys.length === 0) return '';
   
-    // Create a simple example query using the first 2 sort keys
-    const keysToUse = sortKeys.slice(0, 2);
+    // Filter out the timestamp field
+    const tsField = sourceDetails.value?._meta_ts_field || '';
+    const filteredKeys = sortKeys.filter(key => key !== tsField);
+    
+    // Create a simple example query using the first 2 non-timestamp sort keys
+    const keysToUse = filteredKeys.slice(0, 2);
   
+    if (keysToUse.length === 0) return '';
+      
     if (activeMode.value === 'logchefql') {
       return keysToUse.map(key => `${key}="example"`).join(' and ');
     } else {
-      // SQL example with first two keys
+      // SQL example with first two non-timestamp keys
       return `SELECT * FROM ${activeSourceTableName.value} WHERE ${keysToUse.map(key => `\`${key}\` = 'example'`).join(' AND ')} LIMIT 100`;
     }
   };
