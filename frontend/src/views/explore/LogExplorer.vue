@@ -824,11 +824,11 @@ const clearQueryEditor = () => {
 };
 
 // Function to handle drill-down from DataTable to add a filter condition
-const handleDrillDown = (data: { column: string; value: any }) => {
+const handleDrillDown = (data: { column: string; value: any; operator: string }) => {
   // Only handle in LogchefQL mode
   if (activeMode.value !== 'logchefql') return;
 
-  const { column, value } = data;
+  const { column, value, operator } = data;
 
   // Create a new condition based on the column and value
   let newCondition = '';
@@ -852,8 +852,8 @@ const handleDrillDown = (data: { column: string; value: any }) => {
     }
   }
 
-  // Create the condition
-  newCondition = `${column}=${formattedValue}`;
+  // Create the condition based on the operator
+  newCondition = `${column}${operator}${formattedValue}`;
 
   // Get the current query
   let currentQuery = logchefQuery.value?.trim() || '';

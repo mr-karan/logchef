@@ -19,7 +19,7 @@ import {
 } from '@tanstack/vue-table'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Search, GripVertical, Download, Copy, Timer, Rows4, Equal, EqualNot, SearchCheck } from 'lucide-vue-next'
+import { Search, GripVertical, Download, Copy, Timer, Rows4, Equal, EqualNot } from 'lucide-vue-next'
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import DataTableColumnSelector from './data-table-column-selector.vue'
@@ -774,16 +774,10 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
                                                         <Equal class="h-3 w-3" />
                                                     </Button>
                                                     <Button variant="ghost" size="icon"
-                                                        class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100 mr-0.5"
+                                                        class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100 mr-1"
                                                         @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '!=')"
                                                         title="Filter not equals this value" aria-label="Filter not equals this value">
                                                         <EqualNot class="h-3 w-3" />
-                                                    </Button>
-                                                    <Button variant="ghost" size="icon"
-                                                        class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100 mr-1"
-                                                        @click.stop="handleDrillDown(cell.column.id, cell.getValue(), 'contains')"
-                                                        title="Filter contains this value" aria-label="Filter contains this value">
-                                                        <SearchCheck class="h-3 w-3" />
                                                     </Button>
                                                 </template>
                                                 <!-- Copy Button - show only when THIS cell is hovered -->
