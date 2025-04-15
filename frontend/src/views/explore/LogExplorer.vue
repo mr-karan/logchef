@@ -1358,9 +1358,9 @@ function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValu
                   <div class="flex items-center">
                     <Info class="text-blue-600 dark:text-blue-400 h-4 w-4 mr-2" />
                     <span>ClickHouse Performance Tip: Filter by 
-                      <span v-for="(key, index) in sourceDetails.sort_keys" :key="key" class="inline-flex">
+                      <span v-for="(key, index) in sourceDetails?.sort_keys || []" :key="key" class="inline-flex">
                         <code class="px-1 bg-blue-100 dark:bg-blue-900 rounded font-mono">{{ key }}</code>
-                        <span v-if="index < sourceDetails.sort_keys.length - 1" class="px-0.5">,</span>
+                        <span v-if="index < (sourceDetails?.sort_keys?.length || 0) - 1" class="px-0.5">,</span>
                       </span>
                     </span>
                   </div>
@@ -1372,13 +1372,13 @@ function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValu
                 <div v-if="showPerformanceTip" class="px-3 pb-3 pt-0 text-xs text-blue-800 dark:text-blue-200 space-y-2">
                   <div class="flex items-center justify-between">
                     <p>Sort Keys: 
-                      <span v-for="(key, index) in sourceDetails.sort_keys" :key="key" class="inline-flex">
+                      <span v-for="(key, index) in sourceDetails?.sort_keys || []" :key="key" class="inline-flex">
                         <code class="px-1 bg-blue-100 dark:bg-blue-900 rounded font-mono">{{ key }}</code>
-                        <span v-if="index < sourceDetails.sort_keys.length - 1" class="px-0.5">,</span>
+                        <span v-if="index < (sourceDetails?.sort_keys?.length || 0) - 1" class="px-0.5">,</span>
                       </span>
                     </p>
-                    <Button variant="outline" size="xs" class="h-6 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700 px-2"
-                            @click="insertExampleQuery(sourceDetails.sort_keys)">
+                    <Button variant="outline" size="sm" class="h-6 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700 px-2"
+                            @click="insertExampleQuery(sourceDetails?.sort_keys || [])">
                       <Plus class="h-3 w-3 mr-1" />
                       Use Example
                     </Button>
@@ -1389,9 +1389,9 @@ function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValu
                     <p class="text-blue-700 dark:text-blue-300">ClickHouse performs best when queries filter by sort keys in order. This can significantly boost query speed.</p>
                     <p class="text-blue-600 dark:text-blue-400 italic text-xs">
                       Optimal filtering: 
-                      <span v-for="(key, index) in sourceDetails.sort_keys" :key="key">
+                      <span v-for="(key, index) in sourceDetails?.sort_keys || []" :key="key">
                         <code class="px-1 bg-blue-100 dark:bg-blue-900/50 rounded">{{ key }}</code>
-                        <span v-if="index < sourceDetails.sort_keys.length - 1"> then </span>
+                        <span v-if="index < (sourceDetails?.sort_keys?.length || 0) - 1"> then </span>
                       </span>
                     </p>
                   </div>
