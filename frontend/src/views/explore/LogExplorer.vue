@@ -1345,12 +1345,17 @@ function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValu
                 @save-query="handleSaveOrUpdateClick" class="border-0 border-b" />
 
               <!-- Sort Key Optimization Hint (Collapsible) -->
-              <div v-if="sourceDetails?.sort_keys?.length" class="border-t bg-blue-50 dark:bg-blue-950/20">
+              <div v-if="sourceDetails?.sort_keys?.length > 1 || (sourceDetails?.sort_keys?.length === 1 && sourceDetails.sort_keys[0] !== sourceDetails?._meta_ts_field)" class="border-t bg-blue-50 dark:bg-blue-950/20">
                 <button class="w-full px-3 py-1.5 text-xs flex items-center justify-between text-blue-700 dark:text-blue-300 font-medium hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
                         @click="showPerformanceTip = !showPerformanceTip">
                   <div class="flex items-center">
                     <Info class="text-blue-600 dark:text-blue-400 h-4 w-4 mr-2" />
-                    <span>ClickHouse Performance Tip: Optimize with Sort Keys</span>
+                    <span>ClickHouse Performance Tip: Filter by 
+                      <span v-for="(key, index) in sourceDetails.sort_keys" :key="key" class="inline-flex">
+                        <code class="px-1 bg-blue-100 dark:bg-blue-900 rounded font-mono">{{ key }}</code>
+                        <span v-if="index < sourceDetails.sort_keys.length - 1" class="px-0.5">,</span>
+                      </span>
+                    </span>
                   </div>
                   <svg class="h-4 w-4 transition-transform" :class="{ 'rotate-180': showPerformanceTip }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
