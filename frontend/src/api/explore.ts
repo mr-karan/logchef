@@ -127,12 +127,16 @@ export const exploreApi = {
     );
   },
 
-  getHistogramData: (sourceId: number, params: QueryParams, teamId: number, window: string = '1m') => {
+  getHistogramData: (sourceId: number, params: QueryParams, teamId: number, window: string = '1m', groupBy?: string) => {
     if (!teamId) {
       throw new Error("Team ID is required for getting histogram data");
     }
+    let url = `/teams/${teamId}/sources/${sourceId}/logs/histogram?window=${window}`;
+    if (groupBy) {
+      url += `&group_by=${encodeURIComponent(groupBy)}`;
+    }
     return apiClient.post<HistogramResponse>(
-      `/teams/${teamId}/sources/${sourceId}/logs/histogram?window=${window}`,
+      url,
       params
     );
   }
