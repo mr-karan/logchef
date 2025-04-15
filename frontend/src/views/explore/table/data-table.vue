@@ -19,7 +19,7 @@ import {
 } from '@tanstack/vue-table'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Search, GripVertical, Download, Copy, Timer, Rows4, ZoomIn } from 'lucide-vue-next'
+import { Search, GripVertical, Download, Copy, Timer, Rows4, Equal, EqualNot, SearchCheck } from 'lucide-vue-next'
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import DataTableColumnSelector from './data-table-column-selector.vue'
@@ -571,14 +571,14 @@ function formatExecutionTime(ms: number): string {
 
 // Define emits
 const emit = defineEmits<{
-    (e: 'drill-down', value: { column: string, value: any }): void
+    (e: 'drill-down', value: { column: string, value: any, operator: string }): void
 }>();
 
-// Function to handle drill-down action
-const handleDrillDown = (columnName: string, value: any) => {
+// Function to handle drill-down action with different operators
+const handleDrillDown = (columnName: string, value: any, operator: string = '=') => {
     if (props.activeMode !== 'logchefql') return;
 
-    emit('drill-down', { column: columnName, value });
+    emit('drill-down', { column: columnName, value, operator });
 };
 
 </script>
@@ -765,14 +765,27 @@ const handleDrillDown = (columnName: string, value: any) => {
                                             </div>
                                             <!-- Action buttons container -->
                                             <div class="flex items-center">
-                                                <!-- Drill-down button - only in logchefQL mode -->
-                                                <Button v-if="props.activeMode === 'logchefql'" variant="ghost"
-                                                    size="icon"
-                                                    class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100 mr-1"
-                                                    @click.stop="handleDrillDown(cell.column.id, cell.getValue())"
-                                                    title="Filter by this value" aria-label="Filter by this value">
-                                                    <ZoomIn class="h-3 w-3" />
-                                                </Button>
+                                                <!-- Drill-down buttons - only in logchefQL mode -->
+                                                <template v-if="props.activeMode === 'logchefql'">
+                                                    <Button variant="ghost" size="icon"
+                                                        class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100 mr-0.5"
+                                                        @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '=')"
+                                                        title="Filter equals this value" aria-label="Filter equals this value">
+                                                        <Equal class="h-3 w-3" />
+                                                    </Button>
+                                                    <Button variant="ghost" size="icon"
+                                                        class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100 mr-0.5"
+                                                        @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '!=')"
+                                                        title="Filter not equals this value" aria-label="Filter not equals this value">
+                                                        <EqualNot class="h-3 w-3" />
+                                                    </Button>
+                                                    <Button variant="ghost" size="icon"
+                                                        class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100 mr-1"
+                                                        @click.stop="handleDrillDown(cell.column.id, cell.getValue(), 'contains')"
+                                                        title="Filter contains this value" aria-label="Filter contains this value">
+                                                        <SearchCheck class="h-3 w-3" />
+                                                    </Button>
+                                                </template>
                                                 <!-- Copy Button - show only when THIS cell is hovered -->
                                                 <Button variant="ghost" size="icon"
                                                     class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100"
