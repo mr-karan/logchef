@@ -53,20 +53,20 @@ export interface TeamGroupedQuery {
  * Saved Queries API client
  */
 export const savedQueriesApi = {
-  listTeamSourceCollections: (teamId: number, sourceId: number) =>
+  listTeamSourceQueries: (teamId: number, sourceId: number) =>
     apiClient.get<SavedTeamQuery[]>(`/teams/${teamId}/sources/${sourceId}/collections`),
 
-  getTeamSourceCollection: (teamId: number, sourceId: number, collectionId: string) =>
+  getTeamSourceQuery: (teamId: number, sourceId: number, collectionId: string) =>
     apiClient.get<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}`),
 
-  createTeamSourceCollection: (teamId: number, sourceId: number, query: {
+  createTeamSourceQuery: (teamId: number, sourceId: number, query: {
     name: string;
     description: string;
     query_type: string;
     query_content: string;
   }) => apiClient.post<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections`, query),
 
-  updateTeamSourceCollection: (
+  updateTeamSourceQuery: (
     teamId: number,
     sourceId: number,
     collectionId: string,
@@ -74,7 +74,7 @@ export const savedQueriesApi = {
   ) =>
     apiClient.put<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}`, query),
 
-  deleteTeamSourceCollection: (teamId: number, sourceId: number, collectionId: string) =>
+  deleteTeamSourceQuery: (teamId: number, sourceId: number, collectionId: string) =>
     apiClient.delete<{ success: boolean }>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}`),
 
   // For retrieving user teams

@@ -221,7 +221,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
       };
 
       return await state.callApi<SavedTeamQuery>({
-        apiCall: () => savedQueriesApi.createSourceQuery(teamId, sourceId, query),
+        apiCall: () => savedQueriesApi.createTeamSourceQuery(teamId, sourceId, query),
         operationKey: `createSourceQuery-${teamId}-${sourceId}`,
         successMessage: "Query created successfully",
         onSuccess: (response) => {
@@ -306,7 +306,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     return await state.withLoading(`deleteQuery-${teamId}-${sourceId}-${queryId}`, async () => {
       // Delete API might return different structure, adjust type if needed
       return await state.callApi<{ success: boolean }>({ // Specify expected type
-        apiCall: () => savedQueriesApi.deleteQuery(teamId, sourceId, queryId),
+        apiCall: () => savedQueriesApi.deleteTeamSourceQuery(teamId, sourceId, queryId),
         operationKey: `deleteQuery-${teamId}-${sourceId}-${queryId}`,
         successMessage: "Query deleted successfully",
         onSuccess: (response) => {
