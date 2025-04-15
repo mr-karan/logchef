@@ -1042,20 +1042,37 @@ function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValu
   }
 }
 
-// Helper function to create example query with sort keys
-const createExampleQueryWithSortKeys = (sortKeys: string[] = []) => {
-  if (!sortKeys || sortKeys.length === 0) return '';
-
-  // Create a simple example query using the first 2 sort keys
-  const keysToUse = sortKeys.slice(0, 2);
-
-  if (activeMode.value === 'logchefql') {
-    return keysToUse.map(key => `${key}="example"`).join(' and ');
-  } else {
-    // SQL example with first two keys
-    return `SELECT * FROM ${activeSourceTableName.value} WHERE ${keysToUse.map(key => `${key} = 'example'`).join(' AND ')} LIMIT 100`;
-  }
-};
+  // Helper function to create example query with sort keys
+  const createExampleQueryWithSortKeys = (sortKeys: string[] = []) => {
+    if (!sortKeys || sortKeys.length === 0) return '';
+  
+    // Create a simple example query using the first 2 sort keys
+    const keysToUse = sortKeys.slice(0, 2);
+  
+    if (activeMode.value === 'logchefql') {
+      return keysToUse.map(key => `${key}="example"`).join(' and ');
+    } else {
+      // SQL example with first two keys
+      return `SELECT * FROM ${activeSourceTableName.value} WHERE ${keysToUse.map(key => `\`${key}\` = 'example'`).join(' AND ')} LIMIT 100`;
+    }
+  };
+  
+  // Function to insert example query into editor
+  const showPerformanceTip = ref(false);
+  
+  const insertExampleQuery = (sortKeys: string[] = []) => {
+    const exampleQuery = createExampleQueryWithSortKeys(sortKeys);
+    if (exampleQuery) {
+      if (activeMode.value === 'logchefql') {
+        logchefQuery.value = exampleQuery;
+      } else {
+        sqlQuery.value = exampleQuery;
+      }
+      nextTick(() => {
+        queryEditorRef.value?.focus(true);
+      });
+    }
+  };
 </script>
 
 <template>
@@ -1327,40 +1344,45 @@ const createExampleQueryWithSortKeys = (sortKeys: string[] = []) => {
                 @toggle-fields="showFieldsPanel = !showFieldsPanel" @select-saved-query="loadSavedQuery"
                 @save-query="handleSaveOrUpdateClick" class="border-0 border-b" />
 
-              <!-- Sort Key Optimization Hint -->
-              <div v-if="sourceDetails?.sort_keys?.length"
-                class="px-3 py-1.5 text-xs bg-blue-50 dark:bg-blue-950/40 border-t flex items-center">
-                <Info class="text-blue-600 dark:text-blue-400 h-4 w-4 mr-2" />
-                <div>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger class="flex items-center gap-1 text-blue-700 dark:text-blue-300 font-medium">
-                        ClickHouse performance tip:
-                        <span v-for="(key, index) in sourceDetails.sort_keys" :key="key" class="inline-flex">
-                          <code class="px-1 bg-blue-100 dark:bg-blue-900 rounded font-mono">{{ key }}</code>
-                          <span v-if="index < sourceDetails.sort_keys.length - 1" class="px-0.5">,</span>
-                        </span>
-                        <HelpCircle class="h-3.5 w-3.5 ml-1" />
-                      </TooltipTrigger>
-                      <TooltipContent class="max-w-md">
-                        <div class="space-y-2">
-                          <p class="font-medium">Why this matters:</p>
-                          <p>ClickHouse works best when queries filter by the table's sort keys in the same order.
-                            Including these fields in your filters can dramatically improve query performance.</p>
-                          <p class="text-sm text-muted-foreground italic">
-                            For optimal performance, filter by
-                            <span v-for="(key, index) in sourceDetails.sort_keys" :key="key">
-                              <code class="px-1 bg-primary/10 rounded">{{ key }}</code>
-                              <span v-if="index < sourceDetails.sort_keys.length - 1"> then </span>
-                            </span>
-                          </p>
-                          <p class="text-xs border-t border-border pt-1 mt-1">Example query: <code
-                              class="bg-muted p-0.5 rounded">{{ createExampleQueryWithSortKeys(sourceDetails.sort_keys) }}</code>
-                          </p>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+              <!-- Sort Key Optimization Hint (Collapsible) -->
+              <div v-if="sourceDetails?.sort_keys?.length" class="border-t bg-blue-50 dark:bg-blue-950/20">
+                <button class="w-full px-3 py-1.5 text-xs flex items-center justify-between text-blue-700 dark:text-blue-300 font-medium hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+                        @click="showPerformanceTip = !showPerformanceTip">
+                  <div class="flex items-center">
+                    <Info class="text-blue-600 dark:text-blue-400 h-4 w-4 mr-2" />
+                    <span>ClickHouse Performance Tip: Optimize with Sort Keys</span>
+                  </div>
+                  <svg class="h-4 w-4 transition-transform" :class="{ 'rotate-180': showPerformanceTip }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                
+                <div v-if="showPerformanceTip" class="px-3 pb-3 pt-0 text-xs text-blue-800 dark:text-blue-200 space-y-2">
+                  <div class="flex items-center justify-between">
+                    <p>Sort Keys: 
+                      <span v-for="(key, index) in sourceDetails.sort_keys" :key="key" class="inline-flex">
+                        <code class="px-1 bg-blue-100 dark:bg-blue-900 rounded font-mono">{{ key }}</code>
+                        <span v-if="index < sourceDetails.sort_keys.length - 1" class="px-0.5">,</span>
+                      </span>
+                    </p>
+                    <Button variant="outline" size="xs" class="h-6 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700 px-2"
+                            @click="insertExampleQuery(sourceDetails.sort_keys)">
+                      <Plus class="h-3 w-3 mr-1" />
+                      Use Example
+                    </Button>
+                  </div>
+                  
+                  <div class="border-l-2 border-blue-300 dark:border-blue-700 pl-3 space-y-1.5">
+                    <p class="font-medium">Why this matters:</p>
+                    <p class="text-blue-700 dark:text-blue-300">ClickHouse performs best when queries filter by sort keys in order. This can significantly boost query speed.</p>
+                    <p class="text-blue-600 dark:text-blue-400 italic text-xs">
+                      Optimal filtering: 
+                      <span v-for="(key, index) in sourceDetails.sort_keys" :key="key">
+                        <code class="px-1 bg-blue-100 dark:bg-blue-900/50 rounded">{{ key }}</code>
+                        <span v-if="index < sourceDetails.sort_keys.length - 1"> then </span>
+                      </span>
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
