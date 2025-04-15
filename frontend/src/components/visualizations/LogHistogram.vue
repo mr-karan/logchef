@@ -126,7 +126,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 type: 'bar',
                 data: [],
                 itemStyle: {
-                    color: 'hsl(var(--primary))'
+                    color: '#4a90e2' // A pleasant, Kibana-like blue for log analytics
                 }
             }]
         };
@@ -218,7 +218,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 return `<div style="font-size: 12px;">
                     <div style="font-weight: 500; margin-bottom: 4px;">${timeStr}</div>
                     <div style="display: flex; align-items: center;">
-                        <span style="display: inline-block; width: 10px; height: 10px; background-color: hsl(var(--primary)); margin-right: 6px; border-radius: 2px;"></span>
+                        <span style="display: inline-block; width: 10px; height: 10px; background-color: #4a90e2; margin-right: 6px; border-radius: 2px;"></span>
                         <span>Log Count: <strong>${value.toLocaleString()}</strong></span>
                     </div>
                 </div>`;
@@ -342,13 +342,13 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 large: true,
                 largeThreshold: 100,
                 itemStyle: {
-                    color: 'hsl(var(--primary))',
+                    color: '#4a90e2', // A pleasant, Kibana-like blue for log analytics
                     borderRadius: [2, 2, 0, 0],
                     opacity: 0.85
                 },
                 emphasis: {
                     itemStyle: {
-                        color: 'hsl(var(--primary))',
+                        color: '#357abd', // Slightly darker blue for hover/selection
                         opacity: 1,
                         shadowBlur: 4,
                         shadowColor: 'rgba(0, 0, 0, 0.2)'
