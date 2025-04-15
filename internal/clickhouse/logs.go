@@ -3,10 +3,10 @@ package clickhouse
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
-	clickhouseparser "github.com/AfterShip/clickhouse-sql-parser/parser"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -73,12 +73,14 @@ type HistogramParams struct {
 	EndTime   time.Time
 	Window    TimeWindow
 	Query     string // Optional: Raw SQL WHERE clause conditions to apply.
+	GroupBy   string // Optional: Field to group by for segmented histograms.
 }
 
 // HistogramData represents a single time bucket and its log count in a histogram.
 type HistogramData struct {
-	Bucket   time.Time `json:"bucket"`    // Start time of the bucket.
-	LogCount int       `json:"log_count"` // Number of logs in the bucket.
+	Bucket     time.Time `json:"bucket"`      // Start time of the bucket.
+	LogCount   int       `json:"log_count"`   // Number of logs in the bucket.
+	GroupValue string    `json:"group_value"` // Value of the group for grouped histograms.
 }
 
 // HistogramResult holds the complete histogram data and its granularity.
@@ -87,86 +89,159 @@ type HistogramResult struct {
 	Data        []HistogramData `json:"data"`
 }
 
+// Helper function to find the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// Helper function to extract WHERE clause from SQL query
+func extractWhereClause(sql string) string {
+	// Simple extraction using case-insensitive regex to find WHERE clause
+	// This is a basic implementation that might need to be enhanced for complex queries
+	wherePattern := `(?i)WHERE\s+(.*?)(?:\s+(?:GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|OFFSET|UNION|INTERSECT|EXCEPT|$))`
+	re := regexp.MustCompile(wherePattern)
+	matches := re.FindStringSubmatch(sql)
+
+	if len(matches) > 1 {
+		return strings.TrimSpace(matches[1])
+	}
+
+	// If no WHERE clause found or if the input might be just conditions
+	// Check if it contains standard SQL operators
+	operatorPattern := `(?i)(=|!=|<>|<|>|<=|>=|LIKE|IN\s*\(|NOT IN\s*\(|BETWEEN)`
+	hasOperators := regexp.MustCompile(operatorPattern).MatchString(sql)
+
+	if hasOperators {
+		// Looks like conditions without WHERE keyword
+		return strings.TrimSpace(sql)
+	}
+
+	return ""
+}
+
 // GetHistogramData generates histogram data by grouping log counts into time buckets.
 // It applies the time range and an optional WHERE clause filter provided in params.Query.
-func (c *Client) GetHistogramData(ctx context.Context, tableName string, timestampField string, params HistogramParams) (*HistogramResult, error) {
-	intervalValue, intervalUnit, err := getIntervalFromWindow(params.Window)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get interval from window: %w", err)
+// If params.GroupBy is provided, results will be grouped by that field.
+func (c *Client) GetHistogramData(ctx context.Context, tableName, timestampField string, params HistogramParams) (*HistogramResult, error) {
+	// Convert TimeWindow to the appropriate ClickHouse interval function
+	var intervalFunc string
+	switch params.Window {
+	case TimeWindow1s:
+		intervalFunc = fmt.Sprintf("toStartOfSecond(%s)", timestampField)
+	case TimeWindow5s, TimeWindow10s, TimeWindow15s, TimeWindow30s:
+		// For custom second intervals, use toStartOfInterval
+		seconds := strings.TrimSuffix(string(params.Window), "s")
+		intervalFunc = fmt.Sprintf("toStartOfInterval(%s, INTERVAL %s SECOND)", timestampField, seconds)
+	case TimeWindow1m:
+		intervalFunc = fmt.Sprintf("toStartOfMinute(%s)", timestampField)
+	case TimeWindow5m:
+		intervalFunc = fmt.Sprintf("toStartOfFiveMinute(%s)", timestampField)
+	case TimeWindow10m, TimeWindow15m, TimeWindow30m:
+		// For custom minute intervals, use toStartOfInterval
+		minutes := strings.TrimSuffix(string(params.Window), "m")
+		intervalFunc = fmt.Sprintf("toStartOfInterval(%s, INTERVAL %s MINUTE)", timestampField, minutes)
+	case TimeWindow1h:
+		intervalFunc = fmt.Sprintf("toStartOfHour(%s)", timestampField)
+	case TimeWindow2h, TimeWindow3h, TimeWindow6h, TimeWindow12h, TimeWindow24h:
+		// For custom hour intervals, use toStartOfInterval
+		hours := strings.TrimSuffix(string(params.Window), "h")
+		intervalFunc = fmt.Sprintf("toStartOfInterval(%s, INTERVAL %s HOUR)", timestampField, hours)
+	default:
+		return nil, fmt.Errorf("invalid time window: %s", params.Window)
 	}
 
-	// Attempt to parse the optional user-provided query to extract WHERE conditions.
-	var whereClauseStr string
-	if params.Query != "" {
-		const placeholder = "___ESCAPED_QUOTE___"
-		processedSQL := strings.ReplaceAll(params.Query, "''", placeholder)
-
-		parser := clickhouseparser.NewParser(processedSQL)
-		stmts, err := parser.ParseStmts()
-		if err != nil {
-			c.logger.Warn("failed to parse raw SQL for histogram WHERE clause extraction", "error", err, "query", params.Query)
-			// Do not proceed if the filter query is invalid.
-			return nil, fmt.Errorf("failed to parse raw SQL filter '%s': %w", params.Query, err)
-		}
-
-		if len(stmts) == 1 {
-			if selectStmt, ok := stmts[0].(*clickhouseparser.SelectQuery); ok {
-				if selectStmt.Where != nil && selectStmt.Where.Expr != nil {
-					// Extract the WHERE expression, excluding the "WHERE" keyword.
-					whereClauseStr = selectStmt.Where.Expr.String()
-					whereClauseStr = strings.ReplaceAll(whereClauseStr, placeholder, "''") // Restore quotes
-					c.logger.Debug("extracted WHERE clause conditions for histogram", "conditions", whereClauseStr)
-				}
-			} else {
-				c.logger.Warn("parsed SQL filter is not a SELECT statement, ignoring for histogram", "query", params.Query)
-			}
-		} else if len(stmts) > 1 {
-			c.logger.Warn("multiple SQL statements found in filter, cannot reliably extract WHERE clause for histogram", "query", params.Query)
-		}
-	}
-
-	// Construct the final WHERE clause for the histogram query.
-	// Combine the time range filter with the extracted user filter.
-	timeFilter := fmt.Sprintf("`%s` >= toDateTime('%s') AND `%s` <= toDateTime('%s')",
+	// Construct time range filter
+	timeFilter := fmt.Sprintf("%s >= toDateTime('%s') AND %s <= toDateTime('%s')",
 		timestampField, params.StartTime.Format("2006-01-02 15:04:05"),
 		timestampField, params.EndTime.Format("2006-01-02 15:04:05"))
 
+	// Extract WHERE clauses from user query
+	var whereClauseStr string
+	if params.Query != "" {
+		whereClause := extractWhereClause(params.Query)
+		if whereClause != "" {
+			whereClauseStr = whereClause
+		} else {
+			whereClauseStr = params.Query
+		}
+	}
+
+	// Combine time filter with user filter
 	combinedWhereClause := timeFilter
 	if whereClauseStr != "" {
-		// Combine time filter and user filter with AND.
 		combinedWhereClause = fmt.Sprintf("(%s) AND (%s)", timeFilter, whereClauseStr)
 	}
 
-	// Build the histogram aggregation query.
-	query := fmt.Sprintf(`
-		SELECT
-			toStartOfInterval(%s, INTERVAL %d %s) AS bucket,
-			count(*) AS log_count
-		FROM %s
-		WHERE %s
-		GROUP BY bucket
-		ORDER BY bucket ASC
-	`, timestampField, intervalValue, intervalUnit, tableName, combinedWhereClause)
+	var query string
+	if params.GroupBy != "" && strings.TrimSpace(params.GroupBy) != "" {
+		// Use CTE approach for grouped data with top values
+		// Add GLOBAL keyword for distributed tables
+		query = fmt.Sprintf(`
+			WITH top_groups AS (
+				SELECT
+					%s AS group_value,
+					count(*) AS total_logs
+				FROM %s
+				WHERE %s
+				GROUP BY group_value
+				ORDER BY total_logs DESC
+				LIMIT 10
+			)
+			SELECT
+				%s AS bucket,
+				%s AS group_value,
+				count(*) AS log_count
+			FROM %s
+			WHERE
+				%s
+				AND %s GLOBAL IN (SELECT group_value FROM top_groups)
+			GROUP BY
+				bucket,
+				group_value
+			ORDER BY
+				bucket ASC,
+				log_count DESC
+		`, params.GroupBy, tableName, combinedWhereClause,
+			intervalFunc, params.GroupBy, tableName,
+			combinedWhereClause, params.GroupBy)
+	} else {
+		// Standard histogram query without grouping
+		query = fmt.Sprintf(`
+			SELECT
+				%s AS bucket,
+				count(*) AS log_count
+			FROM %s
+			WHERE %s
+			GROUP BY bucket
+			ORDER BY bucket ASC
+		`, intervalFunc, tableName, combinedWhereClause)
+	}
 
-	// Execute the query.
+	// Execute the query
 	result, err := c.Query(ctx, query)
 	if err != nil {
 		c.logger.Error("failed to execute histogram query", "error", err, "table", tableName)
 		return nil, fmt.Errorf("failed to execute histogram query: %w", err)
 	}
 
-	// Parse results into HistogramData.
+	// Parse results into HistogramData
 	var results []HistogramData
+
 	for _, row := range result.Logs {
 		bucket, okB := row["bucket"].(time.Time)
 		countVal, okC := row["log_count"] // Type can vary (uint64, int64, etc.)
 
 		if !okB || !okC {
-			c.logger.Warn("unexpected type in histogram row, skipping", "bucket_val", row["bucket"], "count_val", row["log_count"])
+			c.logger.Warn("unexpected type in histogram row, skipping",
+				"bucket_val", row["bucket"],
+				"count_val", row["log_count"])
 			continue
 		}
 
-		// Safely convert count to int.
+		// Safely convert count to int
 		count := 0
 		switch v := countVal.(type) {
 		case uint64:
@@ -175,16 +250,37 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName string, timesta
 			count = int(v)
 		case int:
 			count = v
-		case float64: // Handle potential float conversion if needed
+		case float64:
 			count = int(v)
 		default:
-			c.logger.Warn("unexpected numeric type for log_count in histogram row", "type", fmt.Sprintf("%T", countVal))
+			c.logger.Warn("unexpected numeric type for log_count in histogram row",
+				"type", fmt.Sprintf("%T", countVal))
 			continue
 		}
 
+		groupValueStr := ""
+		if params.GroupBy != "" {
+			groupVal, okG := row["group_value"]
+			if !okG {
+				c.logger.Warn("missing group_value in histogram row")
+				continue
+			}
+
+			// Convert group value to string
+			switch v := groupVal.(type) {
+			case string:
+				groupValueStr = v
+			case nil:
+				groupValueStr = "null"
+			default:
+				groupValueStr = fmt.Sprintf("%v", v)
+			}
+		}
+
 		results = append(results, HistogramData{
-			Bucket:   bucket,
-			LogCount: count,
+			Bucket:     bucket,
+			LogCount:   count,
+			GroupValue: groupValueStr,
 		})
 	}
 
@@ -192,51 +288,4 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName string, timesta
 		Granularity: string(params.Window),
 		Data:        results,
 	}, nil
-}
-
-// getIntervalFromWindow converts a TimeWindow constant into a numeric value and unit string
-// suitable for ClickHouse INTERVAL clauses. Returns error if window value is unsupported.
-func getIntervalFromWindow(window TimeWindow) (int, string, error) {
-	switch window {
-	// Second-based intervals
-	case TimeWindow1s:
-		return 1, "second", nil
-	case TimeWindow5s:
-		return 5, "second", nil
-	case TimeWindow10s:
-		return 10, "second", nil
-	case TimeWindow15s:
-		return 15, "second", nil
-	case TimeWindow30s:
-		return 30, "second", nil
-
-	// Minute-based intervals
-	case TimeWindow1m:
-		return 1, "minute", nil
-	case TimeWindow5m:
-		return 5, "minute", nil
-	case TimeWindow10m:
-		return 10, "minute", nil
-	case TimeWindow15m:
-		return 15, "minute", nil
-	case TimeWindow30m:
-		return 30, "minute", nil
-
-	// Hour-based intervals
-	case TimeWindow1h:
-		return 1, "hour", nil
-	case TimeWindow2h:
-		return 2, "hour", nil
-	case TimeWindow3h:
-		return 3, "hour", nil
-	case TimeWindow6h:
-		return 6, "hour", nil
-	case TimeWindow12h:
-		return 12, "hour", nil
-	case TimeWindow24h:
-		return 24, "hour", nil
-	default:
-		// Return a proper error instead of panicking
-		return 0, "", fmt.Errorf("unsupported time window value: %s", window)
-	}
 }

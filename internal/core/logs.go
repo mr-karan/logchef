@@ -106,6 +106,7 @@ type HistogramParams struct {
 	EndTime   time.Time
 	Window    string // e.g., "1m", "5m", "1h"
 	Query     string // Optional filter query (WHERE clause part)
+	GroupBy   string // Optional field to group by
 }
 
 // HistogramResponse structures the response for histogram data.
@@ -141,6 +142,7 @@ func GetHistogramData(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manag
 		"end_time", params.EndTime,
 		"window", params.Window,
 		"filter_query_len", len(params.Query),
+		"group_by", params.GroupBy,
 	)
 
 	// 2. Get ClickHouse connection
@@ -201,7 +203,8 @@ func GetHistogramData(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manag
 		StartTime: params.StartTime,
 		EndTime:   params.EndTime,
 		Window:    chWindow,
-		Query:     params.Query, // Pass the optional filter query
+		Query:     params.Query,   // Pass the optional filter query
+		GroupBy:   params.GroupBy, // Pass the optional group by field
 	}
 
 	// 4. Call the ClickHouse client method

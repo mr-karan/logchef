@@ -92,7 +92,7 @@ func (s *Server) handleGetSourceSchema(c *fiber.Ctx) error {
 }
 
 // handleGetHistogram generates histogram data (log counts over time intervals) for a specific source.
-// It accepts time range and optional filter query parameters.
+// It accepts time range, window size, and optional group-by field in the request body.
 // Access is controlled by the requireSourceAccess middleware.
 func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
@@ -101,14 +101,17 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
 	}
 
-	// Parse time range and optional filter query from request body.
-	var req models.LogQueryRequest // Re-use LogQueryRequest for convenience
+	// Parse request body containing time range, window, groupBy and optional filter query
+	var req models.LogQueryRequest
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Get time window granularity from query parameter.
-	window := c.Query("window", "1m") // Default to 1 minute.
+	// Use window from the request body or default to 1 minute
+	window := req.Window
+	if window == "" {
+		window = "1m" // Default to 1 minute if not specified
+	}
 
 	// Prepare parameters for the core histogram function.
 	params := core.HistogramParams{
@@ -116,6 +119,11 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 		EndTime:   time.UnixMilli(req.EndTimestamp),
 		Window:    window,
 		Query:     req.RawSQL, // Pass potential filter query (WHERE clause).
+	}
+
+	// Only add groupBy if it's not empty
+	if req.GroupBy != "" && strings.TrimSpace(req.GroupBy) != "" {
+		params.GroupBy = req.GroupBy
 	}
 
 	// Execute histogram query via core function.

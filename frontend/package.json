@@ -7,6 +7,9 @@
     "dev": "vite",
     "typecheck": "vue-tsc -b",
     "build": "vite build",
+    "build:analyze": "vite build --mode analyze",
+    "build:modern": "vite build --minify terser --target esnext",
+    "analyze": "node scripts/analyze-bundle.js",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -53,10 +56,13 @@
     "@vitejs/plugin-vue": "^5.2.1",
     "@vue/tsconfig": "^0.7.0",
     "autoprefixer": "^10.4.20",
+    "rollup-plugin-visualizer": "^5.14.0",
     "tailwindcss": "^3.4.17",
+    "terser": "^5.39.0",
     "ts-node": "^10.9.2",
     "typescript": "~5.6.2",
     "vite": "^6.0.5",
+    "vite-plugin-compression": "^0.5.1",
     "vue-tsc": "^2.2.0"
   },
   "packageManager": "pnpm@10.6.2+sha512.47870716bea1572b53df34ad8647b42962bc790ce2bf4562ba0f643237d7302a3d6a8ecef9e4bdfc01d23af1969aa90485d4cebb0b9638fa5ef1daef656f6c1b"

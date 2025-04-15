@@ -31,6 +31,7 @@ import type { SavedTeamQuery } from '@/api/savedQueries';
 import { useTeamsStore } from '@/stores/teams';
 import { Badge } from '@/components/ui/badge';
 import { useSavedQueries } from '@/composables/useSavedQueries';
+import type { SaveQueryFormData } from '@/views/explore/types';
 
 // Initialize router and services with better error handling
 const router = useRouter();
@@ -220,8 +221,8 @@ async function handleTeamChange(teamId: string) {
 
     const currentTeamId = parseInt(teamId);
 
-    // Update URL to reflect the team change
-    router.replace({
+    // Update URL to reflect the team change - use push instead of replace for proper history
+    router.push({
       path: '/logs/saved',
       query: { team: teamId }
     });
@@ -242,7 +243,8 @@ async function handleTeamChange(teamId: string) {
       selectedSourceId.value = String(sourcesStore.teamSources[0].id);
 
       // Update URL with the new source - use currentTeamId for safety
-      router.replace({
+      // Use push instead of replace for proper history
+      router.push({
         path: '/logs/saved',
         query: {
           team: teamId,
@@ -282,8 +284,8 @@ async function handleSourceChange(sourceId: string) {
       selectedSourceId.value = '';
       queries.value = [];
 
-      // Update URL to remove source parameter
-      router.replace({
+      // Update URL to remove source parameter - use push for proper history
+      router.push({
         path: '/logs/saved',
         query: { team: teamsStore?.currentTeamId?.toString() || '' }
       });
@@ -304,8 +306,8 @@ async function handleSourceChange(sourceId: string) {
 
     selectedSourceId.value = sourceId;
 
-    // Update URL with the new source
-    router.replace({
+    // Update URL with the new source - use push for proper history
+    router.push({
       path: '/logs/saved',
       query: {
         team: teamsStore?.currentTeamId?.toString() || '',
@@ -365,7 +367,10 @@ async function handleDeleteQuery(query: SavedTeamQuery) {
 }
 
 // Handle save query modal submission
-// Now handled by the useSavedQueries composable
+async function handleSaveQuery(formData: SaveQueryFormData) {
+  const { handleSaveQuery } = useSavedQueries();
+  return await handleSaveQuery(formData);
+}
 
 // Get query type badge color
 function getQueryTypeBadgeVariant(type: string): "default" | "secondary" | "destructive" | "outline" {
@@ -376,6 +381,7 @@ function getQueryTypeBadgeVariant(type: string): "default" | "secondary" | "dest
 function handleCreateNewQuery() {
   createNewQuery(selectedSourceId.value ? parseInt(selectedSourceId.value) : undefined);
 }
+
 </script>
 
 <template>
@@ -597,5 +603,3 @@ function handleCreateNewQuery() {
     </div>
   </div>
 </template>
-
-<!-- Custom styles removed in favor of Tailwind classes -->

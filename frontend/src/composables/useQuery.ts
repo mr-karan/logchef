@@ -7,6 +7,7 @@ import { getErrorMessage } from '@/api/types';
 import type { TimeRange, QueryResult } from '@/types/query';
 import { validateLogchefQLWithDetails } from '@/utils/logchefql/api';
 import { validateSQLWithDetails } from '@/utils/clickhouse-sql';
+import { useExploreUrlSync } from './useExploreUrlSync';
 
 // Define the valid editor modes
 type EditorMode = 'logchefql' | 'sql';
@@ -20,6 +21,7 @@ export function useQuery() {
   const exploreStore = useExploreStore();
   const sourcesStore = useSourcesStore();
   const teamsStore = useTeamsStore();
+  const { pushQueryHistoryEntry } = useExploreUrlSync();
 
   // Local state
   const queryError = ref<string>('');
@@ -393,6 +395,10 @@ export function useQuery() {
 
       if (!execResult.success) {
         queryError.value = execResult.error?.message || 'Query execution failed';
+      } else {
+        // Create a new history entry in the browser history
+        // But only do this for successful queries to avoid cluttering history with errors
+        pushQueryHistoryEntry();
       }
 
       // Mark that we've run a query

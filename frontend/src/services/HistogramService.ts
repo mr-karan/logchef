@@ -5,6 +5,7 @@ import { isErrorResponse } from '@/api/types';
 export interface HistogramData {
   bucket: string;
   log_count: number;
+  group_value?: string; // Field needed for grouped histogram data
 }
 
 export interface HistogramParams {
@@ -115,16 +116,20 @@ export class HistogramService {
         limit: 100,
         start_timestamp: new Date(params.timeRange.start).getTime(),
         end_timestamp: new Date(params.timeRange.end).getTime(),
-        query_type: params.queryType
+        query_type: params.queryType,
+        window: granularity,
       };
 
-      // Call the API
+      // Only include group_by if it has a non-empty value
+      if (params.groupBy && params.groupBy.trim() !== '') {
+        queryParams.group_by = params.groupBy;
+      }
+
+      // Call the API with all parameters in the body
       const response = await exploreApi.getHistogramData(
         params.sourceId,
         queryParams,
-        params.teamId,
-        granularity,
-        params.groupBy
+        params.teamId
       );
 
       if (isErrorResponse(response)) {

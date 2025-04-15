@@ -4,7 +4,6 @@ import autoprefixer from "autoprefixer";
 import tailwind from "tailwindcss";
 import { defineConfig, loadEnv } from "vite";
 import { resolve } from "path";
-import compression from 'vite-plugin-compression';
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -20,19 +19,7 @@ export default defineConfig(({ mode }) => {
         plugins: [tailwind(), autoprefixer()],
       },
     },
-    plugins: [
-      vue(),
-      compression({
-        algorithm: 'brotliCompress',
-        ext: '.br',
-        threshold: 10240 // 10kb
-      }),
-      compression({
-        algorithm: 'gzip',
-        ext: '.gz',
-        threshold: 10240
-      })
-    ],
+    plugins: [vue()],
     resolve: {
       alias: {
         "@": fileURLToPath(new URL("./src", import.meta.url)),
@@ -52,49 +39,16 @@ export default defineConfig(({ mode }) => {
       emptyOutDir: true,
       rollupOptions: {
         output: {
-          manualChunks(id) {
-            if (id.includes('node_modules')) {
-              // Split vendor chunks
-              if (id.includes('vue')) {
-                return 'vendor-vue';
-              }
-              if (id.includes('date-fns')) {
-                return 'vendor-date-fns';
-              }
-              return 'vendor'; // Other node_modules
-            }
+          manualChunks: {
+            // Create a separate chunk for Monaco Editor
+            // This helps with lazy loading and reduces the initial bundle size
+            "monaco-editor": ["monaco-editor"],
           },
-          // Better chunk naming
-          chunkFileNames: 'assets/[name]-[hash].js',
-          entryFileNames: 'assets/[name]-[hash].js',
-          assetFileNames: 'assets/[name]-[hash][extname]'
-        }
+        },
       },
-      // Minification options
-      minify: 'terser',
-      terserOptions: {
-        compress: {
-          drop_console: true,
-          drop_debugger: true
-        }
-      },
-      chunkSizeWarningLimit: 1500 // Set higher warning limit
     },
     optimizeDeps: {
-      include: [
-        'monaco-editor',
-        'vue',
-        'vue-router',
-        // Add other heavy dependencies
-      ],
-      exclude: ['vue-demi']
+      include: ["monaco-editor"],
     },
-
-    // Add these experimental options
-    experimental: {
-      renderBuiltUrl(filename) {
-        return { relative: true };
-      }
-    }
   };
 });

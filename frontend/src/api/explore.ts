@@ -41,6 +41,8 @@ export interface QueryParams {
   };
   original_query?: string; // Original LogchefQL query if applicable
   query_type?: string; // 'logchefql' or 'sql'
+  window?: string;
+  group_by?: string;
 }
 
 export interface QueryStats {
@@ -103,8 +105,10 @@ export function prepareQueryParams(params: {
   endTimestamp: number;
   limit?: number;
   timeRange?: TimeRange;
+  window?: string;
+  groupBy?: string;
 }): QueryParams {
-  const { query, queryType, startTimestamp, endTimestamp, limit = 100 } = params;
+  const { query, queryType, startTimestamp, endTimestamp, limit = 100, window, groupBy } = params;
 
   // Use the raw SQL value as is - SQL transformation should happen before calling this function
   return {
@@ -112,7 +116,9 @@ export function prepareQueryParams(params: {
     limit,
     start_timestamp: startTimestamp,
     end_timestamp: endTimestamp,
-    query_type: queryType
+    query_type: queryType,
+    window,
+    group_by: groupBy
   };
 }
 
@@ -127,17 +133,25 @@ export const exploreApi = {
     );
   },
 
-  getHistogramData: (sourceId: number, params: QueryParams, teamId: number, window: string = '1m', groupBy?: string) => {
+  getHistogramData: (sourceId: number, params: QueryParams, teamId: number) => {
     if (!teamId) {
       throw new Error("Team ID is required for getting histogram data");
     }
-    let url = `/teams/${teamId}/sources/${sourceId}/logs/histogram?window=${window}`;
-    if (groupBy) {
-      url += `&group_by=${encodeURIComponent(groupBy)}`;
+
+    // Clean up params to ensure group_by is only included when it has a meaningful value
+    const histogramParams = {
+      ...params
+    };
+
+    // Let the body-level params come through as they are,
+    // but don't add an empty string for group_by if it's not meaningful
+    if (histogramParams.group_by === '') {
+      delete histogramParams.group_by;
     }
+
     return apiClient.post<HistogramResponse>(
-      url,
-      params
+      `/teams/${teamId}/sources/${sourceId}/logs/histogram`,
+      histogramParams
     );
   }
 };

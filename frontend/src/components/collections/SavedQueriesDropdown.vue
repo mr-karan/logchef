@@ -169,6 +169,8 @@ function goToQueries() {
   if (props.selectedTeamId) query.team = props.selectedTeamId;
   if (props.selectedSourceId) query.source = props.selectedSourceId;
 
+  // Use push instead of replace to create a proper navigation entry
+  // This ensures the back button will work correctly
   router.push({
     path: '/logs/saved',
     query

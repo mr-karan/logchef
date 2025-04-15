@@ -71,18 +71,29 @@ const windowResizeEventCallback = debounce(async () => {
     }
 }, 100);
 
-// Color palette for grouped data
+// Color palette for grouped data - Expanded palette with carefully selected colors
+// that maintain good contrast in both light and dark modes
 const colorPalette = [
-    '#4a90e2', // Blue
-    '#e74c3c', // Red
-    '#2ecc71', // Green
-    '#f39c12', // Orange
-    '#9b59b6', // Purple
-    '#1abc9c', // Turquoise
-    '#d35400', // Dark Orange
-    '#3498db', // Light Blue
-    '#e67e22', // Carrot
-    '#7f8c8d'  // Gray
+    '#4a90e2',  // Blue
+    '#e74c3c',  // Red
+    '#2ecc71',  // Green
+    '#f39c12',  // Orange
+    '#9b59b6',  // Purple
+    '#1abc9c',  // Turquoise
+    '#d35400',  // Dark Orange
+    '#3498db',  // Light Blue
+    '#e67e22',  // Carrot
+    '#7f8c8d',  // Gray
+    '#16a085',  // Green Sea
+    '#8e44ad',  // Wisteria
+    '#27ae60',  // Nephritis
+    '#d64541',  // Pomegranate
+    '#f1c40f',  // Sunflower
+    '#34495e',  // Wet Asphalt
+    '#2980b9',  // Belize Hole
+    '#c0392b',  // Brick Red
+    '#5499c7',  // Steel Blue
+    '#6c7a89'   // Lynch
 ];
 
 // Convert the histogram data to chart options with Kibana-like styling
@@ -127,7 +138,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 axisLine: { show: false },
                 splitLine: {
                     show: true,
-                    lineStyle: { 
+                    lineStyle: {
                         type: 'dashed',
                         color: 'hsl(var(--border))',
                         opacity: 0.5
@@ -370,7 +381,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             },
             splitLine: {
                 show: true,
-                lineStyle: { 
+                lineStyle: {
                     type: 'dashed',
                     color: 'hsl(var(--border))',
                     opacity: 0.5
@@ -448,7 +459,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
         series: seriesData,
         animation: true,
         animationDuration: 800,
-        animationEasing: 'cubicOut'
+        animationEasing: 'cubicOut' as const
     };
 };
 
@@ -1046,6 +1057,7 @@ onBeforeUnmount(() => {
     0% {
         transform: rotate(0deg);
     }
+
     100% {
         transform: rotate(360deg);
     }

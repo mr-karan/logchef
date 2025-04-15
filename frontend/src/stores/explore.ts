@@ -99,6 +99,8 @@ export interface ExploreState {
   };
   // Add field for last successful execution timestamp
   lastExecutionTimestamp?: number | null;
+  // Group by field for histogram
+  groupByField?: string | null;
 }
 
 const DEFAULT_QUERY_STATS: QueryStats = {
@@ -122,6 +124,7 @@ export const useExploreStore = defineStore("explore", () => {
     activeMode: "logchefql",
     lastExecutionTimestamp: null,
     selectedQueryId: null, // Initialize new state
+    groupByField: null, // Initialize the groupByField
   });
 
   // Getters
@@ -322,6 +325,7 @@ export const useExploreStore = defineStore("explore", () => {
       lastExecutedState: undefined,
       lastExecutionTimestamp: null,
       selectedQueryId: null, // Reset selectedQueryId
+      groupByField: state.data.value.groupByField, // Preserve groupByField
     };
   }
 
@@ -523,6 +527,11 @@ export const useExploreStore = defineStore("explore", () => {
     state.error.value = null;
   }
 
+  // Set the group by field
+  function setGroupByField(field: string | null) {
+    state.data.value.groupByField = field;
+  }
+
   // Return the store
   return {
     // State
@@ -547,6 +556,7 @@ export const useExploreStore = defineStore("explore", () => {
     lastExecutionTimestamp: computed(() => state.data.value.lastExecutionTimestamp),
     selectedQueryId: computed(() => state.data.value.selectedQueryId),
     activeSavedQueryName: computed(() => state.data.value.activeSavedQueryName),
+    groupByField: computed(() => state.data.value.groupByField),
 
     // Loading state
     isLoading: state.isLoading,
@@ -571,6 +581,7 @@ export const useExploreStore = defineStore("explore", () => {
     executeQuery,
     getLogContext,
     clearError,
+    setGroupByField,
 
     // Loading state helpers
     isLoadingOperation: state.isLoadingOperation,

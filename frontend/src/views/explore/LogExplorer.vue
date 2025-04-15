@@ -270,7 +270,21 @@ const queryEditorRef = ref<ComponentPublicInstance<{
 }> | null>(null);
 const isLoadingQuery = ref(false)
 const editQueryData = ref<SavedTeamQuery | null>(null)
-const groupByField = ref<string>('__none__')
+
+// Group by field with computed default value based on severity field
+const groupByField = computed({
+  get() {
+    // Return the stored value or compute default
+    return exploreStore.groupByField ||
+      // Use severity field as default if available
+      (sourcesStore.currentSourceDetails?._meta_severity_field ?
+        sourcesStore.currentSourceDetails._meta_severity_field :
+        '__none__');
+  },
+  set(value) {
+    exploreStore.setGroupByField(value);
+  }
+});
 
 // UI state computed properties
 const showLoadingState = computed(() => isInitializing.value && !initializationError.value)
@@ -1043,43 +1057,43 @@ function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValu
   }
 }
 
-  // Helper function to create example query with sort keys
-  const createExampleQueryWithSortKeys = (sortKeys: string[] = []) => {
-    if (!sortKeys || sortKeys.length === 0) return '';
-  
-    // Filter out the timestamp field
-    const tsField = sourceDetails.value?._meta_ts_field || '';
-    const filteredKeys = sortKeys.filter(key => key !== tsField);
-    
-    // Create a simple example query using the first 2 non-timestamp sort keys
-    const keysToUse = filteredKeys.slice(0, 2);
-  
-    if (keysToUse.length === 0) return '';
-      
+// Helper function to create example query with sort keys
+const createExampleQueryWithSortKeys = (sortKeys: string[] = []) => {
+  if (!sortKeys || sortKeys.length === 0) return '';
+
+  // Filter out the timestamp field
+  const tsField = sourceDetails.value?._meta_ts_field || '';
+  const filteredKeys = sortKeys.filter(key => key !== tsField);
+
+  // Create a simple example query using the first 2 non-timestamp sort keys
+  const keysToUse = filteredKeys.slice(0, 2);
+
+  if (keysToUse.length === 0) return '';
+
+  if (activeMode.value === 'logchefql') {
+    return keysToUse.map(key => `${key}="example"`).join(' and ');
+  } else {
+    // SQL example with first two non-timestamp keys
+    return `SELECT * FROM ${activeSourceTableName.value} WHERE ${keysToUse.map(key => `\`${key}\` = 'example'`).join(' AND ')} LIMIT 100`;
+  }
+};
+
+// Function to insert example query into editor
+const showPerformanceTip = ref(false);
+
+const insertExampleQuery = (sortKeys: string[] = []) => {
+  const exampleQuery = createExampleQueryWithSortKeys(sortKeys);
+  if (exampleQuery) {
     if (activeMode.value === 'logchefql') {
-      return keysToUse.map(key => `${key}="example"`).join(' and ');
+      logchefQuery.value = exampleQuery;
     } else {
-      // SQL example with first two non-timestamp keys
-      return `SELECT * FROM ${activeSourceTableName.value} WHERE ${keysToUse.map(key => `\`${key}\` = 'example'`).join(' AND ')} LIMIT 100`;
+      sqlQuery.value = exampleQuery;
     }
-  };
-  
-  // Function to insert example query into editor
-  const showPerformanceTip = ref(false);
-  
-  const insertExampleQuery = (sortKeys: string[] = []) => {
-    const exampleQuery = createExampleQueryWithSortKeys(sortKeys);
-    if (exampleQuery) {
-      if (activeMode.value === 'logchefql') {
-        logchefQuery.value = exampleQuery;
-      } else {
-        sqlQuery.value = exampleQuery;
-      }
-      nextTick(() => {
-        queryEditorRef.value?.focus(true);
-      });
-    }
-  };
+    nextTick(() => {
+      queryEditorRef.value?.focus(true);
+    });
+  }
+};
 </script>
 
 <template>
@@ -1352,43 +1366,50 @@ function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValu
                 @save-query="handleSaveOrUpdateClick" class="border-0 border-b" />
 
               <!-- Sort Key Optimization Hint (Collapsible) -->
-              <div v-if="sourceDetails?.sort_keys?.length > 1 || (sourceDetails?.sort_keys?.length === 1 && sourceDetails.sort_keys[0] !== sourceDetails?._meta_ts_field)" class="border-t bg-blue-50 dark:bg-blue-950/20">
-                <button class="w-full px-3 py-1.5 text-xs flex items-center justify-between text-blue-700 dark:text-blue-300 font-medium hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
-                        @click="showPerformanceTip = !showPerformanceTip">
+              <div
+                v-if="sourceDetails?.sort_keys && (sourceDetails.sort_keys.length > 1 || (sourceDetails.sort_keys.length === 1 && sourceDetails.sort_keys[0] !== sourceDetails?._meta_ts_field))"
+                class="border-t bg-blue-50 dark:bg-blue-950/20">
+                <button
+                  class="w-full px-3 py-1.5 text-xs flex items-center justify-between text-blue-700 dark:text-blue-300 font-medium hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+                  @click="showPerformanceTip = !showPerformanceTip">
                   <div class="flex items-center">
                     <Info class="text-blue-600 dark:text-blue-400 h-4 w-4 mr-2" />
-                    <span>ClickHouse Performance Tip: Filter by 
+                    <span>ClickHouse Performance Tip: Filter by
                       <span v-for="(key, index) in sourceDetails?.sort_keys || []" :key="key" class="inline-flex">
                         <code class="px-1 bg-blue-100 dark:bg-blue-900 rounded font-mono">{{ key }}</code>
                         <span v-if="index < (sourceDetails?.sort_keys?.length || 0) - 1" class="px-0.5">,</span>
                       </span>
                     </span>
                   </div>
-                  <svg class="h-4 w-4 transition-transform" :class="{ 'rotate-180': showPerformanceTip }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg class="h-4 w-4 transition-transform" :class="{ 'rotate-180': showPerformanceTip }"
+                    xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
-                
-                <div v-if="showPerformanceTip" class="px-3 pb-3 pt-0 text-xs text-blue-800 dark:text-blue-200 space-y-2">
+
+                <div v-if="showPerformanceTip"
+                  class="px-3 pb-3 pt-0 text-xs text-blue-800 dark:text-blue-200 space-y-2">
                   <div class="flex items-center justify-between">
-                    <p>Sort Keys: 
+                    <p>Sort Keys:
                       <span v-for="(key, index) in sourceDetails?.sort_keys || []" :key="key" class="inline-flex">
                         <code class="px-1 bg-blue-100 dark:bg-blue-900 rounded font-mono">{{ key }}</code>
                         <span v-if="index < (sourceDetails?.sort_keys?.length || 0) - 1" class="px-0.5">,</span>
                       </span>
                     </p>
-                    <Button variant="outline" size="sm" class="h-6 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700 px-2"
-                            @click="insertExampleQuery(sourceDetails?.sort_keys || [])">
+                    <Button variant="outline" size="sm"
+                      class="h-6 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700 px-2"
+                      @click="insertExampleQuery(sourceDetails?.sort_keys || [])">
                       <Plus class="h-3 w-3 mr-1" />
                       Use Example
                     </Button>
                   </div>
-                  
+
                   <div class="border-l-2 border-blue-300 dark:border-blue-700 pl-3 space-y-1.5">
                     <p class="font-medium">Why this matters:</p>
-                    <p class="text-blue-700 dark:text-blue-300">ClickHouse performs best when queries filter by sort keys in order. This can significantly boost query speed.</p>
+                    <p class="text-blue-700 dark:text-blue-300">ClickHouse performs best when queries filter by sort
+                      keys in order. This can significantly boost query speed.</p>
                     <p class="text-blue-600 dark:text-blue-400 italic text-xs">
-                      Optimal filtering: 
+                      Optimal filtering:
                       <span v-for="(key, index) in sourceDetails?.sort_keys || []" :key="key">
                         <code class="px-1 bg-blue-100 dark:bg-blue-900/50 rounded">{{ key }}</code>
                         <span v-if="index < (sourceDetails?.sort_keys?.length || 0) - 1"> then </span>
@@ -1432,11 +1453,11 @@ function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValu
             <div class="flex items-center gap-2">
               <Button variant="default" class="h-9 px-4 flex items-center gap-2 shadow-sm" :class="{
                 'bg-amber-500 hover:bg-amber-600 text-amber-foreground': isDirty && !isExecutingQuery,
-                'bg-sky-500 hover:bg-sky-600 text-sky-foreground': isExecutingQuery
+                'bg-primary hover:bg-primary/90 text-primary-foreground': isExecutingQuery
               }" :disabled="isExecutingQuery || !canExecuteQuery" @click="executeQuery">
                 <Play v-if="!isExecutingQuery" class="h-4 w-4" />
                 <RefreshCw v-else class="h-4 w-4 animate-spin" />
-                <span>{{ isExecutingQuery ? 'Running Query...' : (isDirty ? 'Run Query*' : 'Run Query') }}</span>
+                <span>{{ isDirty ? 'Run Query*' : 'Run Query' }}</span>
                 <div class="flex flex-col items-start ml-1 border-l border-current/20 pl-2 text-xs text-current">
                   <div class="flex items-center gap-1">
                     <Keyboard class="h-3 w-3" />
@@ -1459,11 +1480,28 @@ function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValu
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
+
+              <!-- Group By Selector - Moved here -->
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-muted-foreground whitespace-nowrap">Group By:</label>
+                <Select v-model="groupByField" class="max-w-[140px] h-8">
+                  <SelectTrigger class="h-8 text-xs">
+                    <SelectValue placeholder="No Grouping">
+                      {{ groupByField === '__none__' ? 'No Grouping' : groupByField }}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No Grouping</SelectItem>
+                    <SelectItem v-for="field in availableFields" :key="field.name" :value="field.name">
+                      {{ field.name }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <!-- Query Stats Preview -->
-            <div class="text-xs text-muted-foreground flex items-center gap-3"
-              v-if="exploreStore.lastExecutionTimestamp">
+            <div class="text-xs text-muted-foreground flex items-center" v-if="exploreStore.lastExecutionTimestamp">
               <span>Last successful run: {{ new Date(exploreStore.lastExecutionTimestamp).toLocaleTimeString() }}</span>
             </div>
           </div>
@@ -1483,23 +1521,10 @@ function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValu
           </div>
         </div>
 
-        <!-- Log Histogram Visualization with Group By Selection -->
+        <!-- Log Histogram Visualization -->
         <div class="px-4 pb-3" v-if="!isChangingContext && currentSourceId && hasValidSource && exploreStore.timeRange">
-          <div class="flex items-center justify-between mb-2">
-            <label class="text-sm text-muted-foreground">Group By:</label>
-            <Select v-model="groupByField" class="w-48 h-8">
-              <SelectTrigger>
-                <SelectValue placeholder="No Grouping">{{ groupByField === '__none__' ? 'No Grouping' : groupByField }}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">No Grouping</SelectItem>
-                <SelectItem v-for="field in availableFields" :key="field.name" :value="field.name">
-                  {{ field.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <LogHistogram :time-range="exploreStore.timeRange" :is-loading="isExecutingQuery" :group-by="groupByField === '__none__' ? '' : groupByField"
+          <LogHistogram :time-range="exploreStore.timeRange" :is-loading="isExecutingQuery"
+            :group-by="groupByField === '__none__' ? undefined : groupByField"
             @zoom-time-range="handleHistogramTimeRangeZoom" @update:timeRange="handleHistogramTimeRangeUpdate" />
         </div>
 

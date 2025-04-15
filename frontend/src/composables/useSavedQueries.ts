@@ -497,13 +497,9 @@ export function useSavedQueries() {
   // Handle opening query in explorer
   function openQuery(query: SavedTeamQuery) {
     const url = getQueryUrl(query)
-    // Force reload component when navigating to the same route with different params
-    if (router.currentRoute.value.path === '/logs/explore') {
-      // If we're already on the explore page, replace instead of push to avoid navigation guards
-      router.replace(url)
-    } else {
-      router.push(url)
-    }
+    // Always use router.push to create a proper history entry
+    // This ensures the back button works correctly when navigating between queries
+    router.push(url)
   }
 
   // Handle edit query
@@ -646,8 +642,8 @@ export function useSavedQueries() {
     // Set mode from current store state
     newQuery.mode = exploreStore.activeMode;
 
-    // Apply the new URL
-    router.replace({
+    // Apply the new URL - use push instead of replace to preserve history
+    router.push({
       path: '/logs/explore',
       query: newQuery
     }).then(() => {
