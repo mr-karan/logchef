@@ -1343,7 +1343,7 @@ function handleHistogramTimeRangeUpdate(range: { start: DateValue; end: DateValu
                 :value="exploreStore.activeMode === 'logchefql' ? logchefQuery : sqlQuery" @change="(event) => event.mode === 'logchefql' ?
                   updateLogchefqlValue(event.query, event.isUserInput) :
                   updateSqlValue(event.query, event.isUserInput)"
-                :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter search criteria (e.g., level=\"error\" and status>400)' : 'Enter SQL query...'"
+                :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter search criteria (e.g., level=&quot;error&quot; and status>400)' : 'Enter SQL query...'"
                 :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
                 :showFieldsPanel="showFieldsPanel" @submit="executeQuery"
                 @update:activeMode="(mode, isModeSwitchOnly) => changeMode(mode === 'logchefql' ? 'logchefql' : 'sql', isModeSwitchOnly)"
