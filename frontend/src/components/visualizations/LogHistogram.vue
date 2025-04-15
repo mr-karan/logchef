@@ -274,7 +274,17 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 }
             },
             axisLabel: {
-                formatter: (value: number) => Math.round(value).toLocaleString(),
+                formatter: (value: number) => {
+                    if (value < 1000) {
+                        return Math.round(value).toLocaleString();
+                    } else if (value < 1000000) {
+                        return (Math.round(value / 100) / 10).toLocaleString() + 'K';
+                    } else if (value < 1000000000) {
+                        return (Math.round(value / 100000) / 10).toLocaleString() + 'M';
+                    } else {
+                        return (Math.round(value / 100000000) / 10).toLocaleString() + 'B';
+                    }
+                },
                 color: 'hsl(var(--muted-foreground))',
                 fontSize: 11,
                 margin: 12
