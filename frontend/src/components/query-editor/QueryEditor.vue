@@ -216,7 +216,7 @@ const currentPlaceholder = computed(() => {
   if (props.placeholder) return props.placeholder;
 
   return props.activeMode === 'logchefql'
-    ? 'Enter search criteria (e.g., level=\'error\' and status>400)'
+    ? 'Enter search criteria (e.g., level="error" and status>400)'
     : `Enter ClickHouse SQL query (e.g., SELECT * FROM ${props.tableName || 'your_table'} WHERE ...)`;
 });
 
