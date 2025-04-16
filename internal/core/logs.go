@@ -87,7 +87,7 @@ func GetSourceSchema(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manage
 
 	// 3. Get table schema from ClickHouse client
 	// Use GetTableSchema which returns the full TableInfo
-	tableInfo, err := client.GetTableSchema(ctx, source.Connection.Database, source.Connection.TableName)
+	tableInfo, err := client.GetTableInfo(ctx, source.Connection.Database, source.Connection.TableName)
 	if err != nil {
 		log.Error("failed to get table schema from clickhouse", "source_id", sourceID, "database", source.Connection.Database, "table", source.Connection.TableName, "error", err)
 		return nil, fmt.Errorf("error retrieving schema for source %d: %w", sourceID, err)

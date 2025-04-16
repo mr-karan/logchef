@@ -264,7 +264,7 @@ func GetSourcesWithDetails(ctx context.Context, db *sqlite.DB, chDB *clickhouse.
 			// Only fetch schema details if source is connected
 			if source.IsConnected {
 				// Get the comprehensive table schema information
-				tableInfo, err := client.Schema(ctx, source.Connection.Database, source.Connection.TableName)
+				tableInfo, err := client.GetTableInfo(ctx, source.Connection.Database, source.Connection.TableName)
 				if err != nil {
 					log.Warn("failed to get table schema",
 						"source_id", source.ID,
@@ -349,7 +349,7 @@ func GetSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log
 		// Fetch the table schema and CREATE statement only if the source is connected
 		if source.IsConnected {
 			// Get the table schema (including all metadata)
-			tableInfo, err := client.Schema(ctx, source.Connection.Database, source.Connection.TableName)
+			tableInfo, err := client.GetTableInfo(ctx, source.Connection.Database, source.Connection.TableName)
 			if err != nil {
 				log.Warn("failed to get table schema",
 					"source_id", source.ID,
