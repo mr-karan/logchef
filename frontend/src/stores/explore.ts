@@ -421,11 +421,11 @@ export const useExploreStore = defineStore("explore", () => {
       console.log('Explore store: Setting last executed state:', executionState);
       state.data.value.lastExecutedState = executionState;
 
-      // Reset previous results
-      state.data.value.logs = [];
-      state.data.value.queryStats = DEFAULT_QUERY_STATS;
-      state.data.value.columns = [];
-      state.data.value.queryId = null;
+      // DO NOT reset previous results here. Keep old data until new data arrives.
+      // state.data.value.logs = [];
+      // state.data.value.queryStats = DEFAULT_QUERY_STATS;
+      // state.data.value.columns = [];
+      // state.data.value.queryId = null;
 
       // Prepare parameters for the correct API call (getLogs)
       const timestamps = getTimestamps();
@@ -441,19 +441,25 @@ export const useExploreStore = defineStore("explore", () => {
       // This structure assumes callApi returns the API response directly or throws/handles errors
       const response = await state.callApi({
         apiCall: async () => exploreApi.getLogs(state.data.value.sourceId, params, currentTeamId),
-        // Modify onSuccess to handle potential null and use correct properties
+        // Update results ONLY on successful API call with data
         onSuccess: (data: QuerySuccessResponse | null) => {
-          if (data) {
-              state.data.value.logs = data.logs || []; // Use data.logs
+          if (data && data.logs && data.logs.length > 0) {
+              // We have new data, update the store
+              state.data.value.logs = data.logs;
               state.data.value.columns = data.columns || [];
               state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
-              if (data.params && "query_id" in data.params) {
+              // Check if query_id exists in params before accessing it
+              // Ensure data.params is an object before checking for query_id
+              if (data.params && typeof data.params === 'object' && "query_id" in data.params) {
                   state.data.value.queryId = data.params.query_id as string;
+              } else {
+                  state.data.value.queryId = null; // Reset if not present
               }
               state.data.value.lastExecutionTimestamp = Date.now(); // Set timestamp on success
           } else {
-              console.warn("Query successful but received null data.");
-              // Reset state even on null success data
+              // Query was successful but returned no logs or null data
+              console.warn("Query successful but received no logs or null data.");
+              // Clear the logs, columns, stats now that the API call is complete
               state.data.value.logs = [];
               state.data.value.columns = [];
               state.data.value.queryStats = DEFAULT_QUERY_STATS;
