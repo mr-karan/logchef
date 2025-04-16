@@ -291,31 +291,31 @@ func (c *Client) Close() error {
 func (c *Client) Reconnect(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	// Only attempt reconnect if connection exists but is failing
 	if c.conn != nil {
 		// Try to close the existing connection first
 		_ = c.conn.Close() // Ignore close errors
 	}
-	
+
 	// Get the existing connection settings from the current connection
 	options, ok := c.conn.ClientInfo().Options.(*clickhouse.Options)
 	if !ok || options == nil {
 		return fmt.Errorf("failed to get connection options for reconnect")
 	}
-	
+
 	// Create a new connection with the same settings
 	newConn, err := clickhouse.Open(options)
 	if err != nil {
 		return fmt.Errorf("reconnecting to clickhouse: %w", err)
 	}
-	
+
 	// Test the new connection
 	if err := newConn.Ping(ctx); err != nil {
 		_ = newConn.Close() // Clean up failed connection
 		return fmt.Errorf("ping after reconnect failed: %w", err)
 	}
-	
+
 	// Replace the connection
 	c.conn = newConn
 	c.logger.Info("successfully reconnected to clickhouse")
