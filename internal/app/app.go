@@ -100,7 +100,8 @@ func (a *App) Initialize(ctx context.Context) error {
 			"table", source.Connection.TableName)
 		if err := a.ClickHouse.AddSource(source); err != nil {
 			// Log failure but continue initialization.
-			a.Logger.Warn("failed to initialize source connection",
+			// The health check system will attempt to recover these connections.
+			a.Logger.Warn("failed to initialize source connection, will attempt recovery via health checks",
 				"source_id", source.ID,
 				"error", err)
 		}

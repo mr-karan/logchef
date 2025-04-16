@@ -286,6 +286,99 @@ func (c *Client) Close() error {
 	return c.conn.Close()
 }
 
+// Reconnect attempts to re-establish the connection to the ClickHouse server.
+// This is useful for recovering from connection failures during health checks.
+func (c *Client) Reconnect(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	// Only attempt reconnect if connection exists but is failing
+	if c.conn != nil {
+		// Try to close the existing connection first
+		_ = c.conn.Close() // Ignore close errors
+	}
+	
+	// Get the existing connection settings from the current connection
+	options, ok := c.conn.ClientInfo().Options.(*clickhouse.Options)
+	if !ok || options == nil {
+		return fmt.Errorf("failed to get connection options for reconnect")
+	}
+	
+	// Create a new connection with the same settings
+	newConn, err := clickhouse.Open(options)
+	if err != nil {
+		return fmt.Errorf("reconnecting to clickhouse: %w", err)
+	}
+	
+	// Test the new connection
+	if err := newConn.Ping(ctx); err != nil {
+		_ = newConn.Close() // Clean up failed connection
+		return fmt.Errorf("ping after reconnect failed: %w", err)
+	}
+	
+	// Replace the connection
+	c.conn = newConn
+	c.logger.Info("successfully reconnected to clickhouse")
+	return nil
+}
+
+// NewClientWithoutPing creates a new Client without performing the initial ping test.
+// This is useful for initializing clients that may be temporarily unreachable.
+func NewClientWithoutPing(opts ClientOptions, logger *slog.Logger) (*Client, error) {
+	// Ensure host includes the native protocol port (default 9000) if not specified.
+	host := opts.Host
+	if !strings.Contains(host, ":") {
+		host = host + ":9000"
+	}
+
+	options := &clickhouse.Options{
+		Addr: []string{host},
+		Auth: clickhouse.Auth{
+			Database: opts.Database,
+			Username: opts.Username,
+			Password: opts.Password,
+		},
+		Settings: clickhouse.Settings{
+			// Default settings.
+			"max_execution_time": 60,
+		},
+		DialTimeout: 10 * time.Second,
+		Compression: &clickhouse.Compression{
+			Method: clickhouse.CompressionLZ4,
+		},
+		Protocol: clickhouse.Native,
+	}
+
+	// Apply any additional user-provided settings.
+	if opts.Settings != nil {
+		for k, v := range opts.Settings {
+			options.Settings[k] = v
+		}
+	}
+
+	logger.Debug("creating clickhouse connection without ping validation",
+		"host", host,
+		"database", opts.Database,
+		"protocol", "native",
+	)
+
+	conn, err := clickhouse.Open(options)
+	if err != nil {
+		return nil, fmt.Errorf("creating clickhouse connection: %w", err)
+	}
+
+	client := &Client{
+		conn:       conn,
+		logger:     logger,
+		queryHooks: []QueryHook{}, // Initialize hooks slice.
+	}
+
+	// Apply a default hook for basic query logging.
+	client.AddQueryHook(NewLogQueryHook(logger, false)) // Verbose logging disabled by default.
+
+	return client, nil
+}
+
 // GetTableSchema retrieves comprehensive schema information for a ClickHouse table.
 // This is an alias for GetTableInfo.
 func (c *Client) GetTableSchema(ctx context.Context, database, table string) (*TableInfo, error) {

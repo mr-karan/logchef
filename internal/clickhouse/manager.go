@@ -103,21 +103,33 @@ func (m *Manager) checkAllSourcesHealth() {
 	m.logger.Debug("finished checking health for all sources", "count", len(idsToCheck))
 }
 
+// updateHealthStatus is a helper method to update the health status of a source.
+func (m *Manager) updateHealthStatus(sourceID models.SourceID, isHealthy bool, errorMsg string) {
+	m.healthMux.Lock()
+	defer m.healthMux.Unlock()
+	
+	status := models.HealthStatusUnhealthy
+	if isHealthy {
+		status = models.HealthStatusHealthy
+	}
+	
+	m.health[sourceID] = models.SourceHealth{
+		SourceID:    sourceID,
+		Status:      status,
+		LastChecked: time.Now(),
+		Error:       errorMsg,
+	}
+}
+
 // performSingleSourceCheck checks a single source and updates the health map.
+// It now attempts to reconnect if the connection is unhealthy.
 func (m *Manager) performSingleSourceCheck(sourceID models.SourceID) {
 	// Get the client connection. GetConnection handles locking internally.
 	client, err := m.GetConnection(sourceID)
 
-	currentHealth := models.SourceHealth{
-		SourceID:    sourceID,
-		LastChecked: time.Now(),
-	}
-
 	if err != nil { // Error getting client (e.g., removed during check)
-		currentHealth.Status = models.HealthStatusUnhealthy
-		currentHealth.Error = fmt.Sprintf("failed to get client for health check: %v", err)
-		// Do not update health map if client doesn't exist
 		m.logger.Warn("client not found during health check", "source_id", sourceID)
+		m.updateHealthStatus(sourceID, false, fmt.Sprintf("failed to get client for health check: %v", err))
 		return
 	}
 
@@ -127,16 +139,28 @@ func (m *Manager) performSingleSourceCheck(sourceID models.SourceID) {
 
 	err = client.Ping(ctx) // Use the Ping method
 	if err != nil {
-		currentHealth.Status = models.HealthStatusUnhealthy
-		currentHealth.Error = err.Error()
+		m.logger.Warn("ping failed during health check, attempting reconnect", 
+			"source_id", sourceID, 
+			"error", err)
+		
+		// Attempt to reconnect
+		reconnectCtx, reconnectCancel := context.WithTimeout(context.Background(), HealthCheckTimeout)
+		defer reconnectCancel()
+		
+		if reconnectErr := client.Reconnect(reconnectCtx); reconnectErr != nil {
+			m.logger.Error("reconnection attempt failed", 
+				"source_id", sourceID, 
+				"error", reconnectErr)
+			m.updateHealthStatus(sourceID, false, fmt.Sprintf("reconnection failed: %v", reconnectErr))
+		} else {
+			// Reconnection successful
+			m.logger.Info("successfully reconnected to source", "source_id", sourceID)
+			m.updateHealthStatus(sourceID, true, "")
+		}
 	} else {
-		currentHealth.Status = models.HealthStatusHealthy
+		// Connection is healthy
+		m.updateHealthStatus(sourceID, true, "")
 	}
-
-	// Update the health map.
-	m.healthMux.Lock()
-	m.health[sourceID] = currentHealth
-	m.healthMux.Unlock()
 }
 
 // GetCachedHealth retrieves the latest known health status for a source ID from the cache.
@@ -160,6 +184,7 @@ func (m *Manager) GetCachedHealth(sourceID models.SourceID) models.SourceHealth 
 
 // AddSource creates a new ClickHouse client connection based on the source details,
 // applies existing hooks, stores it in the manager pool, and initializes health.
+// Modified to always create a client entry even if initial connection fails.
 func (m *Manager) AddSource(source *models.Source) error {
 	m.clientsMux.Lock() // Lock clients map for writing.
 	defer m.clientsMux.Unlock()
@@ -183,15 +208,19 @@ func (m *Manager) AddSource(source *models.Source) error {
 		return nil // Not an error, already managed.
 	}
 
-	// Create new client.
-	client, err := NewClient(ClientOptions{
+	// Create new client without initial ping validation
+	client, err := NewClientWithoutPing(ClientOptions{
 		Host:     source.Connection.Host,
 		Database: source.Connection.Database,
 		Username: source.Connection.Username,
 		Password: source.Connection.Password,
 	}, m.logger)
+	
 	if err != nil {
-		// If client creation fails, store unhealthy status
+		// If client creation fails completely (not just connection), log and return error
+		m.logger.Error("failed to create client instance", 
+			"source_id", source.ID, 
+			"error", err)
 		m.health[source.ID] = models.SourceHealth{
 			SourceID:    source.ID,
 			Status:      models.HealthStatusUnhealthy,
@@ -206,18 +235,19 @@ func (m *Manager) AddSource(source *models.Source) error {
 		client.AddQueryHook(hook)
 	}
 
-	// Store the client.
+	// Store the client regardless of connection status
 	m.clients[source.ID] = client
 
 	// Initialize health status as Unhealthy - background check will update it.
 	m.health[source.ID] = models.SourceHealth{
 		SourceID:    source.ID,
 		Status:      models.HealthStatusUnhealthy, // Default to Unhealthy until first check passes
-		LastChecked: time.Time{},                  // Zero time indicates initial state
+		LastChecked: time.Now(),                   // Set current time to indicate we've attempted
+		Error:       "Initial connection pending",
 	}
 
-	// Optional: Trigger an immediate check for the newly added source?
-	// go m.performSingleSourceCheck(source.ID) // Run in background
+	// Trigger an immediate check for the newly added source in the background
+	go m.performSingleSourceCheck(source.ID)
 
 	return nil
 }
