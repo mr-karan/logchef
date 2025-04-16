@@ -1552,18 +1552,12 @@ const handleQueryExecution = async () => {
         <div class="flex-1 overflow-hidden flex flex-col border-t mt-2">
           <!-- Results Area -->
           <div class="flex-1 overflow-hidden relative bg-background">
-            <!-- Loading State -->
-            <template v-if="isExecutingQuery">
-              <div class="absolute inset-0 flex items-center justify-center bg-background/70 z-10">
-                <p class="text-muted-foreground animate-pulse">Loading results...</p>
-              </div>
-            </template>
-
-            <!-- Results Table -->
-            <template v-if="!isExecutingQuery && exploreStore.logs?.length">
+            <!-- Results Table (Now always rendered if data exists, loading handled inside) -->
+            <template v-if="exploreStore.logs?.length">
               <DataTable v-if="exploreStore.logs.length > 0 && exploreStore.columns?.length > 0"
                 :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}`"
                 :columns="exploreStore.columns as any" :data="exploreStore.logs" :stats="exploreStore.queryStats"
+                :is-loading="isExecutingQuery" <!-- Pass loading state -->
                 :source-id="String(exploreStore.sourceId)" :team-id="teamsStore.currentTeamId"
                 :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
                 :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field" :timezone="displayTimezone"

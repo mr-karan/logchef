@@ -54,6 +54,7 @@ interface Props {
     queryFields?: string[] // Fields used in the query for column indicators
     regexHighlights?: Record<string, { pattern: string, isNegated: boolean }> // Column-specific regex patterns
     activeMode?: 'logchefql' | 'clickhouse-sql' | 'sql' // Current query mode
+    isLoading?: boolean // Prop to indicate loading state
 }
 
 // Define the structure for storing state
@@ -69,7 +70,8 @@ const props = withDefaults(defineProps<Props>(), {
     timezone: 'local',
     queryFields: () => [],
     regexHighlights: () => ({}),
-    activeMode: 'logchefql'
+    activeMode: 'logchefql',
+    isLoading: false // Default isLoading to false
 })
 
 // Get the actual field names to use with fallbacks
@@ -590,18 +592,22 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
 
         <!-- Results Header with Controls and Pagination -->
         <div class="flex items-center justify-between p-2 border-b flex-shrink-0">
-            <!-- Left side - Query stats -->
+            <!-- Left side - Query stats & Loading Indicator -->
             <div class="flex items-center gap-3 text-sm text-muted-foreground">
-                <span v-if="stats && stats.execution_time_ms !== undefined" class="inline-flex items-center">
+                <!-- Loading Spinner -->
+                <RefreshCw v-if="props.isLoading" class="h-4 w-4 text-primary animate-spin" />
+                <!-- Query Stats -->
+                <span v-if="!props.isLoading && stats && stats.execution_time_ms !== undefined" class="inline-flex items-center">
                     <Timer class="h-3.5 w-3.5 mr-1.5 text-muted-foreground/80" />
                     Query time:
-                    <span class="ml-1 font-medium text-foreground/90">{{ formatExecutionTime(stats.execution_time_ms)
-                    }}</span>
+                    <span class="ml-1 font-medium text-foreground/90">{{ formatExecutionTime(stats.execution_time_ms) }}</span>
                 </span>
-                <span v-if="stats && stats.rows_read !== undefined" class="inline-flex items-center">
+                <span v-if="!props.isLoading && stats && stats.rows_read !== undefined" class="inline-flex items-center">
                     <Rows4 class="h-3.5 w-3.5 mr-1.5 text-muted-foreground/80" />
                     Rows:
                     <span class="ml-1 font-medium text-foreground/90">{{ stats.rows_read.toLocaleString() }}</span>
+                </span>
+                <span v-if="props.isLoading" class="text-primary animate-pulse">Loading...</span>
                 </span>
             </div>
 
@@ -674,11 +680,12 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
         </div>
 
         <!-- Table Section with full-height scrolling -->
-        <div class="flex-1 relative overflow-hidden" ref="tableContainerRef">
+        <div class="flex-1 relative overflow-hidden" ref="tableContainerRef"
+             :class="{ 'opacity-60 pointer-events-none': props.isLoading }"> <!-- Dim table during load -->
             <!-- Add v-if="table" here -->
             <div v-if="table && table.getRowModel().rows?.length" class="absolute inset-0">
                 <div
-                    class="w-full h-full overflow-auto scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent">
+                    class="w-full h-full overflow-auto scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent transition-opacity duration-150">
                     <table ref="tableRef" class="table-fixed border-separate border-spacing-0 text-sm shadow-sm"
                         :data-resizing="isResizing">
                         <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
