@@ -31,8 +31,8 @@ type TableStat struct {
 	PartCount    uint64  `json:"part_count"`   // Number of data parts.
 }
 
-// GetTableColumnStats retrieves detailed statistics for each column of a specific table.
-func (c *Client) GetTableColumnStats(ctx context.Context, database, table string) ([]TableColumnStat, error) {
+// ColumnStats retrieves detailed statistics for each column of a specific table.
+func (c *Client) ColumnStats(ctx context.Context, database, table string) ([]TableColumnStat, error) {
 	// Query system.parts_columns for statistics on active parts.
 	query := fmt.Sprintf(`
 		SELECT
@@ -93,8 +93,8 @@ func (c *Client) GetTableColumnStats(ctx context.Context, database, table string
 	return stats, nil
 }
 
-// GetTableStats retrieves overall statistics for a specific table from active parts.
-func (c *Client) GetTableStats(ctx context.Context, database, table string) (*TableStat, error) {
+// TableStats retrieves overall statistics for a specific table from active parts.
+func (c *Client) TableStats(ctx context.Context, database, table string) (*TableStat, error) {
 	// Query system.parts for aggregated table statistics.
 	query := fmt.Sprintf(`
 		SELECT

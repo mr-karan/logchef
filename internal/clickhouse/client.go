@@ -23,6 +23,7 @@ type Client struct {
 	logger     *slog.Logger
 	queryHooks []QueryHook // Hooks to execute before/after queries.
 	mu         sync.Mutex  // Protects shared resources within the client if any
+	opts       *clickhouse.Options // Stores connection options for reconnection
 }
 
 // ClientOptions holds configuration for establishing a new ClickHouse client connection.
@@ -116,6 +117,7 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 		conn:       conn,
 		logger:     logger,
 		queryHooks: []QueryHook{}, // Initialize hooks slice.
+		opts:       options,
 	}
 
 	// Apply a default hook for basic query logging.
@@ -298,14 +300,13 @@ func (c *Client) Reconnect(ctx context.Context) error {
 		_ = c.conn.Close() // Ignore close errors
 	}
 
-	// Get the existing connection settings from the current connection
-	options, ok := c.conn.ClientInfo().Options.(*clickhouse.Options)
-	if !ok || options == nil {
-		return fmt.Errorf("failed to get connection options for reconnect")
+	// Use stored connection options
+	if c.opts == nil {
+		return fmt.Errorf("missing connection options for reconnect")
 	}
 
 	// Create a new connection with the same settings
-	newConn, err := clickhouse.Open(options)
+	newConn, err := clickhouse.Open(c.opts)
 	if err != nil {
 		return fmt.Errorf("reconnecting to clickhouse: %w", err)
 	}
@@ -371,6 +372,7 @@ func NewClientWithoutPing(opts ClientOptions, logger *slog.Logger) (*Client, err
 		conn:       conn,
 		logger:     logger,
 		queryHooks: []QueryHook{}, // Initialize hooks slice.
+		opts:       options,
 	}
 
 	// Apply a default hook for basic query logging.
@@ -379,8 +381,14 @@ func NewClientWithoutPing(opts ClientOptions, logger *slog.Logger) (*Client, err
 	return client, nil
 }
 
-// GetTableSchema retrieves comprehensive schema information for a ClickHouse table.
+// Schema retrieves comprehensive schema information for a ClickHouse table.
 // This is an alias for GetTableInfo.
+func (c *Client) Schema(ctx context.Context, database, table string) (*TableInfo, error) {
+	return c.GetTableInfo(ctx, database, table)
+}
+
+// GetTableSchema is kept for backward compatibility.
+// Use Schema instead for new code.
 func (c *Client) GetTableSchema(ctx context.Context, database, table string) (*TableInfo, error) {
 	return c.GetTableInfo(ctx, database, table)
 }

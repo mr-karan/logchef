@@ -264,7 +264,7 @@ func GetSourcesWithDetails(ctx context.Context, db *sqlite.DB, chDB *clickhouse.
 			// Only fetch schema details if source is connected
 			if source.IsConnected {
 				// Get the comprehensive table schema information
-				tableInfo, err := client.GetTableSchema(ctx, source.Connection.Database, source.Connection.TableName)
+				tableInfo, err := client.Schema(ctx, source.Connection.Database, source.Connection.TableName)
 				if err != nil {
 					log.Warn("failed to get table schema",
 						"source_id", source.ID,
@@ -349,7 +349,7 @@ func GetSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log
 		// Fetch the table schema and CREATE statement only if the source is connected
 		if source.IsConnected {
 			// Get the table schema (including all metadata)
-			tableInfo, err := client.GetTableSchema(ctx, source.Connection.Database, source.Connection.TableName)
+			tableInfo, err := client.Schema(ctx, source.Connection.Database, source.Connection.TableName)
 			if err != nil {
 				log.Warn("failed to get table schema",
 					"source_id", source.ID,
@@ -715,7 +715,7 @@ func GetSourceStats(ctx context.Context, chDB *clickhouse.Manager, log *slog.Log
 	}
 
 	// Get table stats with fallback to default
-	tableStats, err := client.GetTableStats(ctx, source.Connection.Database, source.Connection.TableName)
+	tableStats, err := client.TableStats(ctx, source.Connection.Database, source.Connection.TableName)
 	if err != nil {
 		log.Warn("failed to get table stats, using defaults",
 			"error", err,
@@ -727,7 +727,7 @@ func GetSourceStats(ctx context.Context, chDB *clickhouse.Manager, log *slog.Log
 
 	// Get column stats
 	var columnStats []clickhouse.TableColumnStat
-	columnStatsResult, err := client.GetTableColumnStats(ctx, source.Connection.Database, source.Connection.TableName)
+	columnStatsResult, err := client.ColumnStats(ctx, source.Connection.Database, source.Connection.TableName)
 	if err != nil {
 		log.Warn("failed to get column stats, will use schema if available",
 			"error", err,

@@ -96,7 +96,7 @@ func (m *Manager) checkAllSourcesHealth() {
 		wg.Add(1)
 		go func(sourceID models.SourceID) {
 			defer wg.Done()
-			m.performSingleSourceCheck(sourceID)
+			m.checkSource(sourceID)
 		}(id)
 	}
 	wg.Wait()
@@ -121,9 +121,9 @@ func (m *Manager) updateHealthStatus(sourceID models.SourceID, isHealthy bool, e
 	}
 }
 
-// performSingleSourceCheck checks a single source and updates the health map.
-// It now attempts to reconnect if the connection is unhealthy.
-func (m *Manager) performSingleSourceCheck(sourceID models.SourceID) {
+// checkSource checks a single source and updates the health map.
+// It attempts to reconnect if the connection is unhealthy.
+func (m *Manager) checkSource(sourceID models.SourceID) {
 	// Get the client connection. GetConnection handles locking internally.
 	client, err := m.GetConnection(sourceID)
 
@@ -247,7 +247,7 @@ func (m *Manager) AddSource(source *models.Source) error {
 	}
 
 	// Trigger an immediate check for the newly added source in the background
-	go m.performSingleSourceCheck(source.ID)
+	go m.checkSource(source.ID)
 
 	return nil
 }
@@ -305,7 +305,7 @@ func (m *Manager) GetClient(sourceID models.SourceID) (*Client, error) {
 // Use this only if an immediate, live check is explicitly required.
 func (m *Manager) GetHealth(sourceID models.SourceID) models.SourceHealth {
 	m.logger.Warn("GetHealth called (performs live check), consider GetCachedHealth instead", "source_id", sourceID)
-	m.performSingleSourceCheck(sourceID)
+	m.checkSource(sourceID)
 	return m.GetCachedHealth(sourceID)
 }
 
