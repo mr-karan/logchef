@@ -1552,17 +1552,24 @@ const handleQueryExecution = async () => {
         <div class="flex-1 overflow-hidden flex flex-col border-t mt-2">
           <!-- Results Area -->
           <div class="flex-1 overflow-hidden relative bg-background">
-            <!-- Results Table (Now always rendered if data exists, loading handled inside) -->
-            <template v-if="exploreStore.logs?.length">
-              <DataTable v-if="exploreStore.logs.length > 0 && exploreStore.columns?.length > 0"
+            <!-- Results Table (Render if logs exist OR if loading) -->
+            <template v-if="exploreStore.logs?.length > 0 || isExecutingQuery">
+              <!-- Render DataTable only if columns are available -->
+              <DataTable v-if="exploreStore.columns?.length > 0"
                 :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}`"
-                :columns="exploreStore.columns as any" :data="exploreStore.logs" :stats="exploreStore.queryStats"
+                :columns="exploreStore.columns as any"
+                :data="exploreStore.logs" <!-- Pass potentially empty logs during initial load -->
+                :stats="exploreStore.queryStats"
                 :is-loading="isExecutingQuery"
                 :source-id="String(exploreStore.sourceId)" :team-id="teamsStore.currentTeamId"
                 :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
                 :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field" :timezone="displayTimezone"
                 :query-fields="queryFields" :regex-highlights="regexHighlights" :active-mode="activeMode"
                 @drill-down="handleDrillDown" />
+              <!-- Show loading placeholder if loading but columns aren't ready -->
+              <div v-else-if="isExecutingQuery" class="absolute inset-0 flex items-center justify-center bg-background/70 z-10">
+                 <p class="text-muted-foreground animate-pulse">Loading results...</p>
+              </div>
             </template>
 
             <!-- No Results State -->
