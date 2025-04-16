@@ -209,7 +209,7 @@ func (m *Manager) AddSource(source *models.Source) error {
 	}
 
 	// Create new client without initial ping validation
-	client, err := NewClientWithoutPing(ClientOptions{
+	client, err := NewClient(ClientOptions{
 		Host:     source.Connection.Host,
 		Database: source.Connection.Database,
 		Username: source.Connection.Username,
@@ -358,6 +358,15 @@ func (m *Manager) CreateTemporaryClient(source *models.Source) (*Client, error) 
 	if err != nil {
 		m.logger.Error("failed to create temporary client", "error", err)
 		return nil, fmt.Errorf("error creating temporary client: %w", err)
+	}
+	
+	// Explicitly verify the connection is active by pinging the server.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx); err != nil {
+		// Attempt to close the potentially problematic connection before returning error.
+		_ = client.Close()
+		return nil, fmt.Errorf("pinging clickhouse failed: %w", err)
 	}
 
 	return client, nil

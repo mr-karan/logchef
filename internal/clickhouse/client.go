@@ -60,7 +60,8 @@ type TableInfo struct {
 }
 
 // NewClient establishes a new connection to a ClickHouse server using the native protocol.
-// It takes connection options and a logger, tests the connection, and returns a Client instance.
+// It takes connection options and a logger, creates the connection, and returns a Client instance.
+// Note: This does not automatically verify the connection with a ping - callers should do that if needed.
 func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 	// Ensure host includes the native protocol port (default 9000) if not specified.
 	host := opts.Host
@@ -102,15 +103,6 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 	conn, err := clickhouse.Open(options)
 	if err != nil {
 		return nil, fmt.Errorf("creating clickhouse connection: %w", err)
-	}
-
-	// Verify the connection is active by pinging the server.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := conn.Ping(ctx); err != nil {
-		// Attempt to close the potentially problematic connection before returning error.
-		_ = conn.Close()
-		return nil, fmt.Errorf("pinging clickhouse failed: %w", err)
 	}
 
 	client := &Client{
@@ -323,63 +315,6 @@ func (c *Client) Reconnect(ctx context.Context) error {
 	return nil
 }
 
-// NewClientWithoutPing creates a new Client without performing the initial ping test.
-// This is useful for initializing clients that may be temporarily unreachable.
-func NewClientWithoutPing(opts ClientOptions, logger *slog.Logger) (*Client, error) {
-	// Ensure host includes the native protocol port (default 9000) if not specified.
-	host := opts.Host
-	if !strings.Contains(host, ":") {
-		host = host + ":9000"
-	}
-
-	options := &clickhouse.Options{
-		Addr: []string{host},
-		Auth: clickhouse.Auth{
-			Database: opts.Database,
-			Username: opts.Username,
-			Password: opts.Password,
-		},
-		Settings: clickhouse.Settings{
-			// Default settings.
-			"max_execution_time": 60,
-		},
-		DialTimeout: 10 * time.Second,
-		Compression: &clickhouse.Compression{
-			Method: clickhouse.CompressionLZ4,
-		},
-		Protocol: clickhouse.Native,
-	}
-
-	// Apply any additional user-provided settings.
-	if opts.Settings != nil {
-		for k, v := range opts.Settings {
-			options.Settings[k] = v
-		}
-	}
-
-	logger.Debug("creating clickhouse connection without ping validation",
-		"host", host,
-		"database", opts.Database,
-		"protocol", "native",
-	)
-
-	conn, err := clickhouse.Open(options)
-	if err != nil {
-		return nil, fmt.Errorf("creating clickhouse connection: %w", err)
-	}
-
-	client := &Client{
-		conn:       conn,
-		logger:     logger,
-		queryHooks: []QueryHook{}, // Initialize hooks slice.
-		opts:       options,
-	}
-
-	// Apply a default hook for basic query logging.
-	client.AddQueryHook(NewLogQueryHook(logger, false)) // Verbose logging disabled by default.
-
-	return client, nil
-}
 
 // GetTableInfo retrieves detailed metadata about a table, including handling
 // for Distributed tables by inspecting the underlying local table.
