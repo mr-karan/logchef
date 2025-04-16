@@ -106,6 +106,10 @@ func (a *App) Initialize(ctx context.Context) error {
 		}
 	}
 
+	// Start background health checks for the ClickHouse manager.
+	// Use 0 to trigger the default interval defined in the manager.
+	a.ClickHouse.StartBackgroundHealthChecks(0)
+
 	// Initialize HTTP server.
 	serverOpts := server.ServerOptions{
 		Config:       a.Config,
@@ -146,6 +150,13 @@ func (a *App) Shutdown(ctx context.Context) error {
 		if err := a.server.Shutdown(ctx); err != nil {
 			a.Logger.Error("error shutting down server", "error", err)
 			// Continue shutdown even if server fails.
+		}
+	}
+
+	// Close ClickHouse manager (stops health checks and closes clients).
+	if a.ClickHouse != nil {
+		if err := a.ClickHouse.Close(); err != nil {
+			a.Logger.Error("error closing clickhouse manager", "error", err)
 		}
 	}
 

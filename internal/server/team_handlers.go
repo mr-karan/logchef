@@ -223,10 +223,9 @@ func (s *Server) handleRemoveTeamMember(c *fiber.Ctx) error {
 
 // --- Team Source Handlers ---
 
-// handleListTeamSources lists sources linked to a specific team.
+// handleListTeamSources lists sources linked to a specific team, including their connection status.
 // URL: GET /api/v1/teams/:teamID/sources
 // Requires: Team membership (requireTeamMember middleware)
-// Returns basic source information only.
 func (s *Server) handleListTeamSources(c *fiber.Ctx) error {
 	idStr := c.Params("teamID")
 	teamID, err := core.ParseTeamID(idStr)
@@ -234,20 +233,21 @@ func (s *Server) handleListTeamSources(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Invalid team ID: "+err.Error())
 	}
 
-	// Get basic source info linked to the team using the updated core function.
-	basicSources, err := core.ListTeamSources(c.Context(), s.sqlite, teamID)
+	// Get source info, including connection status, linked to the team using the updated core function.
+	sources, err := core.ListTeamSources(c.Context(), s.sqlite, s.clickhouse, s.log, teamID)
 	if err != nil {
 		if errors.Is(err, core.ErrTeamNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Team not found", models.NotFoundErrorType)
+			// Team not found is a valid case, return empty list.
+			return SendSuccess(c, fiber.StatusOK, []*models.SourceResponse{})
 		}
-		s.log.Error("failed to list basic team sources via core function", slog.Any("error", err), "team_id", teamID)
+		s.log.Error("failed to list team sources via core function", slog.Any("error", err), "team_id", teamID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to list team sources")
 	}
 
-	// Convert basic sources to response objects.
-	sourceResponses := make([]*models.SourceResponse, 0, len(basicSources))
-	for _, src := range basicSources {
-		// Check for nil just in case
+	// Convert sources (which now include IsConnected) to response objects.
+	sourceResponses := make([]*models.SourceResponse, 0, len(sources))
+	for _, src := range sources {
+		// Check for nil just in case (core function should prevent this)
 		if src != nil {
 			sourceResponses = append(sourceResponses, src.ToResponse())
 		}

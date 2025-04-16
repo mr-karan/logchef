@@ -2,7 +2,32 @@
 import { ref, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue';
 const isMounted = ref(true);
 import { toCalendarDateTime, CalendarDateTime } from '@internationalized/date';
-import * as echarts from 'echarts';
+// Tree-shaking echarts imports
+import { init, use } from 'echarts/core';
+import type { ECharts } from 'echarts/core';
+import { BarChart } from 'echarts/charts';
+import {
+    TitleComponent,
+    TooltipComponent,
+    GridComponent,
+    DataZoomComponent,
+    ToolboxComponent,
+    LegendComponent
+} from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
+
+// Register necessary components
+use([
+    BarChart,
+    TitleComponent,
+    TooltipComponent,
+    GridComponent,
+    DataZoomComponent,
+    ToolboxComponent,
+    LegendComponent,
+    CanvasRenderer
+]);
+
 import { debounce } from 'lodash-es';
 import { useExploreStore } from '@/stores/explore';
 import { useSourcesStore } from '@/stores/sources';
@@ -36,7 +61,7 @@ const emit = defineEmits<{
 
 // Component state
 const chartRef = ref<HTMLElement | null>(null);
-let chart: echarts.ECharts | null = null;
+let chart: ECharts | null = null;
 const histogramData = ref<HistogramData[]>([]);
 const isChartLoading = ref(false);
 const initialDataLoaded = ref(false);
@@ -71,29 +96,28 @@ const windowResizeEventCallback = debounce(async () => {
     }
 }, 100);
 
-// Color palette for grouped data - Expanded palette with carefully selected colors
-// that maintain good contrast in both light and dark modes
+// Optimized for clarity, contrast, and accessibility in both light and dark themes
 const colorPalette = [
-    '#4a90e2',  // Blue
-    '#e74c3c',  // Red
-    '#2ecc71',  // Green
-    '#f39c12',  // Orange
-    '#9b59b6',  // Purple
-    '#1abc9c',  // Turquoise
-    '#d35400',  // Dark Orange
-    '#3498db',  // Light Blue
-    '#e67e22',  // Carrot
-    '#7f8c8d',  // Gray
-    '#16a085',  // Green Sea
-    '#8e44ad',  // Wisteria
-    '#27ae60',  // Nephritis
-    '#d64541',  // Pomegranate
-    '#f1c40f',  // Sunflower
-    '#34495e',  // Wet Asphalt
-    '#2980b9',  // Belize Hole
-    '#c0392b',  // Brick Red
-    '#5499c7',  // Steel Blue
-    '#6c7a89'   // Lynch
+    '#5794F2',  // Blue
+    '#73BF69',  // Green
+    '#F2495C',  // Red
+    '#FF9830',  // Orange
+    '#B877D9',  // Purple
+    '#20E7C9',  // Teal
+    '#FADE2A',  // Yellow
+    '#8AB8FF',  // Light blue
+    '#95F086',  // Light green
+    '#FF8A8A',  // Light red
+    '#CA95E5',  // Light purple
+    '#44A2F3',  // Alternate blue
+    '#37872D',  // Dark green
+    '#8F3D86',  // Dark purple
+    '#1250B0',  // Dark blue
+    '#A13531',  // Dark red
+    '#3D4A8F',  // Navy
+    '#63561B',  // Olive
+    '#6E6E6E',  // Gray
+    '#23707D'   // Turquoise
 ];
 
 // Convert the histogram data to chart options with Kibana-like styling
@@ -154,7 +178,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 type: 'bar',
                 data: [],
                 itemStyle: {
-                    color: '#4a90e2' // A pleasant, Kibana-like blue for log analytics
+                    color: '#5794F2' // Professional blue for log analytics
                 }
             }]
         };
@@ -252,13 +276,13 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             large: true,
             largeThreshold: 100,
             itemStyle: {
-                color: '#4a90e2', // A pleasant, Kibana-like blue for log analytics
+                color: '#5794F2', // Professional-style blue for log analytics
                 borderRadius: [2, 2, 0, 0],
                 opacity: 0.85
             },
             emphasis: {
                 itemStyle: {
-                    color: '#357abd', // Slightly darker blue for hover/selection
+                    color: '#44A2F3', // Slightly darker blue for hover/selection
                     opacity: 1,
                     shadowBlur: 4,
                     shadowColor: 'rgba(0, 0, 0, 0.2)'
@@ -603,7 +627,7 @@ const initChart = async () => {
         }
 
         // Create chart instance
-        chart = echarts.init(chartRef.value);
+        chart = init(chartRef.value);
 
         // Set initial options
         updateChartOptions();

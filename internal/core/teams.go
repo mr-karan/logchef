@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -362,27 +363,54 @@ func RemoveTeamMember(ctx context.Context, db *sqlite.DB, log *slog.Logger, team
 
 // --- Team Source Functions ---
 
-// ListTeamSources returns all sources associated with a specific team.
-// It only fetches basic information from the database.
-func ListTeamSources(ctx context.Context, db *sqlite.DB, teamID models.TeamID) ([]*models.Source, error) {
-	// Validate team exists first (optional, but good practice)
-	_, err := GetTeam(ctx, db, teamID)
+// ListTeamSources returns basic information for all sources associated with a specific team,
+// including their connection status fetched from the ClickHouse manager's cache.
+func ListTeamSources(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, teamID models.TeamID) ([]*models.Source, error) {
+	// First, validate the team exists
+	_, err := GetTeam(ctx, db, teamID) // Use existing GetTeam function
 	if err != nil {
 		if errors.Is(err, ErrTeamNotFound) {
-			// Return specific error if team not found
-			return nil, err
+			// Return specific error if team not found, allows handler to differentiate
+			return nil, ErrTeamNotFound
 		}
-		// Log and return generic error for other DB issues
-		// log.Error("failed to get team before listing sources", "error", err, "team_id", teamID) // Consider adding logging if needed
-		return nil, fmt.Errorf("error verifying team %d: %w", teamID, err)
+		// Return other DB errors
+		return nil, fmt.Errorf("error checking team existence before listing sources: %w", err)
 	}
 
-	// Directly list basic source info from the database.
+	// Get the basic source info from SQLite
 	sources, err := db.ListTeamSources(ctx, teamID)
 	if err != nil {
-		// log.Error("failed to list team sources from db", "error", err, "team_id", teamID) // Consider adding logging if needed
-		return nil, fmt.Errorf("error listing team sources: %w", err)
+		// If the error is sql.ErrNoRows (or equivalent), it means no sources are linked.
+		// Return an empty slice and no error in this case.
+		if errors.Is(err, sql.ErrNoRows) || sqlite.IsNotFoundError(err) { // Check for standard and custom not found
+			return []*models.Source{}, nil
+		}
+		// Return other database errors
+		return nil, fmt.Errorf("error listing team sources from db: %w", err)
 	}
+
+	// Iterate and populate connection status from the manager's cache
+	for _, source := range sources {
+		if source == nil { // Safety check
+			continue
+		}
+		// Get the cached health status from the manager
+		health := chDB.GetCachedHealth(source.ID)
+		// Update the IsConnected field based on the cached status
+		source.IsConnected = (health.Status == models.HealthStatusHealthy)
+
+		// Optionally log if status is unhealthy for debugging
+		if !source.IsConnected {
+			log.Debug("retrieved unhealthy status from cache for source",
+				"source_id", source.ID,
+				"team_id", teamID,
+				"cached_status", health.Status,
+				"last_checked", health.LastChecked,
+				"error", health.Error,
+			)
+		}
+	}
+
 	return sources, nil
 }
 

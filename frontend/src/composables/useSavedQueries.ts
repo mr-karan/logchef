@@ -8,7 +8,6 @@ import { getErrorMessage } from '@/api/types'
 import type { SaveQueryFormData } from '@/views/explore/types'
 import type { SavedTeamQuery } from '@/api/savedQueries'
 import { CalendarDateTime, getLocalTimeZone, type DateValue } from '@internationalized/date'
-import { useExploreUrlSync } from './useExploreUrlSync'
 
 // Add this helper function before the useSavedQueries function definition
 function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): number | null {

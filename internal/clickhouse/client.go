@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mr-karan/logchef/pkg/models"
@@ -21,6 +22,7 @@ type Client struct {
 	conn       driver.Conn // Underlying ClickHouse native connection.
 	logger     *slog.Logger
 	queryHooks []QueryHook // Hooks to execute before/after queries.
+	mu         sync.Mutex  // Protects shared resources within the client if any
 }
 
 // ClientOptions holds configuration for establishing a new ClickHouse client connection.
@@ -670,4 +672,19 @@ func isKeyword(s string) bool {
 		// "now": true, "today": true,
 	}
 	return keywords[lowerS]
+}
+
+// Ping checks the connectivity to the ClickHouse server.
+// It sends a PING request and waits for a PONG response.
+func (c *Client) Ping(ctx context.Context) error {
+	if c.conn == nil {
+		return fmt.Errorf("clickhouse client connection is nil")
+	}
+	// Use the underlying driver connection's Ping method
+	if err := c.conn.Ping(ctx); err != nil {
+		// Log the specific ping error for debugging
+		c.logger.Debug("clickhouse ping failed", "error", err)
+		return fmt.Errorf("clickhouse ping failed: %w", err)
+	}
+	return nil
 }
