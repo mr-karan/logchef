@@ -21,6 +21,7 @@ export function useExploreUrlSync() {
 
   const isInitializing = ref(true);
   const initializationError = ref<string | null>(null);
+  const skipNextUrlSync = ref(false);
 
   // --- Internal Helper Functions ---
 
@@ -229,6 +230,13 @@ export function useExploreUrlSync() {
        return;
     }
 
+    // Skip this URL sync if the flag is set
+    if (skipNextUrlSync.value) {
+      console.log("Skipping URL sync as requested - waiting for pushQueryHistoryEntry");
+      skipNextUrlSync.value = false; // Reset the flag
+      return;
+    }
+
     const query: Record<string, string> = {};
 
     // Team
@@ -289,6 +297,9 @@ export function useExploreUrlSync() {
     if (isInitializing.value) {
       return;
     }
+
+    // Set the flag to skip the next automatic URL sync
+    skipNextUrlSync.value = true;
 
     const query: Record<string, string> = {};
 
@@ -351,6 +362,10 @@ export function useExploreUrlSync() {
     () => {
       // Avoid syncing during the initial setup phase
       if (isInitializing.value) {
+        return;
+      }
+      // Don't sync if we're planning to push a history entry instead
+      if (skipNextUrlSync.value) {
         return;
       }
       // Debounce? Consider adding debounce later if updates are too frequent

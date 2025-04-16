@@ -398,13 +398,18 @@ export function useQuery() {
       } else {
         // Create a new history entry in the browser history
         // But only do this for successful queries to avoid cluttering history with errors
-        pushQueryHistoryEntry();
+        // NOTE: This is now handled by the LogExplorer component's handleQueryExecution
+        // pushQueryHistoryEntry();
       }
 
       // Mark that we've run a query
       hasRunQuery.value = true;
 
-      return execResult;
+      return {
+        success: execResult.success,
+        error: execResult.error,
+        data: execResult.data
+      };
     } catch (error) {
       // Still update timestamp on error
       exploreStore.updateExecutionTimestamp();
@@ -412,7 +417,11 @@ export function useQuery() {
       const errorMessage = error instanceof Error ? error.message : getErrorMessage(error);
       queryError.value = errorMessage;
       console.error('Query execution error:', errorMessage);
-      return { success: false, error: { message: errorMessage } };
+      return {
+        success: false,
+        error: { message: errorMessage },
+        data: null
+      };
     }
   };
 

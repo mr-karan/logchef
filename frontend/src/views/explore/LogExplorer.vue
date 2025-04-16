@@ -47,7 +47,7 @@ import type { SaveQueryFormData } from '@/views/explore/types'
 import type { SavedTeamQuery } from '@/api/savedQueries'
 import { useExploreUrlSync } from '@/composables/useExploreUrlSync'
 import { useQuery } from '@/composables/useQuery'
-import type { EditorMode } from '@/views/explore/types'
+import type { EditorMode, EditorChangeEvent } from '@/components/query-editor/types'; // Import types
 import type { ComponentPublicInstance } from 'vue'; // Import ComponentPublicInstance
 import { type QueryCondition, parseAndTranslateLogchefQL, validateLogchefQLWithDetails } from '@/utils/logchefql/api';
 import { QueryService } from '@/services/QueryService';
@@ -60,7 +60,8 @@ const teamsStore = useTeamsStore()
 const sourcesStore = useSourcesStore()
 const savedQueriesStore = useSavedQueriesStore()
 const { toast } = useToast()
-const { isInitializing, initializationError, initializeFromUrl, syncUrlFromState } = useExploreUrlSync();
+// Get pushQueryHistoryEntry along with other functions from useExploreUrlSync
+const { isInitializing, initializationError, initializeFromUrl, syncUrlFromState, pushQueryHistoryEntry } = useExploreUrlSync();
 
 // Composables
 const {
@@ -1094,6 +1095,23 @@ const insertExampleQuery = (sortKeys: string[] = []) => {
     });
   }
 };
+
+// Update the handler function for query execution to properly handle browser history
+const handleQueryExecution = async () => {
+  try {
+    // Execute the query
+    const result = await executeQuery();
+
+    // Only push a history entry if the query executed successfully
+    if (result && result.success) {
+      // This will create a new browser history entry with router.push
+      // and prevent the watcher from using router.replace
+      pushQueryHistoryEntry();
+    }
+  } catch (error) {
+    console.error("Error during query execution:", error);
+  }
+};
 </script>
 
 <template>
@@ -1352,16 +1370,18 @@ const insertExampleQuery = (sortKeys: string[] = []) => {
           <!-- Query Editor - only show when we have valid source and time range -->
           <template v-else-if="currentSourceId && hasValidSource && exploreStore.timeRange">
             <div class="bg-card shadow-sm rounded-md overflow-hidden">
-              <QueryEditor ref="queryEditorRef" :sourceId="currentSourceId" :teamId="currentTeamId ?? 0"
-                :schema="sourceDetails?.columns?.reduce((acc, col) => ({ ...acc, [col.name]: { type: col.type } }), {}) || {}"
+              <QueryEditor ref="queryEditorRef" :sourceId="currentSourceId" :teamId="currentTeamId ?? 0" :schema="sourceDetails?.columns?.reduce((acc: Record<string, { type: string }>, col: { name: string; type: string }) => {
+                acc[col.name] = { type: col.type };
+                return acc;
+              }, {} as Record<string, { type: string }>) || {}"
                 :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
-                :value="exploreStore.activeMode === 'logchefql' ? logchefQuery : sqlQuery" @change="(event) => event.mode === 'logchefql' ?
+                :value="exploreStore.activeMode === 'logchefql' ? logchefQuery : sqlQuery" @change="(event: EditorChangeEvent) => event.mode === 'logchefql' ?
                   updateLogchefqlValue(event.query, event.isUserInput) :
                   updateSqlValue(event.query, event.isUserInput)"
                 :placeholder="exploreStore.activeMode === 'logchefql' ? 'Enter search criteria (e.g., level=&quot;error&quot; and status>400)' : 'Enter SQL query...'"
                 :tsField="sourceDetails?._meta_ts_field || 'timestamp'" :tableName="activeSourceTableName"
-                :showFieldsPanel="showFieldsPanel" @submit="executeQuery"
-                @update:activeMode="(mode, isModeSwitchOnly) => changeMode(mode === 'logchefql' ? 'logchefql' : 'sql', isModeSwitchOnly)"
+                :showFieldsPanel="showFieldsPanel" @submit="handleQueryExecution"
+                @update:activeMode="(mode: EditorMode, isModeSwitchOnly?: boolean) => changeMode(mode === 'logchefql' ? 'logchefql' : 'sql', isModeSwitchOnly)"
                 @toggle-fields="showFieldsPanel = !showFieldsPanel" @select-saved-query="loadSavedQuery"
                 @save-query="handleSaveOrUpdateClick" class="border-0 border-b" />
 
@@ -1454,7 +1474,7 @@ const insertExampleQuery = (sortKeys: string[] = []) => {
               <Button variant="default" class="h-9 px-4 flex items-center gap-2 shadow-sm" :class="{
                 'bg-amber-500 hover:bg-amber-600 text-amber-foreground': isDirty && !isExecutingQuery,
                 'bg-primary hover:bg-primary/90 text-primary-foreground': isExecutingQuery
-              }" :disabled="isExecutingQuery || !canExecuteQuery" @click="executeQuery">
+              }" :disabled="isExecutingQuery || !canExecuteQuery" @click="handleQueryExecution">
                 <Play v-if="!isExecutingQuery" class="h-4 w-4" />
                 <RefreshCw v-else class="h-4 w-4 animate-spin" />
                 <span>{{ isDirty ? 'Run Query*' : 'Run Query' }}</span>
@@ -1590,7 +1610,7 @@ const insertExampleQuery = (sortKeys: string[] = []) => {
                 <p class="text-sm text-muted-foreground max-w-md mb-4">
                   Enter a query or use the default, then click 'Run' to see logs.
                 </p>
-                <Button variant="outline" size="sm" @click="executeQuery"
+                <Button variant="outline" size="sm" @click="handleQueryExecution"
                   class="border-primary/20 text-primary hover:bg-primary/5 hover:text-primary hover:border-primary/30">
                   <Play class="h-3.5 w-3.5 mr-1.5" />
                   Run default query

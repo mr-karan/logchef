@@ -66,7 +66,8 @@
 
         <!-- Saved Queries Dropdown -->
         <SavedQueriesDropdown :selected-source-id="props.sourceId" :selected-team-id="props.teamId"
-          @select-saved-query="(query) => $emit('select-saved-query', query)" @save="$emit('save-query')" class="h-8" />
+          @select-saved-query="(query: SavedTeamQuery) => $emit('select-saved-query', query)"
+          @save="$emit('save-query')" class="h-8" />
 
         <!-- Help Icon -->
         <HoverCard :open-delay="200">
@@ -87,7 +88,9 @@
                 <div><code class="bg-muted px-1 rounded">field!~"pattern"</code> - Regex exclusion</div>
                 <div><code class="bg-muted px-1 rounded">field>100</code> - Comparison</div>
                 <div><code class="bg-muted px-1 rounded">(c1 and c2) or c3</code> - Grouping</div>
-                <div class="pt-1"><em>Example: <code class="bg-muted px-1 rounded">level="error" and status>=500</code></em></div>
+                <div class="pt-1"><em>Example: <code
+                      class="bg-muted px-1 rounded">level="error" and status>=500</code></em>
+                </div>
               </div>
               <div v-else class="text-xs space-y-1.5">
                 <div><code class="bg-muted px-1 rounded">SELECT count() FROM {{ tableName || 'table' }}</code></div>
@@ -126,7 +129,8 @@
         <span class="font-medium">Validation Error: </span>
         {{ validationError }}
         <span v-if="validationError?.includes('Missing boolean operator')" class="block mt-1 text-xs">
-          Hint: Use <code class="bg-muted px-1 rounded">and</code> or <code class="bg-muted px-1 rounded">or</code> between
+          Hint: Use <code class="bg-muted px-1 rounded">and</code> or <code class="bg-muted px-1 rounded">or</code>
+          between
           conditions. Example: <code class="bg-muted px-1 rounded">field1="value" and field2="value"</code>
         </span>
       </span>
