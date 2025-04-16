@@ -21,8 +21,8 @@ import (
 type Client struct {
 	conn       driver.Conn // Underlying ClickHouse native connection.
 	logger     *slog.Logger
-	queryHooks []QueryHook // Hooks to execute before/after queries.
-	mu         sync.Mutex  // Protects shared resources within the client if any
+	queryHooks []QueryHook         // Hooks to execute before/after queries.
+	mu         sync.Mutex          // Protects shared resources within the client if any
 	opts       *clickhouse.Options // Stores connection options for reconnection
 }
 
@@ -379,18 +379,6 @@ func NewClientWithoutPing(opts ClientOptions, logger *slog.Logger) (*Client, err
 	client.AddQueryHook(NewLogQueryHook(logger, false)) // Verbose logging disabled by default.
 
 	return client, nil
-}
-
-// Schema retrieves comprehensive schema information for a ClickHouse table.
-// This is an alias for GetTableInfo.
-func (c *Client) Schema(ctx context.Context, database, table string) (*TableInfo, error) {
-	return c.GetTableInfo(ctx, database, table)
-}
-
-// GetTableSchema is kept for backward compatibility.
-// Use Schema instead for new code.
-func (c *Client) GetTableSchema(ctx context.Context, database, table string) (*TableInfo, error) {
-	return c.GetTableInfo(ctx, database, table)
 }
 
 // GetTableInfo retrieves detailed metadata about a table, including handling
