@@ -19,7 +19,7 @@ import {
 } from '@tanstack/vue-table'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Search, GripVertical, Download, Copy, Timer, Rows4, Equal, EqualNot } from 'lucide-vue-next'
+import { Search, GripVertical, Download, Copy, Timer, Rows4, Equal, EqualNot, RefreshCw } from 'lucide-vue-next' // Added RefreshCw
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import DataTableColumnSelector from './data-table-column-selector.vue'
