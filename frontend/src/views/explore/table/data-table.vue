@@ -608,7 +608,6 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
                     <span class="ml-1 font-medium text-foreground/90">{{ stats.rows_read.toLocaleString() }}</span>
                 </span>
                 <span v-if="props.isLoading" class="text-primary animate-pulse">Loading...</span>
-                </span>
             </div>
 
             <!-- Right side controls with pagination moved to top -->
