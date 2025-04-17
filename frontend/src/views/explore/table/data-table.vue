@@ -937,28 +937,42 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
     /* Ensure hover appears above other rows */
 }
 
-/* Ensure proper rendering inside table cells - single line with no wrapping */
+/* Rendering for table cells - show full text by default, add ellipsis only on hover */
 td>.flex>.whitespace-pre {
     white-space: pre !important;
     /* Prevent wrapping */
     overflow: hidden !important;
     /* Hide overflow within the cell's inner div */
-    text-overflow: ellipsis !important;
-    /* Add ellipsis for hidden text */
+    text-overflow: clip !important;
+    /* Default to clip overflow (no ellipsis) */
+    transition: text-overflow 0.2s ease;
 }
 
-/* Ensure JSON objects don't wrap in table cells */
+/* Add ellipsis only when cell is hovered (to make space for action buttons) */
+.cell-hover-target:hover .whitespace-pre {
+    text-overflow: ellipsis !important;
+    /* Add ellipsis for hidden text on hover */
+}
+
+/* Handling for JSON objects in table cells */
 :deep(.json-content) {
     white-space: nowrap !important;
     /* Prevent wrapping for JSON content */
     overflow: hidden !important;
     /* Hide overflow */
-    text-overflow: ellipsis !important;
-    /* Add ellipsis for hidden text */
+    text-overflow: clip !important;
+    /* Default to clip overflow (no ellipsis) */
     display: inline-block !important;
     /* Keep it as inline block */
     max-width: 100% !important;
     /* Limit width to cell size */
+    transition: text-overflow 0.2s ease;
+}
+
+/* Add ellipsis for JSON content only on hover */
+.cell-hover-target:hover :deep(.json-content) {
+    text-overflow: ellipsis !important;
+    /* Add ellipsis for hidden text on hover */
 }
 
 /* Add cursor styling for drag handle */

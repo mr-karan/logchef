@@ -49,7 +49,7 @@ import { useExploreUrlSync } from '@/composables/useExploreUrlSync'
 import { useQuery } from '@/composables/useQuery'
 import type { EditorMode, EditorChangeEvent } from '@/components/query-editor/types'; // Import types
 import type { ComponentPublicInstance } from 'vue'; // Import ComponentPublicInstance
-import { type QueryCondition, parseAndTranslateLogchefQL, validateLogchefQLWithDetails } from '@/utils/logchefql/api';
+import { type QueryCondition, parseAndTranslateLogchefQL } from '@/utils/logchefql/api';
 import { QueryService } from '@/services/QueryService';
 import LogHistogram from '@/components/visualizations/LogHistogram.vue';
 
@@ -1557,18 +1557,16 @@ const handleQueryExecution = async () => {
               <!-- Render DataTable only if columns are available -->
               <DataTable v-if="exploreStore.columns?.length > 0"
                 :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}`"
-                :columns="exploreStore.columns as any"
-                :data="exploreStore.logs"
-                :stats="exploreStore.queryStats"
-                :is-loading="isExecutingQuery"
-                :source-id="String(exploreStore.sourceId)" :team-id="teamsStore.currentTeamId"
-                :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
+                :columns="exploreStore.columns as any" :data="exploreStore.logs" :stats="exploreStore.queryStats"
+                :is-loading="isExecutingQuery" :source-id="String(exploreStore.sourceId)"
+                :team-id="teamsStore.currentTeamId" :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
                 :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field" :timezone="displayTimezone"
                 :query-fields="queryFields" :regex-highlights="regexHighlights" :active-mode="activeMode"
                 @drill-down="handleDrillDown" />
               <!-- Show loading placeholder if loading but columns aren't ready -->
-              <div v-else-if="isExecutingQuery" class="absolute inset-0 flex items-center justify-center bg-background/70 z-10">
-                 <p class="text-muted-foreground animate-pulse">Loading results...</p>
+              <div v-else-if="isExecutingQuery"
+                class="absolute inset-0 flex items-center justify-center bg-background/70 z-10">
+                <p class="text-muted-foreground animate-pulse">Loading results...</p>
               </div>
             </template>
 

@@ -22,37 +22,37 @@ interface ColumnWidthConfig {
 // Width configurations for each column type
 const COLUMN_WIDTH_CONFIG: Record<string, { minWidth: number, defaultWidth: number, maxWidth: number }> = {
   timestamp: {
-    minWidth: 170,
-    defaultWidth: 190,
-    maxWidth: 300,
+    minWidth: 200,
+    defaultWidth: 220,
+    maxWidth: 330,
   },
   severity: {
-    minWidth: 90,
-    defaultWidth: 110,
-    maxWidth: 150,
+    minWidth: 120,
+    defaultWidth: 140,
+    maxWidth: 180,
   },
   status: {
-    minWidth: 70,
-    defaultWidth: 90,
-    maxWidth: 120,
+    minWidth: 100,
+    defaultWidth: 120,
+    maxWidth: 150,
   },
   // Default widths should be generous enough for most column types
   default: {
-    minWidth: 120,
-    defaultWidth: 160,
-    maxWidth: 500,
+    minWidth: 150,
+    defaultWidth: 190,
+    maxWidth: 530,
   },
   // Smart width for columns with longer names
   wide: {
-    minWidth: 150,
-    defaultWidth: 200,
-    maxWidth: 500,
+    minWidth: 180,
+    defaultWidth: 230,
+    maxWidth: 530,
   },
   // Extra width for columns with very long names
   extraWide: {
-    minWidth: 180,
-    defaultWidth: 250,
-    maxWidth: 600,
+    minWidth: 210,
+    defaultWidth: 280,
+    maxWidth: 630,
   }
 };
 
