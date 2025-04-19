@@ -487,8 +487,8 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             axisLine: {
                 // lineStyle color will be handled by the theme
                 lineStyle: {
-                    color: 'hsl(var(--border))'
-                // lineStyle color will be handled by the theme
+                    // color: 'hsl(var(--border))' // Color handled by theme
+                } // <-- Added missing closing brace
             },
             axisTick: {
                 alignWithLabel: true,
