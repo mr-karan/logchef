@@ -34,6 +34,21 @@ const routes: RouteRecordRaw[] = [
           public: true,
           layout: "outer",
         },
+        alias: "/login",
+      },
+      {
+        path: "logout",
+        name: "Logout",
+        component: () => import("@/views/auth/Logout.vue").catch(err => {
+          error("Router", "Failed to load Logout component", err);
+          return { default: ComponentLoadError };
+        }),
+        meta: {
+          title: "Logout",
+          public: true,
+          layout: "outer",
+        },
+        alias: "/logout",
       },
     ],
   },

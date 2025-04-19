@@ -24,6 +24,9 @@ const router = useRouter()
             <Button @click="router.push('/logs/explore')">
                 Go to Explore
             </Button>
+            <Button variant="destructive" @click="router.push('/auth/logout')">
+                Logout
+            </Button>
         </div>
     </div>
 </template>
