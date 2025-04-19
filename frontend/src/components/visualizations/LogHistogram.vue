@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue';
-import { useColorMode } from '@vueuse/core'; // Import useColorMode
+import { useColorMode } from '@vueuse/core';
 const isMounted = ref(true);
 import { toCalendarDateTime, CalendarDateTime } from '@internationalized/date';
 // Tree-shaking echarts imports
-import { init, use } from 'echarts/core';
+import { init, use, registerTheme } from 'echarts/core'; // Import registerTheme
 import type { ECharts } from 'echarts/core';
 import { BarChart } from 'echarts/charts';
 import {
@@ -28,6 +28,18 @@ use([
     LegendComponent,
     CanvasRenderer
 ]);
+
+// Import the dark theme
+import { logchefDarkTheme } from '@/utils/echarts-theme-dark';
+
+// Register the dark theme only once
+let themeRegistered = false;
+if (!themeRegistered) {
+    registerTheme('logchef-dark', logchefDarkTheme);
+    themeRegistered = true;
+    console.log("LogChef dark theme registered for ECharts.");
+}
+
 
 import { debounce } from 'lodash-es';
 import { useExploreStore } from '@/stores/explore';
@@ -134,13 +146,14 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             title: {
                 text: 'Log Distribution',
                 left: 'center',
+                // textStyle color will be handled by the theme
                 textStyle: {
                     fontSize: 14,
                     fontWeight: '500',
-                    color: 'hsl(var(--foreground))'
+                    // color: 'hsl(var(--foreground))' // Removed
                 }
             },
-            backgroundColor: 'transparent',
+            backgroundColor: 'transparent', // Keep background transparent
             grid: {
                 containLabel: true,
                 left: 25,
@@ -176,8 +189,9 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                     }
                 },
                 axisTick: { show: false },
+                // axisLabel color will be handled by the theme
                 axisLabel: {
-                    color: 'hsl(var(--muted-foreground))',
+                    // color: 'hsl(var(--muted-foreground))', // Removed
                     fontSize: 11
                 }
             },
@@ -339,13 +353,14 @@ const convertHistogramData = (buckets: HistogramData[]) => {
         title: {
             text: `${buckets.length.toLocaleString()} Log Records`,
             left: 'center',
+            // textStyle color will be handled by the theme
             textStyle: {
                 fontSize: 14,
                 fontWeight: '500',
-                color: 'hsl(var(--foreground))'
+                // color: 'hsl(var(--foreground))' // Removed
             }
         },
-        backgroundColor: 'transparent',
+        backgroundColor: 'transparent', // Keep background transparent
         grid: {
             containLabel: true,
             left: 25,
@@ -442,8 +457,9 @@ const convertHistogramData = (buckets: HistogramData[]) => {
         legend: isGrouped ? {
             show: true,
             bottom: 0,
+            // textStyle color will be handled by the theme
             textStyle: {
-                color: 'hsl(var(--foreground))',
+                // color: 'hsl(var(--foreground))', // Removed
                 fontSize: 11
             }
         } : {
@@ -465,21 +481,20 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                     return value;
                 },
                 fontSize: 11,
-                color: 'hsl(var(--muted-foreground))',
+                // color: 'hsl(var(--muted-foreground))', // Removed - Handled by theme
                 margin: 10
             },
             axisLine: {
+                // lineStyle color will be handled by the theme
                 lineStyle: {
                     color: 'hsl(var(--border))'
-                }
+                // lineStyle color will be handled by the theme
             },
             axisTick: {
                 alignWithLabel: true,
-                lineStyle: {
-                    color: 'hsl(var(--border))'
-                }
+                // lineStyle color will be handled by the theme
             },
-            splitLine: { show: false }
+            splitLine: { show: false } // Keep this specific override if needed
         },
         yAxis: {
             type: 'value',
@@ -508,7 +523,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                         return (Math.round(value / 100000000) / 10).toLocaleString() + 'B';
                     }
                 },
-                color: 'hsl(var(--muted-foreground))',
+                // color: 'hsl(var(--muted-foreground))', // Removed - Handled by theme
                 fontSize: 11,
                 margin: 12
             }
@@ -734,9 +749,10 @@ const initChart = async () => {
             chart.dispose();
         }
 
-        // Create chart instance with the current theme
-        const currentTheme = colorMode.value === 'dark' ? 'dark' : 'light';
-        chart = init(chartRef.value, currentTheme); // Pass theme here
+        // Create chart instance with the current theme name
+        const themeName = colorMode.value === 'dark' ? 'logchef-dark' : 'light'; // Use registered name
+        console.log(`Initializing chart with theme: ${themeName}`);
+        chart = init(chartRef.value, themeName);
 
         // Set initial options
         updateChartOptions();
@@ -866,8 +882,11 @@ watch(
 
 // Watch for theme changes to re-initialize the chart
 watch(colorMode, async (newMode, oldMode) => {
+    // Add more detailed logging
+    console.log(`Theme watcher triggered: newMode='${newMode}', oldMode='${oldMode}', isMounted=${isMounted.value}`);
+
     if (newMode !== oldMode && chartRef.value && isMounted.value) {
-        console.log(`Theme changed to ${newMode}, re-initializing chart.`);
+        console.log(`Actual theme change detected (${oldMode} -> ${newMode}), re-initializing chart.`);
         // Dispose existing chart and re-initialize with the new theme
         await initChart();
         // Re-fetch data if needed, or rely on existing data update logic
