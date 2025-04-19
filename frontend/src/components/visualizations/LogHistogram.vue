@@ -193,6 +193,40 @@ const convertHistogramData = (buckets: HistogramData[]) => {
     const timestamps: number[] = []; // Store actual timestamps for calculation
     let seriesData: any[] = [];
 
+    // --- Determine Optimal Date/Time Format ---
+    let timeFormatOptions: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' }; // Default: HH:MM
+    const showSeconds = currentGranularity.value.endsWith('s');
+    if (showSeconds) {
+        timeFormatOptions.second = '2-digit'; // Add seconds if granularity requires it
+    }
+
+    if (buckets.length > 0) {
+        const firstTimestamp = new Date(buckets[0].bucket).getTime();
+        const lastTimestamp = new Date(buckets[buckets.length - 1].bucket).getTime();
+        const spanMs = lastTimestamp - firstTimestamp;
+        const spanHours = spanMs / (1000 * 60 * 60);
+
+        const firstDate = new Date(firstTimestamp);
+        const lastDate = new Date(lastTimestamp);
+        const isSameDay = firstDate.toDateString() === lastDate.toDateString();
+
+        // If span is >= 24 hours OR data spans multiple days, include the date
+        if (spanHours >= 24 || !isSameDay) {
+            timeFormatOptions = {
+                month: 'numeric', // MM
+                day: 'numeric',   // DD
+                ...timeFormatOptions // Include HH:MM or HH:MM:SS
+            };
+            // Optional: Add year if span is very large (e.g., > 365 days)
+            // const spanDays = spanHours / 24;
+            // if (spanDays > 365) {
+            //     timeFormatOptions.year = 'numeric';
+            // }
+        }
+    }
+    // --- End Determine Format ---
+
+
     if (isGrouped) {
         // Group data by bucket and group_value
         const groupedByBucket: Record<string, Record<string, number>> = {};
@@ -203,9 +237,8 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             const bucketKey = date.toISOString(); // Use ISO string as key for consistency
             if (!groupedByBucket[bucketKey]) {
                 groupedByBucket[bucketKey] = {};
-                // Always format with seconds initially
-                const timeFormatOptions: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', second: '2-digit' };
-                categoryData.push(`${date.toLocaleDateString()} ${date.toLocaleTimeString([], timeFormatOptions)}`);
+                // Use the determined intelligent format
+                categoryData.push(date.toLocaleString([], timeFormatOptions));
                 timestamps.push(date.getTime());
             }
             const groupVal = item.group_value || 'Other';
@@ -244,13 +277,11 @@ const convertHistogramData = (buckets: HistogramData[]) => {
         });
     } else {
         const valueData: number[] = [];
-        // Always format with seconds initially
-        const timeFormatOptions: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', second: '2-digit' };
         buckets.forEach(item => {
             const date = new Date(item.bucket);
             timestamps.push(date.getTime());
-            const formatDate = `${date.toLocaleDateString()} ${date.toLocaleTimeString([], timeFormatOptions)}`;
-            categoryData.push(formatDate);
+            // Use the determined intelligent format
+            categoryData.push(date.toLocaleString([], timeFormatOptions));
             valueData.push(item.log_count);
         });
 
@@ -262,9 +293,9 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             const oneMinBefore = new Date(date.getTime() - 60000);
             const oneMinAfter = new Date(date.getTime() + 60000);
 
-            // Format added points consistently
-            categoryData.unshift(`${oneMinBefore.toLocaleDateString()} ${oneMinBefore.toLocaleTimeString([], timeFormatOptions)}`);
-            categoryData.push(`${oneMinAfter.toLocaleDateString()} ${oneMinAfter.toLocaleTimeString([], timeFormatOptions)}`);
+            // Format added points consistently using the determined format
+            categoryData.unshift(oneMinBefore.toLocaleString([], timeFormatOptions));
+            categoryData.push(oneMinAfter.toLocaleString([], timeFormatOptions));
 
             valueData.unshift(0);
             valueData.push(0);
@@ -381,20 +412,8 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 // Add bounds checking for data arrays
                 if (index < 0 || index >= categoryData.length) return '';
 
-                const fullTimeStr = categoryData[index]; // e.g., "MM/DD/YYYY HH:MM:SS"
-                let displayTimeStr = fullTimeStr;
-
-                // Conditionally format time based on granularity
-                const showSeconds = currentGranularity.value.endsWith('s');
-                if (!showSeconds) {
-                    const parts = fullTimeStr.split(' ');
-                    if (parts.length >= 2) {
-                        const timeParts = parts[1].split(':');
-                        if (timeParts.length >= 2) {
-                            displayTimeStr = `${parts[0]} ${timeParts[0]}:${timeParts[1]}`;
-                        }
-                    }
-                }
+                // Use the pre-formatted time string directly from categoryData
+                const displayTimeStr = categoryData[index];
 
                 let total = 0;
                 const details = params.map((p: any) => {
@@ -430,30 +449,13 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             axisLabel: {
                 interval: function (index: number) {
                     // Show fewer labels when there are many data points
+                    // Show fewer labels when there are many data points to avoid overlap
+                    // Adjust the divisor (e.g., 15) based on desired density
                     return index % Math.max(Math.ceil(categoryData.length / 15), 1) === 0;
                 },
                 formatter: function (value: string) {
-                    // value is like "MM/DD/YYYY HH:MM:SS"
-                    const parts = value.split(' ');
-                    if (parts.length < 2) return value; // Safety check
-
-                    const datePart = parts[0];
-                    const timePart = parts[1];
-
-                    // Check current granularity
-                    const showSeconds = currentGranularity.value.endsWith('s');
-
-                    if (showSeconds) {
-                        // Return full date and time with seconds
-                        return `${datePart} ${timePart}`;
-                    } else {
-                        // Return date and time without seconds
-                        const timeParts = timePart.split(':');
-                        if (timeParts.length >= 2) {
-                            return `${datePart} ${timeParts[0]}:${timeParts[1]}`;
-                        }
-                        return value; // Fallback
-                    }
+                    // Value is already pre-formatted intelligently
+                    return value;
                 },
                 fontSize: 11,
                 color: 'hsl(var(--muted-foreground))',
