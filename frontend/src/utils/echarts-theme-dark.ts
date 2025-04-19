@@ -3,13 +3,13 @@
  * Adapted from official ECharts dark theme example.
  */
 const contrastColor = '#B9B8CE'; // Lighter gray for text against dark background
-const backgroundColor = 'hsl(var(--card))'; // Use card background from CSS vars
-const axisLineColor = 'hsl(var(--muted-foreground) / 0.5)'; // Muted foreground for axis lines
-const splitLineColor = 'hsl(var(--border) / 0.5)'; // Border color for split lines
-const labelColor = 'hsl(var(--muted-foreground))'; // Muted foreground for labels
-const titleColor = 'hsl(var(--foreground))'; // Default foreground for titles
-const legendColor = 'hsl(var(--foreground))'; // Default foreground for legends
-const toolboxColor = 'hsl(var(--muted-foreground))'; // Muted foreground for toolbox icons
+const backgroundColor = 'transparent'; // Use transparent to inherit container background
+const axisLineColor = 'rgba(185, 184, 206, 0.5)'; // Explicit light color for axis lines with transparency
+const splitLineColor = 'rgba(120, 120, 140, 0.3)'; // Explicit split line color
+const labelColor = '#D1D1DB'; // Explicit light gray for labels
+const titleColor = '#FFFFFF'; // White for titles
+const legendColor = '#FFFFFF'; // White for legend text
+const toolboxColor = '#B9B8CE'; // Light gray for toolbox icons
 
 const axisCommon = () => ({
     axisLine: {
@@ -25,12 +25,12 @@ const axisCommon = () => ({
     },
     splitArea: {
         areaStyle: {
-            color: ['hsla(var(--card-hsl) / 0.02)', 'hsla(var(--card-hsl) / 0.05)']
+            color: ['rgba(40, 40, 50, 0.02)', 'rgba(40, 40, 50, 0.05)']
         }
     },
     minorSplitLine: {
         lineStyle: {
-            color: 'hsl(var(--border) / 0.2)'
+            color: 'rgba(120, 120, 140, 0.2)'
         }
     },
     axisLabel: {
@@ -61,7 +61,7 @@ export const logchefDarkTheme = {
     darkMode: true, // Indicate this is a dark theme
 
     color: colorPalette,
-    backgroundColor: backgroundColor, // Use CSS variable color
+    backgroundColor: backgroundColor,
 
     axisPointer: {
         lineStyle: {
@@ -76,7 +76,7 @@ export const logchefDarkTheme = {
     },
     legend: {
         textStyle: {
-            color: legendColor // Use CSS variable color
+            color: legendColor
         }
     },
     textStyle: {
@@ -84,7 +84,7 @@ export const logchefDarkTheme = {
     },
     title: {
         textStyle: {
-            color: titleColor // Use CSS variable color
+            color: titleColor
         },
         subtextStyle: {
             color: contrastColor
@@ -92,69 +92,69 @@ export const logchefDarkTheme = {
     },
     toolbox: {
         iconStyle: {
-            borderColor: toolboxColor // Use CSS variable color
+            borderColor: toolboxColor
         },
         emphasis: {
             iconStyle: {
-                borderColor: 'hsl(var(--primary))' // Use primary color on emphasis
+                borderColor: '#6871F1' // Explicit color for primary on emphasis
             }
         }
     },
     dataZoom: {
-        borderColor: 'hsl(var(--border))',
+        borderColor: '#71708A',
         textStyle: {
             color: contrastColor
         },
         brushStyle: {
-            color: 'hsla(var(--primary-hsl) / 0.3)' // Use primary color for brush
+            color: 'rgba(104, 113, 241, 0.3)' // Explicit color for brush
         },
         handleStyle: {
-            color: 'hsl(var(--muted))',
-            borderColor: 'hsl(var(--border))'
+            color: '#474752',
+            borderColor: '#71708A'
         },
         moveHandleStyle: {
-            color: 'hsl(var(--muted-foreground))',
+            color: '#B9B8CE',
             opacity: 0.5
         },
-        fillerColor: 'hsla(var(--primary-hsl) / 0.2)', // Use primary color for filler
+        fillerColor: 'rgba(104, 113, 241, 0.2)', // Explicit color for filler
         emphasis: {
             handleStyle: {
-                borderColor: 'hsl(var(--primary))',
-                color: 'hsl(var(--primary) / 0.5)'
+                borderColor: '#6871F1',
+                color: 'rgba(104, 113, 241, 0.5)'
             },
             moveHandleStyle: {
-                color: 'hsl(var(--primary))',
+                color: '#6871F1',
                 opacity: 0.7
             }
         },
         dataBackground: {
             lineStyle: {
-                color: 'hsl(var(--border))',
+                color: '#71708A',
                 width: 1
             },
             areaStyle: {
-                color: 'hsl(var(--muted))'
+                color: '#474752'
             }
         },
         selectedDataBackground: {
             lineStyle: {
-                color: 'hsl(var(--primary))'
+                color: '#6871F1'
             },
             areaStyle: {
-                color: 'hsla(var(--primary-hsl) / 0.3)'
+                color: 'rgba(104, 113, 241, 0.3)'
             }
         }
     },
     tooltip: {
-        backgroundColor: 'hsl(var(--popover))',
-        borderColor: 'hsl(var(--border))',
+        backgroundColor: '#1c1c25',
+        borderColor: '#302f3d',
         textStyle: {
-            color: 'hsl(var(--popover-foreground))'
+            color: '#FFFFFF'
         },
         axisPointer: {
             type: 'shadow',
             shadowStyle: {
-                color: 'hsla(var(--foreground-hsl) / 0.05)' // Subtle shadow
+                color: 'rgba(220, 220, 240, 0.05)' // Subtle shadow
             }
         }
     },
@@ -216,10 +216,3 @@ export const logchefDarkTheme = {
         }
     }
 };
-
-// Specific overrides
-logchefDarkTheme.categoryAxis.splitLine.show = false;
-logchefDarkTheme.valueAxis.splitLine.show = true;
-logchefDarkTheme.valueAxis.axisLine.show = false; // Hide Y axis line itself
-logchefDarkTheme.valueAxis.axisTick.show = false; // Hide Y axis ticks
-logchefDarkTheme.timeAxis.splitLine.show = false;

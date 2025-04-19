@@ -519,31 +519,31 @@ const convertHistogramData = (buckets: HistogramData[]) => {
         },
         toolbox: {
             orient: 'horizontal',
-            show: true,
-            showTitle: true,
-            itemSize: 14,
+            show: true, // Keep toolbox visible for functionality
+            showTitle: false, // Hide titles
+            itemSize: 1, // Make icons tiny
             right: 15,
             top: 5,
             feature: {
                 dataZoom: {
-                    show: true, // Keep the feature enabled for programmatic control
-                    showTitle: false, // Hide the default "Zoom" and "Reset" icons/titles
+                    show: true, // Keep feature enabled
+                    showTitle: false, // Hide titles
                     yAxisIndex: 'none',
-                    iconStyle: { // Style the button if needed, though icons are hidden
-                        borderColor: 'hsl(var(--muted-foreground))',
-                        borderWidth: 1,
-                        // Optionally hide the default icons if the button is still desired
-                        // icon: 'path://', // Example: replace with empty path or custom icon
+                    icon: {
+                        zoom: 'path://', // Empty path to hide icon but keep functionality
+                        back: 'path://'  // Empty path to hide icon but keep functionality
+                    },
+                    iconStyle: {
+                        borderWidth: 0, // Hide border
+                        opacity: 0 // Make completely transparent
                     },
                     emphasis: {
                         iconStyle: {
-                            borderColor: 'hsl(var(--primary))'
+                            borderWidth: 0,
+                            opacity: 0
                         }
                     }
-                },
-                // saveAsImage: { // Remove saveAsImage feature
-                //     show: false,
-                // }
+                }
             }
         },
         dataZoom: [
@@ -565,26 +565,23 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 // Add brushStyle for better selection visibility
                 brushStyle: {
                     borderWidth: 1,
-                    borderColor: 'hsl(var(--primary))',
-                    color: 'hsla(var(--primary-hsl) / 0.2)', // Use primary color with transparency
+                    borderColor: colorMode.value === 'dark' ? '#6871F1' : 'hsl(var(--primary))',
+                    color: colorMode.value === 'dark' ? 'rgba(104, 113, 241, 0.2)' : 'hsla(var(--primary-hsl) / 0.2)',
                 },
-                // Optional: Customize handle appearance if needed
-                // handleIcon: 'path://...',
-                // handleSize: '80%',
-                // handleStyle: { ... },
-                // dataBackground: { ... },
-                // selectedDataBackground: { ... },
                 height: 15, // Adjust height if needed
                 bottom: 5, // Adjust position if needed
             },
             { // This corresponds to the toolbox dataZoom feature (area selection)
                 type: 'select', // This enables the brush selection via the toolbox button
                 xAxisIndex: 0,
-                start: 0,
-                end: 100,
-                zoomOnMouseWheel: true,
-                moveOnMouseMove: true,
-                moveOnMouseWheel: true
+                brushMode: 'single',
+                brushStyle: {
+                    borderWidth: 1,
+                    borderColor: colorMode.value === 'dark' ? '#6871F1' : 'hsl(var(--primary))',
+                    color: colorMode.value === 'dark' ? 'rgba(104, 113, 241, 0.2)' : 'hsla(var(--primary-hsl) / 0.2)',
+                },
+                transformable: true,
+                throttle: 100
             }
         ],
         series: seriesData,
@@ -664,7 +661,7 @@ const restoreChart = () => {
         type: "restore"
     });
 
-    // Set toolbox datazoom button state
+    // Set toolbox datazoom button state similar to reference code
     chart?.dispatchAction({
         type: "takeGlobalCursor",
         key: "dataZoomSelect",
@@ -695,6 +692,13 @@ const setupChartEvents = () => {
             // For direct toolbox dataZoom
             handleZoomAction(params);
         }
+
+        // Always ensure the dataZoom selection mode is active after a zoom operation
+        chart?.dispatchAction({
+            type: "takeGlobalCursor",
+            key: "dataZoomSelect",
+            dataZoomSelectActive: true
+        });
     }));
 
     // Restore event
@@ -713,9 +717,40 @@ const setupChartEvents = () => {
 
                 // No need to emit update:timeRange here since we're restoring to the original timeRange
             }
+
+            // Ensure dataZoom selection mode is active after restore
+            chart?.dispatchAction({
+                type: "takeGlobalCursor",
+                key: "dataZoomSelect",
+                dataZoomSelectActive: true
+            });
         } catch (e) {
             console.error('Error handling restore event:', e);
         }
+    }));
+
+    // Add a handler for brush selection
+    chart.on('brush', safeHandler(() => {
+        // Make sure dataZoom tool is reselected after brush operation
+        nextTick(() => {
+            chart?.dispatchAction({
+                type: "takeGlobalCursor",
+                key: "dataZoomSelect",
+                dataZoomSelectActive: true
+            });
+        });
+    }));
+
+    // Add a handler for brush end (when selection is complete)
+    chart.on('brushend', safeHandler(() => {
+        // Ensure dataZoom selection mode is active after brush end
+        nextTick(() => {
+            chart?.dispatchAction({
+                type: "takeGlobalCursor",
+                key: "dataZoomSelect",
+                dataZoomSelectActive: true
+            });
+        });
     }));
 
     // Handle window resize
@@ -748,6 +783,13 @@ const initChart = async () => {
 
         // Ensure the dataZoom button is active
         restoreChart();
+
+        // Explicitly set dataZoom to be active on initialization
+        chart.dispatchAction({
+            type: "takeGlobalCursor",
+            key: "dataZoomSelect",
+            dataZoomSelectActive: true
+        });
     } catch (e) {
         console.error('Error initializing chart:', e);
     }
@@ -760,6 +802,24 @@ const updateChartOptions = () => {
     try {
         // Get options based on data
         const options = convertHistogramData(histogramData.value);
+
+        // Add axis overrides for proper dark mode display
+        if (colorMode.value === 'dark') {
+            // Ensure Y axis line is hidden
+            options.yAxis.axisLine = { show: false };
+            options.yAxis.axisTick = { show: false };
+            // Ensure X axis grid lines are hidden
+            options.xAxis.splitLine = { show: false };
+            // Ensure Y axis grid lines are visible with proper style
+            options.yAxis.splitLine = {
+                show: true,
+                lineStyle: {
+                    type: 'dashed',
+                    color: 'rgba(120, 120, 140, 0.3)',
+                    opacity: 0.5
+                }
+            };
+        }
 
         // Set options
         chart.setOption(options, true);
@@ -1086,6 +1146,28 @@ function handleZoomAction(zoomParams: any) {
         }
     }
 }
+
+// Add a function to activate zoom functionality after any component change
+const activateZoomFunctionality = () => {
+    if (!chart) return;
+
+    // Set dataZoom to be active
+    chart.dispatchAction({
+        type: "takeGlobalCursor",
+        key: "dataZoomSelect",
+        dataZoomSelectActive: true
+    });
+};
+
+// Call this function after any major update that might affect the chart
+watch(
+    () => histogramData.value,
+    () => {
+        nextTick(() => {
+            activateZoomFunctionality();
+        });
+    }
+);
 
 // Component lifecycle
 onMounted(async () => {
