@@ -864,6 +864,23 @@ watch(
     { deep: true }
 );
 
+// Watch for theme changes to re-initialize the chart
+watch(colorMode, async (newMode, oldMode) => {
+    if (newMode !== oldMode && chartRef.value && isMounted.value) {
+        console.log(`Theme changed to ${newMode}, re-initializing chart.`);
+        // Dispose existing chart and re-initialize with the new theme
+        await initChart();
+        // Re-fetch data if needed, or rely on existing data update logic
+        // If data doesn't need re-fetching, ensure options are applied
+        if (histogramData.value.length > 0) {
+             updateChartOptions();
+        } else if (hasValidSource.value && exploreStore.lastExecutionTimestamp) {
+            // If no data, trigger a fetch if appropriate
+            debouncedFetchHistogramData();
+        }
+    }
+});
+
 // Watch for height changes to resize chart
 watch(() => props.height, async () => {
     try {
