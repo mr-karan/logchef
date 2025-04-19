@@ -436,16 +436,18 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             right: 15,
             top: 5,
             feature: {
-                dataZoom: {
+                dataZoom: { // Keep dataZoom functionality but hide default icons/titles
                     show: true,
                     yAxisIndex: 'none',
-                    title: {
-                        zoom: 'Area Zoom',
-                        back: 'Reset Zoom'
-                    },
-                    iconStyle: {
+                    // title: { // Remove titles to mimic reference behavior
+                    //     zoom: 'Area Zoom',
+                    //     back: 'Reset Zoom'
+                    // },
+                    iconStyle: { // Keep styling for the button itself if needed
                         borderColor: 'hsl(var(--muted-foreground))',
-                        borderWidth: 1
+                        borderWidth: 1,
+                        // Optionally hide the default icons if the button is still desired
+                        // icon: 'path://', // Example: replace with empty path or custom icon
                     },
                     emphasis: {
                         iconStyle: {
@@ -453,25 +455,43 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                         }
                     }
                 },
-                saveAsImage: {
-                    show: true,
-                    title: 'Save',
-                    pixelRatio: 2,
-                    iconStyle: {
-                        borderColor: 'hsl(var(--muted-foreground))',
-                        borderWidth: 1
-                    },
-                    emphasis: {
-                        iconStyle: {
-                            borderColor: 'hsl(var(--primary))'
-                        }
-                    }
-                }
+                // saveAsImage: { // Remove saveAsImage feature
+                //     show: false,
+                // }
             }
         },
         dataZoom: [
             {
-                type: 'inside',
+                type: 'inside', // For mouse wheel/drag zooming INSIDE the chart area
+                xAxisIndex: 0,
+                start: 0,
+                end: 100,
+                zoomOnMouseWheel: true,
+                moveOnMouseMove: true,
+                moveOnMouseWheel: true
+            },
+            {
+                type: 'slider', // The visual slider component (often at the bottom)
+                xAxisIndex: 0,
+                start: 0,
+                end: 100,
+                // Add brushStyle for better selection visibility
+                brushStyle: {
+                    borderWidth: 1,
+                    borderColor: 'hsl(var(--primary))',
+                    color: 'hsla(var(--primary-hsl) / 0.2)', // Use primary color with transparency
+                },
+                // Optional: Customize handle appearance if needed
+                // handleIcon: 'path://...',
+                // handleSize: '80%',
+                // handleStyle: { ... },
+                // dataBackground: { ... },
+                // selectedDataBackground: { ... },
+                height: 15, // Adjust height if needed
+                bottom: 5, // Adjust position if needed
+            },
+            { // This corresponds to the toolbox dataZoom feature (area selection)
+                type: 'select', // This enables the brush selection via the toolbox button
                 xAxisIndex: 0,
                 start: 0,
                 end: 100,
