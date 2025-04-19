@@ -312,6 +312,8 @@ const convertHistogramData = (buckets: HistogramData[]) => {
         tooltip: {
             show: true,
             trigger: 'axis',
+            confine: false, // Allow tooltip to go outside chart boundaries
+            z: 60, // Ensure tooltip is rendered above other elements
             backgroundColor: 'hsl(var(--popover))',
             borderColor: 'hsl(var(--border))',
             borderWidth: 1,
@@ -472,6 +474,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             },
             {
                 type: 'slider', // The visual slider component (often at the bottom)
+                show: false, // Hide the slider component
                 xAxisIndex: 0,
                 start: 0,
                 end: 100,
