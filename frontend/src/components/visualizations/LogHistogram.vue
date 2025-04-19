@@ -525,14 +525,11 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             right: 15,
             top: 5,
             feature: {
-                dataZoom: { // Keep dataZoom functionality but hide default icons/titles
-                    show: true,
+                dataZoom: {
+                    show: true, // Keep the feature enabled for programmatic control
+                    showTitle: false, // Hide the default "Zoom" and "Reset" icons/titles
                     yAxisIndex: 'none',
-                    // title: { // Remove titles to mimic reference behavior
-                    //     zoom: 'Area Zoom',
-                    //     back: 'Reset Zoom'
-                    // },
-                    iconStyle: { // Keep styling for the button itself if needed
+                    iconStyle: { // Style the button if needed, though icons are hidden
                         borderColor: 'hsl(var(--muted-foreground))',
                         borderWidth: 1,
                         // Optionally hide the default icons if the button is still desired
