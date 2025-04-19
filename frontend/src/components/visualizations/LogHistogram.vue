@@ -347,12 +347,13 @@ const convertHistogramData = (buckets: HistogramData[]) => {
 
     return {
         title: {
-            text: `${buckets.length.toLocaleString()} Log Records`,
-            left: 'center',
-            textStyle: {
-                fontSize: 14,
-                fontWeight: '500',
-            }
+            show: false, // Hide the title
+            // text: `${buckets.length.toLocaleString()} Log Records`,
+            // left: 'center',
+            // textStyle: {
+            //     fontSize: 14,
+            //     fontWeight: '500',
+            // }
         },
         backgroundColor: 'transparent',
         grid: {
