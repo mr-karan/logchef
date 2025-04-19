@@ -146,14 +146,12 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             title: {
                 text: 'Log Distribution',
                 left: 'center',
-                // textStyle color will be handled by the theme
                 textStyle: {
                     fontSize: 14,
                     fontWeight: '500',
-                    // color: 'hsl(var(--foreground))' // Removed
                 }
             },
-            backgroundColor: 'transparent', // Keep background transparent
+            backgroundColor: 'transparent',
             grid: {
                 containLabel: true,
                 left: 25,
@@ -168,12 +166,12 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 splitLine: { show: false },
                 axisLine: {
                     lineStyle: {
-                        color: 'hsl(var(--border))'
+                        color: colorMode.value === 'dark' ? '#71708A' : 'hsl(var(--border))'
                     }
                 },
                 axisTick: {
                     lineStyle: {
-                        color: 'hsl(var(--border))'
+                        color: colorMode.value === 'dark' ? '#71708A' : 'hsl(var(--border))'
                     }
                 }
             },
@@ -184,14 +182,12 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                     show: true,
                     lineStyle: {
                         type: 'dashed',
-                        color: 'hsl(var(--border))',
+                        color: colorMode.value === 'dark' ? 'rgba(120, 120, 140, 0.3)' : 'hsl(var(--border))',
                         opacity: 0.5
                     }
                 },
                 axisTick: { show: false },
-                // axisLabel color will be handled by the theme
                 axisLabel: {
-                    // color: 'hsl(var(--muted-foreground))', // Removed
                     fontSize: 11
                 }
             },
@@ -199,7 +195,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 type: 'bar',
                 data: [],
                 itemStyle: {
-                    color: '#5794F2' // Professional blue for log analytics
+                    color: '#5794F2'
                 }
             }]
         };
@@ -353,14 +349,12 @@ const convertHistogramData = (buckets: HistogramData[]) => {
         title: {
             text: `${buckets.length.toLocaleString()} Log Records`,
             left: 'center',
-            // textStyle color will be handled by the theme
             textStyle: {
                 fontSize: 14,
                 fontWeight: '500',
-                // color: 'hsl(var(--foreground))' // Removed
             }
         },
-        backgroundColor: 'transparent', // Keep background transparent
+        backgroundColor: 'transparent',
         grid: {
             containLabel: true,
             left: 25,
@@ -371,8 +365,8 @@ const convertHistogramData = (buckets: HistogramData[]) => {
         tooltip: {
             show: true,
             trigger: 'axis',
-            confine: false, // Allow tooltip to go outside chart boundaries
-            z: 60, // Ensure tooltip is rendered above other elements
+            confine: false,
+            z: 60,
             position: function (point: any, params: any, dom: any, rect: any, size: any) {
                 // Position the tooltip slightly below the cursor
                 // point[0] is x, point[1] is y coordinate of the mouse
@@ -412,13 +406,13 @@ const convertHistogramData = (buckets: HistogramData[]) => {
 
                 return [posX, posY];
             },
-            backgroundColor: 'hsl(var(--popover))',
-            borderColor: 'hsl(var(--border))',
+            backgroundColor: colorMode.value === 'dark' ? '#1c1c25' : 'hsl(var(--popover))',
+            borderColor: colorMode.value === 'dark' ? '#302f3d' : 'hsl(var(--border))',
             borderWidth: 1,
             padding: 10,
             textStyle: {
                 fontSize: 12,
-                color: 'hsl(var(--popover-foreground))'
+                color: colorMode.value === 'dark' ? '#FFFFFF' : 'hsl(var(--popover-foreground))'
             },
             axisPointer: {
                 type: 'shadow',
@@ -457,9 +451,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
         legend: isGrouped ? {
             show: true,
             bottom: 0,
-            // textStyle color will be handled by the theme
             textStyle: {
-                // color: 'hsl(var(--foreground))', // Removed
                 fontSize: 11
             }
         } : {
@@ -481,20 +473,17 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                     return value;
                 },
                 fontSize: 11,
-                // color: 'hsl(var(--muted-foreground))', // Removed - Handled by theme
                 margin: 10
             },
             axisLine: {
-                // lineStyle color will be handled by the theme
                 lineStyle: {
-                    // color: 'hsl(var(--border))' // Color handled by theme
-                } // <-- Added missing closing brace
+                    color: colorMode.value === 'dark' ? '#71708A' : 'hsl(var(--border))'
+                }
             },
             axisTick: {
                 alignWithLabel: true,
-                // lineStyle color will be handled by the theme
             },
-            splitLine: { show: false } // Keep this specific override if needed
+            splitLine: { show: false }
         },
         yAxis: {
             type: 'value',
@@ -507,7 +496,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 show: true,
                 lineStyle: {
                     type: 'dashed',
-                    color: 'hsl(var(--border))',
+                    color: colorMode.value === 'dark' ? 'rgba(120, 120, 140, 0.3)' : 'hsl(var(--border))',
                     opacity: 0.5
                 }
             },
@@ -523,7 +512,6 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                         return (Math.round(value / 100000000) / 10).toLocaleString() + 'B';
                     }
                 },
-                // color: 'hsl(var(--muted-foreground))', // Removed - Handled by theme
                 fontSize: 11,
                 margin: 12
             }
@@ -750,8 +738,8 @@ const initChart = async () => {
         }
 
         // Create chart instance with the current theme name
-        const themeName = colorMode.value === 'dark' ? 'logchef-dark' : 'light'; // Use registered name
-        console.log(`Initializing chart with theme: ${themeName}`);
+        const themeName = colorMode.value === 'dark' ? 'logchef-dark' : '';
+        console.log(`Initializing chart with theme: ${colorMode.value === 'dark' ? 'logchef-dark' : 'default'}`);
         chart = init(chartRef.value, themeName);
 
         // Set initial options
@@ -892,7 +880,7 @@ watch(colorMode, async (newMode, oldMode) => {
         // Re-fetch data if needed, or rely on existing data update logic
         // If data doesn't need re-fetching, ensure options are applied
         if (histogramData.value.length > 0) {
-             updateChartOptions();
+            updateChartOptions();
         } else if (hasValidSource.value && exploreStore.lastExecutionTimestamp) {
             // If no data, trigger a fetch if appropriate
             debouncedFetchHistogramData();
