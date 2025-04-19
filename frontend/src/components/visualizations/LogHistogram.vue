@@ -97,29 +97,31 @@ const windowResizeEventCallback = debounce(async () => {
     }
 }, 100);
 
-// Optimized for clarity, contrast, and accessibility in both light and dark themes
+// Updated color palette for better visual distinction (Inspired by Tableau 10/ColorBrewer)
 const colorPalette = [
-    '#5794F2',  // Blue
-    '#73BF69',  // Green
-    '#F2495C',  // Red
-    '#FF9830',  // Orange
-    '#B877D9',  // Purple
-    '#20E7C9',  // Teal
-    '#FADE2A',  // Yellow
-    '#8AB8FF',  // Light blue
-    '#95F086',  // Light green
-    '#FF8A8A',  // Light red
-    '#CA95E5',  // Light purple
-    '#44A2F3',  // Alternate blue
-    '#37872D',  // Dark green
-    '#8F3D86',  // Dark purple
-    '#1250B0',  // Dark blue
-    '#A13531',  // Dark red
-    '#3D4A8F',  // Navy
-    '#63561B',  // Olive
-    '#6E6E6E',  // Gray
-    '#23707D'   // Turquoise
+    '#4E79A7', // Blue
+    '#F28E2B', // Orange
+    '#E15759', // Red
+    '#76B7B2', // Teal
+    '#59A14F', // Green
+    '#EDC948', // Yellow
+    '#B07AA1', // Purple
+    '#FF9DA7', // Pink
+    '#9C755F', // Brown
+    '#BAB0AC', // Gray
+    // Extended colors if needed
+    '#86BCB6', // Lighter Teal
+    '#F1A34F', // Lighter Orange
+    '#A45C5E', // Darker Red
+    '#79706E', // Darker Gray
+    '#D37295', // Lighter Pink
+    '#B5CF6B', // Lime Green
+    '#8CD17D', // Light Green
+    '#4C6A9C', // Darker Blue
+    '#D4A6C8', // Light Purple
+    '#9467BD'  // Darker Purple
 ];
+
 
 // Convert the histogram data to chart options with Kibana-like styling
 const convertHistogramData = (buckets: HistogramData[]) => {
