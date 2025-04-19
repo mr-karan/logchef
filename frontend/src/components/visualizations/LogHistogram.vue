@@ -67,6 +67,7 @@ const isChartLoading = ref(false);
 const initialDataLoaded = ref(false);
 const lastProcessedTimestamp = ref<number | null>(null);
 const currentGroupBy = ref<string>('');
+const currentGranularity = ref<string>(''); // Store the granularity used
 
 // Access stores
 const exploreStore = useExploreStore();
@@ -241,10 +242,12 @@ const convertHistogramData = (buckets: HistogramData[]) => {
         });
     } else {
         const valueData: number[] = [];
+        // Always format with seconds initially
+        const timeFormatOptions: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', second: '2-digit' };
         buckets.forEach(item => {
             const date = new Date(item.bucket);
             timestamps.push(date.getTime());
-            const formatDate = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+            const formatDate = `${date.toLocaleDateString()} ${date.toLocaleTimeString([], timeFormatOptions)}`;
             categoryData.push(formatDate);
             valueData.push(item.log_count);
         });
@@ -257,8 +260,9 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             const oneMinBefore = new Date(date.getTime() - 60000);
             const oneMinAfter = new Date(date.getTime() + 60000);
 
-            categoryData.unshift(`${oneMinBefore.toLocaleDateString()} ${oneMinBefore.toLocaleTimeString()}`);
-            categoryData.push(`${oneMinAfter.toLocaleDateString()} ${oneMinAfter.toLocaleTimeString()}`);
+            // Format added points consistently
+            categoryData.unshift(`${oneMinBefore.toLocaleDateString()} ${oneMinBefore.toLocaleTimeString([], timeFormatOptions)}`);
+            categoryData.push(`${oneMinAfter.toLocaleDateString()} ${oneMinAfter.toLocaleTimeString([], timeFormatOptions)}`);
 
             valueData.unshift(0);
             valueData.push(0);
@@ -375,7 +379,21 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 // Add bounds checking for data arrays
                 if (index < 0 || index >= categoryData.length) return '';
 
-                const timeStr = categoryData[index];
+                const fullTimeStr = categoryData[index]; // e.g., "MM/DD/YYYY HH:MM:SS"
+                let displayTimeStr = fullTimeStr;
+
+                // Conditionally format time based on granularity
+                const showSeconds = currentGranularity.value.endsWith('s');
+                if (!showSeconds) {
+                    const parts = fullTimeStr.split(' ');
+                    if (parts.length >= 2) {
+                        const timeParts = parts[1].split(':');
+                        if (timeParts.length >= 2) {
+                            displayTimeStr = `${parts[0]} ${timeParts[0]}:${timeParts[1]}`;
+                        }
+                    }
+                }
+
                 let total = 0;
                 const details = params.map((p: any) => {
                     const value = p.data || 0;
@@ -387,7 +405,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                 }).join('');
 
                 return `<div style="font-size: 12px;">
-                    <div style="font-weight: 500; margin-bottom: 4px;">${timeStr}</div>
+                    <div style="font-weight: 500; margin-bottom: 4px;">${displayTimeStr}</div>
                     <div style="margin-bottom: 4px;">Total: <strong>${total.toLocaleString()}</strong></div>
                     ${details}
                 </div>`;
@@ -413,12 +431,27 @@ const convertHistogramData = (buckets: HistogramData[]) => {
                     return index % Math.max(Math.ceil(categoryData.length / 15), 1) === 0;
                 },
                 formatter: function (value: string) {
-                    // Show date and time in a compact format
+                    // value is like "MM/DD/YYYY HH:MM:SS"
                     const parts = value.split(' ');
-                    if (parts.length >= 2) {
-                        return `${parts[0].split('/')[0]}/${parts[0].split('/')[1]} ${parts[1].substring(0, 5)}`;
+                    if (parts.length < 2) return value; // Safety check
+
+                    const datePart = parts[0];
+                    const timePart = parts[1];
+
+                    // Check current granularity
+                    const showSeconds = currentGranularity.value.endsWith('s');
+
+                    if (showSeconds) {
+                        // Return full date and time with seconds
+                        return `${datePart} ${timePart}`;
+                    } else {
+                        // Return date and time without seconds
+                        const timeParts = timePart.split(':');
+                        if (timeParts.length >= 2) {
+                            return `${datePart} ${timeParts[0]}:${timeParts[1]}`;
+                        }
+                        return value; // Fallback
                     }
-                    return value;
                 },
                 fontSize: 11,
                 color: 'hsl(var(--muted-foreground))',
@@ -598,9 +631,11 @@ const fetchHistogramData = async (forceGranularity?: string) => {
 
         if (response.success && response.data) {
             histogramData.value = response.data.data || [];
+            currentGranularity.value = response.data.granularity || ''; // Store granularity
             initialDataLoaded.value = true;
         } else {
             histogramData.value = [];
+            currentGranularity.value = ''; // Reset on failure
         }
 
     } catch (error) {
