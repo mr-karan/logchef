@@ -194,10 +194,11 @@ const convertHistogramData = (buckets: HistogramData[]) => {
     let seriesData: any[] = [];
 
     // --- Determine Optimal Date/Time Format ---
-    let timeFormatOptions: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' }; // Default: HH:MM
+    // Default: HH:MM in 24-hour format
+    let timeFormatOptions: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hour12: false };
     const showSeconds = currentGranularity.value.endsWith('s');
     if (showSeconds) {
-        timeFormatOptions.second = '2-digit'; // Add seconds if granularity requires it
+        timeFormatOptions.second = '2-digit'; // Add seconds if granularity requires it (still 24-hour)
     }
 
     if (buckets.length > 0) {
