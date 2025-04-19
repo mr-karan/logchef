@@ -200,10 +200,12 @@ const convertHistogramData = (buckets: HistogramData[]) => {
 
         buckets.forEach(item => {
             const date = new Date(item.bucket);
-            const bucketKey = date.toISOString();
+            const bucketKey = date.toISOString(); // Use ISO string as key for consistency
             if (!groupedByBucket[bucketKey]) {
                 groupedByBucket[bucketKey] = {};
-                categoryData.push(`${date.toLocaleDateString()} ${date.toLocaleTimeString()}`);
+                // Always format with seconds initially
+                const timeFormatOptions: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', second: '2-digit' };
+                categoryData.push(`${date.toLocaleDateString()} ${date.toLocaleTimeString([], timeFormatOptions)}`);
                 timestamps.push(date.getTime());
             }
             const groupVal = item.group_value || 'Other';
