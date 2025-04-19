@@ -314,6 +314,45 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             trigger: 'axis',
             confine: false, // Allow tooltip to go outside chart boundaries
             z: 60, // Ensure tooltip is rendered above other elements
+            position: function (point, params, dom, rect, size) {
+                // Position the tooltip slightly below the cursor
+                // point[0] is x, point[1] is y coordinate of the mouse
+                const x = point[0];
+                const y = point[1];
+                const viewWidth = size.viewSize[0];
+                const viewHeight = size.viewSize[1];
+                const boxWidth = size.contentSize[0];
+                const boxHeight = size.contentSize[1];
+                let posX = 0;
+                let posY = 0;
+
+                // Calculate horizontal position
+                if (x + boxWidth > viewWidth) {
+                    // If tooltip overflows right, position it to the left of the cursor
+                    posX = x - boxWidth - 10; // 10px offset
+                } else {
+                    // Otherwise, position it to the right of the cursor
+                    posX = x + 15; // 15px offset
+                }
+
+                // Calculate vertical position - always below the cursor
+                posY = y + 20; // 20px offset below cursor
+
+                // Prevent tooltip from going off the bottom edge
+                if (posY + boxHeight > viewHeight) {
+                    posY = y - boxHeight - 10; // Position above cursor if it overflows bottom
+                }
+                // Prevent tooltip from going off the top edge (if positioned above)
+                if (posY < 0) {
+                    posY = 5; // Small offset from top edge
+                }
+                // Prevent tooltip from going off the left edge (if positioned left)
+                if (posX < 0) {
+                    posX = 5; // Small offset from left edge
+                }
+
+                return [posX, posY];
+            },
             backgroundColor: 'hsl(var(--popover))',
             borderColor: 'hsl(var(--border))',
             borderWidth: 1,
