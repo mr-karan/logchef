@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue';
+import { useColorMode } from '@vueuse/core'; // Import useColorMode
 const isMounted = ref(true);
 import { toCalendarDateTime, CalendarDateTime } from '@internationalized/date';
 // Tree-shaking echarts imports
@@ -82,6 +83,9 @@ const {
     prepareQueryForExecution
 } = useQuery();
 
+// Theme state
+const colorMode = useColorMode(); // Gets the resolved mode ('light' or 'dark')
+
 // Computed properties
 const hasValidSource = computed(() => sourcesStore.hasValidCurrentSource);
 const currentSourceId = computed(() => exploreStore.sourceId);
@@ -97,29 +101,29 @@ const windowResizeEventCallback = debounce(async () => {
     }
 }, 100);
 
-// Updated color palette for better visual distinction (Inspired by Tableau 10/ColorBrewer)
+// Revised color palette for a more professional/dev-tool look
 const colorPalette = [
-    '#4E79A7', // Blue
-    '#F28E2B', // Orange
-    '#E15759', // Red
-    '#76B7B2', // Teal
-    '#59A14F', // Green
-    '#EDC948', // Yellow
-    '#B07AA1', // Purple
-    '#FF9DA7', // Pink
-    '#9C755F', // Brown
-    '#BAB0AC', // Gray
+    '#5470C6', // Blue
+    '#EE6666', // Red
+    '#FAC858', // Yellow
+    '#91CC75', // Green
+    '#73C0DE', // Light Blue
+    '#FC8452', // Orange
+    '#9A60B4', // Purple
+    '#ea7ccc', // Pink (more muted)
     // Extended colors if needed
-    '#86BCB6', // Lighter Teal
-    '#F1A34F', // Lighter Orange
-    '#A45C5E', // Darker Red
-    '#79706E', // Darker Gray
-    '#D37295', // Lighter Pink
-    '#B5CF6B', // Lime Green
-    '#8CD17D', // Light Green
-    '#4C6A9C', // Darker Blue
-    '#D4A6C8', // Light Purple
-    '#9467BD'  // Darker Purple
+    '#3BA272', // Darker Green
+    '#27727B', // Teal Blue
+    '#E062AE', // Magenta
+    '#FFB980', // Light Orange
+    '#5D9B9B', // Grayish Cyan
+    '#D48265', // Brownish Orange
+    '#C6E579', // Lime Green (more muted)
+    '#F4E001', // Bright Yellow (use sparingly)
+    '#B5C334', // Olive Green
+    '#6E7074', // Gray
+    '#8378EA', // Lavender
+    '#7A455D'  // Maroon
 ];
 
 
@@ -730,8 +734,9 @@ const initChart = async () => {
             chart.dispose();
         }
 
-        // Create chart instance
-        chart = init(chartRef.value);
+        // Create chart instance with the current theme
+        const currentTheme = colorMode.value === 'dark' ? 'dark' : 'light';
+        chart = init(chartRef.value, currentTheme); // Pass theme here
 
         // Set initial options
         updateChartOptions();
