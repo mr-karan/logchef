@@ -33,17 +33,17 @@ LogChef supports the following operators:
 
 ## Combining Conditions
 
-You can combine multiple conditions using `AND` and `OR` operators:
+You can combine multiple conditions using `and` and `or` operators:
 
 ```
 # Find errors in payment service
-level="error" AND service="payment-api"
+level="error" and service="payment-api"
 
 # Find successful or redirected responses
-status=200 OR status=301
+status=200 or status=301
 
 # Complex combinations
-(service="auth" OR service="users") AND level="error"
+(service="auth" or service="users") and level="error"
 ```
 
 ## Examples
@@ -64,7 +64,7 @@ status!=200
 ### Service-specific Logs
 
 ```
-service="payment-api" AND level="error"
+service="payment-api" and level="error"
 ```
 
 ### Partial Text Search
@@ -88,7 +88,7 @@ When you use the search syntax, LogChef converts it to optimized Clickhouse SQL 
 For example, this search:
 
 ```
-level="error" AND service="payment-api"
+level="error" and service="payment-api"
 ```
 
 Gets converted to:
@@ -106,5 +106,4 @@ LIMIT 100
 ## Coming Soon
 
 - **JSON Operations**: Support for querying nested JSON fields
-- **Advanced Operators**: Additional comparison operators for numeric fields
 - **Field Suggestions**: Autocomplete for field names and common values

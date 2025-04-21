@@ -3,8 +3,6 @@ title: Roadmap
 description: Upcoming features and future plans for LogChef
 ---
 
-# Roadmap
-
 Here's what we're planning to add to LogChef in upcoming releases:
 
 ## Integration Features

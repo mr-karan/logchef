@@ -3,14 +3,14 @@ title: Schema Design
 description: Understanding LogChef's log schema design and optimization
 ---
 
-LogChef provides optimized schemas for different types of logs while maintaining the flexibility to work with any Clickhouse table structure.
+LogChef provides optimized schemas for different types of logs while maintaining the flexibility to work with any Clickhouse table structure. LogChef is designed to work with any Clickhouse schema, requiring only a timestamp field. However, if you don't have an existing schema or wish to quickly start ingesting logs without worrying about the schema details, you can use the built-in schemas LogChef provides.
 
 ## OpenTelemetry Schema
 
 Our default schema is optimized for OpenTelemetry logs, providing a balance between query performance and storage efficiency:
 
 ```sql
-CREATE TABLE logs (
+CREATE TABLE "{{database_name}}"."{{table_name}}" (
     timestamp DateTime64(3) CODEC(DoubleDelta, LZ4),
     trace_id String CODEC(ZSTD(1)),
     span_id String CODEC(ZSTD(1)),
@@ -20,8 +20,19 @@ CREATE TABLE logs (
     service_name LowCardinality(String) CODEC(ZSTD(1)),
     namespace LowCardinality(String) CODEC(ZSTD(1)),
     body String CODEC(ZSTD(1)),
-    log_attributes Map(LowCardinality(String), String) CODEC(ZSTD(1))
+    log_attributes Map(LowCardinality(String), String) CODEC(ZSTD(1)),
+
+    INDEX idx_trace_id trace_id TYPE bloom_filter(0.001) GRANULARITY 1,
+    INDEX idx_severity_text severity_text TYPE set(100) GRANULARITY 4,
+    INDEX idx_log_attributes_keys mapKeys(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_log_attributes_values mapValues(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_body body TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1
 )
+ENGINE = MergeTree()
+PARTITION BY toDate(timestamp)
+ORDER BY (namespace, service_name, timestamp)
+TTL toDateTime(timestamp) + INTERVAL {{ttl_day}} DAY
+SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
 ```
 
 ### Key Design Decisions
@@ -54,30 +65,14 @@ PARTITION BY toDate(timestamp)
 ORDER BY (namespace, service_name, timestamp)
 ```
 
-## HTTP Access Logs Schema
+### Field Descriptions
 
-For HTTP access logs, we provide a specialized schema that captures common web server metrics:
-
-```sql
-CREATE TABLE http_logs (
-    timestamp DateTime,
-    remote_addr String,
-    request_method String,
-    request_uri String,
-    status UInt16,
-    body_bytes_sent UInt64,
-    request_time Float64,
-    upstream_response_time Float64,
-    request_id String,
-    -- Additional fields available
-)
-```
-
-### Key Features
-
-- Optimized for common HTTP metrics
-- Efficient storage of numeric status codes and timings
-- Support for standard web server log fields
+- **`timestamp`**: The time the log event occurred. Must be `DateTime` or `DateTime64`. This is the **only strictly required field** for LogChef to function.
+- **`severity_text` / `severity_number`**: Represents the log level (e.g., 'INFO', 'ERROR'). Using `LowCardinality(String)` for `severity_text` is highly recommended for performance.
+- **`service_name` / `namespace`**: Identifies the origin of the log. `LowCardinality(String)` improves query speed.
+- **`body`**: The primary content of the log message.
+- **`trace_id` / `span_id`**: Link logs to distributed traces if you are using OpenTelemetry tracing.
+- **`log_attributes`**: A `Map` type for storing arbitrary key-value pairs associated with the log. This allows for flexible and structured logging without needing to alter the table schema frequently.
 
 ## Using Custom Schemas
 
@@ -86,6 +81,8 @@ LogChef works with any Clickhouse table structure. When connecting to an existin
 1. LogChef automatically detects the schema
 2. Adapts its query interface to your fields
 3. Provides appropriate operators based on field types
+
+Remember, you are **not required** to use LogChef's schemas. LogChef can connect to any existing Clickhouse table as long as it has a `timestamp` column (`DateTime` or `DateTime64`). For optimal query performance with custom schemas, consider using `LowCardinality(String)` for frequently repeated text fields and a `Map` type for flexible attributes.
 
 ## Best Practices
 

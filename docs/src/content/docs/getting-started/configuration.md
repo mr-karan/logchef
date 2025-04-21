@@ -43,6 +43,12 @@ Configure your SSO provider (example using Dex):
 # URL of your OIDC provider
 provider_url = "http://dex:5556/dex"
 
+# Authentication endpoint URL (Optional: often discovered via provider_url)
+auth_url = "http://dex:5556/dex/auth"
+
+# Token endpoint URL (Optional: often discovered via provider_url)
+token_url = "http://dex:5556/dex/token"
+
 # OIDC client credentials
 client_id = "logchef"
 client_secret = "logchef-secret"

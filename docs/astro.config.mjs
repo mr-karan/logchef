@@ -23,7 +23,6 @@ export default defineConfig({
           items: [
             { label: "Quick Start", link: "/getting-started/quickstart" },
             { label: "Architecture", link: "/core/architecture" },
-            { label: "Data Model", link: "/core/data-model" },
           ],
         },
         {
@@ -42,13 +41,12 @@ export default defineConfig({
             { label: "User Management", link: "/core/user-management" },
           ],
         },
-        {
-          label: "Project",
-          items: [
-            { label: "Contributing", link: "/contributing/setup" },
-            { label: "Roadmap", link: "/contributing/roadmap" },
-          ],
-        },
+        // {
+        //   label: "Project",
+        //   items: [
+        //     { label: "Roadmap", link: "/contributing/roadmap" },
+        //   ],
+        // },
       ],
     }),
   ],
