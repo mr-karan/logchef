@@ -64,6 +64,11 @@ run-backend: build-backend
 run-frontend:
     cd frontend && pnpm dev
 
+# Run the documentation server locally
+run-docs:
+    @echo "Starting documentation development server..."
+    cd docs && npm run dev
+
 dev-docker:
     cd dev && docker compose up
 

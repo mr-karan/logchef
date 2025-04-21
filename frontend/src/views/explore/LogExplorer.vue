@@ -419,6 +419,11 @@ watch(isInitializing, async (initializing, prevInitializing) => {
         isLoadingQuery.value = false;
 
         if (fetchResult.success && savedQueriesStore.selectedQuery) {
+          // Check and reset groupByField if not already set in the query
+          if (!exploreStore.groupByField) {
+            exploreStore.setGroupByField('__none__');
+          }
+
           // 2. Pass the fetched query object to loadSavedQuery
           const loadResult = await loadSavedQuery(savedQueriesStore.selectedQuery);
 
@@ -457,9 +462,61 @@ watch(isInitializing, async (initializing, prevInitializing) => {
   }
 }, { immediate: false });
 
+// Function to reset/initialize queries when switching sources
+function resetQueriesForSourceChange() {
+  // Reset group-by selection to "No Grouping"
+  exploreStore.setGroupByField('__none__');
+
+  // Reset the query based on active mode
+  if (activeMode.value === 'logchefql') {
+    // In LogchefQL mode, just clear the query
+    exploreStore.setLogchefqlCode('');
+    logchefQuery.value = '';
+  } else {
+    // In SQL mode, set a default query using the current source table
+    if (sourcesStore.getCurrentSourceTableName) {
+      const tableName = sourcesStore.getCurrentSourceTableName;
+      const defaultSql = `SELECT * FROM \`${tableName}\`
+WHERE \`${sourceDetails.value?._meta_ts_field || 'timestamp'}\` BETWEEN toDateTime('${formatSqlDateTime(exploreStore.timeRange?.start)}', '${getLocalTimeZone()}')
+AND toDateTime('${formatSqlDateTime(exploreStore.timeRange?.end)}', '${getLocalTimeZone()}')
+LIMIT ${exploreStore.limit}`;
+
+      exploreStore.setRawSql(defaultSql);
+      sqlQuery.value = defaultSql;
+    } else {
+      // If no table name is available, just clear it
+      exploreStore.setRawSql('');
+      sqlQuery.value = '';
+    }
+  }
+
+  // Clear any errors
+  queryError.value = '';
+}
+
+// Helper function to format date for SQL
+function formatSqlDateTime(date: DateValue | undefined): string {
+  if (!date) {
+    // Default to current date minus 1 hour if no date provided
+    const now = new Date();
+    const oneHourAgo = new Date(now.getTime() - 3600000);
+    return oneHourAgo.toISOString().replace('T', ' ').substring(0, 19);
+  }
+
+  try {
+    const zonedDate = toCalendarDateTime(date);
+    const isoString = zonedDate.toString();
+    // Format as 'YYYY-MM-DD HH:MM:SS'
+    return isoString.replace('T', ' ').substring(0, 19);
+  } catch (e) {
+    console.error("Error formatting date for SQL:", e);
+    return new Date().toISOString().replace('T', ' ').substring(0, 19);
+  }
+}
+
 // Watch for source changes to fetch details AND saved queries
 watch(
-  () => currentSourceId.value, // Watch the computed property from useSourceTeamManagement
+  () => currentSourceId.value,
   async (newSourceId, oldSourceId) => {
     // Skip during initialization to prevent redundant calls
     if (isInitializing.value) {
@@ -467,6 +524,9 @@ watch(
     }
 
     if (newSourceId !== oldSourceId || (!oldSourceId && newSourceId)) {
+      // Reset queries when source changes
+      resetQueriesForSourceChange();
+
       // Fetch Source Details (existing logic)
       if (newSourceId && newSourceId > 0) {
         // Verify source existence (using teamSources from useSourceTeamManagement)
@@ -477,9 +537,9 @@ watch(
             if (currentSourceId.value === newSourceId) { // Check if still the same after timeout
               await sourcesStore.loadSourceDetails(newSourceId);
 
-              // If we're in SQL mode, ensure the table name is correct
+              // After loading source details, initialize SQL query if needed
               if (activeMode.value === 'sql' && sourcesStore.getCurrentSourceTableName) {
-                updateSqlTableReference(sourcesStore.getCurrentSourceTableName);
+                resetQueriesForSourceChange(); // Call again with updated source details
               }
             }
           }, 50);
@@ -502,7 +562,7 @@ watch(
 
 // Watch for changes in currentTeamId to update sources AND saved queries
 watch(
-  () => currentTeamId.value, // Watch the computed property from useSourceTeamManagement
+  () => currentTeamId.value,
   async (newTeamId, oldTeamId) => {
     // Skip during initialization
     if (isInitializing.value) {
@@ -510,6 +570,9 @@ watch(
     }
 
     if (newTeamId !== oldTeamId && newTeamId) {
+      // Reset queries when team changes
+      resetQueriesForSourceChange();
+
       // Load sources for the new team (existing logic)
       const sourcesResult = await sourcesStore.loadTeamSources(newTeamId);
       let newSourceIdToLoadQueries: number | null = null;
@@ -1329,7 +1392,7 @@ const handleQueryExecution = async () => {
       <!-- Share Button -->
       <TooltipProvider>
         <Tooltip>
-          <TooltipTrigger as-child>
+          <TooltipTrigger asChild>
             <Button variant="outline" size="sm" class="h-8 ml-2" @click="copyUrlToClipboard">
               <Share2 class="h-4 w-4 mr-1.5" />
               Share

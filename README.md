@@ -16,6 +16,15 @@ Logchef combines the power of Clickhouse for high-speed log storage with an intu
 - **Alert System** - Configure alerts based on log conditions (_Coming Soon!_)
 - **API Documentation** - Complete Swagger/OpenAPI documentation for all endpoints
 
+## Project Structure
+
+- `/cmd` - Contains the main server executable
+- `/internal` - Internal Go packages
+- `/pkg` - Public Go packages 
+- `/docs` - Documentation site built with Astro and Starlight
+- `/website` - Marketing landing page
+- `/frontend` - Vue.js frontend application
+
 ## Demo
 
 ## Screenshots
@@ -38,6 +47,34 @@ Visit `http://localhost:8125`
 
 - Download the [latest release](https://github.com/mr-karan/logchef/releases) and extract the binary
 - Run `./logchef` and visit `http://localhost:8125`
+
+## Building the Website and Docs
+
+### Documentation
+
+The documentation is built using Astro with Starlight:
+
+```bash
+cd docs
+npm install
+npm run build
+```
+
+Output will be in `/docs/dist/` directory.
+
+### Landing Page
+
+The landing page is a simple HTML/CSS site in the `/website` directory.
+
+### Deployment Strategy
+
+For deployment, copy both into your web server:
+
+```bash
+# Example deployment script
+cp -r website/* /var/www/logchef/
+cp -r docs/dist/* /var/www/logchef/docs/
+```
 
 ## API Documentation
 
