@@ -185,8 +185,12 @@ onMounted(async () => {
         selectedSourceId.value = String(sourcesStore.teamSources[0].id);
       }
 
-      // Don't explicitly call loadSourceQueries here,
-      // the watcher on selectedSourceId will handle it
+      // Explicitly fetch queries once we have both team and source
+      // This ensures we have data right away without relying on the watcher
+      if (teamsStore.currentTeamId && selectedSourceId.value) {
+        await fetchQueries();
+        isInitialLoad.value = false;
+      }
     }
   } catch (error) {
     console.error("Error during SavedQueriesView mount:", error);
@@ -212,7 +216,8 @@ watch(
     // Skip fetching if either:
     // 1. We're in the middle of a team change
     // 2. We're in the middle of a source change
-    if (isChangingTeam.value || isChangingSource.value) {
+    // 3. This is the initial load and fetching is already handled in onMounted
+    if (isChangingTeam.value || isChangingSource.value || isInitialLoad.value) {
       return;
     }
 
@@ -394,9 +399,21 @@ function formatTime(dateStr: string): string {
 
 // Handle delete query with refresh
 async function handleDeleteQuery(query: SavedTeamQuery) {
-  const result = await deleteQuery(query); // Use directly from composable
-  if (result.success && selectedSourceId.value) {
-    await fetchQueries();
+  try {
+    const result = await deleteQuery(query); // Use directly from composable
+
+    // Only refresh the queries if deletion was successful and not canceled
+    if (result.success && selectedSourceId.value) {
+      await fetchQueries();
+    } else if (result.canceled) {
+      // User canceled the deletion, no need to do anything
+      return;
+    } else if (!result.success && result.error) {
+      // Error already handled in deleteQuery function with toast
+      console.error("Error deleting query:", result.error);
+    }
+  } catch (error) {
+    console.error("Unexpected error in handleDeleteQuery:", error);
   }
 }
 

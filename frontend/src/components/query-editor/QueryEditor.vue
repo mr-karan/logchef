@@ -1419,9 +1419,18 @@ const getOperatorsSuggestions = (
 
   // Filter operators based on field type if needed
   const fieldType = props.schema[key]?.type?.toLowerCase() || "";
+  const isNumericField = [
+    "number",
+    "integer",
+    "float",
+    "double",
+    "decimal",
+    "int",
+  ].includes(fieldType);
+
   const filteredOperators = operators.filter((op) => {
     // For numeric fields, only allow comparison operators
-    if (fieldType === "number" || fieldType === "integer") {
+    if (isNumericField) {
       return ["=", "!=", ">", "<", ">=", "<="].includes(op.label);
     }
     // For string fields, allow all operators
@@ -1429,11 +1438,36 @@ const getOperatorsSuggestions = (
   });
 
   return getSuggestionsFromList({
-    items: filteredOperators.map((op) => ({
-      ...op,
-      insertText: op.insertText + " ", // Just add a space after operator, no quote
-      documentation: `${key} ${op.label} value`,
-    })),
+    items: filteredOperators.map((op) => {
+      let insertTextValue;
+      let useSnippetSyntax = false;
+
+      // For string fields with equality operators, add quotes and position cursor between them
+      if (!isNumericField && ["=", "!=", "~", "!~"].includes(op.label)) {
+        // Use snippet syntax with cursor position $1 between quotes
+        insertTextValue = op.insertText + '"$1"';
+        useSnippetSyntax = true;
+      } else if (isNumericField) {
+        // For numeric fields, don't add a space to allow immediate number entry
+        insertTextValue = op.insertText;
+      } else {
+        // For other cases, add space after operator
+        insertTextValue = op.insertText + " ";
+      }
+
+      return {
+        ...op,
+        insertText: insertTextValue,
+        documentation: `${key} ${op.label} value`,
+        // Only apply the InsertAsSnippet rule if we're using snippet syntax
+        ...(useSnippetSyntax
+          ? {
+              insertTextRules:
+                monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            }
+          : {}),
+      };
+    }),
     kind: monaco.languages.CompletionItemKind.Operator,
     range: range,
     postfix: "",

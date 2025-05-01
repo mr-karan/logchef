@@ -34,6 +34,10 @@ func QueryLogs(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log
 		// Consider returning a specific error indicating connection issue
 		return nil, fmt.Errorf("error getting database connection for source %d: %w", sourceID, err)
 	}
+	if client == nil {
+		log.Error("received nil clickhouse client without an error", "source_id", sourceID)
+		return nil, fmt.Errorf("internal error: database connection unavailable for source %d", sourceID)
+	}
 
 	// 3. Build the query (assuming LogQueryParams includes RawSQL or structured fields)
 	// Use the query builder from the clickhouse package

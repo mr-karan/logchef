@@ -140,7 +140,8 @@ export function useQuery() {
     dirtyReason.value.limitChanged = limitChanged;
 
     // Check if the mode has changed
-    const modeChanged = lastState.mode && lastState.mode !== activeMode.value;
+    // Provide a default value (false) if lastState.mode is undefined
+    const modeChanged = lastState?.mode ? lastState.mode !== activeMode.value : false;
     dirtyReason.value.modeChanged = modeChanged;
 
     // If mode has changed, handle special cases

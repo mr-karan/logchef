@@ -182,17 +182,13 @@ func (c *Client) Query(ctx context.Context, query string /* params LogQueryParam
 		var queryErr error
 		queryStartTime = time.Now() // Reset timer before execution
 		rows, queryErr = c.conn.Query(hookCtx, query)
-		// Defer rows.Close() here. We are abandoning getting accurate stats from the driver for now.
-		if rows != nil { // Only defer close if rows is not nil
-			defer func() {
-				// Closing might return an error, potentially overriding queryErr
-				// Consider how to handle this if needed, for now, we prioritize queryErr
-				// closeErr := rows.Close()
-				rows.Close()
-			}()
-		}
 		if queryErr != nil {
 			return queryErr // Return error to be logged by AfterQuery hook.
+		}
+
+		// Clean rows handling - immediately defer close if we have valid rows
+		if rows != nil {
+			defer rows.Close()
 		}
 
 		// Get column names and types.

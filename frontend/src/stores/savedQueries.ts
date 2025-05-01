@@ -8,6 +8,8 @@ import {
 } from "@/api/savedQueries";
 import { useBaseStore } from "./base";
 import type { APIErrorResponse } from "@/api/types";
+import { useToast } from "@/components/ui/toast";
+import { getErrorMessage } from "@/api/types";
 
 export interface SavedQueriesState {
   queries: SavedTeamQuery[];
@@ -112,7 +114,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   async function fetchTeamQueries(teamId: number) {
     return await state.withLoading(`fetchTeamQueries-${teamId}`, async () => {
       return await state.callApi<SavedTeamQuery[]>({ // Specify expected type
-        apiCall: () => savedQueriesApi.listQueries(teamId),
+        apiCall: () => savedQueriesApi.listTeamSourceQueries(teamId, 0), // Use listTeamSourceQueries instead with a default sourceId
         operationKey: `fetchTeamQueries-${teamId}`,
         onSuccess: (responseData) => {
           // responseData is now SavedTeamQuery[] | null
@@ -127,7 +129,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   async function fetchSourceQueries(sourceId: number, teamId: number) {
     return await state.withLoading(`fetchSourceQueries-${sourceId}-${teamId}`, async () => {
       return await state.callApi<SavedTeamQuery[]>({ // Specify expected type
-        apiCall: () => savedQueriesApi.listSourceQueries(sourceId, teamId),
+        apiCall: () => savedQueriesApi.listTeamSourceQueries(teamId, sourceId), // Use listTeamSourceQueries
         operationKey: `fetchSourceQueries-${sourceId}-${teamId}`,
         onSuccess: (responseData) => {
           // responseData is now SavedTeamQuery[] | null
@@ -182,7 +184,12 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   ) {
     return await state.withLoading(`createQuery-${teamId}`, async () => {
       return await state.callApi<SavedTeamQuery>({ // Specify expected type
-        apiCall: () => savedQueriesApi.createQuery(teamId, query),
+        apiCall: () => savedQueriesApi.createTeamSourceQuery(teamId, query.source_id, {
+          name: query.name,
+          description: query.description,
+          query_type: query.query_type,
+          query_content: query.query_content
+        }),
         operationKey: `createQuery-${teamId}`,
         successMessage: "Query created successfully",
         onSuccess: (response) => {
@@ -242,9 +249,22 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     queryId: string,
     query: Partial<SavedTeamQuery>
   ) {
+    // Need source_id for the API call
+    const sourceId = query.source_id || (state.data.value.selectedQuery?.source_id || 0);
+    
     return await state.withLoading(`updateQuery-${teamId}-${queryId}`, async () => {
       return await state.callApi<SavedTeamQuery>({ // Specify expected type
-        apiCall: () => savedQueriesApi.updateQuery(teamId, queryId, query),
+        apiCall: () => savedQueriesApi.updateTeamSourceQuery(
+          teamId, 
+          sourceId, 
+          queryId, 
+          {
+            name: query.name,
+            description: query.description,
+            query_type: query.query_type,
+            query_content: query.query_content
+          }
+        ),
         operationKey: `updateQuery-${teamId}-${queryId}`,
         successMessage: "Query updated successfully",
         onSuccess: (response) => {
@@ -304,23 +324,48 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
 
   async function deleteQuery(teamId: number, sourceId: number, queryId: string) {
     return await state.withLoading(`deleteQuery-${teamId}-${sourceId}-${queryId}`, async () => {
-      // Delete API might return different structure, adjust type if needed
-      return await state.callApi<{ success: boolean }>({ // Specify expected type
-        apiCall: () => savedQueriesApi.deleteTeamSourceQuery(teamId, sourceId, queryId),
-        operationKey: `deleteQuery-${teamId}-${sourceId}-${queryId}`,
-        successMessage: "Query deleted successfully",
-        onSuccess: (response) => {
-          // response is { success: boolean } | null
-          if (response?.success) {
-            state.data.value.queries = state.data.value.queries.filter(
-              (q) => String(q.id) !== queryId
-            );
-            if (state.data.value.selectedQuery?.id === Number(queryId)) {
-              state.data.value.selectedQuery = null;
-            }
+      const { toast } = useToast();
+      try {
+        const response = await savedQueriesApi.deleteTeamSourceQuery(teamId, sourceId, queryId);
+        
+        // Properly handle the API response
+        if (response && 'success' in response && response.success) {
+          // Update the local state
+          state.data.value.queries = state.data.value.queries.filter(
+            (q) => String(q.id) !== queryId
+          );
+          if (state.data.value.selectedQuery?.id === Number(queryId)) {
+            state.data.value.selectedQuery = null;
           }
+           
+          // Show toast message
+          toast({
+            title: "Success",
+            description: "Query deleted successfully", 
+            variant: "default"
+          });
+           
+          return { success: true };
+        } else {
+          // Handle case where API returns success: false
+          const error = { message: "Failed to delete query" };
+          toast({
+            title: "Error",
+            description: error.message,
+            variant: "destructive"
+          });
+          return { success: false, error };
         }
-      });
+      } catch (error) {
+        // Handle errors from the API call
+        const errorMessage = getErrorMessage(error) || "An error occurred while deleting the query";
+        toast({
+          title: "Error",
+          description: errorMessage,
+          variant: "destructive"
+        });
+        return { success: false, error };
+      }
     });
   }
 
