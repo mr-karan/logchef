@@ -12,10 +12,20 @@ export interface Team {
   member_count?: number;
 }
 
+export interface UserTeamMembership {
+  id: number;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+  member_count: number;
+  role: "admin" | "member" | "editor";
+}
+
 export interface TeamMember {
   team_id: number;
   user_id: number;
-  role: "admin" | "member";
+  role: "admin" | "member" | "editor";
   created_at: string;
   updated_at: string;
   email: string;
@@ -32,9 +42,13 @@ export interface UpdateTeamRequest {
   description: string;
 }
 
+export interface UserIdentifier {
+  user_id: number;
+}
+
 export interface AddTeamMemberRequest {
   user_id: number;
-  role: "admin" | "member";
+  role: 'admin' | 'member' | 'editor';
 }
 
 export interface TeamWithMemberCount extends Team {
@@ -42,7 +56,7 @@ export interface TeamWithMemberCount extends Team {
 }
 
 export const teamsApi = {
-  listUserTeams: () => apiClient.get<APIResponse<TeamWithMemberCount[]>>("/me/teams"),
+  listUserTeams: () => apiClient.get<APIResponse<UserTeamMembership[]>>("/me/teams"),
   listAllTeams: () => apiClient.get<APIResponse<TeamWithMemberCount[]>>("/admin/teams"),
   getTeam: (id: number) => apiClient.get<APIResponse<Team>>(`/teams/${id}`),
   createTeam: (data: CreateTeamRequest) => apiClient.post<APIResponse<Team>>("/admin/teams", data),

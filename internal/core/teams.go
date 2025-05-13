@@ -63,8 +63,8 @@ func validateTeamMember(teamID models.TeamID, userID models.UserID, role models.
 	if userID <= 0 {
 		return &ValidationError{Field: "userID", Message: "valid user ID is required"}
 	}
-	if role != models.TeamRoleAdmin && role != models.TeamRoleMember {
-		return &ValidationError{Field: "role", Message: "role must be either 'admin' or 'member'"}
+	if role != models.TeamRoleAdmin && role != models.TeamRoleMember && role != models.TeamRoleEditor {
+		return &ValidationError{Field: "role", Message: "role must be 'admin', 'editor', or 'member'"}
 	}
 	return nil
 }
@@ -518,17 +518,40 @@ func TeamHasSourceAccess(ctx context.Context, db *sqlite.DB, teamID models.TeamI
 	return hasAccess, nil
 }
 
-// ListTeamsForUser returns all teams a user is a member of.
-func ListTeamsForUser(ctx context.Context, db *sqlite.DB, userID models.UserID) ([]*models.Team, error) {
+// ListTeamsForUser returns all teams a user is a member of, including their role and team member count.
+func ListTeamsForUser(ctx context.Context, db *sqlite.DB, userID models.UserID) ([]*models.UserTeamDetails, error) {
 	// Optional: Validate user exists first
-	// _, err := GetUser(ctx, db, userID)
+	// _, err := GetUser(ctx, db, userID) // Assuming GetUser exists and is appropriate here
 	// if err != nil { return nil, err }
 
-	teams, err := db.ListTeamsForUser(ctx, userID)
+	// After sqlc generate, db.ListTeamsForUser returns the new sqlc-generated row struct.
+	// Let's assume it's []sqlc.ListTeamsForUserRow (the actual name might vary based on sqlc config/version)
+	teamRows, err := db.ListTeamsForUser(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("error listing teams for user: %w", err)
+		return nil, fmt.Errorf("error listing teams for user from db: %w", err)
 	}
-	return teams, nil
+
+	userTeams := make([]*models.UserTeamDetails, 0, len(teamRows))
+	for _, row := range teamRows {
+		// The fields of 'row' are now directly from the SQL query via sqlc's generated struct.
+		// e.g., row.ID, row.Name, row.Description, row.CreatedAt, row.UpdatedAt, row.Role, row.MemberCount
+		desc := ""
+		if row.Description.Valid { // Check if sql.NullString is valid
+			desc = row.Description.String
+		}
+
+		userTeams = append(userTeams, &models.UserTeamDetails{
+			ID:          models.TeamID(row.ID),
+			Name:        row.Name,
+			Description: desc,
+			CreatedAt:   row.CreatedAt,
+			UpdatedAt:   row.UpdatedAt,
+			MemberCount: int(row.MemberCount),      // MemberCount from SQL query
+			Role:        models.TeamRole(row.Role), // Role from SQL query
+		})
+	}
+
+	return userTeams, nil
 }
 
 // --- Utility Functions ---
