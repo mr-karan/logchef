@@ -254,10 +254,22 @@ WHERE tm.user_id = ? AND ts.source_id = ?;
 
 -- name: ListTeamsForUser :many
 -- List all teams a user is a member of
-SELECT t.* FROM teams t
-JOIN team_members tm ON t.id = tm.team_id
-WHERE tm.user_id = ?
-ORDER BY t.created_at DESC;
+SELECT
+    t.id,
+    t.name,
+    t.description,
+    t.created_at,
+    t.updated_at,
+    tm.role,  -- The current user's role in this team
+    (SELECT COUNT(*) FROM team_members sub_tm WHERE sub_tm.team_id = t.id) as member_count
+FROM
+    teams t
+JOIN
+    team_members tm ON t.id = tm.team_id
+WHERE
+    tm.user_id = ?  -- The current user ID
+ORDER BY
+    t.created_at DESC;
 
 -- name: GetTeamByName :one
 -- Get a team by its name

@@ -1,29 +1,20 @@
 <template>
   <div class="query-editor">
     <!-- Header Bar (Keep existing structure) -->
-    <div
-      class="flex items-center justify-between bg-muted/40 rounded-t-md px-3 py-1.5 border border-b-0"
-    >
+    <div class="flex items-center justify-between bg-muted/40 rounded-t-md px-3 py-1.5 border border-b-0">
       <div class="flex items-center gap-3">
         <!-- Fields Panel Toggle -->
-        <button
-          class="p-1 text-muted-foreground hover:text-foreground flex items-center"
-          @click="$emit('toggle-fields')"
-          :title="
-            props.showFieldsPanel ? 'Hide fields panel' : 'Show fields panel'
-          "
-          aria-label="Toggle fields panel"
-        >
+        <button class="p-1 text-muted-foreground hover:text-foreground flex items-center"
+          @click="$emit('toggle-fields')" :title="props.showFieldsPanel ? 'Hide fields panel' : 'Show fields panel'
+            " aria-label="Toggle fields panel">
           <PanelRightClose v-if="props.showFieldsPanel" class="h-4 w-4" />
           <PanelRightOpen v-else class="h-4 w-4" />
         </button>
 
         <!-- Tabs for Mode Switching -->
-        <Tabs
-          :model-value="props.activeMode"
+        <Tabs :model-value="props.activeMode"
           @update:model-value="(value: string | number) => $emit('update:activeMode', asEditorMode(value), true)"
-          class="w-auto"
-        >
+          class="w-auto">
           <TabsList class="grid grid-cols-2 w-fit">
             <TabsTrigger value="logchefql">
               <div class="flex-fix">
@@ -52,10 +43,8 @@
         </div>
 
         <!-- New: Active Query Indicator -->
-        <div
-          v-if="activeSavedQueryName"
-          class="flex items-center bg-primary/10 text-primary text-xs font-medium px-2 py-0.5 rounded-md ml-3"
-        >
+        <div v-if="activeSavedQueryName"
+          class="flex items-center bg-primary/10 text-primary text-xs font-medium px-2 py-0.5 rounded-md ml-3">
           <FileEdit class="h-3.5 w-3.5 mr-1.5" />
           <span>{{ activeSavedQueryName }}</span>
         </div>
@@ -66,12 +55,7 @@
         <TooltipProvider v-if="isEditingExistingQuery">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                class="h-7 gap-1"
-                @click="handleNewQueryClick"
-              >
+              <Button variant="outline" size="sm" class="h-7 gap-1" @click="handleNewQueryClick">
                 <FilePlus2 class="h-3.5 w-3.5" />
                 <span class="text-xs">New</span>
               </Button>
@@ -86,17 +70,10 @@
         <TooltipProvider v-if="props.activeMode === 'clickhouse-sql'">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                class="h-7 gap-1"
-                @click="toggleSqlEditorVisibility"
-              >
+              <Button variant="outline" size="sm" class="h-7 gap-1" @click="toggleSqlEditorVisibility">
                 <EyeOff v-if="isEditorVisible" class="h-3.5 w-3.5" />
                 <Eye v-else class="h-3.5 w-3.5" />
-                <span class="text-xs"
-                  >{{ isEditorVisible ? "Hide" : "Show" }} SQL</span
-                >
+                <span class="text-xs">{{ isEditorVisible ? "Hide" : "Show" }} SQL</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
@@ -106,39 +83,26 @@
         </TooltipProvider>
 
         <!-- Saved Queries Dropdown -->
-        <SavedQueriesDropdown
-          :selected-source-id="props.sourceId"
-          :selected-team-id="props.teamId"
+        <SavedQueriesDropdown :selected-source-id="props.sourceId" :selected-team-id="props.teamId"
           @select-saved-query="(query: SavedTeamQuery) => $emit('select-saved-query', query)"
-          @save="$emit('save-query')"
-          class="h-8"
-        />
+          @save="$emit('save-query')" @save-as-new="$emit('save-query-as-new')" class="h-8" />
 
         <!-- Help Icon -->
         <HoverCard :open-delay="200">
           <HoverCardTrigger as-child>
-            <button
-              class="p-1 text-muted-foreground hover:text-foreground"
-              aria-label="Show syntax help"
-            >
+            <button class="p-1 text-muted-foreground hover:text-foreground" aria-label="Show syntax help">
               <HelpCircle class="h-4 w-4" />
             </button>
           </HoverCardTrigger>
-          <HoverCardContent
-            class="w-80 backdrop-blur-md bg-card text-card-foreground border-border shadow-lg"
-            side="bottom"
-            align="end"
-          >
+          <HoverCardContent class="w-80 backdrop-blur-md bg-card text-card-foreground border-border shadow-lg"
+            side="bottom" align="end">
             <!-- Help Content (Keep existing template) -->
             <div class="space-y-2">
               <h4 class="text-sm font-semibold">
                 {{ props.activeMode === "logchefql" ? "LogchefQL" : "SQL" }}
                 Syntax
               </h4>
-              <div
-                v-if="props.activeMode === 'logchefql'"
-                class="text-xs space-y-1.5"
-              >
+              <div v-if="props.activeMode === 'logchefql'" class="text-xs space-y-1.5">
                 <div>
                   <code class="bg-muted px-1 rounded">field="value"</code> -
                   Exact match
@@ -164,36 +128,24 @@
                   Grouping
                 </div>
                 <div class="pt-1">
-                  <em
-                    >Example:
-                    <code class="bg-muted px-1 rounded"
-                      >level="error" and status>=500</code
-                    ></em
-                  >
+                  <em>Example:
+                    <code class="bg-muted px-1 rounded">level="error" and status>=500</code></em>
                 </div>
               </div>
               <div v-else class="text-xs space-y-1.5">
                 <div>
-                  <code class="bg-muted px-1 rounded"
-                    >SELECT count() FROM {{ tableName || "table" }}</code
-                  >
+                  <code class="bg-muted px-1 rounded">SELECT count() FROM {{ tableName || "table" }}</code>
                 </div>
                 <div>
-                  <code class="bg-muted px-1 rounded"
-                    >WHERE field = 'value' AND time > now() - interval 1
-                    hour</code
-                  >
+                  <code class="bg-muted px-1 rounded">WHERE field = 'value' AND time > now() - interval 1
+              hour</code>
                 </div>
                 <div>
-                  <code class="bg-muted px-1 rounded"
-                    >GROUP BY user ORDER BY count() DESC</code
-                  >
+                  <code class="bg-muted px-1 rounded">GROUP BY user ORDER BY count() DESC</code>
                 </div>
                 <div class="pt-1">
-                  <em
-                    >Time range & limit applied if not specified. Use standard
-                    ClickHouse SQL.</em
-                  >
+                  <em>Time range & limit applied if not specified. Use standard
+                    ClickHouse SQL.</em>
                 </div>
               </div>
             </div>
@@ -203,54 +155,30 @@
     </div>
 
     <!-- Monaco Editor Container -->
-    <div
-      class="editor-wrapper"
-      :class="{ 'is-focused': editorFocused }"
-      v-show="isEditorVisible || props.activeMode === 'logchefql'"
-    >
-      <div
-        class="editor-container"
-        :class="{
-          'is-empty': isEditorEmpty,
-        }"
-        :style="{ height: `${editorHeight}px` }"
-        :data-placeholder="currentPlaceholder"
-        :data-mode="props.activeMode"
-      >
+    <div class="editor-wrapper" :class="{ 'is-focused': editorFocused }"
+      v-show="isEditorVisible || props.activeMode === 'logchefql'">
+      <div class="editor-container" :class="{
+        'is-empty': isEditorEmpty,
+      }" :style="{ height: `${editorHeight}px` }" :data-placeholder="currentPlaceholder" :data-mode="props.activeMode">
         <!-- Monaco Editor Component with stable key to prevent remounting -->
-        <vue-monaco-editor
-          key="monaco-editor-instance"
-          v-model:value="editorContent"
-          :theme="theme"
-          :language="props.activeMode"
-          :options="monacoOptions"
-          @mount="handleMount"
-          @update:value="handleEditorChange"
-          class="h-full w-full"
-        />
+        <vue-monaco-editor key="monaco-editor-instance" v-model:value="editorContent" :theme="theme"
+          :language="props.activeMode" :options="monacoOptions" @mount="handleMount" @update:value="handleEditorChange"
+          class="h-full w-full" />
       </div>
     </div>
 
     <!-- SQL Preview when editor is hidden -->
-    <div
-      v-if="
-        !isEditorVisible &&
-        props.activeMode === 'clickhouse-sql' &&
-        !isEditorEmpty
-      "
-      class="sql-preview p-3 border border-border rounded-md bg-card/60 text-sm font-mono overflow-hidden cursor-pointer dark:bg-[#111522]"
-      @click="isEditorVisible = true"
-    >
+    <div v-if="
+      !isEditorVisible &&
+      props.activeMode === 'clickhouse-sql' &&
+      !isEditorEmpty
+    " class="sql-preview p-3 border border-border rounded-md bg-card/60 text-sm font-mono overflow-hidden cursor-pointer dark:bg-[#111522]"
+      @click="isEditorVisible = true">
       <div class="flex items-center justify-between">
         <div class="text-muted-foreground text-xs font-medium mb-1">
           SQL Query (collapsed)
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          class="h-6 px-2"
-          @click.stop="isEditorVisible = true"
-        >
+        <Button variant="ghost" size="sm" class="h-6 px-2" @click.stop="isEditorVisible = true">
           <Eye class="h-3.5 w-3.5 mr-1" />
           <span class="text-xs">Show</span>
         </Button>
@@ -261,24 +189,17 @@
     </div>
 
     <!-- Error Message Display -->
-    <div
-      v-if="validationError"
-      class="mt-2 p-2 text-sm text-destructive bg-destructive/10 rounded flex items-center gap-2"
-    >
+    <div v-if="validationError"
+      class="mt-2 p-2 text-sm text-destructive bg-destructive/10 rounded flex items-center gap-2">
       <AlertCircle class="h-4 w-4 flex-shrink-0" />
       <span>
         <span class="font-medium">Validation Error: </span>
         {{ validationError }}
-        <span
-          v-if="validationError?.includes('Missing boolean operator')"
-          class="block mt-1 text-xs"
-        >
+        <span v-if="validationError?.includes('Missing boolean operator')" class="block mt-1 text-xs">
           Hint: Use <code class="bg-muted px-1 rounded">and</code> or
           <code class="bg-muted px-1 rounded">or</code> between conditions.
           Example:
-          <code class="bg-muted px-1 rounded"
-            >field1="value" and field2="value"</code
-          >
+          <code class="bg-muted px-1 rounded">field1="value" and field2="value"</code>
         </span>
       </span>
     </div>
@@ -400,6 +321,7 @@ const emit = defineEmits<{
   // SavedQueries events
   (e: "select-saved-query", query: SavedTeamQuery): void;
   (e: "save-query"): void;
+  (e: "save-query-as-new"): void;
 }>();
 
 // --- Core State ---
@@ -425,9 +347,8 @@ const currentPlaceholder = computed(() => {
 
   return props.activeMode === "logchefql"
     ? 'Enter search criteria (e.g., lvl="ERROR" and namespace~"sys")'
-    : `Enter ClickHouse SQL query (e.g., SELECT * FROM ${
-        props.tableName || "your_table"
-      } WHERE ...)`;
+    : `Enter ClickHouse SQL query (e.g., SELECT * FROM ${props.tableName || "your_table"
+    } WHERE ...)`;
 });
 
 const editorHeight = computed(() => {
@@ -662,15 +583,15 @@ watchEffect(() => {
       // Add mode-specific options for LogchefQL
       ...(props.activeMode === "logchefql"
         ? {
-            ...getSingleLineModeOptions(),
-          }
+          ...getSingleLineModeOptions(),
+        }
         : {
-            // SQL-specific configuration - keep line numbers off
-            lineNumbers: "off" as const,
-            wordWrap: "on" as const,
-            folding: true,
-            scrollBeyondLastLine: false,
-          }),
+          // SQL-specific configuration - keep line numbers off
+          lineNumbers: "off" as const,
+          wordWrap: "on" as const,
+          folding: true,
+          scrollBeyondLastLine: false,
+        }),
     };
     editor.updateOptions(options);
 
@@ -1540,7 +1461,8 @@ const handleNewQueryClick = () => {
   position: relative;
   width: 100%;
   height: 100%;
-  background-color: transparent; /* Make transparent to let Monaco background show through */
+  background-color: transparent;
+  /* Make transparent to let Monaco background show through */
   padding-left: 16px;
   /* Add padding to container to position cursor */
 }
@@ -1569,7 +1491,8 @@ const handleNewQueryClick = () => {
 :deep(.monaco-editor .overflow-guard) {
   border: none !important;
   outline: none !important;
-  background-color: transparent !important; /* Ensure transparency */
+  background-color: transparent !important;
+  /* Ensure transparency */
 }
 
 /* Style just the margin/gutter */
@@ -1628,6 +1551,7 @@ const handleNewQueryClick = () => {
 }
 
 .dark .sql-preview:hover {
-  background-color: #1c2536; /* Matches the bluish dark theme hover */
+  background-color: #1c2536;
+  /* Matches the bluish dark theme hover */
 }
 </style>

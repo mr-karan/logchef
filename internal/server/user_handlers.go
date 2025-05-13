@@ -191,7 +191,8 @@ func (s *Server) handleDeleteUser(c *fiber.Ctx) error {
 
 // --- Current User Team Handlers ---
 
-// handleListCurrentUserTeams lists teams that the authenticated user belongs to.
+// handleListCurrentUserTeams lists teams that the authenticated user belongs to,
+// including their role in each team and the team's member count.
 // URL: GET /api/v1/me/teams
 // Requires: User authentication (requireAuth middleware)
 func (s *Server) handleListCurrentUserTeams(c *fiber.Ctx) error {
@@ -202,42 +203,17 @@ func (s *Server) handleListCurrentUserTeams(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
 
-	// Get teams user belongs to
-	teams, err := core.ListTeamsForUser(c.Context(), s.sqlite, user.ID)
+	// Get teams user belongs to, now with role and member count included
+	userTeamDetails, err := core.ListTeamsForUser(c.Context(), s.sqlite, user.ID)
 	if err != nil {
-		s.log.Error("failed to list teams for user", "error", err, "user_id", user.ID)
+		s.log.Error("failed to list teams for user with details", "error", err, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Error listing user teams")
 	}
 
-	// Enhanced response with additional info for each team
-	type TeamResponse struct {
-		*models.Team
-		MemberCount int  `json:"member_count"`
-		IsAdmin     bool `json:"is_admin"`
+	if userTeamDetails == nil {
+		// Return empty list if user has no teams, to be consistent.
+		return SendSuccess(c, fiber.StatusOK, []*models.UserTeamDetails{})
 	}
 
-	teamResponses := make([]TeamResponse, 0, len(teams))
-	for _, team := range teams {
-		// Get member count
-		members, err := core.ListTeamMembers(c.Context(), s.sqlite, team.ID)
-		if err != nil {
-			s.log.Warn("failed to get member count for team", "error", err, "team_id", team.ID)
-			continue
-		}
-
-		// Check if user is admin of this team
-		isAdmin, err := core.IsTeamAdmin(c.Context(), s.sqlite, team.ID, user.ID)
-		if err != nil {
-			s.log.Warn("failed to check if user is team admin", "error", err, "team_id", team.ID, "user_id", user.ID)
-			continue
-		}
-
-		teamResponses = append(teamResponses, TeamResponse{
-			Team:        team,
-			MemberCount: len(members),
-			IsAdmin:     isAdmin,
-		})
-	}
-
-	return SendSuccess(c, fiber.StatusOK, teamResponses)
+	return SendSuccess(c, fiber.StatusOK, userTeamDetails)
 }

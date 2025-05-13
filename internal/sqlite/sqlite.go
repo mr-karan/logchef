@@ -143,30 +143,45 @@ func setPragmas(db *sql.DB) error {
 // runMigrations uses the golang-migrate library to apply migrations
 // embedded in the migrationsFS filesystem.
 func runMigrations(db *sql.DB, log *slog.Logger) error {
+	log.Info("initializing database migrations")
 	migrationFS, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
+		log.Error("failed to create migrations filesystem subsection", "error", err)
 		return fmt.Errorf("error creating migrations filesystem: %w", err)
 	}
 
 	sourceDriver, err := iofs.New(migrationFS, ".")
 	if err != nil {
+		log.Error("failed to create migration source driver", "error", err)
 		return fmt.Errorf("error creating migration source driver: %w", err)
 	}
 
-	// Use the SQLite driver provided by golang-migrate.
 	driver, err := sqlite3.WithInstance(db, &sqlite3.Config{
-		MigrationsTable: "schema_migrations", // Standard migrations table name.
-		// NoTransaction allows migrations with PRAGMA statements that need to run outside a transaction.
-		// Set to true if your migrations require it, otherwise false (default) for atomic migrations.
-		// NoTransaction: true,
+		MigrationsTable: "schema_migrations",
+		// NoTransaction: true, // Set if migrations need to run outside a transaction (e.g., for certain PRAGMA statements)
 	})
 	if err != nil {
+		log.Error("failed to create sqlite migration database driver", "error", err)
 		return fmt.Errorf("error creating sqlite migration driver: %w", err)
 	}
 
 	m, err := migrate.NewWithInstance("iofs", sourceDriver, "sqlite3", driver)
 	if err != nil {
+		log.Error("failed to create migrate instance", "error", err)
 		return fmt.Errorf("error creating migrate instance: %w", err)
+	}
+
+	currentVersion, dirty, err := m.Version()
+	if err != nil && !errors.Is(err, migrate.ErrNilVersion) {
+		log.Error("failed to get current migration version", "error", err)
+		// Do not return here, as we still want to attempt migrations
+	} else if errors.Is(err, migrate.ErrNilVersion) {
+		log.Info("no previous migrations found, starting fresh")
+	} else {
+		log.Info("current database migration version", "version", currentVersion, "dirty", dirty)
+		if dirty {
+			log.Warn("database is in a dirty migration state. Manual intervention may be required if migrations fail.")
+		}
 	}
 
 	// Ensure migration resources are closed.
@@ -182,18 +197,23 @@ func runMigrations(db *sql.DB, log *slog.Logger) error {
 		}
 	}()
 
-	// Apply all pending "up" migrations.
-	log.Info("applying migrations...")
+	log.Info("applying database migrations...")
 	if err := m.Up(); err != nil {
 		if errors.Is(err, migrate.ErrNoChange) {
-			log.Info("migrations are already up to date")
-			return nil // No change is not an error.
+			log.Info("migrations are already up to date.")
+			return nil
 		}
-		// Log the specific migration error.
+		log.Error("failed during migration application", "error", err)
 		return fmt.Errorf("error applying migrations: %w", err)
 	}
 
-	log.Info("migrations applied successfully")
+	finalVersion, dirty, err := m.Version()
+	if err != nil {
+		log.Error("failed to get final migration version after apply", "error", err)
+	} else {
+		log.Info("migrations applied successfully.", "new_version", finalVersion, "dirty", dirty)
+	}
+
 	return nil
 }
 

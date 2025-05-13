@@ -154,7 +154,7 @@ const handleAddMember = async () => {
 
     const result = await teamsStore.addTeamMember(team.value.id, {
         user_id: Number(selectedUserId.value),
-        role: newMemberRole.value as 'admin' | 'member',
+        role: newMemberRole.value as 'admin' | 'member' | 'editor',
     })
 
     if (result.success) {
@@ -168,39 +168,29 @@ const handleAddMember = async () => {
 const handleRemoveMember = async (userId: string | number) => {
     if (!team.value) return;
 
-    // Check if user is removing themselves
-    const currentUserId = authStore.user?.id;
-    const isSelf = currentUserId && userId.toString() === currentUserId.toString();
-
-    // Confirmation for self-removal
-    if (isSelf) {
-        const confirm = window.confirm('Are you sure you want to remove yourself from this team? You will lose access to this team and all its sources immediately.');
-        if (!confirm) return;
-    }
-
     try {
         const result = await teamsStore.removeTeamMember(team.value.id, Number(userId));
 
-        if (result.success && isSelf) {
-            // Redirect to teams list if removing self
+        if (!result.success) {
+            // API call failed, show an error toast.
+            // The success toast ("Member removed successfully") is handled by the store's callApi utility.
             toast({
-                title: 'Left Team',
-                description: `You have removed yourself from team ${team.value.name}`,
-                variant: 'default',
+                title: 'Error',
+                description: result.error?.message || 'Failed to remove team member.',
+                variant: 'destructive',
             });
-
-            // Navigate away from this page since user no longer has access
-            router.push({ name: 'Home' });
         }
+        // If result.success is true, the store handles the success toast.
     } catch (error) {
+        // This catch is for unexpected errors during the teamsStore.removeTeamMember call itself
         console.error('Error removing team member:', error);
         toast({
             title: 'Error',
-            description: 'Failed to remove team member',
+            description: 'An unexpected error occurred while trying to remove the team member.',
             variant: 'destructive',
         });
     }
-}
+};
 
 const handleAddSource = async () => {
     if (!team.value || !selectedSourceId.value) return
@@ -357,6 +347,7 @@ onMounted(async () => {
                                                     </SelectTrigger>
                                                     <SelectContent>
                                                         <SelectItem value="member">Member</SelectItem>
+                                                        <SelectItem value="editor">Editor</SelectItem>
                                                         <SelectItem value="admin">Admin</SelectItem>
                                                     </SelectContent>
                                                 </Select>
@@ -401,7 +392,7 @@ onMounted(async () => {
                                             <div class="flex flex-col">
                                                 <span>{{ member.email }}</span>
                                                 <span class="text-sm text-muted-foreground">{{ member.full_name
-                                                    }}</span>
+                                                }}</span>
                                             </div>
                                         </TableCell>
                                         <TableCell class="capitalize">{{ member.role }}</TableCell>

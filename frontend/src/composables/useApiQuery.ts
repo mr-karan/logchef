@@ -23,16 +23,17 @@ export function useApiQuery<T>() {
     
     try {
       const response = await apiCall();
-      if (response.status === "success") {
-        // Use null-coalescing with optional default
+
+      if (response && response.status === "success") {
+        // Standard API response format with status and data fields
         const resultData = response.data ?? options?.defaultData ?? null;
         data.value = resultData;
-        
+
         if (options?.successMessage && options?.showToast !== false) {
           showSuccessToast(options.successMessage);
         }
-        
-        // Pass null-safe data to success handler
+
+        // Pass data to success handler
         options?.onSuccess?.(resultData);
         return { success: true, data: resultData };
       } else {

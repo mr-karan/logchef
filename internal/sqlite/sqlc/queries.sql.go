@@ -858,28 +858,52 @@ func (q *Queries) ListTeams(ctx context.Context) ([]ListTeamsRow, error) {
 }
 
 const listTeamsForUser = `-- name: ListTeamsForUser :many
-SELECT t.id, t.name, t.description, t.created_at, t.updated_at FROM teams t
-JOIN team_members tm ON t.id = tm.team_id
-WHERE tm.user_id = ?
-ORDER BY t.created_at DESC
+SELECT
+    t.id,
+    t.name,
+    t.description,
+    t.created_at,
+    t.updated_at,
+    tm.role,  -- The current user's role in this team
+    (SELECT COUNT(*) FROM team_members sub_tm WHERE sub_tm.team_id = t.id) as member_count
+FROM
+    teams t
+JOIN
+    team_members tm ON t.id = tm.team_id
+WHERE
+    tm.user_id = ?  -- The current user ID
+ORDER BY
+    t.created_at DESC
 `
 
+type ListTeamsForUserRow struct {
+	ID          int64          `json:"id"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	Role        string         `json:"role"`
+	MemberCount int64          `json:"member_count"`
+}
+
 // List all teams a user is a member of
-func (q *Queries) ListTeamsForUser(ctx context.Context, userID int64) ([]Team, error) {
+func (q *Queries) ListTeamsForUser(ctx context.Context, userID int64) ([]ListTeamsForUserRow, error) {
 	rows, err := q.query(ctx, q.listTeamsForUserStmt, listTeamsForUser, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Team{}
+	items := []ListTeamsForUserRow{}
 	for rows.Next() {
-		var i Team
+		var i ListTeamsForUserRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Role,
+			&i.MemberCount,
 		); err != nil {
 			return nil, err
 		}

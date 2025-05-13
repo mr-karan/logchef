@@ -520,30 +520,20 @@ func (db *DB) UserHasSourceAccess(ctx context.Context, userID models.UserID, sou
 	return count > 0, nil
 }
 
-// ListTeamsForUser retrieves all teams a specific user is a member of.
-// This is functionally similar to ListUserTeams but named for consistency.
-func (db *DB) ListTeamsForUser(ctx context.Context, userID models.UserID) ([]*models.Team, error) {
-	db.log.Debug("listing teams for user", "user_id", userID) // Reuses ListUserTeams query
+// ListTeamsForUser retrieves all teams a specific user is a member of, along with their role and team member count.
+// This function now returns the raw sqlc-generated rows, and mapping is handled in the core layer.
+func (db *DB) ListTeamsForUser(ctx context.Context, userID models.UserID) ([]sqlc.ListTeamsForUserRow, error) {
+	db.log.Debug("listing teams for user (with role and count)", "user_id", userID)
 
+	// This calls the sqlc generated function for the modified "ListTeamsForUser" query
 	teamRows, err := db.queries.ListTeamsForUser(ctx, int64(userID))
 	if err != nil {
-		db.log.Error("failed to list teams for user from db", "error", err, "user_id", userID)
-		return nil, fmt.Errorf("error listing teams for user: %w", err)
+		db.log.Error("failed to list teams for user (with role and count) from db", "error", err, "user_id", userID)
+		return nil, fmt.Errorf("error listing teams for user (with role and count): %w", err)
 	}
 
-	teams := make([]*models.Team, 0, len(teamRows))
-	for _, row := range teamRows {
-		teams = append(teams, &models.Team{
-			ID:          models.TeamID(row.ID),
-			Name:        row.Name,
-			Description: row.Description.String,
-			Timestamps: models.Timestamps{
-				CreatedAt: row.CreatedAt,
-				UpdatedAt: row.UpdatedAt,
-			},
-		})
-	}
-
-	db.log.Debug("teams listed for user", "user_id", userID, "count", len(teams))
-	return teams, nil
+	// No mapping here; return the direct sqlc result.
+	// The core layer (core.ListTeamsForUser) will handle mapping to models.UserTeamDetails.
+	db.log.Debug("teams listed for user (with role and count)", "user_id", userID, "count", len(teamRows))
+	return teamRows, nil
 }

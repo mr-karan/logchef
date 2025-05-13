@@ -39,7 +39,7 @@ func (s *Server) handleListTeamSourceCollections(c *fiber.Ctx) error {
 }
 
 // handleCreateTeamSourceCollection creates a new saved query (collection) for a specific team and source.
-// Assumes requireAuth and requireTeamMember middleware have run.
+// Assumes requireAuth, requireTeamMember, and requireCollectionManagement middleware have run.
 func (s *Server) handleCreateTeamSourceCollection(c *fiber.Ctx) error {
 	teamIDStr := c.Params("teamID")
 	sourceIDStr := c.Params("sourceID")
@@ -143,7 +143,7 @@ func (s *Server) handleGetTeamSourceCollection(c *fiber.Ctx) error {
 }
 
 // handleUpdateTeamSourceCollection updates a saved query (collection).
-// Assumes requireAuth, requireTeamMember, and requireTeamAdminOrGlobalAdmin middleware have run.
+// Assumes requireAuth, requireTeamMember, and requireCollectionManagement middleware have run.
 func (s *Server) handleUpdateTeamSourceCollection(c *fiber.Ctx) error {
 	teamIDStr := c.Params("teamID")
 	sourceIDStr := c.Params("sourceID")
@@ -233,7 +233,7 @@ func (s *Server) handleUpdateTeamSourceCollection(c *fiber.Ctx) error {
 }
 
 // handleDeleteTeamSourceCollection deletes a saved query (collection).
-// Assumes requireAuth, requireTeamMember, and requireTeamAdminOrGlobalAdmin middleware have run.
+// Assumes requireAuth, requireTeamMember, and requireCollectionManagement middleware have run.
 func (s *Server) handleDeleteTeamSourceCollection(c *fiber.Ctx) error {
 	teamIDStr := c.Params("teamID")
 	sourceIDStr := c.Params("sourceID")

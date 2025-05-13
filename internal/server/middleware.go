@@ -200,6 +200,54 @@ func (s *Server) requireTeamHasSource(c *fiber.Ctx) error {
 	return c.Next()
 }
 
+// requireCollectionManagement checks if a user has privileges to manage collections for the requested team.
+// This includes Team Editors, Team Admins, or Global Admins.
+// Assumes requireAuth has already run.
+func (s *Server) requireCollectionManagement(c *fiber.Ctx) error {
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil {
+		s.log.Error("user not found in context for collection management check")
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
+	}
+
+	teamIDStr := c.Params("teamID")
+	teamID, err := core.ParseTeamID(teamIDStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
+	}
+
+	s.log.Debug("requireCollectionManagement check", "user_id", user.ID, "user_role", user.Role, "team_id", teamIDStr)
+
+	// Global admins bypass specific team role checks.
+	if user.Role == models.UserRoleAdmin {
+		s.log.Debug("Global admin granting access for collection management", "user_id", user.ID, "team_id", teamIDStr)
+		return c.Next()
+	}
+
+	// Fetch the user's specific role within this team using the core function.
+	teamMember, err := core.GetTeamMember(c.Context(), s.sqlite, teamID, user.ID)
+	if err != nil {
+		// This error means something unexpected happened during DB interaction, not "not found".
+		s.log.Error("failed to get team member details for collection management check", "error", err, "team_id", teamID, "user_id", user.ID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify team role", models.GeneralErrorType)
+	}
+
+	if teamMember == nil {
+		// core.GetTeamMember returns (nil, nil) if the user is not found in the team.
+		s.log.Warn("User not a member of the team for collection management check", "user_id", user.ID, "team_id", teamID)
+		return SendErrorWithType(c, fiber.StatusForbidden, "Team membership required for this action", models.AuthorizationErrorType)
+	}
+
+	// Check if the team member is an Admin or Editor.
+	if teamMember.Role == models.TeamRoleAdmin || teamMember.Role == models.TeamRoleEditor {
+		s.log.Debug("Team editor/admin access granted for collection management", "user_id", user.ID, "team_id", teamID, "team_role", teamMember.Role)
+		return c.Next()
+	}
+
+	s.log.Warn("Collection management privileges required, but user has role", "user_id", user.ID, "team_id", teamID, "team_role", teamMember.Role)
+	return SendErrorWithType(c, fiber.StatusForbidden, "Collection management privileges required", models.AuthorizationErrorType)
+}
+
 // notFoundHandler returns a standardized 404 Not Found error for API routes.
 func (s *Server) notFoundHandler(c *fiber.Ctx) error {
 	return SendErrorWithType(c, fiber.StatusNotFound, "API route not found", models.NotFoundErrorType)
