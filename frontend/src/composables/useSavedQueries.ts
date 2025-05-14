@@ -461,11 +461,11 @@ export function useSavedQueries(
       console.log("Updating URL with saved query state, including query_id:", queryData.id.toString());
       router.replace({ query: queryParams });
 
-      toast({
-        title: 'Success',
-        description: `Query "${queryData.name}" loaded successfully.`,
-        duration: TOAST_DURATION.SUCCESS
-      })
+      // toast({
+      //   title: 'Success',
+      //   description: `Query "${queryData.name}" loaded successfully.`,
+      //   duration: TOAST_DURATION.SUCCESS
+      // })
 
       // Don't call syncUrlFromState() since we're explicitly setting the URL
 

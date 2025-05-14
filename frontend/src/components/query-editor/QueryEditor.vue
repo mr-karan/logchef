@@ -658,6 +658,38 @@ watch(
   { deep: true, flush: "post" }
 );
 
+// Add this watch effect to force refresh editor content when query_id changes
+// This is specifically to fix the issue with kept-alive components
+// First, get the route outside the watcher (at component setup time)
+const route = useRoute();
+
+// Then watch the route.query.query_id property
+watch(
+  () => route.query.query_id,
+  (newQueryId, oldQueryId) => {
+    if (newQueryId !== oldQueryId && editorRef.value && !isDisposing.value) {
+      console.log(`QueryEditor: query_id changed from ${oldQueryId} to ${newQueryId}, ensuring editor content is updated`);
+
+      // Force a refresh from the store values after a small delay
+      setTimeout(() => {
+        if (editorRef.value && !isDisposing.value) {
+          const storeValue =
+            props.activeMode === "logchefql"
+              ? exploreStore.logchefqlCode
+              : exploreStore.rawSql;
+
+          runProgrammaticUpdate(storeValue || "");
+
+          // Focus the editor
+          nextTick(() => {
+            focusEditor(true);
+          });
+        }
+      }, 50);
+    }
+  }
+);
+
 // Watch for loading state to make editor read-only
 watch(
   () => exploreStore.isLoadingOperation("executeQuery"),
@@ -1372,8 +1404,6 @@ const asEditorMode = (value: string | number): EditorMode => {
   return "logchefql";
 };
 
-// After the imports, add route and router
-const route = useRoute();
 const router = useRouter();
 
 // Add these computed properties after other computed properties
