@@ -1135,6 +1135,70 @@ const onSaveQueryModalSave = (formData: SaveQueryFormData) => {
   processSaveQueryFromComposable(formData);
 };
 
+// Handle query_id changes from URL, especially when component is kept alive
+watch(
+  () => route.query.query_id,
+  async (newQueryId, oldQueryId) => {
+    // Skip if it's the same query ID or we're initializing
+    if (newQueryId === oldQueryId || isInitializing.value) {
+      return;
+    }
+
+    console.log(`LogExplorer: query_id changed from ${oldQueryId} to ${newQueryId}`);
+
+    // If we have a query ID, team ID and source ID, load the query
+    if (newQueryId && currentTeamId.value && currentSourceId.value) {
+      try {
+        console.log(`LogExplorer: Loading saved query ${newQueryId}`);
+        isLoadingQuery.value = true;
+
+        // Fetch query details
+        const fetchResult = await savedQueriesStore.fetchTeamSourceQueryDetails(
+          currentTeamId.value,
+          currentSourceId.value,
+          newQueryId as string
+        );
+
+        if (fetchResult.success && savedQueriesStore.selectedQuery) {
+          // Always use no grouping by default when switching queries
+          exploreStore.setGroupByField("__none__");
+
+          // Load the saved query
+          const loadResult = await loadSavedQuery(savedQueriesStore.selectedQuery);
+
+          if (loadResult) {
+            // Execute the query after loading
+            await handleQueryExecution("query-from-url");
+
+            // Focus editor after query is loaded
+            nextTick(() => {
+              queryEditorRef.value?.focus(true);
+            });
+          }
+        } else {
+          console.error("Failed to load query:", fetchResult.error);
+          toast({
+            title: "Error Loading Query",
+            description: fetchResult.error?.message || "Failed to load the selected query",
+            variant: "destructive",
+            duration: TOAST_DURATION.ERROR,
+          });
+        }
+      } catch (error) {
+        console.error("Error loading query from URL:", error);
+        toast({
+          title: "Error",
+          description: getErrorMessage(error),
+          variant: "destructive",
+          duration: TOAST_DURATION.ERROR,
+        });
+      } finally {
+        isLoadingQuery.value = false;
+      }
+    }
+  }
+);
+
 // Component lifecycle
 onMounted(async () => {
   try {
