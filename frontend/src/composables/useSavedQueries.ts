@@ -27,9 +27,13 @@ function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): nu
 }
 
 export function useSavedQueries(
-  queries: Ref<SavedTeamQuery[] | undefined>,
-  currentSource: Ref<Source | undefined>
+  queries?: Ref<SavedTeamQuery[] | undefined>,
+  currentSource?: Ref<Source | undefined>
 ) {
+  // Create a local queries ref if none is provided
+  const localQueries = ref<SavedTeamQuery[]>([]);
+  // Use provided queries ref or fall back to local one
+  const queriesRef = queries || localQueries;
   const router = useRouter()
   const route = useRoute()
   const exploreStore = useExploreStore()
@@ -73,14 +77,14 @@ export function useSavedQueries(
   });
 
   // This is the primary computed property for displaying queries after filtering.
-  // It uses the `queries` ref passed as a parameter.
+  // It uses queriesRef (which is either the passed in queries or our local fallback)
   const filteredQueries = computed(() => {
     if (!searchQuery.value.trim()) {
-      return queries.value;
+      return queriesRef.value;
     }
 
     const search = searchQuery.value.toLowerCase();
-    return queries.value?.filter(query =>
+    return queriesRef.value?.filter(query =>
       query.name.toLowerCase().includes(search) ||
       (query.description && query.description.toLowerCase().includes(search))
     );
@@ -94,8 +98,8 @@ export function useSavedQueries(
 
   // Total query count
   const totalQueryCount = computed(() => {
-    // Ensure queries.value exists before accessing its length
-    return queries.value ? queries.value.length : 0;
+    // Ensure queriesRef.value exists before accessing its length
+    return queriesRef.value ? queriesRef.value.length : 0;
   });
 
   // Clear search function
@@ -613,17 +617,17 @@ export function useSavedQueries(
 
       if (!teamId || !sourceId) {
         console.warn("No team or source ID provided for loading queries")
-        queries.value = []
+        queriesRef.value = []
         return { success: false, error: 'No team or source ID provided' }
       }
 
       const result = await savedQueriesStore.fetchTeamSourceQueries(teamId, sourceId)
 
       if (result.success) {
-        queries.value = result.data ?? []
+        queriesRef.value = result.data ?? []
         return { success: true, data: result.data }
       } else {
-        queries.value = []
+        queriesRef.value = []
         if (result.error) {
           toast({
             title: 'Error',
@@ -635,7 +639,7 @@ export function useSavedQueries(
         return { success: false, error: result.error }
       }
     } catch (error) {
-      queries.value = []
+      queriesRef.value = []
       toast({
         title: 'Error',
         description: getErrorMessage(error),
@@ -764,7 +768,7 @@ export function useSavedQueries(
     editingQuery,
     isLoading,
     isLoadingQueryDetails,
-    queries,
+    queries: queriesRef, // Return the queriesRef instead of direct parameter
     filteredQueries,
     hasQueries,
     totalQueryCount,

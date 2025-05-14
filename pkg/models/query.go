@@ -11,8 +11,8 @@ type APIQueryRequest struct {
 
 // APIHistogramRequest represents the request payload for the histogram endpoint.
 type APIHistogramRequest struct {
-	StartTimestamp int64  `json:"start_timestamp,omitempty"` // Kept for histogram, optional otherwise
-	EndTimestamp   int64  `json:"end_timestamp,omitempty"`   // Kept for histogram, optional otherwise
+	StartTimestamp int64  `json:"start_timestamp,omitempty"` // Legacy - Unix timestamp in milliseconds
+	EndTimestamp   int64  `json:"end_timestamp,omitempty"`   // Legacy - Unix timestamp in milliseconds
 	Limit          int    `json:"limit"`                     // Limit might influence histogram sampling/performance
 	RawSQL         string `json:"raw_sql"`                   // Contains non-time filters
 	Window         string `json:"window,omitempty"`          // For histogram queries: time window size like "1m", "5m", "1h"
@@ -125,4 +125,14 @@ type SavedQuery struct {
 	CreatedBy   UserID    `json:"created_by" db:"created_by"`
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// GenerateSQLRequest defines the request body for SQL generation from natural language.
+type GenerateSQLRequest struct {
+	NaturalLanguageQuery string `json:"natural_language_query" validate:"required"`
+}
+
+// GenerateSQLResponse defines the successful response for SQL generation.
+type GenerateSQLResponse struct {
+	SQLQuery string `json:"sql_query"`
 }

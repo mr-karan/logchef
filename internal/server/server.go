@@ -191,6 +191,7 @@ func (s *Server) setupRoutes() {
 		teamSourceOps.Post("/logs/query", s.handleQueryLogs)
 		teamSourceOps.Get("/schema", s.handleGetSourceSchema)
 		teamSourceOps.Post("/logs/histogram", s.handleGetHistogram)
+		teamSourceOps.Post("/generate-sql", s.handleGenerateAISQL)
 
 		// Collections (Saved Queries) scoped to Team & Source
 		// Regular team members can view and use collections

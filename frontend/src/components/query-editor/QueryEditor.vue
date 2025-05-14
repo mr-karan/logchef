@@ -279,6 +279,8 @@ import {
 } from "@/utils/clickhouse-sql";
 import { useExploreStore } from "@/stores/explore";
 import { QueryService } from "@/services/QueryService";
+import { useExploreUrlSync } from "@/composables/useExploreUrlSync";
+
 // Keep other necessary imports like types...
 // --- Types ---
 type EditorMode = "logchefql" | "clickhouse-sql";
@@ -470,6 +472,8 @@ const handleMount = (editor: MonacoEditor) => {
   focusEditor(true);
 };
 
+const { debouncedSyncUrlFromState } = useExploreUrlSync();
+
 const handleEditorChange = (value: string | undefined) => {
   if (isProgrammaticChange.value || isDisposing.value) {
     return; // Prevent feedback loop or changes during disposal
@@ -494,6 +498,10 @@ const handleEditorChange = (value: string | undefined) => {
     mode: props.activeMode,
     isUserInput: true,
   });
+
+  // Use the debounced URL sync function when user is typing
+  // This will only update the URL after the user stops typing
+  debouncedSyncUrlFromState();
 };
 
 // Function to programmatically update editor content (e.g., from store or clear)
@@ -1421,7 +1429,7 @@ const handleNewQueryClick = () => {
   delete currentQuery.query_id;
 
   // Use the centralized reset function in the store
-  exploreStore.resetQueryStateToDefault();
+  exploreStore.resetQueryToDefaults();
 
   // Explicitly clear the selectedQueryId in the store
   exploreStore.setSelectedQueryId(null);

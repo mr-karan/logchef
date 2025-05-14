@@ -5,7 +5,7 @@ hero:
   tagline: Purpose-built log analytics UI for ClickHouse
   actions:
     - text: Quick Start
-      link: /docs/getting-started/quickstart
+      link: /getting-started/quickstart
       icon: right-arrow
       variant: primary
     - text: Try Demo
@@ -40,8 +40,8 @@ Logchef is a dedicated log query and visualization interface built specifically 
     and analytical capabilities for log exploration.
   </Card>
   <Card title="Dual Query Modes" icon="open-book">
-    Simple search syntax for quick exploration, full SQL power when you need it.
-    Built for both beginners and power users.
+    Simple search syntax for quick exploration, full SQL power when you need it,
+    and AI-powered natural language to SQL. Built for all users.
   </Card>
   <Card title="Team-Centric" icon="puzzle">
     Multi-tenant by design with Teams and Sources. Control who sees what with
@@ -50,6 +50,11 @@ Logchef is a dedicated log query and visualization interface built specifically 
   <Card title="Schema Agnostic" icon="setting">
     Works with any ClickHouse log table structure. No forced migrations or
     schema changes to your existing setup.
+  </Card>
+  <Card title="AI-Powered SQL Generation" icon="wand">
+    Translate natural language questions into ClickHouse SQL. Lower the barrier
+    for exploration and speed up query construction. [Learn
+    More](/features/ai-sql-generation)
   </Card>
 </CardGrid>
 
@@ -70,6 +75,7 @@ Logchef provides the missing piece: a specialized, user-friendly interface to un
 
 - **Simple Search Syntax**: `status=200`, `level="error" AND service="payment-api"`
 - **Full SQL Power**: Write raw ClickHouse SQL for complex analysis
+- **AI-Powered Natural Language to SQL**: Ask questions in plain English and get SQL queries generated for you. See [AI Query Examples](/features/ai-sql-generation).
 - **Collections**: Save and organize reusable queries per source for your team
 
 ![Logchef Collections View](/screenshots/logchef_collections.png)
@@ -107,4 +113,4 @@ Visit our [demo instance](https://demo.logchef.app) to explore Logchef's feature
 
 Logchef is open source software licensed under AGPLv3. We welcome contributions from the community!
 
-[View on GitHub](https://github.com/mr-karan/logchef) • [Read Documentation](/docs/getting-started/quickstart)
+[View on GitHub](https://github.com/mr-karan/logchef) • [Read Documentation](/getting-started/quickstart)

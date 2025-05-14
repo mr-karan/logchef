@@ -11,7 +11,7 @@ import { useRouter, useRoute } from "vue-router";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import { Share2 } from "lucide-vue-next";
+import { Share2, WandSparkles } from "lucide-vue-next";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useExploreStore } from "@/stores/explore";
 import { useTeamsStore } from "@/stores/teams";
@@ -34,9 +34,8 @@ import {
   type QueryCondition,
   parseAndTranslateLogchefQL,
 } from "@/utils/logchefql/api";
-import { QueryService, type QueryOptions as SQLQueryOptions } from "@/services/QueryService";
+import { QueryService } from "@/services/QueryService";
 import { type DateValue, CalendarDate, getLocalTimeZone } from '@internationalized/date';
-import type { TimeRange } from "@/stores/explore";
 
 // Import refactored components
 import TeamSourceSelector from "./components/TeamSourceSelector.vue";
@@ -46,6 +45,7 @@ import GroupBySelector from "./components/GroupBySelector.vue";
 import QueryError from "./components/QueryError.vue";
 import HistogramVisualization from "./components/HistogramVisualization.vue";
 import EmptyResultsState from "./components/EmptyResultsState.vue";
+import AIQueryModal from "@/components/ai/AIQueryModal.vue";
 
 // Router and stores
 const router = useRouter();
@@ -127,6 +127,7 @@ const lastParsedQuery = ref<{
 
 // Basic state
 const showFieldsPanel = ref(false);
+const showAIModal = ref(false);
 const queryEditorRef = ref<ComponentPublicInstance<{
   focus: (revealLastPosition?: boolean) => void;
   code?: { value: string };
@@ -259,76 +260,6 @@ watch(
   { immediate: true }
 );
 
-// Also handle mode changes properly
-watch(
-  () => activeMode.value,
-  (newMode, oldMode) => {
-    // Original parsing logic
-    if (newMode !== "logchefql") {
-      // Reset when switching away from LogchefQL
-      lastParsedQuery.value = EMPTY_PARSED_QUERY;
-    } else if (newMode === "logchefql" && logchefQuery.value) {
-      // Re-parse when switching back to LogchefQL and there's a query
-      const result = parseAndTranslateLogchefQL(logchefQuery.value);
-      lastParsedQuery.value = result;
-    }
-
-    // If switching to SQL mode, ensure the query is updated with current values
-    if (newMode !== oldMode && newMode === "sql") {
-      const hasLogchefQL = logchefQuery.value?.trim();
-      const hasSql = sqlQuery.value?.trim();
-
-      if (!hasLogchefQL && !hasSql) {
-        const tableName = sourcesStore.getCurrentSourceTableName;
-        const tsField =
-          sourcesStore.currentSourceDetails?._meta_ts_field || "timestamp";
-        if (tableName) {
-          let timeRangeForSql;
-          if (exploreStore.timeRange && exploreStore.timeRange.start && exploreStore.timeRange.end) {
-            timeRangeForSql = exploreStore.timeRange;
-          } else {
-            const now = new Date();
-            const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
-            timeRangeForSql = { start: today.subtract({ days: 1 }), end: today };
-          }
-          const sqlOptions: any = { // Using any for now
-            tableName,
-            tsField,
-            limit: exploreStore.limit,
-            timeRange: timeRangeForSql,
-          };
-          const result = QueryService.generateDefaultSQL(sqlOptions);
-          if (result.success) {
-            sqlQuery.value = result.sql;
-            exploreStore.setRawSql(result.sql);
-          }
-        }
-      } else if (hasSql) {
-        // If there's existing SQL but no LogchefQL, we should just update the table name
-        // This preserves any custom SQL the user might have entered directly
-        const tableName = sourcesStore.getCurrentSourceTableName;
-        if (tableName) {
-          const currentSql = sqlQuery.value;
-          const fromMatch = /\bFROM\s+(`?[\w.]+`?)/i.exec(currentSql);
-          if (fromMatch) {
-            // Replace old table name with new one, preserving backticks if present
-            const oldRef = fromMatch[1];
-            const hasBackticks = oldRef.startsWith("`") && oldRef.endsWith("`");
-            const newRef = hasBackticks ? `\`${tableName}\`` : tableName;
-
-            const updatedSql = currentSql.replace(oldRef, newRef);
-            if (updatedSql !== currentSql) {
-              sqlQuery.value = updatedSql;
-              exploreStore.setRawSql(updatedSql);
-            }
-          }
-        }
-      }
-      // If hasLogchefQL is true, the translation is handled by useQuery's changeMode
-    }
-  }
-);
-
 // Add computed property to get parsed query structure
 const parsedQuery = computed(() => {
   return lastParsedQuery.value;
@@ -414,7 +345,8 @@ const handleQueryExecution = async (debouncingKey = "") => {
     lastExecutionKey = debouncingKey;
     lastQueryTime.value = now;
 
-    // Execute the query
+    // Execute the query using the executeQuery function from useQuery composable,
+    // which now delegates to exploreStore
     console.log(`LogExplorer: Executing query with ID ${executionId}`);
     const result = await executeQuery();
 
@@ -425,7 +357,9 @@ const handleQueryExecution = async (debouncingKey = "") => {
       pushQueryHistoryEntry();
 
       // Update SQL and mark as not dirty AFTER successful execution
-      handleTimeRangeUpdate();
+      if (activeMode.value === 'sql') {
+        handleTimeRangeUpdate();
+      }
 
       // Log the dirty state after execution
       console.log(
@@ -450,172 +384,6 @@ const handleQueryExecution = async (debouncingKey = "") => {
   }
 };
 
-// Add explicit watches for time range and limit changes
-// to update SQL and ensure dirty state is properly tracked
-watch(
-  () => exploreStore.timeRange,
-  () => {
-    console.log("LogExplorer: Time range changed");
-
-    // Update SQL if in SQL mode with query content
-    if (activeMode.value === "sql" && sqlQuery.value?.trim()) {
-      handleTimeRangeUpdate();
-    }
-
-    // Note: The dirty state will be automatically calculated
-    // in the isDirty computed property in useQuery composable
-  },
-  { deep: true }
-);
-
-watch(
-  () => exploreStore.limit,
-  () => {
-    console.log("LogExplorer: Limit changed");
-
-    // Update SQL if in SQL mode with query content
-    if (activeMode.value === "sql" && sqlQuery.value?.trim()) {
-      handleLimitUpdate();
-    }
-
-    // Note: The dirty state will be automatically calculated
-    // in the isDirty computed property in useQuery composable
-  }
-);
-
-// Update the watch for initialization
-watch(
-  isInitializing,
-  async (initializing, prevInitializing) => {
-    // Only proceed if initialization has just finished AND the initial query execution logic hasn't run yet
-    if (prevInitializing && !initializing && !initialQueryExecuted.value) {
-      // Immediately mark that we are starting the execution logic
-      initialQueryExecuted.value = true;
-      console.log(
-        "LogExplorer: Initialization complete. Running initial query setup."
-      );
-
-      // If we have a valid source ID after initialization, load its details first
-      if (currentSourceId.value && currentSourceId.value > 0) {
-        const sourceExists = availableSources.value.some(
-          (source) => source.id === currentSourceId.value
-        );
-        if (sourceExists) {
-          await sourcesStore.loadSourceDetails(currentSourceId.value);
-        }
-      }
-
-      const queryId = queryIdFromUrl.value;
-
-      if (queryId) {
-        // Logic for loading saved query
-        if (!currentTeamId.value) {
-          toast({
-            title: "Error",
-            description:
-              "Cannot load saved query because the team context is missing.",
-            variant: "destructive",
-            duration: TOAST_DURATION.ERROR,
-          });
-          return;
-        }
-
-        try {
-          // 1. Fetch the query details using the store
-          isLoadingQuery.value = true;
-          const fetchResult =
-            await savedQueriesStore.fetchTeamSourceQueryDetails(
-              currentTeamId.value,
-              currentSourceId.value,
-              queryId
-            );
-          isLoadingQuery.value = false;
-
-          if (fetchResult.success && savedQueriesStore.selectedQuery) {
-            // Always use no grouping by default
-            exploreStore.setGroupByField("__none__");
-
-            // Pass the fetched query object to loadSavedQuery
-            const loadResult = await loadSavedQuery(
-              savedQueriesStore.selectedQuery
-            );
-
-            if (loadResult) {
-              // Sync URL after successful load and application
-              syncUrlFromState();
-            }
-          } else {
-            throw new Error(
-              fetchResult.error?.message ||
-              `Failed to fetch query details for ID ${queryId}`
-            );
-          }
-        } catch (error) {
-          isLoadingQuery.value = false;
-          toast({
-            title: "Error Loading Saved Query",
-            description: getErrorMessage(error),
-            variant: "destructive",
-            duration: TOAST_DURATION.ERROR,
-          });
-        }
-      }
-
-      // Ensure Time Range Exists
-      if (
-        !exploreStore.timeRange ||
-        !exploreStore.timeRange.start ||
-        !exploreStore.timeRange.end
-      ) {
-        console.log(
-          "LogExplorer: No valid time range found after init, setting default."
-        );
-        // Set a default time range using relative time
-        exploreStore.setRelativeTimeRange("15m");
-        // Ensure the default time range is set before proceeding
-        await nextTick();
-      } else if (!exploreStore.selectedRelativeTime) {
-        // If we have absolute time but no relative time, prefer to set relative time
-        exploreStore.setRelativeTimeRange("15m");
-        await nextTick();
-      }
-
-      // Enhanced check: Wait for source details to be fully loaded before allowing query execution
-      const isSourceReady =
-        currentSourceId.value &&
-        sourceDetails.value &&
-        sourceDetails.value.id === currentSourceId.value &&
-        !!sourcesStore.getCurrentSourceTableName;
-
-      // Execute Initial Query (if applicable)
-      if (canExecuteQuery.value && isSourceReady) {
-        console.log(
-          "LogExplorer: Conditions met, executing initial query synchronously."
-        );
-        await handleQueryExecution("initial-load");
-      } else {
-        console.log(
-          "LogExplorer: Conditions not met for initial query execution (canExecuteQuery is false or source not ready).",
-          { canExecute: canExecuteQuery.value, sourceReady: isSourceReady }
-        );
-        // If we loaded a saved query but can't execute, maybe sync URL state?
-        if (queryId) {
-          syncUrlFromState();
-        }
-      }
-    } else if (
-      prevInitializing &&
-      !initializing &&
-      initialQueryExecuted.value
-    ) {
-      console.log(
-        "LogExplorer: Initialization watcher triggered again, but initial query logic already ran. Skipping."
-      );
-    }
-  },
-  { immediate: false }
-);
-
 // Function to reset/initialize queries when switching sources
 function resetQueriesForSourceChange() {
   console.log("LogExplorer: Resetting queries for source change");
@@ -623,67 +391,8 @@ function resetQueriesForSourceChange() {
   // Reset group-by selection to "No Grouping"
   exploreStore.setGroupByField("__none__");
 
-  // Reset the query based on active mode
-  if (activeMode.value === "logchefql") {
-    // In LogchefQL mode, just clear the query
-    exploreStore.setLogchefqlCode("");
-    logchefQuery.value = "";
-  } else {
-    // In SQL mode, set a default query using the current source table
-    if (sourcesStore.getCurrentSourceTableName) {
-      const tableName = sourcesStore.getCurrentSourceTableName;
-      const tsField = sourceDetails.value?._meta_ts_field || "timestamp";
-
-      // Check if we have a valid time range
-      if (
-        exploreStore.timeRange &&
-        exploreStore.timeRange.start &&
-        exploreStore.timeRange.end
-      ) {
-        // Generate SQL with actual time range values
-        const result = QueryService.generateDefaultSQL({
-          tableName,
-          tsField,
-          timeRange: exploreStore.timeRange,
-          limit: exploreStore.limit,
-        });
-
-        if (result.success) {
-          exploreStore.setRawSql(result.sql);
-          sqlQuery.value = result.sql;
-        } else {
-          // Fallback: Use template if SQL generation fails
-          console.error(
-            "Failed to generate default SQL on source change:",
-            result.error
-          );
-          const defaultSql = QueryService.generateDefaultSQLTemplate(
-            tableName,
-            tsField,
-            exploreStore.limit
-          );
-          exploreStore.setRawSql(defaultSql);
-          sqlQuery.value = defaultSql;
-        }
-      } else {
-        // No valid time range, fall back to template SQL
-        const defaultSql = QueryService.generateDefaultSQLTemplate(
-          tableName,
-          tsField,
-          exploreStore.limit
-        );
-        exploreStore.setRawSql(defaultSql);
-        sqlQuery.value = defaultSql;
-      }
-    } else {
-      // If no table name is available, just clear it
-      exploreStore.setRawSql("");
-      sqlQuery.value = "";
-    }
-  }
-
-  // Clear any errors
-  queryError.value = "";
+  // Delegate to the store's resetQueryToDefaults method
+  exploreStore.resetQueryToDefaults();
 }
 
 // Watch for source changes to fetch details AND saved queries
@@ -714,14 +423,6 @@ watch(
             if (currentSourceId.value === newSourceId) {
               // Check if still the same after timeout
               await sourcesStore.loadSourceDetails(newSourceId);
-
-              // After loading source details, initialize SQL query if needed
-              if (
-                activeMode.value === "sql" &&
-                sourcesStore.getCurrentSourceTableName
-              ) {
-                resetQueriesForSourceChange(); // Call again with updated source details
-              }
             }
           }, 50);
 
@@ -764,7 +465,7 @@ watch(
         !sourcesResult.data ||
         sourcesResult.data.length === 0
       ) {
-        exploreStore.setSource(0);
+        exploreStore.setSourceId(0);
         newSourceIdToLoadQueries = 0; // Signal to load empty queries
       } else {
         const currentSourceExists = sourcesStore.teamSources.some(
@@ -772,7 +473,7 @@ watch(
         );
         if (!currentSourceExists && sourcesStore.teamSources.length > 0) {
           const firstSourceId = sourcesStore.teamSources[0].id;
-          exploreStore.setSource(firstSourceId);
+          exploreStore.setSourceId(firstSourceId);
           await sourcesStore.loadSourceDetails(firstSourceId);
           newSourceIdToLoadQueries = firstSourceId; // Load queries for the new source
         } else {
@@ -851,33 +552,24 @@ const handleDrillDown = (data: {
 
 // Event Handlers for QueryEditor
 const updateLogchefqlValue = (newValue: string, isUserInput = false) => {
-  // If this is from user input, update using the setter which marks it as not from URL
-  if (isUserInput) {
-    logchefQuery.value = newValue;
-  } else {
-    // Direct store update for programmatic/URL changes
-    exploreStore.setLogchefqlCode(newValue);
-  }
+  // Use the store's action to update LogchefQL code
+  exploreStore.setLogchefqlCode(newValue);
 };
 
 const updateSqlValue = (newValue: string, isUserInput = false) => {
-  // If this is from user input, update using the setter which marks it as not from URL
-  if (isUserInput) {
-    sqlQuery.value = newValue;
-  } else {
-    // Direct store update for programmatic/URL changes
-    exploreStore.setRawSql(newValue);
-  }
+  // Use the store's action to update SQL
+  exploreStore.setRawSql(newValue);
 };
 
 // Function to clear the query editor content
 const clearQueryEditor = () => {
-  // Update the store directly
+  // Use the store's actions to clear content
   if (exploreStore.activeMode === "logchefql") {
     exploreStore.setLogchefqlCode("");
   } else {
     exploreStore.setRawSql("");
   }
+
   // Clear any validation errors
   queryError.value = "";
 
@@ -1073,8 +765,8 @@ const addSortKeyExample = () => {
     currentQuery = exampleQuery;
   }
 
-  // Update the query
-  logchefQuery.value = currentQuery;
+  // Update the query through the store
+  exploreStore.setLogchefqlCode(currentQuery);
 
   // Focus the editor and move cursor to the end
   nextTick(() => {
@@ -1091,6 +783,77 @@ const addSortKeyExample = () => {
       duration: TOAST_DURATION.INFO,
       variant: "default",
     });
+  });
+};
+
+// AI Query Modal handlers
+const handleCloseAIModal = () => {
+  showAIModal.value = false;
+  exploreStore.clearAiSqlState();
+};
+
+const handleGenerateAISQL = async ({ naturalLanguageQuery }: { naturalLanguageQuery: string }) => {
+  try {
+    if (!currentSourceId.value) {
+      toast({
+        title: "Error",
+        description: "Please select a source before using the AI Assistant",
+        variant: "destructive",
+        duration: TOAST_DURATION.ERROR,
+      });
+      return;
+    }
+
+    const result = await exploreStore.generateAiSql(naturalLanguageQuery);
+    // Error is now displayed directly in the modal via the aiSqlError prop
+    if (!result.success) {
+      // Only show toast for network/unexpected errors, not for API errors that we can display in the modal
+      if (!(result.error && 'status' in result.error)) {
+        toast({
+          title: "AI SQL Generation Error",
+          description: getErrorMessage(result.error),
+          variant: "destructive",
+          duration: TOAST_DURATION.ERROR,
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Error generating AI SQL:", error);
+    // This will only catch unexpected errors not handled by the store
+    toast({
+      title: "AI SQL Generation Error",
+      description: getErrorMessage(error),
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR,
+    });
+    // Also set the error in the store so it appears in the modal
+    exploreStore.data.value.aiSqlError = getErrorMessage(error);
+  }
+};
+
+const handleInsertAISQL = ({ sql }: { sql: string }) => {
+  if (!sql) return;
+
+  console.log("LogExplorer: Inserting AI-generated SQL");
+
+  // Always switch to SQL mode when inserting AI-generated SQL
+  changeMode('sql');
+
+  // Update the SQL query through the store
+  exploreStore.setRawSql(sql);
+
+  // Close the modal
+  showAIModal.value = false;
+
+  // Clear AI SQL state
+  exploreStore.clearAiSqlState();
+
+  // Explicitly sync URL state to preserve query parameters
+  syncUrlFromState();
+
+  // Focus the editor and move cursor to the end
+  nextTick(() => {
+    queryEditorRef.value?.focus(true);
   });
 };
 
@@ -1115,7 +878,7 @@ const copyUrlToClipboard = () => {
   }
 };
 
-// In the script setup section, add this computed property
+// Filtered sort keys computed property
 const filteredSortKeys = computed(() => {
   if (!sourceDetails.value?.sort_keys) return [];
   return sourceDetails.value.sort_keys.filter(
@@ -1224,13 +987,35 @@ onMounted(async () => {
 
         // Select the first available team instead
         if (teamsStore.userTeams.length > 0) {
-          exploreStore.setSource(0); // First clear the source
+          exploreStore.setSourceId(0); // First clear the source
           teamsStore.setCurrentTeam(teamsStore.userTeams[0].id);
         } else {
-          exploreStore.setSource(0);
+          exploreStore.setSourceId(0);
           teamsStore.setCurrentTeam(0); // Clear the current team
         }
       }
+
+      // Execute initial query if we have required parameters and no query has been executed yet
+      // Wait a bit to ensure the source details are loaded
+      setTimeout(async () => {
+        // Only execute if we have enough parameters and no query has been executed yet
+        if (
+          !exploreStore.lastExecutionTimestamp &&  // No query executed yet
+          exploreStore.sourceId &&
+          exploreStore.timeRange &&
+          sourcesStore.currentSourceDetails?.id === exploreStore.sourceId
+        ) {
+          console.log("LogExplorer: Executing initial query on mount");
+          await handleQueryExecution('initial-mount-query');
+        } else {
+          console.log("LogExplorer: Skipping initial query execution, missing requirements or query already executed", {
+            hasLastExecution: !!exploreStore.lastExecutionTimestamp,
+            sourceId: exploreStore.sourceId,
+            hasTimeRange: !!exploreStore.timeRange,
+            sourceDetailsLoaded: sourcesStore.currentSourceDetails?.id === exploreStore.sourceId
+          });
+        }
+      }, 300);
     }
   } catch (error) {
     console.error("Error during LogExplorer mount:", error);
@@ -1544,7 +1329,10 @@ onBeforeUnmount(() => {
               ">
                 <QueryControls @execute="handleQueryExecution" @clear="clearQueryEditor">
                   <template #extraControls>
-                    <!-- Clear button is already in QueryControls, we're not adding any extraControls here -->
+                    <Button variant="outline" class="ml-2" size="sm" @click="showAIModal = true">
+                      <WandSparkles class="h-4 w-4 mr-1.5" />
+                      AI Assistant
+                    </Button>
                   </template>
                 </QueryControls>
               </div>
@@ -1614,6 +1402,12 @@ onBeforeUnmount(() => {
                 : exploreStore.rawSql,
           })
             " @close="showSaveQueryModal = false" @save="onSaveQueryModalSave" @update="handleUpdateQuery" />
+
+        <!-- AI Query Modal -->
+        <AIQueryModal :is-open="showAIModal" :is-loading="exploreStore.isGeneratingAISQL"
+          :error-message="exploreStore.aiSqlError" :generated-sql="exploreStore.generatedAiSql || ''"
+          :current-source-id="currentSourceId" @close="handleCloseAIModal" @generate-sql="handleGenerateAISQL"
+          @insert-sql="handleInsertAISQL" />
       </div>
     </div>
   </KeepAlive>

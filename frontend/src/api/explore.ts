@@ -24,6 +24,18 @@ export interface FilterCondition {
   value: string;
 }
 
+// AI Query generation types
+export interface AIGenerateSQLRequest {
+  natural_language_query: string;
+}
+
+export interface AIGenerateSQLResponse {
+  sql_query: string;
+}
+
+// Add APIErrorResponse for proper type checking
+import type { APIErrorResponse } from "./types";
+
 export interface ColumnInfo {
   name: string;
   type: string;
@@ -36,6 +48,8 @@ export interface QueryParams {
   window?: string;
   group_by?: string;
   timezone?: string; // User's timezone identifier (e.g., 'America/New_York', 'UTC')
+  start_time?: string; // ISO formatted start time
+  end_time?: string;   // ISO formatted end time
 }
 
 export interface QueryStats {
@@ -149,6 +163,19 @@ export const exploreApi = {
     }
     return apiClient.post<LogContextResponse>(
       `/teams/${teamId}/sources/${sourceId}/logs/context`,
+      params
+    );
+  },
+
+  generateAISQL: (sourceId: number, params: AIGenerateSQLRequest, teamId: number) => {
+    if (!teamId) {
+      throw new Error("Team ID is required for AI SQL generation");
+    }
+    if (!sourceId) {
+      throw new Error("Source ID is required for AI SQL generation");
+    }
+    return apiClient.post<AIGenerateSQLResponse>(
+      `/teams/${teamId}/sources/${sourceId}/generate-sql`,
       params
     );
   }

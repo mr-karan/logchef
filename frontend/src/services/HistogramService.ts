@@ -130,13 +130,14 @@ export class HistogramService {
 
       // Get the explore store to access generatedDisplaySql
       const exploreStore = useExploreStore();
-      
-      // Always use the explore store's SQL which has the correct timezone
-      const sql = exploreStore.generatedDisplaySql;
+
+      // Always use the provided query parameter first, then try store properties as fallback
+      // This ensures we use the exact same SQL for both query and histogram endpoints
+      const sql = params.query && params.query.trim() ? params.query : exploreStore.sqlForExecution;
 
       // Prepare query parameters for the API
       const queryParams: QueryParams = {
-        raw_sql: sql || params.query, // Fallback to params.query only if exploreStore has no SQL yet
+        raw_sql: sql || "", // Ensure we don't send undefined
         limit: 100,
         window: granularity,
         timezone: params.timezone,

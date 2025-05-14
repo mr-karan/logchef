@@ -42,3 +42,20 @@ max_concurrent_sessions = 1
 [logging]
 # Log level (debug, info, warn, error)
 level = "debug"
+
+# AI SQL generation configuration
+[ai]
+# Enable/disable AI features
+enabled = true
+# API endpoint
+# Base URL for OpenAI API (leave empty for default OpenAI endpoint)
+# base_url = "https://openrouter.ai/api/v1"
+# OpenAI API key for AI SQL generation
+api_key = ""
+# Model parameters
+# Model to use (default: gpt-4o)
+model = "gpt-4o"
+# Maximum tokens to generate
+max_tokens = 1024
+# Temperature for generation (0.0-1.0, lower is more deterministic)
+temperature = 0.1
