@@ -11,6 +11,8 @@ import type {
   LogContextResponse,
   QueryErrorResponse,
   QuerySuccessResponse,
+  AIGenerateSQLRequest,
+  AIGenerateSQLResponse,
 } from "@/api/explore";
 import type { QueryResult } from "@/types/query";
 import type { DateValue } from "@internationalized/date";
@@ -20,6 +22,11 @@ import { useTeamsStore } from "@/stores/teams";
 import { useBaseStore } from "./base";
 import { QueryService } from '@/services/QueryService'
 import { parseRelativeTimeString } from "@/utils/time";
+import type { APIErrorResponse, APISuccessResponse, APIResponse } from "@/api/types";
+import { SqlManager } from '@/services/SqlManager';
+import { type TimeRange } from '@/types/query';
+import { getErrorMessage } from '@/api/types';
+import { HistogramService, type HistogramData } from '@/services/HistogramService';
 
 // Helper function to get formatted table name
 export function getFormattedTableName(source: any): string {
@@ -78,7 +85,7 @@ export interface ExploreState {
   // LogchefQL query
   logchefQuery?: string;
   // LogchefQL code state
-  logchefqlCode?: string;
+  logchefqlCode: string;
   // Active mode (logchefql or sql)
   activeMode: "logchefql" | "sql";
   // Loading and error states
@@ -86,29 +93,43 @@ export interface ExploreState {
   error?: string | null;
   // Query ID for tracking
   queryId?: string | null;
-  // NEW: ID of the currently loaded saved query (if any)
-  selectedQueryId?: string | null;
-  // NEW: Name of the currently active saved query (if any)
-  activeSavedQueryName?: string | null;
+  // ID of the currently loaded saved query (if any)
+  selectedQueryId: string | null;
+  // Name of the currently active saved query (if any)
+  activeSavedQueryName: string | null;
   // Query stats
   stats?: any;
-  // Last executed query state
+  // Last executed query state - crucial for dirty checking and consistency
   lastExecutedState?: {
     timeRange: string;
     limit: number;
-    query: string;
-    mode?: "logchefql" | "sql";
+    mode: "logchefql" | "sql";
     logchefqlQuery?: string;
-    sqlQuery?: string;
+    sqlQuery: string;
+    sourceId: number;
   };
   // Add field for last successful execution timestamp
-  lastExecutionTimestamp?: number | null;
+  lastExecutionTimestamp: number | null;
   // Group by field for histogram
-  groupByField?: string | null;
+  groupByField: string | null;
   // User's selected timezone identifier (e.g., 'America/New_York', 'UTC')
-  selectedTimezoneIdentifier?: string | null;
+  selectedTimezoneIdentifier: string | null;
   // Add a new state property to hold the reactively generated SQL for display/internal use
-  generatedDisplaySql?: string | null;
+  generatedDisplaySql: string | null;
+  // AI SQL generation loading state
+  isGeneratingAISQL: boolean;
+  // AI SQL generation error message
+  aiSqlError: string | null;
+  // Generated AI SQL query
+  generatedAiSql: string | null;
+  // Histogram data state
+  histogramData: HistogramData[];
+  // Histogram loading state
+  isLoadingHistogram: boolean;
+  // Histogram error state
+  histogramError: string | null;
+  // Histogram granularity
+  histogramGranularity: string | null;
 }
 
 const DEFAULT_QUERY_STATS: QueryStats = {
@@ -129,13 +150,21 @@ export const useExploreStore = defineStore("explore", () => {
     selectedRelativeTime: null, // Initialize the relative time selection to null
     filterConditions: [],
     rawSql: "",
-    logchefqlCode: undefined,
+    logchefqlCode: "",
     activeMode: "logchefql",
     lastExecutionTimestamp: null,
     selectedQueryId: null, // Initialize new state
+    activeSavedQueryName: null,
     groupByField: null, // Initialize the groupByField
     selectedTimezoneIdentifier: null, // Initialize the timezone identifier
     generatedDisplaySql: null, // Initialize the new state property
+    isGeneratingAISQL: false, // Initialize AI SQL generation loading state
+    aiSqlError: null, // Initialize AI SQL generation error message
+    generatedAiSql: null, // Initialize generated AI SQL query
+    histogramData: [],
+    isLoadingHistogram: false,
+    histogramError: null,
+    histogramGranularity: null,
   });
 
   // Getters
@@ -144,6 +173,161 @@ export const useExploreStore = defineStore("explore", () => {
   const canExecuteQuery = computed(
     () => hasValidSource.value && hasValidTimeRange.value
   );
+
+  // Key computed properties from refactoring plan
+
+  // 1. Internal computed property to translate LogchefQL to SQL
+  const _logchefQlTranslationResult = computed(() => {
+    const { logchefqlCode, timeRange, limit, selectedTimezoneIdentifier } = state.data.value;
+    if (!logchefqlCode || !timeRange || !timeRange.start || !timeRange.end) {
+      return null;
+    }
+
+    const sourcesStore = useSourcesStore();
+    const sourceDetails = sourcesStore.currentSourceDetails;
+    if (!sourceDetails) {
+      return null;
+    }
+
+    const tableName = sourcesStore.getCurrentSourceTableName;
+    if (!tableName) {
+      return null;
+    }
+
+    const tsField = sourceDetails._meta_ts_field || 'timestamp';
+    const timezone = selectedTimezoneIdentifier || getTimezoneIdentifier();
+
+    try {
+      const result = QueryService.translateLogchefQLToSQL({
+        tableName,
+        tsField,
+        timeRange,
+        limit,
+        logchefqlQuery: logchefqlCode,
+        timezone
+      });
+
+      return {
+        sql: result.success ? result.sql : '',
+        error: result.success ? undefined : result.error,
+        warnings: result.warnings
+      };
+    } catch (error) {
+      return {
+        sql: '',
+        error: error instanceof Error ? error.message : 'Translation error',
+        warnings: []
+      };
+    }
+  });
+
+  // 2. Definitive SQL string for execution
+  const sqlForExecution = computed(() => {
+    const { activeMode, rawSql, limit } = state.data.value;
+    if (activeMode === 'sql') {
+      // Use SqlManager to ensure correct limit
+      return SqlManager.ensureCorrectLimit(rawSql, limit);
+    }
+
+    // For LogchefQL mode, use the translation result
+    const translationResult = _logchefQlTranslationResult.value;
+    if (!translationResult) {
+      return '';
+    }
+
+    return translationResult.sql;
+  });
+
+  // 3. Is query state dirty
+  const isQueryStateDirty = computed(() => {
+    const { lastExecutedState, sourceId, limit, activeMode, logchefqlCode, rawSql } = state.data.value;
+
+    if (!lastExecutedState) {
+      // If there's no last executed state, check if we have any query content
+      return (activeMode === 'logchefql' && !!logchefqlCode?.trim()) ||
+             (activeMode === 'sql' && !!rawSql?.trim());
+    }
+
+    // Compare current state with last executed state
+    const timeRangeChanged = JSON.stringify(state.data.value.timeRange) !== lastExecutedState.timeRange;
+    const limitChanged = limit !== lastExecutedState.limit;
+    const modeChanged = activeMode !== lastExecutedState.mode;
+    const sourceChanged = sourceId !== lastExecutedState.sourceId;
+
+    // Compare query content based on mode
+    let queryContentChanged = false;
+    if (activeMode === 'logchefql') {
+      queryContentChanged = logchefqlCode !== lastExecutedState.logchefqlQuery;
+    } else {
+      queryContentChanged = sqlForExecution.value !== lastExecutedState.sqlQuery;
+    }
+
+    return timeRangeChanged || limitChanged || modeChanged || sourceChanged || queryContentChanged;
+  });
+
+  // 4. URL query parameters based on current state
+  const urlQueryParameters = computed(() => {
+    const { sourceId, timeRange, limit, activeMode, logchefqlCode, rawSql, selectedRelativeTime, selectedQueryId } = state.data.value;
+    const teamsStore = useTeamsStore();
+
+    const params: Record<string, string> = {};
+
+    // Team and source
+    if (teamsStore.currentTeamId) {
+      params.team = teamsStore.currentTeamId.toString();
+    }
+
+    if (sourceId) {
+      params.source = sourceId.toString();
+    }
+
+    // Time configuration
+    if (selectedRelativeTime) {
+      params.time = selectedRelativeTime;
+    } else if (timeRange) {
+      // Format absolute time range for URL
+      const startTimestamp = new Date(
+        timeRange.start.year,
+        timeRange.start.month - 1,
+        timeRange.start.day,
+        'hour' in timeRange.start ? timeRange.start.hour : 0,
+        'minute' in timeRange.start ? timeRange.start.minute : 0,
+        'second' in timeRange.start ? timeRange.start.second : 0
+      ).getTime();
+
+      const endTimestamp = new Date(
+        timeRange.end.year,
+        timeRange.end.month - 1,
+        timeRange.end.day,
+        'hour' in timeRange.end ? timeRange.end.hour : 0,
+        'minute' in timeRange.end ? timeRange.end.minute : 0,
+        'second' in timeRange.end ? timeRange.end.second : 0
+      ).getTime();
+
+      params.start = startTimestamp.toString();
+      params.end = endTimestamp.toString();
+    }
+
+    // Limit
+    params.limit = limit.toString();
+
+    // Mode and query content
+    params.mode = activeMode;
+
+    // Send raw query content without any encoding - the router will handle the encoding
+    if (activeMode === 'logchefql' && logchefqlCode) {
+      params.q = logchefqlCode;
+    } else if (activeMode === 'sql' && rawSql) {
+      params.sql = rawSql;
+    }
+
+    // Saved query ID if applicable
+    if (selectedQueryId) {
+      params.query_id = selectedQueryId;
+    }
+
+    return params;
+  });
 
   // Helper to get timestamps in milliseconds
   function getTimestamps() {
@@ -191,7 +375,7 @@ export const useExploreStore = defineStore("explore", () => {
   // Get the current timezone identifier
   function getTimezoneIdentifier(): string {
     // Use the stored timezone or default to the browser's local timezone
-    return state.data.value.selectedTimezoneIdentifier || 
+    return state.data.value.selectedTimezoneIdentifier ||
       (localStorage.getItem('logchef_timezone') === 'utc' ? 'UTC' : getLocalTimeZone());
   }
 
@@ -209,75 +393,238 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.logs = [];
     state.data.value.columns = [];
     state.data.value.queryStats = DEFAULT_QUERY_STATS;
-    
+
     // Set the new source ID
     state.data.value.sourceId = sourceId;
-  }
 
-  function setTimeRange(range: ExploreState["timeRange"]) {
-    console.log('Explore store: Setting time range:', {
-      oldRange: JSON.stringify(state.data.value.timeRange),
-      newRange: JSON.stringify(range),
-      lastExecutedRange: state.data.value.lastExecutedState?.timeRange
-    });
+    // Handle default query generation/clearing if necessary
+    const sourcesStore = useSourcesStore();
+    if (sourceId && sourcesStore.getCurrentSourceTableName) {
+      if (state.data.value.activeMode === 'sql') {
+        // Generate default SQL when changing source in SQL mode
+        const tableName = sourcesStore.getCurrentSourceTableName;
+        const tsField = sourcesStore.currentSourceDetails?._meta_ts_field || 'timestamp';
 
-    // Update the time range
-    state.data.value.timeRange = range;
+        if (state.data.value.timeRange) {
+          const result = QueryService.generateDefaultSQL({
+            tableName,
+            tsField,
+            timeRange: state.data.value.timeRange,
+            limit: state.data.value.limit
+          });
 
-    // When setTimeRange is called directly, we are setting absolute times
-    // Clear the relative time selection to maintain consistency
-    state.data.value.selectedRelativeTime = null;
-  }
-
-  function setLimit(limit: number) {
-    if (limit > 0 && limit <= 10000) {
-      state.data.value.limit = limit;
+          if (result.success) {
+            state.data.value.rawSql = result.sql;
+          }
+        }
+      } else {
+        // In LogchefQL mode, just clear the query
+        state.data.value.logchefqlCode = '';
+      }
     }
   }
 
-  function setFilterConditions(filters: FilterCondition[]) {
-    // Check for the special _force_clear marker
-    const isForceClearing =
-      filters.length === 1 && "_force_clear" in filters[0];
+  // Alias for setSource to maintain API compatibility with useExploreUrlSync
+  function setSourceId(sourceId: number) {
+    setSource(sourceId);
+  }
 
-    if (isForceClearing) {
-      console.log("Explore store: force-clearing filter conditions");
-      // This is our special signal to clear conditions
-      state.data.value.filterConditions = [];
-    } else {
-      console.log("Explore store: setting filter conditions:", filters.length);
-      state.data.value.filterConditions = filters;
+  // Set time configuration (absolute or relative)
+  function setTimeConfiguration(config: { absoluteRange?: { start: DateValue; end: DateValue }, relativeTime?: string }) {
+    if (config.relativeTime) {
+      setRelativeTimeRange(config.relativeTime);
+    } else if (config.absoluteRange) {
+      state.data.value.timeRange = config.absoluteRange;
+      state.data.value.selectedRelativeTime = null; // Clear relative time when setting absolute
     }
   }
 
-  function setRawSql(sql: string) {
-    state.data.value.rawSql = sql;
+  // Set limit
+  function setLimit(newLimit: number) {
+    if (newLimit > 0 && newLimit <= 10000) {
+      state.data.value.limit = newLimit;
+    }
   }
 
-  // Set the active mode (logchefql or sql)
-  function setActiveMode(mode: "logchefql" | "sql") {
-    state.data.value.activeMode = mode;
-  }
-
-  // Set the LogchefQL code
+  // Set LogchefQL code
   function setLogchefqlCode(code: string) {
     state.data.value.logchefqlCode = code;
   }
 
-  // NEW: Action to set the selected saved query ID
-  function setSelectedQueryId(queryId: string | null) {
-    state.data.value.selectedQueryId = queryId;
+  // Set raw SQL
+  function setRawSql(sql: string) {
+    state.data.value.rawSql = sql;
   }
 
-  // NEW: Action to set the active saved query name
-  function setActiveSavedQueryName(name: string | null) {
-    state.data.value.activeSavedQueryName = name;
+  // Set active mode with mode switching logic
+  function setActiveMode(mode: 'logchefql' | 'sql') {
+    const currentMode = state.data.value.activeMode;
+    if (mode === currentMode) return;
+
+    // Mode switching logic
+    if (mode === 'sql' && currentMode === 'logchefql') {
+      // TO SQL FROM LOGCHEFQL
+      const { logchefqlCode, rawSql } = state.data.value;
+
+      if (logchefqlCode && _logchefQlTranslationResult.value?.sql) {
+        // If LogchefQL exists and translates, set rawSql
+        state.data.value.rawSql = _logchefQlTranslationResult.value.sql;
+      } else if (!rawSql) {
+        // If rawSql is empty, generate default SQL
+        const sourcesStore = useSourcesStore();
+        if (sourcesStore.getCurrentSourceTableName && state.data.value.timeRange) {
+          // Use SqlManager to generate default SQL
+          const result = SqlManager.generateDefaultSql({
+            tableName: sourcesStore.getCurrentSourceTableName,
+            tsField: sourcesStore.currentSourceDetails?._meta_ts_field || 'timestamp',
+            timeRange: state.data.value.timeRange,
+            limit: state.data.value.limit,
+            timezone: state.data.value.selectedTimezoneIdentifier || undefined
+          });
+
+          if (result.success) {
+            state.data.value.rawSql = result.sql;
+          }
+        }
+      }
+    }
+    // TO LOGCHEFQL FROM SQL - just preserve logchefqlCode, no reverse translation
+
+    // Update the mode
+    state.data.value.activeMode = mode;
   }
 
-  // NEW: Action to reset the query state to defaults
-  function resetQueryStateToDefault() {
-    console.log("Explore store: Resetting query state to default");
+  // Internal action to update last executed state
+  function _updateLastExecutedState() {
+    state.data.value.lastExecutedState = {
+      timeRange: JSON.stringify(state.data.value.timeRange),
+      limit: state.data.value.limit,
+      mode: state.data.value.activeMode,
+      logchefqlQuery: state.data.value.logchefqlCode,
+      sqlQuery: sqlForExecution.value,
+      sourceId: state.data.value.sourceId
+    };
+    // Also update the execution timestamp
+    state.data.value.lastExecutionTimestamp = Date.now();
+  }
 
+  // Initialize from URL parameters
+  function initializeFromUrl(params: Record<string, string | undefined>) {
+    console.log('Explore store: Initializing from URL with params:', params);
+
+    // Parse source ID
+    if (params.source) {
+      const sourceId = parseInt(params.source, 10);
+      if (!isNaN(sourceId)) {
+        state.data.value.sourceId = sourceId;
+      }
+    }
+
+    // Parse time configuration
+    if (params.time) {
+      // Handle relative time
+      setRelativeTimeRange(params.time);
+    } else if (params.start && params.end) {
+      // Handle absolute time range
+      try {
+        const startTs = parseInt(params.start, 10);
+        const endTs = parseInt(params.end, 10);
+
+        if (!isNaN(startTs) && !isNaN(endTs)) {
+          const startDate = new Date(startTs);
+          const endDate = new Date(endTs);
+
+          const startCalendar = new CalendarDateTime(
+            startDate.getFullYear(),
+            startDate.getMonth() + 1,
+            startDate.getDate(),
+            startDate.getHours(),
+            startDate.getMinutes(),
+            startDate.getSeconds()
+          );
+
+          const endCalendar = new CalendarDateTime(
+            endDate.getFullYear(),
+            endDate.getMonth() + 1,
+            endDate.getDate(),
+            endDate.getHours(),
+            endDate.getMinutes(),
+            endDate.getSeconds()
+          );
+
+          state.data.value.timeRange = {
+            start: startCalendar,
+            end: endCalendar
+          };
+          state.data.value.selectedRelativeTime = null;
+        }
+      } catch (error) {
+        console.error('Failed to parse time range from URL:', error);
+      }
+    }
+
+    // Parse limit
+    if (params.limit) {
+      const limit = parseInt(params.limit, 10);
+      if (!isNaN(limit)) {
+        setLimit(limit);
+      }
+    }
+
+    // Parse mode and query content
+    if (params.mode) {
+      const mode = params.mode === 'sql' ? 'sql' : 'logchefql';
+      state.data.value.activeMode = mode;
+
+      if (mode === 'logchefql' && params.q) {
+        // No need to decode - the router already decoded the URL parameter
+        state.data.value.logchefqlCode = params.q;
+      } else if (mode === 'sql' && params.sql) {
+        state.data.value.rawSql = params.sql;
+      }
+    } else {
+      // Handle backward compatibility where mode isn't specified but query is
+      if (params.q) {
+        state.data.value.activeMode = 'logchefql';
+        // No need to decode - the router already decoded the URL parameter
+        state.data.value.logchefqlCode = params.q;
+      } else if (params.sql) {
+        state.data.value.activeMode = 'sql';
+        state.data.value.rawSql = params.sql;
+      }
+    }
+
+    // Handle saved query ID
+    if (params.query_id) {
+      state.data.value.selectedQueryId = params.query_id;
+    }
+
+    // After initializing all values, update lastExecutedState to mark the initial state as "clean"
+    _updateLastExecutedState();
+
+    // Execute query automatically after initialization if we have enough parameters
+    // Wait for the next tick to ensure all reactive properties are updated
+    setTimeout(() => {
+      const hasRequiredParams = state.data.value.sourceId && state.data.value.timeRange;
+      const hasQueryContent = state.data.value.activeMode === 'sql' ? !!state.data.value.rawSql : true;
+
+      if (hasRequiredParams && hasQueryContent) {
+        console.log('Explore store: Executing query automatically after URL initialization');
+        executeQuery().catch(error => {
+          console.error('Error executing initial query:', error);
+        });
+      } else {
+        console.log('Explore store: Skipping automatic query execution, missing required parameters', {
+          hasSource: !!state.data.value.sourceId,
+          hasTimeRange: !!state.data.value.timeRange,
+          hasQueryContent
+        });
+      }
+    }, 100);
+  }
+
+  // Reset query to defaults
+  function resetQueryToDefaults() {
     // Create a default time range (last 15 minutes)
     const nowDt = now(getLocalTimeZone());
     const timeRange = {
@@ -289,341 +636,197 @@ export const useExploreStore = defineStore("explore", () => {
       )
     };
 
-    // Set time range
+    // Reset time range and relative time
     state.data.value.timeRange = timeRange;
+    state.data.value.selectedRelativeTime = '15m';
 
-    // Set the relative time to "15m" since we're using a 15-minute window
-    state.data.value.selectedRelativeTime = "15m";
-
-    // Reset limit to default
+    // Reset limit
     state.data.value.limit = 100;
 
-    // Get current source details
-    const sourcesStore = useSourcesStore();
+    // Clear queries
+    state.data.value.logchefqlCode = '';
 
-    // Make sure we have a valid table name by checking multiple possible sources
+    // Get source details for default SQL
+    const sourcesStore = useSourcesStore();
     let tableName = sourcesStore.getCurrentSourceTableName;
     if (!tableName && sourcesStore.currentSourceDetails?.connection?.table_name) {
       tableName = sourcesStore.currentSourceDetails.connection.table_name;
     }
     if (!tableName && sourcesStore.currentSourceDetails?.connection?.database) {
-      // Try to build a full table name from database and default table
       tableName = `${sourcesStore.currentSourceDetails.connection.database}.vector_logs`;
     }
-    // If still no table name, use a reasonable default
     if (!tableName) {
       tableName = 'logs.vector_logs';
     }
 
-    // Get timestamp field with fallback
     const timestampField = sourcesStore.currentSourceDetails?._meta_ts_field || 'timestamp';
 
-    // Generate default queries using the QueryService
-    if (state.data.value.activeMode === 'sql') {
-      // Generate default SQL
-      const result = QueryService.generateDefaultSQL({
-        tableName,
-        tsField: timestampField,
-        timeRange,
-        limit: state.data.value.limit
-      });
+    // Generate default SQL using SqlManager
+    const result = SqlManager.generateDefaultSql({
+      tableName,
+      tsField: timestampField,
+      timeRange,
+      limit: state.data.value.limit,
+      timezone: state.data.value.selectedTimezoneIdentifier || undefined
+    });
 
-      state.data.value.rawSql = result.success ? result.sql : '';
-      state.data.value.logchefqlCode = ''; // Clear other mode
-    } else {
-      // For LogchefQL, we start with an empty query
-      state.data.value.logchefqlCode = '';
+    state.data.value.rawSql = result.success ? result.sql : '';
 
-      // But generate a default SQL for the other mode
-      const result = QueryService.generateDefaultSQL({
-        tableName,
-        tsField: timestampField,
-        timeRange,
-        limit: state.data.value.limit
-      });
-
-      state.data.value.rawSql = ''; // Clear other mode
-    }
+    // Reset mode to defaults
+    state.data.value.activeMode = 'logchefql';
 
     // Clear active saved query information
     state.data.value.selectedQueryId = null;
     state.data.value.activeSavedQueryName = null;
+
+    // Update last executed state
+    _updateLastExecutedState();
   }
 
-  // Reset state
-  function resetState() {
-    state.data.value = {
-      logs: [],
-      columns: [],
-      queryStats: DEFAULT_QUERY_STATS,
-      sourceId: state.data.value.sourceId, // Preserve source
-      limit: state.data.value.limit, // Preserve limit
-      timeRange: state.data.value.timeRange, // Preserve time range
-      selectedRelativeTime: state.data.value.selectedRelativeTime, // Preserve relative time selection
-      filterConditions: [],
-      rawSql: "",
-      logchefqlCode: state.data.value.logchefqlCode,
-      activeMode: state.data.value.activeMode,
-      lastExecutedState: undefined,
-      lastExecutionTimestamp: null,
-      selectedQueryId: null, // Reset selectedQueryId
-      groupByField: state.data.value.groupByField, // Preserve groupByField
-      selectedTimezoneIdentifier: state.data.value.selectedTimezoneIdentifier, // Preserve timezone identifier
-      generatedDisplaySql: null, // Reset generatedDisplaySql
-    };
-  }
-
-  // Main query execution
-  async function executeQuery(finalSql?: string) {
+  // Execute query action
+  async function executeQuery() {
     // Store the relative time so we can restore it after execution
     const relativeTime = state.data.value.selectedRelativeTime;
 
     // Reset timestamp at the start of execution attempt
     state.data.value.lastExecutionTimestamp = null;
-    const operationKey = 'executeQuery'; // Define operation key for errors
+    const operationKey = 'executeQuery';
+
     return await state.withLoading(operationKey, async () => {
       // Get current team ID
       const currentTeamId = useTeamsStore().currentTeamId;
       if (!currentTeamId) {
-        // Provide operationKey to handleError
         return state.handleError({ status: "error", message: "No team selected", error_type: "ValidationError" }, operationKey);
       }
 
       // Get source details to check they're fully loaded
       const sourcesStore = useSourcesStore();
       const sourceDetails = sourcesStore.currentSourceDetails;
-      
+
       // Validate that we have the current source details loaded
       if (!sourceDetails || sourceDetails.id !== state.data.value.sourceId) {
         console.warn(`Source details not loaded or mismatch: have ID ${sourceDetails?.id}, need ID ${state.data.value.sourceId}`);
         return state.handleError({
-          status: "error", 
-          message: "Source details not fully loaded. Please try again.", 
-          error_type: "ValidationError"
-        }, operationKey);
-      }
-
-      // Verify we have a valid table name for the current source
-      const tableName = sourcesStore.getCurrentSourceTableName;
-      if (!tableName) {
-        return state.handleError({
           status: "error",
-          message: "Cannot determine table name for current source.",
+          message: "Source details not fully loaded. Please try again.",
           error_type: "ValidationError"
         }, operationKey);
       }
 
-      // Use the reactively generated SQL if available, otherwise generate on the fly (fallback)
-      let sqlToExecute = state.data.value.generatedDisplaySql;
+      // Get the SQL to execute
+      let sql = sqlForExecution.value;
+      let usedDefaultSql = false;
 
-      if (!sqlToExecute || sqlToExecute.startsWith('-- Error') || sqlToExecute.startsWith('-- Exception')) {
-        console.warn("executeQuery: generatedDisplaySql not usable, regenerating SQL on the fly.");
-        if (!state.data.value.timeRange) {
-          return state.handleError({
-            status: "error",
-            message: 'Cannot generate query without a valid time range.',
-            error_type: "ValidationError"
-          }, operationKey);
-        }
-        const generationOptions = {
-            tableName: tableName,
-            tsField: sourceDetails?._meta_ts_field || 'timestamp',
-            timeRange: state.data.value.timeRange,
-            limit: state.data.value.limit,
-            timezone: getTimezoneIdentifier(),
-            logchefqlQuery: state.data.value.logchefqlCode || ''
-        };
-        const result = state.data.value.activeMode === 'logchefql'
-            ? QueryService.translateLogchefQLToSQL(generationOptions)
-            : QueryService.generateDefaultSQL(generationOptions); // Or maybe use rawSql here? Sticking to generation
-
-        if (result.success) {
-            sqlToExecute = result.sql;
-        } else {
-            return state.handleError({
-              status: "error",
-              message: result.error || 'Failed to generate query for execution',
-              error_type: "QueryError"
-            }, operationKey);
-        }
-      }
-
-      // Use rawSql directly if in SQL mode and generatedDisplaySql is null/error
-      // This handles cases where the user manually typed SQL that hasn't been re-gen by watcher yet
-      if (state.data.value.activeMode === 'sql' && (!sqlToExecute || sqlToExecute.startsWith('-- '))) {
-         sqlToExecute = state.data.value.rawSql;
-      }
-
-      if (!sqlToExecute || !sqlToExecute.trim()) {
-         return state.handleError({
-            status: "error",
-            message: "Cannot execute an empty query.",
-            error_type: "ValidationError"
-         }, operationKey);
-      }
-
-      // Validate the SQL references the correct table name before execution
-      if (tableName && !sqlToExecute.includes(tableName)) {
-        const tableFromSql = extractTableNameFromSql(sqlToExecute);
-        if (tableFromSql && tableFromSql !== tableName) {
-          console.error(`SQL references table ${tableFromSql} but current source uses ${tableName}`);
-          return state.handleError({
-            status: "error",
-            message: `Query references incorrect table (${tableFromSql}). Current source uses ${tableName}.`,
-            error_type: "ValidationError"
-          }, operationKey);
-        }
-      }
-
-      // Store current state before execution
-      const executionState = {
-        timeRange: JSON.stringify(state.data.value.timeRange), // Keep original time range info
-        limit: state.data.value.limit,
-        query: sqlToExecute, // Store the SQL that was actually executed
-        mode: state.data.value.activeMode,
-        logchefqlQuery: state.data.value.logchefqlCode, // Store original LogchefQL
-        sqlQuery: sqlToExecute // Store executed SQL here too for consistency?
-      };
-      console.log('Explore store: Setting last executed state:', executionState);
-      state.data.value.lastExecutedState = executionState;
-
-      // Prepare parameters for the correct API call (getLogs)
+      // Prepare parameters for the API call
       const params: QueryParams = {
-          raw_sql: sqlToExecute,
-          limit: state.data.value.limit, // Keep limit
-          // start_timestamp, end_timestamp, and timezone are now baked into raw_sql
+        raw_sql: '', // Will be set below
+        limit: state.data.value.limit
       };
+
+      // Handle empty SQL for both modes
+      if (!sql || !sql.trim()) {
+        // Generate default SQL for both LogchefQL and SQL modes when SQL is empty
+        console.log(`Explore store: Generating default SQL for empty ${state.data.value.activeMode} query`);
+
+        const tsField = sourceDetails._meta_ts_field || 'timestamp';
+        const tableName = sourcesStore.getCurrentSourceTableName || 'default.logs';
+
+        // Generate default SQL using SqlManager
+        const result = SqlManager.generateDefaultSql({
+          tableName,
+          tsField,
+          timeRange: state.data.value.timeRange as TimeRange,
+          limit: state.data.value.limit,
+          timezone: state.data.value.selectedTimezoneIdentifier || undefined
+        });
+
+        if (!result.success) {
+          return state.handleError({
+            status: "error",
+            message: "Failed to generate default SQL",
+            error_type: "ValidationError"
+          }, operationKey);
+        }
+
+        // Use the generated SQL
+        sql = result.sql;
+        usedDefaultSql = true;
+
+        // If in SQL mode, update the UI to show the generated SQL
+        if (state.data.value.activeMode === 'sql') {
+          state.data.value.rawSql = sql;
+        }
+      }
+
+      // Set the SQL in the params
+      params.raw_sql = sql;
+
+      console.log("Explore store: Executing query with SQL:", {
+        sqlLength: sql.length,
+        usedDefaultSql
+      });
 
       // Use the centralized API calling mechanism from base store
       const response = await state.callApi({
         apiCall: async () => exploreApi.getLogs(state.data.value.sourceId, params, currentTeamId),
         // Update results ONLY on successful API call with data
         onSuccess: (data: QuerySuccessResponse | null) => {
-          if (data && data.logs && data.logs.length > 0) {
-              // We have new data, update the store
-              state.data.value.logs = data.logs;
-              state.data.value.columns = data.columns || [];
-              state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
-              // Check if query_id exists in params before accessing it
-              if (data.params && typeof data.params === 'object' && "query_id" in data.params) {
-                  state.data.value.queryId = data.params.query_id as string;
-              } else {
-                  state.data.value.queryId = null; // Reset if not present
-              }
-              state.data.value.lastExecutionTimestamp = Date.now(); // Set timestamp on success
-
-              // Restore the relative time if it was set before execution
-              if (relativeTime) {
-                // Use setRelativeTimeRange to ensure both relative string and absolute range are updated
-                setRelativeTimeRange(relativeTime);
-              }
+          if (data && data.logs) {
+            // We have new data, update the store
+            state.data.value.logs = data.logs;
+            state.data.value.columns = data.columns || [];
+            state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
+            // Check if query_id exists in params before accessing it
+            if (data.params && typeof data.params === 'object' && "query_id" in data.params) {
+              state.data.value.queryId = data.params.query_id as string;
+            } else {
+              state.data.value.queryId = null; // Reset if not present
+            }
           } else {
-              // Query was successful but returned no logs or null data
-              console.warn("Query successful but received no logs or null data.");
-              // Clear the logs, columns, stats now that the API call is complete
-              state.data.value.logs = [];
-              state.data.value.columns = [];
-              state.data.value.queryStats = DEFAULT_QUERY_STATS;
-              state.data.value.queryId = null;
-              state.data.value.lastExecutionTimestamp = Date.now(); // Also set timestamp here
+            // Query was successful but returned no logs or null data
+            console.warn("Query successful but received no logs or null data.");
+            // Clear the logs, columns, stats now that the API call is complete
+            state.data.value.logs = [];
+            state.data.value.columns = [];
+            state.data.value.queryStats = DEFAULT_QUERY_STATS;
+            state.data.value.queryId = null;
+          }
 
-              // Restore the relative time if it was set before
-              if (relativeTime) {
-                state.data.value.selectedRelativeTime = relativeTime;
-              }
+          // Update lastExecutedState after successful execution
+          _updateLastExecutedState();
+
+          // Restore the relative time if it was set before
+          if (relativeTime) {
+            state.data.value.selectedRelativeTime = relativeTime;
           }
         },
         operationKey: operationKey,
       });
 
       // Ensure lastExecutionTimestamp is set even if there was an error
-      // This helps the histogram know when to refresh
       if (!response.success && state.data.value.lastExecutionTimestamp === null) {
-          state.data.value.lastExecutionTimestamp = Date.now();
+        state.data.value.lastExecutionTimestamp = Date.now();
 
-          // Restore the relative time if it was set before execution, even on error
-          if (relativeTime) {
-            // Use setRelativeTimeRange to ensure both relative string and absolute range are updated
-            setRelativeTimeRange(relativeTime);
-          }
+        // Restore the relative time if it was set before execution, even on error
+        if (relativeTime) {
+          state.data.value.selectedRelativeTime = relativeTime;
+        }
       }
 
-      // IMPORTANT: Return structure expected by useQueryExecution
+      // If the query was successful, also fetch histogram data
       if (response.success) {
-          return { success: true, data: response.data };
-      } else {
-          // Assuming callApi handled the error state, return error structure
-          return { success: false, error: response.error };
+        console.log("Explore store: Query successful, fetching histogram data with same SQL");
+        // Use a setTimeout to avoid blocking the UI
+        setTimeout(() => {
+          fetchHistogramData(sql).catch(error => {
+            console.error("Error fetching histogram data:", error);
+          });
+        }, 50);
       }
+
+      // Return the response
+      return response;
     });
-  }
-
-  // Helper function to extract table name from SQL
-  function extractTableNameFromSql(sql: string): string | null {
-    try {
-      // Simple regex to find table name after FROM
-      const fromMatch = /\bFROM\s+(?:`?([^`\s()]+\.[^`\s()]+)`?|\(?`?([^`\s()]+)`?\s+AS\s+[^`\s()]+\)?)/i.exec(sql);
-      if (fromMatch) {
-        // Return the first captured group that isn't undefined
-        return fromMatch[1] || fromMatch[2] || null;
-      }
-      return null;
-    } catch (error) {
-      console.error("Error extracting table name from SQL:", error);
-      return null;
-    }
-  }
-
-  // Get log context
-  async function getLogContext(sourceId: number, params: LogContextRequest) {
-    const operationKey = `getLogContext-${sourceId}`;
-    return await state.withLoading(operationKey, async () => {
-      if (!sourceId) {
-        return state.handleError(
-          { status: "error", message: "Source ID is required", error_type: "ValidationError" },
-          operationKey
-        );
-      }
-      const teamsStore = useTeamsStore();
-      const currentTeamId = teamsStore.currentTeamId;
-      if (!currentTeamId) {
-        return state.handleError(
-          { status: "error", message: "No team selected.", error_type: "ValidationError" },
-          operationKey
-        );
-      }
-      // Assuming callApi structure is similar
-      return await state.callApi<LogContextResponse>({
-        apiCall: () => exploreApi.getLogContext(sourceId, params, currentTeamId),
-        operationKey: operationKey,
-        showToast: false, // Typically don't toast for context fetches
-      });
-    });
-  }
-
-  // Add function to set last executed state
-  function setLastExecutedState(executedState: NonNullable<ExploreState['lastExecutedState']>) {
-    console.log('Explore store: Setting last executed state:', {
-      oldState: state.data.value.lastExecutedState,
-      newState: executedState
-    });
-    state.data.value.lastExecutedState = executedState;
-  }
-
-  // Add helper to update the execution timestamp
-  function updateExecutionTimestamp() {
-    console.log('Explore store: Updating execution timestamp');
-    state.data.value.lastExecutionTimestamp = Date.now();
-  }
-
-  // Clear error helper
-  function clearError() {
-    state.error.value = null;
-  }
-
-  // Set the group by field
-  function setGroupByField(field: string | null) {
-    state.data.value.groupByField = field;
   }
 
   // Add function to set relative time range
@@ -663,124 +866,385 @@ export const useExploreStore = defineStore("explore", () => {
     return state.data.value.selectedRelativeTime;
   }
 
-  // --- Reactive Query Generation Watcher ---
-  watch(
-    // Watch multiple sources
-    [
-      () => state.data.value.sourceId,
-      () => state.data.value.selectedTimezoneIdentifier,
-      () => state.data.value.timeRange,
-      () => state.data.value.logchefqlCode,
-      () => state.data.value.activeMode,
-      () => state.data.value.limit,
-      // Also watch source details, as table name/ts field might change
-      () => useSourcesStore().currentSourceDetails,
-    ],
-    async (
-      [
-        sourceId,
-        timezone,
-        timeRange,
-        logchefqlCode,
-        activeMode,
-        limit,
-        sourceDetails,
-      ],
-      oldValues
-    ) => {
-      console.log("Explore Store Watcher: Detected change in state.");
+  // Add setFilterConditions function
+  function setFilterConditions(filters: FilterCondition[]) {
+    // Check for the special _force_clear marker
+    const isForceClearing =
+      filters.length === 1 && "_force_clear" in filters[0];
 
-      // Prevent running if essential data is missing
-      if (
-        !sourceId ||
-        !timeRange ||
-        !sourceDetails ||
-        !sourceDetails.connection?.table_name ||
-        !sourceDetails._meta_ts_field
-      ) {
-        console.log("Explore Store Watcher: Missing essential data, skipping SQL generation.");
-        // Clear generated SQL if conditions aren't met
-        state.data.value.generatedDisplaySql = null;
-        return;
-      }
-
-      const tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
-      const tsField = sourceDetails._meta_ts_field;
-      const effectiveTimezone = timezone || getTimezoneIdentifier(); // Use state value or default
-
-      let result: QueryResult;
-
-      try {
-        if (activeMode === "logchefql") {
-          console.log("Explore Store Watcher: Generating SQL from LogchefQL.");
-          result = QueryService.translateLogchefQLToSQL({
-            tableName,
-            tsField,
-            timeRange,
-            limit,
-            logchefqlQuery: logchefqlCode || "",
-            timezone: effectiveTimezone,
-          });
-        } else { // activeMode === 'sql'
-          console.log("Explore Store Watcher: Generating default SQL for SQL mode.");
-          // In SQL mode, we regenerate the *base* query using current params
-          // We assume the user modifies rawSql directly for complex changes
-          result = QueryService.generateDefaultSQL({
-            tableName,
-            tsField,
-            timeRange,
-            limit,
-            timezone: effectiveTimezone,
-          });
-
-          // Special case: If only the timezone changed and rawSql already exists,
-          // try to *update* the timezone within the existing rawSql instead of overwriting.
-          // This is complex and might be fragile. Let's stick to regenerating for now.
-          // A better approach might involve parsing/modifying the rawSql AST.
-        } 
-
-        if (result.success) {
-          console.log("Explore Store Watcher: SQL generation successful.");
-          state.data.value.generatedDisplaySql = result.sql;
-
-          // Conditionally update rawSql ONLY if in SQL mode AND the trigger wasn't a direct rawSql edit
-          // (This simplistic check might not be robust enough for all cases)
-          if (activeMode === 'sql' && state.data.value.rawSql !== result.sql) {
-             // Check if the change was driven by parameters (not direct SQL edit)
-             const sourceChanged = oldValues[0] !== sourceId;
-             const timezoneChanged = oldValues[1] !== timezone;
-             const timeRangeChanged = JSON.stringify(oldValues[2]) !== JSON.stringify(timeRange);
-             const logchefCodeChanged = oldValues[3] !== logchefqlCode; // Check if LogchefQL code changed
-             const modeChanged = oldValues[4] !== activeMode;
-             const limitChanged = oldValues[5] !== limit; // Correct index for limit
-             const sourceDetailsChanged = JSON.stringify(oldValues[6]) !== JSON.stringify(sourceDetails); // Correct index for sourceDetails
-  
-             // If the change was driven by parameters (not direct SQL edit), update rawSql
-             if ((timezoneChanged || timeRangeChanged || limitChanged || sourceChanged || modeChanged || sourceDetailsChanged) && !logchefCodeChanged) {
-                   console.log("Explore Store Watcher: Updating rawSql in SQL mode due to parameter change.");
-                   state.data.value.rawSql = result.sql;
-             }
-          }
-
-        } else {
-          console.error("Explore Store Watcher: SQL generation failed:", result.error);
-          state.data.value.generatedDisplaySql = `-- Error generating query: ${result.error}`;
-        }
-      } catch (error) {
-          console.error("Explore Store Watcher: Exception during SQL generation:", error);
-          state.data.value.generatedDisplaySql = `-- Exception generating query: ${error}`;
-      }
-    },
-    {
-      deep: true, // Watch nested properties like timeRange
-      immediate: true, // Run once on store initialization
+    if (isForceClearing) {
+      console.log("Explore store: force-clearing filter conditions");
+      // This is our special signal to clear conditions
+      state.data.value.filterConditions = [];
+    } else {
+      console.log("Explore store: setting filter conditions:", filters.length);
+      state.data.value.filterConditions = filters;
     }
-  );
-  // --- End Watcher ---
+  }
+
+  // Add setSelectedQueryId function
+  function setSelectedQueryId(queryId: string | null) {
+    state.data.value.selectedQueryId = queryId;
+  }
+
+  // Add setActiveSavedQueryName function
+  function setActiveSavedQueryName(name: string | null) {
+    state.data.value.activeSavedQueryName = name;
+  }
+
+  // Add setLastExecutedState function
+  function setLastExecutedState(executedState: {
+    timeRange: string;
+    limit: number;
+    query?: string;
+    mode?: "logchefql" | "sql";
+    logchefqlQuery?: string;
+    sqlQuery?: string;
+  }) {
+    console.log('Explore store: Setting last executed state:', executedState);
+    const updatedState = {
+      ...executedState,
+      mode: executedState.mode || state.data.value.activeMode,
+      sourceId: state.data.value.sourceId
+    };
+    state.data.value.lastExecutedState = updatedState as any;
+  }
+
+  // Add updateExecutionTimestamp function
+  function updateExecutionTimestamp() {
+    console.log('Explore store: Updating execution timestamp');
+    state.data.value.lastExecutionTimestamp = Date.now();
+  }
+
+  // Add resetState function
+  function resetState() {
+    state.data.value = {
+      logs: [],
+      columns: [],
+      queryStats: DEFAULT_QUERY_STATS,
+      sourceId: state.data.value.sourceId, // Preserve source
+      limit: state.data.value.limit, // Preserve limit
+      timeRange: state.data.value.timeRange, // Preserve time range
+      selectedRelativeTime: state.data.value.selectedRelativeTime, // Preserve relative time selection
+      filterConditions: [],
+      rawSql: "",
+      logchefqlCode: "",
+      activeMode: state.data.value.activeMode,
+      lastExecutedState: undefined,
+      lastExecutionTimestamp: null,
+      selectedQueryId: null, // Reset selectedQueryId
+      activeSavedQueryName: null,
+      groupByField: null,
+      selectedTimezoneIdentifier: state.data.value.selectedTimezoneIdentifier, // Preserve timezone identifier
+      generatedDisplaySql: null, // Reset generatedDisplaySql
+      isGeneratingAISQL: false,
+      aiSqlError: null,
+      generatedAiSql: null,
+      histogramData: [],
+      isLoadingHistogram: false,
+      histogramError: null,
+      histogramGranularity: null,
+    };
+  }
+
+  // Add getLogContext function
+  async function getLogContext(sourceId: number, params: LogContextRequest) {
+    const operationKey = `getLogContext-${sourceId}`;
+    return await state.withLoading(operationKey, async () => {
+      if (!sourceId) {
+        return state.handleError(
+          { status: "error", message: "Source ID is required", error_type: "ValidationError" },
+          operationKey
+        );
+      }
+      const teamsStore = useTeamsStore();
+      const currentTeamId = teamsStore.currentTeamId;
+      if (!currentTeamId) {
+        return state.handleError(
+          { status: "error", message: "No team selected.", error_type: "ValidationError" },
+          operationKey
+        );
+      }
+      return await state.callApi<LogContextResponse>({
+        apiCall: () => exploreApi.getLogContext(sourceId, params, currentTeamId),
+        operationKey: operationKey,
+        showToast: false, // Typically don't toast for context fetches
+      });
+    });
+  }
+
+  // Add clearError function
+  function clearError() {
+    state.error.value = null;
+  }
+
+  // Add setGroupByField function
+  function setGroupByField(field: string | null) {
+    state.data.value.groupByField = field;
+  }
+
+  // Add generateAiSql function
+  async function generateAiSql(naturalLanguageQuery: string) {
+    const operationKey = 'generateAiSql';
+
+    // Set loading state
+    state.data.value.isGeneratingAISQL = true;
+    state.data.value.aiSqlError = null;
+    state.data.value.generatedAiSql = null;
+
+    try {
+      const teamsStore = useTeamsStore();
+      const currentTeamId = teamsStore.currentTeamId;
+      if (!currentTeamId) {
+        throw new Error("No team selected");
+      }
+
+      const sourcesStore = useSourcesStore();
+      const sourceDetails = sourcesStore.currentSourceDetails;
+      if (!sourceDetails) {
+        throw new Error("Source details not available");
+      }
+
+      const request: AIGenerateSQLRequest = {
+        natural_language_query: naturalLanguageQuery
+      };
+
+      const response = await state.callApi<AIGenerateSQLResponse>({
+        // The API expects sourceId as first parameter, then the request, then teamId
+        apiCall: () => exploreApi.generateAISQL(
+          state.data.value.sourceId,
+          request,
+          currentTeamId
+        ),
+        operationKey: operationKey,
+      });
+
+      if (response.success && response.data) {
+        // Use the correct property name from AIGenerateSQLResponse
+        state.data.value.generatedAiSql = response.data.sql_query || '';
+
+        // Automatically set the SQL if in SQL mode
+        if (state.data.value.activeMode === 'sql') {
+          state.data.value.rawSql = response.data.sql_query || '';
+        }
+
+        return response;
+      } else {
+        state.data.value.aiSqlError = response.error?.message || 'Failed to generate SQL';
+        return response;
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      state.data.value.aiSqlError = errorMessage;
+      return {
+        success: false,
+        error: { message: errorMessage, status: 'error', error_type: 'AIGenerationError' }
+      };
+    } finally {
+      state.data.value.isGeneratingAISQL = false;
+    }
+  }
+
+  // Add clearAiSqlState function
+  function clearAiSqlState() {
+    state.data.value.isGeneratingAISQL = false;
+    state.data.value.aiSqlError = null;
+    state.data.value.generatedAiSql = null;
+  }
+
+  // Add a function to fetch histogram data with the exact same SQL as the query
+  async function fetchHistogramData(sql?: string, granularity?: string) {
+    const operationKey = 'fetchHistogramData';
+
+    // Set loading state
+    state.data.value.isLoadingHistogram = true;
+    state.data.value.histogramError = null;
+
+    try {
+      // Get current team ID
+      const currentTeamId = useTeamsStore().currentTeamId;
+      if (!currentTeamId) {
+        state.data.value.histogramError = "No team selected";
+        state.data.value.isLoadingHistogram = false;
+        return {
+          success: false,
+          error: {
+            status: "error",
+            message: "No team selected",
+            error_type: "ValidationError"
+          }
+        };
+      }
+
+      // Get source details
+      const sourcesStore = useSourcesStore();
+
+      // Validate source details are loaded
+      if (!sourcesStore.currentSourceDetails || sourcesStore.currentSourceDetails.id !== state.data.value.sourceId) {
+        state.data.value.histogramError = "Source details not fully loaded for histogram.";
+        state.data.value.isLoadingHistogram = false;
+        return {
+          success: false,
+          error: {
+            status: "error",
+            message: "Source details not fully loaded for histogram.",
+            error_type: "ValidationError"
+          }
+        };
+      }
+
+      // Validate SQL input - if empty or not provided, use sqlForExecution
+      let finalSql = sql || sqlForExecution.value;
+      if (!finalSql || !finalSql.trim()) {
+        console.log("Histogram: No SQL provided, generating default query");
+
+        const tsField = sourcesStore.currentSourceDetails._meta_ts_field || 'timestamp';
+        const tableName = sourcesStore.getCurrentSourceTableName || 'default.logs';
+
+        // Generate default SQL using SqlManager
+        const result = SqlManager.generateDefaultSql({
+          tableName,
+          tsField,
+          timeRange: state.data.value.timeRange as TimeRange,
+          limit: state.data.value.limit,
+          timezone: state.data.value.selectedTimezoneIdentifier || undefined
+        });
+
+        if (!result.success) {
+          state.data.value.histogramError = "Failed to generate default SQL for histogram";
+          state.data.value.isLoadingHistogram = false;
+          return {
+            success: false,
+            error: {
+              status: "error",
+              message: "Failed to generate default SQL for histogram",
+              error_type: "ValidationError"
+            }
+          };
+        }
+
+        finalSql = result.sql;
+      }
+
+      console.log("Explore store: Fetching histogram data with SQL", {
+        sourceId: state.data.value.sourceId,
+        sqlLength: finalSql.length,
+        sql: finalSql.substring(0, 100) + (finalSql.length > 100 ? '...' : '')
+      });
+
+      // The final histogram parameters including only the SQL with time range
+      const params = {
+        raw_sql: finalSql, // Always use a valid SQL query with time range included
+        limit: 100,
+        window: granularity || calculateOptimalGranularity(),
+        timezone: state.data.value.selectedTimezoneIdentifier || undefined,
+        group_by: state.data.value.groupByField === "__none__" || state.data.value.groupByField === null ? undefined : state.data.value.groupByField,
+      };
+
+      console.log("Explore store: Histogram request params:", {
+        raw_sql_length: params.raw_sql.length,
+        window: params.window,
+        group_by: params.group_by,
+        timezone: params.timezone
+      });
+
+      // Call the API directly
+      const response = await state.callApi<{ data: Array<HistogramData>, granularity: string }>({
+        apiCall: async () => exploreApi.getHistogramData(
+          state.data.value.sourceId,
+          params,
+          currentTeamId
+        ),
+        operationKey: operationKey,
+        showToast: false, // Don't show toast for histogram data
+      });
+
+      // Update histogram state based on response
+      if (response.success && response.data) {
+        console.log("Explore store: Histogram data fetch successful", {
+          dataPoints: response.data.data?.length || 0,
+          granularity: response.data.granularity
+        });
+
+        state.data.value.histogramData = response.data.data || [];
+        state.data.value.histogramGranularity = response.data.granularity || null;
+        state.data.value.histogramError = null;
+      } else {
+        console.warn("Explore store: Histogram data fetch failed", response.error);
+        state.data.value.histogramData = [];
+        state.data.value.histogramGranularity = null;
+        state.data.value.histogramError = response.error?.message || "Failed to fetch histogram data";
+      }
+
+      return response;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("Error in fetchHistogramData:", errorMessage);
+
+      state.data.value.histogramData = [];
+      state.data.value.histogramGranularity = null;
+      state.data.value.histogramError = errorMessage;
+
+      return {
+        success: false,
+        error: {
+          message: errorMessage,
+          status: "error",
+          error_type: "UnknownError"
+        }
+      };
+    } finally {
+      state.data.value.isLoadingHistogram = false;
+    }
+  }
+
+  // Helper function to calculate optimal granularity based on time range
+  function calculateOptimalGranularity(): string {
+    // Get the time range values
+    const { timeRange } = state.data.value;
+    if (!timeRange) return "1m"; // Default to 1 minute
+
+    // Calculate time difference in milliseconds
+    const startDate = new Date(
+      timeRange.start.year,
+      timeRange.start.month - 1,
+      timeRange.start.day,
+      "hour" in timeRange.start ? timeRange.start.hour : 0,
+      "minute" in timeRange.start ? timeRange.start.minute : 0,
+      "second" in timeRange.start ? timeRange.start.second : 0
+    );
+
+    const endDate = new Date(
+      timeRange.end.year,
+      timeRange.end.month - 1,
+      timeRange.end.day,
+      "hour" in timeRange.end ? timeRange.end.hour : 0,
+      "minute" in timeRange.end ? timeRange.end.minute : 0,
+      "second" in timeRange.end ? timeRange.end.second : 0
+    );
+
+    const diffMs = endDate.getTime() - startDate.getTime();
+    const diffSeconds = diffMs / 1000;
+    const diffMinutes = diffSeconds / 60;
+    const diffHours = diffMinutes / 60;
+    const diffDays = diffHours / 24;
+
+    // Use the same granularity rules as in HistogramService
+    if (diffMinutes <= 5) return "1s";
+    if (diffMinutes <= 30) return "5s";
+    if (diffMinutes <= 60) return "10s";
+    if (diffHours <= 3) return "1m";
+    if (diffHours <= 12) return "5m";
+    if (diffHours <= 24) return "10m";
+    if (diffDays <= 7) return "1h";
+    if (diffDays <= 30) return "6h";
+    if (diffDays <= 90) return "1d";
+    return "1d"; // Default for very long time ranges
+  }
 
   // Return the store
   return {
-    // State
+    // State - exposed as computed properties
     logs: computed(() => state.data.value.logs),
     columns: computed(() => state.data.value.columns),
     queryStats: computed(() => state.data.value.queryStats),
@@ -790,34 +1254,41 @@ export const useExploreStore = defineStore("explore", () => {
     selectedRelativeTime: computed(() => state.data.value.selectedRelativeTime),
     filterConditions: computed(() => state.data.value.filterConditions),
     rawSql: computed(() => state.data.value.rawSql),
-    pendingRawSql: computed({
-      get: () => state.data.value.pendingRawSql,
-      set: (v) => state.data.value.pendingRawSql = v
-    }),
     logchefqlCode: computed(() => state.data.value.logchefqlCode),
     activeMode: computed(() => state.data.value.activeMode),
     error: state.error,
     queryId: computed(() => state.data.value.queryId),
-    stats: computed(() => state.data.value.stats),
     lastExecutedState: computed(() => state.data.value.lastExecutedState),
     lastExecutionTimestamp: computed(() => state.data.value.lastExecutionTimestamp),
     selectedQueryId: computed(() => state.data.value.selectedQueryId),
     activeSavedQueryName: computed(() => state.data.value.activeSavedQueryName),
     groupByField: computed(() => state.data.value.groupByField),
     selectedTimezoneIdentifier: computed(() => state.data.value.selectedTimezoneIdentifier),
-    generatedDisplaySql: computed(() => state.data.value.generatedDisplaySql), // Expose the new computed property
+
+    // AI SQL generation state
+    isGeneratingAISQL: computed(() => state.data.value.isGeneratingAISQL),
+    aiSqlError: computed(() => state.data.value.aiSqlError),
+    generatedAiSql: computed(() => state.data.value.generatedAiSql),
+
+    // Histogram state
+    histogramData: computed(() => state.data.value.histogramData),
+    isLoadingHistogram: computed(() => state.data.value.isLoadingHistogram),
+    histogramError: computed(() => state.data.value.histogramError),
+    histogramGranularity: computed(() => state.data.value.histogramGranularity),
 
     // Loading state
     isLoading: state.isLoading,
 
-    // Derived values
+    // New computed properties from refactoring plan
+    logchefQlTranslationResult: _logchefQlTranslationResult,
+    sqlForExecution,
+    isQueryStateDirty,
+    urlQueryParameters,
     canExecuteQuery,
 
     // Actions
     setSource,
-    setTimeRange,
-    setRelativeTimeRange,
-    getSelectedRelativeTime,
+    setTimeConfiguration,
     setLimit,
     setFilterConditions,
     setRawSql,
@@ -825,15 +1296,17 @@ export const useExploreStore = defineStore("explore", () => {
     setLogchefqlCode,
     setSelectedQueryId,
     setActiveSavedQueryName,
-    resetQueryStateToDefault,
-    setLastExecutedState,
-    updateExecutionTimestamp,
-    resetState,
+    setRelativeTimeRange,
+    resetQueryToDefaults,
+    initializeFromUrl,
     executeQuery,
     getLogContext,
     clearError,
     setGroupByField,
     setTimezoneIdentifier,
+    generateAiSql,
+    clearAiSqlState,
+    fetchHistogramData,
 
     // Loading state helpers
     isLoadingOperation: state.isLoadingOperation,

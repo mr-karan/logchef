@@ -8,6 +8,7 @@ import {
   formatTimezoneForSQL
 } from '@/utils/time-utils';
 import type { QueryOptions, QueryResult, TimeRange, TimeRangeInfo } from '@/types/query';
+import { SqlManager } from './SqlManager';
 
 // Define the QueryCondition type used in meta
 export interface QueryCondition {
@@ -33,13 +34,13 @@ export class QueryService {
     const formattedTableName = tableName.includes('`') || tableName.includes('.')
       ? tableName
       : `\`${tableName}\``;
-    
+
     const formattedTsField = tsField.includes('`') ? tsField : `\`${tsField}\``;
-    
+
     // Get user timezone for the template
     const userTimezone = getUserTimezone();
     const formattedTimezone = formatTimezoneForSQL(userTimezone);
-    
+
     // Create a template with placeholders for actual dates
     return [
       `SELECT *`,
@@ -173,107 +174,26 @@ export class QueryService {
   }
 
   /**
-   * Generates a default SQL query
-   * @param options Query generation options
-   * @returns QueryResult with default SQL
+   * Validates a ClickHouse SQL query
+   * @param query SQL query to validate
    */
-  static generateDefaultSQL(options: QueryOptions): QueryResult {
-    const {
-      tableName,
-      tsField,
-      timeRange,
-      limit,
-      orderBy,
-      timezone
-    } = options;
-
-    // Basic validation
-    if (!tableName || !tsField) {
-      console.warn("Cannot generate default SQL: Missing tableName or tsField.");
-      return {
-        success: false,
-        sql: `SELECT *\nFROM your_table\nORDER BY timestamp_field DESC\nLIMIT 100`,
-        error: "Missing table name or timestamp field",
-        warnings: ["Using placeholder query"]
-      };
-    }
-
-    if (!timeRange.start || !timeRange.end || typeof limit !== 'number') {
-      console.warn("Cannot generate default SQL: Invalid date/time or limit.");
-      return {
-        success: false,
-        sql: `SELECT *\nFROM \`${tableName}\`\n-- Invalid time range or limit provided\nORDER BY \`${tsField}\` DESC\nLIMIT 100`,
-        error: "Invalid time range or limit parameters",
-        warnings: ["Using fallback query with default values"]
-      };
-    }
-
-    try {
-      // Format table name
-      const formattedTableName = tableName.includes('`') || tableName.includes('.')
-        ? tableName
-        : `\`${tableName}\``;
-
-      // Format timestamp field
-      const formattedTsField = tsField.includes('`') ? tsField : `\`${tsField}\``;
-
-      // Create timezone-aware time condition, passing the specific timezone if provided
-      const timeCondition = createTimeRangeCondition(tsField, timeRange, true, timezone);
-
-      // Set order by
-      const orderByField = orderBy ?
-        (orderBy.field.includes('`') ? orderBy.field : `\`${orderBy.field}\``) :
-        formattedTsField;
-      const orderDirection = orderBy ? orderBy.direction : 'DESC';
-
-      // Build the SQL query manually
-      const sql = [
-        `SELECT *`,
-        `FROM ${formattedTableName}`,
-        `WHERE ${timeCondition}`,
-        `ORDER BY ${orderByField} ${orderDirection}`,
-        `LIMIT ${limit}`
-      ].join('\n');
-
-      // Add timezone metadata
-      const userTimezone = getUserTimezone();
-      const meta: NonNullable<QueryResult['meta']> = {
-        fieldsUsed: [],
-        operations: ['filter', 'sort', 'limit'] as ('filter' | 'sort' | 'limit')[], // Add filter as default op
-        timeRangeInfo: {
-          field: tsField,
-          startTime: formatDateForSQL(timeRange.start, false),
-          endTime: formatDateForSQL(timeRange.end, false),
-          timezone: timezone || userTimezone, // Use provided or fallback
-          isTimezoneAware: true
-        }
-      };
-
-      return {
-        success: true,
-        sql,
-        error: null,
-        meta
-      };
-    } catch (error: any) {
-      console.error("Error generating default SQL:", error);
-      return {
-        success: false,
-        sql: `-- Error: ${error.message}\nSELECT *\nFROM \`${tableName}\`\nLIMIT ${limit}`,
-        error: error.message,
-        warnings: ["Error occurred during SQL generation"]
-      };
-    }
+  static validateSQL(query: string): boolean {
+    return SqlManager.validateSql(query).valid;
   }
 
   /**
-   * Validates a SQL query
-   * @param sql SQL query to validate
-   * @returns Whether the query is valid
+   * Generates a default SQL query for a given time range
    */
-  static validateSQL(sql: string): boolean {
-    // Leverage the enhanced validation function
-    return validateSQL(sql);
+  static generateDefaultSQL(params: {
+    tableName: string;
+    tsField: string;
+    timeRange: any;
+    limit: number;
+  }) {
+    return SqlManager.generateDefaultSql({
+      ...params,
+      timezone: undefined // Maintain backwards compatibility
+    });
   }
 
   /**
@@ -301,70 +221,36 @@ export class QueryService {
   }
 
   /**
-   * Prepares a query for execution
-   * @param options Query generation options
-   * @returns SQL query ready for execution
+   * Prepares a query for execution by applying time range, limit, and other constraints
    */
-  static prepareQueryForExecution(options: {
-    mode: 'logchefql' | 'clickhouse-sql' | 'sql';
+  static prepareQueryForExecution(params: {
+    mode: 'logchefql' | 'clickhouse-sql';
     query: string;
     tableName: string;
     tsField: string;
-    timeRange: TimeRange;
+    timeRange: any;
     limit: number;
-    timezone?: string; // Add timezone here too
-  }): QueryResult {
-    const { mode, query, tableName, tsField, timeRange, limit, timezone } = options;
-
-    if (mode === 'clickhouse-sql' || mode === 'sql') {
-      if (!query?.trim()) {
-        // Generate default SQL if query is empty
-        return this.generateDefaultSQL({ tableName, tsField, timeRange, limit, timezone });
-      }
-
-      // Enhanced validation with detailed information
-      const validationResult = this.validateSQLWithDetails(query);
-      if (!validationResult.valid) {
-        return {
-          success: false,
-          sql: query,
-          error: validationResult.error || "Invalid SQL syntax"
-        };
-      }
-
-      // Analyze the query for additional information
-      const queryAnalysis = this.analyzeQuery(query);
-
-      // Final SQL to be executed - might be modified with automatic limit
-      let finalSql = query;
-
-      // Automatically add LIMIT if not present in the query
-      if (queryAnalysis && !queryAnalysis.hasLimit) {
-        finalSql = `${finalSql}\nLIMIT ${limit}`;
-      }
-
-      // The query is valid, return it with enhanced metadata
-      return {
-        success: true,
-        sql: finalSql,
-        error: null,
-        meta: {
-          fieldsUsed: validationResult.columns || [],
-          operations: ['filter', 'sort'], // Assume these operations exist in most queries
-          queryAnalysis: queryAnalysis || undefined,
-          ...(queryAnalysis?.timeRangeInfo && { timeRangeInfo: queryAnalysis.timeRangeInfo })
-        }
-      };
-    } else {
-      // For LogchefQL, always translate to SQL
-      return this.translateLogchefQLToSQL({
-        tableName,
-        tsField,
-        timeRange,
-        limit,
-        logchefqlQuery: query,
-        timezone
+    timezone?: string;
+  }) {
+    // For SQL mode, delegate to SqlManager
+    if (params.mode === 'clickhouse-sql') {
+      return SqlManager.prepareForExecution({
+        sql: params.query,
+        tsField: params.tsField,
+        timeRange: params.timeRange,
+        limit: params.limit,
+        timezone: params.timezone
       });
     }
+
+    // For LogchefQL mode, translate to SQL
+    return this.translateLogchefQLToSQL({
+      tableName: params.tableName,
+      tsField: params.tsField,
+      timeRange: params.timeRange,
+      limit: params.limit,
+      logchefqlQuery: params.query,
+      timezone: params.timezone
+    });
   }
 }

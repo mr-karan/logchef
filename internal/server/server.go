@@ -191,6 +191,7 @@ func (s *Server) setupRoutes() {
 		teamSourceOps.Post("/logs/query", s.handleQueryLogs)
 		teamSourceOps.Get("/schema", s.handleGetSourceSchema)
 		teamSourceOps.Post("/logs/histogram", s.handleGetHistogram)
+		teamSourceOps.Post("/generate-sql", s.handleGenerateAISQL)
 
 		// Collections (Saved Queries) scoped to Team & Source
 		// Regular team members can view and use collections
@@ -199,10 +200,10 @@ func (s *Server) setupRoutes() {
 			collections.Get("/", s.handleListTeamSourceCollections)
 			collections.Get("/:collectionID", s.handleGetTeamSourceCollection)
 
-			// Only team admins can manage collections
-			collections.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleCreateTeamSourceCollection)
-			collections.Put("/:collectionID", s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeamSourceCollection)
-			collections.Delete("/:collectionID", s.requireTeamAdminOrGlobalAdmin, s.handleDeleteTeamSourceCollection)
+			// Only team editors, team admins, or global admins can manage collections
+			collections.Post("/", s.requireCollectionManagement, s.handleCreateTeamSourceCollection)
+			collections.Put("/:collectionID", s.requireCollectionManagement, s.handleUpdateTeamSourceCollection)
+			collections.Delete("/:collectionID", s.requireCollectionManagement, s.handleDeleteTeamSourceCollection)
 		}
 	}
 

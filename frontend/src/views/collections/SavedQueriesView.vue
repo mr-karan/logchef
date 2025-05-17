@@ -46,6 +46,7 @@ import { useTeamsStore } from "@/stores/teams";
 import { Badge } from "@/components/ui/badge";
 import { useSavedQueries } from "@/composables/useSavedQueries";
 import type { SaveQueryFormData } from "@/views/explore/types";
+import type { Source } from "@/api/sources";
 
 // Initialize router and services with better error handling
 const router = useRouter();
@@ -54,6 +55,10 @@ const { toast } = useToast();
 // Initialize stores with error handling
 let sourcesStore = useSourcesStore();
 let teamsStore = useTeamsStore();
+
+// Define local refs for queries and current source
+const localTeamQueries = ref<SavedTeamQuery[] | undefined>();
+const currentSelectedSource = ref<Source | undefined>();
 
 try {
   sourcesStore = useSourcesStore();
@@ -68,12 +73,12 @@ try {
   } as any; // Fallback to any for error case
 
   teamsStore = {
-    loadTeams: async () => {},
-    setCurrentTeam: () => {},
+    loadTeams: async () => { },
+    setCurrentTeam: () => { },
     currentTeamId: null,
     currentTeam: null,
     teams: [],
-    resetAdminTeams: () => {},
+    resetAdminTeams: () => { },
   } as any; // Fallback to any for error case
 }
 
@@ -82,7 +87,6 @@ const {
   showSaveQueryModal,
   editingQuery,
   isLoading,
-  queries,
   filteredQueries,
   hasQueries,
   totalQueryCount,
@@ -94,8 +98,9 @@ const {
   createNewQuery,
   clearSearch,
   loadSourceQueries,
-  handleSaveQuery: handleSaveQueryFromComposable, // Rename the imported function
-} = useSavedQueries();
+  handleSaveQuery: handleSaveQueryFromComposable,
+  canManageCollections,
+} = useSavedQueries(localTeamQueries, currentSelectedSource);
 
 // Local UI state
 const selectedSourceId = ref<string>("");
@@ -126,11 +131,19 @@ const selectedTeamName = computed(() => {
 
 // Selected source name
 const selectedSourceName = computed(() => {
-  if (!selectedSourceId.value) return "Select a source";
+  if (!selectedSourceId.value) {
+    currentSelectedSource.value = undefined;
+    return "Select a source";
+  }
   const source = sourcesStore.teamSources?.find(
     (s) => s.id === parseInt(selectedSourceId.value)
   );
-  return source ? formatSourceName(source) : "Select a source";
+  if (source) {
+    currentSelectedSource.value = source; // Update ref here
+    return formatSourceName(source);
+  }
+  currentSelectedSource.value = undefined;
+  return "Select a source";
 });
 
 // Add this computed property near the other computed properties
@@ -146,8 +159,13 @@ onMounted(async () => {
     // Reset admin teams and load user teams to ensure we have the correct context
     teamsStore.resetAdminTeams();
 
-    // Load teams first (explicitly use user teams endpoint)
-    await teamsStore.loadTeams(true);
+    // Load user teams directly for simplicity
+    await teamsStore.loadUserTeams();
+
+    // Log store state after loading teams
+    console.log("SavedQueriesView onMounted: teamsStore.userTeams after load:", JSON.parse(JSON.stringify(teamsStore.userTeams)));
+    console.log("SavedQueriesView onMounted: teamsStore.teams (computed) after load:", JSON.parse(JSON.stringify(teamsStore.teams)));
+    console.log("SavedQueriesView onMounted: teamsStore.currentTeamId before explicit set:", teamsStore.currentTeamId);
 
     // Check if team ID is specified in the URL query
     const teamIdFromUrl = router.currentRoute.value.query.team;
@@ -184,6 +202,10 @@ onMounted(async () => {
       } else {
         selectedSourceId.value = String(sourcesStore.teamSources[0].id);
       }
+      // Update currentSelectedSource after selectedSourceId is set
+      const src = sourcesStore.teamSources.find(s => s.id === parseInt(selectedSourceId.value));
+      if (src) currentSelectedSource.value = src;
+      else currentSelectedSource.value = undefined;
 
       // Don't explicitly call loadSourceQueries here,
       // the watcher on selectedSourceId will handle it
@@ -224,12 +246,17 @@ watch(
     // Only proceed if we have both a valid team and source ID
     if (newSourceId && newTeamId) {
       // Verify source exists in current team before fetching
-      const sourceId = parseInt(newSourceId);
+      const sourceIdNum = parseInt(newSourceId);
       const sourceExists = sourcesStore.teamSources.some(
-        (source) => source.id === sourceId
+        (source) => source.id === sourceIdNum
       );
 
       if (sourceExists) {
+        // Update currentSelectedSource ref based on newSourceId
+        const src = sourcesStore.teamSources.find(s => s.id === sourceIdNum);
+        if (src) currentSelectedSource.value = src;
+        else currentSelectedSource.value = undefined;
+
         await fetchQueries();
         // Mark initial load as complete after first load
         isInitialLoad.value = false;
@@ -267,13 +294,16 @@ async function handleTeamChange(teamId: string) {
     ) {
       // Clear source selection when team has no sources
       selectedSourceId.value = "";
-      queries.value = [];
+      localTeamQueries.value = [];
+      currentSelectedSource.value = undefined;
       return;
     }
 
     // Reset source selection to the first source from the new team
     if (sourcesStore.teamSources.length > 0) {
-      selectedSourceId.value = String(sourcesStore.teamSources[0].id);
+      const firstSource = sourcesStore.teamSources[0];
+      selectedSourceId.value = String(firstSource.id);
+      currentSelectedSource.value = firstSource;
 
       // Update URL with the new source - use currentTeamId for safety
       // Use push instead of replace for proper history
@@ -290,7 +320,8 @@ async function handleTeamChange(teamId: string) {
     } else {
       // No sources in this team
       selectedSourceId.value = "";
-      queries.value = [];
+      if (localTeamQueries.value) localTeamQueries.value = [];
+      currentSelectedSource.value = undefined;
     }
   } catch (error) {
     console.error("Error changing team:", error);
@@ -314,7 +345,8 @@ async function handleSourceChange(sourceId: string) {
 
     if (!sourceId) {
       selectedSourceId.value = "";
-      queries.value = [];
+      localTeamQueries.value = [];
+      currentSelectedSource.value = undefined;
 
       // Update URL to remove source parameter - use push for proper history
       router.push({
@@ -418,25 +450,19 @@ function handleCreateNewQuery() {
   <div class="container py-6 space-y-6">
     <div class="flex justify-between items-center">
       <h1 class="text-2xl font-bold tracking-tight">Collections</h1>
-      <Button @click="handleCreateNewQuery">
+      <Button v-if="canManageCollections" @click="handleCreateNewQuery">
         <Plus class="mr-2 h-4 w-4" />
         Add to Collection
       </Button>
     </div>
 
     <!-- Error Alert -->
-    <div
-      v-if="urlError"
-      class="bg-destructive/15 text-destructive px-4 py-2 rounded-md mb-2 flex items-center"
-    >
+    <div v-if="urlError" class="bg-destructive/15 text-destructive px-4 py-2 rounded-md mb-2 flex items-center">
       <span class="text-sm">{{ urlError }}</span>
     </div>
 
     <!-- Show loading state -->
-    <div
-      v-if="showLoadingState"
-      class="flex flex-col items-center justify-center h-[calc(100vh-12rem)] gap-4"
-    >
+    <div v-if="showLoadingState" class="flex flex-col items-center justify-center h-[calc(100vh-12rem)] gap-4">
       <div class="space-y-4 p-4 animate-pulse">
         <div class="flex space-x-2">
           <Skeleton class="h-4 w-32" />
@@ -454,26 +480,17 @@ function handleCreateNewQuery() {
       <div class="border-b pb-3 mb-2">
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-2 text-sm">
-            <Select
-              :model-value="
-                teamsStore.currentTeamId
-                  ? teamsStore.currentTeamId.toString()
-                  : ''
-              "
-              @update:model-value="handleTeamChange"
-              class="h-8 min-w-[160px]"
-            >
+            <Select :model-value="teamsStore.currentTeamId
+              ? teamsStore.currentTeamId.toString()
+              : ''
+              " @update:model-value="handleTeamChange" class="h-8 min-w-[160px]">
               <SelectTrigger>
                 <SelectValue placeholder="Select a team">{{
                   selectedTeamName
-                }}</SelectValue>
+                  }}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem
-                  v-for="team in teamsStore.teams"
-                  :key="team.id"
-                  :value="team.id.toString()"
-                >
+                <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id.toString()">
                   {{ team.name }}
                 </SelectItem>
               </SelectContent>
@@ -512,16 +529,10 @@ function handleCreateNewQuery() {
           <div class="flex items-center space-x-4 text-sm">
             <div class="flex flex-col space-y-1.5">
               <label class="text-sm font-medium leading-none">Team</label>
-              <Select
-                :model-value="
-                  teamsStore.currentTeamId
-                    ? teamsStore.currentTeamId.toString()
-                    : ''
-                "
-                @update:model-value="handleTeamChange"
-                class="h-8 min-w-[160px]"
-                :disabled="isChangingTeam"
-              >
+              <Select :model-value="teamsStore.currentTeamId
+                ? teamsStore.currentTeamId.toString()
+                : ''
+                " @update:model-value="handleTeamChange" class="h-8 min-w-[160px]" :disabled="isChangingTeam">
                 <SelectTrigger>
                   <SelectValue placeholder="Select a team">
                     <span v-if="isChangingTeam">Loading...</span>
@@ -529,11 +540,7 @@ function handleCreateNewQuery() {
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem
-                    v-for="team in teamsStore.teams"
-                    :key="team.id"
-                    :value="team.id.toString()"
-                  >
+                  <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id.toString()">
                     {{ team.name }}
                   </SelectItem>
                 </SelectContent>
@@ -544,16 +551,10 @@ function handleCreateNewQuery() {
 
             <div class="flex flex-col space-y-1.5">
               <label class="text-sm font-medium leading-none">Source</label>
-              <Select
-                :model-value="selectedSourceId"
-                @update:model-value="handleSourceChange"
-                :disabled="
-                  isChangingSource ||
-                  !teamsStore.currentTeamId ||
-                  (sourcesStore.teamSources || []).length === 0
-                "
-                class="h-8 min-w-[200px]"
-              >
+              <Select :model-value="selectedSourceId" @update:model-value="handleSourceChange" :disabled="isChangingSource ||
+                !teamsStore.currentTeamId ||
+                (sourcesStore.teamSources || []).length === 0
+                " class="h-8 min-w-[200px]">
                 <SelectTrigger>
                   <SelectValue placeholder="Select a source">
                     <span v-if="isChangingSource">Loading...</span>
@@ -561,11 +562,8 @@ function handleCreateNewQuery() {
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem
-                    v-for="source in sourcesStore.teamSources || []"
-                    :key="source.id"
-                    :value="String(source.id)"
-                  >
+                  <SelectItem v-for="source in sourcesStore.teamSources || []" :key="source.id"
+                    :value="String(source.id)">
                     {{ formatSourceName(source) }}
                   </SelectItem>
                 </SelectContent>
@@ -578,22 +576,10 @@ function handleCreateNewQuery() {
       <!-- Search box -->
       <div class="my-4">
         <div class="relative">
-          <Search
-            class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground"
-          />
-          <Input
-            v-model="searchQuery"
-            type="search"
-            placeholder="Search collection by name or description..."
-            class="pl-8"
-          />
-          <Button
-            v-if="searchQuery"
-            variant="outline"
-            size="sm"
-            class="absolute right-2 top-1.5"
-            @click="clearSearch"
-          >
+          <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input v-model="searchQuery" type="search" placeholder="Search collection by name or description..."
+            class="pl-8" />
+          <Button v-if="searchQuery" variant="outline" size="sm" class="absolute right-2 top-1.5" @click="clearSearch">
             Clear
           </Button>
         </div>
@@ -606,10 +592,7 @@ function handleCreateNewQuery() {
       </div>
 
       <!-- Empty state - no queries -->
-      <div
-        v-else-if="!hasQueries"
-        class="flex flex-col justify-center items-center py-12 space-y-4"
-      >
+      <div v-else-if="!hasQueries" class="flex flex-col justify-center items-center py-12 space-y-4">
         <div class="rounded-full bg-muted p-3">
           <Search class="h-6 w-6 text-muted-foreground" />
         </div>
@@ -619,7 +602,7 @@ function handleCreateNewQuery() {
           <Button v-if="searchQuery" variant="outline" @click="clearSearch">
             Clear Search
           </Button>
-          <Button v-else @click="handleCreateNewQuery">
+          <Button v-if="canManageCollections && !searchQuery" @click="handleCreateNewQuery">
             Add to Collection
           </Button>
         </div>
@@ -640,40 +623,33 @@ function handleCreateNewQuery() {
               <TableHead class="w-[100px] font-sans">Type</TableHead>
               <TableHead class="w-[150px] font-sans">Created</TableHead>
               <TableHead class="w-[150px] font-sans">Updated</TableHead>
-              <TableHead class="w-[100px] text-right font-sans"
-                >Actions</TableHead
-              >
+              <TableHead class="w-[100px] text-right font-sans">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             <TableRow v-for="query in filteredQueries" :key="query.id">
               <TableCell class="font-medium font-sans">
-                <a
-                  @click.prevent="openQuery(query)"
-                  :href="getQueryUrl(query)"
-                  class="text-primary hover:underline cursor-pointer"
-                >
+                <a @click.prevent="openQuery(query)" :href="getQueryUrl(query)"
+                  class="text-primary hover:underline cursor-pointer">
                   {{ query.name }}
                 </a>
               </TableCell>
               <TableCell>{{ query.description || "-" }}</TableCell>
               <TableCell>
-                <Badge
-                  :class="[
-                    'px-2.5 py-0.5 text-xs font-medium rounded-full',
-                    query.query_type === 'logchefql'
-                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                      : query.query_type === 'sql'
+                <Badge :class="[
+                  'px-2.5 py-0.5 text-xs font-medium rounded-full',
+                  query.query_type === 'logchefql'
+                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                    : query.query_type === 'sql'
                       ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
                       : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-                  ]"
-                >
+                ]">
                   {{
                     query.query_type === "logchefql"
                       ? "Search"
                       : query.query_type === "sql"
-                      ? "SQL"
-                      : query.query_type
+                        ? "SQL"
+                        : query.query_type
                   }}
                 </Badge>
               </TableCell>
@@ -691,14 +667,12 @@ function handleCreateNewQuery() {
                       <Eye class="mr-2 h-4 w-4" />
                       Open
                     </DropdownMenuItem>
-                    <DropdownMenuItem @click="editQuery(query)">
+                    <DropdownMenuItem v-if="canManageCollections" @click="editQuery(query)">
                       <Pencil class="mr-2 h-4 w-4" />
                       Edit
                     </DropdownMenuItem>
-                    <DropdownMenuItem
-                      @click="handleDeleteQuery(query)"
-                      class="text-destructive"
-                    >
+                    <DropdownMenuItem v-if="canManageCollections" @click="handleDeleteQuery(query)"
+                      class="text-destructive">
                       <Trash2 class="mr-2 h-4 w-4" />
                       Delete
                     </DropdownMenuItem>
@@ -711,14 +685,8 @@ function handleCreateNewQuery() {
       </div>
 
       <!-- Edit query modal -->
-      <SaveQueryModal
-        v-if="showSaveQueryModal && editingQuery"
-        :is-open="showSaveQueryModal"
-        :initial-data="editingQuery"
-        :is-edit-mode="true"
-        @close="showSaveQueryModal = false"
-        @save="handleSaveQuery"
-      />
+      <SaveQueryModal v-if="showSaveQueryModal && editingQuery" :is-open="showSaveQueryModal"
+        :initial-data="editingQuery" :is-edit-mode="true" @close="showSaveQueryModal = false" @save="handleSaveQuery" />
     </div>
   </div>
 </template>

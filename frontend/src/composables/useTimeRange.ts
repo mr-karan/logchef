@@ -57,17 +57,17 @@ export function useTimeRange() {
       return exploreStore.timeRange;
     },
     set(value) {
-      // Set the time range in the store
-      exploreStore.setTimeRange(value);
-      
-      // Clear any previously set relative time
-      if (exploreStore.selectedRelativeTime) {
-        exploreStore.setRelativeTimeRange(null);
+      // Handle null value properly - only set if there's an actual value
+      if (value) {
+        // Set the time range in the store using setTimeConfiguration
+        exploreStore.setTimeConfiguration({
+          absoluteRange: value
+        });
       }
-      
-      // Time range changes should always trigger a dirty state
-      // Note: The dirty state calculation in isDirty will handle this automatically
-      // by comparing the new time range with the lastExecutedState
+
+      // Note: setTimeConfiguration will automatically clear selectedRelativeTime
+      // when setting an absolute time range, so we don't need to explicitly
+      // call setRelativeTimeRange(null)
     }
   });
 
@@ -123,8 +123,10 @@ export function useTimeRange() {
       const end = toCalendarDateTime(fromDate(range.end, getLocalTimeZone()));
 
       // Update the store's time range using the appropriate action
-      // Use setTimeRange as this is an absolute range selection
-      timeRange.value = { start, end };
+      // Use setTimeConfiguration as this is an absolute range selection
+      exploreStore.setTimeConfiguration({
+        absoluteRange: { start, end }
+      });
 
       return true;
     } catch (e) {

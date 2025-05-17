@@ -86,6 +86,7 @@ export function analyzeQuery(query: string): {
     endTime: string;
     timezone?: string;
     isTimezoneAware: boolean;
+    format: 'toDateTime-between' | 'now-interval' | 'other';
   };
 } | null {
   try {
@@ -115,18 +116,28 @@ export function analyzeQuery(query: string): {
       queryLower.includes('timestamp') ||
       queryLower.includes('datetime') ||
       queryLower.includes('date') ||
-      queryLower.includes('time');
+      queryLower.includes('time') ||
+      queryLower.includes('now(') ||
+      queryLower.includes('today(');
 
     // Enhanced time range detection
     let timeRangeInfo = undefined;
 
-    // Pattern to detect: Standard time range pattern - WHERE `timestamp` BETWEEN toDateTime('...') AND toDateTime('...')
+    // Pattern 1: Standard time range pattern - WHERE `timestamp` BETWEEN toDateTime('...') AND toDateTime('...')
     const basicTimePattern = /WHERE\s+`?(\w+)`?\s+BETWEEN\s+toDateTime\(['"](.+?)[']\)(.*?)AND\s+toDateTime\(['"](.+?)[']\)(.*?)(\s|$)/i;
     const basicTimeMatch = query.match(basicTimePattern);
 
-    // Pattern to detect: Timezone-aware time range - WHERE `timestamp` BETWEEN toDateTime('...', 'Timezone') AND toDateTime('...', 'Timezone')
+    // Pattern 2: Timezone-aware time range - WHERE `timestamp` BETWEEN toDateTime('...', 'Timezone') AND toDateTime('...', 'Timezone')
     const tzTimePattern = /WHERE\s+`?(\w+)`?\s+BETWEEN\s+toDateTime\(['"](.+?)['"],\s*['"]([^'"]+)['"]\)(.*?)AND\s+toDateTime\(['"](.+?)['"],\s*['"]([^'"]+)['"]\)(.*?)(\s|$)/i;
     const tzTimeMatch = query.match(tzTimePattern);
+
+    // Pattern 3: Time range using now() with interval - WHERE timestamp >= now() - INTERVAL N HOUR/DAY/etc.
+    const nowIntervalPattern = /WHERE\s+`?(\w+)`?\s*(?:>=|<=|>|<)\s*now\(\s*(?:['"]([^'"]+)['"]\s*)?\)\s*(?:-|\+)\s*INTERVAL\s+(\d+)\s+(\w+)/i;
+    const nowIntervalMatch = query.match(nowIntervalPattern);
+
+    // Pattern 4: More complex time conditions - check for timestamp with multiple conditions
+    const timestampFieldsWithConditions = /WHERE.*?`?(\w+(?:timestamp|time|date)\w*)`?\s*(?:>=|<=|>|<|=|BETWEEN|IN)/i;
+    const timestampFieldMatch = query.match(timestampFieldsWithConditions);
 
     if (tzTimeMatch) {
       // Extract from timezone-aware pattern
@@ -135,7 +146,8 @@ export function analyzeQuery(query: string): {
         startTime: tzTimeMatch[2],
         endTime: tzTimeMatch[5],
         timezone: tzTimeMatch[3], // Extract the timezone
-        isTimezoneAware: true
+        isTimezoneAware: true,
+        format: 'toDateTime-between' as const
       };
     } else if (basicTimeMatch) {
       // Extract from basic pattern
@@ -143,7 +155,27 @@ export function analyzeQuery(query: string): {
         field: basicTimeMatch[1],
         startTime: basicTimeMatch[2],
         endTime: basicTimeMatch[4],
-        isTimezoneAware: false
+        isTimezoneAware: false,
+        format: 'toDateTime-between' as const
+      };
+    } else if (nowIntervalMatch) {
+      // now() with interval pattern
+      timeRangeInfo = {
+        field: nowIntervalMatch[1],
+        startTime: `now() - INTERVAL ${nowIntervalMatch[3]} ${nowIntervalMatch[4]}`,
+        endTime: 'now()',
+        timezone: nowIntervalMatch[2], // May be undefined
+        isTimezoneAware: !!nowIntervalMatch[2],
+        format: 'now-interval' as const
+      };
+    } else if (timestampFieldMatch) {
+      // Generic timestamp field with some condition
+      timeRangeInfo = {
+        field: timestampFieldMatch[1],
+        startTime: 'custom',
+        endTime: 'custom',
+        isTimezoneAware: false,
+        format: 'other' as const
       };
     }
 

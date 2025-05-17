@@ -34,6 +34,9 @@ const (
 	// TeamRoleAdmin represents a team admin
 	TeamRoleAdmin TeamRole = "admin"
 
+	// TeamRoleEditor represents a team editor with collection management permissions
+	TeamRoleEditor TeamRole = "editor"
+
 	// TeamRoleMember represents a regular team member
 	TeamRoleMember TeamRole = "member"
 )
@@ -90,6 +93,17 @@ type TeamMember struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 	Email     string    `db:"email" json:"email,omitempty"`
 	FullName  string    `db:"full_name" json:"full_name,omitempty"`
+}
+
+// UserTeamDetails represents the details of a team a user is part of, including their role.
+type UserTeamDetails struct {
+	ID          TeamID    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	MemberCount int       `json:"member_count"`
+	Role        TeamRole  `json:"role"`
 }
 
 // TeamQuery represents a saved query in a team

@@ -1,13 +1,17 @@
-import { ref, computed } from 'vue'
+import { ref, computed, type Ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useExploreStore } from '@/stores/explore'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
+import { useAuthStore } from '@/stores/auth';
+import { useTeamsStore } from '@/stores/teams'; // Corrected path
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { getErrorMessage } from '@/api/types'
 import type { SaveQueryFormData } from '@/views/explore/types'
 import type { SavedTeamQuery } from '@/api/savedQueries'
+import type { TeamMember } from '@/api/teams'; // Import TeamMember type
 import { CalendarDateTime, getLocalTimeZone, type DateValue } from '@internationalized/date'
+import type { Source } from "@/api/sources";
 
 // Add this helper function before the useSavedQueries function definition
 function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): number | null {
@@ -22,38 +26,81 @@ function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): nu
   }
 }
 
-export function useSavedQueries() {
+export function useSavedQueries(
+  queries?: Ref<SavedTeamQuery[] | undefined>,
+  currentSource?: Ref<Source | undefined>
+) {
+  // Create a local queries ref if none is provided
+  const localQueries = ref<SavedTeamQuery[]>([]);
+  // Use provided queries ref or fall back to local one
+  const queriesRef = queries || localQueries;
   const router = useRouter()
   const route = useRoute()
   const exploreStore = useExploreStore()
   const savedQueriesStore = useSavedQueriesStore()
+  const authStore = useAuthStore();
+  const teamsStore = useTeamsStore();
   const { toast } = useToast()
 
   const showSaveQueryModal = ref(false)
   const editingQuery = ref<SavedTeamQuery | null>(null)
   const isLoading = ref(false)
   const isLoadingQueryDetails = ref(false)
-  const queries = ref<SavedTeamQuery[]>([])
   const searchQuery = ref('')
 
-  // Computed for filtered queries based on search
-  const filteredQueries = computed(() => {
-    if (!searchQuery.value.trim()) {
-      return queries.value
+  const isEditingExistingQuery = computed(() => !!route.query.collection_id);
+
+  const canManageCollections = computed(() => {
+    if (!authStore.isAuthenticated || !authStore.user) {
+      return false;
+    }
+    // Global admins can always manage collections
+    if (authStore.user.role === "admin") {
+      return true;
     }
 
-    const search = searchQuery.value.toLowerCase()
-    return queries.value.filter(query =>
+    const teamIdParam = route.query.team;
+    if (!teamIdParam) {
+      // If no team context, disallow (or decide default behavior)
+      return false;
+    }
+    const teamId = Number(teamIdParam);
+    if (isNaN(teamId)) {
+      return false;
+    }
+
+    // Use the new getter from teamsStore
+    const userRoleInTeam = teamsStore.getUserRoleInTeam(teamId);
+
+    // Allow if user is team admin or team editor for the current team
+    return userRoleInTeam === "admin" || userRoleInTeam === "editor";
+  });
+
+  // This is the primary computed property for displaying queries after filtering.
+  // It uses queriesRef (which is either the passed in queries or our local fallback)
+  const filteredQueries = computed(() => {
+    if (!searchQuery.value.trim()) {
+      return queriesRef.value;
+    }
+
+    const search = searchQuery.value.toLowerCase();
+    return queriesRef.value?.filter(query =>
       query.name.toLowerCase().includes(search) ||
       (query.description && query.description.toLowerCase().includes(search))
-    )
-  })
+    );
+  });
 
-  // Has queries computed property
-  const hasQueries = computed(() => filteredQueries.value.length > 0)
+  // Has queries computed property, uses the above filteredQueries
+  const hasQueries = computed(() => {
+    // Ensure filteredQueries.value exists before accessing its length
+    return filteredQueries.value ? filteredQueries.value.length > 0 : false;
+  });
 
   // Total query count
-  const totalQueryCount = computed(() => queries.value.length)
+  const totalQueryCount = computed(() => {
+    // Ensure queriesRef.value exists before accessing its length
+    return queriesRef.value ? queriesRef.value.length : 0;
+  });
 
   // Clear search function
   function clearSearch() {
@@ -418,11 +465,11 @@ export function useSavedQueries() {
       console.log("Updating URL with saved query state, including query_id:", queryData.id.toString());
       router.replace({ query: queryParams });
 
-      toast({
-        title: 'Success',
-        description: `Query "${queryData.name}" loaded successfully.`,
-        duration: TOAST_DURATION.SUCCESS
-      })
+      // toast({
+      //   title: 'Success',
+      //   description: `Query "${queryData.name}" loaded successfully.`,
+      //   duration: TOAST_DURATION.SUCCESS
+      // })
 
       // Don't call syncUrlFromState() since we're explicitly setting the URL
 
@@ -570,17 +617,17 @@ export function useSavedQueries() {
 
       if (!teamId || !sourceId) {
         console.warn("No team or source ID provided for loading queries")
-        queries.value = []
+        queriesRef.value = []
         return { success: false, error: 'No team or source ID provided' }
       }
 
       const result = await savedQueriesStore.fetchTeamSourceQueries(teamId, sourceId)
 
       if (result.success) {
-        queries.value = result.data ?? []
+        queriesRef.value = result.data ?? []
         return { success: true, data: result.data }
       } else {
-        queries.value = []
+        queriesRef.value = []
         if (result.error) {
           toast({
             title: 'Error',
@@ -592,7 +639,7 @@ export function useSavedQueries() {
         return { success: false, error: result.error }
       }
     } catch (error) {
-      queries.value = []
+      queriesRef.value = []
       toast({
         title: 'Error',
         description: getErrorMessage(error),
@@ -666,11 +713,6 @@ export function useSavedQueries() {
      // We might need to add one if `fetchTeamSourceQueries` returning a list is inefficient.
   }
 
-  // Check if the current query is being edited (has query_id in URL)
-  const isEditingExistingQuery = computed(() => {
-    return !!route.query.query_id
-  })
-
   // Function to update an existing query
   async function updateSavedQuery(
     teamId: number,
@@ -726,12 +768,13 @@ export function useSavedQueries() {
     editingQuery,
     isLoading,
     isLoadingQueryDetails,
-    queries,
+    queries: queriesRef, // Return the queriesRef instead of direct parameter
     filteredQueries,
     hasQueries,
     totalQueryCount,
     searchQuery,
     isEditingExistingQuery,
+    canManageCollections,
 
     // Functions
     handleSaveQueryClick,

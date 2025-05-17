@@ -30,6 +30,10 @@ export function useExploreUrlSync() {
   // Add a last initialization timestamp to prevent rapid re-initialization
   let lastInitTimestamp = 0;
 
+  // Add a debounced sync flag to avoid syncing during typing
+  const syncPending = ref(false);
+  let syncDebounceTimer: number | null = null;
+
   // --- Internal Helper Functions ---
 
   function parseTimestamp(value: string | null | undefined): number | null {
@@ -62,9 +66,8 @@ export function useExploreUrlSync() {
   function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): number | null {
     if (!dateTime) return null;
     try {
-      // Convert any DateValue to JS Date object using the local timezone
-      const date = dateTime.toDate(getLocalTimeZone());
-      return date.getTime();
+      // Convert any DateValue to timestamp by converting to ISO string and parsing
+      return new Date(dateTime.toString()).getTime();
     } catch (e) {
       console.error("Error converting DateValue to timestamp:", e);
       return null;
@@ -75,16 +78,14 @@ export function useExploreUrlSync() {
   function isCorrectSourceDetail(details: any, expectedId: number): boolean {
     if (!details) return false;
     if (typeof details !== 'object') return false;
-    // @ts-ignore - This is a runtime check
     if (!('id' in details)) return false;
-    // @ts-ignore - We've already checked that id exists
     return details.id === expectedId;
   }
 
   // --- Initialization Logic ---
 
   async function initializeFromUrl() {
-    // Prevent multiple initializations within 500ms of each other (reduced from 1000ms)
+    // Prevent multiple initializations within 500ms of each other
     const now = Date.now();
     if (now - lastInitTimestamp < 500) {
       console.log("useExploreUrlSync: Skipping initialization - too soon after previous init");
@@ -95,7 +96,7 @@ export function useExploreUrlSync() {
     isInitializing.value = true;
     initializationError.value = null;
 
-    // Check immediately if we have a relativeTime parameter in the URL
+    // Check immediately if we have a relative time parameter in the URL
     const hasRelativeTimeParam = !!route.query.relativeTime;
     if (hasRelativeTimeParam) {
       // Set a flag to make all URL sync operations more cautious
@@ -120,9 +121,6 @@ export function useExploreUrlSync() {
         // Exit early but don't throw - allow the component to handle this state
         return;
       }
-
-      // Check if we have a query_id in the URL, which indicates we're editing a saved query
-      const queryId = route.query.query_id as string | undefined;
 
       // 2. Set Team from URL or default
       let teamId: number | null = null;
@@ -163,25 +161,24 @@ export function useExploreUrlSync() {
       if (!sourceId && sourcesStore.teamSources.length > 0) {
         sourceId = sourcesStore.teamSources[0].id; // Default to first source
       }
-      
+
       let didTriggerSourceDetailsLoad = false;
-      
+
       // Set source ID and potentially load details
       if (sourceId) {
          // Check if this would be a source change
          const isSourceChange = exploreStore.sourceId !== sourceId;
-         
+
          if (isSourceChange) {
-            // Clear any previous source data since this is a new source
-            console.log(`useExploreUrlSync: Changing source ID from ${exploreStore.sourceId} to ${sourceId}`);
+            // Use the centralized action from the store
             exploreStore.setSource(sourceId);
-            
-            // For initialization, we should load source details here to prevent race conditions
+
+            // For initialization, pre-load source details to prevent race conditions
             try {
               console.log(`useExploreUrlSync: Pre-loading source details for ID ${sourceId}`);
               await sourcesStore.loadSourceDetails(sourceId);
               didTriggerSourceDetailsLoad = true;
-              
+
               // Check if details loaded
               console.log(`useExploreUrlSync: Checking if source details are loaded for ID ${sourceId}`);
               if (!sourcesStore.currentSourceDetails) {
@@ -204,78 +201,17 @@ export function useExploreUrlSync() {
          initializationError.value = `No sources available for team ${teamId}.`;
       }
 
-      // 5. Set Limit from URL or default
-      const urlLimitStr = route.query.limit as string | undefined;
-      const limit = urlLimitStr ? parseInt(urlLimitStr) : 100;
-      exploreStore.setLimit(!isNaN(limit) && limit > 0 && limit <= 10000 ? limit : 100);
-
-      // 6. Time range - SIMPLIFIED PRIORITY:
-      // First check for relative time (this takes precedence)
-      const relativeTime = route.query.relativeTime as string | undefined;
-      if (relativeTime) {
-        // Set relative time - this will also calculate and set the absolute time range
-        exploreStore.setRelativeTimeRange(relativeTime);
-        // Make a note that we're preserving a relative time
-        console.log(`Initializing with relative time: ${relativeTime}`);
-        preservingRelativeTime = true;
-      }
-      // Only use absolute times if no relative time is specified
-      else {
-        const urlStartTime = parseTimestamp(route.query.start_time as string | undefined);
-        const urlEndTime = parseTimestamp(route.query.end_time as string | undefined);
-
-        // If we have valid timestamps, use them
-        if (urlStartTime !== null && urlEndTime !== null) {
-          const parsedStart = timestampToCalendarDateTime(urlStartTime);
-          const parsedEnd = timestampToCalendarDateTime(urlEndTime);
-
-          if (parsedStart && parsedEnd) {
-            exploreStore.setTimeRange({ start: parsedStart, end: parsedEnd });
-          } else {
-            // Fall back to default range if timestamp parsing fails
-            setDefaultTimeRange();
-          }
-        } else {
-          // No times in URL, use default
-          setDefaultTimeRange();
-        }
-      }
-
-      // 7. Set Mode from URL or default
-      const urlMode = route.query.mode as string | undefined;
-      const mode = (urlMode === 'sql' ? 'sql' : 'logchefql') as 'logchefql' | 'sql';
-      exploreStore.setActiveMode(mode);
-
-      // 8. Set Query Content from URL
-      const urlQuery = route.query.q as string | undefined;
-      let queryContent = "";
-
-      if (urlQuery) {
-        try {
-          // Safely decode the URL parameter, handling double-encoded characters
-          queryContent = decodeURIComponent(urlQuery);
-        } catch (decodeError) {
-          // If decoding fails, use the raw value
-          console.error("Error decoding URL query parameter:", decodeError);
-          queryContent = urlQuery;
-        }
-      }
-
-      if (mode === 'logchefql') {
-        exploreStore.setLogchefqlCode(queryContent);
-        exploreStore.setRawSql(""); // Clear other mode
-      } else {
-        exploreStore.setRawSql(queryContent);
-        exploreStore.setLogchefqlCode(""); // Clear other mode
-      }
+      // Now let's delegate to the store's initializeFromUrl method
+      // to handle all the other parameters in a centralized way
+      exploreStore.initializeFromUrl(route.query as Record<string, string | undefined>);
 
       // If we changed source but haven't loaded details yet, add a small delay to allow the details to load
       if (sourceId && !didTriggerSourceDetailsLoad && !sourcesStore.currentSourceDetails) {
         console.log(`useExploreUrlSync: Waiting for source details to load for ID ${sourceId}`);
-        
+
         // Wait a bit for any in-flight source detail requests to complete
         await new Promise(resolve => setTimeout(resolve, 100));
-        
+
         // Check if details loaded
         console.log(`useExploreUrlSync: Checking if source details are loaded for ID ${sourceId}`);
         if (!sourcesStore.currentSourceDetails) {
@@ -310,19 +246,12 @@ export function useExploreUrlSync() {
           console.log('Preserving relative time parameter in URL - no auto sync');
 
           // Keep the preservation mode active for a bit longer
-          // (This timeout is for the preservation flag, not for isInitializing)
           setTimeout(() => {
             preservingRelativeTime = false;
             console.log('Relative time preservation mode deactivated');
-          }, 2000); // Increase timeout to ensure initial query completes first
+          }, 2000); // Ensure initial query completes first
       }
     }
-  }
-
-  // Helper function to set default time range (last 15 minutes)
-  function setDefaultTimeRange() {
-    // Use relative time format instead of absolute timestamps
-    exploreStore.setRelativeTimeRange('15m');
   }
 
   // --- URL Update Logic ---
@@ -346,60 +275,11 @@ export function useExploreUrlSync() {
       return;
     }
 
-    const query: Record<string, string> = {};
+    // Use the store's urlQueryParameters computed property
+    const query = exploreStore.urlQueryParameters;
 
-    // Team
-    if (teamsStore.currentTeamId) {
-      query.team = teamsStore.currentTeamId.toString();
-    }
-
-    // Source (only if valid and belongs to current team)
-    if (exploreStore.sourceId > 0 && sourcesStore.teamSources.some(s => s.id === exploreStore.sourceId)) {
-      query.source = exploreStore.sourceId.toString();
-    }
-
-    // Only preserve query_id if store has a selectedQueryId - this respects manual deletion
-    if (exploreStore.selectedQueryId) {
-      query.query_id = exploreStore.selectedQueryId;
-    }
-
-    // Limit
-    query.limit = exploreStore.limit.toString();
-
-    // Time handling - prioritize relative time if available
-    if (exploreStore.selectedRelativeTime) {
-      query.relativeTime = exploreStore.selectedRelativeTime;
-
-      // Remove any absolute time params to avoid confusion
-      delete query.start_time;
-      delete query.end_time;
-    } else {
-      // Only use absolute times if no relative time is available
-      const startTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.start);
-      const endTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.end);
-      if (startTime !== null && endTime !== null) {
-        query.start_time = startTime.toString();
-        query.end_time = endTime.toString();
-      }
-
-      // Remove any relative time param to avoid confusion
-      delete query.relativeTime;
-    }
-
-    // Mode
-    query.mode = exploreStore.activeMode;
-
-    // Query Content - prevent double-encoding of URL characters
-    const queryContent = exploreStore.activeMode === 'logchefql'
-      ? exploreStore.logchefqlCode?.trim()
-      : exploreStore.rawSql?.trim();
-    if (queryContent) {
-      // Encode but avoid double-encoding special characters
-      // First decode the content in case it contains encoded characters
-      const decodedContent = decodeURIComponent(queryContent);
-      // Then safely encode it
-      query.q = encodeURIComponent(decodedContent);
-    }
+    // DO NOT try to handle encoding here - let Vue Router handle it
+    // The URL framework will automatically encode values as needed
 
     // Compare with current URL and update only if changed
     if (JSON.stringify(query) !== JSON.stringify(route.query)) {
@@ -413,7 +293,7 @@ export function useExploreUrlSync() {
     }
   };
 
-  // New method to push a history entry when a query is executed
+  // Push a history entry when a query is executed
   const pushQueryHistoryEntry = () => {
     // Don't push if we are still initializing from the URL
     if (isInitializing.value) {
@@ -423,52 +303,11 @@ export function useExploreUrlSync() {
     // Set the flag to skip the next automatic URL sync
     skipNextUrlSync.value = true;
 
-    // Get the original query parameters
-    const query: Record<string, string> = {};
+    // Use the store's urlQueryParameters computed property
+    const query = exploreStore.urlQueryParameters;
 
-    // Include the same parameters as syncUrlFromState
-    if (teamsStore.currentTeamId) {
-      query.team = teamsStore.currentTeamId.toString();
-    }
-
-    if (exploreStore.sourceId > 0 && sourcesStore.teamSources.some(s => s.id === exploreStore.sourceId)) {
-      query.source = exploreStore.sourceId.toString();
-    }
-
-    if (exploreStore.selectedQueryId) {
-      query.query_id = exploreStore.selectedQueryId;
-    }
-
-    query.limit = exploreStore.limit.toString();
-
-    // Time handling - same logic as syncUrlFromState
-    if (exploreStore.selectedRelativeTime) {
-      query.relativeTime = exploreStore.selectedRelativeTime;
-      // Remove any absolute time params
-      delete query.start_time;
-      delete query.end_time;
-    } else {
-      // Only use absolute times if no relative time is available
-      const startTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.start);
-      const endTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.end);
-      if (startTime !== null && endTime !== null) {
-        query.start_time = startTime.toString();
-        query.end_time = endTime.toString();
-      }
-      // Remove any relative time param
-      delete query.relativeTime;
-    }
-
-    query.mode = exploreStore.activeMode;
-
-    const queryContent = exploreStore.activeMode === 'logchefql'
-      ? exploreStore.logchefqlCode?.trim()
-      : exploreStore.rawSql?.trim();
-    if (queryContent) {
-      // Ensure consistent encoding of query content to avoid double-encoding
-      const decodedContent = decodeURIComponent(queryContent);
-      query.q = encodeURIComponent(decodedContent);
-    }
+    // DO NOT try to handle encoding manually - let Vue Router handle it
+    // The URL framework will automatically encode values as needed
 
     console.log("Push History: Using parameters:", JSON.stringify(query));
 
@@ -483,18 +322,20 @@ export function useExploreUrlSync() {
 
   // --- Watchers ---
 
-  // Watch relevant store state and trigger URL update
+  // Modify the watch function to prevent immediate syncing of query content
   watch(
     [
-      // Watch relevant state properties
+      // Watch relevant state properties through the store
       () => teamsStore.currentTeamId,
       () => exploreStore.sourceId,
       () => exploreStore.limit,
       () => exploreStore.timeRange,
-      () => exploreStore.selectedRelativeTime, // Add watcher for selectedRelativeTime
+      () => exploreStore.selectedRelativeTime,
       () => exploreStore.activeMode,
-      () => exploreStore.logchefqlCode,
-      () => exploreStore.rawSql,
+      // Don't trigger URL updates during typing for these values
+      // We'll handle them separately with manual sync
+      // () => exploreStore.logchefqlCode,
+      // () => exploreStore.rawSql,
     ],
     () => {
       // Avoid syncing during the initial setup phase
@@ -505,7 +346,6 @@ export function useExploreUrlSync() {
       if (skipNextUrlSync.value) {
         return;
       }
-      // Debounce? Consider adding debounce later if updates are too frequent
       syncUrlFromState();
     },
     { deep: true } // Use deep watch for objects like timeRange
@@ -514,7 +354,10 @@ export function useExploreUrlSync() {
   // Watch route changes to re-initialize if necessary (e.g., browser back/forward)
   // Note: This might be too aggressive if other query params change often.
   // Consider making this more specific if needed.
-  watch(() => route.fullPath, (newPath, oldPath) => {
+  watch(() => route?.fullPath, (newPath, oldPath) => {
+      // Skip if route is undefined
+      if (!route) return;
+
       // Only re-initialize if the path itself or the core query params changed significantly
       // Avoid re-init on minor changes if updateUrlFromState handles them.
       // A simple check for now: re-init if path changes.
@@ -524,12 +367,28 @@ export function useExploreUrlSync() {
       }
   });
 
+  // Add a new function to manually sync URL after typing completes
+  function debouncedSyncUrlFromState() {
+    // Cancel any pending timers
+    if (syncDebounceTimer !== null) {
+      clearTimeout(syncDebounceTimer);
+    }
+
+    // Set a new timer to sync after a delay
+    syncDebounceTimer = window.setTimeout(() => {
+      if (!isInitializing.value && !skipNextUrlSync.value) {
+        syncUrlFromState();
+      }
+      syncDebounceTimer = null;
+    }, 750); // Delay of 750ms after typing stops
+  }
 
   return {
     isInitializing,
     initializationError,
     initializeFromUrl,
     syncUrlFromState,
+    debouncedSyncUrlFromState,
     pushQueryHistoryEntry,
   };
 }

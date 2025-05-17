@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/sqlite"
@@ -102,12 +101,10 @@ func GetSourceSchema(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manage
 // HistogramParams defines parameters specifically for histogram queries.
 // Keeping it separate allows for specific validation or processing.
 type HistogramParams struct {
-	StartTime time.Time
-	EndTime   time.Time
-	Window    string // e.g., "1m", "5m", "1h"
-	Query     string // Optional filter query (WHERE clause part)
-	GroupBy   string // Optional field to group by
-	Timezone  string // Optional timezone identifier (e.g., 'America/New_York', 'UTC')
+	Window   string // e.g., "1m", "5m", "1h"
+	Query    string // Optional filter query (WHERE clause part)
+	GroupBy  string // Optional field to group by
+	Timezone string // Optional timezone identifier (e.g., 'America/New_York', 'UTC')
 }
 
 // HistogramResponse structures the response for histogram data.
@@ -134,13 +131,17 @@ func GetHistogramData(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manag
 		return nil, fmt.Errorf("source %d does not have a timestamp field configured, cannot generate histogram", sourceID)
 	}
 
+	// Add validation for the query parameter
+	if params.Query == "" {
+		log.Error("histogram query attempted without a query", "source_id", sourceID)
+		return nil, fmt.Errorf("query parameter is required for histogram data")
+	}
+
 	log.Debug("getting histogram data",
 		"source_id", sourceID,
 		"database", source.Connection.Database,
 		"table", source.Connection.TableName,
 		"ts_field", source.MetaTSField,
-		"start_time", params.StartTime,
-		"end_time", params.EndTime,
 		"window", params.Window,
 		"filter_query_len", len(params.Query),
 		"group_by", params.GroupBy,
@@ -201,12 +202,10 @@ func GetHistogramData(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manag
 	}
 
 	chParams := clickhouse.HistogramParams{
-		StartTime: params.StartTime,
-		EndTime:   params.EndTime,
-		Window:    chWindow,
-		Query:     params.Query,    // Pass the optional filter query
-		GroupBy:   params.GroupBy,  // Pass the optional group by field
-		Timezone:  params.Timezone, // Pass the optional timezone identifier
+		Window:   chWindow,
+		Query:    params.Query,    // Pass the optional filter query
+		GroupBy:  params.GroupBy,  // Pass the optional group by field
+		Timezone: params.Timezone, // Pass the optional timezone identifier
 	}
 
 	// 4. Call the ClickHouse client method

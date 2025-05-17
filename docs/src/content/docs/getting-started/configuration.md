@@ -87,23 +87,70 @@ Configure application logging:
 level = "info"
 ```
 
+## AI SQL Generation (OpenAI)
+
+Configure settings for the AI-powered SQL generation feature using OpenAI.
+
+```toml
+[ai]
+# Enable or disable AI features (default: false)
+enabled = true
+
+# --- API Endpoint Configuration ---
+# Optional: Base URL for the OpenAI API compatible endpoint.
+# Useful for proxying or using services like Azure OpenAI, OpenRouter.
+# (default: uses the standard OpenAI API endpoint)
+# base_url = "https://your-proxy.com/v1"
+
+# OpenAI API Key. Required if AI features are enabled.
+# Can also be set via LOGCHEF_AI__API_KEY environment variable.
+api_key = "sk-your_openai_api_key"
+
+# --- Model Parameters ---
+# Model to use for SQL generation (default: "gpt-4o")
+# Examples: "gpt-4o", "gpt-3.5-turbo"
+model = "gpt-4o"
+
+# Maximum number of tokens to generate in the SQL query (default: 1024)
+max_tokens = 1024
+
+# Temperature for generation (0.0-1.0). Lower is more deterministic (default: 0.1)
+temperature = 0.1
+```
+
 ## Environment Variables
 
-All configuration options can also be set using environment variables. The format is:
-`LOGCHEF_SECTION_KEY=value`
+All configuration options set in the TOML file can be overridden or supplied via environment variables. This is particularly useful for sensitive information like API keys or for containerized deployments.
 
-Examples:
+Environment variables are prefixed with `LOGCHEF_`. For nested keys in the TOML structure, use a double underscore `__` to represent the nesting.
 
-```bash
-# Set server port
-LOGCHEF_SERVER_PORT=8125
+**Format:** `LOGCHEF_SECTION__KEY=value`
 
-# Set OIDC provider URL
-LOGCHEF_OIDC_PROVIDER_URL=http://dex:5556/dex
+**Examples:**
 
-# Set admin emails
-LOGCHEF_AUTH_ADMIN_EMAILS=admin@example.com,another@example.com
-```
+- Set server port:
+  ```bash
+  export LOGCHEF_SERVER__PORT=8125
+  ```
+- Set OIDC provider URL:
+  ```bash
+  export LOGCHEF_OIDC__PROVIDER_URL="http://dex.example.com/dex"
+  ```
+- Set admin emails (comma-separated for arrays):
+  ```bash
+  export LOGCHEF_AUTH__ADMIN_EMAILS="admin@example.com,ops@example.com"
+  ```
+- Set AI API Key:
+  ```bash
+  export LOGCHEF_AI__API_KEY="sk-your_actual_api_key_here"
+  ```
+- Enable AI features and set the model:
+  ```bash
+  export LOGCHEF_AI__ENABLED=true
+  export LOGCHEF_AI__MODEL="gpt-4o"
+  ```
+
+Environment variables take precedence over values defined in the TOML configuration file.
 
 ## Production Configuration
 
@@ -115,6 +162,7 @@ For production deployments, ensure you:
 4. Configure admin emails for initial access
 5. Adjust session duration based on your security requirements
 6. Set logging level to "info" or "warn"
+7. If using AI features, ensure `LOGCHEF_AI__API_KEY` is set securely.
 
 ## Example Production Configuration
 
@@ -140,4 +188,17 @@ max_concurrent_sessions = 1
 
 [logging]
 level = "info"
+
+# Example for AI features in production (API key should be set via env var)
+[ai]
+enabled = true
+
+# --- API Endpoint Configuration ---
+# base_url = ""
+# api_key = "" # Prefer LOGCHEF_AI__API_KEY for sensitive data
+
+# --- Model Parameters ---
+model = "gpt-4o"
+max_tokens = 1024
+temperature = 0.1
 ```

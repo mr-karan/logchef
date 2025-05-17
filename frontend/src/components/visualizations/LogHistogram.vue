@@ -1,41 +1,51 @@
 <script setup lang="ts">
 import {
-  ref,
-  onMounted,
-  onBeforeUnmount,
-  watch,
-  computed,
-  nextTick,
-  onActivated,
-  onDeactivated,
+    ref,
+    onMounted,
+    onBeforeUnmount,
+    watch,
+    computed,
+    nextTick,
+    onActivated,
+    onDeactivated,
 } from "vue";
 import { useColorMode } from "@vueuse/core";
-const isMounted = ref(true);
 import { toCalendarDateTime, CalendarDateTime } from "@internationalized/date";
-// Tree-shaking echarts imports
-import { init, use, registerTheme } from "echarts/core"; // Import registerTheme
+import { getLocalTimeZone } from "@internationalized/date";
+import type { DateValue } from "@internationalized/date";
+import { debounce } from "lodash-es";
+
+// Store imports
+import { useExploreStore } from "@/stores/explore";
+import { useSourcesStore } from "@/stores/sources";
+import { useTeamsStore } from "@/stores/teams";
+import { useQuery } from "@/composables/useQuery";
+import { type HistogramData } from "@/services/HistogramService";
+
+// ECharts imports with tree-shaking
+import { init, use, registerTheme } from "echarts/core";
 import type { ECharts } from "echarts/core";
 import { BarChart } from "echarts/charts";
 import {
-  TitleComponent,
-  TooltipComponent,
-  GridComponent,
-  DataZoomComponent,
-  ToolboxComponent,
-  LegendComponent,
+    TitleComponent,
+    TooltipComponent,
+    GridComponent,
+    DataZoomComponent,
+    ToolboxComponent,
+    LegendComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 
-// Register necessary components
+// Register necessary echarts components
 use([
-  BarChart,
-  TitleComponent,
-  TooltipComponent,
-  GridComponent,
-  DataZoomComponent,
-  ToolboxComponent,
-  LegendComponent,
-  CanvasRenderer,
+    BarChart,
+    TitleComponent,
+    TooltipComponent,
+    GridComponent,
+    DataZoomComponent,
+    ToolboxComponent,
+    LegendComponent,
+    CanvasRenderer,
 ]);
 
 // Import the dark theme
@@ -44,1739 +54,1263 @@ import { logchefDarkTheme } from "@/utils/echarts-theme-dark";
 // Register the dark theme only once
 let themeRegistered = false;
 if (!themeRegistered) {
-  registerTheme("logchef-dark", logchefDarkTheme);
-  themeRegistered = true;
-  console.log("LogChef dark theme registered for ECharts.");
+    registerTheme("logchef-dark", logchefDarkTheme);
+    themeRegistered = true;
+    console.log("LogChef dark theme registered for ECharts.");
 }
 
-import { debounce } from "lodash-es";
-import { useExploreStore } from "@/stores/explore";
-import { useSourcesStore } from "@/stores/sources";
-import { useTeamsStore } from "@/stores/teams";
-import { getLocalTimeZone } from "@internationalized/date";
-import type { DateValue } from "@internationalized/date";
-import {
-  HistogramService,
-  type HistogramData,
-} from "@/services/HistogramService";
-import { useQuery } from "@/composables/useQuery";
-
+// Define component props
 interface Props {
-  timeRange?: {
-    start: DateValue | any;
-    end: DateValue | any;
-  };
-  isLoading?: boolean;
-  height?: string;
-  groupBy?: string;
+    timeRange?: {
+        start: DateValue | any;
+        end: DateValue | any;
+    };
+    isLoading?: boolean;
+    height?: string;
+    groupBy?: string | null;
 }
 
 // Define props with defaults
 const props = withDefaults(defineProps<Props>(), {
-  height: "180px",
-  isLoading: false,
-  groupBy: "",
+    height: "180px",
+    isLoading: false,
+    groupBy: null,
 });
 
+// Define emits
 const emit = defineEmits<{
-  (e: "zoom-time-range", range: { start: Date; end: Date }): void;
-  (e: "update:timeRange", range: { start: DateValue; end: DateValue }): void;
+    (e: "zoom-time-range", range: { start: Date; end: Date }): void;
+    (e: "update:timeRange", range: { start: DateValue; end: DateValue }): void;
 }>();
 
 // Component state
+const isMounted = ref(true);
 const chartRef = ref<HTMLElement | null>(null);
 let chart: ECharts | null = null;
-const histogramData = ref<HistogramData[]>([]);
-const isChartLoading = ref(false);
 const initialDataLoaded = ref(false);
 const lastProcessedTimestamp = ref<number | null>(null);
-const currentGroupBy = ref<string>("");
-const currentGranularity = ref<string>(""); // Store the granularity used
-const lastFetchTimestamp = ref<number>(0);
 const pendingFetchTimeoutId = ref<number | null>(null);
-// Add a data loaded flag that remains true even after loading completes
-const hasLoadedData = ref(false);
-// Track fetch requests that are already scheduled to avoid duplicates
 const scheduledFetches = ref<Set<string>>(new Set());
+const hasLoadedData = ref(false);
 
 // Access stores
 const exploreStore = useExploreStore();
 const sourcesStore = useSourcesStore();
 const teamsStore = useTeamsStore();
-
-// Use the same query composable that the main log query uses
-const { logchefQuery, sqlQuery, activeMode, prepareQueryForExecution } =
-  useQuery();
+const { activeMode } = useQuery();
 
 // Theme state
-const colorMode = useColorMode(); // Gets the resolved mode ('light' or 'dark')
+const colorMode = useColorMode();
 
-// Computed properties
+// Computed properties for reactive data
 const hasValidSource = computed(() => sourcesStore.hasValidCurrentSource);
 const currentSourceId = computed(() => exploreStore.sourceId);
 const currentTeamId = computed(() => teamsStore.currentTeamId);
+const histogramData = computed(() => exploreStore.histogramData);
+const isChartLoading = computed(() => props.isLoading || exploreStore.isLoadingHistogram);
+const histogramError = computed(() => exploreStore.histogramError);
+const currentGranularity = computed(() => exploreStore.histogramGranularity || "");
 
 // Window resize handler with debounce
 const windowResizeEventCallback = debounce(async () => {
-  try {
-    await nextTick();
-    chart?.resize();
-  } catch (e) {
-    console.error("Error during chart resize:", e);
-  }
+    try {
+        await nextTick();
+        chart?.resize();
+    } catch (e) {
+        console.error("Error during chart resize:", e);
+    }
 }, 100);
 
 // Define severity-based color mapping for more consistent coloring
 const severityColorMapping: Record<string, string> = {
-  // Error levels
-  error: "#EE6666", // Red
-  err: "#EE6666", // Red
-  fatal: "#CC3333", // Darker Red
-  critical: "#CC3333", // Darker Red
-  crit: "#CC3333", // Darker Red
-  alert: "#CC3333", // Darker Red
-  emerg: "#990000", // Even Darker Red
-  emergency: "#990000", // Even Darker Red
+    // Error levels
+    error: "#EE6666", // Red
+    err: "#EE6666", // Red
+    fatal: "#CC3333", // Darker Red
+    critical: "#CC3333", // Darker Red
+    crit: "#CC3333", // Darker Red
+    alert: "#CC3333", // Darker Red
+    emerg: "#990000", // Even Darker Red
+    emergency: "#990000", // Even Darker Red
 
-  // Warning levels
-  warn: "#FAC858", // Yellow
-  warning: "#FAC858", // Yellow
+    // Warning levels
+    warn: "#FAC858", // Yellow
+    warning: "#FAC858", // Yellow
 
-  // Info levels
-  info: "#5470C6", // Blue
-  information: "#5470C6", // Blue
-  notice: "#73C0DE", // Light Blue
+    // Info levels
+    info: "#5470C6", // Blue
+    information: "#5470C6", // Blue
+    notice: "#73C0DE", // Light Blue
 
-  // Debug levels
-  debug: "#91CC75", // Green
-  trace: "#B5C334", // Olive Green
-  verbose: "#C6E579", // Lime Green
+    // Debug levels
+    debug: "#91CC75", // Green
+    trace: "#B5C334", // Olive Green
+    verbose: "#C6E579", // Lime Green
 
-  // HTTP methods
-  get: "#73C0DE", // Light Blue
-  post: "#91CC75", // Green
-  put: "#FAC858", // Yellow
-  delete: "#EE6666", // Red
-  patch: "#9A60B4", // Purple
-  options: "#6E7074", // Gray
-  head: "#5D9B9B", // Grayish Cyan
+    // HTTP methods
+    get: "#73C0DE", // Light Blue
+    post: "#91CC75", // Green
+    put: "#FAC858", // Yellow
+    delete: "#EE6666", // Red
+    patch: "#9A60B4", // Purple
+    options: "#6E7074", // Gray
+    head: "#5D9B9B", // Grayish Cyan
 
-  // Default/fallback color palette for other values
-  default0: "#5470C6", // Blue
-  default1: "#91CC75", // Green
-  default2: "#FAC858", // Yellow
-  default3: "#EE6666", // Red
-  default4: "#73C0DE", // Light Blue
-  default5: "#FC8452", // Orange
-  default6: "#9A60B4", // Purple
-  default7: "#ea7ccc", // Pink (more muted)
-  default8: "#3BA272", // Darker Green
-  default9: "#27727B", // Teal Blue
-  default10: "#E062AE", // Magenta
-  default11: "#FFB980", // Light Orange
-  default12: "#5D9B9B", // Grayish Cyan
-  default13: "#D48265", // Brownish Orange
-  default14: "#C6E579", // Lime Green (more muted)
-  default15: "#8378EA", // Lavender
+    // Default/fallback color palette for other values
+    default0: "#5470C6", // Blue
+    default1: "#91CC75", // Green
+    default2: "#FAC858", // Yellow
+    default3: "#EE6666", // Red
+    default4: "#73C0DE", // Light Blue
+    default5: "#FC8452", // Orange
+    default6: "#9A60B4", // Purple
+    default7: "#ea7ccc", // Pink (more muted)
+    default8: "#3BA272", // Darker Green
+    default9: "#27727B", // Teal Blue
+    default10: "#E062AE", // Magenta
+    default11: "#FFB980", // Light Orange
+    default12: "#5D9B9B", // Grayish Cyan
+    default13: "#D48265", // Brownish Orange
+    default14: "#C6E579", // Lime Green (more muted)
+    default15: "#8378EA", // Lavender
 };
 
 // Helper function to get color for a group value based on severity level mapping
 const getColorForGroupValue = (value: string): string => {
-  if (!value) return severityColorMapping["default0"];
+    if (!value) return severityColorMapping["default0"];
 
-  // Convert to lowercase for case-insensitive matching
-  const lowerValue = value.toLowerCase();
+    // Convert to lowercase for case-insensitive matching
+    const lowerValue = value.toLowerCase();
 
-  // Check if we have a direct mapping
-  if (severityColorMapping[lowerValue]) {
-    return severityColorMapping[lowerValue];
-  }
-
-  // Check for partial matches in common log level words
-  for (const [key, color] of Object.entries(severityColorMapping)) {
-    // Skip default colors
-    if (key.startsWith("default")) continue;
-
-    // Check if the value contains a known severity word
-    if (lowerValue.includes(key)) {
-      return color;
+    // Check if we have a direct mapping
+    if (severityColorMapping[lowerValue]) {
+        return severityColorMapping[lowerValue];
     }
-  }
 
-  // Calculate a deterministic index for consistent coloring
-  // This ensures the same unknown value always gets the same color
-  let hash = 0;
-  for (let i = 0; i < value.length; i++) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0; // Convert to 32bit integer
-  }
+    // Check for partial matches in common log level words
+    for (const [key, color] of Object.entries(severityColorMapping)) {
+        // Skip default colors
+        if (key.startsWith("default")) continue;
 
-  // Get absolute value and mod with number of default colors
-  const index = Math.abs(hash) % 16;
-  return severityColorMapping[`default${index}`];
+        // Check if the value contains a known severity word
+        if (lowerValue.includes(key)) {
+            return color;
+        }
+    }
+
+    // Calculate a deterministic index for consistent coloring
+    // This ensures the same unknown value always gets the same color
+    let hash = 0;
+    for (let i = 0; i < value.length; i++) {
+        hash = (hash << 5) - hash + value.charCodeAt(i);
+        hash |= 0; // Convert to 32bit integer
+    }
+
+    // Get absolute value and mod with number of default colors
+    const index = Math.abs(hash) % 16;
+    return severityColorMapping[`default${index}`];
 };
+
+// Helper function to update time range and emit events
+function updateTimeRangeForDatePicker(startDate: Date, endDate: Date) {
+    // Convert native Date objects to CalendarDateTime objects
+    const startDateTime = new CalendarDateTime(
+        startDate.getFullYear(),
+        startDate.getMonth() + 1,
+        startDate.getDate(),
+        startDate.getHours(),
+        startDate.getMinutes(),
+        startDate.getSeconds()
+    );
+
+    const endDateTime = new CalendarDateTime(
+        endDate.getFullYear(),
+        endDate.getMonth() + 1,
+        endDate.getDate(),
+        endDate.getHours(),
+        endDate.getMinutes(),
+        endDate.getSeconds()
+    );
+
+    // Emit event with date objects for the parent component
+    emit("zoom-time-range", { start: startDate, end: endDate });
+
+    // Log details for debugging
+    console.log("Emitted updated time range:", {
+        start: startDateTime,
+        end: endDateTime,
+    });
+}
 
 // Convert the histogram data to chart options with Kibana-like styling
 const convertHistogramData = (buckets: HistogramData[]) => {
-  if (!buckets || buckets.length === 0) {
-    return {
-      title: {
-        text: "Log Distribution",
-        left: "center",
-        textStyle: {
-          fontSize: 14,
-          fontWeight: "500",
-        },
-      },
-      backgroundColor: "transparent",
-      grid: {
-        containLabel: true,
-        left: 25,
-        right: 25,
-        bottom: 20,
-        top: 35,
-      },
-      xAxis: {
-        type: "category",
-        data: [],
-        silent: false,
-        splitLine: { show: false },
-        axisLine: {
-          lineStyle: {
-            color:
-              colorMode.value === "dark" ? "#71708A" : "hsl(var(--border))",
-          },
-        },
-        axisTick: {
-          lineStyle: {
-            color:
-              colorMode.value === "dark" ? "#71708A" : "hsl(var(--border))",
-          },
-        },
-      },
-      yAxis: {
-        type: "value",
-        axisLine: { show: false },
-        splitLine: {
-          show: true,
-          lineStyle: {
-            type: "dashed",
-            color:
-              colorMode.value === "dark"
-                ? "rgba(120, 120, 140, 0.3)"
-                : "hsl(var(--border))",
-            opacity: 0.5,
-          },
-        },
-        axisTick: { show: false },
-        axisLabel: {
-          fontSize: 11,
-        },
-      },
-      series: [
-        {
-          type: "bar",
-          data: [],
-          itemStyle: {
-            color: "#5794F2",
-          },
-        },
-      ],
+    if (!buckets || buckets.length === 0) {
+        return {
+            title: {
+                text: "Log Distribution",
+                left: "center",
+                textStyle: {
+                    fontSize: 14,
+                    fontWeight: "500",
+                },
+            },
+            backgroundColor: "transparent",
+            grid: {
+                containLabel: true,
+                left: 25,
+                right: 25,
+                bottom: 20,
+                top: 35,
+            },
+            xAxis: {
+                type: "category",
+                data: [],
+                silent: false,
+                splitLine: { show: false },
+                axisLine: {
+                    lineStyle: {
+                        color:
+                            colorMode.value === "dark" ? "#71708A" : "hsl(var(--border))",
+                    },
+                },
+                axisTick: {
+                    lineStyle: {
+                        color:
+                            colorMode.value === "dark" ? "#71708A" : "hsl(var(--border))",
+                    },
+                },
+            },
+            yAxis: {
+                type: "value",
+                axisLine: { show: false },
+                splitLine: {
+                    show: true,
+                    lineStyle: {
+                        type: "dashed",
+                        color:
+                            colorMode.value === "dark"
+                                ? "rgba(120, 120, 140, 0.3)"
+                                : "hsl(var(--border))",
+                        opacity: 0.5,
+                    },
+                },
+                axisTick: { show: false },
+                axisLabel: {
+                    fontSize: 11,
+                },
+            },
+            series: [
+                {
+                    type: "bar",
+                    data: [],
+                    itemStyle: {
+                        color: "#5794F2",
+                    },
+                },
+            ],
+        };
+    }
+
+    // Check if data is grouped
+    const isGrouped = buckets.some(
+        (item) => item.group_value && item.group_value !== ""
+    );
+
+    // Format data for echart
+    const categoryData: string[] = [];
+    const timestamps: number[] = []; // Store actual timestamps for calculation
+    let seriesData: any[] = [];
+
+    // --- Determine Optimal Date/Time Format ---
+    // Default: HH:MM in 24-hour format
+    let timeFormatOptions: Intl.DateTimeFormatOptions = {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
     };
-  }
-
-  // Check if data is grouped
-  const isGrouped = buckets.some(
-    (item) => item.group_value && item.group_value !== ""
-  );
-
-  // Format data for echart
-  const categoryData: string[] = [];
-  const timestamps: number[] = []; // Store actual timestamps for calculation
-  let seriesData: any[] = [];
-
-  // --- Determine Optimal Date/Time Format ---
-  // Default: HH:MM in 24-hour format
-  let timeFormatOptions: Intl.DateTimeFormatOptions = {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  };
-  const showSeconds = currentGranularity.value.endsWith("s");
-  if (showSeconds) {
-    timeFormatOptions.second = "2-digit"; // Add seconds if granularity requires it (still 24-hour)
-  }
-
-  if (buckets.length > 0) {
-    const firstTimestamp = new Date(buckets[0].bucket).getTime();
-    const lastTimestamp = new Date(
-      buckets[buckets.length - 1].bucket
-    ).getTime();
-    const spanMs = lastTimestamp - firstTimestamp;
-    const spanHours = spanMs / (1000 * 60 * 60);
-
-    const firstDate = new Date(firstTimestamp);
-    const lastDate = new Date(lastTimestamp);
-    const isSameDay = firstDate.toDateString() === lastDate.toDateString();
-
-    // If span is >= 24 hours OR data spans multiple days, include the date
-    if (spanHours >= 24 || !isSameDay) {
-      timeFormatOptions = {
-        month: "numeric", // MM
-        day: "numeric", // DD
-        ...timeFormatOptions, // Include HH:MM or HH:MM:SS
-      };
-      // Optional: Add year if span is very large (e.g., > 365 days)
-      // const spanDays = spanHours / 24;
-      // if (spanDays > 365) {
-      //     timeFormatOptions.year = 'numeric';
-      // }
-    }
-  }
-  // --- End Determine Format ---
-
-  if (isGrouped) {
-    // Group data by bucket and group_value
-    const groupedByBucket: Record<string, Record<string, number>> = {};
-    const uniqueGroups: string[] = [];
-
-    buckets.forEach((item) => {
-      const date = new Date(item.bucket);
-      const bucketKey = date.toISOString(); // Use ISO string as key for consistency
-      if (!groupedByBucket[bucketKey]) {
-        groupedByBucket[bucketKey] = {};
-        // Use the determined intelligent format
-        categoryData.push(date.toLocaleString([], timeFormatOptions));
-        timestamps.push(date.getTime());
-      }
-      const groupVal = item.group_value || "Other";
-      if (!uniqueGroups.includes(groupVal)) {
-        uniqueGroups.push(groupVal);
-      }
-      groupedByBucket[bucketKey][groupVal] = item.log_count;
-    });
-
-    // Create series for each group
-    seriesData = uniqueGroups.map((group, index) => {
-      const dataValues = Object.values(groupedByBucket).map(
-        (bucketData) => bucketData[group] || 0
-      );
-      return {
-        name: group,
-        type: "bar",
-        stack: "group",
-        data: dataValues,
-        barMaxWidth: "80%",
-        barMinWidth: 2,
-        large: true,
-        largeThreshold: 100,
-        itemStyle: {
-          color: getColorForGroupValue(group),
-          borderRadius: [2, 2, 0, 0],
-          opacity: 0.85,
-        },
-        emphasis: {
-          itemStyle: {
-            color: getColorForGroupValue(group),
-            opacity: 1,
-            shadowBlur: 4,
-            shadowColor: "rgba(0, 0, 0, 0.2)",
-          },
-        },
-      };
-    });
-  } else {
-    const valueData: number[] = [];
-    buckets.forEach((item) => {
-      const date = new Date(item.bucket);
-      timestamps.push(date.getTime());
-      // Use the determined intelligent format
-      categoryData.push(date.toLocaleString([], timeFormatOptions));
-      valueData.push(item.log_count);
-    });
-
-    // Handle single data point case
-    if (categoryData.length === 1) {
-      const date = new Date(buckets[0].bucket);
-
-      // Add points before and after
-      const oneMinBefore = new Date(date.getTime() - 60000);
-      const oneMinAfter = new Date(date.getTime() + 60000);
-
-      // Format added points consistently using the determined format
-      categoryData.unshift(oneMinBefore.toLocaleString([], timeFormatOptions));
-      categoryData.push(oneMinAfter.toLocaleString([], timeFormatOptions));
-
-      valueData.unshift(0);
-      valueData.push(0);
-
-      timestamps.unshift(oneMinBefore.getTime());
-      timestamps.push(oneMinAfter.getTime());
+    const showSeconds = currentGranularity.value.endsWith("s");
+    if (showSeconds) {
+        timeFormatOptions.second = "2-digit"; // Add seconds if granularity requires it
     }
 
-    seriesData = [
-      {
-        name: "Log Count",
-        type: "bar",
-        barMaxWidth: "80%",
-        barMinWidth: 2,
-        data: valueData,
-        large: true,
-        largeThreshold: 100,
-        itemStyle: {
-          color: "#5794F2", // Professional-style blue for log analytics
-          borderRadius: [2, 2, 0, 0],
-          opacity: 0.85,
+    if (buckets.length > 0) {
+        const firstTimestamp = new Date(buckets[0].bucket).getTime();
+        const lastTimestamp = new Date(
+            buckets[buckets.length - 1].bucket
+        ).getTime();
+        const spanMs = lastTimestamp - firstTimestamp;
+        const spanHours = spanMs / (1000 * 60 * 60);
+
+        const firstDate = new Date(firstTimestamp);
+        const lastDate = new Date(lastTimestamp);
+        const isSameDay = firstDate.toDateString() === lastDate.toDateString();
+
+        // If span is >= 24 hours OR data spans multiple days, include the date
+        if (spanHours >= 24 || !isSameDay) {
+            timeFormatOptions = {
+                month: "numeric", // MM
+                day: "numeric", // DD
+                ...timeFormatOptions, // Include HH:MM or HH:MM:SS
+            };
+        }
+    }
+    // --- End Determine Format ---
+
+    if (isGrouped) {
+        // Group data by bucket and group_value
+        const groupedByBucket: Record<string, Record<string, number>> = {};
+        const uniqueGroups: string[] = [];
+
+        buckets.forEach((item) => {
+            const date = new Date(item.bucket);
+            const bucketKey = date.toISOString(); // Use ISO string as key for consistency
+            if (!groupedByBucket[bucketKey]) {
+                groupedByBucket[bucketKey] = {};
+                // Use the determined intelligent format
+                categoryData.push(date.toLocaleString([], timeFormatOptions));
+                timestamps.push(date.getTime());
+            }
+            const groupVal = item.group_value || "Other";
+            if (!uniqueGroups.includes(groupVal)) {
+                uniqueGroups.push(groupVal);
+            }
+            groupedByBucket[bucketKey][groupVal] = item.log_count;
+        });
+
+        // Create series for each group
+        seriesData = uniqueGroups.map((group) => {
+            const dataValues = Object.values(groupedByBucket).map(
+                (bucketData) => bucketData[group] || 0
+            );
+            return {
+                name: group,
+                type: "bar",
+                stack: "group",
+                data: dataValues,
+                barMaxWidth: "80%",
+                barMinWidth: 2,
+                large: true,
+                largeThreshold: 100,
+                itemStyle: {
+                    color: getColorForGroupValue(group),
+                    borderRadius: [2, 2, 0, 0],
+                    opacity: 0.85,
+                },
+                emphasis: {
+                    itemStyle: {
+                        color: getColorForGroupValue(group),
+                        opacity: 1,
+                        shadowBlur: 4,
+                        shadowColor: "rgba(0, 0, 0, 0.2)",
+                    },
+                },
+            };
+        });
+    } else {
+        const valueData: number[] = [];
+        buckets.forEach((item) => {
+            const date = new Date(item.bucket);
+            timestamps.push(date.getTime());
+            // Use the determined intelligent format
+            categoryData.push(date.toLocaleString([], timeFormatOptions));
+            valueData.push(item.log_count);
+        });
+
+        // Handle single data point case
+        if (categoryData.length === 1) {
+            const date = new Date(buckets[0].bucket);
+
+            // Add points before and after
+            const oneMinBefore = new Date(date.getTime() - 60000);
+            const oneMinAfter = new Date(date.getTime() + 60000);
+
+            // Format added points consistently using the determined format
+            categoryData.unshift(oneMinBefore.toLocaleString([], timeFormatOptions));
+            categoryData.push(oneMinAfter.toLocaleString([], timeFormatOptions));
+
+            valueData.unshift(0);
+            valueData.push(0);
+
+            timestamps.unshift(oneMinBefore.getTime());
+            timestamps.push(oneMinAfter.getTime());
+        }
+
+        seriesData = [
+            {
+                name: "Log Count",
+                type: "bar",
+                barMaxWidth: "80%",
+                barMinWidth: 2,
+                data: valueData,
+                large: true,
+                largeThreshold: 100,
+                itemStyle: {
+                    color: "#5794F2", // Professional-style blue for log analytics
+                    borderRadius: [2, 2, 0, 0],
+                    opacity: 0.85,
+                },
+                emphasis: {
+                    itemStyle: {
+                        color: "#44A2F3", // Slightly darker blue for hover/selection
+                        opacity: 1,
+                        shadowBlur: 4,
+                        shadowColor: "rgba(0, 0, 0, 0.2)",
+                    },
+                },
+            },
+        ];
+    }
+
+    return {
+        title: {
+            show: false, // Hide the title
         },
-        emphasis: {
-          itemStyle: {
-            color: "#44A2F3", // Slightly darker blue for hover/selection
-            opacity: 1,
-            shadowBlur: 4,
-            shadowColor: "rgba(0, 0, 0, 0.2)",
-          },
+        backgroundColor: "transparent",
+        grid: {
+            containLabel: true,
+            left: 25,
+            right: 25,
+            bottom: 20,
+            top: 35,
         },
-      },
-    ];
-  }
+        tooltip: {
+            show: true,
+            trigger: "axis",
+            confine: false,
+            z: 60,
+            position: function (point: any, params: any, dom: any, rect: any, size: any) {
+                // Position the tooltip slightly below the cursor
+                const x = point[0];
+                const y = point[1];
+                const viewWidth = size.viewSize[0];
+                const viewHeight = size.viewSize[1];
+                const boxWidth = size.contentSize[0];
+                const boxHeight = size.contentSize[1];
+                let posX = 0;
+                let posY = 0;
 
-  return {
-    title: {
-      show: false, // Hide the title
-      // text: `${buckets.length.toLocaleString()} Log Records`,
-      // left: 'center',
-      // textStyle: {
-      //     fontSize: 14,
-      //     fontWeight: '500',
-      // }
-    },
-    backgroundColor: "transparent",
-    grid: {
-      containLabel: true,
-      left: 25,
-      right: 25,
-      bottom: 20,
-      top: 35,
-    },
-    tooltip: {
-      show: true,
-      trigger: "axis",
-      confine: false,
-      z: 60,
-      position: function (
-        point: any,
-        params: any,
-        dom: any,
-        rect: any,
-        size: any
-      ) {
-        // Position the tooltip slightly below the cursor
-        // point[0] is x, point[1] is y coordinate of the mouse
-        const x = point[0];
-        const y = point[1];
-        const viewWidth = size.viewSize[0];
-        const viewHeight = size.viewSize[1];
-        const boxWidth = size.contentSize[0];
-        const boxHeight = size.contentSize[1];
-        let posX = 0;
-        let posY = 0;
+                // Calculate horizontal position
+                if (x + boxWidth > viewWidth) {
+                    // If tooltip overflows right, position it to the left of the cursor
+                    posX = x - boxWidth - 10; // 10px offset
+                } else {
+                    // Otherwise, position it to the right of the cursor
+                    posX = x + 15; // 15px offset
+                }
 
-        // Calculate horizontal position
-        if (x + boxWidth > viewWidth) {
-          // If tooltip overflows right, position it to the left of the cursor
-          posX = x - boxWidth - 10; // 10px offset
-        } else {
-          // Otherwise, position it to the right of the cursor
-          posX = x + 15; // 15px offset
-        }
+                // Calculate vertical position - always below the cursor
+                posY = y + 20; // 20px offset below cursor
 
-        // Calculate vertical position - always below the cursor
-        posY = y + 20; // 20px offset below cursor
+                // Prevent tooltip from going off the bottom edge
+                if (posY + boxHeight > viewHeight) {
+                    posY = y - boxHeight - 10; // Position above cursor if it overflows bottom
+                }
+                // Prevent tooltip from going off the top edge (if positioned above)
+                if (posY < 0) {
+                    posY = 5; // Small offset from top edge
+                }
+                // Prevent tooltip from going off the left edge (if positioned left)
+                if (posX < 0) {
+                    posX = 5; // Small offset from left edge
+                }
 
-        // Prevent tooltip from going off the bottom edge
-        if (posY + boxHeight > viewHeight) {
-          posY = y - boxHeight - 10; // Position above cursor if it overflows bottom
-        }
-        // Prevent tooltip from going off the top edge (if positioned above)
-        if (posY < 0) {
-          posY = 5; // Small offset from top edge
-        }
-        // Prevent tooltip from going off the left edge (if positioned left)
-        if (posX < 0) {
-          posX = 5; // Small offset from left edge
-        }
+                return [posX, posY];
+            },
+            backgroundColor:
+                colorMode.value === "dark" ? "#1c1c25" : "hsl(var(--popover))",
+            borderColor:
+                colorMode.value === "dark" ? "#302f3d" : "hsl(var(--border))",
+            borderWidth: 1,
+            padding: 10,
+            textStyle: {
+                fontSize: 12,
+                color:
+                    colorMode.value === "dark"
+                        ? "#FFFFFF"
+                        : "hsl(var(--popover-foreground))",
+            },
+            axisPointer: {
+                type: "shadow",
+                shadowStyle: {
+                    color: "rgba(0, 0, 0, 0.1)",
+                },
+            },
+            formatter: function (params: any) {
+                // Add null checks for DOM element existence
+                if (!params || !params.length || params[0].dataIndex === undefined)
+                    return "";
 
-        return [posX, posY];
-      },
-      backgroundColor:
-        colorMode.value === "dark" ? "#1c1c25" : "hsl(var(--popover))",
-      borderColor:
-        colorMode.value === "dark" ? "#302f3d" : "hsl(var(--border))",
-      borderWidth: 1,
-      padding: 10,
-      textStyle: {
-        fontSize: 12,
-        color:
-          colorMode.value === "dark"
-            ? "#FFFFFF"
-            : "hsl(var(--popover-foreground))",
-      },
-      axisPointer: {
-        type: "shadow",
-        shadowStyle: {
-          color: "rgba(0, 0, 0, 0.1)",
-        },
-      },
-      formatter: function (params: any) {
-        // Add null checks for DOM element existence
-        if (!params || !params.length || params[0].dataIndex === undefined)
-          return "";
+                const index = params[0].dataIndex;
+                // Add bounds checking for data arrays
+                if (index < 0 || index >= categoryData.length) return "";
 
-        const index = params[0].dataIndex;
-        // Add bounds checking for data arrays
-        if (index < 0 || index >= categoryData.length) return "";
+                // Use the pre-formatted time string directly from categoryData
+                const displayTimeStr = categoryData[index];
 
-        // Use the pre-formatted time string directly from categoryData
-        const displayTimeStr = categoryData[index];
-
-        let total = 0;
-        const details = params
-          .map((p: any) => {
-            const value = p.data || 0;
-            total += value;
-            return `<div style="display: flex; align-items: center; margin-bottom: 4px;">
-                        <span style="display: inline-block; width: 10px; height: 10px; background-color: ${
-                          p.color
-                        }; margin-right: 6px; border-radius: 2px;"></span>
-                        <span>${
-                          p.seriesName
-                        }: <strong>${value.toLocaleString()}</strong></span>
+                let total = 0;
+                const details = params
+                    .map((p: any) => {
+                        const value = p.data || 0;
+                        total += value;
+                        return `<div style="display: flex; align-items: center; margin-bottom: 4px;">
+                        <span style="display: inline-block; width: 10px; height: 10px; background-color: ${p.color
+                            }; margin-right: 6px; border-radius: 2px;"></span>
+                        <span>${p.seriesName
+                            }: <strong>${value.toLocaleString()}</strong></span>
                     </div>`;
-          })
-          .join("");
+                    })
+                    .join("");
 
-        return `<div style="font-size: 12px;">
+                return `<div style="font-size: 12px;">
                     <div style="font-weight: 500; margin-bottom: 4px;">${displayTimeStr}</div>
                     <div style="margin-bottom: 4px;">Total: <strong>${total.toLocaleString()}</strong></div>
                     ${details}
                 </div>`;
-      },
-    },
-    legend: isGrouped
-      ? {
-          show: true,
-          bottom: 0,
-          textStyle: {
-            fontSize: 11,
-          },
-        }
-      : {
-          show: false,
-        },
-    xAxis: {
-      type: "category",
-      data: categoryData,
-      silent: false,
-      axisLabel: {
-        interval: function (index: number) {
-          // Show fewer labels when there are many data points
-          // Show fewer labels when there are many data points to avoid overlap
-          // Adjust the divisor (e.g., 15) based on desired density
-          return index % Math.max(Math.ceil(categoryData.length / 15), 1) === 0;
-        },
-        formatter: function (value: string) {
-          // Value is already pre-formatted intelligently
-          return value;
-        },
-        fontSize: 11,
-        margin: 10,
-      },
-      axisLine: {
-        lineStyle: {
-          color: colorMode.value === "dark" ? "#71708A" : "hsl(var(--border))",
-        },
-      },
-      axisTick: {
-        alignWithLabel: true,
-      },
-      splitLine: { show: false },
-    },
-    yAxis: {
-      type: "value",
-      axisLine: { show: false },
-      axisTick: { show: false },
-      axisPointer: {
-        label: { precision: 0 },
-      },
-      splitLine: {
-        show: true,
-        lineStyle: {
-          type: "dashed",
-          color:
-            colorMode.value === "dark"
-              ? "rgba(120, 120, 140, 0.3)"
-              : "hsl(var(--border))",
-          opacity: 0.5,
-        },
-      },
-      axisLabel: {
-        formatter: (value: number) => {
-          if (value < 1000) {
-            return Math.round(value).toLocaleString();
-          } else if (value < 1000000) {
-            return (Math.round(value / 100) / 10).toLocaleString() + "K";
-          } else if (value < 1000000000) {
-            return (Math.round(value / 100000) / 10).toLocaleString() + "M";
-          } else {
-            return (Math.round(value / 100000000) / 10).toLocaleString() + "B";
-          }
-        },
-        fontSize: 11,
-        margin: 12,
-      },
-    },
-    toolbox: {
-      orient: "horizontal",
-      show: true, // Keep toolbox visible for functionality
-      showTitle: false, // Hide titles
-      itemSize: 1, // Make icons tiny
-      right: 15,
-      top: 5,
-      feature: {
-        dataZoom: {
-          show: true, // Keep feature enabled
-          showTitle: false, // Hide titles
-          yAxisIndex: "none",
-          icon: {
-            zoom: "path://", // Empty path to hide icon but keep functionality
-            back: "path://", // Empty path to hide icon but keep functionality
-          },
-          iconStyle: {
-            borderWidth: 0, // Hide border
-            opacity: 0, // Make completely transparent
-          },
-          emphasis: {
-            iconStyle: {
-              borderWidth: 0,
-              opacity: 0,
             },
-          },
         },
-      },
-    },
-    dataZoom: [
-      {
-        type: "inside", // For mouse wheel/drag zooming INSIDE the chart area
-        xAxisIndex: 0,
-        start: 0,
-        end: 100,
-        zoomOnMouseWheel: false, // Disable mouse wheel zoom
-        moveOnMouseMove: true,
-        moveOnMouseWheel: false, // Disable mouse wheel move
-      },
-      {
-        type: "slider", // The visual slider component (often at the bottom)
-        show: false, // Hide the slider component
-        xAxisIndex: 0,
-        start: 0,
-        end: 100,
-        // Add brushStyle for better selection visibility
-        brushStyle: {
-          borderWidth: 1,
-          borderColor:
-            colorMode.value === "dark" ? "#6871F1" : "hsl(var(--primary))",
-          color:
-            colorMode.value === "dark"
-              ? "rgba(104, 113, 241, 0.2)"
-              : "hsla(var(--primary-hsl) / 0.2)",
+        legend: isGrouped
+            ? {
+                show: true,
+                bottom: 0,
+                textStyle: {
+                    fontSize: 11,
+                },
+            }
+            : {
+                show: false,
+            },
+        xAxis: {
+            type: "category",
+            data: categoryData,
+            silent: false,
+            axisLabel: {
+                interval: function (index: number) {
+                    // Show fewer labels when there are many data points
+                    // Adjust the divisor (e.g., 15) based on desired density
+                    return index % Math.max(Math.ceil(categoryData.length / 15), 1) === 0;
+                },
+                formatter: function (value: string) {
+                    // Value is already pre-formatted intelligently
+                    return value;
+                },
+                fontSize: 11,
+                margin: 10,
+            },
+            axisLine: {
+                lineStyle: {
+                    color: colorMode.value === "dark" ? "#71708A" : "hsl(var(--border))",
+                },
+            },
+            axisTick: {
+                alignWithLabel: true,
+            },
+            splitLine: { show: false },
         },
-        height: 15, // Adjust height if needed
-        bottom: 5, // Adjust position if needed
-      },
-      {
-        // This corresponds to the toolbox dataZoom feature (area selection)
-        type: "select", // This enables the brush selection via the toolbox button
-        xAxisIndex: 0,
-        brushMode: "single",
-        brushStyle: {
-          borderWidth: 1,
-          borderColor:
-            colorMode.value === "dark" ? "#6871F1" : "hsl(var(--primary))",
-          color:
-            colorMode.value === "dark"
-              ? "rgba(104, 113, 241, 0.2)"
-              : "hsla(var(--primary-hsl) / 0.2)",
+        yAxis: {
+            type: "value",
+            axisLine: { show: false },
+            axisTick: { show: false },
+            axisPointer: {
+                label: { precision: 0 },
+            },
+            splitLine: {
+                show: true,
+                lineStyle: {
+                    type: "dashed",
+                    color:
+                        colorMode.value === "dark"
+                            ? "rgba(120, 120, 140, 0.3)"
+                            : "hsl(var(--border))",
+                    opacity: 0.5,
+                },
+            },
+            axisLabel: {
+                formatter: (value: number) => {
+                    if (value < 1000) {
+                        return Math.round(value).toLocaleString();
+                    } else if (value < 1000000) {
+                        return (Math.round(value / 100) / 10).toLocaleString() + "K";
+                    } else if (value < 1000000000) {
+                        return (Math.round(value / 100000) / 10).toLocaleString() + "M";
+                    } else {
+                        return (Math.round(value / 100000000) / 10).toLocaleString() + "B";
+                    }
+                },
+                fontSize: 11,
+                margin: 12,
+            },
         },
-        transformable: true,
-        throttle: 100,
-      },
-    ],
-    series: seriesData,
-    animation: true,
-    animationDuration: 800,
-    animationEasing: "cubicOut" as const,
-  };
+        toolbox: {
+            orient: "horizontal",
+            show: true, // Keep toolbox visible for functionality
+            showTitle: false, // Hide titles
+            itemSize: 1, // Make icons tiny
+            right: 15,
+            top: 5,
+            feature: {
+                dataZoom: {
+                    show: true, // Keep feature enabled
+                    showTitle: false, // Hide titles
+                    yAxisIndex: "none",
+                    icon: {
+                        zoom: "path://", // Empty path to hide icon but keep functionality
+                        back: "path://", // Empty path to hide icon but keep functionality
+                    },
+                    iconStyle: {
+                        borderWidth: 0, // Hide border
+                        opacity: 0, // Make completely transparent
+                    },
+                    emphasis: {
+                        iconStyle: {
+                            borderWidth: 0,
+                            opacity: 0,
+                        },
+                    },
+                },
+            },
+        },
+        dataZoom: [
+            {
+                type: "inside", // For mouse wheel/drag zooming
+                xAxisIndex: 0,
+                start: 0,
+                end: 100,
+                zoomOnMouseWheel: false, // Disable mouse wheel zoom
+                moveOnMouseMove: true,
+                moveOnMouseWheel: false, // Disable mouse wheel move
+            },
+            {
+                type: "slider", // The visual slider component
+                show: false, // Hide the slider component
+                xAxisIndex: 0,
+                start: 0,
+                end: 100,
+                brushStyle: {
+                    borderWidth: 1,
+                    borderColor:
+                        colorMode.value === "dark" ? "#6871F1" : "hsl(var(--primary))",
+                    color:
+                        colorMode.value === "dark"
+                            ? "rgba(104, 113, 241, 0.2)"
+                            : "hsla(var(--primary-hsl) / 0.2)",
+                },
+                height: 15, // Adjust height if needed
+                bottom: 5, // Adjust position if needed
+            },
+            {
+                // This corresponds to the toolbox dataZoom feature (area selection)
+                type: "select", // This enables the brush selection via the toolbox button
+                xAxisIndex: 0,
+                brushMode: "single",
+                brushStyle: {
+                    borderWidth: 1,
+                    borderColor:
+                        colorMode.value === "dark" ? "#6871F1" : "hsl(var(--primary))",
+                    color:
+                        colorMode.value === "dark"
+                            ? "rgba(104, 113, 241, 0.2)"
+                            : "hsla(var(--primary-hsl) / 0.2)",
+                },
+                transformable: true,
+                throttle: 100,
+            },
+        ],
+        series: seriesData,
+        animation: true,
+        animationDuration: 800,
+        animationEasing: "cubicOut" as const,
+    };
 };
 
-// Debounced fetch function to prevent multiple simultaneous calls
-const debouncedFetchHistogramData = debounce(
-  async (forceGranularity?: string, source: string = "unknown") => {
-    // Create a unique fetch ID to track this specific fetch request
-    const fetchId = Date.now();
-    console.log(
-      `Histogram: debouncedFetchHistogramData(${fetchId}, source=${source}) - Starting`
-    );
+// Handle chart zoom events with proper date parsing
+function handleZoomAction(zoomParams: any) {
+    if (!histogramData.value || histogramData.value.length === 0) return;
 
-    // Remove this fetch source from scheduled fetches
-    scheduledFetches.value.delete(source);
-
-    // Skip if already loading to prevent duplicate requests
-    if (isChartLoading.value) {
-      console.log(
-        `Histogram: debouncedFetchHistogramData(${fetchId}, source=${source}) - Skipping, chart is already loading`
-      );
-      return;
-    }
-
-    // Skip if we've already loaded data within the last 2 seconds (covers both paths)
-    const now = Date.now();
-    if (hasLoadedData.value && now - lastFetchTimestamp.value < 2000) {
-      console.log(
-        `Histogram: debouncedFetchHistogramData(${fetchId}, source=${source}) - Skipping, data already loaded ${
-          now - lastFetchTimestamp.value
-        }ms ago`
-      );
-      return;
-    }
-
-    // Mark fetch time BEFORE making the API call
-    lastFetchTimestamp.value = now;
-
-    // Set loading state immediately to prevent other fetch attempts
-    isChartLoading.value = true;
-
-    console.log(
-      `Histogram: debouncedFetchHistogramData(${fetchId}, source=${source}) - Proceeding with data fetch`
-    );
-
-    // Execute the actual fetch
     try {
-      await fetchHistogramData(forceGranularity);
-      console.log(
-        `Histogram: debouncedFetchHistogramData(${fetchId}, source=${source}) - Completed successfully`
-      );
-      // Mark that we have successfully loaded data
-      hasLoadedData.value = true;
-      initialDataLoaded.value = true;
-    } catch (error) {
-      console.error(
-        `Histogram: debouncedFetchHistogramData(${fetchId}, source=${source}) - Failed with error:`,
-        error
-      );
-    } finally {
-      // Always ensure loading state is reset
-      isChartLoading.value = false;
+        console.log("DataZoom triggered with params:", zoomParams);
+
+        // Extract the buckets from the histogramData
+        const buckets = histogramData.value;
+        const totalPoints = buckets.length;
+
+        // Special case: Very small datasets (1-3 points)
+        if (totalPoints <= 3) {
+            // Just use the original time range from the data
+            const startDate = new Date(buckets[0].bucket);
+
+            // For the end date, use the last bucket plus a small increment
+            const lastIndex = totalPoints - 1;
+            const lastBucketTime = new Date(buckets[lastIndex].bucket).getTime();
+            // Add 1 minute if only one bucket, or use bucket width if more than one
+            const increment =
+                lastIndex > 0
+                    ? lastBucketTime - new Date(buckets[0].bucket).getTime()
+                    : 60000; // 1 minute default
+
+            const endDate = new Date(lastBucketTime + increment);
+
+            console.log("Small dataset zoom: Using full range", {
+                startDate,
+                endDate,
+            });
+
+            // Emit native Date event
+            emit("zoom-time-range", { start: startDate, end: endDate });
+
+            return;
+        }
+
+        let startIndex: number;
+        let endIndex: number;
+
+        // Handle different zoom parameter formats
+        if (
+            zoomParams.startValue !== undefined &&
+            zoomParams.endValue !== undefined
+        ) {
+            // Direct index values from toolbox dataZoom
+            startIndex = Math.max(
+                0,
+                Math.min(parseInt(zoomParams.startValue), totalPoints - 1)
+            );
+            endIndex = Math.max(
+                startIndex,
+                Math.min(parseInt(zoomParams.endValue), totalPoints - 1)
+            );
+
+            console.log("Using direct index values:", { startIndex, endIndex });
+        } else if (zoomParams.start !== undefined && zoomParams.end !== undefined) {
+            // Percentage values from inside zoom
+            const startPercent = zoomParams.start || 0;
+            const endPercent = zoomParams.end || 100;
+
+            // Calculate indices based on percentages
+            startIndex = Math.floor((totalPoints * startPercent) / 100);
+            endIndex = Math.ceil((totalPoints * endPercent) / 100) - 1;
+
+            console.log("Using percentage values:", {
+                startPercent,
+                endPercent,
+                startIndex,
+                endIndex,
+            });
+        } else {
+            console.error("Invalid zoom parameters:", zoomParams);
+            return;
+        }
+
+        // Ensure indices are within bounds
+        const validStartIndex = Math.max(0, Math.min(startIndex, totalPoints - 1));
+        const validEndIndex = Math.max(
+            validStartIndex,
+            Math.min(endIndex, totalPoints - 1)
+        );
+
+        // Get the actual timestamps from the data
+        const startDate = new Date(buckets[validStartIndex].bucket);
+
+        // For the end date, we need to include the entire bucket
+        // Calculate the bucket width (assume uniform width)
+        let endDate: Date;
+
+        if (validEndIndex >= totalPoints - 1) {
+            // If at the end of the data, add a bucket width to include the entire last bucket
+            const lastBucketTime = new Date(
+                buckets[validEndIndex].bucket
+            ).getTime();
+
+            // Calculate bucket width if possible
+            let bucketWidth = 60000; // Default 1 minute
+            if (totalPoints > 1) {
+                // Get average bucket width
+                const firstTime = new Date(buckets[0].bucket).getTime();
+                const lastTime = new Date(
+                    buckets[totalPoints - 1].bucket
+                ).getTime();
+                bucketWidth = (lastTime - firstTime) / (totalPoints - 1);
+            }
+
+            endDate = new Date(lastBucketTime + bucketWidth);
+        } else {
+            // Use next bucket's start time as the end time
+            endDate = new Date(buckets[validEndIndex + 1].bucket);
+        }
+
+        console.log("Selected time range:", {
+            startDate,
+            endDate,
+            startIndex: validStartIndex,
+            endIndex: validEndIndex,
+        });
+
+        // Emit native Date event
+        emit("zoom-time-range", { start: startDate, end: endDate });
+
+        // Also update the date picker
+        updateTimeRangeForDatePicker(startDate, endDate);
+    } catch (e) {
+        console.error("Error handling zoom event:", e);
+
+        // Fallback to using the full range
+        if (histogramData.value.length > 0) {
+            try {
+                const startDate = new Date(histogramData.value[0].bucket);
+                const lastBucket =
+                    histogramData.value[histogramData.value.length - 1].bucket;
+                const endDate = new Date(new Date(lastBucket).getTime() + 60000);
+
+                console.log("Fallback: Using full time range after error");
+
+                // Emit native Date event
+                emit("zoom-time-range", { start: startDate, end: endDate });
+
+                // Also update the date picker
+                updateTimeRangeForDatePicker(startDate, endDate);
+            } catch (fallbackError) {
+                console.error("Even fallback failed:", fallbackError);
+            }
+        }
     }
-  },
-  300
-);
-
-// Fetch histogram data from the backend
-const fetchHistogramData = async (forceGranularity?: string) => {
-  console.log("Histogram: Starting fetchHistogramData function");
-
-  if (
-    !isMounted.value ||
-    !hasValidSource.value ||
-    !currentSourceId.value ||
-    !currentTeamId.value
-  ) {
-    console.log(
-      "Histogram: Early return - " +
-        (!isMounted.value
-          ? "not mounted"
-          : !hasValidSource.value
-          ? "invalid source"
-          : !currentSourceId.value
-          ? "no source ID"
-          : !currentTeamId.value
-          ? "no team ID"
-          : "unknown reason")
-    );
-    histogramData.value = [];
-    return;
-  }
-
-  try {
-    isChartLoading.value = true;
-
-    // Get the selected timezone from the store
-    const timezone =
-      exploreStore.selectedTimezoneIdentifier ||
-      (localStorage.getItem("logchef_timezone") === "utc"
-        ? "UTC"
-        : getLocalTimeZone());
-
-    // Call the histogram service with the SQL from explore store
-    const response = await HistogramService.fetchHistogramData({
-      sourceId: currentSourceId.value,
-      teamId: currentTeamId.value,
-      timeRange: {
-        start: props.timeRange?.start
-          ? typeof props.timeRange.start.toDate === "function"
-            ? new Date(
-                props.timeRange.start.toDate(getLocalTimeZone()).getTime()
-              ).toISOString()
-            : new Date().toISOString()
-          : new Date(Date.now() - 3600000).toISOString(),
-        end: props.timeRange?.end
-          ? typeof props.timeRange.end.toDate === "function"
-            ? new Date(
-                props.timeRange.end.toDate(getLocalTimeZone()).getTime()
-              ).toISOString()
-            : new Date().toISOString()
-          : new Date().toISOString(),
-      },
-      query: exploreStore.generatedDisplaySql || exploreStore.rawSql, // Use generatedDisplaySql or rawSql as fallback
-      queryType: activeMode.value,
-      granularity: forceGranularity,
-      groupBy: props.groupBy,
-      timezone: timezone,
-    });
-
-    console.log("Histogram: Response received:", response.success);
-
-    if (response.success && response.data) {
-      console.log(
-        "Histogram: Data loaded successfully",
-        response.data.data?.length || 0,
-        "data points"
-      );
-      histogramData.value = response.data.data || [];
-      currentGranularity.value = response.data.granularity || ""; // Store granularity
-      initialDataLoaded.value = true;
-    } else {
-      console.warn("Histogram: No data or failed response", response.error);
-      histogramData.value = [];
-      currentGranularity.value = ""; // Reset on failure
-    }
-  } catch (error) {
-    console.error("Error fetching histogram data:", error);
-    histogramData.value = [];
-  } finally {
-    isChartLoading.value = false;
-    console.log("Histogram: Fetch complete, isChartLoading set to false");
-  }
-};
+}
 
 // Reset and set the global cursor for datazoom
 const restoreChart = () => {
-  chart?.dispatchAction({
-    type: "restore",
-  });
+    if (!chart) return;
 
-  // Set toolbox datazoom button state similar to reference code
-  chart?.dispatchAction({
-    type: "takeGlobalCursor",
-    key: "dataZoomSelect",
-    dataZoomSelectActive: true,
-  });
+    chart.dispatchAction({
+        type: "restore",
+    });
+
+    // Set toolbox datazoom button state
+    chart.dispatchAction({
+        type: "takeGlobalCursor",
+        key: "dataZoomSelect",
+        dataZoomSelectActive: true,
+    });
 };
 
 // Setup chart event handlers
 const setupChartEvents = () => {
-  if (!chart) return;
+    if (!chart) return;
 
-  // Create safe handler wrapper to check component is still mounted
-  const safeHandler = (handler: Function) => {
-    return (...args: any[]) => {
-      if (!isMounted.value || !chart) return;
-      handler(...args);
+    // Create safe handler wrapper to check component is still mounted
+    const safeHandler = (handler: Function) => {
+        return (...args: any[]) => {
+            if (!isMounted.value || !chart) return;
+            handler(...args);
+        };
     };
-  };
 
-  // Handle chart zoom events
-  chart.on(
-    "datazoom",
-    safeHandler((params: any) => {
-      // Either handle batch or direct parameters
-      if (params?.batch && params.batch.length > 0) {
-        // For the inside zoom with batch
-        const batch = params.batch[0];
-        handleZoomAction(batch);
-      } else if (
-        params?.startValue !== undefined &&
-        params?.endValue !== undefined
-      ) {
-        // For direct toolbox dataZoom
-        handleZoomAction(params);
-      }
+    // Handle chart zoom events
+    chart.on(
+        "datazoom",
+        safeHandler((params: any) => {
+            // Either handle batch or direct parameters
+            if (params?.batch && params.batch.length > 0) {
+                // For the inside zoom with batch
+                const batch = params.batch[0];
+                handleZoomAction(batch);
+            } else if (
+                params?.startValue !== undefined &&
+                params?.endValue !== undefined
+            ) {
+                // For direct toolbox dataZoom
+                handleZoomAction(params);
+            }
 
-      // Always ensure the dataZoom selection mode is active after a zoom operation
-      chart?.dispatchAction({
-        type: "takeGlobalCursor",
-        key: "dataZoomSelect",
-        dataZoomSelectActive: true,
-      });
-    })
-  );
-
-  // Restore event
-  chart.on(
-    "restore",
-    safeHandler(() => {
-      try {
-        // Reset to full time range
-        if (props.timeRange?.start && props.timeRange?.end) {
-          const startDate = props.timeRange.start.toDate(getLocalTimeZone());
-          const endDate = props.timeRange.end.toDate(getLocalTimeZone());
-
-          // Emit native Date event (original behavior)
-          emit("zoom-time-range", {
-            start: startDate,
-            end: endDate,
-          });
-
-          // No need to emit update:timeRange here since we're restoring to the original timeRange
-        }
-
-        // Ensure dataZoom selection mode is active after restore
-        chart?.dispatchAction({
-          type: "takeGlobalCursor",
-          key: "dataZoomSelect",
-          dataZoomSelectActive: true,
-        });
-      } catch (e) {
-        console.error("Error handling restore event:", e);
-      }
-    })
-  );
-
-  // Add a handler for brush selection
-  chart.on(
-    "brush",
-    safeHandler(() => {
-      // Make sure dataZoom tool is reselected after brush operation
-      nextTick(() => {
-        chart?.dispatchAction({
-          type: "takeGlobalCursor",
-          key: "dataZoomSelect",
-          dataZoomSelectActive: true,
-        });
-      });
-    })
-  );
-
-  // Add a handler for brush end (when selection is complete)
-  chart.on(
-    "brushend",
-    safeHandler(() => {
-      // Ensure dataZoom selection mode is active after brush end
-      nextTick(() => {
-        chart?.dispatchAction({
-          type: "takeGlobalCursor",
-          key: "dataZoomSelect",
-          dataZoomSelectActive: true,
-        });
-      });
-    })
-  );
-
-  // Handle window resize
-  window.addEventListener("resize", windowResizeEventCallback);
-};
-
-// Initialize chart
-const initChart = async () => {
-  if (!chartRef.value || !isMounted.value) return;
-
-  try {
-    // Wait for DOM to be ready
-    await nextTick();
-
-    // Clear any existing chart instance
-    if (chart) {
-      chart.dispose();
-    }
-
-    // Create chart instance with the current theme name
-    const themeName = colorMode.value === "dark" ? "logchef-dark" : "";
-    console.log(
-      `Initializing chart with theme: ${
-        colorMode.value === "dark" ? "logchef-dark" : "default"
-      }`
+            // Always ensure the dataZoom selection mode is active
+            chart?.dispatchAction({
+                type: "takeGlobalCursor",
+                key: "dataZoomSelect",
+                dataZoomSelectActive: true,
+            });
+        })
     );
-    chart = init(chartRef.value, themeName);
 
-    // Set initial options
-    updateChartOptions();
+    // Restore event
+    chart.on(
+        "restore",
+        safeHandler(() => {
+            try {
+                // Reset to full time range
+                if (exploreStore.timeRange?.start && exploreStore.timeRange?.end) {
+                    const startDate = new Date(
+                        exploreStore.timeRange.start.year,
+                        exploreStore.timeRange.start.month - 1,
+                        exploreStore.timeRange.start.day,
+                        'hour' in exploreStore.timeRange.start ? exploreStore.timeRange.start.hour : 0,
+                        'minute' in exploreStore.timeRange.start ? exploreStore.timeRange.start.minute : 0,
+                        'second' in exploreStore.timeRange.start ? exploreStore.timeRange.start.second : 0
+                    );
 
-    // Setup event handlers
-    setupChartEvents();
+                    const endDate = new Date(
+                        exploreStore.timeRange.end.year,
+                        exploreStore.timeRange.end.month - 1,
+                        exploreStore.timeRange.end.day,
+                        'hour' in exploreStore.timeRange.end ? exploreStore.timeRange.end.hour : 0,
+                        'minute' in exploreStore.timeRange.end ? exploreStore.timeRange.end.minute : 0,
+                        'second' in exploreStore.timeRange.end ? exploreStore.timeRange.end.second : 0
+                    );
 
-    // Ensure the dataZoom button is active
-    restoreChart();
+                    // Emit native Date event
+                    emit("zoom-time-range", {
+                        start: startDate,
+                        end: endDate,
+                    });
+                }
 
-    // Explicitly set dataZoom to be active on initialization
-    chart.dispatchAction({
-      type: "takeGlobalCursor",
-      key: "dataZoomSelect",
-      dataZoomSelectActive: true,
-    });
-  } catch (e) {
-    console.error("Error initializing chart:", e);
-  }
+                // Ensure dataZoom selection mode is active
+                chart?.dispatchAction({
+                    type: "takeGlobalCursor",
+                    key: "dataZoomSelect",
+                    dataZoomSelectActive: true,
+                });
+            } catch (e) {
+                console.error("Error handling restore event:", e);
+            }
+        })
+    );
+
+    // Add handlers for brush events
+    chart.on(
+        "brush",
+        safeHandler(() => {
+            // Ensure dataZoom selection mode is active
+            nextTick(() => {
+                chart?.dispatchAction({
+                    type: "takeGlobalCursor",
+                    key: "dataZoomSelect",
+                    dataZoomSelectActive: true,
+                });
+            });
+        })
+    );
+
+    chart.on(
+        "brushend",
+        safeHandler(() => {
+            // Ensure dataZoom selection mode is active
+            nextTick(() => {
+                chart?.dispatchAction({
+                    type: "takeGlobalCursor",
+                    key: "dataZoomSelect",
+                    dataZoomSelectActive: true,
+                });
+            });
+        })
+    );
+
+    // Handle window resize
+    window.addEventListener("resize", windowResizeEventCallback);
 };
 
 // Update chart with new options
 const updateChartOptions = () => {
-  if (!chart) return;
+    if (!chart) return;
 
-  try {
-    // Get options based on data
-    const options = convertHistogramData(histogramData.value);
-
-    // Add axis overrides for proper dark mode display
-    if (colorMode.value === "dark") {
-      // Ensure Y axis line is hidden
-      options.yAxis.axisLine = { show: false };
-      options.yAxis.axisTick = { show: false };
-      // Ensure X axis grid lines are hidden
-      options.xAxis.splitLine = { show: false };
-      // Ensure Y axis grid lines are visible with proper style
-      options.yAxis.splitLine = {
-        show: true,
-        lineStyle: {
-          type: "dashed",
-          color: "rgba(120, 120, 140, 0.3)",
-          opacity: 0.5,
-        },
-      };
-    }
-
-    // Set options
-    chart.setOption(options, true);
-
-    // Update loading state
-    if (isChartLoading.value) {
-      chart.showLoading({
-        text: "Loading data...",
-        maskColor: "rgba(255, 255, 255, 0.8)",
-        fontSize: 14,
-      });
-    } else {
-      chart.hideLoading();
-    }
-
-    // Make sure dataZoom tool is selected
-    chart.dispatchAction({
-      type: "takeGlobalCursor",
-      key: "dataZoomSelect",
-      dataZoomSelectActive: true,
-    });
-  } catch (e) {
-    console.error("Error updating chart options:", e);
-  }
-};
-
-// Watch for changes that should trigger chart updates
-watch(
-  () => [props.isLoading, histogramData.value],
-  () => {
-    isChartLoading.value = props.isLoading || false;
-    updateChartOptions();
-  },
-  { deep: true }
-);
-
-// Unified watcher for lastExecutionTimestamp that coordinates with other data sources
-watch(
-  () => exploreStore.lastExecutionTimestamp,
-  (newTimestamp, oldTimestamp) => {
-    // Skip if we're already loading
-    if (isChartLoading.value) {
-      console.log(
-        "Histogram: Skipping lastExecutionTimestamp watcher - chart is already loading"
-      );
-      return;
-    }
-
-    // Handle undefined/null timestamps
-    const safeNewTimestamp = newTimestamp || null;
-    const safeOldTimestamp = oldTimestamp || null;
-
-    // Skip if timestamp hasn't changed or if it's the same one we already processed
-    if (
-      safeNewTimestamp === safeOldTimestamp ||
-      safeNewTimestamp === lastProcessedTimestamp.value
-    ) {
-      console.log(
-        "Histogram: Skipping lastExecutionTimestamp watcher - timestamp unchanged or already processed"
-      );
-      return;
-    }
-
-    // Update the last processed timestamp
-    lastProcessedTimestamp.value = safeNewTimestamp;
-
-    // Clear any pending timeout to avoid multiple queued fetches
-    if (pendingFetchTimeoutId.value !== null) {
-      console.log("Histogram: Cancelling previous fetch timeout");
-      clearTimeout(pendingFetchTimeoutId.value);
-      pendingFetchTimeoutId.value = null;
-      // Also remove from scheduled fetches
-      scheduledFetches.value.delete("timestamp");
-    }
-
-    // Only schedule fetch if we have a valid source
-    if (hasValidSource.value && currentSourceId.value) {
-      // Use a consistent delay for better predictability
-      const fetchDelay = 500;
-      console.log(
-        `Histogram: Scheduling data fetch with ${fetchDelay}ms delay due to lastExecutionTimestamp change`
-      );
-
-      // Add to scheduled fetches
-      scheduledFetches.value.add("timestamp");
-
-      pendingFetchTimeoutId.value = setTimeout(() => {
-        pendingFetchTimeoutId.value = null;
-
-        // Check if data was loaded while we were waiting
-        if (
-          hasLoadedData.value &&
-          Date.now() - lastFetchTimestamp.value < 1000
-        ) {
-          console.log(
-            "Histogram: Skipping scheduled fetch - data already loaded recently"
-          );
-          scheduledFetches.value.delete("timestamp");
-          return;
-        }
-
-        // Double check component is still mounted and not already loading
-        if (isMounted.value && !isChartLoading.value) {
-          console.log(
-            "Histogram: Executing delayed data fetch for timestamp:",
-            safeNewTimestamp
-          );
-          debouncedFetchHistogramData(undefined, "timestamp");
-        } else {
-          console.log(
-            "Histogram: Skipping scheduled fetch - component unmounted or already loading"
-          );
-        }
-        scheduledFetches.value.delete("timestamp");
-      }, fetchDelay) as unknown as number;
-    } else if (currentSourceId.value) {
-      console.warn("Histogram: Skipping data fetch for disconnected source");
-      histogramData.value = [];
-    }
-  },
-  { immediate: false }
-);
-
-// Add a separate deep watcher specifically for time range changes
-// NOTE: We no longer automatically fetch data when time range changes
-// Data will only be fetched when a query is executed
-watch(
-  () => props.timeRange,
-  (newRange, oldRange) => {
-    // Skip if no valid source
-    if (!hasValidSource.value || !currentSourceId.value) return;
-
-    // Only handle UI updates if time range actually changed
-    if (
-      newRange &&
-      oldRange &&
-      (newRange.start?.toString() !== oldRange.start?.toString() ||
-        newRange.end?.toString() !== oldRange.end?.toString())
-    ) {
-      // Only clear data if this is a completely different time range
-      // This prevents showing outdated data while maintaining the dirty state
-      if (histogramData.value.length > 0) {
-        const firstBucketTime = new Date(
-          histogramData.value[0].bucket
-        ).getTime();
-        const lastBucketTime = new Date(
-          histogramData.value[histogramData.value.length - 1].bucket
-        ).getTime();
-
-        // Convert new range to timestamps for comparison
-        const newStartTime = newRange.start?.toDate
-          ? newRange.start.toDate(getLocalTimeZone()).getTime()
-          : 0;
-        const newEndTime = newRange.end?.toDate
-          ? newRange.end.toDate(getLocalTimeZone()).getTime()
-          : 0;
-
-        // Check if new range is completely outside the current data range
-        const isDisjoint =
-          newEndTime < firstBucketTime || newStartTime > lastBucketTime;
-
-        if (isDisjoint) {
-          // Clear histogram data as it's completely irrelevant for the new range
-          histogramData.value = [];
-        }
-      }
-
-      // We don't fetch new data here anymore - it will be fetched when the query is executed
-      console.log(
-        "LogHistogram: Time range changed, waiting for query execution to refresh data"
-      );
-    }
-  },
-  { deep: true }
-);
-
-// Watch for theme changes to re-initialize the chart
-watch(colorMode, async (newMode, oldMode) => {
-  // Add more detailed logging
-  console.log(
-    `Theme watcher triggered: newMode='${newMode}', oldMode='${oldMode}', isMounted=${isMounted.value}`
-  );
-
-  if (newMode !== oldMode && chartRef.value && isMounted.value) {
-    console.log(
-      `Actual theme change detected (${oldMode} -> ${newMode}), re-initializing chart.`
-    );
-    // Dispose existing chart and re-initialize with the new theme
-    await initChart();
-    // Re-fetch data if needed, or rely on existing data update logic
-    // If data doesn't need re-fetching, ensure options are applied
-    if (histogramData.value.length > 0) {
-      updateChartOptions();
-    } else if (hasValidSource.value && exploreStore.lastExecutionTimestamp) {
-      // If no data, trigger a fetch if appropriate
-      debouncedFetchHistogramData();
-    }
-  }
-});
-
-// Watch for height changes to resize chart
-watch(
-  () => props.height,
-  async () => {
     try {
-      await nextTick();
-      chart?.resize();
+        // Get options based on data
+        const options = convertHistogramData(histogramData.value);
+
+        // Add axis overrides for proper dark mode display
+        if (colorMode.value === "dark") {
+            // Update styling for dark mode
+            options.yAxis.axisLine = { show: false };
+            options.yAxis.axisTick = { show: false };
+            options.xAxis.splitLine = { show: false };
+            options.yAxis.splitLine = {
+                show: true,
+                lineStyle: {
+                    type: "dashed",
+                    color: "rgba(120, 120, 140, 0.3)",
+                    opacity: 0.5,
+                },
+            };
+        }
+
+        // Set options
+        chart.setOption(options, true);
+
+        // Update loading state
+        if (isChartLoading.value) {
+            chart.showLoading({
+                text: "Loading data...",
+                maskColor: colorMode.value === "dark" ? "rgba(0, 0, 0, 0.5)" : "rgba(255, 255, 255, 0.8)",
+                fontSize: 14,
+            });
+        } else {
+            chart.hideLoading();
+        }
+
+        // Make sure dataZoom tool is selected
+        chart.dispatchAction({
+            type: "takeGlobalCursor",
+            key: "dataZoomSelect",
+            dataZoomSelectActive: true,
+        });
     } catch (e) {
-      console.error("Error resizing chart:", e);
+        console.error("Error updating chart options:", e);
     }
-  }
-);
-
-// Add a separate watcher for source changes - we should refresh data when source changes
-watch(
-  () => currentSourceId.value,
-  (newSourceId, oldSourceId) => {
-    // Skip if source hasn't changed
-    if (newSourceId === oldSourceId) return;
-
-    // If we have a valid source and an execution has already happened,
-    // fetch histogram data for the new source
-    if (
-      newSourceId &&
-      hasValidSource.value &&
-      exploreStore.lastExecutionTimestamp
-    ) {
-      console.log("Histogram source changed, fetching data for new source");
-      lastProcessedTimestamp.value = exploreStore.lastExecutionTimestamp;
-      debouncedFetchHistogramData();
-    }
-  }
-);
-
-// Watch for changes in groupBy prop to refresh data
-watch(
-  () => props.groupBy,
-  (newGroupBy, oldGroupBy) => {
-    if (
-      newGroupBy !== oldGroupBy &&
-      hasValidSource.value &&
-      exploreStore.lastExecutionTimestamp
-    ) {
-      console.log(
-        "Histogram group by field changed, fetching data with new grouping"
-      );
-      currentGroupBy.value = newGroupBy;
-      lastProcessedTimestamp.value = exploreStore.lastExecutionTimestamp;
-      debouncedFetchHistogramData();
-    }
-  }
-);
-
-// Helper function to convert native Date to CalendarDateTime and emit update
-function updateTimeRangeForDatePicker(startDate: Date, endDate: Date) {
-  // Convert native Date objects to CalendarDateTime objects
-  const startDateTime = new CalendarDateTime(
-    startDate.getFullYear(),
-    startDate.getMonth() + 1,
-    startDate.getDate(),
-    startDate.getHours(),
-    startDate.getMinutes(),
-    startDate.getSeconds()
-  );
-
-  const endDateTime = new CalendarDateTime(
-    endDate.getFullYear(),
-    endDate.getMonth() + 1,
-    endDate.getDate(),
-    endDate.getHours(),
-    endDate.getMinutes(),
-    endDate.getSeconds()
-  );
-
-  // Emit event to update the DateTimePicker
-  emit("update:timeRange", {
-    start: startDateTime,
-    end: endDateTime,
-  });
-
-  console.log("Emitted updated time range for DateTimePicker:", {
-    start: startDateTime,
-    end: endDateTime,
-  });
-}
-
-// Helper function to handle zoom action uniformly
-function handleZoomAction(zoomParams: any) {
-  if (histogramData.value.length === 0) return;
-
-  try {
-    console.log(
-      "DataZoom triggered with params:",
-      zoomParams,
-      "Histogram data length:",
-      histogramData.value.length
-    );
-
-    // Special case: Very small datasets (1-3 points)
-    if (histogramData.value.length <= 3) {
-      // Just use the original time range from the data
-      const startDate = new Date(histogramData.value[0].bucket);
-
-      // For the end date, use the last bucket plus a small increment
-      const lastIndex = histogramData.value.length - 1;
-      const lastBucketTime = new Date(
-        histogramData.value[lastIndex].bucket
-      ).getTime();
-      // Add 1 minute if only one bucket, or use bucket width if more than one
-      const increment =
-        lastIndex > 0
-          ? lastBucketTime - new Date(histogramData.value[0].bucket).getTime()
-          : 60000; // 1 minute default
-
-      const endDate = new Date(lastBucketTime + increment);
-
-      console.log("Small dataset zoom: Using full range", {
-        startDate,
-        endDate,
-      });
-
-      // Emit native Date event
-      emit("zoom-time-range", { start: startDate, end: endDate });
-
-      // Also emit DateValue event for DateTimePicker
-      updateTimeRangeForDatePicker(startDate, endDate);
-
-      return;
-    }
-
-    const totalPoints = histogramData.value.length;
-    let startIndex: number;
-    let endIndex: number;
-
-    // Handle different zoom parameter formats
-    if (
-      zoomParams.startValue !== undefined &&
-      zoomParams.endValue !== undefined
-    ) {
-      // Direct index values from toolbox dataZoom
-      startIndex = Math.max(
-        0,
-        Math.min(parseInt(zoomParams.startValue), totalPoints - 1)
-      );
-      endIndex = Math.max(
-        startIndex,
-        Math.min(parseInt(zoomParams.endValue), totalPoints - 1)
-      );
-
-      console.log("Using direct index values:", { startIndex, endIndex });
-    } else if (zoomParams.start !== undefined && zoomParams.end !== undefined) {
-      // Percentage values from inside zoom
-      const startPercent = zoomParams.start || 0;
-      const endPercent = zoomParams.end || 100;
-
-      // Calculate indices based on percentages
-      startIndex = Math.floor((totalPoints * startPercent) / 100);
-      endIndex = Math.ceil((totalPoints * endPercent) / 100) - 1;
-
-      console.log("Using percentage values:", {
-        startPercent,
-        endPercent,
-        startIndex,
-        endIndex,
-      });
-    } else {
-      console.error("Invalid zoom parameters:", zoomParams);
-      return;
-    }
-
-    // Ensure indices are within bounds
-    const validStartIndex = Math.max(0, Math.min(startIndex, totalPoints - 1));
-    const validEndIndex = Math.max(
-      validStartIndex,
-      Math.min(endIndex, totalPoints - 1)
-    );
-
-    // Get the actual timestamps from the data
-    const startDate = new Date(histogramData.value[validStartIndex].bucket);
-
-    // For the end date, we need to include the entire bucket
-    // Calculate the bucket width (assume uniform width)
-    let endDate: Date;
-
-    if (validEndIndex >= totalPoints - 1) {
-      // If at the end of the data, add a bucket width to include the entire last bucket
-      const lastBucketTime = new Date(
-        histogramData.value[validEndIndex].bucket
-      ).getTime();
-
-      // Calculate bucket width if possible
-      let bucketWidth = 60000; // Default 1 minute
-      if (totalPoints > 1) {
-        // Get average bucket width
-        const firstTime = new Date(histogramData.value[0].bucket).getTime();
-        const lastTime = new Date(
-          histogramData.value[totalPoints - 1].bucket
-        ).getTime();
-        bucketWidth = (lastTime - firstTime) / (totalPoints - 1);
-      }
-
-      endDate = new Date(lastBucketTime + bucketWidth);
-    } else {
-      // Use next bucket's start time as the end time
-      endDate = new Date(histogramData.value[validEndIndex + 1].bucket);
-    }
-
-    console.log("Selected time range:", {
-      startDate,
-      endDate,
-      startIndex: validStartIndex,
-      endIndex: validEndIndex,
-    });
-
-    // Emit native Date event (original behavior)
-    emit("zoom-time-range", {
-      start: startDate,
-      end: endDate,
-    });
-
-    // Also emit DateValue event for DateTimePicker
-    updateTimeRangeForDatePicker(startDate, endDate);
-  } catch (e) {
-    console.error("Error handling zoom event:", e);
-
-    // Fallback to using the full range
-    if (histogramData.value.length > 0) {
-      try {
-        const startDate = new Date(histogramData.value[0].bucket);
-        const lastBucket =
-          histogramData.value[histogramData.value.length - 1].bucket;
-        const endDate = new Date(new Date(lastBucket).getTime() + 60000);
-
-        console.log("Fallback: Using full time range after error");
-
-        // Emit native Date event (original behavior)
-        emit("zoom-time-range", { start: startDate, end: endDate });
-
-        // Also emit DateValue event for DateTimePicker
-        updateTimeRangeForDatePicker(startDate, endDate);
-      } catch (fallbackError) {
-        console.error("Even fallback failed:", fallbackError);
-      }
-    }
-  }
-}
-
-// Add a function to activate zoom functionality after any component change
-const activateZoomFunctionality = () => {
-  if (!chart) return;
-
-  // Set dataZoom to be active
-  chart.dispatchAction({
-    type: "takeGlobalCursor",
-    key: "dataZoomSelect",
-    dataZoomSelectActive: true,
-  });
 };
 
-// Call this function after any major update that might affect the chart
+// Initialize chart
+const initChart = async () => {
+    if (!chartRef.value || !isMounted.value) return;
+
+    try {
+        // Wait for DOM to be ready
+        await nextTick();
+
+        // Clear any existing chart instance
+        if (chart) {
+            chart.dispose();
+        }
+
+        // Create chart instance with the current theme name
+        const themeName = colorMode.value === "dark" ? "logchef-dark" : "";
+        console.log(
+            `Initializing chart with theme: ${colorMode.value === "dark" ? "logchef-dark" : "default"}`
+        );
+        chart = init(chartRef.value, themeName);
+
+        // Set initial options
+        updateChartOptions();
+
+        // Setup event handlers
+        setupChartEvents();
+
+        // Ensure the dataZoom button is active
+        restoreChart();
+
+        // Explicitly set dataZoom to be active on initialization
+        chart.dispatchAction({
+            type: "takeGlobalCursor",
+            key: "dataZoomSelect",
+            dataZoomSelectActive: true,
+        });
+    } catch (e) {
+        console.error("Error initializing chart:", e);
+    }
+};
+
+// Watch for changes in histogram data to update the chart
 watch(
-  () => histogramData.value,
-  () => {
-    nextTick(() => {
-      activateZoomFunctionality();
-    });
-  }
+    () => histogramData.value,
+    () => {
+        updateChartOptions();
+    },
+    { deep: true }
+);
+
+// Watch for changes in loading state
+watch(
+    () => isChartLoading.value,
+    () => {
+        updateChartOptions();
+    }
+);
+
+// Watch theme changes to re-initialize the chart
+watch(
+    () => colorMode.value,
+    async (newMode, oldMode) => {
+        if (newMode !== oldMode && chartRef.value && isMounted.value) {
+            console.log(
+                `Theme changed from ${oldMode} to ${newMode}, re-initializing chart.`
+            );
+            await initChart();
+        }
+    }
+);
+
+// Watch for changes in group by to update chart
+watch(
+    () => props.groupBy,
+    (newGroupBy) => {
+        if (newGroupBy !== exploreStore.groupByField) {
+            // Update the store with the new group by value
+            exploreStore.setGroupByField(newGroupBy);
+
+            // If we already have query execution, fetch histogram data with new groupBy
+            if (exploreStore.lastExecutionTimestamp) {
+                exploreStore.fetchHistogramData().catch(error => {
+                    console.error("Error fetching histogram data after groupBy change:", error);
+                });
+            }
+        }
+    }
 );
 
 // Component lifecycle
 onMounted(async () => {
-  isMounted.value = true;
-  console.log("LogHistogram: Component mounted");
+    isMounted.value = true;
+    console.log("LogHistogram: Component mounted");
 
-  // Wait for multiple ticks to ensure DOM is fully rendered
-  for (let i = 0; i < 5; i++) {
+    // Wait for DOM to be fully rendered
     await nextTick();
-  }
 
-  // Initialize chart
-  await initChart();
-  console.log("LogHistogram: Chart initialized");
+    // Initialize chart
+    await initChart();
+    console.log("LogHistogram: Chart initialized");
 
-  // Single pathway to determine if we should fetch on mount
-  if (hasValidSource.value && currentSourceId.value) {
-    console.log("LogHistogram: Valid source detected on mount");
-
-    // Prioritize using lastExecutionTimestamp if available
-    if (exploreStore.lastExecutionTimestamp) {
-      console.log(
-        "LogHistogram: Using lastExecutionTimestamp for initial data load"
-      );
-      lastProcessedTimestamp.value = exploreStore.lastExecutionTimestamp;
-
-      // Check if we're already scheduled from the timestamp watcher
-      if (scheduledFetches.value.has("timestamp")) {
-        console.log(
-          "LogHistogram: Fetch already scheduled from timestamp watcher, skipping mount fetch"
-        );
-        return;
-      }
-
-      // Delay initial fetch to avoid race conditions
-      scheduledFetches.value.add("mount-timestamp");
-      setTimeout(() => {
-        if (isMounted.value && !isChartLoading.value && !hasLoadedData.value) {
-          console.log(
-            "LogHistogram: Executing initial data fetch via lastExecutionTimestamp"
-          );
-          debouncedFetchHistogramData(undefined, "mount-timestamp");
-        } else {
-          console.log(
-            "LogHistogram: Skipping mount fetch - component unmounted, loading, or data already loaded"
-          );
-        }
-        scheduledFetches.value.delete("mount-timestamp");
-      }, 600);
+    // If we already have histogram data, update the chart
+    if (histogramData.value && histogramData.value.length > 0) {
+        updateChartOptions();
     }
-    // Fallback to using timeRange if available but no lastExecutionTimestamp
-    else if (props.timeRange && props.timeRange.start && props.timeRange.end) {
-      console.log(
-        "LogHistogram: Using timeRange for initial data load (no lastExecutionTimestamp)"
-      );
-
-      // Check if we already have data or a scheduled fetch from elsewhere
-      if (hasLoadedData.value || scheduledFetches.value.size > 0) {
-        console.log(
-          "LogHistogram: Data already loaded or fetch already scheduled, skipping timeRange fetch"
-        );
-        return;
-      }
-
-      // Use a longer delay for timeRange-based fetch to give priority to timestamp-based fetch
-      scheduledFetches.value.add("mount-timerange");
-      setTimeout(() => {
-        if (isMounted.value && !isChartLoading.value && !hasLoadedData.value) {
-          console.log(
-            "LogHistogram: Executing initial data fetch via timeRange"
-          );
-          debouncedFetchHistogramData(undefined, "mount-timerange");
-        } else {
-          console.log(
-            "LogHistogram: Skipping timeRange fetch - component unmounted, loading, or data already loaded"
-          );
-        }
-        scheduledFetches.value.delete("mount-timerange");
-      }, 1000);
-    } else {
-      console.log(
-        "LogHistogram: No valid data source for initial fetch (missing timeRange or lastExecutionTimestamp)"
-      );
-    }
-  } else {
-    console.log(
-      "LogHistogram: Not loading data on mount - invalid source or no source ID"
-    );
-  }
 });
 
 onBeforeUnmount(() => {
-  // Mark component as unmounted
-  isMounted.value = false;
+    // Mark component as unmounted
+    isMounted.value = false;
 
-  // Clean up resources
-  window.removeEventListener("resize", windowResizeEventCallback);
+    // Clean up resources
+    window.removeEventListener("resize", windowResizeEventCallback);
 
-  if (chart) {
-    // Remove event listeners first
-    chart.off("datazoom");
-    chart.off("restore");
-    // Then dispose the chart
-    chart.dispose();
-    chart = null;
-  }
+    if (chart) {
+        // Remove event listeners first
+        chart.off("datazoom");
+        chart.off("restore");
+        chart.off("brush");
+        chart.off("brushend");
+        // Then dispose the chart
+        chart.dispose();
+        chart = null;
+    }
+
+    // Clear any pending timeouts
+    if (pendingFetchTimeoutId.value !== null) {
+        clearTimeout(pendingFetchTimeoutId.value);
+        pendingFetchTimeoutId.value = null;
+    }
 });
 
-// Add onActivated and onDeactivated lifecycle hooks
+// Add onActivated and onDeactivated lifecycle hooks for keep-alive
 onActivated(async () => {
-  console.log("LogHistogram: Component activated");
-  isMounted.value = true;
+    console.log("LogHistogram: Component activated");
+    isMounted.value = true;
 
-  // Wait for DOM to be fully rendered before reinitializing
-  await nextTick();
+    // Wait for DOM to be fully rendered before reinitializing
+    await nextTick();
 
-  try {
-    if (!chart && chartRef.value) {
-      // If chart was disposed, reinitialize it
-      console.log("LogHistogram: Initializing chart on activation");
-      await initChart();
+    try {
+        if (!chart && chartRef.value) {
+            // If chart was disposed, reinitialize it
+            console.log("LogHistogram: Initializing chart on activation");
+            await initChart();
+        } else if (chart) {
+            // If chart still exists, resize it to fit container and refresh
+            console.log("LogHistogram: Resizing existing chart on activation");
+            chart.resize();
 
-      // Fetch data again if we have a valid context
-      if (
-        hasValidSource.value &&
-        currentSourceId.value &&
-        exploreStore.lastExecutionTimestamp
-      ) {
-        console.log("LogHistogram: Reactivated - fetching data");
-        lastProcessedTimestamp.value = exploreStore.lastExecutionTimestamp;
-        await fetchHistogramData();
-      }
-    } else if (chart) {
-      // If chart still exists, resize it to fit container and refresh
-      console.log("LogHistogram: Resizing existing chart on activation");
-      chart.resize();
-
-      // Force redraw with current data
-      updateChartOptions();
+            // Force redraw with current data
+            updateChartOptions();
+        }
+    } catch (e) {
+        console.error("Error during histogram reactivation:", e);
     }
-  } catch (e) {
-    console.error("Error during histogram reactivation:", e);
-  }
 });
 
 onDeactivated(() => {
-  console.log("LogHistogram: Component deactivated");
-  // Don't dispose the chart or set isMounted to false
-  // We want to keep the chart instance alive for faster reactivation
+    console.log("LogHistogram: Component deactivated");
+    // Don't dispose the chart or set isMounted to false
+    // We want to keep the chart instance alive for faster reactivation
 });
 </script>
 
 <template>
-  <div class="log-histogram">
-    <div
-      v-if="!initialDataLoaded && isChartLoading"
-      class="histogram-loading-overlay"
-    >
-      <div class="loading-spinner"></div>
-      <span>Loading histogram data...</span>
+    <div class="log-histogram">
+        <!-- Loading overlay -->
+        <div v-if="isChartLoading" class="histogram-loading-overlay">
+            <div class="loading-spinner"></div>
+            <span>Loading histogram data...</span>
+        </div>
+
+        <!-- Empty state -->
+        <div v-else-if="!histogramData.length" class="histogram-empty-state">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mb-2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="9" y1="9" x2="9" y2="15"></line>
+                <line x1="15" y1="9" x2="15" y2="15"></line>
+            </svg>
+            <span v-if="histogramError">{{ histogramError }}</span>
+            <span v-else>No histogram data available</span>
+        </div>
+
+        <!-- Chart container -->
+        <div ref="chartRef" class="chart-container" :style="{ height: props.height }"></div>
     </div>
-    <div
-      v-else-if="!histogramData.length && !isChartLoading"
-      class="histogram-empty-state"
-    >
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="24"
-        height="24"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        class="mb-2"
-      >
-        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-        <line x1="9" y1="9" x2="9" y2="15"></line>
-        <line x1="15" y1="9" x2="15" y2="15"></line>
-      </svg>
-      <span>No histogram data available</span>
-    </div>
-    <div ref="chartRef" class="chart-container" :style="{ height }"></div>
-  </div>
 </template>
 
 <style scoped>
 .log-histogram {
-  position: relative;
-  width: 100%;
-  border-radius: 0.5rem;
-  background-color: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
-  box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
-  overflow: hidden;
-  margin-bottom: 1rem;
+    position: relative;
+    width: 100%;
+    border-radius: 0.5rem;
+    background-color: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+    overflow: hidden;
+    margin-bottom: 1rem;
 }
 
 .chart-container {
-  width: 100%;
-  min-height: 180px;
-  padding: 0.5rem 0.25rem;
+    width: 100%;
+    min-height: 180px;
+    padding: 0.5rem 0.25rem;
 }
 
 .histogram-loading-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  background-color: hsl(var(--card) / 0.9);
-  z-index: 10;
-  gap: 0.75rem;
-  font-size: 0.875rem;
-  color: hsl(var(--muted-foreground));
-  backdrop-filter: blur(2px);
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background-color: hsl(var(--card) / 0.9);
+    z-index: 10;
+    gap: 0.75rem;
+    font-size: 0.875rem;
+    color: hsl(var(--muted-foreground));
+    backdrop-filter: blur(2px);
 }
 
 .loading-spinner {
-  width: 1.75rem;
-  height: 1.75rem;
-  border: 3px solid hsl(var(--muted));
-  border-top-color: hsl(var(--primary));
-  border-radius: 50%;
-  animation: spinner 0.9s ease-in-out infinite;
+    width: 1.75rem;
+    height: 1.75rem;
+    border: 3px solid hsl(var(--muted));
+    border-top-color: hsl(var(--primary));
+    border-radius: 50%;
+    animation: spinner 0.9s ease-in-out infinite;
 }
 
 .histogram-empty-state {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: hsl(var(--muted-foreground));
-  font-size: 0.875rem;
-  background-color: hsl(var(--card));
-  gap: 0.5rem;
-  opacity: 0.7;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.875rem;
+    background-color: hsl(var(--card));
+    gap: 0.5rem;
+    opacity: 0.7;
 }
 
 @keyframes spinner {
-  0% {
-    transform: rotate(0deg);
-  }
+    0% {
+        transform: rotate(0deg);
+    }
 
-  100% {
-    transform: rotate(360deg);
-  }
+    100% {
+        transform: rotate(360deg);
+    }
 }
 </style>
