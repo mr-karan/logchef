@@ -102,13 +102,17 @@ export function useExploreUrlSync() {
       preservingRelativeTime = true;
     }
 
+    // Check if we have a query_id in the URL, which indicates we're loading a saved query
+    const queryId = route.query.query_id as string | undefined;
+    const hasQueryId = !!queryId;
+
     try {
       // 1. Ensure Teams are loaded (wait if necessary)
       if (!teamsStore.teams || teamsStore.teams.length === 0) {
         await teamsStore.loadTeams(false, false); // Explicitly use user teams endpoint
       }
 
-      // Handle the case where no teams are available more gracefully
+      // Handler the case where no teams are available more gracefully
       if (teamsStore.teams.length === 0) {
         // Set initialization error without throwing
         initializationError.value = "No teams available or accessible.";
@@ -120,9 +124,6 @@ export function useExploreUrlSync() {
         // Exit early but don't throw - allow the component to handle this state
         return;
       }
-
-      // Check if we have a query_id in the URL, which indicates we're editing a saved query
-      const queryId = route.query.query_id as string | undefined;
 
       // 2. Set Team from URL or default
       let teamId: number | null = null;
@@ -204,69 +205,77 @@ export function useExploreUrlSync() {
          initializationError.value = `No sources available for team ${teamId}.`;
       }
 
-      // 5. Set Limit from URL or default
-      const urlLimitStr = route.query.limit as string | undefined;
-      const limit = urlLimitStr ? parseInt(urlLimitStr) : 100;
-      exploreStore.setLimit(!isNaN(limit) && limit > 0 && limit <= 10000 ? limit : 100);
+      // If we have a query_id in the URL, we'll let the component handle loading the query
+      // We'll still set other URL params but those will be overridden when the query is loaded
+      if (hasQueryId) {
+        console.log(`useExploreUrlSync: URL has query_id=${queryId}, component will load saved query content`);
+        exploreStore.setSelectedQueryId(queryId); // Store the query_id for reference
+      } else {
+        // Only set these values from URL if we're not loading a saved query
+        // 5. Set Limit from URL or default
+        const urlLimitStr = route.query.limit as string | undefined;
+        const limit = urlLimitStr ? parseInt(urlLimitStr) : 100;
+        exploreStore.setLimit(!isNaN(limit) && limit > 0 && limit <= 10000 ? limit : 100);
 
-      // 6. Time range - SIMPLIFIED PRIORITY:
-      // First check for relative time (this takes precedence)
-      const relativeTime = route.query.relativeTime as string | undefined;
-      if (relativeTime) {
-        // Set relative time - this will also calculate and set the absolute time range
-        exploreStore.setRelativeTimeRange(relativeTime);
-        // Make a note that we're preserving a relative time
-        console.log(`Initializing with relative time: ${relativeTime}`);
-        preservingRelativeTime = true;
-      }
-      // Only use absolute times if no relative time is specified
-      else {
-        const urlStartTime = parseTimestamp(route.query.start_time as string | undefined);
-        const urlEndTime = parseTimestamp(route.query.end_time as string | undefined);
+        // 6. Time range - SIMPLIFIED PRIORITY:
+        // First check for relative time (this takes precedence)
+        const relativeTime = route.query.relativeTime as string | undefined;
+        if (relativeTime) {
+          // Set relative time - this will also calculate and set the absolute time range
+          exploreStore.setRelativeTimeRange(relativeTime);
+          // Make a note that we're preserving a relative time
+          console.log(`Initializing with relative time: ${relativeTime}`);
+          preservingRelativeTime = true;
+        }
+        // Only use absolute times if no relative time is specified
+        else {
+          const urlStartTime = parseTimestamp(route.query.start_time as string | undefined);
+          const urlEndTime = parseTimestamp(route.query.end_time as string | undefined);
 
-        // If we have valid timestamps, use them
-        if (urlStartTime !== null && urlEndTime !== null) {
-          const parsedStart = timestampToCalendarDateTime(urlStartTime);
-          const parsedEnd = timestampToCalendarDateTime(urlEndTime);
+          // If we have valid timestamps, use them
+          if (urlStartTime !== null && urlEndTime !== null) {
+            const parsedStart = timestampToCalendarDateTime(urlStartTime);
+            const parsedEnd = timestampToCalendarDateTime(urlEndTime);
 
-          if (parsedStart && parsedEnd) {
-            exploreStore.setTimeRange({ start: parsedStart, end: parsedEnd });
+            if (parsedStart && parsedEnd) {
+              exploreStore.setTimeRange({ start: parsedStart, end: parsedEnd });
+            } else {
+              // Fall back to default range if timestamp parsing fails
+              setDefaultTimeRange();
+            }
           } else {
-            // Fall back to default range if timestamp parsing fails
+            // No times in URL, use default
             setDefaultTimeRange();
           }
+        }
+
+        // 7. Set Mode from URL or default
+        const urlMode = route.query.mode as string | undefined;
+        const mode = (urlMode === 'sql' ? 'sql' : 'logchefql') as 'logchefql' | 'sql';
+        exploreStore.setActiveMode(mode);
+
+        // 8. Set Query Content from URL
+        const urlQuery = route.query.q as string | undefined;
+        let queryContent = "";
+
+        if (urlQuery) {
+          try {
+            // Safely decode the URL parameter, handling double-encoded characters
+            queryContent = decodeURIComponent(urlQuery);
+          } catch (decodeError) {
+            // If decoding fails, use the raw value
+            console.error("Error decoding URL query parameter:", decodeError);
+            queryContent = urlQuery;
+          }
+        }
+
+        if (mode === 'logchefql') {
+          exploreStore.setLogchefqlCode(queryContent);
+          exploreStore.setRawSql(""); // Clear other mode
         } else {
-          // No times in URL, use default
-          setDefaultTimeRange();
+          exploreStore.setRawSql(queryContent);
+          exploreStore.setLogchefqlCode(""); // Clear other mode
         }
-      }
-
-      // 7. Set Mode from URL or default
-      const urlMode = route.query.mode as string | undefined;
-      const mode = (urlMode === 'sql' ? 'sql' : 'logchefql') as 'logchefql' | 'sql';
-      exploreStore.setActiveMode(mode);
-
-      // 8. Set Query Content from URL
-      const urlQuery = route.query.q as string | undefined;
-      let queryContent = "";
-
-      if (urlQuery) {
-        try {
-          // Safely decode the URL parameter, handling double-encoded characters
-          queryContent = decodeURIComponent(urlQuery);
-        } catch (decodeError) {
-          // If decoding fails, use the raw value
-          console.error("Error decoding URL query parameter:", decodeError);
-          queryContent = urlQuery;
-        }
-      }
-
-      if (mode === 'logchefql') {
-        exploreStore.setLogchefqlCode(queryContent);
-        exploreStore.setRawSql(""); // Clear other mode
-      } else {
-        exploreStore.setRawSql(queryContent);
-        exploreStore.setLogchefqlCode(""); // Clear other mode
       }
 
       // If we changed source but haven't loaded details yet, add a small delay to allow the details to load
@@ -333,10 +342,15 @@ export function useExploreUrlSync() {
        return;
     }
 
-    // Skip this URL sync if the flag is set
-    if (skipNextUrlSync.value) {
+    // Skip this URL sync if the flag is set (in this composable or in the store)
+    if (skipNextUrlSync.value || exploreStore.skipNextUrlSync) {
       console.log("Skipping URL sync as requested - waiting for pushQueryHistoryEntry");
       skipNextUrlSync.value = false; // Reset the flag
+      
+      // Also reset the store flag if it exists
+      if (exploreStore.skipNextUrlSync !== undefined) {
+        exploreStore.skipNextUrlSync = false;
+      }
       return;
     }
 
@@ -346,6 +360,7 @@ export function useExploreUrlSync() {
       return;
     }
 
+    // Start with current query parameters to preserve non-tracking parameters
     const query: Record<string, string> = {};
 
     // Team
@@ -358,9 +373,13 @@ export function useExploreUrlSync() {
       query.source = exploreStore.sourceId.toString();
     }
 
-    // Only preserve query_id if store has a selectedQueryId - this respects manual deletion
-    if (exploreStore.selectedQueryId) {
-      query.query_id = exploreStore.selectedQueryId;
+    // Get the query_id from the route or from the store's selected query ID
+    // Ensure we preserve query_id if it exists in the URL
+    if (route.query.query_id || exploreStore.selectedQueryId) {
+      const queryId = (route.query.query_id as string) || exploreStore.selectedQueryId;
+      if (queryId) {
+        query.query_id = queryId;
+      }
     }
 
     // Limit
@@ -512,16 +531,27 @@ export function useExploreUrlSync() {
   );
 
   // Watch route changes to re-initialize if necessary (e.g., browser back/forward)
-  // Note: This might be too aggressive if other query params change often.
-  // Consider making this more specific if needed.
   watch(() => route.fullPath, (newPath, oldPath) => {
-      // Only re-initialize if the path itself or the core query params changed significantly
-      // Avoid re-init on minor changes if updateUrlFromState handles them.
-      // A simple check for now: re-init if path changes.
-      if (newPath !== oldPath && !isInitializing.value) {
-          // Re-run initialization logic when route changes
-          // initializeFromUrl(); // Potentially re-enable if back/forward needs full re-init
+    // Check for significant route changes
+    const isSignificantChange = (newPath: string, oldPath: string) => {
+      // If the paths are different (not just query params), it's significant
+      if (newPath.split('?')[0] !== oldPath.split('?')[0]) {
+        return true;
       }
+      
+      // Otherwise, check if query_id parameter is added, removed, or changed
+      const newQueryId = new URL(window.location.origin + newPath).searchParams.get('query_id');
+      const oldQueryId = new URL(window.location.origin + oldPath).searchParams.get('query_id');
+      
+      return newQueryId !== oldQueryId;
+    };
+    
+    // Only re-initialize on significant changes and when not already initializing
+    if (isSignificantChange(newPath, oldPath) && !isInitializing.value) {
+      console.log("useExploreUrlSync: Detected significant change in URL, reinitializing");
+      // Re-run initialization logic when route changes significantly
+      initializeFromUrl();
+    }
   });
 
 

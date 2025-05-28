@@ -1174,7 +1174,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <KeepAlive>
+  <KeepAlive :key="`explorer-${route.query.query_id || 'default'}`">
     <div class="log-explorer-wrapper">
       <!-- Loading State -->
       <div
@@ -1410,10 +1410,14 @@ onBeforeUnmount(() => {
                     :schema="
                       (sourceDetails?.columns || []).reduce((acc, col) => {
                         if (col.name && col.type) {
-                          acc[col.name] = { type: col.type };
+                          // Check if we've already seen this field name
+                          // If we have a duplicate, keep the first one we've seen
+                          if (!acc[col.name]) {
+                            acc[col.name] = { type: col.type };
+                          }
                         }
                         return acc;
-                      }, {})
+                      }, {} as Record<string, {type: string}>)
                     "
                     :activeMode="
                       exploreStore.activeMode === 'logchefql'

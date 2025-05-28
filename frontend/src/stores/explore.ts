@@ -90,6 +90,8 @@ export interface ExploreState {
   selectedQueryId?: string | null;
   // NEW: Name of the currently active saved query (if any)
   activeSavedQueryName?: string | null;
+  // Flag to skip next URL sync (for multi-component coordination)
+  skipNextUrlSync?: boolean;
   // Query stats
   stats?: any;
   // Last executed query state
@@ -348,11 +350,15 @@ export const useExploreStore = defineStore("explore", () => {
     // Clear active saved query information
     state.data.value.selectedQueryId = null;
     state.data.value.activeSavedQueryName = null;
+    
+    // Reset URL sync flag
+    state.data.value.skipNextUrlSync = false;
   }
 
   // Reset state
   function resetState() {
-    state.data.value = {
+    // Initialize the state data with default values
+    const initialData = {
       logs: [],
       columns: [],
       queryStats: DEFAULT_QUERY_STATS,
@@ -367,10 +373,15 @@ export const useExploreStore = defineStore("explore", () => {
       lastExecutedState: undefined,
       lastExecutionTimestamp: null,
       selectedQueryId: null, // Reset selectedQueryId
+      activeSavedQueryName: null, // Reset activeSavedQueryName
+      skipNextUrlSync: false, // Reset URL sync flag
       groupByField: state.data.value.groupByField, // Preserve groupByField
       selectedTimezoneIdentifier: state.data.value.selectedTimezoneIdentifier, // Preserve timezone identifier
       generatedDisplaySql: null, // Reset generatedDisplaySql
     };
+    
+    // Update the state data with the initial values
+    state.data.value = initialData;
   }
 
   // Main query execution
@@ -615,6 +626,12 @@ export const useExploreStore = defineStore("explore", () => {
     console.log('Explore store: Updating execution timestamp');
     state.data.value.lastExecutionTimestamp = Date.now();
   }
+  
+  // Add helper to set skipNextUrlSync flag
+  function setSkipNextUrlSync(value: boolean) {
+    console.log(`Explore store: Setting skipNextUrlSync to ${value}`);
+    state.data.value.skipNextUrlSync = value;
+  }
 
   // Clear error helper
   function clearError() {
@@ -690,6 +707,64 @@ export const useExploreStore = defineStore("explore", () => {
     ) => {
       console.log("Explore Store Watcher: Detected change in state.");
 
+      // --- Check if the *only* change was mode switching to SQL ---
+      const [
+        oldSourceId,
+        oldTimezone,
+        oldTimeRange,
+        oldLogchefqlCode,
+        oldActiveMode,
+        oldLimit,
+        oldSourceDetails,
+      ] = oldValues;
+      const modeJustSwitchedToSql = oldActiveMode !== activeMode && activeMode === 'sql';
+      const otherParamsChanged =
+        oldSourceId !== sourceId ||
+        oldTimezone !== timezone ||
+        JSON.stringify(oldTimeRange) !== JSON.stringify(timeRange) ||
+        // Don't consider logchefqlCode change if mode switched *to* sql
+        // oldLogchefqlCode !== logchefqlCode ||
+        oldLimit !== limit ||
+        JSON.stringify(oldSourceDetails) !== JSON.stringify(sourceDetails);
+
+      // If the mode just switched to SQL AND no other relevant parameters changed,
+      // skip the watcher's SQL generation. Let useQuery.changeMode handle it.
+      if (modeJustSwitchedToSql && !otherParamsChanged) {
+        console.log("Explore Store Watcher: Mode switched to SQL, skipping internal SQL generation to allow useQuery translation.");
+        return;
+      }
+
+      // --- Check if only time or limit changed while in SQL mode ---
+      const timeJustChanged = !modeJustSwitchedToSql && activeMode === 'sql' && JSON.stringify(oldTimeRange) !== JSON.stringify(timeRange) && !otherParamsChanged;
+      const limitJustChanged = !modeJustSwitchedToSql && activeMode === 'sql' && oldLimit !== limit && !otherParamsChanged;
+
+      if ((timeJustChanged || limitJustChanged) && activeMode === 'sql') {
+        console.log(`Explore Store Watcher: ${timeJustChanged ? 'Time range' : 'Limit'} changed in SQL mode, skipping default SQL generation. Handlers in useQuery should update rawSql.`);
+        // Do not generate default SQL or update rawSql here.
+        // The dedicated handlers (handleTimeRangeUpdate/handleLimitUpdate) modify
+        // sqlQuery in useQuery, which updates the store's rawSql.
+        // We still need to update generatedDisplaySql though, based on the (now updated) rawSql.
+        try {
+            const validationResult = QueryService.validateSQLWithDetails(state.data.value.rawSql);
+            if (validationResult.valid) {
+                // Use the potentially updated rawSql directly
+                let finalSql = state.data.value.rawSql;
+                const queryAnalysis = QueryService.analyzeQuery(finalSql);
+                if (queryAnalysis && !queryAnalysis.hasLimit) {
+                    finalSql = `${finalSql}\nLIMIT ${limit}`;
+                }
+                state.data.value.generatedDisplaySql = finalSql;
+                console.log("Explore Store Watcher: Updated generatedDisplaySql after time/limit change in SQL mode.");
+            } else {
+                 state.data.value.generatedDisplaySql = `-- Error validating query after time/limit update: ${validationResult.error}`;
+            }
+        } catch (error) {
+             state.data.value.generatedDisplaySql = `-- Exception validating query after time/limit update: ${error}`;
+        }
+        return; // Exit watcher early
+      }
+      // --- End Check ---
+
       // Prevent running if essential data is missing
       if (
         !sourceId ||
@@ -708,7 +783,7 @@ export const useExploreStore = defineStore("explore", () => {
       const tsField = sourceDetails._meta_ts_field;
       const effectiveTimezone = timezone || getTimezoneIdentifier(); // Use state value or default
 
-      let result: QueryResult;
+      let result: QueryResult | null = null; // Use nullable type
 
       try {
         if (activeMode === "logchefql") {
@@ -722,53 +797,45 @@ export const useExploreStore = defineStore("explore", () => {
             timezone: effectiveTimezone,
           });
         } else { // activeMode === 'sql'
-          console.log("Explore Store Watcher: Generating default SQL for SQL mode.");
-          // In SQL mode, we regenerate the *base* query using current params
-          // We assume the user modifies rawSql directly for complex changes
-          result = QueryService.generateDefaultSQL({
-            tableName,
-            tsField,
-            timeRange,
-            limit,
-            timezone: effectiveTimezone,
-          });
+          // --- Watcher NO LONGER generates default SQL or modifies rawSql here ---
+          console.log("Explore Store Watcher: In SQL mode, validating current rawSql for display/execution.");
+          const currentRawSql = state.data.value.rawSql;
+          if (!currentRawSql || !currentRawSql.trim()) {
+              // Handle case where rawSql is empty in SQL mode
+              console.log("Explore Store Watcher: rawSql is empty in SQL mode.");
+              result = { success: true, sql: '', error: null }; // Treat as valid empty query
+          } else {
+              const validationResult = QueryService.validateSQLWithDetails(currentRawSql);
+              if (validationResult.valid) {
+                  // Use the rawSql from the store directly
+                  let finalSql = currentRawSql;
+                  const queryAnalysis = QueryService.analyzeQuery(finalSql);
+                  // Auto-add limit *for display/execution* if missing, but don't modify rawSql
+                  if (queryAnalysis && !queryAnalysis.hasLimit) {
+                      finalSql = `${finalSql}\nLIMIT ${limit}`;
+                  }
+                  result = { success: true, sql: finalSql, error: null }; // Create a simple result structure
+              } else {
+                   result = { success: false, sql: currentRawSql, error: `Error validating query: ${validationResult.error}` };
+              }
+          }
+        }
 
-          // Special case: If only the timezone changed and rawSql already exists,
-          // try to *update* the timezone within the existing rawSql instead of overwriting.
-          // This is complex and might be fragile. Let's stick to regenerating for now.
-          // A better approach might involve parsing/modifying the rawSql AST.
-        } 
-
-        if (result.success) {
-          console.log("Explore Store Watcher: SQL generation successful.");
+        // Update generatedDisplaySql based on the outcome
+        if (result && result.success) {
+          console.log("Explore Store Watcher: SQL processing successful.");
           state.data.value.generatedDisplaySql = result.sql;
 
-          // Conditionally update rawSql ONLY if in SQL mode AND the trigger wasn't a direct rawSql edit
-          // (This simplistic check might not be robust enough for all cases)
-          if (activeMode === 'sql' && state.data.value.rawSql !== result.sql) {
-             // Check if the change was driven by parameters (not direct SQL edit)
-             const sourceChanged = oldValues[0] !== sourceId;
-             const timezoneChanged = oldValues[1] !== timezone;
-             const timeRangeChanged = JSON.stringify(oldValues[2]) !== JSON.stringify(timeRange);
-             const logchefCodeChanged = oldValues[3] !== logchefqlCode; // Check if LogchefQL code changed
-             const modeChanged = oldValues[4] !== activeMode;
-             const limitChanged = oldValues[5] !== limit; // Correct index for limit
-             const sourceDetailsChanged = JSON.stringify(oldValues[6]) !== JSON.stringify(sourceDetails); // Correct index for sourceDetails
-  
-             // If the change was driven by parameters (not direct SQL edit), update rawSql
-             if ((timezoneChanged || timeRangeChanged || limitChanged || sourceChanged || modeChanged || sourceDetailsChanged) && !logchefCodeChanged) {
-                   console.log("Explore Store Watcher: Updating rawSql in SQL mode due to parameter change.");
-                   state.data.value.rawSql = result.sql;
-             }
-          }
+          // --- REMOVED the conditional update of rawSql based on parameters ---
+          // The specific handlers in useQuery are now responsible for rawSql updates in SQL mode.
 
         } else {
-          console.error("Explore Store Watcher: SQL generation failed:", result.error);
-          state.data.value.generatedDisplaySql = `-- Error generating query: ${result.error}`;
+          console.error("Explore Store Watcher: SQL processing failed:", result?.error);
+          state.data.value.generatedDisplaySql = `-- Error: ${result?.error || 'Failed to process query'}`;
         }
       } catch (error) {
-          console.error("Explore Store Watcher: Exception during SQL generation:", error);
-          state.data.value.generatedDisplaySql = `-- Exception generating query: ${error}`;
+          console.error("Explore Store Watcher: Exception during SQL processing:", error);
+          state.data.value.generatedDisplaySql = `-- Exception: ${error}`;
       }
     },
     {
@@ -803,6 +870,10 @@ export const useExploreStore = defineStore("explore", () => {
     lastExecutionTimestamp: computed(() => state.data.value.lastExecutionTimestamp),
     selectedQueryId: computed(() => state.data.value.selectedQueryId),
     activeSavedQueryName: computed(() => state.data.value.activeSavedQueryName),
+    skipNextUrlSync: computed({
+      get: () => state.data.value.skipNextUrlSync,
+      set: (v) => state.data.value.skipNextUrlSync = v
+    }),
     groupByField: computed(() => state.data.value.groupByField),
     selectedTimezoneIdentifier: computed(() => state.data.value.selectedTimezoneIdentifier),
     generatedDisplaySql: computed(() => state.data.value.generatedDisplaySql), // Expose the new computed property
@@ -828,6 +899,7 @@ export const useExploreStore = defineStore("explore", () => {
     resetQueryStateToDefault,
     setLastExecutedState,
     updateExecutionTimestamp,
+    setSkipNextUrlSync,
     resetState,
     executeQuery,
     getLogContext,

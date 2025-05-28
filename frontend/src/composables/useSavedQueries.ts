@@ -314,6 +314,12 @@ export function useSavedQueries() {
       // Reset state
       exploreStore.clearError()
 
+      // Prevent URL sync before making state changes
+      // This flag will be checked by useExploreUrlSync to prevent automatic URL updates
+      if (exploreStore.skipNextUrlSync !== undefined) {
+        exploreStore.skipNextUrlSync = true;
+      }
+
       // Set the correct mode based on the saved query type
       exploreStore.setActiveMode(isLogchefQL ? 'logchefql' : 'sql')
 
@@ -388,6 +394,11 @@ export function useSavedQueries() {
         exploreStore.setActiveSavedQueryName(queryData.name);
       }
 
+      // Allow URL syncing again
+      if (exploreStore.skipNextUrlSync !== undefined) {
+        exploreStore.skipNextUrlSync = false;
+      }
+
       // CENTRALIZED URL HANDLING: Create URL query parameters directly
       // This ensures consistency between dropdown and saved queries view
       const queryParams = { ...route.query }; // Start with current params
@@ -414,17 +425,14 @@ export function useSavedQueries() {
         queryParams.q = encodeURIComponent(queryToLoad);
       }
 
-      // Update URL with complete state (replaces syncUrlFromState call)
-      console.log("Updating URL with saved query state, including query_id:", queryData.id.toString());
-      router.replace({ query: queryParams });
+      // Update URL with complete state - only when this is called directly (not through openQuery)
+      console.log("loadSavedQuery: Finished loading query ID:", queryData.id.toString());
 
       toast({
         title: 'Success',
         description: `Query "${queryData.name}" loaded successfully.`,
         duration: TOAST_DURATION.SUCCESS
       })
-
-      // Don't call syncUrlFromState() since we're explicitly setting the URL
 
       return true
     } catch (error) {
@@ -494,11 +502,32 @@ export function useSavedQueries() {
   }
 
   // Handle opening query in explorer
-  function openQuery(query: SavedTeamQuery) {
-    const url = getQueryUrl(query)
-    // Always use router.push to create a proper history entry
-    // This ensures the back button works correctly when navigating between queries
-    router.push(url)
+  async function openQuery(query: SavedTeamQuery) {
+    try {
+      // First load the saved query in memory
+      await loadSavedQuery(query);
+    
+      // Then navigate to the URL (which will be derived from the loaded query state)
+      const url = getQueryUrl(query);
+      console.log(`Navigating to query URL after loading saved query: ${url}`);
+      
+      // Force skipNextUrlSync to ensure URL parameters aren't immediately overwritten
+      if (exploreStore.skipNextUrlSync !== undefined) {
+        exploreStore.skipNextUrlSync = true;
+      }
+      
+      // Always use router.push to create a proper history entry
+      // This ensures the back button works correctly when navigating between queries
+      router.push(url);
+    } catch (error) {
+      console.error('Error opening query:', error);
+      toast({
+        title: 'Error',
+        description: `Failed to open query: ${getErrorMessage(error)}`,
+        variant: 'destructive',
+        duration: TOAST_DURATION.ERROR
+      });
+    }
   }
 
   // Handle edit query
@@ -523,7 +552,12 @@ export function useSavedQueries() {
   async function deleteQuery(query: SavedTeamQuery) {
     if (window.confirm(`Are you sure you want to delete "${query.name}"? This action cannot be undone.`)) {
       try {
-        await savedQueriesStore.deleteQuery(query.team_id, query.source_id, query.id.toString())
+        const result = await savedQueriesStore.deleteQuery(query.team_id, query.source_id, query.id.toString())
+
+        // Only proceed if the backend deletion was successful
+        if (!result || !result.success) {
+          throw new Error(result?.error?.message || 'Failed to delete query. Please try again.')
+        }
 
         // Check if the deleted query is the active one
         if (exploreStore.selectedQueryId === query.id.toString()) {
@@ -539,7 +573,7 @@ export function useSavedQueries() {
           }
         }
 
-        // Refresh the queries list - assuming loadSourceQueries will be called externally
+        // Only show success toast after confirmed deletion from backend
         toast({
           title: 'Success',
           description: 'Query deleted successfully',
