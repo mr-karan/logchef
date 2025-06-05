@@ -301,6 +301,7 @@ func (s *Server) handleGenerateAISQL(c *fiber.Ctx) error {
 		req.NaturalLanguageQuery,
 		string(schemaJSON),
 		tableName,
+		req.CurrentQuery,
 	)
 
 	if err != nil {

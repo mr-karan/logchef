@@ -132,11 +132,13 @@ func (c *OpenAIClient) GenerateSQL(
 	naturalLanguageQuery string,
 	schema string,
 	tableName string,
+	currentQuery string, // Optional current query for context
 ) (string, error) {
 	c.logger.Debug("generating SQL from natural language query",
 		"query_length", len(naturalLanguageQuery),
 		"schema_length", len(schema),
 		"table", tableName,
+		"current_query_length", len(currentQuery),
 		"client_model", c.model,
 		"client_max_tokens", c.maxTokens,
 		"client_temperature", c.temperature,
@@ -148,8 +150,16 @@ func (c *OpenAIClient) GenerateSQL(
 
 	now := time.Now()
 	systemPrompt := fmt.Sprintf(DefaultSystemPromptTableFormat, tableName, schema)
-	userPrompt := fmt.Sprintf("Generate a ClickHouse SQL query to answer this question: %s. The current time is %s.",
-		naturalLanguageQuery, now.Format(time.RFC3339))
+
+	// Build user prompt with optional current query context
+	var userPrompt string
+	if currentQuery != "" && strings.TrimSpace(currentQuery) != "" {
+		userPrompt = fmt.Sprintf("Generate a ClickHouse SQL query to answer this question: %s. The current time is %s.\n\nFor context, here is the user's current query:\n%s\n\nPlease use this current query as a reference and modify it as needed to answer the user's question.",
+			naturalLanguageQuery, now.Format(time.RFC3339), currentQuery)
+	} else {
+		userPrompt = fmt.Sprintf("Generate a ClickHouse SQL query to answer this question: %s. The current time is %s.",
+			naturalLanguageQuery, now.Format(time.RFC3339))
+	}
 
 	c.logger.Debug("using model configuration for GenerateSQL call",
 		"model", c.model,

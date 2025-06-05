@@ -130,6 +130,7 @@ type SavedQuery struct {
 // GenerateSQLRequest defines the request body for SQL generation from natural language.
 type GenerateSQLRequest struct {
 	NaturalLanguageQuery string `json:"natural_language_query" validate:"required"`
+	CurrentQuery         string `json:"current_query,omitempty"` // Optional current query for context
 }
 
 // GenerateSQLResponse defines the successful response for SQL generation.

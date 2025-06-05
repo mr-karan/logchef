@@ -27,6 +27,7 @@ export interface FilterCondition {
 // AI Query generation types
 export interface AIGenerateSQLRequest {
   natural_language_query: string;
+  current_query?: string; // Optional current query for context
 }
 
 export interface AIGenerateSQLResponse {

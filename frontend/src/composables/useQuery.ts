@@ -361,8 +361,9 @@ export function useQuery() {
 
   // Execute query - now delegates to store
   const executeQuery = async () => {
-    // Clear any previous errors
+    // Clear any previous errors from both local state and store
     queryError.value = '';
+    exploreStore.clearError();
 
     try {
       // Make sure query is valid before execution

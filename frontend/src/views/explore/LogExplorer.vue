@@ -45,7 +45,7 @@ import GroupBySelector from "./components/GroupBySelector.vue";
 import QueryError from "./components/QueryError.vue";
 import HistogramVisualization from "./components/HistogramVisualization.vue";
 import EmptyResultsState from "./components/EmptyResultsState.vue";
-import AIQueryModal from "@/components/ai/AIQueryModal.vue";
+// import AIQueryModal from "@/components/ai/AIQueryModal.vue"; // No longer needed
 
 // Router and stores
 const router = useRouter();
@@ -127,7 +127,6 @@ const lastParsedQuery = ref<{
 
 // Basic state
 const showFieldsPanel = ref(false);
-const showAIModal = ref(false);
 const queryEditorRef = ref<ComponentPublicInstance<{
   focus: (revealLastPosition?: boolean) => void;
   code?: { value: string };
@@ -465,7 +464,7 @@ watch(
         !sourcesResult.data ||
         sourcesResult.data.length === 0
       ) {
-        exploreStore.setSourceId(0);
+        exploreStore.setSource(0);
         newSourceIdToLoadQueries = 0; // Signal to load empty queries
       } else {
         const currentSourceExists = sourcesStore.teamSources.some(
@@ -473,7 +472,7 @@ watch(
         );
         if (!currentSourceExists && sourcesStore.teamSources.length > 0) {
           const firstSourceId = sourcesStore.teamSources[0].id;
-          exploreStore.setSourceId(firstSourceId);
+          exploreStore.setSource(firstSourceId);
           await sourcesStore.loadSourceDetails(firstSourceId);
           newSourceIdToLoadQueries = firstSourceId; // Load queries for the new source
         } else {
@@ -786,12 +785,7 @@ const addSortKeyExample = () => {
   });
 };
 
-// AI Query Modal handlers
-const handleCloseAIModal = () => {
-  showAIModal.value = false;
-  exploreStore.clearAiSqlState();
-};
-
+// AI SQL generation handler (now handled inline in QueryEditor)
 const handleGenerateAISQL = async ({ naturalLanguageQuery }: { naturalLanguageQuery: string }) => {
   try {
     if (!currentSourceId.value) {
@@ -804,57 +798,47 @@ const handleGenerateAISQL = async ({ naturalLanguageQuery }: { naturalLanguageQu
       return;
     }
 
-    const result = await exploreStore.generateAiSql(naturalLanguageQuery);
-    // Error is now displayed directly in the modal via the aiSqlError prop
-    if (!result.success) {
-      // Only show toast for network/unexpected errors, not for API errors that we can display in the modal
-      if (!(result.error && 'status' in result.error)) {
-        toast({
-          title: "AI SQL Generation Error",
-          description: getErrorMessage(result.error),
-          variant: "destructive",
-          duration: TOAST_DURATION.ERROR,
-        });
-      }
+    // Get the current query based on active mode
+    let currentQuery = "";
+    if (activeMode.value === "logchefql" && logchefQuery.value) {
+      currentQuery = logchefQuery.value.trim();
+    } else if (activeMode.value === "sql" && sqlQuery.value) {
+      currentQuery = sqlQuery.value.trim();
+    }
+
+    const result = await exploreStore.generateAiSql(naturalLanguageQuery, currentQuery);
+
+    if (result.success && 'data' in result && result.data) {
+      // Switch to SQL mode and update the content
+      changeMode('sql');
+      exploreStore.setRawSql(result.data.sql_query);
+
+      // Focus the editor
+      nextTick(() => {
+        queryEditorRef.value?.focus(true);
+      });
+    } else {
+      // Show error in toast
+      const errorMessage = result.error && 'message' in result.error
+        ? result.error.message
+        : 'Failed to generate SQL';
+
+      toast({
+        title: "AI SQL Generation Failed",
+        description: errorMessage,
+        variant: "destructive",
+        duration: TOAST_DURATION.ERROR,
+      });
     }
   } catch (error) {
     console.error("Error generating AI SQL:", error);
-    // This will only catch unexpected errors not handled by the store
     toast({
       title: "AI SQL Generation Error",
       description: getErrorMessage(error),
       variant: "destructive",
       duration: TOAST_DURATION.ERROR,
     });
-    // Also set the error in the store so it appears in the modal
-    exploreStore.data.value.aiSqlError = getErrorMessage(error);
   }
-};
-
-const handleInsertAISQL = ({ sql }: { sql: string }) => {
-  if (!sql) return;
-
-  console.log("LogExplorer: Inserting AI-generated SQL");
-
-  // Always switch to SQL mode when inserting AI-generated SQL
-  changeMode('sql');
-
-  // Update the SQL query through the store
-  exploreStore.setRawSql(sql);
-
-  // Close the modal
-  showAIModal.value = false;
-
-  // Clear AI SQL state
-  exploreStore.clearAiSqlState();
-
-  // Explicitly sync URL state to preserve query parameters
-  syncUrlFromState();
-
-  // Focus the editor and move cursor to the end
-  nextTick(() => {
-    queryEditorRef.value?.focus(true);
-  });
 };
 
 // Function to copy current URL to clipboard
@@ -972,7 +956,7 @@ onMounted(async () => {
     await initializeFromUrl();
 
     // Force a reload of user teams to ensure latest membership data
-    await teamsStore.loadUserTeams(true);
+    await teamsStore.loadUserTeams();
 
     // Skip validation if there's an initialization error - it's already handled
     if (!initializationError.value) {
@@ -987,10 +971,10 @@ onMounted(async () => {
 
         // Select the first available team instead
         if (teamsStore.userTeams.length > 0) {
-          exploreStore.setSourceId(0); // First clear the source
+          exploreStore.setSource(0); // First clear the source
           teamsStore.setCurrentTeam(teamsStore.userTeams[0].id);
         } else {
-          exploreStore.setSourceId(0);
+          exploreStore.setSource(0);
           teamsStore.setCurrentTeam(0); // Clear the current team
         }
       }
@@ -1221,7 +1205,7 @@ onBeforeUnmount(() => {
                         )
                     " @toggle-fields="showFieldsPanel = !showFieldsPanel" @select-saved-query="loadSavedQuery"
                     @save-query="handleSaveOrUpdateClick" @save-query-as-new="handleRequestSaveAsNew"
-                    class="border-0 border-b" />
+                    @generate-ai-sql="handleGenerateAISQL" class="border-0 border-b" />
 
                   <!-- Sort Key Optimization Hint - Concise Version -->
                   <div v-if="
@@ -1327,14 +1311,7 @@ onBeforeUnmount(() => {
                 hasValidSource &&
                 exploreStore.timeRange
               ">
-                <QueryControls @execute="handleQueryExecution" @clear="clearQueryEditor">
-                  <template #extraControls>
-                    <Button variant="outline" class="ml-2" size="sm" @click="showAIModal = true">
-                      <WandSparkles class="h-4 w-4 mr-1.5" />
-                      AI Assistant
-                    </Button>
-                  </template>
-                </QueryControls>
+                <QueryControls @execute="handleQueryExecution" @clear="clearQueryEditor" />
               </div>
             </div>
 
@@ -1403,11 +1380,7 @@ onBeforeUnmount(() => {
           })
             " @close="showSaveQueryModal = false" @save="onSaveQueryModalSave" @update="handleUpdateQuery" />
 
-        <!-- AI Query Modal -->
-        <AIQueryModal :is-open="showAIModal" :is-loading="exploreStore.isGeneratingAISQL"
-          :error-message="exploreStore.aiSqlError" :generated-sql="exploreStore.generatedAiSql || ''"
-          :current-source-id="currentSourceId" @close="handleCloseAIModal" @generate-sql="handleGenerateAISQL"
-          @insert-sql="handleInsertAISQL" />
+
       </div>
     </div>
   </KeepAlive>

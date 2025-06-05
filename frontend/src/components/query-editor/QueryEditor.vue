@@ -51,6 +51,21 @@
       </div>
 
       <div class="flex items-center gap-2">
+        <!-- AI Assistant Toggle - Only show in SQL mode -->
+        <TooltipProvider v-if="props.activeMode === 'clickhouse-sql'">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" class="h-7 gap-1"
+                :class="{ 'bg-primary/10 text-primary border-primary': showAIInput }" @click="toggleAIInput">
+                <WandSparkles class="h-3.5 w-3.5" />
+                <span class="text-xs">AI</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>{{ showAIInput ? "Hide" : "Show" }} AI Assistant</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <!-- New: New Query Button - Only show when editing a saved query -->
         <TooltipProvider v-if="isEditingExistingQuery">
           <Tooltip>
@@ -203,6 +218,47 @@
         </span>
       </span>
     </div>
+
+    <!-- AI Input Section -->
+    <div v-if="showAIInput && props.activeMode === 'clickhouse-sql'"
+      class="mt-3 border border-border rounded-md bg-card/50">
+      <div class="p-3 border-b bg-muted/40">
+        <div class="flex items-center gap-2 text-sm font-medium">
+          <WandSparkles class="h-4 w-4 text-primary" />
+          <span>AI SQL Assistant</span>
+        </div>
+        <p class="text-xs text-muted-foreground mt-1">
+          Describe the data you want to retrieve in natural language
+        </p>
+      </div>
+      <div class="p-3 space-y-3">
+        <!-- Natural Language Input -->
+        <div class="space-y-2">
+          <Textarea v-model="naturalLanguageQuery" :disabled="isGeneratingSQL"
+            placeholder="Example: Show me all error logs from the last hour, excluding database-related errors"
+            class="resize-none h-20 text-sm" @keydown="onAIKeyDown" />
+        </div>
+        <!-- Action Buttons -->
+        <div class="flex items-center justify-between">
+          <div class="text-xs text-muted-foreground">
+            Press Ctrl+Enter to generate SQL
+          </div>
+          <div class="flex gap-2">
+            <Button variant="outline" size="sm" @click="showAIInput = false">
+              Cancel
+            </Button>
+            <Button @click="handleGenerateSQL" :disabled="!naturalLanguageQuery.trim() || isGeneratingSQL" size="sm">
+              <span v-if="isGeneratingSQL" class="flex items-center gap-1.5">
+                <span
+                  class="h-3 w-3 border-2 border-current border-t-transparent rounded-full inline-block animate-spin"></span>
+                Generating...
+              </span>
+              <span v-else>Generate SQL</span>
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -235,6 +291,7 @@ import {
   Code2,
   Eye,
   EyeOff,
+  WandSparkles,
 } from "lucide-vue-next";
 import {
   HoverCard,
@@ -246,6 +303,7 @@ import SavedQueriesDropdown from "@/components/collections/SavedQueriesDropdown.
 import type { SavedTeamQuery } from "@/api/savedQueries";
 import { useRoute, useRouter } from "vue-router";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
   TooltipContent,
@@ -324,6 +382,8 @@ const emit = defineEmits<{
   (e: "select-saved-query", query: SavedTeamQuery): void;
   (e: "save-query"): void;
   (e: "save-query-as-new"): void;
+  // AI events
+  (e: "generate-ai-sql", data: { naturalLanguageQuery: string }): void;
 }>();
 
 // --- Core State ---
@@ -337,6 +397,12 @@ const isProgrammaticChange = ref(false); // Flag to prevent update loops
 const isDisposing = ref(false); // Flag to prevent operations during disposal
 const activeDisposables = ref<MonacoDisposable[]>([]); // Track all disposables
 const isEditorVisible = ref(true); // New state for SQL editor visibility
+const showAIInput = ref(false); // State for AI input visibility
+const naturalLanguageQuery = ref(""); // AI natural language input
+
+// Get AI loading state from the store
+const { exploreStore: storeForAI } = { exploreStore: useExploreStore() };
+const isGeneratingSQL = computed(() => storeForAI.isGeneratingAISQL);
 
 // --- Computed Properties ---
 const theme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
@@ -1057,13 +1123,49 @@ const toggleSqlEditorVisibility = () => {
   }
 };
 
+
+
 // Watch for mode changes to reset visibility
 watch(
   () => props.activeMode,
   (newMode) => {
     // Always show editor when switching modes
-    if (newMode === "logchefql") {
-      isEditorVisible.value = true;
+    isEditorVisible.value = true;
+    // Hide AI input when switching away from SQL mode
+    if (newMode !== 'clickhouse-sql') {
+      showAIInput.value = false;
+    }
+  }
+);
+
+// Toggle AI input visibility
+const toggleAIInput = () => {
+  showAIInput.value = !showAIInput.value;
+};
+
+// AI input handlers
+const onAIKeyDown = (e: KeyboardEvent) => {
+  // Submit on Ctrl+Enter or Cmd+Enter
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+    handleGenerateSQL();
+  }
+};
+
+const handleGenerateSQL = () => {
+  if (naturalLanguageQuery.value.trim()) {
+    // Emit event to parent to handle AI SQL generation
+    emit("generate-ai-sql", { naturalLanguageQuery: naturalLanguageQuery.value });
+  }
+};
+
+// Watch for successful SQL generation to clear the input and hide the AI section
+watch(
+  [() => storeForAI.generatedAiSql, () => storeForAI.isGeneratingAISQL],
+  ([generatedSql, isGenerating]) => {
+    // When generation completes successfully, clear input and hide AI section
+    if (!isGenerating && generatedSql && naturalLanguageQuery.value.trim()) {
+      naturalLanguageQuery.value = "";
+      showAIInput.value = false;
     }
   }
 );

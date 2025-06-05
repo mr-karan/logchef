@@ -424,10 +424,7 @@ export const useExploreStore = defineStore("explore", () => {
     }
   }
 
-  // Alias for setSource to maintain API compatibility with useExploreUrlSync
-  function setSourceId(sourceId: number) {
-    setSource(sourceId);
-  }
+
 
   // Set time configuration (absolute or relative)
   function setTimeConfiguration(config: { absoluteRange?: { start: DateValue; end: DateValue }, relativeTime?: string }) {
@@ -984,7 +981,7 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   // Add generateAiSql function
-  async function generateAiSql(naturalLanguageQuery: string) {
+  async function generateAiSql(naturalLanguageQuery: string, currentQuery?: string) {
     const operationKey = 'generateAiSql';
 
     // Set loading state
@@ -1006,7 +1003,8 @@ export const useExploreStore = defineStore("explore", () => {
       }
 
       const request: AIGenerateSQLRequest = {
-        natural_language_query: naturalLanguageQuery
+        natural_language_query: naturalLanguageQuery,
+        current_query: currentQuery // Include current query if provided
       };
 
       const response = await state.callApi<AIGenerateSQLResponse>({
