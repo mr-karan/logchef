@@ -57,6 +57,12 @@ export default defineConfig({
             { label: "User Management", link: "/core/user-management" },
           ],
         },
+        {
+          label: "Operations",
+          items: [
+            { label: "Metrics Reference", link: "/operations/metrics" },
+          ],
+        },
         // {
         //   label: "Project",
         //   items: [

@@ -9,6 +9,7 @@ import (
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/internal/sqlite"
 
 	"github.com/gofiber/fiber/v2"
@@ -92,6 +93,9 @@ func New(opts ServerOptions) *Server {
 	app.Use(compress.New(compress.Config{
 		Level: compress.LevelBestSpeed, // Prioritize speed over maximum compression
 	})) // Compress responses
+	
+	// Add metrics middleware
+	app.Use(metrics.Middleware())
 
 	// Create the Server instance, injecting dependencies.
 	s := &Server{
@@ -116,6 +120,9 @@ func New(opts ServerOptions) *Server {
 func (s *Server) setupRoutes() {
 	// Swagger documentation route
 	s.app.Get("/swagger/*", swagger.HandlerDefault)
+	
+	// Metrics endpoint
+	s.app.Get("/metrics", metrics.MetricsHandler())
 
 	api := s.app.Group("/api/v1")
 

@@ -7,6 +7,7 @@ toolchain go1.24.2
 require (
 	github.com/AfterShip/clickhouse-sql-parser v0.4.10
 	github.com/ClickHouse/clickhouse-go/v2 v2.36.0
+	github.com/VictoriaMetrics/metrics v1.38.0
 	github.com/coreos/go-oidc/v3 v3.14.1
 	github.com/gofiber/fiber/v2 v2.52.8
 	github.com/gofiber/swagger v1.1.1
@@ -19,7 +20,6 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/sashabaranov/go-openai v1.40.1
 	github.com/swaggo/swag v1.16.4
-	golang.org/x/crypto v0.39.0
 	golang.org/x/oauth2 v0.30.0
 	modernc.org/sqlite v1.38.0
 )
@@ -60,6 +60,8 @@ require (
 	github.com/swaggo/files/v2 v2.0.2 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.62.0 // indirect
+	github.com/valyala/fastrand v1.1.0 // indirect
+	github.com/valyala/histogram v1.2.0 // indirect
 	go.opentelemetry.io/otel v1.36.0 // indirect
 	go.opentelemetry.io/otel/trace v1.36.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -33,6 +34,9 @@ type Client struct {
 	queryHooks []QueryHook         // Hooks to execute before/after queries.
 	mu         sync.Mutex          // Protects shared resources within the client if any
 	opts       *clickhouse.Options // Stores connection options for reconnection
+	sourceID   string              // Source ID for metrics tracking
+	source     *models.Source      // Source model for metrics with meaningful labels
+	metrics    *metrics.ClickHouseMetrics
 }
 
 // ClientOptions holds configuration for establishing a new ClickHouse client connection.
@@ -42,6 +46,8 @@ type ClientOptions struct {
 	Username string                 // Username for authentication.
 	Password string                 // Password for authentication.
 	Settings map[string]interface{} // Additional ClickHouse settings (e.g., max_execution_time).
+	SourceID string                 // Source ID for metrics tracking.
+	Source   *models.Source         // Source model for enhanced metrics.
 }
 
 // ExtendedColumnInfo provides detailed column metadata, including nullability,
@@ -119,10 +125,18 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 		logger:     logger,
 		queryHooks: []QueryHook{}, // Initialize hooks slice.
 		opts:       options,
+		sourceID:   opts.SourceID,
+		source:     opts.Source,
 	}
 
 	// Apply a default hook for basic query logging.
 	client.AddQueryHook(NewLogQueryHook(logger, false)) // Verbose logging disabled by default.
+
+	// Add metrics hook if source is provided
+	if opts.Source != nil {
+		client.AddQueryHook(metrics.NewMetricsQueryHook(opts.Source))
+		client.metrics = metrics.NewClickHouseMetrics(opts.Source)
+	}
 
 	return client, nil
 }
@@ -175,6 +189,13 @@ func (c *Client) QueryWithTimeout(ctx context.Context, query string, timeoutSeco
 	queryStartTime := time.Now() // Separate timer for actual DB execution
 	var queryDuration time.Duration
 
+	// Start query metrics tracking
+	var queryHelper *metrics.QueryMetricsHelper
+	if c.metrics != nil {
+		queryType := metrics.DetermineQueryType(query)
+		queryHelper = c.metrics.StartQuery(queryType, nil) // User context not available in client
+	}
+
 	// Ensure timeout is provided (should always be the case now)
 	if timeoutSeconds == nil {
 		defaultTimeout := DefaultQueryTimeout
@@ -213,7 +234,7 @@ func (c *Client) QueryWithTimeout(ctx context.Context, query string, timeoutSeco
 		if queryErr != nil {
 			return queryErr
 		}
-		
+
 		// Close rows when we're done processing them
 		defer func() {
 			if rows != nil {
@@ -253,6 +274,18 @@ func (c *Client) QueryWithTimeout(ctx context.Context, query string, timeoutSeco
 		// Check for errors during row iteration.
 		return rows.Err()
 	})
+
+	// Complete metrics tracking
+	if queryHelper != nil {
+		success := err == nil
+		rowsReturned := int64(-1)
+		if success && resultData != nil {
+			rowsReturned = int64(len(resultData))
+		}
+		errorType := metrics.DetermineErrorType(err)
+		timedOut := false // TODO: better timeout detection
+		queryHelper.Finish(success, rowsReturned, errorType, timedOut)
+	}
 
 	// Handle errors from either query execution or row processing.
 	if err != nil {
@@ -362,6 +395,14 @@ func (c *Client) Reconnect(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	success := false
+	defer func() {
+		if c.metrics != nil {
+			c.metrics.RecordReconnection(success)
+			c.metrics.UpdateConnectionStatus(success)
+		}
+	}()
+
 	// Only attempt reconnect if connection exists but is failing
 	if c.conn != nil {
 		// Try to close the existing connection first with a timeout
@@ -418,6 +459,7 @@ func (c *Client) Reconnect(ctx context.Context) error {
 
 	// Replace the connection
 	c.conn = newConn
+	success = true
 	c.logger.Info("successfully reconnected to clickhouse")
 	return nil
 }
@@ -808,6 +850,9 @@ func isKeyword(s string) bool {
 // It uses short timeouts internally. Returns nil on success, or an error indicating the failure reason.
 func (c *Client) Ping(ctx context.Context, database string, table string) error {
 	if c.conn == nil {
+		if c.metrics != nil {
+			c.metrics.RecordConnectionValidation(false)
+		}
 		return errors.New("clickhouse connection is nil")
 	}
 
@@ -816,6 +861,11 @@ func (c *Client) Ping(ctx context.Context, database string, table string) error 
 	defer pingCancel()
 
 	if err := c.conn.Ping(pingCtx); err != nil {
+		if c.metrics != nil {
+			c.metrics.RecordConnectionValidation(false)
+			c.metrics.UpdateConnectionStatus(false)
+		}
+
 		// Check if the error is due to the context deadline exceeding
 		if errors.Is(err, context.DeadlineExceeded) {
 			c.logger.Debug("ping timed out after 1 second")
@@ -826,6 +876,10 @@ func (c *Client) Ping(ctx context.Context, database string, table string) error 
 
 	// 2. If database and table are provided, check table existence.
 	if database == "" || table == "" {
+		if c.metrics != nil {
+			c.metrics.RecordConnectionValidation(true)
+			c.metrics.UpdateConnectionStatus(true)
+		}
 		return nil // Basic ping successful, no table check needed.
 	}
 
@@ -841,6 +895,11 @@ func (c *Client) Ping(ctx context.Context, database string, table string) error 
 	// No need for executeQueryWithHooks here, it's a simple metadata check.
 	err := c.conn.QueryRow(tableCtx, query, database, table).Scan(&exists)
 	if err != nil {
+		if c.metrics != nil {
+			c.metrics.RecordConnectionValidation(false)
+			c.metrics.UpdateConnectionStatus(false)
+		}
+
 		if errors.Is(err, context.DeadlineExceeded) {
 			c.logger.Debug("table check timed out", "database", database, "table", table, "timeout", "1s")
 			return fmt.Errorf("table check timed out for %s.%s: %w", database, table, err)
@@ -860,5 +919,9 @@ func (c *Client) Ping(ctx context.Context, database string, table string) error 
 	}
 
 	// If Scan succeeds without error, the table exists.
+	if c.metrics != nil {
+		c.metrics.RecordConnectionValidation(true)
+		c.metrics.UpdateConnectionStatus(true)
+	}
 	return nil
 }

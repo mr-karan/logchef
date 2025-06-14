@@ -1,0 +1,254 @@
+---
+title: Metrics Reference
+description: Comprehensive guide to LogChef's Prometheus metrics for monitoring usage and performance
+---
+
+LogChef exposes comprehensive Prometheus metrics to monitor instance usage, performance, and health. These metrics provide visibility into query patterns, user activity, authentication events, and system resource utilization.
+
+## Metrics Endpoint
+
+All metrics are available at the `/metrics` endpoint in Prometheus format:
+
+```
+GET http://localhost:8125/metrics
+```
+
+Configure your Prometheus server to scrape this endpoint for monitoring and alerting.
+
+## Metric Categories
+
+LogChef emits metrics across several categories:
+
+- **HTTP Metrics**: Request/response patterns and performance
+- **Query Metrics**: Database query execution and performance  
+- **Authentication Metrics**: Login attempts and session management
+- **Authorization Metrics**: Access control failures and patterns
+- **ClickHouse Metrics**: Database connection and operation health
+- **Team & Source Metrics**: Multi-tenant usage patterns
+- **AI Metrics**: AI-powered feature usage and performance
+
+## HTTP Metrics
+
+Monitor web interface performance and usage patterns.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_http_requests_total` | Total HTTP requests | Counter | `method`, `endpoint`, `status`, `user_email`, `user_role` |
+| `logchef_http_request_duration_seconds` | HTTP request latency distribution | Histogram | `method`, `endpoint` |
+| `logchef_http_response_size_bytes` | HTTP response size distribution | Histogram | `method`, `endpoint` |
+| `logchef_http_errors_total` | HTTP errors by type | Counter | `method`, `endpoint`, `error_type`, `status`, `user_email`, `user_role` |
+| `logchef_http_active_requests` | Currently active HTTP requests | Gauge | - |
+
+**Key Use Cases:**
+- Identify slow endpoints with `logchef_http_request_duration_seconds`
+- Monitor error rates by endpoint and user
+- Track API usage patterns across teams
+- Set up alerts for high error rates or latency spikes
+
+## Query Metrics
+
+Track database query execution and performance patterns.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_query_total` | Total queries executed | Counter | `source_id`, `source_name`, `database`, `table`, `query_type`, `result`, `user_email`, `user_role` |
+| `logchef_query_duration_seconds` | Query execution time distribution | Histogram | `source_name`, `database`, `table` |
+| `logchef_query_rows_returned` | Distribution of rows returned | Histogram | `source_name`, `database`, `table` |
+| `logchef_query_timeouts_total` | Query timeouts by source | Counter | `source_id`, `source_name`, `database`, `table`, `query_type` |
+| `logchef_query_errors_total` | Query errors by type | Counter | `source_id`, `source_name`, `database`, `table`, `error_type` |
+
+**Query Types:** `select`, `show`, `describe`, `explain`, `insert`, `create`, `drop`, `alter`, `other`
+
+**Error Types:** `timeout`, `connection`, `syntax`, `permission`, `not_found`, `other`
+
+**Key Use Cases:**
+- Monitor query performance per source/table
+- Identify users running expensive queries
+- Track query patterns and popular sources
+- Set up alerts for high query failure rates
+
+## Authentication Metrics
+
+Monitor login attempts and session management.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_auth_attempts_total` | Authentication attempts | Counter | `method`, `result`, `user_email`, `user_role` |
+| `logchef_session_operations_total` | Session operations (create, validate, destroy) | Counter | `operation`, `result`, `user_email`, `user_role` |
+| `logchef_api_token_operations_total` | API token operations | Counter | `operation`, `result`, `user_email`, `user_role`, `token_name` |
+| `logchef_active_sessions` | Currently active sessions | Gauge | - |
+| `logchef_active_users` | Currently active users | Gauge | - |
+
+**Auth Methods:** `session`, `token`
+
+**Operations:** `create`, `validate`, `destroy`, `renew`
+
+**Key Use Cases:**
+- Monitor authentication failure rates
+- Track session lifecycle and active users
+- Identify suspicious login patterns
+- Alert on failed authentication spikes
+
+## Authorization Metrics
+
+Track access control failures and permission violations.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_authorization_failures_total` | Authorization failures | Counter | `endpoint`, `reason`, `user_email`, `user_role` |
+
+**Failure Reasons:** `insufficient_role`, `team_access_denied`, `source_access_denied`, `token_expired`
+
+**Key Use Cases:**
+- Monitor access control violations
+- Identify users attempting unauthorized access
+- Track permission boundary effectiveness
+
+## ClickHouse Metrics
+
+Monitor database connection health and operation performance.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_clickhouse_connection_status` | ClickHouse connection health (0=down, 1=up) | Gauge | `source_id`, `source_name`, `database`, `table`, `host` |
+| `logchef_clickhouse_connection_validation_total` | Connection validation attempts | Counter | `source_id`, `source_name`, `database`, `table`, `host`, `result` |
+| `logchef_clickhouse_reconnections_total` | Connection reconnection attempts | Counter | `source_id`, `source_name`, `database`, `table`, `host`, `result` |
+
+**Key Use Cases:**
+- Monitor ClickHouse connection health per source
+- Track connection stability and reconnection patterns
+- Set up alerts for database connectivity issues
+
+## Team & Source Metrics
+
+Track multi-tenant usage and resource access patterns.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_team_operations_total` | Team management operations | Counter | `team_id`, `team_name`, `operation`, `result`, `user_email`, `user_role` |
+| `logchef_source_operations_total` | Source management operations | Counter | `source_id`, `source_name`, `database`, `table`, `operation`, `result`, `user_email`, `user_role` |
+| `logchef_collection_operations_total` | Saved query collection operations | Counter | `source_name`, `team_name`, `operation`, `result`, `collection_name`, `user_email`, `user_role` |
+
+**Operations:** `create`, `update`, `delete`, `list`, `get`
+
+**Key Use Cases:**
+- Track team and source usage patterns
+- Monitor saved query collection adoption
+- Identify most active teams and sources
+
+## AI Metrics
+
+Monitor AI-powered feature usage and performance.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_ai_operations_total` | AI operations (SQL generation, suggestions) | Counter | `source_name`, `database`, `table`, `operation`, `result`, `user_email`, `user_role` |
+| `logchef_ai_duration_seconds` | AI operation latency distribution | Histogram | `source_name`, `operation` |
+
+**AI Operations:** `sql_generation`, `field_suggestion`, `query_explanation`
+
+**Key Use Cases:**
+- Track AI feature adoption and success rates
+- Monitor AI operation performance and latency
+- Identify popular AI features by source/user
+
+## Histogram Metrics
+
+Monitor histogram generation for log data visualization.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_histogram_total` | Histogram generation operations | Counter | `source_id`, `source_name`, `database`, `table`, `result`, `user_email`, `user_role` |
+| `logchef_histogram_duration_seconds` | Histogram generation latency | Histogram | `source_name`, `database`, `table` |
+
+**Key Use Cases:**
+- Monitor histogram generation performance
+- Track visualization feature usage patterns
+
+## Example Queries
+
+### Monitor Query Performance by Source
+```promql
+# Average query duration per source
+rate(logchef_query_duration_seconds_sum[5m]) / rate(logchef_query_duration_seconds_count[5m])
+
+# Query success rate by source
+rate(logchef_query_total{result="success"}[5m]) / rate(logchef_query_total[5m])
+```
+
+### Track User Activity
+```promql
+# Most active users by query volume
+topk(10, sum by (user_email) (rate(logchef_query_total[1h])))
+
+# Authentication failure rate by user
+rate(logchef_auth_attempts_total{result="failure"}[5m]) by (user_email)
+```
+
+### Monitor HTTP Performance
+```promql
+# Slowest endpoints (95th percentile)
+histogram_quantile(0.95, rate(logchef_http_request_duration_seconds_bucket[5m]))
+
+# Error rate by endpoint
+rate(logchef_http_errors_total[5m]) / rate(logchef_http_requests_total[5m])
+```
+
+### ClickHouse Health Monitoring
+```promql
+# Sources with connection issues
+logchef_clickhouse_connection_status == 0
+
+# Connection failure rate
+rate(logchef_clickhouse_connection_validation_total{result="failure"}[5m])
+```
+
+## Alerting Examples
+
+### High Query Failure Rate
+```yaml
+- alert: HighQueryFailureRate
+  expr: rate(logchef_query_total{result="failure"}[5m]) / rate(logchef_query_total[5m]) > 0.1
+  for: 2m
+  labels:
+    severity: warning
+  annotations:
+    summary: "High query failure rate detected"
+    description: "Query failure rate is {{ $value | humanizePercentage }} for source {{ $labels.source_name }}"
+```
+
+### Authentication Failures
+```yaml
+- alert: HighAuthFailureRate
+  expr: rate(logchef_auth_attempts_total{result="failure"}[5m]) > 5
+  for: 1m
+  labels:
+    severity: critical
+  annotations:
+    summary: "High authentication failure rate"
+    description: "{{ $value }} failed authentication attempts per second"
+```
+
+### ClickHouse Connection Down
+```yaml
+- alert: ClickHouseConnectionDown
+  expr: logchef_clickhouse_connection_status == 0
+  for: 30s
+  labels:
+    severity: critical
+  annotations:
+    summary: "ClickHouse connection down"
+    description: "Connection to {{ $labels.source_name }} ({{ $labels.host }}) is down"
+```
+
+## Dashboard Recommendations
+
+For comprehensive monitoring, create dashboards tracking:
+
+1. **Overview Dashboard**: Key metrics, active users, query volume, error rates
+2. **Performance Dashboard**: Query latency, HTTP response times, histogram generation
+3. **Security Dashboard**: Authentication patterns, authorization failures, user activity
+4. **Source Health Dashboard**: ClickHouse connection status, per-source performance
+5. **User Activity Dashboard**: Top users, team usage patterns, AI feature adoption
+
+The metrics provide deep visibility into LogChef usage patterns, enabling data-driven optimization and proactive issue resolution.
