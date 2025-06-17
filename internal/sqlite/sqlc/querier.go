@@ -28,6 +28,9 @@ type Querier interface {
 	// Teams
 	// Create a new team
 	CreateTeam(ctx context.Context, arg CreateTeamParams) (int64, error)
+	// Team Bookmarked Queries
+	// Create a new query for a team and source
+	CreateTeamSourceBookmarkedQuery(ctx context.Context, arg CreateTeamSourceBookmarkedQueryParams) (int64, error)
 	// Team Queries
 	// Create a new query for a team and source
 	CreateTeamSourceQuery(ctx context.Context, arg CreateTeamSourceQueryParams) (int64, error)
@@ -64,6 +67,8 @@ type Querier interface {
 	GetUser(ctx context.Context, id int64) (User, error)
 	// Get a user by email
 	GetUserByEmail(ctx context.Context, email string) (User, error)
+	// List all bookmarked queries for a specific team and source
+	ListBookmarkedQueriesByTeamAndSource(ctx context.Context, arg ListBookmarkedQueriesByTeamAndSourceParams) ([]TeamQuery, error)
 	// List all queries for a specific team and source
 	ListQueriesByTeamAndSource(ctx context.Context, arg ListQueriesByTeamAndSourceParams) ([]TeamQuery, error)
 	// List all teams a data source is a member of

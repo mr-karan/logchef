@@ -239,6 +239,18 @@ WHERE id = ? AND team_id = ? AND source_id = ?;
 -- List all queries for a specific team and source
 SELECT * FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY created_at DESC;
 
+-- Team Bookmarked Queries
+
+-- name: CreateTeamSourceBookmarkedQuery :one
+-- Create a new query for a team and source
+INSERT INTO team_queries (team_id, source_id, name, description, query_type, query_content, is_bookmarked)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING id;
+
+-- name: ListBookmarkedQueriesByTeamAndSource :many
+-- List all bookmarked queries for a specific team and source
+SELECT * FROM team_queries WHERE team_id = ? AND source_id = ? AND is_bookmarked = 1 ORDER BY created_at DESC;
+
 -- Additional queries for user-source and team-source access
 
 -- name: TeamHasSource :one

@@ -171,6 +171,40 @@ func (q *Queries) CreateTeam(ctx context.Context, arg CreateTeamParams) (int64, 
 	return id, err
 }
 
+const createTeamSourceBookmarkedQuery = `-- name: CreateTeamSourceBookmarkedQuery :one
+
+INSERT INTO team_queries (team_id, source_id, name, description, query_type, query_content, is_bookmarked)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING id
+`
+
+type CreateTeamSourceBookmarkedQueryParams struct {
+	TeamID       int64          `json:"team_id"`
+	SourceID     int64          `json:"source_id"`
+	Name         string         `json:"name"`
+	Description  sql.NullString `json:"description"`
+	QueryType    string         `json:"query_type"`
+	QueryContent string         `json:"query_content"`
+	IsBookmarked sql.NullBool   `json:"is_bookmarked"`
+}
+
+// Team Bookmarked Queries
+// Create a new query for a team and source
+func (q *Queries) CreateTeamSourceBookmarkedQuery(ctx context.Context, arg CreateTeamSourceBookmarkedQueryParams) (int64, error) {
+	row := q.queryRow(ctx, q.createTeamSourceBookmarkedQueryStmt, createTeamSourceBookmarkedQuery,
+		arg.TeamID,
+		arg.SourceID,
+		arg.Name,
+		arg.Description,
+		arg.QueryType,
+		arg.QueryContent,
+		arg.IsBookmarked,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createTeamSourceQuery = `-- name: CreateTeamSourceQuery :one
 
 INSERT INTO team_queries (team_id, source_id, name, description, query_type, query_content)
@@ -435,7 +469,7 @@ func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (T
 }
 
 const getTeamSourceQuery = `-- name: GetTeamSourceQuery :one
-SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at FROM team_queries
+SELECT id, team_id, source_id, name, description, query_type, query_content, is_bookmarked, created_at, updated_at FROM team_queries
 WHERE id = ? AND team_id = ? AND source_id = ?
 `
 
@@ -457,6 +491,7 @@ func (q *Queries) GetTeamSourceQuery(ctx context.Context, arg GetTeamSourceQuery
 		&i.Description,
 		&i.QueryType,
 		&i.QueryContent,
+		&i.IsBookmarked,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -507,8 +542,52 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	return i, err
 }
 
+const listBookmarkedQueriesByTeamAndSource = `-- name: ListBookmarkedQueriesByTeamAndSource :many
+SELECT id, team_id, source_id, name, description, query_type, query_content, is_bookmarked, created_at, updated_at FROM team_queries WHERE team_id = ? AND source_id = ? AND is_bookmarked = 1 ORDER BY created_at DESC
+`
+
+type ListBookmarkedQueriesByTeamAndSourceParams struct {
+	TeamID   int64 `json:"team_id"`
+	SourceID int64 `json:"source_id"`
+}
+
+// List all bookmarked queries for a specific team and source
+func (q *Queries) ListBookmarkedQueriesByTeamAndSource(ctx context.Context, arg ListBookmarkedQueriesByTeamAndSourceParams) ([]TeamQuery, error) {
+	rows, err := q.query(ctx, q.listBookmarkedQueriesByTeamAndSourceStmt, listBookmarkedQueriesByTeamAndSource, arg.TeamID, arg.SourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TeamQuery{}
+	for rows.Next() {
+		var i TeamQuery
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.SourceID,
+			&i.Name,
+			&i.Description,
+			&i.QueryType,
+			&i.QueryContent,
+			&i.IsBookmarked,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listQueriesByTeamAndSource = `-- name: ListQueriesByTeamAndSource :many
-SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY created_at DESC
+SELECT id, team_id, source_id, name, description, query_type, query_content, is_bookmarked, created_at, updated_at FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY created_at DESC
 `
 
 type ListQueriesByTeamAndSourceParams struct {
@@ -534,6 +613,7 @@ func (q *Queries) ListQueriesByTeamAndSource(ctx context.Context, arg ListQuerie
 			&i.Description,
 			&i.QueryType,
 			&i.QueryContent,
+			&i.IsBookmarked,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {

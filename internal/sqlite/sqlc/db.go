@@ -45,6 +45,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.createTeamStmt, err = db.PrepareContext(ctx, createTeam); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateTeam: %w", err)
 	}
+	if q.createTeamSourceBookmarkedQueryStmt, err = db.PrepareContext(ctx, createTeamSourceBookmarkedQuery); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateTeamSourceBookmarkedQuery: %w", err)
+	}
 	if q.createTeamSourceQueryStmt, err = db.PrepareContext(ctx, createTeamSourceQuery); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateTeamSourceQuery: %w", err)
 	}
@@ -95,6 +98,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getUserByEmailStmt, err = db.PrepareContext(ctx, getUserByEmail); err != nil {
 		return nil, fmt.Errorf("error preparing query GetUserByEmail: %w", err)
+	}
+	if q.listBookmarkedQueriesByTeamAndSourceStmt, err = db.PrepareContext(ctx, listBookmarkedQueriesByTeamAndSource); err != nil {
+		return nil, fmt.Errorf("error preparing query ListBookmarkedQueriesByTeamAndSource: %w", err)
 	}
 	if q.listQueriesByTeamAndSourceStmt, err = db.PrepareContext(ctx, listQueriesByTeamAndSource); err != nil {
 		return nil, fmt.Errorf("error preparing query ListQueriesByTeamAndSource: %w", err)
@@ -196,6 +202,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing createTeamStmt: %w", cerr)
 		}
 	}
+	if q.createTeamSourceBookmarkedQueryStmt != nil {
+		if cerr := q.createTeamSourceBookmarkedQueryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createTeamSourceBookmarkedQueryStmt: %w", cerr)
+		}
+	}
 	if q.createTeamSourceQueryStmt != nil {
 		if cerr := q.createTeamSourceQueryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createTeamSourceQueryStmt: %w", cerr)
@@ -279,6 +290,11 @@ func (q *Queries) Close() error {
 	if q.getUserByEmailStmt != nil {
 		if cerr := q.getUserByEmailStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getUserByEmailStmt: %w", cerr)
+		}
+	}
+	if q.listBookmarkedQueriesByTeamAndSourceStmt != nil {
+		if cerr := q.listBookmarkedQueriesByTeamAndSourceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listBookmarkedQueriesByTeamAndSourceStmt: %w", cerr)
 		}
 	}
 	if q.listQueriesByTeamAndSourceStmt != nil {
@@ -418,101 +434,105 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 }
 
 type Queries struct {
-	db                             DBTX
-	tx                             *sql.Tx
-	addTeamMemberStmt              *sql.Stmt
-	addTeamSourceStmt              *sql.Stmt
-	countAdminUsersStmt            *sql.Stmt
-	countUserSessionsStmt          *sql.Stmt
-	createSessionStmt              *sql.Stmt
-	createSourceStmt               *sql.Stmt
-	createTeamStmt                 *sql.Stmt
-	createTeamSourceQueryStmt      *sql.Stmt
-	createUserStmt                 *sql.Stmt
-	deleteSessionStmt              *sql.Stmt
-	deleteSourceStmt               *sql.Stmt
-	deleteTeamStmt                 *sql.Stmt
-	deleteTeamSourceQueryStmt      *sql.Stmt
-	deleteUserStmt                 *sql.Stmt
-	deleteUserSessionsStmt         *sql.Stmt
-	getSessionStmt                 *sql.Stmt
-	getSourceStmt                  *sql.Stmt
-	getSourceByNameStmt            *sql.Stmt
-	getTeamStmt                    *sql.Stmt
-	getTeamByNameStmt              *sql.Stmt
-	getTeamMemberStmt              *sql.Stmt
-	getTeamSourceQueryStmt         *sql.Stmt
-	getUserStmt                    *sql.Stmt
-	getUserByEmailStmt             *sql.Stmt
-	listQueriesByTeamAndSourceStmt *sql.Stmt
-	listSourceTeamsStmt            *sql.Stmt
-	listSourcesStmt                *sql.Stmt
-	listSourcesForUserStmt         *sql.Stmt
-	listTeamMembersStmt            *sql.Stmt
-	listTeamMembersWithDetailsStmt *sql.Stmt
-	listTeamSourcesStmt            *sql.Stmt
-	listTeamsStmt                  *sql.Stmt
-	listTeamsForUserStmt           *sql.Stmt
-	listUserTeamsStmt              *sql.Stmt
-	listUsersStmt                  *sql.Stmt
-	removeTeamMemberStmt           *sql.Stmt
-	removeTeamSourceStmt           *sql.Stmt
-	teamHasSourceStmt              *sql.Stmt
-	updateSourceStmt               *sql.Stmt
-	updateTeamStmt                 *sql.Stmt
-	updateTeamMemberRoleStmt       *sql.Stmt
-	updateTeamSourceQueryStmt      *sql.Stmt
-	updateUserStmt                 *sql.Stmt
-	userHasSourceAccessStmt        *sql.Stmt
+	db                                       DBTX
+	tx                                       *sql.Tx
+	addTeamMemberStmt                        *sql.Stmt
+	addTeamSourceStmt                        *sql.Stmt
+	countAdminUsersStmt                      *sql.Stmt
+	countUserSessionsStmt                    *sql.Stmt
+	createSessionStmt                        *sql.Stmt
+	createSourceStmt                         *sql.Stmt
+	createTeamStmt                           *sql.Stmt
+	createTeamSourceBookmarkedQueryStmt      *sql.Stmt
+	createTeamSourceQueryStmt                *sql.Stmt
+	createUserStmt                           *sql.Stmt
+	deleteSessionStmt                        *sql.Stmt
+	deleteSourceStmt                         *sql.Stmt
+	deleteTeamStmt                           *sql.Stmt
+	deleteTeamSourceQueryStmt                *sql.Stmt
+	deleteUserStmt                           *sql.Stmt
+	deleteUserSessionsStmt                   *sql.Stmt
+	getSessionStmt                           *sql.Stmt
+	getSourceStmt                            *sql.Stmt
+	getSourceByNameStmt                      *sql.Stmt
+	getTeamStmt                              *sql.Stmt
+	getTeamByNameStmt                        *sql.Stmt
+	getTeamMemberStmt                        *sql.Stmt
+	getTeamSourceQueryStmt                   *sql.Stmt
+	getUserStmt                              *sql.Stmt
+	getUserByEmailStmt                       *sql.Stmt
+	listBookmarkedQueriesByTeamAndSourceStmt *sql.Stmt
+	listQueriesByTeamAndSourceStmt           *sql.Stmt
+	listSourceTeamsStmt                      *sql.Stmt
+	listSourcesStmt                          *sql.Stmt
+	listSourcesForUserStmt                   *sql.Stmt
+	listTeamMembersStmt                      *sql.Stmt
+	listTeamMembersWithDetailsStmt           *sql.Stmt
+	listTeamSourcesStmt                      *sql.Stmt
+	listTeamsStmt                            *sql.Stmt
+	listTeamsForUserStmt                     *sql.Stmt
+	listUserTeamsStmt                        *sql.Stmt
+	listUsersStmt                            *sql.Stmt
+	removeTeamMemberStmt                     *sql.Stmt
+	removeTeamSourceStmt                     *sql.Stmt
+	teamHasSourceStmt                        *sql.Stmt
+	updateSourceStmt                         *sql.Stmt
+	updateTeamStmt                           *sql.Stmt
+	updateTeamMemberRoleStmt                 *sql.Stmt
+	updateTeamSourceQueryStmt                *sql.Stmt
+	updateUserStmt                           *sql.Stmt
+	userHasSourceAccessStmt                  *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
-		db:                             tx,
-		tx:                             tx,
-		addTeamMemberStmt:              q.addTeamMemberStmt,
-		addTeamSourceStmt:              q.addTeamSourceStmt,
-		countAdminUsersStmt:            q.countAdminUsersStmt,
-		countUserSessionsStmt:          q.countUserSessionsStmt,
-		createSessionStmt:              q.createSessionStmt,
-		createSourceStmt:               q.createSourceStmt,
-		createTeamStmt:                 q.createTeamStmt,
-		createTeamSourceQueryStmt:      q.createTeamSourceQueryStmt,
-		createUserStmt:                 q.createUserStmt,
-		deleteSessionStmt:              q.deleteSessionStmt,
-		deleteSourceStmt:               q.deleteSourceStmt,
-		deleteTeamStmt:                 q.deleteTeamStmt,
-		deleteTeamSourceQueryStmt:      q.deleteTeamSourceQueryStmt,
-		deleteUserStmt:                 q.deleteUserStmt,
-		deleteUserSessionsStmt:         q.deleteUserSessionsStmt,
-		getSessionStmt:                 q.getSessionStmt,
-		getSourceStmt:                  q.getSourceStmt,
-		getSourceByNameStmt:            q.getSourceByNameStmt,
-		getTeamStmt:                    q.getTeamStmt,
-		getTeamByNameStmt:              q.getTeamByNameStmt,
-		getTeamMemberStmt:              q.getTeamMemberStmt,
-		getTeamSourceQueryStmt:         q.getTeamSourceQueryStmt,
-		getUserStmt:                    q.getUserStmt,
-		getUserByEmailStmt:             q.getUserByEmailStmt,
-		listQueriesByTeamAndSourceStmt: q.listQueriesByTeamAndSourceStmt,
-		listSourceTeamsStmt:            q.listSourceTeamsStmt,
-		listSourcesStmt:                q.listSourcesStmt,
-		listSourcesForUserStmt:         q.listSourcesForUserStmt,
-		listTeamMembersStmt:            q.listTeamMembersStmt,
-		listTeamMembersWithDetailsStmt: q.listTeamMembersWithDetailsStmt,
-		listTeamSourcesStmt:            q.listTeamSourcesStmt,
-		listTeamsStmt:                  q.listTeamsStmt,
-		listTeamsForUserStmt:           q.listTeamsForUserStmt,
-		listUserTeamsStmt:              q.listUserTeamsStmt,
-		listUsersStmt:                  q.listUsersStmt,
-		removeTeamMemberStmt:           q.removeTeamMemberStmt,
-		removeTeamSourceStmt:           q.removeTeamSourceStmt,
-		teamHasSourceStmt:              q.teamHasSourceStmt,
-		updateSourceStmt:               q.updateSourceStmt,
-		updateTeamStmt:                 q.updateTeamStmt,
-		updateTeamMemberRoleStmt:       q.updateTeamMemberRoleStmt,
-		updateTeamSourceQueryStmt:      q.updateTeamSourceQueryStmt,
-		updateUserStmt:                 q.updateUserStmt,
-		userHasSourceAccessStmt:        q.userHasSourceAccessStmt,
+		db:                                       tx,
+		tx:                                       tx,
+		addTeamMemberStmt:                        q.addTeamMemberStmt,
+		addTeamSourceStmt:                        q.addTeamSourceStmt,
+		countAdminUsersStmt:                      q.countAdminUsersStmt,
+		countUserSessionsStmt:                    q.countUserSessionsStmt,
+		createSessionStmt:                        q.createSessionStmt,
+		createSourceStmt:                         q.createSourceStmt,
+		createTeamStmt:                           q.createTeamStmt,
+		createTeamSourceBookmarkedQueryStmt:      q.createTeamSourceBookmarkedQueryStmt,
+		createTeamSourceQueryStmt:                q.createTeamSourceQueryStmt,
+		createUserStmt:                           q.createUserStmt,
+		deleteSessionStmt:                        q.deleteSessionStmt,
+		deleteSourceStmt:                         q.deleteSourceStmt,
+		deleteTeamStmt:                           q.deleteTeamStmt,
+		deleteTeamSourceQueryStmt:                q.deleteTeamSourceQueryStmt,
+		deleteUserStmt:                           q.deleteUserStmt,
+		deleteUserSessionsStmt:                   q.deleteUserSessionsStmt,
+		getSessionStmt:                           q.getSessionStmt,
+		getSourceStmt:                            q.getSourceStmt,
+		getSourceByNameStmt:                      q.getSourceByNameStmt,
+		getTeamStmt:                              q.getTeamStmt,
+		getTeamByNameStmt:                        q.getTeamByNameStmt,
+		getTeamMemberStmt:                        q.getTeamMemberStmt,
+		getTeamSourceQueryStmt:                   q.getTeamSourceQueryStmt,
+		getUserStmt:                              q.getUserStmt,
+		getUserByEmailStmt:                       q.getUserByEmailStmt,
+		listBookmarkedQueriesByTeamAndSourceStmt: q.listBookmarkedQueriesByTeamAndSourceStmt,
+		listQueriesByTeamAndSourceStmt:           q.listQueriesByTeamAndSourceStmt,
+		listSourceTeamsStmt:                      q.listSourceTeamsStmt,
+		listSourcesStmt:                          q.listSourcesStmt,
+		listSourcesForUserStmt:                   q.listSourcesForUserStmt,
+		listTeamMembersStmt:                      q.listTeamMembersStmt,
+		listTeamMembersWithDetailsStmt:           q.listTeamMembersWithDetailsStmt,
+		listTeamSourcesStmt:                      q.listTeamSourcesStmt,
+		listTeamsStmt:                            q.listTeamsStmt,
+		listTeamsForUserStmt:                     q.listTeamsForUserStmt,
+		listUserTeamsStmt:                        q.listUserTeamsStmt,
+		listUsersStmt:                            q.listUsersStmt,
+		removeTeamMemberStmt:                     q.removeTeamMemberStmt,
+		removeTeamSourceStmt:                     q.removeTeamSourceStmt,
+		teamHasSourceStmt:                        q.teamHasSourceStmt,
+		updateSourceStmt:                         q.updateSourceStmt,
+		updateTeamStmt:                           q.updateTeamStmt,
+		updateTeamMemberRoleStmt:                 q.updateTeamMemberRoleStmt,
+		updateTeamSourceQueryStmt:                q.updateTeamSourceQueryStmt,
+		updateUserStmt:                           q.updateUserStmt,
+		userHasSourceAccessStmt:                  q.userHasSourceAccessStmt,
 	}
 }

@@ -56,6 +56,7 @@ type TeamQuery struct {
 	Description  sql.NullString `json:"description"`
 	QueryType    string         `json:"query_type"`
 	QueryContent string         `json:"query_content"`
+	IsBookmarked sql.NullBool   `json:"is_bookmarked"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 }

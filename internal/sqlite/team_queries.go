@@ -154,3 +154,70 @@ func (db *DB) ListQueriesByTeamAndSource(ctx context.Context, teamID models.Team
 	db.log.Debug("team and source queries listed", "team_id", teamID, "source_id", sourceID, "count", len(queries))
 	return queries, nil
 }
+
+// ListBookmarkedQueriesByTeamAndSource retrieves all bookmarked saved queries for a specific team and source, ordered by creation date.
+func (db *DB) ListBookmarkedQueriesByTeamAndSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) ([]*models.SavedTeamQuery, error) {
+	db.log.Debug("listing bookmarked queries for team and source", "team_id", teamID, "source_id", sourceID)
+
+	params := sqlc.ListBookmarkedQueriesByTeamAndSourceParams{
+		TeamID:   int64(teamID),
+		SourceID: int64(sourceID),
+	}
+	sqlcQueries, err := db.queries.ListBookmarkedQueriesByTeamAndSource(ctx, params)
+	if err != nil {
+		db.log.Error("failed to list bookmarked queries for team and source from db", "error", err, "team_id", teamID, "source_id", sourceID)
+		return nil, fmt.Errorf("error listing bookmarked queries for team and source: %w", err)
+	}
+
+	// Map results to domain model slice.
+	queries := make([]*models.SavedTeamQuery, 0, len(sqlcQueries))
+	for _, sq := range sqlcQueries {
+		queries = append(queries, &models.SavedTeamQuery{
+			ID:           int(sq.ID),
+			TeamID:       models.TeamID(sq.TeamID),
+			SourceID:     models.SourceID(sq.SourceID),
+			Name:         sq.Name,
+			Description:  sq.Description.String, // Handle NULL string
+			QueryType:    models.SavedQueryType(sq.QueryType),
+			QueryContent: sq.QueryContent,
+			IsBookmarked: sq.IsBookmarked.Bool,
+			CreatedAt:    sq.CreatedAt,
+			UpdatedAt:    sq.UpdatedAt,
+		})
+	}
+
+	db.log.Debug("team and source queries listed", "team_id", teamID, "source_id", sourceID, "count", len(queries))
+	return queries, nil
+}
+
+// CreateTeamSourceBookmarkedQuery inserts a new bookmarked saved query record associated with a team and source.
+// It populates the ID field on the input query model upon success.
+func (db *DB) CreateTeamSourceBookmarkedQuery(ctx context.Context, query *models.BookmarkedTeamQuery) error {
+	db.log.Debug("creating team source query record", "team_id", query.TeamID, "source_id", query.SourceID, "name", query.Name)
+
+	// Map domain model to sqlc parameters.
+	description := sql.NullString{String: query.Description, Valid: query.Description != ""}
+	params := sqlc.CreateTeamSourceBookmarkedQueryParams{
+		TeamID:       int64(query.TeamID),
+		SourceID:     int64(query.SourceID),
+		Name:         query.Name,
+		Description:  description,
+		QueryType:    string(query.QueryType),
+		QueryContent: query.QueryContent,
+		IsBookmarked: sql.NullBool{Bool: query.IsBookmarked, Valid: true},
+	}
+
+	id, err := db.queries.CreateTeamSourceBookmarkedQuery(ctx, params)
+	if err != nil {
+		// Consider checking for specific constraint errors (e.g., FK violations if team/source don't exist).
+		db.log.Error("failed to create team source bookmarked query record in db", "error", err, "team_id", query.TeamID, "source_id", query.SourceID)
+		return fmt.Errorf("error creating team source bookmarked query: %w", err)
+	}
+
+	// Set auto-generated ID on the input model.
+	query.ID = int(id)
+	// Timestamps are handled by DB; caller doesn't need them updated here.
+
+	db.log.Debug("team source bookmarked query record created", "query_id", query.ID)
+	return nil
+}	

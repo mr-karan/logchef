@@ -103,3 +103,16 @@ type TeamQuery struct {
 	QueryContent string         `json:"query_content" db:"query_content"`
 	Timestamps
 }
+
+// BookmarkedTeamQuery represents a bookmarked saved query in a team
+type BookmarkedTeamQuery struct {
+	ID           int            `json:"id" db:"id"`
+	TeamID       TeamID         `json:"team_id" db:"team_id"`
+	SourceID     SourceID       `json:"source_id" db:"source_id"`
+	Name         string         `json:"name" db:"name"`
+	Description  string         `json:"description" db:"description"`
+	QueryType    SavedQueryType `json:"query_type" db:"query_type"`
+	QueryContent string         `json:"query_content" db:"query_content"`
+	IsBookmarked bool           `json:"is_bookmarked" db:"is_bookmarked"`
+	Timestamps
+}

@@ -204,6 +204,19 @@ func (s *Server) setupRoutes() {
 			collections.Put("/:collectionID", s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeamSourceCollection)
 			collections.Delete("/:collectionID", s.requireTeamAdminOrGlobalAdmin, s.handleDeleteTeamSourceCollection)
 		}
+
+		// Bookmarked queries scoped to Team & Source
+		// Regular team members can view and use bookmarked queries
+		bookmarkedQueries := teamSourceOps.Group("/bookmarked-queries")
+		{
+			bookmarkedQueries.Get("/", s.handleListTeamSourceBookmarkedQueries)
+			bookmarkedQueries.Get("/:bookmarkedQueryID", s.handleGetTeamSourceBookmarkedQuery)
+
+			// Only team admins can manage bookmarked queries
+			bookmarkedQueries.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleCreateTeamSourceBookmarkedQuery)
+			bookmarkedQueries.Put("/:bookmarkedQueryID", s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeamSourceBookmarkedQuery)
+			bookmarkedQueries.Delete("/:bookmarkedQueryID", s.requireTeamAdminOrGlobalAdmin, s.handleDeleteTeamSourceBookmarkedQuery)
+		}
 	}
 
 	// --- Static Asset and SPA Handling ---

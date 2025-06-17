@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS team_queries (
     description TEXT,
     query_type TEXT NOT NULL, -- Type of query: 'sql' or 'logchefql'
     query_content TEXT NOT NULL,
+    is_bookmarked BOOLEAN,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,

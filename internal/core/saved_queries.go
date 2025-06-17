@@ -226,3 +226,63 @@ func DeleteTeamSourceQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger,
 	log.Info("saved query deleted successfully", "query_id", queryID)
 	return nil
 }
+
+// CreateTeamSourceBookmarkedQuery creates a new bookmarked saved query for a team and source.
+func CreateTeamSourceBookmarkedQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, name, description, queryContentJSON, queryType string, isBookmarked bool) (*models.SavedTeamQuery, error) {
+	log.Debug("creating bookmarked saved query", "team_id", teamID, "source_id", sourceID, "name", name, "type", queryType, "is_bookmarked", isBookmarked)
+
+	// Validate Query Type
+	if queryType == "" {
+		return nil, ErrQueryTypeRequired
+	}
+	if models.SavedQueryType(queryType) != models.SavedQueryTypeLogchefQL && models.SavedQueryType(queryType) != models.SavedQueryTypeSQL {
+		return nil, ErrInvalidQueryType
+	}
+
+	// Validate Query Content JSON
+	if err := ValidateSavedQueryContent(queryContentJSON); err != nil {
+		log.Warn("invalid saved query content provided", "error", err, "team_id", teamID, "source_id", sourceID, "name", name)
+		return nil, err // Return the specific validation error
+	}
+
+	// Optional: Validate team and source existence?
+
+	// Create TeamQuery model for DB interaction
+	// Note: The DB layer takes a models.TeamQuery which might differ slightly
+	// from models.SavedTeamQuery (e.g., CreatedBy might be handled differently).
+	dbQuery := &models.BookmarkedTeamQuery{
+		TeamID:       teamID,
+		SourceID:     sourceID,
+		Name:         name,
+		Description:  description,
+		QueryContent: queryContentJSON, // Store the raw JSON
+		QueryType:    models.SavedQueryType(queryType),
+		IsBookmarked: isBookmarked,
+		// CreatedBy: createdBy, // Pass if DB layer expects it
+	}
+
+	// Create in database
+	if err := db.CreateTeamSourceBookmarkedQuery(ctx, dbQuery); err != nil {
+		log.Error("failed to create bookmarked saved query in db", "error", err, "team_id", teamID, "source_id", sourceID, "name", name)
+		// TODO: Check for specific DB errors (e.g., constraints)?
+		return nil, fmt.Errorf("error creating bookmarked saved query: %w", err)
+	}
+
+	// Convert the result back to SavedTeamQuery for the caller
+	// The dbQuery object should now have the ID and timestamps populated.
+	createdQuery := &models.SavedTeamQuery{
+		ID:           dbQuery.ID,
+		TeamID:       teamID,
+		SourceID:     sourceID,
+		Name:         name,
+		Description:  description,
+		QueryType:    models.SavedQueryType(queryType),
+		QueryContent: queryContentJSON,
+		CreatedAt:    dbQuery.CreatedAt,
+		UpdatedAt:    dbQuery.UpdatedAt,
+		// CreatedByUserID: createdBy, // Map if needed
+	}
+
+	log.Info("saved query created successfully", "query_id", createdQuery.ID, "team_id", teamID, "source_id", sourceID)
+	return createdQuery, nil
+}
