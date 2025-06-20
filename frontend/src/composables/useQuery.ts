@@ -128,7 +128,24 @@ export function useQuery() {
 
     // If switching to SQL and we have LogchefQL content, validate first
     if (newMode === 'sql' && activeMode.value === 'logchefql' && logchefQuery.value?.trim()) {
-      const validation = validateLogchefQLWithDetails(logchefQuery.value);
+
+      // replace dynamic variable to value to avoid to be failed by validation
+      let sql = logchefQuery.value;
+      for (const variable of allVariables.value) {
+        const key = variable.name;
+        const value = variable.value;
+        const formattedValue =
+            variable.type === 'number'
+                ? value
+                : variable.type === 'date'
+                    ? `'${new Date(value).toISOString()}'`
+                    : `'${value}'`;
+
+        const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
+        sql = sql.replace(regex, formattedValue as string);
+      }
+
+      const validation = validateLogchefQLWithDetails(sql);
       if (!validation.valid) {
         queryError.value = `Invalid LogchefQL syntax: ${validation.error}`;
         return; // Don't switch modes if validation fails
