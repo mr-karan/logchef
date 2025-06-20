@@ -1,4 +1,4 @@
-import { defineStore } from "pinia";
+import { defineStore, storeToRefs } from "pinia";
 import { computed, watch } from "vue";
 import { exploreApi } from "@/api/explore";
 import type {
@@ -20,6 +20,7 @@ import { now, getLocalTimeZone, CalendarDateTime } from "@internationalized/date
 import { useSourcesStore } from "./sources";
 import { useTeamsStore } from "@/stores/teams";
 import { useBaseStore } from "./base";
+import { useVariableStore } from '@/stores/variables';
 import { QueryService } from '@/services/QueryService'
 import { parseRelativeTimeString } from "@/utils/time";
 import type { APIErrorResponse, APISuccessResponse, APIResponse } from "@/api/types";
@@ -182,6 +183,8 @@ export const useExploreStore = defineStore("explore", () => {
   // 1. Internal computed property to translate LogchefQL to SQL
   const _logchefQlTranslationResult = computed(() => {
     const { logchefqlCode, timeRange, limit, selectedTimezoneIdentifier } = state.data.value;
+
+    console.log("logchefqlCode : "+logchefqlCode);
     if (!logchefqlCode || !timeRange || !timeRange.start || !timeRange.end) {
       return null;
     }
@@ -237,7 +240,7 @@ export const useExploreStore = defineStore("explore", () => {
     if (!translationResult) {
       return '';
     }
-
+    console.log("logchefqlCode : "+translationResult.sql);
     return translationResult.sql;
   });
 
@@ -755,6 +758,9 @@ export const useExploreStore = defineStore("explore", () => {
 
       // Get the SQL to execute
       let sql = sqlForExecution.value;
+
+      console.log("logchef sqlForExecution.value; "+sql);
+
       let usedDefaultSql = false;
 
       // Prepare parameters for the API call
@@ -789,15 +795,37 @@ export const useExploreStore = defineStore("explore", () => {
           }, operationKey);
         }
 
-        // Use the generated SQL
         sql = result.sql;
+        // Use the generated SQL
         usedDefaultSql = true;
 
         // If in SQL mode, update the UI to show the generated SQL
         if (state.data.value.activeMode === 'sql') {
-          state.data.value.rawSql = sql;
+          state.data.value.rawSql = result.sql;
         }
       }
+
+      // dynamic variable to value
+      // Access variable store
+      const variableStore = useVariableStore();
+      // dynamic variables list
+      const { allVariables } = storeToRefs(variableStore);
+      for (const variable of allVariables.value) {
+        const key = variable.name;
+        const value = variable.value;
+        const formattedValue =
+            variable.type === 'number'
+                ? value
+                : variable.type === 'date'
+                    ? `'${new Date(value).toISOString()}'`
+                    : `'${value}'`;
+
+        const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
+        sql = sql.replace(regex, formattedValue as string);
+      }
+
+      console.log("Replaced dynamic variables in query for validation: " + sql);
+
 
       // Set the SQL in the params
       params.raw_sql = sql;

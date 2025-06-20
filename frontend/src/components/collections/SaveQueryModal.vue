@@ -18,9 +18,11 @@ import { useSavedQueriesStore } from '@/stores/savedQueries';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
 import { useExploreStore } from '@/stores/explore';
+import { useVariableStore } from '@/stores/variables';
 import { useRoute } from 'vue-router';
 import { TOAST_DURATION } from '@/lib/constants';
 import { useToast } from '@/components/ui/toast';
+import {storeToRefs} from "pinia";
 
 const props = defineProps<{
   isOpen: boolean;
@@ -43,6 +45,7 @@ const savedQueriesStore = useSavedQueriesStore();
 const teamsStore = useTeamsStore();
 const sourcesStore = useSourcesStore();
 const exploreStore = useExploreStore();
+const variableStore = useVariableStore();
 const { toast } = useToast();
 
 // Form state
@@ -52,6 +55,7 @@ const saveTimestamp = ref(true);
 const isSubmitting = ref(false);
 const isEditing = computed(() => !!props.editData || (!!props.initialData && props.isEditMode));
 const queryId = ref('');
+const { allVariables } = storeToRefs(variableStore);
 
 // Get the current source ID
 const currentSourceId = computed(() => {
@@ -212,7 +216,6 @@ watch([() => props.initialData, () => props.editData], ([newInitialData, newEdit
 // Prepare query content with proper structure
 function prepareQueryContent(saveTimestamp: boolean): string {
   try {
-    // Get the current active mode from the explore store
     const activeMode = exploreStore.activeMode || 'sql';
 
     // Get initial content if available
@@ -231,17 +234,14 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       }
     }
 
-    // Get the query content based on mode
     const queryContent = activeMode === 'logchefql'
-      ? exploreStore.logchefqlCode || ''
-      : exploreStore.rawSql || '';
+        ? exploreStore.logchefqlCode || ''
+        : exploreStore.rawSql || '';
 
-    // Validate query content
     if (!queryContent.trim()) {
       throw new Error(`${activeMode === 'logchefql' ? 'LogchefQL' : 'SQL'} content is required`);
     }
 
-    // Create simplified structure
     const simplifiedContent = {
       version: content.version || 1,
       sourceId: content.sourceId || currentSourceId.value,
@@ -253,6 +253,7 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       } : null, // Set timeRange to null if saveTimestamp is false
       limit: exploreStore.limit, // Always save the current limit regardless of timestamp setting
       content: queryContent,
+      variables: allVariables.value,
     };
 
     return JSON.stringify(simplifiedContent);
@@ -263,7 +264,6 @@ function prepareQueryContent(saveTimestamp: boolean): string {
     const currentTime = Date.now();
     const oneHourAgo = currentTime - 3600000;
 
-    // Create fallback structure with optional timeRange
     return JSON.stringify({
       version: 1,
       sourceId: currentSourceId.value,
@@ -277,6 +277,7 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       content: exploreStore.activeMode === 'logchefql' ?
         (exploreStore.logchefqlCode || '') :
         (exploreStore.rawSql || ''),
+      variables: allVariables?.value || []
     });
   }
 }

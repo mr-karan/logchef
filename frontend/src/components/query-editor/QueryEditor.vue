@@ -1,20 +1,29 @@
 <template>
   <div class="query-editor">
     <!-- Header Bar (Keep existing structure) -->
-    <div class="flex items-center justify-between bg-muted/40 rounded-t-md px-3 py-1.5 border border-b-0">
+    <div
+      class="flex items-center justify-between bg-muted/40 rounded-t-md px-3 py-1.5 border border-b-0"
+    >
       <div class="flex items-center gap-3">
         <!-- Fields Panel Toggle -->
-        <button class="p-1 text-muted-foreground hover:text-foreground flex items-center"
-          @click="$emit('toggle-fields')" :title="props.showFieldsPanel ? 'Hide fields panel' : 'Show fields panel'
-            " aria-label="Toggle fields panel">
+        <button
+          class="p-1 text-muted-foreground hover:text-foreground flex items-center"
+          @click="$emit('toggle-fields')"
+          :title="
+            props.showFieldsPanel ? 'Hide fields panel' : 'Show fields panel'
+          "
+          aria-label="Toggle fields panel"
+        >
           <PanelRightClose v-if="props.showFieldsPanel" class="h-4 w-4" />
           <PanelRightOpen v-else class="h-4 w-4" />
         </button>
 
         <!-- Tabs for Mode Switching -->
-        <Tabs :model-value="props.activeMode"
+        <Tabs
+          :model-value="props.activeMode"
           @update:model-value="(value: string | number) => $emit('update:activeMode', asEditorMode(value), true)"
-          class="w-auto">
+          class="w-auto"
+        >
           <TabsList class="grid grid-cols-2 w-fit">
             <TabsTrigger value="logchefql">
               <div class="flex-fix">
@@ -43,34 +52,26 @@
         </div>
 
         <!-- New: Active Query Indicator -->
-        <div v-if="activeSavedQueryName"
-          class="flex items-center bg-primary/10 text-primary text-xs font-medium px-2 py-0.5 rounded-md ml-3">
+        <div
+          v-if="activeSavedQueryName"
+          class="flex items-center bg-primary/10 text-primary text-xs font-medium px-2 py-0.5 rounded-md ml-3"
+        >
           <FileEdit class="h-3.5 w-3.5 mr-1.5" />
           <span>{{ activeSavedQueryName }}</span>
         </div>
       </div>
 
       <div class="flex items-center gap-2">
-        <!-- AI Assistant Toggle - Only show in SQL mode -->
-        <TooltipProvider v-if="props.activeMode === 'clickhouse-sql'">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="outline" size="sm" class="h-7 gap-1"
-                :class="{ 'bg-primary/10 text-primary border-primary': showAIInput }" @click="toggleAIInput">
-                <WandSparkles class="h-3.5 w-3.5" />
-                <span class="text-xs">AI</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <p>{{ showAIInput ? "Hide" : "Show" }} AI Assistant</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
         <!-- New: New Query Button - Only show when editing a saved query -->
         <TooltipProvider v-if="isEditingExistingQuery">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="outline" size="sm" class="h-7 gap-1" @click="handleNewQueryClick">
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-7 gap-1"
+                @click="handleNewQueryClick"
+              >
                 <FilePlus2 class="h-3.5 w-3.5" />
                 <span class="text-xs">New</span>
               </Button>
@@ -85,10 +86,17 @@
         <TooltipProvider v-if="props.activeMode === 'clickhouse-sql'">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="outline" size="sm" class="h-7 gap-1" @click="toggleSqlEditorVisibility">
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-7 gap-1"
+                @click="toggleSqlEditorVisibility"
+              >
                 <EyeOff v-if="isEditorVisible" class="h-3.5 w-3.5" />
                 <Eye v-else class="h-3.5 w-3.5" />
-                <span class="text-xs">{{ isEditorVisible ? "Hide" : "Show" }} SQL</span>
+                <span class="text-xs"
+                  >{{ isEditorVisible ? "Hide" : "Show" }} SQL</span
+                >
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
@@ -98,26 +106,39 @@
         </TooltipProvider>
 
         <!-- Saved Queries Dropdown -->
-        <SavedQueriesDropdown :selected-source-id="props.sourceId" :selected-team-id="props.teamId"
+        <SavedQueriesDropdown
+          :selected-source-id="props.sourceId"
+          :selected-team-id="props.teamId"
           @select-saved-query="(query: SavedTeamQuery) => $emit('select-saved-query', query)"
-          @save="$emit('save-query')" @save-as-new="$emit('save-query-as-new')" class="h-8" />
+          @save="$emit('save-query')"
+          class="h-8"
+        />
 
         <!-- Help Icon -->
         <HoverCard :open-delay="200">
           <HoverCardTrigger as-child>
-            <button class="p-1 text-muted-foreground hover:text-foreground" aria-label="Show syntax help">
+            <button
+              class="p-1 text-muted-foreground hover:text-foreground"
+              aria-label="Show syntax help"
+            >
               <HelpCircle class="h-4 w-4" />
             </button>
           </HoverCardTrigger>
-          <HoverCardContent class="w-80 backdrop-blur-md bg-card text-card-foreground border-border shadow-lg"
-            side="bottom" align="end">
+          <HoverCardContent
+            class="w-80 backdrop-blur-md bg-card text-card-foreground border-border shadow-lg"
+            side="bottom"
+            align="end"
+          >
             <!-- Help Content (Keep existing template) -->
             <div class="space-y-2">
               <h4 class="text-sm font-semibold">
                 {{ props.activeMode === "logchefql" ? "LogchefQL" : "SQL" }}
                 Syntax
               </h4>
-              <div v-if="props.activeMode === 'logchefql'" class="text-xs space-y-1.5">
+              <div
+                v-if="props.activeMode === 'logchefql'"
+                class="text-xs space-y-1.5"
+              >
                 <div>
                   <code class="bg-muted px-1 rounded">field="value"</code> -
                   Exact match
@@ -143,24 +164,36 @@
                   Grouping
                 </div>
                 <div class="pt-1">
-                  <em>Example:
-                    <code class="bg-muted px-1 rounded">level="error" and status>=500</code></em>
+                  <em
+                    >Example:
+                    <code class="bg-muted px-1 rounded"
+                      >level="error" and status>=500</code
+                    ></em
+                  >
                 </div>
               </div>
               <div v-else class="text-xs space-y-1.5">
                 <div>
-                  <code class="bg-muted px-1 rounded">SELECT count() FROM {{ tableName || "table" }}</code>
+                  <code class="bg-muted px-1 rounded"
+                    >SELECT count() FROM {{ tableName || "table" }}</code
+                  >
                 </div>
                 <div>
-                  <code class="bg-muted px-1 rounded">WHERE field = 'value' AND time > now() - interval 1
-              hour</code>
+                  <code class="bg-muted px-1 rounded"
+                    >WHERE field = 'value' AND time > now() - interval 1
+                    hour</code
+                  >
                 </div>
                 <div>
-                  <code class="bg-muted px-1 rounded">GROUP BY user ORDER BY count() DESC</code>
+                  <code class="bg-muted px-1 rounded"
+                    >GROUP BY user ORDER BY count() DESC</code
+                  >
                 </div>
                 <div class="pt-1">
-                  <em>Time range & limit applied if not specified. Use standard
-                    ClickHouse SQL.</em>
+                  <em
+                    >Time range & limit applied if not specified. Use standard
+                    ClickHouse SQL.</em
+                  >
                 </div>
               </div>
             </div>
@@ -169,31 +202,68 @@
       </div>
     </div>
 
+    <!-- Dynamic variable list -->
+    <div class="flex flex-wrap gap-2 mb-2 bg-white">
+      <div v-for="variable in allVariables" :key="variable.name" class="flex items-center">
+        <input
+            v-model="variable.value"
+            type="text"
+            :placeholder="variable.label"
+            @click="() => openVariableSettings(variable)"
+            class="border p-2 rounded"
+        />
+      </div>
+    </div>
+
     <!-- Monaco Editor Container -->
-    <div class="editor-wrapper" :class="{ 'is-focused': editorFocused }"
-      v-show="isEditorVisible || props.activeMode === 'logchefql'">
-      <div class="editor-container" :class="{
-        'is-empty': isEditorEmpty,
-      }" :style="{ height: `${editorHeight}px` }" :data-placeholder="currentPlaceholder" :data-mode="props.activeMode">
+    <div
+      class="editor-wrapper"
+      :class="{ 'is-focused': editorFocused }"
+      v-show="isEditorVisible || props.activeMode === 'logchefql'"
+    >
+      <div
+        class="editor-container"
+        :class="{
+          'is-empty': isEditorEmpty,
+        }"
+        :style="{ height: `${editorHeight}px` }"
+        :data-placeholder="currentPlaceholder"
+        :data-mode="props.activeMode"
+      >
         <!-- Monaco Editor Component with stable key to prevent remounting -->
-        <vue-monaco-editor key="monaco-editor-instance" v-model:value="editorContent" :theme="theme"
-          :language="props.activeMode" :options="monacoOptions" @mount="handleMount" @update:value="handleEditorChange"
-          class="h-full w-full" />
+        <vue-monaco-editor
+          key="monaco-editor-instance"
+          v-model:value="editorContent"
+          :theme="theme"
+          :language="props.activeMode"
+          :options="monacoOptions"
+          @mount="handleMount"
+          @update:value="handleEditorChange"
+          class="h-full w-full"
+        />
       </div>
     </div>
 
     <!-- SQL Preview when editor is hidden -->
-    <div v-if="
-      !isEditorVisible &&
-      props.activeMode === 'clickhouse-sql' &&
-      !isEditorEmpty
-    " class="sql-preview p-3 border border-border rounded-md bg-card/60 text-sm font-mono overflow-hidden cursor-pointer dark:bg-[#111522]"
-      @click="isEditorVisible = true">
+    <div
+      v-if="
+        !isEditorVisible &&
+        props.activeMode === 'clickhouse-sql' &&
+        !isEditorEmpty
+      "
+      class="sql-preview p-3 border border-border rounded-md bg-card/60 text-sm font-mono overflow-hidden cursor-pointer dark:bg-[#111522]"
+      @click="isEditorVisible = true"
+    >
       <div class="flex items-center justify-between">
         <div class="text-muted-foreground text-xs font-medium mb-1">
           SQL Query (collapsed)
         </div>
-        <Button variant="ghost" size="sm" class="h-6 px-2" @click.stop="isEditorVisible = true">
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-6 px-2"
+          @click.stop="isEditorVisible = true"
+        >
           <Eye class="h-3.5 w-3.5 mr-1" />
           <span class="text-xs">Show</span>
         </Button>
@@ -204,62 +274,52 @@
     </div>
 
     <!-- Error Message Display -->
-    <div v-if="validationError"
-      class="mt-2 p-2 text-sm text-destructive bg-destructive/10 rounded flex items-center gap-2">
+    <div
+      v-if="validationError"
+      class="mt-2 p-2 text-sm text-destructive bg-destructive/10 rounded flex items-center gap-2"
+    >
       <AlertCircle class="h-4 w-4 flex-shrink-0" />
       <span>
         <span class="font-medium">Validation Error: </span>
         {{ validationError }}
-        <span v-if="validationError?.includes('Missing boolean operator')" class="block mt-1 text-xs">
+        <span
+          v-if="validationError?.includes('Missing boolean operator')"
+          class="block mt-1 text-xs"
+        >
           Hint: Use <code class="bg-muted px-1 rounded">and</code> or
           <code class="bg-muted px-1 rounded">or</code> between conditions.
           Example:
-          <code class="bg-muted px-1 rounded">field1="value" and field2="value"</code>
+          <code class="bg-muted px-1 rounded"
+            >field1="value" and field2="value"</code
+          >
         </span>
       </span>
     </div>
+  </div>
 
-    <!-- AI Input Section -->
-    <div v-if="showAIInput && props.activeMode === 'clickhouse-sql'"
-      class="mt-3 border border-border rounded-md bg-card/50">
-      <div class="p-3 border-b bg-muted/40">
-        <div class="flex items-center gap-2 text-sm font-medium">
-          <WandSparkles class="h-4 w-4 text-primary" />
-          <span>AI SQL Assistant</span>
-        </div>
-        <p class="text-xs text-muted-foreground mt-1">
-          Describe the data you want to retrieve in natural language
-        </p>
-      </div>
-      <div class="p-3 space-y-3">
-        <!-- Natural Language Input -->
-        <div class="space-y-2">
-          <Textarea v-model="naturalLanguageQuery" :disabled="isGeneratingSQL"
-            placeholder="Example: Show me all error logs from the last hour, excluding database-related errors"
-            class="resize-none h-20 text-sm" @keydown="onAIKeyDown" />
-        </div>
-        <!-- Action Buttons -->
-        <div class="flex items-center justify-between">
-          <div class="text-xs text-muted-foreground">
-            Press Ctrl+Enter to generate SQL
-          </div>
-          <div class="flex gap-2">
-            <Button variant="outline" size="sm" @click="showAIInput = false">
-              Cancel
-            </Button>
-            <Button @click="handleGenerateSQL" :disabled="!naturalLanguageQuery.trim() || isGeneratingSQL" size="sm">
-              <span v-if="isGeneratingSQL" class="flex items-center gap-1.5">
-                <span
-                  class="h-3 w-3 border-2 border-current border-t-transparent rounded-full inline-block animate-spin"></span>
-                Generating...
-              </span>
-              <span v-else>Generate SQL</span>
-            </Button>
-          </div>
-        </div>
-      </div>
+  <!-- Dynamic variable drawer (edit panel) -->
+  <div v-if="selectedVariable" ref="drawerRef" class="drawer z-20">
+    <div class="drawer-header">
+      <h3>Variable Settings</h3>
+      <button @click="closeDrawer">✕</button>
+    </div>
+
+    <div class="drawer-body">
+      <label>Variable name</label>
+      <p class="text-[#2980b9] font-bold">{{ selectedVariable.name }}</p>
+
+      <label>Variable type</label>
+      <select v-model="selectedVariable.type" @change="setDefaultValueByType">
+        <option value="text">Text</option>
+        <option value="number">Number</option>
+        <option value="date">Date</option>
+      </select>
+
+      <label>Filter widget label</label>
+      <input v-model="selectedVariable.label" placeholder="Enter label..." />
     </div>
   </div>
+
 </template>
 
 <script setup lang="ts">
@@ -291,7 +351,6 @@ import {
   Code2,
   Eye,
   EyeOff,
-  WandSparkles,
 } from "lucide-vue-next";
 import {
   HoverCard,
@@ -303,7 +362,6 @@ import SavedQueriesDropdown from "@/components/collections/SavedQueriesDropdown.
 import type { SavedTeamQuery } from "@/api/savedQueries";
 import { useRoute, useRouter } from "vue-router";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
   TooltipContent,
@@ -335,10 +393,11 @@ import {
   CLICKHOUSE_FUNCTIONS,
   SQL_TYPES,
 } from "@/utils/clickhouse-sql";
+import { storeToRefs } from 'pinia';
 import { useExploreStore } from "@/stores/explore";
+import type { VariableState as VariableSetting } from '@/stores/variables';
+import { useVariableStore } from '@/stores/variables';
 import { QueryService } from "@/services/QueryService";
-import { useExploreUrlSync } from "@/composables/useExploreUrlSync";
-
 // Keep other necessary imports like types...
 // --- Types ---
 type EditorMode = "logchefql" | "clickhouse-sql";
@@ -381,14 +440,14 @@ const emit = defineEmits<{
   // SavedQueries events
   (e: "select-saved-query", query: SavedTeamQuery): void;
   (e: "save-query"): void;
-  (e: "save-query-as-new"): void;
-  // AI events
-  (e: "generate-ai-sql", data: { naturalLanguageQuery: string }): void;
 }>();
 
 // --- Core State ---
 const isDark = useDark();
 const exploreStore = useExploreStore();
+// Access variable store
+const variableStore = useVariableStore();
+
 const editorRef = shallowRef<MonacoEditor | null>(null);
 const editorContent = ref(props.value || ""); // Initialize with prop value
 const editorFocused = ref(false);
@@ -397,12 +456,13 @@ const isProgrammaticChange = ref(false); // Flag to prevent update loops
 const isDisposing = ref(false); // Flag to prevent operations during disposal
 const activeDisposables = ref<MonacoDisposable[]>([]); // Track all disposables
 const isEditorVisible = ref(true); // New state for SQL editor visibility
-const showAIInput = ref(false); // State for AI input visibility
-const naturalLanguageQuery = ref(""); // AI natural language input
 
-// Get AI loading state from the store
-const { exploreStore: storeForAI } = { exploreStore: useExploreStore() };
-const isGeneratingSQL = computed(() => storeForAI.isGeneratingAISQL);
+// dynamic variables list
+const { allVariables } = storeToRefs(variableStore);
+// Selected variable for drawer editing
+const selectedVariable = ref<VariableSetting | null>(null);
+// drawerRef to hide it when user click outside of drawer
+const drawerRef = ref<HTMLElement | null>(null);
 
 // --- Computed Properties ---
 const theme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
@@ -415,8 +475,9 @@ const currentPlaceholder = computed(() => {
 
   return props.activeMode === "logchefql"
     ? 'Enter search criteria (e.g., lvl="ERROR" and namespace~"sys")'
-    : `Enter ClickHouse SQL query (e.g., SELECT * FROM ${props.tableName || "your_table"
-    } WHERE ...)`;
+    : `Enter ClickHouse SQL query (e.g., SELECT * FROM ${
+        props.tableName || "your_table"
+      } WHERE ...)`;
 });
 
 const editorHeight = computed(() => {
@@ -538,36 +599,30 @@ const handleMount = (editor: MonacoEditor) => {
   focusEditor(true);
 };
 
-const { debouncedSyncUrlFromState } = useExploreUrlSync();
-
+// Handle editor changes (e.g., user typing query with {{variable}})
 const handleEditorChange = (value: string | undefined) => {
   if (isProgrammaticChange.value || isDisposing.value) {
-    return; // Prevent feedback loop or changes during disposal
+    return;
   }
 
   const currentQuery = value ?? "";
-  editorContent.value = currentQuery; // Update internal state FIRST
+  editorContent.value = currentQuery;
 
-  // Update store based on current mode
   if (props.activeMode === "logchefql") {
     exploreStore.setLogchefqlCode(currentQuery);
   } else {
     exploreStore.setRawSql(currentQuery);
   }
 
-  // Clear validation errors on manual input
   validationError.value = null;
 
-  // Emit change event - this was manual user input, not URL loading
+  detectVariables(currentQuery); // detect dynamic variables and make variable list in dom
+
   emit("change", {
     query: currentQuery,
     mode: props.activeMode,
     isUserInput: true,
   });
-
-  // Use the debounced URL sync function when user is typing
-  // This will only update the URL after the user stops typing
-  debouncedSyncUrlFromState();
 };
 
 // Function to programmatically update editor content (e.g., from store or clear)
@@ -577,6 +632,8 @@ const runProgrammaticUpdate = (newValue: string) => {
   isProgrammaticChange.value = true;
   editorContent.value = newValue; // Update internal state
   editorRef.value.setValue(newValue); // Update Monaco instance
+
+  detectVariables(newValue); // detect dynamic variables and make variable list in dom
 
   // Release the flag after the update is likely processed
   nextTick(() => {
@@ -588,6 +645,39 @@ const runProgrammaticUpdate = (newValue: string) => {
       isUserInput: false,
     });
   });
+};
+
+const detectVariables = (value: string) => {
+  if (typeof value !== 'string') return;
+
+  // Extract dynamic variable names from query like {{ variable }}
+  const matches = [...value.matchAll(/{{\s*(\w+)\s*}}/g)].map(m => m[1]);
+  const uniqueVariableNames = [...new Set(matches)];
+
+  // If allVariables is not ready, just upsert all found variables
+  const currentVariables = allVariables?.value ?? [];
+
+  const existingNames = currentVariables.map(v => v.name);
+
+  // Remove variables that are no longer in the query
+  for (const variable of currentVariables) {
+    if (!uniqueVariableNames.includes(variable.name)) {
+      variableStore.removeVariable(variable.name);
+    }
+  }
+
+  // Add new variables that appeared in query
+  for (const name of uniqueVariableNames) {
+    if (!existingNames.includes(name)) {
+      variableStore.upsertVariable({
+        name,
+        type: 'text',
+        label: name,
+        inputType: 'input',
+        value: ''
+      });
+    }
+  }
 };
 
 // Watch for prop value changes to update editor content
@@ -657,15 +747,15 @@ watchEffect(() => {
       // Add mode-specific options for LogchefQL
       ...(props.activeMode === "logchefql"
         ? {
-          ...getSingleLineModeOptions(),
-        }
+            ...getSingleLineModeOptions(),
+          }
         : {
-          // SQL-specific configuration - keep line numbers off
-          lineNumbers: "off" as const,
-          wordWrap: "on" as const,
-          folding: true,
-          scrollBeyondLastLine: false,
-        }),
+            // SQL-specific configuration - keep line numbers off
+            lineNumbers: "off" as const,
+            wordWrap: "on" as const,
+            folding: true,
+            scrollBeyondLastLine: false,
+          }),
     };
     editor.updateOptions(options);
 
@@ -730,38 +820,6 @@ watch(
     }
   },
   { deep: true, flush: "post" }
-);
-
-// Add this watch effect to force refresh editor content when query_id changes
-// This is specifically to fix the issue with kept-alive components
-// First, get the route outside the watcher (at component setup time)
-const route = useRoute();
-
-// Then watch the route.query.query_id property
-watch(
-  () => route.query.query_id,
-  (newQueryId, oldQueryId) => {
-    if (newQueryId !== oldQueryId && editorRef.value && !isDisposing.value) {
-      console.log(`QueryEditor: query_id changed from ${oldQueryId} to ${newQueryId}, ensuring editor content is updated`);
-
-      // Force a refresh from the store values after a small delay
-      setTimeout(() => {
-        if (editorRef.value && !isDisposing.value) {
-          const storeValue =
-            props.activeMode === "logchefql"
-              ? exploreStore.logchefqlCode
-              : exploreStore.rawSql;
-
-          runProgrammaticUpdate(storeValue || "");
-
-          // Focus the editor
-          nextTick(() => {
-            focusEditor(true);
-          });
-        }
-      }, 50);
-    }
-  }
 );
 
 // Watch for loading state to make editor read-only
@@ -874,47 +932,51 @@ const registerCompletionProvider = () => {
 };
 
 // --- Actions ---
+// Replace dynamic variables in query before submit
 const submitQuery = () => {
   const currentContent = editorContent.value;
-  validationError.value = null; // Clear previous error
+  validationError.value = null;
+
+  let replaceVariableContent = currentContent;
+
+  for (const variable of allVariables.value) {
+    const key = variable.name;
+    const value = variable.value;
+    const formattedValue =
+        variable.type === 'number'
+            ? value
+            : variable.type === 'date'
+                ? `'${new Date(value).toISOString()}'`
+                : `'${value}'`;
+
+    const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
+    replaceVariableContent = replaceVariableContent.replace(regex, formattedValue as string);
+  }
 
   try {
     let isValid = true;
-    if (currentContent.trim()) {
-      // Only validate non-empty queries
+
+    if (replaceVariableContent.trim()) {
       if (props.activeMode === "logchefql") {
-        // Use detailed validation to get specific error messages
-        const validation = validateLogchefQLWithDetails(currentContent);
+        const validation = validateLogchefQLWithDetails(replaceVariableContent);
         isValid = validation.valid;
-        if (!isValid) {
-          // Display the specific error message instead of generic one
-          validationError.value =
-            validation.error || "Invalid LogchefQL syntax.";
-        }
+        if (!isValid) validationError.value = validation.error || "Invalid LogchefQL syntax.";
       } else {
-        // Use the enhanced SQL validation with detailed errors
-        const validation = validateSQLWithDetails(currentContent);
+        const validation = validateSQLWithDetails(replaceVariableContent);
         isValid = validation.valid;
-        if (!isValid) {
-          validationError.value = validation.error || "Invalid SQL syntax.";
-        }
+        console.log("Invalid SQL syntax. : "+isValid);
+        if (!isValid) validationError.value = validation.error || "Invalid SQL syntax.";
       }
     }
 
-    if (!isValid) {
-      return; // Stop if validation fails
-    }
+    if (!isValid) return;
 
-    // Update store (might be redundant if handleEditorChange already did, but ensures consistency)
     if (props.activeMode === "logchefql") {
-      if (exploreStore.logchefqlCode !== currentContent)
-        exploreStore.setLogchefqlCode(currentContent);
+      if (exploreStore.logchefqlCode !== currentContent) exploreStore.setLogchefqlCode(currentContent);
     } else {
-      if (exploreStore.rawSql !== currentContent)
-        exploreStore.setRawSql(currentContent);
+      if (exploreStore.rawSql !== currentContent) exploreStore.setRawSql(currentContent);
     }
 
-    // Emit submit event
     emit("submit", {
       query: currentContent,
       mode: props.activeMode,
@@ -1065,8 +1127,16 @@ const safelyDisposeEditor = (fullDisposal = false) => {
   editorRef.value = null; // Clear ref
 };
 
+onMounted(() => {
+  // add listener to hide dynamic variable drawer
+  document.addEventListener('mousedown', handleClickOutside);
+});
+
 // Handle full disposal on unmount
+// to hide it when user click outside of drawer
 onBeforeUnmount(() => {
+  // remove listener to hide dynamic variable drawer
+  document.removeEventListener('mousedown', handleClickOutside);
   safelyDisposeEditor(true); // Full disposal
 });
 
@@ -1123,49 +1193,13 @@ const toggleSqlEditorVisibility = () => {
   }
 };
 
-
-
 // Watch for mode changes to reset visibility
 watch(
   () => props.activeMode,
   (newMode) => {
     // Always show editor when switching modes
-    isEditorVisible.value = true;
-    // Hide AI input when switching away from SQL mode
-    if (newMode !== 'clickhouse-sql') {
-      showAIInput.value = false;
-    }
-  }
-);
-
-// Toggle AI input visibility
-const toggleAIInput = () => {
-  showAIInput.value = !showAIInput.value;
-};
-
-// AI input handlers
-const onAIKeyDown = (e: KeyboardEvent) => {
-  // Submit on Ctrl+Enter or Cmd+Enter
-  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-    handleGenerateSQL();
-  }
-};
-
-const handleGenerateSQL = () => {
-  if (naturalLanguageQuery.value.trim()) {
-    // Emit event to parent to handle AI SQL generation
-    emit("generate-ai-sql", { naturalLanguageQuery: naturalLanguageQuery.value });
-  }
-};
-
-// Watch for successful SQL generation to clear the input and hide the AI section
-watch(
-  [() => storeForAI.generatedAiSql, () => storeForAI.isGeneratingAISQL],
-  ([generatedSql, isGenerating]) => {
-    // When generation completes successfully, clear input and hide AI section
-    if (!isGenerating && generatedSql && naturalLanguageQuery.value.trim()) {
-      naturalLanguageQuery.value = "";
-      showAIInput.value = false;
+    if (newMode === "logchefql") {
+      isEditorVisible.value = true;
     }
   }
 );
@@ -1514,6 +1548,8 @@ const asEditorMode = (value: string | number): EditorMode => {
   return "logchefql";
 };
 
+// After the imports, add route and router
+const route = useRoute();
 const router = useRouter();
 
 // Add these computed properties after other computed properties
@@ -1531,7 +1567,7 @@ const handleNewQueryClick = () => {
   delete currentQuery.query_id;
 
   // Use the centralized reset function in the store
-  exploreStore.resetQueryToDefaults();
+  exploreStore.resetQueryStateToDefault();
 
   // Explicitly clear the selectedQueryId in the store
   exploreStore.setSelectedQueryId(null);
@@ -1562,6 +1598,47 @@ const handleNewQueryClick = () => {
       });
   });
 };
+// Open drawer to edit selected variable
+const openVariableSettings = (variable: VariableSetting) => {
+  selectedVariable.value = variable;
+};
+
+// Close the drawer UI
+const closeDrawer = () => {
+  selectedVariable.value = null;
+};
+
+// to hide it when user click outside of drawer
+const handleClickOutside = (event: MouseEvent) => {
+  if (drawerRef.value && !drawerRef.value.contains(event.target as Node)) {
+    closeDrawer();
+  }
+};
+
+// Update default value based on variable type
+const setDefaultValueByType = () => {
+  if (!selectedVariable.value) return;
+
+  switch (selectedVariable.value.type) {
+    case 'text':
+      selectedVariable.value.value = '';
+      break;
+    case 'number':
+      selectedVariable.value.value = 0;
+      break;
+    case 'date':
+      selectedVariable.value.value = new Date().toISOString();
+      break;
+  }
+};
+
+// Determine input type for a given variable type
+const inputTypeFor = (type: string) => {
+  if (type === 'number') return 'number';
+  if (type === 'date') return 'datetime-local';
+  return 'text';
+};
+
 </script>
 
 <style scoped>
@@ -1601,8 +1678,7 @@ const handleNewQueryClick = () => {
   position: relative;
   width: 100%;
   height: 100%;
-  background-color: transparent;
-  /* Make transparent to let Monaco background show through */
+  background-color: transparent; /* Make transparent to let Monaco background show through */
   padding-left: 16px;
   /* Add padding to container to position cursor */
 }
@@ -1631,8 +1707,7 @@ const handleNewQueryClick = () => {
 :deep(.monaco-editor .overflow-guard) {
   border: none !important;
   outline: none !important;
-  background-color: transparent !important;
-  /* Ensure transparency */
+  background-color: transparent !important; /* Ensure transparency */
 }
 
 /* Style just the margin/gutter */
@@ -1691,7 +1766,34 @@ const handleNewQueryClick = () => {
 }
 
 .dark .sql-preview:hover {
-  background-color: #1c2536;
-  /* Matches the bluish dark theme hover */
+  background-color: #1c2536; /* Matches the bluish dark theme hover */
+}
+
+/* drawer setting for dynamic variables */
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 320px;
+  height: 100%;
+  background: #fff;
+  border-left: 1px solid #ccc;
+  padding: 20px;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.drawer-body {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 </style>

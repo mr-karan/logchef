@@ -90,7 +90,9 @@ export function analyzeQuery(query: string): {
   };
 } | null {
   try {
-    const { ast, tables = [], columns = [] } = validateSQLWithDetails(query);
+    // replace dynamic variable to __var__ to avoid return false
+    const queryForParsing = query.replace(/{{.*?}}/g, "'__var__'");
+    const { ast, tables = [], columns = [] } = validateSQLWithDetails(queryForParsing);
 
     if (!ast) return null;
 

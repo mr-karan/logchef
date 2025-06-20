@@ -1,14 +1,15 @@
 import { ref, computed } from 'vue';
+import { storeToRefs } from "pinia";
 import { useExploreStore } from '@/stores/explore';
 import { useSourcesStore } from '@/stores/sources';
 import { useTeamsStore } from '@/stores/teams';
+import { useVariableStore } from '@/stores/variables';
 import { QueryService } from '@/services/QueryService';
 import { SqlManager } from '@/services/SqlManager';
 import { getErrorMessage } from '@/api/types';
 import type { TimeRange, QueryResult } from '@/types/query';
 import { validateLogchefQLWithDetails } from '@/utils/logchefql/api';
 import { validateSQLWithDetails, analyzeQuery } from '@/utils/clickhouse-sql';
-import { createTimeRangeCondition } from '@/utils/time-utils';
 import { useExploreUrlSync } from './useExploreUrlSync';
 
 // Define the valid editor modes
@@ -31,12 +32,16 @@ export function useQuery() {
   const sourcesStore = useSourcesStore();
   const teamsStore = useTeamsStore();
   const { syncUrlFromState } = useExploreUrlSync();
-
+  // Access variable store
+  const variableStore = useVariableStore();
   // Local state that isn't persisted in the store
   const queryError = ref<string>('');
   const sqlWarnings = ref<string[]>([]);
 
-  // Computed query content that reads/writes to the store
+  // dynamic variables list
+  const { allVariables } = storeToRefs(variableStore);
+
+  // Computed query content
   const logchefQuery = computed({
     get: () => exploreStore.logchefqlCode,
     set: (value) => exploreStore.setLogchefqlCode(value)
@@ -55,19 +60,19 @@ export function useQuery() {
 
   // Current query based on active mode
   const currentQuery = computed(() =>
-    activeMode.value === 'logchefql' ? logchefQuery.value : sqlQuery.value
+      activeMode.value === 'logchefql' ? logchefQuery.value : sqlQuery.value
   );
 
   // Source and execution state - delegate to store
   const canExecuteQuery = computed(() =>
-    exploreStore.sourceId > 0 &&
-    teamsStore.currentTeamId !== null &&
-    teamsStore.currentTeamId > 0 &&
-    sourcesStore.hasValidCurrentSource
+      exploreStore.sourceId > 0 &&
+      teamsStore.currentTeamId !== null &&
+      teamsStore.currentTeamId > 0 &&
+      sourcesStore.hasValidCurrentSource
   );
 
   const isExecutingQuery = computed(() =>
-    exploreStore.isLoadingOperation('executeQuery')
+      exploreStore.isLoadingOperation('executeQuery')
   );
 
   // Check if query state is dirty using store's computed property
@@ -148,6 +153,7 @@ export function useQuery() {
     }
 
     const currentSql = exploreStore.rawSql;
+
     if (!currentSql.trim()) {
       return;
     }
@@ -174,7 +180,7 @@ export function useQuery() {
       const analysis = analyzeQuery(currentSql);
       if (analysis?.timeRangeInfo &&
           (analysis.timeRangeInfo.format === 'now-interval' ||
-           analysis.timeRangeInfo.format === 'other')) {
+              analysis.timeRangeInfo.format === 'other')) {
         console.log("useQuery: SQL contains complex time format, preserving user query");
         return;
       }
@@ -290,12 +296,32 @@ export function useQuery() {
       }
 
       const mode = activeMode.value;
-      const query = mode === 'logchefql' ? logchefQuery.value : sqlQuery.value;
 
-      // Validate query before execution
+      let query = mode === 'logchefql' ? logchefQuery.value : sqlQuery.value;
+
+      for (const variable of allVariables.value) {
+        const key = variable.name;
+        const value = variable.value;
+        const formattedValue =
+            variable.type === 'number'
+                ? value
+                : variable.type === 'date'
+                    ? `'${new Date(value).toISOString()}'`
+                    : `'${value}'`;
+
+        const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
+        query = query.replace(regex, formattedValue as string);
+      }
+
+      console.log("Replaced dynamic variables in query for validation: " + query);
+
+      console.log("useQuery: Preparing query - mode:", mode, "query:", query ? (query.length > 50 ? query.substring(0, 50) + '...' : query) : '(empty)');
+
+      // Validate LogchefQL query before execution
       if (mode === 'logchefql' && query.trim()) {
         const validation = validateLogchefQLWithDetails(query);
         if (!validation.valid) {
+          console.log("useQuery: LogchefQL validation failed:", validation.error);
           queryError.value = validation.error || 'Invalid LogchefQL syntax';
           return {
             success: false,
@@ -306,6 +332,7 @@ export function useQuery() {
       } else if (mode === 'sql' && query.trim()) {
         const validation = SqlManager.validateSql(query);
         if (!validation.valid) {
+          console.log("useQuery: SQL validation failed:", validation.error);
           queryError.value = validation.error || 'Invalid SQL syntax';
           return {
             success: false,

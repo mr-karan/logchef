@@ -147,6 +147,12 @@ LIMIT ${limit}`;
         }
       }
 
+      console.log("original SQL:", sql);
+      console.log("parsed timestamp field:", tsField);
+      console.log("new time condition will be inserted:", timeRange);
+      console.log("newTimeCondition ",newTimeCondition);
+      console.log("tsFieldForRegex",tsFieldForRegex);
+
       return updatedSql;
     } catch (error) {
       console.error("SqlManager: Error updating SQL with new time range:", error);
