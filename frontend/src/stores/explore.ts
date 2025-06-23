@@ -1,4 +1,4 @@
-import { defineStore, storeToRefs } from "pinia";
+import { defineStore } from "pinia";
 import { computed, watch } from "vue";
 import { exploreApi } from "@/api/explore";
 import type {
@@ -20,7 +20,6 @@ import { now, getLocalTimeZone, CalendarDateTime } from "@internationalized/date
 import { useSourcesStore } from "./sources";
 import { useTeamsStore } from "@/stores/teams";
 import { useBaseStore } from "./base";
-import { useVariableStore } from '@/stores/variables';
 import { QueryService } from '@/services/QueryService'
 import { parseRelativeTimeString } from "@/utils/time";
 import type { APIErrorResponse, APISuccessResponse, APIResponse } from "@/api/types";
@@ -28,6 +27,7 @@ import { SqlManager } from '@/services/SqlManager';
 import { type TimeRange } from '@/types/query';
 import { getErrorMessage } from '@/api/types';
 import { HistogramService, type HistogramData } from '@/services/HistogramService';
+import { useVariables } from "@/composables/useVariables";
 
 // Helper function to get formatted table name
 export function getFormattedTableName(source: any): string {
@@ -806,23 +806,8 @@ export const useExploreStore = defineStore("explore", () => {
       }
 
       // dynamic variable to value
-      // Access variable store
-      const variableStore = useVariableStore();
-      // dynamic variables list
-      const { allVariables } = storeToRefs(variableStore);
-      for (const variable of allVariables.value) {
-        const key = variable.name;
-        const value = variable.value;
-        const formattedValue =
-            variable.type === 'number'
-                ? value
-                : variable.type === 'date'
-                    ? `'${new Date(value).toISOString()}'`
-                    : `'${value}'`;
-
-        const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
-        sql = sql.replace(regex, formattedValue as string);
-      }
+      const { convertVariables } = useVariables();
+      sql = convertVariables(sql);
 
       console.log("Replaced dynamic variables in query for validation: " + sql);
 

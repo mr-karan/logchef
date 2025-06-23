@@ -398,6 +398,7 @@ import { useExploreStore } from "@/stores/explore";
 import type { VariableState as VariableSetting } from '@/stores/variables';
 import { useVariableStore } from '@/stores/variables';
 import { QueryService } from "@/services/QueryService";
+import {useVariables} from "@/composables/useVariables.ts";
 // Keep other necessary imports like types...
 // --- Types ---
 type EditorMode = "logchefql" | "clickhouse-sql";
@@ -937,21 +938,8 @@ const submitQuery = () => {
   const currentContent = editorContent.value;
   validationError.value = null;
 
-  let replaceVariableContent = currentContent;
-
-  for (const variable of allVariables.value) {
-    const key = variable.name;
-    const value = variable.value;
-    const formattedValue =
-        variable.type === 'number'
-            ? value
-            : variable.type === 'date'
-                ? `'${new Date(value).toISOString()}'`
-                : `'${value}'`;
-
-    const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
-    replaceVariableContent = replaceVariableContent.replace(regex, formattedValue as string);
-  }
+  const { convertVariables } = useVariables();
+  let replaceVariableContent = convertVariables(currentContent);
 
   try {
     let isValid = true;

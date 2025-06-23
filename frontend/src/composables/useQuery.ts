@@ -1,16 +1,15 @@
 import { ref, computed } from 'vue';
-import { storeToRefs } from "pinia";
 import { useExploreStore } from '@/stores/explore';
 import { useSourcesStore } from '@/stores/sources';
 import { useTeamsStore } from '@/stores/teams';
-import { useVariableStore } from '@/stores/variables';
 import { QueryService } from '@/services/QueryService';
 import { SqlManager } from '@/services/SqlManager';
 import { getErrorMessage } from '@/api/types';
 import type { TimeRange, QueryResult } from '@/types/query';
 import { validateLogchefQLWithDetails } from '@/utils/logchefql/api';
 import { validateSQLWithDetails, analyzeQuery } from '@/utils/clickhouse-sql';
-import { useExploreUrlSync } from './useExploreUrlSync';
+import { useExploreUrlSync } from '@/composables/useExploreUrlSync';
+import { useVariables } from "@/composables/useVariables";
 
 // Define the valid editor modes
 type EditorMode = 'logchefql' | 'sql';
@@ -32,14 +31,10 @@ export function useQuery() {
   const sourcesStore = useSourcesStore();
   const teamsStore = useTeamsStore();
   const { syncUrlFromState } = useExploreUrlSync();
-  // Access variable store
-  const variableStore = useVariableStore();
+  const { convertVariables } = useVariables();
   // Local state that isn't persisted in the store
   const queryError = ref<string>('');
   const sqlWarnings = ref<string[]>([]);
-
-  // dynamic variables list
-  const { allVariables } = storeToRefs(variableStore);
 
   // Computed query content
   const logchefQuery = computed({
@@ -130,20 +125,7 @@ export function useQuery() {
     if (newMode === 'sql' && activeMode.value === 'logchefql' && logchefQuery.value?.trim()) {
 
       // replace dynamic variable to value to avoid to be failed by validation
-      let sql = logchefQuery.value;
-      for (const variable of allVariables.value) {
-        const key = variable.name;
-        const value = variable.value;
-        const formattedValue =
-            variable.type === 'number'
-                ? value
-                : variable.type === 'date'
-                    ? `'${new Date(value).toISOString()}'`
-                    : `'${value}'`;
-
-        const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
-        sql = sql.replace(regex, formattedValue as string);
-      }
+      let sql = convertVariables(logchefQuery.value);
 
       const validation = validateLogchefQLWithDetails(sql);
       if (!validation.valid) {
@@ -315,20 +297,7 @@ export function useQuery() {
       const mode = activeMode.value;
 
       let query = mode === 'logchefql' ? logchefQuery.value : sqlQuery.value;
-
-      for (const variable of allVariables.value) {
-        const key = variable.name;
-        const value = variable.value;
-        const formattedValue =
-            variable.type === 'number'
-                ? value
-                : variable.type === 'date'
-                    ? `'${new Date(value).toISOString()}'`
-                    : `'${value}'`;
-
-        const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
-        query = query.replace(regex, formattedValue as string);
-      }
+      query = convertVariables(query);
 
       console.log("Replaced dynamic variables in query for validation: " + query);
 
