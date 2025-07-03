@@ -82,11 +82,17 @@ export function connectWebSocket(path: string): WebSocket | null {
     });
 
     socket.addEventListener("message", (e) => {
+        let parsedData: any;
 
-        console.log("[WebSocket] Message received:", e.data);
+        try {
+            parsedData = JSON.parse(e.data); // string → object
+        } catch (err) {
+            console.warn("Failed to parse message as JSON", err);
+            return;
+        }
         // if return from request log
-        if (isQuerySuccessResponse(e.data)) {
-            useExploreStore().fetchLogData(e.data);
+        if (isQuerySuccessResponse(parsedData)) {
+            useExploreStore().fetchLogData(parsedData);
         }
         // handle for other messages for other request
 
@@ -122,7 +128,11 @@ export function closeWebSocket(): void {
 }
 
 export function isQuerySuccessResponse(data: any): data is QuerySuccessResponse {
-    return data && typeof data === 'object' && 'yourExpectedKey' in data;
+    return (
+        data !== null &&
+        typeof data === 'object' &&
+        'logs' in data
+    );
 }
 
 export function runLiveLogQuery() {

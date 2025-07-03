@@ -19,6 +19,7 @@ import type { DateValue } from "@internationalized/date";
 import { now, getLocalTimeZone, CalendarDateTime } from "@internationalized/date";
 import { useSourcesStore } from "./sources";
 import { useTeamsStore } from "@/stores/teams";
+import { useLiveLogStore } from "@/stores/liveLog";
 import { useBaseStore } from "./base";
 import { QueryService } from '@/services/QueryService'
 import { parseRelativeTimeString } from "@/utils/time";
@@ -27,6 +28,8 @@ import { SqlManager } from '@/services/SqlManager';
 import { type TimeRange } from '@/types/query';
 import { getErrorMessage } from '@/api/types';
 import { HistogramService, type HistogramData } from '@/services/HistogramService';
+
+const liveLogStore = useLiveLogStore();
 
 // Helper function to get formatted table name
 export function getFormattedTableName(source: any): string {
@@ -1337,8 +1340,14 @@ export const useExploreStore = defineStore("explore", () => {
 
   function fetchLogData(data: QuerySuccessResponse | null) {
     if (data && data.logs) {
-      // We have new data, update the store
-      state.data.value.logs = data.logs;
+      // check is live log or not
+      if(liveLogStore.isOn && !liveLogStore.isPause) {
+        // append data when live log
+        state.data.value.logs = [...state.data.value.logs, ...data.logs];
+      } else {
+        // We have new data, update the store
+        state.data.value.logs = data.logs;
+      }
       state.data.value.columns = data.columns || [];
       state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
       // Check if query_id exists in params before accessing it
@@ -1347,6 +1356,7 @@ export const useExploreStore = defineStore("explore", () => {
       } else {
         state.data.value.queryId = null; // Reset if not present
       }
+
     } else {
       // Query was successful but returned no logs or null data
       console.warn("Query successful but received no logs or null data.");

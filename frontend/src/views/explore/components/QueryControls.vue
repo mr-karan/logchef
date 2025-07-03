@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {closeWebSocket, connectWebSocket, getWebSocket, sendMessage} from '@/websocket/websocket';
+import { useLiveLogStore } from "@/stores/liveLog.ts";
 
 interface Props {
   showExecuteControls?: boolean
@@ -40,6 +41,7 @@ const emit = defineEmits<{
 const router = useRouter();
 const { toast } = useToast();
 const exploreStore = useExploreStore();
+const liveLogStore = useLiveLogStore();
 const isLiveTail = ref(false);
 const isPaused = ref(false);
 
@@ -217,7 +219,7 @@ const clearEditor = () => {
 // live tail on/off
 const handleSwitchChange = (checked: boolean) => {
   isLiveTail.value = checked;
-
+  liveLogStore.setIsOn(checked);
   if (checked) {
     handleSwitchOn();
   } else {
