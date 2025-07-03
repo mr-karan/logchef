@@ -17,7 +17,7 @@ import {
     type ColumnResizeMode,
     type Header,
 } from '@tanstack/vue-table'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Search, GripVertical, Download, Copy, Timer, Rows4, Equal, EqualNot, RefreshCw } from 'lucide-vue-next' // Added RefreshCw
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
@@ -453,11 +453,15 @@ onMounted(() => {
             }
         }
     }
+  const el = tableContainerRef.value
+  if (el) el.addEventListener('scroll', handleScroll)
 })
 
 // Add refs for DOM elements
 const tableContainerRef = ref<HTMLElement | null>(null)
 const tableRef = ref<HTMLElement | null>(null)
+// Whether auto-scroll is currently paused (user scrolled up)
+const isScrollLocked = ref(true)
 
 onMounted(() => {
     if (!tableContainerRef.value) return
@@ -511,6 +515,17 @@ watch(
         }
     }
 )
+
+// Watch for new logs added
+watch(() => exploreStore.logs.length, () => {
+  if (!isScrollLocked.value) {
+    // Auto-scroll to bottom when not locked
+    nextTick(() => {
+      const el = tableContainerRef.value
+      if (el) el.scrollTop = el.scrollHeight
+    })
+  }
+})
 
 // --- Native Drag and Drop Implementation ---
 
@@ -595,6 +610,15 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
 
     emit('drill-down', { column: columnName, value, operator });
 };
+
+// Detect if user scrolls away from the bottom
+const handleScroll = () => {
+  const el = tableContainerRef.value
+  if (!el) return
+
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30
+  isScrollLocked.value = !nearBottom
+}
 
 </script>
 

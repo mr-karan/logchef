@@ -811,36 +811,7 @@ export const useExploreStore = defineStore("explore", () => {
       const response = await state.callApi({
         apiCall: async () => exploreApi.getLogs(state.data.value.sourceId, params, currentTeamId),
         // Update results ONLY on successful API call with data
-        onSuccess: (data: QuerySuccessResponse | null) => {
-          if (data && data.logs) {
-            // We have new data, update the store
-            state.data.value.logs = data.logs;
-            state.data.value.columns = data.columns || [];
-            state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
-            // Check if query_id exists in params before accessing it
-            if (data.params && typeof data.params === 'object' && "query_id" in data.params) {
-              state.data.value.queryId = data.params.query_id as string;
-            } else {
-              state.data.value.queryId = null; // Reset if not present
-            }
-          } else {
-            // Query was successful but returned no logs or null data
-            console.warn("Query successful but received no logs or null data.");
-            // Clear the logs, columns, stats now that the API call is complete
-            state.data.value.logs = [];
-            state.data.value.columns = [];
-            state.data.value.queryStats = DEFAULT_QUERY_STATS;
-            state.data.value.queryId = null;
-          }
-
-          // Update lastExecutedState after successful execution
-          _updateLastExecutedState();
-
-          // Restore the relative time if it was set before
-          if (relativeTime) {
-            state.data.value.selectedRelativeTime = relativeTime;
-          }
-        },
+        onSuccess: (data: QuerySuccessResponse | null) => fetchLogData(data),
         operationKey: operationKey,
       });
 
@@ -1307,6 +1278,95 @@ export const useExploreStore = defineStore("explore", () => {
     return "1d"; // Default for very long time ranges
   }
 
+  function prepareQueryParams(sql: string) {
+
+    // Prepare parameters for the API call
+    const params: QueryParams = {
+      raw_sql: '', // Will be set below
+      limit: state.data.value.limit,
+      query_timeout: state.data.value.queryTimeout
+    };
+
+    // Handle empty SQL for both modes
+    if (!sql || !sql.trim()) {
+      // Generate default SQL for both LogchefQL and SQL modes when SQL is empty
+      console.log(`Explore store: Generating default SQL for empty ${state.data.value.activeMode} query`);
+
+      // Get source details to check they're fully loaded
+      const sourcesStore = useSourcesStore();
+      const sourceDetails = sourcesStore.currentSourceDetails;
+      if (!sourceDetails) {
+        throw new Error("Source details not available");
+      }
+
+      const tsField = sourceDetails._meta_ts_field || 'timestamp';
+      const tableName = sourcesStore.getCurrentSourceTableName || 'default.logs';
+
+      // Generate default SQL using SqlManager
+      const result = SqlManager.generateDefaultSql({
+        tableName,
+        tsField,
+        timeRange: state.data.value.timeRange as TimeRange,
+        limit: state.data.value.limit,
+        timezone: state.data.value.selectedTimezoneIdentifier || undefined
+      });
+
+      if (!result.success) {
+        const operationKey = 'executeQuery';
+        return state.handleError({
+          status: "error",
+          message: "Failed to generate default SQL",
+          error_type: "ValidationError"
+        }, operationKey);
+      }
+
+      // Use the generated SQL
+      sql = result.sql;
+
+      // If in SQL mode, update the UI to show the generated SQL
+      if (state.data.value.activeMode === 'sql') {
+        state.data.value.rawSql = sql;
+      }
+    }
+
+    // Set the SQL in the params
+    params.raw_sql = sql;
+
+    return params;
+  }
+
+  function fetchLogData(data: QuerySuccessResponse | null) {
+    if (data && data.logs) {
+      // We have new data, update the store
+      state.data.value.logs = data.logs;
+      state.data.value.columns = data.columns || [];
+      state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
+      // Check if query_id exists in params before accessing it
+      if (data.params && typeof data.params === 'object' && "query_id" in data.params) {
+        state.data.value.queryId = data.params.query_id as string;
+      } else {
+        state.data.value.queryId = null; // Reset if not present
+      }
+    } else {
+      // Query was successful but returned no logs or null data
+      console.warn("Query successful but received no logs or null data.");
+      // Clear the logs, columns, stats now that the API call is complete
+      state.data.value.logs = [];
+      state.data.value.columns = [];
+      state.data.value.queryStats = DEFAULT_QUERY_STATS;
+      state.data.value.queryId = null;
+    }
+
+    // Update lastExecutedState after successful execution
+    _updateLastExecutedState();
+
+    // Restore the relative time if it was set before
+    const relativeTime = state.data.value.selectedRelativeTime;
+    if (relativeTime) {
+      state.data.value.selectedRelativeTime = relativeTime;
+    }
+  }
+
   // Return the store
   return {
     // State - exposed as computed properties
@@ -1375,7 +1435,9 @@ export const useExploreStore = defineStore("explore", () => {
     generateAiSql,
     clearAiSqlState,
     fetchHistogramData,
-
+    prepareQueryParams,
+    fetchLogData,
+    getTimezoneIdentifier,
     // Loading state helpers
     isLoadingOperation: state.isLoadingOperation,
   };
