@@ -13,7 +13,7 @@ import type {
 
 let socket: WebSocket | null = null;
 let logRequestIntervalId: ReturnType<typeof setInterval> | null = null;
-const longPoolingTimeOut = 3000; // how frequently client request log to server
+const longPoolingTimeOut = 10000; // how frequently client request log to server
 const query = useQuery();
 const exploreStore = useExploreStore();
 const sourcesStore = useSourcesStore();

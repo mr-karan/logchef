@@ -17,7 +17,7 @@ import {
     type ColumnResizeMode,
     type Header,
 } from '@tanstack/vue-table'
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, watch, nextTick, watchEffect } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Search, GripVertical, Download, Copy, Timer, Rows4, Equal, EqualNot, RefreshCw } from 'lucide-vue-next' // Added RefreshCw
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
@@ -31,6 +31,7 @@ import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
 import { createColumns } from './columns'
 import { useExploreStore } from '@/stores/explore'
+import { useLiveLogStore } from '@/stores/liveLog'
 import type { Source } from '@/api/sources'
 import { useSourcesStore } from '@/stores/sources'
 import { useStorage, type UseStorageOptions, type RemovableRef } from '@vueuse/core'
@@ -92,6 +93,7 @@ const pagination = ref<PaginationState>({
     pageIndex: 0,
     pageSize: 50,
 })
+let pageSizeBeforeLiveLog =  50 // save pre page sive before live log so that restore when live log off
 const globalFilter = ref('')
 const columnSizing = ref<ColumnSizingState>({})
 const columnResizeMode = ref<ColumnResizeMode>('onChange')
@@ -100,6 +102,7 @@ const displayTimezone = ref<'local' | 'utc'>(localStorage.getItem('logchef_timez
 const columnOrder = ref<string[]>([])
 const draggingColumnId = ref<string | null>(null)
 const dragOverColumnId = ref<string | null>(null)
+const liveLogStore = useLiveLogStore()
 
 // --- Local Storage State Management ---
 const storageKey = computed(() => {
@@ -367,37 +370,39 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
 }
 
 // Initialize table
-const table = useVueTable({
+const table = ref()
+watchEffect(() => {
+  table.value = useVueTable({
     get data() {
-        return props.data
+      return props.data
     },
     // Use tableColumns directly
     get columns() {
-        return tableColumns.value;
+      return tableColumns.value;
     },
     state: {
-        get sorting() {
-            return sorting.value
-        },
-        get expanded() {
-            return expanded.value
-        },
-        get columnVisibility() {
-            return columnVisibility.value
-        },
-        get pagination() {
-            return pagination.value
-        },
-        get globalFilter() {
-            return globalFilter.value
-        },
-        get columnSizing() {
-            return columnSizing.value
-        },
-        get columnOrder() {
-            // Important: Let the table read the order directly from the state ref
-            return columnOrder.value
-        },
+      get sorting() {
+        return sorting.value
+      },
+      get expanded() {
+        return expanded.value
+      },
+      get columnVisibility() {
+        return columnVisibility.value
+      },
+      get pagination() {
+        return pagination.value
+      },
+      get globalFilter() {
+        return globalFilter.value
+      },
+      get columnSizing() {
+        return columnSizing.value
+      },
+      get columnOrder() {
+        // Important: Let the table read the order directly from the state ref
+        return columnOrder.value
+      },
     },
     // Keep columnOrder handling separate using onColumnOrderChange
     // Do NOT set initialState.columnOrder here as it might conflict with the reactive ref
@@ -411,7 +416,7 @@ const table = useVueTable({
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
+    getPaginationRowModel: liveLogStore.isOn ? undefined : getPaginationRowModel(), // do not show when live log
     getFilteredRowModel: getFilteredRowModel(),
     enableColumnResizing: true,
     columnResizeMode: columnResizeMode.value,
@@ -419,6 +424,19 @@ const table = useVueTable({
     // Remove onColumnSizingInfoChange if not strictly needed for custom logic
     // onColumnSizingInfoChange: (info) => { ... },
     defaultColumn,
+  })
+})
+// when live log active, then show all data in one page
+watch(() => liveLogStore.isOn, (isOn) => {
+  if (isOn) {
+    pageSizeBeforeLiveLog = pagination.value.pageSize
+  } else {
+    pagination.value.pageSize = pageSizeBeforeLiveLog
+  }
+  if (isOn) {
+    pagination.value.pageSize = Number.MAX_SAFE_INTEGER
+    pagination.value.pageIndex = 0
+  }
 })
 
 // Simplified row expansion handler
@@ -703,7 +721,8 @@ const handleScroll = () => {
                 </div>
 
                 <!-- Pagination moved to top -->
-                <DataTablePagination v-if="table && table.getRowModel().rows?.length > 0" :table="table" />
+                <!-- do not show pagenation when live log on  -->
+                <DataTablePagination v-if="!liveLogStore.isOn && table && table.getRowModel().rows?.length > 0" :table="table" />
 
                 <!-- Column selector -->
                 <DataTableColumnSelector v-if="table" :table="table" :column-order="columnOrder"
