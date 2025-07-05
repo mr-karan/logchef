@@ -29,9 +29,9 @@ func isUserAdmin(c *fiber.Ctx) bool {
 }
 
 // requireAuth is middleware that ensures the request includes valid authentication.
-// It supports both API token authentication (Authorization: Bearer <token>) and 
+// It supports both API token authentication (Authorization: Bearer <token>) and
 // session-based authentication (session cookie). It validates the authentication,
-// retrieves the associated user, and stores the user information in the request 
+// retrieves the associated user, and stores the user information in the request
 // context (c.Locals) for subsequent handlers.
 func (s *Server) requireAuth(c *fiber.Ctx) error {
 	// Try API token authentication first
@@ -39,7 +39,7 @@ func (s *Server) requireAuth(c *fiber.Ctx) error {
 	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
 		return s.authenticateWithToken(c, authHeader)
 	}
-	
+
 	// Fall back to session-based authentication
 	return s.authenticateWithSession(c)
 }
@@ -59,7 +59,7 @@ func (s *Server) authenticateWithToken(c *fiber.Ctx, authHeader string) error {
 		if errors.Is(err, core.ErrInvalidToken) || errors.Is(err, core.ErrTokenExpired) {
 			return SendErrorWithType(c, fiber.StatusForbidden, "Invalid or expired token", models.AuthenticationErrorType)
 		}
-		
+
 		s.log.Error("error authenticating API token", "error", err)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error validating token", models.GeneralErrorType)
 	}

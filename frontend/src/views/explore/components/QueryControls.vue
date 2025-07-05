@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
-import { Play, RefreshCw, Share2, Keyboard, Eraser, AlertCircle, Clock } from 'lucide-vue-next'
+import { Switch } from "@/components/ui/switch";
+import {Play, RefreshCw, Share2, Keyboard, Eraser, AlertCircle, Clock, Pause} from 'lucide-vue-next'
 import { useToast } from '@/components/ui/toast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { useExploreStore } from '@/stores/explore'
@@ -20,6 +21,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {closeWebSocket, connectWebSocket, getWebSocket, sendMessage} from '@/websocket/websocket';
+import { useLiveLogStore } from "@/stores/liveLog.ts";
 
 interface Props {
   showExecuteControls?: boolean
@@ -32,11 +35,15 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'execute', key: string): void
   (e: 'clear'): void
+  (e: 'liveLog', key: boolean): void
 }>()
 
-const router = useRouter()
-const { toast } = useToast()
-const exploreStore = useExploreStore()
+const router = useRouter();
+const { toast } = useToast();
+const exploreStore = useExploreStore();
+const liveLogStore = useLiveLogStore();
+const isLiveTail = ref(false);
+const isPaused = ref(false);
 
 const {
   isDirty,
@@ -208,6 +215,58 @@ const executeQuery = () => {
 const clearEditor = () => {
   emit('clear')
 }
+
+// live tail on/off
+const handleSwitchChange = (checked: boolean) => {
+  isLiveTail.value = checked;
+  liveLogStore.setIsOn(checked);
+  if (checked) {
+    handleSwitchOn();
+  } else {
+    handleSwitchOff();
+  }
+}
+
+const handleSwitchOn = () => {
+  console.log("Live Tail turned ON");
+  // connect websocket
+  connectWebSocket('log');
+
+}
+
+const handleSwitchOff = () => {
+  console.log("Live Tail turned OFF");
+  // disconnect websocket
+  closeWebSocket();
+}
+
+function handlePauseToggle() {
+  isPaused.value = !isPaused.value;
+
+  if (isPaused.value) {
+    handlePauseOn();
+  } else {
+    handlePauseOff();
+  }
+}
+
+function handlePauseOn() {
+  console.log('Live tail paused.');
+  emit('liveLog', true)
+}
+
+function handlePauseOff() {
+  console.log('Live tail resumed.');
+  emit('liveLog', false)
+}
+
+onBeforeUnmount(() => {
+  // close websocket
+  closeWebSocket();
+  // update live-log store
+
+});
+
 </script>
 
 <template>
@@ -239,6 +298,47 @@ const clearEditor = () => {
           </TooltipTrigger>
           <TooltipContent side="bottom" class="max-w-xs">
             <p>{{ dirtyTooltipContent }}</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+
+      <!-- Live Tail Toggle -->
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div class="flex items-center gap-1">
+              <Switch
+                  id="live-tail-switch"
+                  :checked="isLiveTail"
+                  @update:checked="handleSwitchChange"
+              />
+              <span class="text-xs">Live Tail</span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>Toggle Live Tail (auto-refresh)</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+
+      <!-- Pause/Resume Button -->
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+                variant="outline"
+                size="sm"
+                class="h-9 px-3 flex items-center gap-1.5"
+                @click="handlePauseToggle"
+                :disabled="!isLiveTail || isExecutingQuery"
+                aria-label="Pause or resume live logs"
+            >
+              <component :is="isPaused ? Play : Pause" class="h-4 w-4" />
+              <span>{{ isPaused ? 'Resume' : 'Pause' }}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>{{ isPaused ? 'Resume live log tailing' : 'Pause live log tailing' }}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>

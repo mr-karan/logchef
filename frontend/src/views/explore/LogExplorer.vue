@@ -17,6 +17,7 @@ import { useExploreStore } from "@/stores/explore";
 import { useTeamsStore } from "@/stores/teams";
 import { useSourcesStore } from "@/stores/sources";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
+import { useLiveLogStore } from "@/stores/liveLog"
 import { FieldSideBar } from "@/components/field-sidebar";
 import { getErrorMessage } from "@/api/types";
 import DataTable from "./table/data-table.vue";
@@ -144,6 +145,9 @@ const sortKeysInfoOpen = ref(false); // State for sort keys info expandable sect
 const executingQueryId = ref<string | null>(null);
 const lastQueryTime = ref<number>(0);
 let lastExecutionKey = "";
+
+// live log paused or not
+const isPaused = ref(false);
 
 // Display related refs
 const displayTimezone = computed(() =>
@@ -891,6 +895,13 @@ const onSaveQueryModalSave = (formData: SaveQueryFormData) => {
   processSaveQueryFromComposable(formData);
 };
 
+// handle live log's pause on / off
+const liveLogPauseOnOff = (isPause: boolean) => {
+  isPaused.value = isPause;
+  const liveLogStore = useLiveLogStore();
+  liveLogStore.setIsPause(isPause);
+};
+
 // Handle query_id changes from URL, especially when component is kept alive
 watch(
   () => route.query.query_id,
@@ -1322,7 +1333,7 @@ onBeforeUnmount(() => {
                 hasValidSource &&
                 exploreStore.timeRange
               ">
-                <QueryControls @execute="handleQueryExecution" @clear="clearQueryEditor" />
+                <QueryControls @execute="handleQueryExecution" @clear="clearQueryEditor" @liveLog="liveLogPauseOnOff" />
               </div>
             </div>
 

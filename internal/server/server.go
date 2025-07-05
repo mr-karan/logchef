@@ -3,19 +3,20 @@ package server
 import (
 	"context"
 	"fmt"
-	"log/slog"
-	"net/http"
-
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/pkg/models"
+	"log/slog"
+	"net/http"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/compress"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
-	"github.com/gofiber/swagger" // Swagger handler
-
+	"github.com/gofiber/swagger"      // Swagger handler
+	"github.com/gofiber/websocket/v2" // websocket for live log
 	// Import generated docs (will be created after running swag init)
 	_ "github.com/mr-karan/logchef/docs"
 )
@@ -131,7 +132,7 @@ func (s *Server) setupRoutes() {
 	// --- Current User ("Me") Routes ---
 	api.Get("/me", s.requireAuth, s.handleGetCurrentUser)
 	api.Get("/me/teams", s.requireAuth, s.handleListCurrentUserTeams)
-	
+
 	// API Token Management for current user
 	api.Get("/me/tokens", s.requireAuth, s.handleListAPITokens)
 	api.Post("/me/tokens", s.requireAuth, s.handleCreateAPIToken)
@@ -217,6 +218,37 @@ func (s *Server) setupRoutes() {
 		}
 	}
 
+	// --- web socket request ---
+	// WebSocket access path
+	teamSourceOps.Use("/ws/log", func(c *fiber.Ctx) error {
+		user := c.Locals("user")
+		session := c.Locals("session")
+		authMethod := c.Locals("auth_method")
+
+		// Fiber does not hand over these value automatically to websocket.Conn, so move at here
+		c.Locals("user", user)
+		c.Locals("session", session)
+		c.Locals("auth_method", authMethod)
+		return c.Next()
+	})
+
+	teamSourceOps.Get("/ws/log", websocket.New(func(conn *websocket.Conn) {
+		if conn == nil {
+			s.log.Error("WebSocket connection upgrade failed: conn is nil")
+			return
+		}
+		userRaw := conn.Locals("user")
+		if userRaw == nil {
+			conn.WriteMessage(websocket.TextMessage, []byte("unauthorized"))
+			conn.Close()
+			return
+		}
+		user := userRaw.(*models.User)
+		teamID := conn.Params("teamID")
+		sourceID := conn.Params("sourceID")
+		s.handleLiveLogStream(conn, teamID, sourceID, user)
+	}))
+
 	// --- Static Asset and SPA Handling ---
 	s.app.Use("/api/*", s.notFoundHandler) // Catch-all for API 404s
 	s.app.Use("/assets", filesystem.New(filesystem.Config{
@@ -236,12 +268,41 @@ func (s *Server) setupRoutes() {
 // Start binds the server to the configured host and port and begins listening.
 func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Server.Port)
-	s.log.Info("starting http server", "address", addr)
 	return s.app.Listen(addr)
 }
 
 // Shutdown gracefully shuts down the Fiber server within the given context timeout.
 func (s *Server) Shutdown(ctx context.Context) error {
-	s.log.Info("shutting down http server")
 	return s.app.ShutdownWithContext(ctx)
+}
+
+func (s *Server) handleLiveLogStream(conn *websocket.Conn, teamID, sourceID string, user *models.User) {
+	conn.SetCloseHandler(func(code int, text string) error {
+		s.log.Info("WebSocket closed by client",
+			"code", code,
+			"text", text,
+			"user_id", user.ID,
+			"team_id", teamID,
+			"source_id", sourceID,
+		)
+		return nil
+	})
+
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				s.log.Info("WebSocket closed normally")
+			} else {
+				s.log.Warn("WebSocket read error", "error", err)
+			}
+			break
+		}
+		parsedSourceID, err := core.ParseSourceID(sourceID)
+		if err != nil {
+			s.log.Warn("Invalid source ID", "error", err)
+			continue
+		}
+		s.handleLiveQueryRequest(conn, parsedSourceID, msg)
+	}
 }
