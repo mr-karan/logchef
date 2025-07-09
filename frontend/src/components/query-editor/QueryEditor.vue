@@ -225,7 +225,7 @@
         size="sm"
         class="h-8 w-8 p-0 flex-shrink-0"
         @click="openAllVariableSettings"
-        :title="Configure all variables"
+        title="Configure all variables"
       >
         <Settings class="h-4 w-4" />
       </Button>
@@ -1049,19 +1049,27 @@ const submitQuery = () => {
   const currentContent = editorContent.value;
   validationError.value = null;
 
-  const { convertVariables } = useVariables();
-  let replaceVariableContent = convertVariables(currentContent);
+  // For validation, replace variables with placeholders instead of actual values
+  let queryForValidation = currentContent;
+  if (props.activeMode === "logchefql") {
+    // For LogchefQL, replace with placeholder values that will parse correctly
+    queryForValidation = currentContent.replace(/{{(\w+)}}/g, '"placeholder"');
+  } else {
+    // For SQL, use the converted variables
+    const { convertVariables } = useVariables();
+    queryForValidation = convertVariables(currentContent);
+  }
 
   try {
     let isValid = true;
 
-    if (replaceVariableContent.trim()) {
+    if (queryForValidation.trim()) {
       if (props.activeMode === "logchefql") {
-        const validation = validateLogchefQLWithDetails(replaceVariableContent);
+        const validation = validateLogchefQLWithDetails(queryForValidation);
         isValid = validation.valid;
         if (!isValid) validationError.value = validation.error || "Invalid LogchefQL syntax.";
       } else {
-        const validation = validateSQLWithDetails(replaceVariableContent);
+        const validation = validateSQLWithDetails(queryForValidation);
         isValid = validation.valid;
         console.log("Invalid SQL syntax. : "+isValid);
         if (!isValid) validationError.value = validation.error || "Invalid SQL syntax.";

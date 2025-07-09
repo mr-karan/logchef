@@ -91,7 +91,7 @@ export function analyzeQuery(query: string): {
 } | null {
   try {
     // replace dynamic variable to __var__ to avoid return false
-    const queryForParsing = query.replace(/{{.*?}}/g, "'__var__'");
+    const queryForParsing = query.replace(/{{(\w+)}}/g, "'__VAR_$1__'");
     const { ast, tables = [], columns = [] } = validateSQLWithDetails(queryForParsing);
 
     if (!ast) return null;

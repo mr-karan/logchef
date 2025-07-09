@@ -24,8 +24,12 @@ export function useVariables() {
                         ? `'${new Date(value).toISOString()}'`
                         : `'${value}'`;
 
-            const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
-            sql = sql.replace(regex, formattedValue as string);
+            // Replace both original {{variable}} syntax and translated __VAR_variable__ placeholders
+            const originalRegex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
+            const placeholderRegex = new RegExp(`'__VAR_${key}__'`, 'g');
+            
+            sql = sql.replace(originalRegex, formattedValue as string);
+            sql = sql.replace(placeholderRegex, formattedValue as string);
         }
 
         return sql;

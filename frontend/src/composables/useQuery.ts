@@ -124,8 +124,8 @@ export function useQuery() {
     // If switching to SQL and we have LogchefQL content, validate first
     if (newMode === 'sql' && activeMode.value === 'logchefql' && logchefQuery.value?.trim()) {
 
-      // replace dynamic variable to value to avoid to be failed by validation
-      let sql = convertVariables(logchefQuery.value);
+      // Replace variables with placeholder values for validation
+      let sql = logchefQuery.value.replace(/{{(\w+)}}/g, '"placeholder"');
 
       const validation = validateLogchefQLWithDetails(sql);
       if (!validation.valid) {
@@ -297,15 +297,14 @@ export function useQuery() {
       const mode = activeMode.value;
 
       let query = mode === 'logchefql' ? logchefQuery.value : sqlQuery.value;
-      query = convertVariables(query);
-
-      console.log("Replaced dynamic variables in query for validation: " + query);
 
       console.log("useQuery: Preparing query - mode:", mode, "query:", query ? (query.length > 50 ? query.substring(0, 50) + '...' : query) : '(empty)');
 
-      // Validate LogchefQL query before execution
+      // Validate query before execution (without variable substitution for LogchefQL)
       if (mode === 'logchefql' && query.trim()) {
-        const validation = validateLogchefQLWithDetails(query);
+        // For LogchefQL validation, use placeholder values
+        const queryForValidation = query.replace(/{{(\w+)}}/g, '"placeholder"');
+        const validation = validateLogchefQLWithDetails(queryForValidation);
         if (!validation.valid) {
           console.log("useQuery: LogchefQL validation failed:", validation.error);
           queryError.value = validation.error || 'Invalid LogchefQL syntax';
@@ -316,13 +315,15 @@ export function useQuery() {
           };
         }
       } else if (mode === 'sql' && query.trim()) {
-        const validation = SqlManager.validateSql(query);
+        // For SQL, apply variable substitution then validate
+        const queryWithVars = convertVariables(query);
+        const validation = SqlManager.validateSql(queryWithVars);
         if (!validation.valid) {
           console.log("useQuery: SQL validation failed:", validation.error);
           queryError.value = validation.error || 'Invalid SQL syntax';
           return {
             success: false,
-            sql: query,
+            sql: queryWithVars,
             error: validation.error || 'Invalid SQL syntax'
           };
         }
