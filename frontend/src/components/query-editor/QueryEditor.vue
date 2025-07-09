@@ -1,29 +1,20 @@
 <template>
   <div :class="['query-editor', props.class]">
     <!-- Header Bar (Keep existing structure) -->
-    <div
-      class="flex items-center justify-between bg-muted/40 rounded-t-md px-3 py-1.5 border border-b-0"
-    >
+    <div class="flex items-center justify-between bg-muted/40 rounded-t-md px-3 py-1.5 border border-b-0">
       <div class="flex items-center gap-3">
         <!-- Fields Panel Toggle -->
-        <button
-          class="p-1 text-muted-foreground hover:text-foreground flex items-center"
-          @click="$emit('toggle-fields')"
-          :title="
-            props.showFieldsPanel ? 'Hide fields panel' : 'Show fields panel'
-          "
-          aria-label="Toggle fields panel"
-        >
+        <button class="p-1 text-muted-foreground hover:text-foreground flex items-center"
+          @click="$emit('toggle-fields')" :title="props.showFieldsPanel ? 'Hide fields panel' : 'Show fields panel'
+            " aria-label="Toggle fields panel">
           <PanelRightClose v-if="props.showFieldsPanel" class="h-4 w-4" />
           <PanelRightOpen v-else class="h-4 w-4" />
         </button>
 
         <!-- Tabs for Mode Switching -->
-        <Tabs
-          :model-value="props.activeMode"
+        <Tabs :model-value="props.activeMode"
           @update:model-value="(value: string | number) => $emit('update:activeMode', asEditorMode(value), true)"
-          class="w-auto"
-        >
+          class="w-auto">
           <TabsList class="grid grid-cols-2 w-fit">
             <TabsTrigger value="logchefql">
               <div class="flex-fix">
@@ -52,10 +43,8 @@
         </div>
 
         <!-- New: Active Query Indicator -->
-        <div
-          v-if="activeSavedQueryName"
-          class="flex items-center bg-primary/10 text-primary text-xs font-medium px-2 py-0.5 rounded-md ml-3"
-        >
+        <div v-if="activeSavedQueryName"
+          class="flex items-center bg-primary/10 text-primary text-xs font-medium px-2 py-0.5 rounded-md ml-3">
           <FileEdit class="h-3.5 w-3.5 mr-1.5" />
           <span>{{ activeSavedQueryName }}</span>
         </div>
@@ -66,12 +55,7 @@
         <TooltipProvider v-if="isEditingExistingQuery">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                class="h-7 gap-1"
-                @click="handleNewQueryClick"
-              >
+              <Button variant="outline" size="sm" class="h-7 gap-1" @click="handleNewQueryClick">
                 <FilePlus2 class="h-3.5 w-3.5" />
                 <span class="text-xs">New</span>
               </Button>
@@ -86,17 +70,10 @@
         <TooltipProvider v-if="props.activeMode === 'clickhouse-sql'">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                class="h-7 gap-1"
-                @click="toggleSqlEditorVisibility"
-              >
+              <Button variant="outline" size="sm" class="h-7 gap-1" @click="toggleSqlEditorVisibility">
                 <EyeOff v-if="isEditorVisible" class="h-3.5 w-3.5" />
                 <Eye v-else class="h-3.5 w-3.5" />
-                <span class="text-xs"
-                  >{{ isEditorVisible ? "Hide" : "Show" }} SQL</span
-                >
+                <span class="text-xs">{{ isEditorVisible ? "Hide" : "Show" }} SQL</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
@@ -106,39 +83,26 @@
         </TooltipProvider>
 
         <!-- Saved Queries Dropdown -->
-        <SavedQueriesDropdown
-          :selected-source-id="props.sourceId"
-          :selected-team-id="props.teamId"
+        <SavedQueriesDropdown :selected-source-id="props.sourceId" :selected-team-id="props.teamId"
           @select-saved-query="(query: SavedTeamQuery) => $emit('select-saved-query', query)"
-          @save="$emit('save-query')"
-          class="h-8"
-        />
+          @save="$emit('save-query')" class="h-8" />
 
         <!-- Help Icon -->
         <HoverCard :open-delay="200">
           <HoverCardTrigger as-child>
-            <button
-              class="p-1 text-muted-foreground hover:text-foreground"
-              aria-label="Show syntax help"
-            >
+            <button class="p-1 text-muted-foreground hover:text-foreground" aria-label="Show syntax help">
               <HelpCircle class="h-4 w-4" />
             </button>
           </HoverCardTrigger>
-          <HoverCardContent
-            class="w-80 backdrop-blur-md bg-card text-card-foreground border-border shadow-lg"
-            side="bottom"
-            align="end"
-          >
+          <HoverCardContent class="w-80 backdrop-blur-md bg-card text-card-foreground border-border shadow-lg"
+            side="bottom" align="end">
             <!-- Help Content (Keep existing template) -->
             <div class="space-y-2">
               <h4 class="text-sm font-semibold">
                 {{ props.activeMode === "logchefql" ? "LogchefQL" : "SQL" }}
                 Syntax
               </h4>
-              <div
-                v-if="props.activeMode === 'logchefql'"
-                class="text-xs space-y-1.5"
-              >
+              <div v-if="props.activeMode === 'logchefql'" class="text-xs space-y-1.5">
                 <div>
                   <code class="bg-muted px-1 rounded">field="value"</code> -
                   Exact match
@@ -164,36 +128,24 @@
                   Grouping
                 </div>
                 <div class="pt-1">
-                  <em
-                    >Example:
-                    <code class="bg-muted px-1 rounded"
-                      >level="error" and status>=500</code
-                    ></em
-                  >
+                  <em>Example:
+                    <code class="bg-muted px-1 rounded">level="error" and status>=500</code></em>
                 </div>
               </div>
               <div v-else class="text-xs space-y-1.5">
                 <div>
-                  <code class="bg-muted px-1 rounded"
-                    >SELECT count() FROM {{ tableName || "table" }}</code
-                  >
+                  <code class="bg-muted px-1 rounded">SELECT count() FROM {{ tableName || "table" }}</code>
                 </div>
                 <div>
-                  <code class="bg-muted px-1 rounded"
-                    >WHERE field = 'value' AND time > now() - interval 1
-                    hour</code
-                  >
+                  <code class="bg-muted px-1 rounded">WHERE field = 'value' AND time > now() - interval 1
+              hour</code>
                 </div>
                 <div>
-                  <code class="bg-muted px-1 rounded"
-                    >GROUP BY user ORDER BY count() DESC</code
-                  >
+                  <code class="bg-muted px-1 rounded">GROUP BY user ORDER BY count() DESC</code>
                 </div>
                 <div class="pt-1">
-                  <em
-                    >Time range & limit applied if not specified. Use standard
-                    ClickHouse SQL.</em
-                  >
+                  <em>Time range & limit applied if not specified. Use standard
+                    ClickHouse SQL.</em>
                 </div>
               </div>
             </div>
@@ -202,84 +154,79 @@
       </div>
     </div>
 
-    <!-- Dynamic variable list -->
-    <div v-if="allVariables && allVariables.length > 0" class="flex items-center justify-between gap-3 mb-3 px-3 py-2 bg-muted/20 border border-border/30 rounded-md">
-      <div class="flex items-center gap-4 flex-1 min-w-0">
-        <div v-for="variable in allVariables" :key="variable.name" class="flex items-center gap-2">
-          <Label :for="`var-${variable.name}`" class="text-sm font-medium text-foreground whitespace-nowrap">
-            {{ variable.label || variable.name }}
-          </Label>
-          <Input
-            :id="`var-${variable.name}`"
-            v-model="variable.value"
-            :type="inputTypeFor(variable.type)"
-            :placeholder="`${variable.type}...`"
-            class="h-8 w-32 text-sm"
-          />
+    <!-- Compact Variable Editor -->
+    <div v-if="allVariables && allVariables.length > 0" class="mb-3">
+      <!-- Variables Header -->
+      <div class="flex items-center justify-between mb-2 px-1">
+        <div class="flex items-center gap-2">
+          <div class="w-1 h-3 bg-primary rounded-full"></div>
+          <span class="text-xs font-medium text-foreground">Variables</span>
+          <span class="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+            {{ allVariables.length }}
+          </span>
         </div>
+        <Button variant="ghost" size="sm" class="h-6 px-2 text-xs" @click="openAllVariableSettings"
+          title="Configure variables">
+          <Settings class="h-3 w-3 mr-1" />
+          Configure
+        </Button>
       </div>
 
-      <!-- Single settings button for all variables -->
-      <Button
-        variant="ghost"
-        size="sm"
-        class="h-8 w-8 p-0 flex-shrink-0"
-        @click="openAllVariableSettings"
-        title="Configure all variables"
-      >
-        <Settings class="h-4 w-4" />
-      </Button>
+      <!-- Compact Variables List -->
+      <div class="bg-muted/20 border border-border/30 rounded-md p-2">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+          <div v-for="variable in allVariables" :key="variable.name" class="flex items-center gap-2 min-w-0">
+            <!-- Variable indicator and label -->
+            <div class="flex items-center gap-1.5 min-w-0 flex-shrink-0">
+              <div class="w-1.5 h-1.5 bg-primary/60 rounded-full flex-shrink-0"></div>
+              <Label :for="`var-${variable.name}`"
+                class="text-xs font-medium text-foreground truncate cursor-pointer min-w-0"
+                :title="variable.label || variable.name">
+                {{ variable.label || variable.name }}
+              </Label>
+              <span class="text-xs px-1 py-0.5 bg-muted text-muted-foreground rounded font-mono flex-shrink-0">
+                {{ variable.type[0] }}
+              </span>
+            </div>
+
+            <!-- Compact input -->
+            <Input :id="`var-${variable.name}`" v-model="variable.value" :type="inputTypeFor(variable.type)"
+              :placeholder="getPlaceholderForType(variable.type)"
+              class="h-7 text-xs flex-1 min-w-0 border-muted-foreground/20 focus:border-primary/50 transition-colors"
+              :class="{
+                'border-primary/30 bg-primary/5': variable.value,
+                'border-dashed': !variable.value
+              }" />
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Monaco Editor Container -->
-    <div
-      class="editor-wrapper"
-      :class="{ 'is-focused': editorFocused }"
-      v-show="isEditorVisible || props.activeMode === 'logchefql'"
-    >
-      <div
-        class="editor-container"
-        :class="{
-          'is-empty': isEditorEmpty,
-        }"
-        :style="{ height: `${editorHeight}px` }"
-        :data-placeholder="currentPlaceholder"
-        :data-mode="props.activeMode"
-      >
+    <div class="editor-wrapper" :class="{ 'is-focused': editorFocused }"
+      v-show="isEditorVisible || props.activeMode === 'logchefql'">
+      <div class="editor-container" :class="{
+        'is-empty': isEditorEmpty,
+      }" :style="{ height: `${editorHeight}px` }" :data-placeholder="currentPlaceholder" :data-mode="props.activeMode">
         <!-- Monaco Editor Component with stable key to prevent remounting -->
-        <vue-monaco-editor
-          key="monaco-editor-instance"
-          v-model:value="editorContent"
-          :theme="theme"
-          :language="props.activeMode"
-          :options="monacoOptions"
-          @mount="handleMount"
-          @update:value="handleEditorChange"
-          class="h-full w-full"
-        />
+        <vue-monaco-editor key="monaco-editor-instance" v-model:value="editorContent" :theme="theme"
+          :language="props.activeMode" :options="monacoOptions" @mount="handleMount" @update:value="handleEditorChange"
+          class="h-full w-full" />
       </div>
     </div>
 
     <!-- SQL Preview when editor is hidden -->
-    <div
-      v-if="
-        !isEditorVisible &&
-        props.activeMode === 'clickhouse-sql' &&
-        !isEditorEmpty
-      "
-      class="sql-preview p-3 border border-border rounded-md bg-card/60 text-sm font-mono overflow-hidden cursor-pointer dark:bg-[#111522]"
-      @click="isEditorVisible = true"
-    >
+    <div v-if="
+      !isEditorVisible &&
+      props.activeMode === 'clickhouse-sql' &&
+      !isEditorEmpty
+    " class="sql-preview p-3 border border-border rounded-md bg-card/60 text-sm font-mono overflow-hidden cursor-pointer dark:bg-[#111522]"
+      @click="isEditorVisible = true">
       <div class="flex items-center justify-between">
         <div class="text-muted-foreground text-xs font-medium mb-1">
           SQL Query (collapsed)
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          class="h-6 px-2"
-          @click.stop="isEditorVisible = true"
-        >
+        <Button variant="ghost" size="sm" class="h-6 px-2" @click.stop="isEditorVisible = true">
           <Eye class="h-3.5 w-3.5 mr-1" />
           <span class="text-xs">Show</span>
         </Button>
@@ -290,110 +237,135 @@
     </div>
 
     <!-- Error Message Display -->
-    <div
-      v-if="validationError"
-      class="mt-2 p-2 text-sm text-destructive bg-destructive/10 rounded flex items-center gap-2"
-    >
+    <div v-if="validationError"
+      class="mt-2 p-2 text-sm text-destructive bg-destructive/10 rounded flex items-center gap-2">
       <AlertCircle class="h-4 w-4 flex-shrink-0" />
       <span>
         <span class="font-medium">Validation Error: </span>
         {{ validationError }}
-        <span
-          v-if="validationError?.includes('Missing boolean operator')"
-          class="block mt-1 text-xs"
-        >
+        <span v-if="validationError?.includes('Missing boolean operator')" class="block mt-1 text-xs">
           Hint: Use <code class="bg-muted px-1 rounded">and</code> or
           <code class="bg-muted px-1 rounded">or</code> between conditions.
           Example:
-          <code class="bg-muted px-1 rounded"
-            >field1="value" and field2="value"</code
-          >
+          <code class="bg-muted px-1 rounded">field1="value" and field2="value"</code>
         </span>
       </span>
     </div>
   </div>
 
-  <!-- Dynamic variable settings sheet -->
+  <!-- Enhanced Variable Settings Sheet -->
   <Sheet :open="showVariablesConfig" @update:open="(open) => !open && closeDrawer()">
-    <SheetContent class="w-96">
+    <SheetContent class="w-[480px] max-w-[90vw]">
       <SheetHeader class="pb-6">
         <SheetTitle class="text-lg flex items-center gap-2">
+          <div class="w-2 h-2 bg-primary rounded-full"></div>
           <Settings class="h-5 w-5" />
-          Configure Variables
+          Variable Configuration
         </SheetTitle>
         <SheetDescription class="text-sm">
-          Manage all variables used in your query
+          Configure variables used in your query. Variables are replaced with actual values when the query runs.
         </SheetDescription>
       </SheetHeader>
 
-      <div v-if="allVariables && allVariables.length > 0" class="space-y-6 max-h-[60vh] overflow-y-auto pr-2">
+      <div v-if="allVariables && allVariables.length > 0" class="space-y-6 max-h-[70vh] overflow-y-auto pr-2">
         <div v-for="(variable, index) in allVariables" :key="variable.name" class="space-y-4">
-          <!-- Variable Header -->
-          <div class="flex items-center gap-3 pb-2 border-b border-border/50">
-            <div class="flex-1">
-              <h4 class="font-medium text-foreground">{{ variable.name }}</h4>
-              <p class="text-xs text-muted-foreground">Variable {{ index + 1 }} of {{ allVariables.length }}</p>
-            </div>
-            <span class="text-xs px-2 py-1 bg-muted text-muted-foreground rounded font-mono">
-              {{ variable.type }}
-            </span>
-          </div>
-
-          <!-- Variable Configuration -->
-          <div class="space-y-3 pl-1">
-            <!-- Variable Type -->
-            <div class="space-y-1.5">
-              <Label class="text-sm font-medium">Type</Label>
-              <Select v-model="variable.type" @update:model-value="() => updateVariableType(variable)">
-                <SelectTrigger class="h-9">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="text">Text</SelectItem>
-                  <SelectItem value="number">Number</SelectItem>
-                  <SelectItem value="date">Date</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <!-- Display Label -->
-            <div class="space-y-1.5">
-              <Label class="text-sm font-medium">Display Label</Label>
-              <Input
-                v-model="variable.label"
-                placeholder="Enter display name..."
-                class="h-9"
-                @input="() => variableStore.upsertVariable(variable)"
-              />
-              <p class="text-xs text-muted-foreground">
-                This label will appear in the query interface
-              </p>
-            </div>
-
-            <!-- Current Value -->
-            <div class="space-y-1.5">
-              <Label class="text-sm font-medium">Current Value</Label>
-              <div class="px-3 py-2 bg-muted/50 rounded-md border text-sm font-mono">
-                {{ variable.value || 'No value set' }}
+          <!-- Enhanced Variable Card -->
+          <div class="border border-border rounded-lg p-4 bg-card hover:shadow-sm transition-all duration-200">
+            <!-- Variable Header -->
+            <div class="flex items-center justify-between mb-4">
+              <div class="flex items-center gap-3">
+                <div class="w-2 h-2 bg-primary/60 rounded-full flex-shrink-0"></div>
+                <div>
+                  <h4 class="font-medium text-foreground">{{ variable.name }}</h4>
+                  <p class="text-xs text-muted-foreground">Variable {{ index + 1 }} of {{ allVariables.length }}</p>
+                </div>
               </div>
-              <p class="text-xs text-muted-foreground">
-                This value will be substituted in your query
-              </p>
+              <div class="flex items-center gap-2">
+                <span class="text-xs px-2 py-1 bg-muted text-muted-foreground rounded font-mono">
+                  {{ variable.type }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Variable Configuration -->
+            <div class="space-y-4">
+              <!-- Variable Type -->
+              <div class="space-y-2">
+                <Label class="text-sm font-medium flex items-center gap-2">
+                  <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
+                  Variable Type
+                </Label>
+                <Select v-model="variable.type" @update:model-value="() => updateVariableType(variable)">
+                  <SelectTrigger class="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="text">
+                      <div class="flex items-center gap-2">
+                        <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
+                        Text
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="number">
+                      <div class="flex items-center gap-2">
+                        <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+                        Number
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="date">
+                      <div class="flex items-center gap-2">
+                        <div class="w-2 h-2 bg-purple-500 rounded-full"></div>
+                        Date
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <!-- Display Label -->
+              <div class="space-y-2">
+                <Label class="text-sm font-medium flex items-center gap-2">
+                  <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
+                  Display Label
+                </Label>
+                <Input v-model="variable.label" placeholder="Enter display name..." class="h-9"
+                  @input="() => variableStore.upsertVariable(variable)" />
+              </div>
+
+              <!-- Current Value Preview -->
+              <div class="space-y-2">
+                <Label class="text-sm font-medium flex items-center gap-2">
+                  <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
+                  Current Value
+                </Label>
+                <div class="px-3 py-2 bg-muted/30 rounded-md border text-sm font-mono min-h-[36px] flex items-center">
+                  <span v-if="variable.value" class="text-foreground">
+                    {{ formatVariableValue(variable) }}
+                  </span>
+                  <span v-else class="text-muted-foreground italic">
+                    No value set
+                  </span>
+                </div>
+
+              </div>
             </div>
           </div>
 
-          <!-- Separator between variables (except last one) -->
-          <div v-if="index < allVariables.length - 1" class="pt-4">
-            <div class="border-t border-border/30"></div>
-          </div>
+
         </div>
       </div>
 
-      <!-- Empty state -->
-      <div v-else class="text-center py-8 text-muted-foreground">
-        <Settings class="h-8 w-8 mx-auto mb-3 opacity-50" />
-        <p class="text-sm">No variables found in your query</p>
-        <p class="text-xs mt-1">Use <code class="bg-muted px-1 rounded">&#123;&#123;variable_name&#125;&#125;</code> syntax to create variables</p>
+      <!-- Enhanced Empty State -->
+      <div v-else class="text-center py-12 text-muted-foreground">
+        <div class="w-12 h-12 bg-muted/50 rounded-full flex items-center justify-center mx-auto mb-4">
+          <Settings class="h-6 w-6 opacity-50" />
+        </div>
+        <p class="text-sm font-medium mb-2">No variables found in your query</p>
+        <p class="text-xs">Use <code class="bg-muted px-1.5 py-0.5 rounded">&#123;&#123;variable_name&#125;&#125;</code>
+          syntax to create variables</p>
+        <div class="mt-4 text-xs text-muted-foreground/60">
+          <p>Example: <code class="bg-muted px-1.5 py-0.5 rounded">namespace=&#123;&#123;env&#125;&#125;</code></p>
+        </div>
       </div>
     </SheetContent>
   </Sheet>
@@ -493,7 +465,7 @@ import { useExploreStore } from "@/stores/explore";
 import type { VariableState as VariableSetting } from '@/stores/variables';
 import { useVariableStore } from '@/stores/variables';
 import { QueryService } from "@/services/QueryService";
-import {useVariables} from "@/composables/useVariables.ts";
+import { useVariables } from "@/composables/useVariables.ts";
 // Keep other necessary imports like types...
 // --- Types ---
 type EditorMode = "logchefql" | "clickhouse-sql";
@@ -576,9 +548,7 @@ const currentPlaceholder = computed(() => {
 
   return props.activeMode === "logchefql"
     ? 'Enter search criteria (e.g., lvl="ERROR" and namespace~"sys")'
-    : `Enter ClickHouse SQL query (e.g., SELECT * FROM ${
-        props.tableName || "your_table"
-      } WHERE ...)`;
+    : `Enter ClickHouse SQL query (e.g., SELECT * FROM ${props.tableName || "your_table"} WHERE ...)`;
 });
 
 const editorHeight = computed(() => {
@@ -868,15 +838,15 @@ watchEffect(() => {
       // Add mode-specific options for LogchefQL
       ...(props.activeMode === "logchefql"
         ? {
-            ...getSingleLineModeOptions(),
-          }
+          ...getSingleLineModeOptions(),
+        }
         : {
-            // SQL-specific configuration - keep line numbers off
-            lineNumbers: "off" as const,
-            wordWrap: "on" as const,
-            folding: true,
-            scrollBeyondLastLine: false,
-          }),
+          // SQL-specific configuration - keep line numbers off
+          lineNumbers: "off" as const,
+          wordWrap: "on" as const,
+          folding: true,
+          scrollBeyondLastLine: false,
+        }),
     };
     editor.updateOptions(options);
 
@@ -1080,7 +1050,7 @@ const submitQuery = () => {
       } else {
         const validation = validateSQLWithDetails(queryForValidation);
         isValid = validation.valid;
-        console.log("Invalid SQL syntax. : "+isValid);
+        console.log("Invalid SQL syntax. : " + isValid);
         if (!isValid) validationError.value = validation.error || "Invalid SQL syntax.";
       }
     }
@@ -1531,7 +1501,7 @@ const getKeySuggestions = (range: MonacoRange): MonacoCompletionItem[] => {
     insertText: name,
     range: range,
     detail: props.schema[name]?.type || "Unknown",
-    sortText: `0-${name}`,
+    sortText: `0 - ${name} `,
     command: { id: "editor.action.triggerSuggest", title: "Trigger Suggest" },
   }));
 };
@@ -1579,10 +1549,10 @@ const prepareSuggestionValues = (
       return { label: item }; // Numeric values don't need quotes unless context demands it
     } else {
       // Escape existing quotes within the value
-      const escapedValue = item.replace(new RegExp(`\\${q}`, "g"), `\\${q}`);
+      const escapedValue = item.replace(new RegExp(`\\${q} `, "g"), `\\${q} `);
       return {
         label: item,
-        insertText: `${q}${escapedValue}${q}`,
+        insertText: `${q}${escapedValue}${q} `,
       };
     }
   });
@@ -1776,6 +1746,40 @@ const inputTypeFor = (type: string) => {
   return 'text';
 };
 
+// Get placeholder text for variable type
+const getPlaceholderForType = (type: string) => {
+  switch (type) {
+    case 'number':
+      return 'Enter a number...';
+    case 'date':
+      return 'Select date and time...';
+    case 'text':
+    default:
+      return 'Enter text value...';
+  }
+};
+
+// Format variable value for display
+const formatVariableValue = (variable: VariableSetting) => {
+  if (!variable.value) return '';
+
+  switch (variable.type) {
+    case 'number':
+      return `Value: ${variable.value} `;
+    case 'date':
+      try {
+        const date = new Date(variable.value);
+        return `Date: ${date.toLocaleDateString()} ${date.toLocaleTimeString()} `;
+      } catch {
+        return `Date: ${variable.value} `;
+      }
+    case 'text':
+    default:
+      const value = String(variable.value);
+      return value.length > 20 ? `"${value.substring(0, 20)}..."` : `"${value}"`;
+  }
+};
+
 // Watch for changes to selected variable and update the store
 watch(
   () => selectedVariable.value,
@@ -1827,7 +1831,8 @@ watch(
   position: relative;
   width: 100%;
   height: 100%;
-  background-color: transparent; /* Make transparent to let Monaco background show through */
+  background-color: transparent;
+  /* Make transparent to let Monaco background show through */
   padding-left: 16px;
   /* Add padding to container to position cursor */
 }
@@ -1856,7 +1861,8 @@ watch(
 :deep(.monaco-editor .overflow-guard) {
   border: none !important;
   outline: none !important;
-  background-color: transparent !important; /* Ensure transparency */
+  background-color: transparent !important;
+  /* Ensure transparency */
 }
 
 /* Style just the margin/gutter */
@@ -1915,7 +1921,8 @@ watch(
 }
 
 .dark .sql-preview:hover {
-  background-color: #1c2536; /* Matches the bluish dark theme hover */
+  background-color: #1c2536;
+  /* Matches the bluish dark theme hover */
 }
 
 /* Remove old drawer styles as we're using shadcn-ui Sheet component now */
