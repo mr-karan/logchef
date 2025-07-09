@@ -131,7 +131,7 @@ func (s *Server) setupRoutes() {
 	// --- Current User ("Me") Routes ---
 	api.Get("/me", s.requireAuth, s.handleGetCurrentUser)
 	api.Get("/me/teams", s.requireAuth, s.handleListCurrentUserTeams)
-	
+
 	// API Token Management for current user
 	api.Get("/me/tokens", s.requireAuth, s.handleListAPITokens)
 	api.Post("/me/tokens", s.requireAuth, s.handleCreateAPIToken)

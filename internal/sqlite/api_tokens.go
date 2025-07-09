@@ -113,4 +113,3 @@ func (db *DB) DeleteExpiredAPITokens(ctx context.Context) error {
 	db.log.Debug("expired API tokens deleted successfully")
 	return nil
 }
-

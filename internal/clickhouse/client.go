@@ -213,7 +213,7 @@ func (c *Client) QueryWithTimeout(ctx context.Context, query string, timeoutSeco
 		if queryErr != nil {
 			return queryErr
 		}
-		
+
 		// Close rows when we're done processing them
 		defer func() {
 			if rows != nil {

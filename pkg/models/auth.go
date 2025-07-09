@@ -120,13 +120,13 @@ type TeamQuery struct {
 
 // APIToken represents an API token for authentication
 type APIToken struct {
-	ID          int        `json:"id" db:"id"`
-	UserID      UserID     `json:"user_id" db:"user_id"`
-	Name        string     `json:"name" db:"name"`
-	TokenHash   string     `json:"-" db:"token_hash"` // Never expose in JSON
-	Prefix      string     `json:"prefix" db:"prefix"`
-	LastUsedAt  *time.Time `json:"last_used_at,omitempty" db:"last_used_at"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty" db:"expires_at"`
+	ID         int        `json:"id" db:"id"`
+	UserID     UserID     `json:"user_id" db:"user_id"`
+	Name       string     `json:"name" db:"name"`
+	TokenHash  string     `json:"-" db:"token_hash"` // Never expose in JSON
+	Prefix     string     `json:"prefix" db:"prefix"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty" db:"last_used_at"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty" db:"expires_at"`
 	Timestamps
 }
 
@@ -138,6 +138,6 @@ type CreateAPITokenRequest struct {
 
 // CreateAPITokenResponse represents the response when creating an API token
 type CreateAPITokenResponse struct {
-	Token     string    `json:"token"`      // Full token (only shown once)
-	APIToken  *APIToken `json:"api_token"`  // Token metadata
+	Token    string    `json:"token"`     // Full token (only shown once)
+	APIToken *APIToken `json:"api_token"` // Token metadata
 }

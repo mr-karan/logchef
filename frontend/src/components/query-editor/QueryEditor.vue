@@ -203,16 +203,32 @@
     </div>
 
     <!-- Dynamic variable list -->
-    <div class="flex flex-wrap gap-2 mb-2 bg-white">
-      <div v-for="variable in allVariables" :key="variable.name" class="flex items-center">
-        <input
+    <div v-if="allVariables && allVariables.length > 0" class="flex items-center justify-between gap-3 mb-3 px-3 py-2 bg-muted/20 border border-border/30 rounded-md">
+      <div class="flex items-center gap-4 flex-1 min-w-0">
+        <div v-for="variable in allVariables" :key="variable.name" class="flex items-center gap-2">
+          <Label :for="`var-${variable.name}`" class="text-sm font-medium text-foreground whitespace-nowrap">
+            {{ variable.label || variable.name }}
+          </Label>
+          <Input
+            :id="`var-${variable.name}`"
             v-model="variable.value"
-            type="text"
-            :placeholder="variable.label"
-            @click="() => openVariableSettings(variable)"
-            class="border p-2 rounded"
-        />
+            :type="inputTypeFor(variable.type)"
+            :placeholder="`${variable.type}...`"
+            class="h-8 w-32 text-sm"
+          />
+        </div>
       </div>
+      
+      <!-- Single settings button for all variables -->
+      <Button
+        variant="ghost"
+        size="sm"
+        class="h-8 w-8 p-0 flex-shrink-0"
+        @click="openAllVariableSettings"
+        :title="Configure all variables"
+      >
+        <Settings class="h-4 w-4" />
+      </Button>
     </div>
 
     <!-- Monaco Editor Container -->
@@ -297,28 +313,90 @@
     </div>
   </div>
 
-  <!-- Dynamic variable drawer (edit panel) -->
-  <div v-if="selectedVariable" ref="drawerRef" class="drawer z-20">
-    <div class="drawer-header">
-      <h3>Variable Settings</h3>
-      <button @click="closeDrawer">✕</button>
-    </div>
+  <!-- Dynamic variable settings sheet -->
+  <Sheet :open="showVariablesConfig" @update:open="(open) => !open && closeDrawer()">
+    <SheetContent class="w-96">
+      <SheetHeader class="pb-6">
+        <SheetTitle class="text-lg flex items-center gap-2">
+          <Settings class="h-5 w-5" />
+          Configure Variables
+        </SheetTitle>
+        <SheetDescription class="text-sm">
+          Manage all variables used in your query
+        </SheetDescription>
+      </SheetHeader>
+      
+      <div v-if="allVariables && allVariables.length > 0" class="space-y-6 max-h-[60vh] overflow-y-auto pr-2">
+        <div v-for="(variable, index) in allVariables" :key="variable.name" class="space-y-4">
+          <!-- Variable Header -->
+          <div class="flex items-center gap-3 pb-2 border-b border-border/50">
+            <div class="flex-1">
+              <h4 class="font-medium text-foreground">{{ variable.name }}</h4>
+              <p class="text-xs text-muted-foreground">Variable {{ index + 1 }} of {{ allVariables.length }}</p>
+            </div>
+            <span class="text-xs px-2 py-1 bg-muted text-muted-foreground rounded font-mono">
+              {{ variable.type }}
+            </span>
+          </div>
 
-    <div class="drawer-body">
-      <label>Variable name</label>
-      <p class="text-[#2980b9] font-bold">{{ selectedVariable.name }}</p>
+          <!-- Variable Configuration -->
+          <div class="space-y-3 pl-1">
+            <!-- Variable Type -->
+            <div class="space-y-1.5">
+              <Label class="text-sm font-medium">Type</Label>
+              <Select v-model="variable.type" @update:model-value="() => updateVariableType(variable)">
+                <SelectTrigger class="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="text">Text</SelectItem>
+                  <SelectItem value="number">Number</SelectItem>
+                  <SelectItem value="date">Date</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-      <label>Variable type</label>
-      <select v-model="selectedVariable.type" @change="setDefaultValueByType">
-        <option value="text">Text</option>
-        <option value="number">Number</option>
-        <option value="date">Date</option>
-      </select>
+            <!-- Display Label -->
+            <div class="space-y-1.5">
+              <Label class="text-sm font-medium">Display Label</Label>
+              <Input 
+                v-model="variable.label" 
+                placeholder="Enter display name..."
+                class="h-9"
+                @input="() => variableStore.upsertVariable(variable)"
+              />
+              <p class="text-xs text-muted-foreground">
+                This label will appear in the query interface
+              </p>
+            </div>
 
-      <label>Filter widget label</label>
-      <input v-model="selectedVariable.label" placeholder="Enter label..." />
-    </div>
-  </div>
+            <!-- Current Value -->
+            <div class="space-y-1.5">
+              <Label class="text-sm font-medium">Current Value</Label>
+              <div class="px-3 py-2 bg-muted/50 rounded-md border text-sm font-mono">
+                {{ variable.value || 'No value set' }}
+              </div>
+              <p class="text-xs text-muted-foreground">
+                This value will be substituted in your query
+              </p>
+            </div>
+          </div>
+
+          <!-- Separator between variables (except last one) -->
+          <div v-if="index < allVariables.length - 1" class="pt-4">
+            <div class="border-t border-border/30"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Empty state -->
+      <div v-else class="text-center py-8 text-muted-foreground">
+        <Settings class="h-8 w-8 mx-auto mb-3 opacity-50" />
+        <p class="text-sm">No variables found in your query</p>
+        <p class="text-xs mt-1">Use <code class="bg-muted px-1 rounded">&#123;&#123;variable_name&#125;&#125;</code> syntax to create variables</p>
+      </div>
+    </SheetContent>
+  </Sheet>
 
 </template>
 
@@ -368,6 +446,23 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Settings } from "lucide-vue-next";
 
 import {
   initMonacoSetup,
@@ -460,10 +555,10 @@ const isEditorVisible = ref(true); // New state for SQL editor visibility
 
 // dynamic variables list
 const { allVariables } = storeToRefs(variableStore);
-// Selected variable for drawer editing
+// Selected variable for sheet editing
 const selectedVariable = ref<VariableSetting | null>(null);
-// drawerRef to hide it when user click outside of drawer
-const drawerRef = ref<HTMLElement | null>(null);
+// Show variables configuration panel
+const showVariablesConfig = ref(false);
 
 // --- Computed Properties ---
 const theme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
@@ -691,6 +786,17 @@ watch(
   }
 );
 
+// Watch for editor content changes to detect variables immediately
+watch(
+  () => editorContent.value,
+  (newValue) => {
+    if (newValue) {
+      detectVariables(newValue);
+    }
+  },
+  { immediate: true }
+);
+
 // --- Synchronization and Option Updates ---
 watchEffect(() => {
   // 1. Sync content from store if it differs from internal state
@@ -710,6 +816,11 @@ watchEffect(() => {
   if (editorContent.value !== valueToSet) {
     runProgrammaticUpdate(valueToSet);
     shouldRestoreCursor = true;
+  }
+
+  // Detect variables whenever store content changes
+  if (valueToSet) {
+    detectVariables(valueToSet);
   }
 
   // 2. Update editor options and language if editor instance exists
@@ -1116,15 +1227,11 @@ const safelyDisposeEditor = (fullDisposal = false) => {
 };
 
 onMounted(() => {
-  // add listener to hide dynamic variable drawer
-  document.addEventListener('mousedown', handleClickOutside);
+  // No need for click outside listener anymore since we're using Sheet component
 });
 
 // Handle full disposal on unmount
-// to hide it when user click outside of drawer
 onBeforeUnmount(() => {
-  // remove listener to hide dynamic variable drawer
-  document.removeEventListener('mousedown', handleClickOutside);
   safelyDisposeEditor(true); // Full disposal
 });
 
@@ -1586,38 +1693,63 @@ const handleNewQueryClick = () => {
       });
   });
 };
-// Open drawer to edit selected variable
-const openVariableSettings = (variable: VariableSetting) => {
-  selectedVariable.value = variable;
+// Open sheet to edit all variables
+const openAllVariableSettings = () => {
+  showVariablesConfig.value = true;
 };
 
-// Close the drawer UI
+// Open sheet to edit selected variable (kept for backward compatibility)
+const openVariableSettings = (variable: VariableSetting) => {
+  selectedVariable.value = { ...variable }; // Create a copy to avoid direct mutation
+};
+
+// Close the sheet UI
 const closeDrawer = () => {
   selectedVariable.value = null;
-};
-
-// to hide it when user click outside of drawer
-const handleClickOutside = (event: MouseEvent) => {
-  if (drawerRef.value && !drawerRef.value.contains(event.target as Node)) {
-    closeDrawer();
-  }
+  showVariablesConfig.value = false;
 };
 
 // Update default value based on variable type
 const setDefaultValueByType = () => {
   if (!selectedVariable.value) return;
 
-  switch (selectedVariable.value.type) {
+  // Update the variable in the store
+  const updatedVariable = { ...selectedVariable.value };
+  
+  switch (updatedVariable.type) {
     case 'text':
-      selectedVariable.value.value = '';
+      updatedVariable.value = '';
       break;
     case 'number':
-      selectedVariable.value.value = 0;
+      updatedVariable.value = 0;
       break;
     case 'date':
-      selectedVariable.value.value = new Date().toISOString();
+      updatedVariable.value = new Date().toISOString();
       break;
   }
+  
+  // Update both local state and store
+  selectedVariable.value = updatedVariable;
+  variableStore.upsertVariable(updatedVariable);
+};
+
+// Update variable type for multi-variable panel
+const updateVariableType = (variable: VariableSetting) => {
+  // Update default value based on new type
+  switch (variable.type) {
+    case 'text':
+      variable.value = '';
+      break;
+    case 'number':
+      variable.value = 0;
+      break;
+    case 'date':
+      variable.value = new Date().toISOString();
+      break;
+  }
+  
+  // Update in store
+  variableStore.upsertVariable(variable);
 };
 
 // Determine input type for a given variable type
@@ -1626,6 +1758,18 @@ const inputTypeFor = (type: string) => {
   if (type === 'date') return 'datetime-local';
   return 'text';
 };
+
+// Watch for changes to selected variable and update the store
+watch(
+  () => selectedVariable.value,
+  (newVariable) => {
+    if (newVariable) {
+      // Update the variable in the store when it changes
+      variableStore.upsertVariable(newVariable);
+    }
+  },
+  { deep: true }
+);
 
 </script>
 
@@ -1757,31 +1901,5 @@ const inputTypeFor = (type: string) => {
   background-color: #1c2536; /* Matches the bluish dark theme hover */
 }
 
-/* drawer setting for dynamic variables */
-.drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  width: 320px;
-  height: 100%;
-  background: #fff;
-  border-left: 1px solid #ccc;
-  padding: 20px;
-  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
-  display: flex;
-  flex-direction: column;
-}
-
-.drawer-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.drawer-body {
-  margin-top: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+/* Remove old drawer styles as we're using shadcn-ui Sheet component now */
 </style>

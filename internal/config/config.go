@@ -130,7 +130,7 @@ func Load(path string) (*Config, error) {
 	if len(cfg.Auth.AdminEmails) == 0 {
 		return nil, fmt.Errorf("admin_emails is required in auth configuration (either in file or %sAUTH__ADMIN_EMAILS)", envPrefix)
 	}
-	
+
 	// Validate API token secret
 	if cfg.Auth.APITokenSecret == "" {
 		return nil, fmt.Errorf("api_token_secret is required in auth configuration (either in file or %sAUTH__API_TOKEN_SECRET)", envPrefix)

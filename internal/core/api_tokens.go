@@ -60,7 +60,6 @@ func hashAPIToken(token, secret string) string {
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
-
 // validateAPITokenCreation validates parameters for creating a new API token
 func validateAPITokenCreation(name string) error {
 	if name == "" {
@@ -197,7 +196,7 @@ func AuthenticateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, 
 
 	// Hash the incoming token for lookup
 	tokenHash := hashAPIToken(token, config.APITokenSecret)
-	
+
 	// Direct lookup by token hash (very efficient with unique index)
 	sqlcToken, err := db.GetAPITokenByHash(ctx, tokenHash)
 	if err != nil {
@@ -206,23 +205,23 @@ func AuthenticateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, 
 		}
 		return nil, nil, fmt.Errorf("failed to get token: %w", err)
 	}
-	
+
 	// Check if token is expired
 	if sqlcToken.ExpiresAt.Valid && time.Now().After(sqlcToken.ExpiresAt.Time) {
 		return nil, nil, ErrTokenExpired
 	}
-	
+
 	// Get associated user
 	user, err := GetUser(ctx, db, models.UserID(sqlcToken.UserID))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get user for token: %w", err)
 	}
-	
+
 	// Check if user is active
 	if user.Status != models.UserStatusActive {
 		return nil, nil, ErrInvalidToken
 	}
-	
+
 	// Convert to model and update last used (async)
 	apiToken := convertSQLCAPITokenToModel(sqlcToken)
 	go func() {
@@ -230,7 +229,7 @@ func AuthenticateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, 
 		defer cancel()
 		_ = UpdateAPITokenLastUsed(ctx, db, int(sqlcToken.ID))
 	}()
-	
+
 	return user, apiToken, nil
 }
 
@@ -264,21 +263,21 @@ func extractUserIDFromToken(token string) (models.UserID, error) {
 	if !hasTokenPrefix(token) {
 		return 0, ErrInvalidToken
 	}
-	
+
 	// Remove prefix and split by underscore
 	withoutPrefix := token[len(TokenPrefix):]
 	parts := strings.Split(withoutPrefix, "_")
-	
+
 	if len(parts) < 2 {
 		return 0, ErrInvalidToken
 	}
-	
+
 	// Parse user ID
 	userID, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
 		return 0, ErrInvalidToken
 	}
-	
+
 	return models.UserID(userID), nil
 }
 
