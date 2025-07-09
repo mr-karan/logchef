@@ -218,7 +218,7 @@
           />
         </div>
       </div>
-      
+
       <!-- Single settings button for all variables -->
       <Button
         variant="ghost"
@@ -325,7 +325,7 @@
           Manage all variables used in your query
         </SheetDescription>
       </SheetHeader>
-      
+
       <div v-if="allVariables && allVariables.length > 0" class="space-y-6 max-h-[60vh] overflow-y-auto pr-2">
         <div v-for="(variable, index) in allVariables" :key="variable.name" class="space-y-4">
           <!-- Variable Header -->
@@ -359,8 +359,8 @@
             <!-- Display Label -->
             <div class="space-y-1.5">
               <Label class="text-sm font-medium">Display Label</Label>
-              <Input 
-                v-model="variable.label" 
+              <Input
+                v-model="variable.label"
                 placeholder="Enter display name..."
                 class="h-9"
                 @input="() => variableStore.upsertVariable(variable)"
@@ -751,9 +751,13 @@ const runProgrammaticUpdate = (newValue: string) => {
 const detectVariables = (value: string) => {
   if (typeof value !== 'string') return;
 
-  // Extract dynamic variable names from query like {{ variable }}
-  const matches = [...value.matchAll(/{{\s*(\w+)\s*}}/g)].map(m => m[1]);
-  const uniqueVariableNames = [...new Set(matches)];
+  // Extract dynamic variable names from query - handle both {{variable}} and __VAR_variable__ formats
+  const bracketMatches = [...value.matchAll(/{{\s*(\w+)\s*}}/g)].map(m => m[1]);
+  const underscoreMatches = [...value.matchAll(/__VAR_(\w+)__/g)].map(m => m[1]);
+
+  // Combine both formats and get unique variable names
+  const allMatches = [...bracketMatches, ...underscoreMatches];
+  const uniqueVariableNames = [...new Set(allMatches)];
 
   // If allVariables is not ready, just upsert all found variables
   const currentVariables = allVariables?.value ?? [];
@@ -1675,7 +1679,7 @@ const handleNewQueryClick = () => {
   delete currentQuery.query_id;
 
   // Use the centralized reset function in the store
-  exploreStore.resetQueryStateToDefault();
+  exploreStore.resetQueryToDefaults();
 
   // Explicitly clear the selectedQueryId in the store
   exploreStore.setSelectedQueryId(null);
@@ -1728,7 +1732,7 @@ const setDefaultValueByType = () => {
 
   // Update the variable in the store
   const updatedVariable = { ...selectedVariable.value };
-  
+
   switch (updatedVariable.type) {
     case 'text':
       updatedVariable.value = '';
@@ -1740,7 +1744,7 @@ const setDefaultValueByType = () => {
       updatedVariable.value = new Date().toISOString();
       break;
   }
-  
+
   // Update both local state and store
   selectedVariable.value = updatedVariable;
   variableStore.upsertVariable(updatedVariable);
@@ -1760,7 +1764,7 @@ const updateVariableType = (variable: VariableSetting) => {
       variable.value = new Date().toISOString();
       break;
   }
-  
+
   // Update in store
   variableStore.upsertVariable(variable);
 };

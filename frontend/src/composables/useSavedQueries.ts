@@ -414,9 +414,11 @@ export function useSavedQueries(
             );
 
             // Set the time range in the store
-            exploreStore.setTimeRange({
-              start: startDateTime,
-              end: endDateTime
+            exploreStore.setTimeConfiguration({
+              absoluteRange: {
+                start: startDateTime,
+                end: endDateTime
+              }
             });
           } else {
             console.warn("Invalid timestamp in saved query timeRange, keeping current range");
@@ -672,7 +674,8 @@ export function useSavedQueries(
     console.log("Creating new query in useSavedQueries...");
 
     // Reset the query state to defaults
-    exploreStore.resetQueryStateToDefault();
+    // Use the centralized reset function in the store
+    exploreStore.resetQueryToDefaults();
 
     // Build new query parameters without query_id
     const newQuery: Record<string, string> = {};

@@ -117,10 +117,12 @@ export class QueryService {
           // Don't fail completely, just add warning and continue with base query
           warnings.push(translationResult.error || "Failed to translate LogchefQL.");
         } else {
-          // Assign the translated conditions
+          // Assign the translated conditions and convert __VAR_ placeholders back to {{variable}} format
           logchefqlConditions = translationResult.sql || "";
-          // Note: Keep the translated SQL even if it contains variable placeholders
-          // The variable substitution will happen later in the pipeline
+          // Convert __VAR_variable__ back to {{variable}} format for consistent display
+          logchefqlConditions = logchefqlConditions.replace(/'__VAR_(\w+)__'/g, '{{$1}}');
+          // Also handle cases where quotes might be missing
+          logchefqlConditions = logchefqlConditions.replace(/__VAR_(\w+)__/g, '{{$1}}');
 
           // Add filter operation if we have conditions
           if (logchefqlConditions && !meta.operations.includes('filter')) {

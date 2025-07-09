@@ -121,7 +121,7 @@ export function useQuery() {
     // Clear any validation errors when changing modes
     queryError.value = '';
 
-    // If switching to SQL and we have LogchefQL content, validate first
+    // If switching to SQL and we have LogchefQL content, translate it to SQL
     if (newMode === 'sql' && activeMode.value === 'logchefql' && logchefQuery.value?.trim()) {
 
       // Replace variables with placeholder values for validation
@@ -131,6 +131,16 @@ export function useQuery() {
       if (!validation.valid) {
         queryError.value = `Invalid LogchefQL syntax: ${validation.error}`;
         return; // Don't switch modes if validation fails
+      }
+
+      // If validation passed, translate LogchefQL to SQL
+      const translationResult = translateLogchefQLToSQL(logchefQuery.value);
+      if (translationResult.success && translationResult.sql) {
+        // Update the SQL query in the store with the translated SQL
+        exploreStore.setRawSql(translationResult.sql);
+        console.log("useQuery: Translated LogchefQL to SQL during mode switch");
+      } else {
+        console.warn("useQuery: Failed to translate LogchefQL to SQL:", translationResult.error);
       }
     }
 
@@ -330,9 +340,10 @@ export function useQuery() {
       }
 
       if (mode === 'sql') {
-        // For SQL mode, use SqlManager to prepare for execution
+        // For SQL mode, apply variable substitution then use SqlManager to prepare for execution
+        const queryWithVariables = convertVariables(query);
         const result = SqlManager.prepareForExecution({
-          sql: query,
+          sql: queryWithVariables,
           tsField: sourceDetails._meta_ts_field || 'timestamp',
           timeRange: exploreStore.timeRange as TimeRange,
           limit: exploreStore.limit,
