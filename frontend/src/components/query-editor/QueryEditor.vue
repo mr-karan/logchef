@@ -1,5 +1,5 @@
 <template>
-  <div class="query-editor">
+  <div :class="['query-editor', props.class]">
     <!-- Header Bar (Keep existing structure) -->
     <div
       class="flex items-center justify-between bg-muted/40 rounded-t-md px-3 py-1.5 border border-b-0"
@@ -526,6 +526,8 @@ const props = defineProps({
   // SavedQueriesDropdown props
   teamId: { type: Number, required: true },
   useCurrentTeam: { type: Boolean, default: true },
+  // Additional props to prevent Vue warnings
+  class: { type: String, default: "" },
 });
 
 const emit = defineEmits<{
@@ -536,6 +538,9 @@ const emit = defineEmits<{
   // SavedQueries events
   (e: "select-saved-query", query: SavedTeamQuery): void;
   (e: "save-query"): void;
+  // Additional emits to prevent Vue warnings
+  (e: "saveQueryAsNew"): void;
+  (e: "generateAiSql", payload: any): void;
 }>();
 
 // --- Core State ---
