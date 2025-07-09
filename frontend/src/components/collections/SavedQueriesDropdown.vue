@@ -211,13 +211,15 @@ const isUserAuthenticated = computed(() => authStore.isAuthenticated);
 const activeSavedQueryName = computed(() => exploreStore.activeSavedQueryName);
 
 const navigateToCollectionsView = () => {
-  const teamId = route.query.team;
-  const sourceId = route.query.source;
-  if (teamId && sourceId) {
-    router.push(`/teams/${teamId}/sources/${sourceId}/collections`);
-  } else {
-    console.warn('Cannot navigate to collections view: missing team or source ID in route query');
-  }
+  const query: Record<string, string | number> = {};
+  if (props.selectedTeamId) query.team = props.selectedTeamId;
+  if (props.selectedSourceId) query.source = props.selectedSourceId;
+
+  router.push({
+    path: '/logs/saved',
+    query
+  });
+  isOpen.value = false;
 };
 </script>
 
