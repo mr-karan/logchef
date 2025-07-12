@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"regexp"
 )
 
 // TableColumnStat represents statistics for a single column in a ClickHouse table,
@@ -34,6 +35,28 @@ type TableStat struct {
 // ColumnStats retrieves detailed statistics for each column of a specific table.
 func (c *Client) ColumnStats(ctx context.Context, database, table string) ([]TableColumnStat, error) {
 	// Query system.parts_columns for statistics on active parts.
+	engine,err := c.getEngine(ctx, database, table)
+	var actualTable string
+	if err !=nil {
+		fmt.Println(err)
+	}
+	switch engine{
+	case "Distributed":
+		var engine_full,err = c.getEngineTable(ctx, database,table)
+		if err !=nil {
+			fmt.Println(err)
+		}
+		pattern := `Distributed\(.*?,\s*'(.*?)'\s*,\s*'(.*?)'`
+		re := regexp.MustCompile(pattern)
+		matches := re.FindStringSubmatch(engine_full)
+
+		if len(matches) < 3 {
+			fmt.Errorf("invalid Distributed table definition")
+		}
+		actualTable = matches[2]
+	default:
+		actualTable = table
+	}
 	query := fmt.Sprintf(`
 		SELECT
 			database,
@@ -51,7 +74,7 @@ func (c *Client) ColumnStats(ctx context.Context, database, table string) ([]Tab
 			table,
 			column
 		ORDER BY size DESC
-	`, database, table)
+	`, database, actualTable)
 
 	rows, err := c.conn.Query(ctx, query)
 	if err != nil {
@@ -161,4 +184,48 @@ func (c *Client) TableStats(ctx context.Context, database, table string) (*Table
 
 	// Return the first row (should be the only one).
 	return &stats[0], nil
+}
+
+func (c* Client) getEngine(ctx context.Context, database, table string) (string, error){
+	query := fmt.Sprintf(`
+		SELECT 
+			name,engine 
+		FROM system.tables 
+		WHERE (database = '%s') AND (table = '%s')
+		`, database, table)
+	var name, engine string
+	rows,err := c.conn.Query(ctx, query)
+	if err!=nil{
+		return "",fmt.Errorf("Error getting the engine : %v", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		if err := rows.Scan(&name, &engine); err !=nil {
+			return "", fmt.Errorf("error scanning engine result: %w", err)
+		}
+	} else {
+		return "", fmt.Errorf("no engine found for table %s.%s", database, table)
+	}
+	return engine, nil
+}
+
+func (c* Client) getEngineTable(ctx context.Context, database, table string) (string,error){
+	tableQuery := fmt.Sprintf(`
+		SELECT 
+			engine_full
+		FROM 	system.tables
+		WHERE (database = '%s') and (table = '%s')
+		`	, database, table)
+	rows,err := c.conn.Query(ctx, tableQuery)
+	var engine_full string
+	if err != nil {
+		fmt.Println("Error with engine", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		if err := rows.Scan(&engine_full); err !=nil {
+			return "", fmt.Errorf("error scanning engine result: %w", err)
+		}
+	}
+	return engine_full,nil
 }
