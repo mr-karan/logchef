@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 
 	"github.com/mr-karan/logchef/internal/ai"
 	"github.com/mr-karan/logchef/internal/clickhouse"
@@ -31,6 +33,107 @@ const (
 	// OpenAIRequestTimeout is the maximum time to wait for OpenAI to respond
 	OpenAIRequestTimeout = 15 * time.Second
 )
+
+// QueryTracker manages active queries for cancellation support
+type QueryTracker struct {
+	mu      sync.RWMutex
+	queries map[string]*ActiveQuery
+}
+
+// ActiveQuery represents an active query with its context for cancellation
+type ActiveQuery struct {
+	ID        string
+	UserID    models.UserID
+	SourceID  models.SourceID
+	TeamID    models.TeamID
+	StartTime time.Time
+	SQL       string
+	Cancel    context.CancelFunc
+}
+
+// Global query tracker instance
+var queryTracker = &QueryTracker{
+	queries: make(map[string]*ActiveQuery),
+}
+
+// AddQuery adds a new active query to the tracker
+func (qt *QueryTracker) AddQuery(userID models.UserID, sourceID models.SourceID, teamID models.TeamID, sql string, cancel context.CancelFunc) string {
+	qt.mu.Lock()
+	defer qt.mu.Unlock()
+	
+	queryID := uuid.New().String()
+	qt.queries[queryID] = &ActiveQuery{
+		ID:        queryID,
+		UserID:    userID,
+		SourceID:  sourceID,
+		TeamID:    teamID,
+		StartTime: time.Now(),
+		SQL:       sql,
+		Cancel:    cancel,
+	}
+	
+	return queryID
+}
+
+// RemoveQuery removes a query from the tracker
+func (qt *QueryTracker) RemoveQuery(queryID string) {
+	qt.mu.Lock()
+	defer qt.mu.Unlock()
+	delete(qt.queries, queryID)
+}
+
+// CancelQuery cancels a query if it exists and belongs to the user
+func (qt *QueryTracker) CancelQuery(queryID string, userID models.UserID) bool {
+	qt.mu.Lock()
+	defer qt.mu.Unlock()
+	
+	query, exists := qt.queries[queryID]
+	if !exists {
+		return false
+	}
+	
+	// Only allow users to cancel their own queries
+	if query.UserID != userID {
+		return false
+	}
+	
+	// Cancel the context
+	query.Cancel()
+	
+	// Remove from tracker
+	delete(qt.queries, queryID)
+	
+	return true
+}
+
+// GetUserQueries returns all active queries for a user
+func (qt *QueryTracker) GetUserQueries(userID models.UserID) []*ActiveQuery {
+	qt.mu.RLock()
+	defer qt.mu.RUnlock()
+	
+	var userQueries []*ActiveQuery
+	for _, query := range qt.queries {
+		if query.UserID == userID {
+			userQueries = append(userQueries, query)
+		}
+	}
+	
+	return userQueries
+}
+
+// Cleanup removes queries that have been running for too long (over 1 hour)
+func (qt *QueryTracker) Cleanup() {
+	qt.mu.Lock()
+	defer qt.mu.Unlock()
+	
+	cutoff := time.Now().Add(-1 * time.Hour)
+	for queryID, query := range qt.queries {
+		if query.StartTime.Before(cutoff) {
+			query.Cancel()
+			delete(qt.queries, queryID)
+		}
+	}
+}
 
 // handleQueryLogs handles requests to query logs for a specific source.
 // Access is controlled by the requireSourceAccess middleware.
@@ -62,6 +165,27 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
+	// Get user information for query tracking
+	user := c.Locals("user").(*models.User)
+	if user == nil {
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+	}
+	
+	// Get team ID from params
+	teamIDStr := c.Params("teamID")
+	teamID, err := core.ParseTeamID(teamIDStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
+	}
+
+	// Create a cancellable context for this query
+	queryCtx, cancel := context.WithCancel(c.Context())
+	defer cancel() // Ensure cleanup
+	
+	// Add query to tracker
+	queryID := queryTracker.AddQuery(user.ID, sourceID, teamID, req.RawSQL, cancel)
+	defer queryTracker.RemoveQuery(queryID) // Ensure cleanup
+
 	// Prepare parameters for the core query function.
 	params := clickhouse.LogQueryParams{
 		RawSQL:       req.RawSQL,
@@ -71,8 +195,8 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 	// StartTime, EndTime, and Timezone are no longer passed here;
 	// they are expected to be baked into the RawSQL by the frontend.
 
-	// Execute query via core function.
-	result, err := core.QueryLogs(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID, params)
+	// Execute query via core function with cancellable context.
+	result, err := core.QueryLogs(queryCtx, s.sqlite, s.clickhouse, s.log, sourceID, params)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -84,7 +208,47 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to query logs: %v", err), models.DatabaseErrorType)
 	}
 
+	// Add query ID to the response for frontend tracking
+	if result != nil {
+		// Create a map to include the query ID with the result
+		responseWithQueryID := map[string]interface{}{
+			"query_id": queryID,
+			"data":     result.Logs,
+			"stats":    result.Stats,
+			"columns":  result.Columns,
+		}
+		return SendSuccess(c, fiber.StatusOK, responseWithQueryID)
+	}
+	
 	return SendSuccess(c, fiber.StatusOK, result)
+}
+
+// handleCancelQuery cancels a running query for a specific source
+func (s *Server) handleCancelQuery(c *fiber.Ctx) error {
+	// Get query ID from params
+	queryID := c.Params("queryID")
+	if queryID == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Query ID is required", models.ValidationErrorType)
+	}
+
+	// Get user information
+	user := c.Locals("user").(*models.User)
+	if user == nil {
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+	}
+
+	// Try to cancel the query
+	cancelled := queryTracker.CancelQuery(queryID, user.ID)
+	if !cancelled {
+		return SendErrorWithType(c, fiber.StatusNotFound, "Query not found or already completed", models.NotFoundErrorType)
+	}
+
+	s.log.Info("Query cancelled successfully", "query_id", queryID, "user_id", user.ID)
+	
+	return SendSuccess(c, fiber.StatusOK, map[string]interface{}{
+		"message":  "Query cancelled successfully",
+		"query_id": queryID,
+	})
 }
 
 // handleGetSourceSchema retrieves the schema (column names and types) for a specific source.

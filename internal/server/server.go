@@ -206,6 +206,7 @@ func (s *Server) setupRoutes() {
 
 		// Query and explore logs
 		teamSourceOps.Post("/logs/query", s.handleQueryLogs)
+		teamSourceOps.Post("/logs/query/:queryID/cancel", s.handleCancelQuery)
 		teamSourceOps.Get("/schema", s.handleGetSourceSchema)
 		teamSourceOps.Post("/logs/histogram", s.handleGetHistogram)
 		teamSourceOps.Post("/generate-sql", s.handleGenerateAISQL)

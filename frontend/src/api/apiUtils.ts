@@ -8,9 +8,12 @@ export async function apiRequest<T>(
   method: "get" | "post" | "put" | "delete",
   url: string,
   data?: any,
-  options?: { timeout?: number }
+  options?: { timeout?: number; signal?: AbortSignal }
 ): Promise<APIResponse<T>> {
-  const config = options?.timeout ? { timeout: options.timeout * 1000 } : {}; // Convert seconds to milliseconds
+  const config = {
+    ...(options?.timeout ? { timeout: options.timeout * 1000 } : {}), // Convert seconds to milliseconds
+    ...(options?.signal ? { signal: options.signal } : {})
+  };
   
   let response;
   if (method === "get" || method === "delete") {
@@ -25,8 +28,8 @@ export async function apiRequest<T>(
  * Shorthand methods for common API operations
  */
 export const apiClient = {
-  get: <T>(url: string, options?: { timeout?: number }) => apiRequest<T>("get", url, undefined, options),
-  post: <T>(url: string, data?: any, options?: { timeout?: number }) => apiRequest<T>("post", url, data, options),
-  put: <T>(url: string, data?: any, options?: { timeout?: number }) => apiRequest<T>("put", url, data, options),
-  delete: <T>(url: string, options?: { timeout?: number }) => apiRequest<T>("delete", url, undefined, options)
+  get: <T>(url: string, options?: { timeout?: number; signal?: AbortSignal }) => apiRequest<T>("get", url, undefined, options),
+  post: <T>(url: string, data?: any, options?: { timeout?: number; signal?: AbortSignal }) => apiRequest<T>("post", url, data, options),
+  put: <T>(url: string, data?: any, options?: { timeout?: number; signal?: AbortSignal }) => apiRequest<T>("put", url, data, options),
+  delete: <T>(url: string, options?: { timeout?: number; signal?: AbortSignal }) => apiRequest<T>("delete", url, undefined, options)
 };

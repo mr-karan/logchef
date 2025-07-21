@@ -133,6 +133,10 @@ export interface ExploreState {
   histogramGranularity: string | null;
   // Query timeout in seconds
   queryTimeout: number;
+  // Query cancellation state
+  currentQueryAbortController: AbortController | null;
+  currentQueryId: string | null;
+  isCancellingQuery: boolean;
 }
 
 const DEFAULT_QUERY_STATS: QueryStats = {
@@ -169,6 +173,9 @@ export const useExploreStore = defineStore("explore", () => {
     histogramError: null,
     histogramGranularity: null,
     queryTimeout: 30, // Default to 30 seconds
+    currentQueryAbortController: null,
+    currentQueryId: null,
+    isCancellingQuery: false,
   });
 
   // Getters
@@ -176,6 +183,12 @@ export const useExploreStore = defineStore("explore", () => {
   const hasValidTimeRange = computed(() => !!state.data.value.timeRange);
   const canExecuteQuery = computed(
     () => hasValidSource.value && hasValidTimeRange.value
+  );
+  const isExecutingQuery = computed(() => state.isLoadingOperation('executeQuery'));
+  const canCancelQuery = computed(() => 
+    (!!state.data.value.currentQueryAbortController || !!state.data.value.currentQueryId) && 
+    !state.data.value.isCancellingQuery && 
+    isExecutingQuery.value
   );
 
   // Key computed properties from refactoring plan
@@ -725,6 +738,16 @@ export const useExploreStore = defineStore("explore", () => {
     // Store the relative time so we can restore it after execution
     const relativeTime = state.data.value.selectedRelativeTime;
 
+    // Cancel any existing query
+    if (state.data.value.currentQueryAbortController) {
+      state.data.value.currentQueryAbortController.abort();
+    }
+
+    // Create new AbortController for this query
+    const abortController = new AbortController();
+    state.data.value.currentQueryAbortController = abortController;
+    state.data.value.isCancellingQuery = false;
+
     // Reset timestamp at the start of execution attempt
     state.data.value.lastExecutionTimestamp = null;
     
@@ -822,7 +845,7 @@ export const useExploreStore = defineStore("explore", () => {
 
       // Use the centralized API calling mechanism from base store
       const response = await state.callApi({
-        apiCall: async () => exploreApi.getLogs(state.data.value.sourceId, params, currentTeamId),
+        apiCall: async () => exploreApi.getLogs(state.data.value.sourceId, params, currentTeamId, abortController.signal),
         // Update results ONLY on successful API call with data
         onSuccess: (data: QuerySuccessResponse | null) => {
           if (data && data.logs) {
@@ -844,6 +867,11 @@ export const useExploreStore = defineStore("explore", () => {
             state.data.value.columns = [];
             state.data.value.queryStats = DEFAULT_QUERY_STATS;
             state.data.value.queryId = null;
+          }
+          
+          // Extract query ID from response for cancellation tracking
+          if (data && typeof data === 'object' && 'query_id' in data) {
+            state.data.value.currentQueryId = data.query_id as string;
           }
 
           // Update lastExecutedState after successful execution
@@ -878,9 +906,55 @@ export const useExploreStore = defineStore("explore", () => {
         }, 50);
       }
 
+      // Clean up AbortController and query ID after query completion
+      state.data.value.currentQueryAbortController = null;
+      state.data.value.currentQueryId = null;
+      state.data.value.isCancellingQuery = false;
+
       // Return the response
       return response;
     });
+  }
+
+  // Cancel current query
+  async function cancelQuery() {
+    if (state.data.value.isCancellingQuery) {
+      return; // Already cancelling
+    }
+    
+    state.data.value.isCancellingQuery = true;
+    
+    try {
+      // First, try to cancel via backend API if we have a query ID
+      if (state.data.value.currentQueryId) {
+        const currentTeamId = useTeamsStore().currentTeamId;
+        if (currentTeamId && state.data.value.sourceId) {
+          try {
+            await exploreApi.cancelQuery(
+              state.data.value.sourceId,
+              state.data.value.currentQueryId,
+              currentTeamId
+            );
+            console.log("Query cancelled via backend API");
+          } catch (error) {
+            console.warn("Backend query cancellation failed, falling back to HTTP abort:", error);
+          }
+        }
+      }
+      
+      // Also abort the HTTP request if it's still active
+      if (state.data.value.currentQueryAbortController) {
+        state.data.value.currentQueryAbortController.abort();
+        console.log("HTTP request aborted");
+      }
+      
+      console.log("Query cancellation requested");
+    } finally {
+      // Clean up state
+      state.data.value.currentQueryAbortController = null;
+      state.data.value.currentQueryId = null;
+      state.data.value.isCancellingQuery = false;
+    }
   }
 
   // Add function to set relative time range
@@ -1381,6 +1455,7 @@ export const useExploreStore = defineStore("explore", () => {
     resetQueryContentForSourceChange,
     initializeFromUrl,
     executeQuery,
+    cancelQuery,
     getLogContext,
     clearError,
     setGroupByField,
@@ -1391,5 +1466,8 @@ export const useExploreStore = defineStore("explore", () => {
 
     // Loading state helpers
     isLoadingOperation: state.isLoadingOperation,
+    isExecutingQuery,
+    canCancelQuery,
+    isCancellingQuery: computed(() => state.data.value.isCancellingQuery),
   };
 });
