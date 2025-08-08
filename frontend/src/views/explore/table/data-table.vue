@@ -19,7 +19,7 @@ import {
 } from '@tanstack/vue-table'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Search, GripVertical, Download, Copy, Timer, Rows4, Equal, EqualNot, RefreshCw } from 'lucide-vue-next' // Added RefreshCw
+import { Search, GripVertical, Download, Copy, Timer, Rows4, Equal, EqualNot, RefreshCw, TerminalSquare } from 'lucide-vue-next' // Added RefreshCw
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import DataTableColumnSelector from './data-table-column-selector.vue'
@@ -48,6 +48,7 @@ interface Props {
     stats: QueryStats
     sourceId: string
     teamId: number | null
+    displayMode?: 'table' | 'compact'
     timestampField?: string
     severityField?: string
     timezone?: 'local' | 'utc'
@@ -587,6 +588,7 @@ function formatExecutionTime(ms: number): string {
 // Define emits
 const emit = defineEmits<{
     (e: 'drill-down', value: { column: string, value: any, operator: string }): void
+    (e: 'update:displayMode', value: 'table' | 'compact'): void
 }>();
 
 // Function to handle drill-down action with different operators

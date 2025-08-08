@@ -11,7 +11,7 @@ import { useRouter, useRoute } from "vue-router";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/composables/useToast";
-import { Share2, WandSparkles } from "lucide-vue-next";
+import { Share2, WandSparkles, Rows4, TerminalSquare } from "lucide-vue-next";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useExploreStore } from "@/stores/explore";
 import { useTeamsStore } from "@/stores/teams";
@@ -20,6 +20,7 @@ import { useSavedQueriesStore } from "@/stores/savedQueries";
 import { FieldSideBar } from "@/components/field-sidebar";
 import { getErrorMessage } from "@/api/types";
 import DataTable from "./table/data-table.vue";
+import CompactLogList from "./table/CompactLogListSimple.vue";
 import SaveQueryModal from "@/components/collections/SaveQueryModal.vue";
 import QueryEditor from "@/components/query-editor/QueryEditor.vue";
 import { useSourceTeamManagement } from "@/composables/useSourceTeamManagement";
@@ -56,17 +57,15 @@ const sourcesStore = useSourcesStore();
 const savedQueriesStore = useSavedQueriesStore();
 const { toast } = useToast();
 
-// Composables
-import { useRouteSync } from '@/composables/useRouteSync';
-const { isHydrating, hydrationError, hydrateFromUrl, changeTeam, changeSource } = useRouteSync();
-
-// Back-compat flags used in template
-const isInitializing = isHydrating;
-const initializationError = hydrationError;
-
-// Minimal stubs for old methods used below
-const syncUrlFromState = () => {};
-const pushQueryHistoryEntry = () => {};
+// URL synchronization and state management
+// Handles URL parameter syncing, browser history, and initialization from URL
+const { 
+  isInitializing, 
+  initializationError, 
+  syncUrlFromState, 
+  pushQueryHistoryEntry, 
+  initializeFromUrl 
+} = useExploreUrlSync();
 
 const {
   logchefQuery,
@@ -152,6 +151,16 @@ let lastExecutionKey = "";
 const displayTimezone = computed(() =>
   localStorage.getItem("logchef_timezone") === "utc" ? "utc" : "local"
 );
+
+// Display mode for table vs compact view
+const displayMode = ref<'table' | 'compact'>(
+  (localStorage.getItem("logchef_display_mode") as 'table' | 'compact') || 'table'
+);
+
+// Watch display mode changes and persist to localStorage
+watch(displayMode, (newMode) => {
+  localStorage.setItem("logchef_display_mode", newMode);
+}, { immediate: false });
 
 // UI state computed properties
 const showLoadingState = computed(
@@ -395,8 +404,7 @@ function resetQueriesForSourceChange() {
   exploreStore.resetQueryContentForSourceChange();
 }
 
-// Route/store sync now handled by useRouteSync
-// Minimal watch: load saved queries when source changes (no source mutation)
+// Load saved queries when source changes
 watch(
   () => currentSourceId.value,
   async (newSourceId, oldSourceId) => {
@@ -419,13 +427,13 @@ watch(
     const t = teamParam ? parseInt(teamParam as string) : null;
     const s = sourceParam ? parseInt(sourceParam as string) : null;
     if (t && t !== currentTeamId.value) {
-      await changeTeam(t);
+      await handleTeamChange(t);
       // If URL includes a specific source, switch to it after team change
       if (s) {
-        await changeSource(s);
+        await handleSourceChange(s);
       }
     } else if (s && s !== currentSourceId.value) {
-      await changeSource(s);
+      await handleSourceChange(s);
     }
   }
 )
@@ -908,8 +916,8 @@ watch(
 // Component lifecycle
 onMounted(async () => {
   try {
-    // Single hydration entry point
-    await hydrateFromUrl();
+    // Initialize from URL parameters
+    await initializeFromUrl();
 
     // Execute initial query if we have required parameters and no query has been executed yet
     setTimeout(async () => {
@@ -1260,17 +1268,51 @@ onBeforeUnmount(() => {
             <div class="flex-1 overflow-hidden flex flex-col border-t mt-2">
               <!-- Results Area -->
               <div class="flex-1 overflow-hidden relative bg-background">
+                <!-- Display Mode Toggle (always visible when we have data) -->
+                <div v-if="exploreStore.logs?.length > 0" class="flex items-center justify-between p-2 border-b bg-muted/30">
+                  <div class="text-sm font-medium">
+                    {{ exploreStore.logs?.length?.toLocaleString() }} logs
+                  </div>
+                  <div class="flex items-center space-x-1">
+                    <Button variant="ghost" size="sm" class="h-8 px-2 text-xs"
+                        :class="{ 'bg-muted': displayMode === 'table' }" 
+                        @click="displayMode = 'table'"
+                        title="Table view">
+                        <Rows4 class="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="sm" class="h-8 px-2 text-xs"
+                        :class="{ 'bg-muted': displayMode === 'compact' }" 
+                        @click="displayMode = 'compact'"
+                        title="Compact view">
+                        <TerminalSquare class="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
                 <!-- Results Table -->
                 <template v-if="exploreStore.logs?.length > 0 || isExecutingQuery">
-                  <!-- Render DataTable only if columns are available -->
-                  <DataTable v-if="exploreStore.columns?.length > 0"
-                    :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}`"
-                    :columns="exploreStore.columns as any" :data="exploreStore.logs" :stats="exploreStore.queryStats"
-                    :is-loading="isExecutingQuery" :source-id="String(exploreStore.sourceId)"
-                    :team-id="teamsStore.currentTeamId" :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field
-                      " :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field
-                        " :timezone="displayTimezone" :query-fields="queryFields" :regex-highlights="regexHighlights"
-                    :active-mode="activeMode" @drill-down="handleDrillDown" />
+                  <!-- Render DataTable or CompactLogList based on display mode -->
+                  <component
+                    v-if="exploreStore.columns?.length > 0"
+                    :is="displayMode === 'table' ? DataTable : CompactLogList"
+                    :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}-${displayMode}`"
+                    :columns="exploreStore.columns as any"
+                    :data="exploreStore.logs"
+                    :logs="exploreStore.logs"
+                    :stats="exploreStore.queryStats"
+                    :is-loading="isExecutingQuery"
+                    :source-id="String(exploreStore.sourceId)"
+                    :team-id="teamsStore.currentTeamId"
+                    :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
+                    :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field"
+                    :timezone="displayTimezone"
+                    :query-fields="queryFields"
+                    :regex-highlights="regexHighlights"
+                    :active-mode="activeMode"
+                    :display-mode="displayMode"
+                    @drill-down="handleDrillDown"
+                    @update:display-mode="displayMode = $event"
+                  />
 
                   <!-- Loading placeholder -->
                   <div v-else-if="isExecutingQuery"
