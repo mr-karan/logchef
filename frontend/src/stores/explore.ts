@@ -192,6 +192,12 @@ export const useExploreStore = defineStore("explore", () => {
     isExecutingQuery.value
   );
 
+  // Computed property to check if histogram should be generated
+  const isHistogramEligible = computed(() => {
+    // Simple rule: Only LogchefQL queries in LogchefQL mode are eligible for histogram
+    return state.data.value.activeMode === 'logchefql';
+  });
+
   // Key computed properties from refactoring plan
 
   // 1. Internal computed property to translate LogchefQL to SQL
@@ -480,24 +486,22 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.rawSql = sql;
   }
 
-  // Set active mode with mode switching logic
+  // Set active mode with simplified switching logic
   function setActiveMode(mode: 'logchefql' | 'sql') {
     const currentMode = state.data.value.activeMode;
     if (mode === currentMode) return;
 
-    // Mode switching logic
+    // Simple mode switching: translate LogchefQL to SQL when switching to SQL mode
     if (mode === 'sql' && currentMode === 'logchefql') {
-      // TO SQL FROM LOGCHEFQL
-      const { logchefqlCode, rawSql } = state.data.value;
-
+      const { logchefqlCode } = state.data.value;
+      
       if (logchefqlCode && _logchefQlTranslationResult.value?.sql) {
         // If LogchefQL exists and translates, set rawSql
         state.data.value.rawSql = _logchefQlTranslationResult.value.sql;
-      } else if (!rawSql) {
-        // If rawSql is empty, generate default SQL
+      } else {
+        // If no LogchefQL code, generate default SQL
         const sourcesStore = useSourcesStore();
         if (sourcesStore.getCurrentSourceTableName && state.data.value.timeRange) {
-          // Use SqlManager to generate default SQL
           const result = SqlManager.generateDefaultSql({
             tableName: sourcesStore.getCurrentSourceTableName,
             tsField: sourcesStore.currentSourceDetails?._meta_ts_field || 'timestamp',
@@ -512,7 +516,6 @@ export const useExploreStore = defineStore("explore", () => {
         }
       }
     }
-    // TO LOGCHEFQL FROM SQL - just preserve logchefqlCode, no reverse translation
 
     // Update the mode
     state.data.value.activeMode = mode;
@@ -1212,6 +1215,28 @@ export const useExploreStore = defineStore("explore", () => {
   async function fetchHistogramData(sql?: string, granularity?: string) {
     const operationKey = 'fetchHistogramData';
 
+    // Check if histogram is eligible for current query state
+    if (!isHistogramEligible.value) {
+      console.log("Explore store: Skipping histogram - only available for LogchefQL mode", {
+        activeMode: state.data.value.activeMode
+      });
+      
+      // Clear histogram data and set appropriate state
+      state.data.value.histogramData = [];
+      state.data.value.histogramGranularity = null;
+      state.data.value.histogramError = "Histogram is only available for LogchefQL queries";
+      state.data.value.isLoadingHistogram = false;
+      
+      return {
+        success: false,
+        error: {
+          status: "skipped",
+          message: "Histogram is only available for LogchefQL queries",
+          error_type: "HistogramSkipped"
+        }
+      };
+    }
+
     // Set loading state
     state.data.value.isLoadingHistogram = true;
     state.data.value.histogramError = null;
@@ -1490,5 +1515,8 @@ export const useExploreStore = defineStore("explore", () => {
     isExecutingQuery,
     canCancelQuery,
     isCancellingQuery: computed(() => state.data.value.isCancellingQuery),
+    
+    // Histogram eligibility
+    isHistogramEligible,
   };
 });

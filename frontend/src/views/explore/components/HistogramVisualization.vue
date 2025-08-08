@@ -22,6 +22,7 @@ const isExecutingQuery = computed(() => exploreStore.isLoadingOperation('execute
 const timeRange = computed(() => exploreStore.timeRange)
 const groupByField = computed(() => exploreStore.groupByField === '__none__' ? undefined : exploreStore.groupByField)
 const sourceId = computed(() => exploreStore.sourceId)
+const isHistogramEligible = computed(() => exploreStore.isHistogramEligible)
 
 // Event handlers for histogram interactions
 const handleZoomTimeRange = (range: TimeRangeUpdateEvent) => {
@@ -34,7 +35,8 @@ const handleTimeRangeUpdate = (range: TimeRangeUpdateEvent) => {
 </script>
 
 <template>
-  <div class="histogram-container">
+  <!-- Only show histogram if query is eligible -->
+  <div v-if="isHistogramEligible" class="histogram-container">
     <LogHistogram
       :key="`histogram-${sourceId}`"
       :time-range="timeRange"
@@ -43,5 +45,12 @@ const handleTimeRangeUpdate = (range: TimeRangeUpdateEvent) => {
       @zoom-time-range="handleZoomTimeRange"
       @update:timeRange="handleTimeRangeUpdate"
     />
+  </div>
+  
+  <!-- Show message when histogram is not available -->
+  <div v-else class="histogram-unavailable-message">
+    <div class="flex items-center justify-center h-16 text-sm text-muted-foreground">
+      <span>📊 Histogram is only available for LogchefQL queries</span>
+    </div>
   </div>
 </template>
