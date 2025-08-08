@@ -57,13 +57,16 @@ const savedQueriesStore = useSavedQueriesStore();
 const { toast } = useToast();
 
 // Composables
-const {
-  isInitializing,
-  initializationError,
-  initializeFromUrl,
-  syncUrlFromState,
-  pushQueryHistoryEntry,
-} = useExploreUrlSync();
+import { useRouteSync } from '@/composables/useRouteSync';
+const { isHydrating, hydrationError, hydrateFromUrl, changeTeam, changeSource } = useRouteSync();
+
+// Back-compat flags used in template
+const isInitializing = isHydrating;
+const initializationError = hydrationError;
+
+// Minimal stubs for old methods used below
+const syncUrlFromState = () => {};
+const pushQueryHistoryEntry = () => {};
 
 const {
   logchefQuery,
@@ -392,112 +395,40 @@ function resetQueriesForSourceChange() {
   exploreStore.resetQueryContentForSourceChange();
 }
 
-// Watch for source changes to fetch details AND saved queries
+// Route/store sync now handled by useRouteSync
+// Minimal watch: load saved queries when source changes (no source mutation)
 watch(
   () => currentSourceId.value,
   async (newSourceId, oldSourceId) => {
-    // Skip during initialization to prevent redundant calls
-    if (isInitializing.value) {
-      return;
-    }
-
-    // Reset sort keys info panel state on source change
-    sortKeysInfoOpen.value = false;
-
-    if (newSourceId !== oldSourceId || (!oldSourceId && newSourceId)) {
-      // Reset queries when source changes
-      resetQueriesForSourceChange();
-
-      // Fetch Source Details
-      if (newSourceId && newSourceId > 0) {
-        // Verify source existence
-        const sourceExists = availableSources.value.some(
-          (source) => source.id === newSourceId
-        );
-        if (sourceExists) {
-          // Fetch details (debounced)
-          setTimeout(async () => {
-            if (currentSourceId.value === newSourceId) {
-              // Check if still the same after timeout
-              await sourcesStore.loadSourceDetails(newSourceId);
-              
-              // Execute query after source details are loaded if we have valid data
-              if (
-                sourcesStore.currentSourceDetails?.id === newSourceId &&
-                sourcesStore.hasValidCurrentSource &&
-                exploreStore.timeRange
-              ) {
-                console.log("LogExplorer: Executing query after source change and details loaded");
-                // Execute query immediately after source details are confirmed loaded
-                handleQueryExecution('source-change-query');
-              }
-            }
-          }, 50);
-
-          // Fetch Saved Queries
-          if (currentTeamId.value) {
-            // Ensure team ID is available
-            await loadSourceQueries(currentTeamId.value, newSourceId);
-          }
-        }
-      } else {
-        // Clear saved queries if source is deselected
-        if (currentTeamId.value) {
-          await loadSourceQueries(currentTeamId.value, 0);
-        }
-      }
+    if (isInitializing.value) return;
+    if (!newSourceId || !currentTeamId.value) return;
+    try {
+      await loadSourceQueries(currentTeamId.value, newSourceId);
+    } catch (e) {
+      console.error('Error loading saved queries for source:', e);
     }
   },
-  { immediate: false } // Don't run immediately, wait for initialization
-);
+  { immediate: false }
+)
 
-// Watch for changes in currentTeamId to update sources AND saved queries
+// Keep store selection in sync with URL when team/source query params change
 watch(
-  () => currentTeamId.value,
-  async (newTeamId, oldTeamId) => {
-    // Skip during initialization
-    if (isInitializing.value) {
-      return;
-    }
-
-    if (newTeamId !== oldTeamId && newTeamId) {
-      // Reset queries when team changes
-      resetQueriesForSourceChange();
-
-      // Load sources for the new team
-      const sourcesResult = await sourcesStore.loadTeamSources(newTeamId);
-      let newSourceIdToLoadQueries: number | null = null;
-
-      if (
-        !sourcesResult.success ||
-        !sourcesResult.data ||
-        sourcesResult.data.length === 0
-      ) {
-        exploreStore.setSource(0);
-        newSourceIdToLoadQueries = 0; // Signal to load empty queries
-      } else {
-        const currentSourceExists = sourcesStore.teamSources.some(
-          (source) => source.id === exploreStore.sourceId
-        );
-        if (!currentSourceExists && sourcesStore.teamSources.length > 0) {
-          const firstSourceId = sourcesStore.teamSources[0].id;
-          exploreStore.setSource(firstSourceId);
-          await sourcesStore.loadSourceDetails(firstSourceId);
-          newSourceIdToLoadQueries = firstSourceId; // Load queries for the new source
-        } else {
-          // If current source is still valid, load its queries
-          newSourceIdToLoadQueries = exploreStore.sourceId;
-        }
+  () => [route.query.team, route.query.source],
+  async ([teamParam, sourceParam]) => {
+    if (isInitializing.value) return;
+    const t = teamParam ? parseInt(teamParam as string) : null;
+    const s = sourceParam ? parseInt(sourceParam as string) : null;
+    if (t && t !== currentTeamId.value) {
+      await changeTeam(t);
+      // If URL includes a specific source, switch to it after team change
+      if (s) {
+        await changeSource(s);
       }
-
-      // Load Saved Queries for the new team/source combination
-      if (newSourceIdToLoadQueries !== null) {
-        await loadSourceQueries(newTeamId, newSourceIdToLoadQueries);
-      }
+    } else if (s && s !== currentSourceId.value) {
+      await changeSource(s);
     }
-  },
-  { immediate: false } // Don't run immediately
-);
+  }
+)
 
 // Function to handle drill-down from DataTable to add a filter condition
 const handleDrillDown = (data: {
@@ -902,16 +833,35 @@ watch(
 
     console.log(`LogExplorer: query_id changed from ${oldQueryId} to ${newQueryId}`);
 
+    // Ensure team/source in URL match current selection to avoid race conditions
+    const urlTeam = route.query.team ? parseInt(route.query.team as string) : null;
+    const urlSource = route.query.source ? parseInt(route.query.source as string) : null;
+
+    // If URL doesn't specify team/source yet, or mismatch with current, wait briefly
+    if (!urlTeam || !urlSource || urlTeam !== currentTeamId.value || urlSource !== currentSourceId.value) {
+      // Poll for up to 500ms for context to align
+      for (let i = 0; i < 5; i++) {
+        await new Promise(r => setTimeout(r, 100));
+        if (
+          route.query.team && route.query.source &&
+          parseInt(route.query.team as string) === (currentTeamId.value ?? 0) &&
+          parseInt(route.query.source as string) === (currentSourceId.value ?? 0)
+        ) {
+          break;
+        }
+      }
+    }
+
     // If we have a query ID, team ID and source ID, load the query
-    if (newQueryId && currentTeamId.value && currentSourceId.value) {
+    if (newQueryId && urlTeam && urlSource) {
       try {
         console.log(`LogExplorer: Loading saved query ${newQueryId}`);
         isLoadingQuery.value = true;
 
-        // Fetch query details
+        // Fetch query details using the team/source from URL to avoid mismatches
         const fetchResult = await savedQueriesStore.fetchTeamSourceQueryDetails(
-          currentTeamId.value,
-          currentSourceId.value,
+          urlTeam,
+          urlSource,
           newQueryId as string
         );
 
@@ -958,60 +908,22 @@ watch(
 // Component lifecycle
 onMounted(async () => {
   try {
-    // Reset admin teams and load user teams
-    teamsStore.resetAdminTeams();
+    // Single hydration entry point
+    await hydrateFromUrl();
 
-    // Initialize state from URL
-    await initializeFromUrl();
-
-    // Force a reload of user teams to ensure latest membership data
-    await teamsStore.loadUserTeams();
-
-    // Skip validation if there's an initialization error - it's already handled
-    if (!initializationError.value) {
-      // After loading teams, verify the current teamId is still valid
+    // Execute initial query if we have required parameters and no query has been executed yet
+    setTimeout(async () => {
       if (
-        currentTeamId.value &&
-        !teamsStore.userBelongsToTeam(currentTeamId.value)
+        !exploreStore.lastExecutionTimestamp &&
+        exploreStore.sourceId &&
+        exploreStore.timeRange &&
+        sourcesStore.currentSourceDetails?.id === exploreStore.sourceId &&
+        sourcesStore.hasValidCurrentSource
       ) {
-        console.log(
-          `Current team ${currentTeamId.value} is no longer accessible, resetting selection`
-        );
-
-        // Select the first available team instead
-        if (teamsStore.userTeams.length > 0) {
-          exploreStore.setSource(0); // First clear the source
-          teamsStore.setCurrentTeam(teamsStore.userTeams[0].id);
-        } else {
-          exploreStore.setSource(0);
-          teamsStore.setCurrentTeam(0); // Clear the current team
-        }
+        console.log("LogExplorer: Executing initial query on mount");
+        await handleQueryExecution('initial-mount-query');
       }
-
-      // Execute initial query if we have required parameters and no query has been executed yet
-      // Wait a bit to ensure the source details are loaded
-      setTimeout(async () => {
-        // Only execute if we have enough parameters and no query has been executed yet
-        if (
-          !exploreStore.lastExecutionTimestamp &&  // No query executed yet
-          exploreStore.sourceId &&
-          exploreStore.timeRange &&
-          sourcesStore.currentSourceDetails?.id === exploreStore.sourceId &&
-          sourcesStore.hasValidCurrentSource // Ensure source is actually valid/connected
-        ) {
-          console.log("LogExplorer: Executing initial query on mount");
-          await handleQueryExecution('initial-mount-query');
-        } else {
-          console.log("LogExplorer: Skipping initial query execution, missing requirements or query already executed", {
-            hasLastExecution: !!exploreStore.lastExecutionTimestamp,
-            sourceId: exploreStore.sourceId,
-            hasTimeRange: !!exploreStore.timeRange,
-            sourceDetailsLoaded: sourcesStore.currentSourceDetails?.id === exploreStore.sourceId,
-            hasValidSource: sourcesStore.hasValidCurrentSource
-          });
-        }
-      }, 500); // Increased timeout to allow more time for source details to load
-    }
+    }, 300);
   } catch (error) {
     console.error("Error during LogExplorer mount:", error);
     toast({

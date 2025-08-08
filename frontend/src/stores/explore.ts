@@ -412,7 +412,12 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   // Actions
-  function setSource(sourceId: number) {
+  function setSource(sourceId: number, opts?: { origin?: 'url' | 'user' | 'auto' }) {
+    // If we're auto-changing and a saved query is selected, avoid clobbering
+    if (opts?.origin === 'auto' && state.data.value.selectedQueryId) {
+      return;
+    }
+
     // Clear query results to prevent showing old data
     state.data.value.generatedDisplaySql = null;
     state.data.value.logs = [];

@@ -4,6 +4,7 @@ import { useSourcesStore } from '@/stores/sources'
 import { useTeamsStore } from '@/stores/teams'
 import { formatSourceName } from '@/utils/format'
 import type { FieldInfo } from '@/views/explore/types'
+import { useRouteSync } from '@/composables/useRouteSync'
 
 export function useSourceTeamManagement() {
   const exploreStore = useExploreStore()
@@ -47,6 +48,8 @@ export function useSourceTeamManagement() {
     return [...sourceDetails.value.columns].sort((a, b) => a.name.localeCompare(b.name));
   })
 
+  const { changeTeam: routeChangeTeam, changeSource: routeChangeSource } = useRouteSync()
+
   // Team change handler
   async function handleTeamChange(teamIdStr: string) {
     if (isProcessingTeamChange.value) return
@@ -60,33 +63,13 @@ export function useSourceTeamManagement() {
     }
 
     try {
-      // Set immediately to avoid FOUC
-      teamsStore.setCurrentTeam(teamId)
-      
-      // Clear source details BEFORE changing sourceId to prevent flicker
-      sourcesStore.clearCurrentSourceDetails()
-      exploreStore.setSource(0)
-
-      // Load team sources
-      const sourcesResult = await sourcesStore.loadTeamSources(teamId)
-
-      // Only after we have sources loaded, set the first source as active
-      if (sourcesResult.success && sourcesResult.data?.length) {
-        // Assert the type here since we know data is non-empty
-        const firstSourceId = (sourcesResult.data as { id: number }[])[0].id
-        exploreStore.setSource(firstSourceId)
-        
-        // Load source details AFTER setting source ID
-        await sourcesStore.loadSourceDetails(firstSourceId)
-      }
+      await routeChangeTeam(teamId)
     } catch (error) {
       console.error('Error changing team:', error)
     } finally {
-      // Use nextTick to ensure state updates propagate before resetting the flag
-      // This gives a smoother transition between states
       setTimeout(() => {
         isProcessingTeamChange.value = false
-      }, 50) // Short delay to ensure state transitions properly
+      }, 50)
     }
   }
 
@@ -97,11 +80,8 @@ export function useSourceTeamManagement() {
 
     const sourceId = parseInt(sourceIdStr)
     if (isNaN(sourceId) || sourceId <= 0) {
-      // First clear source details to avoid showing old source info
       sourcesStore.clearCurrentSourceDetails()
       exploreStore.setSource(0)
-      
-      // Use setTimeout instead of nextTick for consistent timing
       setTimeout(() => {
         isProcessingSourceChange.value = false
       }, 50)
@@ -115,21 +95,13 @@ export function useSourceTeamManagement() {
     }
 
     try {
-      // Clear source details BEFORE setting source ID to prevent flickering
-      sourcesStore.clearCurrentSourceDetails()
-      
-      // Then set source ID (this will trigger UI changes)
-      exploreStore.setSource(sourceId)
-      
-      // Load source details
-      await sourcesStore.loadSourceDetails(sourceId)
+      await routeChangeSource(sourceId)
     } catch (error) {
       console.error('Error changing source:', error)
     } finally {
-      // Use setTimeout for consistent timing
       setTimeout(() => {
         isProcessingSourceChange.value = false
-      }, 50) // Short delay to ensure state transitions properly
+      }, 50)
     }
   }
 

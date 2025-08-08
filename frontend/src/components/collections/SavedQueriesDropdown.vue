@@ -166,13 +166,17 @@ function getQueryUrl(query: SavedTeamQuery): string {
     try {
       const queryContent = JSON.parse(query.query_content);
       if (queryContent.content) {
-        url += `&q=${encodeURIComponent(queryContent.content)}`;
+        if (queryType === 'logchefql') {
+          url += `&q=${encodeURIComponent(queryContent.content)}`;
+        } else {
+          url += `&sql=${encodeURIComponent(queryContent.content)}`;
+        }
       }
       if (queryContent.limit) {
         url += `&limit=${queryContent.limit}`;
       }
       if (queryContent.timeRange?.absolute) {
-        url += `&start_time=${queryContent.timeRange.absolute.start}&end_time=${queryContent.timeRange.absolute.end}`;
+        url += `&start=${queryContent.timeRange.absolute.start}&end=${queryContent.timeRange.absolute.end}`;
       }
     } catch (error) {
       console.error('Error parsing query content:', error);

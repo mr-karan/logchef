@@ -454,7 +454,7 @@ export function useSavedQueries(
 
       // CENTRALIZED URL HANDLING: Create URL query parameters directly
       // This ensures consistency between dropdown and saved queries view
-      const queryParams = { ...route.query }; // Start with current params
+      const queryParams: Record<string, string> = {};
 
       // Always include these critical parameters for proper state tracking
       queryParams.team = queryData.team_id.toString();
@@ -465,8 +465,9 @@ export function useSavedQueries(
       const startTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.start);
       const endTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.end);
       if (startTime !== null && endTime !== null) {
-        queryParams.start_time = startTime.toString();
-        queryParams.end_time = endTime.toString();
+        // Use canonical keys expected by explorer
+        queryParams.start = startTime.toString();
+        queryParams.end = endTime.toString();
       }
 
       // Set limit from current store state
@@ -475,7 +476,12 @@ export function useSavedQueries(
       // Set mode and query content
       queryParams.mode = isLogchefQL ? 'logchefql' : 'sql';
       if (queryToLoad) {
-        queryParams.q = encodeURIComponent(queryToLoad);
+        // For SQL mode use `sql`, for logchefql use `q`
+        if (isLogchefQL) {
+          queryParams.q = queryToLoad;
+        } else {
+          queryParams.sql = queryToLoad;
+        }
       }
 
       // Update URL with complete state (replaces syncUrlFromState call)
@@ -537,8 +543,8 @@ export function useSavedQueries(
       if (queryContent.timeRange !== null &&
           queryContent.timeRange?.absolute?.start &&
           queryContent.timeRange?.absolute?.end) {
-        url += `&start_time=${queryContent.timeRange.absolute.start}`
-        url += `&end_time=${queryContent.timeRange.absolute.end}`
+        url += `&start=${queryContent.timeRange.absolute.start}`
+        url += `&end=${queryContent.timeRange.absolute.end}`
       }
 
       // Add mode parameter based on query type
@@ -546,7 +552,11 @@ export function useSavedQueries(
 
       // Add the query content (actual query text)
       if (queryContent.content) {
-        url += `&q=${encodeURIComponent(queryContent.content)}`
+        if (queryType === 'logchefql') {
+          url += `&q=${encodeURIComponent(queryContent.content)}`
+        } else {
+          url += `&sql=${encodeURIComponent(queryContent.content)}`
+        }
       }
 
       return url

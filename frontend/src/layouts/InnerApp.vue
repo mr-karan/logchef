@@ -55,11 +55,27 @@ import {
 import { useAuthStore } from "@/stores/auth";
 import { useThemeStore } from "@/stores/theme";
 import { useMetaStore } from "@/stores/meta";
-import { ref, onMounted, watch } from "vue";
+import { ref, onMounted, watch, computed } from "vue";
+import { useTeamsStore } from "@/stores/teams";
+import { useExploreStore } from "@/stores/explore";
 
 const authStore = useAuthStore();
 const themeStore = useThemeStore();
 const metaStore = useMetaStore();
+const teamsStore = useTeamsStore();
+const exploreStore = useExploreStore();
+
+const collectionsTo = computed(() => {
+  const team = teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : undefined;
+  const source = exploreStore.sourceId ? exploreStore.sourceId.toString() : undefined;
+  return {
+    path: "/logs/saved",
+    query: {
+      ...(team ? { team } : {}),
+      ...(source ? { source } : {}),
+    },
+  };
+});
 
 // Get initial sidebar state from cookie or default to true
 const getSavedState = () => {
@@ -211,7 +227,7 @@ const navItems = [
                   ">
                     <SidebarMenuButton asChild :tooltip="item.title"
                       class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
-                      <router-link :to="item.url" class="flex items-center" active-class="font-medium">
+                      <router-link :to="item.url === '/logs/saved' ? collectionsTo : item.url" class="flex items-center" active-class="font-medium">
                         <component :is="item.icon" class="size-5" :class="sidebarOpen ? 'mr-3 ml-1' : 'mx-auto'" />
                         <span v-if="sidebarOpen">{{ item.title }}</span>
                       </router-link>
@@ -231,7 +247,7 @@ const navItems = [
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild :tooltip="item.title"
                       class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
-                      <router-link :to="item.url" class="flex items-center" active-class="font-medium">
+                      <router-link :to="item.url === '/logs/saved' ? collectionsTo : item.url" class="flex items-center" active-class="font-medium">
                         <component :is="item.icon" class="size-5" :class="sidebarOpen ? 'mr-3 ml-1' : 'mx-auto'" />
                         <span v-if="sidebarOpen">{{ item.title }}</span>
                       </router-link>
@@ -251,7 +267,7 @@ const navItems = [
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild :tooltip="item.title"
                       class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
-                      <router-link :to="item.url" class="flex items-center" active-class="font-medium">
+                      <router-link :to="item.url === '/logs/saved' ? collectionsTo : item.url" class="flex items-center" active-class="font-medium">
                         <component :is="item.icon" class="size-5" :class="sidebarOpen ? 'mr-3 ml-1' : 'mx-auto'" />
                         <span v-if="sidebarOpen">{{ item.title }}</span>
                       </router-link>

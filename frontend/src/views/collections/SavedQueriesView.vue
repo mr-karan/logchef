@@ -207,6 +207,15 @@ onMounted(async () => {
       if (src) currentSelectedSource.value = src;
       else currentSelectedSource.value = undefined;
 
+      // Ensure URL always shows team and source on initial load
+      router.replace({
+        path: "/logs/saved",
+        query: {
+          team: teamsStore.currentTeamId?.toString() || "",
+          source: selectedSourceId.value,
+        },
+      });
+
       // Don't explicitly call loadSourceQueries here,
       // the watcher on selectedSourceId will handle it
     }
