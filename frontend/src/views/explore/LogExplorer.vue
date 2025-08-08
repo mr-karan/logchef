@@ -10,7 +10,7 @@ import {
 import { useRouter, useRoute } from "vue-router";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/composables/useToast";
 import { Share2, WandSparkles } from "lucide-vue-next";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useExploreStore } from "@/stores/explore";

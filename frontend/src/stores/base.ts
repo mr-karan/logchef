@@ -3,7 +3,7 @@ import type { Ref } from "vue";
 import type { APIErrorResponse } from "@/api/types";
 import { useApiQuery } from "@/composables/useApiQuery";
 import { useLoadingState } from "@/composables/useLoadingState";
-import { useToast } from "@/components/ui/toast/use-toast";
+import { useToast } from "@/composables/useToast";
 import { formatErrorMessage, getErrorType, formatErrorTypeToTitle } from "@/api/error-handler";
 
 export interface BaseState<T> {

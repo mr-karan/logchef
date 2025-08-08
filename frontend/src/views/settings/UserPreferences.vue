@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
 
 const { toast } = useToast();

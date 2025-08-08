@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Toaster } from '@/components/ui/toast'
+import { Toaster } from '@/components/ui/sonner'
+import 'vue-sonner/style.css'
 import OuterApp from '@/layouts/OuterApp.vue'
 import InnerApp from '@/layouts/InnerApp.vue'
 import { computed, onMounted } from 'vue'
@@ -24,7 +25,12 @@ const layout = computed(() => {
 </script>
 
 <template>
-  <Toaster />
+  <Toaster 
+    position="top-right" 
+    closeButton 
+    richColors
+    :visibleToasts="5"
+  />
   <component :is="layout">
     <router-view />
   </component>

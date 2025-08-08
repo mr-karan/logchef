@@ -848,9 +848,9 @@ export const useExploreStore = defineStore("explore", () => {
         apiCall: async () => exploreApi.getLogs(state.data.value.sourceId, params, currentTeamId, abortController.signal),
         // Update results ONLY on successful API call with data
         onSuccess: (data: QuerySuccessResponse | null) => {
-          if (data && data.logs) {
+          if (data && (data as any).data) {
             // We have new data, update the store
-            state.data.value.logs = data.logs;
+            state.data.value.logs = (data as any).data;
             state.data.value.columns = data.columns || [];
             state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
             // Check if query_id exists in params before accessing it

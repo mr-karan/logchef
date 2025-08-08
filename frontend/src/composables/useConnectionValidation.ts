@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { useToast } from '@/components/ui/toast'
+import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { useSourcesStore } from '@/stores/sources'
 

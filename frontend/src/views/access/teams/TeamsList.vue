@@ -28,7 +28,7 @@ import { type Team } from '@/api/teams'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import AddTeam from './AddTeam.vue'
 import { useTeamsStore } from '@/stores/teams'
-import { useToast } from '@/components/ui/toast/use-toast'
+import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/utils/format'
 
 const router = useRouter()

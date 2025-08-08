@@ -21,7 +21,7 @@ import { useExploreStore } from '@/stores/explore';
 import { useVariableStore } from '@/stores/variables';
 import { useRoute } from 'vue-router';
 import { TOAST_DURATION } from '@/lib/constants';
-import { useToast } from '@/components/ui/toast';
+import { useToast } from '@/composables/useToast';
 import {storeToRefs} from "pinia";
 
 const props = defineProps<{

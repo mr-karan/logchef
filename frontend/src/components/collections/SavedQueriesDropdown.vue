@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useToast } from '@/components/ui/toast';
+import { useToast } from '@/composables/useToast';
 import { TOAST_DURATION } from '@/lib/constants';
 import { type SavedTeamQuery } from '@/api/savedQueries';
 import { useSavedQueriesStore } from '@/stores/savedQueries';

@@ -17,7 +17,7 @@ import type {
   APIResponse,
   APISuccessResponse
 } from "@/api/types";
-import { useToast } from "@/components/ui/toast/use-toast";
+import { useToast } from "@/composables/useToast";
 import { useAuthStore } from "./auth";
 
 export interface TeamWithMemberCount extends Team {

@@ -1,4 +1,4 @@
-import { useToast } from "@/components/ui/toast/use-toast";
+import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
 import type { AxiosError } from "axios";
 

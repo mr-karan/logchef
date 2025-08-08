@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue'
-import { useToast } from '@/components/ui/toast'
+import { useToast } from '@/composables/useToast'
 import ErrorAlert from '@/components/ui/ErrorAlert.vue'
 import { useRoute } from 'vue-router'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'

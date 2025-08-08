@@ -5,7 +5,7 @@ import json from 'highlight.js/lib/languages/json'
 import 'highlight.js/styles/stackoverflow-light.css'
 import { Button } from '@/components/ui/button'
 import { Copy, History, Check } from 'lucide-vue-next'
-import { useToast } from '@/components/ui/toast'
+import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
 
 const props = defineProps<{

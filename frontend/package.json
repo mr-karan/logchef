@@ -47,6 +47,7 @@
     "vue": "^3.5.13",
     "vue-json-pretty": "^2.4.0",
     "vue-router": "^4.5.0",
+    "vue-sonner": "^2.0.2",
     "zod": "^3.24.3"
   },
   "devDependencies": {

@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
-import { useToast } from '@/components/ui/toast'
+import { useToast } from '@/composables/useToast'
 
 const authStore = useAuthStore()
 const router = useRouter()

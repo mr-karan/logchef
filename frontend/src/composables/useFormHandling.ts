@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { useToast } from '@/components/ui/toast'
+import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
 
 export function useFormHandling<T, R = any>(

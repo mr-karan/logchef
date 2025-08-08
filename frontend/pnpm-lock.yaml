@@ -110,6 +110,9 @@ importers:
       vue-router:
         specifier: ^4.5.0
         version: 4.5.0(vue@3.5.13(typescript@5.6.3))
+      vue-sonner:
+        specifier: ^2.0.2
+        version: 2.0.2
       zod:
         specifier: ^3.24.3
         version: 3.24.3
@@ -1608,6 +1611,9 @@ packages:
     peerDependencies:
       vue: ^3.2.0
 
+  vue-sonner@2.0.2:
+    resolution: {integrity: sha512-cN6onnN6aBOZ56YWN8CMj6t4zqbz/XlenE+jx5z+mgduMMelFo6B6G+e2Q6hhxU9YFiV16MXG2MBPluZabyElQ==}
+
   vue-tsc@2.2.10:
     resolution: {integrity: sha512-jWZ1xSaNbabEV3whpIDMbjVSVawjAyW+x1n3JeGQo7S0uv2n9F/JMgWW90tGWNFRKya4YwKMZgCtr0vRAM7DeQ==}
     hasBin: true
@@ -3012,6 +3018,8 @@ snapshots:
     dependencies:
       '@vue/devtools-api': 6.6.4
       vue: 3.5.13(typescript@5.6.3)
+
+  vue-sonner@2.0.2: {}
 
   vue-tsc@2.2.10(typescript@5.6.3):
     dependencies:

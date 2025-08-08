@@ -5,7 +5,7 @@ import { useSavedQueriesStore } from '@/stores/savedQueries'
 import { useAuthStore } from '@/stores/auth';
 import { useTeamsStore } from '@/stores/teams'; // Corrected path
 import { useVariableStore } from '@/stores/variables'
-import { useToast } from '@/components/ui/toast'
+import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { getErrorMessage } from '@/api/types'
 import type { SaveQueryFormData } from '@/views/explore/types'

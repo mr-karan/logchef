@@ -7,7 +7,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useToast } from '@/components/ui/toast'
+import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { ref, watch } from 'vue'
 import { exploreApi } from '@/api/explore'
