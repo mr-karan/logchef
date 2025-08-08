@@ -28,6 +28,7 @@ import { type TimeRange } from '@/types/query';
 import { getErrorMessage } from '@/api/types';
 import { HistogramService, type HistogramData } from '@/services/HistogramService';
 import { useVariables } from "@/composables/useVariables";
+import { useToast } from "@/composables/useToast";
 
 // Helper function to get formatted table name
 export function getFormattedTableName(source: any): string {
@@ -843,73 +844,80 @@ export const useExploreStore = defineStore("explore", () => {
         usedDefaultSql
       });
 
-      // Use the centralized API calling mechanism from base store
-      const response = await state.callApi({
-        apiCall: async () => exploreApi.getLogs(state.data.value.sourceId, params, currentTeamId, abortController.signal),
-        // Update results ONLY on successful API call with data
-        onSuccess: (data: QuerySuccessResponse | null) => {
-          if (data && (data as any).data) {
-            // We have new data, update the store
-            state.data.value.logs = (data as any).data;
-            state.data.value.columns = data.columns || [];
-            state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
-            // Check if query_id exists in params before accessing it
-            if (data.params && typeof data.params === 'object' && "query_id" in data.params) {
-              state.data.value.queryId = data.params.query_id as string;
+      let response;
+      
+      try {
+        // Use the centralized API calling mechanism from base store
+        response = await state.callApi({
+          apiCall: async () => exploreApi.getLogs(state.data.value.sourceId, params, currentTeamId, abortController.signal),
+          // Update results ONLY on successful API call with data
+          onSuccess: (data: QuerySuccessResponse | null) => {
+            if (data && (data.data || data.logs)) {
+              // We have new data, update the store
+              // Handle both new 'data' property and legacy 'logs' property
+              state.data.value.logs = data.data || data.logs || [];
+              state.data.value.columns = data.columns || [];
+              state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
+              // Check if query_id exists in params before accessing it
+              if (data.params && typeof data.params === 'object' && "query_id" in data.params) {
+                state.data.value.queryId = data.params.query_id as string;
+              } else {
+                state.data.value.queryId = null; // Reset if not present
+              }
             } else {
-              state.data.value.queryId = null; // Reset if not present
+              // Query was successful but returned no logs or null data
+              console.warn("Query successful but received no logs or null data.");
+              // Clear the logs, columns, stats now that the API call is complete
+              state.data.value.logs = [];
+              state.data.value.columns = [];
+              state.data.value.queryStats = DEFAULT_QUERY_STATS;
+              state.data.value.queryId = null;
             }
-          } else {
-            // Query was successful but returned no logs or null data
-            console.warn("Query successful but received no logs or null data.");
-            // Clear the logs, columns, stats now that the API call is complete
-            state.data.value.logs = [];
-            state.data.value.columns = [];
-            state.data.value.queryStats = DEFAULT_QUERY_STATS;
-            state.data.value.queryId = null;
-          }
-          
-          // Extract query ID from response for cancellation tracking
-          if (data && typeof data === 'object' && 'query_id' in data) {
-            state.data.value.currentQueryId = data.query_id as string;
-          }
+            
+            // Extract query ID from response for cancellation tracking
+            if (data && data.query_id) {
+              state.data.value.currentQueryId = data.query_id;
+              console.log("Stored query ID for cancellation:", state.data.value.currentQueryId);
+            }
 
-          // Update lastExecutedState after successful execution
-          _updateLastExecutedState();
+            // Update lastExecutedState after successful execution
+            _updateLastExecutedState();
 
-          // Restore the relative time if it was set before
+            // Restore the relative time if it was set before
+            if (relativeTime) {
+              state.data.value.selectedRelativeTime = relativeTime;
+            }
+          },
+          operationKey: operationKey,
+        });
+
+        // Ensure lastExecutionTimestamp is set even if there was an error
+        if (!response.success && state.data.value.lastExecutionTimestamp === null) {
+          state.data.value.lastExecutionTimestamp = Date.now();
+
+          // Restore the relative time if it was set before execution, even on error
           if (relativeTime) {
             state.data.value.selectedRelativeTime = relativeTime;
           }
-        },
-        operationKey: operationKey,
-      });
-
-      // Ensure lastExecutionTimestamp is set even if there was an error
-      if (!response.success && state.data.value.lastExecutionTimestamp === null) {
-        state.data.value.lastExecutionTimestamp = Date.now();
-
-        // Restore the relative time if it was set before execution, even on error
-        if (relativeTime) {
-          state.data.value.selectedRelativeTime = relativeTime;
         }
-      }
 
-      // If the query was successful, also fetch histogram data
-      if (response.success) {
-        console.log("Explore store: Query successful, fetching histogram data with same SQL");
-        // Use a setTimeout to avoid blocking the UI
-        setTimeout(() => {
-          fetchHistogramData(sql).catch(error => {
-            console.error("Error fetching histogram data:", error);
-          });
-        }, 50);
+        // If the query was successful, also fetch histogram data
+        if (response.success) {
+          console.log("Explore store: Query successful, fetching histogram data with same SQL");
+          // Use a setTimeout to avoid blocking the UI
+          setTimeout(() => {
+            fetchHistogramData(sql).catch(error => {
+              console.error("Error fetching histogram data:", error);
+            });
+          }, 50);
+        }
+      } finally {
+        // Clean up AbortController and query ID after query completion - this ALWAYS runs
+        console.log("Cleaning up query state - AbortController and query ID");
+        state.data.value.currentQueryAbortController = null;
+        state.data.value.currentQueryId = null;
+        state.data.value.isCancellingQuery = false;
       }
-
-      // Clean up AbortController and query ID after query completion
-      state.data.value.currentQueryAbortController = null;
-      state.data.value.currentQueryId = null;
-      state.data.value.isCancellingQuery = false;
 
       // Return the response
       return response;
@@ -922,10 +930,30 @@ export const useExploreStore = defineStore("explore", () => {
       return; // Already cancelling
     }
     
+    // Prevent cancelling if there's nothing to cancel
+    if (!state.data.value.currentQueryAbortController && !state.data.value.currentQueryId) {
+      console.warn("Attempted to cancel a query that was already complete.");
+      return;
+    }
+
     state.data.value.isCancellingQuery = true;
     
     try {
-      // First, try to cancel via backend API if we have a query ID
+      // First, abort the HTTP request for immediate user feedback
+      if (state.data.value.currentQueryAbortController) {
+        state.data.value.currentQueryAbortController.abort();
+        console.log("HTTP request aborted");
+        
+        // Show toast notification after successful abort
+        const { toast } = useToast();
+        toast({
+          title: "Query Cancelled",
+          description: "The running query has been cancelled.",
+          variant: "default"
+        });
+      }
+
+      // Then try to cancel via backend API if we have a query ID
       if (state.data.value.currentQueryId) {
         const currentTeamId = useTeamsStore().currentTeamId;
         if (currentTeamId && state.data.value.sourceId) {
@@ -937,24 +965,17 @@ export const useExploreStore = defineStore("explore", () => {
             );
             console.log("Query cancelled via backend API");
           } catch (error) {
-            console.warn("Backend query cancellation failed, falling back to HTTP abort:", error);
+            console.warn("Backend query cancellation failed, but HTTP request was aborted:", error);
+            // Don't show error to user since HTTP cancellation worked
           }
         }
       }
       
-      // Also abort the HTTP request if it's still active
-      if (state.data.value.currentQueryAbortController) {
-        state.data.value.currentQueryAbortController.abort();
-        console.log("HTTP request aborted");
-      }
-      
       console.log("Query cancellation requested");
-    } finally {
-      // Clean up state
-      state.data.value.currentQueryAbortController = null;
-      state.data.value.currentQueryId = null;
-      state.data.value.isCancellingQuery = false;
+    } catch (error) {
+      console.error("An error occurred during the cancellation process:", error);
     }
+    // Note: isCancellingQuery will be reset by executeQuery's finally block to avoid race conditions
   }
 
   // Add function to set relative time range

@@ -46,6 +46,14 @@ export function useApiQuery<T>() {
         return { success: false, error: response as APIErrorResponse };
       }
     } catch (err) {
+      // Handle AbortError (user-initiated cancellation) gracefully
+      if (err instanceof Error && err.name === 'AbortError') {
+        console.log('Query aborted by user - this is expected');
+        // Don't treat user-initiated aborts as operational errors
+        // Don't show error toast or call onError handler for cancellations
+        return { success: false, error: null, aborted: true };
+      }
+
       // Handle unexpected errors
       error.value = err as APIErrorResponse;
       if (options?.showToast !== false) {

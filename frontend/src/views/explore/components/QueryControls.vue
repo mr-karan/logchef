@@ -216,12 +216,6 @@ const clearEditor = () => {
 // Cancel query
 const cancelQuery = () => {
   exploreStore.cancelQuery()
-  toast({
-    title: "Query Cancelled",
-    description: "The running query has been cancelled.",
-    duration: TOAST_DURATION.INFO,
-    variant: "default"
-  })
 }
 </script>
 

@@ -61,12 +61,14 @@ export interface QueryStats {
 }
 
 export interface QuerySuccessResponse {
-  logs: Record<string, any>[] | null;
+  logs?: Record<string, any>[] | null; // For backward compatibility
+  data?: Record<string, any>[] | null; // New structure
   stats: QueryStats;
   params?: QueryParams & {
     source_id: number;
   };
   columns: ColumnInfo[];
+  query_id?: string; // Add query_id for cancellation
 }
 
 export interface QueryErrorResponse {
