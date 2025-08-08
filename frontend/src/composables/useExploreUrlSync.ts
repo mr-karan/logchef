@@ -4,6 +4,7 @@ import { useExploreStore } from '@/stores/explore';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
 import { useSavedQueriesStore } from '@/stores/savedQueries';
+import { contextTransitionInProgress } from '@/composables/useSourceTeamManagement';
 import {
   CalendarDateTime,
   now,
@@ -262,6 +263,12 @@ export function useExploreUrlSync() {
        return;
     }
 
+    // Don't sync during team/source context transitions to prevent race conditions
+    if (contextTransitionInProgress.value) {
+      console.log("Skipping URL sync - team/source context transition in progress");
+      return;
+    }
+
     // Skip this URL sync if the flag is set
     if (skipNextUrlSync.value) {
       console.log("Skipping URL sync as requested - waiting for pushQueryHistoryEntry");
@@ -273,6 +280,16 @@ export function useExploreUrlSync() {
     if (preservingRelativeTime && route.query.relativeTime) {
       console.log(`Protecting relativeTime=${route.query.relativeTime} from URL sync`);
       return;
+    }
+
+    // Validate that current source belongs to current team before syncing
+    if (exploreStore.sourceId && teamsStore.currentTeamId) {
+      const currentTeamSources = sourcesStore.teamSources || [];
+      const sourceExists = currentTeamSources.some(s => s.id === exploreStore.sourceId);
+      if (!sourceExists) {
+        console.log(`Skipping URL sync - source ${exploreStore.sourceId} doesn't belong to team ${teamsStore.currentTeamId}`);
+        return;
+      }
     }
 
     // Use the store's urlQueryParameters computed property

@@ -23,6 +23,7 @@ import { Input } from '@/components/ui/input';
 import { useExploreStore } from '@/stores/explore';
 import { useAuthStore } from '@/stores/auth';
 import { useSavedQueries } from '@/composables/useSavedQueries';
+import { contextTransitionInProgress } from '@/composables/useSourceTeamManagement';
 
 const props = defineProps<{
   selectedTeamId?: number;
@@ -83,6 +84,12 @@ const filteredQueryCount = computed(() => filteredQueries.value.length); // Coun
 watch(
   () => [props.selectedTeamId, props.selectedSourceId],
   async ([teamId, sourceId]) => {
+    // Don't load queries during team/source context transitions to prevent 403 errors
+    if (contextTransitionInProgress.value) {
+      console.log('SavedQueriesDropdown: Skipping query load during context transition');
+      return;
+    }
+    
     if (teamId && sourceId) {
       await loadQueries(teamId, sourceId);
     } else {
@@ -97,6 +104,11 @@ watch(
 // Load queries when dropdown opens
 watch(isOpen, async (open) => {
   if (open && props.selectedTeamId && props.selectedSourceId && !queries.value.length) {
+    // Don't load queries during team/source context transitions
+    if (contextTransitionInProgress.value) {
+      console.log('SavedQueriesDropdown: Skipping query load on open during context transition');
+      return;
+    }
     await loadQueries(props.selectedTeamId, props.selectedSourceId);
   }
 

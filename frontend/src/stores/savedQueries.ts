@@ -8,6 +8,7 @@ import {
 } from "@/api/savedQueries";
 import { useBaseStore } from "./base";
 import type { APIErrorResponse } from "@/api/types";
+import { useTeamsStore } from "./teams";
 
 export interface SavedQueriesState {
   queries: SavedTeamQuery[];
@@ -143,6 +144,15 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     // Ensure sourceId is valid, otherwise return empty results gracefully
     if (!sourceId || sourceId <= 0) {
        console.warn(`fetchTeamSourceQueries: Invalid sourceId ${sourceId}, returning empty.`);
+       state.data.value.queries = [];
+       return { success: true, data: [] }; // Mimic successful empty response
+    }
+
+    // Validate that source belongs to the team
+    const teamsStore = useTeamsStore();
+    const teamSources = teamsStore.getTeamSources(teamId);
+    if (!teamSources.some(source => source.id === sourceId)) {
+       console.warn(`fetchTeamSourceQueries: Source ${sourceId} does not belong to team ${teamId}, returning empty.`);
        state.data.value.queries = [];
        return { success: true, data: [] }; // Mimic successful empty response
     }

@@ -23,7 +23,7 @@ import DataTable from "./table/data-table.vue";
 import CompactLogList from "./table/CompactLogListSimple.vue";
 import SaveQueryModal from "@/components/collections/SaveQueryModal.vue";
 import QueryEditor from "@/components/query-editor/QueryEditor.vue";
-import { useSourceTeamManagement } from "@/composables/useSourceTeamManagement";
+import { useSourceTeamManagement, contextTransitionInProgress } from "@/composables/useSourceTeamManagement";
 import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useExploreUrlSync } from "@/composables/useExploreUrlSync";
 import { useQuery } from "@/composables/useQuery";
@@ -409,6 +409,7 @@ watch(
   () => currentSourceId.value,
   async (newSourceId, oldSourceId) => {
     if (isInitializing.value) return;
+    if (contextTransitionInProgress.value) return; // Don't load during team/source transitions
     if (!newSourceId || !currentTeamId.value) return;
     try {
       await loadSourceQueries(currentTeamId.value, newSourceId);

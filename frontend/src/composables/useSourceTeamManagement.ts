@@ -5,11 +5,17 @@ import { useTeamsStore } from '@/stores/teams'
 import { formatSourceName } from '@/utils/format'
 import type { FieldInfo } from '@/views/explore/types'
 import { useRouteSync } from '@/composables/useRouteSync'
+import { useRouter, useRoute } from 'vue-router'
+
+// Export a shared flag to prevent URL sync during context transitions
+export const contextTransitionInProgress = ref(false)
 
 export function useSourceTeamManagement() {
   const exploreStore = useExploreStore()
   const sourcesStore = useSourcesStore()
   const teamsStore = useTeamsStore()
+  const router = useRouter()
+  const route = useRoute()
 
   const isProcessingTeamChange = ref(false)
   const isProcessingSourceChange = ref(false)
@@ -50,33 +56,70 @@ export function useSourceTeamManagement() {
 
   const { changeTeam: routeChangeTeam, changeSource: routeChangeSource } = useRouteSync()
 
-  // Team change handler
+  // Coordinated team change handler - loads resources in proper sequence
   async function handleTeamChange(teamIdStr: string) {
     if (isProcessingTeamChange.value) return
     isProcessingTeamChange.value = true
+    contextTransitionInProgress.value = true
 
     const teamId = parseInt(teamIdStr)
     if (isNaN(teamId)) {
       console.warn('Invalid team ID:', teamIdStr)
       isProcessingTeamChange.value = false
+      contextTransitionInProgress.value = false
       return
     }
 
     try {
-      await routeChangeTeam(teamId)
+      // Step 1: Set team in store (this stops most reactive watchers)
+      if (teamsStore.currentTeamId !== teamId) {
+        teamsStore.setCurrentTeam(teamId)
+      }
+
+      // Step 2: Load team sources 
+      await sourcesStore.loadTeamSources(teamId)
+
+      // Step 3: Select first available source for this team
+      const firstSource = sourcesStore.teamSources[0]
+      if (firstSource) {
+        // Update stores with new source
+        exploreStore.setSource(firstSource.id, { origin: 'user' })
+        await sourcesStore.loadSourceDetails(firstSource.id)
+        
+        // Step 4: Update URL with both team and source
+        await router.replace({ 
+          query: { 
+            ...route.query, 
+            team: String(teamId), 
+            source: String(firstSource.id) 
+          } 
+        })
+      } else {
+        // No sources available, just update team
+        await router.replace({ 
+          query: { 
+            ...route.query, 
+            team: String(teamId), 
+            source: undefined 
+          } 
+        })
+      }
     } catch (error) {
       console.error('Error changing team:', error)
     } finally {
+      // Allow brief time for all state to settle
       setTimeout(() => {
         isProcessingTeamChange.value = false
-      }, 50)
+        contextTransitionInProgress.value = false
+      }, 100)
     }
   }
 
-  // Source change handler
+  // Coordinated source change handler
   async function handleSourceChange(sourceIdStr: string) {
     if (isProcessingSourceChange.value) return
     isProcessingSourceChange.value = true
+    contextTransitionInProgress.value = true
 
     const sourceId = parseInt(sourceIdStr)
     if (isNaN(sourceId) || sourceId <= 0) {
@@ -84,6 +127,7 @@ export function useSourceTeamManagement() {
       exploreStore.setSource(0)
       setTimeout(() => {
         isProcessingSourceChange.value = false
+        contextTransitionInProgress.value = false
       }, 50)
       return
     }
@@ -91,17 +135,31 @@ export function useSourceTeamManagement() {
     if (!availableSources.value.some(s => s.id === sourceId)) {
       console.warn(`Source ${sourceId} not found in team ${currentTeamId.value}'s sources`)
       isProcessingSourceChange.value = false
+      contextTransitionInProgress.value = false
       return
     }
 
     try {
-      await routeChangeSource(sourceId)
+      // Step 1: Update explore store with new source
+      exploreStore.setSource(sourceId, { origin: 'user' })
+      
+      // Step 2: Load source details
+      await sourcesStore.loadSourceDetails(sourceId)
+      
+      // Step 3: Update URL
+      await router.replace({ 
+        query: { 
+          ...route.query, 
+          source: String(sourceId) 
+        } 
+      })
     } catch (error) {
       console.error('Error changing source:', error)
     } finally {
       setTimeout(() => {
         isProcessingSourceChange.value = false
-      }, 50)
+        contextTransitionInProgress.value = false
+      }, 100)
     }
   }
 

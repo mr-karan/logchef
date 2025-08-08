@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, watch } from "vue";
 import { exploreApi } from "@/api/explore";
+import { contextTransitionInProgress } from "@/composables/useSourceTeamManagement";
 import type {
   ColumnInfo,
   QueryStats,
@@ -781,6 +782,12 @@ export const useExploreStore = defineStore("explore", () => {
       // Validate that we have the current source details loaded
       if (!sourceDetails || sourceDetails.id !== state.data.value.sourceId) {
         console.warn(`Source details not loaded or mismatch: have ID ${sourceDetails?.id}, need ID ${state.data.value.sourceId}`);
+        
+        // Don't show error toast during team/source context transitions
+        if (contextTransitionInProgress.value) {
+          return { success: false, data: null };
+        }
+        
         return state.handleError({
           status: "error",
           message: "Source details not fully loaded. Please try again.",
