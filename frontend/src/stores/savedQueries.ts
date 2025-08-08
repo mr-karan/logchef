@@ -148,11 +148,12 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
        return { success: true, data: [] }; // Mimic successful empty response
     }
 
-    // Validate that source belongs to the team
+    // Validate that source belongs to the team (only if team sources are loaded)
     const teamsStore = useTeamsStore();
     const teamSources = teamsStore.getTeamSources(teamId);
-    if (!teamSources.some(source => source.id === sourceId)) {
+    if (teamSources.length > 0 && !teamSources.some(source => source.id === sourceId)) {
        console.warn(`fetchTeamSourceQueries: Source ${sourceId} does not belong to team ${teamId}, returning empty.`);
+       console.log(`Available sources for team ${teamId}:`, teamSources.map(s => s.id));
        state.data.value.queries = [];
        return { success: true, data: [] }; // Mimic successful empty response
     }
