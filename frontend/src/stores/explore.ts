@@ -792,6 +792,15 @@ export const useExploreStore = defineStore("explore", () => {
     // Store the relative time so we can restore it after execution
     const relativeTime = state.data.value.selectedRelativeTime;
 
+    if (relativeTime) {
+      try {
+        const { start, end } = parseRelativeTimeString(relativeTime);
+        state.data.value.timeRange = { start, end };
+      } catch (error) {
+        console.error('Failed to recalculate relative time range:', error);
+      }
+    }
+
     // Cancel any existing query
     if (state.data.value.currentQueryAbortController) {
       state.data.value.currentQueryAbortController.abort();
@@ -843,7 +852,7 @@ export const useExploreStore = defineStore("explore", () => {
 
       // 4. Validate that the source belongs to the current team
       const teamSources = sourcesStore.teamSources || [];
-      if (!teamSources.some(s => s.id === state.data.value.sourceId)) {
+      if (!teamSources.some((s: any) => s.id === state.data.value.sourceId)) {
         console.warn(`Source ${state.data.value.sourceId} does not belong to team ${currentTeamId}`);
         return state.handleError({
           status: "error", 
