@@ -82,7 +82,7 @@ const expanded = ref<ExpandedState>({})
 const columnVisibility = ref<VisibilityState>({})
 const pagination = ref<PaginationState>({
     pageIndex: 0,
-    pageSize: 50,
+    pageSize: 100,
 })
 const globalFilter = ref('')
 const columnSizing = ref<ColumnSizingState>({})
