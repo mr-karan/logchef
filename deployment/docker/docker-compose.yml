@@ -24,6 +24,8 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
+    extra_hosts:
+      - "localhost:host-gateway"
 
 
   clickhouse:
@@ -67,8 +69,8 @@ services:
     image: dexidp/dex:v2.35.3
     container_name: dex
     restart: on-failure
-    ports:
-      - "127.0.0.1:5556:5556"
+    # ports:
+    #   - "127.0.0.1:5556:5556"
     configs:
       - source: dex_config
         target: /etc/dex/config.yaml
@@ -82,6 +84,20 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
+
+  nginx:
+    image: nginx:stable
+    container_name: dex-nginx
+    restart: on-failure
+    ports:
+      - "127.0.0.1:5556:80"   # expose nginx on host:5556
+    networks:
+      - logchef_net
+    depends_on:
+      - dex
+    volumes:
+    - ./nginx.conf:/etc/nginx/conf.d/dex.conf:ro
+    - /dev/null:/etc/nginx/conf.d/default.conf
 
   vector:
     image: docker.io/timberio/vector:0.45.0-debian
@@ -116,13 +132,13 @@ configs:
       path = "/data/local.db"
 
       [oidc]
-      # Use explicit URLs for each endpoint instead of discovery
-      # Provider URL for OIDC discovery - use service name for container-to-container communication
-      provider_url = "http://dex:5556/dex"
+      # Use explicit URLs for each endpoint - these must go through nginx proxy
+      # Provider URL for OIDC discovery - use external nginx URL
+      provider_url = "http://localhost:5556/dex"
       # Browser-facing auth URL - must match the domain/issuer used by DEX for browser communication
       auth_url = "http://localhost:5556/dex/auth"
       # Internal container-to-container token URL
-      token_url = "http://dex:5556/dex/token"
+      token_url = "http://localhost:5556/dex/token"
 
       client_id = "logchef"
       client_secret = "logchef-secret"
@@ -145,13 +161,8 @@ configs:
 
   dex_config:
     content: |
-      # Use internal service name as issuer - this must match the provider_url
-      issuer: http://dex:5556/dex
-
-      # Also provide a public issuer endpoint for browsers
-      issuerRotation:
-        # Keep old issuer id for existing token validation
-        - issuer: http://localhost:5556/dex
+      # Use external URL as issuer - this must match the nginx proxy URL
+      issuer: http://localhost:5556/dex
 
       storage:
         type: sqlite3
@@ -166,6 +177,7 @@ configs:
         - id: logchef
           redirectURIs:
             - "http://localhost:8125/api/v1/auth/callback"
+            - "http://localhost:5556/dex/callback"
           name: "LogChef"
           secret: logchef-secret
 
@@ -174,14 +186,33 @@ configs:
 
       enablePasswordDB: true
 
+      connectors:
+        - type: oidc
+          id: google
+          name: Google
+          config:
+            issuer: https://accounts.google.com
+            clientID: 40239328118-5gj1gam1oipvf0sksuldkt2rhm80di4m.apps.googleusercontent.com
+            clientSecret: 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
+            redirectURI: http://localhost:5556/dex/callback
+            scopes: ["openid", "profile", "email"]
+        - type: github
+          id: github
+          name: GitHub
+          config:
+            clientID: Ov23liiLu4NRHbqjqguG
+            clientSecret: a2d6050ec9a4292714be533a97132bf7314e6099
+            redirectURI: http://localhost:5556/dex/callback
+            scopes: ["user:email"]
+
       staticPasswords:
         - email: "admin@logchef.internal"
-          hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+          hash: "$$2a$$10$$dhpreVAbkedKYtgzZfMsRu/S8BJ1/mWbqBYiXwqINmyp4GwvfuDDS"
           username: "admin"
           userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
 
         - email: "demo@logchef.internal"
-          hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+          hash: "$$2a$$10$$dhpreVAbkedKYtgzZfMsRu/S8BJ1/mWbqBYiXwqINmyp4GwvfuDDS"
           username: "demo-user"
           userID: "08a8684b-db88-4b73-90a9-3cd1661f5467"
 
