@@ -5,6 +5,8 @@ services:
     restart: on-failure
     ports:
       - "8125:8125"
+    env_file:
+      - .env
     configs:
       - source: logchef_config
         target: /etc/logchef/config.toml
@@ -69,6 +71,8 @@ services:
     image: dexidp/dex:v2.35.3
     container_name: dex
     restart: on-failure
+    env_file:
+      - .env
     # ports:
     #   - "127.0.0.1:5556:5556"
     configs:
@@ -127,7 +131,7 @@ configs:
       [server]
       port = 8125
       host = "0.0.0.0"
-      frontend_url = "http://localhost:8125"
+      frontend_url = "${LOGCHEF_BASE_URL}"
 
       [sqlite]
       path = "/data/local.db"
@@ -135,16 +139,16 @@ configs:
       [oidc]
       # Use explicit URLs for each endpoint - these must go through nginx proxy
       # Provider URL for OIDC discovery - use external nginx URL
-      provider_url = "http://localhost:5556/dex"
+      provider_url = "${DEX_BASE_URL}/dex"
       # Browser-facing auth URL - must match the domain/issuer used by DEX for browser communication
-      auth_url = "http://localhost:5556/dex/auth"
+      auth_url = "${DEX_BASE_URL}/dex/auth"
       # Internal container-to-container token URL
-      token_url = "http://localhost:5556/dex/token"
+      token_url = "${DEX_BASE_URL}/dex/token"
 
       client_id = "logchef"
       client_secret = "logchef-secret"
       # Browser-facing redirect URL
-      redirect_url = "http://localhost:8125/api/v1/auth/callback"
+      redirect_url = "${LOGCHEF_BASE_URL}/api/v1/auth/callback"
       scopes = ["openid", "email", "profile"]
 
       [auth]
@@ -163,7 +167,7 @@ configs:
   dex_config:
     content: |
       # Use external URL as issuer - this must match the nginx proxy URL
-      issuer: http://localhost:5556/dex
+      issuer: ${DEX_BASE_URL}/dex
 
       storage:
         type: sqlite3
@@ -177,8 +181,8 @@ configs:
       staticClients:
         - id: logchef
           redirectURIs:
-            - "http://localhost:8125/api/v1/auth/callback"
-            - "http://localhost:5556/dex/callback"
+            - "${LOGCHEF_BASE_URL}/api/v1/auth/callback"
+            - "${DEX_BASE_URL}/dex/callback"
           name: "LogChef"
           secret: logchef-secret
 
@@ -193,17 +197,17 @@ configs:
           name: Google
           config:
             issuer: https://accounts.google.com
-            clientID: 40239328118-5gj1gam1oipvf0sksuldkt2rhm80di4m.apps.googleusercontent.com
-            clientSecret: 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
-            redirectURI: http://localhost:5556/dex/callback
+            clientID: ${GOOGLE_CLIENT_ID}
+            clientSecret: ${GOOGLE_CLIENT_SECRET}
+            redirectURI: ${DEX_BASE_URL}/dex/callback
             scopes: ["openid", "profile", "email"]
         - type: github
           id: github
           name: GitHub
           config:
-            clientID: Ov23liiLu4NRHbqjqguG
-            clientSecret: a2d6050ec9a4292714be533a97132bf7314e6099
-            redirectURI: http://localhost:5556/dex/callback
+            clientID: ${GITHUB_CLIENT_ID}
+            clientSecret: ${GITHUB_CLIENT_SECRET}
+            redirectURI: ${DEX_BASE_URL}/dex/callback
             scopes: ["user:email"]
 
       staticPasswords:
