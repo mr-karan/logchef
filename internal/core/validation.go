@@ -50,9 +50,9 @@ func isValidEmail(email string) bool {
 
 // isValidFullName checks if the name contains only valid characters for a person's name.
 func isValidFullName(name string) bool {
-	// Allow letters, spaces, hyphens, and apostrophes.
+	// Allow letters, numbers, spaces, hyphens, and apostrophes.
 	for _, r := range name {
-		if !unicode.IsLetter(r) && r != ' ' && r != '-' && r != '\'' {
+		if !unicode.IsLetter(r) && !unicode.IsNumber(r) && r != ' ' && r != '-' && r != '\'' {
 			return false
 		}
 	}

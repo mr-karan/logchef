@@ -5,7 +5,7 @@ port = 8125
 # HTTP server host address
 host = "0.0.0.0"
 # URL of the frontend application
-frontend_url = "http://localhost:5173"  # Development frontend URL, empty in production
+frontend_url = "http://localhost:8125"  # Development frontend URL, empty in production
 # HTTP server timeout for requests
 http_server_timeout = "30s"
 

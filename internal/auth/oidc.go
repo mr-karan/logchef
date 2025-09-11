@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -143,15 +144,26 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db *sqlite.DB, log *s
 	// Look up user in the local database.
 	user, err := core.GetUserByEmail(ctx, db, claims.Email)
 	if err != nil {
-		// User not found is treated as unauthorized access.
-		if errors.Is(err, core.ErrUserNotFound) {
-			p.log.Warn("unauthorized user attempted login (user not found in db)", "email", claims.Email, "name", claims.Name)
-			return nil, nil, ErrUnauthorizedUser
+		// Check if this is a "user not found" error (either direct or wrapped)
+		if errors.Is(err, core.ErrUserNotFound) || strings.Contains(err.Error(), "resource not found") || strings.Contains(err.Error(), "user not found") {
+			p.log.Info("creating new user from Google OAuth", "email", claims.Email, "name", claims.Name)
+
+			createdUser, err := core.CreateUser(ctx, db, log, claims.Email, claims.Name, models.UserRoleMember, models.UserStatusActive)
+			if err != nil {
+				p.log.Error("failed to create new user from Google OAuth", "error", err, "email", claims.Email)
+				return nil, nil, fmt.Errorf("failed to create user: %w", err)
+			}
+
+			user = createdUser
+
+			p.log.Info("successfully created new user from Google OAuth", "user_id", user.ID, "email", user.Email)
+		} else {
+			// Log other unexpected DB errors.
+			p.log.Error("failed to lookup user by email via core function", "error", err, "email", claims.Email)
+			return nil, nil, fmt.Errorf("failed to lookup user: %w", err)
 		}
-		// Log other unexpected DB errors.
-		p.log.Error("failed to lookup user by email via core function", "error", err, "email", claims.Email)
-		return nil, nil, fmt.Errorf("failed to lookup user: %w", err)
 	}
+
 	// User exists, check status.
 	if user.Status == models.UserStatusInactive {
 		p.log.Warn("inactive user attempted login", "user_id", user.ID, "email", user.Email)
