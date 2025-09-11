@@ -40,6 +40,8 @@ export interface Token {
     line: number;
     column: number;
   };
+  // Indicates the token originated from a quoted string literal
+  quoted?: boolean;
 }
 
 export interface ParseError {

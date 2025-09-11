@@ -7,7 +7,7 @@ const KEY_CHARS = /[a-zA-Z0-9_./:-]/;
 export function tokenize(input: string): { tokens: Token[]; errors: ParseError[] } {
   const tokens: Token[] = [];
   const errors: ParseError[] = [];
-  let current: { type: Token['type']; value: string; line: number; column: number } | null = null;
+  let current: { type: Token['type']; value: string; line: number; column: number; quoted?: boolean } | null = null;
   let line = 1;
   let column = 1;
   let inEscape = false;
@@ -20,6 +20,7 @@ export function tokenize(input: string): { tokens: Token[]; errors: ParseError[]
         type: current.type,
         value: current.value,
         position: { line: current.line, column: current.column },
+        quoted: current.quoted,
       });
       current = null;
     }
@@ -64,14 +65,14 @@ export function tokenize(input: string): { tokens: Token[]; errors: ParseError[]
     }
 
     // Start string literals
-    if ((char === '"' || char === "'") && !inString) {
-      pushCurrent();
-      inString = true;
-      stringDelimiter = char;
-      current = { type: 'value', value: '', line, column };
-      column++;
-      continue;
-    }
+if ((char === '"' || char === "'") && !inString) {
+    pushCurrent();
+    inString = true;
+    stringDelimiter = char;
+    current = { type: 'value', value: '', line, column, quoted: true };
+    column++;
+    continue;
+}
 
     // Handle whitespace (outside strings)
     if (WHITESPACE.test(char)) {

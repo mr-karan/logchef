@@ -162,7 +162,7 @@ export class QueryParser {
         type: 'expression',
         key: keyToken.value,
         operator: this.mapToOperator(operatorToken.value),
-        value: this.parseValue(valueToken.value)
+        value: this.parseValue(valueToken.value, (valueToken as any).quoted)
       };
     }
 
@@ -191,17 +191,38 @@ export class QueryParser {
     throw new Error(`Unknown boolean operator: ${operator}`);
   }
 
-  private parseValue(value: string): Value {
+  private parseValue(value: string, quoted?: boolean): Value {
+    // If explicitly quoted, always treat as string
+    if (quoted) {
+      return value;
+    }
+
+    // Only unquoted literals are coerced
     if (value === 'null' || value === 'NULL') return null;
     if (value === 'true' || value === 'TRUE') return true;
     if (value === 'false' || value === 'FALSE') return false;
 
-    // Check if it's a number
-    if (/^-?\d+(\.\d+)?$/.test(value)) {
+    // Numbers: harden to avoid precision loss
+    // Decimal numbers
+    if (/^-?\d+\.\d+$/.test(value)) {
       return Number(value);
     }
+    // Integers: only coerce if safe
+    if (/^-?\d+$/.test(value)) {
+      try {
+        const bi = BigInt(value);
+        if (bi <= BigInt(Number.MAX_SAFE_INTEGER) && bi >= BigInt(Number.MIN_SAFE_INTEGER)) {
+          return Number(value);
+        }
+        // Unsafe integer range: keep as string
+        return value;
+      } catch {
+        // If BigInt parsing fails, keep as string
+        return value;
+      }
+    }
 
-    // Handle quoted strings - remove quotes
+    // Best-effort: if the user somehow provided quotes in value, strip them
     if ((value.startsWith('"') && value.endsWith('"')) ||
         (value.startsWith("'") && value.endsWith("'"))) {
       return value.slice(1, -1);
