@@ -1,5 +1,15 @@
 import type { ASTNode, Token, ParseError, Value, NestedField, SelectField } from './types';
 import { Operator, BoolOperator } from './types';
+import {
+  createUnexpectedEndError,
+  createUnexpectedTokenError,
+  createExpectedOperatorError,
+  createExpectedValueError,
+  createExpectedClosingParenError,
+  createUnknownOperatorError,
+  createUnknownBooleanOperatorError,
+  createInvalidTokenTypeError
+} from './errors';
 
 export class QueryParser {
   private position = 0;
@@ -15,54 +25,50 @@ export class QueryParser {
       return { ast: null, errors: [] };
     }
 
-    try {
-      // Check if this is a query with pipe operator (field selection)
-      const pipeIndex = this.tokens.findIndex(token => token.type === 'pipe');
+    // Check if this is a query with pipe operator (field selection)
+    const pipeIndex = this.tokens.findIndex(token => token.type === 'pipe');
 
-      if (pipeIndex !== -1) {
-        // Parse query with field selection: WHERE | SELECT
-        const whereTokens = this.tokens.slice(0, pipeIndex);
-        const selectTokens = this.tokens.slice(pipeIndex + 1);
+    if (pipeIndex !== -1) {
+      // Parse query with field selection: WHERE | SELECT
+      const whereTokens = this.tokens.slice(0, pipeIndex);
+      const selectTokens = this.tokens.slice(pipeIndex + 1);
 
-        let whereClause: ASTNode | undefined;
-        if (whereTokens.length > 0) {
-          const whereParser = new QueryParser(whereTokens);
-          const whereResult = whereParser.parse();
-          if (whereResult.errors.length > 0) {
-            this.errors.push(...whereResult.errors);
-          }
-          whereClause = whereResult.ast || undefined;
+      let whereClause: ASTNode | undefined;
+      if (whereTokens.length > 0) {
+        const whereParser = new QueryParser(whereTokens);
+        const whereResult = whereParser.parse();
+        if (whereResult.errors.length > 0) {
+          this.errors.push(...whereResult.errors);
         }
-
-        // Parse select fields
-        const selectFields = this.parseSelectFields(selectTokens);
-
-        return {
-          ast: {
-            type: 'query',
-            where: whereClause,
-            select: selectFields
-          },
-          errors: this.errors
-        };
-      } else {
-        // Regular expression parsing
-        const ast = this.parseExpression();
-        return { ast, errors: this.errors };
+        whereClause = whereResult.ast || undefined;
       }
-    } catch (error) {
-      if (error instanceof Error) {
-        const token = this.position < this.tokens.length
-          ? this.tokens[this.position]
-          : this.tokens[this.tokens.length - 1];
 
-        this.errors.push({
-          code: 'PARSE_ERROR',
-          message: error.message,
-          position: token?.position
-        });
+      // Parse select fields - this should also collect errors
+      const selectFields = this.parseSelectFields(selectTokens);
+
+      // If we have errors, return null AST but still return collected errors
+      if (this.errors.length > 0) {
+        return { ast: null, errors: this.errors };
       }
-      return { ast: null, errors: this.errors };
+
+      return {
+        ast: {
+          type: 'query',
+          where: whereClause,
+          select: selectFields
+        },
+        errors: this.errors
+      };
+    } else {
+      // Regular expression parsing
+      const ast = this.parseExpression();
+
+      // If parsing failed or we have errors, return null AST
+      if (!ast || this.errors.length > 0) {
+        return { ast: null, errors: this.errors };
+      }
+
+      return { ast, errors: this.errors };
     }
   }
 
@@ -70,21 +76,34 @@ export class QueryParser {
     return this.tokens[this.position + offset];
   }
 
-  private consume(): Token {
+  private consume(): Token | null {
     const token = this.tokens[this.position];
     if (!token) {
-      throw new Error('Unexpected end of input');
+      // Use the last token's position if available, otherwise estimate
+      const lastToken = this.tokens[this.position - 1];
+      const position = lastToken ? {
+        line: lastToken.position.line,
+        column: lastToken.position.column + lastToken.value.length
+      } : { line: 1, column: 1 };
+      this.errors.push(createUnexpectedEndError(position));
+      return null;
     }
     this.position++;
     return token;
   }
 
-  private expect(type: Token['type'], value?: string): Token {
+  private expect(type: Token['type'], value?: string): Token | null {
     const token = this.consume();
+    if (!token) {
+      return null;
+    }
+
     if (token.type !== type || (value !== undefined && token.value !== value)) {
-      throw new Error(
-        `Expected ${type}${value ? ` with value "${value}"` : ''}, but got ${token.type} with value "${token.value}"`
-      );
+      this.errors.push(createUnexpectedTokenError(
+        `${token.type}:"${token.value}"`,
+        token.position
+      ));
+      return null;
     }
     return token;
   }
@@ -97,13 +116,19 @@ export class QueryParser {
     };
   }
 
-  private parseExpression(): ASTNode {
+  private parseExpression(): ASTNode | null {
     let left = this.parsePrimary();
+    if (!left) return null;
 
     while (this.peek()?.type === 'bool') {
       const operatorToken = this.consume();
+      if (!operatorToken) break;
+
       const operator = this.mapToBoolOperator(operatorToken.value);
+      if (!operator) break;
+
       const right = this.parsePrimary();
+      if (!right) break;
 
       // If we already have a logical node as left, and with the same operator,
       // we can add the right child to its children array
@@ -131,42 +156,58 @@ export class QueryParser {
 
       // Continue parsing to give the best effort result
       const right = this.parsePrimary();
-      // Assume an AND operator to give a best-effort parse
-      if (left.type === 'logical' && left.operator === BoolOperator.AND) {
-        left.children.push(right);
-      } else {
-        left = {
-          type: 'logical',
-          operator: BoolOperator.AND,
-          children: [left, right]
-        };
+      if (right) {
+        // Assume an AND operator to give a best-effort parse
+        if (left.type === 'logical' && left.operator === BoolOperator.AND) {
+          left.children.push(right);
+        } else {
+          left = {
+            type: 'logical',
+            operator: BoolOperator.AND,
+            children: [left, right]
+          };
+        }
       }
     }
 
     return left;
   }
 
-  private parsePrimary(): ASTNode {
+  private parsePrimary(): ASTNode | null {
     const token = this.peek();
 
     if (!token) {
-      throw new Error('Unexpected end of input');
+      // Use the last token's position if available, otherwise estimate
+      const lastToken = this.tokens[this.position - 1];
+      const position = lastToken ? {
+        line: lastToken.position.line,
+        column: lastToken.position.column + lastToken.value.length
+      } : { line: 1, column: 1 };
+      this.errors.push(createUnexpectedEndError(position));
+      return null;
     }
 
     if (token.type === 'paren' && token.value === '(') {
-      this.consume(); // Consume the open paren
+      const openParen = this.consume(); // Consume the open paren
+      if (!openParen) return null;
+
       const expressions: ASTNode[] = [];
 
       // Parse expressions until we hit a closing paren
       while (this.peek() && !(this.peek()?.type === 'paren' && this.peek()?.value === ')')) {
-        expressions.push(this.parseExpression());
+        const expr = this.parseExpression();
+        if (expr) {
+          expressions.push(expr);
+        }
       }
 
       // Consume the closing paren
       if (this.peek()?.type === 'paren' && this.peek()?.value === ')') {
         this.consume();
       } else {
-        throw new Error('Expected closing parenthesis');
+        const currentToken = this.peek();
+        this.errors.push(createExpectedClosingParenError(currentToken?.position));
+        return null;
       }
 
       // If there's only one expression in the group, we don't need the group wrapper
@@ -183,27 +224,40 @@ export class QueryParser {
     // Handle key-operator-value expressions
     if (token.type === 'key') {
       const keyToken = this.consume();
+      if (!keyToken) return null;
+
       const operatorToken = this.expect('operator');
+      if (!operatorToken) return null;
+
       const valueToken = this.consume();
+      if (!valueToken) return null;
 
       if (valueToken.type !== 'value' && valueToken.type !== 'key') {
-        throw new Error(`Expected value but got ${valueToken.type}`);
+        this.errors.push(createExpectedValueError(valueToken.position));
+        return null;
       }
 
+      const operator = this.mapToOperator(operatorToken.value);
+      if (!operator) return null;
+
+      const quoted = Boolean((valueToken as any).quoted);
       return {
         type: 'expression',
         key: this.parseNestedField(keyToken.value),
-        operator: this.mapToOperator(operatorToken.value),
-        value: this.parseValue(valueToken.value, (valueToken as any).quoted)
+        operator,
+        value: this.parseValue(valueToken.value, quoted),
+        ...(quoted ? { quoted: true } : {}) // Only include if quoted
       };
     }
 
-    throw new Error(`Unexpected token type: ${token.type}`);
+    this.errors.push(createInvalidTokenTypeError(token.type, token.position));
+    return null;
   }
 
-  private mapToOperator(operator: string): Operator {
+  private mapToOperator(operator: string): Operator | null {
     switch (operator) {
-      case '=': return Operator.EQUALS;
+      case '=':
+      case '==': return Operator.EQUALS;
       case '!=': return Operator.NOT_EQUALS;
       case '~': return Operator.REGEX;
       case '!~': return Operator.NOT_REGEX;
@@ -212,15 +266,20 @@ export class QueryParser {
       case '>=': return Operator.GTE;
       case '<=': return Operator.LTE;
       default:
-        throw new Error(`Unknown operator: ${operator}`);
+        const token = this.tokens[this.position - 1]; // Get the operator token we just processed
+        this.errors.push(createUnknownOperatorError(operator, token?.position));
+        return null;
     }
   }
 
-  private mapToBoolOperator(operator: string): BoolOperator {
+  private mapToBoolOperator(operator: string): BoolOperator | null {
     const normalizedOp = operator.toUpperCase();
     if (normalizedOp === 'AND') return BoolOperator.AND;
     if (normalizedOp === 'OR') return BoolOperator.OR;
-    throw new Error(`Unknown boolean operator: ${operator}`);
+
+    const token = this.tokens[this.position - 1]; // Get the boolean operator token we just processed
+    this.errors.push(createUnknownBooleanOperatorError(operator, token?.position));
+    return null;
   }
 
   private parseValue(value: string, quoted?: boolean): Value {
@@ -336,7 +395,11 @@ export class QueryParser {
           i++;
         }
       } else {
-        // Skip unexpected tokens
+        // Collect error for unexpected token in SELECT clause
+        this.errors.push(createUnexpectedTokenError(
+          `${token.type}:"${token.value}"`,
+          token.position
+        ));
         i++;
       }
     }

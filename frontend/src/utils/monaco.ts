@@ -8,6 +8,9 @@ import {
   SQL_TYPES,
   CharType
 } from "./clickhouse-sql/language";
+import { registerEnhancedLogChefQL, updateLogChefQLFields, updateLogChefQLFieldsFromSchema, updateLogChefQLFieldsFromSchemaAndSamples } from "./logchefql/monaco-adapter";
+import type { FieldInfo } from "./logchefql/autocomplete";
+import type { ClickHouseColumn } from "./logchefql/schema-converter";
 
 // Global cache for Monaco models to preserve across navigation
 interface ModelCacheEntry {
@@ -173,6 +176,8 @@ export function initMonacoSetup() {
   // Register languages (ensure this runs only once)
   if (!monaco.languages.getLanguages().some(lang => lang.id === 'logchefql')) {
     registerLogchefQL();
+    // Register enhanced autocomplete after basic language setup
+    registerEnhancedLogChefQL();
   }
   if (!monaco.languages.getLanguages().some(lang => lang.id === 'clickhouse-sql')) {
     registerClickhouseSQL();
@@ -343,6 +348,27 @@ function pruneModelCache() {
   console.log(`Pruned ${entriesToRemove.length} models from cache. Cache size: ${globalModelCache.size}`);
 }
 
+// Update LogChefQL autocomplete fields
+export function updateLogChefQLAutocompleteFields(fields: FieldInfo[]) {
+  updateLogChefQLFields(fields);
+}
+
+// Update LogChefQL autocomplete fields from ClickHouse schema
+export function updateLogChefQLFieldsFromClickHouseSchema(columns: ClickHouseColumn[]) {
+  updateLogChefQLFieldsFromSchema(columns);
+}
+
+// Update LogChefQL autocomplete fields from schema and log samples
+export function updateLogChefQLFieldsFromSchemaAndLogSamples(
+  columns: ClickHouseColumn[],
+  logSampleFields: FieldInfo[] = []
+) {
+  updateLogChefQLFieldsFromSchemaAndSamples(columns, logSampleFields);
+}
+
+// Export types for external use
+export type { ClickHouseColumn, FieldInfo };
+
 // Clean up all Monaco resources when app is unloaded
 export function disposeAllMonacoResources() {
   // Dispose all active editors
@@ -449,35 +475,7 @@ function registerLogchefQL() {
     }
   });
 
-  // Add a completion provider for autocompletion
-  monaco.languages.registerCompletionItemProvider(LANGUAGE_ID, {
-    provideCompletionItems: (model, position) => {
-      const wordInfo = model.getWordUntilPosition(position);
-      const range = {
-        startLineNumber: position.lineNumber,
-        endLineNumber: position.lineNumber,
-        startColumn: wordInfo.startColumn,
-        endColumn: wordInfo.endColumn
-      };
-
-      const suggestions = [
-        {
-          label: 'and',
-          kind: monaco.languages.CompletionItemKind.Keyword,
-          insertText: 'and ',
-          range: range
-        },
-        {
-          label: 'or',
-          kind: monaco.languages.CompletionItemKind.Keyword,
-          insertText: 'or ',
-          range: range
-        }
-      ];
-
-      return { suggestions };
-    }
-  });
+  // Enhanced autocomplete is now handled by monaco-adapter.ts and will be registered automatically
 }
 
 function registerClickhouseSQL() {

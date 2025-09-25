@@ -278,4 +278,86 @@ export class QueryService {
       timezone: params.timezone
     });
   }
+
+  /**
+   * Updates the time range in an existing SQL query
+   * @param sql The existing SQL query
+   * @param tsField The timestamp field name
+   * @param newTimeRange The new time range to apply
+   * @param timezone Optional timezone (defaults to user timezone)
+   * @returns Result object with success status and updated SQL
+   */
+  static updateTimeRange(
+    sql: string,
+    tsField: string,
+    newTimeRange: TimeRange,
+    timezone?: string
+  ): { success: boolean; sql?: string; error?: string } {
+    try {
+      // Validate inputs
+      if (!sql || typeof sql !== 'string') {
+        return { success: false, error: 'SQL query is required' };
+      }
+      if (!tsField || typeof tsField !== 'string') {
+        return { success: false, error: 'Timestamp field is required' };
+      }
+      if (!newTimeRange || !newTimeRange.start || !newTimeRange.end) {
+        return { success: false, error: 'Valid time range is required' };
+      }
+
+      // Delegate to SqlManager which has more robust implementation
+      const updatedSql = SqlManager.updateTimeRange({
+        sql,
+        tsField,
+        timeRange: newTimeRange,
+        timezone
+      });
+
+      return {
+        success: true,
+        sql: updatedSql
+      };
+
+    } catch (error: any) {
+      return {
+        success: false,
+        error: `Failed to update time range: ${error.message}`
+      };
+    }
+  }
+
+  /**
+   * Updates the limit in an existing SQL query
+   * @param sql The existing SQL query
+   * @param limit The new limit value
+   * @returns Result object with success status and updated SQL
+   */
+  static updateLimit(
+    sql: string,
+    limit: number
+  ): { success: boolean; sql?: string; error?: string } {
+    try {
+      // Validate inputs
+      if (!sql || typeof sql !== 'string') {
+        return { success: false, error: 'SQL query is required' };
+      }
+      if (typeof limit !== 'number' || limit <= 0) {
+        return { success: false, error: 'Valid limit is required' };
+      }
+
+      // Delegate to SqlManager which has robust implementation
+      const updatedSql = SqlManager.updateLimit(sql, limit);
+
+      return {
+        success: true,
+        sql: updatedSql
+      };
+
+    } catch (error: any) {
+      return {
+        success: false,
+        error: `Failed to update limit: ${error.message}`
+      };
+    }
+  }
 }

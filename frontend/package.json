@@ -10,7 +10,11 @@
     "build:analyze": "vite build --mode analyze",
     "build:modern": "vite build --minify terser --target esnext",
     "analyze": "node scripts/analyze-bundle.js",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:ci": "vitest run --coverage",
+    "test:logchefql": "vitest run src/utils/logchefql/__tests__/logchefql.test.ts",
+    "test:watch": "vitest --watch"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -53,8 +57,10 @@
   "devDependencies": {
     "@types/node": "^22.14.1",
     "@vitejs/plugin-vue": "^5.2.3",
+    "@vitest/coverage-v8": "2.1.9",
     "@vue/tsconfig": "^0.7.0",
     "autoprefixer": "^10.4.21",
+    "jsdom": "^25.0.1",
     "rollup-plugin-visualizer": "^5.14.0",
     "tailwindcss": "^3.4.17",
     "terser": "^5.39.0",
@@ -62,6 +68,7 @@
     "typescript": "~5.6.3",
     "vite": "^6.3.3",
     "vite-plugin-compression": "^0.5.1",
+    "vitest": "^2.1.8",
     "vue-tsc": "^2.2.10"
   },
   "packageManager": "pnpm@10.6.2+sha512.47870716bea1572b53df34ad8647b42962bc790ce2bf4562ba0f643237d7302a3d6a8ecef9e4bdfc01d23af1969aa90485d4cebb0b9638fa5ef1daef656f6c1b"

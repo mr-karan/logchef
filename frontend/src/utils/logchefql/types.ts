@@ -22,6 +22,8 @@ export type ASTNode =
       key: string | NestedField;
       operator: Operator;
       value: Value;
+      // Preserve whether the original value was quoted for display/formatting purposes
+      quoted?: boolean;
     }
   | {
       type: 'logical';
@@ -57,6 +59,8 @@ export interface Token {
   };
   // Indicates the token originated from a quoted string literal
   quoted?: boolean;
+  // Indicates the token is potentially incomplete (e.g., unterminated string)
+  incomplete?: boolean;
 }
 
 export interface ParseError {
@@ -67,3 +71,15 @@ export interface ParseError {
     column: number;
   };
 }
+
+export const ErrorCodes = {
+  UNTERMINATED_STRING: 'UNTERMINATED_STRING',
+  UNEXPECTED_END: 'UNEXPECTED_END',
+  UNEXPECTED_TOKEN: 'UNEXPECTED_TOKEN',
+  EXPECTED_OPERATOR: 'EXPECTED_OPERATOR',
+  EXPECTED_VALUE: 'EXPECTED_VALUE',
+  EXPECTED_CLOSING_PAREN: 'EXPECTED_CLOSING_PAREN',
+  UNKNOWN_OPERATOR: 'UNKNOWN_OPERATOR',
+  UNKNOWN_BOOLEAN_OPERATOR: 'UNKNOWN_BOOLEAN_OPERATOR',
+  INVALID_TOKEN_TYPE: 'INVALID_TOKEN_TYPE',
+} as const;

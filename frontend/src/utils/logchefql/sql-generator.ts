@@ -20,6 +20,46 @@ export class SQLVisitor {
     this.schema = schema;
   }
 
+  /**
+   * Safely escapes a string for use in SQL queries.
+   * Handles single quotes, backslashes, and other potentially dangerous characters.
+   * This is critical for preventing SQL injection attacks in nested field paths.
+   */
+  private escapeSQLString(value: string): string {
+    if (typeof value !== 'string') {
+      // Convert to string and log warning for debugging
+      console.warn('SQLVisitor: Non-string value passed to escapeSQLString:', value);
+      value = String(value);
+    }
+
+    // Escape single quotes by doubling them (SQL standard)
+    // Escape backslashes to prevent escape sequence issues
+    // Also escape null bytes and other control characters that could cause issues
+    return value
+      .replace(/\\/g, '\\\\')  // Escape backslashes first
+      .replace(/'/g, "''")     // Escape single quotes
+      .replace(/\0/g, '\\0')   // Escape null bytes
+      .replace(/\r/g, '\\r')   // Escape carriage returns
+      .replace(/\n/g, '\\n');  // Escape newlines
+  }
+
+  /**
+   * Strips surrounding quotes from a string while preserving internal quotes.
+   * Used when processing quoted field paths that shouldn't be double-quoted.
+   */
+  private stripSurroundingQuotes(value: string): string {
+    if (typeof value !== 'string') {
+      return String(value);
+    }
+
+    // Only strip if the string starts and ends with matching quotes
+    if ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))) {
+      return value.slice(1, -1);
+    }
+    return value;
+  }
+
   public generate(node: ASTNode): { sql: string; params: unknown[] } {
     this.params = [];
     return {
@@ -281,7 +321,9 @@ export class SQLVisitor {
 
     // For ClickHouse Maps, we can access nested keys using dot notation as a single key
     // e.g., log_attributes['syslog.version'] rather than log_attributes['syslog']['version']
-    const fullKey = path.map(segment => segment.replace(/['"]/g, '')).join('.');
+    const fullKey = path
+      .map(segment => this.escapeSQLString(this.stripSurroundingQuotes(segment)))
+      .join('.');
     const mapAccess = `${escapedColumn}['${fullKey}']`;
 
     return this.generateComparisonExpression(mapAccess, operator, formattedValue);
@@ -297,7 +339,9 @@ export class SQLVisitor {
 
     // ClickHouse JSONExtractString requires separate parameters for nested access
     // Convert path array to comma-separated quoted parameters
-    const pathParams = path.map(segment => `'${segment.replace(/['"]/g, '')}'`).join(', ');
+    const pathParams = path
+      .map(segment => `'${this.escapeSQLString(this.stripSurroundingQuotes(segment))}'`)
+      .join(', ');
 
     // Use JSONExtractString with proper ClickHouse syntax
     const jsonExtract = `JSONExtractString(${escapedColumn}, ${pathParams})`;
@@ -344,12 +388,16 @@ export class SQLVisitor {
       if (columnType && this.isMapType(columnType)) {
         // Map column: use subscript notation
         const escapedColumn = this.escapeIdentifier(nestedField.base);
-        const fullKey = nestedField.path.map(segment => segment.replace(/['"]/g, '')).join('.');
+        const fullKey = nestedField.path
+          .map(segment => this.escapeSQLString(this.stripSurroundingQuotes(segment)))
+          .join('.');
         columnExpression = `${escapedColumn}['${fullKey}']`;
       } else {
         // JSON or String column: use JSONExtractString
         const escapedColumn = this.escapeIdentifier(nestedField.base);
-        const pathParams = nestedField.path.map(segment => `'${segment.replace(/['"]/g, '')}'`).join(', ');
+        const pathParams = nestedField.path
+          .map(segment => `'${this.escapeSQLString(this.stripSurroundingQuotes(segment))}'`)
+          .join(', ');
         columnExpression = `JSONExtractString(${escapedColumn}, ${pathParams})`;
       }
     } else {
