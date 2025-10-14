@@ -14,13 +14,14 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Server     ServerConfig     `koanf:"server"`
-	SQLite     SQLiteConfig     `koanf:"sqlite"`
-	Clickhouse ClickhouseConfig `koanf:"clickhouse"`
-	OIDC       OIDCConfig       `koanf:"oidc"`
-	Auth       AuthConfig       `koanf:"auth"`
-	Logging    LoggingConfig    `koanf:"logging"`
-	AI         AIConfig         `koanf:"ai"`
+        Server     ServerConfig     `koanf:"server"`
+        SQLite     SQLiteConfig     `koanf:"sqlite"`
+        Clickhouse ClickhouseConfig `koanf:"clickhouse"`
+        OIDC       OIDCConfig       `koanf:"oidc"`
+        Auth       AuthConfig       `koanf:"auth"`
+        Logging    LoggingConfig    `koanf:"logging"`
+        AI         AIConfig         `koanf:"ai"`
+        Alerts     AlertsConfig     `koanf:"alerts"`
 }
 
 // ServerConfig contains HTTP server settings
@@ -76,18 +77,27 @@ type LoggingConfig struct {
 
 // AIConfig contains AI service (OpenAI) settings
 type AIConfig struct {
-	// OpenAI API key
-	APIKey string `koanf:"api_key"`
-	// Model to use for AI SQL generation (default: gpt-4o)
-	Model string `koanf:"model"`
-	// MaxTokens is the maximum number of tokens to generate (default: 1024)
-	MaxTokens int `koanf:"max_tokens"`
-	// Temperature controls randomness in generation (0.0-1.0, default: 0.1)
-	Temperature float32 `koanf:"temperature"`
-	// Enabled indicates whether AI features are enabled
-	Enabled bool `koanf:"enabled"`
-	// BaseURL for OpenAI API (default: "", which uses the standard OpenAI API endpoint)
-	BaseURL string `koanf:"base_url"`
+        // OpenAI API key
+        APIKey string `koanf:"api_key"`
+        // Model to use for AI SQL generation (default: gpt-4o)
+        Model string `koanf:"model"`
+        // MaxTokens is the maximum number of tokens to generate (default: 1024)
+        MaxTokens int `koanf:"max_tokens"`
+        // Temperature controls randomness in generation (0.0-1.0, default: 0.1)
+        Temperature float32 `koanf:"temperature"`
+        // Enabled indicates whether AI features are enabled
+        Enabled bool `koanf:"enabled"`
+        // BaseURL for OpenAI API (default: "", which uses the standard OpenAI API endpoint)
+        BaseURL string `koanf:"base_url"`
+}
+
+// AlertsConfig controls scheduling and notification behaviour for alert rules.
+type AlertsConfig struct {
+        Enabled             bool          `koanf:"enabled"`
+        EvaluationInterval  time.Duration `koanf:"evaluation_interval"`
+        DefaultLookback     time.Duration `koanf:"default_lookback"`
+        NotificationTimeout time.Duration `koanf:"notification_timeout"`
+        HistoryLimit        int           `koanf:"history_limit"`
 }
 
 const envPrefix = "LOGCHEF_"
@@ -152,9 +162,22 @@ func Load(path string) (*Config, error) {
 	if cfg.OIDC.ClientID == "" {
 		return nil, fmt.Errorf("client_id is required in OIDC configuration (either in file or %sOIDC__CLIENT_ID)", envPrefix)
 	}
-	if cfg.OIDC.RedirectURL == "" {
-		return nil, fmt.Errorf("redirect_url is required in OIDC configuration (either in file or %sOIDC__REDIRECT_URL)", envPrefix)
-	}
+        if cfg.OIDC.RedirectURL == "" {
+                return nil, fmt.Errorf("redirect_url is required in OIDC configuration (either in file or %sOIDC__REDIRECT_URL)", envPrefix)
+        }
 
-	return &cfg, nil
+        if cfg.Alerts.EvaluationInterval <= 0 {
+                cfg.Alerts.EvaluationInterval = time.Minute
+        }
+        if cfg.Alerts.DefaultLookback <= 0 {
+                cfg.Alerts.DefaultLookback = 5 * time.Minute
+        }
+        if cfg.Alerts.NotificationTimeout <= 0 {
+                cfg.Alerts.NotificationTimeout = 5 * time.Second
+        }
+        if cfg.Alerts.HistoryLimit <= 0 {
+                cfg.Alerts.HistoryLimit = 50
+        }
+
+        return &cfg, nil
 }

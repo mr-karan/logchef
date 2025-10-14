@@ -93,7 +93,7 @@ func New(opts ServerOptions) *Server {
 	app.Use(compress.New(compress.Config{
 		Level: compress.LevelBestSpeed, // Prioritize speed over maximum compression
 	})) // Compress responses
-	
+
 	// Add metrics middleware
 	app.Use(metrics.Middleware())
 
@@ -120,7 +120,7 @@ func New(opts ServerOptions) *Server {
 func (s *Server) setupRoutes() {
 	// Swagger documentation route
 	s.app.Get("/swagger/*", swagger.HandlerDefault)
-	
+
 	// Metrics endpoint
 	s.app.Get("/metrics", metrics.MetricsHandler())
 
@@ -222,6 +222,17 @@ func (s *Server) setupRoutes() {
 			collections.Post("/", s.requireCollectionManagement, s.handleCreateTeamSourceCollection)
 			collections.Put("/:collectionID", s.requireCollectionManagement, s.handleUpdateTeamSourceCollection)
 			collections.Delete("/:collectionID", s.requireCollectionManagement, s.handleDeleteTeamSourceCollection)
+		}
+
+		alerts := teamSourceOps.Group("/alerts")
+		{
+			alerts.Get("/", s.handleListAlerts)
+			alerts.Get("/:alertID", s.handleGetAlert)
+			alerts.Get("/:alertID/history", s.handleListAlertHistory)
+			alerts.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleCreateAlert)
+			alerts.Put("/:alertID", s.requireTeamAdminOrGlobalAdmin, s.handleUpdateAlert)
+			alerts.Delete("/:alertID", s.requireTeamAdminOrGlobalAdmin, s.handleDeleteAlert)
+			alerts.Post("/:alertID/resolve", s.requireTeamAdminOrGlobalAdmin, s.handleResolveAlert)
 		}
 	}
 

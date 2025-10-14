@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS alert_history;
+DROP TABLE IF EXISTS alerts;
