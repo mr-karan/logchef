@@ -65,3 +65,11 @@ model = "gpt-4o"
 max_tokens = 1024
 # Temperature for generation (0.0-1.0, lower is more deterministic)
 temperature = 0.1
+
+# Alerting configuration
+[alerts]
+enabled = true
+evaluation_interval = "1m"
+default_lookback = "5m"
+notification_timeout = "5s"
+history_limit = 50

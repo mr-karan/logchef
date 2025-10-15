@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
@@ -27,6 +28,7 @@ type App struct {
 	WebFS      http.FileSystem
 	BuildInfo  string
 	Version    string
+	Alerts     *alerts.Manager
 }
 
 // Options contains configuration needed when creating a new App instance.
@@ -127,6 +129,14 @@ func (a *App) Initialize(ctx context.Context) error {
 	}
 	a.server = server.New(serverOpts)
 
+	a.Alerts = alerts.NewManager(alerts.Options{
+		Config:     a.Config.Alerts,
+		DB:         a.SQLite,
+		ClickHouse: a.ClickHouse,
+		Logger:     a.Logger,
+	})
+	a.Alerts.Start(ctx)
+
 	return nil
 }
 
@@ -156,6 +166,12 @@ func (a *App) Shutdown(ctx context.Context) error {
 
 	clickhouseCtx, clickhouseCancel := context.WithTimeout(ctx, 8*time.Second)
 	defer clickhouseCancel()
+
+	if a.Alerts != nil {
+		a.Logger.Info("stopping alert manager")
+		a.Alerts.Stop()
+	}
+
 	// Shutdown server first to stop accepting new requests.
 	if a.server != nil {
 		a.Logger.Info("shutting down HTTP server")

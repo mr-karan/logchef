@@ -324,7 +324,7 @@ func InitAdminUsers(ctx context.Context, db *sqlite.DB, log *slog.Logger, adminE
 				if createErr != nil {
 					errMsg := fmt.Sprintf("failed to create admin user %s: %v", email, createErr)
 					log.Error(errMsg)
-					setupErrors = append(setupErrors, fmt.Errorf(errMsg))
+					setupErrors = append(setupErrors, errors.New(errMsg))
 				} else {
 					log.Info("created new admin user successfully", "email", email, "user_id", newUser.ID)
 				}
@@ -334,7 +334,7 @@ func InitAdminUsers(ctx context.Context, db *sqlite.DB, log *slog.Logger, adminE
 			// If it's a different error (not "not found"), log and continue
 			errMsg := fmt.Sprintf("failed to check existing admin user %s: %v", email, err)
 			log.Error(errMsg)
-			setupErrors = append(setupErrors, fmt.Errorf(errMsg))
+			setupErrors = append(setupErrors, errors.New(errMsg))
 			continue // Try next email
 		}
 
@@ -355,7 +355,7 @@ func InitAdminUsers(ctx context.Context, db *sqlite.DB, log *slog.Logger, adminE
 				if err := db.UpdateUser(ctx, existing); err != nil {
 					errMsg := fmt.Sprintf("failed to update admin user %s: %v", email, err)
 					log.Error(errMsg)
-					setupErrors = append(setupErrors, fmt.Errorf(errMsg))
+					setupErrors = append(setupErrors, errors.New(errMsg))
 				} else {
 					log.Info("updated existing user to active admin", "email", email, "user_id", existing.ID)
 				}
@@ -370,7 +370,7 @@ func InitAdminUsers(ctx context.Context, db *sqlite.DB, log *slog.Logger, adminE
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to count admin users after initialization: %v", err)
 		log.Error(errMsg)
-		setupErrors = append(setupErrors, fmt.Errorf(errMsg))
+		setupErrors = append(setupErrors, errors.New(errMsg))
 	} else if count == 0 {
 		errMsg := "initialization finished, but no active admin users found in the database"
 		log.Error(errMsg)
