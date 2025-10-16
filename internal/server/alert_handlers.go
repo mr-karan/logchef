@@ -108,9 +108,17 @@ func (s *Server) handleDeleteAlert(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleResolveAlert(c *fiber.Ctx) error {
-	_, _, alertID, err := s.parseAlertIdentifiers(c)
+	teamID, sourceID, alertID, err := s.parseAlertIdentifiers(c)
 	if err != nil {
 		return err
+	}
+
+	if _, err := s.sqlite.GetAlertForTeamSource(c.Context(), teamID, sourceID, alertID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Alert not found", models.NotFoundErrorType)
+		}
+		s.log.Error("failed to verify alert ownership", "alert_id", alertID, "team_id", teamID, "source_id", sourceID, "error", err)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve alert", models.GeneralErrorType)
 	}
 
 	var req models.ResolveAlertRequest
@@ -128,9 +136,17 @@ func (s *Server) handleResolveAlert(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleListAlertHistory(c *fiber.Ctx) error {
-	_, _, alertID, err := s.parseAlertIdentifiers(c)
+	teamID, sourceID, alertID, err := s.parseAlertIdentifiers(c)
 	if err != nil {
 		return err
+	}
+
+	if _, err := s.sqlite.GetAlertForTeamSource(c.Context(), teamID, sourceID, alertID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Alert not found", models.NotFoundErrorType)
+		}
+		s.log.Error("failed to verify alert ownership", "alert_id", alertID, "team_id", teamID, "source_id", sourceID, "error", err)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list alert history", models.GeneralErrorType)
 	}
 
 	limit := s.config.Alerts.HistoryLimit
@@ -151,6 +167,26 @@ func (s *Server) handleListAlertHistory(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list alert history", models.GeneralErrorType)
 	}
 	return SendSuccess(c, fiber.StatusOK, history)
+}
+
+func (s *Server) handleTestAlertQuery(c *fiber.Ctx) error {
+	teamID, sourceID, err := s.parseTeamAndSourceIDs(c)
+	if err != nil {
+		return err
+	}
+
+	var req models.TestAlertQueryRequest
+	if err := c.BodyParser(&req); err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
+	}
+
+	result, err := core.TestAlertQuery(c.Context(), s.sqlite, s.clickhouse, s.log, teamID, sourceID, &req)
+	if err != nil {
+		s.log.Error("failed to test alert query", "team_id", teamID, "source_id", sourceID, "error", err)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, err.Error(), models.GeneralErrorType)
+	}
+
+	return SendSuccess(c, fiber.StatusOK, result)
 }
 
 func (s *Server) parseTeamAndSourceIDs(c *fiber.Ctx) (models.TeamID, models.SourceID, error) {

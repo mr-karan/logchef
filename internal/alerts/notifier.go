@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/pkg/models"
@@ -21,7 +22,8 @@ type NotificationPayload struct {
 
 // Notifier defines the contract for sending alert notifications.
 type Notifier interface {
-	Notify(ctx context.Context, alert *models.Alert, channel models.AlertChannel, payload NotificationPayload) error
+	NotifyEmail(ctx context.Context, alert *models.Alert, email string, payload NotificationPayload) error
+	NotifyRoomChannel(ctx context.Context, alert *models.Alert, channel *models.RoomChannel, payload NotificationPayload) error
 }
 
 // DefaultNotifier implements a simple multi-channel notifier using logging for email/slack
@@ -41,27 +43,31 @@ func NewDefaultNotifier(log *slog.Logger) *DefaultNotifier {
 }
 
 // Notify dispatches the alert to the configured target.
-func (n *DefaultNotifier) Notify(ctx context.Context, alert *models.Alert, channel models.AlertChannel, payload NotificationPayload) error {
+func (n *DefaultNotifier) NotifyEmail(ctx context.Context, alert *models.Alert, email string, payload NotificationPayload) error {
+	n.log.Info("email notification", "alert_id", alert.ID, "target", email, "message", payload.Message, "value", payload.Value)
+	return nil
+}
+
+func (n *DefaultNotifier) NotifyRoomChannel(ctx context.Context, alert *models.Alert, channel *models.RoomChannel, payload NotificationPayload) error {
 	switch channel.Type {
-	case models.AlertChannelEmail:
-		n.log.Info("email notification", "alert_id", alert.ID, "target", channel.Target, "message", payload.Message, "value", payload.Value)
-		return nil
-	case models.AlertChannelSlack:
-		n.log.Info("slack notification", "alert_id", alert.ID, "target", channel.Target, "message", payload.Message, "value", payload.Value)
-		return nil
-	case models.AlertChannelWebhook:
+	case models.RoomChannelSlack, models.RoomChannelWebhook:
+		url, _ := channel.Config["url"].(string)
+		if strings.TrimSpace(url) == "" {
+			return fmt.Errorf("channel %d missing url config", channel.ID)
+		}
 		body := map[string]any{
 			"alert_id": alert.ID,
 			"name":     alert.Name,
 			"severity": alert.Severity,
 			"value":    payload.Value,
 			"message":  payload.Message,
+			"channel":  channel.Type,
 		}
 		buf, err := json.Marshal(body)
 		if err != nil {
 			return fmt.Errorf("failed to marshal webhook payload: %w", err)
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, channel.Target, bytes.NewReader(buf))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
 		if err != nil {
 			return fmt.Errorf("failed to create webhook request: %w", err)
 		}
@@ -76,6 +82,6 @@ func (n *DefaultNotifier) Notify(ctx context.Context, alert *models.Alert, chann
 		}
 		return nil
 	default:
-		return fmt.Errorf("unsupported channel type %q", channel.Type)
+		return fmt.Errorf("unsupported room channel type %q", channel.Type)
 	}
 }

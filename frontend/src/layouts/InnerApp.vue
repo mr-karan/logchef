@@ -50,6 +50,7 @@ import {
   Monitor,
   PanelLeft,
   PanelRight,
+  Bell,
 } from "lucide-vue-next";
 
 import { useAuthStore } from "@/stores/auth";
@@ -147,6 +148,11 @@ const mainNavItems: NavItem[] = [
     title: "Explorer",
     icon: Search,
     url: "/logs/explore",
+  },
+  {
+    title: "Alerts",
+    icon: Bell,
+    url: "/logs/alerts",
   },
   {
     title: "Collections",

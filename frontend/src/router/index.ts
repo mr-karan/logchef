@@ -87,6 +87,24 @@ const routes: RouteRecordRaw[] = [
         }),
         meta: { title: "Collections" },
       },
+      {
+        path: "alerts",
+        name: "AlertsOverview",
+        component: () => import("@/views/alerts/AlertsOverview.vue").catch(err => {
+          error("Router", "Failed to load AlertsOverview component", err);
+          return { default: ComponentLoadError };
+        }),
+        meta: { title: "Alerts" },
+      },
+      {
+        path: "alerts/:alertID",
+        name: "AlertDetail",
+        component: () => import("@/views/alerts/AlertsOverview.vue").catch(err => {
+          error("Router", "Failed to load AlertsOverview component", err);
+          return { default: ComponentLoadError };
+        }),
+        meta: { title: "Alerts" },
+      },
     ],
   },
   // Management Section (Admin only)
