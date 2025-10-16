@@ -165,13 +165,20 @@ export const useSourcesStore = defineStore("sources", () => {
       
       console.log(`SourcesStore: Source changed from ${oldSourceId} to ${newSourceId}`);
       lastProcessedSourceId = newSourceId;
-      
+
       // Clear previous state
       state.data.value.sourceDetailsError = null;
       state.data.value.currentSourceDetails = null;
 
       if (!newSourceId) {
         console.log('SourcesStore: No source selected, skipping details loading');
+        return;
+      }
+
+      // Don't load source details if there's no team selected (prevents race condition)
+      const currentTeamId = contextStore.teamId;
+      if (!currentTeamId) {
+        console.log(`SourcesStore: No team selected, deferring source ${newSourceId} details loading`);
         return;
       }
 

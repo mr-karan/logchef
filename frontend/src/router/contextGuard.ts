@@ -44,8 +44,9 @@ export function contextRouterGuard(to: RouteLocationNormalized) {
     teamId = teamsStore.teams[0].id
     console.log(`ContextGuard: Auto-selected first team ${teamId} for explore route`)
   }
-  
-  // Update context store
+
+  // Update context store (always set, even if teamId is null)
+  // The individual stores will handle the null case appropriately
   contextStore.setFromRoute(teamId, sourceId)
   
   // IMPORTANT: Also update the old teams store for API compatibility
