@@ -8,8 +8,10 @@ import {
   Clock3,
   History,
   MoreHorizontal,
+  Pencil,
   Plus,
   RefreshCcw,
+  Users,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -221,16 +223,50 @@ function formatFrequency(alert: Alert) {
     return `${alert.frequency_seconds}s`;
   }
   if (minutes === 1) {
-    return "Every minute";
+    return "1m";
   }
   if (minutes < 60) {
-    return `Every ${minutes} minutes`;
+    return `${minutes}m`;
   }
   const hours = Math.round(minutes / 60);
   if (hours === 1) {
-    return "Every hour";
+    return "1h";
   }
-  return `Every ${hours} hours`;
+  return `${hours}h`;
+}
+
+function formatThreshold(alert: Alert) {
+  const ops: Record<string, string> = {
+    gt: ">",
+    gte: "≥",
+    lt: "<",
+    lte: "≤",
+    eq: "=",
+    neq: "≠",
+  };
+  return `${ops[alert.threshold_operator] || alert.threshold_operator} ${alert.threshold_value}`;
+}
+
+function formatRelativeTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return "Never";
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return formatDate(dateStr);
+}
+
+function getRoomsSummary(alert: Alert): string {
+  if (!alert.rooms.length) return "No rooms";
+  if (alert.rooms.length === 1) return alert.rooms[0].name;
+  return `${alert.rooms[0].name} +${alert.rooms.length - 1}`;
 }
 
 async function ensureDataLoaded() {
@@ -374,101 +410,96 @@ onMounted(async () => {
           <div v-if="isLoadingAlerts" class="py-8 text-center text-sm text-muted-foreground">
             Loading alerts…
           </div>
-          <Table v-else class="overflow-hidden rounded-lg border">
+          <Table v-else>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Severity</TableHead>
-                <TableHead>Query</TableHead>
-                <TableHead>Threshold</TableHead>
-                <TableHead>Schedule</TableHead>
-                <TableHead>Rooms</TableHead>
-                <TableHead>Last Triggered</TableHead>
-                <TableHead class="text-right">Actions</TableHead>
+                <TableHead class="w-[35%]">Name</TableHead>
+                <TableHead class="w-[15%]">Configuration</TableHead>
+                <TableHead class="w-[20%]">Rooms</TableHead>
+                <TableHead class="w-[15%]">Last Triggered</TableHead>
+                <TableHead class="w-[15%] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow v-for="alert in alerts" :key="alert.id" :class="{ 'opacity-60': !alert.is_active }">
-                <TableCell class="font-medium">
-                  <div class="flex items-center gap-2">
-                    <span>{{ alert.name }}</span>
-                    <Badge v-if="!alert.is_active" variant="outline">Disabled</Badge>
-                  </div>
-                  <p v-if="alert.description" class="text-xs text-muted-foreground">
-                    {{ alert.description }}
-                  </p>
-                </TableCell>
-                <TableCell>
-                  <Badge :variant="mapSeverityVariant(alert.severity)" class="capitalize">
-                    {{ alert.severity }}
-                  </Badge>
-                </TableCell>
-                <TableCell class="text-sm text-muted-foreground">
-                  <div class="flex flex-col gap-1">
-                    <span class="font-medium capitalize">{{ alert.query_type === "sql" ? "SQL" : "Log condition" }}</span>
-                    <code class="break-all rounded bg-muted px-2 py-1 text-xs">{{ alert.query }}</code>
-                  </div>
-                </TableCell>
-                <TableCell class="text-sm">
-                  <div class="flex flex-col">
-                    <span class="font-medium">Value {{ alert.threshold_operator }} {{ alert.threshold_value }}</span>
-                    <span class="text-xs text-muted-foreground">Lookback: {{ alert.lookback_seconds }}s</span>
-                  </div>
-                </TableCell>
-                <TableCell class="text-sm">
-                  <div class="flex items-center gap-2">
-                    <Clock3 class="h-4 w-4 text-muted-foreground" />
-                    <span>{{ formatFrequency(alert) }}</span>
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div class="flex flex-col gap-2">
-                    <div v-if="!alert.rooms.length" class="text-xs text-muted-foreground">
-                      No rooms configured
-                    </div>
-                    <div v-else class="flex flex-wrap gap-2">
-                      <Badge v-for="room in alert.rooms" :key="room.id" variant="outline" class="flex items-center gap-2">
-                        <span class="text-sm font-medium">{{ room.name }}</span>
-                        <span class="text-[11px] uppercase tracking-wide text-muted-foreground">
-                          {{ room.channel_types.length ? room.channel_types.join(", ") : "email" }}
-                        </span>
-                        <span class="text-[11px] text-muted-foreground">{{ room.member_count }} members</span>
-                      </Badge>
+              <TableRow v-for="alert in alerts" :key="alert.id" :class="{ 'opacity-60': !alert.is_active }" class="group">
+                <TableCell class="py-4">
+                  <div class="flex items-start gap-3">
+                    <div class="flex-1 space-y-1 min-w-0">
+                      <div class="flex items-center gap-2">
+                        <span class="font-medium truncate">{{ alert.name }}</span>
+                        <Badge :variant="mapSeverityVariant(alert.severity)" class="capitalize shrink-0">
+                          {{ alert.severity }}
+                        </Badge>
+                        <Badge v-if="!alert.is_active" variant="outline" class="shrink-0">Disabled</Badge>
+                      </div>
+                      <p v-if="alert.description" class="text-sm text-muted-foreground line-clamp-1">
+                        {{ alert.description }}
+                      </p>
                     </div>
                   </div>
                 </TableCell>
-                <TableCell class="text-sm">
-                  <div class="flex flex-col">
-                    <span>{{ formatDate(alert.last_triggered_at || alert.last_evaluated_at || alert.updated_at) }}</span>
-                    <span class="text-xs text-muted-foreground">Evaluated {{ formatDate(alert.last_evaluated_at || alert.updated_at) }}</span>
+                <TableCell class="py-4">
+                  <div class="space-y-1 text-sm">
+                    <div class="flex items-center gap-1.5 font-medium tabular-nums">
+                      <span class="text-muted-foreground">{{ formatThreshold(alert) }}</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Clock3 class="h-3 w-3" />
+                      <span>Every {{ formatFrequency(alert) }}</span>
+                    </div>
                   </div>
                 </TableCell>
-                <TableCell class="text-right">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger as-child>
-                      <Button variant="ghost" size="icon">
-                        <MoreHorizontal class="h-4 w-4" />
-                        <span class="sr-only">Open alert actions</span>
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" class="w-48">
-                      <DropdownMenuItem @click="openEditForm(alert)">
-                        Edit alert
-                      </DropdownMenuItem>
-                      <DropdownMenuItem @click="openHistory(alert)">
-                        <History class="mr-2 h-4 w-4" />
-                        View history
-                      </DropdownMenuItem>
-                      <DropdownMenuItem @click="toggleAlert(alert)">
-                        <CalendarClock class="mr-2 h-4 w-4" />
-                        {{ alert.is_active ? "Disable" : "Enable" }}
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem class="text-destructive focus:text-destructive" @click="confirmDelete(alert)">
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                <TableCell class="py-4">
+                  <div class="flex items-center gap-2">
+                    <Users class="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span class="text-sm truncate" :title="alert.rooms.map(r => r.name).join(', ')">
+                      {{ getRoomsSummary(alert) }}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell class="py-4">
+                  <div class="text-sm">
+                    <div class="font-medium">{{ formatRelativeTime(alert.last_triggered_at) }}</div>
+                    <div class="text-xs text-muted-foreground">{{ formatRelativeTime(alert.last_evaluated_at) }}</div>
+                  </div>
+                </TableCell>
+                <TableCell class="py-4 text-right">
+                  <div class="flex items-center justify-end gap-1">
+                    <Button variant="ghost" size="icon" class="h-8 w-8" @click="openEditForm(alert)" title="Edit alert">
+                      <Pencil class="h-4 w-4" />
+                      <span class="sr-only">Edit alert</span>
+                    </Button>
+                    <Button variant="ghost" size="icon" class="h-8 w-8" @click="openHistory(alert)" title="View history">
+                      <History class="h-4 w-4" />
+                      <span class="sr-only">View history</span>
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger as-child>
+                        <Button variant="ghost" size="icon" class="h-8 w-8">
+                          <MoreHorizontal class="h-4 w-4" />
+                          <span class="sr-only">More actions</span>
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" class="w-48">
+                        <DropdownMenuItem @click="openEditForm(alert)">
+                          <Pencil class="mr-2 h-4 w-4" />
+                          Edit alert
+                        </DropdownMenuItem>
+                        <DropdownMenuItem @click="openHistory(alert)">
+                          <History class="mr-2 h-4 w-4" />
+                          View history
+                        </DropdownMenuItem>
+                        <DropdownMenuItem @click="toggleAlert(alert)">
+                          <CalendarClock class="mr-2 h-4 w-4" />
+                          {{ alert.is_active ? "Disable" : "Enable" }}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem class="text-destructive focus:text-destructive" @click="confirmDelete(alert)">
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 </TableCell>
               </TableRow>
             </TableBody>
