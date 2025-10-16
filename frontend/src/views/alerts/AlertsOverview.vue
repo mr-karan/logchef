@@ -11,6 +11,7 @@ import {
   Pencil,
   Plus,
   RefreshCcw,
+  Trash2,
   Users,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
@@ -495,6 +496,7 @@ onMounted(async () => {
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem class="text-destructive focus:text-destructive" @click="confirmDelete(alert)">
+                          <Trash2 class="mr-2 h-4 w-4" />
                           Delete
                         </DropdownMenuItem>
                       </DropdownMenuContent>
