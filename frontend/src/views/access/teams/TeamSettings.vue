@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, reactive } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/composables/useToast'
 import { type Team, type TeamMember } from '@/api/teams'
 import { type Source } from '@/api/sources'
+import type { RoomSummary, RoomMemberDetail, RoomChannel, AddRoomMemberRequest, CreateRoomChannelRequest } from '@/api/rooms'
 import { Loader2, Plus, Trash2, UserPlus, Database } from 'lucide-vue-next'
 import {
     Table,
@@ -40,6 +41,7 @@ import { useUsersStore } from "@/stores/users"
 import { useSourcesStore } from "@/stores/sources"
 import { useTeamsStore } from "@/stores/teams"
 import { useAuthStore } from "@/stores/auth"
+import { useRoomsStore } from "@/stores/rooms"
 import { formatDate, formatSourceName } from '@/utils/format'
 
 const route = useRoute()
@@ -51,6 +53,7 @@ const usersStore = useUsersStore()
 const sourcesStore = useSourcesStore()
 const teamsStore = useTeamsStore()
 const authStore = useAuthStore()
+const roomsStore = useRoomsStore()
 
 // Get the teamId from route params
 const teamId = computed(() => Number(route.params.id))
@@ -65,6 +68,7 @@ const { error: teamError } = storeToRefs(teamsStore)
 const team = computed(() => teamsStore.getTeamById(teamId.value))
 const members = computed(() => teamsStore.getTeamMembersByTeamId(teamId.value) || [])
 const teamSources = computed(() => teamsStore.getTeamSourcesByTeamId(teamId.value) || [])
+const rooms = computed(() => roomsStore.rooms)
 
 // Combined saving state - more specific than overall loading
 const isSaving = computed(() => {
@@ -86,6 +90,14 @@ const newMemberRole = ref('member')
 const selectedUserId = ref('')
 const showAddSourceDialog = ref(false)
 const selectedSourceId = ref('')
+const selectedRoomId = ref<number | null>(null)
+const showCreateRoomDialog = ref(false)
+const createRoomForm = reactive({ name: '', description: '' })
+const showAddRoomMemberDialog = ref(false)
+const selectedRoomUserId = ref('')
+const addEntireTeamLoading = ref(false)
+const channelType = ref<'slack' | 'webhook'>('slack')
+const channelForm = reactive({ name: '', url: '' })
 
 // Sync form data when team changes
 watch(() => team.value, (newTeam) => {
@@ -94,6 +106,26 @@ watch(() => team.value, (newTeam) => {
         description.value = newTeam.description || ''
     }
 }, { immediate: true })
+
+watch(() => teamId.value, async (newTeamId, oldTeamId) => {
+    if (!newTeamId || newTeamId === oldTeamId) return
+    await roomsStore.fetchRooms(newTeamId)
+    selectedRoomId.value = rooms.value[0]?.id ?? null
+    if (selectedRoomId.value) {
+        await roomsStore.fetchMembers(newTeamId, selectedRoomId.value)
+        await roomsStore.fetchChannels(newTeamId, selectedRoomId.value)
+    }
+}, { immediate: true })
+
+watch(rooms, (newRooms) => {
+    if (!newRooms.length) {
+        selectedRoomId.value = null
+        return
+    }
+    if (!selectedRoomId.value || !newRooms.some((room) => room.id === selectedRoomId.value)) {
+        selectedRoomId.value = newRooms[0].id
+    }
+})
 
 // Compute available users (users not in team)
 const availableUsers = computed(() => {
@@ -107,8 +139,37 @@ const availableSources = computed(() => {
     return sourcesStore.getSourcesNotInTeam(teamSourceIds)
 })
 
+const roomMembers = computed(() => {
+    if (!selectedRoomId.value) return [] as RoomMemberDetail[];
+    return roomsStore.membersByRoom[selectedRoomId.value] || [];
+})
+
+const roomChannels = computed(() => {
+    if (!selectedRoomId.value) return [] as RoomChannel[];
+    return roomsStore.channelsByRoom[selectedRoomId.value] || [];
+})
+
+const selectedRoom = computed(() => rooms.value.find((room) => room.id === selectedRoomId.value) || null)
+
+const availableRoomUsers = computed(() => {
+    const memberIds = new Set(roomMembers.value.map((member) => member.user_id))
+    return members.value.filter((member) => !memberIds.has(member.user_id))
+})
+
+watch(selectedRoomId, async (roomId) => {
+    if (!roomId || !teamId.value) return
+    await roomsStore.fetchMembers(teamId.value, roomId)
+    await roomsStore.fetchChannels(teamId.value, roomId)
+})
+
 // Load users when dialog opens to prevent unnecessary API calls
 watch(showAddMemberDialog, async (isOpen) => {
+    if (isOpen && !usersStore.users.length) {
+        await usersStore.loadUsers()
+    }
+})
+
+watch(showAddRoomMemberDialog, async (isOpen) => {
     if (isOpen && !usersStore.users.length) {
         await usersStore.loadUsers()
     }
@@ -207,6 +268,92 @@ const handleAddSource = async () => {
     }
 }
 
+const handleCreateRoom = async () => {
+    if (!team.value) return
+    if (!createRoomForm.name.trim()) {
+        toast({ title: 'Error', description: 'Room name is required', variant: 'destructive' })
+        return
+    }
+    const result = await roomsStore.createRoom(team.value.id, {
+        name: createRoomForm.name.trim(),
+        description: createRoomForm.description.trim(),
+    })
+    if (result.success) {
+        showCreateRoomDialog.value = false
+        createRoomForm.name = ''
+        createRoomForm.description = ''
+        if (team.value?.id) {
+            await roomsStore.fetchRooms(team.value.id)
+            selectedRoomId.value = rooms.value[0]?.id ?? null
+        }
+    }
+}
+
+const handleSelectRoom = async (roomId: number) => {
+    selectedRoomId.value = roomId
+}
+
+const handleAddRoomMember = async () => {
+    if (!team.value || !selectedRoomId.value || !selectedRoomUserId.value) return
+    const payload: AddRoomMemberRequest = {
+        user_id: Number(selectedRoomUserId.value),
+        role: newMemberRole.value,
+    }
+    const result = await roomsStore.addMember(team.value.id, selectedRoomId.value, payload)
+    if (result.success) {
+        selectedRoomUserId.value = ''
+        showAddRoomMemberDialog.value = false
+    }
+}
+
+const handleRemoveRoomMember = async (userId: number) => {
+    if (!team.value || !selectedRoomId.value) return
+    await roomsStore.removeMember(team.value.id, selectedRoomId.value, userId)
+}
+
+const handleAddEntireTeamToRoom = async () => {
+    if (!team.value || !selectedRoomId.value) return
+    addEntireTeamLoading.value = true
+    try {
+        const existingIds = new Set(roomMembers.value.map((member) => member.user_id))
+        for (const member of members.value) {
+            if (!existingIds.has(member.user_id)) {
+                await roomsStore.addMember(team.value.id, selectedRoomId.value, {
+                    user_id: member.user_id,
+                    role: 'member',
+                })
+            }
+        }
+        await roomsStore.fetchMembers(team.value.id, selectedRoomId.value)
+    } finally {
+        addEntireTeamLoading.value = false
+    }
+}
+
+const handleCreateChannel = async () => {
+    if (!team.value || !selectedRoomId.value) return
+    if (!channelForm.url.trim()) {
+        toast({ title: 'Error', description: 'Channel URL is required', variant: 'destructive' })
+        return
+    }
+    const payload: CreateRoomChannelRequest = {
+        type: channelType.value,
+        name: channelForm.name.trim(),
+        config: { url: channelForm.url.trim() },
+        enabled: true,
+    }
+    const result = await roomsStore.createChannel(team.value.id, selectedRoomId.value, payload)
+    if (result.success) {
+        channelForm.name = ''
+        channelForm.url = ''
+    }
+}
+
+const handleDeleteChannel = async (channelId: number) => {
+    if (!team.value || !selectedRoomId.value) return
+    await roomsStore.deleteChannel(team.value.id, selectedRoomId.value, channelId)
+}
+
 const handleRemoveSource = async (sourceId: string | number) => {
     if (!team.value) return
 
@@ -296,6 +443,7 @@ onMounted(async () => {
                 <TabsList>
                     <TabsTrigger value="members">Members</TabsTrigger>
                     <TabsTrigger value="sources">Sources</TabsTrigger>
+                    <TabsTrigger value="rooms">Rooms</TabsTrigger>
                     <TabsTrigger value="settings">Settings</TabsTrigger>
                 </TabsList>
 
@@ -409,6 +557,277 @@ onMounted(async () => {
                             </Table>
                         </CardContent>
                     </Card>
+                </TabsContent>
+
+                <!-- Rooms Tab -->
+                <TabsContent value="rooms">
+                    <div class="grid gap-6 lg:grid-cols-[280px,1fr]">
+                        <Card class="self-start">
+                            <CardHeader class="pb-4">
+                                <CardTitle class="text-base">Rooms</CardTitle>
+                                <CardDescription class="text-xs">
+                                    Notification groups for alerts
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent class="space-y-3">
+                                <Dialog v-model:open="showCreateRoomDialog">
+                                    <DialogTrigger asChild>
+                                        <Button size="sm" class="w-full">
+                                            <Plus class="mr-2 h-4 w-4" />
+                                            Create Room
+                                        </Button>
+                                    </DialogTrigger>
+                                    <DialogContent>
+                                        <DialogHeader>
+                                            <DialogTitle>Create Room</DialogTitle>
+                                            <DialogDescription>
+                                                Create a reusable group of recipients for alert notifications
+                                            </DialogDescription>
+                                        </DialogHeader>
+                                        <div class="space-y-4 py-4">
+                                            <div class="space-y-2">
+                                                <Label for="room-name">Name</Label>
+                                                <Input id="room-name" v-model="createRoomForm.name" placeholder="e.g., On-call Team, DevOps Alerts" />
+                                            </div>
+                                            <div class="space-y-2">
+                                                <Label for="room-description">Description <span class="text-xs text-muted-foreground">(optional)</span></Label>
+                                                <Textarea id="room-description" v-model="createRoomForm.description" rows="3" placeholder="Describe the purpose of this room" />
+                                            </div>
+                                        </div>
+                                        <DialogFooter>
+                                            <Button variant="outline" @click="showCreateRoomDialog = false">Cancel</Button>
+                                            <Button @click="handleCreateRoom">
+                                                <Plus class="mr-2 h-4 w-4" />
+                                                Create Room
+                                            </Button>
+                                        </DialogFooter>
+                                    </DialogContent>
+                                </Dialog>
+
+                                <div v-if="rooms.length" class="space-y-1">
+                                    <Button
+                                        v-for="room in rooms"
+                                        :key="room.id"
+                                        variant="ghost"
+                                        size="sm"
+                                        :class="[
+                                            'w-full h-auto py-3 px-3 justify-start text-left transition-colors',
+                                            selectedRoomId === room.id ? 'bg-muted hover:bg-muted/80' : 'hover:bg-muted/50'
+                                        ]"
+                                        @click="handleSelectRoom(room.id)"
+                                    >
+                                        <div class="flex flex-col items-start gap-1 min-w-0 w-full">
+                                            <span class="text-sm font-medium truncate w-full">{{ room.name }}</span>
+                                            <span class="text-xs text-muted-foreground">
+                                                {{ room.member_count }} {{ room.member_count === 1 ? 'member' : 'members' }}
+                                            </span>
+                                            <span v-if="room.channel_types?.length" class="text-xs text-muted-foreground font-mono">
+                                                {{ room.channel_types.join(', ') }}
+                                            </span>
+                                        </div>
+                                    </Button>
+                                </div>
+
+                                <div v-else class="rounded-lg border border-dashed p-6 text-center">
+                                    <p class="text-sm text-muted-foreground">
+                                        No rooms yet. Create one to get started.
+                                    </p>
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        <div v-if="selectedRoom" class="space-y-6">
+                            <Card>
+                                <CardHeader class="pb-4">
+                                    <div class="space-y-4">
+                                        <div>
+                                            <CardTitle class="text-xl">{{ selectedRoom.name }}</CardTitle>
+                                            <CardDescription class="mt-1.5">
+                                                {{ selectedRoom.description || 'Room members receive email alerts when notifications are triggered.' }}
+                                            </CardDescription>
+                                        </div>
+                                        <div class="flex flex-wrap items-center gap-2">
+                                            <Dialog v-model:open="showAddRoomMemberDialog">
+                                                <DialogTrigger asChild>
+                                                    <Button size="sm">
+                                                        <UserPlus class="mr-2 h-4 w-4" />
+                                                        Add Member
+                                                    </Button>
+                                                </DialogTrigger>
+                                                <DialogContent>
+                                                    <DialogHeader>
+                                                        <DialogTitle>Add Room Member</DialogTitle>
+                                                        <DialogDescription>Select a team member to add to this room for alert notifications</DialogDescription>
+                                                    </DialogHeader>
+                                                    <div class="space-y-4 py-4">
+                                                        <div class="space-y-2">
+                                                            <Label>Team Member</Label>
+                                                            <Select v-model="selectedRoomUserId">
+                                                                <SelectTrigger>
+                                                                    <SelectValue placeholder="Select team member" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem v-for="member in availableRoomUsers" :key="member.user_id" :value="String(member.user_id)">
+                                                                        {{ member.email }}
+                                                                    </SelectItem>
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                    </div>
+                                                    <DialogFooter>
+                                                        <Button variant="outline" @click="showAddRoomMemberDialog = false">Cancel</Button>
+                                                        <Button @click="handleAddRoomMember" :disabled="!selectedRoomUserId">
+                                                            <Plus class="mr-2 h-4 w-4" />
+                                                            Add Member
+                                                        </Button>
+                                                    </DialogFooter>
+                                                </DialogContent>
+                                            </Dialog>
+                                            <Button size="sm" variant="outline" :disabled="addEntireTeamLoading" @click="handleAddEntireTeamToRoom">
+                                                <Loader2 v-if="addEntireTeamLoading" class="mr-2 h-4 w-4 animate-spin" />
+                                                <UserPlus v-else class="mr-2 h-4 w-4" />
+                                                Add entire team
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </CardHeader>
+                                <CardContent class="pt-6">
+                                    <div v-if="roomMembers.length === 0" class="rounded-lg border border-dashed p-8 text-center">
+                                        <UserPlus class="h-8 w-8 mx-auto mb-3 text-muted-foreground/50" />
+                                        <p class="text-sm font-medium mb-1">No members yet</p>
+                                        <p class="text-xs text-muted-foreground">
+                                            Add team members to this room to send them alert notifications
+                                        </p>
+                                    </div>
+                                    <Table v-else>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead>Member</TableHead>
+                                                <TableHead>Role</TableHead>
+                                                <TableHead>Added</TableHead>
+                                                <TableHead class="text-right">Actions</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            <TableRow v-for="member in roomMembers" :key="member.user_id">
+                                                <TableCell>
+                                                    <div class="flex flex-col gap-0.5">
+                                                        <span class="font-medium">{{ member.email }}</span>
+                                                        <span v-if="member.name" class="text-xs text-muted-foreground">{{ member.name }}</span>
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <span class="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium capitalize">
+                                                        {{ member.role }}
+                                                    </span>
+                                                </TableCell>
+                                                <TableCell class="text-sm text-muted-foreground">{{ formatDate(member.added_at) }}</TableCell>
+                                                <TableCell class="text-right">
+                                                    <Button variant="ghost" size="icon" class="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10" @click="handleRemoveRoomMember(member.user_id)">
+                                                        <Trash2 class="h-4 w-4" />
+                                                    </Button>
+                                                </TableCell>
+                                            </TableRow>
+                                        </TableBody>
+                                    </Table>
+                                </CardContent>
+                            </Card>
+
+                            <Card>
+                                <CardHeader class="pb-4">
+                                    <CardTitle class="text-base">Channels</CardTitle>
+                                    <CardDescription>
+                                        Configure Slack webhooks or HTTP endpoints to deliver real-time alert notifications
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent class="space-y-6">
+                                    <div class="rounded-lg border bg-muted/30 p-4 space-y-4">
+                                        <h4 class="text-sm font-medium">Add New Channel</h4>
+                                        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-[140px,1fr,2fr,auto]">
+                                            <div class="space-y-2">
+                                                <Label for="channel-type" class="text-xs">Type</Label>
+                                                <Select v-model="channelType" id="channel-type">
+                                                    <SelectTrigger class="h-9">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="slack">Slack</SelectItem>
+                                                        <SelectItem value="webhook">Webhook</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div class="space-y-2">
+                                                <Label for="channel-name" class="text-xs">Name <span class="text-muted-foreground">(optional)</span></Label>
+                                                <Input id="channel-name" v-model="channelForm.name" placeholder="e.g., #alerts" class="h-9" />
+                                            </div>
+                                            <div class="space-y-2">
+                                                <Label for="channel-url" class="text-xs">Webhook URL</Label>
+                                                <Input id="channel-url" v-model="channelForm.url" placeholder="https://hooks.slack.com/..." class="h-9" />
+                                            </div>
+                                            <div class="flex items-end">
+                                                <Button size="sm" @click="handleCreateChannel" :disabled="!channelForm.url.trim()">
+                                                    <Plus class="mr-2 h-3.5 w-3.5" />
+                                                    Add Channel
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div v-if="roomChannels.length === 0" class="rounded-lg border border-dashed p-8 text-center">
+                                        <Database class="h-8 w-8 mx-auto mb-3 text-muted-foreground/50" />
+                                        <p class="text-sm font-medium mb-1">No channels configured</p>
+                                        <p class="text-xs text-muted-foreground">
+                                            Add Slack or webhook channels to deliver alerts beyond email notifications
+                                        </p>
+                                    </div>
+
+                                    <Table v-else>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead>Channel</TableHead>
+                                                <TableHead>Type</TableHead>
+                                                <TableHead>Webhook URL</TableHead>
+                                                <TableHead class="text-right">Actions</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            <TableRow v-for="channel in roomChannels" :key="channel.id">
+                                                <TableCell>
+                                                    <span class="font-medium">{{ channel.name || 'Unnamed Channel' }}</span>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <span class="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium capitalize">
+                                                        {{ channel.type }}
+                                                    </span>
+                                                </TableCell>
+                                                <TableCell class="max-w-[300px]">
+                                                    <code class="text-xs text-muted-foreground truncate block">
+                                                        {{ channel.config?.url }}
+                                                    </code>
+                                                </TableCell>
+                                                <TableCell class="text-right">
+                                                    <Button variant="ghost" size="icon" class="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10" @click="handleDeleteChannel(channel.id)">
+                                                        <Trash2 class="h-4 w-4" />
+                                                    </Button>
+                                                </TableCell>
+                                            </TableRow>
+                                        </TableBody>
+                                    </Table>
+                                </CardContent>
+                            </Card>
+                        </div>
+                        <div v-else class="flex items-center justify-center rounded-lg border border-dashed p-12 min-h-[400px]">
+                            <div class="text-center space-y-3">
+                                <div class="h-12 w-12 rounded-full bg-muted/50 mx-auto flex items-center justify-center mb-2">
+                                    <Database class="h-6 w-6 text-muted-foreground/50" />
+                                </div>
+                                <p class="text-sm font-medium text-muted-foreground">Select a room to get started</p>
+                                <p class="text-xs text-muted-foreground max-w-[280px]">
+                                    Choose a room from the sidebar to manage its members and notification channels
+                                </p>
+                            </div>
+                        </div>
+                    </div>
                 </TabsContent>
 
                 <!-- Sources Tab -->
