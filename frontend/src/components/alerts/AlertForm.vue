@@ -377,7 +377,7 @@ function handleSubmit() {
             </div>
 
             <!-- Warnings -->
-            <div v-if="testQueryResult.warnings.length > 0" class="space-y-2">
+            <div v-if="testQueryResult.warnings && testQueryResult.warnings.length > 0" class="space-y-2">
               <div
                 v-for="(warning, index) in testQueryResult.warnings"
                 :key="index"
