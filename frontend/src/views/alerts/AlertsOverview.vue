@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import {
@@ -45,20 +45,15 @@ import {
 import ErrorAlert from "@/components/ui/ErrorAlert.vue";
 import TeamSourceSelector from "@/views/explore/components/TeamSourceSelector.vue";
 import { useAlertsStore } from "@/stores/alerts";
-import { useAlertHistoryStore } from "@/stores/alertHistory";
 import { useContextStore } from "@/stores/context";
 import { useTeamsStore } from "@/stores/teams";
 import { useSourcesStore } from "@/stores/sources";
-import { formatDate } from "@/utils/format";
 import type { Alert } from "@/api/alerts";
-import AlertForm from "@/components/alerts/AlertForm.vue";
-import AlertHistoryDrawer from "@/components/alerts/AlertHistoryDrawer.vue";
 
 const router = useRouter();
 const route = useRoute();
 
 const alertsStore = useAlertsStore();
-const alertHistoryStore = useAlertHistoryStore();
 const contextStore = useContextStore();
 const teamsStore = useTeamsStore();
 const sourcesStore = useSourcesStore();
@@ -66,18 +61,10 @@ const sourcesStore = useSourcesStore();
 const { alerts } = storeToRefs(alertsStore);
 
 const isFormOpen = ref(false);
-const formMode = ref<"create" | "edit">("create");
-const editingAlert = ref<Alert | null>(null);
-
-const isHistoryOpen = ref(false);
-const historyAlert = ref<Alert | null>(null);
 
 const showDeleteDialog = ref(false);
 const alertToDelete = ref<Alert | null>(null);
 
-const localState = reactive({
-  pendingRouteAlertId: null as number | null,
-});
 
 const currentTeamId = computed(() => contextStore.teamId);
 const currentSourceId = computed(() => contextStore.sourceId);
@@ -112,52 +99,14 @@ const emptyStateMessage = computed(() => {
   return "";
 });
 
-function setRouteAlert(alertId: number | null) {
-  const baseRoute = { name: "AlertsOverview" as const, params: {} as Record<string, string>, query: route.query };
-  if (alertId) {
-    router.replace({
-      name: "AlertDetail",
-      params: { alertID: String(alertId) },
-      query: route.query,
-    });
-  } else {
-    router.replace(baseRoute);
-  }
-}
 
 function openCreateForm() {
-  formMode.value = "create";
-  editingAlert.value = null;
+  // TODO: Navigate to create page when implemented
   isFormOpen.value = true;
 }
 
 function openEditForm(alert: Alert) {
-  formMode.value = "edit";
-  editingAlert.value = alert;
-  alertsStore.setSelectedAlert(alert.id);
-  isFormOpen.value = true;
-}
-
-function handleFormClose() {
-  isFormOpen.value = false;
-  editingAlert.value = null;
-}
-
-async function handleCreate(payload: Parameters<typeof alertsStore.createAlert>[2]) {
-  if (!currentTeamId.value || !currentSourceId.value) return;
-  const result = await alertsStore.createAlert(currentTeamId.value, currentSourceId.value, payload);
-  if (result.success) {
-    isFormOpen.value = false;
-  }
-}
-
-async function handleUpdate(payload: Parameters<typeof alertsStore.updateAlert>[3]) {
-  if (!currentTeamId.value || !currentSourceId.value || !editingAlert.value) return;
-  const result = await alertsStore.updateAlert(currentTeamId.value, currentSourceId.value, editingAlert.value.id, payload);
-  if (result.success) {
-    isFormOpen.value = false;
-    editingAlert.value = null;
-  }
+  router.push({ name: "AlertDetail", params: { alertID: alert.id }, query: route.query });
 }
 
 function confirmDelete(alert: Alert) {
@@ -183,19 +132,7 @@ async function toggleAlert(alert: Alert) {
 }
 
 function openHistory(alert: Alert) {
-  historyAlert.value = alert;
-  alertsStore.setSelectedAlert(alert.id);
-  isHistoryOpen.value = true;
-  setRouteAlert(alert.id);
-  if (currentTeamId.value && currentSourceId.value) {
-    alertHistoryStore.loadHistory(currentTeamId.value, currentSourceId.value, alert.id);
-  }
-}
-
-function closeHistory() {
-  isHistoryOpen.value = false;
-  historyAlert.value = null;
-  setRouteAlert(null);
+  router.push({ name: "AlertDetail", params: { alertID: alert.id }, query: { ...route.query, tab: "history" } });
 }
 
 async function retryLoad() {
@@ -291,26 +228,6 @@ async function handleContextChange(teamId: number | null, sourceId: number | nul
   }
 }
 
-function syncRouteAlert(alertIdParam: unknown) {
-  if (!alertIdParam) {
-    localState.pendingRouteAlertId = null;
-    if (isHistoryOpen.value) {
-      closeHistory();
-    }
-    return;
-  }
-  const parsed = Number(alertIdParam);
-  if (Number.isNaN(parsed)) {
-    localState.pendingRouteAlertId = null;
-    return;
-  }
-  localState.pendingRouteAlertId = parsed;
-  const existing = alerts.value.find((alert) => alert.id === parsed);
-  if (existing) {
-    openHistory(existing);
-  }
-}
-
 watch(
   () => [currentTeamId.value, currentSourceId.value] as const,
   async ([teamId, sourceId], oldValue) => {
@@ -321,27 +238,6 @@ watch(
       }
     }
     await handleContextChange(teamId, sourceId);
-  },
-  { immediate: true }
-);
-
-watch(
-  () => alerts.value.length,
-  () => {
-    if (localState.pendingRouteAlertId) {
-      const alert = alerts.value.find((a) => a.id === localState.pendingRouteAlertId);
-      if (alert) {
-        openHistory(alert);
-        localState.pendingRouteAlertId = null;
-      }
-    }
-  }
-);
-
-watch(
-  () => route.params.alertID,
-  (value) => {
-    syncRouteAlert(value);
   },
   { immediate: true }
 );
@@ -427,7 +323,12 @@ onMounted(async () => {
                   <div class="flex items-start gap-3">
                     <div class="flex-1 space-y-1 min-w-0">
                       <div class="flex items-center gap-2">
-                        <span class="font-medium truncate">{{ alert.name }}</span>
+                        <router-link
+                          :to="{ name: 'AlertDetail', params: { alertID: alert.id }, query: route.query }"
+                          class="font-medium truncate hover:underline cursor-pointer"
+                        >
+                          {{ alert.name }}
+                        </router-link>
                         <Badge :variant="mapSeverityVariant(alert.severity)" class="capitalize shrink-0">
                           {{ alert.severity }}
                         </Badge>
@@ -510,26 +411,7 @@ onMounted(async () => {
       </CardContent>
     </Card>
 
-    <AlertForm
-      v-if="isFormOpen"
-      :open="isFormOpen"
-      :mode="formMode"
-      :team-id="currentTeamId"
-      :source-id="currentSourceId"
-      :alert="formMode === 'edit' ? editingAlert : null"
-      @cancel="handleFormClose"
-      @create="handleCreate"
-      @update="handleUpdate"
-    />
-
-    <AlertHistoryDrawer
-      v-if="historyAlert"
-      :open="isHistoryOpen"
-      :alert="historyAlert"
-      :team-id="currentTeamId"
-      :source-id="currentSourceId"
-      @close="closeHistory"
-    />
+    <!-- TODO: Add create alert modal/page -->
 
     <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = $event">
       <AlertDialogContent>

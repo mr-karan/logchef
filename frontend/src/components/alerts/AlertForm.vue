@@ -30,13 +30,16 @@ import { alertsApi } from "@/api/alerts";
 import type { Alert, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryResponse } from "@/api/alerts";
 import type { RoomSummary } from "@/api/rooms";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   open: boolean;
   mode: "create" | "edit";
   teamId: number | null;
   sourceId: number | null;
   alert: Alert | null;
-}>();
+  inline?: boolean;
+}>(), {
+  inline: false,
+});
 
 const emit = defineEmits<{
   (e: "cancel"): void;
@@ -265,7 +268,7 @@ function handleSubmit() {
 </script>
 
 <template>
-  <Dialog :open="open" @update:open="(value) => !value && handleClose()">
+  <Dialog v-if="!inline" :open="open" @update:open="(value) => !value && handleClose()">
     <DialogContent class="max-h-[90vh] max-w-4xl overflow-y-auto">
       <DialogHeader>
         <DialogTitle>
@@ -493,7 +496,7 @@ function handleSubmit() {
           </ScrollArea>
         </section>
 
-        <DialogFooter class="pt-4">
+        <DialogFooter v-if="!inline" class="pt-4">
           <Button type="button" variant="ghost" @click="handleClose" :disabled="isSubmitting">
             Cancel
           </Button>
@@ -501,7 +504,237 @@ function handleSubmit() {
             {{ isSubmitting ? "Saving..." : mode === "create" ? "Create alert" : "Save changes" }}
           </Button>
         </DialogFooter>
+        <div v-else class="flex items-center justify-end gap-2 pt-4">
+          <Button type="submit" :disabled="!isValid || isDisabled">
+            {{ isSubmitting ? "Saving..." : "Save changes" }}
+          </Button>
+        </div>
       </form>
     </DialogContent>
   </Dialog>
+
+  <!-- Inline mode (no dialog wrapper) -->
+  <form v-else class="space-y-6" @submit.prevent="handleSubmit">
+    <!-- Reuse same form sections - copy content from above -->
+    <section class="space-y-4">
+      <div class="grid gap-4 lg:grid-cols-3">
+        <div class="space-y-2 lg:col-span-2">
+          <Label for="alert-name-inline">Alert name</Label>
+          <Input id="alert-name-inline" v-model="form.name" placeholder="High error rate alert" :disabled="isDisabled" />
+        </div>
+        <div class="space-y-2">
+          <Label for="alert-severity-inline">Severity</Label>
+          <Select :model-value="form.severity" :disabled="isDisabled" @update:model-value="(value: any) => (form.severity = value)">
+            <SelectTrigger id="alert-severity-inline">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectLabel>Severity</SelectLabel>
+                <SelectItem value="info">Info</SelectItem>
+                <SelectItem value="warning">Warning</SelectItem>
+                <SelectItem value="critical">Critical</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div class="space-y-2">
+        <Label for="alert-description-inline">Description <span class="text-xs text-muted-foreground">(optional)</span></Label>
+        <Textarea id="alert-description-inline" v-model="form.description" placeholder="Provide context about when this alert should fire and what action to take" :rows="2" :disabled="isDisabled" />
+      </div>
+    </section>
+
+    <!-- Evaluation Query -->
+    <section class="space-y-4 rounded-lg border bg-muted/20 p-5">
+      <div>
+        <h3 class="text-sm font-semibold">Evaluation query</h3>
+        <p class="text-xs text-muted-foreground mt-1">Write a SQL query that returns a single numeric value. Include time filters in your WHERE clause.</p>
+      </div>
+
+      <!-- Query Templates -->
+      <div class="space-y-2">
+        <Label for="query-template-inline">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
+        <Select @update:model-value="(value: any) => applyTemplate(queryTemplates[parseInt(value)])">
+          <SelectTrigger id="query-template-inline">
+            <SelectValue placeholder="Choose a template..." />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectLabel>Query Templates</SelectLabel>
+              <SelectItem v-for="(template, index) in queryTemplates" :key="index" :value="String(index)">
+                <div class="flex flex-col gap-0.5">
+                  <span class="font-medium">{{ template.name }}</span>
+                  <span class="text-xs text-muted-foreground">{{ template.description }}</span>
+                </div>
+              </SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div class="space-y-2">
+        <div class="flex items-center justify-between">
+          <Label for="alert-query-inline">SQL Query</Label>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            :disabled="!form.query.trim() || isDisabled || isTestingQuery"
+            @click="handleTestQuery"
+          >
+            {{ isTestingQuery ? "Testing..." : "Test Query" }}
+          </Button>
+        </div>
+        <Textarea
+          id="alert-query-inline"
+          v-model="form.query"
+          placeholder="SELECT count(*) as value FROM logs WHERE severity = 'ERROR' AND timestamp >= now() - INTERVAL 5 MINUTE"
+          :rows="6"
+          :disabled="isDisabled"
+          class="font-mono text-sm resize-none"
+        />
+      </div>
+
+      <!-- Test Query Results -->
+      <div v-if="testQueryResult" class="rounded-lg border bg-background p-4 space-y-3">
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex-1 space-y-1">
+            <h4 class="text-sm font-medium">Test Result</h4>
+            <div class="flex items-baseline gap-3">
+              <span class="text-2xl font-semibold tabular-nums">{{ testQueryResult.value }}</span>
+              <span class="text-sm text-muted-foreground">
+                {{ testQueryResult.threshold_met ? '✓ Threshold met' : '✗ Threshold not met' }}
+              </span>
+            </div>
+          </div>
+          <div class="text-right space-y-1">
+            <div class="text-xs text-muted-foreground">Execution time</div>
+            <div class="text-sm font-medium tabular-nums">{{ testQueryResult.execution_time_ms }}ms</div>
+          </div>
+        </div>
+
+        <!-- Warnings -->
+        <div v-if="testQueryResult.warnings && testQueryResult.warnings.length > 0" class="space-y-2">
+          <div
+            v-for="(warning, index) in testQueryResult.warnings"
+            :key="index"
+            class="flex gap-2 text-sm rounded-md bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 p-3"
+          >
+            <span class="text-yellow-600 dark:text-yellow-500 flex-shrink-0">⚠️</span>
+            <span class="text-yellow-900 dark:text-yellow-100">{{ warning }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Test Query Error -->
+      <div v-if="testQueryError" class="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20 p-4">
+        <div class="flex gap-2 text-sm">
+          <span class="text-red-600 dark:text-red-500 flex-shrink-0">✗</span>
+          <span class="text-red-900 dark:text-red-100">{{ testQueryError }}</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Threshold & Timing -->
+    <section class="space-y-4">
+      <div>
+        <h3 class="text-sm font-semibold mb-3">Threshold & timing</h3>
+        <div class="grid gap-4 lg:grid-cols-2">
+          <div class="space-y-2">
+            <Label for="alert-threshold-operator-inline">Threshold operator</Label>
+            <Select :model-value="form.threshold_operator" :disabled="isDisabled" @update:model-value="(value: any) => (form.threshold_operator = value)">
+              <SelectTrigger id="alert-threshold-operator-inline">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="gt">Greater than (&gt;)</SelectItem>
+                <SelectItem value="gte">Greater than or equal (&ge;)</SelectItem>
+                <SelectItem value="lt">Less than (&lt;)</SelectItem>
+                <SelectItem value="lte">Less than or equal (&le;)</SelectItem>
+                <SelectItem value="eq">Equal (=)</SelectItem>
+                <SelectItem value="neq">Not equal (&ne;)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="space-y-2">
+            <Label for="alert-threshold-value-inline">Threshold value</Label>
+            <Input id="alert-threshold-value-inline" v-model.number="form.threshold_value" type="number" min="0" step="0.01" :disabled="isDisabled" placeholder="1" />
+          </div>
+          <div class="space-y-2">
+            <Label for="alert-frequency-inline">
+              Evaluation frequency (seconds)
+              <span class="text-xs font-normal text-muted-foreground ml-1">· How often to check</span>
+            </Label>
+            <Input id="alert-frequency-inline" v-model.number="form.frequency_seconds" type="number" min="30" step="30" :disabled="isDisabled" placeholder="300" />
+            <p class="text-xs text-muted-foreground">
+              How often this alert runs (e.g., 300s = every 5 minutes)
+            </p>
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center justify-between rounded-lg border bg-muted/20 p-4">
+        <div>
+          <h3 class="text-sm font-medium">Alert status</h3>
+          <p class="text-xs text-muted-foreground mt-0.5">
+            {{ form.is_active ? "This alert will evaluate on schedule" : "Disabled alerts are skipped until re-enabled" }}
+          </p>
+        </div>
+        <Switch :checked="form.is_active" :disabled="isDisabled" @update:checked="(checked) => (form.is_active = Boolean(checked))" />
+      </div>
+    </section>
+
+    <!-- Target Rooms -->
+    <section class="space-y-4 rounded-lg border bg-muted/20 p-5">
+      <div>
+        <h3 class="text-sm font-semibold">Target rooms</h3>
+        <p class="text-xs text-muted-foreground mt-1">
+          Select one or more rooms. Members receive email alerts and room channels deliver Slack/Webhook notifications.
+        </p>
+      </div>
+      <ScrollArea class="max-h-56 rounded-lg border bg-background p-3">
+        <div class="space-y-2">
+          <div
+            v-for="room in availableRooms"
+            :key="room.id"
+            class="flex items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/40"
+          >
+            <Checkbox
+              :id="`room-inline-${room.id}`"
+              :checked="form.roomIds.includes(room.id)"
+              :disabled="isDisabled"
+              @update:checked="(checked) => {
+                if (checked) {
+                  if (!form.roomIds.includes(room.id)) form.roomIds.push(room.id);
+                } else {
+                  form.roomIds = form.roomIds.filter((id) => id !== room.id);
+                }
+              }"
+              class="mt-0.5"
+            />
+            <div class="flex-1 space-y-1">
+              <Label :for="`room-inline-${room.id}`" class="font-medium cursor-pointer">
+                {{ room.name }}
+              </Label>
+              <p v-if="room.description" class="text-xs text-muted-foreground">
+                {{ room.description }}
+              </p>
+              <p class="text-[11px] text-muted-foreground">
+                {{ room.member_count }} {{ room.member_count === 1 ? 'member' : 'members' }} · {{ room.channel_types?.length ? room.channel_types.join(", ") : "email" }}
+              </p>
+            </div>
+          </div>
+          <p v-if="!availableRooms.length" class="text-sm text-muted-foreground text-center py-6">
+            No rooms available yet. Create rooms from team settings to manage recipients.
+          </p>
+        </div>
+      </ScrollArea>
+    </section>
+
+    <div class="flex items-center justify-end gap-2 pt-4">
+      <Button type="submit" :disabled="!isValid || isDisabled">
+        {{ isSubmitting ? "Saving..." : "Save changes" }}
+      </Button>
+    </div>
+  </form>
 </template>
