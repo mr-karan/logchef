@@ -9,6 +9,41 @@ import (
 	"time"
 )
 
+type Alert struct {
+	ID                int64          `json:"id"`
+	TeamID            int64          `json:"team_id"`
+	SourceID          int64          `json:"source_id"`
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	Query             string         `json:"query"`
+	ThresholdOperator string         `json:"threshold_operator"`
+	ThresholdValue    float64        `json:"threshold_value"`
+	FrequencySeconds  int64          `json:"frequency_seconds"`
+	Severity          string         `json:"severity"`
+	IsActive          int64          `json:"is_active"`
+	LastEvaluatedAt   sql.NullTime   `json:"last_evaluated_at"`
+	LastTriggeredAt   sql.NullTime   `json:"last_triggered_at"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+}
+
+type AlertHistory struct {
+	ID          int64          `json:"id"`
+	AlertID     int64          `json:"alert_id"`
+	Status      string         `json:"status"`
+	TriggeredAt time.Time      `json:"triggered_at"`
+	ResolvedAt  sql.NullTime   `json:"resolved_at"`
+	ValueText   sql.NullString `json:"value_text"`
+	RoomsJson   sql.NullString `json:"rooms_json"`
+	Message     sql.NullString `json:"message"`
+	CreatedAt   time.Time      `json:"created_at"`
+}
+
+type AlertRoom struct {
+	AlertID int64 `json:"alert_id"`
+	RoomID  int64 `json:"room_id"`
+}
+
 type ApiToken struct {
 	ID         int64        `json:"id"`
 	UserID     int64        `json:"user_id"`
@@ -19,6 +54,33 @@ type ApiToken struct {
 	ExpiresAt  sql.NullTime `json:"expires_at"`
 	CreatedAt  time.Time    `json:"created_at"`
 	UpdatedAt  time.Time    `json:"updated_at"`
+}
+
+type Room struct {
+	ID          int64          `json:"id"`
+	TeamID      int64          `json:"team_id"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
+type RoomChannel struct {
+	ID         int64          `json:"id"`
+	RoomID     int64          `json:"room_id"`
+	Type       string         `json:"type"`
+	Name       sql.NullString `json:"name"`
+	ConfigJson string         `json:"config_json"`
+	Enabled    int64          `json:"enabled"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+}
+
+type RoomMember struct {
+	RoomID  int64     `json:"room_id"`
+	UserID  int64     `json:"user_id"`
+	Role    string    `json:"role"`
+	AddedAt time.Time `json:"added_at"`
 }
 
 type Session struct {

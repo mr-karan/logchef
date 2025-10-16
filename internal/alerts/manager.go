@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -116,15 +117,7 @@ func (m *Manager) evaluateCycle(ctx context.Context) {
 }
 
 func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error {
-	source, err := m.db.GetSource(ctx, alert.SourceID)
-	if err != nil {
-		return fmt.Errorf("failed to load source for alert %d: %w", alert.ID, err)
-	}
-
-	query, err := m.buildEvaluationQuery(alert, source)
-	if err != nil {
-		return err
-	}
+	query := alert.Query
 
 	client, err := m.clickhouse.GetConnection(alert.SourceID)
 	if err != nil {
@@ -150,31 +143,34 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 }
 
 func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, value float64) error {
-	// Avoid duplicating history entries if the alert is already active.
-	_, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
+	roomSnapshots, emailTargets, channelTargets, buildErr := m.buildNotificationContext(ctx, alert)
+	if buildErr != nil {
+		return buildErr
+	}
+
+	prevHistory, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		m.log.Warn("failed to check existing alert history", "alert_id", alert.ID, "error", err)
 	}
-	alreadyActive := false
-	if err == nil {
-		alreadyActive = true
-	} else if errors.Is(err, sql.ErrNoRows) {
+	alreadyActive := err == nil && prevHistory != nil
+
+	if errors.Is(err, sql.ErrNoRows) {
 		history := &models.AlertHistoryEntry{
 			AlertID:   alert.ID,
 			Status:    models.AlertStatusTriggered,
 			ValueText: strconv.FormatFloat(value, 'f', 4, 64),
-			Channels:  alert.Channels,
+			Rooms:     roomSnapshots,
 			Message:   fmt.Sprintf("alert %s triggered with value %.4f", alert.Name, value),
 		}
-		if err := m.db.InsertAlertHistory(ctx, history); err != nil {
-			m.log.Error("failed to insert alert history", "alert_id", alert.ID, "error", err)
+		if insertErr := m.db.InsertAlertHistory(ctx, history); insertErr != nil {
+			m.log.Error("failed to insert alert history", "alert_id", alert.ID, "error", insertErr)
 		} else if pruneErr := m.db.PruneAlertHistory(ctx, alert.ID, m.cfg.HistoryLimit); pruneErr != nil {
 			m.log.Warn("failed to prune alert history", "alert_id", alert.ID, "error", pruneErr)
 		}
 	}
 
-	if err := m.db.MarkAlertTriggered(ctx, alert.ID); err != nil {
-		m.log.Error("failed to mark alert triggered", "alert_id", alert.ID, "error", err)
+	if markErr := m.db.MarkAlertTriggered(ctx, alert.ID); markErr != nil {
+		m.log.Error("failed to mark alert triggered", "alert_id", alert.ID, "error", markErr)
 	}
 
 	if alreadyActive {
@@ -182,21 +178,96 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 		return nil
 	}
 
+	if sendErr := m.dispatchNotifications(ctx, alert, value, emailTargets, channelTargets); sendErr != nil {
+		m.log.Warn("failed to dispatch notifications", "alert_id", alert.ID, "error", sendErr)
+	}
+	return nil
+}
+
+func (m *Manager) buildNotificationContext(ctx context.Context, alert *models.Alert) ([]models.AlertHistoryRoomSnapshot, []string, []*models.RoomChannel, error) {
+	var (
+		snapshots      []models.AlertHistoryRoomSnapshot
+		emailSet       = make(map[string]struct{})
+		channelTargets []*models.RoomChannel
+	)
+
+	for _, room := range alert.Rooms {
+		emails, err := m.db.ListRoomMemberEmails(ctx, room.ID)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to list members for room %d: %w", room.ID, err)
+		}
+		channels, err := m.db.ListEnabledRoomChannels(ctx, room.ID)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to list channels for room %d: %w", room.ID, err)
+		}
+
+		channelTargets = append(channelTargets, channels...)
+
+		for _, email := range emails {
+			normalized := strings.ToLower(strings.TrimSpace(email))
+			if normalized != "" {
+				emailSet[normalized] = struct{}{}
+			}
+		}
+
+		snapshots = append(snapshots, models.AlertHistoryRoomSnapshot{
+			RoomID:       room.ID,
+			Name:         room.Name,
+			ChannelTypes: room.ChannelTypes,
+			MemberEmails: emails,
+		})
+	}
+
+	emails := make([]string, 0, len(emailSet))
+	for email := range emailSet {
+		emails = append(emails, email)
+	}
+	sort.Strings(emails)
+
+	return snapshots, emails, channelTargets, nil
+}
+
+func (m *Manager) dispatchNotifications(ctx context.Context, alert *models.Alert, value float64, emails []string, channels []*models.RoomChannel) error {
+	if len(emails) == 0 && len(channels) == 0 {
+		return nil
+	}
+
 	timeout := m.cfg.NotificationTimeout
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	for _, ch := range alert.Channels {
+
+	payload := NotificationPayload{
+		Value:   value,
+		Message: fmt.Sprintf("Alert %s triggered", alert.Name),
+	}
+
+	for _, email := range emails {
+		if email == "" {
+			continue
+		}
+		email := email
 		notifyCtx, cancel := context.WithTimeout(ctx, timeout)
-		go func(channel models.AlertChannel) {
+		go func() {
 			defer cancel()
-			if notifyErr := m.notifier.Notify(notifyCtx, alert, channel, NotificationPayload{
-				Value:   value,
-				Message: fmt.Sprintf("Alert %s triggered", alert.Name),
-			}); notifyErr != nil {
-				m.log.Warn("notification failed", "alert_id", alert.ID, "channel", channel.Type, "target", channel.Target, "error", notifyErr)
+			if err := m.notifier.NotifyEmail(notifyCtx, alert, email, payload); err != nil {
+				m.log.Warn("email notification failed", "alert_id", alert.ID, "email", email, "error", err)
 			}
-		}(ch)
+		}()
+	}
+
+	for _, ch := range channels {
+		if ch == nil || !ch.Enabled {
+			continue
+		}
+		channel := ch
+		notifyCtx, cancel := context.WithTimeout(ctx, timeout)
+		go func() {
+			defer cancel()
+			if err := m.notifier.NotifyRoomChannel(notifyCtx, alert, channel, payload); err != nil {
+				m.log.Warn("channel notification failed", "alert_id", alert.ID, "channel_id", channel.ID, "type", channel.Type, "error", err)
+			}
+		}()
 	}
 	return nil
 }
@@ -221,29 +292,6 @@ func (m *Manager) handleResolved(ctx context.Context, alert *models.Alert, value
 	return nil
 }
 
-func (m *Manager) buildEvaluationQuery(alert *models.Alert, source *models.Source) (string, error) {
-	switch alert.QueryType {
-	case models.AlertQueryTypeSQL:
-		return alert.Query, nil
-	case models.AlertQueryTypeLogCondition:
-		lookback := alert.LookbackSeconds
-		if lookback <= 0 {
-			lookback = int(m.cfg.DefaultLookback.Seconds())
-		}
-		condition := strings.TrimSpace(alert.Query)
-		if condition == "" {
-			return "", fmt.Errorf("log condition alert requires a query filter")
-		}
-		tsField := source.MetaTSField
-		if tsField == "" {
-			return "", fmt.Errorf("source missing timestamp field for log condition alerts")
-		}
-		table := source.GetFullTableName()
-		return fmt.Sprintf("SELECT count(*) AS value FROM %s WHERE (%s) AND %s >= now() - INTERVAL %d SECOND", table, condition, tsField, lookback), nil
-	default:
-		return "", fmt.Errorf("unsupported alert query type %q", alert.QueryType)
-	}
-}
 
 func extractFirstNumeric(result *models.QueryResult) (float64, error) {
 	if result == nil || len(result.Logs) == 0 {

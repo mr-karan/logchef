@@ -112,6 +112,114 @@ func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) 
 	return id, err
 }
 
+const createAlert = `-- name: CreateAlert :one
+
+INSERT INTO alerts (
+    team_id,
+    source_id,
+    name,
+    description,
+    query,
+    threshold_operator,
+    threshold_value,
+    frequency_seconds,
+    severity,
+    is_active
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id
+`
+
+type CreateAlertParams struct {
+	TeamID            int64          `json:"team_id"`
+	SourceID          int64          `json:"source_id"`
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	Query             string         `json:"query"`
+	ThresholdOperator string         `json:"threshold_operator"`
+	ThresholdValue    float64        `json:"threshold_value"`
+	FrequencySeconds  int64          `json:"frequency_seconds"`
+	Severity          string         `json:"severity"`
+	IsActive          int64          `json:"is_active"`
+}
+
+// Alerts
+func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (int64, error) {
+	row := q.queryRow(ctx, q.createAlertStmt, createAlert,
+		arg.TeamID,
+		arg.SourceID,
+		arg.Name,
+		arg.Description,
+		arg.Query,
+		arg.ThresholdOperator,
+		arg.ThresholdValue,
+		arg.FrequencySeconds,
+		arg.Severity,
+		arg.IsActive,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const createRoom = `-- name: CreateRoom :one
+
+INSERT INTO rooms (
+    team_id,
+    name,
+    description
+) VALUES (?, ?, ?)
+RETURNING id
+`
+
+type CreateRoomParams struct {
+	TeamID      int64          `json:"team_id"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+}
+
+// Rooms
+func (q *Queries) CreateRoom(ctx context.Context, arg CreateRoomParams) (int64, error) {
+	row := q.queryRow(ctx, q.createRoomStmt, createRoom, arg.TeamID, arg.Name, arg.Description)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const createRoomChannel = `-- name: CreateRoomChannel :one
+
+INSERT INTO room_channels (
+    room_id,
+    type,
+    name,
+    config_json,
+    enabled
+) VALUES (?, ?, ?, ?, ?)
+RETURNING id
+`
+
+type CreateRoomChannelParams struct {
+	RoomID     int64          `json:"room_id"`
+	Type       string         `json:"type"`
+	Name       sql.NullString `json:"name"`
+	ConfigJson string         `json:"config_json"`
+	Enabled    int64          `json:"enabled"`
+}
+
+// Room channels
+func (q *Queries) CreateRoomChannel(ctx context.Context, arg CreateRoomChannelParams) (int64, error) {
+	row := q.queryRow(ctx, q.createRoomChannelStmt, createRoomChannel,
+		arg.RoomID,
+		arg.Type,
+		arg.Name,
+		arg.ConfigJson,
+		arg.Enabled,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createSession = `-- name: CreateSession :exec
 
 INSERT INTO sessions (id, user_id, expires_at, created_at)
@@ -278,6 +386,24 @@ func (q *Queries) DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) 
 	return err
 }
 
+const deleteAlert = `-- name: DeleteAlert :exec
+DELETE FROM alerts WHERE id = ?
+`
+
+func (q *Queries) DeleteAlert(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.deleteAlertStmt, deleteAlert, id)
+	return err
+}
+
+const deleteAlertRooms = `-- name: DeleteAlertRooms :exec
+DELETE FROM alert_rooms WHERE alert_id = ?
+`
+
+func (q *Queries) DeleteAlertRooms(ctx context.Context, alertID int64) error {
+	_, err := q.exec(ctx, q.deleteAlertRoomsStmt, deleteAlertRooms, alertID)
+	return err
+}
+
 const deleteExpiredAPITokens = `-- name: DeleteExpiredAPITokens :exec
 DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at < datetime('now')
 `
@@ -285,6 +411,24 @@ DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at < datetime('n
 // Delete all expired API tokens
 func (q *Queries) DeleteExpiredAPITokens(ctx context.Context) error {
 	_, err := q.exec(ctx, q.deleteExpiredAPITokensStmt, deleteExpiredAPITokens)
+	return err
+}
+
+const deleteRoom = `-- name: DeleteRoom :exec
+DELETE FROM rooms WHERE id = ?
+`
+
+func (q *Queries) DeleteRoom(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.deleteRoomStmt, deleteRoom, id)
+	return err
+}
+
+const deleteRoomChannel = `-- name: DeleteRoomChannel :exec
+DELETE FROM room_channels WHERE id = ?
+`
+
+func (q *Queries) DeleteRoomChannel(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.deleteRoomChannelStmt, deleteRoomChannel, id)
 	return err
 }
 
@@ -393,6 +537,108 @@ func (q *Queries) GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiT
 		&i.Prefix,
 		&i.LastUsedAt,
 		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAlert = `-- name: GetAlert :one
+SELECT id, team_id, source_id, name, description, "query", threshold_operator, threshold_value, frequency_seconds, severity, is_active, last_evaluated_at, last_triggered_at, created_at, updated_at FROM alerts WHERE id = ?
+`
+
+func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
+	row := q.queryRow(ctx, q.getAlertStmt, getAlert, id)
+	var i Alert
+	err := row.Scan(
+		&i.ID,
+		&i.TeamID,
+		&i.SourceID,
+		&i.Name,
+		&i.Description,
+		&i.Query,
+		&i.ThresholdOperator,
+		&i.ThresholdValue,
+		&i.FrequencySeconds,
+		&i.Severity,
+		&i.IsActive,
+		&i.LastEvaluatedAt,
+		&i.LastTriggeredAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAlertForTeamSource = `-- name: GetAlertForTeamSource :one
+SELECT id, team_id, source_id, name, description, "query", threshold_operator, threshold_value, frequency_seconds, severity, is_active, last_evaluated_at, last_triggered_at, created_at, updated_at FROM alerts WHERE id = ? AND team_id = ? AND source_id = ?
+`
+
+type GetAlertForTeamSourceParams struct {
+	ID       int64 `json:"id"`
+	TeamID   int64 `json:"team_id"`
+	SourceID int64 `json:"source_id"`
+}
+
+func (q *Queries) GetAlertForTeamSource(ctx context.Context, arg GetAlertForTeamSourceParams) (Alert, error) {
+	row := q.queryRow(ctx, q.getAlertForTeamSourceStmt, getAlertForTeamSource, arg.ID, arg.TeamID, arg.SourceID)
+	var i Alert
+	err := row.Scan(
+		&i.ID,
+		&i.TeamID,
+		&i.SourceID,
+		&i.Name,
+		&i.Description,
+		&i.Query,
+		&i.ThresholdOperator,
+		&i.ThresholdValue,
+		&i.FrequencySeconds,
+		&i.Severity,
+		&i.IsActive,
+		&i.LastEvaluatedAt,
+		&i.LastTriggeredAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLatestUnresolvedAlertHistory = `-- name: GetLatestUnresolvedAlertHistory :one
+SELECT id, alert_id, status, triggered_at, resolved_at, value_text, rooms_json, message, created_at FROM alert_history
+WHERE alert_id = ? AND status = 'triggered'
+ORDER BY triggered_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID int64) (AlertHistory, error) {
+	row := q.queryRow(ctx, q.getLatestUnresolvedAlertHistoryStmt, getLatestUnresolvedAlertHistory, alertID)
+	var i AlertHistory
+	err := row.Scan(
+		&i.ID,
+		&i.AlertID,
+		&i.Status,
+		&i.TriggeredAt,
+		&i.ResolvedAt,
+		&i.ValueText,
+		&i.RoomsJson,
+		&i.Message,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getRoom = `-- name: GetRoom :one
+SELECT id, team_id, name, description, created_at, updated_at FROM rooms WHERE id = ?
+`
+
+func (q *Queries) GetRoom(ctx context.Context, id int64) (Room, error) {
+	row := q.queryRow(ctx, q.getRoomStmt, getRoom, id)
+	var i Room
+	err := row.Scan(
+		&i.ID,
+		&i.TeamID,
+		&i.Name,
+		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -606,6 +852,58 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	return i, err
 }
 
+const insertAlertHistory = `-- name: InsertAlertHistory :one
+
+INSERT INTO alert_history (
+    alert_id,
+    status,
+    value_text,
+    rooms_json,
+    message
+)
+VALUES (?, ?, ?, ?, ?)
+RETURNING id
+`
+
+type InsertAlertHistoryParams struct {
+	AlertID   int64          `json:"alert_id"`
+	Status    string         `json:"status"`
+	ValueText sql.NullString `json:"value_text"`
+	RoomsJson sql.NullString `json:"rooms_json"`
+	Message   sql.NullString `json:"message"`
+}
+
+// Alert history queries
+func (q *Queries) InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (int64, error) {
+	row := q.queryRow(ctx, q.insertAlertHistoryStmt, insertAlertHistory,
+		arg.AlertID,
+		arg.Status,
+		arg.ValueText,
+		arg.RoomsJson,
+		arg.Message,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertAlertRoom = `-- name: InsertAlertRoom :exec
+
+INSERT INTO alert_rooms (alert_id, room_id)
+VALUES (?, ?)
+`
+
+type InsertAlertRoomParams struct {
+	AlertID int64 `json:"alert_id"`
+	RoomID  int64 `json:"room_id"`
+}
+
+// Alert to room mapping
+func (q *Queries) InsertAlertRoom(ctx context.Context, arg InsertAlertRoomParams) error {
+	_, err := q.exec(ctx, q.insertAlertRoomStmt, insertAlertRoom, arg.AlertID, arg.RoomID)
+	return err
+}
+
 const listAPITokensForUser = `-- name: ListAPITokensForUser :many
 SELECT id, user_id, name, token_hash, prefix, last_used_at, expires_at, created_at, updated_at FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC
 `
@@ -628,6 +926,178 @@ func (q *Queries) ListAPITokensForUser(ctx context.Context, userID int64) ([]Api
 			&i.Prefix,
 			&i.LastUsedAt,
 			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveAlertsDue = `-- name: ListActiveAlertsDue :many
+SELECT id, team_id, source_id, name, description, "query", threshold_operator, threshold_value, frequency_seconds, severity, is_active, last_evaluated_at, last_triggered_at, created_at, updated_at FROM alerts
+WHERE is_active = 1
+  AND (
+        last_evaluated_at IS NULL
+        OR last_evaluated_at <= datetime('now', '-' || frequency_seconds || ' seconds')
+      )
+`
+
+func (q *Queries) ListActiveAlertsDue(ctx context.Context) ([]Alert, error) {
+	rows, err := q.query(ctx, q.listActiveAlertsDueStmt, listActiveAlertsDue)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Alert{}
+	for rows.Next() {
+		var i Alert
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.SourceID,
+			&i.Name,
+			&i.Description,
+			&i.Query,
+			&i.ThresholdOperator,
+			&i.ThresholdValue,
+			&i.FrequencySeconds,
+			&i.Severity,
+			&i.IsActive,
+			&i.LastEvaluatedAt,
+			&i.LastTriggeredAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlertHistory = `-- name: ListAlertHistory :many
+SELECT id, alert_id, status, triggered_at, resolved_at, value_text, rooms_json, message, created_at FROM alert_history
+WHERE alert_id = ?
+ORDER BY triggered_at DESC
+LIMIT ?
+`
+
+type ListAlertHistoryParams struct {
+	AlertID int64 `json:"alert_id"`
+	Limit   int64 `json:"limit"`
+}
+
+func (q *Queries) ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error) {
+	rows, err := q.query(ctx, q.listAlertHistoryStmt, listAlertHistory, arg.AlertID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AlertHistory{}
+	for rows.Next() {
+		var i AlertHistory
+		if err := rows.Scan(
+			&i.ID,
+			&i.AlertID,
+			&i.Status,
+			&i.TriggeredAt,
+			&i.ResolvedAt,
+			&i.ValueText,
+			&i.RoomsJson,
+			&i.Message,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlertRoomIDs = `-- name: ListAlertRoomIDs :many
+SELECT room_id FROM alert_rooms
+WHERE alert_id = ?
+ORDER BY room_id
+`
+
+func (q *Queries) ListAlertRoomIDs(ctx context.Context, alertID int64) ([]int64, error) {
+	rows, err := q.query(ctx, q.listAlertRoomIDsStmt, listAlertRoomIDs, alertID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var room_id int64
+		if err := rows.Scan(&room_id); err != nil {
+			return nil, err
+		}
+		items = append(items, room_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlertsByTeamAndSource = `-- name: ListAlertsByTeamAndSource :many
+SELECT id, team_id, source_id, name, description, "query", threshold_operator, threshold_value, frequency_seconds, severity, is_active, last_evaluated_at, last_triggered_at, created_at, updated_at FROM alerts
+WHERE team_id = ? AND source_id = ?
+ORDER BY created_at DESC
+`
+
+type ListAlertsByTeamAndSourceParams struct {
+	TeamID   int64 `json:"team_id"`
+	SourceID int64 `json:"source_id"`
+}
+
+func (q *Queries) ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsByTeamAndSourceParams) ([]Alert, error) {
+	rows, err := q.query(ctx, q.listAlertsByTeamAndSourceStmt, listAlertsByTeamAndSource, arg.TeamID, arg.SourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Alert{}
+	for rows.Next() {
+		var i Alert
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.SourceID,
+			&i.Name,
+			&i.Description,
+			&i.Query,
+			&i.ThresholdOperator,
+			&i.ThresholdValue,
+			&i.FrequencySeconds,
+			&i.Severity,
+			&i.IsActive,
+			&i.LastEvaluatedAt,
+			&i.LastTriggeredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -671,6 +1141,144 @@ func (q *Queries) ListQueriesByTeamAndSource(ctx context.Context, arg ListQuerie
 			&i.Description,
 			&i.QueryType,
 			&i.QueryContent,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRoomChannels = `-- name: ListRoomChannels :many
+SELECT id, room_id, type, name, config_json, enabled, created_at, updated_at FROM room_channels
+WHERE room_id = ?
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListRoomChannels(ctx context.Context, roomID int64) ([]RoomChannel, error) {
+	rows, err := q.query(ctx, q.listRoomChannelsStmt, listRoomChannels, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RoomChannel{}
+	for rows.Next() {
+		var i RoomChannel
+		if err := rows.Scan(
+			&i.ID,
+			&i.RoomID,
+			&i.Type,
+			&i.Name,
+			&i.ConfigJson,
+			&i.Enabled,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRoomMemberEmails = `-- name: ListRoomMemberEmails :many
+SELECT u.email FROM room_members rm
+JOIN users u ON u.id = rm.user_id
+WHERE rm.room_id = ?
+ORDER BY u.email
+`
+
+func (q *Queries) ListRoomMemberEmails(ctx context.Context, roomID int64) ([]string, error) {
+	rows, err := q.query(ctx, q.listRoomMemberEmailsStmt, listRoomMemberEmails, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return nil, err
+		}
+		items = append(items, email)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRoomMembers = `-- name: ListRoomMembers :many
+SELECT room_id, user_id, role, added_at FROM room_members
+WHERE room_id = ?
+ORDER BY added_at DESC
+`
+
+func (q *Queries) ListRoomMembers(ctx context.Context, roomID int64) ([]RoomMember, error) {
+	rows, err := q.query(ctx, q.listRoomMembersStmt, listRoomMembers, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RoomMember{}
+	for rows.Next() {
+		var i RoomMember
+		if err := rows.Scan(
+			&i.RoomID,
+			&i.UserID,
+			&i.Role,
+			&i.AddedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRoomsByTeam = `-- name: ListRoomsByTeam :many
+SELECT id, team_id, name, description, created_at, updated_at FROM rooms
+WHERE team_id = ?
+ORDER BY name
+`
+
+func (q *Queries) ListRoomsByTeam(ctx context.Context, teamID int64) ([]Room, error) {
+	rows, err := q.query(ctx, q.listRoomsByTeamStmt, listRoomsByTeam, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Room{}
+	for rows.Next() {
+		var i Room
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.Name,
+			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1131,6 +1739,46 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const markAlertEvaluated = `-- name: MarkAlertEvaluated :exec
+UPDATE alerts
+SET last_evaluated_at = datetime('now'),
+    updated_at = datetime('now')
+WHERE id = ?
+`
+
+func (q *Queries) MarkAlertEvaluated(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.markAlertEvaluatedStmt, markAlertEvaluated, id)
+	return err
+}
+
+const markAlertTriggered = `-- name: MarkAlertTriggered :exec
+UPDATE alerts
+SET last_triggered_at = datetime('now'),
+    last_evaluated_at = datetime('now'),
+    updated_at = datetime('now')
+WHERE id = ?
+`
+
+func (q *Queries) MarkAlertTriggered(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.markAlertTriggeredStmt, markAlertTriggered, id)
+	return err
+}
+
+const removeRoomMember = `-- name: RemoveRoomMember :exec
+DELETE FROM room_members
+WHERE room_id = ? AND user_id = ?
+`
+
+type RemoveRoomMemberParams struct {
+	RoomID int64 `json:"room_id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) RemoveRoomMember(ctx context.Context, arg RemoveRoomMemberParams) error {
+	_, err := q.exec(ctx, q.removeRoomMemberStmt, removeRoomMember, arg.RoomID, arg.UserID)
+	return err
+}
+
 const removeTeamMember = `-- name: RemoveTeamMember :exec
 DELETE FROM team_members
 WHERE team_id = ? AND user_id = ?
@@ -1159,6 +1807,24 @@ type RemoveTeamSourceParams struct {
 // Remove a data source from a team
 func (q *Queries) RemoveTeamSource(ctx context.Context, arg RemoveTeamSourceParams) error {
 	_, err := q.exec(ctx, q.removeTeamSourceStmt, removeTeamSource, arg.TeamID, arg.SourceID)
+	return err
+}
+
+const resolveAlertHistory = `-- name: ResolveAlertHistory :exec
+UPDATE alert_history
+SET status = 'resolved',
+    resolved_at = datetime('now'),
+    message = ?
+WHERE id = ?
+`
+
+type ResolveAlertHistoryParams struct {
+	Message sql.NullString `json:"message"`
+	ID      int64          `json:"id"`
+}
+
+func (q *Queries) ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) error {
+	_, err := q.exec(ctx, q.resolveAlertHistoryStmt, resolveAlertHistory, arg.Message, arg.ID)
 	return err
 }
 
@@ -1192,6 +1858,92 @@ WHERE id = ?
 // Update the last used timestamp for an API token
 func (q *Queries) UpdateAPITokenLastUsed(ctx context.Context, id int64) error {
 	_, err := q.exec(ctx, q.updateAPITokenLastUsedStmt, updateAPITokenLastUsed, id)
+	return err
+}
+
+const updateAlert = `-- name: UpdateAlert :exec
+UPDATE alerts
+SET name = ?,
+    description = ?,
+    query = ?,
+    threshold_operator = ?,
+    threshold_value = ?,
+    frequency_seconds = ?,
+    severity = ?,
+    is_active = ?,
+    updated_at = datetime('now')
+WHERE id = ?
+`
+
+type UpdateAlertParams struct {
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	Query             string         `json:"query"`
+	ThresholdOperator string         `json:"threshold_operator"`
+	ThresholdValue    float64        `json:"threshold_value"`
+	FrequencySeconds  int64          `json:"frequency_seconds"`
+	Severity          string         `json:"severity"`
+	IsActive          int64          `json:"is_active"`
+	ID                int64          `json:"id"`
+}
+
+func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) error {
+	_, err := q.exec(ctx, q.updateAlertStmt, updateAlert,
+		arg.Name,
+		arg.Description,
+		arg.Query,
+		arg.ThresholdOperator,
+		arg.ThresholdValue,
+		arg.FrequencySeconds,
+		arg.Severity,
+		arg.IsActive,
+		arg.ID,
+	)
+	return err
+}
+
+const updateRoom = `-- name: UpdateRoom :exec
+UPDATE rooms
+SET name = ?,
+    description = ?,
+    updated_at = datetime('now')
+WHERE id = ?
+`
+
+type UpdateRoomParams struct {
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	ID          int64          `json:"id"`
+}
+
+func (q *Queries) UpdateRoom(ctx context.Context, arg UpdateRoomParams) error {
+	_, err := q.exec(ctx, q.updateRoomStmt, updateRoom, arg.Name, arg.Description, arg.ID)
+	return err
+}
+
+const updateRoomChannel = `-- name: UpdateRoomChannel :exec
+UPDATE room_channels
+SET name = ?,
+    config_json = ?,
+    enabled = ?,
+    updated_at = datetime('now')
+WHERE id = ?
+`
+
+type UpdateRoomChannelParams struct {
+	Name       sql.NullString `json:"name"`
+	ConfigJson string         `json:"config_json"`
+	Enabled    int64          `json:"enabled"`
+	ID         int64          `json:"id"`
+}
+
+func (q *Queries) UpdateRoomChannel(ctx context.Context, arg UpdateRoomChannelParams) error {
+	_, err := q.exec(ctx, q.updateRoomChannelStmt, updateRoomChannel,
+		arg.Name,
+		arg.ConfigJson,
+		arg.Enabled,
+		arg.ID,
+	)
 	return err
 }
 
@@ -1359,6 +2111,27 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 		arg.UpdatedAt,
 		arg.ID,
 	)
+	return err
+}
+
+const upsertRoomMember = `-- name: UpsertRoomMember :exec
+
+INSERT INTO room_members (room_id, user_id, role)
+VALUES (?, ?, ?)
+ON CONFLICT(room_id, user_id) DO UPDATE SET
+    role = excluded.role,
+    added_at = datetime('now')
+`
+
+type UpsertRoomMemberParams struct {
+	RoomID int64  `json:"room_id"`
+	UserID int64  `json:"user_id"`
+	Role   string `json:"role"`
+}
+
+// Rooms members
+func (q *Queries) UpsertRoomMember(ctx context.Context, arg UpsertRoomMemberParams) error {
+	_, err := q.exec(ctx, q.upsertRoomMemberStmt, upsertRoomMember, arg.RoomID, arg.UserID, arg.Role)
 	return err
 }
 

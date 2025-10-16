@@ -16,16 +16,13 @@ const (
     source_id,
     name,
     description,
-    query_type,
     query,
-    lookback_seconds,
     threshold_operator,
     threshold_value,
     frequency_seconds,
     severity,
-    channels,
     is_active
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id, created_at, updated_at, last_evaluated_at, last_triggered_at`
 
 	selectAlertBase = `SELECT
@@ -34,14 +31,11 @@ RETURNING id, created_at, updated_at, last_evaluated_at, last_triggered_at`
     source_id,
     name,
     description,
-    query_type,
     query,
-    lookback_seconds,
     threshold_operator,
     threshold_value,
     frequency_seconds,
     severity,
-    channels,
     is_active,
     last_evaluated_at,
     last_triggered_at,
@@ -70,14 +64,11 @@ WHERE id = ?`
 	updateAlertQuery = `UPDATE alerts
 SET name = ?,
     description = ?,
-    query_type = ?,
     query = ?,
-    lookback_seconds = ?,
     threshold_operator = ?,
     threshold_value = ?,
     frequency_seconds = ?,
     severity = ?,
-    channels = ?,
     is_active = ?,
     updated_at = datetime('now')
 WHERE id = ?`
@@ -88,7 +79,7 @@ WHERE id = ?`
     alert_id,
     status,
     value_text,
-    channels,
+    rooms_json,
     message
 ) VALUES (?, ?, ?, ?, ?)
 RETURNING id, triggered_at, resolved_at, created_at`
@@ -127,6 +118,13 @@ WHERE alert_id = ?
   AND id IN (
     SELECT id FROM ranked WHERE rn > ?
  )`
+
+	listAlertRoomIDsQuery     = `SELECT room_id FROM alert_rooms WHERE alert_id = ? ORDER BY room_id`
+	deleteAlertRoomsQuery     = `DELETE FROM alert_rooms WHERE alert_id = ?`
+	insertAlertRoomQuery      = `INSERT INTO alert_rooms (alert_id, room_id) VALUES (?, ?)`
+	selectRoomBase            = `SELECT id, team_id, name, description, created_at, updated_at FROM rooms`
+	countRoomMembersQuery     = `SELECT COUNT(*) FROM room_members WHERE room_id = ?`
+	listRoomChannelTypesQuery = `SELECT DISTINCT type FROM room_channels WHERE room_id = ? AND enabled = 1`
 )
 
 // CreateAlert inserts a new alert definition for a team/source pair.
@@ -135,24 +133,16 @@ func (db *DB) CreateAlert(ctx context.Context, alert *models.Alert) error {
 		return fmt.Errorf("alert payload is required")
 	}
 
-	channelsJSON, err := json.Marshal(alert.Channels)
-	if err != nil {
-		return fmt.Errorf("failed to marshal alert channels: %w", err)
-	}
-
 	row := db.db.QueryRowContext(ctx, insertAlertQuery,
 		int64(alert.TeamID),
 		int64(alert.SourceID),
 		alert.Name,
 		nullableString(alert.Description),
-		string(alert.QueryType),
 		alert.Query,
-		alert.LookbackSeconds,
 		string(alert.ThresholdOperator),
 		alert.ThresholdValue,
 		alert.FrequencySeconds,
 		string(alert.Severity),
-		string(channelsJSON),
 		boolToInt(alert.IsActive),
 	)
 
@@ -177,6 +167,12 @@ func (db *DB) CreateAlert(ctx context.Context, alert *models.Alert) error {
 	if lastTriggeredAt.Valid {
 		alert.LastTriggeredAt = &lastTriggeredAt.Time
 	}
+	if err := db.replaceAlertRooms(ctx, alert.ID, alert.RoomIDs); err != nil {
+		return err
+	}
+	if err := db.populateAlertRooms(ctx, []*models.Alert{alert}); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -186,22 +182,14 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 		return fmt.Errorf("alert payload is required")
 	}
 
-	channelsJSON, err := json.Marshal(alert.Channels)
-	if err != nil {
-		return fmt.Errorf("failed to marshal alert channels: %w", err)
-	}
-
 	res, err := db.db.ExecContext(ctx, updateAlertQuery,
 		alert.Name,
 		nullableString(alert.Description),
-		string(alert.QueryType),
 		alert.Query,
-		alert.LookbackSeconds,
 		string(alert.ThresholdOperator),
 		alert.ThresholdValue,
 		alert.FrequencySeconds,
 		string(alert.Severity),
-		string(channelsJSON),
 		boolToInt(alert.IsActive),
 		int64(alert.ID),
 	)
@@ -211,6 +199,13 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return sql.ErrNoRows
 	}
+
+	if err := db.replaceAlertRooms(ctx, alert.ID, alert.RoomIDs); err != nil {
+		return err
+	}
+	if err := db.populateAlertRooms(ctx, []*models.Alert{alert}); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -218,14 +213,28 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 func (db *DB) GetAlert(ctx context.Context, alertID models.AlertID) (*models.Alert, error) {
 	query := selectAlertBase + " WHERE id = ?"
 	row := db.db.QueryRowContext(ctx, query, int64(alertID))
-	return scanAlert(row)
+	alert, err := scanAlert(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.populateAlertRooms(ctx, []*models.Alert{alert}); err != nil {
+		return nil, err
+	}
+	return alert, nil
 }
 
 // GetAlertForTeamSource ensures the alert belongs to the requested team and source.
 func (db *DB) GetAlertForTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, alertID models.AlertID) (*models.Alert, error) {
 	query := selectAlertBase + " WHERE id = ? AND team_id = ? AND source_id = ?"
 	row := db.db.QueryRowContext(ctx, query, int64(alertID), int64(teamID), int64(sourceID))
-	return scanAlert(row)
+	alert, err := scanAlert(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.populateAlertRooms(ctx, []*models.Alert{alert}); err != nil {
+		return nil, err
+	}
+	return alert, nil
 }
 
 // ListAlertsByTeamAndSource fetches all alerts scoped to a specific team and source.
@@ -247,6 +256,9 @@ func (db *DB) ListAlertsByTeamAndSource(ctx context.Context, teamID models.TeamI
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating alerts: %w", err)
+	}
+	if err := db.populateAlertRooms(ctx, alerts); err != nil {
+		return nil, err
 	}
 	return alerts, nil
 }
@@ -282,6 +294,9 @@ func (db *DB) ListActiveAlertsDue(ctx context.Context) ([]*models.Alert, error) 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating due alerts: %w", err)
 	}
+	if err := db.populateAlertRooms(ctx, alerts); err != nil {
+		return nil, err
+	}
 	return alerts, nil
 }
 
@@ -306,16 +321,16 @@ func (db *DB) InsertAlertHistory(ctx context.Context, entry *models.AlertHistory
 	if entry == nil {
 		return fmt.Errorf("history entry is required")
 	}
-	channelsJSON, err := json.Marshal(entry.Channels)
+	roomsJSON, err := json.Marshal(entry.Rooms)
 	if err != nil {
-		return fmt.Errorf("failed to marshal history channels: %w", err)
+		return fmt.Errorf("failed to marshal history rooms: %w", err)
 	}
 
 	row := db.db.QueryRowContext(ctx, insertAlertHistoryQuery,
 		entry.AlertID,
 		string(entry.Status),
 		entry.ValueText,
-		string(channelsJSON),
+		string(roomsJSON),
 		nullableString(entry.Message),
 	)
 
@@ -367,6 +382,65 @@ func (db *DB) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID model
 	return scanAlertHistory(row)
 }
 
+func (db *DB) replaceAlertRooms(ctx context.Context, alertID models.AlertID, roomIDs []models.RoomID) error {
+	if _, err := db.db.ExecContext(ctx, deleteAlertRoomsQuery, int64(alertID)); err != nil {
+		return fmt.Errorf("failed to reset alert rooms: %w", err)
+	}
+	for _, roomID := range roomIDs {
+		if roomID == 0 {
+			continue
+		}
+		if _, err := db.db.ExecContext(ctx, insertAlertRoomQuery, int64(alertID), int64(roomID)); err != nil {
+			return fmt.Errorf("failed to attach room %d to alert %d: %w", roomID, alertID, err)
+		}
+	}
+	return nil
+}
+
+func (db *DB) populateAlertRooms(ctx context.Context, alerts []*models.Alert) error {
+	for _, alert := range alerts {
+		if alert == nil {
+			continue
+		}
+		roomIDs, err := db.listRoomIDsForAlert(ctx, alert.ID)
+		if err != nil {
+			return err
+		}
+		alert.RoomIDs = roomIDs
+		summaries := make([]models.RoomSummary, 0, len(roomIDs))
+		for _, roomID := range roomIDs {
+			summary, err := db.GetRoomSummary(ctx, roomID)
+			if err != nil {
+				return err
+			}
+			summaries = append(summaries, *summary)
+		}
+		alert.Rooms = summaries
+	}
+	return nil
+}
+
+func (db *DB) listRoomIDsForAlert(ctx context.Context, alertID models.AlertID) ([]models.RoomID, error) {
+	rows, err := db.db.QueryContext(ctx, listAlertRoomIDsQuery, int64(alertID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list rooms for alert %d: %w", alertID, err)
+	}
+	defer rows.Close()
+
+	var roomIDs []models.RoomID
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan alert room id: %w", err)
+		}
+		roomIDs = append(roomIDs, models.RoomID(id))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating alert rooms: %w", err)
+	}
+	return roomIDs, nil
+}
+
 // ListAlertHistory returns the most recent history entries for an alert.
 func (db *DB) ListAlertHistory(ctx context.Context, alertID models.AlertID, limit int) ([]*models.AlertHistoryEntry, error) {
 	if limit <= 0 {
@@ -400,32 +474,22 @@ func scanAlert(scanner interface{ Scan(dest ...any) error }) (*models.Alert, err
 		sourceID          int64
 		name              string
 		description       sql.NullString
-		queryType         string
 		query             string
-		lookbackSeconds   int
 		thresholdOperator string
 		thresholdValue    float64
 		frequencySeconds  int
 		severity          string
-		channelsJSON      string
 		isActive          int64
 		lastEvaluatedAt   sql.NullTime
 		lastTriggeredAt   sql.NullTime
 		createdAt         time.Time
 		updatedAt         time.Time
 	)
-	if err := scanner.Scan(&id, &teamID, &sourceID, &name, &description, &queryType, &query, &lookbackSeconds, &thresholdOperator, &thresholdValue, &frequencySeconds, &severity, &channelsJSON, &isActive, &lastEvaluatedAt, &lastTriggeredAt, &createdAt, &updatedAt); err != nil {
+	if err := scanner.Scan(&id, &teamID, &sourceID, &name, &description, &query, &thresholdOperator, &thresholdValue, &frequencySeconds, &severity, &isActive, &lastEvaluatedAt, &lastTriggeredAt, &createdAt, &updatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, err
 		}
 		return nil, fmt.Errorf("failed to scan alert: %w", err)
-	}
-
-	var channels []models.AlertChannel
-	if channelsJSON != "" {
-		if err := json.Unmarshal([]byte(channelsJSON), &channels); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal alert channels: %w", err)
-		}
 	}
 
 	alert := &models.Alert{
@@ -434,14 +498,11 @@ func scanAlert(scanner interface{ Scan(dest ...any) error }) (*models.Alert, err
 		SourceID:          models.SourceID(sourceID),
 		Name:              name,
 		Description:       description.String,
-		QueryType:         models.AlertQueryType(queryType),
 		Query:             query,
-		LookbackSeconds:   lookbackSeconds,
 		ThresholdOperator: models.AlertThresholdOperator(thresholdOperator),
 		ThresholdValue:    thresholdValue,
 		FrequencySeconds:  frequencySeconds,
 		Severity:          models.AlertSeverity(severity),
-		Channels:          channels,
 		IsActive:          isActive == 1,
 		CreatedAt:         createdAt,
 		UpdatedAt:         updatedAt,
@@ -457,27 +518,27 @@ func scanAlert(scanner interface{ Scan(dest ...any) error }) (*models.Alert, err
 
 func scanAlertHistory(scanner interface{ Scan(dest ...any) error }) (*models.AlertHistoryEntry, error) {
 	var (
-		id           int64
-		alertID      int64
-		status       string
-		triggeredAt  time.Time
-		resolvedAt   sql.NullTime
-		valueText    sql.NullString
-		channelsJSON sql.NullString
-		message      sql.NullString
-		createdAt    time.Time
+		id          int64
+		alertID     int64
+		status      string
+		triggeredAt time.Time
+		resolvedAt  sql.NullTime
+		valueText   sql.NullString
+		roomsJSON   sql.NullString
+		message     sql.NullString
+		createdAt   time.Time
 	)
-	if err := scanner.Scan(&id, &alertID, &status, &triggeredAt, &resolvedAt, &valueText, &channelsJSON, &message, &createdAt); err != nil {
+	if err := scanner.Scan(&id, &alertID, &status, &triggeredAt, &resolvedAt, &valueText, &roomsJSON, &message, &createdAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, err
 		}
 		return nil, fmt.Errorf("failed to scan alert history: %w", err)
 	}
 
-	var channels []models.AlertChannel
-	if channelsJSON.Valid && channelsJSON.String != "" {
-		if err := json.Unmarshal([]byte(channelsJSON.String), &channels); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal alert history channels: %w", err)
+	var rooms []models.AlertHistoryRoomSnapshot
+	if roomsJSON.Valid && roomsJSON.String != "" {
+		if err := json.Unmarshal([]byte(roomsJSON.String), &rooms); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal alert history rooms: %w", err)
 		}
 	}
 
@@ -487,7 +548,7 @@ func scanAlertHistory(scanner interface{ Scan(dest ...any) error }) (*models.Ale
 		Status:      models.AlertStatus(status),
 		TriggeredAt: triggeredAt,
 		ValueText:   valueText.String,
-		Channels:    channels,
+		Rooms:       rooms,
 		Message:     message.String,
 		CreatedAt:   createdAt,
 	}
