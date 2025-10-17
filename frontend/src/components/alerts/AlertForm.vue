@@ -22,13 +22,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Checkbox } from "@/components/ui/checkbox";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAlertsStore } from "@/stores/alerts";
-import { useRoomsStore } from "@/stores/rooms";
 import { alertsApi } from "@/api/alerts";
 import type { Alert, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryResponse } from "@/api/alerts";
-import type { RoomSummary } from "@/api/rooms";
 
 const props = withDefaults(defineProps<{
   open: boolean;
@@ -48,7 +44,6 @@ const emit = defineEmits<{
 }>();
 
 const alertsStore = useAlertsStore();
-const roomsStore = useRoomsStore();
 
 const form = reactive({
   name: "",
@@ -61,8 +56,12 @@ const form = reactive({
   frequency_seconds: 300,
   severity: "warning" as Alert["severity"],
   is_active: true,
-  roomIds: [] as number[],
+  labels: [] as Array<{ id: number; key: string; value: string }>,
+  annotations: [] as Array<{ id: number; key: string; value: string }>,
 });
+
+const labelCounter = ref(0);
+const annotationCounter = ref(0);
 
 const testQueryResult = ref<TestAlertQueryResponse | null>(null);
 const isTestingQuery = ref(false);
@@ -114,8 +113,6 @@ WHERE timestamp >= now() - INTERVAL 5 MINUTE`,
   },
 ];
 
-const availableRooms = computed<RoomSummary[]>(() => roomsStore.rooms);
-
 const isSubmitting = computed(() => {
   if (props.mode === "create") {
     return alertsStore.isLoadingOperation("createAlert");
@@ -131,9 +128,31 @@ const isValid = computed(() => {
     !!form.query.trim() &&
     form.threshold_value !== undefined &&
     form.frequency_seconds > 0 &&
-    form.roomIds.length > 0
+    form.lookback_seconds > 0
   );
 });
+
+function addLabel() {
+  form.labels.push({ id: labelCounter.value++, key: "", value: "" });
+}
+
+function removeLabel(id: number) {
+  const index = form.labels.findIndex((label) => label.id === id);
+  if (index >= 0) {
+    form.labels.splice(index, 1);
+  }
+}
+
+function addAnnotation() {
+  form.annotations.push({ id: annotationCounter.value++, key: "", value: "" });
+}
+
+function removeAnnotation(id: number) {
+  const index = form.annotations.findIndex((annotation) => annotation.id === id);
+  if (index >= 0) {
+    form.annotations.splice(index, 1);
+  }
+}
 
 function resetForm(alert: Alert | null) {
   testQueryResult.value = null;
@@ -149,7 +168,10 @@ function resetForm(alert: Alert | null) {
     form.frequency_seconds = 300;
     form.severity = "warning";
     form.is_active = true;
-    form.roomIds = [];
+    form.labels = [];
+    form.annotations = [];
+    labelCounter.value = 0;
+    annotationCounter.value = 0;
     return;
   }
   form.name = alert.name;
@@ -162,7 +184,14 @@ function resetForm(alert: Alert | null) {
   form.frequency_seconds = alert.frequency_seconds;
   form.severity = alert.severity;
   form.is_active = alert.is_active;
-  form.roomIds = [...(alert.room_ids ?? [])];
+  labelCounter.value = 0;
+  annotationCounter.value = 0;
+  form.labels = alert.labels
+    ? Object.entries(alert.labels).map(([key, value]) => ({ id: labelCounter.value++, key, value }))
+    : [];
+  form.annotations = alert.annotations
+    ? Object.entries(alert.annotations).map(([key, value]) => ({ id: annotationCounter.value++, key, value }))
+    : [];
 }
 
 async function handleTestQuery() {
@@ -176,7 +205,9 @@ async function handleTestQuery() {
 
   try {
     const result = await alertsApi.testAlertQuery(props.teamId, props.sourceId, {
+      query_type: form.query_type,
       query: form.query.trim(),
+      lookback_seconds: form.lookback_seconds,
       threshold_operator: form.threshold_operator,
       threshold_value: form.threshold_value,
     });
@@ -207,13 +238,10 @@ watch(
 
 watch(
   () => props.open,
-  async (open) => {
+  (open) => {
     if (open) {
       if (props.mode === "create") {
         resetForm(null);
-      }
-      if (props.teamId) {
-        await roomsStore.fetchRooms(props.teamId);
       }
     }
   },
@@ -238,30 +266,56 @@ function handleSubmit() {
     return;
   }
   if (props.mode === "create") {
+    const labelsRecord = form.labels.reduce<Record<string, string>>((acc, { key, value }) => {
+      const trimmedKey = key.trim();
+      if (trimmedKey) acc[trimmedKey] = value;
+      return acc;
+    }, {});
+    const annotationsRecord = form.annotations.reduce<Record<string, string>>((acc, { key, value }) => {
+      const trimmedKey = key.trim();
+      if (trimmedKey) acc[trimmedKey] = value;
+      return acc;
+    }, {});
     const payload: CreateAlertRequest = {
       name: form.name.trim(),
       description: form.description.trim(),
+      query_type: form.query_type,
       query: form.query.trim(),
+      lookback_seconds: Number(form.lookback_seconds),
       threshold_operator: form.threshold_operator,
       threshold_value: Number(form.threshold_value),
       frequency_seconds: Number(form.frequency_seconds),
       severity: form.severity,
-      room_ids: [...form.roomIds],
       is_active: form.is_active,
+      labels: labelsRecord,
+      annotations: annotationsRecord,
     };
     emit("create", payload);
     return;
   }
+  const labelsRecord = form.labels.reduce<Record<string, string>>((acc, { key, value }) => {
+    const trimmedKey = key.trim();
+    if (trimmedKey) acc[trimmedKey] = value;
+    return acc;
+  }, {});
+  const annotationsRecord = form.annotations.reduce<Record<string, string>>((acc, { key, value }) => {
+    const trimmedKey = key.trim();
+    if (trimmedKey) acc[trimmedKey] = value;
+    return acc;
+  }, {});
   const payload: UpdateAlertRequest = {
     name: form.name.trim(),
     description: form.description.trim(),
+    query_type: form.query_type,
     query: form.query.trim(),
+    lookback_seconds: Number(form.lookback_seconds),
     threshold_operator: form.threshold_operator,
     threshold_value: Number(form.threshold_value),
     frequency_seconds: Number(form.frequency_seconds),
     severity: form.severity,
-    room_ids: [...form.roomIds],
     is_active: form.is_active,
+    labels: labelsRecord,
+    annotations: annotationsRecord,
   };
   emit("update", payload);
 }
@@ -427,6 +481,16 @@ function handleSubmit() {
                 <Input id="alert-threshold-value" v-model.number="form.threshold_value" type="number" min="0" step="0.01" :disabled="isDisabled" placeholder="1" />
               </div>
               <div class="space-y-2">
+                <Label for="alert-lookback">
+                  Lookback window (seconds)
+                  <span class="text-xs font-normal text-muted-foreground ml-1">· Time range to query</span>
+                </Label>
+                <Input id="alert-lookback" v-model.number="form.lookback_seconds" type="number" min="60" step="60" :disabled="isDisabled" placeholder="300" />
+                <p class="text-xs text-muted-foreground">
+                  How far back to look in logs (e.g., 300s = last 5 minutes)
+                </p>
+              </div>
+              <div class="space-y-2">
                 <Label for="alert-frequency">
                   Evaluation frequency (seconds)
                   <span class="text-xs font-normal text-muted-foreground ml-1">· How often to check</span>
@@ -438,6 +502,78 @@ function handleSubmit() {
               </div>
             </div>
           </div>
+        </section>
+
+        <!-- Labels & Annotations (for Alertmanager routing) -->
+        <section class="space-y-4">
+          <div>
+            <h3 class="text-sm font-semibold">Alertmanager routing <span class="text-xs font-normal text-muted-foreground ml-1">(optional)</span></h3>
+            <p class="text-xs text-muted-foreground mt-1">Add custom labels and annotations to control Alertmanager routing, grouping, and notification templates.</p>
+          </div>
+
+          <!-- Labels -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <Label class="text-xs font-medium">Labels <span class="font-normal text-muted-foreground ml-1">· Used for routing and grouping</span></Label>
+              <Button type="button" variant="outline" size="sm" @click="addLabel" :disabled="isDisabled">
+                + Add Label
+              </Button>
+            </div>
+            <div v-if="form.labels.length > 0" class="space-y-2">
+              <div v-for="label in form.labels" :key="label.id" class="flex gap-2">
+                <Input
+                  v-model="label.key"
+                  placeholder="Key (e.g., env)"
+                  class="flex-1"
+                  :disabled="isDisabled"
+                />
+                <Input
+                  v-model="label.value"
+                  placeholder="Value (e.g., production)"
+                  class="flex-1"
+                  :disabled="isDisabled"
+                />
+                <Button type="button" variant="ghost" size="icon" @click="removeLabel(label.id)" :disabled="isDisabled">
+                  ×
+                </Button>
+              </div>
+            </div>
+            <p v-else class="text-xs text-muted-foreground">No custom labels. Labels like alertname, severity, team_id are added automatically.</p>
+          </div>
+
+          <!-- Annotations -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <Label class="text-xs font-medium">Annotations <span class="font-normal text-muted-foreground ml-1">· Additional context for notifications</span></Label>
+              <Button type="button" variant="outline" size="sm" @click="addAnnotation" :disabled="isDisabled">
+                + Add Annotation
+              </Button>
+            </div>
+            <div v-if="form.annotations.length > 0" class="space-y-2">
+              <div v-for="annotation in form.annotations" :key="annotation.id" class="flex gap-2">
+                <Input
+                  v-model="annotation.key"
+                  placeholder="Key (e.g., runbook_url)"
+                  class="flex-1"
+                  :disabled="isDisabled"
+                />
+                <Input
+                  v-model="annotation.value"
+                  placeholder="Value (e.g., https://docs.example.com/runbook)"
+                  class="flex-1"
+                  :disabled="isDisabled"
+                />
+                <Button type="button" variant="ghost" size="icon" @click="removeAnnotation(annotation.id)" :disabled="isDisabled">
+                  ×
+                </Button>
+              </div>
+            </div>
+            <p v-else class="text-xs text-muted-foreground">No custom annotations. Common annotations: summary, description, dashboard_url, runbook_url.</p>
+          </div>
+        </section>
+
+        <!-- Alert Status -->
+        <section class="space-y-4">
           <div class="flex items-center justify-between rounded-lg border bg-muted/20 p-4">
             <div>
               <h3 class="text-sm font-medium">Alert status</h3>
@@ -447,53 +583,6 @@ function handleSubmit() {
             </div>
             <Switch :checked="form.is_active" :disabled="isDisabled" @update:checked="(checked) => (form.is_active = Boolean(checked))" />
           </div>
-        </section>
-
-        <!-- Target Rooms -->
-        <section class="space-y-4 rounded-lg border bg-muted/20 p-5">
-          <div>
-            <h3 class="text-sm font-semibold">Target rooms</h3>
-            <p class="text-xs text-muted-foreground mt-1">
-              Select one or more rooms. Members receive email alerts and room channels deliver Slack/Webhook notifications.
-            </p>
-          </div>
-          <ScrollArea class="max-h-56 rounded-lg border bg-background p-3">
-            <div class="space-y-2">
-              <div
-                v-for="room in availableRooms"
-                :key="room.id"
-                class="flex items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/40"
-              >
-                <Checkbox
-                  :id="`room-${room.id}`"
-                  :checked="form.roomIds.includes(room.id)"
-                  :disabled="isDisabled"
-                  @update:checked="(checked) => {
-                    if (checked) {
-                      if (!form.roomIds.includes(room.id)) form.roomIds.push(room.id);
-                    } else {
-                      form.roomIds = form.roomIds.filter((id) => id !== room.id);
-                    }
-                  }"
-                  class="mt-0.5"
-                />
-                <div class="flex-1 space-y-1">
-                  <Label :for="`room-${room.id}`" class="font-medium cursor-pointer">
-                    {{ room.name }}
-                  </Label>
-                  <p v-if="room.description" class="text-xs text-muted-foreground">
-                    {{ room.description }}
-                  </p>
-                  <p class="text-[11px] text-muted-foreground">
-                    {{ room.member_count }} {{ room.member_count === 1 ? 'member' : 'members' }} · {{ room.channel_types?.length ? room.channel_types.join(", ") : "email" }}
-                  </p>
-                </div>
-              </div>
-              <p v-if="!availableRooms.length" class="text-sm text-muted-foreground text-center py-6">
-                No rooms available yet. Create rooms from team settings to manage recipients.
-              </p>
-            </div>
-          </ScrollArea>
         </section>
 
         <DialogFooter v-if="!inline" class="pt-4">
@@ -662,6 +751,16 @@ function handleSubmit() {
             <Input id="alert-threshold-value-inline" v-model.number="form.threshold_value" type="number" min="0" step="0.01" :disabled="isDisabled" placeholder="1" />
           </div>
           <div class="space-y-2">
+            <Label for="alert-lookback-inline">
+              Lookback window (seconds)
+              <span class="text-xs font-normal text-muted-foreground ml-1">· Time range to query</span>
+            </Label>
+            <Input id="alert-lookback-inline" v-model.number="form.lookback_seconds" type="number" min="60" step="60" :disabled="isDisabled" placeholder="300" />
+            <p class="text-xs text-muted-foreground">
+              How far back to look in logs (e.g., 300s = last 5 minutes)
+            </p>
+          </div>
+          <div class="space-y-2">
             <Label for="alert-frequency-inline">
               Evaluation frequency (seconds)
               <span class="text-xs font-normal text-muted-foreground ml-1">· How often to check</span>
@@ -673,6 +772,78 @@ function handleSubmit() {
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- Labels & Annotations (for Alertmanager routing) - Inline Mode -->
+    <section class="space-y-4">
+      <div>
+        <h3 class="text-sm font-semibold">Alertmanager routing <span class="text-xs font-normal text-muted-foreground ml-1">(optional)</span></h3>
+        <p class="text-xs text-muted-foreground mt-1">Add custom labels and annotations to control Alertmanager routing, grouping, and notification templates.</p>
+      </div>
+
+      <!-- Labels -->
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <Label class="text-xs font-medium">Labels <span class="font-normal text-muted-foreground ml-1">· Used for routing and grouping</span></Label>
+          <Button type="button" variant="outline" size="sm" @click="addLabel" :disabled="isDisabled">
+            + Add Label
+          </Button>
+        </div>
+        <div v-if="form.labels.length > 0" class="space-y-2">
+          <div v-for="label in form.labels" :key="label.id" class="flex gap-2">
+            <Input
+              v-model="label.key"
+              placeholder="Key (e.g., env)"
+              class="flex-1"
+              :disabled="isDisabled"
+            />
+            <Input
+              v-model="label.value"
+              placeholder="Value (e.g., production)"
+              class="flex-1"
+              :disabled="isDisabled"
+            />
+            <Button type="button" variant="ghost" size="icon" @click="removeLabel(label.id)" :disabled="isDisabled">
+              ×
+            </Button>
+          </div>
+        </div>
+        <p v-else class="text-xs text-muted-foreground">No custom labels. Labels like alertname, severity, team_id are added automatically.</p>
+      </div>
+
+      <!-- Annotations -->
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <Label class="text-xs font-medium">Annotations <span class="font-normal text-muted-foreground ml-1">· Additional context for notifications</span></Label>
+          <Button type="button" variant="outline" size="sm" @click="addAnnotation" :disabled="isDisabled">
+            + Add Annotation
+          </Button>
+        </div>
+        <div v-if="form.annotations.length > 0" class="space-y-2">
+          <div v-for="annotation in form.annotations" :key="annotation.id" class="flex gap-2">
+            <Input
+              v-model="annotation.key"
+              placeholder="Key (e.g., runbook_url)"
+              class="flex-1"
+              :disabled="isDisabled"
+            />
+            <Input
+              v-model="annotation.value"
+              placeholder="Value (e.g., https://docs.example.com/runbook)"
+              class="flex-1"
+              :disabled="isDisabled"
+            />
+            <Button type="button" variant="ghost" size="icon" @click="removeAnnotation(annotation.id)" :disabled="isDisabled">
+              ×
+            </Button>
+          </div>
+        </div>
+        <p v-else class="text-xs text-muted-foreground">No custom annotations. Common annotations: summary, description, dashboard_url, runbook_url.</p>
+      </div>
+    </section>
+
+    <!-- Alert Status - Inline Mode -->
+    <section class="space-y-4">
       <div class="flex items-center justify-between rounded-lg border bg-muted/20 p-4">
         <div>
           <h3 class="text-sm font-medium">Alert status</h3>
@@ -682,53 +853,6 @@ function handleSubmit() {
         </div>
         <Switch :checked="form.is_active" :disabled="isDisabled" @update:checked="(checked) => (form.is_active = Boolean(checked))" />
       </div>
-    </section>
-
-    <!-- Target Rooms -->
-    <section class="space-y-4 rounded-lg border bg-muted/20 p-5">
-      <div>
-        <h3 class="text-sm font-semibold">Target rooms</h3>
-        <p class="text-xs text-muted-foreground mt-1">
-          Select one or more rooms. Members receive email alerts and room channels deliver Slack/Webhook notifications.
-        </p>
-      </div>
-      <ScrollArea class="max-h-56 rounded-lg border bg-background p-3">
-        <div class="space-y-2">
-          <div
-            v-for="room in availableRooms"
-            :key="room.id"
-            class="flex items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/40"
-          >
-            <Checkbox
-              :id="`room-inline-${room.id}`"
-              :checked="form.roomIds.includes(room.id)"
-              :disabled="isDisabled"
-              @update:checked="(checked) => {
-                if (checked) {
-                  if (!form.roomIds.includes(room.id)) form.roomIds.push(room.id);
-                } else {
-                  form.roomIds = form.roomIds.filter((id) => id !== room.id);
-                }
-              }"
-              class="mt-0.5"
-            />
-            <div class="flex-1 space-y-1">
-              <Label :for="`room-inline-${room.id}`" class="font-medium cursor-pointer">
-                {{ room.name }}
-              </Label>
-              <p v-if="room.description" class="text-xs text-muted-foreground">
-                {{ room.description }}
-              </p>
-              <p class="text-[11px] text-muted-foreground">
-                {{ room.member_count }} {{ room.member_count === 1 ? 'member' : 'members' }} · {{ room.channel_types?.length ? room.channel_types.join(", ") : "email" }}
-              </p>
-            </div>
-          </div>
-          <p v-if="!availableRooms.length" class="text-sm text-muted-foreground text-center py-6">
-            No rooms available yet. Create rooms from team settings to manage recipients.
-          </p>
-        </div>
-      </ScrollArea>
     </section>
 
     <div class="flex items-center justify-end gap-2 pt-4">

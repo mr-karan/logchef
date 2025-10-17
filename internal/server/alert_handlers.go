@@ -38,6 +38,13 @@ func (s *Server) handleCreateAlert(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
+	if req.QueryType == "" {
+		req.QueryType = models.AlertQueryTypeSQL
+	}
+	if req.LookbackSeconds <= 0 {
+		req.LookbackSeconds = int(s.config.Alerts.DefaultLookback.Seconds())
+	}
+
 	alert, err := core.CreateAlert(c.Context(), s.sqlite, s.log, teamID, sourceID, &req)
 	if err != nil {
 		if errors.Is(err, core.ErrInvalidAlertConfiguration) {
@@ -178,6 +185,13 @@ func (s *Server) handleTestAlertQuery(c *fiber.Ctx) error {
 	var req models.TestAlertQueryRequest
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
+	}
+
+	if req.QueryType == "" {
+		req.QueryType = models.AlertQueryTypeSQL
+	}
+	if req.LookbackSeconds <= 0 {
+		req.LookbackSeconds = int(s.config.Alerts.DefaultLookback.Seconds())
 	}
 
 	result, err := core.TestAlertQuery(c.Context(), s.sqlite, s.clickhouse, s.log, teamID, sourceID, &req)

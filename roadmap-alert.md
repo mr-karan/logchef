@@ -2,23 +2,24 @@
 
 ## Overview
 
-This document outlines the implementation plan for adding an alerting system to LogChef that monitors query results or log conditions and notifies users when thresholds are met. The design integrates seamlessly with the existing Go-Fiber/Vue3 architecture.
+This document outlines the implementation plan for adding an alerting system to LogChef that monitors query results or log conditions and notifies users when thresholds are met. Alert delivery is delegated to an external Alertmanager instance, keeping the LogChef codebase focused on evaluation while leveraging Alertmanager’s mature routing and notification ecosystem. The design integrates seamlessly with the existing Go-Fiber/Vue3 architecture.
 
 ## Core Features
 
-- **Alert Rules**: Custom SQL queries or condition-based log monitoring
-- **Thresholds & Scheduling**: Configurable thresholds, frequency, and severity levels
-- **Multi-Channel Notifications**: Email, Slack, webhook support
-- **Alert History**: Complete audit trail with timestamps and status tracking
-- **Proactive Detection**: Real-time monitoring for anomalies, errors, and important events
+- **Alert Rules**: Custom SQL queries or condition-based log monitoring that produce a numeric result
+- **Threshold Evaluation**: Configurable comparison operators, rolling windows, frequency, and severity levels
+- **Alertmanager Integration**: Direct delivery to a Prometheus Alertmanager instance with rich labels and annotations
+- **Alert History**: Optional local audit trail with timestamps, values, and resolution state
+- **UI Workflow**: Rule builder with live testing, metadata management, and quick links into Alertmanager
 
 ## Architecture Overview
 
-The alerting system follows LogChef's existing patterns:
-- SQLite for metadata storage (rules, channels, events) via SQLC
+The alerting system follows LogChef's existing patterns while outsourcing notification delivery:
+- SQLite for metadata storage (rules plus optional evaluation history) via SQLC
 - ClickHouse for log data queries and aggregations
-- Go services with clean interfaces and testable components
+- Go services with clean interfaces, including an Alertmanager client
 - Vue 3 frontend with Pinia state management and Radix UI components
+- Declarative configuration (e.g. `config.toml`) for pointing to a team’s Alertmanager endpoint
 
 ## Database Schema
 
@@ -27,52 +28,53 @@ The alerting system follows LogChef's existing patterns:
 ```sql
 -- Alert rule definitions
 CREATE TABLE alert_rules (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    team_id         INTEGER NOT NULL REFERENCES teams(id),
-    name            TEXT NOT NULL,
-    description     TEXT,
-    query_type      TEXT NOT NULL,      -- 'sql' | 'condition'
-    query_text      TEXT,               -- Raw SQL for ClickHouse
-    condition_json  TEXT,               -- JSON for DSL conditions
-    threshold_op    TEXT NOT NULL,      -- '>' '>=' '<' '<=' '=' '!='
-    threshold_value REAL,
-    frequency_sec   INTEGER NOT NULL DEFAULT 60,
-    severity        TEXT NOT NULL DEFAULT 'medium',
-    enabled         BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at      DATETIME,
-    last_triggered_at DATETIME
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    team_id          INTEGER NOT NULL REFERENCES teams(id),
+    name             TEXT NOT NULL,
+    description      TEXT,
+    query_type       TEXT NOT NULL,      -- 'sql' | 'condition'
+    query_text       TEXT,               -- Raw SQL for ClickHouse
+    condition_json   TEXT,               -- JSON for DSL conditions
+    threshold_op     TEXT NOT NULL,      -- '>' '>=' '<' '<=' '=' '!='
+    threshold_value  REAL NOT NULL,
+    frequency_sec    INTEGER NOT NULL DEFAULT 60,
+    severity         TEXT NOT NULL DEFAULT 'warning',
+    labels_json      TEXT,               -- Extra labels forwarded to Alertmanager
+    annotations_json TEXT,               -- Additional annotations (runbook, summary)
+    generator_url    TEXT,               -- Optional deep link back into LogChef
+    enabled          BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at       DATETIME,
+    last_triggered_at DATETIME,
+    last_state       TEXT NOT NULL DEFAULT 'resolved'
 );
 
--- Notification channel configurations
-CREATE TABLE notification_channels (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    team_id     INTEGER NOT NULL REFERENCES teams(id),
-    type        TEXT NOT NULL,           -- email|slack|webhook
-    name        TEXT,
-    config_json TEXT NOT NULL,           -- Configuration data
-    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- Many-to-many: rules to channels
-CREATE TABLE alert_rule_channels (
-    rule_id     INTEGER NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
-    channel_id  INTEGER NOT NULL REFERENCES notification_channels(id) ON DELETE CASCADE,
-    PRIMARY KEY (rule_id, channel_id)
-);
-
--- Alert event history
+-- Optional: evaluation history for audit trail
 CREATE TABLE alert_events (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    rule_id         INTEGER NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
-    triggered_at    DATETIME NOT NULL,
-    resolved_at     DATETIME,
-    status          TEXT NOT NULL,      -- triggered | resolved | error
-    triggered_value REAL,
-    details_json    TEXT                -- Query result snapshot / error info
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_id          INTEGER NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
+    triggered_at     DATETIME NOT NULL,
+    resolved_at      DATETIME,
+    triggered_value  REAL,
+    details_json     TEXT                -- Query result snapshot / payload metadata
 );
 ```
+
+### Configuration
+
+Alertmanager connectivity is defined centrally (e.g. in `config.toml`) to keep deployment simple:
+
+```toml
+[alerting]
+enabled = true
+frequency_sec_default = 60
+alertmanager_url = "https://alertmanager.internal/api/v2/alerts"
+external_url = "https://logchef.example.com"  # Used as generatorURL
+timeout_sec = 10
+tls_insecure_skip_verify = false
+```
+
+Per-team overrides can be layered in later if required; the initial milestone assumes a single Alertmanager endpoint per LogChef deployment.
 
 ## Backend Implementation
 
@@ -82,20 +84,20 @@ CREATE TABLE alert_events (
    - `Evaluator` interface for rule evaluation
    - `SQLQueryEvaluator` - executes custom SQL against ClickHouse
    - `ConditionEvaluator` - builds queries from condition DSL
-   - `AnomalyEvaluator` - statistical anomaly detection (Phase 2)
+   - State tracking helpers for firing → resolved transitions
 
-2. **scheduler/**
+2. **alertmanager/**
+   - Minimal client wrapping `/api/v2/alerts`
+   - Payload builders for labels, annotations, generator URLs
+   - Retry and backoff handling
+
+3. **scheduler/**
    - Cron-based scheduling using `robfig/cron/v3`
    - Worker pool for concurrent rule evaluation
    - Context-aware timeout handling
 
-3. **notifier/**
-   - `Notifier` interface for pluggable notification channels
-   - Email, Slack, and webhook implementations
-   - Secure configuration handling
-
 4. **service/**
-   - `AlertService` - orchestrates scheduler, evaluator, and notifiers
+   - `AlertService` - orchestrates scheduler, evaluator, and Alertmanager client
    - Helper methods for manual triggering and resolution
    - Integration with existing LogChef services
 
@@ -108,21 +110,16 @@ POST   /api/v1/alert-rules
 GET    /api/v1/alert-rules/:id
 PUT    /api/v1/alert-rules/:id
 DELETE /api/v1/alert-rules/:id
-POST   /api/v1/alert-rules/:id/test      # Dry run
+POST   /api/v1/alert-rules/:id/test        # Dry run / preview
 POST   /api/v1/alert-rules/:id/enable
 POST   /api/v1/alert-rules/:id/disable
+POST   /api/v1/alert-rules/:id/evaluate    # Manual evaluation (sends to Alertmanager)
 
-# Notification Channels
-GET    /api/v1/notification-channels
-POST   /api/v1/notification-channels
-PUT    /api/v1/notification-channels/:id
-DELETE /api/v1/notification-channels/:id
-
-# Alert Events
+# Alert Events (optional audit trail)
 GET    /api/v1/alert-events
 
 # Real-time (optional)
-/ws/alerts                              # WebSocket for live updates
+/ws/alerts                                  # WebSocket for live updates / status changes
 ```
 
 ## Frontend Implementation
@@ -131,33 +128,33 @@ GET    /api/v1/alert-events
 
 - `useAlertRulesStore.ts` - CRUD operations for alert rules
 - `useAlertEventsStore.ts` - Event history and real-time updates
-- `useNotificationChannelsStore.ts` - Channel management
+- `useAlertmanagerStore.ts` - Connectivity status, configuration metadata, health checks
 
 ### Vue Components
 
 1. **AlertsOverview.vue**
    - Data table with rule status, last triggered, and controls
-   - Severity badges and status indicators
-   - Quick enable/disable toggles
+   - Severity badges, Alertmanager state (firing/resolved), and quick enable/disable toggles
+   - Link out to the matching Alertmanager search
 
 2. **AlertRuleForm.vue**
    - Multi-step wizard for rule creation/editing
    - Query builder with SQL and condition tabs
-   - Live rule testing functionality
-   - Notification channel selection
+   - Live rule testing functionality with preview ranges
+   - Labels and annotations editor (summary, runbook URL, etc.)
 
 3. **AlertHistory.vue**
    - Timeline view of alert events
    - Expandable event details
    - Status tracking and resolution
 
-4. **NotificationSettings.vue**
-   - Channel configuration management
-   - Secure credential handling
-
-5. **SaveAsAlertButton.vue**
+4. **SaveAsAlertButton.vue**
    - Integration with log query results
    - Pre-populated rule creation
+
+5. **AlertmanagerStatusBanner.vue** (optional)
+   - Surface connectivity errors or silences
+   - Provide CTA to open Alertmanager UI
 
 ## Example Query Templates
 
@@ -199,31 +196,35 @@ FROM current_window, historical_baseline;
 ## Implementation Phases
 
 ### Phase 1: Core Infrastructure
-- [ ] Database schema and migrations
+- [ ] Database schema and migrations (alert_rules + optional alert_events)
 - [ ] SQLC query generation
-- [ ] Basic alert service structure
-- [ ] Simple threshold evaluator
-- [ ] Email notification support
+- [ ] Alertmanager client with configuration loading and retries
+- [ ] Threshold evaluator and scheduler wiring
+- [ ] REST API for rule CRUD, test, enable/disable, manual evaluate
+- [ ] Minimal Vue UI for listing and editing rules
+- [ ] Basic audit logging of evaluations
 
 ### Phase 2: Enhanced Features
-- [ ] Slack and webhook notifications
-- [ ] Advanced query builder UI
-- [ ] Real-time WebSocket updates
-- [ ] Alert event history and resolution
-- [ ] Team-based permissions
+- [ ] Condition-builder UI and reusable query templates
+- [ ] Live preview with selectable time ranges (table/chart)
+- [ ] Alert event history UI and WebSocket updates
+- [ ] Labels/annotations editor with validation helpers
+- [ ] Alertmanager connectivity health indicators
+- [ ] Team-based permissions and RBAC controls
 
 ### Phase 3: Advanced Capabilities
+- [ ] Optional webhook fallback mode for non-Alertmanager users
+- [ ] Per-team Alertmanager overrides and secrets management
 - [ ] Anomaly detection evaluator
-- [ ] Composite rules (AND/OR logic)
-- [ ] Rate limiting and suppression
-- [ ] Escalation policies
-- [ ] Dashboard integration
+- [ ] Composite rules (AND/OR logic) and dependency suppression
+- [ ] Business-hour scheduling and maintenance windows
+- [ ] Dashboard integration and shared presets
 
 ## Testing Strategy
 
 ### Backend Tests
 - Unit tests for evaluators with mocked ClickHouse
-- Notifier tests with HTTP mocks and SMTP stubs
+- Alertmanager client tests with HTTP mocks and retry scenarios
 - Integration tests for scheduler pipeline
 - Database migration tests
 
@@ -235,38 +236,38 @@ FROM current_window, historical_baseline;
 ### Load Testing
 - ClickHouse query performance under alert load
 - Concurrent rule evaluation scaling
-- Notification delivery reliability
+- Alertmanager delivery reliability (latency, retries, failures)
 
 ## Deployment Strategy
 
 1. **Feature Flag Rollout**
    - Deploy schema changes with `ALERTING_ENABLED=false`
-   - Enable UI for rule creation without evaluation
-   - Gradual scheduler enablement
+   - Enable UI for rule creation without Alertmanager delivery
+   - Gradual scheduler enablement with canary rules
 
 2. **Monitoring & Observability**
    - Alert service metrics and health checks
    - ClickHouse query performance monitoring
-   - Notification delivery success rates
+   - Alertmanager client success/failure counters and latency
 
 3. **Configuration Management**
    - Environment-specific alert thresholds
-   - Notification channel credentials handling
-   - Rate limiting and resource controls
+   - Alertmanager endpoint, auth, and TLS handling
+   - Retry, timeout, and batching controls
 
 ## Future Enhancements
 
-- **Additional Integrations**: PagerDuty, OpsGenie, Microsoft Teams
-- **Machine Learning**: Predictive anomaly detection
-- **Advanced Scheduling**: Business hours, maintenance windows
+- **Alertmanager Sync**: Surface silences, acknowledgements, and routing summaries inside LogChef
+- **Machine Learning**: Predictive anomaly detection and adaptive thresholds
+- **Advanced Scheduling**: Business hours, maintenance windows, holiday calendars
 - **Alert Clustering**: Group related alerts to reduce noise
-- **Mobile Notifications**: Push notifications for critical alerts
+- **Standalone Notifications**: Optional built-in email/Slack sender for lightweight deployments
 
 ## Success Metrics
 
 - **User Adoption**: Number of active alert rules per team
 - **Performance**: Alert evaluation latency and resource usage
-- **Reliability**: False positive/negative rates and notification delivery
+- **Reliability**: False positive/negative rates and Alertmanager delivery success
 - **User Experience**: Time to create first alert, support ticket reduction
 
 ---

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/alerts"
@@ -129,11 +130,29 @@ func (a *App) Initialize(ctx context.Context) error {
 	}
 	a.server = server.New(serverOpts)
 
+	var alertSender alerts.AlertSender
+	if strings.TrimSpace(a.Config.Alerts.AlertmanagerURL) == "" {
+		a.Logger.Warn("alertmanager_url not configured; alerts will not be delivered")
+	} else {
+		client, err := alerts.NewAlertmanagerClient(alerts.ClientOptions{
+			BaseURL:       a.Config.Alerts.AlertmanagerURL,
+			Timeout:       a.Config.Alerts.RequestTimeout,
+			SkipTLSVerify: a.Config.Alerts.TLSInsecureSkipVerify,
+			Logger:        a.Logger,
+		})
+		if err != nil {
+			a.Logger.Error("failed to initialize alertmanager client", "error", err)
+		} else {
+			alertSender = client
+		}
+	}
+
 	a.Alerts = alerts.NewManager(alerts.Options{
 		Config:     a.Config.Alerts,
 		DB:         a.SQLite,
 		ClickHouse: a.ClickHouse,
 		Logger:     a.Logger,
+		Sender:     alertSender,
 	})
 	a.Alerts.Start(ctx)
 

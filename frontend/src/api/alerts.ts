@@ -2,51 +2,40 @@ import { apiClient } from "./apiUtils";
 
 export type AlertThresholdOperator = "gt" | "gte" | "lt" | "lte" | "eq" | "neq";
 export type AlertSeverity = "info" | "warning" | "critical";
-export type RoomChannelType = "slack" | "webhook";
-
-export interface RoomSummary {
-  id: number;
-  name: string;
-  description?: string;
-  member_count: number;
-  channel_types: RoomChannelType[];
-}
-
+export type AlertQueryType = "sql" | "condition";
 export interface Alert {
   id: number;
   team_id: number;
   source_id: number;
   name: string;
   description?: string;
+  query_type: AlertQueryType;
   query: string;
+  condition_json?: string;
+  lookback_seconds: number;
   threshold_operator: AlertThresholdOperator;
   threshold_value: number;
   frequency_seconds: number;
   severity: AlertSeverity;
-  room_ids: number[];
-  rooms: RoomSummary[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  generator_url?: string;
   is_active: boolean;
+  last_state: "firing" | "resolved";
   last_evaluated_at?: string | null;
   last_triggered_at?: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export interface AlertHistoryRoomSnapshot {
-  room_id: number;
-  name: string;
-  channel_types: RoomChannelType[];
-  member_emails?: string[];
-}
-
 export interface AlertHistoryEntry {
   id: number;
   alert_id: number;
-  status: "triggered" | "resolved";
+  status: "triggered" | "resolved" | "error";
   triggered_at: string;
   resolved_at?: string | null;
-  value_text?: string | null;
-  rooms: AlertHistoryRoomSnapshot[];
+  value?: number | null;
+  payload?: Record<string, unknown>;
   message?: string | null;
   created_at: string;
 }
@@ -56,12 +45,15 @@ export interface CreateAlertRequest {
   description?: string;
   query_type: AlertQueryType;
   query: string;
+  condition_json?: string;
   lookback_seconds: number;
   threshold_operator: AlertThresholdOperator;
   threshold_value: number;
   frequency_seconds: number;
   severity: AlertSeverity;
-  room_ids: number[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  generator_url?: string;
   is_active: boolean;
 }
 
@@ -70,12 +62,15 @@ export interface UpdateAlertRequest {
   description?: string;
   query_type?: AlertQueryType;
   query?: string;
+  condition_json?: string;
   lookback_seconds?: number;
   threshold_operator?: AlertThresholdOperator;
   threshold_value?: number;
   frequency_seconds?: number;
   severity?: AlertSeverity;
-  room_ids?: number[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  generator_url?: string;
   is_active?: boolean;
 }
 
@@ -86,6 +81,7 @@ export interface ResolveAlertRequest {
 export interface TestAlertQueryRequest {
   query: string;
   query_type: AlertQueryType;
+  condition_json?: string;
   lookback_seconds?: number;
   threshold_operator: AlertThresholdOperator;
   threshold_value: number;

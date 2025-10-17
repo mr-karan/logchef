@@ -24,10 +24,6 @@ type Querier interface {
 	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (int64, error)
 	// Alerts
 	CreateAlert(ctx context.Context, arg CreateAlertParams) (int64, error)
-	// Rooms
-	CreateRoom(ctx context.Context, arg CreateRoomParams) (int64, error)
-	// Room channels
-	CreateRoomChannel(ctx context.Context, arg CreateRoomChannelParams) (int64, error)
 	// Sessions
 	// Create a new session
 	CreateSession(ctx context.Context, arg CreateSessionParams) error
@@ -46,11 +42,8 @@ type Querier interface {
 	// Delete an API token by ID and user ID (ensure user owns the token)
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) error
 	DeleteAlert(ctx context.Context, id int64) error
-	DeleteAlertRooms(ctx context.Context, alertID int64) error
 	// Delete all expired API tokens
 	DeleteExpiredAPITokens(ctx context.Context) error
-	DeleteRoom(ctx context.Context, id int64) error
-	DeleteRoomChannel(ctx context.Context, id int64) error
 	// Delete a session by ID
 	DeleteSession(ctx context.Context, id string) error
 	// Delete a source by ID
@@ -70,7 +63,6 @@ type Querier interface {
 	GetAlert(ctx context.Context, id int64) (Alert, error)
 	GetAlertForTeamSource(ctx context.Context, arg GetAlertForTeamSourceParams) (Alert, error)
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID int64) (AlertHistory, error)
-	GetRoom(ctx context.Context, id int64) (Room, error)
 	// Get a session by ID
 	GetSession(ctx context.Context, id string) (Session, error)
 	// Get a single source by ID
@@ -91,20 +83,13 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	// Alert history queries
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (int64, error)
-	// Alert to room mapping
-	InsertAlertRoom(ctx context.Context, arg InsertAlertRoomParams) error
 	// List all API tokens for a user
 	ListAPITokensForUser(ctx context.Context, userID int64) ([]ApiToken, error)
 	ListActiveAlertsDue(ctx context.Context) ([]Alert, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
-	ListAlertRoomIDs(ctx context.Context, alertID int64) ([]int64, error)
 	ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsByTeamAndSourceParams) ([]Alert, error)
 	// List all queries for a specific team and source
 	ListQueriesByTeamAndSource(ctx context.Context, arg ListQueriesByTeamAndSourceParams) ([]TeamQuery, error)
-	ListRoomChannels(ctx context.Context, roomID int64) ([]RoomChannel, error)
-	ListRoomMemberEmails(ctx context.Context, roomID int64) ([]string, error)
-	ListRoomMembers(ctx context.Context, roomID int64) ([]RoomMember, error)
-	ListRoomsByTeam(ctx context.Context, teamID int64) ([]Room, error)
 	// List all teams a data source is a member of
 	ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, error)
 	// Get all sources ordered by creation date
@@ -127,7 +112,6 @@ type Querier interface {
 	ListUsers(ctx context.Context) ([]User, error)
 	MarkAlertEvaluated(ctx context.Context, id int64) error
 	MarkAlertTriggered(ctx context.Context, id int64) error
-	RemoveRoomMember(ctx context.Context, arg RemoveRoomMemberParams) error
 	// Remove a member from a team
 	RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error
 	// Remove a data source from a team
@@ -139,8 +123,6 @@ type Querier interface {
 	// Update the last used timestamp for an API token
 	UpdateAPITokenLastUsed(ctx context.Context, id int64) error
 	UpdateAlert(ctx context.Context, arg UpdateAlertParams) error
-	UpdateRoom(ctx context.Context, arg UpdateRoomParams) error
-	UpdateRoomChannel(ctx context.Context, arg UpdateRoomChannelParams) error
 	// Update an existing source
 	UpdateSource(ctx context.Context, arg UpdateSourceParams) error
 	// Update a team
@@ -151,8 +133,6 @@ type Querier interface {
 	UpdateTeamSourceQuery(ctx context.Context, arg UpdateTeamSourceQueryParams) error
 	// Update a user
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
-	// Rooms members
-	UpsertRoomMember(ctx context.Context, arg UpsertRoomMemberParams) error
 	// Check if a user has access to a source through any team
 	UserHasSourceAccess(ctx context.Context, arg UserHasSourceAccessParams) (int64, error)
 }

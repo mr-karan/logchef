@@ -60,8 +60,6 @@ const sourcesStore = useSourcesStore();
 
 const { alerts } = storeToRefs(alertsStore);
 
-const isFormOpen = ref(false);
-
 const showDeleteDialog = ref(false);
 const alertToDelete = ref<Alert | null>(null);
 
@@ -101,8 +99,7 @@ const emptyStateMessage = computed(() => {
 
 
 function openCreateForm() {
-  // TODO: Navigate to create page when implemented
-  isFormOpen.value = true;
+  router.push({ name: "AlertCreate", query: route.query });
 }
 
 function openEditForm(alert: Alert) {
@@ -201,10 +198,8 @@ function formatRelativeTime(dateStr: string | null | undefined): string {
   return formatDate(dateStr);
 }
 
-function getRoomsSummary(alert: Alert): string {
-  if (!alert.rooms.length) return "No rooms";
-  if (alert.rooms.length === 1) return alert.rooms[0].name;
-  return `${alert.rooms[0].name} +${alert.rooms.length - 1}`;
+function getDeliverySummary(_alert: Alert): string {
+  return "Alertmanager";
 }
 
 async function ensureDataLoaded() {
@@ -297,7 +292,7 @@ onMounted(async () => {
           <p class="mt-1 text-sm text-muted-foreground">
             {{ emptyStateMessage }}
           </p>
-          <Button v-if="currentTeamId && currentSourceId && !alerts.length" class="mt-4" @click="openCreateForm">
+      <Button v-if="currentTeamId && currentSourceId && !alerts.length" class="mt-4" @click="openCreateForm">
             <Plus class="-ml-1 mr-2 h-4 w-4" />
             Create alert
           </Button>
@@ -312,7 +307,7 @@ onMounted(async () => {
               <TableRow>
                 <TableHead class="w-[35%]">Name</TableHead>
                 <TableHead class="w-[15%]">Configuration</TableHead>
-                <TableHead class="w-[20%]">Rooms</TableHead>
+                <TableHead class="w-[20%]">Delivery</TableHead>
                 <TableHead class="w-[15%]">Last Triggered</TableHead>
                 <TableHead class="w-[15%] text-right">Actions</TableHead>
               </TableRow>
@@ -354,8 +349,8 @@ onMounted(async () => {
                 <TableCell class="py-4">
                   <div class="flex items-center gap-2">
                     <Users class="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span class="text-sm truncate" :title="alert.rooms.map(r => r.name).join(', ')">
-                      {{ getRoomsSummary(alert) }}
+                    <span class="text-sm truncate" title="Alertmanager">
+                      {{ getDeliverySummary(alert) }}
                     </span>
                   </div>
                 </TableCell>
@@ -410,8 +405,6 @@ onMounted(async () => {
         </div>
       </CardContent>
     </Card>
-
-    <!-- TODO: Add create alert modal/page -->
 
     <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = $event">
       <AlertDialogContent>

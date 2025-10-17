@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 	"time"
 
@@ -91,13 +92,17 @@ type AIConfig struct {
         BaseURL string `koanf:"base_url"`
 }
 
-// AlertsConfig controls scheduling and notification behaviour for alert rules.
+// AlertsConfig controls scheduling behaviour for alert rules and delivery via Alertmanager.
 type AlertsConfig struct {
-        Enabled             bool          `koanf:"enabled"`
-        EvaluationInterval  time.Duration `koanf:"evaluation_interval"`
-        DefaultLookback     time.Duration `koanf:"default_lookback"`
-        NotificationTimeout time.Duration `koanf:"notification_timeout"`
-        HistoryLimit        int           `koanf:"history_limit"`
+        Enabled                bool          `koanf:"enabled"`
+        EvaluationInterval     time.Duration `koanf:"evaluation_interval"`
+        DefaultLookback        time.Duration `koanf:"default_lookback"`
+        HistoryLimit           int           `koanf:"history_limit"`
+        AlertmanagerURL        string        `koanf:"alertmanager_url"`
+        ExternalURL            string        `koanf:"external_url"`     // Backend URL (for API access)
+        FrontendURL            string        `koanf:"frontend_url"`     // Frontend URL (for web UI links)
+        RequestTimeout         time.Duration `koanf:"request_timeout"`
+        TLSInsecureSkipVerify  bool          `koanf:"tls_insecure_skip_verify"`
 }
 
 const envPrefix = "LOGCHEF_"
@@ -172,12 +177,26 @@ func Load(path string) (*Config, error) {
         if cfg.Alerts.DefaultLookback <= 0 {
                 cfg.Alerts.DefaultLookback = 5 * time.Minute
         }
-        if cfg.Alerts.NotificationTimeout <= 0 {
-                cfg.Alerts.NotificationTimeout = 5 * time.Second
+        if cfg.Alerts.RequestTimeout <= 0 {
+                cfg.Alerts.RequestTimeout = 5 * time.Second
         }
         if cfg.Alerts.HistoryLimit <= 0 {
                 cfg.Alerts.HistoryLimit = 50
         }
+
+	// Validate Alertmanager URL if provided
+	if cfg.Alerts.AlertmanagerURL != "" {
+		parsedURL, err := url.Parse(cfg.Alerts.AlertmanagerURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid alertmanager_url: %w", err)
+		}
+		if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+			return nil, fmt.Errorf("alertmanager_url must use http or https scheme, got: %s", parsedURL.Scheme)
+		}
+		if parsedURL.Host == "" {
+			return nil, fmt.Errorf("alertmanager_url must include a host")
+		}
+	}
 
         return &cfg, nil
 }

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,13 +18,18 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+// AlertSender abstracts the delivery mechanism for alert notifications.
+type AlertSender interface {
+	Send(ctx context.Context, alerts []AlertPayload) error
+}
+
 // Options encapsulates the dependencies required to run the alerting manager.
 type Options struct {
 	Config     config.AlertsConfig
 	DB         *sqlite.DB
 	ClickHouse *clickhouse.Manager
 	Logger     *slog.Logger
-	Notifier   Notifier
+	Sender     AlertSender
 }
 
 // Manager coordinates alert evaluation and dispatches notifications when thresholds are met.
@@ -34,7 +38,7 @@ type Manager struct {
 	db         *sqlite.DB
 	clickhouse *clickhouse.Manager
 	log        *slog.Logger
-	notifier   Notifier
+	sender     AlertSender
 
 	stop chan struct{}
 	wg   sync.WaitGroup
@@ -42,16 +46,16 @@ type Manager struct {
 
 // NewManager constructs a new alert manager instance.
 func NewManager(opts Options) *Manager {
-	notifier := opts.Notifier
-	if notifier == nil {
-		notifier = NewDefaultNotifier(opts.Logger)
+	sender := opts.Sender
+	if sender == nil {
+		sender = noopSender{}
 	}
 	return &Manager{
 		cfg:        opts.Config,
 		db:         opts.DB,
 		clickhouse: opts.ClickHouse,
 		log:        opts.Logger.With("component", "alert_manager"),
-		notifier:   notifier,
+		sender:     sender,
 		stop:       make(chan struct{}),
 	}
 }
@@ -117,55 +121,88 @@ func (m *Manager) evaluateCycle(ctx context.Context) {
 }
 
 func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error {
-	query := alert.Query
+	if alert == nil {
+		return nil
+	}
+
+	if alert.QueryType != "" && alert.QueryType != models.AlertQueryTypeSQL {
+		m.log.Warn("unsupported alert query type; skipping evaluation", "alert_id", alert.ID, "query_type", alert.QueryType)
+		return nil
+	}
+
+	query := strings.TrimSpace(alert.Query)
+	if query == "" {
+		m.log.Warn("alert query is empty; skipping evaluation", "alert_id", alert.ID)
+		return nil
+	}
 
 	client, err := m.clickhouse.GetConnection(alert.SourceID)
 	if err != nil {
+		m.recordEvaluationError(ctx, alert, fmt.Errorf("failed to obtain ClickHouse connection: %w", err))
 		return fmt.Errorf("failed to obtain ClickHouse connection: %w", err)
 	}
 
 	timeout := models.DefaultQueryTimeoutSeconds
 	result, err := client.QueryWithTimeout(ctx, query, &timeout)
 	if err != nil {
+		m.recordEvaluationError(ctx, alert, fmt.Errorf("alert query failed: %w", err))
 		return fmt.Errorf("alert query failed: %w", err)
 	}
 
 	value, err := extractFirstNumeric(result)
 	if err != nil {
+		m.recordEvaluationError(ctx, alert, fmt.Errorf("failed to extract alert result: %w", err))
 		return fmt.Errorf("failed to extract alert result: %w", err)
 	}
 
 	triggered := compareThreshold(value, alert.ThresholdValue, alert.ThresholdOperator)
+
+	m.log.Debug("alert evaluation complete",
+		"alert_id", alert.ID,
+		"alert_name", alert.Name,
+		"value", value,
+		"threshold", alert.ThresholdValue,
+		"operator", alert.ThresholdOperator,
+		"triggered", triggered)
+
 	if triggered {
 		return m.handleTriggered(ctx, alert, value)
 	}
 	return m.handleResolved(ctx, alert, value)
 }
 
-func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, value float64) error {
-	roomSnapshots, emailTargets, channelTargets, buildErr := m.buildNotificationContext(ctx, alert)
-	if buildErr != nil {
-		return buildErr
+func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert, evalErr error) {
+	if alert == nil || evalErr == nil {
+		return
 	}
 
+	errorMessage := fmt.Sprintf("Evaluation failed: %v", evalErr)
+	errorPayload := map[string]any{
+		"error":      evalErr.Error(),
+		"query_type": string(alert.QueryType),
+		"query":      alert.Query,
+		"status":     string(models.AlertStatusError),
+	}
+
+	_, err := m.db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusError, nil, errorMessage, errorPayload)
+	if err != nil {
+		m.log.Error("failed to insert error history entry", "alert_id", alert.ID, "error", err)
+	}
+}
+
+func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, value float64) error {
 	prevHistory, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, sqlite.ErrNotFound) {
 		m.log.Warn("failed to check existing alert history", "alert_id", alert.ID, "error", err)
 	}
 	alreadyActive := err == nil && prevHistory != nil
 
-	if errors.Is(err, sql.ErrNoRows) {
-		history := &models.AlertHistoryEntry{
-			AlertID:   alert.ID,
-			Status:    models.AlertStatusTriggered,
-			ValueText: strconv.FormatFloat(value, 'f', 4, 64),
-			Rooms:     roomSnapshots,
-			Message:   fmt.Sprintf("alert %s triggered with value %.4f", alert.Name, value),
-		}
-		if insertErr := m.db.InsertAlertHistory(ctx, history); insertErr != nil {
-			m.log.Error("failed to insert alert history", "alert_id", alert.ID, "error", insertErr)
-		} else if pruneErr := m.db.PruneAlertHistory(ctx, alert.ID, m.cfg.HistoryLimit); pruneErr != nil {
-			m.log.Warn("failed to prune alert history", "alert_id", alert.ID, "error", pruneErr)
+	// Check if previous delivery failed - if so, we should retry
+	shouldRetryDelivery := false
+	if alreadyActive && prevHistory.Payload != nil {
+		if deliveryFailed, ok := prevHistory.Payload["delivery_failed"].(bool); ok && deliveryFailed {
+			m.log.Info("retrying previously failed alertmanager delivery", "alert_id", alert.ID, "history_id", prevHistory.ID)
+			shouldRetryDelivery = true
 		}
 	}
 
@@ -173,102 +210,75 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 		m.log.Error("failed to mark alert triggered", "alert_id", alert.ID, "error", markErr)
 	}
 
-	if alreadyActive {
-		m.log.Debug("alert already active, suppressing duplicate notifications", "alert_id", alert.ID)
+	// If already active and delivery succeeded previously, suppress duplicate notification
+	if alreadyActive && !shouldRetryDelivery {
+		m.log.Debug("alert already active with successful delivery, suppressing duplicate alertmanager notification", "alert_id", alert.ID)
 		return nil
 	}
 
-	if sendErr := m.dispatchNotifications(ctx, alert, value, emailTargets, channelTargets); sendErr != nil {
-		m.log.Warn("failed to dispatch notifications", "alert_id", alert.ID, "error", sendErr)
+	m.log.Info("alert triggered",
+		"alert_id", alert.ID,
+		"alert_name", alert.Name,
+		"severity", alert.Severity,
+		"value", value,
+		"threshold", alert.ThresholdValue,
+		"operator", alert.ThresholdOperator)
+
+	labels, annotations := m.buildAlertMetadata(alert, models.AlertStatusTriggered, value)
+
+	valueCopy := value
+	message := fmt.Sprintf("alert %s triggered with value %.4f", alert.Name, value)
+
+	// Send to Alertmanager first
+	var deliveryErr error
+	var history *models.AlertHistoryEntry
+	if shouldRetryDelivery && prevHistory != nil {
+		// Retry on existing history entry - update it with new attempt
+		history = prevHistory
+		deliveryErr = m.sendAlertmanager(ctx, alert, history, labels, annotations, models.AlertStatusTriggered)
+	} else {
+		// Create new history entry
+		now := time.Now().UTC()
+		history = &models.AlertHistoryEntry{
+			AlertID:     alert.ID,
+			Status:      models.AlertStatusTriggered,
+			TriggeredAt: now,
+			Value:       &valueCopy,
+			Message:     message,
+		}
+		deliveryErr = m.sendAlertmanager(ctx, alert, history, labels, annotations, models.AlertStatusTriggered)
 	}
-	return nil
-}
 
-func (m *Manager) buildNotificationContext(ctx context.Context, alert *models.Alert) ([]models.AlertHistoryRoomSnapshot, []string, []*models.RoomChannel, error) {
-	var (
-		snapshots      []models.AlertHistoryRoomSnapshot
-		emailSet       = make(map[string]struct{})
-		channelTargets []*models.RoomChannel
-	)
+	// Record history with delivery status
+	historyPayload := map[string]any{
+		"labels":          copyStringMap(labels),
+		"annotations":     copyStringMap(annotations),
+		"status":          string(models.AlertStatusTriggered),
+		"delivery_failed": deliveryErr != nil,
+	}
+	if deliveryErr != nil {
+		historyPayload["delivery_error"] = deliveryErr.Error()
+		m.log.Warn("failed to send alert to Alertmanager", "alert_id", alert.ID, "error", deliveryErr)
+	} else {
+		m.log.Info("alert successfully sent to Alertmanager",
+			"alert_id", alert.ID,
+			"alert_name", alert.Name,
+			"alertmanager", "delivered")
+	}
 
-	for _, room := range alert.Rooms {
-		emails, err := m.db.ListRoomMemberEmails(ctx, room.ID)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to list members for room %d: %w", room.ID, err)
-		}
-		channels, err := m.db.ListEnabledRoomChannels(ctx, room.ID)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to list channels for room %d: %w", room.ID, err)
-		}
-
-		channelTargets = append(channelTargets, channels...)
-
-		for _, email := range emails {
-			normalized := strings.ToLower(strings.TrimSpace(email))
-			if normalized != "" {
-				emailSet[normalized] = struct{}{}
+	if !shouldRetryDelivery {
+		// Insert new history entry
+		insertedHistory, insertErr := m.db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusTriggered, &valueCopy, message, historyPayload)
+		if insertErr != nil {
+			m.log.Error("failed to insert alert history", "alert_id", alert.ID, "error", insertErr)
+		} else {
+			history = insertedHistory
+			if pruneErr := m.db.PruneAlertHistory(ctx, alert.ID, m.cfg.HistoryLimit); pruneErr != nil {
+				m.log.Warn("failed to prune alert history", "alert_id", alert.ID, "error", pruneErr)
 			}
 		}
-
-		snapshots = append(snapshots, models.AlertHistoryRoomSnapshot{
-			RoomID:       room.ID,
-			Name:         room.Name,
-			ChannelTypes: room.ChannelTypes,
-			MemberEmails: emails,
-		})
 	}
 
-	emails := make([]string, 0, len(emailSet))
-	for email := range emailSet {
-		emails = append(emails, email)
-	}
-	sort.Strings(emails)
-
-	return snapshots, emails, channelTargets, nil
-}
-
-func (m *Manager) dispatchNotifications(ctx context.Context, alert *models.Alert, value float64, emails []string, channels []*models.RoomChannel) error {
-	if len(emails) == 0 && len(channels) == 0 {
-		return nil
-	}
-
-	timeout := m.cfg.NotificationTimeout
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
-
-	payload := NotificationPayload{
-		Value:   value,
-		Message: fmt.Sprintf("Alert %s triggered", alert.Name),
-	}
-
-	for _, email := range emails {
-		if email == "" {
-			continue
-		}
-		email := email
-		notifyCtx, cancel := context.WithTimeout(ctx, timeout)
-		go func() {
-			defer cancel()
-			if err := m.notifier.NotifyEmail(notifyCtx, alert, email, payload); err != nil {
-				m.log.Warn("email notification failed", "alert_id", alert.ID, "email", email, "error", err)
-			}
-		}()
-	}
-
-	for _, ch := range channels {
-		if ch == nil || !ch.Enabled {
-			continue
-		}
-		channel := ch
-		notifyCtx, cancel := context.WithTimeout(ctx, timeout)
-		go func() {
-			defer cancel()
-			if err := m.notifier.NotifyRoomChannel(notifyCtx, alert, channel, payload); err != nil {
-				m.log.Warn("channel notification failed", "alert_id", alert.ID, "channel_id", channel.ID, "type", channel.Type, "error", err)
-			}
-		}()
-	}
 	return nil
 }
 
@@ -279,17 +289,156 @@ func (m *Manager) handleResolved(ctx context.Context, alert *models.Alert, value
 
 	entry, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
 			return nil
 		}
 		return fmt.Errorf("failed to fetch unresolved alert history: %w", err)
 	}
 
+	m.log.Info("alert resolved",
+		"alert_id", alert.ID,
+		"alert_name", alert.Name,
+		"value", value,
+		"threshold", alert.ThresholdValue)
+
 	message := fmt.Sprintf("alert %s resolved with value %.4f", alert.Name, value)
 	if err := m.db.ResolveAlertHistory(ctx, entry.ID, message); err != nil {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+			return nil
+		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
 	}
+
+	now := time.Now().UTC()
+	entry.Message = message
+	entry.ResolvedAt = &now
+	entry.Status = models.AlertStatusResolved
+	if entry.Value == nil {
+		entry.Value = &value
+	}
+
+	labels, annotations := m.buildAlertMetadata(alert, models.AlertStatusResolved, value)
+	if annotations == nil {
+		annotations = make(map[string]string, 1)
+	}
+	annotations["resolved_at"] = now.Format(time.RFC3339Nano)
+
+	if sendErr := m.sendAlertmanager(ctx, alert, entry, labels, annotations, models.AlertStatusResolved); sendErr != nil {
+		m.log.Warn("failed to send resolved alert to Alertmanager", "alert_id", alert.ID, "error", sendErr)
+		// Note: We don't track delivery failures for resolved alerts as critically
+		// since the main concern is ensuring triggered alerts reach Alertmanager
+	} else {
+		m.log.Info("resolved alert successfully sent to Alertmanager",
+			"alert_id", alert.ID,
+			"alert_name", alert.Name)
+	}
 	return nil
+}
+
+func (m *Manager) buildAlertMetadata(alert *models.Alert, status models.AlertStatus, value float64) (map[string]string, map[string]string) {
+	labels := copyStringMap(alert.Labels)
+	if labels == nil {
+		labels = make(map[string]string, 8)
+	}
+	labels["alertname"] = alert.Name
+	labels["alert_id"] = strconv.FormatInt(int64(alert.ID), 10)
+	labels["severity"] = string(alert.Severity)
+	labels["status"] = string(status)
+
+	// Fetch team and source names for more readable labels
+	if team, err := m.db.GetTeam(context.Background(), alert.TeamID); err == nil && team != nil {
+		labels["team"] = team.Name
+		labels["team_id"] = strconv.FormatInt(int64(alert.TeamID), 10)
+	} else {
+		// Fallback to just ID if fetch fails
+		labels["team_id"] = strconv.FormatInt(int64(alert.TeamID), 10)
+		m.log.Warn("failed to fetch team name for alert metadata", "team_id", alert.TeamID, "error", err)
+	}
+
+	if source, err := m.db.GetSource(context.Background(), alert.SourceID); err == nil && source != nil {
+		labels["source"] = source.Name
+		labels["source_id"] = strconv.FormatInt(int64(alert.SourceID), 10)
+	} else {
+		// Fallback to just ID if fetch fails
+		labels["source_id"] = strconv.FormatInt(int64(alert.SourceID), 10)
+		m.log.Warn("failed to fetch source name for alert metadata", "source_id", alert.SourceID, "error", err)
+	}
+
+	annotations := copyStringMap(alert.Annotations)
+	if annotations == nil {
+		annotations = make(map[string]string, 8)
+	}
+	if desc := strings.TrimSpace(alert.Description); desc != "" {
+		annotations["description"] = desc
+	}
+	if query := strings.TrimSpace(alert.Query); query != "" {
+		annotations["query"] = query
+	}
+	if alert.ConditionJSON != "" {
+		annotations["condition_json"] = alert.ConditionJSON
+	}
+	annotations["threshold"] = fmt.Sprintf("%s %.4f", alert.ThresholdOperator, alert.ThresholdValue)
+	annotations["value"] = strconv.FormatFloat(value, 'f', 4, 64)
+	annotations["status"] = string(status)
+	annotations["frequency_seconds"] = strconv.Itoa(alert.FrequencySeconds)
+	if alert.LookbackSeconds > 0 {
+		annotations["lookback_seconds"] = strconv.Itoa(alert.LookbackSeconds)
+	}
+	return labels, annotations
+}
+
+func (m *Manager) sendAlertmanager(ctx context.Context, alert *models.Alert, history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus) error {
+	if m.sender == nil || history == nil {
+		return nil
+	}
+
+	payload := AlertPayload{
+		Labels:       labels,
+		Annotations:  annotations,
+		StartsAt:     history.TriggeredAt.UTC(),
+		GeneratorURL: m.generatorURL(alert),
+	}
+	if status == models.AlertStatusResolved && history.ResolvedAt != nil {
+		resolved := history.ResolvedAt.UTC()
+		payload.EndsAt = &resolved
+	}
+	return m.sender.Send(ctx, []AlertPayload{payload})
+}
+
+func (m *Manager) generatorURL(alert *models.Alert) string {
+	if trimmed := strings.TrimSpace(alert.GeneratorURL); trimmed != "" {
+		return trimmed
+	}
+
+	// Use frontend URL if configured, otherwise fall back to external URL
+	base := strings.TrimSpace(m.cfg.FrontendURL)
+	if base == "" {
+		base = strings.TrimSpace(m.cfg.ExternalURL)
+	}
+	if base == "" {
+		return ""
+	}
+
+	base = strings.TrimSuffix(base, "/")
+	// Frontend format: /logs/alerts/:alertId?team=:teamId&source=:sourceId
+	return fmt.Sprintf("%s/logs/alerts/%d?team=%d&source=%d", base, alert.ID, alert.TeamID, alert.SourceID)
+}
+
+type noopSender struct{}
+
+func (noopSender) Send(_ context.Context, _ []AlertPayload) error {
+	return nil
+}
+
+func copyStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }
 
 

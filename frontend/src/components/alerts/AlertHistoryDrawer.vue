@@ -128,34 +128,47 @@ watch(
                   Triggered {{ formatDate(entry.triggered_at) }}
                 </span>
               </div>
-              <div class="mt-3 space-y-2 text-xs text-muted-foreground">
-                <div v-if="entry.value_text">
-                  Value: <span class="font-medium text-foreground">{{ entry.value_text }}</span>
+              <div class="mt-3 space-y-3 text-xs text-muted-foreground">
+                <div class="flex items-center justify-between">
+                  <span>Latest value</span>
+                  <span class="font-medium text-foreground">
+                    {{ entry.value != null ? entry.value : "—" }}
+                  </span>
                 </div>
                 <div v-if="entry.resolved_at">
                   Resolved {{ formatDate(entry.resolved_at) }}
                 </div>
-                <div>
-                  Rooms:
-                  <div class="mt-1 flex flex-col gap-1">
-                    <div v-for="room in entry.rooms" :key="room.room_id" class="space-y-1">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline" class="text-xs font-medium">
-                          {{ room.name }}
-                        </Badge>
-                        <span class="text-[11px] uppercase tracking-wide text-muted-foreground">
-                          {{ room.channel_types.length ? room.channel_types.join(", ") : "email" }}
-                        </span>
+                <p v-if="entry.message" class="text-foreground">
+                  {{ entry.message }}
+                </p>
+                <div v-if="entry.payload && (entry.payload.labels || entry.payload.annotations)" class="space-y-2">
+                  <div v-if="entry.payload.labels">
+                    <h4 class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Labels</h4>
+                    <div class="mt-1 grid gap-1">
+                      <div
+                        v-for="(labelValue, labelKey) in (entry.payload.labels as Record<string, string>)"
+                        :key="`label-${labelKey}`"
+                        class="flex items-center justify-between gap-2 rounded-md border bg-background px-2 py-1 text-[11px] text-muted-foreground"
+                      >
+                        <span class="font-medium text-foreground">{{ labelKey }}</span>
+                        <span class="truncate">{{ labelValue }}</span>
                       </div>
-                      <div v-if="room.member_emails && room.member_emails.length" class="text-[11px] text-muted-foreground">
-                        Recipients: {{ room.member_emails.join(", ") }}
+                    </div>
+                  </div>
+                  <div v-if="entry.payload.annotations">
+                    <h4 class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Annotations</h4>
+                    <div class="mt-1 grid gap-1">
+                      <div
+                        v-for="(annotationValue, annotationKey) in (entry.payload.annotations as Record<string, string>)"
+                        :key="`annotation-${annotationKey}`"
+                        class="flex items-center justify-between gap-2 rounded-md border bg-background px-2 py-1 text-[11px] text-muted-foreground"
+                      >
+                        <span class="font-medium text-foreground">{{ annotationKey }}</span>
+                        <span class="truncate">{{ annotationValue }}</span>
                       </div>
                     </div>
                   </div>
                 </div>
-                <p v-if="entry.message" class="text-foreground">
-                  {{ entry.message }}
-                </p>
               </div>
             </div>
           </div>

@@ -38,12 +38,49 @@ var validSeverities = map[models.AlertSeverity]struct{}{
 	models.AlertSeverityCritical: {},
 }
 
+var validQueryTypes = map[models.AlertQueryType]struct{}{
+	models.AlertQueryTypeSQL:       {},
+	models.AlertQueryTypeCondition: {},
+}
+
+func sanitizeStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		key := strings.TrimSpace(k)
+		if key == "" {
+			continue
+		}
+		out[key] = strings.TrimSpace(v)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func validateAlertRequest(req *models.CreateAlertRequest) error {
 	if req.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	if strings.TrimSpace(req.Query) == "" {
-		return fmt.Errorf("query is required")
+	queryType := req.QueryType
+	if queryType == "" {
+		queryType = models.AlertQueryTypeSQL
+	}
+	if _, ok := validQueryTypes[queryType]; !ok {
+		return fmt.Errorf("invalid query_type %q", req.QueryType)
+	}
+	switch queryType {
+	case models.AlertQueryTypeSQL:
+		if strings.TrimSpace(req.Query) == "" {
+			return fmt.Errorf("query is required for sql query_type")
+		}
+	case models.AlertQueryTypeCondition:
+		if strings.TrimSpace(req.ConditionJSON) == "" {
+			return fmt.Errorf("condition_json is required for condition query_type")
+		}
 	}
 	if _, ok := validOperators[req.ThresholdOperator]; !ok {
 		return fmt.Errorf("invalid threshold_operator %q", req.ThresholdOperator)
@@ -51,36 +88,11 @@ func validateAlertRequest(req *models.CreateAlertRequest) error {
 	if req.FrequencySeconds <= 0 {
 		return fmt.Errorf("frequency_seconds must be greater than zero")
 	}
+	if req.LookbackSeconds <= 0 {
+		return fmt.Errorf("lookback_seconds must be greater than zero")
+	}
 	if _, ok := validSeverities[req.Severity]; !ok {
 		return fmt.Errorf("invalid severity %q", req.Severity)
-	}
-	return nil
-}
-
-func validateAlertRooms(ctx context.Context, db *sqlite.DB, teamID models.TeamID, roomIDs []models.RoomID) error {
-	if len(roomIDs) == 0 {
-		return fmt.Errorf("at least one room is required")
-	}
-	seen := make(map[models.RoomID]struct{}, len(roomIDs))
-	for _, roomID := range roomIDs {
-		if roomID == 0 {
-			return fmt.Errorf("invalid room id 0")
-		}
-		if _, exists := seen[roomID]; exists {
-			return fmt.Errorf("duplicate room id %d", roomID)
-		}
-		seen[roomID] = struct{}{}
-
-		room, err := db.GetRoom(ctx, roomID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
-				return fmt.Errorf("room %d not found", roomID)
-			}
-			return fmt.Errorf("failed to validate room %d: %w", roomID, err)
-		}
-		if room.TeamID != teamID {
-			return fmt.Errorf("room %d does not belong to team %d", roomID, teamID)
-		}
 	}
 	return nil
 }
@@ -93,21 +105,27 @@ func CreateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mo
 	if err := validateAlertRequest(req); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
 	}
-	if err := validateAlertRooms(ctx, db, teamID, req.RoomIDs); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
-	}
 
+	queryType := req.QueryType
+	if queryType == "" {
+		queryType = models.AlertQueryTypeSQL
+	}
 	alert := &models.Alert{
 		TeamID:            teamID,
 		SourceID:          sourceID,
 		Name:              strings.TrimSpace(req.Name),
 		Description:       strings.TrimSpace(req.Description),
+		QueryType:         queryType,
 		Query:             strings.TrimSpace(req.Query),
+		ConditionJSON:     strings.TrimSpace(req.ConditionJSON),
+		LookbackSeconds:   req.LookbackSeconds,
 		ThresholdOperator: req.ThresholdOperator,
 		ThresholdValue:    req.ThresholdValue,
 		FrequencySeconds:  req.FrequencySeconds,
 		Severity:          req.Severity,
-		RoomIDs:           req.RoomIDs,
+		Labels:            sanitizeStringMap(req.Labels),
+		Annotations:       sanitizeStringMap(req.Annotations),
+		GeneratorURL:      strings.TrimSpace(req.GeneratorURL),
 		IsActive:          req.IsActive,
 	}
 
@@ -153,11 +171,35 @@ func UpdateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mo
 	if req.Description != nil {
 		existing.Description = strings.TrimSpace(*req.Description)
 	}
+	if req.QueryType != nil {
+		if _, ok := validQueryTypes[*req.QueryType]; !ok {
+			return nil, fmt.Errorf("%w: invalid query_type %q", ErrInvalidAlertConfiguration, *req.QueryType)
+		}
+		existing.QueryType = *req.QueryType
+	}
 	if req.Query != nil {
-		if strings.TrimSpace(*req.Query) == "" {
-			return nil, fmt.Errorf("%w: query is required", ErrInvalidAlertConfiguration)
+		if existing.QueryType == models.AlertQueryTypeSQL && strings.TrimSpace(*req.Query) == "" {
+			return nil, fmt.Errorf("%w: query is required for sql query_type", ErrInvalidAlertConfiguration)
 		}
 		existing.Query = strings.TrimSpace(*req.Query)
+	}
+	if req.ConditionJSON != nil {
+		if existing.QueryType == models.AlertQueryTypeCondition && strings.TrimSpace(*req.ConditionJSON) == "" {
+			return nil, fmt.Errorf("%w: condition_json is required for condition query_type", ErrInvalidAlertConfiguration)
+		}
+		existing.ConditionJSON = strings.TrimSpace(*req.ConditionJSON)
+	}
+	if existing.QueryType == models.AlertQueryTypeSQL && existing.Query == "" {
+		return nil, fmt.Errorf("%w: query is required for sql query_type", ErrInvalidAlertConfiguration)
+	}
+	if existing.QueryType == models.AlertQueryTypeCondition && existing.ConditionJSON == "" {
+		return nil, fmt.Errorf("%w: condition_json is required for condition query_type", ErrInvalidAlertConfiguration)
+	}
+	if req.LookbackSeconds != nil {
+		if *req.LookbackSeconds <= 0 {
+			return nil, fmt.Errorf("%w: lookback_seconds must be greater than zero", ErrInvalidAlertConfiguration)
+		}
+		existing.LookbackSeconds = *req.LookbackSeconds
 	}
 	if req.ThresholdOperator != nil {
 		if _, ok := validOperators[*req.ThresholdOperator]; !ok {
@@ -180,13 +222,14 @@ func UpdateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mo
 		}
 		existing.Severity = *req.Severity
 	}
-	if req.RoomIDs != nil {
-		roomIDs := make([]models.RoomID, len(*req.RoomIDs))
-		copy(roomIDs, *req.RoomIDs)
-		if err := validateAlertRooms(ctx, db, teamID, roomIDs); err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
-		}
-		existing.RoomIDs = roomIDs
+	if req.Labels != nil {
+		existing.Labels = sanitizeStringMap(*req.Labels)
+	}
+	if req.Annotations != nil {
+		existing.Annotations = sanitizeStringMap(*req.Annotations)
+	}
+	if req.GeneratorURL != nil {
+		existing.GeneratorURL = strings.TrimSpace(*req.GeneratorURL)
 	}
 	if req.IsActive != nil {
 		existing.IsActive = *req.IsActive
@@ -272,8 +315,25 @@ func TestAlertQuery(ctx context.Context, db *sqlite.DB, ch *clickhouse.Manager, 
 	if req == nil {
 		return nil, fmt.Errorf("test query request is required")
 	}
-	if strings.TrimSpace(req.Query) == "" {
-		return nil, fmt.Errorf("query is required")
+	queryType := req.QueryType
+	if queryType == "" {
+		queryType = models.AlertQueryTypeSQL
+	}
+	if _, ok := validQueryTypes[queryType]; !ok {
+		return nil, fmt.Errorf("invalid query_type %q", req.QueryType)
+	}
+	query := strings.TrimSpace(req.Query)
+	if queryType == models.AlertQueryTypeSQL && query == "" {
+		return nil, fmt.Errorf("query is required for sql query_type")
+	}
+	if queryType == models.AlertQueryTypeCondition {
+		return nil, fmt.Errorf("condition query_type is not yet supported for testing")
+	}
+	if req.LookbackSeconds == 0 {
+		req.LookbackSeconds = 300
+	}
+	if req.LookbackSeconds < 0 {
+		return nil, fmt.Errorf("lookback_seconds must be greater than zero")
 	}
 
 	// Load source to verify access
@@ -284,8 +344,6 @@ func TestAlertQuery(ctx context.Context, db *sqlite.DB, ch *clickhouse.Manager, 
 		}
 		return nil, fmt.Errorf("failed to load source: %w", err)
 	}
-
-	query := req.Query
 
 	// Get ClickHouse connection
 	client, err := ch.GetConnection(sourceID)

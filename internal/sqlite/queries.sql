@@ -365,13 +365,15 @@ DELETE FROM alerts WHERE id = ?;
 
 -- name: MarkAlertEvaluated :exec
 UPDATE alerts
-SET last_evaluated_at = datetime('now'),
+SET last_state = 'resolved',
+    last_evaluated_at = datetime('now'),
     updated_at = datetime('now')
 WHERE id = ?;
 
 -- name: MarkAlertTriggered :exec
 UPDATE alerts
-SET last_triggered_at = datetime('now'),
+SET last_state = 'firing',
+    last_triggered_at = datetime('now'),
     last_evaluated_at = datetime('now'),
     updated_at = datetime('now')
 WHERE id = ?;
@@ -390,106 +392,12 @@ WHERE is_active = 1
 INSERT INTO alert_history (
     alert_id,
     status,
-    value_text,
-    rooms_json,
-    message
+    value,
+    message,
+    payload_json
 )
 VALUES (?, ?, ?, ?, ?)
 RETURNING id;
-
--- Rooms
-
--- name: CreateRoom :one
-INSERT INTO rooms (
-    team_id,
-    name,
-    description
-) VALUES (?, ?, ?)
-RETURNING id;
-
--- name: UpdateRoom :exec
-UPDATE rooms
-SET name = ?,
-    description = ?,
-    updated_at = datetime('now')
-WHERE id = ?;
-
--- name: DeleteRoom :exec
-DELETE FROM rooms WHERE id = ?;
-
--- name: GetRoom :one
-SELECT * FROM rooms WHERE id = ?;
-
--- name: ListRoomsByTeam :many
-SELECT * FROM rooms
-WHERE team_id = ?
-ORDER BY name;
-
--- Rooms members
-
--- name: UpsertRoomMember :exec
-INSERT INTO room_members (room_id, user_id, role)
-VALUES (?, ?, ?)
-ON CONFLICT(room_id, user_id) DO UPDATE SET
-    role = excluded.role,
-    added_at = datetime('now');
-
--- name: RemoveRoomMember :exec
-DELETE FROM room_members
-WHERE room_id = ? AND user_id = ?;
-
--- name: ListRoomMembers :many
-SELECT * FROM room_members
-WHERE room_id = ?
-ORDER BY added_at DESC;
-
--- Room channels
-
--- name: CreateRoomChannel :one
-INSERT INTO room_channels (
-    room_id,
-    type,
-    name,
-    config_json,
-    enabled
-) VALUES (?, ?, ?, ?, ?)
-RETURNING id;
-
--- name: UpdateRoomChannel :exec
-UPDATE room_channels
-SET name = ?,
-    config_json = ?,
-    enabled = ?,
-    updated_at = datetime('now')
-WHERE id = ?;
-
--- name: DeleteRoomChannel :exec
-DELETE FROM room_channels WHERE id = ?;
-
--- name: ListRoomChannels :many
-SELECT * FROM room_channels
-WHERE room_id = ?
-ORDER BY created_at ASC;
-
--- name: ListRoomMemberEmails :many
-SELECT u.email FROM room_members rm
-JOIN users u ON u.id = rm.user_id
-WHERE rm.room_id = ?
-ORDER BY u.email;
-
--- Alert to room mapping
-
--- name: InsertAlertRoom :exec
-INSERT INTO alert_rooms (alert_id, room_id)
-VALUES (?, ?);
-
--- name: DeleteAlertRooms :exec
-DELETE FROM alert_rooms WHERE alert_id = ?;
-
--- name: ListAlertRoomIDs :many
-SELECT room_id FROM alert_rooms
-WHERE alert_id = ?
-ORDER BY room_id;
 
 -- name: ResolveAlertHistory :exec
 UPDATE alert_history
