@@ -145,6 +145,54 @@ Your API token needs appropriate permissions for the model you're using. For Ope
 - Monitor API usage and costs
 - Consider rate limiting for high-traffic deployments
 
+## Alerting
+
+Configure real-time log monitoring with Alertmanager integration. See the [alerting documentation](/features/alerting) for complete details.
+
+```toml
+[alerts]
+# Enable alert evaluation and delivery (default: false)
+enabled = true
+
+# How often to evaluate all alerts (default: 1m)
+evaluation_interval = "1m"
+
+# Default lookback window if not specified in alert (default: 5m)
+default_lookback = "5m"
+
+# Maximum alert history entries to keep per alert (default: 50)
+history_limit = 50
+
+# Alertmanager API endpoint (required if alerts.enabled = true)
+alertmanager_url = "http://alertmanager:9093"
+
+# Backend URL for API access (used for fallback)
+external_url = "http://localhost:8125"
+
+# Frontend URL for web UI generator links
+frontend_url = "http://localhost:5173"
+
+# HTTP request timeout for Alertmanager communication (default: 5s)
+request_timeout = "5s"
+
+# Skip TLS certificate verification (for development only, default: false)
+tls_insecure_skip_verify = false
+```
+
+### Alerting Configuration Details
+
+- **enabled**: Controls whether the alert manager runs background evaluations
+- **evaluation_interval**: How frequently to check all active alerts
+- **default_lookback**: Default time range for alert queries (can be overridden per alert)
+- **history_limit**: Number of historical events to keep per alert for audit trail
+- **alertmanager_url**: Prometheus Alertmanager endpoint for sending alerts
+- **external_url**: Backend URL used as fallback for generator links
+- **frontend_url**: Frontend URL used in generator links (Alertmanager UI → LogChef)
+- **request_timeout**: Maximum time to wait for Alertmanager responses
+- **tls_insecure_skip_verify**: Only enable for development/testing environments
+
+For alert configuration examples, notification setup, and best practices, see the [alerting feature guide](/features/alerting).
+
 ## Environment Variables
 
 All configuration options set in the TOML file can be overridden or supplied via environment variables. This is particularly useful for sensitive information like API keys or for containerized deployments.
@@ -176,6 +224,12 @@ Environment variables are prefixed with `LOGCHEF_`. For nested keys in the TOML 
   export LOGCHEF_AI__ENABLED=true
   export LOGCHEF_AI__MODEL="gpt-4o"
   ```
+- Configure alerting:
+  ```bash
+  export LOGCHEF_ALERTS__ENABLED=true
+  export LOGCHEF_ALERTS__ALERTMANAGER_URL="http://alertmanager:9093"
+  export LOGCHEF_ALERTS__FRONTEND_URL="https://logchef.example.com"
+  ```
 
 Environment variables take precedence over values defined in the TOML configuration file.
 
@@ -189,7 +243,9 @@ For production deployments, ensure you:
 4. Configure admin emails for initial access
 5. Adjust session duration based on your security requirements
 6. Set logging level to "info" or "warn"
-7. If using AI features, ensure `LOGCHEF_AI__API_KEY` is set securely.
+7. If using AI features, ensure `LOGCHEF_AI__API_KEY` is set securely
+8. If using alerting, configure Alertmanager and set `frontend_url` for correct generator links
+9. Enable TLS for Alertmanager communication in production
 
 ## Example Production Configuration
 
@@ -225,4 +281,14 @@ enabled = true
 model = "gpt-4o"
 max_tokens = 1024
 temperature = 0.1
+
+# Alerting configuration (configure Alertmanager separately)
+[alerts]
+enabled = true
+evaluation_interval = "1m"
+alertmanager_url = "https://alertmanager.example.com"
+external_url = "https://api.logchef.example.com"
+frontend_url = "https://logchef.example.com"
+request_timeout = "5s"
+tls_insecure_skip_verify = false
 ```

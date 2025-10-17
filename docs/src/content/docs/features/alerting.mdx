@@ -1,0 +1,439 @@
+---
+title: Real-time Alerting
+description: Monitor your logs continuously and get notified when critical conditions are detected.
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+LogChef provides a powerful alerting system that continuously evaluates your log data against custom conditions. When thresholds are exceeded, alerts are automatically sent to Alertmanager, which routes notifications to your preferred channels like Slack, PagerDuty, email, or webhooks.
+
+The alerting system is designed for production use with built-in reliability features including retry logic, delivery failure tracking, and comprehensive error handling.
+
+<CardGrid stagger>
+  <Card title="Alertmanager Integration" icon="siren">
+    Native Prometheus Alertmanager support for battle-tested alert routing and notification delivery.
+  </Card>
+  <Card title="SQL-Based Conditions" icon="magnifier">
+    Use familiar ClickHouse SQL to define alert conditions with full access to your log schema.
+  </Card>
+  <Card title="Delivery Guarantees" icon="approve-check">
+    Automatic retry logic with exponential backoff ensures alerts reach Alertmanager even during network issues.
+  </Card>
+  <Card title="Rich Metadata" icon="information">
+    Alerts include team and source names, custom labels, annotations, and direct links to the web UI.
+  </Card>
+</CardGrid>
+
+## How it Works
+
+LogChef's alert manager runs in the background, continuously evaluating active alerts at the configured interval (default: 1 minute). When an alert's SQL query returns a value that exceeds the threshold, the alert fires and is sent to Alertmanager with full context including labels, annotations, and metadata.
+
+### Alert Lifecycle
+
+1. **Evaluation**: Alert SQL query runs against ClickHouse
+2. **Threshold Check**: Result is compared against configured threshold
+3. **Triggered**: If threshold is met, alert fires and is sent to Alertmanager
+4. **Grouped**: Alertmanager groups similar alerts by team, source, and severity
+5. **Routed**: Notifications are sent to configured receivers (Slack, PagerDuty, etc.)
+6. **Resolved**: When conditions clear, a resolution notification is sent
+
+## Creating Alerts
+
+### Basic Alert Configuration
+
+Every alert requires the following components:
+
+- **Name**: Human-readable identifier for the alert
+- **Description**: Optional context about what the alert monitors
+- **Severity**: `info`, `warning`, or `critical`
+- **Query**: ClickHouse SQL that returns a single numeric value
+- **Threshold**: Value and operator (`>`, `>=`, `<`, `<=`, `==`, `!=`)
+- **Frequency**: How often to evaluate the alert (in seconds)
+- **Lookback Window**: Time range for the query to analyze
+
+### Example Alerts
+
+#### High Error Rate
+
+Monitor when error log count exceeds acceptable levels:
+
+```sql
+SELECT count(*) as value
+FROM logs
+WHERE severity_text = 'ERROR'
+  AND timestamp >= now() - INTERVAL 5 MINUTE
+```
+
+**Threshold**: Greater than 100
+**Frequency**: 60 seconds
+**Severity**: Critical
+
+---
+
+#### API Response Time Degradation
+
+Detect when API response times spike:
+
+```sql
+SELECT avg(JSONExtractFloat(log_attributes, 'response_time_ms')) as value
+FROM logs
+WHERE service = 'api-gateway'
+  AND timestamp >= now() - INTERVAL 10 MINUTE
+```
+
+**Threshold**: Greater than 500.0 (ms)
+**Frequency**: 120 seconds
+**Severity**: Warning
+
+---
+
+#### Failed Authentication Attempts
+
+Alert on suspicious authentication activity:
+
+```sql
+SELECT count(*) as value
+FROM logs
+WHERE body LIKE '%authentication failed%'
+  AND timestamp >= now() - INTERVAL 15 MINUTE
+```
+
+**Threshold**: Greater than 10
+**Frequency**: 300 seconds
+**Severity**: Warning
+
+---
+
+#### Database Connection Pool Exhaustion
+
+Monitor when connection pool usage is critically high:
+
+```sql
+SELECT max(JSONExtractInt(log_attributes, 'pool_active_connections')) as value
+FROM logs
+WHERE service = 'database-proxy'
+  AND timestamp >= now() - INTERVAL 5 MINUTE
+```
+
+**Threshold**: Greater than or equal to 95
+**Frequency**: 60 seconds
+**Severity**: Critical
+
+---
+
+#### Memory Usage Threshold
+
+Alert when application memory usage exceeds limits:
+
+```sql
+SELECT avg(JSONExtractFloat(log_attributes, 'memory_mb')) as value
+FROM logs
+WHERE namespace = 'production'
+  AND log_attributes LIKE '%memory_mb%'
+  AND timestamp >= now() - INTERVAL 5 MINUTE
+```
+
+**Threshold**: Greater than 8000.0 (MB)
+**Frequency**: 180 seconds
+**Severity**: Warning
+
+## Configuration
+
+### LogChef Configuration
+
+Enable and configure alerting in your `config.toml`:
+
+```toml
+[alerts]
+# Enable alert evaluation and delivery
+enabled = true
+
+# How often to evaluate all alerts (default: 1 minute)
+evaluation_interval = "1m"
+
+# Default lookback window if not specified in alert (default: 5 minutes)
+default_lookback = "5m"
+
+# Maximum alert history entries to keep per alert (default: 50)
+history_limit = 50
+
+# Alertmanager API endpoint
+alertmanager_url = "http://alertmanager:9093"
+
+# Backend URL for API access (used for fallback)
+external_url = "http://localhost:8125"
+
+# Frontend URL for web UI generator links
+frontend_url = "http://localhost:5173"
+
+# HTTP request timeout for Alertmanager communication
+request_timeout = "5s"
+
+# Skip TLS certificate verification (for development only)
+tls_insecure_skip_verify = false
+```
+
+### Alertmanager Configuration
+
+Configure Alertmanager to route LogChef alerts to your notification channels. Example configuration:
+
+```yaml
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: 'default-receiver'
+  group_by: ['alertname', 'severity', 'team', 'source']
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 12h
+
+  routes:
+    # Critical alerts to PagerDuty
+    - match:
+        severity: critical
+      receiver: 'pagerduty'
+      continue: true
+
+    # Warning alerts to Slack
+    - match:
+        severity: warning
+      receiver: 'slack-oncall'
+
+receivers:
+  - name: 'default-receiver'
+    webhook_configs:
+      - url: 'http://webhook-receiver:8080/alerts'
+
+  - name: 'pagerduty'
+    pagerduty_configs:
+      - service_key: 'YOUR_SERVICE_KEY'
+
+  - name: 'slack-oncall'
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
+        channel: '#alerts'
+        title: 'LogChef Alert: {{ .GroupLabels.alertname }}'
+```
+
+## Alert Labels and Annotations
+
+### Default Labels
+
+Every alert includes these labels automatically:
+
+- `alertname`: Name of the alert
+- `alert_id`: Unique alert identifier
+- `severity`: Alert severity level
+- `status`: Current status (`triggered` or `resolved`)
+- `team`: Human-readable team name
+- `team_id`: Numeric team identifier
+- `source`: Human-readable source name
+- `source_id`: Numeric source identifier
+
+### Custom Labels
+
+Add custom labels to categorize and route alerts:
+
+```json
+{
+  "env": "production",
+  "service": "payment-api",
+  "region": "us-east-1",
+  "component": "database"
+}
+```
+
+These labels can be used in Alertmanager routing rules to send alerts to appropriate teams or channels.
+
+### Annotations
+
+Annotations provide additional context that doesn't affect routing:
+
+- `description`: Alert description text
+- `query`: The SQL query used for evaluation
+- `threshold`: Threshold value and operator
+- `value`: Actual value that triggered the alert
+- `frequency_seconds`: Evaluation frequency
+- `lookback_seconds`: Query lookback window
+
+Custom annotations can be added for runbooks, dashboards, or documentation links:
+
+```json
+{
+  "runbook": "https://wiki.example.com/runbooks/high-error-rate",
+  "dashboard": "https://grafana.example.com/d/logs-overview",
+  "playbook": "Check database connection pool and recent deployments"
+}
+```
+
+## Alert History
+
+LogChef maintains a complete history of all alert evaluations including:
+
+- **Triggered Events**: When alerts fire with the metric value
+- **Resolved Events**: When conditions clear
+- **Error Events**: Query failures or evaluation errors
+- **Delivery Status**: Whether alerts successfully reached Alertmanager
+
+Access alert history through the web UI to investigate:
+- Why an alert fired
+- How long it stayed active
+- Previous occurrences and patterns
+- Delivery failures and retries
+
+## Reliability Features
+
+### Retry Logic with Exponential Backoff
+
+If Alertmanager is temporarily unavailable, LogChef automatically retries alert delivery:
+
+- **Default**: 2 retry attempts
+- **Initial Delay**: 500ms
+- **Backoff**: Exponential (500ms → 1s → 2s)
+- **Retry On**: Network errors and 5xx HTTP status codes
+
+### Delivery Failure Tracking
+
+Failed deliveries are recorded in alert history with:
+- Error message and timestamp
+- Retry attempts counter
+- Automatic retry on next evaluation cycle
+
+### Evaluation Error Handling
+
+Query failures or database issues are captured as error status in history:
+- Error message preserved for debugging
+- Query and configuration included in error payload
+- Alert evaluation continues on next cycle
+
+## Monitoring Alerts
+
+### Log Messages
+
+Alert evaluations produce structured logs for observability:
+
+```json
+// Successful evaluation
+{"level":"DEBUG","msg":"alert evaluation complete","alert_id":1,"value":42.5,"triggered":true}
+
+// Alert triggered
+{"level":"INFO","msg":"alert triggered","alert_name":"High Error Rate","value":150,"threshold":100}
+
+// Successful delivery
+{"level":"INFO","msg":"alert successfully sent to Alertmanager","alert_id":1}
+
+// Alert resolved
+{"level":"INFO","msg":"alert resolved","alert_name":"High Error Rate","value":45}
+```
+
+### Alertmanager UI
+
+Access the Alertmanager web interface to:
+- View active alerts and their current status
+- See alert grouping and routing decisions
+- Silence alerts temporarily
+- Inspect alert payloads and labels
+
+## Best Practices
+
+### Query Design
+
+- **Return Single Value**: Queries must return exactly one numeric value
+- **Use Lookback Windows**: Always include a time filter for performance
+- **Test First**: Use "Test Query" in the UI to validate before saving
+- **Keep it Simple**: Complex aggregations may timeout or return unexpected results
+
+### Threshold Selection
+
+- **Avoid Flapping**: Set thresholds with enough buffer to prevent constant triggering
+- **Consider Baselines**: Analyze normal metrics before setting thresholds
+- **Use Percentiles**: For variable metrics, consider 95th or 99th percentile instead of max/avg
+
+### Frequency Configuration
+
+- **Match Urgency**: Critical alerts can evaluate every 30-60 seconds
+- **Resource Aware**: Frequent evaluation increases database load
+- **Align with Lookback**: Evaluation frequency should be less than lookback window
+
+### Organization
+
+- **Descriptive Names**: Use clear, searchable alert names
+- **Team Ownership**: Assign alerts to appropriate teams
+- **Runbook Links**: Add runbook URLs in annotations for quick response
+- **Review Regularly**: Audit and tune alerts based on actual incidents
+
+### Production Deployment
+
+- **Use TLS**: Always enable TLS for Alertmanager communication in production
+- **Set External URL**: Configure frontend_url for correct generator links
+- **Configure Receivers**: Set up PagerDuty, Slack, or email for critical alerts
+- **Test Notifications**: Verify alert delivery to all configured channels
+- **Monitor Alertmanager**: Ensure Alertmanager itself is monitored and has high availability
+
+## Troubleshooting
+
+### Alerts Not Firing
+
+1. **Check Alert Status**: Verify alert is enabled and active
+2. **Test Query**: Run the SQL query manually to verify it returns a numeric value
+3. **Check Logs**: Look for evaluation errors in LogChef logs
+4. **Verify Frequency**: Ensure enough time has passed since last evaluation
+
+### Alerts Not Delivered
+
+1. **Check Alertmanager URL**: Verify alertmanager_url in config is correct
+2. **Test Connectivity**: Ensure LogChef can reach Alertmanager (`curl http://alertmanager:9093/-/healthy`)
+3. **Review Logs**: Check for delivery errors in LogChef logs
+4. **Inspect History**: Check alert history for delivery failure details
+
+### False Positives
+
+1. **Adjust Threshold**: Increase threshold to reduce noise
+2. **Extend Lookback**: Longer windows smooth out temporary spikes
+3. **Use Aggregation**: Consider avg() instead of max() for less sensitive alerts
+4. **Add Filters**: Narrow down query to specific services or conditions
+
+### Performance Issues
+
+1. **Optimize Queries**: Add appropriate indexes in ClickHouse
+2. **Reduce Frequency**: Increase evaluation interval for non-critical alerts
+3. **Limit Lookback**: Shorter time windows query less data
+4. **Monitor Database**: Watch ClickHouse query performance
+
+## Example Workflows
+
+### Setting Up Your First Alert
+
+1. Navigate to Alerts in your team/source
+2. Click "Create Alert"
+3. Name: "High Error Count"
+4. Query: `SELECT count(*) as value FROM logs WHERE severity_text = 'ERROR' AND timestamp >= now() - INTERVAL 5 MINUTE`
+5. Threshold: Greater than 50
+6. Frequency: 60 seconds
+7. Severity: Warning
+8. Click "Test Query" to verify
+9. Save and monitor alert history
+
+### Creating an On-Call Rotation
+
+1. Set up PagerDuty integration in Alertmanager
+2. Create critical alerts for your services
+3. Tag alerts with `severity: critical` and `team: your-team`
+4. Configure Alertmanager route to match on team label
+5. Test with a temporary threshold adjustment
+
+### Building a Comprehensive Monitoring Suite
+
+1. **Error Alerts**: Monitor error rates across all services
+2. **Performance Alerts**: Track response times and latency
+3. **Availability Alerts**: Watch for service health check failures
+4. **Resource Alerts**: Monitor memory, CPU, and connection pools
+5. **Business Metrics**: Alert on transaction failures or conversion drops
+
+## Related Documentation
+
+- [Configuration Guide](/getting-started/configuration)
+- [ClickHouse Schema Design](/integration/schema-design)
+- [Search Syntax](/guide/search-syntax)
+- [Team Management](/core/user-management)
