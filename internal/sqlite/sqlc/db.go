@@ -39,6 +39,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.createAPITokenStmt, err = db.PrepareContext(ctx, createAPIToken); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateAPIToken: %w", err)
 	}
+	if q.createAlertStmt, err = db.PrepareContext(ctx, createAlert); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateAlert: %w", err)
+	}
 	if q.createSessionStmt, err = db.PrepareContext(ctx, createSession); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateSession: %w", err)
 	}
@@ -56,6 +59,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.deleteAPITokenStmt, err = db.PrepareContext(ctx, deleteAPIToken); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteAPIToken: %w", err)
+	}
+	if q.deleteAlertStmt, err = db.PrepareContext(ctx, deleteAlert); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteAlert: %w", err)
 	}
 	if q.deleteExpiredAPITokensStmt, err = db.PrepareContext(ctx, deleteExpiredAPITokens); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteExpiredAPITokens: %w", err)
@@ -84,6 +90,15 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getAPITokenByHashStmt, err = db.PrepareContext(ctx, getAPITokenByHash); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAPITokenByHash: %w", err)
 	}
+	if q.getAlertStmt, err = db.PrepareContext(ctx, getAlert); err != nil {
+		return nil, fmt.Errorf("error preparing query GetAlert: %w", err)
+	}
+	if q.getAlertForTeamSourceStmt, err = db.PrepareContext(ctx, getAlertForTeamSource); err != nil {
+		return nil, fmt.Errorf("error preparing query GetAlertForTeamSource: %w", err)
+	}
+	if q.getLatestUnresolvedAlertHistoryStmt, err = db.PrepareContext(ctx, getLatestUnresolvedAlertHistory); err != nil {
+		return nil, fmt.Errorf("error preparing query GetLatestUnresolvedAlertHistory: %w", err)
+	}
 	if q.getSessionStmt, err = db.PrepareContext(ctx, getSession); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSession: %w", err)
 	}
@@ -111,8 +126,20 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getUserByEmailStmt, err = db.PrepareContext(ctx, getUserByEmail); err != nil {
 		return nil, fmt.Errorf("error preparing query GetUserByEmail: %w", err)
 	}
+	if q.insertAlertHistoryStmt, err = db.PrepareContext(ctx, insertAlertHistory); err != nil {
+		return nil, fmt.Errorf("error preparing query InsertAlertHistory: %w", err)
+	}
 	if q.listAPITokensForUserStmt, err = db.PrepareContext(ctx, listAPITokensForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAPITokensForUser: %w", err)
+	}
+	if q.listActiveAlertsDueStmt, err = db.PrepareContext(ctx, listActiveAlertsDue); err != nil {
+		return nil, fmt.Errorf("error preparing query ListActiveAlertsDue: %w", err)
+	}
+	if q.listAlertHistoryStmt, err = db.PrepareContext(ctx, listAlertHistory); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAlertHistory: %w", err)
+	}
+	if q.listAlertsByTeamAndSourceStmt, err = db.PrepareContext(ctx, listAlertsByTeamAndSource); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAlertsByTeamAndSource: %w", err)
 	}
 	if q.listQueriesByTeamAndSourceStmt, err = db.PrepareContext(ctx, listQueriesByTeamAndSource); err != nil {
 		return nil, fmt.Errorf("error preparing query ListQueriesByTeamAndSource: %w", err)
@@ -147,17 +174,29 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listUsersStmt, err = db.PrepareContext(ctx, listUsers); err != nil {
 		return nil, fmt.Errorf("error preparing query ListUsers: %w", err)
 	}
+	if q.markAlertEvaluatedStmt, err = db.PrepareContext(ctx, markAlertEvaluated); err != nil {
+		return nil, fmt.Errorf("error preparing query MarkAlertEvaluated: %w", err)
+	}
+	if q.markAlertTriggeredStmt, err = db.PrepareContext(ctx, markAlertTriggered); err != nil {
+		return nil, fmt.Errorf("error preparing query MarkAlertTriggered: %w", err)
+	}
 	if q.removeTeamMemberStmt, err = db.PrepareContext(ctx, removeTeamMember); err != nil {
 		return nil, fmt.Errorf("error preparing query RemoveTeamMember: %w", err)
 	}
 	if q.removeTeamSourceStmt, err = db.PrepareContext(ctx, removeTeamSource); err != nil {
 		return nil, fmt.Errorf("error preparing query RemoveTeamSource: %w", err)
 	}
+	if q.resolveAlertHistoryStmt, err = db.PrepareContext(ctx, resolveAlertHistory); err != nil {
+		return nil, fmt.Errorf("error preparing query ResolveAlertHistory: %w", err)
+	}
 	if q.teamHasSourceStmt, err = db.PrepareContext(ctx, teamHasSource); err != nil {
 		return nil, fmt.Errorf("error preparing query TeamHasSource: %w", err)
 	}
 	if q.updateAPITokenLastUsedStmt, err = db.PrepareContext(ctx, updateAPITokenLastUsed); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateAPITokenLastUsed: %w", err)
+	}
+	if q.updateAlertStmt, err = db.PrepareContext(ctx, updateAlert); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateAlert: %w", err)
 	}
 	if q.updateSourceStmt, err = db.PrepareContext(ctx, updateSource); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSource: %w", err)
@@ -207,6 +246,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing createAPITokenStmt: %w", cerr)
 		}
 	}
+	if q.createAlertStmt != nil {
+		if cerr := q.createAlertStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createAlertStmt: %w", cerr)
+		}
+	}
 	if q.createSessionStmt != nil {
 		if cerr := q.createSessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createSessionStmt: %w", cerr)
@@ -235,6 +279,11 @@ func (q *Queries) Close() error {
 	if q.deleteAPITokenStmt != nil {
 		if cerr := q.deleteAPITokenStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteAPITokenStmt: %w", cerr)
+		}
+	}
+	if q.deleteAlertStmt != nil {
+		if cerr := q.deleteAlertStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteAlertStmt: %w", cerr)
 		}
 	}
 	if q.deleteExpiredAPITokensStmt != nil {
@@ -282,6 +331,21 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getAPITokenByHashStmt: %w", cerr)
 		}
 	}
+	if q.getAlertStmt != nil {
+		if cerr := q.getAlertStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getAlertStmt: %w", cerr)
+		}
+	}
+	if q.getAlertForTeamSourceStmt != nil {
+		if cerr := q.getAlertForTeamSourceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getAlertForTeamSourceStmt: %w", cerr)
+		}
+	}
+	if q.getLatestUnresolvedAlertHistoryStmt != nil {
+		if cerr := q.getLatestUnresolvedAlertHistoryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getLatestUnresolvedAlertHistoryStmt: %w", cerr)
+		}
+	}
 	if q.getSessionStmt != nil {
 		if cerr := q.getSessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getSessionStmt: %w", cerr)
@@ -327,9 +391,29 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getUserByEmailStmt: %w", cerr)
 		}
 	}
+	if q.insertAlertHistoryStmt != nil {
+		if cerr := q.insertAlertHistoryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing insertAlertHistoryStmt: %w", cerr)
+		}
+	}
 	if q.listAPITokensForUserStmt != nil {
 		if cerr := q.listAPITokensForUserStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAPITokensForUserStmt: %w", cerr)
+		}
+	}
+	if q.listActiveAlertsDueStmt != nil {
+		if cerr := q.listActiveAlertsDueStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listActiveAlertsDueStmt: %w", cerr)
+		}
+	}
+	if q.listAlertHistoryStmt != nil {
+		if cerr := q.listAlertHistoryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAlertHistoryStmt: %w", cerr)
+		}
+	}
+	if q.listAlertsByTeamAndSourceStmt != nil {
+		if cerr := q.listAlertsByTeamAndSourceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAlertsByTeamAndSourceStmt: %w", cerr)
 		}
 	}
 	if q.listQueriesByTeamAndSourceStmt != nil {
@@ -387,6 +471,16 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listUsersStmt: %w", cerr)
 		}
 	}
+	if q.markAlertEvaluatedStmt != nil {
+		if cerr := q.markAlertEvaluatedStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing markAlertEvaluatedStmt: %w", cerr)
+		}
+	}
+	if q.markAlertTriggeredStmt != nil {
+		if cerr := q.markAlertTriggeredStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing markAlertTriggeredStmt: %w", cerr)
+		}
+	}
 	if q.removeTeamMemberStmt != nil {
 		if cerr := q.removeTeamMemberStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing removeTeamMemberStmt: %w", cerr)
@@ -397,6 +491,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing removeTeamSourceStmt: %w", cerr)
 		}
 	}
+	if q.resolveAlertHistoryStmt != nil {
+		if cerr := q.resolveAlertHistoryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing resolveAlertHistoryStmt: %w", cerr)
+		}
+	}
 	if q.teamHasSourceStmt != nil {
 		if cerr := q.teamHasSourceStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing teamHasSourceStmt: %w", cerr)
@@ -405,6 +504,11 @@ func (q *Queries) Close() error {
 	if q.updateAPITokenLastUsedStmt != nil {
 		if cerr := q.updateAPITokenLastUsedStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateAPITokenLastUsedStmt: %w", cerr)
+		}
+	}
+	if q.updateAlertStmt != nil {
+		if cerr := q.updateAlertStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateAlertStmt: %w", cerr)
 		}
 	}
 	if q.updateSourceStmt != nil {
@@ -474,115 +578,141 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 }
 
 type Queries struct {
-	db                             DBTX
-	tx                             *sql.Tx
-	addTeamMemberStmt              *sql.Stmt
-	addTeamSourceStmt              *sql.Stmt
-	countAdminUsersStmt            *sql.Stmt
-	countUserSessionsStmt          *sql.Stmt
-	createAPITokenStmt             *sql.Stmt
-	createSessionStmt              *sql.Stmt
-	createSourceStmt               *sql.Stmt
-	createTeamStmt                 *sql.Stmt
-	createTeamSourceQueryStmt      *sql.Stmt
-	createUserStmt                 *sql.Stmt
-	deleteAPITokenStmt             *sql.Stmt
-	deleteExpiredAPITokensStmt     *sql.Stmt
-	deleteSessionStmt              *sql.Stmt
-	deleteSourceStmt               *sql.Stmt
-	deleteTeamStmt                 *sql.Stmt
-	deleteTeamSourceQueryStmt      *sql.Stmt
-	deleteUserStmt                 *sql.Stmt
-	deleteUserSessionsStmt         *sql.Stmt
-	getAPITokenStmt                *sql.Stmt
-	getAPITokenByHashStmt          *sql.Stmt
-	getSessionStmt                 *sql.Stmt
-	getSourceStmt                  *sql.Stmt
-	getSourceByNameStmt            *sql.Stmt
-	getTeamStmt                    *sql.Stmt
-	getTeamByNameStmt              *sql.Stmt
-	getTeamMemberStmt              *sql.Stmt
-	getTeamSourceQueryStmt         *sql.Stmt
-	getUserStmt                    *sql.Stmt
-	getUserByEmailStmt             *sql.Stmt
-	listAPITokensForUserStmt       *sql.Stmt
-	listQueriesByTeamAndSourceStmt *sql.Stmt
-	listSourceTeamsStmt            *sql.Stmt
-	listSourcesStmt                *sql.Stmt
-	listSourcesForUserStmt         *sql.Stmt
-	listTeamMembersStmt            *sql.Stmt
-	listTeamMembersWithDetailsStmt *sql.Stmt
-	listTeamSourcesStmt            *sql.Stmt
-	listTeamsStmt                  *sql.Stmt
-	listTeamsForUserStmt           *sql.Stmt
-	listUserTeamsStmt              *sql.Stmt
-	listUsersStmt                  *sql.Stmt
-	removeTeamMemberStmt           *sql.Stmt
-	removeTeamSourceStmt           *sql.Stmt
-	teamHasSourceStmt              *sql.Stmt
-	updateAPITokenLastUsedStmt     *sql.Stmt
-	updateSourceStmt               *sql.Stmt
-	updateTeamStmt                 *sql.Stmt
-	updateTeamMemberRoleStmt       *sql.Stmt
-	updateTeamSourceQueryStmt      *sql.Stmt
-	updateUserStmt                 *sql.Stmt
-	userHasSourceAccessStmt        *sql.Stmt
+	db                                  DBTX
+	tx                                  *sql.Tx
+	addTeamMemberStmt                   *sql.Stmt
+	addTeamSourceStmt                   *sql.Stmt
+	countAdminUsersStmt                 *sql.Stmt
+	countUserSessionsStmt               *sql.Stmt
+	createAPITokenStmt                  *sql.Stmt
+	createAlertStmt                     *sql.Stmt
+	createSessionStmt                   *sql.Stmt
+	createSourceStmt                    *sql.Stmt
+	createTeamStmt                      *sql.Stmt
+	createTeamSourceQueryStmt           *sql.Stmt
+	createUserStmt                      *sql.Stmt
+	deleteAPITokenStmt                  *sql.Stmt
+	deleteAlertStmt                     *sql.Stmt
+	deleteExpiredAPITokensStmt          *sql.Stmt
+	deleteSessionStmt                   *sql.Stmt
+	deleteSourceStmt                    *sql.Stmt
+	deleteTeamStmt                      *sql.Stmt
+	deleteTeamSourceQueryStmt           *sql.Stmt
+	deleteUserStmt                      *sql.Stmt
+	deleteUserSessionsStmt              *sql.Stmt
+	getAPITokenStmt                     *sql.Stmt
+	getAPITokenByHashStmt               *sql.Stmt
+	getAlertStmt                        *sql.Stmt
+	getAlertForTeamSourceStmt           *sql.Stmt
+	getLatestUnresolvedAlertHistoryStmt *sql.Stmt
+	getSessionStmt                      *sql.Stmt
+	getSourceStmt                       *sql.Stmt
+	getSourceByNameStmt                 *sql.Stmt
+	getTeamStmt                         *sql.Stmt
+	getTeamByNameStmt                   *sql.Stmt
+	getTeamMemberStmt                   *sql.Stmt
+	getTeamSourceQueryStmt              *sql.Stmt
+	getUserStmt                         *sql.Stmt
+	getUserByEmailStmt                  *sql.Stmt
+	insertAlertHistoryStmt              *sql.Stmt
+	listAPITokensForUserStmt            *sql.Stmt
+	listActiveAlertsDueStmt             *sql.Stmt
+	listAlertHistoryStmt                *sql.Stmt
+	listAlertsByTeamAndSourceStmt       *sql.Stmt
+	listQueriesByTeamAndSourceStmt      *sql.Stmt
+	listSourceTeamsStmt                 *sql.Stmt
+	listSourcesStmt                     *sql.Stmt
+	listSourcesForUserStmt              *sql.Stmt
+	listTeamMembersStmt                 *sql.Stmt
+	listTeamMembersWithDetailsStmt      *sql.Stmt
+	listTeamSourcesStmt                 *sql.Stmt
+	listTeamsStmt                       *sql.Stmt
+	listTeamsForUserStmt                *sql.Stmt
+	listUserTeamsStmt                   *sql.Stmt
+	listUsersStmt                       *sql.Stmt
+	markAlertEvaluatedStmt              *sql.Stmt
+	markAlertTriggeredStmt              *sql.Stmt
+	removeTeamMemberStmt                *sql.Stmt
+	removeTeamSourceStmt                *sql.Stmt
+	resolveAlertHistoryStmt             *sql.Stmt
+	teamHasSourceStmt                   *sql.Stmt
+	updateAPITokenLastUsedStmt          *sql.Stmt
+	updateAlertStmt                     *sql.Stmt
+	updateSourceStmt                    *sql.Stmt
+	updateTeamStmt                      *sql.Stmt
+	updateTeamMemberRoleStmt            *sql.Stmt
+	updateTeamSourceQueryStmt           *sql.Stmt
+	updateUserStmt                      *sql.Stmt
+	userHasSourceAccessStmt             *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
-		db:                             tx,
-		tx:                             tx,
-		addTeamMemberStmt:              q.addTeamMemberStmt,
-		addTeamSourceStmt:              q.addTeamSourceStmt,
-		countAdminUsersStmt:            q.countAdminUsersStmt,
-		countUserSessionsStmt:          q.countUserSessionsStmt,
-		createAPITokenStmt:             q.createAPITokenStmt,
-		createSessionStmt:              q.createSessionStmt,
-		createSourceStmt:               q.createSourceStmt,
-		createTeamStmt:                 q.createTeamStmt,
-		createTeamSourceQueryStmt:      q.createTeamSourceQueryStmt,
-		createUserStmt:                 q.createUserStmt,
-		deleteAPITokenStmt:             q.deleteAPITokenStmt,
-		deleteExpiredAPITokensStmt:     q.deleteExpiredAPITokensStmt,
-		deleteSessionStmt:              q.deleteSessionStmt,
-		deleteSourceStmt:               q.deleteSourceStmt,
-		deleteTeamStmt:                 q.deleteTeamStmt,
-		deleteTeamSourceQueryStmt:      q.deleteTeamSourceQueryStmt,
-		deleteUserStmt:                 q.deleteUserStmt,
-		deleteUserSessionsStmt:         q.deleteUserSessionsStmt,
-		getAPITokenStmt:                q.getAPITokenStmt,
-		getAPITokenByHashStmt:          q.getAPITokenByHashStmt,
-		getSessionStmt:                 q.getSessionStmt,
-		getSourceStmt:                  q.getSourceStmt,
-		getSourceByNameStmt:            q.getSourceByNameStmt,
-		getTeamStmt:                    q.getTeamStmt,
-		getTeamByNameStmt:              q.getTeamByNameStmt,
-		getTeamMemberStmt:              q.getTeamMemberStmt,
-		getTeamSourceQueryStmt:         q.getTeamSourceQueryStmt,
-		getUserStmt:                    q.getUserStmt,
-		getUserByEmailStmt:             q.getUserByEmailStmt,
-		listAPITokensForUserStmt:       q.listAPITokensForUserStmt,
-		listQueriesByTeamAndSourceStmt: q.listQueriesByTeamAndSourceStmt,
-		listSourceTeamsStmt:            q.listSourceTeamsStmt,
-		listSourcesStmt:                q.listSourcesStmt,
-		listSourcesForUserStmt:         q.listSourcesForUserStmt,
-		listTeamMembersStmt:            q.listTeamMembersStmt,
-		listTeamMembersWithDetailsStmt: q.listTeamMembersWithDetailsStmt,
-		listTeamSourcesStmt:            q.listTeamSourcesStmt,
-		listTeamsStmt:                  q.listTeamsStmt,
-		listTeamsForUserStmt:           q.listTeamsForUserStmt,
-		listUserTeamsStmt:              q.listUserTeamsStmt,
-		listUsersStmt:                  q.listUsersStmt,
-		removeTeamMemberStmt:           q.removeTeamMemberStmt,
-		removeTeamSourceStmt:           q.removeTeamSourceStmt,
-		teamHasSourceStmt:              q.teamHasSourceStmt,
-		updateAPITokenLastUsedStmt:     q.updateAPITokenLastUsedStmt,
-		updateSourceStmt:               q.updateSourceStmt,
-		updateTeamStmt:                 q.updateTeamStmt,
-		updateTeamMemberRoleStmt:       q.updateTeamMemberRoleStmt,
-		updateTeamSourceQueryStmt:      q.updateTeamSourceQueryStmt,
-		updateUserStmt:                 q.updateUserStmt,
-		userHasSourceAccessStmt:        q.userHasSourceAccessStmt,
+		db:                                  tx,
+		tx:                                  tx,
+		addTeamMemberStmt:                   q.addTeamMemberStmt,
+		addTeamSourceStmt:                   q.addTeamSourceStmt,
+		countAdminUsersStmt:                 q.countAdminUsersStmt,
+		countUserSessionsStmt:               q.countUserSessionsStmt,
+		createAPITokenStmt:                  q.createAPITokenStmt,
+		createAlertStmt:                     q.createAlertStmt,
+		createSessionStmt:                   q.createSessionStmt,
+		createSourceStmt:                    q.createSourceStmt,
+		createTeamStmt:                      q.createTeamStmt,
+		createTeamSourceQueryStmt:           q.createTeamSourceQueryStmt,
+		createUserStmt:                      q.createUserStmt,
+		deleteAPITokenStmt:                  q.deleteAPITokenStmt,
+		deleteAlertStmt:                     q.deleteAlertStmt,
+		deleteExpiredAPITokensStmt:          q.deleteExpiredAPITokensStmt,
+		deleteSessionStmt:                   q.deleteSessionStmt,
+		deleteSourceStmt:                    q.deleteSourceStmt,
+		deleteTeamStmt:                      q.deleteTeamStmt,
+		deleteTeamSourceQueryStmt:           q.deleteTeamSourceQueryStmt,
+		deleteUserStmt:                      q.deleteUserStmt,
+		deleteUserSessionsStmt:              q.deleteUserSessionsStmt,
+		getAPITokenStmt:                     q.getAPITokenStmt,
+		getAPITokenByHashStmt:               q.getAPITokenByHashStmt,
+		getAlertStmt:                        q.getAlertStmt,
+		getAlertForTeamSourceStmt:           q.getAlertForTeamSourceStmt,
+		getLatestUnresolvedAlertHistoryStmt: q.getLatestUnresolvedAlertHistoryStmt,
+		getSessionStmt:                      q.getSessionStmt,
+		getSourceStmt:                       q.getSourceStmt,
+		getSourceByNameStmt:                 q.getSourceByNameStmt,
+		getTeamStmt:                         q.getTeamStmt,
+		getTeamByNameStmt:                   q.getTeamByNameStmt,
+		getTeamMemberStmt:                   q.getTeamMemberStmt,
+		getTeamSourceQueryStmt:              q.getTeamSourceQueryStmt,
+		getUserStmt:                         q.getUserStmt,
+		getUserByEmailStmt:                  q.getUserByEmailStmt,
+		insertAlertHistoryStmt:              q.insertAlertHistoryStmt,
+		listAPITokensForUserStmt:            q.listAPITokensForUserStmt,
+		listActiveAlertsDueStmt:             q.listActiveAlertsDueStmt,
+		listAlertHistoryStmt:                q.listAlertHistoryStmt,
+		listAlertsByTeamAndSourceStmt:       q.listAlertsByTeamAndSourceStmt,
+		listQueriesByTeamAndSourceStmt:      q.listQueriesByTeamAndSourceStmt,
+		listSourceTeamsStmt:                 q.listSourceTeamsStmt,
+		listSourcesStmt:                     q.listSourcesStmt,
+		listSourcesForUserStmt:              q.listSourcesForUserStmt,
+		listTeamMembersStmt:                 q.listTeamMembersStmt,
+		listTeamMembersWithDetailsStmt:      q.listTeamMembersWithDetailsStmt,
+		listTeamSourcesStmt:                 q.listTeamSourcesStmt,
+		listTeamsStmt:                       q.listTeamsStmt,
+		listTeamsForUserStmt:                q.listTeamsForUserStmt,
+		listUserTeamsStmt:                   q.listUserTeamsStmt,
+		listUsersStmt:                       q.listUsersStmt,
+		markAlertEvaluatedStmt:              q.markAlertEvaluatedStmt,
+		markAlertTriggeredStmt:              q.markAlertTriggeredStmt,
+		removeTeamMemberStmt:                q.removeTeamMemberStmt,
+		removeTeamSourceStmt:                q.removeTeamSourceStmt,
+		resolveAlertHistoryStmt:             q.resolveAlertHistoryStmt,
+		teamHasSourceStmt:                   q.teamHasSourceStmt,
+		updateAPITokenLastUsedStmt:          q.updateAPITokenLastUsedStmt,
+		updateAlertStmt:                     q.updateAlertStmt,
+		updateSourceStmt:                    q.updateSourceStmt,
+		updateTeamStmt:                      q.updateTeamStmt,
+		updateTeamMemberRoleStmt:            q.updateTeamMemberRoleStmt,
+		updateTeamSourceQueryStmt:           q.updateTeamSourceQueryStmt,
+		updateUserStmt:                      q.updateUserStmt,
+		userHasSourceAccessStmt:             q.userHasSourceAccessStmt,
 	}
 }

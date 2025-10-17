@@ -18,6 +18,9 @@ type (
 
 	// SessionID represents a unique session identifier
 	SessionID string
+
+	// AlertID represents a unique alert identifier
+	AlertID int64
 )
 
 // Timestamps provides common timestamp fields used across multiple models

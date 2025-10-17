@@ -3,7 +3,28 @@ title: Roadmap
 description: Upcoming features and future plans for LogChef
 ---
 
-Here's what we're planning to add to LogChef in upcoming releases:
+## Recently Released
+
+### Alerting System ✅
+
+LogChef now includes a comprehensive alerting system integrated with Prometheus Alertmanager:
+
+- ✅ SQL-based alert conditions with ClickHouse query support
+- ✅ Alertmanager integration for battle-tested alert routing
+- ✅ Multiple severity levels (info, warning, critical)
+- ✅ Team and source-specific alerts
+- ✅ Automatic retry logic with exponential backoff
+- ✅ Delivery failure tracking and alert history
+- ✅ Rich metadata including custom labels and annotations
+- ✅ Configurable evaluation intervals and lookback windows
+
+[Read the full alerting documentation →](/features/alerting)
+
+---
+
+## Upcoming Features
+
+Here's what we're planning to add to LogChef in future releases:
 
 ## Integration Features
 
@@ -31,14 +52,6 @@ Here's what we're planning to add to LogChef in upcoming releases:
 - Interactive dashboards
 - Rich chart types (line, bar, heat maps)
 - Dynamic filtering and drill-down capabilities
-
-### Alerting System
-
-- Flexible alert rules with pattern matching
-- Multiple notification channels (email, webhooks)
-- Alert grouping and deduplication
-- Team-specific alert routing
-- Maintenance windows
 
 ## Get Involved
 

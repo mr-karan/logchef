@@ -28,6 +28,32 @@ services:
         - ./dex/config.yaml:/etc/dex/config.yaml
         command: [ "dex", "serve", "/etc/dex/config.yaml" ]
 
+    alertmanager:
+        image: prom/alertmanager:latest
+        hostname: alertmanager
+        restart: on-failure
+        ports:
+            - "9093:9093"
+        volumes:
+            - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+            - alertmanager-data:/alertmanager
+        command:
+            - '--config.file=/etc/alertmanager/alertmanager.yml'
+            - '--storage.path=/alertmanager'
+            - '--log.level=debug'
+
+    webhook-receiver:
+        image: mendhak/http-https-echo:31
+        hostname: webhook-receiver
+        restart: on-failure
+        ports:
+            - "8888:8080"
+        environment:
+            - HTTP_PORT=8080
+            - LOG_WITHOUT_NEWLINE=true
+            - LOG_IGNORE_PATH=/ping
+
 volumes:
     clickhouse-data:
     clickhouse-logs:
+    alertmanager-data:

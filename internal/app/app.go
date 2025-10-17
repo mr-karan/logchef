@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
@@ -27,6 +29,7 @@ type App struct {
 	WebFS      http.FileSystem
 	BuildInfo  string
 	Version    string
+	Alerts     *alerts.Manager
 }
 
 // Options contains configuration needed when creating a new App instance.
@@ -127,6 +130,32 @@ func (a *App) Initialize(ctx context.Context) error {
 	}
 	a.server = server.New(serverOpts)
 
+	var alertSender alerts.AlertSender
+	if strings.TrimSpace(a.Config.Alerts.AlertmanagerURL) == "" {
+		a.Logger.Warn("alertmanager_url not configured; alerts will not be delivered")
+	} else {
+		client, err := alerts.NewAlertmanagerClient(alerts.ClientOptions{
+			BaseURL:       a.Config.Alerts.AlertmanagerURL,
+			Timeout:       a.Config.Alerts.RequestTimeout,
+			SkipTLSVerify: a.Config.Alerts.TLSInsecureSkipVerify,
+			Logger:        a.Logger,
+		})
+		if err != nil {
+			a.Logger.Error("failed to initialize alertmanager client", "error", err)
+		} else {
+			alertSender = client
+		}
+	}
+
+	a.Alerts = alerts.NewManager(alerts.Options{
+		Config:     a.Config.Alerts,
+		DB:         a.SQLite,
+		ClickHouse: a.ClickHouse,
+		Logger:     a.Logger,
+		Sender:     alertSender,
+	})
+	a.Alerts.Start(ctx)
+
 	return nil
 }
 
@@ -156,6 +185,12 @@ func (a *App) Shutdown(ctx context.Context) error {
 
 	clickhouseCtx, clickhouseCancel := context.WithTimeout(ctx, 8*time.Second)
 	defer clickhouseCancel()
+
+	if a.Alerts != nil {
+		a.Logger.Info("stopping alert manager")
+		a.Alerts.Stop()
+	}
+
 	// Shutdown server first to stop accepting new requests.
 	if a.server != nil {
 		a.Logger.Info("shutting down HTTP server")

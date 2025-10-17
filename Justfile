@@ -79,6 +79,29 @@ setup-docs-domain:
 dev-docker:
     cd dev && docker compose up
 
+# View Alertmanager webhook receiver logs (for testing alerts)
+dev-webhook-logs:
+    cd dev && docker compose logs -f webhook-receiver
+
+# View Alertmanager logs
+dev-alertmanager-logs:
+    cd dev && docker compose logs -f alertmanager
+
+# Test webhook receiver is working
+dev-test-webhook:
+    @echo "Testing webhook receiver..."
+    curl -X POST http://localhost:8888/webhook \
+        -H "Content-Type: application/json" \
+        -d '{"test": "alert", "message": "This is a test webhook payload"}'
+    @echo "\nCheck webhook logs with: just dev-webhook-logs"
+
+# Open Alertmanager UI in browser
+dev-alertmanager-ui:
+    @echo "Opening Alertmanager UI at http://localhost:9093"
+    @command -v xdg-open >/dev/null 2>&1 && xdg-open http://localhost:9093 || \
+     command -v open >/dev/null 2>&1 && open http://localhost:9093 || \
+     echo "Please open http://localhost:9093 in your browser"
+
 # Clean build artifacts
 clean:
     @echo "Cleaning build artifacts..."

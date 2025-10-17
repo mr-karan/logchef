@@ -22,6 +22,8 @@ type Querier interface {
 	// API Tokens
 	// Create a new API token
 	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (int64, error)
+	// Alerts
+	CreateAlert(ctx context.Context, arg CreateAlertParams) (int64, error)
 	// Sessions
 	// Create a new session
 	CreateSession(ctx context.Context, arg CreateSessionParams) error
@@ -39,6 +41,7 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (int64, error)
 	// Delete an API token by ID and user ID (ensure user owns the token)
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) error
+	DeleteAlert(ctx context.Context, id int64) error
 	// Delete all expired API tokens
 	DeleteExpiredAPITokens(ctx context.Context) error
 	// Delete a session by ID
@@ -57,6 +60,9 @@ type Querier interface {
 	GetAPIToken(ctx context.Context, id int64) (ApiToken, error)
 	// Get an API token by its hash (for authentication)
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiToken, error)
+	GetAlert(ctx context.Context, id int64) (Alert, error)
+	GetAlertForTeamSource(ctx context.Context, arg GetAlertForTeamSourceParams) (Alert, error)
+	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID int64) (AlertHistory, error)
 	// Get a session by ID
 	GetSession(ctx context.Context, id string) (Session, error)
 	// Get a single source by ID
@@ -75,8 +81,13 @@ type Querier interface {
 	GetUser(ctx context.Context, id int64) (User, error)
 	// Get a user by email
 	GetUserByEmail(ctx context.Context, email string) (User, error)
+	// Alert history queries
+	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (int64, error)
 	// List all API tokens for a user
 	ListAPITokensForUser(ctx context.Context, userID int64) ([]ApiToken, error)
+	ListActiveAlertsDue(ctx context.Context) ([]Alert, error)
+	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
+	ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsByTeamAndSourceParams) ([]Alert, error)
 	// List all queries for a specific team and source
 	ListQueriesByTeamAndSource(ctx context.Context, arg ListQueriesByTeamAndSourceParams) ([]TeamQuery, error)
 	// List all teams a data source is a member of
@@ -99,15 +110,19 @@ type Querier interface {
 	ListUserTeams(ctx context.Context, userID int64) ([]Team, error)
 	// List all users
 	ListUsers(ctx context.Context) ([]User, error)
+	MarkAlertEvaluated(ctx context.Context, id int64) error
+	MarkAlertTriggered(ctx context.Context, id int64) error
 	// Remove a member from a team
 	RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error
 	// Remove a data source from a team
 	RemoveTeamSource(ctx context.Context, arg RemoveTeamSourceParams) error
+	ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) error
 	// Additional queries for user-source and team-source access
 	// Check if a team has access to a source
 	TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (int64, error)
 	// Update the last used timestamp for an API token
 	UpdateAPITokenLastUsed(ctx context.Context, id int64) error
+	UpdateAlert(ctx context.Context, arg UpdateAlertParams) error
 	// Update an existing source
 	UpdateSource(ctx context.Context, arg UpdateSourceParams) error
 	// Update a team

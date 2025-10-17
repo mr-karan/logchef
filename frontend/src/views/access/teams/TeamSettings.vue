@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -39,7 +38,6 @@ import {
 import { useUsersStore } from "@/stores/users"
 import { useSourcesStore } from "@/stores/sources"
 import { useTeamsStore } from "@/stores/teams"
-import { useAuthStore } from "@/stores/auth"
 import { formatDate, formatSourceName } from '@/utils/format'
 
 const route = useRoute()
@@ -50,16 +48,11 @@ const { toast } = useToast()
 const usersStore = useUsersStore()
 const sourcesStore = useSourcesStore()
 const teamsStore = useTeamsStore()
-const authStore = useAuthStore()
-
 // Get the teamId from route params
 const teamId = computed(() => Number(route.params.id))
 
 // Single loading state for better UX
 const isLoading = ref(true)
-
-// Get reactive state from the stores
-const { error: teamError } = storeToRefs(teamsStore)
 
 // Computed properties for cleaner store access
 const team = computed(() => teamsStore.getTeamById(teamId.value))

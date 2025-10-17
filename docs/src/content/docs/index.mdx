@@ -56,6 +56,11 @@ Logchef is a dedicated log query and visualization interface built specifically 
     for exploration and speed up query construction. [Learn
     More](/features/ai-sql-generation)
   </Card>
+  <Card title="Real-time Alerting" icon="siren">
+    Monitor your logs continuously with SQL-based alerts. Integrate with
+    Alertmanager for battle-tested routing to Slack, PagerDuty, email, and more.
+    [Learn More](/features/alerting)
+  </Card>
   <Card title="MCP Integration" icon="external">
     Model Context Protocol server enables AI assistants like Claude to interact
     with your logs naturally. [Explore MCP](/integration/mcp-server)
@@ -98,6 +103,14 @@ Logchef provides the missing piece: a specialized, user-friendly interface to un
 - **Any Log Source**: Application logs, HTTP logs, system logs - you name it
 - **Bring Your Own Collection**: Works with Vector, Fluentbit, or any tool that can write to ClickHouse
 - **Schema Agnostic**: Use our optimized OTEL schema or your existing table structure
+
+### Real-time Alerting
+
+- **SQL-Based Conditions**: Define alerts using familiar ClickHouse SQL queries
+- **Alertmanager Integration**: Native Prometheus Alertmanager support for routing to Slack, PagerDuty, email, and webhooks
+- **Delivery Guarantees**: Automatic retry logic with exponential backoff ensures alerts reach their destination
+- **Alert History**: Complete audit trail of all alert evaluations, triggers, and resolutions
+- **Learn More**: Check out the [alerting documentation](/features/alerting) for configuration examples
 
 ### Built for Scale
 
