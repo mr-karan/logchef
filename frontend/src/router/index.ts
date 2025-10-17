@@ -97,6 +97,15 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "Alerts" },
       },
       {
+        path: "alerts/new",
+        name: "AlertCreate",
+        component: () => import("@/views/alerts/AlertCreate.vue").catch(err => {
+          error("Router", "Failed to load AlertCreate component", err);
+          return { default: ComponentLoadError };
+        }),
+        meta: { title: "Create Alert" },
+      },
+      {
         path: "alerts/:alertID",
         name: "AlertDetail",
         component: () => import("@/views/alerts/AlertDetail.vue").catch(err => {

@@ -196,26 +196,6 @@ func (s *Server) setupRoutes() {
 		teamSources.Delete("/:sourceID", s.requireTeamAdminOrGlobalAdmin, s.handleUnlinkSourceFromTeam)
 	}
 
-	// Rooms (notification groups)
-	rooms := api.Group("/teams/:teamID/rooms", s.requireAuth, s.requireTeamMember)
-	{
-		rooms.Get("/", s.handleListRooms)
-		rooms.Get("/:roomID/members", s.handleListRoomMembers)
-		rooms.Get("/:roomID/channels", s.handleListRoomChannels)
-
-		roomsAdmin := rooms.Group("", s.requireTeamAdminOrGlobalAdmin)
-		{
-			roomsAdmin.Post("/", s.handleCreateRoom)
-			roomsAdmin.Put("/:roomID", s.handleUpdateRoom)
-			roomsAdmin.Delete("/:roomID", s.handleDeleteRoom)
-			roomsAdmin.Post("/:roomID/members", s.handleAddRoomMember)
-			roomsAdmin.Delete("/:roomID/members/:userID", s.handleRemoveRoomMember)
-			roomsAdmin.Post("/:roomID/channels", s.handleCreateRoomChannel)
-			roomsAdmin.Put("/:roomID/channels/:channelID", s.handleUpdateRoomChannel)
-			roomsAdmin.Delete("/:roomID/channels/:channelID", s.handleDeleteRoomChannel)
-		}
-	}
-
 	// --- Team Source Operations (requires team membership) ---
 	// These endpoints allow team members to interact with a specific source linked to their team
 	teamSourceOps := api.Group("/teams/:teamID/sources/:sourceID", s.requireAuth, s.requireTeamMember, s.requireTeamHasSource)

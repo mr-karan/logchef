@@ -3,57 +3,43 @@ import { useContextStore } from '@/stores/context'
 import { useTeamsStore } from '@/stores/teams'
 
 /**
- * Router guard that keeps context store in sync with route params.
- * 
- * Route is the single source of truth for team/source selection.
- * This guard updates the context store based on route params.
+ * Keep the context store in sync with route params. The route remains the
+ * single source of truth; we merely reflect it into stores and apply sensible
+ * defaults without doing extra work such as fetching.
  */
-
 export function contextRouterGuard(to: RouteLocationNormalized) {
   const contextStore = useContextStore()
   const teamsStore = useTeamsStore()
-  
-  // Parse team and source from route params/query
+
+  // Parse team/source from params or query
   let teamId: number | null = null
   let sourceId: number | null = null
-  
-  // Try route params first (for routes like /team/:teamId/source/:sourceId)
-  if (to.params.teamId) {
-    const parsed = parseInt(String(to.params.teamId))
-    if (!isNaN(parsed)) teamId = parsed
-  }
-  
-  if (to.params.sourceId) {
-    const parsed = parseInt(String(to.params.sourceId))
-    if (!isNaN(parsed)) sourceId = parsed
-  }
-  
-  // Fallback to query params (for routes like /explore?team=1&source=2)
-  if (!teamId && to.query.team) {
-    const parsed = parseInt(String(to.query.team))
-    if (!isNaN(parsed)) teamId = parsed
-  }
-  
-  if (!sourceId && to.query.source) {
-    const parsed = parseInt(String(to.query.source))
-    if (!isNaN(parsed)) sourceId = parsed
-  }
-  
-  // Auto-select first team for explore routes if no team specified and teams are available
-  if (!teamId && to.path.startsWith('/logs/') && teamsStore.teams && teamsStore.teams.length > 0) {
-    teamId = teamsStore.teams[0].id
-    console.log(`ContextGuard: Auto-selected first team ${teamId} for explore route`)
+
+  const parseId = (value: unknown): number | null => {
+    if (value == null) return null
+    const parsed = parseInt(String(value), 10)
+    return Number.isNaN(parsed) ? null : parsed
   }
 
-  // Update context store (always set, even if teamId is null)
-  // The individual stores will handle the null case appropriately
-  contextStore.setFromRoute(teamId, sourceId)
-  
-  // IMPORTANT: Also update the old teams store for API compatibility
+  teamId = parseId(to.params.teamId) ?? parseId(to.query.team)
+  sourceId = parseId(to.params.sourceId) ?? parseId(to.query.source)
+
+  // If no team provided, fall back to the first known team (user or admin)
+  if (!teamId) {
+    const fallbackTeam = teamsStore.teams?.[0]
+    if (fallbackTeam) {
+      teamId = fallbackTeam.id
+      console.log(`ContextGuard: defaulted team to ${teamId}`)
+    }
+  }
+
+  // Keep old teams store in sync for legacy consumers
   if (teamId && teamsStore.currentTeamId !== teamId) {
     teamsStore.setCurrentTeam(teamId)
-    console.log(`ContextGuard: Updated teamsStore.currentTeamId to ${teamId}`)
   }
-  
+
+  // Reflect into context store (allows nulls)
+  contextStore.setFromRoute(teamId, sourceId)
+
   console.log(`ContextGuard: Route changed - team: ${teamId}, source: ${sourceId}`)
 }
