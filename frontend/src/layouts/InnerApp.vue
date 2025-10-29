@@ -51,6 +51,7 @@ import {
   PanelLeft,
   PanelRight,
   Bell,
+  Wrench,
 } from "lucide-vue-next";
 
 import { useAuthStore } from "@/stores/auth";
@@ -178,6 +179,12 @@ const adminNavItems: NavItem[] = [
     title: "Teams",
     icon: Users,
     url: "/management/teams",
+    adminOnly: true,
+  },
+  {
+    title: "System Settings",
+    icon: Wrench,
+    url: "/management/settings",
     adminOnly: true,
   },
 ];
