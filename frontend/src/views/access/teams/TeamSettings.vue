@@ -88,16 +88,18 @@ watch(() => team.value, (newTeam) => {
     }
 }, { immediate: true })
 
-// Compute available users (users not in team)
+// Compute available users (users not in team) sorted alphabetically by email
 const availableUsers = computed(() => {
     const teamMemberIds = members.value?.map(m => String(m.user_id)) || []
-    return usersStore.getUsersNotInTeam(teamMemberIds)
+    const users = usersStore.getUsersNotInTeam(teamMemberIds)
+    return users.sort((a, b) => a.email.localeCompare(b.email))
 })
 
-// Compute available sources (sources not in team)
+// Compute available sources (sources not in team) sorted alphabetically by name
 const availableSources = computed(() => {
     const teamSourceIds = teamSources.value?.map((s: Source) => s.id) || []
-    return sourcesStore.getSourcesNotInTeam(teamSourceIds)
+    const sources = sourcesStore.getSourcesNotInTeam(teamSourceIds)
+    return sources.sort((a, b) => a.name.localeCompare(b.name))
 })
 
 // Load users when dialog opens to prevent unnecessary API calls
