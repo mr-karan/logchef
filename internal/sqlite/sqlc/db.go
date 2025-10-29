@@ -72,6 +72,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.deleteSourceStmt, err = db.PrepareContext(ctx, deleteSource); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSource: %w", err)
 	}
+	if q.deleteSystemSettingStmt, err = db.PrepareContext(ctx, deleteSystemSetting); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteSystemSetting: %w", err)
+	}
 	if q.deleteTeamStmt, err = db.PrepareContext(ctx, deleteTeam); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteTeam: %w", err)
 	}
@@ -107,6 +110,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getSourceByNameStmt, err = db.PrepareContext(ctx, getSourceByName); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSourceByName: %w", err)
+	}
+	if q.getSystemSettingStmt, err = db.PrepareContext(ctx, getSystemSetting); err != nil {
+		return nil, fmt.Errorf("error preparing query GetSystemSetting: %w", err)
 	}
 	if q.getTeamStmt, err = db.PrepareContext(ctx, getTeam); err != nil {
 		return nil, fmt.Errorf("error preparing query GetTeam: %w", err)
@@ -152,6 +158,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listSourcesForUserStmt, err = db.PrepareContext(ctx, listSourcesForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSourcesForUser: %w", err)
+	}
+	if q.listSystemSettingsStmt, err = db.PrepareContext(ctx, listSystemSettings); err != nil {
+		return nil, fmt.Errorf("error preparing query ListSystemSettings: %w", err)
+	}
+	if q.listSystemSettingsByCategoryStmt, err = db.PrepareContext(ctx, listSystemSettingsByCategory); err != nil {
+		return nil, fmt.Errorf("error preparing query ListSystemSettingsByCategory: %w", err)
 	}
 	if q.listTeamMembersStmt, err = db.PrepareContext(ctx, listTeamMembers); err != nil {
 		return nil, fmt.Errorf("error preparing query ListTeamMembers: %w", err)
@@ -215,6 +227,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.updateUserStmt, err = db.PrepareContext(ctx, updateUser); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateUser: %w", err)
+	}
+	if q.upsertSystemSettingStmt, err = db.PrepareContext(ctx, upsertSystemSetting); err != nil {
+		return nil, fmt.Errorf("error preparing query UpsertSystemSetting: %w", err)
 	}
 	if q.userHasSourceAccessStmt, err = db.PrepareContext(ctx, userHasSourceAccess); err != nil {
 		return nil, fmt.Errorf("error preparing query UserHasSourceAccess: %w", err)
@@ -304,6 +319,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing deleteSourceStmt: %w", cerr)
 		}
 	}
+	if q.deleteSystemSettingStmt != nil {
+		if cerr := q.deleteSystemSettingStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteSystemSettingStmt: %w", cerr)
+		}
+	}
 	if q.deleteTeamStmt != nil {
 		if cerr := q.deleteTeamStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteTeamStmt: %w", cerr)
@@ -362,6 +382,11 @@ func (q *Queries) Close() error {
 	if q.getSourceByNameStmt != nil {
 		if cerr := q.getSourceByNameStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getSourceByNameStmt: %w", cerr)
+		}
+	}
+	if q.getSystemSettingStmt != nil {
+		if cerr := q.getSystemSettingStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getSystemSettingStmt: %w", cerr)
 		}
 	}
 	if q.getTeamStmt != nil {
@@ -437,6 +462,16 @@ func (q *Queries) Close() error {
 	if q.listSourcesForUserStmt != nil {
 		if cerr := q.listSourcesForUserStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listSourcesForUserStmt: %w", cerr)
+		}
+	}
+	if q.listSystemSettingsStmt != nil {
+		if cerr := q.listSystemSettingsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listSystemSettingsStmt: %w", cerr)
+		}
+	}
+	if q.listSystemSettingsByCategoryStmt != nil {
+		if cerr := q.listSystemSettingsByCategoryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listSystemSettingsByCategoryStmt: %w", cerr)
 		}
 	}
 	if q.listTeamMembersStmt != nil {
@@ -544,6 +579,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateUserStmt: %w", cerr)
 		}
 	}
+	if q.upsertSystemSettingStmt != nil {
+		if cerr := q.upsertSystemSettingStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing upsertSystemSettingStmt: %w", cerr)
+		}
+	}
 	if q.userHasSourceAccessStmt != nil {
 		if cerr := q.userHasSourceAccessStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing userHasSourceAccessStmt: %w", cerr)
@@ -604,6 +644,7 @@ type Queries struct {
 	deleteExpiredAPITokensStmt          *sql.Stmt
 	deleteSessionStmt                   *sql.Stmt
 	deleteSourceStmt                    *sql.Stmt
+	deleteSystemSettingStmt             *sql.Stmt
 	deleteTeamStmt                      *sql.Stmt
 	deleteTeamSourceQueryStmt           *sql.Stmt
 	deleteUserStmt                      *sql.Stmt
@@ -616,6 +657,7 @@ type Queries struct {
 	getSessionStmt                      *sql.Stmt
 	getSourceStmt                       *sql.Stmt
 	getSourceByNameStmt                 *sql.Stmt
+	getSystemSettingStmt                *sql.Stmt
 	getTeamStmt                         *sql.Stmt
 	getTeamByNameStmt                   *sql.Stmt
 	getTeamMemberStmt                   *sql.Stmt
@@ -631,6 +673,8 @@ type Queries struct {
 	listSourceTeamsStmt                 *sql.Stmt
 	listSourcesStmt                     *sql.Stmt
 	listSourcesForUserStmt              *sql.Stmt
+	listSystemSettingsStmt              *sql.Stmt
+	listSystemSettingsByCategoryStmt    *sql.Stmt
 	listTeamMembersStmt                 *sql.Stmt
 	listTeamMembersWithDetailsStmt      *sql.Stmt
 	listTeamSourcesStmt                 *sql.Stmt
@@ -652,6 +696,7 @@ type Queries struct {
 	updateTeamMemberRoleStmt            *sql.Stmt
 	updateTeamSourceQueryStmt           *sql.Stmt
 	updateUserStmt                      *sql.Stmt
+	upsertSystemSettingStmt             *sql.Stmt
 	userHasSourceAccessStmt             *sql.Stmt
 }
 
@@ -675,6 +720,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteExpiredAPITokensStmt:          q.deleteExpiredAPITokensStmt,
 		deleteSessionStmt:                   q.deleteSessionStmt,
 		deleteSourceStmt:                    q.deleteSourceStmt,
+		deleteSystemSettingStmt:             q.deleteSystemSettingStmt,
 		deleteTeamStmt:                      q.deleteTeamStmt,
 		deleteTeamSourceQueryStmt:           q.deleteTeamSourceQueryStmt,
 		deleteUserStmt:                      q.deleteUserStmt,
@@ -687,6 +733,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getSessionStmt:                      q.getSessionStmt,
 		getSourceStmt:                       q.getSourceStmt,
 		getSourceByNameStmt:                 q.getSourceByNameStmt,
+		getSystemSettingStmt:                q.getSystemSettingStmt,
 		getTeamStmt:                         q.getTeamStmt,
 		getTeamByNameStmt:                   q.getTeamByNameStmt,
 		getTeamMemberStmt:                   q.getTeamMemberStmt,
@@ -702,6 +749,8 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listSourceTeamsStmt:                 q.listSourceTeamsStmt,
 		listSourcesStmt:                     q.listSourcesStmt,
 		listSourcesForUserStmt:              q.listSourcesForUserStmt,
+		listSystemSettingsStmt:              q.listSystemSettingsStmt,
+		listSystemSettingsByCategoryStmt:    q.listSystemSettingsByCategoryStmt,
 		listTeamMembersStmt:                 q.listTeamMembersStmt,
 		listTeamMembersWithDetailsStmt:      q.listTeamMembersWithDetailsStmt,
 		listTeamSourcesStmt:                 q.listTeamSourcesStmt,
@@ -723,6 +772,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateTeamMemberRoleStmt:            q.updateTeamMemberRoleStmt,
 		updateTeamSourceQueryStmt:           q.updateTeamSourceQueryStmt,
 		updateUserStmt:                      q.updateUserStmt,
+		upsertSystemSettingStmt:             q.upsertSystemSettingStmt,
 		userHasSourceAccessStmt:             q.userHasSourceAccessStmt,
 	}
 }

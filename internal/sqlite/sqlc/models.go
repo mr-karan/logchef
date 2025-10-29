@@ -82,6 +82,17 @@ type Source struct {
 	UpdatedAt         time.Time      `json:"updated_at"`
 }
 
+type SystemSetting struct {
+	Key         string         `json:"key"`
+	Value       string         `json:"value"`
+	ValueType   string         `json:"value_type"`
+	Category    string         `json:"category"`
+	Description sql.NullString `json:"description"`
+	IsSensitive int64          `json:"is_sensitive"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
 type Team struct {
 	ID          int64          `json:"id"`
 	Name        string         `json:"name"`

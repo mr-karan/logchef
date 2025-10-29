@@ -422,3 +422,32 @@ SELECT * FROM alert_history
 WHERE alert_id = ?
 ORDER BY triggered_at DESC
 LIMIT ?;
+
+-- System Settings Queries
+
+-- name: GetSystemSetting :one
+SELECT * FROM system_settings
+WHERE key = ?;
+
+-- name: ListSystemSettings :many
+SELECT * FROM system_settings
+ORDER BY category, key;
+
+-- name: ListSystemSettingsByCategory :many
+SELECT * FROM system_settings
+WHERE category = ?
+ORDER BY key;
+
+-- name: UpsertSystemSetting :exec
+INSERT INTO system_settings (key, value, value_type, category, description, is_sensitive, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+ON CONFLICT(key) DO UPDATE SET
+    value = excluded.value,
+    value_type = excluded.value_type,
+    description = excluded.description,
+    is_sensitive = excluded.is_sensitive,
+    updated_at = datetime('now');
+
+-- name: DeleteSystemSetting :exec
+DELETE FROM system_settings
+WHERE key = ?;

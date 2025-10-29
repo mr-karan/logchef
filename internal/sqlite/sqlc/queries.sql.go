@@ -367,6 +367,16 @@ func (q *Queries) DeleteSource(ctx context.Context, id int64) error {
 	return err
 }
 
+const deleteSystemSetting = `-- name: DeleteSystemSetting :exec
+DELETE FROM system_settings
+WHERE key = ?
+`
+
+func (q *Queries) DeleteSystemSetting(ctx context.Context, key string) error {
+	_, err := q.exec(ctx, q.deleteSystemSettingStmt, deleteSystemSetting, key)
+	return err
+}
+
 const deleteTeam = `-- name: DeleteTeam :exec
 DELETE FROM teams WHERE id = ?
 `
@@ -626,6 +636,29 @@ func (q *Queries) GetSourceByName(ctx context.Context, arg GetSourceByNameParams
 		&i.TableName,
 		&i.Description,
 		&i.TtlDays,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getSystemSetting = `-- name: GetSystemSetting :one
+
+SELECT "key", value, value_type, category, description, is_sensitive, created_at, updated_at FROM system_settings
+WHERE key = ?
+`
+
+// System Settings Queries
+func (q *Queries) GetSystemSetting(ctx context.Context, key string) (SystemSetting, error) {
+	row := q.queryRow(ctx, q.getSystemSettingStmt, getSystemSetting, key)
+	var i SystemSetting
+	err := row.Scan(
+		&i.Key,
+		&i.Value,
+		&i.ValueType,
+		&i.Category,
+		&i.Description,
+		&i.IsSensitive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -1148,6 +1181,81 @@ func (q *Queries) ListSourcesForUser(ctx context.Context, userID int64) ([]Sourc
 			&i.TableName,
 			&i.Description,
 			&i.TtlDays,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSystemSettings = `-- name: ListSystemSettings :many
+SELECT "key", value, value_type, category, description, is_sensitive, created_at, updated_at FROM system_settings
+ORDER BY category, key
+`
+
+func (q *Queries) ListSystemSettings(ctx context.Context) ([]SystemSetting, error) {
+	rows, err := q.query(ctx, q.listSystemSettingsStmt, listSystemSettings)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SystemSetting{}
+	for rows.Next() {
+		var i SystemSetting
+		if err := rows.Scan(
+			&i.Key,
+			&i.Value,
+			&i.ValueType,
+			&i.Category,
+			&i.Description,
+			&i.IsSensitive,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSystemSettingsByCategory = `-- name: ListSystemSettingsByCategory :many
+SELECT "key", value, value_type, category, description, is_sensitive, created_at, updated_at FROM system_settings
+WHERE category = ?
+ORDER BY key
+`
+
+func (q *Queries) ListSystemSettingsByCategory(ctx context.Context, category string) ([]SystemSetting, error) {
+	rows, err := q.query(ctx, q.listSystemSettingsByCategoryStmt, listSystemSettingsByCategory, category)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SystemSetting{}
+	for rows.Next() {
+		var i SystemSetting
+		if err := rows.Scan(
+			&i.Key,
+			&i.Value,
+			&i.ValueType,
+			&i.Category,
+			&i.Description,
+			&i.IsSensitive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1809,6 +1917,38 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 		arg.LastActiveAt,
 		arg.UpdatedAt,
 		arg.ID,
+	)
+	return err
+}
+
+const upsertSystemSetting = `-- name: UpsertSystemSetting :exec
+INSERT INTO system_settings (key, value, value_type, category, description, is_sensitive, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+ON CONFLICT(key) DO UPDATE SET
+    value = excluded.value,
+    value_type = excluded.value_type,
+    description = excluded.description,
+    is_sensitive = excluded.is_sensitive,
+    updated_at = datetime('now')
+`
+
+type UpsertSystemSettingParams struct {
+	Key         string         `json:"key"`
+	Value       string         `json:"value"`
+	ValueType   string         `json:"value_type"`
+	Category    string         `json:"category"`
+	Description sql.NullString `json:"description"`
+	IsSensitive int64          `json:"is_sensitive"`
+}
+
+func (q *Queries) UpsertSystemSetting(ctx context.Context, arg UpsertSystemSettingParams) error {
+	_, err := q.exec(ctx, q.upsertSystemSettingStmt, upsertSystemSetting,
+		arg.Key,
+		arg.Value,
+		arg.ValueType,
+		arg.Category,
+		arg.Description,
+		arg.IsSensitive,
 	)
 	return err
 }

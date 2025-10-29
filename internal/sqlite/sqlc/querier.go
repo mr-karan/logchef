@@ -48,6 +48,7 @@ type Querier interface {
 	DeleteSession(ctx context.Context, id string) error
 	// Delete a source by ID
 	DeleteSource(ctx context.Context, id int64) error
+	DeleteSystemSetting(ctx context.Context, key string) error
 	// Delete a team by ID
 	DeleteTeam(ctx context.Context, id int64) error
 	// Delete a query by ID for a specific team and source
@@ -69,6 +70,8 @@ type Querier interface {
 	GetSource(ctx context.Context, id int64) (Source, error)
 	// Get a single source by table name and database
 	GetSourceByName(ctx context.Context, arg GetSourceByNameParams) (Source, error)
+	// System Settings Queries
+	GetSystemSetting(ctx context.Context, key string) (SystemSetting, error)
 	// Get a team by ID
 	GetTeam(ctx context.Context, id int64) (Team, error)
 	// Get a team by its name
@@ -96,6 +99,8 @@ type Querier interface {
 	ListSources(ctx context.Context) ([]Source, error)
 	// List all sources a user has access to
 	ListSourcesForUser(ctx context.Context, userID int64) ([]Source, error)
+	ListSystemSettings(ctx context.Context) ([]SystemSetting, error)
+	ListSystemSettingsByCategory(ctx context.Context, category string) ([]SystemSetting, error)
 	// List all members of a team
 	ListTeamMembers(ctx context.Context, teamID int64) ([]TeamMember, error)
 	// List all members of a team with user details
@@ -134,6 +139,7 @@ type Querier interface {
 	UpdateTeamSourceQuery(ctx context.Context, arg UpdateTeamSourceQueryParams) error
 	// Update a user
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
+	UpsertSystemSetting(ctx context.Context, arg UpsertSystemSettingParams) error
 	// Check if a user has access to a source through any team
 	UserHasSourceAccess(ctx context.Context, arg UserHasSourceAccessParams) (int64, error)
 }
