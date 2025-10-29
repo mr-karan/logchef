@@ -277,6 +277,11 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 				m.log.Warn("failed to prune alert history", "alert_id", alert.ID, "error", pruneErr)
 			}
 		}
+	} else {
+		// Update existing history entry to reflect the retry outcome
+		if updateErr := m.db.UpdateAlertHistoryPayload(ctx, history.ID, historyPayload); updateErr != nil {
+			m.log.Error("failed to update alert history payload after retry", "alert_id", alert.ID, "history_id", history.ID, "error", updateErr)
+		}
 	}
 
 	return nil

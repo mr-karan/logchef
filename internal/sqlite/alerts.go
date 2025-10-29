@@ -139,6 +139,10 @@ SET status = 'resolved',
     message = ?
 WHERE id = ?`
 
+	updateAlertHistoryPayloadQuery = `UPDATE alert_history
+SET payload_json = ?
+WHERE id = ?`
+
 	pruneAlertHistoryQuery = `WITH ranked AS (
     SELECT id,
            ROW_NUMBER() OVER (ORDER BY triggered_at DESC, id DESC) AS rn
@@ -554,6 +558,27 @@ func (db *DB) ResolveAlertHistory(ctx context.Context, historyID int64, message 
 	res, err := db.db.ExecContext(ctx, resolveAlertHistoryQuery, nullableString(message), historyID)
 	if err != nil {
 		return fmt.Errorf("failed to resolve alert history: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// UpdateAlertHistoryPayload updates the payload of an existing alert history entry.
+func (db *DB) UpdateAlertHistoryPayload(ctx context.Context, historyID int64, payload map[string]any) error {
+	var payloadJSON string
+	if len(payload) > 0 {
+		buf, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("failed to marshal history payload: %w", err)
+		}
+		payloadJSON = string(buf)
+	}
+
+	res, err := db.db.ExecContext(ctx, updateAlertHistoryPayloadQuery, nullableString(payloadJSON), historyID)
+	if err != nil {
+		return fmt.Errorf("failed to update alert history payload: %w", err)
 	}
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return sql.ErrNoRows

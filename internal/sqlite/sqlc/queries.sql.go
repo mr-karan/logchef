@@ -1630,6 +1630,22 @@ func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) error 
 	return err
 }
 
+const updateAlertHistoryPayload = `-- name: UpdateAlertHistoryPayload :exec
+UPDATE alert_history
+SET payload_json = ?
+WHERE id = ?
+`
+
+type UpdateAlertHistoryPayloadParams struct {
+	PayloadJson sql.NullString `json:"payload_json"`
+	ID          int64          `json:"id"`
+}
+
+func (q *Queries) UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlertHistoryPayloadParams) error {
+	_, err := q.exec(ctx, q.updateAlertHistoryPayloadStmt, updateAlertHistoryPayload, arg.PayloadJson, arg.ID)
+	return err
+}
+
 const updateSource = `-- name: UpdateSource :exec
 UPDATE sources
 SET name = ?,

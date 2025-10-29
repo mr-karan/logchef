@@ -123,6 +123,7 @@ type Querier interface {
 	// Update the last used timestamp for an API token
 	UpdateAPITokenLastUsed(ctx context.Context, id int64) error
 	UpdateAlert(ctx context.Context, arg UpdateAlertParams) error
+	UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlertHistoryPayloadParams) error
 	// Update an existing source
 	UpdateSource(ctx context.Context, arg UpdateSourceParams) error
 	// Update a team

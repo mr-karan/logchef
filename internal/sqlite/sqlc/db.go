@@ -198,6 +198,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateAlertStmt, err = db.PrepareContext(ctx, updateAlert); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateAlert: %w", err)
 	}
+	if q.updateAlertHistoryPayloadStmt, err = db.PrepareContext(ctx, updateAlertHistoryPayload); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateAlertHistoryPayload: %w", err)
+	}
 	if q.updateSourceStmt, err = db.PrepareContext(ctx, updateSource); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSource: %w", err)
 	}
@@ -511,6 +514,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateAlertStmt: %w", cerr)
 		}
 	}
+	if q.updateAlertHistoryPayloadStmt != nil {
+		if cerr := q.updateAlertHistoryPayloadStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateAlertHistoryPayloadStmt: %w", cerr)
+		}
+	}
 	if q.updateSourceStmt != nil {
 		if cerr := q.updateSourceStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateSourceStmt: %w", cerr)
@@ -638,6 +646,7 @@ type Queries struct {
 	teamHasSourceStmt                   *sql.Stmt
 	updateAPITokenLastUsedStmt          *sql.Stmt
 	updateAlertStmt                     *sql.Stmt
+	updateAlertHistoryPayloadStmt       *sql.Stmt
 	updateSourceStmt                    *sql.Stmt
 	updateTeamStmt                      *sql.Stmt
 	updateTeamMemberRoleStmt            *sql.Stmt
@@ -708,6 +717,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		teamHasSourceStmt:                   q.teamHasSourceStmt,
 		updateAPITokenLastUsedStmt:          q.updateAPITokenLastUsedStmt,
 		updateAlertStmt:                     q.updateAlertStmt,
+		updateAlertHistoryPayloadStmt:       q.updateAlertHistoryPayloadStmt,
 		updateSourceStmt:                    q.updateSourceStmt,
 		updateTeamStmt:                      q.updateTeamStmt,
 		updateTeamMemberRoleStmt:            q.updateTeamMemberRoleStmt,

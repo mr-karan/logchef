@@ -406,6 +406,11 @@ SET status = 'resolved',
     message = ?
 WHERE id = ?;
 
+-- name: UpdateAlertHistoryPayload :exec
+UPDATE alert_history
+SET payload_json = ?
+WHERE id = ?;
+
 -- name: GetLatestUnresolvedAlertHistory :one
 SELECT * FROM alert_history
 WHERE alert_id = ? AND status = 'triggered'
