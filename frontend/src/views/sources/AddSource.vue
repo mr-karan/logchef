@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, watch, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,16 +24,19 @@ import {
 } from '@/components/ui/dialog'
 
 const router = useRouter()
+const route = useRoute()
 const { toast } = useToast()
 const sourcesStore = useSourcesStore()
 
 // Define types for our API requests and responses
-interface ConnectionInfo {
+interface ConnectionRequestInfo {
     host: string;
     username: string;
     password: string;
     database: string;
     table_name: string;
+    timestamp_field?: string;
+    severity_field?: string;
 }
 
 // Form state
@@ -53,11 +56,11 @@ const metaSeverityField = ref<string | number>('severity_text')
 
 // Use connection validation with source store
 const isValidating = ref(false)
-const validationResult = ref(null)
+const validationResult = ref<any>(null)
 const isValidated = ref(false)
 
 // Validate connection using source store
-const validateConnection = async (connectionInfo) => {
+const validateConnection = async (connectionInfo: ConnectionRequestInfo) => {
     isValidating.value = true
     isValidated.value = false
     validationResult.value = null
@@ -167,7 +170,7 @@ const submitButtonText = computed(() => {
 // Validate connection handler
 const handleValidateConnection = async () => {
     // Prepare connection info
-    const connectionInfo: ConnectionInfo = {
+    const connectionInfo: ConnectionRequestInfo = {
         host: String(host.value),
         username: enableAuth.value ? String(username.value) : '',
         password: enableAuth.value ? String(password.value) : '',
@@ -187,9 +190,67 @@ const handleValidateConnection = async () => {
     await validateConnection(connectionInfo)
 }
 
+// Duplicate source handling
+const isDuplicating = ref(false)
+
+onMounted(async () => {
+    const duplicateFromId = route.query.duplicateFrom
+    if (duplicateFromId) {
+        isDuplicating.value = true
+        try {
+            // Get the source from the store (it should already be loaded)
+            const sourceId = Number(duplicateFromId)
+            const source = sourcesStore.sources.find(s => s.id === sourceId)
+
+            if (source) {
+                // Pre-fill form with source data
+                sourceName.value = `${source.name} (Copy)`
+                description.value = source.description || ''
+                host.value = source.connection.host
+                database.value = source.connection.database
+                tableName.value = source.connection.table_name
+                metaTSField.value = source._meta_ts_field
+                metaSeverityField.value = source._meta_severity_field || ''
+                ttlDays.value = source.ttl_days || 90
+
+                // Set table mode based on whether it was auto-created
+                tableMode.value = source._meta_is_auto_created ? 'create' : 'connect'
+
+                // Note: username/password are not returned by the API for security
+                // User will need to re-enter credentials if authentication was enabled
+                // We default to auth enabled to prompt the user
+                enableAuth.value = true
+
+                toast({
+                    title: 'Duplicating Source',
+                    description: `Form pre-filled from "${source.name}". Please enter connection credentials and update other fields as needed.`,
+                    duration: TOAST_DURATION.SUCCESS,
+                })
+            } else {
+                toast({
+                    title: 'Warning',
+                    description: 'Could not find source to duplicate',
+                    variant: 'destructive',
+                    duration: TOAST_DURATION.ERROR,
+                })
+            }
+        } catch (error) {
+            console.error('Error loading source for duplication:', error)
+            toast({
+                title: 'Error',
+                description: 'Failed to load source data for duplication',
+                variant: 'destructive',
+                duration: TOAST_DURATION.ERROR,
+            })
+        } finally {
+            isDuplicating.value = false
+        }
+    }
+})
+
 // Form state
 const isSubmitting = ref(false)
-const formError = ref(null)
+const formError = ref<any>(null)
 
 const submitForm = async () => {
     if (!isValid.value) {
@@ -252,9 +313,11 @@ const submitForm = async () => {
     <div class="container mx-auto max-w-4xl px-4 py-8">
         <Card>
             <CardHeader>
-                <CardTitle>Add Source</CardTitle>
+                <CardTitle>{{ route.query.duplicateFrom ? 'Duplicate Source' : 'Add Source' }}</CardTitle>
                 <CardDescription>
-                    Connect to a ClickHouse database and configure log ingestion
+                    {{ route.query.duplicateFrom
+                        ? 'Create a new source based on an existing configuration'
+                        : 'Connect to a ClickHouse database and configure log ingestion' }}
                 </CardDescription>
             </CardHeader>
             <CardContent>

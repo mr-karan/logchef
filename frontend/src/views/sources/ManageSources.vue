@@ -14,7 +14,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Plus, Trash2 } from 'lucide-vue-next'
+import { Plus, Trash2, Copy } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { type Source } from '@/api/sources'
 import {
@@ -50,6 +50,10 @@ const loadingError = computed(() => {
 const handleDelete = (source: Source) => {
     sourceToDelete.value = source
     showDeleteDialog.value = true
+}
+
+const handleDuplicate = (source: Source) => {
+    router.push({ name: 'NewSource', query: { duplicateFrom: source.id } })
 }
 
 const retryLoading = async () => {
@@ -126,7 +130,7 @@ import { formatDate } from '@/utils/format'
                                 <TableHead class="w-[300px]">Connection</TableHead>
                                 <TableHead class="w-[100px]">Status</TableHead>
                                 <TableHead class="w-[100px]">Created At</TableHead>
-                                <TableHead class="w-[70px] text-right">Actions</TableHead>
+                                <TableHead class="w-[120px] text-right">Actions</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -174,9 +178,16 @@ import { formatDate } from '@/utils/format'
                                 </TableCell>
                                 <TableCell>{{ formatDate(source.created_at) }}</TableCell>
                                 <TableCell class="text-right">
-                                    <Button variant="destructive" size="icon" @click="handleDelete(source)">
-                                        <Trash2 class="h-4 w-4" />
-                                    </Button>
+                                    <div class="flex items-center justify-end gap-2">
+                                        <Button variant="outline" size="icon" @click="handleDuplicate(source)"
+                                                title="Duplicate source">
+                                            <Copy class="h-4 w-4" />
+                                        </Button>
+                                        <Button variant="destructive" size="icon" @click="handleDelete(source)"
+                                                title="Delete source">
+                                            <Trash2 class="h-4 w-4" />
+                                        </Button>
+                                    </div>
                                 </TableCell>
                             </TableRow>
                         </TableBody>
