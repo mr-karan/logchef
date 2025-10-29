@@ -328,7 +328,7 @@ onMounted(async () => {
                                                     </SelectTrigger>
                                                     <SelectContent>
                                                         <SelectItem v-for="user in availableUsers" :key="user.id"
-                                                            :value="String(user.id)">
+                                                            :value="String(user.id)" :text-value="user.email">
                                                             {{ user.email }}
                                                         </SelectItem>
                                                     </SelectContent>
@@ -440,7 +440,8 @@ onMounted(async () => {
                                                     </SelectTrigger>
                                                     <SelectContent>
                                                         <SelectItem v-for="source in availableSources" :key="source.id"
-                                                            :value="String(source.id)">
+                                                            :value="String(source.id)"
+                                                            :text-value="formatSourceName(source)">
                                                             {{ formatSourceName(source) }}
                                                         </SelectItem>
                                                     </SelectContent>
