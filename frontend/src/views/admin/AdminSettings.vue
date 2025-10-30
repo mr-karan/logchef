@@ -61,6 +61,7 @@ const settingToEdit = ref<SystemSetting | null>(null)
 const settingToDelete = ref<SystemSetting | null>(null)
 const showSensitiveValues = ref<Record<string, boolean>>({})
 const testingConnection = ref<Record<string, boolean>>({})
+const currentTab = ref('alerts')
 
 const editForm = ref<UpdateSettingRequest>({
   value: '',
@@ -210,7 +211,7 @@ onMounted(() => {
         <div v-if="isLoading" class="text-center py-4">
           Loading settings...
         </div>
-        <Tabs v-else default-value="alerts" class="w-full">
+        <Tabs v-else v-model="currentTab" class="w-full">
           <TabsList>
             <TabsTrigger value="alerts">Alerts</TabsTrigger>
             <TabsTrigger value="ai">AI</TabsTrigger>
