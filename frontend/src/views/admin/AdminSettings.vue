@@ -95,7 +95,13 @@ const handleEdit = (setting: SystemSetting) => {
 const confirmEdit = async () => {
   if (!settingToEdit.value) return
 
-  await settingsStore.updateSetting(settingToEdit.value.key, editForm.value)
+  // Ensure value is always a string (type="number" input converts to number)
+  const requestData = {
+    ...editForm.value,
+    value: String(editForm.value.value)
+  }
+
+  await settingsStore.updateSetting(settingToEdit.value.key, requestData)
 
   showEditDialog.value = false
   settingToEdit.value = null
