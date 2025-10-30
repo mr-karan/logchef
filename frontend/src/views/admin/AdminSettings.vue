@@ -13,7 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Pencil, Trash2, Eye, EyeOff, Save, X } from 'lucide-vue-next'
+import { Pencil, Trash2, Eye, EyeOff, Save, X, Plug } from 'lucide-vue-next'
 import { Input } from '@/components/ui/input'
 import {
   Table,
@@ -49,6 +49,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { useSettingsStore } from '@/stores/settings'
 import type { SystemSetting, UpdateSettingRequest } from '@/api/settings'
+import { settingsApi } from '@/api/settings'
+import { toast } from 'vue-sonner'
 
 const settingsStore = useSettingsStore()
 const { isLoading } = storeToRefs(settingsStore)
@@ -58,6 +60,7 @@ const showDeleteDialog = ref(false)
 const settingToEdit = ref<SystemSetting | null>(null)
 const settingToDelete = ref<SystemSetting | null>(null)
 const showSensitiveValues = ref<Record<string, boolean>>({})
+const testingConnection = ref<Record<string, boolean>>({})
 
 const editForm = ref<UpdateSettingRequest>({
   value: '',
@@ -147,6 +150,38 @@ const formatKey = (key: string) => {
   ).join(' ')
 }
 
+const handleTestAlertmanager = async () => {
+  const alertmanagerURLSetting = alertsSettings.value.find(s => s.key === 'alerts.alertmanager_url')
+  const tlsSkipVerifySetting = alertsSettings.value.find(s => s.key === 'alerts.tls_insecure_skip_verify')
+  const timeoutSetting = alertsSettings.value.find(s => s.key === 'alerts.request_timeout')
+
+  if (!alertmanagerURLSetting || !alertmanagerURLSetting.value) {
+    toast.error('Alertmanager URL is not configured')
+    return
+  }
+
+  testingConnection.value['alertmanager'] = true
+
+  try {
+    await settingsApi.testAlertmanagerConnection({
+      url: alertmanagerURLSetting.value,
+      tls_insecure_skip_verify: tlsSkipVerifySetting?.value === 'true',
+      timeout: timeoutSetting?.value || '5s'
+    })
+
+    toast.success('Successfully connected to Alertmanager')
+  } catch (error: any) {
+    const errorMessage = error?.response?.data?.error || error?.message || 'Connection test failed'
+    toast.error(`Alertmanager connection failed: ${errorMessage}`)
+  } finally {
+    testingConnection.value['alertmanager'] = false
+  }
+}
+
+const canTestConnection = (key: string) => {
+  return key === 'alerts.alertmanager_url'
+}
+
 onMounted(() => {
   loadSettings()
 })
@@ -166,10 +201,10 @@ onMounted(() => {
           Loading settings...
         </div>
         <Tabs v-else default-value="alerts" class="w-full">
-          <TabsList class="grid w-full grid-cols-4">
+          <TabsList>
             <TabsTrigger value="alerts">Alerts</TabsTrigger>
             <TabsTrigger value="ai">AI</TabsTrigger>
-            <TabsTrigger value="auth">Auth</TabsTrigger>
+            <TabsTrigger value="auth">Authentication</TabsTrigger>
             <TabsTrigger value="server">Server</TabsTrigger>
           </TabsList>
 
@@ -213,6 +248,16 @@ onMounted(() => {
                     <TableCell class="text-sm text-muted-foreground">{{ setting.description || '-' }}</TableCell>
                     <TableCell>
                       <div class="flex items-center gap-2 justify-end">
+                        <Button
+                          v-if="canTestConnection(setting.key)"
+                          variant="outline"
+                          size="icon"
+                          :disabled="testingConnection['alertmanager']"
+                          @click="handleTestAlertmanager"
+                          title="Test connection to Alertmanager"
+                        >
+                          <Plug class="h-4 w-4" :class="{ 'animate-pulse': testingConnection['alertmanager'] }" />
+                        </Button>
                         <Button variant="outline" size="icon" @click="handleEdit(setting)">
                           <Pencil class="h-4 w-4" />
                         </Button>

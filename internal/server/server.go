@@ -173,6 +173,7 @@ func (s *Server) setupRoutes() {
 		admin.Get("/settings/:key", s.handleGetSetting)
 		admin.Put("/settings/:key", s.handleUpdateSetting)
 		admin.Delete("/settings/:key", s.handleDeleteSetting)
+		admin.Post("/settings/test-alertmanager", s.handleTestAlertmanagerConnection)
 	}
 
 	// --- Team Routes (Access controlled by team membership) ---

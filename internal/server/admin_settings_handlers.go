@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -250,4 +251,67 @@ func (s *Server) validateSpecificSetting(key, value string) error {
 		}
 	}
 	return nil
+}
+
+// TestAlertmanagerRequest represents a request to test Alertmanager connection.
+type TestAlertmanagerRequest struct {
+	URL                   string `json:"url"`
+	TLSInsecureSkipVerify bool   `json:"tls_insecure_skip_verify"`
+	Timeout               string `json:"timeout,omitempty"` // Duration string (e.g., "5s")
+}
+
+// handleTestAlertmanagerConnection tests connectivity to an Alertmanager instance.
+// POST /api/v1/admin/settings/test-alertmanager
+func (s *Server) handleTestAlertmanagerConnection(c *fiber.Ctx) error {
+	var req TestAlertmanagerRequest
+	if err := c.BodyParser(&req); err != nil {
+		return SendError(c, fiber.StatusBadRequest, "invalid request body")
+	}
+
+	if req.URL == "" {
+		return SendError(c, fiber.StatusBadRequest, "alertmanager URL is required")
+	}
+
+	// Validate URL format
+	parsedURL, err := url.Parse(req.URL)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("invalid URL format: %v", err))
+	}
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return SendError(c, fiber.StatusBadRequest, "URL must use http or https scheme")
+	}
+
+	// Parse timeout
+	timeout := 5 * time.Second
+	if req.Timeout != "" {
+		parsedTimeout, err := time.ParseDuration(req.Timeout)
+		if err != nil {
+			return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("invalid timeout format: %v", err))
+		}
+		timeout = parsedTimeout
+	}
+
+	// Create a temporary Alertmanager client for testing
+	client, err := alerts.NewAlertmanagerClient(alerts.ClientOptions{
+		BaseURL:       req.URL,
+		Timeout:       timeout,
+		SkipTLSVerify: req.TLSInsecureSkipVerify,
+		Logger:        s.log,
+	})
+	if err != nil {
+		s.log.Error("failed to create alertmanager client for testing", "error", err, "url", req.URL)
+		return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("failed to create alertmanager client: %v", err))
+	}
+
+	// Perform health check
+	if err := client.HealthCheck(c.Context()); err != nil {
+		s.log.Warn("alertmanager health check failed", "error", err, "url", req.URL)
+		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Alertmanager health check failed: %v", err))
+	}
+
+	s.log.Info("alertmanager health check successful", "url", req.URL)
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{
+		"message": "Successfully connected to Alertmanager",
+		"url":     req.URL,
+	})
 }

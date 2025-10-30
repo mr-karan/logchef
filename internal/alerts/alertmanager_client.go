@@ -172,3 +172,42 @@ func (c *Client) Send(ctx context.Context, alerts []AlertPayload) error {
 
 	return fmt.Errorf("alertmanager request failed after %d retries: %w", c.maxRetries, lastErr)
 }
+
+// HealthCheck verifies connectivity to the Alertmanager instance.
+// It makes a GET request to the /api/v2/status endpoint to check if Alertmanager is reachable.
+func (c *Client) HealthCheck(ctx context.Context) error {
+	// Use the status endpoint for health check
+	statusURL := strings.Replace(c.baseURL, "/api/v2/alerts", "/api/v2/status", 1)
+	statusURL = strings.Replace(statusURL, "/api/v1/alerts", "/api/v1/status", 1)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create health check request: %w", err)
+	}
+
+	for k, values := range c.headers {
+		for _, v := range values {
+			req.Header.Add(k, v)
+		}
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Alertmanager: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body for error details
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		c.log.Info("alertmanager health check successful", "status_code", resp.StatusCode)
+		return nil
+	}
+
+	if readErr != nil {
+		return fmt.Errorf("alertmanager health check failed with status %d (body read error: %w)", resp.StatusCode, readErr)
+	}
+
+	return fmt.Errorf("alertmanager health check failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+}
