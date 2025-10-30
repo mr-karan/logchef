@@ -1,11 +1,7 @@
 # LogChef Configuration Sample
 #
 # This file demonstrates the MINIMAL configuration required to run LogChef.
-# On first boot, non-essential settings will be seeded from this file to the database
-# and can then be managed through the Admin Settings UI.
-#
-# After first boot, you can remove the optional sections ([ai], [alerts], auth session settings)
-# from your config.toml as they will be stored in the database.
+# Additional settings (AI, alerts, sessions, etc.) are managed via the Admin Settings UI.
 
 # ============================================================================
 # ESSENTIAL CONFIGURATION (Required for bootstrap)
@@ -47,39 +43,8 @@ api_token_secret = "REPLACE_WITH_YOUR_SECRET_KEY_MINIMUM_32_CHARS"
 level = "info"  # Options: debug, info, warn, error
 
 # ============================================================================
-# OPTIONAL CONFIGURATION (Seeded to database on first boot)
+# OPTIONAL CONFIGURATION
 # ============================================================================
-# The sections below are OPTIONAL. If present, they will be seeded to the database
-# on first boot. If absent, migration defaults will be used.
-#
-# After first boot, these settings are managed via the Admin Settings UI and can be
-# removed from config.toml for future deployments.
-
-# Session management (optional - seeded to database on first boot)
-# Uncomment to customize session behavior
-# session_duration = "8h"
-# max_concurrent_sessions = 1
-# default_token_expiry = "2160h"  # 90 days
-
-# AI SQL generation (optional - seeded to database on first boot)
-# Uncomment to enable AI features
-# [ai]
-# enabled = false
-# base_url = ""  # Leave empty for default OpenAI endpoint (https://api.openai.com/v1), or use OpenAI-compatible API
-# api_key = ""   # OpenAI API key or compatible provider key
-# model = "gpt-4o"
-# max_tokens = 1024
-# temperature = 0.1
-
-# Alerting (optional - seeded to database on first boot)
-# Uncomment to enable alerting features
-# [alerts]
-# enabled = false
-# evaluation_interval = "1m"
-# default_lookback = "5m"
-# history_limit = 50
-# alertmanager_url = ""  # Alertmanager endpoint URL
-# external_url = ""      # Backend URL for API access
-# frontend_url = ""      # Frontend URL for web UI links in notifications
-# request_timeout = "5s"
-# tls_insecure_skip_verify = false
+# Additional settings (AI, alerts, sessions, etc.) can be managed via the
+# Admin Settings UI after first boot. No need to add them here unless you want
+# to customize defaults during initial deployment.
