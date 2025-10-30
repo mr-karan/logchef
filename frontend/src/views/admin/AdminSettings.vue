@@ -145,9 +145,13 @@ const formatKey = (key: string) => {
   // Remove category prefix and convert to title case
   const parts = key.split('.')
   const name = parts[parts.length - 1]
-  return name.split('_').map(word =>
-    word.charAt(0).toUpperCase() + word.slice(1)
-  ).join(' ')
+  const acronyms = ['url', 'api', 'ai', 'tls', 'id']
+  return name.split('_').map(word => {
+    if (acronyms.includes(word.toLowerCase())) {
+      return word.toUpperCase()
+    }
+    return word.charAt(0).toUpperCase() + word.slice(1)
+  }).join(' ')
 }
 
 const handleTestAlertmanager = async () => {
