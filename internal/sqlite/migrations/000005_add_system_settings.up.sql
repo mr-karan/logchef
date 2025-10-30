@@ -1,4 +1,14 @@
 -- Create system_settings table for storing runtime configuration
+--
+-- Migration Strategy:
+-- 1. This migration creates the table and inserts default values as fallbacks
+-- 2. On first boot, app.seedSystemSettings() checks if table is empty
+-- 3. If empty, values from config.toml are seeded (overriding these migration defaults)
+-- 4. If config.toml doesn't specify values, these migration defaults are used
+-- 5. After first boot, settings are managed via Admin Settings UI
+-- 6. Future deployments can omit [alerts], [ai], and auth session fields from config.toml
+--
+-- This allows users to gradually migrate from config.toml to database-backed configuration.
 CREATE TABLE IF NOT EXISTS system_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -13,33 +23,8 @@ CREATE TABLE IF NOT EXISTS system_settings (
 -- Create index on category for efficient filtering
 CREATE INDEX IF NOT EXISTS idx_system_settings_category ON system_settings(category);
 
--- Insert default settings for alerts (migrating from config.toml)
-INSERT INTO system_settings (key, value, value_type, category, description) VALUES
-    ('alerts.enabled', 'true', 'boolean', 'alerts', 'Enable or disable alert evaluation'),
-    ('alerts.evaluation_interval', '1m', 'duration', 'alerts', 'How often to evaluate alert rules'),
-    ('alerts.default_lookback', '5m', 'duration', 'alerts', 'Default lookback window for alert queries'),
-    ('alerts.history_limit', '50', 'number', 'alerts', 'Maximum number of alert history entries to keep per alert'),
-    ('alerts.alertmanager_url', '', 'string', 'alerts', 'Alertmanager endpoint URL for sending notifications'),
-    ('alerts.external_url', '', 'string', 'alerts', 'External URL for backend API access'),
-    ('alerts.frontend_url', '', 'string', 'alerts', 'Frontend URL for generating alert links in notifications'),
-    ('alerts.request_timeout', '5s', 'duration', 'alerts', 'Timeout for Alertmanager HTTP requests'),
-    ('alerts.tls_insecure_skip_verify', 'false', 'boolean', 'alerts', 'Skip TLS certificate verification for Alertmanager');
-
--- Insert default settings for AI
-INSERT INTO system_settings (key, value, value_type, category, description, is_sensitive) VALUES
-    ('ai.enabled', 'false', 'boolean', 'ai', 'Enable or disable AI-assisted SQL generation', 0),
-    ('ai.api_key', '', 'string', 'ai', 'OpenAI API key or compatible provider key', 1),
-    ('ai.base_url', '', 'string', 'ai', 'Base URL for OpenAI-compatible API (empty for default OpenAI)', 0),
-    ('ai.model', 'gpt-4o', 'string', 'ai', 'AI model to use for SQL generation', 0),
-    ('ai.max_tokens', '1024', 'number', 'ai', 'Maximum tokens to generate in AI responses', 0),
-    ('ai.temperature', '0.1', 'number', 'ai', 'Temperature for generation (0.0-1.0, lower is more deterministic)', 0);
-
--- Insert default settings for auth session management
-INSERT INTO system_settings (key, value, value_type, category, description) VALUES
-    ('auth.session_duration', '8h', 'duration', 'auth', 'Duration of user sessions before expiration'),
-    ('auth.max_concurrent_sessions', '1', 'number', 'auth', 'Maximum number of concurrent sessions per user'),
-    ('auth.default_token_expiry', '2160h', 'duration', 'auth', 'Default expiration for API tokens (90 days)');
-
--- Insert default settings for server
-INSERT INTO system_settings (key, value, value_type, category, description) VALUES
-    ('server.frontend_url', '', 'string', 'server', 'URL of the frontend application for CORS configuration');
+-- No default values are inserted here. On first boot, app.seedSystemSettings() will:
+-- 1. Check if the table is empty
+-- 2. If empty, seed values from config.toml (if provided)
+-- 3. If config.toml doesn't specify values, use built-in defaults
+-- 4. After first boot, settings are managed via Admin Settings UI

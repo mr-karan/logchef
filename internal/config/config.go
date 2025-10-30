@@ -171,18 +171,9 @@ func Load(path string) (*Config, error) {
                 return nil, fmt.Errorf("redirect_url is required in OIDC configuration (either in file or %sOIDC__REDIRECT_URL)", envPrefix)
         }
 
-        if cfg.Alerts.EvaluationInterval <= 0 {
-                cfg.Alerts.EvaluationInterval = time.Minute
-        }
-        if cfg.Alerts.DefaultLookback <= 0 {
-                cfg.Alerts.DefaultLookback = 5 * time.Minute
-        }
-        if cfg.Alerts.RequestTimeout <= 0 {
-                cfg.Alerts.RequestTimeout = 5 * time.Second
-        }
-        if cfg.Alerts.HistoryLimit <= 0 {
-                cfg.Alerts.HistoryLimit = 50
-        }
+	// Non-essential configuration fields (alerts, AI, auth sessions) are optional in config.toml.
+	// They will be seeded from config.toml to the database on first boot, and can be managed via UI afterwards.
+	// If not specified in config.toml, database migration defaults will be used.
 
 	// Validate Alertmanager URL if provided
 	if cfg.Alerts.AlertmanagerURL != "" {
