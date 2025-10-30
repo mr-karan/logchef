@@ -55,7 +55,7 @@ level = "debug"
 enabled = true
 # API endpoint
 # Base URL for OpenAI API (leave empty for default OpenAI endpoint)
-base_url = "https://openrouter.ai/api/v1"
+base_url = "https://api.openai.com/v1"
 # OpenAI API key for AI SQL generation
 api_key = ""
 # Model parameters

@@ -65,7 +65,7 @@ level = "info"  # Options: debug, info, warn, error
 # Uncomment to enable AI features
 # [ai]
 # enabled = false
-# base_url = ""  # Leave empty for default OpenAI endpoint, or use OpenAI-compatible API
+# base_url = ""  # Leave empty for default OpenAI endpoint (https://api.openai.com/v1), or use OpenAI-compatible API
 # api_key = ""   # OpenAI API key or compatible provider key
 # model = "gpt-4o"
 # max_tokens = 1024
