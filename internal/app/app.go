@@ -85,6 +85,11 @@ func (a *App) Initialize(ctx context.Context) error {
 		a.Logger.Warn("failed to seed system settings from config", "error", err)
 	}
 
+	// Load runtime configuration: merge static config.toml with database settings.
+	// Database settings override config.toml for non-essential settings.
+	a.Config = config.LoadRuntimeConfig(ctx, a.Config, a.SQLite)
+	a.Logger.Info("runtime configuration loaded from database and config.toml")
+
 	// Initialize ClickHouse connection manager.
 	a.ClickHouse = clickhouse.NewManager(a.Logger)
 
