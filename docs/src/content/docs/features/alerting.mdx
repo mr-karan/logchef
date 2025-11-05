@@ -139,9 +139,26 @@ WHERE namespace = 'production'
 
 ## Configuration
 
-### LogChef Configuration
+### Admin Settings UI
 
-Enable and configure alerting in your `config.toml`:
+Alerting is configured through the **Administration → System Settings → Alerts** tab in the web interface. This provides a user-friendly way to manage all alert settings without editing configuration files.
+
+**Available Settings:**
+- **Enabled**: Toggle alert evaluation on/off
+- **Alertmanager URL**: Endpoint for sending alerts
+  - Test connectivity with the built-in health check button
+  - Supports HTTP Basic Auth: `https://username:password@alertmanager.example.com`
+- **Evaluation Interval**: How often to evaluate all alerts
+- **Default Lookback**: Default time range for alert queries
+- **History Limit**: Number of historical events to keep per alert
+- **External URL**: Backend URL for API access
+- **Frontend URL**: Frontend URL for web UI links in alert notifications
+- **Request Timeout**: HTTP timeout for Alertmanager requests
+- **TLS Insecure Skip Verify**: Skip TLS certificate verification (development only)
+
+### Initial Configuration (First Boot)
+
+On first boot, you can optionally seed alert settings from `config.toml`. After first boot, all changes must be made via the Admin Settings UI:
 
 ```toml
 [alerts]
@@ -172,6 +189,43 @@ request_timeout = "5s"
 # Skip TLS certificate verification (for development only)
 tls_insecure_skip_verify = false
 ```
+
+**Note:** After first boot, changes to `[alerts]` in `config.toml` are ignored. Use the Admin Settings UI to modify alert configuration.
+
+### Alertmanager Authentication
+
+If your Alertmanager requires authentication, include credentials in the URL using HTTP Basic Auth:
+
+**Format:**
+```
+https://username:password@alertmanager.example.com
+```
+
+**Examples:**
+```
+# Basic authentication
+https://admin:secretpass@alertmanager.internal:9093
+
+# URL-encoded special characters in password
+https://admin:my%40pass%3A123@alertmanager.internal:9093
+```
+
+**Special character encoding:**
+- `@` → `%40`
+- `:` → `%3A`
+- `#` → `%23`
+- `%` → `%25`
+- Space → `%20`
+
+### Testing Connectivity
+
+Before saving Alertmanager configuration, use the **Test Connection** button in the Admin Settings UI to verify:
+- Alertmanager is reachable
+- Authentication credentials are correct
+- Network connectivity is working
+- TLS certificates are valid (or properly skipped)
+
+The health check calls Alertmanager's `/api/v2/status` endpoint and reports success or detailed error messages.
 
 ### Alertmanager Configuration
 

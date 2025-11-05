@@ -3,7 +3,30 @@ title: Configuration
 description: Configure LogChef to match your environment
 ---
 
-LogChef uses a TOML configuration file to manage its settings. This guide explains all available configuration options.
+LogChef uses a minimal TOML configuration file for bootstrap settings, with runtime configuration managed through the Admin Settings UI. This guide explains the essential configuration options and how to manage non-essential settings through the web interface.
+
+## Configuration Architecture
+
+LogChef separates configuration into two categories:
+
+**Essential (Bootstrap) Settings** - Required in `config.toml`:
+- Server connection details (port, host)
+- SQLite database path
+- OIDC authentication credentials
+- Admin user emails and API token secrets
+- Logging configuration
+
+**Runtime Settings** - Managed via Admin Settings UI:
+- Alerting configuration (Alertmanager URL, intervals, timeouts)
+- AI/LLM settings (API keys, models, endpoints)
+- Session management (duration, concurrency)
+- Frontend URL for CORS
+
+On first boot, LogChef seeds the database with values from `config.toml`. After that, runtime settings are stored in the database and managed through the Admin Settings UI at **Administration → System Settings**.
+
+## Essential Configuration
+
+These settings must be present in `config.toml` for LogChef to start:
 
 ## Server Settings
 
@@ -70,15 +93,15 @@ Configure authentication behavior:
 
 ```toml
 [auth]
-# List of email addresses that have admin privileges
+# List of email addresses that have admin privileges (required)
 admin_emails = ["admin@corp.internal"]
 
-# Duration of user sessions (e.g., "8h", "24h", "7d")
-session_duration = "8h"
-
-# Maximum number of concurrent sessions per user
-max_concurrent_sessions = 1
+# Secret key for API token hashing (required, min 32 characters)
+# Generate with: openssl rand -hex 32
+api_token_secret = "your-secret-key-minimum-32-characters-long"
 ```
+
+**Note:** Session duration, concurrent session limits, and default token expiry are managed via the Admin Settings UI under Authentication settings.
 
 ## Logging
 
@@ -90,106 +113,73 @@ Configure application logging:
 level = "info"
 ```
 
-## AI SQL Generation
+## Runtime Configuration (Admin Settings UI)
 
-Configure settings for AI-powered SQL generation using OpenAI-compatible APIs.
+The following settings are managed through the web interface at **Administration → System Settings** after first boot. You can optionally set initial values in `config.toml` which will be seeded to the database on first boot.
 
-```toml
-[ai]
-# Enable or disable AI features (default: false)
-enabled = true
+### AI SQL Generation
 
-# --- API Endpoint Configuration ---
-# Optional: Base URL for OpenAI-compatible endpoints
-# Leave empty for standard OpenAI API
-# Examples:
-# - OpenRouter: "https://openrouter.ai/api/v1"
-# - Azure OpenAI: "https://your-resource.openai.azure.com/"
-# - Custom proxy: "https://your-proxy.com/v1"
-base_url = ""
+Configure AI-powered SQL generation through the Admin Settings UI:
 
-# OpenAI API Key (required if AI features are enabled)
-# Can also be set via LOGCHEF_AI__API_KEY environment variable
-api_key = "sk-your_api_key_here"
+**Settings available:**
+- **Enabled**: Enable/disable AI features
+- **API Key**: OpenAI API key (marked as sensitive, hidden in UI)
+- **Base URL**: OpenAI-compatible API endpoint (default: https://api.openai.com/v1)
+- **Model**: Model name (e.g., "gpt-4o", "gpt-4o-mini")
+- **Max Tokens**: Maximum tokens to generate (default: 1024)
+- **Temperature**: Generation temperature 0.0-1.0 (default: 0.1)
 
-# --- Model Parameters ---
-# Model to use for SQL generation (default: "gpt-4o")
-# Popular options: "gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"
-# For OpenRouter: model names like "openai/gpt-4o", "anthropic/claude-3-sonnet"
-model = "gpt-4o"
-
-# Maximum number of tokens to generate (default: 1024)
-max_tokens = 1024
-
-# Temperature for generation (0.0-1.0, lower is more deterministic, default: 0.1)
-temperature = 0.1
-```
-
-### Supported Providers
-
-The AI integration works with any OpenAI-compatible API:
-
-- **OpenAI**: Leave `base_url` empty (default)
-- **OpenRouter**: Set `base_url = "https://openrouter.ai/api/v1"`
+**Supported Providers:**
+- **OpenAI**: Use default base URL (https://api.openai.com/v1)
+- **OpenRouter**: Set base URL to "https://openrouter.ai/api/v1"
 - **Azure OpenAI**: Configure your Azure endpoint
 - **Local Models**: Point to your local OpenAI-compatible server
 
-### API Token Requirements
+**Optional `config.toml` seeding (first boot only):**
+```toml
+[ai]
+enabled = false
+base_url = "https://api.openai.com/v1"
+api_key = ""  # Set via Admin UI after first boot
+model = "gpt-4o"
+max_tokens = 1024
+temperature = 0.1
+```
 
-Your API token needs appropriate permissions for the model you're using. For OpenRouter, make sure your token has access to the specific model.
+**Note:** After first boot, changes to `[ai]` section in `config.toml` are ignored. Manage settings via the UI.
 
-### Security Considerations
+### Alerting
 
-- Store API keys in environment variables for production
-- Use the least privileged API tokens possible
-- Monitor API usage and costs
-- Consider rate limiting for high-traffic deployments
+Configure real-time log monitoring with Alertmanager integration through the Admin Settings UI.
 
-## Alerting
+**Settings available:**
+- **Enabled**: Enable/disable alert evaluation and delivery
+- **Alertmanager URL**: Prometheus Alertmanager endpoint
+  - Supports HTTP Basic Auth: `https://username:password@alertmanager.example.com`
+  - Includes health check button to test connectivity
+- **Evaluation Interval**: How often to check all active alerts (e.g., "1m")
+- **Default Lookback**: Default time range for alert queries (e.g., "5m")
+- **History Limit**: Number of historical events to keep per alert (default: 50)
+- **External URL**: Backend URL for API access
+- **Frontend URL**: Frontend URL for web UI links in notifications
+- **Request Timeout**: Alertmanager HTTP request timeout (default: "5s")
+- **TLS Insecure Skip Verify**: Skip TLS cert verification (dev only)
 
-Configure real-time log monitoring with Alertmanager integration. See the [alerting documentation](/features/alerting) for complete details.
-
+**Optional `config.toml` seeding (first boot only):**
 ```toml
 [alerts]
-# Enable alert evaluation and delivery (default: false)
-enabled = true
-
-# How often to evaluate all alerts (default: 1m)
+enabled = false
 evaluation_interval = "1m"
-
-# Default lookback window if not specified in alert (default: 5m)
 default_lookback = "5m"
-
-# Maximum alert history entries to keep per alert (default: 50)
 history_limit = 50
-
-# Alertmanager API endpoint (required if alerts.enabled = true)
-alertmanager_url = "http://alertmanager:9093"
-
-# Backend URL for API access (used for fallback)
-external_url = "http://localhost:8125"
-
-# Frontend URL for web UI generator links
-frontend_url = "http://localhost:5173"
-
-# HTTP request timeout for Alertmanager communication (default: 5s)
+alertmanager_url = ""
+external_url = ""
+frontend_url = ""
 request_timeout = "5s"
-
-# Skip TLS certificate verification (for development only, default: false)
 tls_insecure_skip_verify = false
 ```
 
-### Alerting Configuration Details
-
-- **enabled**: Controls whether the alert manager runs background evaluations
-- **evaluation_interval**: How frequently to check all active alerts
-- **default_lookback**: Default time range for alert queries (can be overridden per alert)
-- **history_limit**: Number of historical events to keep per alert for audit trail
-- **alertmanager_url**: Prometheus Alertmanager endpoint for sending alerts
-- **external_url**: Backend URL used as fallback for generator links
-- **frontend_url**: Frontend URL used in generator links (Alertmanager UI → LogChef)
-- **request_timeout**: Maximum time to wait for Alertmanager responses
-- **tls_insecure_skip_verify**: Only enable for development/testing environments
+**Note:** After first boot, manage all alert settings via **Administration → System Settings → Alerts**. The health check button allows you to test Alertmanager connectivity before saving.
 
 For alert configuration examples, notification setup, and best practices, see the [alerting feature guide](/features/alerting).
 
@@ -247,7 +237,9 @@ For production deployments, ensure you:
 8. If using alerting, configure Alertmanager and set `frontend_url` for correct generator links
 9. Enable TLS for Alertmanager communication in production
 
-## Example Production Configuration
+## Minimal Production Configuration
+
+This example shows the **essential configuration** required to run LogChef. All other settings (AI, alerting, sessions) are managed via the Admin Settings UI.
 
 ```toml
 [server]
@@ -267,28 +259,19 @@ scopes = ["openid", "email", "profile"]
 
 [auth]
 admin_emails = ["admin@example.com"]
-session_duration = "8h"
-max_concurrent_sessions = 1
+api_token_secret = "your-secret-key-minimum-32-characters-long"
 
 [logging]
 level = "info"
-
-# AI features configuration (API key should be set via env var)
-[ai]
-enabled = true
-# base_url = ""  # Leave empty for OpenAI, or set for other providers
-# api_key = ""   # Use LOGCHEF_AI__API_KEY environment variable
-model = "gpt-4o"
-max_tokens = 1024
-temperature = 0.1
-
-# Alerting configuration (configure Alertmanager separately)
-[alerts]
-enabled = true
-evaluation_interval = "1m"
-alertmanager_url = "https://alertmanager.example.com"
-external_url = "https://api.logchef.example.com"
-frontend_url = "https://logchef.example.com"
-request_timeout = "5s"
-tls_insecure_skip_verify = false
 ```
+
+**After deployment:**
+1. Login as admin user
+2. Navigate to **Administration → System Settings**
+3. Configure:
+   - **AI** tab: Enable AI features and add API key
+   - **Alerts** tab: Configure Alertmanager URL and settings
+   - **Authentication** tab: Set session duration and limits
+   - **Server** tab: Set frontend URL if needed
+
+See [config.sample.toml](https://github.com/mr-karan/logchef/blob/main/config.sample.toml) for a complete minimal configuration example.
