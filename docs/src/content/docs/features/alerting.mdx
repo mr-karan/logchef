@@ -9,6 +9,50 @@ LogChef provides a powerful alerting system that continuously evaluates your log
 
 The alerting system is designed for production use with built-in reliability features including retry logic, delivery failure tracking, and comprehensive error handling.
 
+## Understanding the Alert Flow
+
+**What you do in LogChef:**
+1. Create an alert with a SQL query and threshold (e.g., "error count > 100")
+2. LogChef evaluates your query every X seconds (you set the frequency)
+3. When threshold is exceeded, LogChef sends the alert to Alertmanager
+
+**What Alertmanager does:**
+1. Receives alerts from LogChef
+2. Groups similar alerts together (e.g., all critical alerts from your team)
+3. Routes alerts to notification channels based on your Alertmanager configuration
+4. Sends notifications to Slack, PagerDuty, email, webhooks, etc.
+
+**Important to understand:**
+- **LogChef creates and evaluates alerts** - You define what to monitor and when to alert
+- **Alertmanager handles notifications** - It decides where notifications go and how they're grouped
+- **You configure Slack/PagerDuty in Alertmanager** - Not in LogChef
+- **LogChef shows alert history** - You can see when alerts fired and their values in the UI
+
+This separation means you can change notification channels (add Slack, remove email, etc.) without touching your alert definitions in LogChef.
+
+### Quick Example
+
+**Scenario:** You want to get notified on Slack when your API has more than 100 errors in 5 minutes.
+
+**In LogChef:**
+1. Navigate to your team/source
+2. Create alert: "High API Errors"
+3. Query: `SELECT count(*) FROM logs WHERE severity = 'ERROR' AND timestamp >= now() - INTERVAL 5 MINUTE`
+4. Threshold: Greater than 100
+5. Frequency: Every 60 seconds
+6. Save
+
+**In Alertmanager config:**
+```yaml
+receivers:
+  - name: 'slack-alerts'
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK'
+        channel: '#api-alerts'
+```
+
+**Result:** Every minute, LogChef checks error count. If > 100, it fires the alert to Alertmanager. Alertmanager sends a message to your Slack #api-alerts channel. You can see all firings in LogChef's alert history.
+
 <CardGrid stagger>
   <Card title="Alertmanager Integration" icon="siren">
     Native Prometheus Alertmanager support for battle-tested alert routing and notification delivery.
@@ -321,7 +365,23 @@ Custom annotations can be added for runbooks, dashboards, or documentation links
 }
 ```
 
-## Alert History
+## Viewing Alert Status and History
+
+### Where to Find Your Alerts
+
+**Alert List View:**
+- Navigate to your team → source → Alerts tab
+- See all alerts for that source
+- Status indicators show if alert is currently triggered
+- Quick access to edit, delete, or view history
+
+**Alert Detail Page:**
+- Click on any alert to see full details
+- **Edit tab**: Modify query, threshold, frequency
+- **History tab**: See all past evaluations and firings
+- Test query before saving changes
+
+### Alert History
 
 LogChef maintains a complete history of all alert evaluations including:
 
@@ -330,11 +390,20 @@ LogChef maintains a complete history of all alert evaluations including:
 - **Error Events**: Query failures or evaluation errors
 - **Delivery Status**: Whether alerts successfully reached Alertmanager
 
-Access alert history through the web UI to investigate:
-- Why an alert fired
-- How long it stayed active
-- Previous occurrences and patterns
-- Delivery failures and retries
+**What you can see in history:**
+- **Timestamp**: When the alert was evaluated
+- **Status**: triggered, resolved, or error
+- **Value**: The actual metric value from your query
+- **Delivery Status**: Success or failure with error details
+- **Duration**: How long the alert was active (for triggered alerts)
+
+Use alert history to:
+- Investigate why an alert fired
+- See the actual query result that triggered the alert
+- Check how long conditions persisted
+- Review previous occurrences and patterns
+- Debug delivery failures to Alertmanager
+- Verify alerts are evaluating correctly
 
 ## Reliability Features
 
