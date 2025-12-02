@@ -22,8 +22,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAlertsStore } from "@/stores/alerts";
+import { useSourcesStore } from "@/stores/sources";
 import { alertsApi } from "@/api/alerts";
+import { parseAndTranslateLogchefQL } from "@/utils/logchefql/api";
 import type { Alert, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryResponse } from "@/api/alerts";
 
 const props = withDefaults(defineProps<{
@@ -44,12 +47,18 @@ const emit = defineEmits<{
 }>();
 
 const alertsStore = useAlertsStore();
+const sourcesStore = useSourcesStore();
+
+// Get current source table name for SQL generation
+const currentTableName = computed(() => sourcesStore.getCurrentSourceTableName || "logs");
 
 const form = reactive({
   name: "",
   description: "",
-  query_type: "sql" as Alert["query_type"],
+  query_type: "condition" as Alert["query_type"], // Default to LogChefQL mode
   query: "",
+  condition_json: "", // LogChefQL condition string
+  aggregate_function: "count" as "count" | "sum" | "avg" | "min" | "max",
   lookback_seconds: 300,
   threshold_operator: "gt" as Alert["threshold_operator"],
   threshold_value: 1,
@@ -60,6 +69,62 @@ const form = reactive({
   annotations: [] as Array<{ id: number; key: string; value: string }>,
 });
 
+// LogChefQL validation state
+const conditionError = ref<string | null>(null);
+
+// Get source details for schema-aware parsing (same pattern as explore page)
+const sourceDetails = computed(() => sourcesStore.currentSourceDetails);
+const timestampField = computed(() => sourceDetails.value?.timestamp_field || "timestamp");
+
+// Schema for type-aware SQL generation (same as explore page)
+const schema = computed(() => {
+  if (!sourceDetails.value?.columns) return undefined;
+  return {
+    columns: sourceDetails.value.columns.map(col => ({ name: col.name, type: col.type }))
+  };
+});
+
+// Generate ClickHouse lookback expression based on lookback_seconds
+const lookbackExpression = computed(() => {
+  const seconds = form.lookback_seconds || 300;
+  return `now() - toIntervalSecond(${seconds})`;
+});
+
+// Validate LogChefQL condition and generate SQL using existing parseAndTranslateLogchefQL
+const generatedSQL = computed(() => {
+  if (form.query_type !== "condition" || !form.condition_json.trim()) {
+    conditionError.value = null;
+    return "";
+  }
+
+  // Use the existing parseAndTranslateLogchefQL function with schema (same as explore page)
+  const result = parseAndTranslateLogchefQL(form.condition_json, schema.value);
+  
+  if (!result.success) {
+    conditionError.value = result.error || "Invalid condition";
+    return "";
+  }
+  conditionError.value = null;
+
+  // Build the full SQL query with aggregate function and lookback (WYSIWYG - actual ClickHouse expression)
+  const aggFunc = form.aggregate_function === "count" ? "count(*)" : `${form.aggregate_function}(value)`;
+  const tableName = currentTableName.value;
+  const tsField = timestampField.value;
+  
+  // Construct WHERE clause: LogChefQL conditions + time filter with actual expression
+  let whereClause = result.sql ? `(${result.sql})` : "1=1";
+  whereClause += ` AND \`${tsField}\` >= ${lookbackExpression.value}`;
+  
+  return `SELECT ${aggFunc} as value\nFROM ${tableName}\nWHERE ${whereClause}`;
+});
+
+// Sync generated SQL to query field when using condition mode
+watch(generatedSQL, (sql) => {
+  if (form.query_type === "condition" && sql) {
+    form.query = sql;
+  }
+});
+
 const labelCounter = ref(0);
 const annotationCounter = ref(0);
 
@@ -67,51 +132,102 @@ const testQueryResult = ref<TestAlertQueryResponse | null>(null);
 const isTestingQuery = ref(false);
 const testQueryError = ref<string | null>(null);
 
-const queryTemplates = [
-  {
-    name: "High Error Count",
-    description: "Alert when error count exceeds threshold in time window",
-    queryType: "sql" as const,
-    query: `SELECT count(*) as value
-FROM logs
+// SQL query templates - functions that generate queries with actual lookback expression
+function getQueryTemplates() {
+  const tableName = currentTableName.value;
+  const tsField = timestampField.value;
+  const lookback = lookbackExpression.value;
+  
+  return [
+    {
+      name: "High Error Count",
+      description: "Alert when error count exceeds threshold in lookback window",
+      queryType: "sql" as const,
+      query: `SELECT count(*) as value
+FROM ${tableName}
 WHERE severity = 'ERROR'
-  AND timestamp >= now() - INTERVAL 5 MINUTE`,
+  AND \`${tsField}\` >= ${lookback}`,
+    },
+    {
+      name: "Critical Logs",
+      description: "Alert on any critical severity logs",
+      queryType: "sql" as const,
+      query: `SELECT count(*) as value
+FROM ${tableName}
+WHERE severity = 'CRITICAL'
+  AND \`${tsField}\` >= ${lookback}`,
+    },
+    {
+      name: "High Response Time",
+      description: "Alert when average response time is high",
+      queryType: "sql" as const,
+      query: `SELECT avg(response_time) as value
+FROM ${tableName}
+WHERE \`${tsField}\` >= ${lookback}`,
+    },
+    {
+      name: "Failed Requests",
+      description: "Alert on HTTP 5xx status codes",
+      queryType: "sql" as const,
+      query: `SELECT count(*) as value
+FROM ${tableName}
+WHERE status_code >= 500
+  AND \`${tsField}\` >= ${lookback}`,
+    },
+    {
+      name: "Low Success Rate",
+      description: "Alert when success rate drops below threshold",
+      queryType: "sql" as const,
+      query: `SELECT (countIf(status_code < 400) * 100.0 / count(*)) as value
+FROM ${tableName}
+WHERE \`${tsField}\` >= ${lookback}`,
+    },
+  ];
+}
+
+const queryTemplates = computed(() => getQueryTemplates());
+
+// LogChefQL condition templates - simpler filter expressions
+const conditionTemplates = [
+  {
+    name: "Error Logs",
+    description: "Match logs with ERROR severity",
+    condition: `severity = "ERROR"`,
+    aggregate: "count" as const,
   },
   {
     name: "Critical Logs",
-    description: "Alert on any critical severity logs",
-    queryType: "sql" as const,
-    query: `SELECT count(*) as value
-FROM logs
-WHERE severity = 'CRITICAL'
-  AND timestamp >= now() - INTERVAL 5 MINUTE`,
+    description: "Match logs with CRITICAL severity",
+    condition: `severity = "CRITICAL"`,
+    aggregate: "count" as const,
   },
   {
-    name: "High Response Time",
-    description: "Alert when average response time is high",
-    queryType: "sql" as const,
-    query: `SELECT avg(response_time) as value
-FROM logs
-WHERE timestamp >= now() - INTERVAL 5 MINUTE`,
+    name: "Server Errors",
+    description: "Match HTTP 5xx status codes",
+    condition: `status_code >= 500`,
+    aggregate: "count" as const,
   },
   {
-    name: "Failed Requests",
-    description: "Alert on HTTP 5xx status codes",
-    queryType: "sql" as const,
-    query: `SELECT count(*) as value
-FROM logs
-WHERE status_code >= 500
-  AND timestamp >= now() - INTERVAL 5 MINUTE`,
+    name: "Slow Requests",
+    description: "Match requests taking over 1 second",
+    condition: `response_time > 1000`,
+    aggregate: "count" as const,
   },
   {
-    name: "Low Success Rate",
-    description: "Alert when success rate drops below threshold",
-    queryType: "sql" as const,
-    query: `SELECT (countIf(status_code < 400) * 100.0 / count(*)) as value
-FROM logs
-WHERE timestamp >= now() - INTERVAL 5 MINUTE`,
+    name: "Error Messages",
+    description: "Match logs containing 'error' in the message",
+    condition: `message ~ "error"`,
+    aggregate: "count" as const,
   },
 ];
+
+function applyConditionTemplate(template: typeof conditionTemplates[0]) {
+  form.condition_json = template.condition;
+  form.aggregate_function = template.aggregate;
+  testQueryResult.value = null;
+  testQueryError.value = null;
+  conditionError.value = null;
+}
 
 const isSubmitting = computed(() => {
   if (props.mode === "create") {
@@ -123,13 +239,19 @@ const isSubmitting = computed(() => {
 const isDisabled = computed(() => !props.teamId || !props.sourceId || isSubmitting.value);
 
 const isValid = computed(() => {
-  return (
-    !!form.name.trim() &&
-    !!form.query.trim() &&
-    form.threshold_value !== undefined &&
-    form.frequency_seconds > 0 &&
-    form.lookback_seconds > 0
-  );
+  const hasName = !!form.name.trim();
+  const hasThreshold = form.threshold_value !== undefined;
+  const hasFrequency = form.frequency_seconds > 0;
+  const hasLookback = form.lookback_seconds > 0;
+  
+  // For condition mode, check if condition is valid and generates SQL
+  if (form.query_type === "condition") {
+    return hasName && hasThreshold && hasFrequency && hasLookback && 
+           !!form.condition_json.trim() && !conditionError.value && !!generatedSQL.value;
+  }
+  
+  // For SQL mode, just check if query is not empty
+  return hasName && !!form.query.trim() && hasThreshold && hasFrequency && hasLookback;
 });
 
 function addLabel() {
@@ -157,11 +279,14 @@ function removeAnnotation(id: number) {
 function resetForm(alert: Alert | null) {
   testQueryResult.value = null;
   testQueryError.value = null;
+  conditionError.value = null;
   if (!alert) {
     form.name = "";
     form.description = "";
-    form.query_type = "sql";
+    form.query_type = "condition"; // Default to LogChefQL mode
     form.query = "";
+    form.condition_json = "";
+    form.aggregate_function = "count";
     form.lookback_seconds = 300;
     form.threshold_operator = "gt";
     form.threshold_value = 1;
@@ -178,6 +303,8 @@ function resetForm(alert: Alert | null) {
   form.description = alert.description ?? "";
   form.query_type = alert.query_type;
   form.query = alert.query;
+  form.condition_json = alert.condition_json ?? "";
+  form.aggregate_function = "count"; // Default, could be stored in condition_json if needed
   form.lookback_seconds = alert.lookback_seconds;
   form.threshold_operator = alert.threshold_operator;
   form.threshold_value = alert.threshold_value;
@@ -219,7 +346,7 @@ async function handleTestQuery() {
   }
 }
 
-function applyTemplate(template: typeof queryTemplates[0]) {
+function applyTemplate(template: ReturnType<typeof getQueryTemplates>[0]) {
   form.query_type = template.queryType;
   form.query = template.query;
   testQueryResult.value = null;
@@ -229,7 +356,9 @@ function applyTemplate(template: typeof queryTemplates[0]) {
 watch(
   () => props.alert,
   (alert) => {
-    if (props.mode === "edit") {
+    // For edit mode, always use the alert
+    // For create mode, use alert if provided (duplication case)
+    if (props.mode === "edit" || (props.mode === "create" && alert)) {
       resetForm(alert || null);
     }
   },
@@ -240,7 +369,8 @@ watch(
   () => props.open,
   (open) => {
     if (open) {
-      if (props.mode === "create") {
+      // Only reset to empty if creating fresh (not duplicating)
+      if (props.mode === "create" && !props.alert) {
         resetForm(null);
       }
     }
@@ -281,6 +411,7 @@ function handleSubmit() {
       description: form.description.trim(),
       query_type: form.query_type,
       query: form.query.trim(),
+      condition_json: form.query_type === "condition" ? form.condition_json.trim() : undefined,
       lookback_seconds: Number(form.lookback_seconds),
       threshold_operator: form.threshold_operator,
       threshold_value: Number(form.threshold_value),
@@ -308,6 +439,7 @@ function handleSubmit() {
     description: form.description.trim(),
     query_type: form.query_type,
     query: form.query.trim(),
+    condition_json: form.query_type === "condition" ? form.condition_json.trim() : undefined,
     lookback_seconds: Number(form.lookback_seconds),
     threshold_operator: form.threshold_operator,
     threshold_value: Number(form.threshold_value),
@@ -366,54 +498,151 @@ function handleSubmit() {
 
         <!-- Evaluation Query -->
         <section class="space-y-4 rounded-lg border bg-muted/20 p-5">
-          <div>
-            <h3 class="text-sm font-semibold">Evaluation query</h3>
-            <p class="text-xs text-muted-foreground mt-1">Write a SQL query that returns a single numeric value. Include time filters in your WHERE clause.</p>
-          </div>
-
-          <!-- Query Templates -->
-          <div class="space-y-2">
-            <Label for="query-template">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
-            <Select @update:model-value="(value: any) => applyTemplate(queryTemplates[parseInt(value)])">
-              <SelectTrigger id="query-template">
-                <SelectValue placeholder="Choose a template..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectLabel>Query Templates</SelectLabel>
-                  <SelectItem v-for="(template, index) in queryTemplates" :key="index" :value="String(index)">
-                    <div class="flex flex-col gap-0.5">
-                      <span class="font-medium">{{ template.name }}</span>
-                      <span class="text-xs text-muted-foreground">{{ template.description }}</span>
-                    </div>
-                  </SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div class="space-y-2">
-            <div class="flex items-center justify-between">
-              <Label for="alert-query">SQL Query</Label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                :disabled="!form.query.trim() || isDisabled || isTestingQuery"
-                @click="handleTestQuery"
-              >
-                {{ isTestingQuery ? "Testing..." : "Test Query" }}
-              </Button>
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h3 class="text-sm font-semibold">Evaluation query</h3>
+              <p class="text-xs text-muted-foreground mt-1">
+                {{ form.query_type === 'condition' 
+                  ? 'Write a simple filter condition. The time filter is auto-applied.' 
+                  : 'Write a SQL query that returns a single numeric value.' }}
+              </p>
             </div>
-            <Textarea
-              id="alert-query"
-              v-model="form.query"
-              placeholder="SELECT count(*) as value FROM logs WHERE severity = 'ERROR' AND timestamp >= now() - INTERVAL 5 MINUTE"
-              :rows="6"
-              :disabled="isDisabled"
-              class="font-mono text-sm resize-none"
-            />
+            <!-- Query Type Toggle -->
+            <Tabs :model-value="form.query_type" @update:model-value="(v: any) => form.query_type = v" class="w-auto">
+              <TabsList class="h-8">
+                <TabsTrigger value="condition" class="text-xs px-3 h-7">LogChefQL</TabsTrigger>
+                <TabsTrigger value="sql" class="text-xs px-3 h-7">SQL</TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
+
+          <!-- LogChefQL Mode -->
+          <template v-if="form.query_type === 'condition'">
+            <!-- Condition Templates -->
+            <div class="space-y-2">
+              <Label for="condition-template">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
+              <Select @update:model-value="(value: any) => applyConditionTemplate(conditionTemplates[parseInt(value)])">
+                <SelectTrigger id="condition-template">
+                  <SelectValue placeholder="Choose a template..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectLabel>Condition Templates</SelectLabel>
+                    <SelectItem v-for="(template, index) in conditionTemplates" :key="index" :value="String(index)">
+                      <div class="flex flex-col gap-0.5">
+                        <span class="font-medium">{{ template.name }}</span>
+                        <span class="text-xs text-muted-foreground">{{ template.description }}</span>
+                      </div>
+                    </SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <!-- Aggregate Function -->
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div class="space-y-2">
+                <Label for="aggregate-function">Aggregate function</Label>
+                <Select :model-value="form.aggregate_function" @update:model-value="(v: any) => form.aggregate_function = v">
+                  <SelectTrigger id="aggregate-function">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="count">count(*) - Count matching logs</SelectItem>
+                    <SelectItem value="sum">sum(value) - Sum of values</SelectItem>
+                    <SelectItem value="avg">avg(value) - Average value</SelectItem>
+                    <SelectItem value="min">min(value) - Minimum value</SelectItem>
+                    <SelectItem value="max">max(value) - Maximum value</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <!-- Condition Input -->
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <Label for="alert-condition">Filter condition</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  :disabled="!generatedSQL || isDisabled || isTestingQuery"
+                  @click="handleTestQuery"
+                >
+                  {{ isTestingQuery ? "Testing..." : "Test Query" }}
+                </Button>
+              </div>
+              <Input
+                id="alert-condition"
+                v-model="form.condition_json"
+                placeholder='severity = "ERROR" and status_code >= 500'
+                :disabled="isDisabled"
+                class="font-mono text-sm"
+              />
+              <p v-if="conditionError" class="text-xs text-destructive">{{ conditionError }}</p>
+              <p class="text-xs text-muted-foreground">
+                Examples: <code class="bg-muted px-1 rounded">severity = "ERROR"</code>, 
+                <code class="bg-muted px-1 rounded">status_code >= 500</code>, 
+                <code class="bg-muted px-1 rounded">message ~ "timeout"</code>
+              </p>
+            </div>
+
+            <!-- Generated SQL Preview -->
+            <div v-if="generatedSQL" class="space-y-2">
+              <Label class="text-xs text-muted-foreground">Generated SQL (read-only)</Label>
+              <pre class="bg-muted/50 border rounded-md p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap">{{ generatedSQL }}</pre>
+            </div>
+          </template>
+
+          <!-- SQL Mode -->
+          <template v-else>
+            <!-- Query Templates -->
+            <div class="space-y-2">
+              <Label for="query-template">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
+              <Select @update:model-value="(value: any) => applyTemplate(queryTemplates.value[parseInt(value)])">
+                <SelectTrigger id="query-template">
+                  <SelectValue placeholder="Choose a template..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectLabel>Query Templates</SelectLabel>
+                    <SelectItem v-for="(template, index) in queryTemplates" :key="index" :value="String(index)">
+                      <div class="flex flex-col gap-0.5">
+                        <span class="font-medium">{{ template.name }}</span>
+                        <span class="text-xs text-muted-foreground">{{ template.description }}</span>
+                      </div>
+                    </SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <Label for="alert-query">SQL Query</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  :disabled="!form.query.trim() || isDisabled || isTestingQuery"
+                  @click="handleTestQuery"
+                >
+                  {{ isTestingQuery ? "Testing..." : "Test Query" }}
+                </Button>
+              </div>
+              <Textarea
+                id="alert-query"
+                v-model="form.query"
+                :placeholder="`SELECT count(*) as value FROM ${currentTableName} WHERE severity = 'ERROR' AND \`${timestampField}\` >= ${lookbackExpression}`"
+                :rows="6"
+                :disabled="isDisabled"
+                class="font-mono text-sm resize-none"
+              />
+              <p class="text-xs text-muted-foreground">
+                Use a template above to auto-fill with the correct table, timestamp field, and lookback window.
+              </p>
+            </div>
+          </template>
 
           <!-- Test Query Results -->
           <div v-if="testQueryResult" class="rounded-lg border bg-background p-4 space-y-3">
@@ -636,54 +865,151 @@ function handleSubmit() {
 
     <!-- Evaluation Query -->
     <section class="space-y-4 rounded-lg border bg-muted/20 p-5">
-      <div>
-        <h3 class="text-sm font-semibold">Evaluation query</h3>
-        <p class="text-xs text-muted-foreground mt-1">Write a SQL query that returns a single numeric value. Include time filters in your WHERE clause.</p>
-      </div>
-
-      <!-- Query Templates -->
-      <div class="space-y-2">
-        <Label for="query-template-inline">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
-        <Select @update:model-value="(value: any) => applyTemplate(queryTemplates[parseInt(value)])">
-          <SelectTrigger id="query-template-inline">
-            <SelectValue placeholder="Choose a template..." />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectLabel>Query Templates</SelectLabel>
-              <SelectItem v-for="(template, index) in queryTemplates" :key="index" :value="String(index)">
-                <div class="flex flex-col gap-0.5">
-                  <span class="font-medium">{{ template.name }}</span>
-                  <span class="text-xs text-muted-foreground">{{ template.description }}</span>
-                </div>
-              </SelectItem>
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div class="space-y-2">
-        <div class="flex items-center justify-between">
-          <Label for="alert-query-inline">SQL Query</Label>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            :disabled="!form.query.trim() || isDisabled || isTestingQuery"
-            @click="handleTestQuery"
-          >
-            {{ isTestingQuery ? "Testing..." : "Test Query" }}
-          </Button>
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h3 class="text-sm font-semibold">Evaluation query</h3>
+          <p class="text-xs text-muted-foreground mt-1">
+            {{ form.query_type === 'condition' 
+              ? 'Write a simple filter condition. The time filter is auto-applied.' 
+              : 'Write a SQL query that returns a single numeric value.' }}
+          </p>
         </div>
-        <Textarea
-          id="alert-query-inline"
-          v-model="form.query"
-          placeholder="SELECT count(*) as value FROM logs WHERE severity = 'ERROR' AND timestamp >= now() - INTERVAL 5 MINUTE"
-          :rows="6"
-          :disabled="isDisabled"
-          class="font-mono text-sm resize-none"
-        />
+        <!-- Query Type Toggle -->
+        <Tabs :model-value="form.query_type" @update:model-value="(v: any) => form.query_type = v" class="w-auto">
+          <TabsList class="h-8">
+            <TabsTrigger value="condition" class="text-xs px-3 h-7">LogChefQL</TabsTrigger>
+            <TabsTrigger value="sql" class="text-xs px-3 h-7">SQL</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
+
+      <!-- LogChefQL Mode -->
+      <template v-if="form.query_type === 'condition'">
+        <!-- Condition Templates -->
+        <div class="space-y-2">
+          <Label for="condition-template-inline">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
+          <Select @update:model-value="(value: any) => applyConditionTemplate(conditionTemplates[parseInt(value)])">
+            <SelectTrigger id="condition-template-inline">
+              <SelectValue placeholder="Choose a template..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectLabel>Condition Templates</SelectLabel>
+                <SelectItem v-for="(template, index) in conditionTemplates" :key="index" :value="String(index)">
+                  <div class="flex flex-col gap-0.5">
+                    <span class="font-medium">{{ template.name }}</span>
+                    <span class="text-xs text-muted-foreground">{{ template.description }}</span>
+                  </div>
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <!-- Aggregate Function -->
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="space-y-2">
+            <Label for="aggregate-function-inline">Aggregate function</Label>
+            <Select :model-value="form.aggregate_function" @update:model-value="(v: any) => form.aggregate_function = v">
+              <SelectTrigger id="aggregate-function-inline">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="count">count(*) - Count matching logs</SelectItem>
+                <SelectItem value="sum">sum(value) - Sum of values</SelectItem>
+                <SelectItem value="avg">avg(value) - Average value</SelectItem>
+                <SelectItem value="min">min(value) - Minimum value</SelectItem>
+                <SelectItem value="max">max(value) - Maximum value</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <!-- Condition Input -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <Label for="alert-condition-inline">Filter condition</Label>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              :disabled="!generatedSQL || isDisabled || isTestingQuery"
+              @click="handleTestQuery"
+            >
+              {{ isTestingQuery ? "Testing..." : "Test Query" }}
+            </Button>
+          </div>
+          <Input
+            id="alert-condition-inline"
+            v-model="form.condition_json"
+            placeholder='severity = "ERROR" and status_code >= 500'
+            :disabled="isDisabled"
+            class="font-mono text-sm"
+          />
+          <p v-if="conditionError" class="text-xs text-destructive">{{ conditionError }}</p>
+          <p class="text-xs text-muted-foreground">
+            Examples: <code class="bg-muted px-1 rounded">severity = "ERROR"</code>, 
+            <code class="bg-muted px-1 rounded">status_code >= 500</code>, 
+            <code class="bg-muted px-1 rounded">message ~ "timeout"</code>
+          </p>
+        </div>
+
+        <!-- Generated SQL Preview -->
+        <div v-if="generatedSQL" class="space-y-2">
+          <Label class="text-xs text-muted-foreground">Generated SQL (read-only)</Label>
+          <pre class="bg-muted/50 border rounded-md p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap">{{ generatedSQL }}</pre>
+        </div>
+      </template>
+
+      <!-- SQL Mode -->
+      <template v-else>
+        <!-- Query Templates -->
+        <div class="space-y-2">
+          <Label for="query-template-inline">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
+          <Select @update:model-value="(value: any) => applyTemplate(queryTemplates.value[parseInt(value)])">
+            <SelectTrigger id="query-template-inline">
+              <SelectValue placeholder="Choose a template..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectLabel>Query Templates</SelectLabel>
+                <SelectItem v-for="(template, index) in queryTemplates" :key="index" :value="String(index)">
+                  <div class="flex flex-col gap-0.5">
+                    <span class="font-medium">{{ template.name }}</span>
+                    <span class="text-xs text-muted-foreground">{{ template.description }}</span>
+                  </div>
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <Label for="alert-query-inline">SQL Query</Label>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              :disabled="!form.query.trim() || isDisabled || isTestingQuery"
+              @click="handleTestQuery"
+            >
+              {{ isTestingQuery ? "Testing..." : "Test Query" }}
+            </Button>
+          </div>
+          <Textarea
+            id="alert-query-inline"
+            v-model="form.query"
+            :placeholder="`SELECT count(*) as value FROM ${currentTableName} WHERE severity = 'ERROR' AND \`${timestampField}\` >= ${lookbackExpression}`"
+            :rows="6"
+            :disabled="isDisabled"
+            class="font-mono text-sm resize-none"
+          />
+          <p class="text-xs text-muted-foreground">
+            Use a template above to auto-fill with the correct table, timestamp field, and lookback window.
+          </p>
+        </div>
+      </template>
 
       <!-- Test Query Results -->
       <div v-if="testQueryResult" class="rounded-lg border bg-background p-4 space-y-3">
@@ -857,7 +1183,7 @@ function handleSubmit() {
 
     <div class="flex items-center justify-end gap-2 pt-4">
       <Button type="submit" :disabled="!isValid || isDisabled">
-        {{ isSubmitting ? "Saving..." : "Save changes" }}
+        {{ isSubmitting ? "Saving..." : mode === "create" ? "Create alert" : "Save changes" }}
       </Button>
     </div>
   </form>

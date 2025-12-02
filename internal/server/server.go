@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
@@ -24,28 +25,30 @@ import (
 // ServerOptions holds the dependencies required to create a new Server instance.
 // This structure reflects the refactored approach using direct dependencies instead of services.
 type ServerOptions struct {
-	Config       *config.Config
-	SQLite       *sqlite.DB
-	ClickHouse   *clickhouse.Manager
-	OIDCProvider *auth.OIDCProvider // OIDC provider for authentication flows.
-	FS           http.FileSystem    // Filesystem for serving static assets (frontend).
-	Logger       *slog.Logger
-	BuildInfo    string
-	Version      string
+	Config        *config.Config
+	SQLite        *sqlite.DB
+	ClickHouse    *clickhouse.Manager
+	AlertsManager *alerts.Manager      // Alerts manager for manual resolution with Alertmanager notification.
+	OIDCProvider  *auth.OIDCProvider   // OIDC provider for authentication flows.
+	FS            http.FileSystem      // Filesystem for serving static assets (frontend).
+	Logger        *slog.Logger
+	BuildInfo     string
+	Version       string
 }
 
 // Server represents the core HTTP server, encapsulating the Fiber app instance
 // and necessary dependencies like database connections and configuration.
 type Server struct {
-	app          *fiber.App
-	config       *config.Config
-	sqlite       *sqlite.DB
-	clickhouse   *clickhouse.Manager
-	oidcProvider *auth.OIDCProvider // Handles OIDC authentication logic.
-	fs           http.FileSystem
-	log          *slog.Logger
-	buildInfo    string
-	version      string
+	app           *fiber.App
+	config        *config.Config
+	sqlite        *sqlite.DB
+	clickhouse    *clickhouse.Manager
+	alertsManager *alerts.Manager    // Alerts manager for manual resolution with Alertmanager notification.
+	oidcProvider  *auth.OIDCProvider // Handles OIDC authentication logic.
+	fs            http.FileSystem
+	log           *slog.Logger
+	buildInfo     string
+	version       string
 }
 
 // @title LogChef API
@@ -99,15 +102,16 @@ func New(opts ServerOptions) *Server {
 
 	// Create the Server instance, injecting dependencies.
 	s := &Server{
-		app:          app,
-		config:       opts.Config,
-		sqlite:       opts.SQLite,
-		clickhouse:   opts.ClickHouse,
-		oidcProvider: opts.OIDCProvider,
-		fs:           opts.FS,
-		log:          opts.Logger,
-		buildInfo:    opts.BuildInfo,
-		version:      opts.Version,
+		app:           app,
+		config:        opts.Config,
+		sqlite:        opts.SQLite,
+		clickhouse:    opts.ClickHouse,
+		alertsManager: opts.AlertsManager,
+		oidcProvider:  opts.OIDCProvider,
+		fs:            opts.FS,
+		log:           opts.Logger,
+		buildInfo:     opts.BuildInfo,
+		version:       opts.Version,
 	}
 
 	// Register all application routes.

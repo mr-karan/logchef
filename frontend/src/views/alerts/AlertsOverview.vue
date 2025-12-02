@@ -4,18 +4,18 @@ import { useRoute, useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import {
   BellRing,
-  CalendarClock,
   Clock3,
+  Copy,
   History,
   MoreHorizontal,
   Pencil,
   Plus,
   RefreshCcw,
   Trash2,
-  Users,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -132,6 +132,10 @@ function openHistory(alert: Alert) {
   router.push({ name: "AlertDetail", params: { alertID: alert.id }, query: { ...route.query, tab: "history" } });
 }
 
+function duplicateAlert(alert: Alert) {
+  router.push({ name: "AlertCreate", query: { ...route.query, duplicate: String(alert.id) } });
+}
+
 async function retryLoad() {
   if (!currentTeamId.value || !currentSourceId.value) return;
   await alertsStore.fetchAlerts(currentTeamId.value, currentSourceId.value);
@@ -182,9 +186,15 @@ function formatThreshold(alert: Alert) {
   return `${ops[alert.threshold_operator] || alert.threshold_operator} ${alert.threshold_value}`;
 }
 
-function formatRelativeTime(dateStr: string | null | undefined): string {
-  if (!dateStr) return "Never";
+function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatRelativeTime(dateStr: string | null | undefined): string {
+  if (!dateStr || dateStr === "") return "Never";
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return "Never";
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
@@ -194,12 +204,8 @@ function formatRelativeTime(dateStr: string | null | undefined): string {
   if (diffMins < 1) return "Just now";
   if (diffMins < 60) return `${diffMins}m ago`;
   if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffDays < 30) return `${diffDays}d ago`;
   return formatDate(dateStr);
-}
-
-function getDeliverySummary(_alert: Alert): string {
-  return "Alertmanager";
 }
 
 async function ensureDataLoaded() {
@@ -305,90 +311,92 @@ onMounted(async () => {
           <Table v-else>
             <TableHeader>
               <TableRow>
-                <TableHead class="w-[35%]">Name</TableHead>
-                <TableHead class="w-[15%]">Configuration</TableHead>
-                <TableHead class="w-[20%]">Delivery</TableHead>
-                <TableHead class="w-[15%]">Last Triggered</TableHead>
-                <TableHead class="w-[15%] text-right">Actions</TableHead>
+                <TableHead class="w-12">Active</TableHead>
+                <TableHead>Alert</TableHead>
+                <TableHead>Condition</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Last Triggered</TableHead>
+                <TableHead class="w-24 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow v-for="alert in alerts" :key="alert.id" :class="{ 'opacity-60': !alert.is_active }" class="group">
-                <TableCell class="py-4">
-                  <div class="flex items-start gap-3">
-                    <div class="flex-1 space-y-1 min-w-0">
-                      <div class="flex items-center gap-2">
-                        <router-link
-                          :to="{ name: 'AlertDetail', params: { alertID: alert.id }, query: route.query }"
-                          class="font-medium truncate hover:underline cursor-pointer"
-                        >
-                          {{ alert.name }}
-                        </router-link>
-                        <Badge :variant="mapSeverityVariant(alert.severity)" class="capitalize shrink-0">
-                          {{ alert.severity }}
-                        </Badge>
-                        <Badge v-if="!alert.is_active" variant="outline" class="shrink-0">Disabled</Badge>
-                      </div>
-                      <p v-if="alert.description" class="text-sm text-muted-foreground line-clamp-1">
-                        {{ alert.description }}
-                      </p>
+              <TableRow v-for="alert in alerts" :key="alert.id" :class="{ 'opacity-50': !alert.is_active }" class="group">
+                <!-- Active Toggle -->
+                <TableCell class="py-3">
+                  <Switch 
+                    :checked="alert.is_active" 
+                    @update:checked="toggleAlert(alert)"
+                    :title="alert.is_active ? 'Disable alert' : 'Enable alert'"
+                  />
+                </TableCell>
+                <!-- Alert Name & Description -->
+                <TableCell class="py-3">
+                  <div class="space-y-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <router-link
+                        :to="{ name: 'AlertDetail', params: { alertID: alert.id }, query: route.query }"
+                        class="font-medium hover:underline cursor-pointer"
+                      >
+                        {{ alert.name }}
+                      </router-link>
+                      <Badge :variant="mapSeverityVariant(alert.severity)" class="capitalize shrink-0 text-xs">
+                        {{ alert.severity }}
+                      </Badge>
                     </div>
+                    <p v-if="alert.description" class="text-sm text-muted-foreground line-clamp-1">
+                      {{ alert.description }}
+                    </p>
                   </div>
                 </TableCell>
-                <TableCell class="py-4">
-                  <div class="space-y-1 text-sm">
-                    <div class="flex items-center gap-1.5 font-medium tabular-nums">
-                      <span class="text-muted-foreground">{{ formatThreshold(alert) }}</span>
+                <!-- Condition: Threshold + Frequency -->
+                <TableCell class="py-3">
+                  <div class="text-sm space-y-0.5">
+                    <div class="font-mono text-xs bg-muted px-1.5 py-0.5 rounded inline-block">
+                      {{ formatThreshold(alert) }}
                     </div>
-                    <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <div class="text-xs text-muted-foreground flex items-center gap-1">
                       <Clock3 class="h-3 w-3" />
-                      <span>Every {{ formatFrequency(alert) }}</span>
+                      Every {{ formatFrequency(alert) }}
                     </div>
                   </div>
                 </TableCell>
-                <TableCell class="py-4">
+                <!-- Status: Firing/Resolved -->
+                <TableCell class="py-3">
                   <div class="flex items-center gap-2">
-                    <Users class="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span class="text-sm truncate" title="Alertmanager">
-                      {{ getDeliverySummary(alert) }}
-                    </span>
+                    <span 
+                      class="h-2 w-2 rounded-full shrink-0"
+                      :class="alert.last_state === 'firing' ? 'bg-red-500 animate-pulse' : 'bg-green-500'"
+                    />
+                    <span class="text-sm capitalize">{{ alert.last_state }}</span>
                   </div>
                 </TableCell>
-                <TableCell class="py-4">
+                <!-- Last Triggered -->
+                <TableCell class="py-3">
                   <div class="text-sm">
-                    <div class="font-medium">{{ formatRelativeTime(alert.last_triggered_at) }}</div>
-                    <div class="text-xs text-muted-foreground">{{ formatRelativeTime(alert.last_evaluated_at) }}</div>
+                    <div :class="alert.last_triggered_at ? 'font-medium' : 'text-muted-foreground'">
+                      {{ formatRelativeTime(alert.last_triggered_at) }}
+                    </div>
                   </div>
                 </TableCell>
-                <TableCell class="py-4 text-right">
-                  <div class="flex items-center justify-end gap-1">
-                    <Button variant="ghost" size="icon" class="h-8 w-8" @click="openEditForm(alert)" title="Edit alert">
+                <!-- Actions -->
+                <TableCell class="py-3 text-right">
+                  <div class="inline-flex items-center gap-0.5">
+                    <Button variant="ghost" size="icon" class="h-8 w-8" @click="openEditForm(alert)" title="Edit">
                       <Pencil class="h-4 w-4" />
-                      <span class="sr-only">Edit alert</span>
                     </Button>
-                    <Button variant="ghost" size="icon" class="h-8 w-8" @click="openHistory(alert)" title="View history">
+                    <Button variant="ghost" size="icon" class="h-8 w-8" @click="openHistory(alert)" title="History">
                       <History class="h-4 w-4" />
-                      <span class="sr-only">View history</span>
                     </Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger as-child>
                         <Button variant="ghost" size="icon" class="h-8 w-8">
                           <MoreHorizontal class="h-4 w-4" />
-                          <span class="sr-only">More actions</span>
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" class="w-48">
-                        <DropdownMenuItem @click="openEditForm(alert)">
-                          <Pencil class="mr-2 h-4 w-4" />
-                          Edit alert
-                        </DropdownMenuItem>
-                        <DropdownMenuItem @click="openHistory(alert)">
-                          <History class="mr-2 h-4 w-4" />
-                          View history
-                        </DropdownMenuItem>
-                        <DropdownMenuItem @click="toggleAlert(alert)">
-                          <CalendarClock class="mr-2 h-4 w-4" />
-                          {{ alert.is_active ? "Disable" : "Enable" }}
+                      <DropdownMenuContent align="end" class="w-40">
+                        <DropdownMenuItem @click="duplicateAlert(alert)">
+                          <Copy class="mr-2 h-4 w-4" />
+                          Duplicate
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem class="text-destructive focus:text-destructive" @click="confirmDelete(alert)">

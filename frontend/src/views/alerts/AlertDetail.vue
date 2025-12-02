@@ -44,12 +44,13 @@ const currentTeamId = computed(() => contextStore.teamId);
 const currentSourceId = computed(() => contextStore.sourceId);
 
 const historyEntries = computed(() => {
-  if (!alertHistoryStore.entriesByAlert) return [];
-  return alertHistoryStore.entriesByAlert[alertId.value] || [];
+  // Only return entries if they belong to the current alert
+  if (alertHistoryStore.currentAlertId !== alertId.value) return [];
+  return alertHistoryStore.entries;
 });
 
 const isLoadingHistory = computed(() => {
-  return alertHistoryStore.isLoadingOperation(`loadHistory-${currentTeamId.value}-${currentSourceId.value}-${alertId.value}`);
+  return alertHistoryStore.isLoadingOperation(`loadHistory-${alertId.value}`);
 });
 
 function mapSeverityVariant(severity: Alert["severity"]) {

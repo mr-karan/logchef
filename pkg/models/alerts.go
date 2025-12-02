@@ -148,4 +148,4 @@ type TestAlertQueryResponse struct {
 }
 
 // DefaultAlertHistoryLimit controls the number of history entries returned when unspecified.
-const DefaultAlertHistoryLimit = 50
+const DefaultAlertHistoryLimit = 100

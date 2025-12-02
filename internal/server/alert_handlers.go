@@ -133,11 +133,23 @@ func (s *Server) handleResolveAlert(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	if err := core.ResolveAlert(c.Context(), s.sqlite, s.log, alertID, strings.TrimSpace(req.Message)); err != nil {
-		if errors.Is(err, core.ErrAlertNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Alert is not active", models.NotFoundErrorType)
+	// Use the alerts manager to resolve, which also notifies Alertmanager
+	if s.alertsManager != nil {
+		if err := s.alertsManager.ManualResolve(c.Context(), alertID, strings.TrimSpace(req.Message)); err != nil {
+			if strings.Contains(err.Error(), "no active alert") {
+				return SendErrorWithType(c, fiber.StatusNotFound, "Alert is not active", models.NotFoundErrorType)
+			}
+			s.log.Error("failed to manually resolve alert", "alert_id", alertID, "error", err)
+			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve alert", models.GeneralErrorType)
 		}
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve alert", models.GeneralErrorType)
+	} else {
+		// Fallback to core.ResolveAlert if alerts manager is not available (shouldn't happen in practice)
+		if err := core.ResolveAlert(c.Context(), s.sqlite, s.log, alertID, strings.TrimSpace(req.Message)); err != nil {
+			if errors.Is(err, core.ErrAlertNotFound) {
+				return SendErrorWithType(c, fiber.StatusNotFound, "Alert is not active", models.NotFoundErrorType)
+			}
+			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve alert", models.GeneralErrorType)
+		}
 	}
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Alert resolved"})
 }

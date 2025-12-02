@@ -18,7 +18,7 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     currentAlertId: null,
     teamId: null,
     sourceId: null,
-    limit: 50,
+    limit: 100,
   });
 
   const entries = computed(() => state.data.value.entries);
@@ -66,7 +66,10 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
       };
       return { success: false, error };
     }
-    const payload: ResolveAlertRequest = { message };
+    return resolveAlert(teamId, sourceId, alertId, { message });
+  }
+
+  async function resolveAlert(teamId: number, sourceId: number, alertId: number, payload: ResolveAlertRequest) {
     return await state.withLoading(`resolveAlert-${alertId}`, async () => {
       return await state.callApi<{ message: string }>({
         apiCall: () => alertsApi.resolveAlert(teamId, sourceId, alertId, payload),
@@ -81,7 +84,7 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
               ...entry,
               status: "resolved",
               resolved_at: new Date().toISOString(),
-              message: message ?? entry.message ?? undefined,
+              message: payload.message ?? entry.message ?? undefined,
             });
           }
         },
@@ -99,6 +102,7 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     hasHistory,
     isLoadingOperation: state.isLoadingOperation,
     loadHistory,
+    resolveAlert,
     resolveCurrentAlert,
     setCurrentContext,
     setLimit,

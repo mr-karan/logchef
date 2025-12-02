@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import TeamSourceSelector from "@/views/explore/components/TeamSourceSelector.vu
 import { useAlertsStore } from "@/stores/alerts";
 import { useContextStore } from "@/stores/context";
 import { useSourcesStore } from "@/stores/sources";
-import type { CreateAlertRequest } from "@/api/alerts";
+import type { Alert, CreateAlertRequest } from "@/api/alerts";
 
 const router = useRouter();
 const route = useRoute();
@@ -18,6 +18,16 @@ const sourcesStore = useSourcesStore();
 
 const currentTeamId = computed(() => contextStore.teamId);
 const currentSourceId = computed(() => contextStore.sourceId);
+
+// For duplicating an existing alert
+const duplicateAlertId = computed(() => {
+  const id = route.query.duplicate;
+  return id ? Number(id) : null;
+});
+
+const alertToDuplicate = ref<Alert | null>(null);
+const isDuplicating = computed(() => duplicateAlertId.value !== null);
+
 async function ensureSourcesLoaded() {
   if (!currentTeamId.value) {
     return;
@@ -27,12 +37,38 @@ async function ensureSourcesLoaded() {
   }
 }
 
+async function loadAlertForDuplication() {
+  if (!duplicateAlertId.value || !currentTeamId.value || !currentSourceId.value) {
+    alertToDuplicate.value = null;
+    return;
+  }
+  // Find the alert in the store or fetch alerts first
+  if (!alertsStore.alerts.length) {
+    await alertsStore.fetchAlerts(currentTeamId.value, currentSourceId.value);
+  }
+  const found = alertsStore.alerts.find((a) => a.id === duplicateAlertId.value);
+  if (found) {
+    // Create a copy with modified name
+    alertToDuplicate.value = {
+      ...found,
+      id: 0, // Reset ID for new alert
+      name: `${found.name} (Copy)`,
+    };
+  }
+}
+
 onMounted(async () => {
   await ensureSourcesLoaded();
+  await loadAlertForDuplication();
 });
 
 watch([currentTeamId, currentSourceId], async () => {
   await ensureSourcesLoaded();
+  await loadAlertForDuplication();
+});
+
+watch(duplicateAlertId, async () => {
+  await loadAlertForDuplication();
 });
 
 async function handleCreate(payload: CreateAlertRequest) {
@@ -41,16 +77,19 @@ async function handleCreate(payload: CreateAlertRequest) {
   }
   const result = await alertsStore.createAlert(currentTeamId.value, currentSourceId.value, payload);
   if (result.success && result.data) {
+    // Remove the duplicate query param when navigating away
+    const { duplicate, ...restQuery } = route.query;
     router.push({
       name: "AlertDetail",
       params: { alertID: result.data.id },
-      query: route.query,
+      query: restQuery,
     });
   }
 }
 
 function handleCancel() {
-  router.push({ name: "AlertsOverview", query: route.query });
+  const { duplicate, ...restQuery } = route.query;
+  router.push({ name: "AlertsOverview", query: restQuery });
 }
 </script>
 
@@ -58,9 +97,14 @@ function handleCancel() {
   <div class="space-y-6">
     <div class="flex items-start justify-between gap-4">
       <div class="space-y-1">
-        <h1 class="text-2xl font-semibold tracking-tight">Create Alert</h1>
+        <h1 class="text-2xl font-semibold tracking-tight">
+          {{ isDuplicating ? "Duplicate Alert" : "Create Alert" }}
+        </h1>
         <p class="text-muted-foreground">
-          Configure an alert rule for the currently selected team and source.
+          {{ isDuplicating
+            ? "Create a new alert based on an existing configuration."
+            : "Configure an alert rule for the currently selected team and source."
+          }}
         </p>
       </div>
       <Button variant="outline" @click="handleCancel">Cancel</Button>
@@ -85,7 +129,7 @@ function handleCancel() {
           mode="create"
           :team-id="currentTeamId"
           :source-id="currentSourceId"
-          :alert="null"
+          :alert="alertToDuplicate"
           :open="true"
           @create="handleCreate"
           @cancel="handleCancel"

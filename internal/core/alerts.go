@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -361,17 +361,24 @@ func TestAlertQuery(ctx context.Context, db *sqlite.DB, ch *clickhouse.Manager, 
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}
 
-	// Extract numeric value from result
-	value, err := extractFirstNumericValue(result)
+	// Extract numeric value from result (handle no rows gracefully)
+	value, err := util.ExtractFirstNumeric(result)
+	var warnings []string
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract numeric value from result: %w", err)
+		// If no rows returned, allow test to succeed with value=0 and a warning
+		if len(result.Logs) == 0 {
+			warnings = append(warnings, "Query returned no rows. The alert will be evaluated when matching data exists. Using value 0 for threshold comparison.")
+			value = 0
+		} else {
+			return nil, fmt.Errorf("failed to extract numeric value from result: %w", err)
+		}
 	}
 
 	// Check if threshold would be met
 	thresholdMet := compareAlertThreshold(value, req.ThresholdValue, req.ThresholdOperator)
 
-	// Generate warnings
-	warnings := generateQueryWarnings(query, executionTime, result)
+	// Generate additional warnings
+	warnings = append(warnings, generateQueryWarnings(query, executionTime, result)...)
 
 	return &models.TestAlertQueryResponse{
 		Value:           value,
@@ -380,55 +387,6 @@ func TestAlertQuery(ctx context.Context, db *sqlite.DB, ch *clickhouse.Manager, 
 		RowsReturned:    len(result.Logs),
 		Warnings:        warnings,
 	}, nil
-}
-
-func extractFirstNumericValue(result *models.QueryResult) (float64, error) {
-	if result == nil || len(result.Logs) == 0 {
-		return 0, fmt.Errorf("query returned no rows")
-	}
-	row := result.Logs[0]
-	if len(result.Columns) == 0 {
-		return 0, fmt.Errorf("query returned no columns")
-	}
-
-	// Try the first column
-	firstColumn := result.Columns[0].Name
-	rawValue, ok := row[firstColumn]
-	if !ok {
-		// Fallback: try any value in the row
-		for _, v := range row {
-			rawValue = v
-			ok = true
-			break
-		}
-	}
-	if !ok {
-		return 0, fmt.Errorf("unable to locate numeric value in query result")
-	}
-
-	// Convert to float64
-	switch v := rawValue.(type) {
-	case float64:
-		return v, nil
-	case float32:
-		return float64(v), nil
-	case int:
-		return float64(v), nil
-	case int64:
-		return float64(v), nil
-	case uint64:
-		return float64(v), nil
-	case uint32:
-		return float64(v), nil
-	case string:
-		parsed, err := strconv.ParseFloat(v, 64)
-		if err != nil {
-			return 0, fmt.Errorf("unable to parse numeric value %q: %w", v, err)
-		}
-		return parsed, nil
-	default:
-		return 0, fmt.Errorf("unsupported result type %T", rawValue)
-	}
 }
 
 func compareAlertThreshold(value, threshold float64, operator models.AlertThresholdOperator) bool {

@@ -15,6 +15,7 @@ import (
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -149,7 +150,7 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 		return fmt.Errorf("alert query failed: %w", err)
 	}
 
-	value, err := extractFirstNumeric(result)
+	value, err := util.ExtractFirstNumeric(result)
 	if err != nil {
 		m.recordEvaluationError(ctx, alert, fmt.Errorf("failed to extract alert result: %w", err))
 		return fmt.Errorf("failed to extract alert result: %w", err)
@@ -187,6 +188,12 @@ func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert
 	_, err := m.db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusError, nil, errorMessage, errorPayload)
 	if err != nil {
 		m.log.Error("failed to insert error history entry", "alert_id", alert.ID, "error", err)
+		return
+	}
+
+	// Prune old history entries to prevent unbounded growth from repeated errors
+	if pruneErr := m.db.PruneAlertHistory(ctx, alert.ID, m.cfg.HistoryLimit); pruneErr != nil {
+		m.log.Warn("failed to prune alert history after error", "alert_id", alert.ID, "error", pruneErr)
 	}
 }
 
@@ -435,6 +442,62 @@ func (noopSender) Send(_ context.Context, _ []AlertPayload) error {
 	return nil
 }
 
+// ManualResolve allows a user to manually resolve an active alert and notifies Alertmanager.
+// This should be called when a user clicks "Resolve" in the UI.
+func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, message string) error {
+	alert, err := m.db.GetAlert(ctx, alertID)
+	if err != nil {
+		return fmt.Errorf("failed to get alert: %w", err)
+	}
+
+	entry, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alertID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+			return fmt.Errorf("no active alert to resolve")
+		}
+		return fmt.Errorf("failed to find unresolved alert history: %w", err)
+	}
+
+	// Update the history entry in the database
+	if err := m.db.ResolveAlertHistory(ctx, entry.ID, message); err != nil {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+			return fmt.Errorf("alert history entry not found")
+		}
+		return fmt.Errorf("failed to resolve alert history: %w", err)
+	}
+
+	// Update the entry for Alertmanager notification
+	now := time.Now().UTC()
+	entry.Message = message
+	entry.ResolvedAt = &now
+	entry.Status = models.AlertStatusResolved
+
+	// Get the current value if available, otherwise use 0
+	value := float64(0)
+	if entry.Value != nil {
+		value = *entry.Value
+	}
+
+	// Send resolution notification to Alertmanager
+	labels, annotations := m.buildAlertMetadata(alert, models.AlertStatusResolved, value)
+	if annotations == nil {
+		annotations = make(map[string]string, 2)
+	}
+	annotations["resolved_at"] = now.Format(time.RFC3339Nano)
+	annotations["resolved_by"] = "manual"
+
+	if sendErr := m.sendAlertmanager(ctx, alert, entry, labels, annotations, models.AlertStatusResolved); sendErr != nil {
+		m.log.Warn("failed to send manual resolution to Alertmanager", "alert_id", alertID, "error", sendErr)
+		// Don't fail the operation - the DB is already updated
+	} else {
+		m.log.Info("manual alert resolution sent to Alertmanager",
+			"alert_id", alertID,
+			"alert_name", alert.Name)
+	}
+
+	return nil
+}
+
 func copyStringMap(src map[string]string) map[string]string {
 	if len(src) == 0 {
 		return nil
@@ -445,52 +508,6 @@ func copyStringMap(src map[string]string) map[string]string {
 	}
 	return dst
 }
-
-
-func extractFirstNumeric(result *models.QueryResult) (float64, error) {
-	if result == nil || len(result.Logs) == 0 {
-		return 0, fmt.Errorf("query returned no rows")
-	}
-	row := result.Logs[0]
-	if len(result.Columns) == 0 {
-		return 0, fmt.Errorf("query returned no columns")
-	}
-	firstColumn := result.Columns[0].Name
-	rawValue, ok := row[firstColumn]
-	if !ok {
-		for _, v := range row {
-			rawValue = v
-			ok = true
-			break
-		}
-	}
-	if !ok {
-		return 0, fmt.Errorf("unable to locate numeric value in query result")
-	}
-	switch v := rawValue.(type) {
-	case float64:
-		return v, nil
-	case float32:
-		return float64(v), nil
-	case int:
-		return float64(v), nil
-	case int64:
-		return float64(v), nil
-	case uint64:
-		return float64(v), nil
-	case uint32:
-		return float64(v), nil
-	case string:
-		parsed, err := strconv.ParseFloat(v, 64)
-		if err != nil {
-			return 0, fmt.Errorf("unable to parse numeric value: %w", err)
-		}
-		return parsed, nil
-	default:
-		return 0, fmt.Errorf("unsupported result type %T", rawValue)
-	}
-}
-
 func compareThreshold(value, threshold float64, operator models.AlertThresholdOperator) bool {
 	switch operator {
 	case models.AlertThresholdGreaterThan:

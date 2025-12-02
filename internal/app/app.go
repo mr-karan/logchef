@@ -128,19 +128,7 @@ func (a *App) Initialize(ctx context.Context) error {
 	// Use 0 to trigger the default interval defined in the manager.
 	a.ClickHouse.StartBackgroundHealthChecks(0)
 
-	// Initialize HTTP server.
-	serverOpts := server.ServerOptions{
-		Config:       a.Config,
-		SQLite:       a.SQLite,
-		ClickHouse:   a.ClickHouse,
-		OIDCProvider: oidcProvider,
-		FS:           a.WebFS,
-		Logger:       a.Logger,
-		BuildInfo:    a.BuildInfo,
-		Version:      a.Version,
-	}
-	a.server = server.New(serverOpts)
-
+	// Initialize alerts manager before the server so it can be used for manual resolution.
 	var alertSender alerts.AlertSender
 	if strings.TrimSpace(a.Config.Alerts.AlertmanagerURL) == "" {
 		a.Logger.Warn("alertmanager_url not configured; alerts will not be delivered")
@@ -165,6 +153,22 @@ func (a *App) Initialize(ctx context.Context) error {
 		Logger:     a.Logger,
 		Sender:     alertSender,
 	})
+
+	// Initialize HTTP server with alerts manager for manual resolution.
+	serverOpts := server.ServerOptions{
+		Config:        a.Config,
+		SQLite:        a.SQLite,
+		ClickHouse:    a.ClickHouse,
+		AlertsManager: a.Alerts,
+		OIDCProvider:  oidcProvider,
+		FS:            a.WebFS,
+		Logger:        a.Logger,
+		BuildInfo:     a.BuildInfo,
+		Version:       a.Version,
+	}
+	a.server = server.New(serverOpts)
+
+	// Start the alerts evaluation loop.
 	a.Alerts.Start(ctx)
 
 	return nil
