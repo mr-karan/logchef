@@ -12,7 +12,7 @@ The alerting system is designed for production use with built-in reliability fea
 ## Understanding the Alert Flow
 
 **What you do in LogChef:**
-1. Create an alert with a SQL query and threshold (e.g., "error count > 100")
+1. Create an alert with a condition or SQL query and threshold (e.g., "error count > 100")
 2. LogChef evaluates your query every X seconds (you set the frequency)
 3. When threshold is exceeded, LogChef sends the alert to Alertmanager
 
@@ -34,13 +34,17 @@ This separation means you can change notification channels (add Slack, remove em
 
 **Scenario:** You want to get notified on Slack when your API has more than 100 errors in 5 minutes.
 
-**In LogChef:**
-1. Navigate to your team/source
-2. Create alert: "High API Errors"
-3. Query: `SELECT count(*) FROM logs WHERE severity = 'ERROR' AND timestamp >= now() - INTERVAL 5 MINUTE`
-4. Threshold: Greater than 100
-5. Frequency: Every 60 seconds
-6. Save
+**In LogChef (using LogChefQL - the simple way):**
+1. Navigate to your team/source → Alerts
+2. Click "New Alert"
+3. Name: "High API Errors"
+4. Filter condition: `severity = "ERROR"`
+5. Threshold: Greater than 100
+6. Lookback: 5 minutes (time filter is auto-applied)
+7. Frequency: Every 60 seconds
+8. Save
+
+The generated SQL will be: `SELECT count(*) as value FROM logs WHERE (severity = 'ERROR') AND timestamp >= now() - toIntervalSecond(300)`
 
 **In Alertmanager config:**
 ```yaml
@@ -57,8 +61,8 @@ receivers:
   <Card title="Alertmanager Integration" icon="siren">
     Native Prometheus Alertmanager support for battle-tested alert routing and notification delivery.
   </Card>
-  <Card title="SQL-Based Conditions" icon="magnifier">
-    Use familiar ClickHouse SQL to define alert conditions with full access to your log schema.
+  <Card title="Simple & Advanced Modes" icon="magnifier">
+    Use LogChefQL for simple filter conditions, or write raw ClickHouse SQL for complex queries.
   </Card>
   <Card title="Delivery Guarantees" icon="approve-check">
     Automatic retry logic with exponential backoff ensures alerts reach Alertmanager even during network issues.
@@ -83,6 +87,36 @@ LogChef's alert manager runs in the background, continuously evaluating active a
 
 ## Creating Alerts
 
+### Query Modes
+
+LogChef supports two ways to define alert conditions:
+
+#### LogChefQL Mode (Recommended)
+
+The simplest way to create alerts. Write a filter condition and LogChef generates the SQL automatically:
+
+- **Filter Condition**: Simple expressions like `severity = "ERROR"` or `status_code >= 500`
+- **Aggregate Function**: Choose count, sum, avg, min, or max
+- **Auto Time Filter**: Lookback period is automatically applied—no manual time filters needed
+- **Live Preview**: See the generated SQL before saving
+
+**Example conditions:**
+```
+severity = "ERROR"
+severity = "ERROR" and service = "api"
+status_code >= 500
+response_time > 1000
+message ~ "timeout"
+```
+
+#### SQL Mode (Advanced)
+
+For complex queries, switch to SQL mode and write raw ClickHouse SQL:
+
+- Full control over the query
+- Access to all ClickHouse functions
+- Must return a single numeric value as `value`
+
 ### Basic Alert Configuration
 
 Every alert requires the following components:
@@ -90,7 +124,7 @@ Every alert requires the following components:
 - **Name**: Human-readable identifier for the alert
 - **Description**: Optional context about what the alert monitors
 - **Severity**: `info`, `warning`, or `critical`
-- **Query**: ClickHouse SQL that returns a single numeric value
+- **Query**: LogChefQL condition or ClickHouse SQL
 - **Threshold**: Value and operator (`>`, `>=`, `<`, `<=`, `==`, `!=`)
 - **Frequency**: How often to evaluate the alert (in seconds)
 - **Lookback Window**: Time range for the query to analyze
@@ -99,56 +133,81 @@ Every alert requires the following components:
 
 #### High Error Rate
 
-Monitor when error log count exceeds acceptable levels:
+Monitor when error log count exceeds acceptable levels.
 
+**LogChefQL:**
+```
+severity_text = "ERROR"
+```
+- Aggregate: count(*)
+- Lookback: 5 minutes
+
+**SQL equivalent:**
 ```sql
 SELECT count(*) as value
 FROM logs
 WHERE severity_text = 'ERROR'
-  AND timestamp >= now() - INTERVAL 5 MINUTE
+  AND timestamp >= now() - toIntervalSecond(300)
 ```
 
-**Threshold**: Greater than 100
-**Frequency**: 60 seconds
-**Severity**: Critical
+**Threshold**: Greater than 100 | **Frequency**: 60 seconds | **Severity**: Critical
 
 ---
 
-#### API Response Time Degradation
+#### Server Errors by Service
 
-Detect when API response times spike:
+Alert on HTTP 5xx errors for a specific service.
 
-```sql
-SELECT avg(JSONExtractFloat(log_attributes, 'response_time_ms')) as value
-FROM logs
-WHERE service = 'api-gateway'
-  AND timestamp >= now() - INTERVAL 10 MINUTE
+**LogChefQL:**
 ```
+status_code >= 500 and service = "api-gateway"
+```
+- Aggregate: count(*)
+- Lookback: 5 minutes
 
-**Threshold**: Greater than 500.0 (ms)
-**Frequency**: 120 seconds
-**Severity**: Warning
+**Threshold**: Greater than 10 | **Frequency**: 60 seconds | **Severity**: Warning
 
 ---
 
 #### Failed Authentication Attempts
 
-Alert on suspicious authentication activity:
+Alert on suspicious authentication activity.
 
+**LogChefQL:**
+```
+body ~ "authentication failed"
+```
+- Aggregate: count(*)
+- Lookback: 15 minutes
+
+**SQL equivalent:**
 ```sql
 SELECT count(*) as value
 FROM logs
 WHERE body LIKE '%authentication failed%'
-  AND timestamp >= now() - INTERVAL 15 MINUTE
+  AND timestamp >= now() - toIntervalSecond(900)
 ```
 
-**Threshold**: Greater than 10
-**Frequency**: 300 seconds
-**Severity**: Warning
+**Threshold**: Greater than 10 | **Frequency**: 300 seconds | **Severity**: Warning
 
 ---
 
-#### Database Connection Pool Exhaustion
+#### API Response Time Degradation (SQL Mode)
+
+For complex aggregations, use SQL mode:
+
+```sql
+SELECT avg(JSONExtractFloat(log_attributes, 'response_time_ms')) as value
+FROM logs
+WHERE service = 'api-gateway'
+  AND timestamp >= now() - toIntervalSecond(600)
+```
+
+**Threshold**: Greater than 500.0 (ms) | **Frequency**: 120 seconds | **Severity**: Warning
+
+---
+
+#### Database Connection Pool Exhaustion (SQL Mode)
 
 Monitor when connection pool usage is critically high:
 
@@ -156,30 +215,10 @@ Monitor when connection pool usage is critically high:
 SELECT max(JSONExtractInt(log_attributes, 'pool_active_connections')) as value
 FROM logs
 WHERE service = 'database-proxy'
-  AND timestamp >= now() - INTERVAL 5 MINUTE
+  AND timestamp >= now() - toIntervalSecond(300)
 ```
 
-**Threshold**: Greater than or equal to 95
-**Frequency**: 60 seconds
-**Severity**: Critical
-
----
-
-#### Memory Usage Threshold
-
-Alert when application memory usage exceeds limits:
-
-```sql
-SELECT avg(JSONExtractFloat(log_attributes, 'memory_mb')) as value
-FROM logs
-WHERE namespace = 'production'
-  AND log_attributes LIKE '%memory_mb%'
-  AND timestamp >= now() - INTERVAL 5 MINUTE
-```
-
-**Threshold**: Greater than 8000.0 (MB)
-**Frequency**: 180 seconds
-**Severity**: Warning
+**Threshold**: Greater than or equal to 95 | **Frequency**: 60 seconds | **Severity**: Critical
 
 ## Configuration
 
@@ -215,8 +254,8 @@ evaluation_interval = "1m"
 # Default lookback window if not specified in alert (default: 5 minutes)
 default_lookback = "5m"
 
-# Maximum alert history entries to keep per alert (default: 50)
-history_limit = 50
+# Maximum alert history entries to keep per alert (default: 100)
+history_limit = 100
 
 # Alertmanager API endpoint
 alertmanager_url = "http://alertmanager:9093"
@@ -365,15 +404,34 @@ Custom annotations can be added for runbooks, dashboards, or documentation links
 }
 ```
 
-## Viewing Alert Status and History
+## Alerts Dashboard
+
+The alerts dashboard provides a quick overview of all your alert rules with real-time status.
+
+### Dashboard Features
+
+| Column | Description |
+|--------|-------------|
+| **Active** | Toggle switch to quickly enable/disable alerts |
+| **Alert** | Name, severity badge, and description |
+| **Condition** | Threshold value and evaluation frequency |
+| **Status** | Live indicator: 🔴 firing (pulsing) or 🟢 resolved |
+| **Last Triggered** | When the alert last fired |
+| **Actions** | Edit, view history, duplicate, delete |
+
+### Quick Actions
+
+- **Toggle Switch**: Enable or disable alerts directly from the list without opening the edit form
+- **Duplicate**: Create a new alert based on an existing one—great for similar conditions across services
+- **Status Indicator**: Red pulsing dot for firing alerts, green dot for resolved
 
 ### Where to Find Your Alerts
 
 **Alert List View:**
 - Navigate to your team → source → Alerts tab
-- See all alerts for that source
-- Status indicators show if alert is currently triggered
-- Quick access to edit, delete, or view history
+- See all alerts for that source with live status
+- Toggle alerts on/off with one click
+- Quick access to edit, duplicate, delete, or view history
 
 **Alert Detail Page:**
 - Click on any alert to see full details
@@ -462,10 +520,12 @@ Access the Alertmanager web interface to:
 
 ### Query Design
 
+- **Start with LogChefQL**: Use simple filter conditions when possible—time filters are auto-applied
 - **Return Single Value**: Queries must return exactly one numeric value
-- **Use Lookback Windows**: Always include a time filter for performance
+- **Use Lookback Windows**: In SQL mode, always include a time filter for performance
 - **Test First**: Use "Test Query" in the UI to validate before saving
 - **Keep it Simple**: Complex aggregations may timeout or return unexpected results
+- **Preview SQL**: In LogChefQL mode, review the generated SQL to understand what will run
 
 ### Threshold Selection
 
@@ -528,15 +588,40 @@ Access the Alertmanager web interface to:
 
 ### Setting Up Your First Alert
 
+**Using LogChefQL (Recommended):**
 1. Navigate to Alerts in your team/source
-2. Click "Create Alert"
+2. Click "New Alert"
 3. Name: "High Error Count"
-4. Query: `SELECT count(*) as value FROM logs WHERE severity_text = 'ERROR' AND timestamp >= now() - INTERVAL 5 MINUTE`
-5. Threshold: Greater than 50
-6. Frequency: 60 seconds
-7. Severity: Warning
-8. Click "Test Query" to verify
-9. Save and monitor alert history
+4. Keep "LogChefQL" mode selected (default)
+5. Filter condition: `severity_text = "ERROR"`
+6. Aggregate: count(*) (default)
+7. Lookback: 5 minutes
+8. Threshold: Greater than 50
+9. Frequency: 60 seconds
+10. Severity: Warning
+11. Click "Test Query" to verify the generated SQL
+12. Save and monitor alert history
+
+**Using SQL Mode:**
+1. Navigate to Alerts in your team/source
+2. Click "New Alert"
+3. Name: "High Error Count"
+4. Switch to "SQL" mode
+5. Query: `SELECT count(*) as value FROM logs WHERE severity_text = 'ERROR' AND timestamp >= now() - toIntervalSecond(300)`
+6. Threshold: Greater than 50
+7. Frequency: 60 seconds
+8. Severity: Warning
+9. Click "Test Query" to verify
+10. Save and monitor alert history
+
+### Duplicating an Alert
+
+To create a similar alert quickly:
+1. Find the alert in the dashboard
+2. Click the "..." menu → "Duplicate"
+3. A new alert form opens pre-filled with the original settings
+4. Modify the name and any conditions as needed
+5. Save the new alert
 
 ### Creating an On-Call Rotation
 
