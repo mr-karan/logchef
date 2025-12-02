@@ -9,9 +9,12 @@ import (
 
 // ExtractFirstNumeric extracts a numeric value from the first column of the first row
 // in a query result. It supports both value and pointer types for all numeric types.
+// If the query returns no rows (e.g., no matching data for an aggregate query),
+// it returns 0 instead of an error since this typically means "zero matches".
 func ExtractFirstNumeric(result *models.QueryResult) (float64, error) {
 	if result == nil || len(result.Logs) == 0 {
-		return 0, fmt.Errorf("query returned no rows")
+		// For aggregate queries like count(*), no rows typically means 0
+		return 0, nil
 	}
 	row := result.Logs[0]
 	if len(result.Columns) == 0 {

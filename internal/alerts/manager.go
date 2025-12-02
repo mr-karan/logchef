@@ -177,6 +177,12 @@ func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert
 		return
 	}
 
+	// Update last_evaluated_at even on error so the alert respects its frequency_seconds
+	// instead of being re-evaluated every cycle
+	if err := m.db.MarkAlertEvaluated(ctx, alert.ID); err != nil {
+		m.log.Error("failed to mark alert evaluated after error", "alert_id", alert.ID, "error", err)
+	}
+
 	errorMessage := fmt.Sprintf("Evaluation failed: %v", evalErr)
 	errorPayload := map[string]any{
 		"error":      evalErr.Error(),

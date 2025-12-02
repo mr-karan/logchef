@@ -76,17 +76,19 @@ func TestExtractFirstNumeric(t *testing.T) {
 			shouldError: true,
 		},
 		{
-			name:        "nil result",
+			name:        "nil result returns 0",
 			result:      nil,
-			shouldError: true,
+			expected:    0,
+			shouldError: false,
 		},
 		{
-			name: "empty logs",
+			name: "empty logs returns 0",
 			result: &models.QueryResult{
 				Columns: []models.ColumnInfo{{Name: "count"}},
 				Logs:    []map[string]interface{}{},
 			},
-			shouldError: true,
+			expected:    0,
+			shouldError: false,
 		},
 		{
 			name: "no columns",
