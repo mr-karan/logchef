@@ -361,7 +361,8 @@ func (m *Manager) buildAlertMetadata(alert *models.Alert, status models.AlertSta
 	labels["alertname"] = alert.Name
 	labels["alert_id"] = strconv.FormatInt(int64(alert.ID), 10)
 	labels["severity"] = string(alert.Severity)
-	labels["status"] = string(status)
+	// Note: status is NOT included in labels because labels identify unique alert instances
+	// in Alertmanager. Changing labels creates a new alert. Status goes in annotations only.
 
 	// Fetch team and source names for more readable labels
 	if team, err := m.db.GetTeam(context.Background(), alert.TeamID); err == nil && team != nil {
