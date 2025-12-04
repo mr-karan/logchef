@@ -55,7 +55,7 @@ level = "debug"
 enabled = true
 # API endpoint
 # Base URL for OpenAI API (leave empty for default OpenAI endpoint)
-base_url = "https://openrouter.ai/api/v1"
+base_url = "https://api.openai.com/v1"
 # OpenAI API key for AI SQL generation
 api_key = ""
 # Model parameters
@@ -65,3 +65,15 @@ model = "gpt-4o"
 max_tokens = 1024
 # Temperature for generation (0.0-1.0, lower is more deterministic)
 temperature = 0.1
+
+# Alerting configuration
+[alerts]
+enabled = true
+evaluation_interval = "1m"
+default_lookback = "5m"
+history_limit = 50
+alertmanager_url = "http://localhost:9093"
+external_url = "http://localhost:8125"        # Backend URL (for API access)
+frontend_url = "http://localhost:5173"        # Frontend URL (for web UI generator links)
+request_timeout = "5s"
+tls_insecure_skip_verify = false

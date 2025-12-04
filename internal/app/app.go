@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
@@ -27,6 +29,7 @@ type App struct {
 	WebFS      http.FileSystem
 	BuildInfo  string
 	Version    string
+	Alerts     *alerts.Manager
 }
 
 // Options contains configuration needed when creating a new App instance.
@@ -76,6 +79,17 @@ func (a *App) Initialize(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize admin users: %w", err)
 	}
 
+	// Seed system settings from config.toml on first boot (if database is empty).
+	if err := a.seedSystemSettings(ctx); err != nil {
+		// Don't fail initialization - migration defaults will be used.
+		a.Logger.Warn("failed to seed system settings from config", "error", err)
+	}
+
+	// Load runtime configuration: merge static config.toml with database settings.
+	// Database settings override config.toml for non-essential settings.
+	a.Config = config.LoadRuntimeConfig(ctx, a.Config, a.SQLite)
+	a.Logger.Info("runtime configuration loaded from database and config.toml")
+
 	// Initialize ClickHouse connection manager.
 	a.ClickHouse = clickhouse.NewManager(a.Logger)
 
@@ -114,18 +128,48 @@ func (a *App) Initialize(ctx context.Context) error {
 	// Use 0 to trigger the default interval defined in the manager.
 	a.ClickHouse.StartBackgroundHealthChecks(0)
 
-	// Initialize HTTP server.
+	// Initialize alerts manager before the server so it can be used for manual resolution.
+	var alertSender alerts.AlertSender
+	if strings.TrimSpace(a.Config.Alerts.AlertmanagerURL) == "" {
+		a.Logger.Warn("alertmanager_url not configured; alerts will not be delivered")
+	} else {
+		client, err := alerts.NewAlertmanagerClient(alerts.ClientOptions{
+			BaseURL:       a.Config.Alerts.AlertmanagerURL,
+			Timeout:       a.Config.Alerts.RequestTimeout,
+			SkipTLSVerify: a.Config.Alerts.TLSInsecureSkipVerify,
+			Logger:        a.Logger,
+		})
+		if err != nil {
+			a.Logger.Error("failed to initialize alertmanager client", "error", err)
+		} else {
+			alertSender = client
+		}
+	}
+
+	a.Alerts = alerts.NewManager(alerts.Options{
+		Config:     a.Config.Alerts,
+		DB:         a.SQLite,
+		ClickHouse: a.ClickHouse,
+		Logger:     a.Logger,
+		Sender:     alertSender,
+	})
+
+	// Initialize HTTP server with alerts manager for manual resolution.
 	serverOpts := server.ServerOptions{
-		Config:       a.Config,
-		SQLite:       a.SQLite,
-		ClickHouse:   a.ClickHouse,
-		OIDCProvider: oidcProvider,
-		FS:           a.WebFS,
-		Logger:       a.Logger,
-		BuildInfo:    a.BuildInfo,
-		Version:      a.Version,
+		Config:        a.Config,
+		SQLite:        a.SQLite,
+		ClickHouse:    a.ClickHouse,
+		AlertsManager: a.Alerts,
+		OIDCProvider:  oidcProvider,
+		FS:            a.WebFS,
+		Logger:        a.Logger,
+		BuildInfo:     a.BuildInfo,
+		Version:       a.Version,
 	}
 	a.server = server.New(serverOpts)
+
+	// Start the alerts evaluation loop.
+	a.Alerts.Start(ctx)
 
 	return nil
 }
@@ -156,6 +200,12 @@ func (a *App) Shutdown(ctx context.Context) error {
 
 	clickhouseCtx, clickhouseCancel := context.WithTimeout(ctx, 8*time.Second)
 	defer clickhouseCancel()
+
+	if a.Alerts != nil {
+		a.Logger.Info("stopping alert manager")
+		a.Alerts.Stop()
+	}
+
 	// Shutdown server first to stop accepting new requests.
 	if a.server != nil {
 		a.Logger.Info("shutting down HTTP server")
@@ -212,5 +262,179 @@ func (a *App) Shutdown(ctx context.Context) error {
 	}
 
 	a.Logger.Info("application shutdown complete")
+	return nil
+}
+
+// seedSystemSettings populates the system_settings table from config.toml on first boot.
+// This allows users to customize default settings via config.toml before first deployment.
+// After seeding, database becomes the source of truth and config.toml can be simplified.
+func (a *App) seedSystemSettings(ctx context.Context) error {
+	// Check if settings already exist
+	settings, err := a.SQLite.ListSettings(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to check existing settings: %w", err)
+	}
+
+	// If settings exist, skip seeding (already initialized or migrated)
+	if len(settings) > 0 {
+		a.Logger.Info("system settings already exist, skipping seeding from config.toml")
+		return nil
+	}
+
+	a.Logger.Info("seeding system settings from config.toml (first boot)")
+
+	// Seed alerts settings
+	alertsSettings := map[string]struct {
+		value       string
+		valueType   string
+		description string
+	}{
+		"alerts.enabled": {
+			value:       fmt.Sprintf("%t", a.Config.Alerts.Enabled),
+			valueType:   "boolean",
+			description: "Enable or disable alert evaluation",
+		},
+		"alerts.evaluation_interval": {
+			value:       a.Config.Alerts.EvaluationInterval.String(),
+			valueType:   "duration",
+			description: "How often to evaluate alert rules",
+		},
+		"alerts.default_lookback": {
+			value:       a.Config.Alerts.DefaultLookback.String(),
+			valueType:   "duration",
+			description: "Default lookback window for alert queries",
+		},
+		"alerts.history_limit": {
+			value:       fmt.Sprintf("%d", a.Config.Alerts.HistoryLimit),
+			valueType:   "number",
+			description: "Maximum number of alert history entries to keep per alert",
+		},
+		"alerts.alertmanager_url": {
+			value:       a.Config.Alerts.AlertmanagerURL,
+			valueType:   "string",
+			description: "Alertmanager endpoint URL for sending notifications",
+		},
+		"alerts.external_url": {
+			value:       a.Config.Alerts.ExternalURL,
+			valueType:   "string",
+			description: "External URL for backend API access",
+		},
+		"alerts.frontend_url": {
+			value:       a.Config.Alerts.FrontendURL,
+			valueType:   "string",
+			description: "Frontend URL for generating alert links in notifications",
+		},
+		"alerts.request_timeout": {
+			value:       a.Config.Alerts.RequestTimeout.String(),
+			valueType:   "duration",
+			description: "Timeout for Alertmanager HTTP requests",
+		},
+		"alerts.tls_insecure_skip_verify": {
+			value:       fmt.Sprintf("%t", a.Config.Alerts.TLSInsecureSkipVerify),
+			valueType:   "boolean",
+			description: "Skip TLS certificate verification for Alertmanager",
+		},
+	}
+
+	for key, setting := range alertsSettings {
+		if err := a.SQLite.UpsertSetting(ctx, key, setting.value, setting.valueType, "alerts", setting.description, false); err != nil {
+			a.Logger.Warn("failed to seed alert setting", "key", key, "error", err)
+		} else {
+			a.Logger.Debug("seeded alert setting", "key", key, "value", setting.value)
+		}
+	}
+
+	// Seed AI settings
+	aiSettings := map[string]struct {
+		value       string
+		valueType   string
+		description string
+		isSensitive bool
+	}{
+		"ai.enabled": {
+			value:       fmt.Sprintf("%t", a.Config.AI.Enabled),
+			valueType:   "boolean",
+			description: "Enable or disable AI-assisted SQL generation",
+			isSensitive: false,
+		},
+		"ai.api_key": {
+			value:       a.Config.AI.APIKey,
+			valueType:   "string",
+			description: "OpenAI API key or compatible provider key",
+			isSensitive: true,
+		},
+		"ai.base_url": {
+			value:       a.Config.AI.BaseURL,
+			valueType:   "string",
+			description: "Base URL for OpenAI-compatible API (empty for default OpenAI)",
+			isSensitive: false,
+		},
+		"ai.model": {
+			value:       a.Config.AI.Model,
+			valueType:   "string",
+			description: "AI model to use for SQL generation",
+			isSensitive: false,
+		},
+		"ai.max_tokens": {
+			value:       fmt.Sprintf("%d", a.Config.AI.MaxTokens),
+			valueType:   "number",
+			description: "Maximum tokens to generate in AI responses",
+			isSensitive: false,
+		},
+		"ai.temperature": {
+			value:       fmt.Sprintf("%f", a.Config.AI.Temperature),
+			valueType:   "number",
+			description: "Temperature for generation (0.0-1.0, lower is more deterministic)",
+			isSensitive: false,
+		},
+	}
+
+	for key, setting := range aiSettings {
+		if err := a.SQLite.UpsertSetting(ctx, key, setting.value, setting.valueType, "ai", setting.description, setting.isSensitive); err != nil {
+			a.Logger.Warn("failed to seed AI setting", "key", key, "error", err)
+		} else {
+			a.Logger.Debug("seeded AI setting", "key", key)
+		}
+	}
+
+	// Seed auth session settings
+	authSettings := map[string]struct {
+		value       string
+		valueType   string
+		description string
+	}{
+		"auth.session_duration": {
+			value:       a.Config.Auth.SessionDuration.String(),
+			valueType:   "duration",
+			description: "Duration of user sessions before expiration",
+		},
+		"auth.max_concurrent_sessions": {
+			value:       fmt.Sprintf("%d", a.Config.Auth.MaxConcurrentSessions),
+			valueType:   "number",
+			description: "Maximum number of concurrent sessions per user",
+		},
+		"auth.default_token_expiry": {
+			value:       a.Config.Auth.DefaultTokenExpiry.String(),
+			valueType:   "duration",
+			description: "Default expiration for API tokens (90 days)",
+		},
+	}
+
+	for key, setting := range authSettings {
+		if err := a.SQLite.UpsertSetting(ctx, key, setting.value, setting.valueType, "auth", setting.description, false); err != nil {
+			a.Logger.Warn("failed to seed auth setting", "key", key, "error", err)
+		} else {
+			a.Logger.Debug("seeded auth setting", "key", key, "value", setting.value)
+		}
+	}
+
+	// Seed server settings
+	if err := a.SQLite.UpsertSetting(ctx, "server.frontend_url", a.Config.Server.FrontendURL, "string", "server", "URL of the frontend application for CORS configuration", false); err != nil {
+		a.Logger.Warn("failed to seed server.frontend_url", "error", err)
+	} else {
+		a.Logger.Debug("seeded server.frontend_url", "value", a.Config.Server.FrontendURL)
+	}
+
+	a.Logger.Info("system settings seeded from config.toml successfully")
 	return nil
 }

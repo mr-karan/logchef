@@ -44,6 +44,10 @@ frontend/stats.html
 .gopath/
 .cache/
 .pnpm/
+.direnv/
+.gocache/
+.gomodcache/
+frontend/.pnpm-home/
 
 # Docs
 docs/dist/*

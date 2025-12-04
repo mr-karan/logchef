@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
@@ -24,28 +25,30 @@ import (
 // ServerOptions holds the dependencies required to create a new Server instance.
 // This structure reflects the refactored approach using direct dependencies instead of services.
 type ServerOptions struct {
-	Config       *config.Config
-	SQLite       *sqlite.DB
-	ClickHouse   *clickhouse.Manager
-	OIDCProvider *auth.OIDCProvider // OIDC provider for authentication flows.
-	FS           http.FileSystem    // Filesystem for serving static assets (frontend).
-	Logger       *slog.Logger
-	BuildInfo    string
-	Version      string
+	Config        *config.Config
+	SQLite        *sqlite.DB
+	ClickHouse    *clickhouse.Manager
+	AlertsManager *alerts.Manager      // Alerts manager for manual resolution with Alertmanager notification.
+	OIDCProvider  *auth.OIDCProvider   // OIDC provider for authentication flows.
+	FS            http.FileSystem      // Filesystem for serving static assets (frontend).
+	Logger        *slog.Logger
+	BuildInfo     string
+	Version       string
 }
 
 // Server represents the core HTTP server, encapsulating the Fiber app instance
 // and necessary dependencies like database connections and configuration.
 type Server struct {
-	app          *fiber.App
-	config       *config.Config
-	sqlite       *sqlite.DB
-	clickhouse   *clickhouse.Manager
-	oidcProvider *auth.OIDCProvider // Handles OIDC authentication logic.
-	fs           http.FileSystem
-	log          *slog.Logger
-	buildInfo    string
-	version      string
+	app           *fiber.App
+	config        *config.Config
+	sqlite        *sqlite.DB
+	clickhouse    *clickhouse.Manager
+	alertsManager *alerts.Manager    // Alerts manager for manual resolution with Alertmanager notification.
+	oidcProvider  *auth.OIDCProvider // Handles OIDC authentication logic.
+	fs            http.FileSystem
+	log           *slog.Logger
+	buildInfo     string
+	version       string
 }
 
 // @title LogChef API
@@ -93,21 +96,22 @@ func New(opts ServerOptions) *Server {
 	app.Use(compress.New(compress.Config{
 		Level: compress.LevelBestSpeed, // Prioritize speed over maximum compression
 	})) // Compress responses
-	
+
 	// Add metrics middleware
 	app.Use(metrics.Middleware())
 
 	// Create the Server instance, injecting dependencies.
 	s := &Server{
-		app:          app,
-		config:       opts.Config,
-		sqlite:       opts.SQLite,
-		clickhouse:   opts.ClickHouse,
-		oidcProvider: opts.OIDCProvider,
-		fs:           opts.FS,
-		log:          opts.Logger,
-		buildInfo:    opts.BuildInfo,
-		version:      opts.Version,
+		app:           app,
+		config:        opts.Config,
+		sqlite:        opts.SQLite,
+		clickhouse:    opts.ClickHouse,
+		alertsManager: opts.AlertsManager,
+		oidcProvider:  opts.OIDCProvider,
+		fs:            opts.FS,
+		log:           opts.Logger,
+		buildInfo:     opts.BuildInfo,
+		version:       opts.Version,
 	}
 
 	// Register all application routes.
@@ -120,7 +124,7 @@ func New(opts ServerOptions) *Server {
 func (s *Server) setupRoutes() {
 	// Swagger documentation route
 	s.app.Get("/swagger/*", swagger.HandlerDefault)
-	
+
 	// Metrics endpoint
 	s.app.Get("/metrics", metrics.MetricsHandler())
 
@@ -166,6 +170,14 @@ func (s *Server) setupRoutes() {
 		admin.Post("/sources/validate", s.handleValidateSourceConnection)
 		admin.Delete("/sources/:sourceID", s.handleDeleteSource)
 		admin.Get("/sources/:sourceID/stats", s.handleGetSourceStats) // Admin-only source stats
+
+		// System Settings Management
+		admin.Get("/settings", s.handleListSettings)
+		admin.Get("/settings/category/:category", s.handleListSettingsByCategory)
+		admin.Get("/settings/:key", s.handleGetSetting)
+		admin.Put("/settings/:key", s.handleUpdateSetting)
+		admin.Delete("/settings/:key", s.handleDeleteSetting)
+		admin.Post("/settings/test-alertmanager", s.handleTestAlertmanagerConnection)
 	}
 
 	// --- Team Routes (Access controlled by team membership) ---
@@ -222,6 +234,18 @@ func (s *Server) setupRoutes() {
 			collections.Post("/", s.requireCollectionManagement, s.handleCreateTeamSourceCollection)
 			collections.Put("/:collectionID", s.requireCollectionManagement, s.handleUpdateTeamSourceCollection)
 			collections.Delete("/:collectionID", s.requireCollectionManagement, s.handleDeleteTeamSourceCollection)
+		}
+
+		alerts := teamSourceOps.Group("/alerts")
+		{
+			alerts.Get("/", s.handleListAlerts)
+			alerts.Get("/:alertID", s.handleGetAlert)
+			alerts.Get("/:alertID/history", s.handleListAlertHistory)
+			alerts.Post("/test", s.handleTestAlertQuery) // Test query endpoint (accessible to all team members)
+			alerts.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleCreateAlert)
+			alerts.Put("/:alertID", s.requireTeamAdminOrGlobalAdmin, s.handleUpdateAlert)
+			alerts.Delete("/:alertID", s.requireTeamAdminOrGlobalAdmin, s.handleDeleteAlert)
+			alerts.Post("/:alertID/resolve", s.requireTeamAdminOrGlobalAdmin, s.handleResolveAlert)
 		}
 	}
 

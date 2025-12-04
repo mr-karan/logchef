@@ -2,10 +2,12 @@ version: "2"
 sql:
   - engine: "sqlite"
     queries: "internal/sqlite/queries.sql"
-    schema: 
+    schema:
       - "internal/sqlite/migrations/000001_init.up.sql"
       - "internal/sqlite/migrations/000002_add_editor_role.up.sql"
       - "internal/sqlite/migrations/000003_add_api_tokens.up.sql"
+      - "internal/sqlite/migrations/000004_add_alerts.up.sql"
+      - "internal/sqlite/migrations/000005_add_system_settings.up.sql"
     gen:
       go:
         package: "sqlc"

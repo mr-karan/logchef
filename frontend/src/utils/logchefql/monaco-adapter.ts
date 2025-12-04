@@ -85,13 +85,6 @@ export class MonacoLogChefQLAdapter {
     };
   }
 
-  /**
-   * Update custom fields for autocomplete
-   */
-  public updateCustomFields(fields: FieldInfo[]): void {
-    this.autocomplete.updateCustomFields(fields);
-  }
-
   private createAutocompleteContext(
     model: monaco.editor.ITextModel,
     position: monaco.Position

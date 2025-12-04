@@ -1,0 +1,50 @@
+# LogChef Configuration Sample
+#
+# This file demonstrates the MINIMAL configuration required to run LogChef.
+# Additional settings (AI, alerts, sessions, etc.) are managed via the Admin Settings UI.
+
+# ============================================================================
+# ESSENTIAL CONFIGURATION (Required for bootstrap)
+# ============================================================================
+
+# Server configuration
+[server]
+port = 8125
+host = "0.0.0.0"
+# URL of the frontend application for CORS (can be empty in production if same origin)
+frontend_url = "http://localhost:5173"
+http_server_timeout = "30s"
+
+# SQLite database configuration
+[sqlite]
+path = "local.db"
+
+# OpenID Connect configuration (required for authentication)
+[oidc]
+provider_url = "http://localhost:5556/dex"
+auth_url = "http://localhost:5556/dex/auth"
+token_url = "http://localhost:5556/dex/token"
+client_id = "logchef"
+client_secret = "logchef-secret"
+redirect_url = "http://localhost:8125/api/v1/auth/callback"
+scopes = ["openid", "email", "profile"]
+
+# Authentication configuration
+[auth]
+# Admin email addresses (required - these users will have admin privileges)
+admin_emails = ["admin@example.com"]
+
+# API token secret (required - generate with: openssl rand -hex 32)
+# Must be at least 32 characters long for security
+api_token_secret = "REPLACE_WITH_YOUR_SECRET_KEY_MINIMUM_32_CHARS"
+
+# Logging configuration
+[logging]
+level = "info"  # Options: debug, info, warn, error
+
+# ============================================================================
+# OPTIONAL CONFIGURATION
+# ============================================================================
+# Additional settings (AI, alerts, sessions, etc.) can be managed via the
+# Admin Settings UI after first boot. No need to add them here unless you want
+# to customize defaults during initial deployment.

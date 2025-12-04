@@ -1,2 +1,0 @@
-This placeholder file ensures that go:embed has at least one file to include.
-It can be safely removed once the frontend build assets are generated into this directory.

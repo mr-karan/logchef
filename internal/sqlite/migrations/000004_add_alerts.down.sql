@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS alert_history;
+DROP TABLE IF EXISTS alert_rooms;
+DROP TABLE IF EXISTS room_channels;
+DROP TABLE IF EXISTS room_members;
+DROP TABLE IF EXISTS rooms;
+DROP TABLE IF EXISTS alerts;

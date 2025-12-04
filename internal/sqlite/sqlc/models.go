@@ -9,6 +9,43 @@ import (
 	"time"
 )
 
+type Alert struct {
+	ID                int64          `json:"id"`
+	TeamID            int64          `json:"team_id"`
+	SourceID          int64          `json:"source_id"`
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	QueryType         string         `json:"query_type"`
+	Query             sql.NullString `json:"query"`
+	ConditionJson     sql.NullString `json:"condition_json"`
+	LookbackSeconds   int64          `json:"lookback_seconds"`
+	ThresholdOperator string         `json:"threshold_operator"`
+	ThresholdValue    float64        `json:"threshold_value"`
+	FrequencySeconds  int64          `json:"frequency_seconds"`
+	Severity          string         `json:"severity"`
+	LabelsJson        sql.NullString `json:"labels_json"`
+	AnnotationsJson   sql.NullString `json:"annotations_json"`
+	GeneratorUrl      sql.NullString `json:"generator_url"`
+	IsActive          int64          `json:"is_active"`
+	LastState         string         `json:"last_state"`
+	LastEvaluatedAt   sql.NullTime   `json:"last_evaluated_at"`
+	LastTriggeredAt   sql.NullTime   `json:"last_triggered_at"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+}
+
+type AlertHistory struct {
+	ID          int64           `json:"id"`
+	AlertID     int64           `json:"alert_id"`
+	Status      string          `json:"status"`
+	TriggeredAt time.Time       `json:"triggered_at"`
+	ResolvedAt  sql.NullTime    `json:"resolved_at"`
+	Value       sql.NullFloat64 `json:"value"`
+	Message     sql.NullString  `json:"message"`
+	PayloadJson sql.NullString  `json:"payload_json"`
+	CreatedAt   time.Time       `json:"created_at"`
+}
+
 type ApiToken struct {
 	ID         int64        `json:"id"`
 	UserID     int64        `json:"user_id"`
@@ -43,6 +80,17 @@ type Source struct {
 	TtlDays           int64          `json:"ttl_days"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
+}
+
+type SystemSetting struct {
+	Key         string         `json:"key"`
+	Value       string         `json:"value"`
+	ValueType   string         `json:"value_type"`
+	Category    string         `json:"category"`
+	Description sql.NullString `json:"description"`
+	IsSensitive int64          `json:"is_sensitive"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
 }
 
 type Team struct {

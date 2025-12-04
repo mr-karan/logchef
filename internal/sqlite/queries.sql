@@ -317,3 +317,137 @@ DELETE FROM api_tokens WHERE id = ? AND user_id = ?;
 -- name: DeleteExpiredAPITokens :exec
 -- Delete all expired API tokens
 DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at < datetime('now');
+
+-- Alerts
+
+-- name: CreateAlert :one
+INSERT INTO alerts (
+    team_id,
+    source_id,
+    name,
+    description,
+    query,
+    threshold_operator,
+    threshold_value,
+    frequency_seconds,
+    severity,
+    is_active
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id;
+
+-- name: GetAlert :one
+SELECT * FROM alerts WHERE id = ?;
+
+-- name: GetAlertForTeamSource :one
+SELECT * FROM alerts WHERE id = ? AND team_id = ? AND source_id = ?;
+
+-- name: ListAlertsByTeamAndSource :many
+SELECT * FROM alerts
+WHERE team_id = ? AND source_id = ?
+ORDER BY created_at DESC;
+
+-- name: UpdateAlert :exec
+UPDATE alerts
+SET name = ?,
+    description = ?,
+    query = ?,
+    threshold_operator = ?,
+    threshold_value = ?,
+    frequency_seconds = ?,
+    severity = ?,
+    is_active = ?,
+    updated_at = datetime('now')
+WHERE id = ?;
+
+-- name: DeleteAlert :exec
+DELETE FROM alerts WHERE id = ?;
+
+-- name: MarkAlertEvaluated :exec
+UPDATE alerts
+SET last_state = 'resolved',
+    last_evaluated_at = datetime('now'),
+    updated_at = datetime('now')
+WHERE id = ?;
+
+-- name: MarkAlertTriggered :exec
+UPDATE alerts
+SET last_state = 'firing',
+    last_triggered_at = datetime('now'),
+    last_evaluated_at = datetime('now'),
+    updated_at = datetime('now')
+WHERE id = ?;
+
+-- name: ListActiveAlertsDue :many
+SELECT * FROM alerts
+WHERE is_active = 1
+  AND (
+        last_evaluated_at IS NULL
+        OR last_evaluated_at <= datetime('now', '-' || frequency_seconds || ' seconds')
+      );
+
+-- Alert history queries
+
+-- name: InsertAlertHistory :one
+INSERT INTO alert_history (
+    alert_id,
+    status,
+    value,
+    message,
+    payload_json
+)
+VALUES (?, ?, ?, ?, ?)
+RETURNING id;
+
+-- name: ResolveAlertHistory :exec
+UPDATE alert_history
+SET status = 'resolved',
+    resolved_at = datetime('now'),
+    message = ?
+WHERE id = ?;
+
+-- name: UpdateAlertHistoryPayload :exec
+UPDATE alert_history
+SET payload_json = ?
+WHERE id = ?;
+
+-- name: GetLatestUnresolvedAlertHistory :one
+SELECT * FROM alert_history
+WHERE alert_id = ? AND status = 'triggered'
+ORDER BY triggered_at DESC
+LIMIT 1;
+
+-- name: ListAlertHistory :many
+SELECT * FROM alert_history
+WHERE alert_id = ?
+ORDER BY triggered_at DESC
+LIMIT ?;
+
+-- System Settings Queries
+
+-- name: GetSystemSetting :one
+SELECT * FROM system_settings
+WHERE key = ?;
+
+-- name: ListSystemSettings :many
+SELECT * FROM system_settings
+ORDER BY category, key;
+
+-- name: ListSystemSettingsByCategory :many
+SELECT * FROM system_settings
+WHERE category = ?
+ORDER BY key;
+
+-- name: UpsertSystemSetting :exec
+INSERT INTO system_settings (key, value, value_type, category, description, is_sensitive, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+ON CONFLICT(key) DO UPDATE SET
+    value = excluded.value,
+    value_type = excluded.value_type,
+    description = excluded.description,
+    is_sensitive = excluded.is_sensitive,
+    updated_at = datetime('now');
+
+-- name: DeleteSystemSetting :exec
+DELETE FROM system_settings
+WHERE key = ?;

@@ -112,6 +112,56 @@ func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) 
 	return id, err
 }
 
+const createAlert = `-- name: CreateAlert :one
+
+INSERT INTO alerts (
+    team_id,
+    source_id,
+    name,
+    description,
+    query,
+    threshold_operator,
+    threshold_value,
+    frequency_seconds,
+    severity,
+    is_active
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id
+`
+
+type CreateAlertParams struct {
+	TeamID            int64          `json:"team_id"`
+	SourceID          int64          `json:"source_id"`
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	Query             sql.NullString `json:"query"`
+	ThresholdOperator string         `json:"threshold_operator"`
+	ThresholdValue    float64        `json:"threshold_value"`
+	FrequencySeconds  int64          `json:"frequency_seconds"`
+	Severity          string         `json:"severity"`
+	IsActive          int64          `json:"is_active"`
+}
+
+// Alerts
+func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (int64, error) {
+	row := q.queryRow(ctx, q.createAlertStmt, createAlert,
+		arg.TeamID,
+		arg.SourceID,
+		arg.Name,
+		arg.Description,
+		arg.Query,
+		arg.ThresholdOperator,
+		arg.ThresholdValue,
+		arg.FrequencySeconds,
+		arg.Severity,
+		arg.IsActive,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createSession = `-- name: CreateSession :exec
 
 INSERT INTO sessions (id, user_id, expires_at, created_at)
@@ -278,6 +328,15 @@ func (q *Queries) DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) 
 	return err
 }
 
+const deleteAlert = `-- name: DeleteAlert :exec
+DELETE FROM alerts WHERE id = ?
+`
+
+func (q *Queries) DeleteAlert(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.deleteAlertStmt, deleteAlert, id)
+	return err
+}
+
 const deleteExpiredAPITokens = `-- name: DeleteExpiredAPITokens :exec
 DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at < datetime('now')
 `
@@ -305,6 +364,16 @@ DELETE FROM sources WHERE id = ?
 // Delete a source by ID
 func (q *Queries) DeleteSource(ctx context.Context, id int64) error {
 	_, err := q.exec(ctx, q.deleteSourceStmt, deleteSource, id)
+	return err
+}
+
+const deleteSystemSetting = `-- name: DeleteSystemSetting :exec
+DELETE FROM system_settings
+WHERE key = ?
+`
+
+func (q *Queries) DeleteSystemSetting(ctx context.Context, key string) error {
+	_, err := q.exec(ctx, q.deleteSystemSettingStmt, deleteSystemSetting, key)
 	return err
 }
 
@@ -399,6 +468,104 @@ func (q *Queries) GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiT
 	return i, err
 }
 
+const getAlert = `-- name: GetAlert :one
+SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at FROM alerts WHERE id = ?
+`
+
+func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
+	row := q.queryRow(ctx, q.getAlertStmt, getAlert, id)
+	var i Alert
+	err := row.Scan(
+		&i.ID,
+		&i.TeamID,
+		&i.SourceID,
+		&i.Name,
+		&i.Description,
+		&i.QueryType,
+		&i.Query,
+		&i.ConditionJson,
+		&i.LookbackSeconds,
+		&i.ThresholdOperator,
+		&i.ThresholdValue,
+		&i.FrequencySeconds,
+		&i.Severity,
+		&i.LabelsJson,
+		&i.AnnotationsJson,
+		&i.GeneratorUrl,
+		&i.IsActive,
+		&i.LastState,
+		&i.LastEvaluatedAt,
+		&i.LastTriggeredAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAlertForTeamSource = `-- name: GetAlertForTeamSource :one
+SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at FROM alerts WHERE id = ? AND team_id = ? AND source_id = ?
+`
+
+type GetAlertForTeamSourceParams struct {
+	ID       int64 `json:"id"`
+	TeamID   int64 `json:"team_id"`
+	SourceID int64 `json:"source_id"`
+}
+
+func (q *Queries) GetAlertForTeamSource(ctx context.Context, arg GetAlertForTeamSourceParams) (Alert, error) {
+	row := q.queryRow(ctx, q.getAlertForTeamSourceStmt, getAlertForTeamSource, arg.ID, arg.TeamID, arg.SourceID)
+	var i Alert
+	err := row.Scan(
+		&i.ID,
+		&i.TeamID,
+		&i.SourceID,
+		&i.Name,
+		&i.Description,
+		&i.QueryType,
+		&i.Query,
+		&i.ConditionJson,
+		&i.LookbackSeconds,
+		&i.ThresholdOperator,
+		&i.ThresholdValue,
+		&i.FrequencySeconds,
+		&i.Severity,
+		&i.LabelsJson,
+		&i.AnnotationsJson,
+		&i.GeneratorUrl,
+		&i.IsActive,
+		&i.LastState,
+		&i.LastEvaluatedAt,
+		&i.LastTriggeredAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLatestUnresolvedAlertHistory = `-- name: GetLatestUnresolvedAlertHistory :one
+SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at FROM alert_history
+WHERE alert_id = ? AND status = 'triggered'
+ORDER BY triggered_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID int64) (AlertHistory, error) {
+	row := q.queryRow(ctx, q.getLatestUnresolvedAlertHistoryStmt, getLatestUnresolvedAlertHistory, alertID)
+	var i AlertHistory
+	err := row.Scan(
+		&i.ID,
+		&i.AlertID,
+		&i.Status,
+		&i.TriggeredAt,
+		&i.ResolvedAt,
+		&i.Value,
+		&i.Message,
+		&i.PayloadJson,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getSession = `-- name: GetSession :one
 SELECT id, user_id, expires_at, created_at FROM sessions WHERE id = ?
 `
@@ -469,6 +636,29 @@ func (q *Queries) GetSourceByName(ctx context.Context, arg GetSourceByNameParams
 		&i.TableName,
 		&i.Description,
 		&i.TtlDays,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getSystemSetting = `-- name: GetSystemSetting :one
+
+SELECT "key", value, value_type, category, description, is_sensitive, created_at, updated_at FROM system_settings
+WHERE key = ?
+`
+
+// System Settings Queries
+func (q *Queries) GetSystemSetting(ctx context.Context, key string) (SystemSetting, error) {
+	row := q.queryRow(ctx, q.getSystemSettingStmt, getSystemSetting, key)
+	var i SystemSetting
+	err := row.Scan(
+		&i.Key,
+		&i.Value,
+		&i.ValueType,
+		&i.Category,
+		&i.Description,
+		&i.IsSensitive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -606,6 +796,41 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	return i, err
 }
 
+const insertAlertHistory = `-- name: InsertAlertHistory :one
+
+INSERT INTO alert_history (
+    alert_id,
+    status,
+    value,
+    message,
+    payload_json
+)
+VALUES (?, ?, ?, ?, ?)
+RETURNING id
+`
+
+type InsertAlertHistoryParams struct {
+	AlertID     int64           `json:"alert_id"`
+	Status      string          `json:"status"`
+	Value       sql.NullFloat64 `json:"value"`
+	Message     sql.NullString  `json:"message"`
+	PayloadJson sql.NullString  `json:"payload_json"`
+}
+
+// Alert history queries
+func (q *Queries) InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (int64, error) {
+	row := q.queryRow(ctx, q.insertAlertHistoryStmt, insertAlertHistory,
+		arg.AlertID,
+		arg.Status,
+		arg.Value,
+		arg.Message,
+		arg.PayloadJson,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const listAPITokensForUser = `-- name: ListAPITokensForUser :many
 SELECT id, user_id, name, token_hash, prefix, last_used_at, expires_at, created_at, updated_at FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC
 `
@@ -628,6 +853,163 @@ func (q *Queries) ListAPITokensForUser(ctx context.Context, userID int64) ([]Api
 			&i.Prefix,
 			&i.LastUsedAt,
 			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveAlertsDue = `-- name: ListActiveAlertsDue :many
+SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at FROM alerts
+WHERE is_active = 1
+  AND (
+        last_evaluated_at IS NULL
+        OR last_evaluated_at <= datetime('now', '-' || frequency_seconds || ' seconds')
+      )
+`
+
+func (q *Queries) ListActiveAlertsDue(ctx context.Context) ([]Alert, error) {
+	rows, err := q.query(ctx, q.listActiveAlertsDueStmt, listActiveAlertsDue)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Alert{}
+	for rows.Next() {
+		var i Alert
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.SourceID,
+			&i.Name,
+			&i.Description,
+			&i.QueryType,
+			&i.Query,
+			&i.ConditionJson,
+			&i.LookbackSeconds,
+			&i.ThresholdOperator,
+			&i.ThresholdValue,
+			&i.FrequencySeconds,
+			&i.Severity,
+			&i.LabelsJson,
+			&i.AnnotationsJson,
+			&i.GeneratorUrl,
+			&i.IsActive,
+			&i.LastState,
+			&i.LastEvaluatedAt,
+			&i.LastTriggeredAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlertHistory = `-- name: ListAlertHistory :many
+SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at FROM alert_history
+WHERE alert_id = ?
+ORDER BY triggered_at DESC
+LIMIT ?
+`
+
+type ListAlertHistoryParams struct {
+	AlertID int64 `json:"alert_id"`
+	Limit   int64 `json:"limit"`
+}
+
+func (q *Queries) ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error) {
+	rows, err := q.query(ctx, q.listAlertHistoryStmt, listAlertHistory, arg.AlertID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AlertHistory{}
+	for rows.Next() {
+		var i AlertHistory
+		if err := rows.Scan(
+			&i.ID,
+			&i.AlertID,
+			&i.Status,
+			&i.TriggeredAt,
+			&i.ResolvedAt,
+			&i.Value,
+			&i.Message,
+			&i.PayloadJson,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlertsByTeamAndSource = `-- name: ListAlertsByTeamAndSource :many
+SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at FROM alerts
+WHERE team_id = ? AND source_id = ?
+ORDER BY created_at DESC
+`
+
+type ListAlertsByTeamAndSourceParams struct {
+	TeamID   int64 `json:"team_id"`
+	SourceID int64 `json:"source_id"`
+}
+
+func (q *Queries) ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsByTeamAndSourceParams) ([]Alert, error) {
+	rows, err := q.query(ctx, q.listAlertsByTeamAndSourceStmt, listAlertsByTeamAndSource, arg.TeamID, arg.SourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Alert{}
+	for rows.Next() {
+		var i Alert
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.SourceID,
+			&i.Name,
+			&i.Description,
+			&i.QueryType,
+			&i.Query,
+			&i.ConditionJson,
+			&i.LookbackSeconds,
+			&i.ThresholdOperator,
+			&i.ThresholdValue,
+			&i.FrequencySeconds,
+			&i.Severity,
+			&i.LabelsJson,
+			&i.AnnotationsJson,
+			&i.GeneratorUrl,
+			&i.IsActive,
+			&i.LastState,
+			&i.LastEvaluatedAt,
+			&i.LastTriggeredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -799,6 +1181,81 @@ func (q *Queries) ListSourcesForUser(ctx context.Context, userID int64) ([]Sourc
 			&i.TableName,
 			&i.Description,
 			&i.TtlDays,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSystemSettings = `-- name: ListSystemSettings :many
+SELECT "key", value, value_type, category, description, is_sensitive, created_at, updated_at FROM system_settings
+ORDER BY category, key
+`
+
+func (q *Queries) ListSystemSettings(ctx context.Context) ([]SystemSetting, error) {
+	rows, err := q.query(ctx, q.listSystemSettingsStmt, listSystemSettings)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SystemSetting{}
+	for rows.Next() {
+		var i SystemSetting
+		if err := rows.Scan(
+			&i.Key,
+			&i.Value,
+			&i.ValueType,
+			&i.Category,
+			&i.Description,
+			&i.IsSensitive,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSystemSettingsByCategory = `-- name: ListSystemSettingsByCategory :many
+SELECT "key", value, value_type, category, description, is_sensitive, created_at, updated_at FROM system_settings
+WHERE category = ?
+ORDER BY key
+`
+
+func (q *Queries) ListSystemSettingsByCategory(ctx context.Context, category string) ([]SystemSetting, error) {
+	rows, err := q.query(ctx, q.listSystemSettingsByCategoryStmt, listSystemSettingsByCategory, category)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SystemSetting{}
+	for rows.Next() {
+		var i SystemSetting
+		if err := rows.Scan(
+			&i.Key,
+			&i.Value,
+			&i.ValueType,
+			&i.Category,
+			&i.Description,
+			&i.IsSensitive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1131,6 +1588,33 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const markAlertEvaluated = `-- name: MarkAlertEvaluated :exec
+UPDATE alerts
+SET last_state = 'resolved',
+    last_evaluated_at = datetime('now'),
+    updated_at = datetime('now')
+WHERE id = ?
+`
+
+func (q *Queries) MarkAlertEvaluated(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.markAlertEvaluatedStmt, markAlertEvaluated, id)
+	return err
+}
+
+const markAlertTriggered = `-- name: MarkAlertTriggered :exec
+UPDATE alerts
+SET last_state = 'firing',
+    last_triggered_at = datetime('now'),
+    last_evaluated_at = datetime('now'),
+    updated_at = datetime('now')
+WHERE id = ?
+`
+
+func (q *Queries) MarkAlertTriggered(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.markAlertTriggeredStmt, markAlertTriggered, id)
+	return err
+}
+
 const removeTeamMember = `-- name: RemoveTeamMember :exec
 DELETE FROM team_members
 WHERE team_id = ? AND user_id = ?
@@ -1159,6 +1643,24 @@ type RemoveTeamSourceParams struct {
 // Remove a data source from a team
 func (q *Queries) RemoveTeamSource(ctx context.Context, arg RemoveTeamSourceParams) error {
 	_, err := q.exec(ctx, q.removeTeamSourceStmt, removeTeamSource, arg.TeamID, arg.SourceID)
+	return err
+}
+
+const resolveAlertHistory = `-- name: ResolveAlertHistory :exec
+UPDATE alert_history
+SET status = 'resolved',
+    resolved_at = datetime('now'),
+    message = ?
+WHERE id = ?
+`
+
+type ResolveAlertHistoryParams struct {
+	Message sql.NullString `json:"message"`
+	ID      int64          `json:"id"`
+}
+
+func (q *Queries) ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) error {
+	_, err := q.exec(ctx, q.resolveAlertHistoryStmt, resolveAlertHistory, arg.Message, arg.ID)
 	return err
 }
 
@@ -1192,6 +1694,63 @@ WHERE id = ?
 // Update the last used timestamp for an API token
 func (q *Queries) UpdateAPITokenLastUsed(ctx context.Context, id int64) error {
 	_, err := q.exec(ctx, q.updateAPITokenLastUsedStmt, updateAPITokenLastUsed, id)
+	return err
+}
+
+const updateAlert = `-- name: UpdateAlert :exec
+UPDATE alerts
+SET name = ?,
+    description = ?,
+    query = ?,
+    threshold_operator = ?,
+    threshold_value = ?,
+    frequency_seconds = ?,
+    severity = ?,
+    is_active = ?,
+    updated_at = datetime('now')
+WHERE id = ?
+`
+
+type UpdateAlertParams struct {
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	Query             sql.NullString `json:"query"`
+	ThresholdOperator string         `json:"threshold_operator"`
+	ThresholdValue    float64        `json:"threshold_value"`
+	FrequencySeconds  int64          `json:"frequency_seconds"`
+	Severity          string         `json:"severity"`
+	IsActive          int64          `json:"is_active"`
+	ID                int64          `json:"id"`
+}
+
+func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) error {
+	_, err := q.exec(ctx, q.updateAlertStmt, updateAlert,
+		arg.Name,
+		arg.Description,
+		arg.Query,
+		arg.ThresholdOperator,
+		arg.ThresholdValue,
+		arg.FrequencySeconds,
+		arg.Severity,
+		arg.IsActive,
+		arg.ID,
+	)
+	return err
+}
+
+const updateAlertHistoryPayload = `-- name: UpdateAlertHistoryPayload :exec
+UPDATE alert_history
+SET payload_json = ?
+WHERE id = ?
+`
+
+type UpdateAlertHistoryPayloadParams struct {
+	PayloadJson sql.NullString `json:"payload_json"`
+	ID          int64          `json:"id"`
+}
+
+func (q *Queries) UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlertHistoryPayloadParams) error {
+	_, err := q.exec(ctx, q.updateAlertHistoryPayloadStmt, updateAlertHistoryPayload, arg.PayloadJson, arg.ID)
 	return err
 }
 
@@ -1358,6 +1917,38 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 		arg.LastActiveAt,
 		arg.UpdatedAt,
 		arg.ID,
+	)
+	return err
+}
+
+const upsertSystemSetting = `-- name: UpsertSystemSetting :exec
+INSERT INTO system_settings (key, value, value_type, category, description, is_sensitive, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+ON CONFLICT(key) DO UPDATE SET
+    value = excluded.value,
+    value_type = excluded.value_type,
+    description = excluded.description,
+    is_sensitive = excluded.is_sensitive,
+    updated_at = datetime('now')
+`
+
+type UpsertSystemSettingParams struct {
+	Key         string         `json:"key"`
+	Value       string         `json:"value"`
+	ValueType   string         `json:"value_type"`
+	Category    string         `json:"category"`
+	Description sql.NullString `json:"description"`
+	IsSensitive int64          `json:"is_sensitive"`
+}
+
+func (q *Queries) UpsertSystemSetting(ctx context.Context, arg UpsertSystemSettingParams) error {
+	_, err := q.exec(ctx, q.upsertSystemSettingStmt, upsertSystemSetting,
+		arg.Key,
+		arg.Value,
+		arg.ValueType,
+		arg.Category,
+		arg.Description,
+		arg.IsSensitive,
 	)
 	return err
 }
