@@ -70,15 +70,18 @@ watch(() => props.timezone, (newVal) => {
 // Create proper column definitions for the table - ensure all columns have proper IDs
 const tableColumns = computed<ColumnDef<Record<string, any>>[]>(() => {
   if (props.columns?.length > 0) {
-    // Use the columns directly as they should already be properly formed from createColumns()
+    // Handle both ColumnInfo objects (from store) and ColumnDef objects (from createColumns)
     return props.columns.map(col => {
-      // Ensure each column has required properties
-      const id = col.id || col.accessorKey || String(col.header) || 'unknown'
+      // ColumnInfo has 'name' property, ColumnDef has 'id' and 'accessorKey'
+      const colAny = col as any
+      const colName = colAny.name // ColumnInfo.name
+      const id = col.id || colAny.accessorKey || colName || String(col.header) || 'unknown'
+      
       return {
         ...col,
         id: id,
-        accessorKey: col.accessorKey || id,
-        header: col.header || id,
+        accessorKey: colAny.accessorKey || colName || id,
+        header: col.header || colName || id,
         cell: col.cell || (({ getValue }) => getValue()),
       }
     })
