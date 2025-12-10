@@ -60,7 +60,7 @@ var queryTracker = &QueryTracker{
 func (qt *QueryTracker) AddQuery(userID models.UserID, sourceID models.SourceID, teamID models.TeamID, sql string, cancel context.CancelFunc) string {
 	qt.mu.Lock()
 	defer qt.mu.Unlock()
-	
+
 	queryID := uuid.New().String()
 	qt.queries[queryID] = &ActiveQuery{
 		ID:        queryID,
@@ -71,7 +71,7 @@ func (qt *QueryTracker) AddQuery(userID models.UserID, sourceID models.SourceID,
 		SQL:       sql,
 		Cancel:    cancel,
 	}
-	
+
 	return queryID
 }
 
@@ -86,23 +86,23 @@ func (qt *QueryTracker) RemoveQuery(queryID string) {
 func (qt *QueryTracker) CancelQuery(queryID string, userID models.UserID) bool {
 	qt.mu.Lock()
 	defer qt.mu.Unlock()
-	
+
 	query, exists := qt.queries[queryID]
 	if !exists {
 		return false
 	}
-	
+
 	// Only allow users to cancel their own queries
 	if query.UserID != userID {
 		return false
 	}
-	
+
 	// Cancel the context
 	query.Cancel()
-	
+
 	// Remove from tracker
 	delete(qt.queries, queryID)
-	
+
 	return true
 }
 
@@ -110,14 +110,14 @@ func (qt *QueryTracker) CancelQuery(queryID string, userID models.UserID) bool {
 func (qt *QueryTracker) GetUserQueries(userID models.UserID) []*ActiveQuery {
 	qt.mu.RLock()
 	defer qt.mu.RUnlock()
-	
+
 	var userQueries []*ActiveQuery
 	for _, query := range qt.queries {
 		if query.UserID == userID {
 			userQueries = append(userQueries, query)
 		}
 	}
-	
+
 	return userQueries
 }
 
@@ -125,7 +125,7 @@ func (qt *QueryTracker) GetUserQueries(userID models.UserID) []*ActiveQuery {
 func (qt *QueryTracker) Cleanup() {
 	qt.mu.Lock()
 	defer qt.mu.Unlock()
-	
+
 	cutoff := time.Now().Add(-1 * time.Hour)
 	for queryID, query := range qt.queries {
 		if query.StartTime.Before(cutoff) {
@@ -170,7 +170,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 	if user == nil {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
 	}
-	
+
 	// Get team ID from params
 	teamIDStr := c.Params("teamID")
 	teamID, err := core.ParseTeamID(teamIDStr)
@@ -181,7 +181,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 	// Create a cancellable context for this query
 	queryCtx, cancel := context.WithCancel(c.Context())
 	defer cancel() // Ensure cleanup
-	
+
 	// Add query to tracker
 	queryID := queryTracker.AddQuery(user.ID, sourceID, teamID, req.RawSQL, cancel)
 	defer queryTracker.RemoveQuery(queryID) // Ensure cleanup
@@ -219,7 +219,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		}
 		return SendSuccess(c, fiber.StatusOK, responseWithQueryID)
 	}
-	
+
 	return SendSuccess(c, fiber.StatusOK, result)
 }
 
@@ -244,7 +244,7 @@ func (s *Server) handleCancelQuery(c *fiber.Ctx) error {
 	}
 
 	s.log.Info("Query cancelled successfully", "query_id", queryID, "user_id", user.ID)
-	
+
 	return SendSuccess(c, fiber.StatusOK, map[string]interface{}{
 		"message":  "Query cancelled successfully",
 		"query_id": queryID,
@@ -505,5 +505,74 @@ func (s *Server) handleGenerateAISQL(c *fiber.Ctx) error {
 
 	return SendSuccess(c, http.StatusOK, models.GenerateSQLResponse{
 		SQLQuery: generatedSQL,
+	})
+}
+
+// handleGetLogContext retrieves surrounding logs around a specific timestamp.
+// This is similar to grep -C, showing N logs before and M logs after a target log.
+// Access is controlled by the requireSourceAccess middleware.
+func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
+	sourceIDStr := c.Params("sourceID")
+	sourceID, err := core.ParseSourceID(sourceIDStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+	}
+
+	// Parse request body
+	var req models.LogContextRequest
+	if err := c.BodyParser(&req); err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
+	}
+
+	// Validate required fields
+	if req.Timestamp <= 0 {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Timestamp is required and must be positive", models.ValidationErrorType)
+	}
+
+	// Apply defaults for limits if not specified
+	beforeLimit := req.BeforeLimit
+	if beforeLimit <= 0 {
+		beforeLimit = 10
+	}
+	afterLimit := req.AfterLimit
+	if afterLimit <= 0 {
+		afterLimit = 10
+	}
+
+	// Cap limits to prevent excessive queries
+	if beforeLimit > 100 {
+		beforeLimit = 100
+	}
+	if afterLimit > 100 {
+		afterLimit = 100
+	}
+
+	// Prepare parameters for the core function
+	params := core.LogContextParams{
+		TargetTimestamp: req.Timestamp,
+		BeforeLimit:     beforeLimit,
+		AfterLimit:      afterLimit,
+		BeforeOffset:    req.BeforeOffset,
+		AfterOffset:     req.AfterOffset,
+		ExcludeBoundary: req.ExcludeBoundary,
+	}
+
+	// Execute context query via core function
+	result, err := core.GetLogContext(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID, params)
+	if err != nil {
+		if errors.Is(err, core.ErrSourceNotFound) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		}
+		s.log.Error("failed to get log context via core function", slog.Any("error", err), "source_id", sourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to retrieve log context: %v", err), models.DatabaseErrorType)
+	}
+
+	// Return the context response
+	return SendSuccess(c, fiber.StatusOK, models.LogContextResponse{
+		TargetTimestamp: result.TargetTimestamp,
+		BeforeLogs:      result.BeforeLogs,
+		TargetLogs:      result.TargetLogs,
+		AfterLogs:       result.AfterLogs,
+		Stats:           result.Stats,
 	})
 }

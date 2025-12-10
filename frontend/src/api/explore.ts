@@ -83,6 +83,9 @@ export interface LogContextRequest {
   timestamp: number;
   before_limit: number;
   after_limit: number;
+  before_offset?: number;     // Offset for before query (for pagination)
+  after_offset?: number;      // Offset for after query (for pagination)
+  exclude_boundary?: boolean; // When true, excludes logs at exact timestamp (for pagination)
 }
 
 export interface LogContextResponse {

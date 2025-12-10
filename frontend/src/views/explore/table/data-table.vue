@@ -19,7 +19,8 @@ import {
 } from '@tanstack/vue-table'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { GripVertical, Copy, Equal, EqualNot, TerminalSquare } from 'lucide-vue-next'
+import { GripVertical, Copy, Equal, EqualNot, TerminalSquare, Clock } from 'lucide-vue-next'
+import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
 import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
@@ -79,6 +80,16 @@ const tableColumns = ref<CustomColumnDef[]>([])
 // Table state
 const sorting = ref<SortingState>([])
 const expanded = ref<ExpandedState>({})
+
+// Context modal state
+const showContextModal = ref(false)
+const contextLog = ref<Record<string, any> | null>(null)
+
+// Open context modal for a log
+const openContextModal = (log: Record<string, any>) => {
+    contextLog.value = log
+    showContextModal.value = true
+}
 const columnVisibility = ref<VisibilityState>({})
 const pagination = ref<PaginationState>({
     pageIndex: 0,
@@ -725,6 +736,17 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
                                 <tr v-if="row.getIsExpanded()" class="expanded-json-row">
                                     <td :colspan="row.getVisibleCells().length" class="p-0">
                                         <div class="p-3 bg-muted/30 border-y border-y-primary/40">
+                                            <div class="flex items-center justify-end mb-2 gap-2">
+                                                <Button 
+                                                    variant="outline" 
+                                                    size="sm" 
+                                                    class="h-7 text-xs"
+                                                    @click.stop="openContextModal(row.original)"
+                                                >
+                                                    <Clock class="h-3 w-3 mr-1" />
+                                                    Show Context
+                                                </Button>
+                                            </div>
                                             <JsonViewer :value="row.original" :expanded="false" class="text-xs" />
                                         </div>
                                     </td>
@@ -744,6 +766,17 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
             </div>
         </div>
     </div>
+
+    <!-- Log Context Modal -->
+    <LogTimelineModal
+        v-if="contextLog"
+        :is-open="showContextModal"
+        :source-id="props.sourceId"
+        :team-id="props.teamId ?? 0"
+        :log="contextLog"
+        :timestamp-field="timestampFieldName"
+        @update:is-open="showContextModal = $event"
+    />
 </template>
 
 <style scoped>

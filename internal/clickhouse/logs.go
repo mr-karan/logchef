@@ -54,9 +54,12 @@ const (
 
 // LogContextParams defines parameters for fetching logs around a specific target time.
 type LogContextParams struct {
-	TargetTime  time.Time
-	BeforeLimit int
-	AfterLimit  int
+	TargetTime      time.Time
+	BeforeLimit     int
+	AfterLimit      int
+	BeforeOffset    int  // Offset for before query (for pagination)
+	AfterOffset     int  // Offset for after query (for pagination)
+	ExcludeBoundary bool // When true, use < instead of <= for before query (for pagination)
 }
 
 // LogContextResult holds the logs retrieved before, at, and after the target time.
@@ -307,23 +310,129 @@ func (c *Client) ensureTimestampInQuery(query, timestampField string) (string, e
 	// For LogchefQL-originated queries, the timestamp field is always present
 	// If this query reaches here, it should be a simple SELECT * or already contain the timestamp
 	upperQuery := strings.ToUpper(strings.TrimSpace(query))
-	
+
 	// Check if it's a SELECT * query (most common case from LogchefQL)
 	if strings.Contains(upperQuery, "SELECT *") {
 		// SELECT * includes all columns including the timestamp, so return as-is
 		return query, nil
 	}
-	
+
 	// Check if timestamp field is already explicitly mentioned
 	if strings.Contains(upperQuery, strings.ToUpper(timestampField)) {
 		// Timestamp field is already present, return as-is
 		return query, nil
 	}
-	
+
 	// For any other case, assume the query is properly formatted and return as-is
 	// This should not happen with our new query provenance system
-	c.logger.Warn("Histogram query may not contain timestamp field, but proceeding anyway", 
+	c.logger.Warn("Histogram query may not contain timestamp field, but proceeding anyway",
 		"query_preview", query[:min(100, len(query))])
 	return query, nil
 }
 
+// GetSurroundingLogs retrieves logs around a specific timestamp, similar to grep -C.
+// It executes 2 queries: one for logs at or before the target time, one for logs after.
+// The target timestamp logs are included at the end of BeforeLogs (after reversing).
+func (c *Client) GetSurroundingLogs(ctx context.Context, tableName, timestampField string, params LogContextParams, queryTimeout *int) (*LogContextResult, error) {
+	// Ensure timeout is set
+	if queryTimeout == nil {
+		defaultTimeout := DefaultQueryTimeout
+		queryTimeout = &defaultTimeout
+	}
+
+	// Validate limits
+	if params.BeforeLimit <= 0 {
+		params.BeforeLimit = 10
+	}
+	if params.AfterLimit <= 0 {
+		params.AfterLimit = 10
+	}
+
+	// Cap limits to prevent excessive queries
+	if params.BeforeLimit > 100 {
+		params.BeforeLimit = 100
+	}
+	if params.AfterLimit > 100 {
+		params.AfterLimit = 100
+	}
+
+	c.logger.Debug("fetching surrounding logs",
+		"table", tableName,
+		"timestamp_field", timestampField,
+		"target_time", params.TargetTime,
+		"before_limit", params.BeforeLimit,
+		"after_limit", params.AfterLimit,
+		"timeout_seconds", *queryTimeout)
+
+	var result LogContextResult
+	var totalExecutionMs float64
+
+	// Format the target timestamp for ClickHouse DateTime64
+	targetTimeStr := params.TargetTime.UTC().Format("2006-01-02 15:04:05.000")
+
+	// Determine comparison operator for before query
+	// Use < (exclusive) for pagination to avoid duplicates, <= (inclusive) for initial load
+	beforeOp := "<="
+	if params.ExcludeBoundary {
+		beforeOp = "<"
+	}
+
+	// Query 1: Get logs AT OR BEFORE the target time (ordered DESC to get closest ones first)
+	// Use OFFSET for pagination when loading more
+	beforeQuery := fmt.Sprintf(`
+		SELECT * FROM %s
+		WHERE %s %s toDateTime64('%s', 3, 'UTC')
+		ORDER BY %s DESC
+		LIMIT %d OFFSET %d
+	`, tableName, timestampField, beforeOp, targetTimeStr, timestampField, params.BeforeLimit, params.BeforeOffset)
+
+	beforeResult, err := c.QueryWithTimeout(ctx, beforeQuery, queryTimeout)
+	if err != nil {
+		c.logger.Error("failed to query before logs", "error", err)
+		return nil, fmt.Errorf("failed to query logs before target time: %w", err)
+	}
+	// Reverse so logs appear in chronological order (oldest first, target timestamp at end)
+	result.BeforeLogs = reverseLogSlice(beforeResult.Logs)
+	totalExecutionMs += beforeResult.Stats.ExecutionTimeMs
+
+	// Query 2: Get logs AFTER the target time (ordered ASC to get closest ones first)
+	// Uses > (exclusive) for the timestamp, with OFFSET for pagination
+	afterQuery := fmt.Sprintf(`
+		SELECT * FROM %s
+		WHERE %s > toDateTime64('%s', 3, 'UTC')
+		ORDER BY %s ASC
+		LIMIT %d OFFSET %d
+	`, tableName, timestampField, targetTimeStr, timestampField, params.AfterLimit, params.AfterOffset)
+
+	afterResult, err := c.QueryWithTimeout(ctx, afterQuery, queryTimeout)
+	if err != nil {
+		c.logger.Error("failed to query after logs", "error", err)
+		return nil, fmt.Errorf("failed to query logs after target time: %w", err)
+	}
+	result.AfterLogs = afterResult.Logs
+	totalExecutionMs += afterResult.Stats.ExecutionTimeMs
+
+	// TargetLogs is kept empty - target timestamp logs are included in BeforeLogs
+	result.TargetLogs = []map[string]interface{}{}
+
+	// Aggregate stats
+	result.Stats = models.QueryStats{
+		RowsRead:        len(result.BeforeLogs) + len(result.AfterLogs),
+		ExecutionTimeMs: totalExecutionMs,
+	}
+
+	c.logger.Debug("surrounding logs query complete",
+		"before_count", len(result.BeforeLogs),
+		"after_count", len(result.AfterLogs),
+		"total_execution_ms", totalExecutionMs)
+
+	return &result, nil
+}
+
+// reverseLogSlice reverses a slice of log maps in place and returns it.
+func reverseLogSlice(logs []map[string]interface{}) []map[string]interface{} {
+	for i, j := 0, len(logs)-1; i < j; i, j = i+1, j-1 {
+		logs[i], logs[j] = logs[j], logs[i]
+	}
+	return logs
+}

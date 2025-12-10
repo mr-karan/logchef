@@ -221,6 +221,7 @@ func (s *Server) setupRoutes() {
 		teamSourceOps.Post("/logs/query/:queryID/cancel", s.handleCancelQuery)
 		teamSourceOps.Get("/schema", s.handleGetSourceSchema)
 		teamSourceOps.Post("/logs/histogram", s.handleGetHistogram)
+		teamSourceOps.Post("/logs/context", s.handleGetLogContext)
 		teamSourceOps.Post("/generate-sql", s.handleGenerateAISQL)
 
 		// Collections (Saved Queries) scoped to Team & Source

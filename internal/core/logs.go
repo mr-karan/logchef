@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/sqlite"
@@ -249,5 +250,119 @@ func GetHistogramData(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manag
 	return &HistogramResponse{
 		Granularity: histogramData.Granularity,
 		Data:        histogramData.Data,
+	}, nil
+}
+
+// --- Log Context Functions ---
+
+// LogContextParams defines parameters for the log context query.
+type LogContextParams struct {
+	TargetTimestamp int64 // Unix timestamp in milliseconds
+	BeforeLimit     int   // Number of logs to fetch before target time
+	AfterLimit      int   // Number of logs to fetch after target time
+	BeforeOffset    int   // Offset for before query (for pagination)
+	AfterOffset     int   // Offset for after query (for pagination)
+	ExcludeBoundary bool  // When true, use < instead of <= for before query (for pagination)
+	QueryTimeout    *int  // Optional query timeout in seconds
+}
+
+// LogContextResponse structures the response for log context data.
+type LogContextResponse struct {
+	TargetTimestamp int64                    `json:"target_timestamp"`
+	BeforeLogs      []map[string]interface{} `json:"before_logs"`
+	TargetLogs      []map[string]interface{} `json:"target_logs"`
+	AfterLogs       []map[string]interface{} `json:"after_logs"`
+	Stats           models.QueryStats        `json:"stats"`
+}
+
+// GetLogContext retrieves surrounding logs around a specific timestamp for contextual analysis.
+// This is similar to grep -C, showing N logs before and M logs after the target time.
+func GetLogContext(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, sourceID models.SourceID, params LogContextParams) (*LogContextResponse, error) {
+	// 1. Get source details (especially the timestamp field)
+	source, err := db.GetSource(ctx, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting source details: %w", err)
+	}
+	if source == nil {
+		return nil, ErrSourceNotFound
+	}
+
+	// Ensure MetaTSField is configured for the source
+	if source.MetaTSField == "" {
+		log.Error("log context query attempted on source without configured timestamp field", "source_id", sourceID)
+		return nil, fmt.Errorf("source %d does not have a timestamp field configured", sourceID)
+	}
+
+	// Apply defaults for limits
+	if params.BeforeLimit <= 0 {
+		params.BeforeLimit = 10
+	}
+	if params.AfterLimit <= 0 {
+		params.AfterLimit = 10
+	}
+
+	// Ensure timeout is set
+	if params.QueryTimeout == nil {
+		defaultTimeout := models.DefaultQueryTimeoutSeconds
+		params.QueryTimeout = &defaultTimeout
+	}
+
+	log.Debug("getting log context",
+		"source_id", sourceID,
+		"database", source.Connection.Database,
+		"table", source.Connection.TableName,
+		"ts_field", source.MetaTSField,
+		"target_timestamp_ms", params.TargetTimestamp,
+		"before_limit", params.BeforeLimit,
+		"after_limit", params.AfterLimit,
+		"timeout_seconds", *params.QueryTimeout,
+	)
+
+	// 2. Get ClickHouse connection
+	client, err := chDB.GetConnection(sourceID)
+	if err != nil {
+		log.Error("failed to get clickhouse client for log context", "source_id", sourceID, "error", err)
+		return nil, fmt.Errorf("error getting database connection for source %d: %w", sourceID, err)
+	}
+
+	// 3. Convert millisecond timestamp to time.Time
+	targetTime := time.UnixMilli(params.TargetTimestamp)
+
+	// 4. Prepare parameters for the ClickHouse client call
+	chParams := clickhouse.LogContextParams{
+		TargetTime:      targetTime,
+		BeforeLimit:     params.BeforeLimit,
+		AfterLimit:      params.AfterLimit,
+		BeforeOffset:    params.BeforeOffset,
+		AfterOffset:     params.AfterOffset,
+		ExcludeBoundary: params.ExcludeBoundary,
+	}
+
+	// 5. Call the ClickHouse client method
+	contextResult, err := client.GetSurroundingLogs(
+		ctx,
+		source.GetFullTableName(), // e.g., "default.logs"
+		source.MetaTSField,        // The configured timestamp field
+		chParams,
+		params.QueryTimeout,
+	)
+	if err != nil {
+		log.Error("failed to get surrounding logs from clickhouse", "source_id", sourceID, "error", err)
+		return nil, fmt.Errorf("error retrieving log context for source %d: %w", sourceID, err)
+	}
+
+	log.Debug("log context retrieval successful",
+		"source_id", sourceID,
+		"before_count", len(contextResult.BeforeLogs),
+		"target_count", len(contextResult.TargetLogs),
+		"after_count", len(contextResult.AfterLogs))
+
+	// 6. Format the response
+	return &LogContextResponse{
+		TargetTimestamp: params.TargetTimestamp,
+		BeforeLogs:      contextResult.BeforeLogs,
+		TargetLogs:      contextResult.TargetLogs,
+		AfterLogs:       contextResult.AfterLogs,
+		Stats:           contextResult.Stats,
 	}, nil
 }
