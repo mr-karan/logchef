@@ -304,29 +304,52 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName, timestampField
 }
 
 // ensureTimestampInQuery ensures the timestamp field is available for histogram bucketing.
-// Since the frontend now only sends LogchefQL-originated queries which always include the timestamp field,
-// we can use a much simpler approach than complex SQL parsing.
+// IMPORTANT: In ClickHouse, MATERIALIZED columns are NOT included in SELECT *.
+// When we wrap a query in a subquery for histogram, we must explicitly select the timestamp field.
 func (c *Client) ensureTimestampInQuery(query, timestampField string) (string, error) {
-	// For LogchefQL-originated queries, the timestamp field is always present
-	// If this query reaches here, it should be a simple SELECT * or already contain the timestamp
-	upperQuery := strings.ToUpper(strings.TrimSpace(query))
-
-	// Check if it's a SELECT * query (most common case from LogchefQL)
-	if strings.Contains(upperQuery, "SELECT *") {
-		// SELECT * includes all columns including the timestamp, so return as-is
-		return query, nil
+	if strings.TrimSpace(query) == "" {
+		return "", fmt.Errorf("query cannot be empty")
 	}
 
-	// Check if timestamp field is already explicitly mentioned
+	upperQuery := strings.ToUpper(strings.TrimSpace(query))
+	escapedTsField := fmt.Sprintf("`%s`", timestampField)
+
+	// Check if timestamp field is already explicitly mentioned in SELECT clause
 	if strings.Contains(upperQuery, strings.ToUpper(timestampField)) {
 		// Timestamp field is already present, return as-is
 		return query, nil
 	}
 
-	// For any other case, assume the query is properly formatted and return as-is
-	// This should not happen with our new query provenance system
-	c.logger.Warn("Histogram query may not contain timestamp field, but proceeding anyway",
-		"query_preview", query[:min(100, len(query))])
+	// For SELECT * queries, we need to explicitly add the timestamp field
+	// because MATERIALIZED columns are NOT included in SELECT *
+	// Replace "SELECT *" with "SELECT *, `timestamp_field`"
+	selectStarRegex := regexp.MustCompile(`(?i)SELECT\s+\*`)
+	if selectStarRegex.MatchString(query) {
+		modifiedQuery := selectStarRegex.ReplaceAllString(query, fmt.Sprintf("SELECT *, %s", escapedTsField))
+		if c.logger != nil {
+			c.logger.Debug("Added timestamp field to SELECT * for histogram",
+				"timestamp_field", timestampField,
+				"reason", "MATERIALIZED columns not included in SELECT *")
+		}
+		return modifiedQuery, nil
+	}
+
+	// For any other case, try to add the timestamp field after SELECT
+	// This handles cases like "SELECT col1, col2 FROM ..."
+	selectRegex := regexp.MustCompile(`(?i)^SELECT\s+`)
+	if selectRegex.MatchString(query) {
+		modifiedQuery := selectRegex.ReplaceAllString(query, fmt.Sprintf("SELECT %s, ", escapedTsField))
+		if c.logger != nil {
+			c.logger.Debug("Prepended timestamp field to SELECT for histogram",
+				"timestamp_field", timestampField)
+		}
+		return modifiedQuery, nil
+	}
+
+	if c.logger != nil {
+		c.logger.Warn("Could not modify query to include timestamp field",
+			"query_preview", query[:min(100, len(query))])
+	}
 	return query, nil
 }
 

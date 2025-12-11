@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - LogchefQL validation now uses backend API with debounced calls
 - Frontend no longer generates SQL - only renders what backend provides
 
+### Fixed
+- Histogram queries now work with MATERIALIZED timestamp columns (fixes [#59](https://github.com/mr-karan/logchef/discussions/59))
+  - ClickHouse's `SELECT *` does not include MATERIALIZED columns
+  - Histogram query builder now explicitly adds the timestamp field to ensure it's available in subqueries
+
 ### Removed
 - Frontend LogchefQL parser (`frontend/src/utils/logchefql/`) - replaced by backend implementation
 

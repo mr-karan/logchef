@@ -2,34 +2,27 @@ import { defineStore } from "pinia";
 import { computed, watch } from "vue";
 import { exploreApi } from "@/api/explore";
 import { logchefqlApi } from "@/api/logchefql";
-// Removed contextTransitionInProgress - using clean architecture now
 import type {
   ColumnInfo,
   QueryStats,
   FilterCondition,
-  QueryResponse,
   QueryParams,
   LogContextRequest,
   LogContextResponse,
-  QueryErrorResponse,
   QuerySuccessResponse,
   AIGenerateSQLRequest,
   AIGenerateSQLResponse,
 } from "@/api/explore";
-import type { QueryResult } from "@/types/query";
 import type { DateValue } from "@internationalized/date";
 import { now, getLocalTimeZone, CalendarDateTime } from "@internationalized/date";
 import { useSourcesStore } from "./sources";
 import { useTeamsStore } from "@/stores/teams";
 import { useContextStore } from "@/stores/context";
 import { useBaseStore } from "./base";
-import { QueryService } from '@/services/QueryService'
 import { parseRelativeTimeString } from "@/utils/time";
-import type { APIErrorResponse, APISuccessResponse, APIResponse } from "@/api/types";
 import { SqlManager } from '@/services/SqlManager';
 import { type TimeRange } from '@/types/query';
-import { getErrorMessage } from '@/api/types';
-import { HistogramService, type HistogramData } from '@/services/HistogramService';
+import { type HistogramData } from '@/services/HistogramService';
 import { useVariables } from "@/composables/useVariables";
 import { queryHistoryService } from "@/services/QueryHistoryService";
 import { createTimeRangeCondition } from '@/utils/time-utils';
@@ -831,9 +824,10 @@ export const useExploreStore = defineStore("explore", () => {
       // 
       // Backend builds the full SQL query and executes it
       // Response includes `generated_sql` for "View as SQL" feature
+      // Empty LogchefQL query → backend generates default SELECT * query
       // =====================================
       
-      if (state.data.value.activeMode === 'logchefql' && state.data.value.logchefqlCode?.trim()) {
+      if (state.data.value.activeMode === 'logchefql') {
         console.log("Explore store: LogchefQL mode - sending to /logchefql/query endpoint");
         try {
           // Replace dynamic variables with actual values
@@ -1087,15 +1081,10 @@ export const useExploreStore = defineStore("explore", () => {
           }
         }
 
-        // If the query was successful, also fetch histogram data
+        // SQL mode does not support histogram - user controls their own query
+        // Histogram is only available in LogchefQL mode where we have the backend-generated SQL
         if (response.success) {
-          console.log("Explore store: Query successful, fetching histogram data with same SQL");
-          // Use a setTimeout to avoid blocking the UI
-          setTimeout(() => {
-            fetchHistogramData(sql).catch(error => {
-              console.error("Error fetching histogram data:", error);
-            });
-          }, 50);
+          console.log("Explore store: SQL mode query successful - histogram not available in this mode");
         }
       } finally {
         // Clean up AbortController and query ID after query completion - this ALWAYS runs
@@ -1389,30 +1378,30 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.generatedAiSql = null;
   }
 
-  // Add a function to fetch histogram data with the exact same SQL as the query
-  async function fetchHistogramData(sql?: string, granularity?: string) {
+  // ========== HISTOGRAM ==========
+  // Histogram is only available in LogchefQL mode.
+  // It uses the `generatedDisplaySql` from the backend (the actual executed query).
+  // This ensures consistency - histogram shows data for the exact query that was run.
+  // ================================
+  
+  async function fetchHistogramData(granularity?: string) {
     const operationKey = 'fetchHistogramData';
 
-    // Check if histogram is eligible for current query state
+    // Check if histogram is eligible (LogchefQL mode only)
     if (!isHistogramEligible.value) {
-      console.log("Explore store: Skipping histogram - only available for LogchefQL mode", {
-        activeMode: state.data.value.activeMode
-      });
-      
-      // Clear histogram data and set appropriate state
-      state.data.value.histogramData = [];
-      state.data.value.histogramGranularity = null;
+      console.log("Explore store: Histogram only available in LogchefQL mode");
+      _clearHistogramData();
       state.data.value.histogramError = "Histogram is only available for LogchefQL queries";
-      state.data.value.isLoadingHistogram = false;
-      
-      return {
-        success: false,
-        error: {
-          status: "skipped",
-          message: "Histogram is only available for LogchefQL queries",
-          error_type: "HistogramSkipped"
-        }
-      };
+      return { success: false, error: { message: "Histogram is only available for LogchefQL queries" } };
+    }
+
+    // Must have generated SQL from a previous LogchefQL execution
+    const sql = state.data.value.generatedDisplaySql;
+    if (!sql) {
+      console.log("Explore store: No generated SQL available for histogram");
+      _clearHistogramData();
+      state.data.value.histogramError = "Run a LogchefQL query first to see the histogram";
+      return { success: false, error: { message: "Run a LogchefQL query first" } };
     }
 
     // Set loading state
@@ -1420,139 +1409,44 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.histogramError = null;
 
     try {
-      // Get current team ID
       const currentTeamId = useTeamsStore().currentTeamId;
       if (!currentTeamId) {
         state.data.value.histogramError = "No team selected";
         state.data.value.isLoadingHistogram = false;
-        return {
-          success: false,
-          error: {
-            status: "error",
-            message: "No team selected",
-            error_type: "ValidationError"
-          }
-        };
+        return { success: false, error: { message: "No team selected" } };
       }
 
-      // Get source details
-      const sourcesStore = useSourcesStore();
-
-      // Validate source details are loaded
-      if (!sourcesStore.currentSourceDetails || sourcesStore.currentSourceDetails.id !== state.data.value.sourceId) {
-        console.warn(`Histogram: Source details not loaded or mismatch. Have ID ${sourcesStore.currentSourceDetails?.id}, need ID ${state.data.value.sourceId}`);
-        state.data.value.histogramError = "Source details not fully loaded for histogram.";
-        state.data.value.isLoadingHistogram = false;
-        return {
-          success: false,
-          error: {
-            status: "error",
-            message: "Source details not fully loaded for histogram.",
-            error_type: "ValidationError"
-          }
-        };
-      }
-      
-      // Validate source is connected and valid
-      if (!sourcesStore.hasValidCurrentSource) {
-        console.warn(`Histogram: Source ${state.data.value.sourceId} is not connected or valid`);
-        state.data.value.histogramError = "Source is not connected or valid.";
-        state.data.value.isLoadingHistogram = false;
-        return {
-          success: false,
-          error: {
-            status: "error", 
-            message: "Source is not connected or valid.",
-            error_type: "ValidationError"
-          }
-        };
-      }
-
-      // Validate SQL input - if empty or not provided, use sqlForExecution
-      let finalSql = sql || sqlForExecution.value;
-      if (!finalSql || !finalSql.trim()) {
-        console.log("Histogram: No SQL provided, generating default query");
-
-        const sourceDetails = sourcesStore.currentSourceDetails;
-        const tsField = sourceDetails._meta_ts_field || 'timestamp';
-        
-        // Get table name directly from source details
-        let tableName = 'default.logs'; // Default fallback
-        if (sourceDetails?.connection?.database && sourceDetails?.connection?.table_name) {
-          tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
-        }
-
-        // Generate default SQL using SqlManager
-        const result = SqlManager.generateDefaultSql({
-          tableName,
-          tsField,
-          timeRange: state.data.value.timeRange as TimeRange,
-          limit: state.data.value.limit,
-          timezone: state.data.value.selectedTimezoneIdentifier || undefined
-        });
-
-        if (!result.success) {
-          state.data.value.histogramError = "Failed to generate default SQL for histogram";
-          state.data.value.isLoadingHistogram = false;
-          return {
-            success: false,
-            error: {
-              status: "error",
-              message: "Failed to generate default SQL for histogram",
-              error_type: "ValidationError"
-            }
-          };
-        }
-
-        finalSql = result.sql;
-      }
-
-      console.log("Explore store: Fetching histogram data with SQL", {
-        sourceId: state.data.value.sourceId,
-        sqlLength: finalSql.length,
-        sql: finalSql.substring(0, 100) + (finalSql.length > 100 ? '...' : '')
+      console.log("Explore store: Fetching histogram with backend-generated SQL", {
+        sqlLength: sql.length,
+        sql: sql.substring(0, 100) + "..."
       });
 
-      // The final histogram parameters including only the SQL with time range
       const params = {
-        raw_sql: finalSql, // Always use a valid SQL query with time range included
+        raw_sql: sql,  // Use the exact SQL that was executed by backend
         limit: 100,
         window: granularity || calculateOptimalGranularity(),
         timezone: state.data.value.selectedTimezoneIdentifier || undefined,
-        group_by: state.data.value.groupByField === "__none__" || state.data.value.groupByField === null ? undefined : state.data.value.groupByField,
+        group_by: state.data.value.groupByField === "__none__" || state.data.value.groupByField === null 
+          ? undefined 
+          : state.data.value.groupByField,
         query_timeout: state.data.value.queryTimeout,
       };
 
-      console.log("Explore store: Histogram request params:", {
-        raw_sql_length: params.raw_sql.length,
-        window: params.window,
-        group_by: params.group_by,
-        timezone: params.timezone
-      });
-
-      // Call the API directly
       const response = await state.callApi<{ data: Array<HistogramData>, granularity: string }>({
         apiCall: async () => exploreApi.getHistogramData(
           state.data.value.sourceId,
           params,
           currentTeamId
         ),
-        operationKey: operationKey,
-        showToast: false, // Don't show toast for histogram data
+        operationKey,
+        showToast: false,
       });
 
-      // Update histogram state based on response
       if (response.success && response.data) {
-        console.log("Explore store: Histogram data fetch successful", {
-          dataPoints: response.data.data?.length || 0,
-          granularity: response.data.granularity
-        });
-
         state.data.value.histogramData = response.data.data || [];
         state.data.value.histogramGranularity = response.data.granularity || null;
         state.data.value.histogramError = null;
       } else {
-        console.warn("Explore store: Histogram data fetch failed", response.error);
         state.data.value.histogramData = [];
         state.data.value.histogramGranularity = null;
         state.data.value.histogramError = response.error?.message || "Failed to fetch histogram data";
@@ -1562,19 +1456,9 @@ export const useExploreStore = defineStore("explore", () => {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("Error in fetchHistogramData:", errorMessage);
-
-      state.data.value.histogramData = [];
-      state.data.value.histogramGranularity = null;
+      _clearHistogramData();
       state.data.value.histogramError = errorMessage;
-
-      return {
-        success: false,
-        error: {
-          message: errorMessage,
-          status: "error",
-          error_type: "UnknownError"
-        }
-      };
+      return { success: false, error: { message: errorMessage } };
     } finally {
       state.data.value.isLoadingHistogram = false;
     }
