@@ -876,6 +876,368 @@ func isKeyword(s string) bool {
 	return keywords[lowerS]
 }
 
+// FieldValueInfo represents a distinct value with its count for a field.
+type FieldValueInfo struct {
+	Value string `json:"value"`
+	Count int64  `json:"count"`
+}
+
+// FieldValuesResult holds the distinct values for a field along with metadata.
+type FieldValuesResult struct {
+	FieldName     string           `json:"field_name"`
+	FieldType     string           `json:"field_type"`
+	IsLowCard     bool             `json:"is_low_cardinality"`
+	Values        []FieldValueInfo `json:"values"`
+	TotalDistinct int64            `json:"total_distinct"`
+}
+
+// FieldValuesParams holds parameters for fetching field distinct values.
+// FilterCondition represents a single filter condition from the user's query
+type FilterCondition struct {
+	Field    string `json:"field"`
+	Operator string `json:"operator"` // =, !=, ~, !~, >, <, >=, <=
+	Value    string `json:"value"`
+}
+
+type FieldValuesParams struct {
+	FieldName      string
+	FieldType      string
+	TimestampField string            // Required: timestamp column name for time range filter
+	StartTime      time.Time         // Required: start of time range
+	EndTime        time.Time         // Required: end of time range
+	Timezone       string            // Optional: timezone for time conversion (defaults to UTC)
+	Limit          int               // Optional: max values to return (default 10, max 100)
+	Timeout        *int              // Optional: query timeout in seconds
+	Conditions     []FilterCondition // Optional: additional filter conditions from user's query
+}
+
+// buildFilterConditionsSQL converts filter conditions to a SQL WHERE clause fragment.
+// Returns empty string if no conditions, or " AND condition1 AND condition2..." if conditions exist.
+// Handles SQL injection prevention by escaping values and validating operators.
+func buildFilterConditionsSQL(conditions []FilterCondition) string {
+	if len(conditions) == 0 {
+		return ""
+	}
+
+	var parts []string
+	for _, cond := range conditions {
+		// Validate operator to prevent injection
+		var sqlOp string
+		switch cond.Operator {
+		case "=":
+			sqlOp = "="
+		case "!=":
+			sqlOp = "!="
+		case "~": // regex match
+			sqlOp = "LIKE"
+		case "!~": // regex not match
+			sqlOp = "NOT LIKE"
+		case ">":
+			sqlOp = ">"
+		case "<":
+			sqlOp = "<"
+		case ">=":
+			sqlOp = ">="
+		case "<=":
+			sqlOp = "<="
+		default:
+			continue // Skip unknown operators
+		}
+
+		// Escape single quotes in value to prevent SQL injection
+		escapedValue := strings.ReplaceAll(cond.Value, "'", "''")
+		// Escape backslashes
+		escapedValue = strings.ReplaceAll(escapedValue, "\\", "\\\\")
+
+		// Build the condition based on operator type
+		var part string
+		if cond.Operator == "~" || cond.Operator == "!~" {
+			// For regex operators, convert to LIKE pattern
+			// Simple conversion: wrap with % for contains-like behavior
+			// User's regex patterns like "sys" become "%sys%"
+			pattern := "%" + escapedValue + "%"
+			part = fmt.Sprintf("%s %s '%s'", cond.Field, sqlOp, pattern)
+		} else {
+			part = fmt.Sprintf("%s %s '%s'", cond.Field, sqlOp, escapedValue)
+		}
+		parts = append(parts, part)
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return " AND " + strings.Join(parts, " AND ")
+}
+
+// GetFieldDistinctValues retrieves the top N distinct values for a field within a time range.
+// This is optimized for LowCardinality fields but works for any field type.
+// For LowCardinality fields, the query is very fast as ClickHouse maintains
+// a dictionary of unique values.
+// IMPORTANT: Time range is required to avoid scanning entire tables.
+func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table string, params FieldValuesParams) (*FieldValuesResult, error) {
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100 // Cap to prevent expensive queries
+	}
+
+	// Ensure timeout is provided
+	timeoutSeconds := params.Timeout
+	if timeoutSeconds == nil {
+		defaultTimeout := 10 // Shorter timeout for this type of query
+		timeoutSeconds = &defaultTimeout
+	}
+
+	// Default timezone to UTC
+	timezone := params.Timezone
+	if timezone == "" {
+		timezone = "UTC"
+	}
+
+	c.logger.Debug("fetching distinct values for field",
+		"database", database,
+		"table", table,
+		"field", params.FieldName,
+		"field_type", params.FieldType,
+		"timestamp_field", params.TimestampField,
+		"start_time", params.StartTime,
+		"end_time", params.EndTime,
+		"timezone", timezone,
+		"limit", limit,
+		"timeout_seconds", *timeoutSeconds,
+		"conditions_count", len(params.Conditions))
+
+	// Determine if it's LowCardinality from the provided type
+	isLowCard := strings.Contains(params.FieldType, "LowCardinality")
+
+	// Format time range for ClickHouse query
+	startTimeStr := params.StartTime.UTC().Format("2006-01-02 15:04:05")
+	endTimeStr := params.EndTime.UTC().Format("2006-01-02 15:04:05")
+
+	// Build additional WHERE conditions from user's query filters
+	additionalConditions := buildFilterConditionsSQL(params.Conditions)
+
+	// Build optimized query:
+	// 1. PREWHERE for timestamp - ClickHouse reads timestamp column first, filters, then reads field
+	// 2. Direct field reference (no toString) - Go code handles *string pointers for Nullable types
+	// 3. Simplified WHERE clause with optional user filter conditions
+	query := fmt.Sprintf(`
+		SELECT 
+			%s AS value,
+			count() AS cnt
+		FROM %s.%s
+		PREWHERE %s BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')
+		WHERE %s != ''%s
+		GROUP BY value
+		ORDER BY cnt DESC
+		LIMIT %d
+	`, params.FieldName, database, table,
+		params.TimestampField, startTimeStr, timezone, endTimeStr, timezone,
+		params.FieldName, additionalConditions,
+		limit)
+
+	result, err := c.QueryWithTimeout(ctx, query, timeoutSeconds)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query distinct values for %s: %w", params.FieldName, err)
+	}
+
+	values := make([]FieldValueInfo, 0, len(result.Logs))
+	for _, row := range result.Logs {
+		// Value can be string or pointer types depending on column nullability
+		var val string
+		switch v := row["value"].(type) {
+		case string:
+			val = v
+		case *string:
+			// Nullable string columns return *string from the driver
+			if v == nil {
+				continue // skip null values
+			}
+			val = *v
+		case []byte:
+			val = string(v)
+		case *[]byte:
+			if v == nil {
+				continue
+			}
+			val = string(*v)
+		default:
+			// For other types, try to convert to string safely
+			if v == nil {
+				continue
+			}
+			val = fmt.Sprintf("%v", v)
+		}
+
+		// Skip empty values
+		if val == "" {
+			continue
+		}
+
+		cnt, okC := row["cnt"]
+		if !okC {
+			continue
+		}
+
+		// Convert count to int64
+		var count int64
+		switch v := cnt.(type) {
+		case uint64:
+			count = int64(v)
+		case int64:
+			count = v
+		case int:
+			count = int64(v)
+		case float64:
+			count = int64(v)
+		default:
+			continue
+		}
+
+		values = append(values, FieldValueInfo{
+			Value: val,
+			Count: count,
+		})
+	}
+
+	// Get total distinct count within time range
+	// Using uniq() instead of uniqExact() - faster and approximate is fine for display
+	// Also apply user's filter conditions for accurate count
+	totalQuery := fmt.Sprintf(`
+		SELECT uniq(%s) AS total
+		FROM %s.%s
+		PREWHERE %s BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')
+		WHERE %s != ''%s
+	`, params.FieldName, database, table,
+		params.TimestampField, startTimeStr, timezone, endTimeStr, timezone,
+		params.FieldName, additionalConditions)
+
+	totalResult, err := c.QueryWithTimeout(ctx, totalQuery, timeoutSeconds)
+	var totalDistinct int64 = 0
+	if err == nil && len(totalResult.Logs) > 0 {
+		if total, ok := totalResult.Logs[0]["total"]; ok {
+			switch v := total.(type) {
+			case uint64:
+				totalDistinct = int64(v)
+			case int64:
+				totalDistinct = v
+			}
+		}
+	}
+
+	return &FieldValuesResult{
+		FieldName:     params.FieldName,
+		FieldType:     params.FieldType,
+		IsLowCard:     isLowCard,
+		Values:        values,
+		TotalDistinct: totalDistinct,
+	}, nil
+}
+
+// AllFieldValuesParams holds parameters for fetching field values for filterable columns.
+type AllFieldValuesParams struct {
+	TimestampField string            // Required: timestamp column name for time range filter
+	StartTime      time.Time         // Required: start of time range
+	EndTime        time.Time         // Required: end of time range
+	Timezone       string            // Optional: timezone for time conversion (defaults to UTC)
+	Limit          int               // Optional: max values per field (default 10, max 100)
+	Timeout        *int              // Optional: query timeout in seconds (default 5s for String fields)
+	Conditions     []FilterCondition // Optional: additional filter conditions from user's query
+}
+
+// isFilterableColumnType returns true if the column type is suitable for distinct value queries.
+// LowCardinality fields are always fast. String fields are included with timeout protection.
+func isFilterableColumnType(colType string) bool {
+	// LowCardinality fields - always fast due to dictionary
+	if strings.Contains(colType, "LowCardinality") {
+		return true
+	}
+
+	// Regular String fields - may be slow for high cardinality, but we use timeout
+	if colType == "String" || colType == "Nullable(String)" {
+		return true
+	}
+
+	// Enum types - always fast, finite set of values
+	if strings.HasPrefix(colType, "Enum") {
+		return true
+	}
+
+	return false
+}
+
+// GetAllFilterableFieldValues retrieves distinct values for all filterable fields within a time range.
+// Filterable fields include: LowCardinality, String, Nullable(String), and Enum types.
+// This is useful for populating a field sidebar with filterable values.
+// For String fields, a shorter timeout is used to gracefully handle high cardinality columns.
+// IMPORTANT: Time range is required to avoid scanning entire tables.
+func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, table string, params AllFieldValuesParams) (map[string]*FieldValuesResult, error) {
+	// Reuse existing getColumns function to get column metadata
+	columns, err := c.getColumns(ctx, database, table)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	results := make(map[string]*FieldValuesResult)
+
+	// Default timeout for String fields (shorter to fail fast on high cardinality)
+	stringFieldTimeout := 5
+	lowCardTimeout := 10
+
+	for _, col := range columns {
+		// Check if this column type is suitable for distinct value queries
+		if !isFilterableColumnType(col.Type) {
+			continue
+		}
+
+		// Use shorter timeout for regular String fields (may be high cardinality)
+		timeout := params.Timeout
+		if timeout == nil {
+			if strings.Contains(col.Type, "LowCardinality") {
+				timeout = &lowCardTimeout
+			} else {
+				timeout = &stringFieldTimeout
+			}
+		}
+
+		// Build params for individual field query
+		fieldParams := FieldValuesParams{
+			FieldName:      col.Name,
+			FieldType:      col.Type,
+			TimestampField: params.TimestampField,
+			StartTime:      params.StartTime,
+			EndTime:        params.EndTime,
+			Timezone:       params.Timezone,
+			Limit:          params.Limit,
+			Timeout:        timeout,
+			Conditions:     params.Conditions, // Pass through user's filter conditions
+		}
+
+		fieldResult, err := c.GetFieldDistinctValues(ctx, database, table, fieldParams)
+		if err != nil {
+			// Log but don't fail - this field just won't have values shown
+			// Common for high cardinality String fields that timeout
+			c.logger.Debug("skipping field values (likely timeout or high cardinality)",
+				"field", col.Name,
+				"type", col.Type,
+				"error", err)
+			continue
+		}
+		results[col.Name] = fieldResult
+	}
+
+	return results, nil
+}
+
+// GetAllLowCardinalityFieldValues is deprecated, use GetAllFilterableFieldValues instead.
+// Kept for backwards compatibility.
+func (c *Client) GetAllLowCardinalityFieldValues(ctx context.Context, database, table string, params AllFieldValuesParams) (map[string]*FieldValuesResult, error) {
+	return c.GetAllFilterableFieldValues(ctx, database, table, params)
+}
+
 // Ping checks the connectivity to the ClickHouse server and optionally verifies a table exists.
 // It uses short timeouts internally. Returns nil on success, or an error indicating the failure reason.
 func (c *Client) Ping(ctx context.Context, database string, table string) error {

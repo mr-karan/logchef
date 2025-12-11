@@ -220,12 +220,6 @@ onMounted(async () => {
                 // User will need to re-enter credentials if authentication was enabled
                 // We default to auth enabled to prompt the user
                 enableAuth.value = true
-
-                toast({
-                    title: 'Duplicating Source',
-                    description: `Form pre-filled from "${source.name}". Please enter connection credentials and update other fields as needed.`,
-                    duration: TOAST_DURATION.SUCCESS,
-                })
             } else {
                 toast({
                     title: 'Warning',

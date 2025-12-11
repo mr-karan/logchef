@@ -141,11 +141,6 @@ const handleDeleteQuery = async (entryId: string) => {
   try {
     queryHistoryService.deleteQueryEntry(entryId)
     await loadHistory() // Refresh the list
-    toast({
-      title: 'Query removed',
-      description: 'Query removed from history',
-      variant: 'default',
-    })
   } catch (error) {
     console.error('Failed to delete query from history:', error)
     toast({
@@ -163,11 +158,6 @@ const clearHistory = async () => {
     queryHistoryService.clearTeamSourceHistory(props.teamId, props.sourceId)
     history.value = []
     storageStats.value = queryHistoryService.getStorageStats()
-    toast({
-      title: 'History cleared',
-      description: 'Query history cleared for this source',
-      variant: 'default',
-    })
   } catch (error) {
     console.error('Failed to clear query history:', error)
     toast({

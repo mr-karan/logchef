@@ -268,7 +268,7 @@ function formatValue(value: any): string {
     <Dialog :open="isOpen" @update:open="emit('update:isOpen', $event)">
         <DialogContent class="max-w-4xl h-[85vh]">
             <DialogHeader>
-                <div class="flex items-center justify-between">
+                <div class="flex items-center justify-between pr-8">
                     <DialogTitle class="flex items-center gap-2">
                         <Clock class="h-5 w-5" />
                         Log Context

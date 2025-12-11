@@ -22,8 +22,6 @@ import { Button } from '@/components/ui/button'
 import { GripVertical, Copy, Equal, EqualNot, TerminalSquare, Clock } from 'lucide-vue-next'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
-import { useToast } from '@/composables/useToast'
-import { TOAST_DURATION } from '@/lib/constants'
 import type { QueryStats, ColumnInfo } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
@@ -254,8 +252,6 @@ watch(displayTimezone, (newValue) => {
     localStorage.setItem('logchef_timezone', newValue)
 })
 
-const { toast } = useToast()
-
 // Helper function for cell handling
 function formatCellValue(value: any): string {
     if (value === null || value === undefined) return '';
@@ -438,11 +434,6 @@ const handleRowClick = (row: Row<Record<string, any>>) => (e: MouseEvent) => {
 const copyCell = (value: any) => {
     const text = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)
     navigator.clipboard.writeText(text)
-    toast({
-        title: 'Copied',
-        description: 'Value copied to clipboard',
-        duration: TOAST_DURATION.SUCCESS,
-    })
 }
 
 // Initialize default sorting on mount

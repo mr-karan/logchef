@@ -47,11 +47,6 @@ async function copyToClipboard() {
     try {
         await navigator.clipboard.writeText(text)
         isCopied.value = true
-        toast({
-            title: 'Copied',
-            description: 'JSON data copied to clipboard',
-            duration: TOAST_DURATION.SUCCESS,
-        })
         // Reset copy state after 2 seconds
         setTimeout(() => {
             isCopied.value = false

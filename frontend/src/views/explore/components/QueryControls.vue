@@ -168,12 +168,6 @@ const dirtyTooltipContent = computed(() => {
 const copyUrlToClipboard = () => {
   try {
     navigator.clipboard.writeText(window.location.href)
-    toast({
-      title: "URL Copied",
-      description: "The shareable link has been copied to your clipboard.",
-      duration: TOAST_DURATION.INFO,
-      variant: "success"
-    })
   } catch (error) {
     console.error("Failed to copy URL: ", error)
     toast({

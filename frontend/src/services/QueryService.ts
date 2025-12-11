@@ -1,5 +1,4 @@
-import { parseAndTranslateLogchefQL } from '@/utils/logchefql/api';
-import { tokenize, QueryParser, SQLVisitor } from '@/utils/logchefql/index';
+import { logchefqlApi, type TranslateResponse, type FilterCondition } from '@/api/logchefql';
 import { validateSQL, validateSQLWithDetails, analyzeQuery } from '@/utils/clickhouse-sql';
 import {
   createTimeRangeCondition,
@@ -10,14 +9,11 @@ import {
 } from '@/utils/time-utils';
 import type { QueryOptions, QueryResult, TimeRange, TimeRangeInfo } from '@/types/query';
 import { SqlManager } from './SqlManager';
+import { useTeamsStore } from '@/stores/teams';
+import { useSourcesStore } from '@/stores/sources';
 
-// Define the QueryCondition type used in meta
-export interface QueryCondition {
-  field: string;
-  operator: string;
-  value: string | number | boolean;
-  type?: string;
-}
+// Re-export QueryCondition for backwards compatibility
+export type { FilterCondition as QueryCondition } from '@/api/logchefql';
 
 /**
  * Central service for all query generation and manipulation operations
@@ -54,19 +50,18 @@ export class QueryService {
   }
 
   /**
-   * Translates a LogchefQL query to SQL with proper error handling
+   * Translates a LogchefQL query to SQL using the backend API (async)
    * @param options Query generation options including LogchefQL
-   * @returns QueryResult with SQL and metadata
+   * @returns Promise<QueryResult> with SQL and metadata
    */
-  static translateLogchefQLToSQL(options: QueryOptions): QueryResult {
+  static async translateLogchefQLToSQLAsync(options: QueryOptions): Promise<QueryResult> {
     const {
       tableName,
       tsField,
       timeRange,
       limit,
       logchefqlQuery = '',
-      timezone,
-      schema
+      timezone
     } = options;
 
     // --- Input Validation ---
@@ -97,17 +92,17 @@ export class QueryService {
     const formattedTsField = tsField.includes('`') ? tsField : `\`${tsField}\``;
     const orderByClause = `ORDER BY ${formattedTsField} DESC`;
 
-    // Create timezone-aware time condition, passing the specific timezone if provided
+    // Create timezone-aware time condition
     const timeCondition = createTimeRangeCondition(tsField, timeRange, true, timezone);
     const limitClause = `LIMIT ${limit}`;
 
-    // --- Translate LogchefQL ---
+    // --- Translate LogchefQL via backend ---
     const warnings: string[] = [];
     let logchefqlConditions = '';
-    let parsedAST: any = null; // Store the parsed AST for later use
+    let selectClause = 'SELECT *';
     const meta: NonNullable<QueryResult['meta']> = {
       fieldsUsed: [],
-      operations: ['sort', 'limit'] // Base operations
+      operations: ['sort', 'limit']
     };
 
     if (logchefqlQuery?.trim()) {
@@ -115,41 +110,47 @@ export class QueryService {
         // Replace dynamic variables with placeholders while preserving variable names
         const queryForParsing = logchefqlQuery.replace(/{{(\w+)}}/g, "'__VAR_$1__'");
 
-        // Parse the query to get the AST
-        const { tokens } = tokenize(queryForParsing);
-        const parser = new QueryParser(tokens);
-        const { ast, errors } = parser.parse();
+        // Get team and source IDs for API call
+        const teamsStore = useTeamsStore();
+        const sourcesStore = useSourcesStore();
+        const teamId = teamsStore.currentTeamId;
+        const sourceId = sourcesStore.currentSourceId;
 
-        if (errors.length > 0 || !ast) {
-          warnings.push(errors[0]?.message || "Failed to parse LogchefQL query.");
+        if (!teamId || !sourceId) {
+          warnings.push("Team or source not available for translation");
         } else {
-          parsedAST = ast;
+          const response = await logchefqlApi.translate(teamId, sourceId, { query: queryForParsing });
+          
+          if (response.data) {
+            const translateResult = response.data;
+            
+            if (!translateResult.valid && translateResult.error) {
+              warnings.push(translateResult.error.message || "Failed to parse LogchefQL query.");
+            } else {
+              logchefqlConditions = translateResult.sql || '';
+              
+              // Convert __VAR_ placeholders back to {{variable}} format
+              logchefqlConditions = logchefqlConditions.replace(/'__VAR_(\w+)__'/g, '{{$1}}');
+              logchefqlConditions = logchefqlConditions.replace(/__VAR_(\w+)__/g, '{{$1}}');
 
-          // Generate SQL conditions from AST
-          const visitor = new SQLVisitor(false, schema);
-          const { sql } = visitor.generate(ast);
-          logchefqlConditions = sql;
+              // Add filter operation if we have conditions
+              if (logchefqlConditions && !meta.operations.includes('filter')) {
+                meta.operations.push('filter');
+              }
 
-          // Convert __VAR_ placeholders back to {{variable}} format for consistent display
-          logchefqlConditions = logchefqlConditions.replace(/'__VAR_(\w+)__'/g, '{{$1}}');
-          // Also handle cases where quotes might be missing
-          logchefqlConditions = logchefqlConditions.replace(/__VAR_(\w+)__/g, '{{$1}}');
-
-          // Add filter operation if we have conditions
-          if (logchefqlConditions && !meta.operations.includes('filter')) {
-            meta.operations.push('filter');
+              meta.fieldsUsed = translateResult.fields_used || [];
+              meta.conditions = translateResult.conditions?.map(c => ({
+                field: c.field,
+                operator: c.operator,
+                value: c.value,
+                isRegex: c.is_regex
+              }));
+            }
+          } else if (response.error) {
+            warnings.push(`Translation API error: ${response.error.message}`);
           }
-
-          // Extract field information from the tokens
-          const fieldsUsed = tokens
-            .filter(token => token.type === 'key')
-            .map(token => token.value)
-            .filter((field, index, self) => self.indexOf(field) === index);
-
-          meta.fieldsUsed = fieldsUsed;
         }
       } catch (error: any) {
-        // Capture error but don't fail - use base query instead
         warnings.push(`LogchefQL error: ${error.message}`);
       }
     }
@@ -161,16 +162,6 @@ export class QueryService {
     }
 
     // --- Assemble the final query string ---
-    // Generate SELECT clause - check if we have custom field selection
-    let selectClause = 'SELECT *';
-
-    // Check if the parsed AST has custom select fields (pipe operator was used)
-    if (parsedAST && parsedAST.type === 'query' && parsedAST.select) {
-      const visitor = new SQLVisitor(false, schema);
-      const customSelectClause = visitor.generateSelectClause(parsedAST.select, tsField);
-      selectClause = `SELECT ${customSelectClause}`;
-    }
-
     const finalSqlParts = [
       selectClause,
       `FROM ${formattedTableName}`,
@@ -199,6 +190,59 @@ export class QueryService {
   }
 
   /**
+   * Synchronous version that returns a promise-based result
+   * For backwards compatibility - wraps the async version
+   * @deprecated Use translateLogchefQLToSQLAsync instead
+   */
+  static translateLogchefQLToSQL(options: QueryOptions): QueryResult {
+    // For synchronous contexts, return a basic query without LogchefQL translation
+    // The async translation should be called separately
+    const {
+      tableName,
+      tsField,
+      timeRange,
+      limit,
+      timezone
+    } = options;
+
+    if (!tableName || !tsField || !timeRange.start || !timeRange.end) {
+      return { success: false, sql: "", error: "Missing required parameters." };
+    }
+
+    const formattedTableName = tableName.includes('`') || tableName.includes('.')
+      ? tableName
+      : `\`${tableName}\``;
+
+    const formattedTsField = tsField.includes('`') ? tsField : `\`${tsField}\``;
+    const timeCondition = createTimeRangeCondition(tsField, timeRange, true, timezone);
+
+    const sql = [
+      'SELECT *',
+      `FROM ${formattedTableName}`,
+      `WHERE ${timeCondition}`,
+      `ORDER BY ${formattedTsField} DESC`,
+      `LIMIT ${limit}`
+    ].join('\n');
+
+    return {
+      success: true,
+      sql,
+      error: null,
+      meta: {
+        fieldsUsed: [],
+        operations: ['sort', 'limit'],
+        timeRangeInfo: {
+          field: tsField,
+          startTime: formatDateForSQL(timeRange.start, false),
+          endTime: formatDateForSQL(timeRange.end, false),
+          timezone: timezone || getUserTimezone(),
+          isTimezoneAware: true
+        }
+      }
+    };
+  }
+
+  /**
    * Validates a ClickHouse SQL query
    * @param query SQL query to validate
    */
@@ -217,7 +261,7 @@ export class QueryService {
   }) {
     return SqlManager.generateDefaultSql({
       ...params,
-      timezone: undefined // Maintain backwards compatibility
+      timezone: undefined
     });
   }
 
@@ -247,8 +291,9 @@ export class QueryService {
 
   /**
    * Prepares a query for execution by applying time range, limit, and other constraints
+   * Now async for LogchefQL mode
    */
-  static prepareQueryForExecution(params: {
+  static async prepareQueryForExecutionAsync(params: {
     mode: 'logchefql' | 'clickhouse-sql';
     query: string;
     tableName: string;
@@ -256,7 +301,7 @@ export class QueryService {
     timeRange: any;
     limit: number;
     timezone?: string;
-  }) {
+  }): Promise<QueryResult> {
     // For SQL mode, delegate to SqlManager
     if (params.mode === 'clickhouse-sql') {
       return SqlManager.prepareForExecution({
@@ -268,8 +313,8 @@ export class QueryService {
       });
     }
 
-    // For LogchefQL mode, translate to SQL
-    return this.translateLogchefQLToSQL({
+    // For LogchefQL mode, translate to SQL via backend
+    return this.translateLogchefQLToSQLAsync({
       tableName: params.tableName,
       tsField: params.tsField,
       timeRange: params.timeRange,
@@ -280,12 +325,42 @@ export class QueryService {
   }
 
   /**
+   * Synchronous version for backwards compatibility
+   * @deprecated Use prepareQueryForExecutionAsync instead
+   */
+  static prepareQueryForExecution(params: {
+    mode: 'logchefql' | 'clickhouse-sql';
+    query: string;
+    tableName: string;
+    tsField: string;
+    timeRange: any;
+    limit: number;
+    timezone?: string;
+  }): QueryResult {
+    // For SQL mode, delegate to SqlManager
+    if (params.mode === 'clickhouse-sql') {
+      return SqlManager.prepareForExecution({
+        sql: params.query,
+        tsField: params.tsField,
+        timeRange: params.timeRange,
+        limit: params.limit,
+        timezone: params.timezone
+      });
+    }
+
+    // For LogchefQL mode, return basic query (translation happens async)
+    return this.translateLogchefQLToSQL({
+      tableName: params.tableName,
+      tsField: params.tsField,
+      timeRange: params.timeRange,
+      limit: params.limit,
+      logchefqlQuery: '', // Empty - actual translation happens async
+      timezone: params.timezone
+    });
+  }
+
+  /**
    * Updates the time range in an existing SQL query
-   * @param sql The existing SQL query
-   * @param tsField The timestamp field name
-   * @param newTimeRange The new time range to apply
-   * @param timezone Optional timezone (defaults to user timezone)
-   * @returns Result object with success status and updated SQL
    */
   static updateTimeRange(
     sql: string,
@@ -294,7 +369,6 @@ export class QueryService {
     timezone?: string
   ): { success: boolean; sql?: string; error?: string } {
     try {
-      // Validate inputs
       if (!sql || typeof sql !== 'string') {
         return { success: false, error: 'SQL query is required' };
       }
@@ -305,7 +379,6 @@ export class QueryService {
         return { success: false, error: 'Valid time range is required' };
       }
 
-      // Delegate to SqlManager which has more robust implementation
       const updatedSql = SqlManager.updateTimeRange({
         sql,
         tsField,
@@ -313,31 +386,20 @@ export class QueryService {
         timezone
       });
 
-      return {
-        success: true,
-        sql: updatedSql
-      };
-
+      return { success: true, sql: updatedSql };
     } catch (error: any) {
-      return {
-        success: false,
-        error: `Failed to update time range: ${error.message}`
-      };
+      return { success: false, error: `Failed to update time range: ${error.message}` };
     }
   }
 
   /**
    * Updates the limit in an existing SQL query
-   * @param sql The existing SQL query
-   * @param limit The new limit value
-   * @returns Result object with success status and updated SQL
    */
   static updateLimit(
     sql: string,
     limit: number
   ): { success: boolean; sql?: string; error?: string } {
     try {
-      // Validate inputs
       if (!sql || typeof sql !== 'string') {
         return { success: false, error: 'SQL query is required' };
       }
@@ -345,19 +407,10 @@ export class QueryService {
         return { success: false, error: 'Valid limit is required' };
       }
 
-      // Delegate to SqlManager which has robust implementation
       const updatedSql = SqlManager.updateLimit(sql, limit);
-
-      return {
-        success: true,
-        sql: updatedSql
-      };
-
+      return { success: true, sql: updatedSql };
     } catch (error: any) {
-      return {
-        success: false,
-        error: `Failed to update limit: ${error.message}`
-      };
+      return { success: false, error: `Failed to update limit: ${error.message}` };
     }
   }
 }

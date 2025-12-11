@@ -135,14 +135,8 @@ const handleSubmit = async () => {
         description: description.value || '',
     })
 
-    if (result.success) {
-        toast({
-            title: 'Success',
-            description: 'Team settings updated successfully',
-            variant: 'default',
-        })
-    }
 }
+
 
 const handleAddMember = async () => {
     if (!team.value || !selectedUserId.value) return

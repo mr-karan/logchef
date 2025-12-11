@@ -17,7 +17,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useToast } from "@/composables/useToast";
 import { useAlertsStore } from "@/stores/alerts";
 import { useAlertHistoryStore } from "@/stores/alertHistory";
 import { useContextStore } from "@/stores/context";
@@ -26,7 +25,6 @@ import type { Alert, UpdateAlertRequest } from "@/api/alerts";
 
 const route = useRoute();
 const router = useRouter();
-const { toast } = useToast();
 
 const alertsStore = useAlertsStore();
 const alertHistoryStore = useAlertHistoryStore();
@@ -76,12 +74,6 @@ async function handleUpdate(payload: UpdateAlertRequest) {
     alert.value.id,
     payload
   );
-  if (result.success) {
-    toast({
-      title: "Alert updated",
-      description: "Your alert has been successfully updated.",
-    });
-  }
 }
 
 function confirmDelete() {
@@ -93,10 +85,6 @@ async function handleDelete() {
   const result = await alertsStore.deleteAlert(currentTeamId.value, currentSourceId.value, alert.value.id);
   showDeleteDialog.value = false;
   if (result.success) {
-    toast({
-      title: "Alert deleted",
-      description: `Alert "${alert.value.name}" has been deleted.`,
-    });
     goBack();
   }
 }

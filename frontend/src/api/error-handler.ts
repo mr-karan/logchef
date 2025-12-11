@@ -120,15 +120,3 @@ export function showErrorToast(error: unknown, customMessage?: string): void {
   });
 }
 
-/**
- * Shows a success toast notification
- */
-export function showSuccessToast(message: string): void {
-  const { toast } = useToast();
-  toast({
-    title: "Success",
-    description: message,
-    variant: "success",
-    duration: TOAST_DURATION.SUCCESS
-  });
-}

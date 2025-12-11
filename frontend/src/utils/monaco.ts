@@ -1,16 +1,19 @@
 import * as monaco from "monaco-editor";
 import { loader } from "@guolao/vue-monaco-editor";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
-import { tokenTypes as logchefqlTokenTypes, Parser as LogchefQLParser } from "./logchefql";
 import {
   SQL_KEYWORDS,
   CLICKHOUSE_FUNCTIONS,
   SQL_TYPES,
-  CharType
 } from "./clickhouse-sql/language";
-import { registerEnhancedLogChefQL, updateLogChefQLFields, updateLogChefQLFieldsFromSchema, updateLogChefQLFieldsFromSchemaAndSamples } from "./logchefql/monaco-adapter";
-import type { FieldInfo } from "./logchefql/autocomplete";
-import type { ClickHouseColumn } from "./logchefql/schema-converter";
+import {
+  registerEnhancedLogChefQL,
+  updateLogChefQLFields,
+  updateLogChefQLFieldsFromSchema,
+  updateLogChefQLFieldsFromSchemaAndSamples,
+  type FieldInfo,
+  type ClickHouseColumn
+} from "./logchefql-minimal";
 
 // Global cache for Monaco models to preserve across navigation
 interface ModelCacheEntry {

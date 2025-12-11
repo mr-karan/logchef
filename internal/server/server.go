@@ -224,6 +224,15 @@ func (s *Server) setupRoutes() {
 		teamSourceOps.Post("/logs/context", s.handleGetLogContext)
 		teamSourceOps.Post("/generate-sql", s.handleGenerateAISQL)
 
+		// LogchefQL endpoints - query language parsing and translation
+		teamSourceOps.Post("/logchefql/translate", s.handleLogchefQLTranslate) // Translate LogchefQL to SQL
+		teamSourceOps.Post("/logchefql/validate", s.handleLogchefQLValidate)   // Validate LogchefQL syntax
+		teamSourceOps.Post("/logchefql/query", s.handleLogchefQLQuery)         // Execute LogchefQL query directly
+
+		// Field value exploration for sidebar
+		teamSourceOps.Get("/fields/values", s.handleGetAllFieldValues)           // Get all LowCardinality field values
+		teamSourceOps.Get("/fields/:fieldName/values", s.handleGetFieldValues)   // Get values for a specific field
+
 		// Collections (Saved Queries) scoped to Team & Source
 		// Regular team members can view and use collections
 		collections := teamSourceOps.Group("/collections")

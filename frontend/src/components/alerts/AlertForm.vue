@@ -26,7 +26,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAlertsStore } from "@/stores/alerts";
 import { useSourcesStore } from "@/stores/sources";
 import { alertsApi } from "@/api/alerts";
-import { parseAndTranslateLogchefQL } from "@/utils/logchefql/api";
+import { logchefqlApi } from "@/api/logchefql";
+import { useTeamsStore } from "@/stores/teams";
 import type { Alert, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryResponse } from "@/api/alerts";
 
 const props = withDefaults(defineProps<{
@@ -90,33 +91,68 @@ const lookbackExpression = computed(() => {
   return `now() - toIntervalSecond(${seconds})`;
 });
 
-// Validate LogChefQL condition and generate SQL using existing parseAndTranslateLogchefQL
-const generatedSQL = computed(() => {
+// Generated SQL from LogchefQL condition
+const generatedSQL = ref("");
+const isTranslating = ref(false);
+
+// Translate LogChefQL condition to SQL using backend API
+async function translateCondition() {
   if (form.query_type !== "condition" || !form.condition_json.trim()) {
     conditionError.value = null;
-    return "";
+    generatedSQL.value = "";
+    return;
   }
 
-  // Use the existing parseAndTranslateLogchefQL function with schema (same as explore page)
-  const result = parseAndTranslateLogchefQL(form.condition_json, schema.value);
+  const teamsStore = useTeamsStore();
+  const teamId = teamsStore.currentTeamId;
   
-  if (!result.success) {
-    conditionError.value = result.error || "Invalid condition";
-    return "";
+  if (!teamId || !props.sourceId) {
+    conditionError.value = "Team or source not available";
+    return;
   }
-  conditionError.value = null;
 
-  // Build the full SQL query with aggregate function and lookback (WYSIWYG - actual ClickHouse expression)
-  const aggFunc = form.aggregate_function === "count" ? "count(*)" : `${form.aggregate_function}(value)`;
-  const tableName = currentTableName.value;
-  const tsField = timestampField.value;
-  
-  // Construct WHERE clause: LogChefQL conditions + time filter with actual expression
-  let whereClause = result.sql ? `(${result.sql})` : "1=1";
-  whereClause += ` AND \`${tsField}\` >= ${lookbackExpression.value}`;
-  
-  return `SELECT ${aggFunc} as value\nFROM ${tableName}\nWHERE ${whereClause}`;
-});
+  isTranslating.value = true;
+  try {
+    const response = await logchefqlApi.translate(teamId, props.sourceId, { query: form.condition_json });
+    
+    if (response.data && response.data.valid) {
+      conditionError.value = null;
+      
+      // Build the full SQL query with aggregate function and lookback
+      const aggFunc = form.aggregate_function === "count" ? "count(*)" : `${form.aggregate_function}(value)`;
+      const tableName = currentTableName.value;
+      const tsField = timestampField.value;
+      
+      // Construct WHERE clause: LogChefQL conditions + time filter
+      let whereClause = response.data.sql ? `(${response.data.sql})` : "1=1";
+      whereClause += ` AND \`${tsField}\` >= ${lookbackExpression.value}`;
+      
+      generatedSQL.value = `SELECT ${aggFunc} as value\nFROM ${tableName}\nWHERE ${whereClause}`;
+    } else if (response.data && !response.data.valid) {
+      conditionError.value = response.data.error?.message || "Invalid condition";
+      generatedSQL.value = "";
+    } else {
+      conditionError.value = response.error?.message || "Translation failed";
+      generatedSQL.value = "";
+    }
+  } catch (error: any) {
+    conditionError.value = error.message || "Translation error";
+    generatedSQL.value = "";
+  } finally {
+    isTranslating.value = false;
+  }
+}
+
+// Watch for changes that should trigger translation
+watch(
+  () => [form.condition_json, form.aggregate_function, form.lookback_seconds],
+  () => {
+    if (form.query_type === "condition") {
+      translateCondition();
+    }
+  },
+  { debounce: 300 }
+);
 
 // Sync generated SQL to query field when using condition mode
 watch(generatedSQL, (sql) => {

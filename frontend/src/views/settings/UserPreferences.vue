@@ -12,10 +12,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { useToast } from "@/composables/useToast";
-import { TOAST_DURATION } from "@/lib/constants";
-
-const { toast } = useToast();
 
 // Preferences
 const emailNotifications = ref(true);
@@ -26,11 +22,6 @@ const refreshInterval = ref(30);
 
 const handleUpdatePreferences = () => {
   // TODO: Implement preferences update
-  toast({
-    title: "Success",
-    description: "Preferences updated successfully",
-    duration: TOAST_DURATION.SUCCESS,
-  });
 };
 </script>
 

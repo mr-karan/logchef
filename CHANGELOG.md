@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Field Values Sidebar** - Kibana-inspired field exploration panel that displays available fields and their top distinct values
+  - Shows top 10 unique values for `LowCardinality` and `String` columns with occurrence counts
+  - Click any value to instantly add it as a filter (`field="value"`) or exclude it (`field!="value"`)
+  - Auto-expands fields with 6 or fewer distinct values for quick access
+  - Respects the selected time range to show relevant values and optimize query performance
+  - Displays value count badges on collapsed fields
+  - Supports query cancellation for long-running field value queries
+- Backend LogchefQL parser (`internal/logchefql/`) - full parsing, validation, and SQL generation in Go
+  - Pipe operator (`|`) for custom SELECT clauses: `namespace="prod" | namespace msg.level`
+  - Dot notation for nested JSON fields: `log_attributes.user.name = "john"`
+  - Quoted field support for dotted keys: `log_attributes."user.name" = "alice"`
+  - Type-aware SQL generation for Map, JSON, and String columns
+- LogchefQL API endpoints for translation (`/logchefql/translate`), validation (`/logchefql/validate`), and direct query execution (`/logchefql/query`)
+- API endpoints for field value exploration (`/fields/values`, `/fields/:fieldName/values`)
+- Query cancellation support - cancel long-running queries from the UI with the Cancel button or `Esc` key, which also cancels the query in ClickHouse
+- Frontend API client for LogchefQL backend integration
+
+### Changed
+- **Breaking:** LogchefQL parsing and SQL generation moved from frontend to backend
+- **Architecture:** Backend is now the single source of truth for SQL generation
+  - LogchefQL queries execute via `/logchefql/query` - backend builds and executes full SQL
+  - "View as SQL" button shows the actual executed SQL from backend
+  - Mode switching (LogchefQL → SQL) fetches full SQL from backend via `/logchefql/translate`
+- LogchefQL validation now uses backend API with debounced calls
+- Frontend no longer generates SQL - only renders what backend provides
+
+### Removed
+- Frontend LogchefQL parser (`frontend/src/utils/logchefql/`) - replaced by backend implementation
+
+## [0.6.0] - 2025-06-05
+
+### Added
 - Database-backed system settings infrastructure for runtime configuration management
 - Admin Settings UI for managing alerts, AI, authentication, and server settings
 - API endpoints for system settings management (list, get, update, delete)
@@ -45,5 +77,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial release with alerting system, team management, and LogChef QL query language.
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/mr-karan/logchef/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/mr-karan/logchef/releases/tag/v0.5.0

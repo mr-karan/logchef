@@ -309,12 +309,6 @@ export function useSavedQueries(
           await loadSourceQueries(formData.team_id, formData.source_id);
         }
 
-        toast({
-          title: 'Success',
-          description: isUpdate ? 'Query updated successfully.' : 'Query saved successfully.',
-          duration: TOAST_DURATION.SUCCESS
-        });
-
         // Only clear query_id from URL if we were editing and now want to create a new one
         // NOT when we just created a new query
         if (queryIdFromUrl && response.data && response.data.id && queryIdFromUrl !== response.data.id.toString()) {
@@ -612,13 +606,6 @@ export function useSavedQueries(
             router.replace({ query: currentQuery });
           }
         }
-
-        // Refresh the queries list - assuming loadSourceQueries will be called externally
-        toast({
-          title: 'Success',
-          description: 'Query deleted successfully',
-          duration: TOAST_DURATION.SUCCESS,
-        })
 
         return { success: true }
       } catch (error) {

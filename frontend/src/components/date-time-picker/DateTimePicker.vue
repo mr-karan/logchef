@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, type WritableComputedRef } from "vue";
+import { ref, computed, watch } from "vue";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -7,9 +7,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Calendar } from "@/components/ui/calendar";
-import { CalendarIcon, Clock, Globe } from "lucide-vue-next";
+import { CalendarIcon, Clock, ChevronDown, Search } from "lucide-vue-next";
 import type { DateRange } from "radix-vue";
 import {
   getLocalTimeZone,
@@ -21,7 +20,6 @@ import {
   parseDateTime,
 } from "@internationalized/date";
 import { cn } from "@/lib/utils";
-import { relativeTimeToLabel } from "@/utils/time";
 
 interface Props {
   modelValue?: DateRange | null;
@@ -37,16 +35,13 @@ const props = withDefaults(defineProps<Props>(), {
   selectedQuickRange: null,
 });
 
-const emit = defineEmits<{
-  (e: "update:modelValue", value: DateRange): void;
-  (e: "update:timezone", value: string): void;
-}>();
+const emit = defineEmits(['update:modelValue', 'update:timezone']);
 
 // UI state
 const showDatePicker = ref(false);
 const showFromCalendar = ref(false);
 const showToCalendar = ref(false);
-const errorMessage = ref("");
+const quickRangeSearch = ref("");
 
 // Timezone state
 const timezonePreference = ref(
@@ -63,50 +58,49 @@ const dateRange = ref<{ start: DateValue; end: DateValue }>({
   end: currentTime,
 });
 
-// Get the currently selected range text (now synced with props)
+// Selected quick range (synced with props)
 const selectedQuickRange = ref<string | null>(props.selectedQuickRange || null);
 
-// Computed DateRange for v-model binding
-const calendarDateRange = computed({
-  get: () => ({
-    start: dateRange.value.start,
-    end: dateRange.value.end,
-  }),
-  set: (newValue: DateRange | null) => {
-    if (newValue?.start && newValue?.end) {
-      dateRange.value = {
-        start: newValue.start as DateValue,
-        end: newValue.end as DateValue,
-      };
-    }
-  },
-}) as unknown as WritableComputedRef<DateRange>;
-
-// Initialize time state from current dateRange
-const startZoned = toZoned(
-  dateRange.value.start as CalendarDateTime,
-  currentTimezoneId.value
-);
-const endZoned = toZoned(
-  dateRange.value.end as CalendarDateTime,
-  currentTimezoneId.value
+// Recently used absolute ranges (stored in localStorage)
+const recentRanges = ref<Array<{ from: string; to: string; label: string }>>(
+  JSON.parse(localStorage.getItem("logchef_recent_ranges") || "[]")
 );
 
-// Separate date and time inputs
+// Draft state for absolute time inputs
 const draftState = ref({
-  start: {
-    date: formatDate(startZoned),
-    time: formatTime(startZoned),
-  },
-  end: {
-    date: formatDate(endZoned),
-    time: formatTime(endZoned),
-  },
+  from: "now-1h",
+  to: "now",
 });
 
-// Initialize modelValue if not provided
+// Quick ranges organized by category
+const quickRanges = [
+  { label: "Last 5 minutes", value: "5m", duration: { minutes: 5 } },
+  { label: "Last 15 minutes", value: "15m", duration: { minutes: 15 } },
+  { label: "Last 30 minutes", value: "30m", duration: { minutes: 30 } },
+  { label: "Last 1 hour", value: "1h", duration: { hours: 1 } },
+  { label: "Last 3 hours", value: "3h", duration: { hours: 3 } },
+  { label: "Last 6 hours", value: "6h", duration: { hours: 6 } },
+  { label: "Last 12 hours", value: "12h", duration: { hours: 12 } },
+  { label: "Last 24 hours", value: "24h", duration: { hours: 24 } },
+  { label: "Last 2 days", value: "2d", duration: { days: 2 } },
+  { label: "Last 7 days", value: "7d", duration: { days: 7 } },
+  { label: "Last 30 days", value: "30d", duration: { days: 30 } },
+  { label: "Last 90 days", value: "90d", duration: { days: 90 } },
+] as const;
+
+// Filtered quick ranges based on search
+const filteredQuickRanges = computed(() => {
+  if (!quickRangeSearch.value) return quickRanges;
+  const search = quickRangeSearch.value.toLowerCase();
+  return quickRanges.filter(r => 
+    r.label.toLowerCase().includes(search) || 
+    r.value.toLowerCase().includes(search)
+  );
+});
+
+// Initialize from props
 if (!props.modelValue?.start || !props.modelValue?.end) {
-  emit("update:modelValue", calendarDateRange.value);
+  emit("update:modelValue", { start: dateRange.value.start, end: dateRange.value.end });
 }
 
 // Watch for changes in props.selectedQuickRange
@@ -114,10 +108,6 @@ watch(
   () => props.selectedQuickRange,
   (newValue) => {
     if (newValue !== selectedQuickRange.value) {
-      console.log(
-        "DateTimePicker: Updating selectedQuickRange from props:",
-        newValue
-      );
       selectedQuickRange.value = newValue;
     }
   },
@@ -129,283 +119,175 @@ watch(
   () => props.modelValue,
   (newValue) => {
     if (newValue?.start && newValue?.end) {
-      const start =
-        newValue.start instanceof ZonedDateTime
-          ? newValue.start
-          : toZoned(
-              newValue.start as CalendarDateTime,
-              currentTimezoneId.value
-            );
-      const end =
-        newValue.end instanceof ZonedDateTime
-          ? newValue.end
-          : toZoned(newValue.end as CalendarDateTime, currentTimezoneId.value);
-
       dateRange.value = {
         start: newValue.start,
         end: newValue.end,
       };
+      // Update draft state for absolute inputs
+      const start = toZoned(newValue.start as CalendarDateTime, currentTimezoneId.value);
+      const end = toZoned(newValue.end as CalendarDateTime, currentTimezoneId.value);
       draftState.value = {
-        start: {
-          date: formatDate(start),
-          time: formatTime(start),
-        },
-        end: {
-          date: formatDate(end),
-          time: formatTime(end),
-        },
+        from: formatDateTime(start),
+        to: formatDateTime(end),
       };
-
-      // We don't automatically reset the selectedQuickRange anymore
-      // This allows us to maintain the relative time display when using quick ranges
-      // selectedQuickRange.value will be updated by parent components through normal binding
     }
   },
   { immediate: true, deep: true }
 );
-
-// Add the toggleTimezone function
-function toggleTimezone() {
-  timezonePreference.value =
-    timezonePreference.value === "local" ? "utc" : "local";
-}
 
 // Watch for timezone changes
 watch(
   () => timezonePreference.value,
   (newValue) => {
     localStorage.setItem("logchef_timezone", newValue);
-    // Emit the new timezone identifier to parent components
     emit("update:timezone", newValue === "local" ? getLocalTimeZone() : "UTC");
-    // We might need to re-apply the date/time inputs to reflect the new timezone
-    // Call handleApply() to re-parse and emit the updated ZonedDateTime values
-    // handleApply(); // Revisit this if needed after testing
   }
-  // We might want this to run immediately on component mount too
-  // { immediate: true } // Keep this commented for now, only trigger on actual change
 );
 
-const quickRanges = [
-  { label: "Last 5m", duration: { minutes: 5 } },
-  { label: "Last 15m", duration: { minutes: 15 } },
-  { label: "Last 30m", duration: { minutes: 30 } },
-  { label: "Last 1h", duration: { hours: 1 } },
-  { label: "Last 3h", duration: { hours: 3 } },
-  { label: "Last 6h", duration: { hours: 6 } },
-  { label: "Last 12h", duration: { hours: 12 } },
-  { label: "Last 24h", duration: { hours: 24 } },
-  { label: "Last 2d", duration: { days: 2 } },
-  { label: "Last 7d", duration: { days: 7 } },
-  { label: "Last 30d", duration: { days: 30 } },
-  { label: "Last 90d", duration: { days: 90 } },
-] as const;
-
-function formatDate(date: ZonedDateTime | null | undefined): string {
+function formatDateTime(date: ZonedDateTime | null | undefined): string {
   if (!date) return "";
   try {
     const isoString = date.toString();
-    return isoString.split("T")[0];
+    const datePart = isoString.split("T")[0];
+    const timePart = isoString.split("T")[1].slice(0, 8);
+    return `${datePart} ${timePart}`;
   } catch (e) {
-    console.error("Error formatting date:", e);
     return "";
   }
 }
 
-function formatTime(date: ZonedDateTime | null | undefined): string {
-  if (!date) return "";
-  try {
-    const isoString = date.toString();
-    return isoString.split("T")[1].slice(0, 8); // Get HH:MM:SS
-  } catch (e) {
-    console.error("Error formatting time:", e);
-    return "";
+function parseRelativeTime(input: string): ZonedDateTime | null {
+  const trimmed = input.trim().toLowerCase();
+  
+  // Handle "now"
+  if (trimmed === "now") {
+    return now(currentTimezoneId.value);
   }
-}
-
-function parseDateTimeInput(date: string, time: string): ZonedDateTime | null {
-  if (!date || !time) return null;
+  
+  // Handle "now-Xm/h/d" format
+  const relativeMatch = trimmed.match(/^now-(\d+)(m|h|d)$/);
+  if (relativeMatch) {
+    const value = parseInt(relativeMatch[1]);
+    const unit = relativeMatch[2];
+    const current = now(currentTimezoneId.value);
+    
+    switch (unit) {
+      case 'm': return current.subtract({ minutes: value });
+      case 'h': return current.subtract({ hours: value });
+      case 'd': return current.subtract({ days: value });
+    }
+  }
+  
+  // Try to parse as absolute datetime
   try {
-    const [year, month, day] = date.split("-").map(Number);
-    const [hour, minute, second] = time.split(":").map(Number);
-
-    if (isNaN(year) || isNaN(month) || isNaN(day)) {
-      errorMessage.value = 'Invalid date format. Expected "YYYY-MM-DD"';
-      return null;
-    }
-    if (
-      isNaN(hour) ||
-      isNaN(minute) ||
-      isNaN(second) ||
-      hour < 0 ||
-      hour > 23 ||
-      minute < 0 ||
-      minute > 59 ||
-      second < 0 ||
-      second > 59
-    ) {
-      errorMessage.value = 'Invalid time format. Expected "HH:mm:ss"';
-      return null;
-    }
-
-    try {
-      // Create an ISO string and parse it with parseDateTime
-      const dateString = `${year}-${month.toString().padStart(2, "0")}-${day
-        .toString()
-        .padStart(2, "0")}T${hour.toString().padStart(2, "0")}:${minute
-        .toString()
-        .padStart(2, "0")}:${second.toString().padStart(2, "0")}`;
-      // Call parseDateTime with a single argument - the ISO string
+    // Handle "YYYY-MM-DD HH:mm:ss" format
+    const parts = trimmed.split(' ');
+    if (parts.length === 2) {
+      const dateString = `${parts[0]}T${parts[1]}`;
       const calendarDate = parseDateTime(dateString);
-      // Convert the CalendarDateTime to a ZonedDateTime
       return toZoned(calendarDate, currentTimezoneId.value);
-    } catch (e) {
-      console.error("Error creating ZonedDateTime:", e);
-      errorMessage.value = "Invalid date/time values";
-      return null;
+    }
+    // Handle "YYYY-MM-DD" format (assume start of day)
+    if (parts.length === 1 && parts[0].match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const dateString = `${parts[0]}T00:00:00`;
+      const calendarDate = parseDateTime(dateString);
+      return toZoned(calendarDate, currentTimezoneId.value);
     }
   } catch (e) {
-    console.error("Error parsing date-time:", e);
-    errorMessage.value =
-      "Error parsing date-time. Please use format: YYYY-MM-DD HH:mm:ss";
-    return null;
+    console.error("Error parsing date:", e);
   }
+  
+  return null;
 }
 
-function handleCalendarUpdate(
-  type: "start" | "end",
-  date: DateValue | undefined | null
-) {
+function applyQuickRange(range: typeof quickRanges[number]) {
+  const end = now(currentTimezoneId.value);
+  const start = end.subtract(range.duration);
+
+  dateRange.value = { start, end };
+  selectedQuickRange.value = `Last ${range.value}`;
+  draftState.value = {
+    from: `now-${range.value}`,
+    to: "now",
+  };
+  
+  emit("update:modelValue", { start, end });
+  showDatePicker.value = false;
+}
+
+function applyAbsoluteRange() {
+  const start = parseRelativeTime(draftState.value.from);
+  const end = parseRelativeTime(draftState.value.to);
+  
+  if (!start || !end) {
+    return;
+  }
+  
+  if (start.compare(end) > 0) {
+    return;
+  }
+
+  dateRange.value = { start, end };
+  selectedQuickRange.value = null;
+  
+  // Save to recent ranges
+  const rangeEntry = {
+    from: draftState.value.from,
+    to: draftState.value.to,
+    label: `${formatDateTime(start)} to ${formatDateTime(end)}`,
+  };
+  
+  // Add to recent, avoiding duplicates
+  const existingIndex = recentRanges.value.findIndex(
+    r => r.from === rangeEntry.from && r.to === rangeEntry.to
+  );
+  if (existingIndex !== -1) {
+    recentRanges.value.splice(existingIndex, 1);
+  }
+  recentRanges.value.unshift(rangeEntry);
+  recentRanges.value = recentRanges.value.slice(0, 5); // Keep only 5 recent
+  localStorage.setItem("logchef_recent_ranges", JSON.stringify(recentRanges.value));
+  
+  emit("update:modelValue", { start, end });
+  showDatePicker.value = false;
+}
+
+function applyRecentRange(range: { from: string; to: string }) {
+  draftState.value = { from: range.from, to: range.to };
+  applyAbsoluteRange();
+}
+
+function handleCalendarSelect(type: 'from' | 'to', date: DateValue | undefined | null) {
   if (!date) return;
-
   const zonedDate = toZoned(date as CalendarDateTime, currentTimezoneId.value);
-  draftState.value[type].date = formatDate(zonedDate);
-
-  // Close the respective calendar popover
-  if (type === "start") {
+  const formatted = formatDateTime(zonedDate).split(' ')[0] + ' 00:00:00';
+  draftState.value[type] = formatted;
+  
+  if (type === 'from') {
     showFromCalendar.value = false;
   } else {
     showToCalendar.value = false;
   }
 }
 
-function formatDisplayText() {
-  const start = toZoned(
-    dateRange.value.start as CalendarDateTime,
-    currentTimezoneId.value
-  );
-  const end = toZoned(
-    dateRange.value.end as CalendarDateTime,
-    currentTimezoneId.value
-  );
-  return `${formatDate(start)} ${formatTime(start)} - ${formatDate(
-    end
-  )} ${formatTime(end)}`;
+function clearRecentRanges() {
+  recentRanges.value = [];
+  localStorage.removeItem("logchef_recent_ranges");
 }
 
-function handleApply() {
-  errorMessage.value = "";
-
-  const start = parseDateTimeInput(
-    draftState.value.start.date,
-    draftState.value.start.time
-  );
-  const end = parseDateTimeInput(
-    draftState.value.end.date,
-    draftState.value.end.time
-  );
-
-  if (!start || !end) return;
-
-  if (start.compare(end) > 0) {
-    errorMessage.value = "Start date must be before end date";
-    return;
+// Display text for trigger button
+const triggerDisplayText = computed(() => {
+  if (selectedQuickRange.value) {
+    return selectedQuickRange.value;
   }
-
-  dateRange.value = { start, end };
-  selectedQuickRange.value = null;
-  emitUpdate();
-  showDatePicker.value = false;
-}
-
-function applyQuickRange(range: (typeof quickRanges)[number]) {
-  const end = now(currentTimezoneId.value);
-  const start = end.subtract(range.duration);
-
-  dateRange.value = { start, end };
-  draftState.value = {
-    start: {
-      date: formatDate(start),
-      time: formatTime(start),
-    },
-    end: {
-      date: formatDate(end),
-      time: formatTime(end),
-    },
-  };
-  selectedQuickRange.value = range.label;
-  emitUpdate();
-  showDatePicker.value = false;
-}
-
-function handleCancel() {
-  errorMessage.value = "";
-  const start = toZoned(
-    dateRange.value.start as CalendarDateTime,
-    currentTimezoneId.value
-  );
-  const end = toZoned(
-    dateRange.value.end as CalendarDateTime,
-    currentTimezoneId.value
-  );
-  draftState.value = {
-    start: {
-      date: formatDate(start),
-      time: formatTime(start),
-    },
-    end: {
-      date: formatDate(end),
-      time: formatTime(end),
-    },
-  };
-  showDatePicker.value = false;
-}
-
-function handleKeyDown(e: KeyboardEvent) {
-  if (e.key === "Enter" && e.ctrlKey) {
-    handleApply();
-  } else if (e.key === "Escape") {
-    handleCancel();
+  
+  if (!dateRange.value?.start || !dateRange.value?.end) {
+    return "Select time range";
   }
-}
-
-function emitUpdate() {
-  if (dateRange.value?.start && dateRange.value?.end) {
-    emit("update:modelValue", calendarDateRange.value);
-  }
-}
-
-// Compute duration between dates
-const durationText = computed(() => {
-  if (!dateRange.value?.start || !dateRange.value?.end) return "";
-  const start = toZoned(
-    dateRange.value.start as CalendarDateTime,
-    currentTimezoneId.value
-  );
-  const end = toZoned(
-    dateRange.value.end as CalendarDateTime,
-    currentTimezoneId.value
-  );
-  const diffMs = end.toDate().getTime() - start.toDate().getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  const diffHours = Math.floor(
-    (diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)
-  );
-  const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-
-  if (diffDays > 0)
-    return `Duration: ${diffDays}d ${diffHours}h ${diffMinutes}m`;
-  if (diffHours > 0) return `Duration: ${diffHours}h ${diffMinutes}m`;
-  return `Duration: ${diffMinutes}m`;
+  
+  const start = toZoned(dateRange.value.start as CalendarDateTime, currentTimezoneId.value);
+  const end = toZoned(dateRange.value.end as CalendarDateTime, currentTimezoneId.value);
+  return `${formatDateTime(start)} - ${formatDateTime(end)}`;
 });
 
 // Function to open the date picker programmatically
@@ -413,254 +295,195 @@ function openDatePicker() {
   showDatePicker.value = true;
 }
 
-// Re-introduce computed property for display text
-const selectedRangeText = computed(() => {
-  if (!dateRange.value?.start || !dateRange.value?.end)
-    return "Select time range";
-
-  // Use the quick range label if available
-  if (selectedQuickRange.value) {
-    return relativeTimeToLabel(selectedQuickRange.value);
+// Get current timezone display
+const timezoneDisplay = computed(() => {
+  if (timezonePreference.value === "local") {
+    return `Browser Time (${getLocalTimeZone()})`;
   }
-
-  // Otherwise use the absolute time format
-  return formatDisplayText();
+  return "UTC";
 });
 
 // Expose methods and computed properties to parent component
 defineExpose({
   openDatePicker,
   selectedQuickRange,
-  selectedRangeText,
+  selectedRangeText: triggerDisplayText,
   currentTimezoneId,
 });
 </script>
 
 <template>
-  <div :class="cn('flex transition-all', props.class)">
-    <div class="flex items-center">
-      <Popover v-model:open="showDatePicker">
-        <PopoverTrigger as-child>
-          <Button
-            variant="outline"
-            :class="[
-              'min-w-[260px] max-w-[420px] truncate',
-              props.disabled ? 'opacity-50 cursor-not-allowed' : '',
-            ]"
-            :disabled="props.disabled"
-          >
-            <div class="flex items-center">
-              <CalendarIcon class="mr-2 h-4 w-4 flex-shrink-0" />
-              <span>{{ selectedRangeText }}</span>
-            </div>
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
-          v-if="!props.disabled"
-          class="w-[400px] p-4"
-          align="start"
-          side="bottom"
+  <div :class="cn('flex items-center gap-1', props.class)">
+    <Popover v-model:open="showDatePicker">
+      <PopoverTrigger as-child>
+        <Button
+          variant="ghost"
+          :class="[
+            'h-7 px-2.5 gap-1.5 font-normal text-sm border border-transparent hover:border-border hover:bg-muted/50',
+            props.disabled ? 'opacity-50 cursor-not-allowed' : '',
+          ]"
+          :disabled="props.disabled"
         >
-          <div class="space-y-4">
-            <!-- Date/Time Inputs -->
-            <div class="space-y-4">
-              <!-- From -->
-              <div class="space-y-2">
-                <Label class="text-sm font-medium">From</Label>
-                <div class="flex gap-2">
-                  <div class="relative flex-1">
-                    <Input
-                      v-model="draftState.start.date"
-                      class="pr-10 font-mono text-sm h-9"
-                      placeholder="YYYY-MM-DD"
-                      @keydown="handleKeyDown"
+          <Clock class="h-3.5 w-3.5 text-muted-foreground" />
+          <span>{{ triggerDisplayText }}</span>
+          <ChevronDown class="h-3 w-3 text-muted-foreground ml-0.5" />
+        </Button>
+      </PopoverTrigger>
+      
+      <PopoverContent
+        v-if="!props.disabled"
+        class="w-[580px] p-0"
+        align="start"
+        side="bottom"
+      >
+        <div class="flex">
+          <!-- Left Panel: Absolute time range -->
+          <div class="w-[260px] p-4 border-r">
+            <h4 class="text-sm font-medium mb-3">Absolute time range</h4>
+            
+            <!-- From input -->
+            <div class="space-y-1.5 mb-3">
+              <label class="text-xs text-muted-foreground">From</label>
+              <div class="relative">
+                <Input
+                  v-model="draftState.from"
+                  class="h-8 text-sm font-mono pr-8"
+                  placeholder="now-1h or YYYY-MM-DD HH:mm:ss"
+                  @keydown.enter="applyAbsoluteRange"
+                />
+                <Popover v-model:open="showFromCalendar">
+                  <PopoverTrigger as-child>
+                    <button class="absolute right-1 top-1 p-1 hover:bg-muted rounded">
+                      <CalendarIcon class="h-4 w-4 text-muted-foreground" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent class="w-auto p-0" side="right" align="start">
+                    <Calendar
+                      class="rounded-md border"
+                      @update:model-value="(date) => handleCalendarSelect('from', date)"
                     />
-                    <Popover v-model:open="showFromCalendar">
-                      <PopoverTrigger as-child>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="absolute right-0 top-0 h-full w-9 px-0 hover:bg-accent"
-                        >
-                          <CalendarIcon class="h-4 w-4" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent
-                        class="w-auto p-0"
-                        :side="'bottom'"
-                        :align="'end'"
-                      >
-                        <Calendar
-                          :selected-date="dateRange.start"
-                          class="rounded-md border"
-                          @update:model-value="
-                            (date) => handleCalendarUpdate('start', date)
-                          "
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                  <div class="relative w-[120px]">
-                    <Input
-                      v-model="draftState.start.time"
-                      class="font-mono text-sm h-9"
-                      placeholder="HH:mm:ss"
-                      @keydown="handleKeyDown"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      class="absolute right-0 top-0 h-full w-9 px-0 hover:bg-accent pointer-events-none"
-                    >
-                      <Clock class="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-              <!-- To -->
-              <div class="space-y-2">
-                <Label class="text-sm font-medium">To</Label>
-                <div class="flex gap-2">
-                  <div class="relative flex-1">
-                    <Input
-                      v-model="draftState.end.date"
-                      class="pr-10 font-mono text-sm h-9"
-                      placeholder="YYYY-MM-DD"
-                      @keydown="handleKeyDown"
-                    />
-                    <Popover v-model:open="showToCalendar">
-                      <PopoverTrigger as-child>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="absolute right-0 top-0 h-full w-9 px-0 hover:bg-accent"
-                        >
-                          <CalendarIcon class="h-4 w-4" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent
-                        class="w-auto p-0"
-                        :side="'bottom'"
-                        :align="'end'"
-                      >
-                        <Calendar
-                          :selected-date="dateRange.end"
-                          class="rounded-md border"
-                          @update:model-value="
-                            (date) => handleCalendarUpdate('end', date)
-                          "
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                  <div class="relative w-[120px]">
-                    <Input
-                      v-model="draftState.end.time"
-                      class="font-mono text-sm h-9"
-                      placeholder="HH:mm:ss"
-                      @keydown="handleKeyDown"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      class="absolute right-0 top-0 h-full w-9 px-0 hover:bg-accent pointer-events-none"
-                    >
-                      <Clock class="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
-
-            <!-- Timezone selection -->
-            <div class="flex items-center justify-between text-sm">
-              <div class="flex items-center">
-                <Globe class="h-4 w-4 mr-1" />
-                <span>Timezone:</span>
+            
+            <!-- To input -->
+            <div class="space-y-1.5 mb-4">
+              <label class="text-xs text-muted-foreground">To</label>
+              <div class="relative">
+                <Input
+                  v-model="draftState.to"
+                  class="h-8 text-sm font-mono pr-8"
+                  placeholder="now or YYYY-MM-DD HH:mm:ss"
+                  @keydown.enter="applyAbsoluteRange"
+                />
+                <Popover v-model:open="showToCalendar">
+                  <PopoverTrigger as-child>
+                    <button class="absolute right-1 top-1 p-1 hover:bg-muted rounded">
+                      <CalendarIcon class="h-4 w-4 text-muted-foreground" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent class="w-auto p-0" side="right" align="start">
+                    <Calendar
+                      class="rounded-md border"
+                      @update:model-value="(date) => handleCalendarSelect('to', date)"
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
-              <div class="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  class="h-7 px-2"
-                  :class="{
-                    'bg-primary text-primary-foreground':
-                      timezonePreference === 'local',
-                  }"
-                  @click="timezonePreference = 'local'"
+            </div>
+            
+            <!-- Apply button -->
+            <Button 
+              class="w-full h-8" 
+              @click="applyAbsoluteRange"
+            >
+              Apply time range
+            </Button>
+            
+            <!-- Recently used -->
+            <div v-if="recentRanges.length > 0" class="mt-4 pt-4 border-t">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs text-muted-foreground">Recently used</span>
+                <button 
+                  class="text-xs text-muted-foreground hover:text-foreground"
+                  @click="clearRecentRanges"
                 >
-                  Local
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  class="h-7 px-2"
-                  :class="{
-                    'bg-primary text-primary-foreground':
-                      timezonePreference === 'utc',
-                  }"
-                  @click="timezonePreference = 'utc'"
+                  Clear
+                </button>
+              </div>
+              <div class="space-y-1">
+                <button
+                  v-for="(range, idx) in recentRanges"
+                  :key="idx"
+                  class="w-full text-left text-xs p-1.5 hover:bg-muted rounded truncate"
+                  @click="applyRecentRange(range)"
                 >
-                  UTC
-                </Button>
+                  {{ range.from }} to {{ range.to }}
+                </button>
               </div>
             </div>
-
-            <!-- Error message -->
-            <div v-if="errorMessage" class="text-sm text-destructive">
-              {{ errorMessage }}
-            </div>
-
-            <!-- Quick Ranges -->
-            <div class="space-y-2">
-              <Label class="text-sm font-medium">Quick Ranges</Label>
-              <div class="grid grid-cols-4 gap-2">
-                <Button
-                  v-for="range in quickRanges"
-                  :key="range.label"
-                  variant="outline"
-                  size="sm"
-                  :class="[
-                    'h-8',
-                    selectedQuickRange === range.label &&
-                      'bg-accent text-accent-foreground',
-                  ]"
-                  @click="applyQuickRange(range)"
+            
+            <!-- Timezone info -->
+            <div class="mt-4 pt-4 border-t">
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-muted-foreground">{{ timezoneDisplay }}</span>
+                <button 
+                  class="text-xs text-primary hover:underline"
+                  @click="timezonePreference = timezonePreference === 'local' ? 'utc' : 'local'"
                 >
-                  {{ range.label }}
-                </Button>
+                  Change
+                </button>
               </div>
-            </div>
-
-            <!-- Action buttons -->
-            <div class="flex justify-end space-x-2 pt-2">
-              <Button variant="outline" @click="handleCancel">Cancel</Button>
-              <Button @click="handleApply">Apply</Button>
             </div>
           </div>
-        </PopoverContent>
-      </Popover>
-
-      <!-- Timezone indicator button -->
-      <Button
-        variant="ghost"
-        size="sm"
-        class="ml-1 h-9 px-2 flex items-center"
-        @click="toggleTimezone"
-        title="Toggle timezone between local and UTC"
-      >
-        <Globe class="h-4 w-4 mr-1" />
-        <span class="text-xs">{{
-          timezonePreference === "local" ? "Local" : "UTC"
-        }}</span>
-      </Button>
-    </div>
+          
+          <!-- Right Panel: Quick ranges -->
+          <div class="flex-1 p-4">
+            <!-- Search -->
+            <div class="relative mb-3">
+              <Search class="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                v-model="quickRangeSearch"
+                class="h-8 pl-8 text-sm"
+                placeholder="Search quick ranges"
+              />
+            </div>
+            
+            <!-- Quick range list -->
+            <div class="space-y-0.5 max-h-[320px] overflow-y-auto">
+              <button
+                v-for="range in filteredQuickRanges"
+                :key="range.value"
+                :class="[
+                  'w-full text-left px-3 py-2 text-sm rounded-md transition-colors',
+                  selectedQuickRange === `Last ${range.value}` 
+                    ? 'bg-primary/10 text-primary border-l-2 border-primary' 
+                    : 'hover:bg-muted'
+                ]"
+                @click="applyQuickRange(range)"
+              >
+                {{ range.label }}
+              </button>
+              
+              <div v-if="filteredQuickRanges.length === 0" class="text-sm text-muted-foreground text-center py-4">
+                No matching ranges
+              </div>
+            </div>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+    
+    <!-- Timezone indicator -->
+    <Button
+      variant="ghost"
+      size="sm"
+      class="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+      @click="timezonePreference = timezonePreference === 'local' ? 'utc' : 'local'"
+      title="Click to toggle timezone"
+    >
+      {{ timezonePreference === "local" ? "Local" : "UTC" }}
+    </Button>
   </div>
 </template>
-
-<style scoped>
-/* Ensure popovers aren't too wide */
-:deep(.v-popper__popper) {
-  max-width: 350px;
-}
-</style>

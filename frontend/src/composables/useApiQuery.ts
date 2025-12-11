@@ -1,6 +1,6 @@
 import { ref } from "vue";
 import type { APIResponse, APIErrorResponse } from "@/api/types";
-import { showErrorToast, showSuccessToast } from "@/api/error-handler";
+import { showErrorToast } from "@/api/error-handler";
 
 export function useApiQuery<T>() {
   const isLoading = ref(false);
@@ -28,10 +28,6 @@ export function useApiQuery<T>() {
         // Standard API response format with status and data fields
         const resultData = response.data ?? options?.defaultData ?? null;
         data.value = resultData;
-
-        if (options?.successMessage && options?.showToast !== false) {
-          showSuccessToast(options.successMessage);
-        }
 
         // Pass data to success handler
         options?.onSuccess?.(resultData);

@@ -88,6 +88,21 @@
           </Tooltip>
         </TooltipProvider>
 
+        <!-- View as SQL Button - Switch to SQL mode with the generated SQL -->
+        <TooltipProvider v-if="props.activeMode === 'logchefql' && exploreStore.generatedDisplaySql">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" class="h-7 gap-1" @click="switchToSqlModeWithGeneratedSql">
+                <Code2 class="h-3.5 w-3.5" />
+                <span class="text-xs">View as SQL</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>Switch to SQL mode to view and edit the generated query</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
         <!-- SQL Toggle Button - Only show when in SQL mode -->
         <TooltipProvider v-if="props.activeMode === 'clickhouse-sql'">
           <Tooltip>
@@ -108,6 +123,56 @@
         <SavedQueriesDropdown :selected-source-id="props.sourceId" :selected-team-id="props.teamId"
           @select-saved-query="(query: SavedTeamQuery) => $emit('select-saved-query', query)"
           @save="$emit('save-query')" class="h-8" />
+
+        <!-- Run Query Button - Integrated -->
+        <TooltipProvider v-if="props.showRunButton && !props.isExecuting">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button 
+                variant="default" 
+                size="sm" 
+                class="h-7 gap-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+                :disabled="!props.canExecute"
+                @click="$emit('execute')"
+              >
+                <Play class="h-3.5 w-3.5" />
+                <span class="font-medium">Run</span>
+                <kbd class="ml-1 text-[10px] bg-emerald-700/50 px-1 py-0.5 rounded hidden sm:inline">⌘↵</kbd>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p class="text-xs">Execute query (Ctrl+Enter)</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
+        <!-- Cancel Query Button - Shows when executing -->
+        <TooltipProvider v-if="props.showRunButton && props.isExecuting">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button 
+                variant="destructive" 
+                size="sm" 
+                class="h-7 gap-1.5 px-3 shadow-sm"
+                :disabled="props.isCancelling"
+                @click="$emit('cancel-query')"
+              >
+                <template v-if="props.isCancelling">
+                  <RefreshCw class="h-3.5 w-3.5 animate-spin" />
+                  <span class="font-medium">Cancelling...</span>
+                </template>
+                <template v-else>
+                  <Square class="h-3.5 w-3.5" />
+                  <span class="font-medium">Cancel</span>
+                  <kbd class="ml-1 text-[10px] bg-red-700/50 px-1 py-0.5 rounded hidden sm:inline">Esc</kbd>
+                </template>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p class="text-xs">Cancel running query (Escape)</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
 
         <!-- Help Icon -->
         <HoverCard :open-delay="200">
@@ -540,6 +605,7 @@
     </DialogContent>
   </Dialog>
 
+
 </template>
 
 <script setup lang="ts">
@@ -573,6 +639,10 @@ import {
   EyeOff,
   Wand2,
   History,
+  Play,
+  RefreshCw,
+  Keyboard,
+  Square,
 } from "lucide-vue-next";
 import {
   HoverCard,
@@ -628,14 +698,55 @@ import {
   lightweightEditorDisposal,
   reactivateEditor,
 } from "@/utils/monaco";
-import {
-  Parser as LogchefQLParser,
-  State as LogchefQLState,
-  Operator as LogchefQLOperator,
-  VALID_KEY_VALUE_OPERATORS as LogchefQLValidOperators,
-  isNumeric,
-} from "@/utils/logchefql";
-import { validateLogchefQLWithDetails } from "@/utils/logchefql/api"; // Import detailed validation
+import { logchefqlApi, type ValidateResponse } from "@/api/logchefql";
+
+// Simple parser states for autocomplete (lightweight, no backend dependency)
+enum AutocompleteState {
+  INITIAL = 'INITIAL',
+  KEY = 'KEY',
+  OPERATOR = 'OPERATOR',
+  VALUE = 'VALUE',
+  EXPECT_BOOL_OP = 'EXPECT_BOOL_OP',
+}
+
+// Simple function to detect autocomplete state from text
+function detectAutocompleteState(text: string): { state: AutocompleteState; key: string; value: string } {
+  const trimmed = text.trim();
+  if (!trimmed) return { state: AutocompleteState.INITIAL, key: '', value: '' };
+  
+  // Check if we're after a boolean operator
+  if (/\b(and|or)\s*$/i.test(trimmed)) {
+    return { state: AutocompleteState.KEY, key: '', value: '' };
+  }
+  
+  // Check if we have a complete condition and need a boolean operator
+  const conditionPattern = /(\w+)\s*([=!~><]+)\s*("[^"]*"|'[^']*'|\S+)\s*$/;
+  const conditionMatch = trimmed.match(conditionPattern);
+  if (conditionMatch) {
+    return { state: AutocompleteState.EXPECT_BOOL_OP, key: conditionMatch[1], value: conditionMatch[3] };
+  }
+  
+  // Check if we have key + operator, expecting value
+  const keyOpPattern = /(\w+)\s*([=!~><]+)\s*$/;
+  const keyOpMatch = trimmed.match(keyOpPattern);
+  if (keyOpMatch) {
+    return { state: AutocompleteState.VALUE, key: keyOpMatch[1], value: '' };
+  }
+  
+  // Check if we're typing a key
+  const keyPattern = /(\w+)\s*$/;
+  const keyMatch = trimmed.match(keyPattern);
+  if (keyMatch) {
+    // Check if this looks like a partial value (after operator)
+    if (/[=!~><]\s*\S*$/.test(trimmed)) {
+      const fullMatch = trimmed.match(/(\w+)\s*[=!~><]+\s*(\S*)$/);
+      return { state: AutocompleteState.VALUE, key: fullMatch?.[1] || '', value: fullMatch?.[2] || '' };
+    }
+    return { state: AutocompleteState.KEY, key: keyMatch[1], value: '' };
+  }
+  
+  return { state: AutocompleteState.INITIAL, key: '', value: '' };
+}
 import {
   validateSQLWithDetails,
   SQL_KEYWORDS,
@@ -644,6 +755,7 @@ import {
 } from "@/utils/clickhouse-sql";
 import { storeToRefs } from 'pinia';
 import { useExploreStore } from "@/stores/explore";
+import { useTeamsStore } from "@/stores/teams";
 import type { VariableState as VariableSetting } from '@/stores/variables';
 import { useVariableStore } from '@/stores/variables';
 import { QueryService } from "@/services/QueryService";
@@ -682,6 +794,12 @@ const props = defineProps({
   useCurrentTeam: { type: Boolean, default: true },
   // Additional props to prevent Vue warnings
   class: { type: String, default: "" },
+  // Run button integration
+  isExecuting: { type: Boolean, default: false },
+  canExecute: { type: Boolean, default: true },
+  showRunButton: { type: Boolean, default: true },
+  // Cancel button integration
+  isCancelling: { type: Boolean, default: false },
 });
 
 const emit = defineEmits<{
@@ -695,6 +813,10 @@ const emit = defineEmits<{
   // Additional emits to prevent Vue warnings
   (e: "saveQueryAsNew"): void;
   (e: "generateAiSql", payload: any): void;
+  // Run button
+  (e: "execute"): void;
+  // Cancel button
+  (e: "cancel-query"): void;
 }>();
 
 // --- Core State ---
@@ -1227,7 +1349,7 @@ const registerCompletionProvider = () => {
 
 // --- Actions ---
 // Replace dynamic variables in query before submit
-const submitQuery = () => {
+const submitQuery = async () => {
   const currentContent = editorContent.value;
   validationError.value = null;
 
@@ -1247,9 +1369,22 @@ const submitQuery = () => {
 
     if (queryForValidation.trim()) {
       if (props.activeMode === "logchefql") {
-        const validation = validateLogchefQLWithDetails(queryForValidation);
-        isValid = validation.valid;
-        if (!isValid) validationError.value = validation.error || "Invalid LogchefQL syntax.";
+        // Use backend validation API
+        try {
+          const teamsStore = useTeamsStore();
+          const currentTeamId = teamsStore.currentTeamId;
+          if (currentTeamId && props.sourceId) {
+            const response = await logchefqlApi.validate(currentTeamId, props.sourceId, queryForValidation);
+            if (response.data) {
+              isValid = response.data.valid;
+              if (!isValid) validationError.value = response.data.error?.message || "Invalid LogchefQL syntax.";
+            }
+          }
+        } catch (validationErr) {
+          // If validation API fails, allow the query to proceed (fail-open)
+          console.warn("LogchefQL validation API error:", validationErr);
+          isValid = true;
+        }
       } else {
         const validation = validateSQLWithDetails(queryForValidation);
         isValid = validation.valid;
@@ -1416,12 +1551,23 @@ const safelyDisposeEditor = (fullDisposal = false) => {
   editorRef.value = null; // Clear ref
 };
 
+// Global escape key handler for query cancellation
+const handleEscapeKey = (e: KeyboardEvent) => {
+  if (e.key === 'Escape' && props.isExecuting && !props.isCancelling) {
+    e.preventDefault();
+    emit('cancel-query');
+  }
+};
+
 onMounted(() => {
-  // No need for click outside listener anymore since we're using Sheet component
+  // Add escape key listener for query cancellation
+  document.addEventListener('keydown', handleEscapeKey);
 });
 
 // Handle full disposal on unmount
 onBeforeUnmount(() => {
+  // Remove escape key listener
+  document.removeEventListener('keydown', handleEscapeKey);
   safelyDisposeEditor(true); // Full disposal
 });
 
@@ -1524,23 +1670,20 @@ const registerLogchefQLCompletionProvider = (): MonacoDisposable | null => {
       };
       const textBeforeCursor = model.getValueInRange(lineStartToPosition);
 
-      const parser = new LogchefQLParser();
-      parser.parse(textBeforeCursor, false, true);
+      // Use simplified autocomplete state detection
+      const parserState = detectAutocompleteState(textBeforeCursor);
 
       let suggestions: MonacoCompletionItem[] = [];
       let incomplete = false;
 
       // Handle "and" operator specifically
       if (textBeforeCursor.trim().endsWith("and")) {
-        // Don't trigger completion after 'and' unless there's at least one more character
-        // This helps prevent cursor position issues
         return { suggestions: [], incomplete: false };
       }
 
       if (
-        parser.state === LogchefQLState.KEY ||
-        parser.state === LogchefQLState.INITIAL ||
-        parser.state === LogchefQLState.BOOL_OP_DELIMITER
+        parserState.state === AutocompleteState.KEY ||
+        parserState.state === AutocompleteState.INITIAL
       ) {
         if (fieldNames.value.includes(wordInfo.word)) {
           const operatorRange: MonacoRange = {
@@ -1553,19 +1696,19 @@ const registerLogchefQLCompletionProvider = (): MonacoDisposable | null => {
         } else {
           suggestions = getKeySuggestions(range);
         }
-      } else if (parser.state === LogchefQLState.EXPECT_BOOL_OP) {
+      } else if (parserState.state === AutocompleteState.EXPECT_BOOL_OP) {
         suggestions = getBooleanOperatorsSuggestions(range);
-      } else if (parser.state === LogchefQLState.KEY_VALUE_OPERATOR) {
+      } else if (parserState.state === AutocompleteState.VALUE || parserState.state === AutocompleteState.OPERATOR) {
         const valueRange: MonacoRange = {
           startLineNumber: position.lineNumber,
           endLineNumber: position.lineNumber,
           startColumn: wordInfo.startColumn,
           endColumn: wordInfo.endColumn,
         };
-        // Standard value suggestions - let user add quotes manually
+        // Standard value suggestions
         const valueResult = await getValueSuggestions(
-          parser.key,
-          parser.value,
+          parserState.key,
+          parserState.value,
           valueRange
         );
         suggestions = valueResult.suggestions;
@@ -2060,12 +2203,6 @@ const setExamplePrompt = (prompt: string) => {
 const copyToClipboard = async (text: string) => {
   try {
     await navigator.clipboard.writeText(text);
-    const { toast } = useToast();
-    toast({
-      title: "Copied!",
-      description: "SQL query copied to clipboard",
-      duration: 2000,
-    });
   } catch (error) {
     console.error('Failed to copy to clipboard:', error);
     const { toast } = useToast();
@@ -2076,6 +2213,12 @@ const copyToClipboard = async (text: string) => {
       duration: 3000,
     });
   }
+};
+
+// Switch to SQL mode - the changeMode function will use generatedDisplaySql
+const switchToSqlModeWithGeneratedSql = () => {
+  // Just switch mode - changeMode will pick up generatedDisplaySql automatically
+  emit('update:activeMode', 'clickhouse-sql', true);
 };
 
 // Watch for changes to selected variable and update the store

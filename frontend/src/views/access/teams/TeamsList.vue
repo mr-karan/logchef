@@ -90,14 +90,6 @@ const confirmDelete = async () => {
     try {
         const result = await teamsStore.deleteTeam(teamToDelete.value.id)
 
-        if (result.success) {
-            toast({
-                title: 'Team Deleted',
-                description: `Team "${teamToDelete.value.name}" has been deleted`,
-                variant: 'default'
-            })
-        }
-
         // Reset UI state
         showDeleteDialog.value = false
         teamToDelete.value = null
@@ -112,13 +104,6 @@ const confirmDelete = async () => {
 }
 
 const handleTeamCreated = (teamId?: number) => {
-    // Show success message
-    toast({
-        title: 'Team Created',
-        description: 'Team has been created successfully',
-        variant: 'default'
-    })
-
     // Reset search to ensure the new team is visible
     searchQuery.value = ''
 }

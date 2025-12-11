@@ -120,10 +120,6 @@ const handleDeleteToken = async (tokenId: number) => {
 const copyToClipboard = async (text: string) => {
     try {
         await navigator.clipboard.writeText(text)
-        toast({
-            title: "Copied!",
-            description: "Token copied to clipboard"
-        })
     } catch (err) {
         toast({
             title: "Error",

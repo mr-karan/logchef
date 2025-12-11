@@ -95,6 +95,29 @@ export interface SourceStats {
   }[];
 }
 
+// Field values types for sidebar exploration
+export interface FieldValueInfo {
+  value: string;
+  count: number;
+}
+
+export interface FieldValuesResult {
+  field_name: string;
+  field_type: string;
+  is_low_cardinality: boolean;
+  values: FieldValueInfo[];
+  total_distinct: number;
+}
+
+export type AllFieldValuesResult = Record<string, FieldValuesResult>;
+
+// Filter condition for querying field values with user's query context
+export interface FilterCondition {
+  field: string;
+  operator: string; // =, !=, ~, !~, >, <, >=, <=
+  value: string;
+}
+
 export const sourcesApi = {
   // Source management
   listAllSourcesForAdmin: () =>
@@ -131,5 +154,54 @@ export const sourcesApi = {
   validateSourceConnection: (connectionInfo: ConnectionRequestInfo & {
     timestamp_field?: string;
     severity_field?: string;
-  }) => apiClient.post<{ message: string }>("/admin/sources/validate", connectionInfo)
+  }) => apiClient.post<{ message: string }>("/admin/sources/validate", connectionInfo),
+
+  // Field values for sidebar exploration
+  // Time range is required for performance (avoids full table scan)
+  // Conditions are optional - apply user's query filters to show relevant values
+  getFieldValues: (
+    teamId: number, 
+    sourceId: number, 
+    fieldName: string, 
+    fieldType: string, 
+    startTime: string,  // ISO8601 format
+    endTime: string,    // ISO8601 format
+    timezone?: string,
+    limit?: number,
+    conditions?: FilterCondition[]
+  ) => {
+    let url = `/teams/${teamId}/sources/${sourceId}/fields/${encodeURIComponent(fieldName)}/values?` +
+      `limit=${limit || 10}` +
+      `&type=${encodeURIComponent(fieldType)}` +
+      `&start_time=${encodeURIComponent(startTime)}` +
+      `&end_time=${encodeURIComponent(endTime)}`;
+    if (timezone) {
+      url += `&timezone=${encodeURIComponent(timezone)}`;
+    }
+    if (conditions && conditions.length > 0) {
+      url += `&conditions=${encodeURIComponent(JSON.stringify(conditions))}`;
+    }
+    return apiClient.get<FieldValuesResult>(url);
+  },
+  getAllFieldValues: (
+    teamId: number, 
+    sourceId: number, 
+    startTime: string,  // ISO8601 format
+    endTime: string,    // ISO8601 format
+    timezone?: string,
+    limit?: number,
+    conditions?: FilterCondition[]
+  ) => {
+    let url = `/teams/${teamId}/sources/${sourceId}/fields/values?` +
+      `limit=${limit || 10}` +
+      `&start_time=${encodeURIComponent(startTime)}` +
+      `&end_time=${encodeURIComponent(endTime)}`;
+    if (timezone) {
+      url += `&timezone=${encodeURIComponent(timezone)}`;
+    }
+    if (conditions && conditions.length > 0) {
+      url += `&conditions=${encodeURIComponent(JSON.stringify(conditions))}`;
+    }
+    return apiClient.get<AllFieldValuesResult>(url);
+  },
 };

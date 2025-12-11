@@ -24,15 +24,6 @@ export function useFormHandling<T, R = any>(
     try {
       const result = await storeAction(payload)
       
-      if (options?.successMessage) {
-        toast({
-          title: 'Success',
-          description: options.successMessage,
-          variant: 'default',
-          duration: TOAST_DURATION.SUCCESS,
-        })
-      }
-      
       if (options?.onSuccess) {
         options.onSuccess(result)
       }

@@ -1,7 +1,16 @@
-import { type QueryCondition } from '@/utils/logchefql/api';
-import type { SchemaInfo } from '@/utils/logchefql/sql-generator';
+import type { FilterCondition } from '@/api/logchefql';
+import type { DateValue } from '@internationalized/date';
 
-import type { DateValue, CalendarDateTime } from '@internationalized/date';
+// Re-export for backwards compatibility
+export type QueryCondition = FilterCondition;
+
+// Schema info type (moved from logchefql)
+export interface SchemaInfo {
+  columns: Array<{
+    name: string;
+    type: string;
+  }>;
+}
 
 /**
  * Time range representation with start and end dates

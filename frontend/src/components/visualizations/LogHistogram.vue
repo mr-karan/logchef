@@ -10,16 +10,12 @@ import {
     onDeactivated,
 } from "vue";
 import { useColorMode } from "@vueuse/core";
-import { toCalendarDateTime, CalendarDateTime } from "@internationalized/date";
-import { getLocalTimeZone } from "@internationalized/date";
+import { CalendarDateTime } from "@internationalized/date";
 import type { DateValue } from "@internationalized/date";
 import { debounce } from "lodash-es";
 
 // Store imports
 import { useExploreStore } from "@/stores/explore";
-import { useSourcesStore } from "@/stores/sources";
-import { useTeamsStore } from "@/stores/teams";
-import { useQuery } from "@/composables/useQuery";
 import { type HistogramData } from "@/services/HistogramService";
 
 // ECharts imports with tree-shaking
@@ -87,25 +83,13 @@ const emit = defineEmits<{
 const isMounted = ref(true);
 const chartRef = ref<HTMLElement | null>(null);
 let chart: ECharts | null = null;
-const initialDataLoaded = ref(false);
-const lastProcessedTimestamp = ref<number | null>(null);
 const pendingFetchTimeoutId = ref<number | null>(null);
-const scheduledFetches = ref<Set<string>>(new Set());
-const hasLoadedData = ref(false);
 
 // Access stores
 const exploreStore = useExploreStore();
-const sourcesStore = useSourcesStore();
-const teamsStore = useTeamsStore();
-const { activeMode } = useQuery();
 
 // Theme state
 const colorMode = useColorMode();
-
-// Computed properties for reactive data
-const hasValidSource = computed(() => sourcesStore.hasValidCurrentSource);
-const currentSourceId = computed(() => exploreStore.sourceId);
-const currentTeamId = computed(() => teamsStore.currentTeamId);
 const histogramData = computed(() => exploreStore.histogramData);
 const isChartLoading = computed(() => props.isLoading || exploreStore.isLoadingHistogram);
 const histogramError = computed(() => exploreStore.histogramError);
@@ -478,7 +462,7 @@ const convertHistogramData = (buckets: HistogramData[]) => {
             trigger: "axis",
             confine: false,
             z: 60,
-            position: function (point: any, params: any, dom: any, rect: any, size: any) {
+            position: function (point: any, _params: any, _dom: any, _rect: any, size: any) {
                 // Position the tooltip slightly below the cursor
                 const x = point[0];
                 const y = point[1];

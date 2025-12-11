@@ -576,3 +576,203 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 		Stats:           result.Stats,
 	})
 }
+
+// handleGetFieldValues retrieves distinct values for a specific field within a time range.
+// This is optimized for LowCardinality fields but works for any field.
+// Access is controlled by the requireSourceAccess middleware.
+// Query params:
+//   - limit: max number of values to return (default 10, max 100)
+//   - type: the field type from source schema (required)
+//   - start_time: ISO8601 start time (required for performance)
+//   - end_time: ISO8601 end time (required for performance)
+//   - timezone: timezone for time conversion (optional, defaults to UTC)
+//   - conditions: JSON array of filter conditions (optional, from user's query)
+func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
+	sourceIDStr := c.Params("sourceID")
+	sourceID, err := core.ParseSourceID(sourceIDStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+	}
+
+	fieldName := c.Params("fieldName")
+	if fieldName == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Field name is required", models.ValidationErrorType)
+	}
+
+	// Get field type from query param (frontend already has this from source details)
+	fieldType := c.Query("type", "")
+	if fieldType == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Field type is required (pass from source schema)", models.ValidationErrorType)
+	}
+
+	// Parse time range parameters (required for performance)
+	startTimeStr := c.Query("start_time", "")
+	endTimeStr := c.Query("end_time", "")
+	if startTimeStr == "" || endTimeStr == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Time range (start_time, end_time) is required for performance", models.ValidationErrorType)
+	}
+
+	startTime, err := time.Parse(time.RFC3339, startTimeStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid start_time format (use ISO8601/RFC3339)", models.ValidationErrorType)
+	}
+	endTime, err := time.Parse(time.RFC3339, endTimeStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid end_time format (use ISO8601/RFC3339)", models.ValidationErrorType)
+	}
+
+	timezone := c.Query("timezone", "UTC")
+
+	// Parse optional limit query parameter (default 10, max 100)
+	limit := c.QueryInt("limit", 10)
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	// Parse optional filter conditions from user's query (JSON array)
+	var conditions []clickhouse.FilterCondition
+	conditionsStr := c.Query("conditions", "")
+	if conditionsStr != "" {
+		if err := json.Unmarshal([]byte(conditionsStr), &conditions); err != nil {
+			s.log.Warn("failed to parse conditions parameter, ignoring", "error", err, "conditions", conditionsStr)
+			conditions = nil // Ignore invalid conditions, don't fail the request
+		}
+	}
+
+	// Get source information
+	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	if err != nil {
+		if errors.Is(err, core.ErrSourceNotFound) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		}
+		s.log.Error("failed to get source", slog.Any("error", err), "source_id", sourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+	}
+
+	// Get ClickHouse client
+	client, err := s.clickhouse.GetConnection(sourceID)
+	if err != nil {
+		s.log.Error("failed to get clickhouse client", slog.Any("error", err), "source_id", sourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to connect to source", models.ExternalServiceErrorType)
+	}
+
+	// Fetch field values with time range filter and user's query conditions
+	result, err := client.GetFieldDistinctValues(
+		c.Context(),
+		source.Connection.Database,
+		source.Connection.TableName,
+		clickhouse.FieldValuesParams{
+			FieldName:      fieldName,
+			FieldType:      fieldType,
+			TimestampField: source.MetaTSField,
+			StartTime:      startTime,
+			EndTime:        endTime,
+			Timezone:       timezone,
+			Limit:          limit,
+			Timeout:        nil,        // Use default timeout
+			Conditions:     conditions, // Apply user's query filters
+		},
+	)
+	if err != nil {
+		s.log.Error("failed to get field values", slog.Any("error", err), "source_id", sourceID, "field", fieldName)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
+	}
+
+	return SendSuccess(c, fiber.StatusOK, result)
+}
+
+// handleGetAllFieldValues retrieves distinct values for all LowCardinality fields within a time range.
+// This is useful for populating the field sidebar with filterable values.
+// Access is controlled by the requireSourceAccess middleware.
+// Query params:
+//   - limit: max number of values per field (default 10, max 100)
+//   - start_time: ISO8601 start time (required for performance)
+//   - end_time: ISO8601 end time (required for performance)
+//   - timezone: timezone for time conversion (optional, defaults to UTC)
+//   - conditions: JSON array of filter conditions (optional, from user's query)
+func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
+	sourceIDStr := c.Params("sourceID")
+	sourceID, err := core.ParseSourceID(sourceIDStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+	}
+
+	// Parse time range parameters (required for performance)
+	startTimeStr := c.Query("start_time", "")
+	endTimeStr := c.Query("end_time", "")
+	if startTimeStr == "" || endTimeStr == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Time range (start_time, end_time) is required for performance", models.ValidationErrorType)
+	}
+
+	startTime, err := time.Parse(time.RFC3339, startTimeStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid start_time format (use ISO8601/RFC3339)", models.ValidationErrorType)
+	}
+	endTime, err := time.Parse(time.RFC3339, endTimeStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid end_time format (use ISO8601/RFC3339)", models.ValidationErrorType)
+	}
+
+	timezone := c.Query("timezone", "UTC")
+
+	// Parse optional limit query parameter (default 10, max 100)
+	limit := c.QueryInt("limit", 10)
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	// Get source information
+	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	if err != nil {
+		if errors.Is(err, core.ErrSourceNotFound) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		}
+		s.log.Error("failed to get source", slog.Any("error", err), "source_id", sourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+	}
+
+	// Parse optional filter conditions from user's query (JSON array)
+	var conditions []clickhouse.FilterCondition
+	conditionsStr := c.Query("conditions", "")
+	if conditionsStr != "" {
+		if err := json.Unmarshal([]byte(conditionsStr), &conditions); err != nil {
+			s.log.Warn("failed to parse conditions parameter, ignoring", "error", err, "conditions", conditionsStr)
+			conditions = nil // Ignore invalid conditions, don't fail the request
+		}
+	}
+
+	// Get ClickHouse client
+	client, err := s.clickhouse.GetConnection(sourceID)
+	if err != nil {
+		s.log.Error("failed to get clickhouse client", slog.Any("error", err), "source_id", sourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to connect to source", models.ExternalServiceErrorType)
+	}
+
+	// Fetch all low cardinality field values with time range filter and user's query conditions
+	result, err := client.GetAllLowCardinalityFieldValues(
+		c.Context(),
+		source.Connection.Database,
+		source.Connection.TableName,
+		clickhouse.AllFieldValuesParams{
+			TimestampField: source.MetaTSField,
+			StartTime:      startTime,
+			EndTime:        endTime,
+			Timezone:       timezone,
+			Limit:          limit,
+			Timeout:        nil,        // Use default timeout
+			Conditions:     conditions, // Apply user's query filters
+		},
+	)
+	if err != nil {
+		s.log.Error("failed to get all field values", slog.Any("error", err), "source_id", sourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
+	}
+
+	return SendSuccess(c, fiber.StatusOK, result)
+}

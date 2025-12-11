@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, watch } from "vue";
 import { exploreApi } from "@/api/explore";
+import { logchefqlApi } from "@/api/logchefql";
 // Removed contextTransitionInProgress - using clean architecture now
 import type {
   ColumnInfo,
@@ -30,8 +31,8 @@ import { type TimeRange } from '@/types/query';
 import { getErrorMessage } from '@/api/types';
 import { HistogramService, type HistogramData } from '@/services/HistogramService';
 import { useVariables } from "@/composables/useVariables";
-import { useToast } from "@/composables/useToast";
 import { queryHistoryService } from "@/services/QueryHistoryService";
+import { createTimeRangeCondition } from '@/utils/time-utils';
 
 // Helper function to get formatted table name
 export function getFormattedTableName(source: any): string {
@@ -235,12 +236,11 @@ export const useExploreStore = defineStore("explore", () => {
 
   // Key computed properties from refactoring plan
 
-  // 1. Internal computed property to translate LogchefQL to SQL
-  const _logchefQlTranslationResult = computed(() => {
+  // Helper function to build a display SQL (without actual LogchefQL translation - that happens at execution)
+  const _buildDisplaySql = () => {
     const { logchefqlCode, timeRange, limit, selectedTimezoneIdentifier } = state.data.value;
 
-    console.log("logchefqlCode : "+logchefqlCode);
-    if (!logchefqlCode || !timeRange || !timeRange.start || !timeRange.end) {
+    if (!timeRange || !timeRange.start || !timeRange.end) {
       return null;
     }
 
@@ -250,50 +250,48 @@ export const useExploreStore = defineStore("explore", () => {
       return null;
     }
 
-    // Get table name directly from source details to avoid stale cached values
-    let tableName = 'default.logs'; // Default fallback
+    let tableName = 'default.logs';
     if (sourceDetails.connection?.database && sourceDetails.connection?.table_name) {
       tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
     } else {
-      return null; // Cannot translate without proper table info
+      return null;
     }
 
     const tsField = sourceDetails._meta_ts_field || 'timestamp';
     const timezone = selectedTimezoneIdentifier || getTimezoneIdentifier();
+    const timeCondition = createTimeRangeCondition(tsField, timeRange as TimeRange, true, timezone);
 
-    try {
-      const result = QueryService.translateLogchefQLToSQL({
-        tableName,
-        tsField,
-        timeRange,
-        limit,
-        logchefqlQuery: logchefqlCode,
-        timezone,
-        schema: sourceDetails.columns ? {
-          columns: sourceDetails.columns.map(col => ({ name: col.name, type: col.type }))
-        } : undefined
-      });
+    // Build a basic SQL for display (actual LogchefQL translation happens at execution time via backend)
+    const formattedTsField = tsField.includes('`') ? tsField : `\`${tsField}\``;
+    const whereClause = logchefqlCode?.trim() 
+      ? `WHERE ${timeCondition}\n  -- LogchefQL: ${logchefqlCode}`
+      : `WHERE ${timeCondition}`;
 
-      return {
-        sql: result.success ? result.sql : '',
-        error: result.success ? undefined : result.error,
-        warnings: result.warnings
-      };
-    } catch (error) {
-      return {
-        sql: '',
-        error: error instanceof Error ? error.message : 'Translation error',
-        warnings: []
-      };
-    }
+    return {
+      sql: [
+        'SELECT *',
+        `FROM ${tableName}`,
+        whereClause,
+        `ORDER BY ${formattedTsField} DESC`,
+        `LIMIT ${limit}`
+      ].join('\n'),
+      error: undefined,
+      warnings: []
+    };
+  };
+
+  // 1. Internal computed property for display SQL (actual translation happens at execution)
+  const _logchefQlTranslationResult = computed(() => {
+    return _buildDisplaySql();
   });
 
   // 2. Definitive SQL string for execution
   const sqlForExecution = computed(() => {
-    const { activeMode, rawSql, limit } = state.data.value;
+    const { activeMode, rawSql } = state.data.value;
     if (activeMode === 'sql') {
-      // Use SqlManager to ensure correct limit
-      return SqlManager.ensureCorrectLimit(rawSql, limit);
+      // In SQL mode, return the raw SQL exactly as the user wrote it
+      // NO modifications - user has full control
+      return rawSql;
     }
 
     // For LogchefQL mode, use the translation result
@@ -519,42 +517,11 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   // Set active mode with simplified switching logic
+  // NOTE: SQL population for mode switching is handled in useQuery.ts changeMode()
+  // This function just updates the mode - the rawSql should already be set by the caller
   function setActiveMode(mode: 'logchefql' | 'sql') {
     const currentMode = state.data.value.activeMode;
     if (mode === currentMode) return;
-
-    // Simple mode switching: translate LogchefQL to SQL when switching to SQL mode
-    if (mode === 'sql' && currentMode === 'logchefql') {
-      const { logchefqlCode } = state.data.value;
-      
-      if (logchefqlCode && _logchefQlTranslationResult.value?.sql) {
-        // If LogchefQL exists and translates, set rawSql
-        state.data.value.rawSql = _logchefQlTranslationResult.value.sql;
-      } else {
-        // If no LogchefQL code, generate default SQL
-        const sourcesStore = useSourcesStore();
-        const sourceDetails = sourcesStore.currentSourceDetails;
-        if (sourceDetails && state.data.value.timeRange) {
-          // Get table name directly from source details
-          let tableName = 'default.logs'; // Default fallback
-          if (sourceDetails.connection?.database && sourceDetails.connection?.table_name) {
-            tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
-          }
-          
-          const result = SqlManager.generateDefaultSql({
-            tableName,
-            tsField: sourceDetails._meta_ts_field || 'timestamp',
-            timeRange: state.data.value.timeRange,
-            limit: state.data.value.limit,
-            timezone: state.data.value.selectedTimezoneIdentifier || undefined
-          });
-
-          if (result.success) {
-            state.data.value.rawSql = result.sql;
-          }
-        }
-      }
-    }
 
     // Update the mode
     state.data.value.activeMode = mode;
@@ -856,12 +823,126 @@ export const useExploreStore = defineStore("explore", () => {
         }, operationKey);
       }
 
-      // Get the SQL to execute
+      // ========== LOGCHEFQL MODE ==========
+      // In LogchefQL mode, the UI controls the query parameters:
+      // - Time range: Controlled by the date picker → sent to backend
+      // - Limit: Controlled by the limit dropdown → sent to backend
+      // - Timezone: Controlled by the timezone setting → sent to backend
+      // 
+      // Backend builds the full SQL query and executes it
+      // Response includes `generated_sql` for "View as SQL" feature
+      // =====================================
+      
+      if (state.data.value.activeMode === 'logchefql' && state.data.value.logchefqlCode?.trim()) {
+        console.log("Explore store: LogchefQL mode - sending to /logchefql/query endpoint");
+        try {
+          // Replace dynamic variables with actual values
+          const { convertVariables } = useVariables();
+          const queryWithVariables = convertVariables(state.data.value.logchefqlCode);
+          
+          // Format time range for API
+          const timeRange = state.data.value.timeRange as TimeRange;
+          const timezone = state.data.value.selectedTimezoneIdentifier || getTimezoneIdentifier();
+          
+          // Format dates as ISO8601 strings
+          const formatDateTime = (dt: any) => {
+            if (!dt) return '';
+            const year = dt.year;
+            const month = String(dt.month).padStart(2, '0');
+            const day = String(dt.day).padStart(2, '0');
+            const hour = String(dt.hour || 0).padStart(2, '0');
+            const minute = String(dt.minute || 0).padStart(2, '0');
+            const second = String(dt.second || 0).padStart(2, '0');
+            return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+          };
+
+          const queryResponse = await logchefqlApi.query(currentTeamId, state.data.value.sourceId, {
+            query: queryWithVariables,
+            start_time: formatDateTime(timeRange.start),
+            end_time: formatDateTime(timeRange.end),
+            timezone: timezone,
+            limit: state.data.value.limit,
+            query_timeout: state.data.value.queryTimeout
+          });
+
+          if (queryResponse.data) {
+            // Success - update store with results
+            state.data.value.logs = queryResponse.data.logs || [];
+            state.data.value.columns = queryResponse.data.columns || [];
+            state.data.value.queryStats = queryResponse.data.stats || DEFAULT_QUERY_STATS;
+            
+            // Store query ID for cancellation
+            if (queryResponse.data.query_id) {
+              state.data.value.currentQueryId = queryResponse.data.query_id;
+            }
+
+            // Store the generated SQL for "Show SQL" feature
+            if (queryResponse.data.generated_sql) {
+              state.data.value.generatedDisplaySql = queryResponse.data.generated_sql;
+              console.log("Explore store: Stored generated SQL from backend:", queryResponse.data.generated_sql.substring(0, 100) + "...");
+            } else {
+              console.warn("Explore store: Backend did not return generated_sql");
+            }
+
+            // Update lastExecutedState
+            _updateLastExecutedState();
+
+            // Add to query history
+            try {
+              if (currentTeamId && state.data.value.sourceId) {
+                queryHistoryService.addQueryEntry({
+                  teamId: currentTeamId,
+                  sourceId: state.data.value.sourceId,
+                  query: state.data.value.logchefqlCode,
+                  mode: 'logchefql'
+                });
+              }
+            } catch (historyError) {
+              console.warn("Failed to add query to history:", historyError);
+            }
+
+            // Restore relative time if it was set
+            if (relativeTime) {
+              state.data.value.selectedRelativeTime = relativeTime;
+            }
+
+            // Set execution timestamp
+            state.data.value.lastExecutionTimestamp = Date.now();
+
+            // Fetch histogram data
+            fetchHistogramData();
+
+            return { success: true, data: queryResponse.data, error: null };
+          } else {
+            // Handle error response - no data means query failed
+            return state.handleError({
+              status: "error",
+              message: "Query execution failed",
+              error_type: "DatabaseError"
+            }, operationKey);
+          }
+        } catch (error: any) {
+          return state.handleError({
+            status: "error",
+            message: `LogchefQL query error: ${error.message}`,
+            error_type: "DatabaseError"
+          }, operationKey);
+        }
+      }
+
+      // ========== SQL MODE ==========
+      // In SQL mode, user has FULL CONTROL over their query:
+      // - Time range: Specified in the SQL WHERE clause by user
+      // - Limit: Specified in the SQL LIMIT clause by user
+      // - The frontend does NOT modify the SQL in any way
+      // 
+      // The raw SQL is sent to /logs/query endpoint exactly as written
+      // ================================
+      
       let sql = sqlForExecution.value;
-
-      console.log("logchef sqlForExecution.value; "+sql);
-
       let usedDefaultSql = false;
+
+      console.log("SQL mode execution:", sql.substring(0, 100) + "...");
 
       // Prepare parameters for the API call
       const params: QueryParams = {
@@ -1048,14 +1129,6 @@ export const useExploreStore = defineStore("explore", () => {
       if (state.data.value.currentQueryAbortController) {
         state.data.value.currentQueryAbortController.abort();
         console.log("HTTP request aborted");
-        
-        // Show toast notification after successful abort
-        const { toast } = useToast();
-        toast({
-          title: "Query Cancelled",
-          description: "The running query has been cancelled.",
-          variant: "default"
-        });
       }
 
       // Then try to cancel via backend API if we have a query ID
@@ -1204,6 +1277,9 @@ export const useExploreStore = defineStore("explore", () => {
       isLoadingHistogram: false,
       histogramError: null,
       histogramGranularity: null,
+      currentQueryAbortController: null,
+      currentQueryId: null,
+      isCancellingQuery: false,
     };
   }
 
@@ -1577,6 +1653,9 @@ export const useExploreStore = defineStore("explore", () => {
     aiSqlError: computed(() => state.data.value.aiSqlError),
     generatedAiSql: computed(() => state.data.value.generatedAiSql),
 
+    // Generated SQL from last LogchefQL query execution (for "View as SQL" feature)
+    generatedDisplaySql: computed(() => state.data.value.generatedDisplaySql),
+
     // Histogram state
     histogramData: computed(() => state.data.value.histogramData),
     isLoadingHistogram: computed(() => state.data.value.isLoadingHistogram),
@@ -1626,5 +1705,8 @@ export const useExploreStore = defineStore("explore", () => {
     
     // Histogram eligibility
     isHistogramEligible,
+
+    // Timezone helper
+    getTimezoneIdentifier,
   };
 });

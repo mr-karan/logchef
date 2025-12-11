@@ -5,16 +5,15 @@ import { useTeamsStore } from '@/stores/teams';
 import { QueryService } from '@/services/QueryService';
 import { SqlManager } from '@/services/SqlManager';
 import { getErrorMessage } from '@/api/types';
-import type { TimeRange, QueryResult } from '@/types/query';
-import { validateLogchefQLWithDetails } from '@/utils/logchefql/api';
-import { validateSQLWithDetails, analyzeQuery } from '@/utils/clickhouse-sql';
+import type { TimeRange } from '@/types/query';
+import { logchefqlApi } from '@/api/logchefql';
 import { useExploreUrlSync } from '@/composables/useExploreUrlSync';
 import { useVariables } from "@/composables/useVariables";
 
 // Define the valid editor modes
 type EditorMode = 'logchefql' | 'sql';
 
-// Add an interface for tracking why a query is dirty
+// Interface for tracking why a query is dirty (used in computed)
 interface DirtyStateReason {
   timeRangeChanged: boolean;
   limitChanged: boolean;
@@ -72,8 +71,8 @@ export function useQuery() {
   const isDirty = computed(() => exploreStore.isQueryStateDirty);
 
   // Get dirtyReason from the store's computed property
-  const dirtyReason = computed(() => {
-    const dirtyState = {
+  const dirtyReason = computed((): DirtyStateReason => {
+    const dirtyState: DirtyStateReason = {
       timeRangeChanged: false,
       limitChanged: false,
       queryChanged: false,
@@ -114,31 +113,100 @@ export function useQuery() {
     return SqlManager.validateSql(sql);
   };
 
-  // Change query mode - now delegates to store
-  const changeMode = (newMode: EditorMode, isModeSwitchOnly: boolean = false) => {
+  // Validate LogchefQL query via backend API
+  const validateLogchefQL = async (query: string): Promise<{ valid: boolean; error?: string }> => {
+    try {
+      const currentTeamId = teamsStore.currentTeamId;
+      const sourceId = exploreStore.sourceId;
+      
+      if (!currentTeamId || !sourceId) {
+        return { valid: true }; // Fail open if no context
+      }
+
+      const response = await logchefqlApi.validate(currentTeamId, sourceId, query);
+      if (response.data) {
+        return {
+          valid: response.data.valid,
+          error: response.data.error?.message
+        };
+      }
+      return { valid: true }; // Fail open on API error
+    } catch (error) {
+      console.warn("LogchefQL validation API error:", error);
+      return { valid: true }; // Fail open
+    }
+  };
+
+  // Change query mode - uses backend as single source of truth for SQL generation
+  const changeMode = async (newMode: EditorMode, _isModeSwitchOnly: boolean = false) => {
     // Clear any validation errors when changing modes
     queryError.value = '';
 
-    // If switching to SQL and we have LogchefQL content, translate it to SQL
-    if (newMode === 'sql' && activeMode.value === 'logchefql' && logchefQuery.value?.trim()) {
-
-      // Replace variables with placeholder values for validation
-      let sql = logchefQuery.value.replace(/{{(\w+)}}/g, '"placeholder"');
-
-      const validation = validateLogchefQLWithDetails(sql);
-      if (!validation.valid) {
-        queryError.value = `Invalid LogchefQL syntax: ${validation.error}`;
-        return; // Don't switch modes if validation fails
-      }
-
-      // If validation passed, translate LogchefQL to SQL
-      const translationResult = translateLogchefQLToSQL(logchefQuery.value);
-      if (translationResult.success && translationResult.sql) {
-        // Update the SQL query in the store with the translated SQL
-        exploreStore.setRawSql(translationResult.sql);
-        console.log("useQuery: Translated LogchefQL to SQL during mode switch");
+    // If switching to SQL mode
+    if (newMode === 'sql' && activeMode.value === 'logchefql') {
+      // First, check if we have the actual generated SQL from a previous execution
+      if (exploreStore.generatedDisplaySql) {
+        exploreStore.setRawSql(exploreStore.generatedDisplaySql);
+        console.log("useQuery: Using generated SQL from last execution");
       } else {
-        console.warn("useQuery: Failed to translate LogchefQL to SQL:", translationResult.error);
+        // No executed query yet - ask backend for full SQL (even if LogchefQL is empty)
+        const currentTeamId = teamsStore.currentTeamId;
+        const sourceId = exploreStore.sourceId;
+        
+        if (currentTeamId && sourceId) {
+          try {
+            // Format time range for backend
+            const timeRange = exploreStore.timeRange as TimeRange;
+            const formatDateTime = (dt: any) => {
+              if (!dt) return '';
+              const year = dt.year;
+              const month = String(dt.month).padStart(2, '0');
+              const day = String(dt.day).padStart(2, '0');
+              const hour = String(dt.hour || 0).padStart(2, '0');
+              const minute = String(dt.minute || 0).padStart(2, '0');
+              const second = String(dt.second || 0).padStart(2, '0');
+              return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+            };
+
+            // Replace variables with placeholders for translation (if query exists)
+            const query = logchefQuery.value?.trim() || '';
+            const queryWithPlaceholders = query.replace(/{{(\w+)}}/g, '"placeholder"');
+
+            console.log("useQuery: LogchefQL query from store:", logchefQuery.value);
+            console.log("useQuery: Query after trim:", query);
+            console.log("useQuery: Calling backend /translate for full SQL", {
+              query: queryWithPlaceholders,
+              start_time: formatDateTime(timeRange?.start),
+              end_time: formatDateTime(timeRange?.end),
+              timezone: exploreStore.getTimezoneIdentifier(),
+              limit: exploreStore.limit
+            });
+
+            const response = await logchefqlApi.translate(currentTeamId, sourceId, {
+              query: queryWithPlaceholders,
+              start_time: formatDateTime(timeRange?.start),
+              end_time: formatDateTime(timeRange?.end),
+              timezone: exploreStore.getTimezoneIdentifier(),
+              limit: exploreStore.limit
+            });
+
+            console.log("useQuery: Backend response", response.data);
+
+            if (response.data && !response.data.valid) {
+              queryError.value = response.data.error?.message || "Invalid LogchefQL syntax";
+              return; // Don't switch modes if validation fails
+            }
+
+            if (response.data?.full_sql) {
+              exploreStore.setRawSql(response.data.full_sql);
+              console.log("useQuery: Set SQL from backend full_sql");
+            } else {
+              console.warn("useQuery: Backend did not return full_sql, response:", response.data);
+            }
+          } catch (error: any) {
+            console.error("useQuery: Failed to get full SQL from backend:", error);
+          }
+        }
       }
     }
 
@@ -149,94 +217,32 @@ export function useQuery() {
     syncUrlFromState();
   };
 
-  // Handle time range update - now uses SqlManager
+  // Handle time range update
+  // NOTE: In SQL mode, we do NOT modify the user's raw SQL
+  // The time picker in SQL mode is informational only - users have full control over their query
   const handleTimeRangeUpdate = () => {
-    const exploreStore = useExploreStore();
-    const sourcesStore = useSourcesStore();
-
-    // Only proceed if in SQL mode
-    if (exploreStore.activeMode !== 'sql') {
+    // In SQL mode, user has full control - don't modify their query
+    if (exploreStore.activeMode === 'sql') {
+      console.log("useQuery: SQL mode - not modifying user's raw SQL on time range change");
       return;
     }
 
-    const currentSql = exploreStore.rawSql;
-
-    if (!currentSql.trim()) {
-      return;
-    }
-
-    try {
-      // Get source details for metadata
-      const sourceDetails = sourcesStore.currentSourceDetails;
-      if (!sourceDetails) {
-        console.error("Cannot update SQL time range: Source details not available");
-        return;
-      }
-
-      // Get the timestamp field from source metadata
-      const tsField = sourceDetails._meta_ts_field || 'timestamp';
-
-      // Get the current time range from the store
-      const timeRange = exploreStore.timeRange;
-      if (!timeRange) {
-        console.error("Cannot update SQL time range: No time range available");
-        return;
-      }
-
-      // Check if SQL has complex time conditions we shouldn't modify
-      const analysis = analyzeQuery(currentSql);
-      if (analysis?.timeRangeInfo &&
-          (analysis.timeRangeInfo.format === 'now-interval' ||
-              analysis.timeRangeInfo.format === 'other')) {
-        console.log("useQuery: SQL contains complex time format, preserving user query");
-        return;
-      }
-
-      // Use SqlManager to update time range
-      const updatedSql = SqlManager.updateTimeRange({
-        sql: currentSql,
-        tsField,
-        timeRange,
-        timezone: exploreStore.selectedTimezoneIdentifier || undefined
-      });
-
-      // If SQL was changed, update the store
-      if (updatedSql !== currentSql) {
-        exploreStore.setRawSql(updatedSql);
-        console.log("useQuery: Successfully updated SQL query with new time range");
-      } else {
-        console.log("useQuery: SQL query not changed - time condition preserved");
-      }
-
-      // Sync URL state with the updated query
-      syncUrlFromState();
-    } catch (error) {
-      console.error("Error updating SQL with new time range:", error);
-    }
+    // In LogchefQL mode, the time range is passed to the backend separately
+    // No need to modify the LogchefQL query itself
+    console.log("useQuery: LogchefQL mode - time range will be applied at execution");
   };
 
-  // Handle limit update - now uses SqlManager
+  // Handle limit update
+  // NOTE: In SQL mode, we do NOT modify the user's raw SQL
+  // Users have full control over their LIMIT clause
   const handleLimitUpdate = () => {
-    // Update SQL query if in SQL mode
+    // In SQL mode, user has full control - don't modify their query
     if (exploreStore.activeMode === 'sql') {
-      const currentSql = exploreStore.rawSql;
-      const newLimit = exploreStore.limit;
-
-      if (currentSql.trim()) {
-        try {
-          // Use SqlManager to update limit
-          const updatedSql = SqlManager.updateLimit(currentSql, newLimit);
-
-          // Update SQL only if changed
-          if (updatedSql !== currentSql) {
-            exploreStore.setRawSql(updatedSql);
-            console.log("useQuery: Updated SQL query with new limit:", newLimit);
-          }
-        } catch (error) {
-          console.error("Error updating SQL with new limit:", error);
-        }
-      }
+      console.log("useQuery: SQL mode - not modifying user's raw SQL on limit change");
     }
+
+    // In LogchefQL mode, the limit is passed to the backend separately
+    // No need to modify the LogchefQL query itself
 
     // Sync URL state after update
     syncUrlFromState();
@@ -268,7 +274,7 @@ export function useQuery() {
     }
   };
 
-  // Translate LogchefQL to SQL - delegates to QueryService
+  // Translate LogchefQL to SQL - delegates to QueryService (synchronous fallback)
   const translateLogchefQLToSQL = (logchefqlQuery: string) => {
     try {
       const sourceDetails = sourcesStore.currentSourceDetails;
@@ -281,10 +287,7 @@ export function useQuery() {
         tsField: sourceDetails._meta_ts_field || 'timestamp',
         timeRange: exploreStore.timeRange as TimeRange,
         limit: exploreStore.limit,
-        logchefqlQuery,
-        schema: sourceDetails.columns ? {
-          columns: sourceDetails.columns.map(col => ({ name: col.name, type: col.type }))
-        } : undefined
+        logchefqlQuery
       };
 
       return QueryService.translateLogchefQLToSQL(params);
@@ -298,7 +301,7 @@ export function useQuery() {
   };
 
   // Prepare query for execution - now uses SqlManager
-  const prepareQueryForExecution = () => {
+  const prepareQueryForExecution = async () => {
     try {
       const sourceDetails = sourcesStore.currentSourceDetails;
       if (!sourceDetails) {
@@ -311,11 +314,11 @@ export function useQuery() {
 
       console.log("useQuery: Preparing query - mode:", mode, "query:", query ? (query.length > 50 ? query.substring(0, 50) + '...' : query) : '(empty)');
 
-      // Validate query before execution (without variable substitution for LogchefQL)
+      // Validate query before execution
       if (mode === 'logchefql' && query.trim()) {
         // For LogchefQL validation, use placeholder values
         const queryForValidation = query.replace(/{{(\w+)}}/g, '"placeholder"');
-        const validation = validateLogchefQLWithDetails(queryForValidation);
+        const validation = await validateLogchefQL(queryForValidation);
         if (!validation.valid) {
           console.log("useQuery: LogchefQL validation failed:", validation.error);
           queryError.value = validation.error || 'Invalid LogchefQL syntax';
@@ -341,20 +344,18 @@ export function useQuery() {
       }
 
       if (mode === 'sql') {
-        // For SQL mode, apply variable substitution then use SqlManager to prepare for execution
+        // For SQL mode, apply variable substitution ONLY - DO NOT modify the query
+        // User has full control over their raw SQL including time ranges
         const queryWithVariables = convertVariables(query);
-        const result = SqlManager.prepareForExecution({
+        
+        return {
+          success: true,
           sql: queryWithVariables,
-          tsField: sourceDetails._meta_ts_field || 'timestamp',
-          timeRange: exploreStore.timeRange as TimeRange,
-          limit: exploreStore.limit,
-          timezone: exploreStore.selectedTimezoneIdentifier || undefined
-        });
-
-        queryError.value = result.error || '';
-        return result;
+          warnings: [],
+          error: undefined
+        };
       } else {
-        // For LogchefQL mode, continue to use QueryService
+        // For LogchefQL mode, use QueryService
         const params = {
           mode: 'logchefql' as const,
           query,
@@ -393,7 +394,7 @@ export function useQuery() {
 
     try {
       // Make sure query is valid before execution
-      const result = prepareQueryForExecution();
+      const result = await prepareQueryForExecution();
       if (!result.success) {
         throw new Error(result.error || 'Failed to prepare query for execution');
       }
@@ -441,6 +442,7 @@ export function useQuery() {
     changeMode,
     validateSQL,
     validateSQLWithErrorDetails,
+    validateLogchefQL,
     handleTimeRangeUpdate,
     handleLimitUpdate,
     generateDefaultSQL,

@@ -179,8 +179,6 @@ const handleTestAlertmanager = async () => {
       tls_insecure_skip_verify: tlsSkipVerifySetting?.value === 'true',
       timeout: timeoutSetting?.value || '5s'
     })
-
-    toast.success('Successfully connected to Alertmanager')
   } catch (error: any) {
     const errorMessage = error?.response?.data?.error || error?.message || 'Connection test failed'
     toast.error(`Alertmanager connection failed: ${errorMessage}`)
