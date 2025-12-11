@@ -21,8 +21,7 @@ import type { QueryStats } from '@/api/explore'
 
 interface Props {
   columns?: ColumnDef<Record<string, any>>[]
-  data?: Record<string, any>[]
-  logs: Record<string, any>[]
+  data?: Record<string, any>[]  // Primary prop - same as DataTable
   stats?: QueryStats
   isLoading?: boolean
   sourceId?: string | number
@@ -37,7 +36,6 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   columns: () => [],
   data: () => [],
-  logs: () => [],
   stats: () => ({}),
   isLoading: false,
   sourceId: 0,
@@ -48,6 +46,9 @@ const props = withDefaults(defineProps<Props>(), {
   queryFields: () => [],
   regexHighlights: () => ({})
 })
+
+// Use 'data' prop - consistent with DataTable component
+const logs = computed(() => props.data)
 
 const emit = defineEmits<{
   'drill-down': [data: { column: string; value: any; operator: string }]
@@ -91,8 +92,8 @@ const tableColumns = computed<ColumnDef<Record<string, any>>[]>(() => {
   }
   
   // Fallback: create basic columns from the first log entry
-  if (props.logs.length > 0) {
-    const firstLog = props.logs[0]
+  if (logs.value.length > 0) {
+    const firstLog = logs.value[0]
     return Object.keys(firstLog).map(key => ({
       id: key,
       accessorKey: key,
@@ -125,7 +126,7 @@ watch(tableColumns, (newColumns) => {
 // Create table
 const table = useVueTable({
   get data() {
-    return props.logs
+    return logs.value
   },
   get columns() {
     return tableColumns.value
