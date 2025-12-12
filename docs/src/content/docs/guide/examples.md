@@ -3,7 +3,7 @@ title: Query Examples
 description: Practical examples for common log analytics scenarios
 ---
 
-This guide provides practical examples for common log analytics scenarios using LogChef. Each example includes both the simple search syntax and the equivalent SQL query.
+This guide provides practical examples for common log analytics scenarios using LogChef. Each example includes both the LogchefQL syntax and the equivalent SQL query.
 
 ## Error Analysis
 
@@ -50,12 +50,12 @@ LIMIT 100
 
 </details>
 
-### Error Spikes in the Last Hour
+### Errors Excluding Debug Noise
 
-Find if there's been a sudden increase in errors in the past hour, which might indicate a service degradation.
+Find errors while excluding specific patterns that aren't relevant.
 
 ```
-level="error" and timestamp > now() - INTERVAL 1 HOUR
+level="error" and message!~"health check"
 ```
 
 <details>
@@ -65,7 +65,29 @@ level="error" and timestamp > now() - INTERVAL 1 HOUR
 SELECT *
 FROM logs.app
 WHERE level = 'error'
-  AND timestamp > now() - INTERVAL 1 HOUR
+  AND positionCaseInsensitive(message, 'health check') = 0
+ORDER BY timestamp DESC
+LIMIT 100
+```
+
+</details>
+
+### Critical vs Warning Analysis
+
+Compare different severity levels.
+
+```
+severity_number>=4 or level="critical"
+```
+
+<details>
+<summary>SQL Equivalent</summary>
+
+```sql
+SELECT *
+FROM logs.app
+WHERE severity_number >= 4
+   OR level = 'critical'
 ORDER BY timestamp DESC
 LIMIT 100
 ```
@@ -140,6 +162,192 @@ LIMIT 100
 
 </details>
 
+### Request Latency Analysis
+
+Find requests within specific latency ranges.
+
+```
+# Very slow requests (over 5 seconds)
+response_time>5000
+
+# Fast requests (under 100ms)
+response_time<100
+
+# Requests in a specific range
+response_time>=100 and response_time<=500
+```
+
+## Nested Field Queries
+
+LogchefQL supports querying nested fields in Map and JSON columns using dot notation.
+
+### Map Column Access
+
+Query logs by attributes stored in Map columns (common in OpenTelemetry logs).
+
+```
+# Filter by user ID in attributes
+log_attributes.user_id="user-12345"
+```
+
+<details>
+<summary>SQL Equivalent</summary>
+
+```sql
+SELECT *
+FROM logs.app
+WHERE log_attributes['user_id'] = 'user-12345'
+ORDER BY timestamp DESC
+LIMIT 100
+```
+
+</details>
+
+### Multi-level Nesting
+
+Access deeply nested fields.
+
+```
+# Query nested request attributes
+log_attributes.http.request.method="POST"
+
+# Query nested error details
+log_attributes.error.code="CONNECTION_REFUSED"
+```
+
+<details>
+<summary>SQL Equivalent</summary>
+
+```sql
+SELECT *
+FROM logs.app
+WHERE log_attributes['http.request.method'] = 'POST'
+ORDER BY timestamp DESC
+LIMIT 100
+```
+
+</details>
+
+### Pattern Matching in Nested Fields
+
+Use contains operator on nested values.
+
+```
+log_attributes.request.url~"/api/v2/"
+```
+
+<details>
+<summary>SQL Equivalent</summary>
+
+```sql
+SELECT *
+FROM logs.app
+WHERE positionCaseInsensitive(log_attributes['request.url'], '/api/v2/') > 0
+ORDER BY timestamp DESC
+LIMIT 100
+```
+
+</details>
+
+### JSON Column Extraction
+
+For JSON or String columns containing JSON, LogchefQL uses `JSONExtractString`.
+
+```
+body.request.user_agent~"Mozilla"
+```
+
+<details>
+<summary>SQL Equivalent</summary>
+
+```sql
+SELECT *
+FROM logs.app
+WHERE positionCaseInsensitive(JSONExtractString(body, 'request', 'user_agent'), 'Mozilla') > 0
+ORDER BY timestamp DESC
+LIMIT 100
+```
+
+</details>
+
+### Quoted Field Names
+
+For field names containing dots or special characters.
+
+```
+# Field name literally contains a dot
+log_attributes."service.name"="payment-api"
+
+# Mixed quoted and unquoted
+log_attributes."nested.key".subfield="value"
+```
+
+## Using the Pipe Operator
+
+The pipe operator (`|`) lets you select specific columns instead of `SELECT *`.
+
+### Basic Column Selection
+
+Select only the fields you need.
+
+```
+level="error" | timestamp service level message
+```
+
+<details>
+<summary>SQL Equivalent</summary>
+
+```sql
+SELECT timestamp, service, level, message
+FROM logs.app
+WHERE level = 'error'
+ORDER BY timestamp DESC
+LIMIT 100
+```
+
+</details>
+
+### Extracting Nested Values
+
+Pull specific values from nested structures.
+
+```
+namespace="prod" | timestamp log_attributes.user_id log_attributes.request_id body
+```
+
+<details>
+<summary>SQL Equivalent</summary>
+
+```sql
+SELECT 
+  timestamp, 
+  log_attributes['user_id'] AS log_attributes_user_id, 
+  log_attributes['request_id'] AS log_attributes_request_id, 
+  body
+FROM logs.app
+WHERE namespace = 'prod'
+ORDER BY timestamp DESC
+LIMIT 100
+```
+
+</details>
+
+### Minimal Output for Scanning
+
+When you just need to scan for specific patterns.
+
+```
+message~"error" | timestamp message
+```
+
+### Service Overview
+
+Get a quick view of service activity.
+
+```
+namespace="production" | timestamp service_name level
+```
+
 ## Security Analysis
 
 ### Failed Authentication Attempts
@@ -188,6 +396,14 @@ LIMIT 100
 ```
 
 </details>
+
+### Access Pattern Analysis
+
+Track access to sensitive endpoints.
+
+```
+request_path~"/admin" or request_path~"/api/internal"
+```
 
 ## System Monitoring
 
@@ -303,6 +519,36 @@ LIMIT 100
 
 </details>
 
+### Trace with Specific Fields
+
+Get a focused view of a trace with only relevant fields.
+
+```
+trace_id="abc123def456" | timestamp service_name span_id body
+```
+
+## OpenTelemetry Log Queries
+
+LogchefQL works great with OpenTelemetry log data.
+
+### Filter by Resource Attributes
+
+```
+log_attributes.service.name="frontend" and severity_text="ERROR"
+```
+
+### Kubernetes Context
+
+```
+log_attributes.k8s.namespace.name="production" and log_attributes.k8s.pod.name~"api-"
+```
+
+### Span Correlation
+
+```
+trace_id!="" and span_id!="" and level="error"
+```
+
 ## Effective Query Tips
 
 1. **Start Specific, Then Broaden**
@@ -310,18 +556,31 @@ LIMIT 100
    - Begin with specific conditions that target your issue
    - Add or remove filters to adjust the result set size
 
-2. **Use Time Windows Effectively**
+2. **Use Comparison Operators for Metrics**
 
-   - Focus on relevant time periods (e.g., `timestamp > now() - INTERVAL 15 MINUTE`)
-   - Compare similar time windows when analyzing patterns
+   - `response_time>1000` is cleaner than text matching
+   - Works well with numeric fields like status codes, durations, counts
 
-3. **Combine Multiple Conditions**
+3. **Leverage Nested Field Access**
+
+   - Query Map and JSON columns directly: `log_attributes.user_id="123"`
+   - No need to flatten your log schema
+
+4. **Use the Pipe Operator for Focus**
+
+   - `level="error" | timestamp service message` reduces noise
+   - Faster queries when you don't need all columns
+
+5. **Combine Multiple Conditions**
 
    - Use `and` to narrow results
    - Use `or` to broaden results
    - Use parentheses for complex conditions: `(condition1 or condition2) and condition3`
 
-4. **Filter by Context First**
+6. **Filter by Context First**
    - Start with service, component, or environment
    - Then add conditions for errors, warnings, or specific events
    - Finally, add free-text search terms with the `~` operator
+
+7. **Switch to SQL Mode for Aggregations**
+   - LogchefQL is for filtering; use SQL mode for `COUNT`, `GROUP BY`, etc.
