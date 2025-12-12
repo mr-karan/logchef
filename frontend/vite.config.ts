@@ -4,7 +4,7 @@ import autoprefixer from "autoprefixer";
 import tailwind from "tailwindcss";
 import { defineConfig, loadEnv } from "vite";
 import { resolve } from "path";
-import { visualizer } from "rollup-plugin-visualizer";
+import type { Plugin } from "vite";
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -13,22 +13,33 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
 
   const apiUrl = env.VITE_API_URL || "http://localhost:8125";
+  const isAnalyze = mode === "analyze";
+
+  // Conditionally load visualizer only when analyzing
+  const plugins: Plugin[] = [vue()];
+
+  if (isAnalyze) {
+    // Dynamic import for visualizer - only loaded when needed
+    const { visualizer } = require("rollup-plugin-visualizer");
+    plugins.push(
+      visualizer({
+        template: "treemap",
+        open: true,
+        gzipSize: true,
+        brotliSize: true,
+        filename: "stats.html",
+      })
+    );
+  }
 
   return {
     css: {
       postcss: {
         plugins: [tailwind(), autoprefixer()],
       },
-      devSourcemap: false, // Disable CSS source maps in production
+      devSourcemap: false,
     },
-    plugins: [vue(),
-      visualizer({
-        template: "treemap", // Show treemap view
-        open: true,
-        gzipSize: true,
-        brotliSize: true,
-      }) // Add bundle analyzer
-    ],
+    plugins,
     resolve: {
       alias: {
         "@": fileURLToPath(new URL("./src", import.meta.url)),
@@ -46,29 +57,74 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: resolve(__dirname, "../cmd/server/ui"),
       emptyOutDir: true,
-      sourcemap: false, // Disable source maps
-      chunkSizeWarningLimit: 1000, // Increase chunk size warning limit (in kB)
+      sourcemap: false,
+      chunkSizeWarningLimit: 1000,
+      // Use esbuild for minification (10-20x faster than terser)
+      minify: "esbuild",
+      // esbuild minification options
+      target: "es2020",
+      cssMinify: "esbuild",
       rollupOptions: {
         output: {
-          manualChunks: {
-            // Create a separate chunk for Monaco Editor
-            // This helps with lazy loading and reduces the initial bundle size
-            "monaco-editor": ["monaco-editor"],
+          // Improved chunk splitting strategy
+          manualChunks: (id) => {
+            // Monaco editor - largest dependency, separate chunk
+            if (id.includes("monaco-editor")) {
+              return "monaco-editor";
+            }
+            // ECharts - tree-shaken but still substantial
+            if (id.includes("echarts")) {
+              return "echarts";
+            }
+            // Vue ecosystem - changes less frequently
+            if (id.includes("node_modules/vue") || 
+                id.includes("node_modules/@vue") ||
+                id.includes("node_modules/pinia") ||
+                id.includes("node_modules/vue-router")) {
+              return "vue-vendor";
+            }
+            // UI libraries - radix, reka, etc.
+            if (id.includes("radix-vue") || 
+                id.includes("reka-ui") ||
+                id.includes("vaul-vue")) {
+              return "ui-vendor";
+            }
+            // Date utilities
+            if (id.includes("date-fns") || id.includes("@internationalized/date")) {
+              return "date-utils";
+            }
+            // Other vendor libs (including node-sql-parser with its lodash dependency)
+            if (id.includes("node_modules")) {
+              return "vendor";
+            }
           },
           entryFileNames: "assets/[name]-[hash].js",
           chunkFileNames: "assets/[name]-[hash].js",
           assetFileNames: "assets/[name]-[hash][extname]",
         },
       },
-      minify: "terser",
-      terserOptions: {
-        compress: {
-          drop_console: true, // Remove console logs in production
-        },
-      },
+      // Enable build caching for faster rebuilds
+      reportCompressedSize: false, // Skip gzip size calculation (faster builds)
     },
+    // Optimize dependency pre-bundling
     optimizeDeps: {
-      include: ["monaco-editor"],
+      include: [
+        "monaco-editor",
+        "vue",
+        "vue-router",
+        "pinia",
+        "lodash-es",
+        "@vueuse/core",
+      ],
+      exclude: ["@guolao/vue-monaco-editor"], // Let it use the pre-bundled monaco
+    },
+    // Enable caching
+    cacheDir: "node_modules/.vite",
+    esbuild: {
+      // Drop console.log in production (equivalent to terser's drop_console)
+      drop: mode === "production" ? ["console", "debugger"] : [],
+      // Faster parsing
+      legalComments: "none",
     },
   };
 });

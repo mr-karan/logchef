@@ -6,39 +6,40 @@ import { getSeverityClasses } from "@/lib/utils";
 import type { ColumnInfo } from '@/api/explore';
 
 // Width configurations for each column type
+// maxWidth is set very high to allow free resizing - users should be able to expand columns as needed
 const COLUMN_WIDTH_CONFIG: Record<string, { minWidth: number, defaultWidth: number, maxWidth: number }> = {
   timestamp: {
-    minWidth: 200,
+    minWidth: 180,
     defaultWidth: 220,
-    maxWidth: 330,
+    maxWidth: 2000, // Allow very wide for full timestamp visibility
   },
   severity: {
-    minWidth: 120,
-    defaultWidth: 140,
-    maxWidth: 180,
+    minWidth: 70,
+    defaultWidth: 100,
+    maxWidth: 2000,
   },
   status: {
-    minWidth: 100,
-    defaultWidth: 120,
-    maxWidth: 150,
+    minWidth: 60,
+    defaultWidth: 90,
+    maxWidth: 2000,
   },
-  // Default widths should be generous enough for most column types
+  // Default widths - generous for log data
   default: {
-    minWidth: 150,
-    defaultWidth: 190,
-    maxWidth: 530,
+    minWidth: 80,
+    defaultWidth: 180,
+    maxWidth: 2000, // No practical limit - let users resize freely
   },
-  // Smart width for columns with longer names
+  // Wider defaults for longer column names
   wide: {
-    minWidth: 180,
-    defaultWidth: 230,
-    maxWidth: 530,
+    minWidth: 100,
+    defaultWidth: 220,
+    maxWidth: 2000,
   },
-  // Extra width for columns with very long names
+  // Extra width for very long column names
   extraWide: {
-    minWidth: 210,
+    minWidth: 120,
     defaultWidth: 280,
-    maxWidth: 630,
+    maxWidth: 2000,
   }
 };
 

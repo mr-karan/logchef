@@ -14,10 +14,10 @@ import (
 // TranslateRequest represents the request body for LogchefQL translation
 type TranslateRequest struct {
 	Query     string `json:"query"`
-	StartTime string `json:"start_time"` // Required. Format: "2006-01-02 15:04:05"
-	EndTime   string `json:"end_time"`   // Required. Format: "2006-01-02 15:04:05"
-	Timezone  string `json:"timezone"`   // Required. e.g., "UTC", "Asia/Kolkata"
-	Limit     int    `json:"limit"`      // Required. e.g., 100
+	StartTime string `json:"start_time"` // Optional. Format: "2006-01-02 15:04:05" - required for full_sql
+	EndTime   string `json:"end_time"`   // Optional. Format: "2006-01-02 15:04:05" - required for full_sql
+	Timezone  string `json:"timezone"`   // Optional. e.g., "UTC", "Asia/Kolkata" - required for full_sql
+	Limit     int    `json:"limit"`      // Optional. e.g., 100 - defaults to 100
 }
 
 // TranslateResponse represents the response for LogchefQL translation
@@ -60,19 +60,14 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Validate required fields
-	if req.StartTime == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "start_time is required", models.ValidationErrorType)
-	}
-	if req.EndTime == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "end_time is required", models.ValidationErrorType)
-	}
-	if req.Timezone == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "timezone is required", models.ValidationErrorType)
-	}
+	// Apply defaults
 	if req.Limit <= 0 {
 		req.Limit = 100 // Default limit
 	}
+
+	// Time params are optional - only needed for full_sql generation
+	// Check if all time params are provided for full SQL generation
+	hasTimeParams := req.StartTime != "" && req.EndTime != "" && req.Timezone != ""
 
 	// Get source information for schema
 	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
@@ -116,8 +111,8 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 		response.FieldsUsed = []string{}
 	}
 
-	// Build the full SQL (time params are now required)
-	if result.Valid {
+	// Build the full SQL only if time params are provided
+	if result.Valid && hasTimeParams {
 		tableName := source.Connection.Database + "." + source.Connection.TableName
 
 		params := logchefql.QueryBuildParams{

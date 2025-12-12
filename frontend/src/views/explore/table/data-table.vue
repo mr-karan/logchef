@@ -19,7 +19,7 @@ import {
 } from '@tanstack/vue-table'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { GripVertical, Copy, Equal, EqualNot, TerminalSquare, Clock } from 'lucide-vue-next'
+import { GripVertical, Copy, Equal, EqualNot, TerminalSquare, Clock, ChevronUp, ChevronDown } from 'lucide-vue-next'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
 import { valueUpdater, getSeverityClasses } from '@/lib/utils'
 import type { QueryStats, ColumnInfo } from '@/api/explore'
@@ -82,6 +82,7 @@ const expanded = ref<ExpandedState>({})
 // Context modal state
 const showContextModal = ref(false)
 const contextLog = ref<Record<string, any> | null>(null)
+
 
 // Open context modal for a log
 const openContextModal = (log: Record<string, any>) => {
@@ -266,10 +267,11 @@ function getColumnType(column: any): string | undefined {
 // Column order is now managed by state, no need for sortedColumns computed
 
 // Define default column configurations
+// Allow very large maxSize for free resizing - professional log tools need this flexibility
 const defaultColumn = {
     minSize: 50,
     size: 150,
-    maxSize: 1000,
+    maxSize: 3000, // Effectively unlimited - allows users to resize columns as wide as needed
     enableResizing: true,
 }
 
@@ -281,6 +283,55 @@ const columnSizingVars = computed(() => {
     })
     return styles
 })
+
+// Auto-fit column width based on content (double-click feature)
+function autoFitColumn(header: any) {
+    const columnId = header.column.id;
+    const minSize = header.column.columnDef.minSize || defaultColumn.minSize;
+    
+    // Get all cells for this column
+    const rows = table.getRowModel().rows;
+    
+    // Create a temporary element to measure text width
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    // Use the same font as the table cells
+    ctx.font = '13px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+    
+    // Measure header text width
+    let maxWidth = ctx.measureText(columnId).width + 80; // Extra padding for header icons
+    
+    // Measure each cell's content width
+    rows.forEach(row => {
+        const cell = row.getVisibleCells().find(c => c.column.id === columnId);
+        if (cell) {
+            const value = cell.getValue();
+            let text = '';
+            if (value === null || value === undefined) {
+                text = '-';
+            } else if (typeof value === 'object') {
+                text = JSON.stringify(value);
+            } else {
+                text = String(value);
+            }
+            const textWidth = ctx.measureText(text).width + 60; // Padding for cell + action buttons
+            maxWidth = Math.max(maxWidth, textWidth);
+        }
+    });
+    
+    // Clamp to reasonable bounds
+    const newSize = Math.max(minSize, Math.min(800, maxWidth));
+    
+    // Update column size
+    const newSizing = {
+        ...columnSizing.value,
+        [columnId]: newSize
+    };
+    columnSizing.value = newSizing;
+    table.setColumnSizing(newSizing);
+}
 
 // Handle column resizing with a clean custom implementation
 function handleResize(e: MouseEvent | TouchEvent, header: any) {
@@ -306,10 +357,9 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
         // Calculate how far the mouse has moved
         const delta = moveEvent.clientX - startX;
 
-        // Calculate new size respecting min/max constraints
+        // Calculate new size respecting min constraint only (no max constraint for free resizing)
         const minSize = header.column.columnDef.minSize || defaultColumn.minSize;
-        const maxSize = header.column.columnDef.maxSize || defaultColumn.maxSize;
-        let newSize = Math.max(minSize, Math.min(maxSize, startSize + delta));
+        let newSize = Math.max(minSize, startSize + delta);
 
         // Update column size in the state
         const newSizing = {
@@ -330,10 +380,9 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
         // Calculate how far the touch has moved
         const delta = moveEvent.touches[0].clientX - startX;
 
-        // Calculate new size respecting min/max constraints
+        // Calculate new size respecting min constraint only (no max constraint for free resizing)
         const minSize = header.column.columnDef.minSize || defaultColumn.minSize;
-        const maxSize = header.column.columnDef.maxSize || defaultColumn.maxSize;
-        let newSize = Math.max(minSize, Math.min(maxSize, startSize + delta));
+        let newSize = Math.max(minSize, startSize + delta);
 
         // Update column size in the state
         const newSizing = {
@@ -420,20 +469,37 @@ const table = useVueTable({
     defaultColumn,
 })
 
-// Simplified row expansion handler
+// Row expansion handler - toggle expand/collapse
 const handleRowClick = (row: Row<Record<string, any>>) => (e: MouseEvent) => {
-    // Don't expand if clicking on an interactive element
-    if ((e.target as HTMLElement).closest('.actions-dropdown, button, a, input, select')) {
+    // Don't toggle if clicking on an interactive element or cell actions
+    if ((e.target as HTMLElement).closest('.cell-actions, button, a, input, select')) {
         return;
     }
     row.toggleExpanded();
-    // No need to manually set dataset attribute, use :class binding in template
 }
 
-// Add back the copyCell function since it's still needed for individual cells
-const copyCell = (value: any) => {
+// Copy feedback state
+const copiedCellId = ref<string | null>(null)
+
+// Copy cell value with visual feedback
+const copyCell = (value: any): boolean => {
     const text = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)
     navigator.clipboard.writeText(text)
+    return true
+}
+
+// Handle cell click - copy value with brief visual feedback
+const handleCellClick = (event: MouseEvent, cell: any) => {
+    const cellId = cell.id
+    copyCell(cell.getValue())
+    
+    // Show brief "copied" feedback
+    copiedCellId.value = cellId
+    setTimeout(() => {
+        if (copiedCellId.value === cellId) {
+            copiedCellId.value = null
+        }
+    }, 1000)
 }
 
 // Initialize default sorting on mount
@@ -614,6 +680,8 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
                             <!-- Check table.getHeaderGroups() exists -->
                             <tr v-if="table.getHeaderGroups().length > 0 && table.getHeaderGroups()[0]"
                                 class="border-b border-b-muted-foreground/10">
+                                <!-- Expand indicator column header -->
+                                <th class="w-6 bg-muted/30 border-r border-muted/30"></th>
                                 <th v-for="header in table.getHeaderGroups()[0].headers" :key="header.id" scope="col"
                                     class="group relative h-9 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden border-r border-muted/30 p-0"
                                     :class="[
@@ -625,7 +693,6 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
                                     ]" :style="{
                                         width: `${header.getSize()}px`,
                                         minWidth: `${header.column.columnDef.minSize ?? defaultColumn.minSize}px`,
-                                        maxWidth: `${header.column.columnDef.maxSize ?? defaultColumn.maxSize}px`,
                                     }" draggable="true" @dragstart="onDragStart($event, header.column.id)"
                                     @dragenter="onDragEnter($event, header.column.id)" @dragover="onDragOver($event)"
                                     @dragleave="onDragLeave($event, header.column.id)"
@@ -645,12 +712,13 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
                                                 :render="header.column.columnDef.header" :props="header.getContext()" />
                                         </div>
 
-                                        <!-- Column Resizer (Absolute Positioned) -->
+                                        <!-- Column Resizer (Absolute Positioned) - Double-click to auto-fit -->
                                         <div v-if="header.column.getCanResize()"
                                             class="absolute right-0 top-0 h-full w-5 cursor-col-resize select-none touch-none flex items-center justify-center hover:bg-muted/40 transition-colors z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                                             @mousedown="(e) => { e.preventDefault(); e.stopPropagation(); handleResize(e, header); }"
                                             @touchstart="(e) => { e.preventDefault(); e.stopPropagation(); handleResize(e, header); }"
-                                            @click.stop title="Resize column">
+                                            @dblclick.stop="autoFitColumn(header)"
+                                            @click.stop title="Drag to resize • Double-click to auto-fit">
                                             <!-- Resize Grip Visual -->
                                             <div class="h-full w-4 flex flex-col items-center justify-center">
                                                 <div
@@ -674,60 +742,71 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
 
                         <tbody>
                             <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
-                                <tr class="group cursor-pointer border-b transition-colors hover:bg-muted/30" :class="[
+                                <tr class="group cursor-pointer border-b transition-colors hover:bg-muted/30 h-8" :class="[
                                     row.getIsExpanded() ? 'expanded-row bg-primary/15' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
                                 ]" @click="handleRowClick(row)($event)">
+                                    <!-- Expand/collapse indicator - first pseudo-cell -->
+                                    <td class="w-6 px-1 text-center text-muted-foreground/50 group-hover:text-muted-foreground transition-colors">
+                                        <ChevronDown v-if="!row.getIsExpanded()" class="h-3.5 w-3.5 inline-block" />
+                                        <ChevronUp v-else class="h-3.5 w-3.5 inline-block text-primary" />
+                                    </td>
                                     <td v-for="cell in row.getVisibleCells()" :key="cell.id"
-                                        class="px-3 py-2 align-top font-mono text-xs leading-normal overflow-hidden border-r border-muted/20 relative cell-hover-target"
+                                        class="px-3 py-1.5 align-middle font-mono text-xs overflow-hidden border-r border-muted/20 relative cell-hover-target whitespace-nowrap transition-colors duration-200"
                                         :class="[
                                             cell.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
+                                            copiedCellId === cell.id ? 'bg-emerald-500/10' : '',
                                         ]" :style="{
                                             width: `${cell.column.getSize()}px`,
                                             minWidth: `${cell.column.columnDef.minSize ?? defaultColumn.minSize}px`,
-                                            maxWidth: `${cell.column.columnDef.maxSize ?? defaultColumn.maxSize}px`
                                         }">
-                                        <div class="flex items-center justify-between gap-1 w-full overflow-hidden">
-                                            <div class="whitespace-pre flex-grow min-w-0 overflow-hidden"
-                                                :title="formatCellValue(cell.getValue())">
-                                                <FlexRender v-if="cell.column.columnDef.cell"
-                                                    :render="cell.column.columnDef.cell" :props="cell.getContext()" />
-                                            </div>
-                                            <!-- Action buttons container -->
-                                            <div class="flex items-center">
-                                                <!-- Drill-down buttons - only in logchefQL mode -->
-                                                <template
-                                                    v-if="props.activeMode === 'logchefql' && cell.column.id !== timestampFieldName">
-                                                    <Button variant="ghost" size="icon"
-                                                        class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100 mr-0.5"
-                                                        @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '=')"
-                                                        title="Filter equals this value"
-                                                        aria-label="Filter equals this value">
-                                                        <Equal class="h-3 w-3" />
-                                                    </Button>
-                                                    <Button variant="ghost" size="icon"
-                                                        class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100 mr-1"
-                                                        @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '!=')"
-                                                        title="Filter not equals this value"
-                                                        aria-label="Filter not equals this value">
-                                                        <EqualNot class="h-3 w-3" />
-                                                    </Button>
-                                                </template>
-                                                <!-- Copy Button - show only when THIS cell is hovered -->
-                                                <Button variant="ghost" size="icon"
-                                                    class="h-5 w-5 flex-shrink-0 opacity-0 cell-action-button transition-opacity duration-150 focus:opacity-100"
-                                                    @click.stop="copyCell(cell.getValue())" title="Copy cell value"
-                                                    aria-label="Copy cell value">
-                                                    <Copy class="h-3 w-3" />
-                                                </Button>
-                                            </div>
+                                        <div class="cell-content-wrapper w-full overflow-hidden whitespace-nowrap text-ellipsis"
+                                            :title="formatCellValue(cell.getValue())">
+                                            <FlexRender v-if="cell.column.columnDef.cell"
+                                                :render="cell.column.columnDef.cell" :props="cell.getContext()" />
+                                        </div>
+                                        <!-- Minimal hover actions - positioned absolute, doesn't take content space -->
+                                        <div class="cell-actions absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 bg-background/95 backdrop-blur-sm rounded px-0.5 shadow-sm border border-border/50">
+                                            <!-- Copy button - always available -->
+                                            <button 
+                                                class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                                                @click.stop="handleCellClick($event, cell)"
+                                                title="Copy value"
+                                            >
+                                                <Copy class="h-3 w-3" />
+                                            </button>
+                                            <!-- Filter buttons - only in logchefQL mode -->
+                                            <template v-if="props.activeMode === 'logchefql' && cell.column.id !== timestampFieldName">
+                                                <button 
+                                                    class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                                                    @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '=')"
+                                                    title="Filter = this value"
+                                                >
+                                                    <Equal class="h-3 w-3" />
+                                                </button>
+                                                <button 
+                                                    class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                                                    @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '!=')"
+                                                    title="Filter ≠ this value"
+                                                >
+                                                    <EqualNot class="h-3 w-3" />
+                                                </button>
+                                            </template>
                                         </div>
                                     </td>
                                 </tr>
 
                                 <tr v-if="row.getIsExpanded()" class="expanded-json-row">
-                                    <td :colspan="row.getVisibleCells().length" class="p-0">
+                                    <td :colspan="row.getVisibleCells().length + 1" class="p-0">
                                         <div class="p-3 bg-muted/30 border-y border-y-primary/40">
-                                            <div class="flex items-center justify-end mb-2 gap-2">
+                                            <div class="flex items-center justify-between mb-2 gap-2">
+                                                <!-- Collapse hint -->
+                                                <button 
+                                                    class="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 cursor-pointer"
+                                                    @click.stop="row.toggleExpanded()"
+                                                >
+                                                    <ChevronUp class="h-3 w-3" />
+                                                    <span>Collapse</span>
+                                                </button>
                                                 <Button 
                                                     variant="outline" 
                                                     size="sm" 
@@ -772,10 +851,11 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
 
 <style scoped>
 /* Add scoped attribute back */
-/* Table styling for log analytics */
+/* Table styling for log analytics - optimized for smooth resizing */
 .table-fixed {
     table-layout: fixed;
-    width: 100%;
+    width: max-content; /* Allow table to grow beyond container for horizontal scrolling */
+    min-width: 100%; /* Ensure it fills container when columns fit */
     border-collapse: separate;
     border-spacing: 0;
     border: 1px solid hsl(var(--border) / 0.7);
@@ -867,6 +947,12 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
     overflow: hidden;
 }
 
+/* Compact single-line rows for log stream feel */
+.table-fixed tbody tr {
+    height: 32px;
+    max-height: 32px;
+}
+
 /* Make table row alternating colors more visible */
 .table-fixed tbody tr:nth-child(odd) {
     background-color: hsl(var(--muted) / 0.05);
@@ -885,21 +971,49 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
     /* Ensure hover appears above other rows */
 }
 
-/* Rendering for table cells - show full text by default, add ellipsis only on hover */
-td>.flex>.whitespace-pre {
-    white-space: pre !important;
-    /* Prevent wrapping */
-    overflow: hidden !important;
-    /* Hide overflow within the cell's inner div */
-    text-overflow: clip !important;
-    /* Default to clip overflow (no ellipsis) */
-    transition: text-overflow 0.2s ease;
+/* Rendering for table cells - single line for log stream feel */
+td {
+    white-space: nowrap !important;
+    /* Force single line - critical for log stream UX */
 }
 
-/* Add ellipsis only when cell is hovered (to make space for action buttons) */
-.cell-hover-target:hover .whitespace-pre {
+td .cell-content-wrapper {
+    white-space: nowrap !important;
+    /* Prevent wrapping for clean single-line display */
+    overflow: hidden !important;
+    /* Hide overflow within the cell's inner div */
     text-overflow: ellipsis !important;
-    /* Add ellipsis for hidden text on hover */
+    /* Always show ellipsis when content overflows */
+}
+
+/* Ensure ALL nested content stays on single line */
+td .cell-content-wrapper :deep(*) {
+    white-space: nowrap !important;
+}
+
+/* flex-render-content is the main cell content wrapper - MUST be inline block for ellipsis */
+td .cell-content-wrapper :deep(.flex-render-content) {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: inline-block !important;
+    max-width: 100% !important;
+    vertical-align: middle !important;
+}
+
+td .cell-content-wrapper :deep(span) {
+    white-space: nowrap !important;
+    display: inline !important;
+}
+
+/* Timestamp specific - ensure no line breaks */
+td>.flex>.cell-content :deep(.timestamp),
+td>.flex>.cell-content :deep(.timestamp-date),
+td>.flex>.cell-content :deep(.timestamp-time),
+td>.flex>.cell-content :deep(.timestamp-offset),
+td>.flex>.cell-content :deep(.timestamp-separator) {
+    white-space: nowrap !important;
+    display: inline !important;
 }
 
 /* Handling for JSON objects in table cells */
@@ -908,19 +1022,12 @@ td>.flex>.whitespace-pre {
     /* Prevent wrapping for JSON content */
     overflow: hidden !important;
     /* Hide overflow */
-    text-overflow: clip !important;
-    /* Default to clip overflow (no ellipsis) */
+    text-overflow: ellipsis !important;
+    /* Always show ellipsis when content overflows */
     display: inline-block !important;
     /* Keep it as inline block */
     max-width: 100% !important;
     /* Limit width to cell size */
-    transition: text-overflow 0.2s ease;
-}
-
-/* Add ellipsis for JSON content only on hover */
-.cell-hover-target:hover :deep(.json-content) {
-    text-overflow: ellipsis !important;
-    /* Add ellipsis for hidden text on hover */
 }
 
 /* Add cursor styling for drag handle */
@@ -938,19 +1045,38 @@ td>.flex>.whitespace-pre {
     /* Force grabbing cursor */
 }
 
-/* Cell-specific hover effect for action buttons */
+/* Cell styling - consistent pointer cursor for clickable rows */
 .cell-hover-target {
     position: relative;
-    /* Ensure positioning context for action buttons */
+    cursor: pointer;
 }
 
-.cell-hover-target:hover .cell-action-button {
-    opacity: 1;
+.cell-hover-target,
+.cell-hover-target *,
+.cell-content-wrapper,
+.cell-content-wrapper * {
+    cursor: pointer;
 }
 
-/* All action buttons are hidden by default and shown only on cell hover */
-.cell-action-button {
+/* Exception: action buttons in the floating pill */
+.cell-actions button {
+    cursor: pointer;
+}
+
+/* Hover action buttons - appear on row hover, positioned outside content flow */
+.cell-actions {
+    pointer-events: auto;
+    z-index: 5;
+}
+
+/* Only show actions on direct cell hover, not entire row */
+.cell-hover-target .cell-actions {
     opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.cell-hover-target:hover .cell-actions {
+    opacity: 1;
 }
 
 /* Style for drop indicator */
@@ -1189,26 +1315,32 @@ td>.flex>.whitespace-pre {
     border: 1px solid #e11d48;
 }
 
-/* Timestamp Formatting */
+/* Timestamp Formatting - MUST stay inline for log stream UX */
 :deep(.timestamp) {
-    /* Optional: Add a subtle background or border if needed */
+    display: inline !important;
+    white-space: nowrap !important;
+}
+
+/* All timestamp parts MUST be inline */
+:deep(.timestamp-date),
+:deep(.timestamp-separator),
+:deep(.timestamp-time),
+:deep(.timestamp-offset) {
+    display: inline !important;
+    white-space: nowrap !important;
 }
 
 /* Refined Timestamp Colors for better distinction */
 :deep(.timestamp-date) {
     color: hsl(var(--foreground) / 0.60);
-    /* Even lighter */
 }
 
 .dark :deep(.timestamp-date) {
     color: hsl(var(--foreground) / 0.50);
-    /* Even lighter */
 }
 
 :deep(.timestamp-separator) {
     color: hsl(var(--muted-foreground) / 0.5);
-    /* Even more subtle separator */
-    margin: 0 1px;
 }
 
 :deep(.timestamp-time) {
@@ -1223,9 +1355,7 @@ td>.flex>.whitespace-pre {
 
 :deep(.timestamp-offset) {
     color: hsl(var(--muted-foreground) / 0.6);
-    margin-left: 2px;
     font-size: 0.5625rem;
-    /* 90% of base */
 }
 
 .dark :deep(.timestamp-offset) {

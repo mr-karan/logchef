@@ -88,21 +88,6 @@
           </Tooltip>
         </TooltipProvider>
 
-        <!-- View as SQL Button - Switch to SQL mode with the generated SQL -->
-        <TooltipProvider v-if="props.activeMode === 'logchefql' && exploreStore.generatedDisplaySql">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="outline" size="sm" class="h-7 gap-1" @click="switchToSqlModeWithGeneratedSql">
-                <Code2 class="h-3.5 w-3.5" />
-                <span class="text-xs">View as SQL</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <p>Switch to SQL mode to view and edit the generated query</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-
         <!-- SQL Toggle Button - Only show when in SQL mode -->
         <TooltipProvider v-if="props.activeMode === 'clickhouse-sql'">
           <Tooltip>
@@ -2171,7 +2156,7 @@ const insertGeneratedSql = () => {
   editorContent.value = generatedSql.value;
   
   // Emit the change event
-  handleEditorChange(generatedSql.value, true);
+  handleEditorChange(generatedSql.value);
   
   // Close dialog and reset state
   resetAiDialog();
@@ -2213,12 +2198,6 @@ const copyToClipboard = async (text: string) => {
       duration: 3000,
     });
   }
-};
-
-// Switch to SQL mode - the changeMode function will use generatedDisplaySql
-const switchToSqlModeWithGeneratedSql = () => {
-  // Just switch mode - changeMode will pick up generatedDisplaySql automatically
-  emit('update:activeMode', 'clickhouse-sql', true);
 };
 
 // Watch for changes to selected variable and update the store

@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Respects the selected time range to show relevant values and optimize query performance
   - Displays value count badges on collapsed fields
   - Supports query cancellation for long-running field value queries
+  - **Sidebar now filters values based on active LogchefQL query** - shows only relevant values matching current filters
+  - **Auto-refresh on query execution** - sidebar updates when you run a query
 - Backend LogchefQL parser (`internal/logchefql/`) - full parsing, validation, and SQL generation in Go
   - Pipe operator (`|`) for custom SELECT clauses: `namespace="prod" | namespace msg.level`
   - Dot notation for nested JSON fields: `log_attributes.user.name = "john"`
@@ -24,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - API endpoints for field value exploration (`/fields/values`, `/fields/:fieldName/values`)
 - Query cancellation support - cancel long-running queries from the UI with the Cancel button or `Esc` key, which also cancels the query in ClickHouse
 - Frontend API client for LogchefQL backend integration
+- Build commands: `just build-ui-analyze` for bundle analysis, `just clean-all` for deep clean including node_modules
+- Double-click column header resizer to auto-fit column width to content
 
 ### Changed
 - **Breaking:** LogchefQL parsing and SQL generation moved from frontend to backend
@@ -33,11 +37,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Mode switching (LogchefQL → SQL) fetches full SQL from backend via `/logchefql/translate`
 - LogchefQL validation now uses backend API with debounced calls
 - Frontend no longer generates SQL - only renders what backend provides
+- Field values API now accepts `logchefql` query param instead of `conditions` - backend handles parsing for proper SQL generation
+- `/logchefql/translate` endpoint time parameters now optional (only required for full SQL generation)
+- Pipe operator now includes timestamp field in SELECT for proper ordering
+- Data table UX improvements:
+  - Rows are more compact (reduced padding) for better log density
+  - Expand/collapse indicator chevron on each row
+  - Cell click-to-copy with visual feedback
+  - Cell action buttons in floating overlay (doesn't affect column width)
+  - Column resizing has no max constraint - resize freely as needed
+- Column width defaults adjusted: lower minimums, higher maximums for flexibility
 
 ### Fixed
 - Histogram queries now work with MATERIALIZED timestamp columns (fixes [#59](https://github.com/mr-karan/logchef/discussions/59))
   - ClickHouse's `SELECT *` does not include MATERIALIZED columns
   - Histogram query builder now explicitly adds the timestamp field to ensure it's available in subqueries
+- Surrounding logs (context modal) now works with MATERIALIZED timestamp columns
+- Field sidebar excludes complex types (Map, Array, Tuple, JSON) that can't have simple distinct values
+- Removed "View as SQL" button from LogchefQL mode (unnecessary duplication)
 
 ### Removed
 - Frontend LogchefQL parser (`frontend/src/utils/logchefql/`) - replaced by backend implementation

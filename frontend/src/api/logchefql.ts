@@ -29,10 +29,10 @@ export interface FilterCondition {
 
 export interface TranslateRequest {
   query: string;
-  start_time: string;   // Required. Format: "YYYY-MM-DD HH:mm:ss"
-  end_time: string;     // Required. Format: "YYYY-MM-DD HH:mm:ss"
-  timezone: string;     // Required. e.g., "UTC", "Asia/Kolkata"
-  limit: number;        // Required. e.g., 100
+  start_time?: string;   // Optional. Format: "YYYY-MM-DD HH:mm:ss" - required for full_sql
+  end_time?: string;     // Optional. Format: "YYYY-MM-DD HH:mm:ss" - required for full_sql
+  timezone?: string;     // Optional. e.g., "UTC", "Asia/Kolkata" - required for full_sql
+  limit?: number;        // Optional. e.g., 100 - defaults to 100
 }
 
 export interface TranslateResponse {

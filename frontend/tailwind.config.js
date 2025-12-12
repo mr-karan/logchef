@@ -1,17 +1,14 @@
-const animate = require("tailwindcss-animate")
-
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   darkMode: ["class"],
   safelist: ["dark"],
   prefix: "",
 
+  // Tightened content paths - only scan actual source files
   content: [
-    './pages/**/*.{ts,tsx,vue}',
-    './components/**/*.{ts,tsx,vue}',
-    './app/**/*.{ts,tsx,vue}',
-    './src/**/*.{ts,tsx,vue}',
-	],
+    './src/**/*.{vue,ts,tsx}',
+    './index.html',
+  ],
 
   theme: {
   	container: {
@@ -118,8 +115,7 @@ module.exports = {
   	}
   },
   plugins: [
-    animate, 
     require("tailwindcss-animate"),
-    require("tailwind-scrollbar")
+    require("tailwind-scrollbar"),
   ],
 }

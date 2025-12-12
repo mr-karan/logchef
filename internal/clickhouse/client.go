@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -892,82 +893,33 @@ type FieldValuesResult struct {
 }
 
 // FieldValuesParams holds parameters for fetching field distinct values.
-// FilterCondition represents a single filter condition from the user's query
-type FilterCondition struct {
-	Field    string `json:"field"`
-	Operator string `json:"operator"` // =, !=, ~, !~, >, <, >=, <=
-	Value    string `json:"value"`
-}
-
 type FieldValuesParams struct {
 	FieldName      string
 	FieldType      string
-	TimestampField string            // Required: timestamp column name for time range filter
-	StartTime      time.Time         // Required: start of time range
-	EndTime        time.Time         // Required: end of time range
-	Timezone       string            // Optional: timezone for time conversion (defaults to UTC)
-	Limit          int               // Optional: max values to return (default 10, max 100)
-	Timeout        *int              // Optional: query timeout in seconds
-	Conditions     []FilterCondition // Optional: additional filter conditions from user's query
+	TimestampField string    // Required: timestamp column name for time range filter
+	StartTime      time.Time // Required: start of time range
+	EndTime        time.Time // Required: end of time range
+	Timezone       string    // Optional: timezone for time conversion (defaults to UTC)
+	Limit          int       // Optional: max values to return (default 10, max 100)
+	Timeout        *int      // Optional: query timeout in seconds
+	LogchefQL      string    // Optional: LogchefQL query string - parsed on backend for proper SQL generation
 }
 
-// buildFilterConditionsSQL converts filter conditions to a SQL WHERE clause fragment.
-// Returns empty string if no conditions, or " AND condition1 AND condition2..." if conditions exist.
-// Handles SQL injection prevention by escaping values and validating operators.
-func buildFilterConditionsSQL(conditions []FilterCondition) string {
-	if len(conditions) == 0 {
+// buildLogchefQLConditionsSQL parses a LogchefQL query and returns the SQL WHERE clause fragment.
+// This uses the proper LogchefQL parser which handles nested fields, Map columns, JSON extraction, etc.
+// Returns empty string if query is empty or invalid.
+func buildLogchefQLConditionsSQL(query string) string {
+	if query == "" || strings.TrimSpace(query) == "" {
 		return ""
 	}
 
-	var parts []string
-	for _, cond := range conditions {
-		// Validate operator to prevent injection
-		var sqlOp string
-		switch cond.Operator {
-		case "=":
-			sqlOp = "="
-		case "!=":
-			sqlOp = "!="
-		case "~": // regex match
-			sqlOp = "LIKE"
-		case "!~": // regex not match
-			sqlOp = "NOT LIKE"
-		case ">":
-			sqlOp = ">"
-		case "<":
-			sqlOp = "<"
-		case ">=":
-			sqlOp = ">="
-		case "<=":
-			sqlOp = "<="
-		default:
-			continue // Skip unknown operators
-		}
-
-		// Escape single quotes in value to prevent SQL injection
-		escapedValue := strings.ReplaceAll(cond.Value, "'", "''")
-		// Escape backslashes
-		escapedValue = strings.ReplaceAll(escapedValue, "\\", "\\\\")
-
-		// Build the condition based on operator type
-		var part string
-		if cond.Operator == "~" || cond.Operator == "!~" {
-			// For regex operators, convert to LIKE pattern
-			// Simple conversion: wrap with % for contains-like behavior
-			// User's regex patterns like "sys" become "%sys%"
-			pattern := "%" + escapedValue + "%"
-			part = fmt.Sprintf("%s %s '%s'", cond.Field, sqlOp, pattern)
-		} else {
-			part = fmt.Sprintf("%s %s '%s'", cond.Field, sqlOp, escapedValue)
-		}
-		parts = append(parts, part)
-	}
-
-	if len(parts) == 0 {
+	result := logchefql.Translate(query, nil)
+	if !result.Valid || result.SQL == "" {
 		return ""
 	}
 
-	return " AND " + strings.Join(parts, " AND ")
+	// Return the SQL wrapped as " AND (...)" to be appended to WHERE clause
+	return " AND (" + result.SQL + ")"
 }
 
 // GetFieldDistinctValues retrieves the top N distinct values for a field within a time range.
@@ -1008,7 +960,7 @@ func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table str
 		"timezone", timezone,
 		"limit", limit,
 		"timeout_seconds", *timeoutSeconds,
-		"conditions_count", len(params.Conditions))
+		"logchefql", params.LogchefQL)
 
 	// Determine if it's LowCardinality from the provided type
 	isLowCard := strings.Contains(params.FieldType, "LowCardinality")
@@ -1017,8 +969,8 @@ func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table str
 	startTimeStr := params.StartTime.UTC().Format("2006-01-02 15:04:05")
 	endTimeStr := params.EndTime.UTC().Format("2006-01-02 15:04:05")
 
-	// Build additional WHERE conditions from user's query filters
-	additionalConditions := buildFilterConditionsSQL(params.Conditions)
+	// Build additional WHERE conditions from user's LogchefQL query
+	additionalConditions := buildLogchefQLConditionsSQL(params.LogchefQL)
 
 	// Build optimized query:
 	// 1. PREWHERE for timestamp - ClickHouse reads timestamp column first, filters, then reads field
@@ -1139,18 +1091,29 @@ func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table str
 
 // AllFieldValuesParams holds parameters for fetching field values for filterable columns.
 type AllFieldValuesParams struct {
-	TimestampField string            // Required: timestamp column name for time range filter
-	StartTime      time.Time         // Required: start of time range
-	EndTime        time.Time         // Required: end of time range
-	Timezone       string            // Optional: timezone for time conversion (defaults to UTC)
-	Limit          int               // Optional: max values per field (default 10, max 100)
-	Timeout        *int              // Optional: query timeout in seconds (default 5s for String fields)
-	Conditions     []FilterCondition // Optional: additional filter conditions from user's query
+	TimestampField string    // Required: timestamp column name for time range filter
+	StartTime      time.Time // Required: start of time range
+	EndTime        time.Time // Required: end of time range
+	Timezone       string    // Optional: timezone for time conversion (defaults to UTC)
+	Limit          int       // Optional: max values per field (default 10, max 100)
+	Timeout        *int      // Optional: query timeout in seconds (default 5s for String fields)
+	LogchefQL      string    // Optional: LogchefQL query string - parsed on backend for proper SQL generation
 }
 
 // isFilterableColumnType returns true if the column type is suitable for distinct value queries.
 // LowCardinality fields are always fast. String fields are included with timeout protection.
 func isFilterableColumnType(colType string) bool {
+	// Exclude complex types that can't be compared to empty string
+	// Map, Array, Tuple, JSON types are not suitable for simple distinct value queries
+	lowerType := strings.ToLower(colType)
+	if strings.HasPrefix(lowerType, "map(") ||
+		strings.HasPrefix(lowerType, "array(") ||
+		strings.HasPrefix(lowerType, "tuple(") ||
+		lowerType == "json" ||
+		strings.HasPrefix(lowerType, "json(") {
+		return false
+	}
+
 	// LowCardinality fields - always fast due to dictionary
 	if strings.Contains(colType, "LowCardinality") {
 		return true
@@ -1213,7 +1176,7 @@ func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, tabl
 			Timezone:       params.Timezone,
 			Limit:          params.Limit,
 			Timeout:        timeout,
-			Conditions:     params.Conditions, // Pass through user's filter conditions
+			LogchefQL:      params.LogchefQL, // Pass through user's LogchefQL query
 		}
 
 		fieldResult, err := c.GetFieldDistinctValues(ctx, database, table, fieldParams)

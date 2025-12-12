@@ -402,12 +402,14 @@ func (c *Client) GetSurroundingLogs(ctx context.Context, tableName, timestampFie
 
 	// Query 1: Get logs AT OR BEFORE the target time (ordered DESC to get closest ones first)
 	// Use OFFSET for pagination when loading more
+	// Note: Explicitly include timestamp field in SELECT to handle MATERIALIZED columns
+	// (SELECT * doesn't include MATERIALIZED columns in ClickHouse)
 	beforeQuery := fmt.Sprintf(`
-		SELECT * FROM %s
+		SELECT %s, * FROM %s
 		WHERE %s %s toDateTime64('%s', 3, 'UTC')
 		ORDER BY %s DESC
 		LIMIT %d OFFSET %d
-	`, tableName, timestampField, beforeOp, targetTimeStr, timestampField, params.BeforeLimit, params.BeforeOffset)
+	`, timestampField, tableName, timestampField, beforeOp, targetTimeStr, timestampField, params.BeforeLimit, params.BeforeOffset)
 
 	beforeResult, err := c.QueryWithTimeout(ctx, beforeQuery, queryTimeout)
 	if err != nil {
@@ -420,12 +422,13 @@ func (c *Client) GetSurroundingLogs(ctx context.Context, tableName, timestampFie
 
 	// Query 2: Get logs AFTER the target time (ordered ASC to get closest ones first)
 	// Uses > (exclusive) for the timestamp, with OFFSET for pagination
+	// Note: Explicitly include timestamp field in SELECT to handle MATERIALIZED columns
 	afterQuery := fmt.Sprintf(`
-		SELECT * FROM %s
+		SELECT %s, * FROM %s
 		WHERE %s > toDateTime64('%s', 3, 'UTC')
 		ORDER BY %s ASC
 		LIMIT %d OFFSET %d
-	`, tableName, timestampField, targetTimeStr, timestampField, params.AfterLimit, params.AfterOffset)
+	`, timestampField, tableName, timestampField, targetTimeStr, timestampField, params.AfterLimit, params.AfterOffset)
 
 	afterResult, err := c.QueryWithTimeout(ctx, afterQuery, queryTimeout)
 	if err != nil {

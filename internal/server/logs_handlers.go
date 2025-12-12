@@ -586,7 +586,7 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 //   - start_time: ISO8601 start time (required for performance)
 //   - end_time: ISO8601 end time (required for performance)
 //   - timezone: timezone for time conversion (optional, defaults to UTC)
-//   - conditions: JSON array of filter conditions (optional, from user's query)
+//   - logchefql: LogchefQL query string (optional, filters field values by user's query)
 func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
@@ -632,15 +632,8 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 		limit = 100
 	}
 
-	// Parse optional filter conditions from user's query (JSON array)
-	var conditions []clickhouse.FilterCondition
-	conditionsStr := c.Query("conditions", "")
-	if conditionsStr != "" {
-		if err := json.Unmarshal([]byte(conditionsStr), &conditions); err != nil {
-			s.log.Warn("failed to parse conditions parameter, ignoring", "error", err, "conditions", conditionsStr)
-			conditions = nil // Ignore invalid conditions, don't fail the request
-		}
-	}
+	// Get optional LogchefQL query - parsed on backend for proper SQL generation
+	logchefqlQuery := c.Query("logchefql", "")
 
 	// Get source information
 	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
@@ -659,7 +652,7 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to connect to source", models.ExternalServiceErrorType)
 	}
 
-	// Fetch field values with time range filter and user's query conditions
+	// Fetch field values with time range filter and user's LogchefQL query
 	result, err := client.GetFieldDistinctValues(
 		c.Context(),
 		source.Connection.Database,
@@ -672,8 +665,8 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 			EndTime:        endTime,
 			Timezone:       timezone,
 			Limit:          limit,
-			Timeout:        nil,        // Use default timeout
-			Conditions:     conditions, // Apply user's query filters
+			Timeout:        nil,           // Use default timeout
+			LogchefQL:      logchefqlQuery, // Apply user's query filters
 		},
 	)
 	if err != nil {
@@ -684,7 +677,7 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, result)
 }
 
-// handleGetAllFieldValues retrieves distinct values for all LowCardinality fields within a time range.
+// handleGetAllFieldValues retrieves distinct values for all filterable fields within a time range.
 // This is useful for populating the field sidebar with filterable values.
 // Access is controlled by the requireSourceAccess middleware.
 // Query params:
@@ -692,7 +685,7 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 //   - start_time: ISO8601 start time (required for performance)
 //   - end_time: ISO8601 end time (required for performance)
 //   - timezone: timezone for time conversion (optional, defaults to UTC)
-//   - conditions: JSON array of filter conditions (optional, from user's query)
+//   - logchefql: LogchefQL query string (optional, filters field values by user's query)
 func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
@@ -727,6 +720,9 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 		limit = 100
 	}
 
+	// Get optional LogchefQL query - parsed on backend for proper SQL generation
+	logchefqlQuery := c.Query("logchefql", "")
+
 	// Get source information
 	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
 	if err != nil {
@@ -737,16 +733,6 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
 	}
 
-	// Parse optional filter conditions from user's query (JSON array)
-	var conditions []clickhouse.FilterCondition
-	conditionsStr := c.Query("conditions", "")
-	if conditionsStr != "" {
-		if err := json.Unmarshal([]byte(conditionsStr), &conditions); err != nil {
-			s.log.Warn("failed to parse conditions parameter, ignoring", "error", err, "conditions", conditionsStr)
-			conditions = nil // Ignore invalid conditions, don't fail the request
-		}
-	}
-
 	// Get ClickHouse client
 	client, err := s.clickhouse.GetConnection(sourceID)
 	if err != nil {
@@ -754,7 +740,7 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to connect to source", models.ExternalServiceErrorType)
 	}
 
-	// Fetch all low cardinality field values with time range filter and user's query conditions
+	// Fetch all filterable field values with time range filter and user's LogchefQL query
 	result, err := client.GetAllLowCardinalityFieldValues(
 		c.Context(),
 		source.Connection.Database,
@@ -765,8 +751,8 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 			EndTime:        endTime,
 			Timezone:       timezone,
 			Limit:          limit,
-			Timeout:        nil,        // Use default timeout
-			Conditions:     conditions, // Apply user's query filters
+			Timeout:        nil,           // Use default timeout
+			LogchefQL:      logchefqlQuery, // Apply user's query filters
 		},
 	)
 	if err != nil {

@@ -578,6 +578,73 @@ func TestBuildFullQuery(t *testing.T) {
 			t.Error("expected no AND clause for empty query")
 		}
 	})
+
+	t.Run("pipe operator includes custom SELECT clause", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `namespace="kite-alerts" | msg`,
+			Schema:         testSchema,
+			TableName:      "logs.nomad_apps",
+			TimestampField: "_timestamp",
+			StartTime:      "2024-01-01 00:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "Asia/Calcutta",
+			Limit:          100,
+		}
+
+		sql, err := BuildFullQuery(params)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+
+		// Should NOT have SELECT *
+		if strings.Contains(sql, "SELECT *") {
+			t.Errorf("expected custom SELECT clause, not SELECT *, got:\n%s", sql)
+		}
+
+		// Should have timestamp field first
+		if !strings.Contains(sql, "SELECT `_timestamp`") {
+			t.Errorf("expected timestamp field in SELECT, got:\n%s", sql)
+		}
+
+		// Should have msg field
+		if !strings.Contains(sql, "`msg`") {
+			t.Errorf("expected msg field in SELECT, got:\n%s", sql)
+		}
+
+		// Should still have WHERE clause
+		if !strings.Contains(sql, "namespace") {
+			t.Errorf("expected namespace condition in WHERE, got:\n%s", sql)
+		}
+	})
+
+	t.Run("pipe operator with multiple fields", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `severity_text="error" | service_name body`,
+			Schema:         testSchema,
+			TableName:      "logs.otel_logs",
+			TimestampField: "timestamp",
+			StartTime:      "2024-01-01 00:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "UTC",
+			Limit:          50,
+		}
+
+		sql, err := BuildFullQuery(params)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+
+		// Should have timestamp field, service_name, and body in SELECT
+		if !strings.Contains(sql, "`timestamp`") {
+			t.Errorf("expected timestamp in SELECT, got:\n%s", sql)
+		}
+		if !strings.Contains(sql, "`service_name`") {
+			t.Errorf("expected service_name in SELECT, got:\n%s", sql)
+		}
+		if !strings.Contains(sql, "`body`") {
+			t.Errorf("expected body in SELECT, got:\n%s", sql)
+		}
+	})
 }
 
 func TestPipeOperator(t *testing.T) {

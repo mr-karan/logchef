@@ -24,9 +24,8 @@ sqlc_cmd := "sqlc"
 default:
     @just --list
 
-# Build both backend and frontend
+# Build both backend and frontend (frontend first - backend embeds the dist)
 build: build-ui build-backend
-
 
 # Generate sqlc code
 sqlc-generate:
@@ -36,7 +35,6 @@ sqlc-generate:
 # Build only the backend
 build-backend: sqlc-generate
     @echo "Building backend..."
-    # LDFLAGS uses the build info
     CGO_ENABLED=0 go build -o {{bin}} -ldflags "{{ldflags}}" ./cmd/server
 
 # Build only the frontend
@@ -45,6 +43,13 @@ build-ui:
     cd frontend && \
     [ -d "node_modules" ] || pnpm install --frozen-lockfile --silent && \
     pnpm build
+
+# Build frontend with bundle analysis
+build-ui-analyze:
+    @echo "Building frontend with bundle analysis..."
+    cd frontend && \
+    [ -d "node_modules" ] || pnpm install --frozen-lockfile --silent && \
+    pnpm build:analyze
 
 # Run the server with config
 run: build
@@ -109,6 +114,12 @@ clean:
     rm -rf coverage
     rm -rf backend/cmd/server/ui
     rm -rf frontend/dist/
+    rm -rf frontend/node_modules/.vite
+
+# Deep clean (includes node_modules)
+clean-all: clean
+    @echo "Removing node_modules..."
+    rm -rf frontend/node_modules
 
 # Clean and rebuild everything
 fresh: clean build run

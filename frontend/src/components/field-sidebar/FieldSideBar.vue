@@ -33,6 +33,7 @@ import { sourcesApi, type AllFieldValuesResult, type FieldValuesResult } from '@
 import { useExploreStore } from '@/stores/explore'
 import { getLocalTimeZone } from '@internationalized/date'
 import { cn } from '@/lib/utils'
+import { useVariables } from '@/composables/useVariables'
 
 // Define field type for auto-completion
 interface FieldInfo {
@@ -52,8 +53,20 @@ const props = withDefaults(defineProps<{
   expanded: false,
 })
 
-// Get time range from explore store
+// Get time range and query from explore store
 const exploreStore = useExploreStore()
+const { convertVariables } = useVariables()
+
+// Get the current LogchefQL query for filtering field values
+const getCurrentLogchefQL = (): string => {
+  // Only pass LogchefQL in logchefql mode - SQL mode doesn't filter sidebar
+  if (exploreStore.activeMode !== 'logchefql') {
+    return ''
+  }
+  const query = exploreStore.logchefqlCode || ''
+  // Replace any variables before sending to backend
+  return query ? convertVariables(query) : ''
+}
 
 // Emits
 const emit = defineEmits<{
@@ -72,7 +85,19 @@ const errorMessage = ref<string | null>(null)
 
 // Check if a field type is filterable (can show distinct values)
 // Matches backend logic: LowCardinality, String, Nullable(String), Enum
+// Excludes complex types: Map, Array, Tuple, JSON
 const isFilterableField = (type: string): boolean => {
+  const lowerType = type.toLowerCase()
+  
+  // Exclude complex types that can't have simple distinct values
+  if (lowerType.startsWith('map(') ||
+      lowerType.startsWith('array(') ||
+      lowerType.startsWith('tuple(') ||
+      lowerType === 'json' ||
+      lowerType.startsWith('json(')) {
+    return false
+  }
+  
   // LowCardinality fields - always fast
   if (type.includes('LowCardinality')) {
     return true
@@ -216,7 +241,8 @@ const fetchFieldValues = async (fieldName: string) => {
       timeRange.startTime,
       timeRange.endTime,
       undefined, // Use default timezone (UTC)
-      10
+      10,
+      getCurrentLogchefQL() // Pass current query to filter field values
     )
     if (response.data) {
       fieldValues.value = {
@@ -234,7 +260,7 @@ const fetchFieldValues = async (fieldName: string) => {
 // Auto-expand threshold - fields with this many or fewer values are auto-expanded
 const AUTO_EXPAND_THRESHOLD = 6
 
-// Fetch all LowCardinality field values
+// Fetch all filterable field values
 const fetchAllLowCardValues = async () => {
   if (!props.teamId || !props.sourceId) return
   
@@ -255,7 +281,8 @@ const fetchAllLowCardValues = async () => {
       timeRange.startTime,
       timeRange.endTime,
       undefined, // Use default timezone (UTC)
-      10
+      10,
+      getCurrentLogchefQL() // Pass current query to filter field values
     )
     if (response.data) {
       fieldValues.value = response.data
@@ -321,6 +348,21 @@ watch(
     }
   },
   { deep: true }
+)
+
+// Watch for query execution to auto-refresh field values
+// This ensures sidebar reflects the current query filters
+watch(
+  () => exploreStore.lastExecutionTimestamp,
+  (newTimestamp, oldTimestamp) => {
+    // Refresh when a query is executed and sidebar is expanded
+    if (props.expanded && newTimestamp && newTimestamp !== oldTimestamp) {
+      // Clear existing values and fetch fresh data with new query filters
+      fieldValues.value = {}
+      expandedFields.value = new Set()
+      fetchAllLowCardValues()
+    }
+  }
 )
 
 // Auto-fetch low cardinality values when sidebar expands

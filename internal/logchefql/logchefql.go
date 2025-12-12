@@ -188,9 +188,15 @@ func BuildFullQuery(params QueryBuildParams) (string, error) {
 	// Build the full query
 	var query strings.Builder
 
-	// SELECT clause
+	// SELECT clause - prefer SelectClause from pipe operator, then params.SelectFields, then *
 	query.WriteString("SELECT ")
-	if params.SelectFields != "" {
+	if translateResult.SelectClause != "" {
+		// Pipe operator used - include timestamp field first, then selected fields
+		if params.TimestampField != "" {
+			query.WriteString(fmt.Sprintf("`%s`, ", params.TimestampField))
+		}
+		query.WriteString(translateResult.SelectClause)
+	} else if params.SelectFields != "" {
 		query.WriteString(params.SelectFields)
 	} else {
 		query.WriteString("*")

@@ -111,13 +111,6 @@ export interface FieldValuesResult {
 
 export type AllFieldValuesResult = Record<string, FieldValuesResult>;
 
-// Filter condition for querying field values with user's query context
-export interface FilterCondition {
-  field: string;
-  operator: string; // =, !=, ~, !~, >, <, >=, <=
-  value: string;
-}
-
 export const sourcesApi = {
   // Source management
   listAllSourcesForAdmin: () =>
@@ -158,7 +151,7 @@ export const sourcesApi = {
 
   // Field values for sidebar exploration
   // Time range is required for performance (avoids full table scan)
-  // Conditions are optional - apply user's query filters to show relevant values
+  // LogchefQL query is optional - filters field values based on user's query
   getFieldValues: (
     teamId: number, 
     sourceId: number, 
@@ -168,7 +161,7 @@ export const sourcesApi = {
     endTime: string,    // ISO8601 format
     timezone?: string,
     limit?: number,
-    conditions?: FilterCondition[]
+    logchefql?: string  // Optional LogchefQL query to filter field values
   ) => {
     let url = `/teams/${teamId}/sources/${sourceId}/fields/${encodeURIComponent(fieldName)}/values?` +
       `limit=${limit || 10}` +
@@ -178,8 +171,8 @@ export const sourcesApi = {
     if (timezone) {
       url += `&timezone=${encodeURIComponent(timezone)}`;
     }
-    if (conditions && conditions.length > 0) {
-      url += `&conditions=${encodeURIComponent(JSON.stringify(conditions))}`;
+    if (logchefql) {
+      url += `&logchefql=${encodeURIComponent(logchefql)}`;
     }
     return apiClient.get<FieldValuesResult>(url);
   },
@@ -190,7 +183,7 @@ export const sourcesApi = {
     endTime: string,    // ISO8601 format
     timezone?: string,
     limit?: number,
-    conditions?: FilterCondition[]
+    logchefql?: string  // Optional LogchefQL query to filter field values
   ) => {
     let url = `/teams/${teamId}/sources/${sourceId}/fields/values?` +
       `limit=${limit || 10}` +
@@ -199,8 +192,8 @@ export const sourcesApi = {
     if (timezone) {
       url += `&timezone=${encodeURIComponent(timezone)}`;
     }
-    if (conditions && conditions.length > 0) {
-      url += `&conditions=${encodeURIComponent(JSON.stringify(conditions))}`;
+    if (logchefql) {
+      url += `&logchefql=${encodeURIComponent(logchefql)}`;
     }
     return apiClient.get<AllFieldValuesResult>(url);
   },
