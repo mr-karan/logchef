@@ -16,7 +16,7 @@ interface Props {
   availableFields: Array<{name: string, type: string}>
 }
 
-const props = defineProps<Props>()
+defineProps<Props>()
 const exploreStore = useExploreStore()
 const sourcesStore = useSourcesStore()
 

@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { ref, computed } from "vue";
+import { computed } from "vue";
 import { useColorMode } from "@vueuse/core";
 import { useBaseStore } from "./base";
 

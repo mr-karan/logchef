@@ -7,7 +7,7 @@ interface Props {
   canExecuteQuery: boolean;
 }
 
-const props = defineProps<Props>()
+defineProps<Props>()
 
 const emit = defineEmits<{
   (e: 'runDefaultQuery'): void

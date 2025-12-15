@@ -67,7 +67,7 @@ const {
   sqlQuery,
   activeMode,
   queryError,
-  sqlWarnings,
+  sqlWarnings: _sqlWarnings,
   isDirty,
   dirtyReason,
   isExecutingQuery,
@@ -75,7 +75,7 @@ const {
   changeMode,
   executeQuery,
   handleTimeRangeUpdate,
-  handleLimitUpdate,
+  handleLimitUpdate: _handleLimitUpdate,
 } = useQuery();
 
 const { handleHistogramTimeRangeZoom } = useTimeRange();
@@ -88,9 +88,6 @@ const sourceDetails = computed(() => sourcesStore.currentSourceDetails);
 const hasValidSource = computed(() => sourcesStore.hasValidCurrentSource);
 const isLoadingTeamSources = computed(() => sourcesStore.isLoadingTeamSources);
 const isLoadingSourceDetails = computed(() => sourcesStore.isLoadingSourceDetails);
-const teamSourcesError = computed(() => sourcesStore.teamSourcesError);
-const sourceDetailsError = computed(() => sourcesStore.sourceDetailsError);
-
 // Convenience aliases for template compatibility
 const teamSources = availableSources;
 const isProcessingTeamChange = isLoadingTeamSources;
@@ -157,7 +154,7 @@ const {
   handleSaveQueryClick: openSaveModalFlow,
   handleSaveQuery: processSaveQueryFromComposable,
   loadSavedQuery,
-  updateSavedQuery,
+  updateSavedQuery: _updateSavedQuery,
   loadSourceQueries,
 } = useSavedQueries();
 
@@ -188,7 +185,6 @@ const queryEditorRef = ref<ComponentPublicInstance<{
 }> | null>(null);
 const isLoadingQuery = ref(false);
 const editQueryData = ref<SavedTeamQuery | null>(null);
-const initialQueryExecuted = ref(false);
 const topBarRef = ref<InstanceType<typeof ExploreTopBar> | null>(null);
 const sortKeysInfoOpen = ref(false); // State for sort keys info expandable section
 const isHistogramVisible = ref(true); // State for histogram visibility toggle
@@ -196,7 +192,6 @@ const isHistogramVisible = ref(true); // State for histogram visibility toggle
 // Query execution deduplication
 const executingQueryId = ref<string | null>(null);
 const lastQueryTime = ref<number>(0);
-let lastExecutionKey = "";
 
 // Display related refs
 const displayTimezone = computed(() =>
@@ -261,33 +256,6 @@ const showSourceNotConnectedState = computed(() => {
   );
 });
 
-// Computed property to show the "Source Connected" state
-const showSourceConnectedState = computed(() => {
-  // Don't show during init, if no teams/sources, or no source selected
-  if (
-    isInitializing.value ||
-    showNoTeamsState.value ||
-    showNoSourcesState.value ||
-    !currentSourceId.value
-  ) {
-    return false;
-  }
-  // Don't show while details for the *current* source are loading
-  if (sourcesStore.isLoadingSourceDetailsForId(currentSourceId.value)) {
-    return false;
-  }
-  // Check if the source is connected
-  return sourceDetails.value?.is_connected;
-});
-
-// Track when URL query params change
-const lastQueryParam = ref(route.query.q);
-const lastModeParam = ref(route.query.mode);
-
-// Check if we're in edit mode (URL has query_id)
-const isEditingExistingQuery = computed(
-  () => !!route.query.query_id || !!exploreStore.selectedQueryId
-);
 const queryIdFromUrl = computed(
   () => route.query.query_id as string | undefined
 );
@@ -497,21 +465,10 @@ const handleCancelQuery = async () => {
   executingQueryId.value = null;
 };
 
-// Function to reset/initialize queries when switching sources
-function resetQueriesForSourceChange() {
-  console.log("LogExplorer: Resetting queries for source change");
-
-  // Reset group-by selection to "No Grouping"
-  exploreStore.setGroupByField("__none__");
-
-  // Use the new method that preserves time range and limit
-  exploreStore.resetQueryContentForSourceChange();
-}
-
 // Load saved queries when source changes
 watch(
   () => currentSourceId.value,
-  async (newSourceId, oldSourceId) => {
+  async (newSourceId, _oldSourceId) => {
     if (isInitializing.value) return;
     if (!newSourceId || !currentTeamId.value) return;
     try {
@@ -602,32 +559,14 @@ const handleDrillDown = (data: {
 };
 
 // Event Handlers for QueryEditor
-const updateLogchefqlValue = (newValue: string, isUserInput = false) => {
+const updateLogchefqlValue = (newValue: string, _isUserInput = false) => {
   // Use the store's action to update LogchefQL code
   exploreStore.setLogchefqlCode(newValue);
 };
 
-const updateSqlValue = (newValue: string, isUserInput = false) => {
+const updateSqlValue = (newValue: string, _isUserInput = false) => {
   // Use the store's action to update SQL
   exploreStore.setRawSql(newValue);
-};
-
-// Function to clear the query editor content
-const clearQueryEditor = () => {
-  // Use the store's actions to clear content
-  if (exploreStore.activeMode === "logchefql") {
-    exploreStore.setLogchefqlCode("");
-  } else {
-    exploreStore.setRawSql("");
-  }
-
-  // Clear any validation errors
-  queryError.value = "";
-
-  // Focus the editor using the ref after clearing
-  nextTick(() => {
-    queryEditorRef.value?.focus(true);
-  });
 };
 
 // New handler for the Save/Update button
@@ -864,21 +803,6 @@ const handleGenerateAISQL = async ({ naturalLanguageQuery }: { naturalLanguageQu
   } catch (error) {
     console.error("Error generating AI SQL:", error);
     // The store will have the error state that the AI dialog can display
-  }
-};
-
-// Function to copy current URL to clipboard
-const copyUrlToClipboard = () => {
-  try {
-    navigator.clipboard.writeText(window.location.href);
-  } catch (error) {
-    console.error("Failed to copy URL: ", error);
-    toast({
-      title: "Copy Failed",
-      description: "Failed to copy URL to clipboard.",
-      variant: "destructive",
-      duration: TOAST_DURATION.ERROR,
-    });
   }
 };
 

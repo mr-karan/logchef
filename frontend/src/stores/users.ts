@@ -3,7 +3,6 @@ import { useBaseStore } from "./base";
 import type { User } from "@/types";
 import { usersApi } from "@/api/users";
 import { computed } from "vue";
-import type { APIErrorResponse } from "@/api/types";
 
 interface UsersState {
   users: User[];

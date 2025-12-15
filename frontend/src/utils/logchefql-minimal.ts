@@ -105,7 +105,8 @@ function createCompletionProvider(): monaco.languages.CompletionItemProvider {
       // Check context: after operator, suggest values; after value, suggest boolean operators
       const hasOperator = OPERATORS.some(op => textBeforeCursor.includes(op));
       const endsWithBoolOp = /\b(and|or)\s*$/i.test(textBeforeCursor);
-      const endsWithValue = /["']\s*$/.test(textBeforeCursor) || /\S+\s*$/.test(textBeforeCursor.replace(/\b(and|or)\b/gi, ''));
+      // Regex to check if cursor is after a value (for context detection)
+      void (/["']\s*$/.test(textBeforeCursor) || /\S+\s*$/.test(textBeforeCursor.replace(/\b(and|or)\b/gi, '')));
 
       if (endsWithBoolOp || !hasOperator) {
         // Suggest field names

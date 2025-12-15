@@ -4,9 +4,8 @@ import { useRoute, useRouter } from "vue-router";
 import { ArrowLeft, Trash2, CheckCircle2, AlertCircle, AlertTriangle, Clock, History } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -68,7 +67,7 @@ function goBack() {
 
 async function handleUpdate(payload: UpdateAlertRequest) {
   if (!currentTeamId.value || !currentSourceId.value || !alert.value) return;
-  const result = await alertsStore.updateAlert(
+  await alertsStore.updateAlert(
     currentTeamId.value,
     currentSourceId.value,
     alert.value.id,
@@ -94,7 +93,7 @@ async function loadHistory() {
   await alertHistoryStore.loadHistory(currentTeamId.value, currentSourceId.value, alertId.value);
 }
 
-async function handleResolve(historyId: number, message: string) {
+async function handleResolve(_historyId: number, message: string) {
   if (!currentTeamId.value || !currentSourceId.value || !alertId.value) return;
   const result = await alertHistoryStore.resolveAlert(
     currentTeamId.value,

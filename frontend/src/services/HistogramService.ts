@@ -1,10 +1,6 @@
-import type { APIResponse } from '@/api/types';
 import { exploreApi, type HistogramResponse, type QueryParams } from '@/api/explore';
 import { isErrorResponse } from '@/api/types';
 import { useExploreStore } from '@/stores/explore';
-import { QueryService } from '@/services/QueryService';
-import { CalendarDateTime, parseDateTime, type DateValue } from '@internationalized/date';
-import type { TimeRange } from '@/types/query';
 
 export interface HistogramData {
   bucket: string;
@@ -30,8 +26,8 @@ export class HistogramService {
   // Default target number of buckets we want to display
   private static readonly TARGET_BUCKETS = 100;
 
-  // Minimum number of buckets to ensure we don't have too few data points
-  private static readonly MIN_BUCKETS = 10;
+  // Minimum number of buckets (kept for future use)
+  // private static readonly MIN_BUCKETS = 10;
 
   // List of "nice" intervals in seconds, from smallest to largest
   private static readonly NICE_INTERVALS = [

@@ -16,7 +16,7 @@ const route = useRoute()
 const selectedSourceId = ref<string>('')
 
 // Get reactive state from the store
-const { loadingStates, error: storeError } = storeToRefs(sourcesStore)
+const { error: storeError } = storeToRefs(sourcesStore)
 
 // Computed properties to reactively access store state
 const isLoadingStats = computed(() =>

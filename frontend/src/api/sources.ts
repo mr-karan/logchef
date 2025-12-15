@@ -153,15 +153,16 @@ export const sourcesApi = {
   // Time range is required for performance (avoids full table scan)
   // LogchefQL query is optional - filters field values based on user's query
   getFieldValues: (
-    teamId: number, 
-    sourceId: number, 
-    fieldName: string, 
-    fieldType: string, 
+    teamId: number,
+    sourceId: number,
+    fieldName: string,
+    fieldType: string,
     startTime: string,  // ISO8601 format
     endTime: string,    // ISO8601 format
     timezone?: string,
     limit?: number,
-    logchefql?: string  // Optional LogchefQL query to filter field values
+    logchefql?: string,  // Optional LogchefQL query to filter field values
+    signal?: AbortSignal // Optional abort signal for request cancellation
   ) => {
     let url = `/teams/${teamId}/sources/${sourceId}/fields/${encodeURIComponent(fieldName)}/values?` +
       `limit=${limit || 10}` +
@@ -174,16 +175,17 @@ export const sourcesApi = {
     if (logchefql) {
       url += `&logchefql=${encodeURIComponent(logchefql)}`;
     }
-    return apiClient.get<FieldValuesResult>(url);
+    return apiClient.get<FieldValuesResult>(url, { signal });
   },
   getAllFieldValues: (
-    teamId: number, 
-    sourceId: number, 
+    teamId: number,
+    sourceId: number,
     startTime: string,  // ISO8601 format
     endTime: string,    // ISO8601 format
     timezone?: string,
     limit?: number,
-    logchefql?: string  // Optional LogchefQL query to filter field values
+    logchefql?: string,  // Optional LogchefQL query to filter field values
+    signal?: AbortSignal // Optional abort signal for request cancellation
   ) => {
     let url = `/teams/${teamId}/sources/${sourceId}/fields/values?` +
       `limit=${limit || 10}` +
@@ -195,6 +197,6 @@ export const sourcesApi = {
     if (logchefql) {
       url += `&logchefql=${encodeURIComponent(logchefql)}`;
     }
-    return apiClient.get<AllFieldValuesResult>(url);
+    return apiClient.get<AllFieldValuesResult>(url, { signal });
   },
 };

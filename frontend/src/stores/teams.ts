@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, watch, inject } from "vue";
+import { computed } from "vue";
 import { useBaseStore } from "./base";
 import {
   teamsApi,
@@ -11,13 +11,9 @@ import {
   type UserTeamMembership,
 } from "@/api/teams";
 import type { Source } from "@/api/sources";
-import { reactive } from "vue";
 import type {
-  APIErrorResponse,
-  APIResponse,
-  APISuccessResponse
+  APIErrorResponse
 } from "@/api/types";
-import { useToast } from "@/composables/useToast";
 import { useAuthStore } from "./auth";
 
 export interface TeamWithMemberCount extends Team {
@@ -41,7 +37,6 @@ export const useTeamsStore = defineStore("teams", () => {
     teamMembersMap: {},
   });
 
-  const { toast } = useToast();
   const authStore = useAuthStore();
 
   // Computed properties
@@ -386,7 +381,7 @@ export const useTeamsStore = defineStore("teams", () => {
         apiCall: () => teamsApi.addTeamMember(teamId, data),
         successMessage: "Member added successfully",
         operationKey: `addTeamMember-${teamId}`,
-        onSuccess: async (response) => {
+        onSuccess: async (_response) => {
           // Update member count in both team lists
           const updateMemberCount = (team: TeamWithMemberCount) => {
             team.memberCount = (team.memberCount || 0) + 1;
@@ -577,8 +572,7 @@ export const useTeamsStore = defineStore("teams", () => {
   }
 
   // Get sources not in team (for filtering in add source dialog)
-  function getSourcesNotInTeam(teamSourceIds: (string | number)[]) {
-    const normalizedIds = teamSourceIds.map(id => typeof id === 'string' ? parseInt(id) : id);
+  function getSourcesNotInTeam(_teamSourceIds: (string | number)[]) {
     return [] as Source[]; // Implement or delegate to sources store
   }
 

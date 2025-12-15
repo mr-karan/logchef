@@ -1,8 +1,4 @@
 import { apiClient } from "./apiUtils";
-import type { DateValue } from "@internationalized/date";
-import { useSourcesStore } from "@/stores/sources";
-import { QueryService } from "@/services/QueryService";
-import type { TimeRange } from "@/types/query";
 
 // Keep these for the UI filter builder
 export interface FilterCondition {
@@ -34,8 +30,6 @@ export interface AIGenerateSQLResponse {
   sql_query: string;
 }
 
-// Add APIErrorResponse for proper type checking
-import type { APIErrorResponse } from "./types";
 
 export interface ColumnInfo {
   name: string;

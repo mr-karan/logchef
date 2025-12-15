@@ -7,7 +7,6 @@ import {
   type SavedQueryContent,
 } from "@/api/savedQueries";
 import { useBaseStore } from "./base";
-import type { APIErrorResponse } from "@/api/types";
 import { useTeamsStore } from "./teams";
 
 export interface SavedQueriesState {
@@ -110,34 +109,17 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     state.data.value.selectedTeamId = teamId;
   }
 
-  async function fetchTeamQueries(teamId: number) {
-    return await state.withLoading(`fetchTeamQueries-${teamId}`, async () => {
-      return await state.callApi<SavedTeamQuery[]>({ // Specify expected type
-        apiCall: () => savedQueriesApi.listQueries(teamId),
-        operationKey: `fetchTeamQueries-${teamId}`,
-        onSuccess: (responseData) => {
-          // responseData is now SavedTeamQuery[] | null
-          state.data.value.queries = responseData ?? []; // Use nullish coalescing
-        },
-        defaultData: [],
-        showToast: false,
-      });
-    });
+  async function fetchTeamQueries(_teamId: number) {
+    // Note: API requires sourceId, but this function is called without it
+    // Return empty result for now - callers should use fetchTeamSourceQueries instead
+    console.warn('fetchTeamQueries: This function is deprecated, use fetchTeamSourceQueries instead');
+    state.data.value.queries = [];
+    return { success: true, data: [] };
   }
 
   async function fetchSourceQueries(sourceId: number, teamId: number) {
-    return await state.withLoading(`fetchSourceQueries-${sourceId}-${teamId}`, async () => {
-      return await state.callApi<SavedTeamQuery[]>({ // Specify expected type
-        apiCall: () => savedQueriesApi.listSourceQueries(sourceId, teamId),
-        operationKey: `fetchSourceQueries-${sourceId}-${teamId}`,
-        onSuccess: (responseData) => {
-          // responseData is now SavedTeamQuery[] | null
-          state.data.value.queries = responseData ?? []; // Use nullish coalescing
-        },
-        defaultData: [],
-        showToast: false,
-      });
-    });
+    // Delegate to the proper API method
+    return await fetchTeamSourceQueries(teamId, sourceId);
   }
 
   async function fetchTeamSourceQueries(teamId: number, sourceId: number) {
@@ -188,27 +170,12 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   }
 
   async function createQuery(
-    teamId: number,
-    query: Omit<SavedTeamQuery, "id" | "created_at" | "updated_at">
+    _teamId: number,
+    _query: Omit<SavedTeamQuery, "id" | "created_at" | "updated_at">
   ) {
-    return await state.withLoading(`createQuery-${teamId}`, async () => {
-      return await state.callApi<SavedTeamQuery>({ // Specify expected type
-        apiCall: () => savedQueriesApi.createQuery(teamId, query),
-        operationKey: `createQuery-${teamId}`,
-        successMessage: "Query created successfully",
-        onSuccess: (response) => {
-          // response is now SavedTeamQuery | null
-          if (response) {
-            // Ensure queries array exists before modifying it
-            if (!state.data.value.queries) {
-              state.data.value.queries = [];
-            }
-            state.data.value.queries.unshift(response);
-            state.data.value.selectedQuery = response;
-          }
-        }
-      });
-    });
+    // Deprecated: use createSourceQuery instead which includes sourceId
+    console.warn('createQuery: This function is deprecated, use createSourceQuery instead');
+    return { success: false, error: { message: 'This function is deprecated, use createSourceQuery instead' } };
   }
 
   async function createSourceQuery(
@@ -249,31 +216,13 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   }
 
   async function updateQuery(
-    teamId: number,
-    queryId: string,
-    query: Partial<SavedTeamQuery>
+    _teamId: number,
+    _queryId: string,
+    _query: Partial<SavedTeamQuery>
   ) {
-    return await state.withLoading(`updateQuery-${teamId}-${queryId}`, async () => {
-      return await state.callApi<SavedTeamQuery>({ // Specify expected type
-        apiCall: () => savedQueriesApi.updateQuery(teamId, queryId, query),
-        operationKey: `updateQuery-${teamId}-${queryId}`,
-        successMessage: "Query updated successfully",
-        onSuccess: (response) => {
-          // response is now SavedTeamQuery | null
-          if (response) {
-             const index = state.data.value.queries.findIndex(
-               (q) => String(q.id) === queryId
-             );
-             if (index >= 0) {
-               state.data.value.queries[index] = response;
-             }
-             if (state.data.value.selectedQuery?.id === Number(queryId)) {
-               state.data.value.selectedQuery = response;
-             }
-          }
-        }
-      });
-    });
+    // Deprecated: use updateTeamSourceQuery instead which includes sourceId
+    console.warn('updateQuery: This function is deprecated, use updateTeamSourceQuery instead');
+    return { success: false, error: { message: 'This function is deprecated, use updateTeamSourceQuery instead' } };
   }
 
   async function updateTeamSourceQuery(

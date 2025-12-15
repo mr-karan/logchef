@@ -56,7 +56,7 @@ interface Emits {
 }
 
 const props = defineProps<Props>()
-const emit = defineEmits<Emits>()
+defineEmits<Emits>()
 
 const MAX_DISPLAY_LENGTH = 60
 

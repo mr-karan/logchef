@@ -290,7 +290,6 @@ export function createColumns(
 
         // Check if the content contains HTTP methods or is a status column
         const hasHttpMethod = /\b(GET|POST|PUT|DELETE|HEAD|PATCH|OPTIONS)\b/i.test(textValue);
-        const needsFormatting = isStatusColumn || hasHttpMethod;
 
         // Format HTTP status codes
         if (isStatusColumn && /^\d{3}$/.test(textValue)) {

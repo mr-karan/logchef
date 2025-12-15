@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useExploreStore } from '@/stores/explore'
-import { useSourcesStore } from '@/stores/sources'
 import LogHistogram from '@/components/visualizations/LogHistogram.vue'
 
 interface TimeRangeUpdateEvent {
@@ -15,7 +14,6 @@ const emit = defineEmits<{
 }>()
 
 const exploreStore = useExploreStore()
-const sourcesStore = useSourcesStore()
 
 // Reactive computed properties
 const isExecutingQuery = computed(() => exploreStore.isLoadingOperation('executeQuery'))

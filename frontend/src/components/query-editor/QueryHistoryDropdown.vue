@@ -73,10 +73,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { History, X, Loader2 } from 'lucide-vue-next'
 import { queryHistoryService, type QueryHistoryEntry } from '@/services/QueryHistoryService'
@@ -96,15 +95,12 @@ const emit = defineEmits<{
 const isOpen = ref(false)
 const isLoading = ref(false)
 const history = ref<QueryHistoryEntry[]>([])
-const storageStats = ref({
+const storageStats = ref<{ totalEntries: number; teamSourceGroups: number; oldestEntry?: number }>({
   totalEntries: 0,
-  teamSourceGroups: 0,
-  oldestEntry: undefined as number | undefined
+  teamSourceGroups: 0
 })
 
 const { toast } = useToast()
-
-const historyCount = computed(() => history.value.length)
 
 // Load history when popover opens and team/source context changes
 watch([isOpen, () => props.teamId, () => props.sourceId], async ([newIsOpen]) => {

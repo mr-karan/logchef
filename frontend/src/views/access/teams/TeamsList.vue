@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
-import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -88,7 +87,7 @@ const confirmDelete = async () => {
     if (!teamToDelete.value) return
 
     try {
-        const result = await teamsStore.deleteTeam(teamToDelete.value.id)
+        await teamsStore.deleteTeam(teamToDelete.value.id)
 
         // Reset UI state
         showDeleteDialog.value = false
@@ -103,7 +102,7 @@ const confirmDelete = async () => {
     }
 }
 
-const handleTeamCreated = (teamId?: number) => {
+const handleTeamCreated = (_teamId?: number) => {
     // Reset search to ensure the new team is visible
     searchQuery.value = ''
 }

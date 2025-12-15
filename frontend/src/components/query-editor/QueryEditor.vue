@@ -615,7 +615,6 @@ import {
   PanelRightOpen,
   PanelRightClose,
   AlertCircle,
-  XCircle,
   FileEdit,
   FilePlus2,
   Search,
@@ -623,10 +622,8 @@ import {
   Eye,
   EyeOff,
   Wand2,
-  History,
   Play,
   RefreshCw,
-  Keyboard,
   Square,
 } from "lucide-vue-next";
 import {
@@ -683,7 +680,7 @@ import {
   lightweightEditorDisposal,
   reactivateEditor,
 } from "@/utils/monaco";
-import { logchefqlApi, type ValidateResponse } from "@/api/logchefql";
+import { logchefqlApi } from "@/api/logchefql";
 
 // Simple parser states for autocomplete (lightweight, no backend dependency)
 enum AutocompleteState {
@@ -735,16 +732,14 @@ function detectAutocompleteState(text: string): { state: AutocompleteState; key:
 import {
   validateSQLWithDetails,
   SQL_KEYWORDS,
-  CLICKHOUSE_FUNCTIONS,
-  SQL_TYPES,
 } from "@/utils/clickhouse-sql";
 import { storeToRefs } from 'pinia';
 import { useExploreStore } from "@/stores/explore";
 import { useTeamsStore } from "@/stores/teams";
 import type { VariableState as VariableSetting } from '@/stores/variables';
 import { useVariableStore } from '@/stores/variables';
-import { QueryService } from "@/services/QueryService";
 import { useVariables } from "@/composables/useVariables.ts";
+import { useToast } from "@/composables/useToast";
 // Keep other necessary imports like types...
 // --- Types ---
 type EditorMode = "logchefql" | "clickhouse-sql";
@@ -755,10 +750,8 @@ type EditorChangeEvent = {
 };
 // Monaco type aliases for clarity
 type MonacoEditor = monaco.editor.IStandaloneCodeEditor;
-type MonacoModel = monaco.editor.ITextModel;
 type MonacoDisposable = monaco.IDisposable;
 type MonacoCompletionItem = monaco.languages.CompletionItem;
-type MonacoPosition = monaco.Position;
 type MonacoRange = monaco.IRange;
 
 // --- Props and Emits ---
@@ -1265,7 +1258,7 @@ watch(
 // --- Monaco Options Update ---
 watch(
   () => props.activeMode,
-  (newMode) => {
+  () => {
     nextTick(() => {
       if (editorRef.value) {
         // Apply options based on mode
@@ -1637,9 +1630,6 @@ const registerLogchefQLCompletionProvider = (): MonacoDisposable | null => {
     provideCompletionItems: async (model, position) => {
       const wordInfo = model.getWordUntilPosition(position);
 
-      // Save cursor position for reliable restoration
-      const currentPosition = position.clone();
-
       const range: MonacoRange = {
         startLineNumber: position.lineNumber,
         endLineNumber: position.lineNumber,
@@ -1868,6 +1858,11 @@ const getSchemaFieldValues = (field: string): string[] => {
   return sampleValues[field] || [];
 };
 
+// Helper to check if a string represents a numeric value
+const isNumeric = (value: string): boolean => {
+  return !isNaN(Number(value)) && !isNaN(parseFloat(value));
+};
+
 const prepareSuggestionValues = (
   items: string[],
   quoteChar?: string
@@ -2038,39 +2033,10 @@ const openAllVariableSettings = () => {
   showVariablesConfig.value = true;
 };
 
-// Open sheet to edit selected variable (kept for backward compatibility)
-const openVariableSettings = (variable: VariableSetting) => {
-  selectedVariable.value = { ...variable }; // Create a copy to avoid direct mutation
-};
-
 // Close the sheet UI
 const closeDrawer = () => {
   selectedVariable.value = null;
   showVariablesConfig.value = false;
-};
-
-// Update default value based on variable type
-const setDefaultValueByType = () => {
-  if (!selectedVariable.value) return;
-
-  // Update the variable in the store
-  const updatedVariable = { ...selectedVariable.value };
-
-  switch (updatedVariable.type) {
-    case 'text':
-      updatedVariable.value = '';
-      break;
-    case 'number':
-      updatedVariable.value = 0;
-      break;
-    case 'date':
-      updatedVariable.value = new Date().toISOString();
-      break;
-  }
-
-  // Update both local state and store
-  selectedVariable.value = updatedVariable;
-  variableStore.upsertVariable(updatedVariable);
 };
 
 // Update variable type for multi-variable panel

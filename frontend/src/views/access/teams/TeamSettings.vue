@@ -8,7 +8,6 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/composables/useToast'
-import { type Team, type TeamMember } from '@/api/teams'
 import { type Source } from '@/api/sources'
 import { Loader2, Plus, Trash2, UserPlus, Database } from 'lucide-vue-next'
 import {
@@ -130,7 +129,7 @@ const handleSubmit = async () => {
         return
     }
 
-    const result = await teamsStore.updateTeam(team.value.id, {
+    await teamsStore.updateTeam(team.value.id, {
         name: name.value,
         description: description.value || '',
     })

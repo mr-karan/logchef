@@ -13,7 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Pencil, Trash2, Eye, EyeOff, Save, X, Plug } from 'lucide-vue-next'
+import { Pencil, Eye, EyeOff, Save, X, Plug } from 'lucide-vue-next'
 import { Input } from '@/components/ui/input'
 import {
   Table,
@@ -37,13 +37,6 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
@@ -106,11 +99,6 @@ const confirmEdit = async () => {
 
   showEditDialog.value = false
   settingToEdit.value = null
-}
-
-const handleDelete = (setting: SystemSetting) => {
-  settingToDelete.value = setting
-  showDeleteDialog.value = true
 }
 
 const confirmDelete = async () => {

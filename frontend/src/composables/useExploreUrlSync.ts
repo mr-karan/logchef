@@ -1,18 +1,9 @@
-import { ref, watch, nextTick, computed } from 'vue';
+import { ref, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useExploreStore } from '@/stores/explore';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
-import { useSavedQueriesStore } from '@/stores/savedQueries';
 // Removed complex coordination imports - using clean router-first approach now
-import {
-  CalendarDateTime,
-  now,
-  getLocalTimeZone,
-  type DateValue,
-  toCalendarDateTime
-} from '@internationalized/date';
-import { parseRelativeTimeString } from '@/utils/time';
 
 export function useExploreUrlSync() {
   const route = useRoute();
@@ -31,57 +22,8 @@ export function useExploreUrlSync() {
   // Add a last initialization timestamp to prevent rapid re-initialization
   let lastInitTimestamp = 0;
 
-  // Add a debounced sync flag to avoid syncing during typing
-  const syncPending = ref(false);
+  // Add a debounce timer to avoid syncing during typing
   let syncDebounceTimer: number | null = null;
-
-  // --- Internal Helper Functions ---
-
-  function parseTimestamp(value: string | null | undefined): number | null {
-    if (!value) return null;
-    const num = parseInt(value);
-    return !isNaN(num) ? num : null;
-  }
-
-  function timestampToCalendarDateTime(timestamp: number | null): CalendarDateTime | null {
-    if (timestamp === null) return null;
-    try {
-      const date = new Date(timestamp);
-      if (isNaN(date.getTime())) return null;
-      // Construct CalendarDateTime directly from JS Date parts
-      return new CalendarDateTime(
-        date.getFullYear(),
-        date.getMonth() + 1, // JS month is 0-indexed
-        date.getDate(),
-        date.getHours(),
-        date.getMinutes(),
-        date.getSeconds(),
-        date.getMilliseconds()
-      );
-    } catch (e) {
-      console.error("Error converting timestamp to CalendarDateTime:", e);
-      return null;
-    }
-  }
-
-  function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): number | null {
-    if (!dateTime) return null;
-    try {
-      // Convert any DateValue to timestamp by converting to ISO string and parsing
-      return new Date(dateTime.toString()).getTime();
-    } catch (e) {
-      console.error("Error converting DateValue to timestamp:", e);
-      return null;
-    }
-  }
-
-  // Helper to safely check source details
-  function isCorrectSourceDetail(details: any, expectedId: number): boolean {
-    if (!details) return false;
-    if (typeof details !== 'object') return false;
-    if (!('id' in details)) return false;
-    return details.id === expectedId;
-  }
 
   // --- Initialization Logic ---
 
@@ -144,10 +86,6 @@ export function useExploreUrlSync() {
       // Use nextTick to ensure all initial store updates have propagated
       // before allowing watchers to update the URL.
       await nextTick();
-
-      // CRITICAL: Save original URL parameters to avoid immediate overwrite
-      const originalParams = { ...route.query };
-      const hadRelativeTime = !!originalParams.relativeTime;
 
       // Mark initialization as complete *after* the next tick
       isInitializing.value = false;

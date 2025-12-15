@@ -1,14 +1,13 @@
-import { ref, computed, watch } from 'vue';
+import { computed } from 'vue';
 import { useExploreStore } from '@/stores/explore';
 import {
   CalendarDateTime,
   getLocalTimeZone,
   type DateValue,
   toCalendarDateTime,
-  now,
   fromDate
 } from '@internationalized/date';
-import { parseRelativeTimeString, relativeTimeToLabel } from '@/utils/time';
+import { relativeTimeToLabel } from '@/utils/time';
 
 /**
  * Composable for handling time range functionality including

@@ -46,7 +46,6 @@ const isResolving = computed(() => {
   return alertHistoryStore.isLoadingOperation(`resolveAlert-${props.alert.id}`);
 });
 
-const latestStatus = computed(() => entries.value[0]);
 const hasActiveIncident = computed(() => {
   return entries.value.some((entry) => entry.status === "triggered");
 });

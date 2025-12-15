@@ -10,8 +10,7 @@ import { TOAST_DURATION } from '@/lib/constants'
 import { getErrorMessage } from '@/api/types'
 import type { SaveQueryFormData } from '@/views/explore/types'
 import type { SavedTeamQuery } from '@/api/savedQueries'
-import type { TeamMember } from '@/api/teams'; // Import TeamMember type
-import { CalendarDateTime, getLocalTimeZone, type DateValue } from '@internationalized/date'
+import { getLocalTimeZone, CalendarDateTime, type DateValue } from '@internationalized/date'
 import type { Source } from "@/api/sources";
 
 // Add this helper function before the useSavedQueries function definition
@@ -29,7 +28,7 @@ function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): nu
 
 export function useSavedQueries(
     queries?: Ref<SavedTeamQuery[] | undefined>,
-    currentSource?: Ref<Source | undefined>
+    _currentSource?: Ref<Source | undefined>
 ) {
   // Create a local queries ref if none is provided
   const localQueries = ref<SavedTeamQuery[]>([]);
@@ -720,7 +719,7 @@ export function useSavedQueries(
   }
 
   // Local helper to fetch details, now using store action
-  async function getQueryDetails(teamId: number, sourceId: number, queryId: string) {
+  async function getQueryDetails(teamId: number, sourceId: number, _queryId: string) {
     console.warn("`getQueryDetails` function in useSavedQueries is deprecated. Use store action directly.");
     return await savedQueriesStore.fetchTeamSourceQueries(teamId, sourceId);
     // Note: This fetches *all* queries for the source, not a single one by ID.

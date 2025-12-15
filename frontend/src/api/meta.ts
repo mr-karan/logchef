@@ -1,5 +1,4 @@
 import { apiClient } from "./apiUtils";
-import type { APIResponse } from "./types";
 
 export interface MetaResponse {
   version: string;

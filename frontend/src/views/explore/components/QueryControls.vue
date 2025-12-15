@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Play, RefreshCw, Share2, Keyboard, Eraser, AlertCircle, Clock, X } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
@@ -25,7 +24,7 @@ interface Props {
   showExecuteControls?: boolean
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   showExecuteControls: true
 })
 
@@ -33,8 +32,6 @@ const emit = defineEmits<{
   (e: 'execute', key: string): void
   (e: 'clear'): void
 }>()
-
-const router = useRouter()
 const { toast } = useToast()
 const exploreStore = useExploreStore()
 

@@ -28,7 +28,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  stats: () => ({}),
+  stats: undefined,
   isLoading: false,
   showColumnSelector: true,
   showExport: true,

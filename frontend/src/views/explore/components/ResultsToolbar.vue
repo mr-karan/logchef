@@ -27,7 +27,7 @@ interface Props {
   isLoading?: boolean
 }
 
-const props = defineProps<Props>()
+defineProps<Props>()
 
 const emit = defineEmits<{
   (e: 'toggle-histogram'): void

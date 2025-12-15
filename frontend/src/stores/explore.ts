@@ -145,7 +145,6 @@ const DEFAULT_QUERY_STATS: QueryStats = {
 
 export const useExploreStore = defineStore("explore", () => {
   // Store references for use in computed properties
-  const sourcesStore = useSourcesStore();
   const contextStore = useContextStore();
   
   // Initialize base store with default state
@@ -386,49 +385,6 @@ export const useExploreStore = defineStore("explore", () => {
 
     return params;
   });
-
-  // Helper to get timestamps in milliseconds
-  function getTimestamps() {
-    const { timeRange } = state.data.value;
-    if (!timeRange) {
-      // If no time range is set, default to "now to 15 minutes ago"
-      console.warn("No time range set, using default (now to 15 minutes ago)");
-      return getDefaultTimeRange();
-    }
-
-    const startDate = new Date(
-      timeRange.start.year,
-      timeRange.start.month - 1,
-      timeRange.start.day,
-      "hour" in timeRange.start ? timeRange.start.hour : 0,
-      "minute" in timeRange.start ? timeRange.start.minute : 0,
-      "second" in timeRange.start ? timeRange.start.second : 0
-    );
-
-    const endDate = new Date(
-      timeRange.end.year,
-      timeRange.end.month - 1,
-      timeRange.end.day,
-      "hour" in timeRange.end ? timeRange.end.hour : 0,
-      "minute" in timeRange.end ? timeRange.end.minute : 0,
-      "second" in timeRange.end ? timeRange.end.second : 0
-    );
-
-    const start = startDate.getTime();
-    const end = endDate.getTime();
-
-    console.log("Time range:", {
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString(),
-      startMs: start,
-      endMs: end,
-    });
-
-    return {
-      start,
-      end,
-    };
-  }
 
   // Get the current timezone identifier
   function getTimezoneIdentifier(): string {
@@ -785,7 +741,6 @@ export const useExploreStore = defineStore("explore", () => {
 
       // Get source details and stores to validate full loading state
       const sourcesStore = useSourcesStore();
-      const teamsStore = useTeamsStore();
       const sourceDetails = sourcesStore.currentSourceDetails;
 
       // Validate that we have the current source details fully loaded and matching
@@ -1177,11 +1132,6 @@ export const useExploreStore = defineStore("explore", () => {
     }
   }
 
-  // Function to get the currently selected relative time
-  function getSelectedRelativeTime() {
-    return state.data.value.selectedRelativeTime;
-  }
-
   // Add setFilterConditions function
   function setFilterConditions(filters: FilterCondition[]) {
     // Check for the special _force_clear marker
@@ -1206,70 +1156,6 @@ export const useExploreStore = defineStore("explore", () => {
   // Add setActiveSavedQueryName function
   function setActiveSavedQueryName(name: string | null) {
     state.data.value.activeSavedQueryName = name;
-  }
-
-  // Add setLastExecutedState function
-  function setLastExecutedState(executedState: {
-    timeRange: string;
-    limit: number;
-    query?: string;
-    mode?: "logchefql" | "sql";
-    logchefqlQuery?: string;
-    sqlQuery?: string;
-  }) {
-    console.log('Explore store: Setting last executed state:', executedState);
-    const updatedState = {
-      ...executedState,
-      mode: executedState.mode || state.data.value.activeMode,
-      sourceId: state.data.value.sourceId
-    };
-    state.data.value.lastExecutedState = updatedState as any;
-  }
-
-  // Add updateExecutionTimestamp function
-  function updateExecutionTimestamp() {
-    console.log('Explore store: Updating execution timestamp');
-    state.data.value.lastExecutionTimestamp = Date.now();
-  }
-
-  // Add resetState function
-  function resetState() {
-    // Preserve certain values during reset
-    const preserved = {
-      sourceId: state.data.value.sourceId,
-      limit: state.data.value.limit,
-      timeRange: state.data.value.timeRange,
-      selectedRelativeTime: state.data.value.selectedRelativeTime,
-      activeMode: state.data.value.activeMode,
-      selectedTimezoneIdentifier: state.data.value.selectedTimezoneIdentifier,
-      queryTimeout: state.data.value.queryTimeout,
-    };
-
-    state.data.value = {
-      logs: [],
-      columns: [],
-      queryStats: DEFAULT_QUERY_STATS,
-      ...preserved,
-      filterConditions: [],
-      rawSql: "",
-      logchefqlCode: "",
-      lastExecutedState: undefined,
-      lastExecutionTimestamp: null,
-      selectedQueryId: null,
-      activeSavedQueryName: null,
-      groupByField: null,
-      generatedDisplaySql: null,
-      isGeneratingAISQL: false,
-      aiSqlError: null,
-      generatedAiSql: null,
-      histogramData: [],
-      isLoadingHistogram: false,
-      histogramError: null,
-      histogramGranularity: null,
-      currentQueryAbortController: null,
-      currentQueryId: null,
-      isCancellingQuery: false,
-    };
   }
 
   // Add getLogContext function

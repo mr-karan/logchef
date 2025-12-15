@@ -47,7 +47,7 @@ import { Label } from '@/components/ui/label'
 import AddUser from './AddUser.vue'
 
 const usersStore = useUsersStore()
-const { isLoading, error: userError } = storeToRefs(usersStore)
+const { isLoading, error: _userError } = storeToRefs(usersStore)
 const showDeleteDialog = ref(false)
 const userToDelete = ref<User | null>(null)
 const showEditDialog = ref(false)

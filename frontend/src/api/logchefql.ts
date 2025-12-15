@@ -162,7 +162,7 @@ export async function translateWithCache(
     valid: false,
     error: {
       code: 'API_ERROR',
-      message: response.error?.message || 'Failed to translate query',
+      message: 'status' in response && response.status === 'error' ? response.message : 'Failed to translate query',
     },
     conditions: [],
     fields_used: [],
@@ -204,7 +204,7 @@ export function createDebouncedValidator(
                 valid: false,
                 error: {
                   code: 'API_ERROR',
-                  message: response.error?.message || 'Validation failed',
+                  message: 'status' in response && response.status === 'error' ? response.message : 'Validation failed',
                 },
               });
             }

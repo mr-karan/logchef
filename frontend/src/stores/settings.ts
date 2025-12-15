@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { useBaseStore } from "./base";
-import { settingsApi, type SystemSetting, type SettingsByCategory, type UpdateSettingRequest } from "@/api/settings";
+import { settingsApi, type SettingsByCategory, type UpdateSettingRequest } from "@/api/settings";
 import { computed } from "vue";
 
 interface SettingsState {

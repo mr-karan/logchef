@@ -75,15 +75,7 @@ const conditionError = ref<string | null>(null);
 
 // Get source details for schema-aware parsing (same pattern as explore page)
 const sourceDetails = computed(() => sourcesStore.currentSourceDetails);
-const timestampField = computed(() => sourceDetails.value?.timestamp_field || "timestamp");
-
-// Schema for type-aware SQL generation (same as explore page)
-const schema = computed(() => {
-  if (!sourceDetails.value?.columns) return undefined;
-  return {
-    columns: sourceDetails.value.columns.map(col => ({ name: col.name, type: col.type }))
-  };
-});
+const timestampField = computed(() => sourceDetails.value?._meta_ts_field || "timestamp");
 
 // Generate ClickHouse lookback expression based on lookback_seconds
 const lookbackExpression = computed(() => {
@@ -132,7 +124,7 @@ async function translateCondition() {
       conditionError.value = response.data.error?.message || "Invalid condition";
       generatedSQL.value = "";
     } else {
-      conditionError.value = response.error?.message || "Translation failed";
+      conditionError.value = 'status' in response && response.status === 'error' ? response.message : "Translation failed";
       generatedSQL.value = "";
     }
   } catch (error: any) {
@@ -143,15 +135,18 @@ async function translateCondition() {
   }
 }
 
-// Watch for changes that should trigger translation
+// Watch for changes that should trigger translation with debounce
+let translateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   () => [form.condition_json, form.aggregate_function, form.lookback_seconds],
   () => {
-    if (form.query_type === "condition") {
-      translateCondition();
-    }
-  },
-  { debounce: 300 }
+    if (translateDebounceTimer) clearTimeout(translateDebounceTimer);
+    translateDebounceTimer = setTimeout(() => {
+      if (form.query_type === "condition") {
+        translateCondition();
+      }
+    }, 300);
+  }
 );
 
 // Sync generated SQL to query field when using condition mode
@@ -635,7 +630,7 @@ function handleSubmit() {
             <!-- Query Templates -->
             <div class="space-y-2">
               <Label for="query-template">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
-              <Select @update:model-value="(value: any) => applyTemplate(queryTemplates.value[parseInt(value)])">
+              <Select @update:model-value="(value: any) => applyTemplate(queryTemplates[parseInt(value)])">
                 <SelectTrigger id="query-template">
                   <SelectValue placeholder="Choose a template..." />
                 </SelectTrigger>
@@ -1002,7 +997,7 @@ function handleSubmit() {
         <!-- Query Templates -->
         <div class="space-y-2">
           <Label for="query-template-inline">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
-          <Select @update:model-value="(value: any) => applyTemplate(queryTemplates.value[parseInt(value)])">
+          <Select @update:model-value="(value: any) => applyTemplate(queryTemplates[parseInt(value)])">
             <SelectTrigger id="query-template-inline">
               <SelectValue placeholder="Choose a template..." />
             </SelectTrigger>

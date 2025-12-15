@@ -107,7 +107,7 @@ const formData = ref<FormData>({
     status: 'active',
 })
 
-const { isLoading, error: formError } = storeToRefs(usersStore)
+const { isLoading, error: _formError } = storeToRefs(usersStore)
 
 const isFormValid = computed(() => {
     return formData.value.email && formData.value.full_name

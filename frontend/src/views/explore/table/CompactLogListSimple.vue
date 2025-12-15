@@ -2,8 +2,6 @@
 import { computed, ref, watch } from 'vue'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
-import { useToast } from '@/composables/useToast'
-import { TOAST_DURATION } from '@/lib/constants'
 import TableControls from './TableControls.vue'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
 import { Clock } from 'lucide-vue-next'
@@ -36,7 +34,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   columns: () => [],
   data: () => [],
-  stats: () => ({}),
+  stats: undefined,
   isLoading: false,
   sourceId: 0,
   teamId: 0,
@@ -50,11 +48,9 @@ const props = withDefaults(defineProps<Props>(), {
 // Use 'data' prop - consistent with DataTable component
 const logs = computed(() => props.data)
 
-const emit = defineEmits<{
+defineEmits<{
   'drill-down': [data: { column: string; value: any; operator: string }]
 }>()
-
-const { toast } = useToast()
 
 // Table state
 const pagination = ref<PaginationState>({
@@ -308,7 +304,7 @@ const renderedRows = computed(() => {
   // Use paginated and filtered rows from the table
   const paginatedRows = table.getRowModel().rows
   
-  return paginatedRows.map((tableRow, index) => {
+  return paginatedRows.map((tableRow) => {
     const row = tableRow.original
     const ts = formatTimestamp(row[props.timestampField])
     const sev = row[props.severityField] || ''
@@ -344,18 +340,18 @@ const openContextModal = (log: Record<string, any>, event: Event) => {
 }
 
 // Simple click to expand/collapse (only if not selecting text)
-const handleClick = (event: Event, rowId: string) => {
+const handleClick = (event: MouseEvent, rowId: string) => {
   // Don't toggle if user is selecting text
   const selection = window.getSelection()
   if (selection && selection.toString().length > 0) {
     return
   }
-  
+
   // Don't toggle if the click was part of a text selection
   if (event.detail > 1) {
     return
   }
-  
+
   expandedRowId.value = expandedRowId.value === rowId ? null : rowId
 }
 </script>

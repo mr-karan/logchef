@@ -1,13 +1,10 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
-import { CalendarIcon } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { DateTimePicker } from "@/components/date-time-picker";
 import { useTimeRange } from "@/composables/useTimeRange";
 import { useExploreStore } from "@/stores/explore";
 import { useQuery } from "@/composables/useQuery";
-import type { CalendarDateTime } from "@internationalized/date";
-import { relativeTimeToLabel } from "@/utils/time";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,8 +17,7 @@ import { useSourcesStore } from "@/stores/sources";
 import { SqlManager } from "@/services/SqlManager";
 
 const exploreStore = useExploreStore();
-const { timeRange, quickRangeLabelToRelativeTime, getHumanReadableTimeRange } =
-  useTimeRange();
+const { timeRange, quickRangeLabelToRelativeTime } = useTimeRange();
 const { isDirty, dirtyReason } = useQuery();
 
 // Reference to the DateTimePicker component
@@ -212,21 +208,6 @@ const openDatePicker = () => {
 
 // Current limit for display
 const currentLimit = computed(() => exploreStore.limit);
-
-// Computed for display text that prioritizes relative time format
-const displayTimeRange = computed(() => {
-  // If we have a human-readable relative time, use it
-  if (getHumanReadableTimeRange.value) {
-    return getHumanReadableTimeRange.value;
-  }
-
-  // If DateTimePicker has a selected range text, use that
-  if (dateTimePickerRef.value?.selectedRangeText) {
-    return dateTimePickerRef.value.selectedRangeText;
-  }
-
-  return "Select time range";
-});
 
 // Expose method to parent components
 defineExpose({

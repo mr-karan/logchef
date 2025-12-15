@@ -585,7 +585,7 @@ function registerClickhouseSQL() {
 
   // Define completions for SQL keywords, functions, etc.
   monaco.languages.registerCompletionItemProvider(LANGUAGE_ID, {
-    provideCompletionItems: (model, position, context, token) => {
+    provideCompletionItems: (model, position, _context, _token) => {
       const wordInfo = model.getWordUntilPosition(position);
       const wordRange = new monaco.Range(
         position.lineNumber,

@@ -49,7 +49,7 @@ const teamsStore = useTeamsStore()
 const sourcesStore = useSourcesStore()
 const exploreStore = useExploreStore()
 
-const { timeRange, quickRangeLabelToRelativeTime, getHumanReadableTimeRange } = useTimeRange()
+const { timeRange, quickRangeLabelToRelativeTime, getHumanReadableTimeRange: _getHumanReadableTimeRange } = useTimeRange()
 
 // Team/Source state
 const currentTeamId = computed(() => contextStore.teamId)

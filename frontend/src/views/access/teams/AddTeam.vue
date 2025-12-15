@@ -71,7 +71,7 @@ const teamName = ref('')
 const description = ref('')
 const showDialog = ref(false)
 
-const { isLoading, error: formError } = storeToRefs(teamsStore)
+const { isLoading, error: _formError } = storeToRefs(teamsStore)
 
 const isFormValid = computed(() => {
     return !!teamName.value.trim()

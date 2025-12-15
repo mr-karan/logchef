@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue';
-import { ChevronDown, Save, PlusCircle, ListTree, Pencil, Eye, Search, X, BookMarked } from 'lucide-vue-next';
-import { useRouter, useRoute } from 'vue-router';
+import { ref, computed, watch } from 'vue';
+import { ChevronDown, Save, PlusCircle, ListTree, BookMarked } from 'lucide-vue-next';
+import { useRouter } from 'vue-router';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,12 +14,10 @@ import {
   DropdownMenuSubContent
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/composables/useToast';
 import { TOAST_DURATION } from '@/lib/constants';
 import { type SavedTeamQuery } from '@/api/savedQueries';
 import { useSavedQueriesStore } from '@/stores/savedQueries';
-import { Input } from '@/components/ui/input';
 import { useExploreStore } from '@/stores/explore';
 import { useAuthStore } from '@/stores/auth';
 import { useSavedQueries } from '@/composables/useSavedQueries';
@@ -37,16 +35,12 @@ const emit = defineEmits<{
 }>();
 
 const router = useRouter();
-const route = useRoute();
 const { toast } = useToast();
 const savedQueriesStore = useSavedQueriesStore();
 const exploreStore = useExploreStore();
 const authStore = useAuthStore();
 
 const {
-  handleSaveQueryClick,
-  loadSavedQuery: handleLoadQuery,
-  createNewQuery: handleCreateNewQuery,
   isEditingExistingQuery,
   canManageCollections,
 } = useSavedQueries();
@@ -56,10 +50,6 @@ const isOpen = ref(false);
 const searchQuery = ref('');
 
 // Computed properties from store
-const isLoadingQueries = computed(() => {
-  if (!props.selectedTeamId || !props.selectedSourceId) return false;
-  return savedQueriesStore.isLoadingOperation(`fetchTeamSourceQueries-${props.selectedTeamId}-${props.selectedSourceId}`);
-});
 const queries = computed(() => savedQueriesStore.queries);
 
 // Filtered queries based on local search term
@@ -121,11 +111,6 @@ async function loadQueries(teamId: number, sourceId: number) {
   }
 }
 
-// Clear search function
-function clearSearch() {
-  searchQuery.value = '';
-}
-
 // Handle query selection
 function selectQuery(query: SavedTeamQuery) {
   try {
@@ -151,60 +136,6 @@ function handleSave() {
 // Handle request to save as new query
 function handleRequestSaveAsNew() {
   emit('save-as-new');
-  isOpen.value = false;
-}
-
-// Generate URL for query exploration
-function getQueryUrl(query: SavedTeamQuery): string {
-  try {
-    const queryType = query.query_type?.toLowerCase() === 'logchefql' ? 'logchefql' : 'sql';
-    let url = `/logs/explore?team=${query.team_id}&source=${query.source_id}&query_id=${query.id}&mode=${queryType}`;
-
-    try {
-      const queryContent = JSON.parse(query.query_content);
-      if (queryContent.content) {
-        if (queryType === 'logchefql') {
-          url += `&q=${encodeURIComponent(queryContent.content)}`;
-        } else {
-          url += `&sql=${encodeURIComponent(queryContent.content)}`;
-        }
-      }
-      if (queryContent.limit) {
-        url += `&limit=${queryContent.limit}`;
-      }
-      if (queryContent.timeRange?.absolute) {
-        url += `&start=${queryContent.timeRange.absolute.start}&end=${queryContent.timeRange.absolute.end}`;
-      }
-    } catch (error) {
-      console.error('Error parsing query content:', error);
-    }
-
-    return url;
-  } catch (error) {
-    console.error('Error generating query URL:', error);
-    return `/logs/explore?team=${query.team_id}&source=${query.source_id}&mode=${query.query_type}`;
-  }
-}
-
-// Edit query - navigate to edit URL
-function handleEditQuery(query: SavedTeamQuery) {
-  const url = getQueryUrl(query);
-  router.push(url);
-  isOpen.value = false;
-}
-
-// Go to queries view
-function goToQueries() {
-  const query: Record<string, string | number> = {};
-  if (props.selectedTeamId) query.team = props.selectedTeamId;
-  if (props.selectedSourceId) query.source = props.selectedSourceId;
-
-  // Use push instead of replace to create a proper navigation entry
-  // This ensures the back button will work correctly
-  router.push({
-    path: '/logs/saved',
-    query
-  });
   isOpen.value = false;
 }
 

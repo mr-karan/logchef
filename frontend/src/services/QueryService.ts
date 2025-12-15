@@ -1,5 +1,5 @@
-import { logchefqlApi, type TranslateResponse, type FilterCondition } from '@/api/logchefql';
-import { validateSQL, validateSQLWithDetails, analyzeQuery } from '@/utils/clickhouse-sql';
+import { logchefqlApi } from '@/api/logchefql';
+import { validateSQLWithDetails, analyzeQuery } from '@/utils/clickhouse-sql';
 import {
   createTimeRangeCondition,
   timeRangeToCalendarDateTime,
@@ -7,7 +7,7 @@ import {
   getUserTimezone,
   formatTimezoneForSQL
 } from '@/utils/time-utils';
-import type { QueryOptions, QueryResult, TimeRange, TimeRangeInfo } from '@/types/query';
+import type { QueryOptions, QueryResult, TimeRange } from '@/types/query';
 import { SqlManager } from './SqlManager';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
@@ -114,7 +114,7 @@ export class QueryService {
         const teamsStore = useTeamsStore();
         const sourcesStore = useSourcesStore();
         const teamId = teamsStore.currentTeamId;
-        const sourceId = sourcesStore.currentSourceId;
+        const sourceId = sourcesStore.currentSourceDetails?.id;
 
         if (!teamId || !sourceId) {
           warnings.push("Team or source not available for translation");
@@ -139,15 +139,15 @@ export class QueryService {
               }
 
               meta.fieldsUsed = translateResult.fields_used || [];
-              meta.conditions = translateResult.conditions?.map(c => ({
+              meta.conditions = translateResult.conditions?.map((c: { field: string; operator: string; value: string; is_regex?: boolean }) => ({
                 field: c.field,
                 operator: c.operator,
                 value: c.value,
                 isRegex: c.is_regex
               }));
             }
-          } else if (response.error) {
-            warnings.push(`Translation API error: ${response.error.message}`);
+          } else if ('status' in response && response.status === 'error') {
+            warnings.push(`Translation API error: ${response.message}`);
           }
         }
       } catch (error: any) {

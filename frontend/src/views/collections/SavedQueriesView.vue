@@ -239,7 +239,7 @@ watch(
     () =>
       teamsStore && teamsStore.currentTeamId ? teamsStore.currentTeamId : null,
   ],
-  async ([newSourceId, newTeamId], [oldSourceId, oldTeamId]) => {
+  async ([newSourceId, newTeamId], [_oldSourceId, oldTeamId]) => {
     // Skip fetching if either:
     // 1. We're in the middle of a team change
     // 2. We're in the middle of a source change

@@ -7,8 +7,6 @@ import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
-import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useToast } from '@/composables/useToast'
@@ -61,13 +59,14 @@ const handleSubmit = async () => {
         full_name: fullName.value,
     })
 
-    if (result.success && result.data?.user) {
+    if (result.success && result.data) {
         // Update the local user state in auth store
-        if (authStore.user) {
+        const userData = result.data as { user: { full_name: string } };
+        if (authStore.user && userData.user) {
             authStore.$patch({
                 user: {
                     ...authStore.user,
-                    full_name: result.data.user.full_name
+                    full_name: userData.user.full_name
                 }
             });
         }

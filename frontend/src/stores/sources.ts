@@ -11,7 +11,6 @@ import type {
 } from "@/api/sources";
 import type { APIErrorResponse } from "@/api/types";
 import { useBaseStore } from "./base";
-import { useSavedQueriesStore } from "./savedQueries";
 
 interface SourcesState {
   sources: Source[];
@@ -226,7 +225,7 @@ export const useSourcesStore = defineStore("sources", () => {
     return isHydrated.value;
   }
 
-  async function loadTeamSources(teamId: number, version?: number) {
+  async function loadTeamSources(teamId: number, _version?: number) {
     return await state.withLoading(`loadTeamSources-${teamId}`, async () => {
       return await state.callApi({
         apiCall: () => sourcesApi.listTeamSources(teamId),
@@ -241,41 +240,6 @@ export const useSourcesStore = defineStore("sources", () => {
           }
         },
         defaultData: [],
-        showToast: false,
-      });
-    });
-  }
-
-  async function loadSourceQueries(sourceId: string | number) {
-    const id = typeof sourceId === "string" ? parseInt(sourceId) : sourceId;
-
-    return await state.withLoading(`loadSourceQueries-${id}`, async () => {
-      // Use the savedQueriesStore to fetch queries
-      const savedQueriesStore = useSavedQueriesStore();
-      const currentTeamId = teamsStore.currentTeamId;
-
-      if (!currentTeamId) {
-        return state.handleError(
-          {
-            status: "error",
-            message: "No team selected",
-            error_type: "ValidationError"
-          } as APIErrorResponse,
-          `loadSourceQueries-${id}`
-        );
-      }
-
-      return await state.callApi({
-        apiCall: () => savedQueriesStore.fetchSourceQueries(id, currentTeamId),
-        operationKey: `loadSourceQueries-${id}`,
-        onSuccess: (result) => {
-          if (result) {
-            state.data.value.sourceQueries = {
-              ...state.data.value.sourceQueries,
-              [id.toString()]: result,
-            };
-          }
-        },
         showToast: false,
       });
     });
@@ -436,7 +400,7 @@ export const useSourcesStore = defineStore("sources", () => {
     });
   }
 
-  async function loadSourceDetails(sourceId: number, version?: number) {
+  async function loadSourceDetails(sourceId: number, _version?: number) {
     // Use a unique loading key
     const loadingKey = `loadSourceDetails-${sourceId}`;
 
@@ -483,7 +447,7 @@ export const useSourcesStore = defineStore("sources", () => {
             state.data.value.teamSources = newTeamSources;
           }
         },
-        onError: (error) => {
+        onError: (_error) => {
           state.data.value.currentSourceDetails = null; // Clear on error
         },
         operationKey: loadingKey,

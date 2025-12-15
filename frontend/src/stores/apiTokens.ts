@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { useBaseStore } from "./base";
 import { computed } from "vue";
-import { apiTokensApi, type APIToken, type CreateAPITokenRequest, type CreateAPITokenResponse } from "@/api/apiTokens";
+import { apiTokensApi, type APIToken, type CreateAPITokenRequest } from "@/api/apiTokens";
 
 interface APITokensState {
   tokens: APIToken[];

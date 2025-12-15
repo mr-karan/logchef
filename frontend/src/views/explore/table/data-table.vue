@@ -12,24 +12,21 @@ import {
     type ExpandedState,
     type VisibilityState,
     type PaginationState,
-    type ColumnSizing as TColumnSizing,
     type ColumnSizingState,
     type ColumnResizeMode,
-    type Header,
 } from '@tanstack/vue-table'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { GripVertical, Copy, Equal, EqualNot, TerminalSquare, Clock, ChevronUp, ChevronDown } from 'lucide-vue-next'
+import { GripVertical, Copy, Equal, EqualNot, Clock, ChevronUp, ChevronDown } from 'lucide-vue-next'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
-import { valueUpdater, getSeverityClasses } from '@/lib/utils'
-import type { QueryStats, ColumnInfo } from '@/api/explore'
+import { valueUpdater } from '@/lib/utils'
+import type { QueryStats } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
 import { createColumns } from './columns'
 import { useExploreStore } from '@/stores/explore'
 import type { Source } from '@/api/sources'
 import { useSourcesStore } from '@/stores/sources'
-import { useStorage, type UseStorageOptions, type RemovableRef } from '@vueuse/core'
 import TableControls from './TableControls.vue'
 
 interface Props {
@@ -275,15 +272,6 @@ const defaultColumn = {
     enableResizing: true,
 }
 
-// Memoized column widths using CSS variables for better performance
-const columnSizingVars = computed(() => {
-    const styles: Record<string, string> = {}
-    table.getAllLeafColumns().forEach(column => {
-        styles[`--col-${column.id}-width`] = `${column.getSize()}px`
-    })
-    return styles
-})
-
 // Auto-fit column width based on content (double-click feature)
 function autoFitColumn(header: any) {
     const columnId = header.column.id;
@@ -489,7 +477,7 @@ const copyCell = (value: any): boolean => {
 }
 
 // Handle cell click - copy value with brief visual feedback
-const handleCellClick = (event: MouseEvent, cell: any) => {
+const handleCellClick = (_event: MouseEvent, cell: any) => {
     const cellId = cell.id
     copyCell(cell.getValue())
     
@@ -607,7 +595,7 @@ const onDragOver = (event: DragEvent) => {
     }
 }
 
-const onDragLeave = (event: DragEvent, columnId: string) => {
+const onDragLeave = (_event: DragEvent, columnId: string) => {
     if (dragOverColumnId.value === columnId) {
         dragOverColumnId.value = null;
     }

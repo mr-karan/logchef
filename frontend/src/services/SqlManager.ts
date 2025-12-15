@@ -284,6 +284,7 @@ LIMIT ${limit}`;
       return {
         success: true,
         sql: processedSql,
+        error: null,
         warnings: []
       };
     } catch (error) {
