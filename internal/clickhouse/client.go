@@ -1151,6 +1151,15 @@ func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, tabl
 	lowCardTimeout := 10
 
 	for _, col := range columns {
+		// Check if context was cancelled (e.g., client disconnected or request timed out)
+		// This allows early termination when the caller no longer needs the results
+		if ctx.Err() != nil {
+			c.logger.Debug("context cancelled, stopping field value queries",
+				"error", ctx.Err(),
+				"fields_completed", len(results))
+			break
+		}
+
 		// Check if this column type is suitable for distinct value queries
 		if !isFilterableColumnType(col.Type) {
 			continue

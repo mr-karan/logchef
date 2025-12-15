@@ -32,6 +32,9 @@ import (
 const (
 	// OpenAIRequestTimeout is the maximum time to wait for OpenAI to respond
 	OpenAIRequestTimeout = 15 * time.Second
+	// FieldValuesTimeout is the maximum time to wait for field values queries
+	// This propagates to ClickHouse as max_execution_time via the context deadline
+	FieldValuesTimeout = 15 * time.Second
 )
 
 // QueryTracker manages active queries for cancellation support
@@ -652,9 +655,14 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to connect to source", models.ExternalServiceErrorType)
 	}
 
+	// Create timeout context - this propagates to ClickHouse as max_execution_time
+	// Also allows early termination if client disconnects (e.g., user navigates away)
+	ctx, cancel := context.WithTimeout(c.Context(), FieldValuesTimeout)
+	defer cancel()
+
 	// Fetch field values with time range filter and user's LogchefQL query
 	result, err := client.GetFieldDistinctValues(
-		c.Context(),
+		ctx,
 		source.Connection.Database,
 		source.Connection.TableName,
 		clickhouse.FieldValuesParams{
@@ -665,11 +673,20 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 			EndTime:        endTime,
 			Timezone:       timezone,
 			Limit:          limit,
-			Timeout:        nil,           // Use default timeout
+			Timeout:        nil,            // Let context deadline handle timeout
 			LogchefQL:      logchefqlQuery, // Apply user's query filters
 		},
 	)
 	if err != nil {
+		// Check if the error was due to context cancellation (client disconnected)
+		if ctx.Err() == context.Canceled {
+			s.log.Debug("field values request cancelled by client", "source_id", sourceID, "field", fieldName)
+			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			s.log.Warn("field values request timed out", "source_id", sourceID, "field", fieldName, "timeout", FieldValuesTimeout)
+			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
+		}
 		s.log.Error("failed to get field values", slog.Any("error", err), "source_id", sourceID, "field", fieldName)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
 	}
@@ -740,9 +757,14 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to connect to source", models.ExternalServiceErrorType)
 	}
 
+	// Create timeout context - this propagates to ClickHouse as max_execution_time
+	// Also allows early termination if client disconnects (e.g., user navigates away)
+	ctx, cancel := context.WithTimeout(c.Context(), FieldValuesTimeout)
+	defer cancel()
+
 	// Fetch all filterable field values with time range filter and user's LogchefQL query
 	result, err := client.GetAllLowCardinalityFieldValues(
-		c.Context(),
+		ctx,
 		source.Connection.Database,
 		source.Connection.TableName,
 		clickhouse.AllFieldValuesParams{
@@ -751,11 +773,20 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 			EndTime:        endTime,
 			Timezone:       timezone,
 			Limit:          limit,
-			Timeout:        nil,           // Use default timeout
+			Timeout:        nil,            // Let context deadline handle timeout
 			LogchefQL:      logchefqlQuery, // Apply user's query filters
 		},
 	)
 	if err != nil {
+		// Check if the error was due to context cancellation (client disconnected)
+		if ctx.Err() == context.Canceled {
+			s.log.Debug("field values request cancelled by client", "source_id", sourceID)
+			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			s.log.Warn("field values request timed out", "source_id", sourceID, "timeout", FieldValuesTimeout)
+			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
+		}
 		s.log.Error("failed to get all field values", slog.Any("error", err), "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
 	}
