@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -28,12 +28,17 @@ import {
   RefreshCw,
   Tag,
   X,
+  AlertTriangle,
+  Loader2,
 } from 'lucide-vue-next'
-import { sourcesApi, type AllFieldValuesResult, type FieldValuesResult } from '@/api/sources'
 import { useExploreStore } from '@/stores/explore'
 import { getLocalTimeZone } from '@internationalized/date'
 import { cn } from '@/lib/utils'
 import { useVariables } from '@/composables/useVariables'
+import {
+  useFieldValuesLoader,
+  isFilterableField as isFilterableFieldType
+} from '@/composables/useFieldValuesLoader'
 
 // Define field type for auto-completion
 interface FieldInfo {
@@ -78,40 +83,29 @@ const emit = defineEmits<{
 // Local state
 const fieldSearch = ref('')
 const expandedFields = ref<Set<string>>(new Set())
-const fieldValues = ref<AllFieldValuesResult>({})
-const loadingFieldValues = ref(false)
-const loadingField = ref<string | null>(null)
-const errorMessage = ref<string | null>(null)
 
-// Check if a field type is filterable (can show distinct values)
-// Matches backend logic: LowCardinality, String, Nullable(String), Enum
-// Excludes complex types: Map, Array, Tuple, JSON
-const isFilterableField = (type: string): boolean => {
-  const lowerType = type.toLowerCase()
-  
-  // Exclude complex types that can't have simple distinct values
-  if (lowerType.startsWith('map(') ||
-      lowerType.startsWith('array(') ||
-      lowerType.startsWith('tuple(') ||
-      lowerType === 'json' ||
-      lowerType.startsWith('json(')) {
-    return false
-  }
-  
-  // LowCardinality fields - always fast
-  if (type.includes('LowCardinality')) {
-    return true
-  }
-  // Regular String fields - included with timeout protection on backend
-  if (type === 'String' || type === 'Nullable(String)') {
-    return true
-  }
-  // Enum types - always fast, finite set
-  if (type.startsWith('Enum')) {
-    return true
-  }
-  return false
-}
+// Use the field values loader composable for progressive per-field loading
+const loaderOptions = computed(() => ({
+  teamId: props.teamId,
+  sourceId: props.sourceId,
+  getTimeRange: getTimeRangeForApi,
+  getLogchefQL: getCurrentLogchefQL,
+  timezone: undefined,
+  limit: 10
+}))
+
+const {
+  fieldValues,
+  isAnyLoading,
+  getFieldState,
+  loadField,
+  loadPriorityFields,
+  cancelAll,
+  clearCache
+} = useFieldValuesLoader(loaderOptions)
+
+// Use the imported isFilterableFieldType function
+const isFilterableField = isFilterableFieldType
 
 // Check if a field is LowCardinality (for styling purposes)
 const isLowCardinality = (type: string): boolean => {
@@ -184,10 +178,13 @@ const toggleField = async (fieldName: string) => {
   } else {
     expandedFields.value.add(fieldName)
     expandedFields.value = new Set(expandedFields.value)
-    
-    // Fetch values if not already loaded
-    if (!fieldValues.value[fieldName] && props.teamId && props.sourceId) {
-      await fetchFieldValues(fieldName)
+
+    // Load values if not already loaded (for click-to-load fields or fields that errored)
+    const state = getFieldState(fieldName)
+    const fieldType = getFieldType(fieldName)
+    if ((state.status === 'click-to-load' || state.status === 'idle' || state.status === 'error')
+        && props.teamId && props.sourceId && fieldType) {
+      await loadField(fieldName, fieldType)
     }
   }
 }
@@ -214,96 +211,14 @@ const getTimeRangeForApi = () => {
   }
 }
 
-// Fetch values for a specific field
-const fetchFieldValues = async (fieldName: string) => {
-  if (!props.teamId || !props.sourceId) return
-  
-  const fieldType = getFieldType(fieldName)
-  if (!fieldType) {
-    console.error(`Field type not found for ${fieldName}`)
-    return
-  }
-  
-  // Get time range - required for performance
-  const timeRange = getTimeRangeForApi()
-  if (!timeRange) {
-    console.error('No time range available for field values query')
-    return
-  }
-  
-  loadingField.value = fieldName
-  try {
-    const response = await sourcesApi.getFieldValues(
-      props.teamId,
-      props.sourceId,
-      fieldName,
-      fieldType,
-      timeRange.startTime,
-      timeRange.endTime,
-      undefined, // Use default timezone (UTC)
-      10,
-      getCurrentLogchefQL() // Pass current query to filter field values
-    )
-    if (response.data) {
-      fieldValues.value = {
-        ...fieldValues.value,
-        [fieldName]: response.data
-      }
-    }
-  } catch (error) {
-    console.error(`Failed to fetch values for ${fieldName}:`, error)
-  } finally {
-    loadingField.value = null
-  }
-}
-
 // Auto-expand threshold - fields with this many or fewer values are auto-expanded
 const AUTO_EXPAND_THRESHOLD = 6
 
-// Fetch all filterable field values
-const fetchAllLowCardValues = async () => {
-  if (!props.teamId || !props.sourceId) return
-  
-  // Get time range - required for performance
-  const timeRange = getTimeRangeForApi()
-  if (!timeRange) {
-    console.error('No time range available for field values query')
-    errorMessage.value = 'Select a time range to load field values'
-    return
-  }
-  
-  loadingFieldValues.value = true
-  errorMessage.value = null
-  try {
-    const response = await sourcesApi.getAllFieldValues(
-      props.teamId,
-      props.sourceId,
-      timeRange.startTime,
-      timeRange.endTime,
-      undefined, // Use default timezone (UTC)
-      10,
-      getCurrentLogchefQL() // Pass current query to filter field values
-    )
-    if (response.data) {
-      fieldValues.value = response.data
-      
-      // Auto-expand fields with ≤6 distinct values
-      // These are typically the most useful for quick filtering (e.g., log levels)
-      const entries = Object.entries(response.data) as [string, FieldValuesResult][]
-      const fieldsToExpand = entries
-        .filter(([_, result]) => result.total_distinct <= AUTO_EXPAND_THRESHOLD)
-        .map(([fieldName]) => fieldName)
-      
-      if (fieldsToExpand.length > 0) {
-        expandedFields.value = new Set(fieldsToExpand)
-      }
-    }
-  } catch (error: any) {
-    console.error('Failed to fetch field values:', error)
-    errorMessage.value = error.message || 'Failed to load field values'
-  } finally {
-    loadingFieldValues.value = false
-  }
+// Refresh all priority fields (called by refresh button)
+const refreshAllFields = () => {
+  clearCache()
+  expandedFields.value = new Set()
+  loadPriorityFields(props.fields)
 }
 
 // Add filter to query
@@ -323,58 +238,65 @@ const formatCount = (count: number): string => {
   return count.toString()
 }
 
-// Watch for source changes to refresh data
+// Watch for source changes to clear data
 watch(
   () => [props.teamId, props.sourceId],
   () => {
-    fieldValues.value = {}
+    clearCache()
     expandedFields.value = new Set()
-    errorMessage.value = null
   }
 )
 
-// Watch for time range changes to refresh field values
-// This ensures field values are always relevant to the current time window
-watch(
-  () => exploreStore.timeRange,
-  (newTimeRange, oldTimeRange) => {
-    // Only refresh if sidebar is expanded and time range actually changed
-    if (props.expanded && newTimeRange && 
-        (newTimeRange.start !== oldTimeRange?.start || newTimeRange.end !== oldTimeRange?.end)) {
-      // Clear existing values and fetch fresh data for new time range
-      fieldValues.value = {}
-      expandedFields.value = new Set()
-      fetchAllLowCardValues()
-    }
-  },
-  { deep: true }
-)
-
 // Watch for query execution to auto-refresh field values
-// This ensures sidebar reflects the current query filters
+// This ensures sidebar reflects the current query filters AND time range
+// (Query execution already incorporates time range, so we only need this one watcher)
 watch(
   () => exploreStore.lastExecutionTimestamp,
   (newTimestamp, oldTimestamp) => {
     // Refresh when a query is executed and sidebar is expanded
     if (props.expanded && newTimestamp && newTimestamp !== oldTimestamp) {
-      // Clear existing values and fetch fresh data with new query filters
-      fieldValues.value = {}
+      // Clear and reload priority fields
+      clearCache()
       expandedFields.value = new Set()
-      fetchAllLowCardValues()
+      loadPriorityFields(props.fields)
     }
   }
 )
 
-// Auto-fetch low cardinality values when sidebar expands
+// Auto-load priority field values when sidebar expands
+// Skip if already loading (prevents duplicate requests on initial page load)
 watch(
   () => props.expanded,
   (isExpanded) => {
-    if (isExpanded && props.teamId && props.sourceId && Object.keys(fieldValues.value).length === 0) {
-      fetchAllLowCardValues()
+    if (isExpanded && props.teamId && props.sourceId && !isAnyLoading.value) {
+      // Load priority fields (LowCardinality, Enum) - String fields will show "click to load"
+      loadPriorityFields(props.fields)
     }
   },
   { immediate: true }
 )
+
+// Auto-expand fields with few values as they load
+watch(
+  () => fieldValues.value,
+  (values) => {
+    // Auto-expand fields with ≤6 distinct values
+    const fieldsToExpand = Object.entries(values)
+      .filter(([_, result]) => result.total_distinct <= AUTO_EXPAND_THRESHOLD)
+      .map(([fieldName]) => fieldName)
+
+    if (fieldsToExpand.length > 0) {
+      fieldsToExpand.forEach(name => expandedFields.value.add(name))
+      expandedFields.value = new Set(expandedFields.value)
+    }
+  },
+  { deep: true }
+)
+
+// Cleanup on unmount
+onUnmounted(() => {
+  cancelAll()
+})
 </script>
 
 <template>
@@ -396,11 +318,11 @@ watch(
                     variant="ghost"
                     size="sm"
                     class="h-6 w-6 p-0"
-                    :disabled="loadingFieldValues"
-                    @click="fetchAllLowCardValues"
+                    :disabled="isAnyLoading"
+                    @click="refreshAllFields"
                   >
-                    <RefreshCw 
-                      :class="cn('h-3.5 w-3.5', loadingFieldValues && 'animate-spin')"
+                    <RefreshCw
+                      :class="cn('h-3.5 w-3.5', isAnyLoading && 'animate-spin')"
                     />
                   </Button>
                 </TooltipTrigger>
@@ -430,21 +352,9 @@ watch(
         </div>
       </div>
 
-      <!-- Error Message -->
-      <div v-if="errorMessage" class="px-3 py-2 bg-destructive/10 text-destructive text-xs">
-        {{ errorMessage }}
-      </div>
-
       <!-- Field List -->
       <ScrollArea class="flex-1">
         <div class="p-2 space-y-1">
-          <!-- Loading skeleton -->
-          <template v-if="loadingFieldValues && Object.keys(fieldValues).length === 0">
-            <div v-for="i in 5" :key="i" class="space-y-1 p-2">
-              <Skeleton class="h-4 w-full" />
-              <Skeleton class="h-3 w-3/4" />
-            </div>
-          </template>
 
           <!-- Filterable Fields Section (LowCardinality, String, Enum) -->
           <template v-if="filterableFields.length > 0">
@@ -467,33 +377,46 @@ watch(
                   <div class="rounded-md hover:bg-muted/50 transition-colors">
                     <CollapsibleTrigger class="w-full">
                       <div class="flex items-center gap-2 px-2 py-1.5 cursor-pointer group">
-                        <ChevronRight 
+                        <ChevronRight
                           :class="cn(
                             'h-3.5 w-3.5 text-muted-foreground transition-transform flex-shrink-0',
                             expandedFields.has(field.name) && 'rotate-90'
                           )"
                         />
-                        <component 
-                          :is="getTypeIcon(field.type)" 
+                        <component
+                          :is="getTypeIcon(field.type)"
                           :class="cn('h-3.5 w-3.5 flex-shrink-0', getTypeColorClass(field))"
                         />
-                        <span 
+                        <span
                           class="text-sm font-medium text-foreground truncate flex-1 text-left"
                           :title="field.name"
                         >
                           {{ field.name }}
                         </span>
+                        <!-- Per-field loading spinner -->
+                        <Loader2
+                          v-if="getFieldState(field.name).status === 'loading'"
+                          class="h-3 w-3 text-muted-foreground animate-spin flex-shrink-0"
+                        />
                         <!-- Value count badge - shows when collapsed and values loaded -->
-                        <Badge 
-                          v-if="!expandedFields.has(field.name) && fieldValues[field.name]?.total_distinct"
-                          variant="secondary" 
+                        <Badge
+                          v-else-if="!expandedFields.has(field.name) && fieldValues[field.name]?.total_distinct"
+                          variant="secondary"
                           class="text-[9px] h-4 px-1.5 font-normal flex-shrink-0 bg-primary/10 text-primary"
                           :title="`${fieldValues[field.name].total_distinct} unique values`"
                         >
                           {{ fieldValues[field.name].total_distinct }}
                         </Badge>
-                        <Badge 
-                          variant="outline" 
+                        <!-- Click to load indicator for String fields -->
+                        <Badge
+                          v-else-if="getFieldState(field.name).status === 'click-to-load'"
+                          variant="outline"
+                          class="text-[9px] h-4 px-1 font-normal flex-shrink-0 text-muted-foreground"
+                        >
+                          click
+                        </Badge>
+                        <Badge
+                          variant="outline"
                           class="text-[9px] h-4 px-1 font-normal flex-shrink-0 opacity-60 group-hover:opacity-100"
                         >
                           {{ getCleanType(field.type) }}
@@ -503,14 +426,48 @@ watch(
 
                     <CollapsibleContent>
                       <div class="pl-8 pr-2 pb-2">
-                        <!-- Loading state for field values -->
-                        <template v-if="loadingField === field.name">
+                        <!-- Loading state -->
+                        <template v-if="getFieldState(field.name).status === 'loading'">
                           <div class="space-y-1">
                             <Skeleton v-for="i in 3" :key="i" class="h-6 w-full" />
                           </div>
                         </template>
 
-                        <!-- Field values -->
+                        <!-- Error state with retry -->
+                        <template v-else-if="getFieldState(field.name).status === 'error'">
+                          <div class="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-500 py-1 px-2">
+                            <AlertTriangle class="h-3.5 w-3.5 flex-shrink-0" />
+                            <span class="flex-1">Failed to load</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              class="h-5 px-2 text-xs"
+                              @click.stop="loadField(field.name, field.type)"
+                            >
+                              Retry
+                            </Button>
+                          </div>
+                        </template>
+
+                        <!-- Click-to-load state for String fields -->
+                        <template v-else-if="getFieldState(field.name).status === 'click-to-load' || getFieldState(field.name).status === 'idle'">
+                          <div class="py-2 px-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              class="w-full h-7 text-xs"
+                              @click.stop="loadField(field.name, field.type)"
+                            >
+                              <RefreshCw class="h-3 w-3 mr-1.5" />
+                              Load values
+                            </Button>
+                            <p class="text-[10px] text-muted-foreground mt-1.5 text-center">
+                              May be slow for high-cardinality fields
+                            </p>
+                          </div>
+                        </template>
+
+                        <!-- Loaded values -->
                         <template v-else-if="fieldValues[field.name]?.values?.length">
                           <div class="space-y-0.5">
                             <div
@@ -558,7 +515,7 @@ watch(
                             </div>
 
                             <!-- Show total if more values exist -->
-                            <div 
+                            <div
                               v-if="fieldValues[field.name].total_distinct > fieldValues[field.name].values.length"
                               class="text-[10px] text-muted-foreground px-2 pt-1"
                             >
@@ -567,8 +524,8 @@ watch(
                           </div>
                         </template>
 
-                        <!-- Empty state -->
-                        <template v-else>
+                        <!-- Empty state (loaded but no values) -->
+                        <template v-else-if="getFieldState(field.name).status === 'loaded'">
                           <div class="text-xs text-muted-foreground italic py-1 px-2">
                             No values found
                           </div>
@@ -621,8 +578,8 @@ watch(
           </template>
 
           <!-- Empty State -->
-          <div 
-            v-if="!loadingFieldValues && filteredFields.length === 0" 
+          <div
+            v-if="filteredFields.length === 0"
             class="text-center py-8"
           >
             <Database class="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
