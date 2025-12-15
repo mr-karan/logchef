@@ -9,14 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Field Values Sidebar** - Kibana-inspired field exploration panel that displays available fields and their top distinct values
-  - Shows top 10 unique values for `LowCardinality` and `String` columns with occurrence counts
+  - Shows top 10 unique values for `LowCardinality`, `Enum`, and `String` columns with occurrence counts
   - Click any value to instantly add it as a filter (`field="value"`) or exclude it (`field!="value"`)
   - Auto-expands fields with 6 or fewer distinct values for quick access
   - Respects the selected time range to show relevant values and optimize query performance
   - Displays value count badges on collapsed fields
-  - Supports query cancellation for long-running field value queries
-  - **Sidebar now filters values based on active LogchefQL query** - shows only relevant values matching current filters
-  - **Auto-refresh on query execution** - sidebar updates when you run a query
+  - Sidebar filters values based on active LogchefQL query - shows only relevant values matching current filters
+  - Auto-refresh on query execution - sidebar updates when you run a query
+  - **Progressive per-field loading** - values load in parallel (max 4 concurrent) with per-field status
+  - **Hybrid loading strategy** - LowCardinality/Enum fields auto-load, String fields require click (avoids slow high-cardinality queries)
+  - Per-field error handling with retry button - one failed field doesn't block others
 - Backend LogchefQL parser (`internal/logchefql/`) - full parsing, validation, and SQL generation in Go
   - Pipe operator (`|`) for custom SELECT clauses: `namespace="prod" | namespace msg.level`
   - Dot notation for nested JSON fields: `log_attributes.user.name = "john"`
@@ -54,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Histogram query builder now explicitly adds the timestamp field to ensure it's available in subqueries
 - Surrounding logs (context modal) now works with MATERIALIZED timestamp columns
 - Field sidebar excludes complex types (Map, Array, Tuple, JSON) that can't have simple distinct values
+- Field values queries now have 15s context timeout to prevent ClickHouse query pileup
 - Removed "View as SQL" button from LogchefQL mode (unnecessary duplication)
 
 ### Removed
