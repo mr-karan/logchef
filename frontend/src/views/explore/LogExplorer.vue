@@ -192,6 +192,7 @@ const isHistogramVisible = ref(true); // State for histogram visibility toggle
 // Query execution deduplication
 const executingQueryId = ref<string | null>(null);
 const lastQueryTime = ref<number>(0);
+let lastExecutionKey = "";
 
 // Display related refs
 const displayTimezone = computed(() =>
