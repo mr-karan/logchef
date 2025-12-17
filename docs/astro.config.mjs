@@ -51,6 +51,7 @@ export default defineConfig({
           label: "Using LogChef",
           items: [
             { label: "Query Interface", link: "/user-guide/query-interface" },
+            { label: "Field Sidebar", link: "/features/field-sidebar" },
             { label: "AI SQL Generation", link: "/features/ai-sql-generation" },
             { label: "Search Guide", link: "/guide/search-syntax" },
             { label: "Query Examples", link: "/guide/examples" },

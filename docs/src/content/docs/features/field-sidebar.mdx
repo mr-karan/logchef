@@ -1,0 +1,93 @@
+---
+title: Field Values Sidebar
+description: Explore field values and quickly filter logs with the Kibana-inspired sidebar
+---
+
+The Field Values Sidebar provides a Kibana-inspired field exploration panel that helps you discover and filter log data quickly. It displays available fields and their top distinct values, making it easy to understand your data and build queries.
+
+## Overview
+
+The sidebar appears on the left side of the query interface and shows:
+
+- All queryable fields from your log source
+- Top 10 unique values for each field with occurrence counts
+- Quick-filter buttons to add or exclude values from your query
+
+## Using the Sidebar
+
+### Viewing Field Values
+
+Click on any field name to expand it and see its top values. Each value shows:
+
+- The actual value
+- How many times it appears in the current time range
+
+### Filtering by Value
+
+- **Click a value** to add it as a filter: `field="value"`
+- **Alt/Option+click a value** to exclude it: `field!="value"`
+
+The filter is automatically added to your LogchefQL query, and results update immediately.
+
+## Field Loading Behavior
+
+The sidebar uses a hybrid loading strategy to balance responsiveness with query performance:
+
+### Auto-Loaded Fields
+
+**LowCardinality** and **Enum** columns load their values automatically when you open the sidebar. These column types are optimized for distinct value queries and return quickly.
+
+### On-Demand Fields
+
+**String** columns require a click to load their values. This prevents slow queries on high-cardinality fields (like request IDs or timestamps) that could have millions of unique values.
+
+### Auto-Expand Behavior
+
+Fields with 6 or fewer distinct values automatically expand to show all values. This gives you quick access to common filter targets like log levels (`debug`, `info`, `warn`, `error`) without extra clicks.
+
+### Value Count Badges
+
+Collapsed fields display a badge showing the total number of distinct values, helping you identify high vs. low cardinality fields at a glance.
+
+## Time Range and Query Integration
+
+The sidebar is context-aware and integrates with your current view:
+
+### Time Range
+
+Values and counts reflect only the selected time range. If you're looking at the last 15 minutes, you'll see values that appeared in that window—not historical data.
+
+### Active Query Filtering
+
+When you have an active LogchefQL query, the sidebar shows only values that match your current filters. For example, if your query is `level="error"`, the sidebar values for other fields show only what appears in error logs.
+
+### Auto-Refresh
+
+The sidebar automatically updates when you run a query, keeping values in sync with your current view.
+
+## Error Handling
+
+The sidebar handles errors gracefully:
+
+- **Per-field errors**: If one field fails to load, other fields continue working normally
+- **Retry button**: Failed fields show a retry button to attempt loading again
+- **Progressive loading**: Values load in parallel (up to 4 concurrent requests) for faster initial display
+
+## Supported Field Types
+
+The sidebar works with these ClickHouse column types:
+
+| Column Type | Loading | Notes |
+|-------------|---------|-------|
+| LowCardinality | Auto | Optimized for distinct queries |
+| Enum | Auto | Fast enumeration of possible values |
+| String | On-demand | Click to load (avoids slow high-cardinality queries) |
+
+Complex types like Map, Array, Tuple, and JSON are excluded since they don't have simple distinct values.
+
+## Tips
+
+1. **Use for exploration**: When investigating unfamiliar data, expand fields to discover what values exist
+2. **Build queries visually**: Click through values to construct LogchefQL filters without typing
+3. **Identify patterns**: High occurrence counts reveal common values; low counts may indicate anomalies
+4. **Narrow first**: Apply time range and basic filters before loading String field values to get faster, more relevant results

@@ -44,6 +44,15 @@ ORDER BY
   time_bucket DESC
 ```
 
+## Query Cancellation
+
+Long-running queries can be cancelled at any time:
+
+- Click the **Cancel** button that appears during query execution
+- Press the **Esc** key while a query is running
+
+Cancellation also stops the query in ClickHouse, freeing server resources immediately. This is useful when you accidentally run an expensive query or realize you need to modify your search criteria.
+
 ### Results View
 
 Results can be viewed in multiple formats:
@@ -52,6 +61,15 @@ Results can be viewed in multiple formats:
 - **JSON View**: Raw JSON format
 - **Time Series**: Visualize time-based data
 - **Logs View**: Optimized for log reading with syntax highlighting
+
+#### Table Interactions
+
+The results table includes several convenience features:
+
+- **Click any cell** to copy its value to clipboard (visual feedback confirms the copy)
+- **Double-click a column header divider** to auto-fit the column width to its content
+- **Expand/collapse rows** using the chevron indicator on each row to see full log details
+- **Cell action buttons** appear in a floating overlay when you hover over cells
 
 ## Common Query Patterns
 

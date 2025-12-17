@@ -37,7 +37,7 @@
             <TooltipTrigger asChild>
               <Button variant="outline" size="sm" class="h-7 gap-1.5" @click="showAiDialog = true">
                 <Wand2 class="h-3.5 w-3.5 text-purple-600" />
-                <span class="text-xs font-medium">AI Assistant</span>
+                <span class="text-xs font-medium hidden sm:inline">AI Assistant</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
@@ -64,12 +64,6 @@
           <span v-else class="italic text-orange-500">No table selected</span>
         </div>
 
-        <!-- New: Active Query Indicator -->
-        <div v-if="activeSavedQueryName"
-          class="flex items-center bg-primary/10 text-primary text-xs font-medium px-2 py-0.5 rounded-md ml-3">
-          <FileEdit class="h-3.5 w-3.5 mr-1.5" />
-          <span>{{ activeSavedQueryName }}</span>
-        </div>
       </div>
 
       <div class="flex items-center gap-2">

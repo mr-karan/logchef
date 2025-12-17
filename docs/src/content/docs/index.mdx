@@ -2,20 +2,16 @@
 title: Logchef
 description: Modern, single binary, high-performance log analytics platform
 hero:
-  tagline: Purpose-built log analytics UI for ClickHouse
+  tagline: Log analytics without the complexity. Built for ClickHouse.
   actions:
-    - text: Quick Start
+    - text: Get Started
       link: /getting-started/quickstart
       icon: right-arrow
       variant: primary
-    - text: Try Demo
+    - text: Try Live Demo
       link: https://demo.logchef.app
       icon: external
       variant: secondary
-    - text: Read Announcement
-      link: https://mrkaran.dev/posts/announcing-logchef/
-      icon: pencil
-      variant: minimal
     - text: View on GitHub
       link: https://github.com/mr-karan/logchef
       icon: github
@@ -28,108 +24,133 @@ import { Card, CardGrid } from "@astrojs/starlight/components";
 
 <Fragment set:html={LOGCHEF} />
 
-Logchef is a dedicated log query and visualization interface built specifically for ClickHouse. It fills a critical gap in the ClickHouse ecosystem, providing a powerful log explorer without reinventing log collection or storage.
-
-**Focus on querying, not ingestion:** Logchef intentionally doesn't handle log collection, relying instead on established tools like Vector, Filebeat, Promtail, or Logstash that already do this job reliably.
+**The open-source log explorer for teams using ClickHouse.** No ELK complexity. No vendor lock-in. Just a single binary that connects to your ClickHouse and lets you search logs instantly.
 
 ![Logchef Explore View](/screenshots/logchef_light_explore.png)
 
-<CardGrid stagger>
-  <Card title="Specialized for ClickHouse" icon="document">
-    Purpose-built interface that leverages ClickHouse's columnar architecture
-    and analytical capabilities for log exploration.
+## Why Logchef?
+
+<CardGrid>
+  <Card title="Single Binary" icon="rocket">
+    Download, configure, run. No complex stack to manage, no external dependencies.
+    Deploy in minutes, not days.
   </Card>
-  <Card title="Dual Query Modes" icon="open-book">
-    Simple search syntax for quick exploration, full SQL power when you need it,
-    and AI-powered natural language to SQL. Built for all users.
+  <Card title="ClickHouse Native" icon="star">
+    Purpose-built for ClickHouse's columnar architecture. Query billions of logs
+    in milliseconds. Your data stays in your database.
   </Card>
-  <Card title="Team-Centric" icon="puzzle">
-    Multi-tenant by design with Teams and Sources. Control who sees what with
-    granular access controls.
+  <Card title="AI-Powered Search" icon="wand">
+    Ask questions in plain English. Logchef translates them to optimized
+    ClickHouse SQL. [Learn more](/features/ai-sql-generation)
   </Card>
   <Card title="Schema Agnostic" icon="setting">
-    Works with any ClickHouse log table structure. No forced migrations or
-    schema changes to your existing setup.
-  </Card>
-  <Card title="AI-Powered SQL Generation" icon="wand">
-    Translate natural language questions into ClickHouse SQL. Lower the barrier
-    for exploration and speed up query construction. [Learn
-    More](/features/ai-sql-generation)
-  </Card>
-  <Card title="Real-time Alerting" icon="siren">
-    Monitor your logs continuously with SQL-based alerts. Integrate with
-    Alertmanager for battle-tested routing to Slack, PagerDuty, email, and more.
-    [Learn More](/features/alerting)
-  </Card>
-  <Card title="MCP Integration" icon="external">
-    Model Context Protocol server enables AI assistants like Claude to interact
-    with your logs naturally. [Explore MCP](/integration/mcp-server)
+    Works with any log table structure. No forced migrations. Connect to your
+    existing ClickHouse tables as-is.
   </Card>
 </CardGrid>
 
-## Why ClickHouse for Logs?
-
-ClickHouse's columnar architecture makes it ideal for log analytics:
-
-- **Blazing-fast aggregations** over billions of log entries
-- **Efficient compression** dramatically reduces storage costs
-- **Powerful SQL** with analytical extensions for complex log queries
-- **Column-oriented design** optimized for searching specific fields in large datasets
-
-Logchef provides the missing piece: a specialized, user-friendly interface to unlock this potential.
-
-## Key Features
+## Built for Developers
 
 ### Query Your Way
 
-- **Simple Search Syntax**: `status=200`, `level="error" AND service="payment-api"`
-- **Full SQL Power**: Write raw ClickHouse SQL for complex analysis
-- **AI-Powered Natural Language to SQL**: Ask questions in plain English and get SQL queries generated for you. See [AI Query Examples](/features/ai-sql-generation).
-- **MCP Server Integration**: Connect AI assistants like Claude to query your logs conversationally. [Learn More](/integration/mcp-server).
-- **Collections**: Save and organize reusable queries per source for your team
+Write queries the way you think:
 
-![Logchef Collections View](/screenshots/logchef_collections.png)
+- **Simple syntax**: `level="error" and service="api"` — no query language to learn
+- **Full SQL**: Drop into raw ClickHouse SQL when you need aggregations or joins
+- **AI assistant**: Describe what you're looking for in plain English
+- **[MCP integration](/integration/mcp-server)**: Let Claude or other AI assistants query your logs directly
 
-- **Smart Field Suggestions**: Intelligent field name autocompletion as you type
+### Field Sidebar
 
-### Team Management
+Discover and filter your data visually:
 
-- **Multi-tenant Support**: Organize users into Teams
-- **Source Management**: Control access to log sources per team
-- **Granular Permissions**: Define who can query what
+- See top values for each field at a glance
+- Click any value to filter — no typing required
+- Alt-click to exclude values
+- Auto-loads low-cardinality fields, click-to-load for high-cardinality
+- [Learn more](/features/field-sidebar)
 
-### Flexible Integration
+### Keyboard-First UX
 
-- **Any Log Source**: Application logs, HTTP logs, system logs - you name it
-- **Bring Your Own Collection**: Works with Vector, Fluentbit, or any tool that can write to ClickHouse
-- **Schema Agnostic**: Use our optimized OTEL schema or your existing table structure
+- **Esc** to cancel long-running queries (stops them in ClickHouse too)
+- **Double-click** column dividers to auto-fit width
+- **Click** any cell to copy its value
+- Expand rows inline to see full log context
 
-### Real-time Alerting
+## Team Ready
 
-- **SQL-Based Conditions**: Define alerts using familiar ClickHouse SQL queries
-- **Alertmanager Integration**: Native Prometheus Alertmanager support for routing to Slack, PagerDuty, email, and webhooks
-- **Delivery Guarantees**: Automatic retry logic with exponential backoff ensures alerts reach their destination
-- **Alert History**: Complete audit trail of all alert evaluations, triggers, and resolutions
-- **Learn More**: Check out the [alerting documentation](/features/alerting) for configuration examples
+- **Multi-tenant**: Organize users into teams with separate log sources
+- **Access control**: Define who can query what
+- **Collections**: Save and share queries with your team
 
-### Built for Scale
+![Logchef Teams View](/screenshots/logchef_teams.png)
 
-- **ClickHouse Performance**: Lightning-fast queries over terabytes of logs
-- **Resource Efficient**: Minimal overhead on top of your ClickHouse instance
-- **Single Binary**: Simple deployment with just one executable
-- **Production Ready**: Used by teams handling millions of log entries daily
-- **Comprehensive Monitoring**: Built-in Prometheus metrics for usage, performance, and health tracking
+## Real-Time Alerting
 
-## Try It Out
+Monitor your logs continuously:
 
-Visit our [demo instance](https://demo.logchef.app) to explore Logchef's features:
+- Define alerts using SQL queries you already know
+- Route to Slack, PagerDuty, email via Alertmanager
+- Full history of evaluations and triggers
+- [Set up alerting](/features/alerting)
 
-1. Choose your Team
-2. Select a Log Source
-3. Start querying with Search or SQL mode
+## Quick Start
+
+Get running in under 5 minutes:
+
+```bash
+# 1. Download
+curl -LO https://github.com/mr-karan/logchef/releases/latest/download/logchef_linux_amd64
+
+# 2. Configure
+cat > config.toml << EOF
+[server]
+address = "0.0.0.0:8125"
+
+[clickhouse]
+dsn = "clickhouse://localhost:9000"
+EOF
+
+# 3. Run
+./logchef_linux_amd64 --config config.toml
+```
+
+Or use Docker:
+
+```bash
+curl -LO https://raw.githubusercontent.com/mr-karan/logchef/main/deployment/docker/docker-compose.yml
+docker compose up -d
+```
+
+Open `http://localhost:8125` and start exploring.
+
+[Full setup guide →](/getting-started/quickstart)
+
+## Why ClickHouse?
+
+ClickHouse is built for exactly this workload:
+
+- **Fast**: Columnar storage + vectorized execution = sub-second queries on billions of rows
+- **Cheap**: 10-20x better compression than Elasticsearch
+- **Flexible**: Full SQL with analytical functions
+- **Battle-tested**: Powers analytics at Uber, Cloudflare, eBay
+
+Logchef gives you a purpose-built UI to unlock this power for log analytics.
 
 ## Open Source
 
-Logchef is open source software licensed under AGPLv3. We welcome contributions from the community!
+Logchef is open source under AGPLv3. No telemetry, no phone-home, no vendor lock-in.
 
-[View on GitHub](https://github.com/mr-karan/logchef) • [Read Documentation](/getting-started/quickstart)
+<div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+  <a href="https://github.com/mr-karan/logchef" style="display: inline-flex; align-items: center; gap: 0.5rem;">
+    Star on GitHub
+  </a>
+  <span>•</span>
+  <a href="https://demo.logchef.app">
+    Try the Demo
+  </a>
+  <span>•</span>
+  <a href="/getting-started/quickstart">
+    Read the Docs
+  </a>
+</div>

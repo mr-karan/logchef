@@ -3,7 +3,7 @@
     <PopoverTrigger asChild>
       <Button variant="outline" size="sm" class="h-7 gap-1.5">
         <History class="w-3.5 h-3.5" />
-        <span class="text-xs font-medium">History</span>
+        <span class="text-xs font-medium hidden sm:inline">History</span>
       </Button>
     </PopoverTrigger>
     <PopoverContent class="w-96 p-0" align="end">
