@@ -443,9 +443,9 @@
       <DialogHeader class="border-b pb-4">
         <DialogTitle class="flex items-center gap-3">
           <Wand2 class="h-6 w-6 text-purple-600" />
-          <span class="text-xl font-semibold text-gray-800">AI SQL Assistant</span>
+          <span class="text-xl font-semibold text-foreground">AI SQL Assistant</span>
         </DialogTitle>
-        <DialogDescription class="text-gray-600 mt-2">
+        <DialogDescription class="text-muted-foreground mt-2">
           Describe the data you want to retrieve in natural language, and I'll generate SQL for you.
         </DialogDescription>
       </DialogHeader>
@@ -453,45 +453,44 @@
       <div class="flex flex-col gap-6 py-4 overflow-y-auto max-h-[60vh]">
         <!-- Input Section -->
         <div class="space-y-3">
-          <Label class="text-sm font-medium text-gray-700">What data are you looking for?</Label>
+          <Label class="text-sm font-medium text-foreground">What data are you looking for?</Label>
           <Textarea 
             ref="aiTextareaRef"
             v-model="aiNaturalQuery"
             placeholder="show logs from syslog namespace for the Scarface service from the past 12 hours."
-            class="min-h-[120px] resize-y border-2 border-gray-300 focus:border-purple-500 bg-white shadow-sm appearance-none outline-none"
-            style="border-style: solid !important; border-width: 2px !important; border-color: rgb(209 213 219) !important;"
+            class="min-h-[120px] resize-y border-2 border-input focus-visible:border-purple-500 focus-visible:ring-2 focus-visible:ring-purple-500 shadow-sm"
             @keydown.meta.enter="handleAiSubmit"
             @keydown.ctrl.enter="handleAiSubmit"
           />
-          <div class="flex items-center justify-between text-xs text-gray-500">
+          <div class="flex items-center justify-between text-xs text-muted-foreground">
             <div>
-              Press <kbd class="px-1.5 py-0.5 bg-gray-100 rounded font-mono">Ctrl+Enter</kbd> to generate
+              Press <kbd class="px-1.5 py-0.5 bg-muted rounded font-mono">Ctrl+Enter</kbd> to generate
             </div>
             <details class="text-xs">
-              <summary class="cursor-pointer hover:text-gray-700 font-medium">Examples</summary>
-              <div class="absolute z-10 mt-2 right-0 bg-white border border-gray-200 rounded-md shadow-lg p-3 w-80">
+              <summary class="cursor-pointer hover:text-foreground font-medium">Examples</summary>
+              <div class="absolute z-10 mt-2 right-0 bg-popover border border-border rounded-md shadow-lg p-3 w-80">
                 <div class="space-y-2">
                   <div 
                     @click="setExamplePrompt('Show me all error logs from the past hour')"
-                    class="cursor-pointer p-2 hover:bg-gray-50 rounded text-sm border border-gray-100"
+                    class="cursor-pointer p-2 hover:bg-muted rounded text-sm border border-border"
                   >
                     Show me all error logs from the past hour
                   </div>
                   <div 
                     @click="setExamplePrompt('Count log entries by level for today')"
-                    class="cursor-pointer p-2 hover:bg-gray-50 rounded text-sm border border-gray-100"
+                    class="cursor-pointer p-2 hover:bg-muted rounded text-sm border border-border"
                   >
                     Count log entries by level for today
                   </div>
                   <div 
                     @click="setExamplePrompt('Find logs containing authentication failed in the past 24 hours')"
-                    class="cursor-pointer p-2 hover:bg-gray-50 rounded text-sm border border-gray-100"
+                    class="cursor-pointer p-2 hover:bg-muted rounded text-sm border border-border"
                   >
                     Find logs containing "authentication failed" in the past 24 hours
                   </div>
                   <div 
                     @click="setExamplePrompt('Show top 10 most frequent error messages this week')"
-                    class="cursor-pointer p-2 hover:bg-gray-50 rounded text-sm border border-gray-100"
+                    class="cursor-pointer p-2 hover:bg-muted rounded text-sm border border-border"
                   >
                     Show top 10 most frequent error messages this week
                   </div>
@@ -504,31 +503,31 @@
         <!-- Generated SQL Section -->
         <div class="space-y-3">
           <div class="flex items-center gap-2">
-            <span class="text-sm font-medium text-gray-700">Generated SQL</span>
-            <div v-if="isGeneratingAi" class="flex items-center gap-2 text-xs text-gray-500">
-              <div class="w-3 h-3 border-2 border-gray-300 border-t-purple-500 rounded-full animate-spin"></div>
+            <span class="text-sm font-medium text-foreground">Generated SQL</span>
+            <div v-if="isGeneratingAi" class="flex items-center gap-2 text-xs text-muted-foreground">
+              <div class="w-3 h-3 border-2 border-border border-t-purple-500 rounded-full animate-spin"></div>
               Generating...
             </div>
           </div>
           
           <!-- SQL Preview Container -->
-          <div class="bg-gray-50 border-2 border-gray-300 rounded-md overflow-hidden shadow-sm">
+          <div class="bg-muted/40 border-2 border-border rounded-md overflow-hidden shadow-sm">
             <!-- Loading State -->
             <div v-if="isGeneratingAi" class="p-4 space-y-2">
-              <div class="h-4 bg-gray-200 rounded animate-pulse"></div>
-              <div class="h-4 bg-gray-200 rounded animate-pulse w-3/4"></div>
-              <div class="h-4 bg-gray-200 rounded animate-pulse w-1/2"></div>
+              <div class="h-4 bg-muted rounded animate-pulse"></div>
+              <div class="h-4 bg-muted rounded animate-pulse w-3/4"></div>
+              <div class="h-4 bg-muted rounded animate-pulse w-1/2"></div>
             </div>
             
             <!-- Empty State -->
-            <div v-else-if="!generatedSql && !aiError" class="p-8 text-center text-gray-400">
+            <div v-else-if="!generatedSql && !aiError" class="p-8 text-center text-muted-foreground">
               <Wand2 class="h-8 w-8 mx-auto mb-2 opacity-50" />
               <p class="text-sm">Your generated SQL will appear here</p>
             </div>
             
             <!-- Generated SQL Display -->
             <div v-else-if="generatedSql" class="relative">
-              <pre class="p-4 text-sm font-mono text-gray-800 overflow-auto max-h-60 whitespace-pre-wrap leading-relaxed"><code>{{ generatedSql }}</code></pre>
+              <pre class="p-4 text-sm font-mono text-foreground overflow-auto max-h-60 whitespace-pre-wrap leading-relaxed"><code>{{ generatedSql }}</code></pre>
               <Button 
                 variant="ghost" 
                 size="sm" 
@@ -541,12 +540,12 @@
             </div>
             
             <!-- Error State -->
-            <div v-else-if="aiError" class="p-4 text-sm text-red-700 bg-red-50 border-l-4 border-red-400">
+            <div v-else-if="aiError" class="p-4 text-sm text-destructive bg-destructive/10 border-l-4 border-destructive/40">
               <div class="flex items-start gap-2">
                 <AlertCircle class="h-4 w-4 flex-shrink-0 mt-0.5" />
                 <div>
                   <div class="font-medium">Generation Failed</div>
-                  <div class="text-xs mt-1 text-red-600">{{ aiError }}</div>
+                  <div class="text-xs mt-1 text-destructive/80">{{ aiError }}</div>
                 </div>
               </div>
             </div>

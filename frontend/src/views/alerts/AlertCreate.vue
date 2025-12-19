@@ -80,8 +80,7 @@ async function handleCreate(payload: CreateAlertRequest) {
     // Remove the duplicate query param when navigating away
     const { duplicate, ...restQuery } = route.query;
     router.push({
-      name: "AlertDetail",
-      params: { alertID: result.data.id },
+      name: "AlertsOverview",
       query: restQuery,
     });
   }
