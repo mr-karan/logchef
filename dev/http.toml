@@ -13,19 +13,18 @@ ts = .timestamp
 '''
 
 [sinks.clickhouse]
-date_time_best_effort=true
-auth.strategy="basic"
-auth.user="default"
-auth.password=""
 type = "clickhouse"
 inputs = ["remap_http"]
 endpoint = "http://localhost:8123"
 database = "default"
-table = "http_logs"
+table = "http"
+date_time_best_effort = true
 skip_unknown_fields = true
+auth.strategy = "basic"
+auth.user = "default"
+auth.password = ""
 
 # [sinks.console]
 # type = "console"
-# # Switch input to the remapped logs to see the result
-# inputs = ["generate_http"]
+# inputs = ["remap_http"]
 # encoding.codec = "json"
