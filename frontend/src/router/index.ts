@@ -114,6 +114,15 @@ const routes: RouteRecordRaw[] = [
         }),
         meta: { title: "Alert Detail" },
       },
+      {
+        path: "collection/:teamId/:sourceId/:collectionId",
+        name: "CollectionRedirect",
+        component: () => import("@/views/collections/CollectionRedirect.vue").catch(err => {
+          error("Router", "Failed to load CollectionRedirect component", err);
+          return { default: ComponentLoadError };
+        }),
+        meta: { title: "Loading Collection..." },
+      },
     ],
   },
   // Management Section (Admin only)

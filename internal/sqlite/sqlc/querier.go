@@ -64,6 +64,8 @@ type Querier interface {
 	GetAlert(ctx context.Context, id int64) (Alert, error)
 	GetAlertForTeamSource(ctx context.Context, arg GetAlertForTeamSourceParams) (Alert, error)
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID int64) (AlertHistory, error)
+	// Get the current bookmark status of a query
+	GetQueryBookmarkStatus(ctx context.Context, arg GetQueryBookmarkStatusParams) (bool, error)
 	// Get a session by ID
 	GetSession(ctx context.Context, id string) (Session, error)
 	// Get a single source by ID
@@ -91,7 +93,7 @@ type Querier interface {
 	ListActiveAlertsDue(ctx context.Context) ([]Alert, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
 	ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsByTeamAndSourceParams) ([]Alert, error)
-	// List all queries for a specific team and source
+	// List all queries for a specific team and source (bookmarked first, then by updated_at)
 	ListQueriesByTeamAndSource(ctx context.Context, arg ListQueriesByTeamAndSourceParams) ([]TeamQuery, error)
 	// List all teams a data source is a member of
 	ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, error)
@@ -125,6 +127,8 @@ type Querier interface {
 	// Additional queries for user-source and team-source access
 	// Check if a team has access to a source
 	TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (int64, error)
+	// Toggle the bookmark status of a query
+	ToggleQueryBookmark(ctx context.Context, arg ToggleQueryBookmarkParams) error
 	// Update the last used timestamp for an API token
 	UpdateAPITokenLastUsed(ctx context.Context, id int64) error
 	UpdateAlert(ctx context.Context, arg UpdateAlertParams) error

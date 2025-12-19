@@ -65,6 +65,7 @@ func (db *DB) GetTeamSourceQuery(ctx context.Context, teamID models.TeamID, sour
 		Description:  sqlcQuery.Description.String, // Handle NULL string
 		QueryType:    models.SavedQueryType(sqlcQuery.QueryType),
 		QueryContent: sqlcQuery.QueryContent,
+		IsBookmarked: sqlcQuery.IsBookmarked,
 		CreatedAt:    sqlcQuery.CreatedAt,
 		UpdatedAt:    sqlcQuery.UpdatedAt,
 		// CreatedByUserID is not present in the sqlc model/query.
@@ -146,6 +147,7 @@ func (db *DB) ListQueriesByTeamAndSource(ctx context.Context, teamID models.Team
 			Description:  sq.Description.String, // Handle NULL string
 			QueryType:    models.SavedQueryType(sq.QueryType),
 			QueryContent: sq.QueryContent,
+			IsBookmarked: sq.IsBookmarked,
 			CreatedAt:    sq.CreatedAt,
 			UpdatedAt:    sq.UpdatedAt,
 		})
@@ -153,4 +155,37 @@ func (db *DB) ListQueriesByTeamAndSource(ctx context.Context, teamID models.Team
 
 	db.log.Debug("team and source queries listed", "team_id", teamID, "source_id", sourceID, "count", len(queries))
 	return queries, nil
+}
+
+// ToggleQueryBookmark toggles the bookmark status of a query.
+// Returns the new bookmark status after toggling.
+func (db *DB) ToggleQueryBookmark(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int) (bool, error) {
+	db.log.Debug("toggling query bookmark", "query_id", queryID, "team_id", teamID, "source_id", sourceID)
+
+	params := sqlc.ToggleQueryBookmarkParams{
+		ID:       int64(queryID),
+		TeamID:   int64(teamID),
+		SourceID: int64(sourceID),
+	}
+
+	err := db.queries.ToggleQueryBookmark(ctx, params)
+	if err != nil {
+		db.log.Error("failed to toggle query bookmark in db", "error", err, "query_id", queryID)
+		return false, fmt.Errorf("error toggling query bookmark: %w", err)
+	}
+
+	// Get the new bookmark status
+	statusParams := sqlc.GetQueryBookmarkStatusParams{
+		ID:       int64(queryID),
+		TeamID:   int64(teamID),
+		SourceID: int64(sourceID),
+	}
+	newStatus, err := db.queries.GetQueryBookmarkStatus(ctx, statusParams)
+	if err != nil {
+		db.log.Error("failed to get query bookmark status from db", "error", err, "query_id", queryID)
+		return false, fmt.Errorf("error getting query bookmark status: %w", err)
+	}
+
+	db.log.Debug("query bookmark toggled successfully", "query_id", queryID, "is_bookmarked", newStatus)
+	return newStatus, nil
 }
