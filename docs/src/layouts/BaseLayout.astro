@@ -1,0 +1,212 @@
+---
+interface Props {
+  title: string;
+  description?: string;
+  activeNav?: 'home' | 'docs' | 'changelog' | 'demo';
+}
+
+const { title, description = "Open-source log explorer for ClickHouse", activeNav } = Astro.props;
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{title}</title>
+  <meta name="description" content={description}>
+  <link rel="icon" type="image/svg+xml" href="/logo.svg">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Theme initialization (before render to prevent flash) -->
+  <script is:inline>
+    (function() {
+      const theme = localStorage.getItem('logchef-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
+
+  <style is:global>
+    :root {
+      --font-sans: 'Inter', system-ui, sans-serif;
+      --font-mono: 'DM Mono', 'SF Mono', monospace;
+    }
+
+    /* Dark theme (default) */
+    :root, [data-theme="dark"] {
+      --color-bg: #0a0a0b;
+      --color-surface: #111113;
+      --color-border: #1f1f23;
+      --color-text: #e4e4e7;
+      --color-text-secondary: #a1a1aa;
+      --color-text-dim: #52525b;
+      --color-accent: #3b82f6;
+      --color-accent-hover: #2563eb;
+      --color-success: #22c55e;
+      --color-warning: #f59e0b;
+      --color-error: #ef4444;
+      --color-purple: #a855f7;
+    }
+
+    /* Light theme */
+    [data-theme="light"] {
+      --color-bg: #ffffff;
+      --color-surface: #f4f4f5;
+      --color-border: #e4e4e7;
+      --color-text: #18181b;
+      --color-text-secondary: #52525b;
+      --color-text-dim: #a1a1aa;
+      --color-accent: #2563eb;
+      --color-accent-hover: #1d4ed8;
+      --color-success: #16a34a;
+      --color-warning: #d97706;
+      --color-error: #dc2626;
+      --color-purple: #9333ea;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; font-size: 16px; }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-bg);
+      color: var(--color-text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+    ::selection { background: var(--color-accent); color: white; }
+    a { color: var(--color-accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Nav */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      padding: 0.75rem 1.5rem;
+      background: color-mix(in srgb, var(--color-bg) 80%, transparent);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--color-border);
+    }
+    .nav-inner {
+      max-width: 1000px; margin: 0 auto;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .nav-logo {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-weight: 600; font-size: 1rem; color: var(--color-text); text-decoration: none;
+    }
+    .nav-logo:hover { text-decoration: none; }
+    .nav-logo svg { width: 22px; height: 22px; }
+
+    .nav-links { display: flex; align-items: center; gap: 0.25rem; }
+    .nav-links a {
+      color: var(--color-text-secondary); font-size: 0.875rem;
+      padding: 0.5rem 0.75rem; border-radius: 6px;
+      transition: all 0.15s ease; text-decoration: none;
+    }
+    .nav-links a:hover { color: var(--color-text); background: var(--color-surface); text-decoration: none; }
+    .nav-links a.active { color: var(--color-text); background: var(--color-surface); }
+    .nav-links .icon-link { display: flex; align-items: center; gap: 0.375rem; }
+    .nav-links .icon-link svg { width: 18px; height: 18px; }
+
+    /* Theme toggle */
+    .theme-toggle {
+      display: flex; align-items: center; justify-content: center;
+      width: 36px; height: 36px;
+      background: transparent; border: 1px solid var(--color-border);
+      border-radius: 6px; cursor: pointer;
+      color: var(--color-text-secondary);
+      transition: all 0.15s ease;
+    }
+    .theme-toggle:hover { color: var(--color-text); border-color: var(--color-text-dim); background: var(--color-surface); }
+    .theme-toggle svg { width: 18px; height: 18px; }
+    .theme-toggle .sun { display: none; }
+    .theme-toggle .moon { display: block; }
+    [data-theme="light"] .theme-toggle .sun { display: block; }
+    [data-theme="light"] .theme-toggle .moon { display: none; }
+
+    /* Footer */
+    footer {
+      padding: 2rem 1.5rem;
+      border-top: 1px solid var(--color-border);
+    }
+    .footer-inner {
+      max-width: 1000px; margin: 0 auto;
+      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;
+    }
+    .footer-links { display: flex; gap: 1.5rem; }
+    .footer-links a { font-size: 0.875rem; color: var(--color-text-dim); transition: color 0.15s ease; }
+    .footer-links a:hover { color: var(--color-text); text-decoration: none; }
+    .footer-copy { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-dim); }
+    .footer-copy a { color: var(--color-text-secondary); }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .nav-links a.hide-mobile { display: none; }
+      .footer-inner { flex-direction: column; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <path d="M7 8h10M7 12h6M7 16h8"/>
+        </svg>
+        LogChef
+      </a>
+
+      <div class="nav-links">
+        <a href="/getting-started/quickstart" class:list={[{ active: activeNav === 'docs' }, 'hide-mobile']}>Docs</a>
+        <a href="/changelog" class:list={[{ active: activeNav === 'changelog' }, 'hide-mobile']}>Changelog</a>
+        <a href="https://demo.logchef.app" target="_blank" class="hide-mobile">Demo</a>
+        <a href="https://github.com/mr-karan/logchef" target="_blank" class="icon-link">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+          </svg>
+          <span class="hide-mobile">GitHub</span>
+        </a>
+        <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+          <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="5"/>
+            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+          </svg>
+          <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <slot />
+
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-links">
+        <a href="/">Home</a>
+        <a href="/getting-started/quickstart">Docs</a>
+        <a href="/changelog">Changelog</a>
+        <a href="https://demo.logchef.app">Demo</a>
+        <a href="https://github.com/mr-karan/logchef">GitHub</a>
+      </div>
+      <span class="footer-copy">LogChef · AGPLv3 · <a href="https://mrkaran.dev" target="_blank">@mr-karan</a></span>
+    </div>
+  </footer>
+
+  <script>
+    const toggle = document.getElementById('theme-toggle');
+    toggle?.addEventListener('click', () => {
+      const current = document.documentElement.getAttribute('data-theme') || 'dark';
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('logchef-theme', next);
+    });
+  </script>
+</body>
+</html>

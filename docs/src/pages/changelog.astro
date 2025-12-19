@@ -1,0 +1,289 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout title="Changelog — LogChef" description="LogChef release history and version changelog." activeNav="changelog">
+  <style>
+    main { max-width: 900px; margin: 0 auto; padding: 6rem 1.5rem 4rem; }
+
+    .page-header { margin-bottom: 3rem; padding-bottom: 2rem; border-bottom: 1px solid var(--color-border); }
+    .page-header h1 { font-size: 2.5rem; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 0.5rem; }
+    .page-header p { color: var(--color-text-secondary); font-size: 1.125rem; }
+
+    .version { margin-bottom: 3rem; padding-bottom: 2.5rem; border-bottom: 1px solid var(--color-border); }
+    .version:last-child { border-bottom: none; }
+    .version-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .version-tag { font-family: var(--font-mono); font-size: 1.25rem; font-weight: 600; color: var(--color-text); }
+    .version-tag.unreleased { color: var(--color-purple); }
+    .version-date {
+      font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-text-dim);
+      background: var(--color-surface); padding: 0.25rem 0.625rem; border-radius: 4px;
+    }
+    .version-badge {
+      font-family: var(--font-mono); font-size: 0.6875rem; font-weight: 500;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      padding: 0.25rem 0.5rem; border-radius: 4px;
+      background: color-mix(in srgb, var(--color-success) 10%, transparent); color: var(--color-success);
+    }
+    .version-link { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-dim); margin-left: auto; }
+    .version-link:hover { color: var(--color-accent); text-decoration: none; }
+
+    .change-section { margin-bottom: 1.5rem; }
+    .change-section:last-child { margin-bottom: 0; }
+    .change-type {
+      display: inline-flex; align-items: center; gap: 0.375rem;
+      font-family: var(--font-mono); font-size: 0.6875rem; font-weight: 500;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      padding: 0.25rem 0.5rem; border-radius: 4px; margin-bottom: 0.75rem;
+    }
+    .change-type.added { background: color-mix(in srgb, var(--color-success) 10%, transparent); color: var(--color-success); }
+    .change-type.changed { background: color-mix(in srgb, var(--color-warning) 10%, transparent); color: var(--color-warning); }
+    .change-type.fixed { background: color-mix(in srgb, var(--color-accent) 10%, transparent); color: var(--color-accent); }
+    .change-type.removed { background: color-mix(in srgb, var(--color-error) 10%, transparent); color: var(--color-error); }
+    .change-type svg { width: 12px; height: 12px; }
+
+    .change-list { list-style: none; display: flex; flex-direction: column; gap: 0.625rem; padding-left: 0.25rem; }
+    .change-list li {
+      position: relative; padding-left: 1.25rem;
+      font-size: 0.9375rem; color: var(--color-text-secondary); line-height: 1.6;
+    }
+    .change-list li::before {
+      content: ''; position: absolute; left: 0; top: 0.625rem;
+      width: 4px; height: 4px; border-radius: 50%; background: var(--color-text-dim);
+    }
+    .change-list li strong { color: var(--color-text); font-weight: 500; }
+    .change-list li code {
+      font-family: var(--font-mono); font-size: 0.8125rem;
+      background: var(--color-surface); padding: 0.125rem 0.375rem;
+      border-radius: 4px; color: var(--color-accent);
+    }
+    .change-list .breaking { color: var(--color-warning); font-weight: 600; }
+
+    .contributors {
+      margin-top: 1rem; padding-top: 1rem;
+      border-top: 1px dashed var(--color-border);
+      font-size: 0.875rem; color: var(--color-text-dim);
+    }
+    .contributors a { color: var(--color-text-secondary); }
+
+    @media (max-width: 768px) {
+      .page-header h1 { font-size: 2rem; }
+      .version-header { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+      .version-link { margin-left: 0; }
+    }
+  </style>
+
+  <main>
+    <header class="page-header">
+      <h1>Changelog</h1>
+      <p>What's new in LogChef.</p>
+    </header>
+
+    <!-- Unreleased -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag unreleased">Unreleased</span>
+        <a href="https://github.com/mr-karan/logchef/compare/v0.6.0...HEAD" class="version-link" target="_blank">View diff →</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Field Values Sidebar</strong> — Browse available fields and their top values. Click any value to instantly filter logs.</li>
+          <li><strong>Query Cancellation</strong> — Stop long-running queries with the Cancel button or Esc key</li>
+          <li>Auto-fit column widths by double-clicking the header resizer</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li>LogchefQL parsing now happens server-side for better reliability</li>
+          <li>Improved data table with compact rows and click-to-copy</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li>Histogram charts now work correctly with MATERIALIZED timestamp columns</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- v0.6.0 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">v0.6.0</span>
+        <span class="version-date">Dec 4, 2025</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v0.6.0" class="version-link" target="_blank">Release notes →</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Alerting</strong> — Create SQL-based alerts with Alertmanager integration. Route to Slack, PagerDuty, or email.</li>
+          <li><strong>Admin Settings</strong> — Configure AI, authentication, and alerts from the web UI</li>
+          <li>Duplicate sources for quick setup</li>
+          <li>Keyboard navigation in dropdowns</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li>Settings now persist in database instead of config file</li>
+          <li>Redesigned alerts list with better readability</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- v0.5.0 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">v0.5.0</span>
+        <span class="version-date">Oct 3, 2025</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v0.5.0" class="version-link" target="_blank">Release notes →</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Pipe Operator</strong> — Select specific columns with <code>status="500" | timestamp method path</code></li>
+          <li><strong>Nested JSON Queries</strong> — Filter on nested fields like <code>user.address.city = "NYC"</code></li>
+          <li><strong>Query History</strong> — Access your recent queries from the editor</li>
+          <li><strong>Source Stats</strong> — View table schema, TTL settings, and sort keys</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- v0.4.0 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">v0.4.0</span>
+        <span class="version-date">Aug 12, 2025</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v0.4.0" class="version-link" target="_blank">Release notes →</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Query Variables</strong> — Define reusable variables in your queries with dynamic input fields</li>
+          <li><strong>Prometheus Metrics</strong> — Monitor LogChef with comprehensive metrics</li>
+          <li><strong>Grafana Dashboard</strong> — Pre-built dashboard for monitoring</li>
+          <li><strong>Compact View</strong> — Terminal-style log display for denser viewing</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li>Team switching no longer causes 403 errors</li>
+          <li>Saved queries load reliably on page refresh</li>
+        </ul>
+      </div>
+
+      <div class="contributors">
+        <strong>Contributors:</strong> <a href="https://github.com/songxuanqing" target="_blank">@songxuanqing</a>
+      </div>
+    </article>
+
+    <!-- v0.3.0 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">v0.3.0</span>
+        <span class="version-date">Jun 13, 2025</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v0.3.0" class="version-link" target="_blank">Release notes →</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>MCP Server</strong> — Connect AI assistants like Claude to query your logs via Model Context Protocol</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- v0.2.2 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">v0.2.2</span>
+        <span class="version-date">Jun 12, 2025</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v0.2.2" class="version-link" target="_blank">Release notes →</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>AI SQL Assistant</strong> — Describe what you want in plain English, get ClickHouse SQL</li>
+          <li><strong>API Tokens</strong> — Programmatic access for scripts and integrations</li>
+          <li>Query timeout configuration</li>
+        </ul>
+      </div>
+
+      <div class="contributors">
+        <strong>Contributors:</strong> 
+        <a href="https://github.com/vedang" target="_blank">@vedang</a>,
+        <a href="https://github.com/r--w" target="_blank">@r--w</a>,
+        <a href="https://github.com/gowthamgts" target="_blank">@gowthamgts</a>
+      </div>
+    </article>
+
+    <!-- v0.2.0 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">v0.2.0</span>
+        <span class="version-date">Apr 27, 2025</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v0.2.0" class="version-link" target="_blank">Release notes →</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Initial Release
+        </div>
+        <ul class="change-list">
+          <li><strong>Log Explorer</strong> — Interactive log exploration with real-time filtering</li>
+          <li><strong>LogchefQL</strong> — Simple query language for filtering logs</li>
+          <li><strong>SQL Mode</strong> — Full ClickHouse SQL for advanced queries</li>
+          <li><strong>Saved Queries</strong> — Save and share queries with your team</li>
+          <li><strong>Teams & RBAC</strong> — Multi-tenant access control</li>
+          <li><strong>Histogram</strong> — Visual distribution of logs over time</li>
+          <li><strong>Dark/Light Theme</strong> — Choose your preferred appearance</li>
+          <li>Single binary, Docker Compose ready</li>
+        </ul>
+      </div>
+    </article>
+  </main>
+</BaseLayout>

@@ -16,6 +16,22 @@ export default defineConfig({
       social: {
         github: "https://github.com/mr-karan/logchef",
       },
+      head: [
+        // Sync theme with standalone pages
+        {
+          tag: "script",
+          content: `
+            (function() {
+              const theme = localStorage.getItem('logchef-theme');
+              if (theme === 'light') {
+                document.documentElement.dataset.theme = 'light';
+              } else if (theme === 'dark') {
+                document.documentElement.dataset.theme = 'dark';
+              }
+            })();
+          `,
+        },
+      ],
       sidebar: [
         {
           label: "Introduction",

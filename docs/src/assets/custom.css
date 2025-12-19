@@ -1,3 +1,17 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --sl-font: 'Inter', system-ui, sans-serif;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
 .hero {
-    padding-block: unset;
+  padding-block: unset;
 }

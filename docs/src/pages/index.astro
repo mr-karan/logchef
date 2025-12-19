@@ -1,0 +1,317 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout title="LogChef — Log Explorer for ClickHouse" activeNav="home">
+  <style>
+    main { max-width: 1000px; margin: 0 auto; }
+
+    .hero {
+      min-height: 80vh;
+      display: flex; flex-direction: column; justify-content: center; align-items: center;
+      padding: 6rem 1.5rem 4rem;
+      text-align: center;
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-accent);
+      background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+      border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+      padding: 0.375rem 0.75rem; border-radius: 100px;
+      margin-bottom: 1.5rem;
+    }
+    .hero h1 {
+      font-size: clamp(2.5rem, 8vw, 4.5rem); font-weight: 700;
+      line-height: 1.1; letter-spacing: -0.03em; margin-bottom: 1.25rem;
+    }
+    .hero h1 span { color: var(--color-text-dim); }
+    .hero-desc {
+      font-size: 1.25rem; color: var(--color-text-secondary);
+      max-width: 560px; margin-bottom: 2.5rem; line-height: 1.7;
+    }
+    .hero-actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 0.75rem; }
+
+    .btn {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      font-family: var(--font-sans); font-size: 0.9rem; font-weight: 500;
+      padding: 0.75rem 1.5rem; border-radius: 8px;
+      border: 1px solid transparent; transition: all 0.15s ease; cursor: pointer;
+      text-decoration: none;
+    }
+    .btn:hover { text-decoration: none; }
+    .btn-primary { background: var(--color-accent); color: white; }
+    .btn-primary:hover { background: var(--color-accent-hover); }
+    .btn-secondary { background: var(--color-surface); color: var(--color-text); border-color: var(--color-border); }
+    .btn-secondary:hover { background: var(--color-border); border-color: var(--color-text-dim); }
+    .btn svg { width: 18px; height: 18px; }
+
+    .gh-stars { display: flex; align-items: center; }
+    .gh-stars img { height: 20px; }
+
+    .features { padding: 5rem 1.5rem; max-width: 1000px; margin: 0 auto; border-top: 1px solid var(--color-border); }
+    .section-header { text-align: center; margin-bottom: 3rem; }
+    .section-label {
+      font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-dim);
+      text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem;
+    }
+    .section-title { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.02em; }
+    .features-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; }
+    .feature {
+      background: var(--color-surface); border: 1px solid var(--color-border);
+      border-radius: 12px; padding: 1.75rem;
+    }
+    .feature-icon {
+      width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+      background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+      border-radius: 10px; margin-bottom: 1rem; color: var(--color-accent);
+    }
+    .feature-icon svg { width: 22px; height: 22px; }
+    .feature h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem; letter-spacing: -0.01em; }
+    .feature p { color: var(--color-text-secondary); font-size: 0.9375rem; line-height: 1.6; }
+
+    .quickstart { padding: 5rem 1.5rem; max-width: 800px; margin: 0 auto; }
+    .quickstart .section-header { text-align: center; }
+    .code-block {
+      background: var(--color-surface); border: 1px solid var(--color-border);
+      border-radius: 12px; overflow: hidden; margin-top: 2rem;
+    }
+    .code-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0.625rem 1rem; border-bottom: 1px solid var(--color-border);
+    }
+    .code-tabs { display: flex; gap: 0; }
+    .code-tab {
+      font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-dim);
+      background: none; border: none; padding: 0.5rem 0.875rem;
+      cursor: pointer; transition: color 0.15s ease; border-radius: 6px;
+    }
+    .code-tab.active { color: var(--color-text); background: var(--color-bg); }
+    .code-tab:hover:not(.active) { color: var(--color-text-secondary); }
+    .copy-btn {
+      font-family: var(--font-mono); font-size: 0.6875rem; color: var(--color-text-dim);
+      background: var(--color-bg); border: 1px solid var(--color-border);
+      padding: 0.375rem 0.625rem; border-radius: 6px; cursor: pointer; transition: all 0.15s ease;
+    }
+    .copy-btn:hover { color: var(--color-text); border-color: var(--color-text-dim); }
+    .code-content {
+      padding: 1.25rem; font-family: var(--font-mono);
+      font-size: 0.8125rem; line-height: 1.7; overflow-x: auto;
+    }
+    .code-content pre { margin: 0; }
+    .code-comment { color: var(--color-text-dim); }
+    .code-string { color: var(--color-success); }
+    .code-keyword { color: var(--color-accent); }
+
+    .integrations { padding: 3rem 1.5rem 5rem; max-width: 1000px; margin: 0 auto; border-top: 1px solid var(--color-border); }
+    .integrations-inner { display: flex; justify-content: center; align-items: center; gap: 3rem; flex-wrap: wrap; }
+    .integrations-label { font-size: 0.875rem; color: var(--color-text-dim); }
+    .integrations-logos { display: flex; align-items: center; gap: 2rem; flex-wrap: wrap; }
+    .integrations-logos a {
+      display: flex; align-items: center; gap: 0.5rem;
+      color: var(--color-text-secondary); font-size: 0.9375rem; font-weight: 500; transition: color 0.15s ease;
+    }
+    .integrations-logos a:hover { color: var(--color-text); text-decoration: none; }
+    .integrations-logos svg { width: 24px; height: 24px; }
+
+    @media (max-width: 768px) {
+      .hero h1 { font-size: clamp(2rem, 10vw, 3rem); }
+      .features-grid { grid-template-columns: 1fr; }
+      .integrations-inner { flex-direction: column; gap: 1.5rem; }
+    }
+
+    .reveal { opacity: 0; transform: translateY(16px); transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+  </style>
+
+  <section class="hero">
+    <div class="badge">
+      <span>Open Source</span>
+      <span>·</span>
+      <span>AGPLv3</span>
+    </div>
+    
+    <h1>
+      Log Explorer<br>
+      <span>for ClickHouse</span>
+    </h1>
+    
+    <p class="hero-desc">
+      Query billions of logs in milliseconds. Single binary, no dependencies.
+      Point it at your ClickHouse cluster and start exploring.
+    </p>
+
+    <div class="hero-actions">
+      <a href="/getting-started/quickstart" class="btn btn-primary">
+        Get Started
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M5 12h14M12 5l7 7-7 7"/>
+        </svg>
+      </a>
+      <a href="https://github.com/mr-karan/logchef" class="btn btn-secondary" target="_blank">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+          <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+        </svg>
+        GitHub
+      </a>
+      <div class="gh-stars">
+        <a href="https://github.com/mr-karan/logchef" target="_blank">
+          <img src="https://img.shields.io/github/stars/mr-karan/logchef?style=social" alt="GitHub stars">
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="features reveal">
+    <div class="section-header">
+      <div class="section-label">Why LogChef</div>
+      <h2 class="section-title">Simple log analytics that scales</h2>
+    </div>
+
+    <div class="features-grid">
+      <div class="feature">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+            <line x1="12" y1="22.08" x2="12" y2="12"/>
+          </svg>
+        </div>
+        <h3>Single Binary</h3>
+        <p>No JVM, no runtime dependencies. Download, configure, run. Deploy anywhere in minutes.</p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <ellipse cx="12" cy="5" rx="9" ry="3"/>
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+          </svg>
+        </div>
+        <h3>Schema Agnostic</h3>
+        <p>Works with any ClickHouse table structure. No migrations, no schema constraints. Just point and query.</p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M7.5 13a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3m9 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3"/>
+          </svg>
+        </div>
+        <h3>AI-Powered SQL</h3>
+        <p>Describe what you're looking for in plain English. LogChef generates the ClickHouse SQL for you.</p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </div>
+        <h3>Teams & RBAC</h3>
+        <p>Multi-tenant by design. Organize access by teams with fine-grained permissions and saved queries.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="quickstart reveal">
+    <div class="section-header">
+      <div class="section-label">Get Started</div>
+      <h2 class="section-title">Running in 2 minutes</h2>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header">
+        <div class="code-tabs">
+          <button class="code-tab active" data-tab="docker">Docker</button>
+          <button class="code-tab" data-tab="binary">Binary</button>
+        </div>
+        <button class="copy-btn">Copy</button>
+      </div>
+      <div class="code-content" id="code-docker">
+        <pre><span class="code-comment"># Start LogChef with ClickHouse</span>
+curl -LO https://raw.githubusercontent.com/mr-karan/logchef/main/deployment/docker/docker-compose.yml
+
+docker compose up -d
+
+<span class="code-comment"># Open http://localhost:8125</span></pre>
+      </div>
+      <div class="code-content" id="code-binary" style="display: none;">
+        <pre><span class="code-comment"># Download the binary</span>
+curl -LO https://github.com/mr-karan/logchef/releases/latest/download/logchef_linux_amd64
+
+<span class="code-comment"># Create config</span>
+cat > config.toml &lt;&lt; <span class="code-string">EOF</span>
+<span class="code-keyword">[server]</span>
+address = <span class="code-string">"0.0.0.0:8125"</span>
+
+<span class="code-keyword">[clickhouse]</span>
+dsn = <span class="code-string">"clickhouse://localhost:9000"</span>
+<span class="code-string">EOF</span>
+
+<span class="code-comment"># Run</span>
+./logchef_linux_amd64 --config config.toml</pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="integrations reveal">
+    <div class="integrations-inner">
+      <span class="integrations-label">Works with</span>
+      <div class="integrations-logos">
+        <a href="https://clickhouse.com" target="_blank">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M21.333 10H24v4h-2.667zM16 1.335h2.667v21.33H16zm-5.333 0h2.666v21.33h-2.666zM0 22.665V1.335h2.667v21.33zm5.333-21.33H8v21.33H5.333z"/>
+          </svg>
+          ClickHouse
+        </a>
+        <a href="https://vector.dev" target="_blank">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12.69.77L2.5 6.71v10.58l10.19 5.94 10.19-5.94V6.71zm0 2.32l7.53 4.39-7.53 4.4-7.53-4.4z"/>
+          </svg>
+          Vector
+        </a>
+        <a href="https://opentelemetry.io" target="_blank">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 3a9 9 0 110 18 9 9 0 010-18zm0 2a7 7 0 100 14 7 7 0 000-14z"/>
+          </svg>
+          OpenTelemetry
+        </a>
+        <a href="https://prometheus.io/docs/alerting/latest/alertmanager/" target="_blank">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 2a10 10 0 110 20 10 10 0 010-20z"/>
+          </svg>
+          Alertmanager
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    document.querySelectorAll('.code-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const id = tab.dataset.tab;
+        document.getElementById('code-docker').style.display = id === 'docker' ? 'block' : 'none';
+        document.getElementById('code-binary').style.display = id === 'binary' ? 'block' : 'none';
+      });
+    });
+
+    document.querySelector('.copy-btn').addEventListener('click', function() {
+      const active = document.querySelector('.code-tab.active').dataset.tab;
+      const code = document.getElementById(`code-${active}`).textContent;
+      navigator.clipboard.writeText(code);
+      this.textContent = 'Copied!';
+      setTimeout(() => this.textContent = 'Copy', 2000);
+    });
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => { if (entry.isIntersecting) entry.target.classList.add('visible'); });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+  </script>
+</BaseLayout>
