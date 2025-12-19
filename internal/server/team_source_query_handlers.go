@@ -268,3 +268,42 @@ func (s *Server) handleDeleteTeamSourceCollection(c *fiber.Ctx) error {
 
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Collection deleted successfully"})
 }
+
+// handleToggleQueryBookmark toggles the bookmark status of a saved query (collection).
+// Assumes requireAuth, requireTeamMember, and requireCollectionManagement middleware have run.
+func (s *Server) handleToggleQueryBookmark(c *fiber.Ctx) error {
+	teamIDStr := c.Params("teamID")
+	sourceIDStr := c.Params("sourceID")
+	collectionIDStr := c.Params("collectionID")
+	if collectionIDStr == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Collection ID is required", models.ValidationErrorType)
+	}
+
+	teamID, err := core.ParseTeamID(teamIDStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team_id parameter", models.ValidationErrorType)
+	}
+	sourceID, err := core.ParseSourceID(sourceIDStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source_id parameter", models.ValidationErrorType)
+	}
+	collectionID, err := strconv.Atoi(collectionIDStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid Collection ID format", models.ValidationErrorType)
+	}
+
+	// Toggle the bookmark status.
+	newStatus, err := s.sqlite.ToggleQueryBookmark(c.Context(), teamID, sourceID, collectionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Collection not found", models.NotFoundErrorType)
+		}
+		s.log.Error("failed to toggle query bookmark via db function", slog.Any("error", err), "collection_id", collectionID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to toggle bookmark", models.GeneralErrorType)
+	}
+
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{
+		"is_bookmarked": newStatus,
+		"message":       "Bookmark status toggled successfully",
+	})
+}

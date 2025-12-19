@@ -244,6 +244,7 @@ func (s *Server) setupRoutes() {
 			collections.Post("/", s.requireCollectionManagement, s.handleCreateTeamSourceCollection)
 			collections.Put("/:collectionID", s.requireCollectionManagement, s.handleUpdateTeamSourceCollection)
 			collections.Delete("/:collectionID", s.requireCollectionManagement, s.handleDeleteTeamSourceCollection)
+			collections.Patch("/:collectionID/bookmark", s.requireCollectionManagement, s.handleToggleQueryBookmark)
 		}
 
 		alerts := teamSourceOps.Group("/alerts")

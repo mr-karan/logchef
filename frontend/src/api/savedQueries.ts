@@ -27,8 +27,17 @@ export interface SavedTeamQuery {
   description: string;
   query_type: string;
   query_content: string; // JSON string of SavedQueryContent
+  is_bookmarked: boolean;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Toggle bookmark response
+ */
+export interface ToggleBookmarkResponse {
+  is_bookmarked: boolean;
+  message: string;
 }
 
 /**
@@ -76,6 +85,9 @@ export const savedQueriesApi = {
 
   deleteTeamSourceQuery: (teamId: number, sourceId: number, collectionId: string) =>
     apiClient.delete<{ success: boolean }>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}`),
+
+  toggleBookmark: (teamId: number, sourceId: number, collectionId: number) =>
+    apiClient.patch<ToggleBookmarkResponse>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}/bookmark`),
 
   // For retrieving user teams
   getUserTeams: () => apiClient.get<Team[]>("/me/teams")

@@ -130,6 +130,7 @@ type SavedTeamQuery struct {
 	Description  string         `json:"description" db:"description"`
 	QueryType    SavedQueryType `json:"query_type" db:"query_type"`
 	QueryContent string         `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
+	IsBookmarked bool           `json:"is_bookmarked" db:"is_bookmarked"`
 	CreatedAt    time.Time      `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at" db:"updated_at"`
 }
