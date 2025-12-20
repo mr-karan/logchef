@@ -257,10 +257,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       object-fit: cover;
       object-position: top center;
       border-radius: inherit;
+      pointer-events: none;
     }
-    .theme-img-light { opacity: 1; }
+    .theme-img-light { opacity: 1; pointer-events: auto; }
     :root[data-theme='dark'] .theme-img-light { opacity: 0; }
-    :root[data-theme='dark'] .theme-img-dark { opacity: 1; }
+    :root[data-theme='dark'] .theme-img-dark { opacity: 1; pointer-events: auto; }
 
     .showcase-list {
       position: relative;
@@ -272,9 +273,18 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     }
 
     .showcase-item {
-      display: flex;
-      flex-direction: column;
-      gap: 1.25rem;
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+      gap: clamp(1.5rem, 4vw, 3rem);
+      align-items: center;
+    }
+
+    .showcase-item.is-reversed .showcase-media {
+      order: 2;
+    }
+
+    .showcase-item.is-reversed .showcase-text {
+      order: 1;
     }
 
     .showcase-media {
@@ -299,7 +309,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     }
 
     .showcase-text {
-      max-width: 640px;
+      max-width: 480px;
     }
 
     .showcase-text h3 {
@@ -317,7 +327,20 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     }
 
     @media (max-width: 768px) {
+      .showcase-item {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+      }
+
+      .showcase-item .showcase-media,
+      .showcase-item .showcase-text {
+        order: initial;
+      }
+
       .showcase-media { border-radius: 16px; }
+      .showcase-text { max-width: 100%; }
+      .showcase-text h3 { font-size: 1.2rem; }
+      .showcase-text p { font-size: 0.95rem; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -414,7 +437,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         </div>
       </article>
 
-      <article class="showcase-item">
+      <article class="showcase-item is-reversed">
         <div class="showcase-media" style="aspect-ratio: 2400 / 2440;">
           <img src="/screenshots/alerts-light.png" class="theme-img theme-img-light" alt="Alerts" />
           <img src="/screenshots/alerts-dark.png" class="theme-img theme-img-dark" alt="Alerts" />
@@ -436,7 +459,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         </div>
       </article>
 
-      <article class="showcase-item">
+      <article class="showcase-item is-reversed">
         <div class="showcase-media" style="aspect-ratio: 16 / 10;">
           <img src="/screenshots/compact-light.png" class="theme-img theme-img-light" alt="Compact View" />
           <img src="/screenshots/compact-dark.png" class="theme-img theme-img-dark" alt="Compact View" />
