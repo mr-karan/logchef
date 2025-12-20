@@ -10,20 +10,22 @@
   <a href="https://mrkaran.dev/posts/announcing-logchef/"><strong>Announcement Blog Post</strong></a>
 </p>
 
-## ![Logchef Light Explore View](screenshots/logchef_light_explore.png)
+<p align="center">
+  <img alt="LogChef Log Explorer" src="docs/public/screenshots/hero-light.png">
+</p>
 
-Logchef is a lightweight, powerful log analytics platform designed for efficient log management and analysis. It operates as a single binary, utilizing ClickHouse for high-performance log storage and querying. Logchef provides an intuitive interface for exploring log data, making it suitable for development teams seeking a robust and scalable solution.
+LogChef is a lightweight, powerful log analytics platform designed for efficient log management and analysis. It operates as a single binary, utilizing ClickHouse for high-performance log storage and querying. LogChef provides an intuitive interface for exploring log data, making it suitable for development teams seeking a robust and scalable solution.
 
 ## Features
 
-- **Schema-Agnostic Log Exploration**: Query any ClickHouse table without predefined schema constraints.
-- **Flexible Query Options**: Supports both simple search syntax and full ClickHouse SQL for advanced analysis.
-- **AI-Powered SQL Generation**: Transform natural language questions into ClickHouse SQL queries using OpenAI-compatible models.
-- **MCP Integration**: Model Context Protocol server for seamless AI assistant integration ([logchef-mcp](https://github.com/mr-karan/logchef-mcp)).
-- **High Performance**: Engineered for fast query execution on large datasets with minimal resource consumption.
-- **Team-Based Access Control**: Provides secure, multi-tenant log access with configurable, fine-grained permissions.
-- **Comprehensive Metrics**: Built-in Prometheus metrics for monitoring instance usage, performance, and health.
-- **Single Binary Deployment**: Simplifies installation, deployment, and management.
+- **Query-first log exploration**: Fast filtering with both LogChefQL and ClickHouse SQL.
+- **AI Query Assistant**: Turn natural language into SQL instantly.
+- **Real-time alerting**: Schedule rules and route alerts via Alertmanager.
+- **OIDC + RBAC included**: SSO and team-based access out of the box.
+- **Schema-agnostic**: Point at any ClickHouse table without migrations.
+- **Single binary**: One executable, no runtime dependencies.
+- **Comprehensive metrics**: Prometheus metrics for usage and performance.
+- **MCP integration**: Model Context Protocol server for AI assistants ([logchef-mcp](https://github.com/mr-karan/logchef-mcp)).
 
 ## Quick Start
 
@@ -65,16 +67,17 @@ For questions or help, open an issue or start a discussion on GitHub.
 
 ## Screenshots
 
-![Logchef Light Explore View](screenshots/logchef_light_explore.png)
-![Logchef Dark Explore View](screenshots/logchef_dark_explore.png)
-![Logchef Collections View](screenshots/logchef_collections.png)
-![Logchef Teams View](screenshots/logchef_teams.png)
-![Logchef Users View](screenshots/logchef_users.png)
-![Logchef Source Settings View](screenshots/logchef_source.png)
+![AI Query Assistant](docs/public/screenshots/ai-light.png)
+
+![Alerting](docs/public/screenshots/alerts-light.png)
+
+![Compact view](docs/public/screenshots/compact-light.png)
+
+![Field exploration](docs/public/screenshots/sidebar-light.png)
 
 ## License
 
-Logchef is distributed under the terms of the AGPLv3 License.
+LogChef is distributed under the terms of the AGPLv3 License.
 
 ### Credits
 
