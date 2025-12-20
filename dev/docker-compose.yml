@@ -10,8 +10,15 @@ services:
         volumes:
             - ./config.xml:/etc/clickhouse-server/config.d/logchef.xml
             - ./users.xml:/etc/clickhouse-server/users.d/logchef.xml
+            - ./init-clickhouse.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
             - clickhouse-data:/var/lib/clickhouse
             - clickhouse-logs:/var/log/clickhouse-server
+        healthcheck:
+            test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+            interval: 5s
+            timeout: 3s
+            retries: 3
+            start_period: 10s
         ulimits:
             nproc: 65535
             nofile:

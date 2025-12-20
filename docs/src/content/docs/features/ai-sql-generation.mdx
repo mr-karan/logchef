@@ -99,45 +99,45 @@ Below are examples of natural language queries you can use with LogChef, demonst
 
 ## Configuration
 
-To enable AI SQL generation, configure the following settings in your `config.toml`:
+AI SQL generation is configured through the **Admin Settings UI** at **Administration → System Settings → AI**.
 
-```toml
-[ai]
-# Enable AI features
-enabled = true
+### Setup Steps
 
-# OpenAI API key (required)
-api_key = "sk-your_api_key_here"
-
-# Model to use (default: gpt-4o)
-model = "gpt-4o"
-
-# Optional: Custom API endpoint for OpenRouter, Azure OpenAI, etc.
-# base_url = "https://openrouter.ai/api/v1"
-
-# Model parameters
-max_tokens = 1024
-temperature = 0.1
-```
+1. Login as an admin user
+2. Navigate to **Administration → System Settings**
+3. Select the **AI** tab
+4. Configure the following settings:
+   - **Enabled**: Toggle AI features on
+   - **API Key**: Your OpenAI API key (stored securely, hidden in UI)
+   - **Base URL**: API endpoint (default: `https://api.openai.com/v1`)
+   - **Model**: Model name (e.g., `gpt-4o`, `gpt-4o-mini`)
+   - **Max Tokens**: Maximum tokens to generate (default: 1024)
+   - **Temperature**: Generation temperature 0.0-1.0 (default: 0.1)
+5. Click **Save Settings**
 
 ### Supported Providers
 
-The AI integration supports OpenAI-compatible APIs including:
+The AI integration supports OpenAI-compatible APIs:
 
-- **OpenAI**: Standard OpenAI API (default)
-- **OpenRouter**: Access to multiple models via `https://openrouter.ai/api/v1`
-- **Azure OpenAI**: Microsoft's OpenAI service
-- **Local Models**: Any OpenAI-compatible endpoint
+| Provider | Base URL |
+|----------|----------|
+| **OpenAI** | `https://api.openai.com/v1` (default) |
+| **OpenRouter** | `https://openrouter.ai/api/v1` |
+| **Azure OpenAI** | Your Azure endpoint |
+| **Local Models** | Your local OpenAI-compatible server |
 
-### Environment Variables
+### Environment Variables (Alternative)
 
-For production deployments, use environment variables for sensitive configuration:
+For containerized deployments or CI/CD, you can set AI configuration via environment variables. These are used on first boot to seed the database:
 
 ```bash
 export LOGCHEF_AI__ENABLED=true
 export LOGCHEF_AI__API_KEY="sk-your_api_key_here"
 export LOGCHEF_AI__MODEL="gpt-4o"
+export LOGCHEF_AI__BASE_URL="https://api.openai.com/v1"
 ```
+
+**Note:** After first boot, the Admin Settings UI takes precedence. Environment variables are only used for initial seeding or if the database setting doesn't exist.
 
 ## Using the AI Assistant
 

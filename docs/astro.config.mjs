@@ -10,7 +10,11 @@ export default defineConfig({
   },
   integrations: [
     starlight({
-      title: "Logchef",
+      title: "LogChef",
+      logo: {
+        src: "./public/logo.svg",
+        alt: "LogChef",
+      },
       description: "Modern, high-performance log analytics platform",
       customCss: ["./src/assets/custom.css"],
       social: {
@@ -68,6 +72,7 @@ export default defineConfig({
           items: [
             { label: "Query Interface", link: "/user-guide/query-interface" },
             { label: "Field Sidebar", link: "/features/field-sidebar" },
+            { label: "Alerting", link: "/features/alerting" },
             { label: "AI SQL Generation", link: "/features/ai-sql-generation" },
             { label: "Search Guide", link: "/guide/search-syntax" },
             { label: "Query Examples", link: "/guide/examples" },

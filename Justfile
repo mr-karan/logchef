@@ -84,6 +84,29 @@ setup-docs-domain:
 dev-docker:
     cd dev && docker compose up
 
+dev-init-tables:
+    @echo "Creating ClickHouse tables..."
+    docker exec -i dev-clickhouse-local-1 clickhouse-client -n < dev/init-clickhouse.sql
+
+dev-seed: dev-init-tables
+    cd dev && ./seed.sh
+
+dev-clean:
+    @echo "Stopping containers, removing volumes, and deleting local database..."
+    cd dev && docker compose down -v
+    rm -f local.db local.db-shm local.db-wal
+    @echo "Clean complete. Run 'just dev-docker' then 'just dev-seed' to start fresh."
+
+dev-ingest-logs duration="60":
+    #!/usr/bin/env bash
+    echo "Ingesting logs for {{duration}}s..."
+    cd dev
+    vector -c http.toml & pid1=$!
+    vector -c syslog.toml & pid2=$!
+    sleep {{duration}}
+    kill $pid1 $pid2 2>/dev/null
+    echo "Done."
+
 # View Alertmanager webhook receiver logs (for testing alerts)
 dev-webhook-logs:
     cd dev && docker compose logs -f webhook-receiver
