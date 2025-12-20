@@ -117,6 +117,8 @@ level = "info"
 
 The following settings are managed through the web interface at **Administration → System Settings** after first boot. You can optionally set initial values in `config.toml` which will be seeded to the database on first boot.
 
+![Admin Settings UI](/screenshots/settings.gif)
+
 ### AI SQL Generation
 
 Configure AI-powered SQL generation through the Admin Settings UI:
