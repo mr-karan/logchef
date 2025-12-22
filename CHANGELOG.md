@@ -7,60 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2025-12-22
+
+The 1.0 release marks Logchef as production-ready. Eight months of development brought alerting, a proper backend query language, field exploration, and many UX improvements.
+
+### Highlights
+
+- **Alerting with Alertmanager** - SQL-based alerts that integrate with your existing alert routing
+- **LogchefQL Backend Parser** - Full parsing, validation, and type-aware SQL generation in Go
+- **Field Values Sidebar** - Kibana-style field exploration with click-to-filter
+- **Query Cancellation** - Cancel long-running queries in ClickHouse, not just the UI
+
 ### Added
-- **Field Values Sidebar** - Kibana-inspired field exploration panel that displays available fields and their top distinct values
+- **Field Values Sidebar** - Kibana-inspired field exploration panel
   - Shows top 10 unique values for `LowCardinality`, `Enum`, and `String` columns with occurrence counts
-  - Click any value to instantly add it as a filter (`field="value"`) or exclude it (`field!="value"`)
-  - Auto-expands fields with 6 or fewer distinct values for quick access
-  - Respects the selected time range to show relevant values and optimize query performance
-  - Displays value count badges on collapsed fields
-  - Sidebar filters values based on active LogchefQL query - shows only relevant values matching current filters
-  - Auto-refresh on query execution - sidebar updates when you run a query
+  - Click any value to add it as a filter (`field="value"`) or exclude it (`field!="value"`)
+  - Auto-expands fields with ≤6 distinct values for quick access
+  - Respects time range and active LogchefQL query filters
   - **Progressive per-field loading** - values load in parallel (max 4 concurrent) with per-field status
-  - **Hybrid loading strategy** - LowCardinality/Enum fields auto-load, String fields require click (avoids slow high-cardinality queries)
-  - Per-field error handling with retry button - one failed field doesn't block others
-- Backend LogchefQL parser (`internal/logchefql/`) - full parsing, validation, and SQL generation in Go
+  - **Hybrid loading strategy** - LowCardinality/Enum fields auto-load, String fields require click
+  - Per-field error handling with retry button
+- **Backend LogchefQL parser** (`internal/logchefql/`) - full parsing, validation, and SQL generation in Go
   - Pipe operator (`|`) for custom SELECT clauses: `namespace="prod" | namespace msg.level`
-  - Dot notation for nested JSON fields: `log_attributes.user.name = "john"`
-  - Quoted field support for dotted keys: `log_attributes."user.name" = "alice"`
-  - Type-aware SQL generation for Map, JSON, and String columns
-- LogchefQL API endpoints for translation (`/logchefql/translate`), validation (`/logchefql/validate`), and direct query execution (`/logchefql/query`)
-- API endpoints for field value exploration (`/fields/values`, `/fields/:fieldName/values`)
-- Query cancellation support - cancel long-running queries from the UI with the Cancel button or `Esc` key, which also cancels the query in ClickHouse
-- Frontend API client for LogchefQL backend integration
-- Build commands: `just build-ui-analyze` for bundle analysis, `just clean-all` for deep clean including node_modules
-- Double-click column header resizer to auto-fit column width to content
+  - Dot notation for nested JSON: `log_attributes.user.name = "john"`
+  - Quoted field syntax for dotted keys: `log_attributes."http.status_code" >= 500`
+  - Type-aware SQL for Map, JSON, and String columns
+- LogchefQL API endpoints: `/logchefql/translate`, `/logchefql/validate`, `/logchefql/query`
+- Field value exploration endpoints: `/fields/values`, `/fields/:fieldName/values`
+- **Query cancellation** - Cancel button or `Esc` key cancels the query in ClickHouse
+- Build commands: `just build-ui-analyze` for bundle analysis, `just clean-all` for deep clean
+- Double-click column header resizer to auto-fit column width
 
 ### Changed
-- **Breaking:** LogchefQL parsing and SQL generation moved from frontend to backend
+- **Breaking:** LogchefQL parsing moved from frontend to backend
 - **Architecture:** Backend is now the single source of truth for SQL generation
-  - LogchefQL queries execute via `/logchefql/query` - backend builds and executes full SQL
-  - "View as SQL" button shows the actual executed SQL from backend
-  - Mode switching (LogchefQL → SQL) fetches full SQL from backend via `/logchefql/translate`
-- LogchefQL validation now uses backend API with debounced calls
-- Frontend no longer generates SQL - only renders what backend provides
-- Field values API now accepts `logchefql` query param instead of `conditions` - backend handles parsing for proper SQL generation
-- `/logchefql/translate` endpoint time parameters now optional (only required for full SQL generation)
-- Pipe operator now includes timestamp field in SELECT for proper ordering
-- Data table UX improvements:
-  - Rows are more compact (reduced padding) for better log density
-  - Expand/collapse indicator chevron on each row
-  - Cell click-to-copy with visual feedback
-  - Cell action buttons in floating overlay (doesn't affect column width)
-  - Column resizing has no max constraint - resize freely as needed
-- Column width defaults adjusted: lower minimums, higher maximums for flexibility
+  - Queries execute via `/logchefql/query` - backend builds and executes full SQL
+  - "View as SQL" shows actual executed SQL from backend
+  - Mode switching (LogchefQL → SQL) fetches SQL from `/logchefql/translate`
+- LogchefQL validation uses backend API with debounced calls
+- Field values API accepts `logchefql` param instead of `conditions`
+- Pipe operator includes timestamp field in SELECT for proper ordering
+- **Data table UX improvements:**
+  - Compact rows for better log density
+  - Expand/collapse chevron on each row
+  - Click-to-copy cells with visual feedback
+  - Cell action buttons in floating overlay
+  - Unrestricted column resizing
 
 ### Fixed
-- Histogram queries now work with MATERIALIZED timestamp columns (fixes [#59](https://github.com/mr-karan/logchef/discussions/59))
-  - ClickHouse's `SELECT *` does not include MATERIALIZED columns
-  - Histogram query builder now explicitly adds the timestamp field to ensure it's available in subqueries
-- Surrounding logs (context modal) now works with MATERIALIZED timestamp columns
-- Field sidebar excludes complex types (Map, Array, Tuple, JSON) that can't have simple distinct values
-- Field values queries now have 15s context timeout to prevent ClickHouse query pileup
-- Removed "View as SQL" button from LogchefQL mode (unnecessary duplication)
+- Histogram queries work with MATERIALIZED timestamp columns ([#59](https://github.com/mr-karan/logchef/discussions/59))
+- Surrounding logs (context modal) works with MATERIALIZED timestamp columns
+- Field sidebar excludes complex types (Map, Array, Tuple, JSON)
+- Field values queries have 15s timeout to prevent query pileup
+- Export in compact mode no longer returns undefined values
+- Alerts create redirect and dark mode AI input styling
 
 ### Removed
-- Frontend LogchefQL parser (`frontend/src/utils/logchefql/`) - replaced by backend implementation
+- Frontend LogchefQL parser - replaced by backend implementation
 
 ## [0.6.0] - 2025-12-04
 
@@ -202,7 +205,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/mr-karan/logchef/compare/v0.6.0...v1.0.0
 [0.6.0]: https://github.com/mr-karan/logchef/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/mr-karan/logchef/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/mr-karan/logchef/compare/v0.3.0...v0.4.0

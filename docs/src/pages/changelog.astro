@@ -79,11 +79,13 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in LogChef.</p>
     </header>
 
-    <!-- Unreleased -->
+    <!-- v1.0.0 -->
     <article class="version">
       <div class="version-header">
-        <span class="version-tag unreleased">Unreleased</span>
-        <a href="https://github.com/mr-karan/logchef/compare/v0.6.0...HEAD" class="version-link" target="_blank">View diff →</a>
+        <span class="version-tag">v1.0.0</span>
+        <span class="version-date">Dec 22, 2025</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v1.0.0" class="version-link" target="_blank">Release notes →</a>
       </div>
 
       <div class="change-section">
@@ -92,8 +94,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Field Values Sidebar</strong> — Browse available fields and their top values. Click any value to instantly filter logs.</li>
-          <li><strong>Query Cancellation</strong> — Stop long-running queries with the Cancel button or Esc key</li>
+          <li><strong>Field Values Sidebar</strong> — Kibana-style field exploration. Browse fields, see top values, click to filter.</li>
+          <li><strong>Backend LogchefQL Parser</strong> — Full parsing, validation, and type-aware SQL generation in Go</li>
+          <li><strong>Query Cancellation</strong> — Cancel button or Esc key stops the query in ClickHouse, not just the UI</li>
           <li>Auto-fit column widths by double-clicking the header resizer</li>
         </ul>
       </div>
@@ -104,8 +107,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Changed
         </div>
         <ul class="change-list">
-          <li>LogchefQL parsing now happens server-side for better reliability</li>
-          <li>Improved data table with compact rows and click-to-copy</li>
+          <li><span class="breaking">Breaking:</span> LogchefQL parsing moved from frontend to backend</li>
+          <li>Backend is now the single source of truth for SQL generation</li>
+          <li>Improved data table with compact rows, click-to-copy, and floating cell actions</li>
         </ul>
       </div>
 
@@ -115,7 +119,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
-          <li>Histogram charts now work correctly with MATERIALIZED timestamp columns</li>
+          <li>Histogram queries now work with MATERIALIZED timestamp columns</li>
+          <li>Surrounding logs (context modal) works with MATERIALIZED columns</li>
+          <li>Field values queries have 15s timeout to prevent query pileup</li>
         </ul>
       </div>
     </article>
@@ -125,7 +131,6 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <div class="version-header">
         <span class="version-tag">v0.6.0</span>
         <span class="version-date">Dec 4, 2025</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v0.6.0" class="version-link" target="_blank">Release notes →</a>
       </div>
 

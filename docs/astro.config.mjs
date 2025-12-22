@@ -21,6 +21,15 @@ export default defineConfig({
         github: "https://github.com/mr-karan/logchef",
       },
       head: [
+        // Umami Analytics
+        {
+          tag: "script",
+          attrs: {
+            defer: true,
+            src: "https://um.mrkaran.dev/script.js",
+            "data-website-id": "7c608903-19f6-4782-8def-c03e71ff35fc",
+          },
+        },
         // Sync theme with standalone pages
         {
           tag: "script",
