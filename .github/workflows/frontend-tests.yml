@@ -20,31 +20,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          version: 10
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "23"
-          cache: "pnpm"
-          cache-dependency-path: frontend/pnpm-lock.yaml
+          bun-version: latest
 
       - name: Install dependencies
         working-directory: frontend
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       # FIXME: Re-enable TypeScript checks after fixing pending local type errors
       # - name: Run TypeScript checks
       #   working-directory: frontend
-      #   run: pnpm typecheck
+      #   run: bun run typecheck
 
       - name: Run tests
         working-directory: frontend
-        run: pnpm test:ci
+        run: bun run test:ci
 
       - name: Build frontend
         working-directory: frontend
-        run: pnpm build
+        run: bun run build

@@ -2,12 +2,11 @@ import { fileURLToPath, URL } from "node:url";
 import vue from "@vitejs/plugin-vue";
 import autoprefixer from "autoprefixer";
 import tailwind from "tailwindcss";
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig, loadEnv, type Plugin, type UserConfig } from "rolldown-vite";
 import { resolve } from "path";
-import type { Plugin } from "vite";
 
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => {
+export default defineConfig(async ({ mode }): Promise<UserConfig> => {
   // Load env file based on `mode` in the current working directory.
   // Set the third parameter to '' to load all env regardless of the `VITE_` prefix.
   const env = loadEnv(mode, process.cwd(), "");
@@ -20,7 +19,7 @@ export default defineConfig(({ mode }) => {
 
   if (isAnalyze) {
     // Dynamic import for visualizer - only loaded when needed
-    const { visualizer } = require("rollup-plugin-visualizer");
+    const { visualizer } = await import("rollup-plugin-visualizer");
     plugins.push(
       visualizer({
         template: "treemap",
@@ -67,7 +66,7 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           // Improved chunk splitting strategy
-          manualChunks: (id) => {
+          manualChunks: (id: string) => {
             // Monaco editor - largest dependency, separate chunk
             if (id.includes("monaco-editor")) {
               return "monaco-editor";

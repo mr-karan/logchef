@@ -41,15 +41,15 @@ build-backend: sqlc-generate
 build-ui:
     @echo "Building frontend..."
     cd frontend && \
-    [ -d "node_modules" ] || pnpm install --frozen-lockfile --silent && \
-    pnpm build
+    [ -d "node_modules" ] || bun install --frozen-lockfile && \
+    bun run build
 
 # Build frontend with bundle analysis
 build-ui-analyze:
     @echo "Building frontend with bundle analysis..."
     cd frontend && \
-    [ -d "node_modules" ] || pnpm install --frozen-lockfile --silent && \
-    pnpm build:analyze
+    [ -d "node_modules" ] || bun install --frozen-lockfile && \
+    bun run build:analyze
 
 # Run the server with config
 run: build
@@ -63,7 +63,7 @@ run-backend: build-backend
 
 # Run only the frontend server
 run-frontend:
-    cd frontend && pnpm dev
+    cd frontend && bun run dev
 
 # Run the documentation server locally
 run-docs:

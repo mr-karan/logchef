@@ -8,7 +8,7 @@
     "typecheck": "vue-tsc -b",
     "build": "vite build",
     "build:analyze": "vite build --mode analyze",
-    "analyze": "node scripts/analyze-bundle.js",
+    "analyze": "bun scripts/analyze-bundle.js",
     "preview": "vite preview",
     "test": "vitest run",
     "test:ci": "vitest run --coverage",
@@ -61,14 +61,20 @@
     "@vitest/coverage-v8": "2.1.9",
     "@vue/tsconfig": "^0.7.0",
     "autoprefixer": "^10.4.22",
+    "esbuild": "^0.27.2",
     "jsdom": "^25.0.1",
     "rollup-plugin-visualizer": "^5.14.0",
     "tailwindcss": "^3.4.19",
     "ts-node": "^10.9.2",
     "typescript": "~5.6.3",
+    "rolldown-vite": "^7.3.0",
     "vite": "^6.4.1",
     "vitest": "^2.1.9",
     "vue-tsc": "^2.2.12"
   },
-  "packageManager": "pnpm@10.6.2+sha512.47870716bea1572b53df34ad8647b42962bc790ce2bf4562ba0f643237d7302a3d6a8ecef9e4bdfc01d23af1969aa90485d4cebb0b9638fa5ef1daef656f6c1b"
+  "trustedDependencies": [
+    "esbuild",
+    "maplibre-gl",
+    "vue-demi"
+  ]
 }
