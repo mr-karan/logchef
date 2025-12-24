@@ -28,9 +28,9 @@ type ServerOptions struct {
 	Config        *config.Config
 	SQLite        *sqlite.DB
 	ClickHouse    *clickhouse.Manager
-	AlertsManager *alerts.Manager      // Alerts manager for manual resolution with Alertmanager notification.
-	OIDCProvider  *auth.OIDCProvider   // OIDC provider for authentication flows.
-	FS            http.FileSystem      // Filesystem for serving static assets (frontend).
+	AlertsManager *alerts.Manager    // Alerts manager for manual resolution with Alertmanager notification.
+	OIDCProvider  *auth.OIDCProvider // OIDC provider for authentication flows.
+	FS            http.FileSystem    // Filesystem for serving static assets (frontend).
 	Logger        *slog.Logger
 	BuildInfo     string
 	Version       string
@@ -230,8 +230,8 @@ func (s *Server) setupRoutes() {
 		teamSourceOps.Post("/logchefql/query", s.handleLogchefQLQuery)         // Execute LogchefQL query directly
 
 		// Field value exploration for sidebar
-		teamSourceOps.Get("/fields/values", s.handleGetAllFieldValues)           // Get all LowCardinality field values
-		teamSourceOps.Get("/fields/:fieldName/values", s.handleGetFieldValues)   // Get values for a specific field
+		teamSourceOps.Get("/fields/values", s.handleGetAllFieldValues)         // Get all LowCardinality field values
+		teamSourceOps.Get("/fields/:fieldName/values", s.handleGetFieldValues) // Get values for a specific field
 
 		// Collections (Saved Queries) scoped to Team & Source
 		// Regular team members can view and use collections

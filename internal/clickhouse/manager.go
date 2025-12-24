@@ -251,7 +251,7 @@ func (m *Manager) AddSource(source *models.Source) error {
 		Username: source.Connection.Username,
 		Password: source.Connection.Password,
 		SourceID: strconv.FormatInt(int64(source.ID), 10), // Convert SourceID to string for metrics
-		Source:   source, // Pass source for enhanced metrics
+		Source:   source,                                  // Pass source for enhanced metrics
 	}, m.logger)
 
 	if err != nil {

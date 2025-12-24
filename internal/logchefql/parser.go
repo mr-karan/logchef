@@ -437,4 +437,3 @@ func DetectMissingBooleanOperators(tokens []Token) *ParseError {
 	}
 	return nil
 }
-

@@ -14,15 +14,15 @@ import (
 
 // SystemSettingResponse represents a setting in API responses.
 type SystemSettingResponse struct {
-	Key          string `json:"key"`
-	Value        string `json:"value"`
-	ValueType    string `json:"value_type"`
-	Category     string `json:"category"`
-	Description  string `json:"description,omitempty"`
-	IsSensitive  bool   `json:"is_sensitive"`
-	MaskedValue  string `json:"masked_value,omitempty"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	Key         string `json:"key"`
+	Value       string `json:"value"`
+	ValueType   string `json:"value_type"`
+	Category    string `json:"category"`
+	Description string `json:"description,omitempty"`
+	IsSensitive bool   `json:"is_sensitive"`
+	MaskedValue string `json:"masked_value,omitempty"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 // UpdateSettingRequest represents a request to update a setting.

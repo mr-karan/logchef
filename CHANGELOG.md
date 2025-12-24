@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Bookmark Favorite Queries** - Star saved queries for quick access ([#60](https://github.com/mr-karan/logchef/pull/60))
+  - Bookmarked queries appear at top of collections dropdown
+  - Copy shareable URL for any saved query
+  - Direct link format: `/logs/collection/:teamId/:sourceId/:collectionId`
+
+### Changed
+- **Frontend Tooling Migration** - Switched from pnpm + Vite to Bun + rolldown-vite
+  - Build time: ~2.3s (was >55s)
+  - Dev server start: ~1s (was ~3s)
+  - Install time: ~8s (was ~25s)
+
+### Contributors
+- [@rhnvrm](https://github.com/rhnvrm) - Bookmark favorite queries feature ([#60](https://github.com/mr-karan/logchef/pull/60))
+
 ## [1.0.0] - 2025-12-22
 
 The 1.0 release marks Logchef as production-ready. Eight months of development brought alerting, a proper backend query language, field exploration, and many UX improvements.

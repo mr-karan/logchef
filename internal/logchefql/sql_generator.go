@@ -376,4 +376,3 @@ func (g *SQLGenerator) generateSelectFieldExpression(selectField SelectField) st
 
 	return columnExpression
 }
-

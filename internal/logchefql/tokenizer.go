@@ -371,4 +371,3 @@ func Tokenize(input string) TokenizeResult {
 		Errors: errors,
 	}
 }
-

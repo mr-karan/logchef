@@ -15,14 +15,14 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-        Server     ServerConfig     `koanf:"server"`
-        SQLite     SQLiteConfig     `koanf:"sqlite"`
-        Clickhouse ClickhouseConfig `koanf:"clickhouse"`
-        OIDC       OIDCConfig       `koanf:"oidc"`
-        Auth       AuthConfig       `koanf:"auth"`
-        Logging    LoggingConfig    `koanf:"logging"`
-        AI         AIConfig         `koanf:"ai"`
-        Alerts     AlertsConfig     `koanf:"alerts"`
+	Server     ServerConfig     `koanf:"server"`
+	SQLite     SQLiteConfig     `koanf:"sqlite"`
+	Clickhouse ClickhouseConfig `koanf:"clickhouse"`
+	OIDC       OIDCConfig       `koanf:"oidc"`
+	Auth       AuthConfig       `koanf:"auth"`
+	Logging    LoggingConfig    `koanf:"logging"`
+	AI         AIConfig         `koanf:"ai"`
+	Alerts     AlertsConfig     `koanf:"alerts"`
 }
 
 // ServerConfig contains HTTP server settings
@@ -78,31 +78,31 @@ type LoggingConfig struct {
 
 // AIConfig contains AI service (OpenAI) settings
 type AIConfig struct {
-        // OpenAI API key
-        APIKey string `koanf:"api_key"`
-        // Model to use for AI SQL generation (default: gpt-4o)
-        Model string `koanf:"model"`
-        // MaxTokens is the maximum number of tokens to generate (default: 1024)
-        MaxTokens int `koanf:"max_tokens"`
-        // Temperature controls randomness in generation (0.0-1.0, default: 0.1)
-        Temperature float32 `koanf:"temperature"`
-        // Enabled indicates whether AI features are enabled
-        Enabled bool `koanf:"enabled"`
-        // BaseURL for OpenAI API (default: "", which uses the standard OpenAI API endpoint)
-        BaseURL string `koanf:"base_url"`
+	// OpenAI API key
+	APIKey string `koanf:"api_key"`
+	// Model to use for AI SQL generation (default: gpt-4o)
+	Model string `koanf:"model"`
+	// MaxTokens is the maximum number of tokens to generate (default: 1024)
+	MaxTokens int `koanf:"max_tokens"`
+	// Temperature controls randomness in generation (0.0-1.0, default: 0.1)
+	Temperature float32 `koanf:"temperature"`
+	// Enabled indicates whether AI features are enabled
+	Enabled bool `koanf:"enabled"`
+	// BaseURL for OpenAI API (default: "", which uses the standard OpenAI API endpoint)
+	BaseURL string `koanf:"base_url"`
 }
 
 // AlertsConfig controls scheduling behaviour for alert rules and delivery via Alertmanager.
 type AlertsConfig struct {
-        Enabled                bool          `koanf:"enabled"`
-        EvaluationInterval     time.Duration `koanf:"evaluation_interval"`
-        DefaultLookback        time.Duration `koanf:"default_lookback"`
-        HistoryLimit           int           `koanf:"history_limit"`
-        AlertmanagerURL        string        `koanf:"alertmanager_url"`
-        ExternalURL            string        `koanf:"external_url"`     // Backend URL (for API access)
-        FrontendURL            string        `koanf:"frontend_url"`     // Frontend URL (for web UI links)
-        RequestTimeout         time.Duration `koanf:"request_timeout"`
-        TLSInsecureSkipVerify  bool          `koanf:"tls_insecure_skip_verify"`
+	Enabled               bool          `koanf:"enabled"`
+	EvaluationInterval    time.Duration `koanf:"evaluation_interval"`
+	DefaultLookback       time.Duration `koanf:"default_lookback"`
+	HistoryLimit          int           `koanf:"history_limit"`
+	AlertmanagerURL       string        `koanf:"alertmanager_url"`
+	ExternalURL           string        `koanf:"external_url"` // Backend URL (for API access)
+	FrontendURL           string        `koanf:"frontend_url"` // Frontend URL (for web UI links)
+	RequestTimeout        time.Duration `koanf:"request_timeout"`
+	TLSInsecureSkipVerify bool          `koanf:"tls_insecure_skip_verify"`
 }
 
 const envPrefix = "LOGCHEF_"
@@ -167,9 +167,9 @@ func Load(path string) (*Config, error) {
 	if cfg.OIDC.ClientID == "" {
 		return nil, fmt.Errorf("client_id is required in OIDC configuration (either in file or %sOIDC__CLIENT_ID)", envPrefix)
 	}
-        if cfg.OIDC.RedirectURL == "" {
-                return nil, fmt.Errorf("redirect_url is required in OIDC configuration (either in file or %sOIDC__REDIRECT_URL)", envPrefix)
-        }
+	if cfg.OIDC.RedirectURL == "" {
+		return nil, fmt.Errorf("redirect_url is required in OIDC configuration (either in file or %sOIDC__REDIRECT_URL)", envPrefix)
+	}
 
 	// Non-essential configuration fields (alerts, AI, auth sessions) are optional in config.toml.
 	// They will be seeded from config.toml to the database on first boot, and can be managed via UI afterwards.
@@ -189,5 +189,5 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-        return &cfg, nil
+	return &cfg, nil
 }
