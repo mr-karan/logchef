@@ -157,9 +157,11 @@ onMounted(async () => {
       console.error("Failed to parse query content from editData", e);
     }
   } else if (props.initialData) {
-    // Creating new query with initial data
+    // Creating new query with initial data OR editing with initialData + isEditMode
     name.value = props.initialData.name || '';
     description.value = props.initialData.description || '';
+    // Set queryId if editing (isEditMode is true and initialData has an id)
+    queryId.value = props.isEditMode ? (props.initialData.id?.toString() || '') : '';
 
     // If we're editing, attempt to parse the query content for better UX
     try {
@@ -197,10 +199,11 @@ watch([() => props.initialData, () => props.editData], ([newInitialData, newEdit
       console.error("Failed to parse query content from editData in watcher", e);
     }
   } else if (newInitialData) {
-    // Creating new query
+    // Creating new query OR editing with initialData + isEditMode
     name.value = newInitialData.name || '';
     description.value = newInitialData.description || '';
-    queryId.value = '';
+    // Set queryId if editing (isEditMode is true and initialData has an id)
+    queryId.value = props.isEditMode ? (newInitialData.id?.toString() || '') : '';
 
     try {
       const content = JSON.parse(newInitialData.query_content);
@@ -226,6 +229,12 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       } catch (e) {
         console.error("Failed to parse provided query content", e);
       }
+    } else if (props.editData?.query_content) {
+      try {
+        content = JSON.parse(props.editData.query_content);
+      } catch (e) {
+        console.error("Failed to parse edit query content", e);
+      }
     } else if (props.initialData?.query_content) {
       try {
         content = JSON.parse(props.initialData.query_content);
@@ -234,9 +243,15 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       }
     }
 
-    const queryContent = activeMode === 'logchefql'
+    // When editing from Collections view, use existing content if exploreStore is empty
+    let queryContent = activeMode === 'logchefql'
         ? exploreStore.logchefqlCode || ''
         : exploreStore.rawSql || '';
+
+    // If exploreStore has no content but we have content from initial/edit data, use that
+    if (!queryContent.trim() && content.content) {
+      queryContent = content.content;
+    }
 
     if (!queryContent.trim()) {
       throw new Error(`${activeMode === 'logchefql' ? 'LogchefQL' : 'SQL'} content is required`);

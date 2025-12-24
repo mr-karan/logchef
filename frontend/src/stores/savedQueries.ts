@@ -284,6 +284,42 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     });
   }
 
+  async function toggleBookmark(teamId: number, sourceId: number, queryId: number) {
+    return await state.withLoading(`toggleBookmark-${teamId}-${sourceId}-${queryId}`, async () => {
+      return await state.callApi<{ is_bookmarked: boolean; message: string }>({
+        apiCall: () => savedQueriesApi.toggleBookmark(teamId, sourceId, queryId),
+        operationKey: `toggleBookmark-${teamId}-${sourceId}-${queryId}`,
+        onSuccess: (response) => {
+          if (response) {
+            // Update the bookmark status in the queries list
+            const index = state.data.value.queries.findIndex(
+              (q) => q.id === queryId
+            );
+            if (index >= 0) {
+              state.data.value.queries[index].is_bookmarked = response.is_bookmarked;
+              // Update updated_at locally so sorting reflects the change
+              state.data.value.queries[index].updated_at = new Date().toISOString();
+              // Re-sort to match backend order: bookmarked first, then by updated_at desc
+              state.data.value.queries.sort((a, b) => {
+                // Bookmarked queries come first
+                if (a.is_bookmarked !== b.is_bookmarked) {
+                  return a.is_bookmarked ? -1 : 1;
+                }
+                // Then sort by updated_at descending
+                return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+              });
+            }
+            // Update selectedQuery if it matches
+            if (state.data.value.selectedQuery?.id === queryId) {
+              state.data.value.selectedQuery.is_bookmarked = response.is_bookmarked;
+            }
+          }
+        },
+        showToast: false, // No toast for bookmark toggle - visual feedback via star icon
+      });
+    });
+  }
+
   // Reset state function
   function resetState() {
     state.data.value = {
@@ -324,6 +360,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     updateQuery,
     updateTeamSourceQuery,
     deleteQuery,
+    toggleBookmark,
     resetState,
 
     // Loading state helpers

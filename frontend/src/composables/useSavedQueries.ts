@@ -49,7 +49,7 @@ export function useSavedQueries(
   const isLoadingQueryDetails = ref(false)
   const searchQuery = ref('')
 
-  const isEditingExistingQuery = computed(() => !!route.query.collection_id);
+  const isEditingExistingQuery = computed(() => !!route.query.query_id);
 
   const canManageCollections = computed(() => {
     if (!authStore.isAuthenticated || !authStore.user) {
@@ -506,58 +506,10 @@ export function useSavedQueries(
     }
   }
 
-  // Generate URL for a saved query
+  // Generate shareable URL for a saved query
   function getQueryUrl(query: SavedTeamQuery): string {
-    try {
-      // Get query type from the saved query - ensure it's normalized
-      const queryType = query.query_type?.toLowerCase() === 'logchefql' ? 'logchefql' : 'sql'
-      console.log(`Building URL for query ${query.id} with type ${queryType}`)
-
-      // Parse the query content
-      const queryContent = JSON.parse(query.query_content)
-
-      // Build the URL with the appropriate parameters
-      let url = `/logs/explore?team=${query.team_id}`
-
-      // Add source ID if available
-      if (query.source_id) {
-        url += `&source=${query.source_id}`
-      }
-
-      // Add query ID for editing
-      url += `&query_id=${query.id}`
-
-      // Add limit if available
-      if (queryContent.limit) {
-        url += `&limit=${queryContent.limit}`
-      }
-
-      // Always add time range if available - this is crucial for query execution
-      if (queryContent.timeRange !== null &&
-          queryContent.timeRange?.absolute?.start &&
-          queryContent.timeRange?.absolute?.end) {
-        url += `&start=${queryContent.timeRange.absolute.start}`
-        url += `&end=${queryContent.timeRange.absolute.end}`
-      }
-
-      // Add mode parameter based on query type
-      url += `&mode=${queryType}`
-
-      // Add the query content (actual query text)
-      if (queryContent.content) {
-        if (queryType === 'logchefql') {
-          url += `&q=${encodeURIComponent(queryContent.content)}`
-        } else {
-          url += `&sql=${encodeURIComponent(queryContent.content)}`
-        }
-      }
-
-      return url
-    } catch (error) {
-      console.error('Error generating query URL:', error)
-      // Fallback URL with explicit mode parameter
-      return `/logs/explore?team=${query.team_id}&source=${query.source_id}&mode=${query.query_type?.toLowerCase() === 'logchefql' ? 'logchefql' : 'sql'}`
-    }
+    // Use the new shareable collection URL format
+    return `/logs/collection/${query.team_id}/${query.source_id}/${query.id}`
   }
 
   // Handle opening query in explorer
