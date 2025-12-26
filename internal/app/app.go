@@ -95,7 +95,7 @@ func (a *App) Initialize(ctx context.Context) error {
 
 	// Initialize OIDC Provider.
 	// This is optional; if OIDC is not configured, auth features relying on it might be disabled.
-	oidcProvider, err := auth.NewOIDCProvider(&a.Config.OIDC, a.Logger)
+	oidcProvider, err := auth.NewOIDCProvider(ctx, &a.Config.OIDC, a.Logger)
 	if err != nil {
 		if errors.Is(err, auth.ErrOIDCProviderNotConfigured) {
 			a.Logger.Warn("OIDC provider not configured, skipping OIDC setup")
@@ -115,7 +115,7 @@ func (a *App) Initialize(ctx context.Context) error {
 		a.Logger.Info("initializing source connection",
 			"source_id", source.ID,
 			"table", source.Connection.TableName)
-		if err := a.ClickHouse.AddSource(source); err != nil {
+		if err := a.ClickHouse.AddSource(ctx, source); err != nil {
 			// Log failure but continue initialization.
 			// The health check system will attempt to recover these connections.
 			a.Logger.Warn("failed to initialize source connection, will attempt recovery via health checks",
@@ -184,6 +184,8 @@ func (a *App) Start() error {
 }
 
 // Shutdown gracefully stops all application components with timeouts.
+//
+//nolint:contextcheck // Shutdown receives its own context from caller (e.g., signal handler)
 func (a *App) Shutdown(ctx context.Context) error {
 	a.Logger.Info("shutting down application")
 

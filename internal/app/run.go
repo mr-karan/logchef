@@ -58,11 +58,10 @@ func Run(opts Options) error {
 
 	// Perform graceful shutdown of components (server, DBs).
 	if err := app.Shutdown(shutdownCtx); err != nil {
-		// Log shutdown error, but exit gracefully anyway.
 		app.Logger.Error("error during application shutdown", "error", err)
-		os.Exit(1)
+		return err
 	}
 
 	app.Logger.Info("shutdown complete")
-	return nil // Return nil on successful shutdown sequence.
+	return nil
 }
