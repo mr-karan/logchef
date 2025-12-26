@@ -6,6 +6,7 @@ import router from "@/router";
 import { useBaseStore } from "./base";
 import { useApiQuery } from "@/composables/useApiQuery";
 import { useMetaStore } from "./meta";
+import { useContextStore } from "./context";
 import type { APIErrorResponse } from "@/api/types";
 
 interface AuthState {
@@ -109,7 +110,6 @@ export const useAuthStore = defineStore("auth", () => {
     });
   }
 
-  // Logout user
   async function logout() {
     return await state.withLoading('logout', async () => {
       try {
@@ -119,14 +119,14 @@ export const useAuthStore = defineStore("auth", () => {
           operationKey: 'logout'
         });
 
-        // Always clear state and redirect to login, regardless of API result
         clearState();
+        useContextStore().clear();
         router.push({ name: "Login" });
 
         return result;
       } catch (error) {
-        // Still clear state and redirect on error
         clearState();
+        useContextStore().clear();
         router.push({ name: "Login" });
         return state.handleError(error as Error | APIErrorResponse, 'logout');
       }

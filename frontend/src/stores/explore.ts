@@ -39,7 +39,6 @@ export interface ExploreState {
   logs: Record<string, any>[];
   columns: ColumnInfo[];
   queryStats: QueryStats;
-  sourceId: number;
   limit: number;
   timeRange: {
     start: DateValue;
@@ -110,12 +109,10 @@ export const useExploreStore = defineStore("explore", () => {
   // Store references for use in computed properties
   const contextStore = useContextStore();
   
-  // Initialize base store with default state
   const state = useBaseStore<ExploreState>({
     logs: [],
     columns: [],
     queryStats: DEFAULT_QUERY_STATS,
-    sourceId: 0,
     limit: 100,
     timeRange: null,
     selectedRelativeTime: null, // Initialize the relative time selection to null
@@ -143,29 +140,17 @@ export const useExploreStore = defineStore("explore", () => {
     isCancellingQuery: false,
   });
 
-  // Watch context store for team/source changes
-  watch(
-    () => contextStore.teamId,
-    (newTeamId) => {
-      if (newTeamId) {
-        // Update the old teams store to maintain compatibility
-        const teamsStore = useTeamsStore();
-        teamsStore.setCurrentTeam(newTeamId);
-      }
-    }
-  );
-
   watch(
     () => contextStore.sourceId,
-    (newSourceId) => {
-      if (newSourceId !== state.data.value.sourceId) {
-        setSource(newSourceId || 0);
+    (newSourceId, oldSourceId) => {
+      if (newSourceId !== oldSourceId) {
+        onSourceChange(newSourceId || 0);
       }
     }
   );
 
-  // Getters
-  const hasValidSource = computed(() => !!state.data.value.sourceId);
+  const sourceId = computed(() => contextStore.sourceId || 0);
+  const hasValidSource = computed(() => !!sourceId.value);
   const hasValidTimeRange = computed(() => !!state.data.value.timeRange);
   const canExecuteQuery = computed(() => {
     // Basic requirements
@@ -259,9 +244,8 @@ export const useExploreStore = defineStore("explore", () => {
     return translationResult.sql;
   });
 
-  // 3. Is query state dirty (compared to last executed state)
   const isQueryStateDirty = computed(() => {
-    const { lastExecutedState, sourceId, limit, activeMode, logchefqlCode, rawSql } = state.data.value;
+    const { lastExecutedState, limit, activeMode, logchefqlCode, rawSql } = state.data.value;
 
     if (!lastExecutedState) {
       return (activeMode === 'logchefql' && !!logchefqlCode?.trim()) ||
@@ -271,7 +255,7 @@ export const useExploreStore = defineStore("explore", () => {
     const timeRangeChanged = JSON.stringify(state.data.value.timeRange) !== lastExecutedState.timeRange;
     const limitChanged = limit !== lastExecutedState.limit;
     const modeChanged = activeMode !== lastExecutedState.mode;
-    const sourceChanged = sourceId !== lastExecutedState.sourceId;
+    const sourceChanged = sourceId.value !== lastExecutedState.sourceId;
 
     let queryContentChanged = false;
     if (activeMode === 'logchefql') {
@@ -325,7 +309,7 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   const urlQueryParameters = computed(() => {
-    const { sourceId, timeRange, limit, activeMode, logchefqlCode, rawSql, selectedRelativeTime, selectedQueryId } = state.data.value;
+    const { timeRange, limit, activeMode, logchefqlCode, rawSql, selectedRelativeTime, selectedQueryId } = state.data.value;
     const teamsStore = useTeamsStore();
 
     const params: Record<string, string> = {};
@@ -334,8 +318,8 @@ export const useExploreStore = defineStore("explore", () => {
       params.team = teamsStore.currentTeamId.toString();
     }
 
-    if (sourceId) {
-      params.source = sourceId.toString();
+    if (sourceId.value) {
+      params.source = sourceId.value.toString();
     }
 
     if (selectedQueryId && !hasDivergedFromSavedQuery.value) {
@@ -395,31 +379,29 @@ export const useExploreStore = defineStore("explore", () => {
     console.log(`Explore store: Set timezone identifier to ${timezone}`);
   }
 
-  // Actions - simplified for clean approach
-  function setSource(sourceId: number) {
-    console.log(`Explore store: Setting source to ${sourceId}`);
+  function onSourceChange(newSourceId: number) {
+    console.log(`Explore store: Source changed to ${newSourceId}`);
 
-    // Clear query results to prevent showing old data
     state.data.value.generatedDisplaySql = null;
     state.data.value.logs = [];
     state.data.value.columns = [];
     state.data.value.queryStats = DEFAULT_QUERY_STATS;
+    state.data.value.groupByField = null;
     
-    // Clear histogram data and reset execution state
     _clearHistogramData();
     state.data.value.lastExecutionTimestamp = null;
     state.data.value.lastExecutedState = undefined;
 
-    // Set the new source ID
-    state.data.value.sourceId = sourceId;
-
-    // Clear queries when source changes to prevent stale table references
     if (state.data.value.activeMode === 'sql') {
       state.data.value.rawSql = '';
-      console.log('Explore store: Cleared SQL on source change');
     } else {
       state.data.value.logchefqlCode = '';
-      console.log('Explore store: Cleared LogchefQL on source change');
+    }
+  }
+
+  function setSource(newSourceId: number) {
+    if (newSourceId !== sourceId.value) {
+      contextStore.selectSource(newSourceId);
     }
   }
 
@@ -480,7 +462,7 @@ export const useExploreStore = defineStore("explore", () => {
       mode: state.data.value.activeMode,
       logchefqlQuery: state.data.value.logchefqlCode,
       sqlQuery: sqlForExecution.value,
-      sourceId: state.data.value.sourceId
+      sourceId: sourceId.value
     };
     // Also update the execution timestamp
     state.data.value.lastExecutionTimestamp = Date.now();
@@ -490,9 +472,9 @@ export const useExploreStore = defineStore("explore", () => {
     console.log('Explore store: Initializing from URL with params:', params);
 
     if (params.source) {
-      const sourceId = parseInt(params.source, 10);
-      if (!isNaN(sourceId)) {
-        state.data.value.sourceId = sourceId;
+      const parsedSourceId = parseInt(params.source, 10);
+      if (!isNaN(parsedSourceId)) {
+        contextStore.selectSource(parsedSourceId);
       }
     }
 
@@ -552,7 +534,7 @@ export const useExploreStore = defineStore("explore", () => {
 
     _updateLastExecutedState();
 
-    const hasRequiredParams = !!(state.data.value.sourceId && state.data.value.timeRange);
+    const hasRequiredParams = !!(sourceId.value && state.data.value.timeRange);
     const hasQueryContent = state.data.value.activeMode === 'sql' ? !!state.data.value.rawSql : true;
 
     return { needsResolve: false, shouldExecute: hasRequiredParams && hasQueryContent };
@@ -612,7 +594,7 @@ export const useExploreStore = defineStore("explore", () => {
 
       _updateLastExecutedState();
 
-      return { shouldExecute: !!(state.data.value.sourceId && state.data.value.timeRange) };
+      return { shouldExecute: !!(sourceId.value && state.data.value.timeRange) };
     } catch (error) {
       console.error('Failed to hydrate from resolved query:', error);
       return { shouldExecute: false };
@@ -758,8 +740,8 @@ export const useExploreStore = defineStore("explore", () => {
       const sourceDetails = sourcesStore.currentSourceDetails;
 
       // Validate that we have the current source details fully loaded and matching
-      if (!sourceDetails || sourceDetails.id !== state.data.value.sourceId) {
-        console.warn(`Source details not loaded or mismatch: have ID ${sourceDetails?.id}, need ID ${state.data.value.sourceId}`);
+      if (!sourceDetails || sourceDetails.id !== sourceId.value) {
+        console.warn(`Source details not loaded or mismatch: have ID ${sourceDetails?.id}, need ID ${sourceId.value}`);
         
         // This is likely a coordination issue during team/source switching
         // Don't show user-facing errors - just silently fail and let the UI retry
@@ -776,8 +758,8 @@ export const useExploreStore = defineStore("explore", () => {
 
       // 4. Validate that the source belongs to the current team
       const teamSources = sourcesStore.teamSources || [];
-      if (!teamSources.some(s => s.id === state.data.value.sourceId)) {
-        console.warn(`Source ${state.data.value.sourceId} does not belong to team ${currentTeamId}`);
+      if (!teamSources.some(s => s.id === sourceId.value)) {
+        console.warn(`Source ${sourceId.value} does not belong to team ${currentTeamId}`);
         return state.handleError({
           status: "error", 
           message: "Source does not belong to current team. Please refresh the page.",
@@ -819,7 +801,7 @@ export const useExploreStore = defineStore("explore", () => {
             return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
           };
 
-          const queryResponse = await logchefqlApi.query(currentTeamId, state.data.value.sourceId, {
+          const queryResponse = await logchefqlApi.query(currentTeamId, sourceId.value, {
             query: queryWithVariables,
             start_time: formatDateTime(timeRange.start),
             end_time: formatDateTime(timeRange.end),
@@ -852,10 +834,10 @@ export const useExploreStore = defineStore("explore", () => {
 
             // Add to query history
             try {
-              if (currentTeamId && state.data.value.sourceId) {
+              if (currentTeamId && sourceId.value) {
                 queryHistoryService.addQueryEntry({
                   teamId: currentTeamId,
-                  sourceId: state.data.value.sourceId,
+                  sourceId: sourceId.value,
                   query: state.data.value.logchefqlCode,
                   mode: 'logchefql'
                 });
@@ -977,7 +959,7 @@ export const useExploreStore = defineStore("explore", () => {
       try {
         // Use the centralized API calling mechanism from base store
         response = await state.callApi({
-          apiCall: async () => exploreApi.getLogs(state.data.value.sourceId, params, currentTeamId, abortController.signal),
+          apiCall: async () => exploreApi.getLogs(sourceId.value, params, currentTeamId, abortController.signal),
           // Update results ONLY on successful API call with data
           onSuccess: (data: QuerySuccessResponse | null) => {
             if (data && (data.data || data.logs)) {
@@ -1015,14 +997,14 @@ export const useExploreStore = defineStore("explore", () => {
             try {
               const teamsStore = useTeamsStore();
               const currentTeamId = teamsStore.currentTeamId;
-              if (currentTeamId && state.data.value.sourceId) {
+              if (currentTeamId && sourceId.value) {
                 const queryContent = state.data.value.activeMode === 'logchefql'
                   ? state.data.value.logchefqlCode
                   : sql;
 
                 queryHistoryService.addQueryEntry({
                   teamId: currentTeamId,
-                  sourceId: state.data.value.sourceId,
+                  sourceId: sourceId.value,
                   mode: state.data.value.activeMode,
                   query: queryContent,
                   title: state.data.value.activeSavedQueryName || undefined
@@ -1092,10 +1074,10 @@ export const useExploreStore = defineStore("explore", () => {
       // Then try to cancel via backend API if we have a query ID
       if (state.data.value.currentQueryId) {
         const currentTeamId = useTeamsStore().currentTeamId;
-        if (currentTeamId && state.data.value.sourceId) {
+        if (currentTeamId && sourceId.value) {
           try {
             await exploreApi.cancelQuery(
-              state.data.value.sourceId,
+              sourceId.value,
               state.data.value.currentQueryId,
               currentTeamId
             );
@@ -1223,7 +1205,7 @@ export const useExploreStore = defineStore("explore", () => {
       const response = await state.callApi<AIGenerateSQLResponse>({
         // The API expects sourceId as first parameter, then the request, then teamId
         apiCall: () => exploreApi.generateAISQL(
-          state.data.value.sourceId,
+          sourceId.value,
           request,
           currentTeamId
         ),
@@ -1337,7 +1319,7 @@ export const useExploreStore = defineStore("explore", () => {
 
       const response = await state.callApi<{ data: Array<HistogramData>, granularity: string }>({
         apiCall: async () => exploreApi.getHistogramData(
-          state.data.value.sourceId,
+          sourceId.value,
           params,
           currentTeamId
         ),
@@ -1373,7 +1355,7 @@ export const useExploreStore = defineStore("explore", () => {
     logs: computed(() => state.data.value.logs),
     columns: computed(() => state.data.value.columns),
     queryStats: computed(() => state.data.value.queryStats),
-    sourceId: computed(() => state.data.value.sourceId),
+    sourceId,
     limit: computed(() => state.data.value.limit),
     queryTimeout: computed(() => state.data.value.queryTimeout),
     timeRange: computed(() => state.data.value.timeRange),

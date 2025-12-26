@@ -38,10 +38,6 @@ export function contextRouterGuard(to: RouteLocationNormalized) {
     }
   }
 
-  if (teamId && teamsStore.currentTeamId !== teamId) {
-    teamsStore.setCurrentTeam(teamId)
-  }
-
   contextStore.setFromRoute(teamId, sourceId)
   console.log(`ContextGuard: team=${teamId}, source=${sourceId}`)
 }

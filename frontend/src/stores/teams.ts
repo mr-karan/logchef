@@ -14,11 +14,11 @@ import type { Source } from "@/api/sources";
 import type { APIErrorResponse } from "@/api/types";
 import { isSuccessResponse } from "@/api/types";
 import { useAuthStore } from "./auth";
+import { useContextStore } from "./context";
 
 interface TeamsState {
   userTeams: UserTeamMembership[];
   adminTeams: TeamWithMemberCount[];
-  currentTeamId: number | null;
   teamSourcesMap: Record<number, Source[]>;
   teamMembersMap: Record<number, TeamMember[]>;
 }
@@ -27,17 +27,16 @@ export const useTeamsStore = defineStore("teams", () => {
   const state = useBaseStore<TeamsState>({
     userTeams: [],
     adminTeams: [],
-    currentTeamId: null,
     teamSourcesMap: {},
     teamMembersMap: {},
   });
 
   const authStore = useAuthStore();
+  const contextStore = useContextStore();
 
-  // Computed properties
   const userTeams = computed(() => state.data.value.userTeams);
   const adminTeams = computed(() => state.data.value.adminTeams);
-  const currentTeamId = computed(() => state.data.value.currentTeamId);
+  const currentTeamId = computed(() => contextStore.teamId);
 
   // Active teams - depends on context (admin vs user)
   // Default to user teams, fallback to admin teams if no user teams
@@ -95,9 +94,7 @@ export const useTeamsStore = defineStore("teams", () => {
     return state.data.value.teamSourcesMap[teamId] || [];
   });
 
-  // Clear store state - helpful when switching contexts
   function clearState() {
-    state.data.value.currentTeamId = null;
     state.data.value.teamMembersMap = {};
     state.data.value.teamSourcesMap = {};
   }
@@ -127,10 +124,9 @@ export const useTeamsStore = defineStore("teams", () => {
             console.log("[teamsStore] loadUserTeams onSuccess: state.data.value.userTeams after assignment:",
               JSON.parse(JSON.stringify(state.data.value.userTeams)));
 
-            // Set current team if none is selected and we have teams
-            if (!state.data.value.currentTeamId && response.length > 0) {
-              state.data.value.currentTeamId = response[0].id;
-              console.log("[teamsStore] loadUserTeams onSuccess: Set currentTeamId to default:", state.data.value.currentTeamId);
+            if (!contextStore.teamId && response.length > 0) {
+              contextStore.selectTeam(response[0].id);
+              console.log("[teamsStore] loadUserTeams onSuccess: Set currentTeamId to default:", response[0].id);
             }
             return { success: true, data: state.data.value.userTeams };
           } else {
@@ -188,9 +184,9 @@ export const useTeamsStore = defineStore("teams", () => {
     }
   }
 
-  // Set the current team
   function setCurrentTeam(teamId: number | string) {
-    state.data.value.currentTeamId = typeof teamId === 'string' ? parseInt(teamId) : teamId;
+    const id = typeof teamId === 'string' ? parseInt(teamId) : teamId;
+    contextStore.selectTeam(id);
   }
 
   async function createTeam(data: CreateTeamRequest) {
@@ -209,7 +205,7 @@ export const useTeamsStore = defineStore("teams", () => {
 
             state.data.value.adminTeams.push(newTeam);
 
-            if (!state.data.value.currentTeamId && state.data.value.adminTeams.length > 0) {
+            if (!contextStore.teamId && state.data.value.adminTeams.length > 0) {
               setCurrentTeam(newTeam.id);
             }
           }
@@ -303,7 +299,6 @@ export const useTeamsStore = defineStore("teams", () => {
         successMessage: "Team deleted successfully",
         operationKey: `deleteTeam-${teamId}`,
         onSuccess: () => {
-          // Remove from both user and admin teams
           state.data.value.userTeams = state.data.value.userTeams.filter(
             (t) => t.id !== teamId
           );
@@ -311,17 +306,19 @@ export const useTeamsStore = defineStore("teams", () => {
             (t) => t.id !== teamId
           );
 
-          // If this was the current team, reset current team
-          if (state.data.value.currentTeamId === teamId) {
-            state.data.value.currentTeamId =
-              state.data.value.userTeams.length > 0
-                ? state.data.value.userTeams[0].id
-                : (state.data.value.adminTeams.length > 0
-                  ? state.data.value.adminTeams[0].id
-                  : null);
+          if (contextStore.teamId === teamId) {
+            const nextTeamId = state.data.value.userTeams.length > 0
+              ? state.data.value.userTeams[0].id
+              : (state.data.value.adminTeams.length > 0
+                ? state.data.value.adminTeams[0].id
+                : null);
+            if (nextTeamId) {
+              contextStore.selectTeam(nextTeamId);
+            } else {
+              contextStore.clear();
+            }
           }
 
-          // Clean up related data
           delete state.data.value.teamMembersMap[teamId];
           delete state.data.value.teamSourcesMap[teamId];
         }
@@ -432,20 +429,20 @@ export const useTeamsStore = defineStore("teams", () => {
               adminTeam.member_count--;
             }
 
-            // If the current user was removed, update userTeams list immediately
-            // This is especially important for the LogExplorer view
             if (isCurrentUser) {
-              // First remove the team from userTeams list directly
               state.data.value.userTeams = state.data.value.userTeams.filter(t => t.id !== teamId);
 
-              // Then handle selecting a new current team if needed
-              if (state.data.value.currentTeamId === teamId) {
-                state.data.value.currentTeamId = state.data.value.userTeams.length > 0
+              if (contextStore.teamId === teamId) {
+                const nextTeamId = state.data.value.userTeams.length > 0
                   ? state.data.value.userTeams[0].id
                   : null;
+                if (nextTeamId) {
+                  contextStore.selectTeam(nextTeamId);
+                } else {
+                  contextStore.clear();
+                }
               }
 
-              // Also reload to ensure consistency
               await loadUserTeams();
             }
           } catch (e) {
@@ -526,25 +523,25 @@ export const useTeamsStore = defineStore("teams", () => {
     return [];
   }
 
-  // Invalidate team cache
   async function invalidateTeamCache(teamId: number) {
-    // Remove team from both user and admin teams
     state.data.value.userTeams = state.data.value.userTeams.filter(t => t.id !== teamId);
     state.data.value.adminTeams = state.data.value.adminTeams.filter(t => t.id !== teamId);
 
-    // Remove team sources from cache
     delete state.data.value.teamSourcesMap[teamId];
 
-    // Reset current team if it was the invalidated one
-    if (state.data.value.currentTeamId === teamId) {
-      state.data.value.currentTeamId = state.data.value.userTeams.length > 0
+    if (contextStore.teamId === teamId) {
+      const nextTeamId = state.data.value.userTeams.length > 0
         ? state.data.value.userTeams[0].id
         : (state.data.value.adminTeams.length > 0
           ? state.data.value.adminTeams[0].id
           : null);
+      if (nextTeamId) {
+        contextStore.selectTeam(nextTeamId);
+      } else {
+        contextStore.clear();
+      }
     }
 
-    // Clear team members cache
     delete state.data.value.teamMembersMap[teamId];
   }
 

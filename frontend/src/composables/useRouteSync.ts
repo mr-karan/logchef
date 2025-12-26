@@ -3,6 +3,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
 import { useExploreStore } from '@/stores/explore';
+import { useContextStore } from '@/stores/context';
 
 export function useRouteSync() {
   const route = useRoute();
@@ -10,6 +11,7 @@ export function useRouteSync() {
   const teamsStore = useTeamsStore();
   const sourcesStore = useSourcesStore();
   const exploreStore = useExploreStore();
+  const contextStore = useContextStore();
 
   const isHydrating = ref(false);
   const hydrationError = ref<string | null>(null);
@@ -18,8 +20,8 @@ export function useRouteSync() {
     if (!teamsStore.teams.length) {
       await teamsStore.loadUserTeams();
     }
-    if (!teamsStore.currentTeamId && teamsStore.teams.length) {
-      teamsStore.setCurrentTeam(teamsStore.teams[0].id);
+    if (!contextStore.teamId && teamsStore.teams.length) {
+      contextStore.selectTeam(teamsStore.teams[0].id);
     }
   }
 
@@ -50,13 +52,12 @@ export function useRouteSync() {
       if (!teamId && teamsStore.teams.length) {
         teamId = teamsStore.teams[0].id;
       }
-      if (teamId && teamsStore.currentTeamId !== teamId) {
-        teamsStore.setCurrentTeam(teamId);
+      if (teamId && contextStore.teamId !== teamId) {
+        contextStore.selectTeam(teamId);
       }
 
-      // Sources for team
-      if (teamsStore.currentTeamId) {
-        await sourcesStore.loadTeamSources(teamsStore.currentTeamId);
+      if (contextStore.teamId) {
+        await sourcesStore.loadTeamSources(contextStore.teamId);
       }
 
       // Source from URL or first
@@ -69,13 +70,12 @@ export function useRouteSync() {
       }
 
       if (sourceId) {
-        if (exploreStore.sourceId !== sourceId) {
-          // mark origin as url to avoid auto overrides
-          (exploreStore as any).setSource(sourceId, { origin: 'url' });
+        if (contextStore.sourceId !== sourceId) {
+          contextStore.selectSource(sourceId);
         }
         await sourcesStore.loadSourceDetails(sourceId);
       } else {
-        exploreStore.setSource(0 as any);
+        contextStore.selectSource(0);
         sourcesStore.clearCurrentSourceDetails();
       }
 
@@ -103,8 +103,8 @@ export function useRouteSync() {
   }
 
   async function changeTeam(teamId: number) {
-    if (teamsStore.currentTeamId !== teamId) {
-      teamsStore.setCurrentTeam(teamId);
+    if (contextStore.teamId !== teamId) {
+      contextStore.selectTeam(teamId);
     }
     await sourcesStore.loadTeamSources(teamId);
     const first = sourcesStore.teamSources[0]?.id;
@@ -115,8 +115,8 @@ export function useRouteSync() {
   }
 
   async function changeSource(sourceId: number) {
-    if (exploreStore.sourceId !== sourceId) {
-      (exploreStore as any).setSource(sourceId, { origin: 'user' });
+    if (contextStore.sourceId !== sourceId) {
+      contextStore.selectSource(sourceId);
     }
     await sourcesStore.loadSourceDetails(sourceId);
     await router.replace({ query: { ...route.query, source: String(sourceId) } });

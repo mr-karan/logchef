@@ -89,8 +89,8 @@ async function handleDelete() {
 }
 
 async function loadHistory() {
-  if (!currentTeamId.value || !currentSourceId.value || !alertId.value) return;
-  await alertHistoryStore.loadHistory(currentTeamId.value, currentSourceId.value, alertId.value);
+  if (!alertId.value) return;
+  await alertHistoryStore.loadHistory(alertId.value);
 }
 
 async function handleResolve(_historyId: number, message: string) {

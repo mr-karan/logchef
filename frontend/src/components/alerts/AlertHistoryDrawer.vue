@@ -57,7 +57,7 @@ const alertSummary = computed(() => {
 
 async function ensureHistoryLoaded() {
   if (!props.open || !props.alert || !props.teamId || !props.sourceId) return;
-  await alertHistoryStore.loadHistory(props.teamId, props.sourceId, props.alert.id);
+  await alertHistoryStore.loadHistory(props.alert.id, props.teamId, props.sourceId);
 }
 
 async function handleResolve() {

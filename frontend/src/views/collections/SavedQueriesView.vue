@@ -45,6 +45,7 @@ import { useSourcesStore } from "@/stores/sources";
 import { formatSourceName } from "@/utils/format";
 import type { SavedTeamQuery } from "@/api/savedQueries";
 import { useTeamsStore } from "@/stores/teams";
+import { useContextStore } from "@/stores/context";
 import { Badge } from "@/components/ui/badge";
 import { useSavedQueries } from "@/composables/useSavedQueries";
 import type { SaveQueryFormData } from "@/views/explore/types";
@@ -55,9 +56,9 @@ import { useSavedQueriesStore } from "@/stores/savedQueries";
 const router = useRouter();
 const { toast } = useToast();
 
-// Initialize stores with error handling
 let sourcesStore = useSourcesStore();
 let teamsStore = useTeamsStore();
+let contextStore = useContextStore();
 const savedQueriesStore = useSavedQueriesStore();
 
 // Define local refs for queries and current source
@@ -176,13 +177,10 @@ onMounted(async () => {
     const teamIdFromUrl = router.currentRoute.value.query.team;
 
     if (teamIdFromUrl) {
-      // Set the team from URL parameter
       const teamId = parseInt(teamIdFromUrl as string);
-      teamsStore.setCurrentTeam(teamId);
-    }
-    // Set default team if none specified in URL and none selected
-    else if (!teamsStore.currentTeamId && teamsStore.teams.length > 0) {
-      teamsStore.setCurrentTeam(teamsStore.teams[0].id);
+      contextStore.selectTeam(teamId);
+    } else if (!contextStore.teamId && teamsStore.teams.length > 0) {
+      contextStore.selectTeam(teamsStore.teams[0].id);
     }
 
     // Load sources for the current team
@@ -280,14 +278,12 @@ watch(
   { immediate: true } // This will trigger immediately when component mounts
 );
 
-// Handle team change
 async function handleTeamChange(teamId: string) {
   try {
     isChangingTeam.value = true;
     urlError.value = null;
 
-    // Use the improved setCurrentTeam that handles string IDs
-    teamsStore.setCurrentTeam(teamId);
+    contextStore.selectTeam(parseInt(teamId));
 
     const currentTeamId = parseInt(teamId);
 

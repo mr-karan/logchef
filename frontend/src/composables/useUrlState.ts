@@ -36,8 +36,7 @@ export function useUrlState(): UrlStateReturn {
       return false;
     }
 
-    const teamId = teamsStore.currentTeamId;
-    if (!teamId) {
+    if (!contextStore.teamId) {
       return false;
     }
 
@@ -45,8 +44,7 @@ export function useUrlState(): UrlStateReturn {
       return false;
     }
 
-    const sourceId = exploreStore.sourceId;
-    if (sourceId && sourcesStore.isLoadingSourceDetails) {
+    if (contextStore.sourceId && sourcesStore.isLoadingSourceDetails) {
       return false;
     }
 
@@ -100,8 +98,8 @@ export function useUrlState(): UrlStateReturn {
           if (!params.source && sourceId) newQuery.source = sourceId.toString();
           
           await router.replace({ query: newQuery });
-          state.value = 'idle';
-          return;
+          params.team = newQuery.team;
+          params.source = newQuery.source;
         }
       }
 
@@ -228,8 +226,6 @@ export function useUrlState(): UrlStateReturn {
       () => exploreStore.selectedRelativeTime,
       () => exploreStore.activeMode,
       () => exploreStore.selectedQueryId,
-      () => exploreStore.logchefqlCode,
-      () => exploreStore.rawSql,
     ],
     () => {
       syncUrlFromStore();
