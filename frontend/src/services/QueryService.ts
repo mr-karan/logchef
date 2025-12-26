@@ -1,11 +1,9 @@
 import { logchefqlApi } from '@/api/logchefql';
-import { validateSQLWithDetails, analyzeQuery } from '@/utils/clickhouse-sql';
 import {
   createTimeRangeCondition,
   timeRangeToCalendarDateTime,
   formatDateForSQL,
-  getUserTimezone,
-  formatTimezoneForSQL
+  getUserTimezone
 } from '@/utils/time-utils';
 import type { QueryOptions, QueryResult, TimeRange } from '@/types/query';
 import { SqlManager } from './SqlManager';
@@ -19,36 +17,6 @@ export type { FilterCondition as QueryCondition } from '@/api/logchefql';
  * Central service for all query generation and manipulation operations
  */
 export class QueryService {
-  /**
-   * Generates a default SQL template without specific dates (uses placeholders)
-   * @param tableName The table name to use
-   * @param tsField The timestamp field name
-   * @param limit The query limit
-   * @returns SQL template string with placeholder for time range
-   */
-  static generateDefaultSQLTemplate(tableName: string, tsField: string, limit: number): string {
-    // Format table and field names
-    const formattedTableName = tableName.includes('`') || tableName.includes('.')
-      ? tableName
-      : `\`${tableName}\``;
-
-    const formattedTsField = tsField.includes('`') ? tsField : `\`${tsField}\``;
-
-    // Get user timezone for the template
-    const userTimezone = getUserTimezone();
-    const formattedTimezone = formatTimezoneForSQL(userTimezone);
-
-    // Create a template with placeholders for actual dates
-    return [
-      `SELECT *`,
-      `FROM ${formattedTableName}`,
-      `WHERE ${formattedTsField} BETWEEN toDateTime('{{startTime}}', '${formattedTimezone}')`,
-      `AND toDateTime('{{endTime}}', '${formattedTimezone}')`,
-      `ORDER BY ${formattedTsField} DESC`,
-      `LIMIT ${limit}`
-    ].join('\n');
-  }
-
   /**
    * Translates a LogchefQL query to SQL using the backend API (async)
    * @param options Query generation options including LogchefQL
@@ -243,14 +211,6 @@ export class QueryService {
   }
 
   /**
-   * Validates a ClickHouse SQL query
-   * @param query SQL query to validate
-   */
-  static validateSQL(query: string): boolean {
-    return SqlManager.validateSql(query).valid;
-  }
-
-  /**
    * Generates a default SQL query for a given time range
    */
   static generateDefaultSQL(params: {
@@ -263,30 +223,6 @@ export class QueryService {
       ...params,
       timezone: undefined
     });
-  }
-
-  /**
-   * Validates a SQL query and returns detailed information
-   * @param sql SQL query to validate
-   * @returns Detailed validation result
-   */
-  static validateSQLWithDetails(sql: string): {
-    valid: boolean;
-    error?: string;
-    ast?: any;
-    tables?: string[];
-    columns?: string[];
-  } {
-    return validateSQLWithDetails(sql);
-  }
-
-  /**
-   * Analyzes a SQL query for structure and components
-   * @param sql SQL query to analyze
-   * @returns Analysis results or null if parsing fails
-   */
-  static analyzeQuery(sql: string) {
-    return analyzeQuery(sql);
   }
 
   /**
