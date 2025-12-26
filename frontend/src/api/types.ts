@@ -68,26 +68,10 @@ export interface SavedQueryContent {
   rawSql: string;
 }
 
-export function isErrorResponse<T>(
-  response: APIResponse<T>
-): response is APIErrorResponse {
-  return response.status === "error";
-}
-
 export function isSuccessResponse<T>(
   response: APIResponse<T>
 ): response is APISuccessResponse<T> {
   return response.status === "success";
-}
-
-export function isAPIListResponse<T>(response: any): response is APIListResponse<T> {
-  return response?.status === "success" && Array.isArray(response?.data);
-}
-
-export function isPaginatedResponse<T>(response: any): response is APIPaginatedResponse<T> {
-  return response?.status === "success" && 
-         typeof response?.data?.count === 'number' && 
-         Array.isArray(response?.data);
 }
 
 // Import from our new error handler utility
