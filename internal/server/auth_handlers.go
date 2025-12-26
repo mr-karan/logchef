@@ -147,7 +147,6 @@ func (s *Server) redirectToFrontend(c *fiber.Ctx, path string, err error) error 
 		)
 	}
 
-	s.log.Debug("redirecting to frontend", "url", finalURL)
 	return c.Redirect(finalURL, fiber.StatusTemporaryRedirect)
 }
 
@@ -177,7 +176,6 @@ func (s *Server) handleLogin(c *fiber.Ctx) error {
 		Path:     "/",
 	})
 
-	s.log.Debug("initiating OIDC login flow")
 	authURL := s.oidcProvider.GetAuthURL(state)
 	return c.Redirect(authURL, fiber.StatusTemporaryRedirect)
 }
@@ -287,12 +285,4 @@ func (s *Server) handleGetCurrentUser(c *fiber.Ctx) error {
 	}
 
 	return SendSuccess(c, fiber.StatusOK, response)
-}
-
-// min is a helper, consider moving to a utility package if used elsewhere.
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

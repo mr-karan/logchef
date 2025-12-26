@@ -53,7 +53,7 @@ func NewAlertmanagerClient(opts ClientOptions) (*Client, error) {
 	// Ensure the URL ends with the correct API endpoint
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	if !strings.HasSuffix(baseURL, "/api/v2/alerts") && !strings.HasSuffix(baseURL, "/api/v1/alerts") {
-		baseURL = baseURL + "/api/v2/alerts"
+		baseURL += "/api/v2/alerts"
 	}
 
 	timeout := opts.Timeout
@@ -122,6 +122,7 @@ func (c *Client) Send(ctx context.Context, alerts []AlertPayload) error {
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
 			// Exponential backoff: delay * 2^(attempt-1)
+			// #nosec G115 -- attempt is always > 0 here, so attempt-1 >= 0
 			delay := c.retryDelay * time.Duration(1<<uint(attempt-1))
 			c.log.Warn("retrying alertmanager request", "attempt", attempt, "delay", delay, "error", lastErr)
 
@@ -180,7 +181,7 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 	statusURL := strings.Replace(c.baseURL, "/api/v2/alerts", "/api/v2/status", 1)
 	statusURL = strings.Replace(statusURL, "/api/v1/alerts", "/api/v1/status", 1)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed to create health check request: %w", err)
 	}

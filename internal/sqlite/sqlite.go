@@ -76,7 +76,7 @@ func New(opts Options) (*DB, error) {
 
 	// Initialization successful.
 	success = true
-	log.Info("sqlite database initialized successfully", "path", opts.Config.Path)
+	log.Debug("sqlite initialized", "path", opts.Config.Path)
 
 	return &DB{
 		db:      db,
@@ -105,12 +105,12 @@ func setupAndRunMigrations(dsn string, log *slog.Logger) error {
 	}
 
 	// Run the migrations using the dedicated connection.
-	log.Info("running database migrations")
+	log.Debug("running database migrations")
 	if err := runMigrations(migrationDB, log); err != nil {
-		log.Error("failed to run migrations", "error", err, "path", dsn)
+		log.Error("migration failed", "error", err, "path", dsn)
 		return fmt.Errorf("error running migrations: %w", err)
 	}
-	log.Info("database migrations completed successfully")
+	log.Debug("database migrations completed")
 	return nil
 }
 
@@ -143,7 +143,7 @@ func setPragmas(db *sql.DB) error {
 // runMigrations uses the golang-migrate library to apply migrations
 // embedded in the migrationsFS filesystem.
 func runMigrations(db *sql.DB, log *slog.Logger) error {
-	log.Info("initializing database migrations")
+	log.Debug("initializing database migrations")
 	migrationFS, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
 		log.Error("failed to create migrations filesystem subsection", "error", err)
@@ -172,13 +172,14 @@ func runMigrations(db *sql.DB, log *slog.Logger) error {
 	}
 
 	currentVersion, dirty, err := m.Version()
-	if err != nil && !errors.Is(err, migrate.ErrNilVersion) {
+	switch {
+	case err != nil && !errors.Is(err, migrate.ErrNilVersion):
 		log.Error("failed to get current migration version", "error", err)
 		// Do not return here, as we still want to attempt migrations
-	} else if errors.Is(err, migrate.ErrNilVersion) {
-		log.Info("no previous migrations found, starting fresh")
-	} else {
-		log.Info("current database migration version", "version", currentVersion, "dirty", dirty)
+	case errors.Is(err, migrate.ErrNilVersion):
+		log.Debug("no previous migrations found")
+	default:
+		log.Debug("current migration version", "version", currentVersion, "dirty", dirty)
 		if dirty {
 			log.Warn("database is in a dirty migration state. Manual intervention may be required if migrations fail.")
 		}
@@ -197,21 +198,21 @@ func runMigrations(db *sql.DB, log *slog.Logger) error {
 		}
 	}()
 
-	log.Info("applying database migrations...")
+	log.Debug("applying database migrations")
 	if err := m.Up(); err != nil {
 		if errors.Is(err, migrate.ErrNoChange) {
-			log.Info("migrations are already up to date.")
+			log.Debug("migrations up to date")
 			return nil
 		}
-		log.Error("failed during migration application", "error", err)
+		log.Error("migration failed", "error", err)
 		return fmt.Errorf("error applying migrations: %w", err)
 	}
 
 	finalVersion, dirty, err := m.Version()
 	if err != nil {
-		log.Error("failed to get final migration version after apply", "error", err)
+		log.Error("failed to get migration version", "error", err)
 	} else {
-		log.Info("migrations applied successfully.", "new_version", finalVersion, "dirty", dirty)
+		log.Debug("migrations applied", "new_version", finalVersion, "dirty", dirty)
 	}
 
 	return nil

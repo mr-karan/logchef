@@ -94,7 +94,10 @@ const (
 )
 
 // SavedQueryTimeRange represents a time range for a saved query
+// Either Relative OR Absolute should be set, not both.
+// If Relative is set, it takes precedence (e.g., "15m", "1h", "24h", "7d")
 type SavedQueryTimeRange struct {
+	Relative string `json:"relative,omitempty"` // Relative time string like "15m", "1h", "7d"
 	Absolute struct {
 		Start int64 `json:"start"` // Unix timestamp in milliseconds
 		End   int64 `json:"end"`   // Unix timestamp in milliseconds

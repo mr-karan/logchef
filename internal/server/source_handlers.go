@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -18,33 +17,16 @@ import (
 // URL: GET /api/v1/admin/sources
 // Requires: Admin privileges
 func (s *Server) handleListSources(c *fiber.Ctx) error {
-	// Use core function, passing required dependencies.
 	sources, err := core.ListSources(c.Context(), s.sqlite, s.clickhouse, s.log)
 	if err != nil {
-		s.log.Error("failed to list sources via core function", slog.Any("error", err))
+		s.log.Error("failed to list sources", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Error listing sources")
-	}
-
-	s.log.Info("sources retrieved for admin list", "count", len(sources))
-
-	// Log connection status of each source
-	for _, src := range sources {
-		s.log.Info("source connection status",
-			"source_id", src.ID,
-			"name", src.Name,
-			"database", src.Connection.Database,
-			"table", src.Connection.TableName,
-			"is_connected", src.IsConnected)
 	}
 
 	// Convert sources to response objects to avoid exposing sensitive information.
 	sourceResponses := make([]*models.SourceResponse, len(sources))
 	for i, src := range sources {
 		sourceResponses[i] = src.ToResponse()
-		s.log.Debug("source response details",
-			"source_id", src.ID,
-			"name", src.Name,
-			"is_connected", sourceResponses[i].IsConnected)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, sourceResponses)
@@ -89,7 +71,7 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ConflictErrorType)
 		}
 
-		s.log.Error("failed to create source via core function", slog.Any("error", err))
+		s.log.Error("failed to create source", "error", err)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Error creating source: %v", err), models.DatabaseErrorType)
 	}
 
@@ -114,7 +96,7 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "Source not found")
 		}
-		s.log.Error("failed to delete source via core function", slog.Any("error", err), "source_id", sourceID)
+		s.log.Error("failed to delete source", "error", err, "source_id", sourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Error deleting source: "+err.Error())
 	}
 
@@ -127,17 +109,9 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 func (s *Server) handleValidateSourceConnection(c *fiber.Ctx) error {
 	var req models.ValidateConnectionRequest
 	if err := c.BodyParser(&req); err != nil {
-		s.log.Error("invalid request body for connection validation", "error", err)
+		s.log.Warn("invalid connection validation request", "error", err)
 		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
 	}
-
-	s.log.Debug("validating connection request",
-		"host", req.Host,
-		"database", req.Database,
-		"table", req.TableName,
-		"timestamp_field", req.TimestampField,
-		"severity_field", req.SeverityField,
-	)
 
 	var result *models.ConnectionValidationResult
 	var coreErr error
@@ -160,12 +134,10 @@ func (s *Server) handleValidateSourceConnection(c *fiber.Ctx) error {
 			s.log.Warn("connection validation failed", "error", validationErr.Message, "field", validationErr.Field)
 			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
 		}
-		// Log other unexpected errors.
-		s.log.Error("error validating connection via core function", "error", coreErr, "host", req.Host)
+		s.log.Error("connection validation error", "error", coreErr, "host", req.Host)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error validating connection: "+coreErr.Error(), models.ExternalServiceErrorType)
 	}
 
-	s.log.Debug("connection validation successful", "message", result.Message, "host", req.Host)
 	return SendSuccess(c, fiber.StatusOK, result)
 }
 
@@ -191,7 +163,7 @@ func (s *Server) handleGetSourceStats(c *fiber.Ctx) error {
 		if errors.Is(err, models.ErrNotFound) || errors.Is(err, sql.ErrNoRows) {
 			return SendError(c, fiber.StatusNotFound, "Source not found")
 		}
-		s.log.Error("failed to get source before getting stats", slog.Any("error", err), "source_id", sourceID)
+		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Error getting source details")
 	}
 
@@ -201,7 +173,7 @@ func (s *Server) handleGetSourceStats(c *fiber.Ctx) error {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "Source not found when getting stats")
 		}
-		s.log.Error("failed to get source stats via core function", slog.Any("error", err), "source_id", sourceID)
+		s.log.Error("failed to get source stats", "error", err, "source_id", sourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Error getting source stats: "+err.Error())
 	}
 

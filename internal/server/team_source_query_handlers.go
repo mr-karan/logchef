@@ -3,7 +3,6 @@ package server
 import (
 	"database/sql"
 	"errors"
-	"log/slog"
 	"strconv"
 
 	core "github.com/mr-karan/logchef/internal/core"
@@ -31,7 +30,7 @@ func (s *Server) handleListTeamSourceCollections(c *fiber.Ctx) error {
 	// Using direct sqlite call as workaround.
 	queries, err := s.sqlite.ListQueriesByTeamAndSource(c.Context(), teamID, sourceID)
 	if err != nil {
-		s.log.Error("failed to list collections via db function", slog.Any("error", err), "team_id", teamID, "source_id", sourceID)
+		s.log.Error("failed to list collections", "error", err, "team_id", teamID, "source_id", sourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to list collections")
 	}
 	return SendSuccess(c, fiber.StatusOK, queries)
@@ -93,7 +92,7 @@ func (s *Server) handleCreateTeamSourceCollection(c *fiber.Ctx) error {
 	)
 
 	if err != nil {
-		s.log.Error("failed to create collection via core function", slog.Any("error", err), "team_id", teamID, "source_id", sourceID)
+		s.log.Error("failed to create collection", "error", err, "team_id", teamID, "source_id", sourceID)
 		if errors.Is(err, core.ErrQueryTypeRequired) || errors.Is(err, core.ErrInvalidQueryType) || errors.Is(err, core.ErrInvalidQueryContent) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 		}
@@ -134,7 +133,7 @@ func (s *Server) handleGetTeamSourceCollection(c *fiber.Ctx) error {
 		if errors.Is(err, sql.ErrNoRows) { // Check for underlying DB error
 			return SendErrorWithType(c, fiber.StatusNotFound, "Collection not found", models.NotFoundErrorType)
 		}
-		s.log.Error("failed to get collection via db function", slog.Any("error", err), "collection_id", collectionID)
+		s.log.Error("failed to get collection", "error", err, "collection_id", collectionID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to retrieve collection", models.GeneralErrorType)
 	}
 
@@ -217,14 +216,14 @@ func (s *Server) handleUpdateTeamSourceCollection(c *fiber.Ctx) error {
 		if errors.Is(err, sql.ErrNoRows) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Collection not found", models.NotFoundErrorType)
 		}
-		s.log.Error("failed to update collection via db function", slog.Any("error", err), "collection_id", collectionID)
+		s.log.Error("failed to update collection", "error", err, "collection_id", collectionID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update collection", models.GeneralErrorType)
 	}
 
 	// Fetch and return updated query.
 	updatedQuery, err := s.sqlite.GetTeamSourceQuery(c.Context(), teamID, sourceID, collectionID)
 	if err != nil {
-		s.log.Error("failed to fetch updated collection after update", slog.Any("error", err), "collection_id", collectionID)
+		s.log.Error("failed to fetch updated collection", "error", err, "collection_id", collectionID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Collection updated but failed to retrieve latest state", models.GeneralErrorType)
 	}
 
@@ -262,11 +261,62 @@ func (s *Server) handleDeleteTeamSourceCollection(c *fiber.Ctx) error {
 		if errors.Is(err, sql.ErrNoRows) { // Check just in case.
 			return SendErrorWithType(c, fiber.StatusNotFound, "Collection not found", models.NotFoundErrorType)
 		}
-		s.log.Error("failed to delete collection via db function", slog.Any("error", err), "collection_id", collectionID)
+		s.log.Error("failed to delete collection", "error", err, "collection_id", collectionID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete collection", models.GeneralErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Collection deleted successfully"})
+}
+
+// handleResolveQuery resolves a saved query (collection) and returns its full details
+// in a format suitable for hydrating the log explorer. This endpoint allows the frontend
+// to load a saved query by ID without including all query parameters in the URL.
+// Assumes requireAuth and requireTeamMember middleware have run.
+func (s *Server) handleResolveQuery(c *fiber.Ctx) error {
+	teamIDStr := c.Params("teamID")
+	sourceIDStr := c.Params("sourceID")
+	collectionIDStr := c.Params("collectionID")
+	if collectionIDStr == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Collection ID is required", models.ValidationErrorType)
+	}
+
+	teamID, err := core.ParseTeamID(teamIDStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team_id parameter", models.ValidationErrorType)
+	}
+	sourceID, err := core.ParseSourceID(sourceIDStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source_id parameter", models.ValidationErrorType)
+	}
+	collectionID, err := strconv.Atoi(collectionIDStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid Collection ID format", models.ValidationErrorType)
+	}
+
+	// Get the saved query from database
+	query, err := s.sqlite.GetTeamSourceQuery(c.Context(), teamID, sourceID, collectionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Collection not found", models.NotFoundErrorType)
+		}
+		s.log.Error("failed to get collection", "error", err, "collection_id", collectionID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to retrieve collection", models.GeneralErrorType)
+	}
+
+	// Return the full query details for hydration
+	// The frontend will use this to populate the explorer state
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{
+		"id":            query.ID,
+		"team_id":       query.TeamID,
+		"source_id":     query.SourceID,
+		"name":          query.Name,
+		"description":   query.Description,
+		"query_type":    query.QueryType,
+		"query_content": query.QueryContent,
+		"is_bookmarked": query.IsBookmarked,
+		"created_at":    query.CreatedAt,
+		"updated_at":    query.UpdatedAt,
+	})
 }
 
 // handleToggleQueryBookmark toggles the bookmark status of a saved query (collection).
@@ -298,7 +348,7 @@ func (s *Server) handleToggleQueryBookmark(c *fiber.Ctx) error {
 		if errors.Is(err, sql.ErrNoRows) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Collection not found", models.NotFoundErrorType)
 		}
-		s.log.Error("failed to toggle query bookmark via db function", slog.Any("error", err), "collection_id", collectionID)
+		s.log.Error("failed to toggle bookmark", "error", err, "collection_id", collectionID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to toggle bookmark", models.GeneralErrorType)
 	}
 

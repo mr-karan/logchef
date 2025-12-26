@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
+
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -16,18 +17,18 @@ func RecordHTTPRequest(method, endpoint string, statusCode int, duration time.Du
 	// Build labels with optional user context
 	var labels string
 	if user != nil {
-		labels = fmt.Sprintf(`logchef_http_requests_total{method="%s",endpoint="%s",status="%d",user_email="%s",user_role="%s"}`,
+		labels = fmt.Sprintf(`logchef_http_requests_total{method=%q,endpoint=%q,status="%d",user_email=%q,user_role=%q}`,
 			method, endpoint, statusCode, user.Email, string(user.Role))
 	} else {
-		labels = fmt.Sprintf(`logchef_http_requests_total{method="%s",endpoint="%s",status="%d",user_email="",user_role=""}`,
+		labels = fmt.Sprintf(`logchef_http_requests_total{method=%q,endpoint=%q,status="%d",user_email="",user_role=""}`,
 			method, endpoint, statusCode)
 	}
 	metrics.GetOrCreateCounter(labels).Inc()
 
-	durationLabels := fmt.Sprintf(`logchef_http_request_duration_seconds{method="%s",endpoint="%s"}`, method, endpoint)
+	durationLabels := fmt.Sprintf(`logchef_http_request_duration_seconds{method=%q,endpoint=%q}`, method, endpoint)
 	metrics.GetOrCreateHistogram(durationLabels).Update(duration.Seconds())
 
-	sizeLabels := fmt.Sprintf(`logchef_http_response_size_bytes{method="%s",endpoint="%s"}`, method, endpoint)
+	sizeLabels := fmt.Sprintf(`logchef_http_response_size_bytes{method=%q,endpoint=%q}`, method, endpoint)
 	metrics.GetOrCreateHistogram(sizeLabels).Update(float64(responseSize))
 }
 
@@ -35,10 +36,10 @@ func RecordHTTPRequest(method, endpoint string, statusCode int, duration time.Du
 func RecordHTTPError(method, endpoint, errorType string, statusCode int, user *models.User) {
 	var labels string
 	if user != nil {
-		labels = fmt.Sprintf(`logchef_http_errors_total{method="%s",endpoint="%s",error_type="%s",status="%d",user_email="%s",user_role="%s"}`,
+		labels = fmt.Sprintf(`logchef_http_errors_total{method=%q,endpoint=%q,error_type=%q,status="%d",user_email=%q,user_role=%q}`,
 			method, endpoint, errorType, statusCode, user.Email, string(user.Role))
 	} else {
-		labels = fmt.Sprintf(`logchef_http_errors_total{method="%s",endpoint="%s",error_type="%s",status="%d",user_email="",user_role=""}`,
+		labels = fmt.Sprintf(`logchef_http_errors_total{method=%q,endpoint=%q,error_type=%q,status="%d",user_email="",user_role=""}`,
 			method, endpoint, errorType, statusCode)
 	}
 	metrics.GetOrCreateCounter(labels).Inc()
@@ -54,21 +55,21 @@ func RecordQuery(source *models.Source, queryType string, success bool, duration
 	// Query metrics with meaningful source and user labels
 	var labels string
 	if user != nil {
-		labels = fmt.Sprintf(`logchef_query_total{source_id="%d",source_name="%s",database="%s",table="%s",query_type="%s",result="%s",user_email="%s",user_role="%s"}`,
+		labels = fmt.Sprintf(`logchef_query_total{source_id="%d",source_name=%q,database=%q,table=%q,query_type=%q,result=%q,user_email=%q,user_role=%q}`,
 			source.ID, source.Name, source.Connection.Database, source.Connection.TableName, queryType, result, user.Email, string(user.Role))
 	} else {
-		labels = fmt.Sprintf(`logchef_query_total{source_id="%d",source_name="%s",database="%s",table="%s",query_type="%s",result="%s",user_email="",user_role=""}`,
+		labels = fmt.Sprintf(`logchef_query_total{source_id="%d",source_name=%q,database=%q,table=%q,query_type=%q,result=%q,user_email="",user_role=""}`,
 			source.ID, source.Name, source.Connection.Database, source.Connection.TableName, queryType, result)
 	}
 	metrics.GetOrCreateCounter(labels).Inc()
 
 	// Duration histogram with source context
-	durationLabels := fmt.Sprintf(`logchef_query_duration_seconds{source_name="%s",database="%s",table="%s"}`,
+	durationLabels := fmt.Sprintf(`logchef_query_duration_seconds{source_name=%q,database=%q,table=%q}`,
 		source.Name, source.Connection.Database, source.Connection.TableName)
 	metrics.GetOrCreateHistogram(durationLabels).Update(duration.Seconds())
 
 	if success && rowsReturned >= 0 {
-		rowsLabels := fmt.Sprintf(`logchef_query_rows_returned{source_name="%s",database="%s",table="%s"}`,
+		rowsLabels := fmt.Sprintf(`logchef_query_rows_returned{source_name=%q,database=%q,table=%q}`,
 			source.Name, source.Connection.Database, source.Connection.TableName)
 		metrics.GetOrCreateHistogram(rowsLabels).Update(float64(rowsReturned))
 	}
@@ -76,14 +77,14 @@ func RecordQuery(source *models.Source, queryType string, success bool, duration
 
 // RecordQueryTimeout records query timeout metrics
 func RecordQueryTimeout(source *models.Source, queryType string) {
-	labels := fmt.Sprintf(`logchef_query_timeouts_total{source_id="%d",source_name="%s",database="%s",table="%s",query_type="%s"}`,
+	labels := fmt.Sprintf(`logchef_query_timeouts_total{source_id="%d",source_name=%q,database=%q,table=%q,query_type=%q}`,
 		source.ID, source.Name, source.Connection.Database, source.Connection.TableName, queryType)
 	metrics.GetOrCreateCounter(labels).Inc()
 }
 
 // RecordQueryError records query error metrics
 func RecordQueryError(source *models.Source, errorType string) {
-	labels := fmt.Sprintf(`logchef_query_errors_total{source_id="%d",source_name="%s",database="%s",table="%s",error_type="%s"}`,
+	labels := fmt.Sprintf(`logchef_query_errors_total{source_id="%d",source_name=%q,database=%q,table=%q,error_type=%q}`,
 		source.ID, source.Name, source.Connection.Database, source.Connection.TableName, errorType)
 	metrics.GetOrCreateCounter(labels).Inc()
 }
@@ -97,15 +98,15 @@ func RecordHistogram(source *models.Source, success bool, duration time.Duration
 
 	var labels string
 	if user != nil {
-		labels = fmt.Sprintf(`logchef_histogram_total{source_id="%d",source_name="%s",database="%s",table="%s",result="%s",user_email="%s",user_role="%s"}`,
+		labels = fmt.Sprintf(`logchef_histogram_total{source_id="%d",source_name=%q,database=%q,table=%q,result=%q,user_email=%q,user_role=%q}`,
 			source.ID, source.Name, source.Connection.Database, source.Connection.TableName, result, user.Email, string(user.Role))
 	} else {
-		labels = fmt.Sprintf(`logchef_histogram_total{source_id="%d",source_name="%s",database="%s",table="%s",result="%s",user_email="",user_role=""}`,
+		labels = fmt.Sprintf(`logchef_histogram_total{source_id="%d",source_name=%q,database=%q,table=%q,result=%q,user_email="",user_role=""}`,
 			source.ID, source.Name, source.Connection.Database, source.Connection.TableName, result)
 	}
 	metrics.GetOrCreateCounter(labels).Inc()
 
-	durationLabels := fmt.Sprintf(`logchef_histogram_duration_seconds{source_name="%s",database="%s",table="%s"}`,
+	durationLabels := fmt.Sprintf(`logchef_histogram_duration_seconds{source_name=%q,database=%q,table=%q}`,
 		source.Name, source.Connection.Database, source.Connection.TableName)
 	metrics.GetOrCreateHistogram(durationLabels).Update(duration.Seconds())
 }
@@ -117,7 +118,7 @@ func RecordClickHouseConnectionStatus(source *models.Source, healthy bool) {
 		status = 1.0
 	}
 
-	labels := fmt.Sprintf(`logchef_clickhouse_connection_status{source_id="%d",source_name="%s",database="%s",table="%s",host="%s"}`,
+	labels := fmt.Sprintf(`logchef_clickhouse_connection_status{source_id="%d",source_name=%q,database=%q,table=%q,host=%q}`,
 		source.ID, source.Name, source.Connection.Database, source.Connection.TableName, source.Connection.Host)
 	metrics.GetOrCreateGauge(labels, nil).Set(status)
 }
@@ -129,7 +130,7 @@ func RecordClickHouseValidation(source *models.Source, success bool) {
 		result = "failure"
 	}
 
-	labels := fmt.Sprintf(`logchef_clickhouse_connection_validation_total{source_id="%d",source_name="%s",database="%s",table="%s",host="%s",result="%s"}`,
+	labels := fmt.Sprintf(`logchef_clickhouse_connection_validation_total{source_id="%d",source_name=%q,database=%q,table=%q,host=%q,result=%q}`,
 		source.ID, source.Name, source.Connection.Database, source.Connection.TableName, source.Connection.Host, result)
 	metrics.GetOrCreateCounter(labels).Inc()
 }
@@ -141,7 +142,7 @@ func RecordClickHouseReconnection(source *models.Source, success bool) {
 		result = "failure"
 	}
 
-	labels := fmt.Sprintf(`logchef_clickhouse_reconnections_total{source_id="%d",source_name="%s",database="%s",table="%s",host="%s",result="%s"}`,
+	labels := fmt.Sprintf(`logchef_clickhouse_reconnections_total{source_id="%d",source_name=%q,database=%q,table=%q,host=%q,result=%q}`,
 		source.ID, source.Name, source.Connection.Database, source.Connection.TableName, source.Connection.Host, result)
 	metrics.GetOrCreateCounter(labels).Inc()
 }
@@ -155,10 +156,10 @@ func RecordAuthAttempt(method string, success bool, user *models.User) {
 
 	var labels string
 	if user != nil {
-		labels = fmt.Sprintf(`logchef_auth_attempts_total{method="%s",result="%s",user_email="%s",user_role="%s"}`,
+		labels = fmt.Sprintf(`logchef_auth_attempts_total{method=%q,result=%q,user_email=%q,user_role=%q}`,
 			method, result, user.Email, string(user.Role))
 	} else {
-		labels = fmt.Sprintf(`logchef_auth_attempts_total{method="%s",result="%s",user_email="",user_role=""}`,
+		labels = fmt.Sprintf(`logchef_auth_attempts_total{method=%q,result=%q,user_email="",user_role=""}`,
 			method, result)
 	}
 	metrics.GetOrCreateCounter(labels).Inc()
@@ -173,10 +174,10 @@ func RecordSessionOperation(operation string, success bool, user *models.User) {
 
 	var labels string
 	if user != nil {
-		labels = fmt.Sprintf(`logchef_session_operations_total{operation="%s",result="%s",user_email="%s",user_role="%s"}`,
+		labels = fmt.Sprintf(`logchef_session_operations_total{operation=%q,result=%q,user_email=%q,user_role=%q}`,
 			operation, result, user.Email, string(user.Role))
 	} else {
-		labels = fmt.Sprintf(`logchef_session_operations_total{operation="%s",result="%s",user_email="",user_role=""}`,
+		labels = fmt.Sprintf(`logchef_session_operations_total{operation=%q,result=%q,user_email="",user_role=""}`,
 			operation, result)
 	}
 	metrics.GetOrCreateCounter(labels).Inc()
@@ -191,10 +192,10 @@ func RecordAPITokenOperation(operation string, success bool, user *models.User, 
 
 	var labels string
 	if user != nil {
-		labels = fmt.Sprintf(`logchef_api_token_operations_total{operation="%s",result="%s",user_email="%s",user_role="%s",token_name="%s"}`,
+		labels = fmt.Sprintf(`logchef_api_token_operations_total{operation=%q,result=%q,user_email=%q,user_role=%q,token_name=%q}`,
 			operation, result, user.Email, string(user.Role), tokenName)
 	} else {
-		labels = fmt.Sprintf(`logchef_api_token_operations_total{operation="%s",result="%s",user_email="",user_role="",token_name="%s"}`,
+		labels = fmt.Sprintf(`logchef_api_token_operations_total{operation=%q,result=%q,user_email="",user_role="",token_name=%q}`,
 			operation, result, tokenName)
 	}
 	metrics.GetOrCreateCounter(labels).Inc()
@@ -204,10 +205,10 @@ func RecordAPITokenOperation(operation string, success bool, user *models.User, 
 func RecordAuthorizationFailure(endpoint string, user *models.User, reason string) {
 	var labels string
 	if user != nil {
-		labels = fmt.Sprintf(`logchef_authorization_failures_total{endpoint="%s",reason="%s",user_email="%s",user_role="%s"}`,
+		labels = fmt.Sprintf(`logchef_authorization_failures_total{endpoint=%q,reason=%q,user_email=%q,user_role=%q}`,
 			endpoint, reason, user.Email, string(user.Role))
 	} else {
-		labels = fmt.Sprintf(`logchef_authorization_failures_total{endpoint="%s",reason="%s",user_email="",user_role=""}`,
+		labels = fmt.Sprintf(`logchef_authorization_failures_total{endpoint=%q,reason=%q,user_email="",user_role=""}`,
 			endpoint, reason)
 	}
 	metrics.GetOrCreateCounter(labels).Inc()
@@ -222,10 +223,10 @@ func RecordTeamOperation(team *models.Team, operation string, success bool, user
 
 	var labels string
 	if user != nil {
-		labels = fmt.Sprintf(`logchef_team_operations_total{team_id="%d",team_name="%s",operation="%s",result="%s",user_email="%s",user_role="%s"}`,
+		labels = fmt.Sprintf(`logchef_team_operations_total{team_id="%d",team_name=%q,operation=%q,result=%q,user_email=%q,user_role=%q}`,
 			team.ID, team.Name, operation, result, user.Email, string(user.Role))
 	} else {
-		labels = fmt.Sprintf(`logchef_team_operations_total{team_id="%d",team_name="%s",operation="%s",result="%s",user_email="",user_role=""}`,
+		labels = fmt.Sprintf(`logchef_team_operations_total{team_id="%d",team_name=%q,operation=%q,result=%q,user_email="",user_role=""}`,
 			team.ID, team.Name, operation, result)
 	}
 	metrics.GetOrCreateCounter(labels).Inc()
@@ -241,10 +242,10 @@ func RecordSourceOperation(source *models.Source, operation string, success bool
 
 	var labels string
 	if user != nil {
-		labels = fmt.Sprintf(`logchef_source_operations_total{source_id="%d",source_name="%s",database="%s",table="%s",operation="%s",result="%s",user_email="%s",user_role="%s"}`,
+		labels = fmt.Sprintf(`logchef_source_operations_total{source_id="%d",source_name=%q,database=%q,table=%q,operation=%q,result=%q,user_email=%q,user_role=%q}`,
 			source.ID, source.Name, source.Connection.Database, source.Connection.TableName, operation, result, user.Email, string(user.Role))
 	} else {
-		labels = fmt.Sprintf(`logchef_source_operations_total{source_id="%d",source_name="%s",database="%s",table="%s",operation="%s",result="%s",user_email="",user_role=""}`,
+		labels = fmt.Sprintf(`logchef_source_operations_total{source_id="%d",source_name=%q,database=%q,table=%q,operation=%q,result=%q,user_email="",user_role=""}`,
 			source.ID, source.Name, source.Connection.Database, source.Connection.TableName, operation, result)
 	}
 	metrics.GetOrCreateCounter(labels).Inc()
@@ -259,10 +260,10 @@ func RecordCollectionOperation(source *models.Source, team *models.Team, operati
 
 	var labels string
 	if user != nil {
-		labels = fmt.Sprintf(`logchef_collection_operations_total{source_name="%s",team_name="%s",operation="%s",result="%s",collection_name="%s",user_email="%s",user_role="%s"}`,
+		labels = fmt.Sprintf(`logchef_collection_operations_total{source_name=%q,team_name=%q,operation=%q,result=%q,collection_name=%q,user_email=%q,user_role=%q}`,
 			source.Name, team.Name, operation, result, collectionName, user.Email, string(user.Role))
 	} else {
-		labels = fmt.Sprintf(`logchef_collection_operations_total{source_name="%s",team_name="%s",operation="%s",result="%s",collection_name="%s",user_email="",user_role=""}`,
+		labels = fmt.Sprintf(`logchef_collection_operations_total{source_name=%q,team_name=%q,operation=%q,result=%q,collection_name=%q,user_email="",user_role=""}`,
 			source.Name, team.Name, operation, result, collectionName)
 	}
 	metrics.GetOrCreateCounter(labels).Inc()
@@ -277,15 +278,15 @@ func RecordAIOperation(source *models.Source, operation string, success bool, du
 
 	var labels string
 	if user != nil {
-		labels = fmt.Sprintf(`logchef_ai_operations_total{source_name="%s",database="%s",table="%s",operation="%s",result="%s",user_email="%s",user_role="%s"}`,
+		labels = fmt.Sprintf(`logchef_ai_operations_total{source_name=%q,database=%q,table=%q,operation=%q,result=%q,user_email=%q,user_role=%q}`,
 			source.Name, source.Connection.Database, source.Connection.TableName, operation, result, user.Email, string(user.Role))
 	} else {
-		labels = fmt.Sprintf(`logchef_ai_operations_total{source_name="%s",database="%s",table="%s",operation="%s",result="%s",user_email="",user_role=""}`,
+		labels = fmt.Sprintf(`logchef_ai_operations_total{source_name=%q,database=%q,table=%q,operation=%q,result=%q,user_email="",user_role=""}`,
 			source.Name, source.Connection.Database, source.Connection.TableName, operation, result)
 	}
 	metrics.GetOrCreateCounter(labels).Inc()
 
-	durationLabels := fmt.Sprintf(`logchef_ai_duration_seconds{source_name="%s",operation="%s"}`, source.Name, operation)
+	durationLabels := fmt.Sprintf(`logchef_ai_duration_seconds{source_name=%q,operation=%q}`, source.Name, operation)
 	metrics.GetOrCreateHistogram(durationLabels).Update(duration.Seconds())
 }
 

@@ -125,8 +125,8 @@ func Load(path string) (*Config, error) {
 	// Env vars will override values from the config file if they exist.
 	envCb := func(s string) string {
 		// LOGCHEF_SERVER__PORT -> server.port
-		return strings.Replace(strings.ToLower(
-			strings.TrimPrefix(s, envPrefix)), "__", ".", -1)
+		return strings.ReplaceAll(strings.ToLower(
+			strings.TrimPrefix(s, envPrefix)), "__", ".")
 	}
 	if err := k.Load(env.Provider(envPrefix, ".", envCb), nil); err != nil {
 		// If loading env vars fails, it's a more critical issue for config setup.

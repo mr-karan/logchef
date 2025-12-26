@@ -17,7 +17,6 @@ import (
 // It sets default status if necessary and handles potential unique email constraint errors.
 // Populates the user ID and timestamps on the input model upon success.
 func (db *DB) CreateUser(ctx context.Context, user *models.User) error {
-	db.log.Debug("creating user record", "email", user.Email)
 
 	// Default status if not provided by caller.
 	if user.Status == "" {
@@ -64,14 +63,12 @@ func (db *DB) CreateUser(ctx context.Context, user *models.User) error {
 	user.CreatedAt = newUser.CreatedAt
 	user.UpdatedAt = newUser.UpdatedAt
 
-	db.log.Debug("user record created successfully", "user_id", user.ID)
 	return nil
 }
 
 // GetUser retrieves a single user by their ID.
 // Returns core.ErrUserNotFound if not found.
 func (db *DB) GetUser(ctx context.Context, id models.UserID) (*models.User, error) {
-	db.log.Debug("getting user record by id", "user_id", id)
 
 	userRow, err := db.queries.GetUser(ctx, int64(id))
 	if err != nil {
@@ -85,7 +82,6 @@ func (db *DB) GetUser(ctx context.Context, id models.UserID) (*models.User, erro
 // GetUserByEmail retrieves a single user by their email address.
 // Returns core.ErrUserNotFound if not found.
 func (db *DB) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
-	db.log.Debug("getting user record by email", "email", email)
 
 	userRow, err := db.queries.GetUserByEmail(ctx, email)
 	if err != nil {
@@ -99,7 +95,6 @@ func (db *DB) GetUserByEmail(ctx context.Context, email string) (*models.User, e
 // UpdateUser updates an existing user record.
 // Automatically sets the updated_at timestamp.
 func (db *DB) UpdateUser(ctx context.Context, user *models.User) error {
-	db.log.Debug("updating user record", "user_id", user.ID, "email", user.Email)
 
 	// Map domain model fields to sqlc parameters, handling nullable times.
 	var lastLoginTime, lastActiveTime sql.NullTime
@@ -131,13 +126,11 @@ func (db *DB) UpdateUser(ctx context.Context, user *models.User) error {
 		return fmt.Errorf("failed to update user: %w", err)
 	}
 
-	db.log.Debug("user record updated successfully", "user_id", user.ID)
 	return nil
 }
 
 // ListUsers retrieves all user records, ordered by creation date.
 func (db *DB) ListUsers(ctx context.Context) ([]*models.User, error) {
-	db.log.Debug("listing user records")
 
 	userRows, err := db.queries.ListUsers(ctx)
 	if err != nil {
@@ -147,20 +140,18 @@ func (db *DB) ListUsers(ctx context.Context) ([]*models.User, error) {
 
 	// Map each row to the domain model.
 	users := make([]*models.User, 0, len(userRows))
-	for _, row := range userRows {
-		mappedUser := mapUserRowToModel(row)
+	for i := range userRows {
+		mappedUser := mapUserRowToModel(userRows[i])
 		if mappedUser != nil {
 			users = append(users, mappedUser)
 		}
 	}
 
-	db.log.Debug("user records listed", "count", len(users))
 	return users, nil
 }
 
 // CountAdminUsers counts active users with the admin role.
 func (db *DB) CountAdminUsers(ctx context.Context) (int, error) {
-	db.log.Debug("counting active admin users")
 
 	count, err := db.queries.CountAdminUsers(ctx, sqlc.CountAdminUsersParams{
 		Role:   string(models.UserRoleAdmin),
@@ -171,13 +162,11 @@ func (db *DB) CountAdminUsers(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("failed to count admin users: %w", err)
 	}
 
-	db.log.Debug("active admin users counted", "count", count)
 	return int(count), nil
 }
 
 // DeleteUser removes a user record by ID.
 func (db *DB) DeleteUser(ctx context.Context, id models.UserID) error {
-	db.log.Debug("deleting user record", "user_id", id)
 
 	err := db.queries.DeleteUser(ctx, int64(id))
 	if err != nil {
@@ -186,7 +175,6 @@ func (db *DB) DeleteUser(ctx context.Context, id models.UserID) error {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
 
-	db.log.Debug("user record deleted successfully", "user_id", id)
 	return nil
 }
 
