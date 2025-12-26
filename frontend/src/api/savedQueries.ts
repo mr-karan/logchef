@@ -1,19 +1,17 @@
 import { apiClient } from "./apiUtils";
 
-/**
- * Saved query content structure
- */
 export interface SavedQueryContent {
   version: number;
   sourceId: number | string;
   timeRange: {
-    absolute: {
+    relative?: string;
+    absolute?: {
       start: number;
       end: number;
     };
   } | null;
   limit: number;
-  content: string; // The content of the query (either LogchefQL or SQL)
+  content: string;
 }
 
 /**
@@ -89,6 +87,8 @@ export const savedQueriesApi = {
   toggleBookmark: (teamId: number, sourceId: number, collectionId: number) =>
     apiClient.patch<ToggleBookmarkResponse>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}/bookmark`),
 
-  // For retrieving user teams
+  resolveQuery: (teamId: number, sourceId: number, collectionId: number) =>
+    apiClient.get<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}/resolve`),
+
   getUserTeams: () => apiClient.get<Team[]>("/me/teams")
 };

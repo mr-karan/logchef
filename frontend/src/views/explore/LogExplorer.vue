@@ -22,7 +22,7 @@ import CompactLogList from "./table/CompactLogListSimple.vue";
 import SaveQueryModal from "@/components/collections/SaveQueryModal.vue";
 import QueryEditor from "@/components/query-editor/QueryEditor.vue";
 import { useSavedQueries } from "@/composables/useSavedQueries";
-import { useExploreUrlSync } from "@/composables/useExploreUrlSync";
+import { useUrlState } from "@/composables/useUrlState";
 import { useQuery } from "@/composables/useQuery";
 import { useTimeRange } from "@/composables/useTimeRange";
 
@@ -52,15 +52,9 @@ const sourcesStore = useSourcesStore();
 const savedQueriesStore = useSavedQueriesStore();
 const { toast } = useToast();
 
-// URL synchronization and state management
-// Handles URL parameter syncing, browser history, and initialization from URL
-const { 
-  isInitializing, 
-  initializationError, 
-  syncUrlFromState, 
-  pushQueryHistoryEntry, 
-  initializeFromUrl 
-} = useExploreUrlSync();
+const urlState = useUrlState();
+const isInitializing = computed(() => urlState.state.value !== 'ready');
+const initializationError = urlState.error;
 
 const {
   logchefQuery,
@@ -192,7 +186,6 @@ const isHistogramVisible = ref(true); // State for histogram visibility toggle
 // Query execution deduplication
 const executingQueryId = ref<string | null>(null);
 const lastQueryTime = ref<number>(0);
-let lastExecutionKey = "";
 
 // Display related refs
 const displayTimezone = computed(() =>
@@ -297,11 +290,11 @@ watch(
                 success: true,
                 meta: {
                   fieldsUsed: response.data.fields_used || [],
-                  conditions: response.data.conditions?.map(c => ({
+                  conditions: response.data.conditions?.map((c: FilterCondition) => ({
                     field: c.field,
                     operator: c.operator,
                     value: c.value,
-                    isRegex: c.is_regex
+                    is_regex: c.is_regex
                   })) || []
                 }
               };
@@ -344,7 +337,7 @@ const regexHighlights = computed(() => {
 
   // Extract only regex conditions
   const regexConditions = (parsedQuery.value.meta?.conditions || []).filter(
-    (cond: QueryCondition) => cond.isRegex
+    (cond: QueryCondition) => cond.is_regex
   );
 
   // Process each regex condition
@@ -404,7 +397,6 @@ const handleQueryExecution = async (debouncingKey = "") => {
 
     // Set executing state
     executingQueryId.value = executionId;
-    lastExecutionKey = debouncingKey;
     lastQueryTime.value = now;
 
     // Execute the query using the executeQuery function from useQuery composable,
@@ -413,7 +405,7 @@ const handleQueryExecution = async (debouncingKey = "") => {
     const result = await executeQuery();
 
     // Handle coordination errors with auto-retry
-    if (result && !result.success && result.error?.error_type === 'CoordinationError') {
+    if (result && !result.success && result.error && 'error_type' in result.error && result.error.error_type === 'CoordinationError') {
       console.log(`LogExplorer: Coordination error detected, scheduling retry in 100ms`);
       // Don't clear execution state yet, let the retry handle it
       setTimeout(() => {
@@ -425,11 +417,8 @@ const handleQueryExecution = async (debouncingKey = "") => {
       return result;
     }
 
-    // Only push a history entry if the query executed successfully
-    // But don't do it during initialization to avoid duplicate history entries
     if (result && result.success && !isInitializing.value) {
-      // This will create a new browser history entry with router.push
-      pushQueryHistoryEntry();
+      urlState.pushHistoryEntry();
 
       // Update SQL and mark as not dirty AFTER successful execution
       if (activeMode.value === 'sql') {
@@ -489,13 +478,13 @@ watch(
     const t = teamParam ? parseInt(teamParam as string) : null;
     const s = sourceParam ? parseInt(sourceParam as string) : null;
     if (t && t !== currentTeamId.value) {
-      await handleTeamChange(t);
+      await handleTeamChange(t.toString());
       // If URL includes a specific source, switch to it after team change
       if (s) {
-        await handleSourceChange(s);
+        await handleSourceChange(s.toString());
       }
     } else if (s && s !== currentSourceId.value) {
-      await handleSourceChange(s);
+      await handleSourceChange(s.toString());
     }
   }
 )
@@ -668,21 +657,13 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
   }
 }
 
-// Handle histogram events
 const onHistogramTimeRangeZoom = (range: { start: Date; end: Date }) => {
   try {
-    // Use the timeRange composable function for handling
     if (handleHistogramTimeRangeZoom(range)) {
-      // Generate a unique key for this zoom operation to prevent duplicates
       const zoomKey = `zoom-${Date.now()}`;
-
-      // Execute query with the new time range
       setTimeout(() => {
         handleQueryExecution(zoomKey);
       }, 50);
-
-      // Update URL state
-      syncUrlFromState();
     }
   } catch (e) {
     console.error("Error handling histogram time range:", e);
@@ -969,25 +950,9 @@ watch(
   }
 );
 
-// Component lifecycle
 onMounted(async () => {
   try {
-    // Initialize from URL parameters
-    await initializeFromUrl();
-
-    // Execute initial query if we have required parameters and no query has been executed yet
-    setTimeout(async () => {
-      if (
-        !exploreStore.lastExecutionTimestamp &&
-        exploreStore.sourceId &&
-        exploreStore.timeRange &&
-        sourcesStore.currentSourceDetails?.id === exploreStore.sourceId &&
-        sourcesStore.hasValidCurrentSource
-      ) {
-        console.log("LogExplorer: Executing initial query on mount");
-        await handleQueryExecution('initial-mount-query');
-      }
-    }, 300);
+    await urlState.initialize();
   } catch (error) {
     console.error("Error during LogExplorer mount:", error);
     toast({
@@ -1109,8 +1074,8 @@ onBeforeUnmount(() => {
           <FieldSideBar 
             v-model:expanded="showFieldsPanel" 
             :fields="availableFields"
-            :team-id="currentTeamId"
-            :source-id="currentSourceId"
+            :team-id="currentTeamId ?? undefined"
+            :source-id="currentSourceId ?? undefined"
             @add-filter="handleAddFieldFilter"
             @field-click="handleFieldClick"
           />

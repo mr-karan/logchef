@@ -50,12 +50,12 @@ const isLoadingHistory = computed(() => {
   return alertHistoryStore.isLoadingOperation(`loadHistory-${alertId.value}`);
 });
 
-function mapSeverityVariant(severity: Alert["severity"]) {
+function mapSeverityVariant(severity: Alert["severity"]): "destructive" | "outline" | "secondary" {
   switch (severity) {
     case "critical":
       return "destructive";
     case "warning":
-      return "warning";
+      return "outline";
     default:
       return "secondary";
   }
@@ -253,7 +253,7 @@ onMounted(async () => {
                     <div class="space-y-1 flex-1">
                       <div class="flex items-center gap-2 flex-wrap">
                         <Badge
-                          :variant="entry.status === 'triggered' ? 'destructive' : entry.status === 'error' ? 'warning' : 'secondary'"
+                          :variant="entry.status === 'triggered' ? 'destructive' : entry.status === 'error' ? 'outline' : 'secondary'"
                           class="capitalize text-xs"
                         >
                           {{ entry.status }}

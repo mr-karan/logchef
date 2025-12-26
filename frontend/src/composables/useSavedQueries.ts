@@ -49,7 +49,7 @@ export function useSavedQueries(
   const isLoadingQueryDetails = ref(false)
   const searchQuery = ref('')
 
-  const isEditingExistingQuery = computed(() => !!route.query.query_id);
+  const isEditingExistingQuery = computed(() => !!(route.query.id || route.query.query_id));
 
   const canManageCollections = computed(() => {
     if (!authStore.isAuthenticated || !authStore.user) {
@@ -124,8 +124,7 @@ export function useSavedQueries(
       return
     }
 
-    // Check if we have a query_id in the URL, which means we're editing an existing query
-    const queryId = route.query.query_id
+    const queryId = route.query.id || route.query.query_id
     if (queryId) {
       // We are editing an existing query - load the query details
       const teamId = route.query.team as string
@@ -185,8 +184,7 @@ export function useSavedQueries(
     try {
       let response;
 
-      // Check if we're updating an existing query from the URL or editingQuery state
-      const queryIdFromUrl = route.query.query_id as string | undefined;
+      const queryIdFromUrl = (route.query.id || route.query.query_id) as string | undefined;
       const isUpdate = !!editingQuery.value || !!queryIdFromUrl;
       const queryId = editingQuery.value?.id.toString() || queryIdFromUrl;
 
@@ -292,29 +290,20 @@ export function useSavedQueries(
           exploreStore.setActiveSavedQueryName(savedQueryName);
         }
 
-        // Add this: Set the selectedQueryId in the store
         if (response.data && response.data.id) {
-          // Save the query ID to the store
           exploreStore.setSelectedQueryId(response.data.id.toString());
 
-          // Update URL with the new query_id
-          const currentQuery = { ...route.query };
-          currentQuery.query_id = response.data.id.toString();
-          router.replace({ query: currentQuery });
+          router.replace({ 
+            query: {
+              team: formData.team_id?.toString(),
+              source: formData.source_id?.toString(),
+              id: response.data.id.toString(),
+            }
+          });
         }
 
-        // Ensure queries are refreshed for the current source
         if (formData.team_id && formData.source_id) {
           await loadSourceQueries(formData.team_id, formData.source_id);
-        }
-
-        // Only clear query_id from URL if we were editing and now want to create a new one
-        // NOT when we just created a new query
-        if (queryIdFromUrl && response.data && response.data.id && queryIdFromUrl !== response.data.id.toString()) {
-          const currentQuery = { ...route.query };
-          // Update to the new query_id instead of deleting it
-          currentQuery.query_id = response.data.id.toString();
-          router.replace({ query: currentQuery });
         }
         return { success: true, data: response.data }; // Return success state
       } else if (response) {
@@ -369,25 +358,19 @@ export function useSavedQueries(
       // Set limit if available
       if (content.limit) exploreStore.setLimit(content.limit)
 
-      // Check if timeRange is explicitly null - this means to keep the current time range
       if (content.timeRange === null) {
         console.log("Saved query has timeRange explicitly set to null, keeping current range");
-        // Keep the current time range from the store
-      }
-      // Set time range from saved query if available and valid
-      else if (content.timeRange &&
-          content.timeRange.absolute &&
-          content.timeRange.absolute.start &&
-          content.timeRange.absolute.end) {
-        console.log("Setting time range from saved query:", content.timeRange);
+      } else if (content.timeRange?.relative) {
+        console.log("Setting relative time range from saved query:", content.timeRange.relative);
+        exploreStore.setRelativeTimeRange(content.timeRange.relative);
+      } else if (content.timeRange?.absolute?.start && content.timeRange?.absolute?.end) {
+        console.log("Setting absolute time range from saved query:", content.timeRange);
 
-        // Convert timestamps to CalendarDateTime objects
         try {
           const startDate = new Date(content.timeRange.absolute.start);
           const endDate = new Date(content.timeRange.absolute.end);
 
           if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
-            // Create CalendarDateTime objects
             const startDateTime = new CalendarDateTime(
                 startDate.getFullYear(),
                 startDate.getMonth() + 1,
@@ -406,7 +389,6 @@ export function useSavedQueries(
                 endDate.getSeconds()
             );
 
-            // Set the time range in the store
             exploreStore.setTimeConfiguration({
               absoluteRange: {
                 start: startDateTime,
@@ -421,7 +403,6 @@ export function useSavedQueries(
         }
       } else {
         console.log("Saved query has no time range specified or it's invalid, keeping current range");
-        // Keep existing time range from the store
       }
 
       // save variable data into store.
@@ -445,49 +426,16 @@ export function useSavedQueries(
         exploreStore.setActiveSavedQueryName(queryData.name);
       }
 
-      // CENTRALIZED URL HANDLING: Create URL query parameters directly
-      // This ensures consistency between dropdown and saved queries view
-      const queryParams: Record<string, string> = {};
+      const queryParams: Record<string, string> = {
+        team: queryData.team_id.toString(),
+        source: queryData.source_id.toString(),
+        id: queryData.id.toString(),
+      };
 
-      // Always include these critical parameters for proper state tracking
-      queryParams.team = queryData.team_id.toString();
-      queryParams.source = queryData.source_id.toString();
-      queryParams.query_id = queryData.id.toString(); // Most important - makes "New Query" button appear
-
-      // Set time range params from the current exploreStore state (after we've updated it)
-      const startTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.start);
-      const endTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.end);
-      if (startTime !== null && endTime !== null) {
-        // Use canonical keys expected by explorer
-        queryParams.start = startTime.toString();
-        queryParams.end = endTime.toString();
+      const currentId = route.query.id as string | undefined;
+      if (currentId !== queryData.id.toString()) {
+        router.replace({ query: queryParams });
       }
-
-      // Set limit from current store state
-      queryParams.limit = exploreStore.limit.toString();
-
-      // Set mode and query content
-      queryParams.mode = isLogchefQL ? 'logchefql' : 'sql';
-      if (queryToLoad) {
-        // For SQL mode use `sql`, for logchefql use `q`
-        if (isLogchefQL) {
-          queryParams.q = queryToLoad;
-        } else {
-          queryParams.sql = queryToLoad;
-        }
-      }
-
-      // Update URL with complete state (replaces syncUrlFromState call)
-      console.log("Updating URL with saved query state, including query_id:", queryData.id.toString());
-      router.replace({ query: queryParams });
-
-      // toast({
-      //   title: 'Success',
-      //   description: `Query "${queryData.name}" loaded successfully.`,
-      //   duration: TOAST_DURATION.SUCCESS
-      // })
-
-      // Don't call syncUrlFromState() since we're explicitly setting the URL
 
       return true
     } catch (error) {
@@ -506,18 +454,19 @@ export function useSavedQueries(
     }
   }
 
-  // Generate shareable URL for a saved query
   function getQueryUrl(query: SavedTeamQuery): string {
-    // Use the new shareable collection URL format
     return `/logs/collection/${query.team_id}/${query.source_id}/${query.id}`
   }
 
-  // Handle opening query in explorer
   function openQuery(query: SavedTeamQuery) {
-    const url = getQueryUrl(query)
-    // Always use router.push to create a proper history entry
-    // This ensures the back button works correctly when navigating between queries
-    router.push(url)
+    router.push({
+      path: '/logs/explore',
+      query: {
+        team: query.team_id.toString(),
+        source: query.source_id.toString(),
+        id: query.id.toString(),
+      },
+    })
   }
 
   // Handle edit query
@@ -550,9 +499,9 @@ export function useSavedQueries(
           exploreStore.setActiveSavedQueryName(null);
           exploreStore.setSelectedQueryId(null);
 
-          // Remove query_id from URL if present
-          if (route.query.query_id) {
+          if (route.query.id || route.query.query_id) {
             const currentQuery = { ...route.query };
+            delete currentQuery.id;
             delete currentQuery.query_id;
             router.replace({ query: currentQuery });
           }

@@ -96,6 +96,18 @@ const explorerTo = computed(() => {
   };
 });
 
+const collectionsTo = computed(() => {
+  const team = teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : undefined;
+  const source = exploreStore.sourceId ? exploreStore.sourceId.toString() : undefined;
+  const query: Record<string, string> = {};
+  if (team) query.team = team;
+  if (source) query.source = source;
+  return {
+    path: "/logs/saved",
+    query,
+  };
+});
+
 // Get initial sidebar state from cookie or default to true
 const getSavedState = () => {
   if (typeof document !== "undefined") {

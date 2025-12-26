@@ -608,7 +608,6 @@ import {
   PanelRightOpen,
   PanelRightClose,
   AlertCircle,
-  FileEdit,
   FilePlus2,
   Search,
   Code2,
@@ -1954,7 +1953,6 @@ const route = useRoute();
 const router = useRouter();
 
 // Add these computed properties after other computed properties
-const activeSavedQueryName = computed(() => exploreStore.activeSavedQueryName);
 const isEditingExistingQuery = computed(() => !!route.query.query_id);
 
 // Handler for loading query from history

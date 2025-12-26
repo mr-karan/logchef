@@ -24,7 +24,7 @@ export const useAPITokensStore = defineStore("apiTokens", () => {
         apiCall: () => apiTokensApi.listTokens(),
         operationKey: 'loadTokens',
         onSuccess: (response) => {
-          state.data.value.tokens = response || [];
+          state.data.value.tokens = (response as APIToken[]) || [];
         },
         showToast: false,
       });

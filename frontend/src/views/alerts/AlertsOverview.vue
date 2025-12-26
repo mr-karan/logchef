@@ -72,13 +72,14 @@ const isLoadingAlerts = computed(() => {
   return alertsStore.isLoadingOperation(`fetchAlerts-${currentTeamId.value}-${currentSourceId.value}`);
 });
 
-const loadError = computed(() => {
+const loadError = computed((): { message: string; operation?: string } | null => {
   const error = alertsStore.error;
   if (!error) return null;
-  if (typeof error === "object" && "operation" in error) {
-    return error;
-  }
-  return null;
+  // Convert APIErrorResponse to the format expected by ErrorAlert
+  return { 
+    message: error.message,
+    operation: undefined 
+  };
 });
 
 const emptyStateMessage = computed(() => {
@@ -145,12 +146,12 @@ function refreshAlerts() {
   retryLoad();
 }
 
-function mapSeverityVariant(severity: Alert["severity"]) {
+function mapSeverityVariant(severity: Alert["severity"]): "destructive" | "outline" | "secondary" {
   switch (severity) {
     case "critical":
       return "destructive";
     case "warning":
-      return "warning";
+      return "outline";
     default:
       return "secondary";
   }

@@ -123,6 +123,7 @@ const routes: RouteRecordRaw[] = [
         }),
         meta: { title: "Loading Collection..." },
       },
+
     ],
   },
   // Management Section (Admin only)

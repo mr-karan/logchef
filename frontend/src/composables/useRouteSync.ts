@@ -83,6 +83,7 @@ export function useRouteSync() {
       const params: Record<string, string | undefined> = {};
       const q = route.query;
       if (q.source) params.source = String(q.source);
+      if (q.t) params.t = String(q.t);
       if (q.time) params.time = String(q.time);
       if (q.start) params.start = String(q.start);
       if (q.end) params.end = String(q.end);
@@ -90,6 +91,7 @@ export function useRouteSync() {
       if (q.mode) params.mode = String(q.mode);
       if (q.q) params.q = String(q.q);
       if (q.sql) params.sql = String(q.sql);
+      if (q.id) params.id = String(q.id);
       if (q.query_id) params.query_id = String(q.query_id);
 
       exploreStore.initializeFromUrl(params);

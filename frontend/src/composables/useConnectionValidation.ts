@@ -71,19 +71,23 @@ export function useConnectionValidation() {
       })
       
       if (result.success) {
+        const data = result.data as { message: string } | null
         validationResult.value = {
           success: true,
-          message: result.data?.message || 'Connection validated successfully'
+          message: data?.message || 'Connection validated successfully'
         }
         
         return { success: true, data: result.data }
       } else {
+        const errorMessage = typeof result.error === 'string' 
+          ? result.error 
+          : result.error?.message || 'Validation failed'
         validationResult.value = {
           success: false,
-          message: result.error || 'Validation failed'
+          message: errorMessage
         }
         
-        return { success: false, error: result.error }
+        return { success: false, error: errorMessage }
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred'

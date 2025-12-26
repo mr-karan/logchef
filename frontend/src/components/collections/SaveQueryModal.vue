@@ -145,12 +145,9 @@ onMounted(async () => {
     description.value = props.editData.description || '';
     queryId.value = props.editData.id?.toString() || '';
 
-    // Attempt to parse the query content for better UX
     try {
       const content = JSON.parse(props.editData.query_content);
-
-      // Set save timestamp based on whether timeRange exists in the data
-      if (content.timeRange && content.timeRange.absolute) {
+      if (content.timeRange && (content.timeRange.absolute || content.timeRange.relative)) {
         saveTimestamp.value = true;
       }
     } catch (e) {
@@ -163,12 +160,9 @@ onMounted(async () => {
     // Set queryId if editing (isEditMode is true and initialData has an id)
     queryId.value = props.isEditMode ? (props.initialData.id?.toString() || '') : '';
 
-    // If we're editing, attempt to parse the query content for better UX
     try {
       const content = JSON.parse(props.initialData.query_content);
-
-      // Set save timestamp based on whether timeRange exists in the data
-      if (content.timeRange && content.timeRange.absolute) {
+      if (content.timeRange && (content.timeRange.absolute || content.timeRange.relative)) {
         saveTimestamp.value = true;
       }
     } catch (e) {
@@ -192,7 +186,7 @@ watch([() => props.initialData, () => props.editData], ([newInitialData, newEdit
 
     try {
       const content = JSON.parse(newEditData.query_content);
-      if (content.timeRange && content.timeRange.absolute) {
+      if (content.timeRange && (content.timeRange.absolute || content.timeRange.relative)) {
         saveTimestamp.value = true;
       }
     } catch (e) {
@@ -207,7 +201,7 @@ watch([() => props.initialData, () => props.editData], ([newInitialData, newEdit
 
     try {
       const content = JSON.parse(newInitialData.query_content);
-      if (content.timeRange && content.timeRange.absolute) {
+      if (content.timeRange && (content.timeRange.absolute || content.timeRange.relative)) {
         saveTimestamp.value = true;
       }
     } catch (e) {
@@ -257,16 +251,25 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       throw new Error(`${activeMode === 'logchefql' ? 'LogchefQL' : 'SQL'} content is required`);
     }
 
+    let timeRangeValue = null;
+    if (saveTimestamp) {
+      if (exploreStore.selectedRelativeTime) {
+        timeRangeValue = { relative: exploreStore.selectedRelativeTime };
+      } else {
+        timeRangeValue = {
+          absolute: {
+            start: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.start) : Date.now() - 3600000,
+            end: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.end) : Date.now()
+          }
+        };
+      }
+    }
+
     const simplifiedContent = {
       version: content.version || 1,
       sourceId: content.sourceId || currentSourceId.value,
-      timeRange: saveTimestamp ? { // Use the function parameter here
-        absolute: {
-          start: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.start) : Date.now() - 3600000,
-          end: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.end) : Date.now()
-        }
-      } : null, // Set timeRange to null if saveTimestamp is false
-      limit: exploreStore.limit, // Always save the current limit regardless of timestamp setting
+      timeRange: timeRangeValue,
+      limit: exploreStore.limit,
       content: queryContent,
       variables: allVariables.value,
     };
@@ -275,20 +278,28 @@ function prepareQueryContent(saveTimestamp: boolean): string {
   } catch (error) {
     console.error('Error preparing query content:', error);
 
-    // Fallback to a minimal valid structure
     const currentTime = Date.now();
     const oneHourAgo = currentTime - 3600000;
+
+    let fallbackTimeRange = null;
+    if (saveTimestamp) {
+      if (exploreStore.selectedRelativeTime) {
+        fallbackTimeRange = { relative: exploreStore.selectedRelativeTime };
+      } else {
+        fallbackTimeRange = {
+          absolute: {
+            start: oneHourAgo,
+            end: currentTime
+          }
+        };
+      }
+    }
 
     return JSON.stringify({
       version: 1,
       sourceId: currentSourceId.value,
-      timeRange: saveTimestamp ? {
-        absolute: {
-          start: oneHourAgo,
-          end: currentTime
-        }
-      } : null, // Set timeRange to null if saveTimestamp is false
-      limit: saveTimestamp ? exploreStore.limit : 100,
+      timeRange: fallbackTimeRange,
+      limit: exploreStore.limit || 100,
       content: exploreStore.activeMode === 'logchefql' ?
         (exploreStore.logchefqlCode || '') :
         (exploreStore.rawSql || ''),

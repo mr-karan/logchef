@@ -19,83 +19,46 @@ import { useSourcesStore } from "./sources";
 import { useTeamsStore } from "@/stores/teams";
 import { useContextStore } from "@/stores/context";
 import { useBaseStore } from "./base";
-import { parseRelativeTimeString } from "@/utils/time";
+import { parseRelativeTimeString, timestampToCalendarDateTime, calendarDateTimeToTimestamp } from "@/utils/time";
 import { SqlManager } from '@/services/SqlManager';
 import { type TimeRange } from '@/types/query';
-import { type HistogramData } from '@/services/HistogramService';
+import { HistogramService, type HistogramData } from '@/services/HistogramService';
 import { useVariables } from "@/composables/useVariables";
 import { queryHistoryService } from "@/services/QueryHistoryService";
 import { createTimeRangeCondition } from '@/utils/time-utils';
 
-// Helper function to get formatted table name
-export function getFormattedTableName(source: any): string {
-  if (!source) {
-    console.error("getFormattedTableName called with null/undefined source");
-    return "logs.vector_logs"; // Default fallback
-  }
-
-  if (source?.connection?.database && source?.connection?.table_name) {
-    return `${source.connection.database}.${source.connection.table_name}`;
-  }
-
-  console.warn("Source missing connection details:", source);
-
-  // Try to extract information from source if possible
-  let database = source?.connection?.database || "logs";
-  let tableName = source?.connection?.table_name || "vector_logs";
-
-  return `${database}.${tableName}`; // Default fallback
-}
-
-// Helper to get the default time range (15 minutes)
-export function getDefaultTimeRange() {
-  const now = new Date();
-  const fifteenMinutesAgo = new Date(now);
-  fifteenMinutesAgo.setMinutes(now.getMinutes() - 15); // Fifteen minutes ago
-
-  // Return timestamps in milliseconds
-  return {
-    start: fifteenMinutesAgo.getTime(),
-    end: now.getTime(),
-  };
+interface SavedQuerySnapshot {
+  queryContent: string;
+  limit: number;
+  relativeTime: string | null;
+  absoluteStart: number | null;
+  absoluteEnd: number | null;
 }
 
 export interface ExploreState {
   logs: Record<string, any>[];
   columns: ColumnInfo[];
   queryStats: QueryStats;
-  // Core query state
   sourceId: number;
   limit: number;
   timeRange: {
     start: DateValue;
     end: DateValue;
   } | null;
-  // Selected relative time window (e.g., "15m", "1h", "7d", "today", etc.)
   selectedRelativeTime: string | null;
-  // UI state for filter builder
   filterConditions: FilterCondition[];
-  // Raw SQL state
   rawSql: string;
-  // Pending raw SQL to execute when source details are available
   pendingRawSql?: string;
-  // SQL for display (with human-readable timestamps)
   displaySql?: string;
-  // LogchefQL query
   logchefQuery?: string;
-  // LogchefQL code state
   logchefqlCode: string;
-  // Active mode (logchefql or sql)
   activeMode: "logchefql" | "sql";
-  // Loading and error states
   isLoading?: boolean;
   error?: string | null;
-  // Query ID for tracking
   queryId?: string | null;
-  // ID of the currently loaded saved query (if any)
   selectedQueryId: string | null;
-  // Name of the currently active saved query (if any)
   activeSavedQueryName: string | null;
+  savedQuerySnapshot: SavedQuerySnapshot | null;
   // Query stats
   stats?: any;
   // Last executed query state - crucial for dirty checking and consistency
@@ -161,8 +124,9 @@ export const useExploreStore = defineStore("explore", () => {
     logchefqlCode: "",
     activeMode: "logchefql",
     lastExecutionTimestamp: null,
-    selectedQueryId: null, // Initialize new state
+    selectedQueryId: null,
     activeSavedQueryName: null,
+    savedQuerySnapshot: null,
     groupByField: null, // Initialize the groupByField
     selectedTimezoneIdentifier: null, // Initialize the timezone identifier
     generatedDisplaySql: null, // Initialize the new state property
@@ -295,23 +259,20 @@ export const useExploreStore = defineStore("explore", () => {
     return translationResult.sql;
   });
 
-  // 3. Is query state dirty
+  // 3. Is query state dirty (compared to last executed state)
   const isQueryStateDirty = computed(() => {
     const { lastExecutedState, sourceId, limit, activeMode, logchefqlCode, rawSql } = state.data.value;
 
     if (!lastExecutedState) {
-      // If there's no last executed state, check if we have any query content
       return (activeMode === 'logchefql' && !!logchefqlCode?.trim()) ||
              (activeMode === 'sql' && !!rawSql?.trim());
     }
 
-    // Compare current state with last executed state
     const timeRangeChanged = JSON.stringify(state.data.value.timeRange) !== lastExecutedState.timeRange;
     const limitChanged = limit !== lastExecutedState.limit;
     const modeChanged = activeMode !== lastExecutedState.mode;
     const sourceChanged = sourceId !== lastExecutedState.sourceId;
 
-    // Compare query content based on mode
     let queryContentChanged = false;
     if (activeMode === 'logchefql') {
       queryContentChanged = logchefqlCode !== lastExecutedState.logchefqlQuery;
@@ -322,14 +283,53 @@ export const useExploreStore = defineStore("explore", () => {
     return timeRangeChanged || limitChanged || modeChanged || sourceChanged || queryContentChanged;
   });
 
-  // 4. URL query parameters based on current state
+  // Check if current state diverges from loaded saved query
+  const hasDivergedFromSavedQuery = computed(() => {
+    const { savedQuerySnapshot, selectedQueryId, activeMode, logchefqlCode, rawSql, limit, selectedRelativeTime, timeRange } = state.data.value;
+    
+    if (!selectedQueryId || !savedQuerySnapshot) {
+      return false;
+    }
+
+    const currentContent = activeMode === 'logchefql' ? logchefqlCode : rawSql;
+    if (currentContent !== savedQuerySnapshot.queryContent) {
+      return true;
+    }
+
+    if (limit !== savedQuerySnapshot.limit) {
+      return true;
+    }
+
+    if (selectedRelativeTime !== savedQuerySnapshot.relativeTime) {
+      return true;
+    }
+
+    if (!selectedRelativeTime && timeRange) {
+      const currentStart = calendarDateTimeToTimestamp(timeRange.start);
+      const currentEnd = calendarDateTimeToTimestamp(timeRange.end);
+
+      if (currentStart !== savedQuerySnapshot.absoluteStart || currentEnd !== savedQuerySnapshot.absoluteEnd) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+
+  function clearSavedQueryIfDirty() {
+    if (hasDivergedFromSavedQuery.value) {
+      state.data.value.selectedQueryId = null;
+      state.data.value.activeSavedQueryName = null;
+      state.data.value.savedQuerySnapshot = null;
+    }
+  }
+
   const urlQueryParameters = computed(() => {
     const { sourceId, timeRange, limit, activeMode, logchefqlCode, rawSql, selectedRelativeTime, selectedQueryId } = state.data.value;
     const teamsStore = useTeamsStore();
 
     const params: Record<string, string> = {};
 
-    // Team and source
     if (teamsStore.currentTeamId) {
       params.team = teamsStore.currentTeamId.toString();
     }
@@ -338,11 +338,14 @@ export const useExploreStore = defineStore("explore", () => {
       params.source = sourceId.toString();
     }
 
-    // Time configuration
+    if (selectedQueryId && !hasDivergedFromSavedQuery.value) {
+      params.id = selectedQueryId;
+      return params;
+    }
+
     if (selectedRelativeTime) {
-      params.time = selectedRelativeTime;
+      params.t = selectedRelativeTime;
     } else if (timeRange) {
-      // Format absolute time range for URL
       const startTimestamp = new Date(
         timeRange.start.year,
         timeRange.start.month - 1,
@@ -365,22 +368,15 @@ export const useExploreStore = defineStore("explore", () => {
       params.end = endTimestamp.toString();
     }
 
-    // Limit
     params.limit = limit.toString();
 
-    // Mode and query content
-    params.mode = activeMode;
-
-    // Send raw query content without any encoding - the router will handle the encoding
     if (activeMode === 'logchefql' && logchefqlCode) {
       params.q = logchefqlCode;
-    } else if (activeMode === 'sql' && rawSql) {
-      params.sql = rawSql;
-    }
-
-    // Saved query ID if applicable
-    if (selectedQueryId) {
-      params.query_id = selectedQueryId;
+    } else if (activeMode === 'sql') {
+      params.mode = 'sql';
+      if (rawSql) {
+        params.sql = rawSql;
+      }
     }
 
     return params;
@@ -427,20 +423,20 @@ export const useExploreStore = defineStore("explore", () => {
     }
   }
 
-  // Set time configuration (absolute or relative)
   function setTimeConfiguration(config: { absoluteRange?: { start: DateValue; end: DateValue }, relativeTime?: string }) {
     if (config.relativeTime) {
       setRelativeTimeRange(config.relativeTime);
     } else if (config.absoluteRange) {
       state.data.value.timeRange = config.absoluteRange;
-      state.data.value.selectedRelativeTime = null; // Clear relative time when setting absolute
+      state.data.value.selectedRelativeTime = null;
+      clearSavedQueryIfDirty();
     }
   }
 
-  // Set limit
   function setLimit(newLimit: number) {
     if (newLimit > 0 && newLimit <= 10000) {
       state.data.value.limit = newLimit;
+      clearSavedQueryIfDirty();
     }
   }
 
@@ -455,14 +451,14 @@ export const useExploreStore = defineStore("explore", () => {
     }
   }
 
-  // Set LogchefQL code
   function setLogchefqlCode(code: string) {
     state.data.value.logchefqlCode = code;
+    clearSavedQueryIfDirty();
   }
 
-  // Set raw SQL
   function setRawSql(sql: string) {
     state.data.value.rawSql = sql;
+    clearSavedQueryIfDirty();
   }
 
   // Set active mode with simplified switching logic
@@ -490,11 +486,9 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.lastExecutionTimestamp = Date.now();
   }
 
-  // Initialize from URL parameters
-  function initializeFromUrl(params: Record<string, string | undefined>) {
+  function initializeFromUrl(params: Record<string, string | undefined>): { needsResolve: boolean; queryId?: string; shouldExecute: boolean } {
     console.log('Explore store: Initializing from URL with params:', params);
 
-    // Parse source ID
     if (params.source) {
       const sourceId = parseInt(params.source, 10);
       if (!isNaN(sourceId)) {
@@ -502,50 +496,34 @@ export const useExploreStore = defineStore("explore", () => {
       }
     }
 
-    // Parse time configuration
-    if (params.time) {
-      // Handle relative time
-      setRelativeTimeRange(params.time);
+    const queryId = params.id || params.query_id;
+    if (queryId) {
+      state.data.value.selectedQueryId = queryId;
+      return { needsResolve: true, queryId, shouldExecute: false };
+    }
+
+    const relativeTime = params.t || params.time;
+    if (relativeTime) {
+      setRelativeTimeRange(relativeTime);
     } else if (params.start && params.end) {
-      // Handle absolute time range
       try {
         const startTs = parseInt(params.start, 10);
         const endTs = parseInt(params.end, 10);
 
         if (!isNaN(startTs) && !isNaN(endTs)) {
-          const startDate = new Date(startTs);
-          const endDate = new Date(endTs);
-
-          const startCalendar = new CalendarDateTime(
-            startDate.getFullYear(),
-            startDate.getMonth() + 1,
-            startDate.getDate(),
-            startDate.getHours(),
-            startDate.getMinutes(),
-            startDate.getSeconds()
-          );
-
-          const endCalendar = new CalendarDateTime(
-            endDate.getFullYear(),
-            endDate.getMonth() + 1,
-            endDate.getDate(),
-            endDate.getHours(),
-            endDate.getMinutes(),
-            endDate.getSeconds()
-          );
-
           state.data.value.timeRange = {
-            start: startCalendar,
-            end: endCalendar
+            start: timestampToCalendarDateTime(startTs),
+            end: timestampToCalendarDateTime(endTs)
           };
           state.data.value.selectedRelativeTime = null;
         }
       } catch (error) {
         console.error('Failed to parse time range from URL:', error);
       }
+    } else if (!state.data.value.timeRange) {
+      setRelativeTimeRange('15m');
     }
 
-    // Parse limit
     if (params.limit) {
       const limit = parseInt(params.limit, 10);
       if (!isNaN(limit)) {
@@ -553,22 +531,18 @@ export const useExploreStore = defineStore("explore", () => {
       }
     }
 
-    // Parse mode and query content
     if (params.mode) {
       const mode = params.mode === 'sql' ? 'sql' : 'logchefql';
       state.data.value.activeMode = mode;
 
       if (mode === 'logchefql' && params.q) {
-        // No need to decode - the router already decoded the URL parameter
         state.data.value.logchefqlCode = params.q;
       } else if (mode === 'sql' && params.sql) {
         state.data.value.rawSql = params.sql;
       }
     } else {
-      // Handle backward compatibility where mode isn't specified but query is
       if (params.q) {
         state.data.value.activeMode = 'logchefql';
-        // No need to decode - the router already decoded the URL parameter
         state.data.value.logchefqlCode = params.q;
       } else if (params.sql) {
         state.data.value.activeMode = 'sql';
@@ -576,33 +550,73 @@ export const useExploreStore = defineStore("explore", () => {
       }
     }
 
-    // Handle saved query ID
-    if (params.query_id) {
-      state.data.value.selectedQueryId = params.query_id;
-    }
-
-    // After initializing all values, update lastExecutedState to mark the initial state as "clean"
     _updateLastExecutedState();
 
-    // Execute query automatically after initialization if we have enough parameters
-    // Wait for the next tick to ensure all reactive properties are updated
-    setTimeout(() => {
-      const hasRequiredParams = state.data.value.sourceId && state.data.value.timeRange;
-      const hasQueryContent = state.data.value.activeMode === 'sql' ? !!state.data.value.rawSql : true;
+    const hasRequiredParams = !!(state.data.value.sourceId && state.data.value.timeRange);
+    const hasQueryContent = state.data.value.activeMode === 'sql' ? !!state.data.value.rawSql : true;
 
-      if (hasRequiredParams && hasQueryContent) {
-        console.log('Explore store: Executing query automatically after URL initialization');
-        executeQuery().catch(error => {
-          console.error('Error executing initial query:', error);
-        });
+    return { needsResolve: false, shouldExecute: hasRequiredParams && hasQueryContent };
+  }
+
+  function hydrateFromResolvedQuery(data: {
+    id: number;
+    name: string;
+    query_type: string;
+    query_content: string;
+  }): { shouldExecute: boolean } {
+    try {
+      const content = JSON.parse(data.query_content);
+      const isLogchefQL = data.query_type === 'logchefql';
+
+      state.data.value.activeMode = isLogchefQL ? 'logchefql' : 'sql';
+      state.data.value.activeSavedQueryName = data.name;
+      state.data.value.selectedQueryId = data.id.toString();
+
+      const queryContent = content.content || '';
+      if (isLogchefQL) {
+        state.data.value.logchefqlCode = queryContent;
       } else {
-        console.log('Explore store: Skipping automatic query execution, missing required parameters', {
-          hasSource: !!state.data.value.sourceId,
-          hasTimeRange: !!state.data.value.timeRange,
-          hasQueryContent
-        });
+        state.data.value.rawSql = queryContent;
       }
-    }, 100);
+
+      const limit = content.limit || 100;
+      state.data.value.limit = limit;
+
+      let relativeTime: string | null = null;
+      let absoluteStart: number | null = null;
+      let absoluteEnd: number | null = null;
+
+      if (content.timeRange?.relative) {
+        relativeTime = content.timeRange.relative;
+        const { start, end } = parseRelativeTimeString(content.timeRange.relative);
+        state.data.value.selectedRelativeTime = relativeTime;
+        state.data.value.timeRange = { start, end };
+      } else if (content.timeRange?.absolute?.start && content.timeRange?.absolute?.end) {
+        absoluteStart = content.timeRange.absolute.start;
+        absoluteEnd = content.timeRange.absolute.end;
+        
+        state.data.value.timeRange = {
+          start: timestampToCalendarDateTime(content.timeRange.absolute.start),
+          end: timestampToCalendarDateTime(content.timeRange.absolute.end)
+        };
+        state.data.value.selectedRelativeTime = null;
+      }
+
+      state.data.value.savedQuerySnapshot = {
+        queryContent,
+        limit,
+        relativeTime,
+        absoluteStart,
+        absoluteEnd,
+      };
+
+      _updateLastExecutedState();
+
+      return { shouldExecute: !!(state.data.value.sourceId && state.data.value.timeRange) };
+    } catch (error) {
+      console.error('Failed to hydrate from resolved query:', error);
+      return { shouldExecute: false };
+    }
   }
 
   // Helper to clear histogram data
@@ -613,13 +627,13 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.isLoadingHistogram = false;
   }
 
-  // Helper to clear query content
   function _clearQueryContent() {
     state.data.value.logchefqlCode = '';
     state.data.value.rawSql = '';
     state.data.value.activeMode = 'logchefql';
     state.data.value.selectedQueryId = null;
     state.data.value.activeSavedQueryName = null;
+    state.data.value.savedQuerySnapshot = null;
   }
 
   // Reset query to defaults
@@ -1100,35 +1114,20 @@ export const useExploreStore = defineStore("explore", () => {
     // Note: isCancellingQuery will be reset by executeQuery's finally block to avoid race conditions
   }
 
-  // Add function to set relative time range
   function setRelativeTimeRange(relativeTimeString: string | null) {
     if (!relativeTimeString) {
       state.data.value.selectedRelativeTime = null;
+      clearSavedQueryIfDirty();
       return;
     }
 
     try {
-      // Parse the relative time string into absolute start/end times
       const { start, end } = parseRelativeTimeString(relativeTimeString);
-
-      // Store the relative time string for URL sharing FIRST
       state.data.value.selectedRelativeTime = relativeTimeString;
-
-      // Then set the absolute time range WITHOUT clearing the selectedRelativeTime
-      // We need to update the internal timeRange property directly to avoid
-      // the automatic clearing of selectedRelativeTime that happens in setTimeRange
       state.data.value.timeRange = { start, end };
-
-      console.log('Explore store: Set relative time range:', {
-        relativeTime: relativeTimeString,
-        absoluteRange: {
-          start: start.toString(),
-          end: end.toString()
-        }
-      });
+      clearSavedQueryIfDirty();
     } catch (error) {
       console.error('Failed to parse relative time string:', error);
-      // Don't update the state if parsing fails
     }
   }
 
@@ -1307,10 +1306,28 @@ export const useExploreStore = defineStore("explore", () => {
         sql: sql.substring(0, 100) + "..."
       });
 
+      const timeRange = state.data.value.timeRange;
+      let windowGranularity = granularity;
+      if (!windowGranularity && timeRange) {
+        const startISO = new Date(
+          timeRange.start.year, timeRange.start.month - 1, timeRange.start.day,
+          'hour' in timeRange.start ? timeRange.start.hour : 0,
+          'minute' in timeRange.start ? timeRange.start.minute : 0,
+          'second' in timeRange.start ? timeRange.start.second : 0
+        ).toISOString();
+        const endISO = new Date(
+          timeRange.end.year, timeRange.end.month - 1, timeRange.end.day,
+          'hour' in timeRange.end ? timeRange.end.hour : 0,
+          'minute' in timeRange.end ? timeRange.end.minute : 0,
+          'second' in timeRange.end ? timeRange.end.second : 0
+        ).toISOString();
+        windowGranularity = HistogramService.calculateOptimalGranularity(startISO, endISO);
+      }
+
       const params = {
-        raw_sql: sql,  // Use the exact SQL that was executed by backend
+        raw_sql: sql,
         limit: 100,
-        window: granularity || calculateOptimalGranularity(),
+        window: windowGranularity || '1m',
         timezone: state.data.value.selectedTimezoneIdentifier || undefined,
         group_by: state.data.value.groupByField === "__none__" || state.data.value.groupByField === null 
           ? undefined 
@@ -1348,50 +1365,6 @@ export const useExploreStore = defineStore("explore", () => {
     } finally {
       state.data.value.isLoadingHistogram = false;
     }
-  }
-
-  // Helper function to calculate optimal granularity based on time range
-  function calculateOptimalGranularity(): string {
-    // Get the time range values
-    const { timeRange } = state.data.value;
-    if (!timeRange) return "1m"; // Default to 1 minute
-
-    // Calculate time difference in milliseconds
-    const startDate = new Date(
-      timeRange.start.year,
-      timeRange.start.month - 1,
-      timeRange.start.day,
-      "hour" in timeRange.start ? timeRange.start.hour : 0,
-      "minute" in timeRange.start ? timeRange.start.minute : 0,
-      "second" in timeRange.start ? timeRange.start.second : 0
-    );
-
-    const endDate = new Date(
-      timeRange.end.year,
-      timeRange.end.month - 1,
-      timeRange.end.day,
-      "hour" in timeRange.end ? timeRange.end.hour : 0,
-      "minute" in timeRange.end ? timeRange.end.minute : 0,
-      "second" in timeRange.end ? timeRange.end.second : 0
-    );
-
-    const diffMs = endDate.getTime() - startDate.getTime();
-    const diffSeconds = diffMs / 1000;
-    const diffMinutes = diffSeconds / 60;
-    const diffHours = diffMinutes / 60;
-    const diffDays = diffHours / 24;
-
-    // Use the same granularity rules as in HistogramService
-    if (diffMinutes <= 5) return "1s";
-    if (diffMinutes <= 30) return "5s";
-    if (diffMinutes <= 60) return "10s";
-    if (diffHours <= 3) return "1m";
-    if (diffHours <= 12) return "5m";
-    if (diffHours <= 24) return "10m";
-    if (diffDays <= 7) return "1h";
-    if (diffDays <= 30) return "6h";
-    if (diffDays <= 90) return "1d";
-    return "1d"; // Default for very long time ranges
   }
 
   // Return the store
@@ -1435,10 +1408,10 @@ export const useExploreStore = defineStore("explore", () => {
     // Loading state
     isLoading: state.isLoading,
 
-    // New computed properties from refactoring plan
     logchefQlTranslationResult: _logchefQlTranslationResult,
     sqlForExecution,
     isQueryStateDirty,
+    hasDivergedFromSavedQuery,
     urlQueryParameters,
     canExecuteQuery,
 
@@ -1457,6 +1430,7 @@ export const useExploreStore = defineStore("explore", () => {
     resetQueryToDefaults,
     resetQueryContentForSourceChange,
     initializeFromUrl,
+    hydrateFromResolvedQuery,
     executeQuery,
     cancelQuery,
     getLogContext,

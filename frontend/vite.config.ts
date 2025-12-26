@@ -15,19 +15,20 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
   const isAnalyze = mode === "analyze";
 
   // Conditionally load visualizer only when analyzing
-  const plugins: Plugin[] = [vue()];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const plugins: Plugin[] = [vue() as any];
 
   if (isAnalyze) {
     // Dynamic import for visualizer - only loaded when needed
     const { visualizer } = await import("rollup-plugin-visualizer");
-    plugins.push(
-      visualizer({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    plugins.push(visualizer({
         template: "treemap",
         open: true,
         gzipSize: true,
         brotliSize: true,
         filename: "stats.html",
-      })
+      }) as any
     );
   }
 
