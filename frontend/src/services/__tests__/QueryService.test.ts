@@ -1,10 +1,30 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { QueryService } from '../QueryService';
 import { now, getLocalTimeZone } from '@internationalized/date';
 
+vi.mock('@/stores/teams', () => ({
+  useTeamsStore: vi.fn(() => ({
+    currentTeamId: 1
+  }))
+}));
+
+vi.mock('@/stores/sources', () => ({
+  useSourcesStore: vi.fn(() => ({
+    currentSourceDetails: { id: 1 }
+  }))
+}));
+
+vi.mock('@/api/logchefql', () => ({
+  logchefqlApi: {
+    translate: vi.fn()
+  },
+  FilterCondition: {}
+}));
+
+import { logchefqlApi } from '@/api/logchefql';
+
 describe('QueryService', () => {
-  // Common test data
   const testOptions = {
     tableName: 'logs.vector_logs',
     tsField: 'timestamp',
@@ -14,6 +34,14 @@ describe('QueryService', () => {
     },
     limit: 100
   };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   describe('generateDefaultSQL', () => {
     it('should generate a default SQL query with proper structure', () => {
@@ -31,55 +59,102 @@ describe('QueryService', () => {
     it('should handle validation errors gracefully', () => {
       const invalidOptions = {
         ...testOptions,
-        tableName: '', // Invalid table name
+        tableName: '',
       };
 
       const result = QueryService.generateDefaultSQL(invalidOptions);
 
-      // generateDefaultSQL delegates to SqlManager.generateDefaultSql which
-      // doesn't validate tableName - it just uses what's provided
       expect(result.success).toBe(true);
       expect(result.sql).toBeTruthy();
     });
   });
 
-  describe('translateLogchefQLToSQL', () => {
-    it('should translate a simple LogchefQL query to SQL', () => {
-      const result = QueryService.translateLogchefQLToSQL({
+  describe('translateLogchefQLToSQLAsync', () => {
+    it('should translate a simple LogchefQL query to SQL', async () => {
+      vi.mocked(logchefqlApi.translate).mockResolvedValue({
+        data: {
+          sql: "`level` = 'error'",
+          valid: true,
+          conditions: [{ field: 'level', operator: '=', value: 'error', is_regex: false }],
+          fields_used: ['level']
+        }
+      } as any);
+
+      const result = await QueryService.translateLogchefQLToSQLAsync({
         ...testOptions,
         logchefqlQuery: 'level="error"'
       });
 
       expect(result.success).toBe(true);
       expect(result.sql).toContain('WHERE');
-      expect(result.sql).toContain('`level` = \'error\'');
+      expect(result.sql).toContain("`level` = 'error'");
+      expect(logchefqlApi.translate).toHaveBeenCalledWith(1, 1, { query: 'level="error"' });
     });
 
-    it('should handle complex LogchefQL queries with AND/OR', () => {
-      const result = QueryService.translateLogchefQLToSQL({
+    it('should handle complex LogchefQL queries with AND/OR', async () => {
+      vi.mocked(logchefqlApi.translate).mockResolvedValue({
+        data: {
+          sql: "(`level` = 'error' AND `status` > 500) OR `message` LIKE '%timeout%'",
+          valid: true,
+          conditions: [
+            { field: 'level', operator: '=', value: 'error', is_regex: false },
+            { field: 'status', operator: '>', value: '500', is_regex: false },
+            { field: 'message', operator: '~', value: 'timeout', is_regex: true }
+          ],
+          fields_used: ['level', 'status', 'message']
+        }
+      } as any);
+
+      const result = await QueryService.translateLogchefQLToSQLAsync({
         ...testOptions,
         logchefqlQuery: 'level="error" and status>500 or message~"timeout"'
       });
 
       expect(result.success).toBe(true);
-      // These expectations are simplified - would need to match exact structure in real test
       expect(result.sql).toContain('level');
       expect(result.sql).toContain('status');
       expect(result.sql).toContain('message');
     });
 
-    it('should return warnings for invalid LogchefQL but still produce SQL', () => {
-      const result = QueryService.translateLogchefQLToSQL({
+    it('should return warnings for invalid LogchefQL but still produce SQL', async () => {
+      vi.mocked(logchefqlApi.translate).mockResolvedValue({
+        data: {
+          sql: '',
+          valid: false,
+          error: { code: 'PARSE_ERROR', message: 'Invalid syntax' },
+          conditions: [],
+          fields_used: []
+        }
+      } as any);
+
+      const result = await QueryService.translateLogchefQLToSQLAsync({
         ...testOptions,
         logchefqlQuery: 'invalid query syntax'
       });
 
-      // Should still succeed with warnings
       expect(result.success).toBe(true);
       expect(result.warnings).toBeTruthy();
-      // Base query should still be generated
+      expect(result.warnings?.some(w => w.includes('Invalid syntax'))).toBe(true);
       expect(result.sql).toContain('SELECT *');
       expect(result.sql).toContain('FROM');
+    });
+
+    it('should handle missing team/source gracefully', async () => {
+      const { useTeamsStore } = await import('@/stores/teams');
+      const { useSourcesStore } = await import('@/stores/sources');
+      
+      vi.mocked(useTeamsStore).mockReturnValue({ currentTeamId: null } as any);
+      vi.mocked(useSourcesStore).mockReturnValue({ currentSourceDetails: null } as any);
+
+      const result = await QueryService.translateLogchefQLToSQLAsync({
+        ...testOptions,
+        logchefqlQuery: 'level="error"'
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.warnings).toBeTruthy();
+      expect(result.warnings?.some(w => w.includes('Team or source not available'))).toBe(true);
+      expect(logchefqlApi.translate).not.toHaveBeenCalled();
     });
   });
 
@@ -113,46 +188,53 @@ describe('QueryService', () => {
     });
   });
 
-  describe('prepareQueryForExecution', () => {
-    it('should prepare a LogchefQL query for execution', () => {
-      const result = QueryService.prepareQueryForExecution({
+  describe('prepareQueryForExecutionAsync', () => {
+    it('should prepare a LogchefQL query for execution', async () => {
+      vi.mocked(logchefqlApi.translate).mockResolvedValue({
+        data: {
+          sql: "`level` = 'error'",
+          valid: true,
+          conditions: [{ field: 'level', operator: '=', value: 'error', is_regex: false }],
+          fields_used: ['level']
+        }
+      } as any);
+
+      const result = await QueryService.prepareQueryForExecutionAsync({
         mode: 'logchefql',
         query: 'level="error"',
         ...testOptions
       });
 
       expect(result.success).toBe(true);
-      expect(result.sql).toContain('`level` = \'error\'');
+      expect(result.sql).toContain("`level` = 'error'");
     });
 
-    it('should prepare a SQL query for execution', () => {
+    it('should prepare a SQL query for execution', async () => {
       const sql = 'SELECT * FROM logs.vector_logs WHERE `timestamp` BETWEEN toDateTime(\'2023-01-01 00:00:00\') AND toDateTime(\'2023-01-02 00:00:00\') ORDER BY `timestamp` DESC LIMIT 100';
 
-      const result = QueryService.prepareQueryForExecution({
+      const result = await QueryService.prepareQueryForExecutionAsync({
         mode: 'clickhouse-sql',
         query: sql,
         ...testOptions
       });
 
       expect(result.success).toBe(true);
-      // The SQL will be modified to use the current time range from testOptions
       expect(result.sql).toContain('SELECT * FROM logs.vector_logs');
       expect(result.sql).toContain('WHERE `timestamp` BETWEEN toDateTime');
       expect(result.sql).toContain('ORDER BY `timestamp` DESC LIMIT 100');
-      // But the dates will be updated to match testOptions.timeRange
       expect(result.sql).not.toContain('2023-01-01');
     });
 
-    it('should handle empty queries correctly', () => {
-      const result = QueryService.prepareQueryForExecution({
+    it('should handle empty queries correctly', async () => {
+      const result = await QueryService.prepareQueryForExecutionAsync({
         mode: 'clickhouse-sql',
         query: '',
         ...testOptions
       });
 
-      // SqlManager.prepareForExecution returns success: false for empty queries
       expect(result.success).toBe(false);
       expect(result.error).toBe('Query is empty');
     });
   });
+
 });
