@@ -14,10 +14,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Direct link format: `/logs/collection/:teamId/:sourceId/:collectionId`
 
 ### Changed
+- **LogChefQL Parser Rewrite** - Replaced hand-written tokenizer with grammar-based parser using [participle](https://github.com/alecthomas/participle)
+  - Better error messages with position-aware diagnostics
+  - More maintainable and extensible grammar definitions
+  - Improved query type detection (LogChefQL vs SQL)
 - **Frontend Tooling Migration** - Switched from pnpm + Vite to Bun + rolldown-vite
   - Build time: ~2.3s (was >55s)
   - Dev server start: ~1s (was ~3s)
   - Install time: ~8s (was ~25s)
+- **Frontend State Management** - Refactored stores and composables
+  - Centralized URL state synchronization
+  - Cleaner explore store with better state transitions
+  - Improved context and teams store initialization
+
+### Fixed
+- Proper context propagation throughout backend (contextcheck compliance)
+- Reduced cyclomatic complexity in high-complexity functions
 
 ### Contributors
 - [@rhnvrm](https://github.com/rhnvrm) - Bookmark favorite queries feature ([#60](https://github.com/mr-karan/logchef/pull/60))
