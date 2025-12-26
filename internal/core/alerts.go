@@ -165,74 +165,8 @@ func UpdateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mo
 		return nil, fmt.Errorf("failed to load alert: %w", err)
 	}
 
-	if req.Name != nil {
-		existing.Name = strings.TrimSpace(*req.Name)
-	}
-	if req.Description != nil {
-		existing.Description = strings.TrimSpace(*req.Description)
-	}
-	if req.QueryType != nil {
-		if _, ok := validQueryTypes[*req.QueryType]; !ok {
-			return nil, fmt.Errorf("%w: invalid query_type %q", ErrInvalidAlertConfiguration, *req.QueryType)
-		}
-		existing.QueryType = *req.QueryType
-	}
-	if req.Query != nil {
-		if existing.QueryType == models.AlertQueryTypeSQL && strings.TrimSpace(*req.Query) == "" {
-			return nil, fmt.Errorf("%w: query is required for sql query_type", ErrInvalidAlertConfiguration)
-		}
-		existing.Query = strings.TrimSpace(*req.Query)
-	}
-	if req.ConditionJSON != nil {
-		if existing.QueryType == models.AlertQueryTypeCondition && strings.TrimSpace(*req.ConditionJSON) == "" {
-			return nil, fmt.Errorf("%w: condition_json is required for condition query_type", ErrInvalidAlertConfiguration)
-		}
-		existing.ConditionJSON = strings.TrimSpace(*req.ConditionJSON)
-	}
-	if existing.QueryType == models.AlertQueryTypeSQL && existing.Query == "" {
-		return nil, fmt.Errorf("%w: query is required for sql query_type", ErrInvalidAlertConfiguration)
-	}
-	if existing.QueryType == models.AlertQueryTypeCondition && existing.ConditionJSON == "" {
-		return nil, fmt.Errorf("%w: condition_json is required for condition query_type", ErrInvalidAlertConfiguration)
-	}
-	if req.LookbackSeconds != nil {
-		if *req.LookbackSeconds <= 0 {
-			return nil, fmt.Errorf("%w: lookback_seconds must be greater than zero", ErrInvalidAlertConfiguration)
-		}
-		existing.LookbackSeconds = *req.LookbackSeconds
-	}
-	if req.ThresholdOperator != nil {
-		if _, ok := validOperators[*req.ThresholdOperator]; !ok {
-			return nil, fmt.Errorf("%w: invalid threshold_operator %q", ErrInvalidAlertConfiguration, *req.ThresholdOperator)
-		}
-		existing.ThresholdOperator = *req.ThresholdOperator
-	}
-	if req.ThresholdValue != nil {
-		existing.ThresholdValue = *req.ThresholdValue
-	}
-	if req.FrequencySeconds != nil {
-		if *req.FrequencySeconds <= 0 {
-			return nil, fmt.Errorf("%w: frequency_seconds must be greater than zero", ErrInvalidAlertConfiguration)
-		}
-		existing.FrequencySeconds = *req.FrequencySeconds
-	}
-	if req.Severity != nil {
-		if _, ok := validSeverities[*req.Severity]; !ok {
-			return nil, fmt.Errorf("%w: invalid severity %q", ErrInvalidAlertConfiguration, *req.Severity)
-		}
-		existing.Severity = *req.Severity
-	}
-	if req.Labels != nil {
-		existing.Labels = sanitizeStringMap(*req.Labels)
-	}
-	if req.Annotations != nil {
-		existing.Annotations = sanitizeStringMap(*req.Annotations)
-	}
-	if req.GeneratorURL != nil {
-		existing.GeneratorURL = strings.TrimSpace(*req.GeneratorURL)
-	}
-	if req.IsActive != nil {
-		existing.IsActive = *req.IsActive
+	if err := applyAlertUpdates(existing, req); err != nil {
+		return nil, err
 	}
 
 	if err := db.UpdateAlert(ctx, existing); err != nil {
@@ -249,6 +183,100 @@ func UpdateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mo
 		return existing, nil
 	}
 	return updated, nil
+}
+
+func applyAlertUpdates(alert *models.Alert, req *models.UpdateAlertRequest) error {
+	if req.Name != nil {
+		alert.Name = strings.TrimSpace(*req.Name)
+	}
+	if req.Description != nil {
+		alert.Description = strings.TrimSpace(*req.Description)
+	}
+
+	if err := applyQueryTypeUpdate(alert, req); err != nil {
+		return err
+	}
+	if err := applyThresholdUpdates(alert, req); err != nil {
+		return err
+	}
+	applyMetadataUpdates(alert, req)
+
+	return nil
+}
+
+func applyQueryTypeUpdate(alert *models.Alert, req *models.UpdateAlertRequest) error {
+	if req.QueryType != nil {
+		if _, ok := validQueryTypes[*req.QueryType]; !ok {
+			return fmt.Errorf("%w: invalid query_type %q", ErrInvalidAlertConfiguration, *req.QueryType)
+		}
+		alert.QueryType = *req.QueryType
+	}
+	if req.Query != nil {
+		if alert.QueryType == models.AlertQueryTypeSQL && strings.TrimSpace(*req.Query) == "" {
+			return fmt.Errorf("%w: query is required for sql query_type", ErrInvalidAlertConfiguration)
+		}
+		alert.Query = strings.TrimSpace(*req.Query)
+	}
+	if req.ConditionJSON != nil {
+		if alert.QueryType == models.AlertQueryTypeCondition && strings.TrimSpace(*req.ConditionJSON) == "" {
+			return fmt.Errorf("%w: condition_json is required for condition query_type", ErrInvalidAlertConfiguration)
+		}
+		alert.ConditionJSON = strings.TrimSpace(*req.ConditionJSON)
+	}
+
+	if alert.QueryType == models.AlertQueryTypeSQL && alert.Query == "" {
+		return fmt.Errorf("%w: query is required for sql query_type", ErrInvalidAlertConfiguration)
+	}
+	if alert.QueryType == models.AlertQueryTypeCondition && alert.ConditionJSON == "" {
+		return fmt.Errorf("%w: condition_json is required for condition query_type", ErrInvalidAlertConfiguration)
+	}
+	return nil
+}
+
+func applyThresholdUpdates(alert *models.Alert, req *models.UpdateAlertRequest) error {
+	if req.LookbackSeconds != nil {
+		if *req.LookbackSeconds <= 0 {
+			return fmt.Errorf("%w: lookback_seconds must be greater than zero", ErrInvalidAlertConfiguration)
+		}
+		alert.LookbackSeconds = *req.LookbackSeconds
+	}
+	if req.ThresholdOperator != nil {
+		if _, ok := validOperators[*req.ThresholdOperator]; !ok {
+			return fmt.Errorf("%w: invalid threshold_operator %q", ErrInvalidAlertConfiguration, *req.ThresholdOperator)
+		}
+		alert.ThresholdOperator = *req.ThresholdOperator
+	}
+	if req.ThresholdValue != nil {
+		alert.ThresholdValue = *req.ThresholdValue
+	}
+	if req.FrequencySeconds != nil {
+		if *req.FrequencySeconds <= 0 {
+			return fmt.Errorf("%w: frequency_seconds must be greater than zero", ErrInvalidAlertConfiguration)
+		}
+		alert.FrequencySeconds = *req.FrequencySeconds
+	}
+	if req.Severity != nil {
+		if _, ok := validSeverities[*req.Severity]; !ok {
+			return fmt.Errorf("%w: invalid severity %q", ErrInvalidAlertConfiguration, *req.Severity)
+		}
+		alert.Severity = *req.Severity
+	}
+	return nil
+}
+
+func applyMetadataUpdates(alert *models.Alert, req *models.UpdateAlertRequest) {
+	if req.Labels != nil {
+		alert.Labels = sanitizeStringMap(*req.Labels)
+	}
+	if req.Annotations != nil {
+		alert.Annotations = sanitizeStringMap(*req.Annotations)
+	}
+	if req.GeneratorURL != nil {
+		alert.GeneratorURL = strings.TrimSpace(*req.GeneratorURL)
+	}
+	if req.IsActive != nil {
+		alert.IsActive = *req.IsActive
+	}
 }
 
 // DeleteAlert removes an alert rule.

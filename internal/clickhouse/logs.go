@@ -3,6 +3,7 @@ package clickhouse
 import (
 	"context"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -94,213 +95,166 @@ type HistogramResult struct {
 }
 
 // GetHistogramData generates histogram data by grouping log counts into time buckets.
-// It uses the provided raw SQL as the base query and applies time window aggregation.
-// Timeout is always applied.
 func (c *Client) GetHistogramData(ctx context.Context, tableName, timestampField string, params HistogramParams) (*HistogramResult, error) {
-	// Validate query parameter
 	if params.Query == "" {
 		return nil, fmt.Errorf("query parameter is required for histogram data")
 	}
 
-	// Ensure timeout is always set
 	if params.QueryTimeout == nil {
 		defaultTimeout := DefaultQueryTimeout
 		params.QueryTimeout = &defaultTimeout
 	}
 
-	// Get timezone or default to UTC
 	timezone := params.Timezone
 	if timezone == "" {
 		timezone = "UTC"
 	}
 
-	// Convert TimeWindow to the appropriate ClickHouse interval function
-	var intervalFunc string
-	switch params.Window {
-	case TimeWindow1s:
-		intervalFunc = fmt.Sprintf("toStartOfSecond(%s, '%s')", timestampField, timezone)
-	case TimeWindow5s, TimeWindow10s, TimeWindow15s, TimeWindow30s:
-		// For custom second intervals, use toStartOfInterval
-		seconds := strings.TrimSuffix(string(params.Window), "s")
-		intervalFunc = fmt.Sprintf("toStartOfInterval(%s, INTERVAL %s SECOND, '%s')", timestampField, seconds, timezone)
-	case TimeWindow1m:
-		intervalFunc = fmt.Sprintf("toStartOfMinute(%s, '%s')", timestampField, timezone)
-	case TimeWindow5m:
-		intervalFunc = fmt.Sprintf("toStartOfFiveMinute(%s, '%s')", timestampField, timezone)
-	case TimeWindow10m, TimeWindow15m, TimeWindow30m:
-		// For custom minute intervals, use toStartOfInterval
-		minutes := strings.TrimSuffix(string(params.Window), "m")
-		intervalFunc = fmt.Sprintf("toStartOfInterval(%s, INTERVAL %s MINUTE, '%s')", timestampField, minutes, timezone)
-	case TimeWindow1h:
-		intervalFunc = fmt.Sprintf("toStartOfHour(%s, '%s')", timestampField, timezone)
-	case TimeWindow2h, TimeWindow3h, TimeWindow6h, TimeWindow12h, TimeWindow24h:
-		// For custom hour intervals, use toStartOfInterval
-		hours := strings.TrimSuffix(string(params.Window), "h")
-		intervalFunc = fmt.Sprintf("toStartOfInterval(%s, INTERVAL %s HOUR, '%s')", timestampField, hours, timezone)
-	default:
-		return nil, fmt.Errorf("invalid time window: %s", params.Window)
+	intervalFunc, err := windowToIntervalFunc(params.Window, timestampField, timezone)
+	if err != nil {
+		return nil, err
 	}
 
-	// Process the raw SQL query
-	baseQuery := ""
-	// Use the query builder to remove LIMIT clause
 	qb := NewQueryBuilder(tableName)
-	var err error
-	baseQuery, err = qb.RemoveLimitClause(params.Query)
+	baseQuery, err := qb.RemoveLimitClause(params.Query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process base query: %w", err)
 	}
 
-	// Extract time range conditions for better logging
-	timeConditionRegex := regexp.MustCompile(fmt.Sprintf(`(?i)%s\s+BETWEEN\s+toDateTime\(['"](.+?)['"](,\s*['"](.+?)['"])?\)\s+AND\s+toDateTime\(['"](.+?)['"](,\s*['"](.+?)['"])?\)`, regexp.QuoteMeta(timestampField)))
-	matches := timeConditionRegex.FindStringSubmatch(params.Query)
-
-	if len(matches) >= 5 {
-		startTime := matches[1]
-		startTz := matches[3]
-		if startTz == "" {
-			startTz = timezone
-		}
-		endTime := matches[4]
-		endTz := matches[6]
-		if endTz == "" {
-			endTz = timezone
-		}
-
-		c.logger.Debug("Extracted time filter from query",
-			"start", startTime,
-			"start_tz", startTz,
-			"end", endTime,
-			"end_tz", endTz)
-	} else {
-		c.logger.Debug("No time filter extracted from query, using entire dataset")
+	query, err := c.buildHistogramQuery(baseQuery, timestampField, intervalFunc, params.GroupBy)
+	if err != nil {
+		return nil, err
 	}
 
-	// Construct the histogram query using CTE
-	var query string
-	if params.GroupBy != "" && strings.TrimSpace(params.GroupBy) != "" {
-		// Histogram with grouping - find top N groups
-		// Ensure timestamp field is available in subquery for histogram bucketing
-		modifiedQuery, err := c.ensureTimestampInQuery(baseQuery, timestampField)
-		if err != nil {
-			return nil, fmt.Errorf("failed to modify query for grouped histogram: %w", err)
-		}
-
-		query = fmt.Sprintf(`
-			WITH
-				top_groups AS (
-					SELECT
-						%s AS group_value,
-						count(*) AS total_logs
-					FROM (%s) AS raw_logs
-					GROUP BY group_value
-					ORDER BY total_logs DESC
-					LIMIT 10
-				)
-			SELECT
-				%s AS bucket,
-				%s AS group_value,
-				count(*) AS log_count
-			FROM (%s) AS raw_logs
-			WHERE %s GLOBAL IN (SELECT group_value FROM top_groups)
-			GROUP BY
-				bucket,
-				group_value
-			ORDER BY
-				bucket ASC,
-				log_count DESC
-		`, params.GroupBy, modifiedQuery, intervalFunc, params.GroupBy, modifiedQuery, params.GroupBy)
-	} else {
-		// Standard histogram without grouping
-		// Ensure timestamp field is available in subquery for histogram bucketing
-		modifiedQuery, err := c.ensureTimestampInQuery(baseQuery, timestampField)
-		if err != nil {
-			return nil, fmt.Errorf("failed to modify query for histogram: %w", err)
-		}
-
-		query = fmt.Sprintf(`
-			SELECT
-				%s AS bucket,
-				count(*) AS log_count
-			FROM (%s) AS raw_logs
-			GROUP BY bucket
-			ORDER BY bucket ASC
-		`, intervalFunc, modifiedQuery)
-	}
-
-	c.logger.Debug("Executing histogram query",
-		"query_length", len(query),
-		"has_time_filter", len(matches) >= 5,
-		"timeout_seconds", *params.QueryTimeout)
-
-	// Execute the query with timeout (always applied)
 	result, err := c.QueryWithTimeout(ctx, query, params.QueryTimeout)
 	if err != nil {
 		c.logger.Error("failed to execute histogram query", "error", err, "table", tableName)
 		return nil, fmt.Errorf("failed to execute histogram query: %w", err)
 	}
 
-	// Parse results into HistogramData
-	var results []HistogramData
-
-	for _, row := range result.Logs {
-		bucket, okB := row["bucket"].(time.Time)
-		countVal, okC := row["log_count"] // Type can vary (uint64, int64, etc.)
-
-		if !okB || !okC {
-			c.logger.Warn("unexpected type in histogram row, skipping",
-				"bucket_val", row["bucket"],
-				"count_val", row["log_count"])
-			continue
-		}
-
-		// Safely convert count to int
-		count := 0
-		switch v := countVal.(type) {
-		case uint64:
-			count = int(v)
-		case int64:
-			count = int(v)
-		case int:
-			count = v
-		case float64:
-			count = int(v)
-		default:
-			c.logger.Warn("unexpected numeric type for log_count in histogram row",
-				"type", fmt.Sprintf("%T", countVal))
-			continue
-		}
-
-		groupValueStr := ""
-		if params.GroupBy != "" {
-			groupVal, okG := row["group_value"]
-			if !okG {
-				c.logger.Warn("missing group_value in histogram row")
-				continue
-			}
-
-			// Convert group value to string
-			switch v := groupVal.(type) {
-			case string:
-				groupValueStr = v
-			case nil:
-				groupValueStr = "null"
-			default:
-				groupValueStr = fmt.Sprintf("%v", v)
-			}
-		}
-
-		results = append(results, HistogramData{
-			Bucket:     bucket,
-			LogCount:   count,
-			GroupValue: groupValueStr,
-		})
-	}
+	results := c.parseHistogramResults(result, params.GroupBy != "")
 
 	return &HistogramResult{
 		Granularity: string(params.Window),
 		Data:        results,
 	}, nil
+}
+
+func windowToIntervalFunc(window TimeWindow, timestampField, timezone string) (string, error) {
+	switch window {
+	case TimeWindow1s:
+		return fmt.Sprintf("toStartOfSecond(%s, '%s')", timestampField, timezone), nil
+	case TimeWindow5s, TimeWindow10s, TimeWindow15s, TimeWindow30s:
+		seconds := strings.TrimSuffix(string(window), "s")
+		return fmt.Sprintf("toStartOfInterval(%s, INTERVAL %s SECOND, '%s')", timestampField, seconds, timezone), nil
+	case TimeWindow1m:
+		return fmt.Sprintf("toStartOfMinute(%s, '%s')", timestampField, timezone), nil
+	case TimeWindow5m:
+		return fmt.Sprintf("toStartOfFiveMinute(%s, '%s')", timestampField, timezone), nil
+	case TimeWindow10m, TimeWindow15m, TimeWindow30m:
+		minutes := strings.TrimSuffix(string(window), "m")
+		return fmt.Sprintf("toStartOfInterval(%s, INTERVAL %s MINUTE, '%s')", timestampField, minutes, timezone), nil
+	case TimeWindow1h:
+		return fmt.Sprintf("toStartOfHour(%s, '%s')", timestampField, timezone), nil
+	case TimeWindow2h, TimeWindow3h, TimeWindow6h, TimeWindow12h, TimeWindow24h:
+		hours := strings.TrimSuffix(string(window), "h")
+		return fmt.Sprintf("toStartOfInterval(%s, INTERVAL %s HOUR, '%s')", timestampField, hours, timezone), nil
+	default:
+		return "", fmt.Errorf("invalid time window: %s", window)
+	}
+}
+
+func (c *Client) buildHistogramQuery(baseQuery, timestampField, intervalFunc, groupBy string) (string, error) {
+	modifiedQuery, err := c.ensureTimestampInQuery(baseQuery, timestampField)
+	if err != nil {
+		return "", fmt.Errorf("failed to modify query for histogram: %w", err)
+	}
+
+	if groupBy != "" && strings.TrimSpace(groupBy) != "" {
+		return fmt.Sprintf(`
+			WITH top_groups AS (
+				SELECT %s AS group_value, count(*) AS total_logs
+				FROM (%s) AS raw_logs
+				GROUP BY group_value ORDER BY total_logs DESC LIMIT 10
+			)
+			SELECT %s AS bucket, %s AS group_value, count(*) AS log_count
+			FROM (%s) AS raw_logs
+			WHERE %s GLOBAL IN (SELECT group_value FROM top_groups)
+			GROUP BY bucket, group_value ORDER BY bucket ASC, log_count DESC
+		`, groupBy, modifiedQuery, intervalFunc, groupBy, modifiedQuery, groupBy), nil
+	}
+
+	return fmt.Sprintf(`
+		SELECT %s AS bucket, count(*) AS log_count
+		FROM (%s) AS raw_logs
+		GROUP BY bucket ORDER BY bucket ASC
+	`, intervalFunc, modifiedQuery), nil
+}
+
+func (c *Client) parseHistogramResults(result *models.QueryResult, hasGroupBy bool) []HistogramData {
+	results := make([]HistogramData, 0, len(result.Logs))
+
+	for _, row := range result.Logs {
+		data, ok := c.parseHistogramRow(row, hasGroupBy)
+		if ok {
+			results = append(results, data)
+		}
+	}
+	return results
+}
+
+func (c *Client) parseHistogramRow(row map[string]any, hasGroupBy bool) (HistogramData, bool) {
+	bucket, okB := row["bucket"].(time.Time)
+	countVal, okC := row["log_count"]
+	if !okB || !okC {
+		return HistogramData{}, false
+	}
+
+	count, ok := toInt(countVal)
+	if !ok {
+		return HistogramData{}, false
+	}
+
+	groupValue := ""
+	if hasGroupBy {
+		groupValue, ok = extractGroupValue(row)
+		if !ok {
+			return HistogramData{}, false
+		}
+	}
+
+	return HistogramData{Bucket: bucket, LogCount: count, GroupValue: groupValue}, true
+}
+
+func toInt(v any) (int, bool) {
+	switch val := v.(type) {
+	case uint64:
+		// #nosec G115 -- histogram counts are bounded by actual log entries
+		return int(min(val, uint64(math.MaxInt))), true
+	case int64:
+		return int(val), true
+	case int:
+		return val, true
+	case float64:
+		return int(val), true
+	default:
+		return 0, false
+	}
+}
+
+func extractGroupValue(row map[string]any) (string, bool) {
+	groupVal, ok := row["group_value"]
+	if !ok {
+		return "", false
+	}
+	switch v := groupVal.(type) {
+	case string:
+		return v, true
+	case nil:
+		return "null", true
+	default:
+		return fmt.Sprintf("%v", v), true
+	}
 }
 
 // ensureTimestampInQuery ensures the timestamp field is available for histogram bucketing.
