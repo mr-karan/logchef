@@ -1,15 +1,12 @@
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { defineStore } from "pinia";
 import { alertsApi, type Alert, type CreateAlertRequest, type UpdateAlertRequest } from "@/api/alerts";
 import { useBaseStore } from "./base";
+import { useContextStore } from "./context";
 
 interface AlertsState {
   alerts: Alert[];
   selectedAlertId: number | null;
-  lastLoaded: {
-    teamId: number | null;
-    sourceId: number | null;
-  };
 }
 
 function sortAlerts(a: Alert, b: Alert) {
@@ -22,11 +19,17 @@ export const useAlertsStore = defineStore("alerts", () => {
   const state = useBaseStore<AlertsState>({
     alerts: [],
     selectedAlertId: null,
-    lastLoaded: {
-      teamId: null,
-      sourceId: null,
-    },
   });
+
+  const contextStore = useContextStore();
+
+  watch(
+    [() => contextStore.teamId, () => contextStore.sourceId],
+    () => {
+      state.data.value.alerts = [];
+      state.data.value.selectedAlertId = null;
+    }
+  );
 
   const alerts = computed(() => state.data.value.alerts);
   const selectedAlertId = computed(() => state.data.value.selectedAlertId);
@@ -45,10 +48,6 @@ export const useAlertsStore = defineStore("alerts", () => {
   }
 
   async function fetchAlerts(teamId: number, sourceId: number) {
-    state.data.value.lastLoaded = {
-      teamId,
-      sourceId,
-    };
     return await state.withLoading(`fetchAlerts-${teamId}-${sourceId}`, async () => {
       return await state.callApi<Alert[]>({
         apiCall: () => alertsApi.listAlerts(teamId, sourceId),

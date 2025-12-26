@@ -67,8 +67,7 @@ func (h *StructuredQueryLoggerHook) AfterQuery(ctx context.Context, query string
 // BeforeQuery optionally logs the query before execution if Verbose is true.
 func (h *LogQueryHook) BeforeQuery(ctx context.Context, query string) (context.Context, error) {
 	if h.Verbose {
-		// Basic logging of the query string.
-		h.logger.Info("executing query", "query", query)
+		h.logger.Debug("executing query", "query", query)
 	}
 	return ctx, nil
 }
@@ -78,13 +77,13 @@ func (h *LogQueryHook) BeforeQuery(ctx context.Context, query string) (context.C
 func (h *LogQueryHook) AfterQuery(ctx context.Context, query string, err error, duration time.Duration) {
 	if err != nil {
 		h.logger.Error("query failed",
-			"query", query, // Consider truncating long queries
+			"query", query,
 			"error", err,
 			"duration_ms", duration.Milliseconds(),
 		)
 	} else if h.Verbose {
-		h.logger.Info("query completed",
-			"query", query, // Consider truncating long queries
+		h.logger.Debug("query completed",
+			"query", query,
 			"duration_ms", duration.Milliseconds(),
 		)
 	}

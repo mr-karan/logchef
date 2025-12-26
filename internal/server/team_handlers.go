@@ -2,7 +2,6 @@ package server
 
 import (
 	"errors"
-	"log/slog"
 
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -18,7 +17,7 @@ import (
 func (s *Server) handleListTeams(c *fiber.Ctx) error {
 	teams, err := core.ListTeams(c.Context(), s.sqlite)
 	if err != nil {
-		s.log.Error("failed to list teams via core function", slog.Any("error", err))
+		s.log.Error("failed to list teams", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Error listing teams")
 	}
 	return SendSuccess(c, fiber.StatusOK, teams)
@@ -39,7 +38,7 @@ func (s *Server) handleGetTeam(c *fiber.Ctx) error {
 		if errors.Is(err, core.ErrTeamNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Team not found", models.NotFoundErrorType)
 		}
-		s.log.Error("failed to get team via core function", slog.Any("error", err), "team_id", teamID)
+		s.log.Error("failed to get team", "error", err, "team_id", teamID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get team", models.DatabaseErrorType)
 	}
 	return SendSuccess(c, fiber.StatusOK, team)
@@ -65,7 +64,7 @@ func (s *Server) handleCreateTeam(c *fiber.Ctx) error {
 		if errors.Is(err, &core.ValidationError{}) { // Check for core validation errors
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 		}
-		s.log.Error("failed to create team via core function", slog.Any("error", err), "name", req.Name)
+		s.log.Error("failed to create team", "error", err, "name", req.Name)
 		return SendError(c, fiber.StatusInternalServerError, "Error creating team")
 	}
 	return SendSuccess(c, fiber.StatusCreated, team)
@@ -109,7 +108,7 @@ func (s *Server) handleUpdateTeam(c *fiber.Ctx) error {
 		if errors.Is(err, &core.ValidationError{}) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 		}
-		s.log.Error("failed to update team via core function", slog.Any("error", err), "team_id", teamID)
+		s.log.Error("failed to update team", "error", err, "team_id", teamID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to update team")
 	}
 
@@ -136,7 +135,7 @@ func (s *Server) handleDeleteTeam(c *fiber.Ctx) error {
 		if errors.Is(err, core.ErrTeamNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Team not found", models.NotFoundErrorType)
 		}
-		s.log.Error("failed to delete team via core function", slog.Any("error", err), "team_id", teamID)
+		s.log.Error("failed to delete team", "error", err, "team_id", teamID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to delete team")
 	}
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team deleted successfully"})
@@ -156,7 +155,7 @@ func (s *Server) handleListTeamMembers(c *fiber.Ctx) error {
 
 	members, err := core.ListTeamMembers(c.Context(), s.sqlite, teamID)
 	if err != nil {
-		s.log.Error("failed to list team members via core function", slog.Any("error", err), "team_id", teamID)
+		s.log.Error("failed to list team members", "error", err, "team_id", teamID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to list team members")
 	}
 	return SendSuccess(c, fiber.StatusOK, members)
@@ -191,7 +190,7 @@ func (s *Server) handleAddTeamMember(c *fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 		}
 		// Handle potential already-exists non-error case implicitly (core function returns nil)
-		s.log.Error("failed to add team member via core function", slog.Any("error", err), "team_id", teamID, "user_id", req.UserID)
+		s.log.Error("failed to add team member", "error", err, "team_id", teamID, "user_id", req.UserID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to add team member")
 	}
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team member added successfully"})
@@ -215,7 +214,7 @@ func (s *Server) handleRemoveTeamMember(c *fiber.Ctx) error {
 
 	if err := core.RemoveTeamMember(c.Context(), s.sqlite, s.log, teamID, userID); err != nil {
 		// Core function returns nil if member didn't exist, so only log unexpected errors.
-		s.log.Error("failed to remove team member via core function", slog.Any("error", err), "team_id", teamID, "user_id", userID)
+		s.log.Error("failed to remove team member", "error", err, "team_id", teamID, "user_id", userID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to remove team member")
 	}
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team member removed successfully"})
@@ -240,7 +239,7 @@ func (s *Server) handleListTeamSources(c *fiber.Ctx) error {
 			// Team not found is a valid case, return empty list.
 			return SendSuccess(c, fiber.StatusOK, []*models.SourceResponse{})
 		}
-		s.log.Error("failed to list team sources via core function", slog.Any("error", err), "team_id", teamID)
+		s.log.Error("failed to list team sources", "error", err, "team_id", teamID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to list team sources")
 	}
 
@@ -288,7 +287,7 @@ func (s *Server) handleGetTeamSource(c *fiber.Ctx) error {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
-		s.log.Error("failed to get source details via core function", slog.Any("error", err), "source_id", sourceID)
+		s.log.Error("failed to get source details", "error", err, "source_id", sourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to get source details")
 	}
 
@@ -323,7 +322,7 @@ func (s *Server) handleLinkSourceToTeam(c *fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusNotFound, err.Error(), models.NotFoundErrorType)
 		}
 		// Core function returns nil if link already exists.
-		s.log.Error("failed to add team source via core function", slog.Any("error", err), "team_id", teamID, "source_id", req.SourceID)
+		s.log.Error("failed to add team source", "error", err, "team_id", teamID, "source_id", req.SourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to link source to team")
 	}
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Source linked to team successfully"})
@@ -348,7 +347,7 @@ func (s *Server) handleUnlinkSourceFromTeam(c *fiber.Ctx) error {
 	// Call core function to remove the link.
 	if err := core.RemoveTeamSource(c.Context(), s.sqlite, s.log, teamID, sourceID); err != nil {
 		// Core function likely doesn't error if link doesn't exist, log unexpected errors.
-		s.log.Error("failed to remove team source via core function", slog.Any("error", err), "team_id", teamID, "source_id", sourceID)
+		s.log.Error("failed to remove team source", "error", err, "team_id", teamID, "source_id", sourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to remove team source link")
 	}
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Source unlinked from team successfully"})

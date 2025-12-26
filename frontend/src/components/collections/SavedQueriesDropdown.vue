@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { ChevronDown, Save, PlusCircle, ListTree, BookMarked } from 'lucide-vue-next';
+import { ChevronDown, Save, PlusCircle, ListTree, BookMarked, Star, Link } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import {
   DropdownMenu,
@@ -153,6 +153,49 @@ const navigateToCollectionsView = () => {
   });
   isOpen.value = false;
 };
+
+// Toggle bookmark status for a query
+async function handleToggleBookmark(event: Event, query: SavedTeamQuery) {
+  event.stopPropagation(); // Prevent triggering query selection
+
+  if (!props.selectedTeamId || !props.selectedSourceId) {
+    return;
+  }
+
+  await savedQueriesStore.toggleBookmark(
+    props.selectedTeamId,
+    props.selectedSourceId,
+    query.id
+  );
+}
+
+// Copy shareable collection URL to clipboard
+async function copyCollectionUrl(event: Event, query: SavedTeamQuery) {
+  event.stopPropagation(); // Prevent triggering query selection
+
+  if (!props.selectedTeamId || !props.selectedSourceId) {
+    return;
+  }
+
+  const url = `${window.location.origin}/logs/collection/${props.selectedTeamId}/${props.selectedSourceId}/${query.id}`;
+
+  try {
+    await navigator.clipboard.writeText(url);
+    toast({
+      title: 'Link Copied',
+      description: 'Collection URL copied to clipboard',
+      duration: TOAST_DURATION.SUCCESS,
+    });
+  } catch (error) {
+    console.error('Failed to copy URL:', error);
+    toast({
+      title: 'Error',
+      description: 'Failed to copy URL to clipboard',
+      variant: 'destructive',
+      duration: TOAST_DURATION.ERROR,
+    });
+  }
+}
 </script>
 
 <template>
@@ -186,8 +229,37 @@ const navigateToCollectionsView = () => {
           <DropdownMenuItem v-if="filteredQueries.length === 0" disabled>
             No matching queries found.
           </DropdownMenuItem>
-          <DropdownMenuItem v-for="query in filteredQueries" :key="query.id" @click="() => selectQuery(query)">
-            <span class="truncate" :title="query.name">{{ query.name }}</span>
+          <DropdownMenuItem
+            v-for="query in filteredQueries"
+            :key="query.id"
+            @click="() => selectQuery(query)"
+            class="flex items-center justify-between gap-2"
+          >
+            <div class="flex items-center gap-2 flex-1 min-w-0">
+              <button
+                v-if="canManageCollections"
+                @click="(e) => handleToggleBookmark(e, query)"
+                class="p-0.5 rounded hover:bg-muted transition-colors flex-shrink-0"
+                :title="query.is_bookmarked ? 'Remove bookmark' : 'Add bookmark'"
+              >
+                <Star
+                  class="h-3.5 w-3.5 transition-transform hover:scale-110"
+                  :class="query.is_bookmarked ? 'text-amber-500 fill-amber-500' : 'text-muted-foreground'"
+                />
+              </button>
+              <Star
+                v-else-if="query.is_bookmarked"
+                class="h-3.5 w-3.5 text-amber-500 fill-amber-500 flex-shrink-0"
+              />
+              <span class="truncate" :title="query.name">{{ query.name }}</span>
+            </div>
+            <button
+              @click="(e) => copyCollectionUrl(e, query)"
+              class="p-0.5 rounded hover:bg-muted transition-colors flex-shrink-0"
+              title="Copy share link"
+            >
+              <Link class="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+            </button>
           </DropdownMenuItem>
         </DropdownMenuSubContent>
       </DropdownMenuSub>

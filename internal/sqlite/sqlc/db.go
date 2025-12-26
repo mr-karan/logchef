@@ -102,6 +102,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getLatestUnresolvedAlertHistoryStmt, err = db.PrepareContext(ctx, getLatestUnresolvedAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query GetLatestUnresolvedAlertHistory: %w", err)
 	}
+	if q.getQueryBookmarkStatusStmt, err = db.PrepareContext(ctx, getQueryBookmarkStatus); err != nil {
+		return nil, fmt.Errorf("error preparing query GetQueryBookmarkStatus: %w", err)
+	}
 	if q.getSessionStmt, err = db.PrepareContext(ctx, getSession); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSession: %w", err)
 	}
@@ -203,6 +206,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.teamHasSourceStmt, err = db.PrepareContext(ctx, teamHasSource); err != nil {
 		return nil, fmt.Errorf("error preparing query TeamHasSource: %w", err)
+	}
+	if q.toggleQueryBookmarkStmt, err = db.PrepareContext(ctx, toggleQueryBookmark); err != nil {
+		return nil, fmt.Errorf("error preparing query ToggleQueryBookmark: %w", err)
 	}
 	if q.updateAPITokenLastUsedStmt, err = db.PrepareContext(ctx, updateAPITokenLastUsed); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateAPITokenLastUsed: %w", err)
@@ -367,6 +373,11 @@ func (q *Queries) Close() error {
 	if q.getLatestUnresolvedAlertHistoryStmt != nil {
 		if cerr := q.getLatestUnresolvedAlertHistoryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getLatestUnresolvedAlertHistoryStmt: %w", cerr)
+		}
+	}
+	if q.getQueryBookmarkStatusStmt != nil {
+		if cerr := q.getQueryBookmarkStatusStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getQueryBookmarkStatusStmt: %w", cerr)
 		}
 	}
 	if q.getSessionStmt != nil {
@@ -539,6 +550,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing teamHasSourceStmt: %w", cerr)
 		}
 	}
+	if q.toggleQueryBookmarkStmt != nil {
+		if cerr := q.toggleQueryBookmarkStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing toggleQueryBookmarkStmt: %w", cerr)
+		}
+	}
 	if q.updateAPITokenLastUsedStmt != nil {
 		if cerr := q.updateAPITokenLastUsedStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateAPITokenLastUsedStmt: %w", cerr)
@@ -654,6 +670,7 @@ type Queries struct {
 	getAlertStmt                        *sql.Stmt
 	getAlertForTeamSourceStmt           *sql.Stmt
 	getLatestUnresolvedAlertHistoryStmt *sql.Stmt
+	getQueryBookmarkStatusStmt          *sql.Stmt
 	getSessionStmt                      *sql.Stmt
 	getSourceStmt                       *sql.Stmt
 	getSourceByNameStmt                 *sql.Stmt
@@ -688,6 +705,7 @@ type Queries struct {
 	removeTeamSourceStmt                *sql.Stmt
 	resolveAlertHistoryStmt             *sql.Stmt
 	teamHasSourceStmt                   *sql.Stmt
+	toggleQueryBookmarkStmt             *sql.Stmt
 	updateAPITokenLastUsedStmt          *sql.Stmt
 	updateAlertStmt                     *sql.Stmt
 	updateAlertHistoryPayloadStmt       *sql.Stmt
@@ -730,6 +748,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getAlertStmt:                        q.getAlertStmt,
 		getAlertForTeamSourceStmt:           q.getAlertForTeamSourceStmt,
 		getLatestUnresolvedAlertHistoryStmt: q.getLatestUnresolvedAlertHistoryStmt,
+		getQueryBookmarkStatusStmt:          q.getQueryBookmarkStatusStmt,
 		getSessionStmt:                      q.getSessionStmt,
 		getSourceStmt:                       q.getSourceStmt,
 		getSourceByNameStmt:                 q.getSourceByNameStmt,
@@ -764,6 +783,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		removeTeamSourceStmt:                q.removeTeamSourceStmt,
 		resolveAlertHistoryStmt:             q.resolveAlertHistoryStmt,
 		teamHasSourceStmt:                   q.teamHasSourceStmt,
+		toggleQueryBookmarkStmt:             q.toggleQueryBookmarkStmt,
 		updateAPITokenLastUsedStmt:          q.updateAPITokenLastUsedStmt,
 		updateAlertStmt:                     q.updateAlertStmt,
 		updateAlertHistoryPayloadStmt:       q.updateAlertHistoryPayloadStmt,

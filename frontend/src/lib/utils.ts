@@ -119,13 +119,6 @@ const severityColumnNames = new Set([
 // Keep track of dynamically added fields from source metadata
 const dynamicSeverityFields = new Set<string>();
 
-// Function to register a custom severity field from source metadata
-export function registerSeverityField(fieldName: string): void {
-  if (fieldName && typeof fieldName === 'string') {
-    dynamicSeverityFields.add(fieldName.toLowerCase());
-  }
-}
-
 // Function to get severity badge classes
 export function getSeverityClasses(
   value: unknown,

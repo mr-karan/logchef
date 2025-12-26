@@ -7,7 +7,6 @@ import { SqlManager } from '@/services/SqlManager';
 import { getErrorMessage } from '@/api/types';
 import type { TimeRange } from '@/types/query';
 import { logchefqlApi } from '@/api/logchefql';
-import { useExploreUrlSync } from '@/composables/useExploreUrlSync';
 import { useVariables } from "@/composables/useVariables";
 
 // Define the valid editor modes
@@ -29,7 +28,6 @@ export function useQuery() {
   const exploreStore = useExploreStore();
   const sourcesStore = useSourcesStore();
   const teamsStore = useTeamsStore();
-  const { syncUrlFromState } = useExploreUrlSync();
   const { convertVariables } = useVariables();
   // Local state that isn't persisted in the store
   const queryError = ref<string>('');
@@ -212,9 +210,6 @@ export function useQuery() {
 
     // Delegate to store action
     exploreStore.setActiveMode(newMode);
-
-    // After mode switch, sync URL state
-    syncUrlFromState();
   };
 
   // Handle time range update
@@ -243,9 +238,6 @@ export function useQuery() {
 
     // In LogchefQL mode, the limit is passed to the backend separately
     // No need to modify the LogchefQL query itself
-
-    // Sync URL state after update
-    syncUrlFromState();
   };
 
   // Generate default SQL - now uses SqlManager
@@ -402,10 +394,7 @@ export function useQuery() {
       // Execute via store action
       const execResult = await exploreStore.executeQuery();
 
-      // Update URL state after successful execution
-      if (execResult.success) {
-        syncUrlFromState();
-      } else {
+      if (!execResult.success) {
         queryError.value = execResult.error?.message || 'Query execution failed';
       }
 

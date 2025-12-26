@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"reflect"
 	"regexp"
 	"strings"
@@ -82,7 +83,7 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 	// Ensure host includes the native protocol port (default 9000) if not specified.
 	host := opts.Host
 	if !strings.Contains(host, ":") {
-		host = host + ":9000"
+		host += ":9000"
 	}
 
 	options := &clickhouse.Options{
@@ -307,12 +308,6 @@ func (c *Client) QueryWithTimeout(ctx context.Context, query string, timeoutSeco
 	return queryResult, nil
 }
 
-// execDDL executes a DDL statement (e.g., CREATE, ALTER, DROP) using hooks.
-// It returns an empty QueryResult on success.
-func (c *Client) execDDL(ctx context.Context, query string) (*models.QueryResult, error) {
-	return c.execDDLWithTimeout(ctx, query, nil)
-}
-
 // execDDLWithTimeout executes a DDL statement with a timeout setting.
 // The timeoutSeconds parameter is required and will always be applied.
 func (c *Client) execDDLWithTimeout(ctx context.Context, query string, timeoutSeconds *int) (*models.QueryResult, error) {
@@ -364,7 +359,7 @@ func isDDLStatement(query string) bool {
 
 // Close terminates the underlying database connection with a timeout.
 func (c *Client) Close() error {
-	c.logger.Info("closing clickhouse client connection")
+	c.logger.Debug("closing clickhouse connection")
 
 	// Create a timeout context for the close operation
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -461,7 +456,7 @@ func (c *Client) Reconnect(ctx context.Context) error {
 	// Replace the connection
 	c.conn = newConn
 	success = true
-	c.logger.Info("successfully reconnected to clickhouse")
+	c.logger.Debug("reconnected to clickhouse")
 	return nil
 }
 
@@ -485,7 +480,7 @@ func (c *Client) GetTableInfo(ctx context.Context, database, table string) (*Tab
 
 	// If it's a Distributed engine table, fetch metadata from the underlying local table.
 	if baseInfo.Engine == "Distributed" && len(baseInfo.EngineParams) >= 3 {
-		return c.handleDistributedTable(ctx, baseInfo)
+		return c.handleDistributedTable(ctx, baseInfo), nil
 	}
 
 	// If it's a MergeTree family table, attempt to get sorting keys.
@@ -588,14 +583,13 @@ func (c *Client) getExtendedColumns(ctx context.Context, database, table string)
 }
 
 // getTableEngine retrieves the table engine, full engine string, and CREATE statement.
-func (c *Client) getTableEngine(ctx context.Context, database, table string) (string, []string, string, error) {
+func (c *Client) getTableEngine(ctx context.Context, database, table string) (engine string, engineParams []string, createQuery string, err error) {
 	query := `
 		SELECT engine, engine_full, create_table_query
 		FROM system.tables
 		WHERE database = ? AND name = ?
 	`
 	var rows driver.Rows
-	var err error
 
 	err = c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
 		rows, err = c.conn.Query(hookCtx, query, database, table)
@@ -607,27 +601,22 @@ func (c *Client) getTableEngine(ctx context.Context, database, table string) (st
 	}
 	defer rows.Close()
 
-	var engine, engineFull, createQuery string
+	var engineFull string
 	if rows.Next() {
-		if err := rows.Scan(&engine, &engineFull, &createQuery); err != nil {
-			return "", nil, "", fmt.Errorf("failed to scan table engine: %w", err)
+		if scanErr := rows.Scan(&engine, &engineFull, &createQuery); scanErr != nil {
+			return "", nil, "", fmt.Errorf("failed to scan table engine: %w", scanErr)
 		}
 	} else {
-		// If no rows returned, the table likely doesn't exist.
 		return "", nil, "", fmt.Errorf("table %s.%s not found in system.tables", database, table)
 	}
-	if err := rows.Err(); err != nil {
-		return "", nil, "", fmt.Errorf("error iterating table engine results: %w", err)
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return "", nil, "", fmt.Errorf("error iterating table engine results: %w", rowsErr)
 	}
 
-	// Skip parsing engine_full since it contains the entire engine clause (PARTITION BY, ORDER BY, TTL)
-	// rather than just constructor parameters. The actual schema details are available in other fields.
-	// Only parse constructor params if we specifically need them for Distributed engines.
-	var params []string
 	if strings.HasPrefix(engine, "Distributed") {
-		params = parseEngineParams(engineFull)
+		engineParams = parseEngineParams(engineFull)
 	}
-	return engine, params, createQuery, nil
+	return engine, engineParams, createQuery, nil
 }
 
 // getColumns retrieves basic column name and type information.
@@ -699,11 +688,10 @@ func (c *Client) getSortKeys(ctx context.Context, database, table string) ([]str
 
 // handleDistributedTable fetches metadata from the underlying local table
 // referenced by a Distributed table engine.
-func (c *Client) handleDistributedTable(ctx context.Context, base *TableInfo) (*TableInfo, error) {
+func (c *Client) handleDistributedTable(ctx context.Context, base *TableInfo) *TableInfo {
 	if len(base.EngineParams) < 3 {
-		// Distributed engine string is malformed or unexpected.
 		c.logger.Warn("distributed table has insufficient engine parameters", "params", base.EngineParams)
-		return base, nil // Return base info as fallback.
+		return base
 	}
 
 	// Extract cluster, local database, and local table names from engine parameters.
@@ -728,7 +716,7 @@ func (c *Client) handleDistributedTable(ctx context.Context, base *TableInfo) (*
 			"local_db", localDB,
 			"local_table", localTable,
 		)
-		return base, nil
+		return base
 	}
 
 	// Construct the final TableInfo, merging distributed table identity
@@ -742,88 +730,77 @@ func (c *Client) handleDistributedTable(ctx context.Context, base *TableInfo) (*
 		Columns:      underlyingInfo.Columns,
 		ExtColumns:   underlyingInfo.ExtColumns,
 		SortKeys:     underlyingInfo.SortKeys,
-	}, nil
+	}
 }
 
-// parseEngineParams attempts to parse the parameters from a full engine string
-// (e.g., "MergeTree() PARTITION BY toYYYYMM(date) ORDER BY (date, id)").
-// This function extracts only the engine constructor parameters, not the full engine clause.
+// parseEngineParams extracts parameters from engine constructor string.
 func parseEngineParams(engineFull string) []string {
-	// Find the engine constructor parentheses (the first pair)
 	start := strings.Index(engineFull, "(")
 	if start == -1 {
-		return nil // No parameters found
+		return nil
 	}
 
-	// Find the matching closing parenthesis by counting nested levels
+	end := findMatchingParen(engineFull, start)
+	if end == -1 || start >= end {
+		return nil
+	}
+
+	return splitEngineParams(engineFull[start+1 : end])
+}
+
+func findMatchingParen(s string, start int) int {
 	parenCount := 0
-	end := -1
-	for i := start; i < len(engineFull); i++ {
-		if engineFull[i] == '(' {
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '(':
 			parenCount++
-		} else if engineFull[i] == ')' {
+		case ')':
 			parenCount--
 			if parenCount == 0 {
-				end = i
-				break
+				return i
 			}
 		}
 	}
+	return -1
+}
 
-	if end == -1 || start >= end {
-		return nil // No matching closing parenthesis found
-	}
-
-	paramsStr := engineFull[start+1 : end]
-
+func splitEngineParams(paramsStr string) []string {
 	params := make([]string, 0)
 	var currentParam strings.Builder
 	inQuote := false
-	nestedLevel := 0 // Handle nested parentheses within parameters.
+	nestedLevel := 0
 
 	for _, char := range paramsStr {
-		switch char {
-		case '\'':
+		switch {
+		case char == '\'':
 			inQuote = !inQuote
 			currentParam.WriteRune(char)
-		case '(':
-			if !inQuote {
-				nestedLevel++
-			}
+		case char == '(' && !inQuote:
+			nestedLevel++
 			currentParam.WriteRune(char)
-		case ')':
-			if !inQuote {
-				nestedLevel--
-			}
+		case char == ')' && !inQuote:
+			nestedLevel--
 			currentParam.WriteRune(char)
-		case ',':
-			// Split only if not inside quotes and not inside nested parentheses.
-			if !inQuote && nestedLevel == 0 {
-				param := strings.TrimSpace(currentParam.String())
-				// Optionally remove surrounding quotes from the parameter itself.
-				if len(param) >= 2 && param[0] == '\'' && param[len(param)-1] == '\'' {
-					param = param[1 : len(param)-1]
-				}
-				params = append(params, param)
-				currentParam.Reset() // Start next parameter.
-			} else {
-				currentParam.WriteRune(char)
-			}
+		case char == ',' && !inQuote && nestedLevel == 0:
+			params = append(params, stripQuotes(strings.TrimSpace(currentParam.String())))
+			currentParam.Reset()
 		default:
 			currentParam.WriteRune(char)
 		}
 	}
 
-	// Add the last parameter accumulated.
 	if currentParam.Len() > 0 {
-		param := strings.TrimSpace(currentParam.String())
-		if len(param) >= 2 && param[0] == '\'' && param[len(param)-1] == '\'' {
-			param = param[1 : len(param)-1]
-		}
-		params = append(params, param)
+		params = append(params, stripQuotes(strings.TrimSpace(currentParam.String())))
 	}
 
 	return params
+}
+
+func stripQuotes(s string) string {
+	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
+		return s[1 : len(s)-1]
+	}
+	return s
 }
 
 // parseSortKeys attempts to extract individual column names from the sorting_key string.
@@ -923,162 +900,36 @@ func buildLogchefQLConditionsSQL(query string) string {
 }
 
 // GetFieldDistinctValues retrieves the top N distinct values for a field within a time range.
-// This is optimized for LowCardinality fields but works for any field type.
-// For LowCardinality fields, the query is very fast as ClickHouse maintains
-// a dictionary of unique values.
-// IMPORTANT: Time range is required to avoid scanning entire tables.
 func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table string, params FieldValuesParams) (*FieldValuesResult, error) {
-	limit := params.Limit
-	if limit <= 0 {
-		limit = 10
-	}
-	if limit > 100 {
-		limit = 100 // Cap to prevent expensive queries
-	}
-
-	// Ensure timeout is provided
-	timeoutSeconds := params.Timeout
-	if timeoutSeconds == nil {
-		defaultTimeout := 10 // Shorter timeout for this type of query
-		timeoutSeconds = &defaultTimeout
-	}
-
-	// Default timezone to UTC
-	timezone := params.Timezone
-	if timezone == "" {
-		timezone = "UTC"
-	}
+	limit, timeoutSeconds, timezone := normalizeFieldValuesParams(params)
 
 	c.logger.Debug("fetching distinct values for field",
-		"database", database,
-		"table", table,
-		"field", params.FieldName,
-		"field_type", params.FieldType,
-		"timestamp_field", params.TimestampField,
-		"start_time", params.StartTime,
-		"end_time", params.EndTime,
-		"timezone", timezone,
-		"limit", limit,
-		"timeout_seconds", *timeoutSeconds,
-		"logchefql", params.LogchefQL)
+		"database", database, "table", table, "field", params.FieldName,
+		"field_type", params.FieldType, "limit", limit)
 
-	// Determine if it's LowCardinality from the provided type
 	isLowCard := strings.Contains(params.FieldType, "LowCardinality")
-
-	// Format time range for ClickHouse query
 	startTimeStr := params.StartTime.UTC().Format("2006-01-02 15:04:05")
 	endTimeStr := params.EndTime.UTC().Format("2006-01-02 15:04:05")
-
-	// Build additional WHERE conditions from user's LogchefQL query
 	additionalConditions := buildLogchefQLConditionsSQL(params.LogchefQL)
 
-	// Build optimized query:
-	// 1. PREWHERE for timestamp - ClickHouse reads timestamp column first, filters, then reads field
-	// 2. Direct field reference (no toString) - Go code handles *string pointers for Nullable types
-	// 3. Simplified WHERE clause with optional user filter conditions
 	query := fmt.Sprintf(`
-		SELECT 
-			%s AS value,
-			count() AS cnt
+		SELECT %s AS value, count() AS cnt
 		FROM %s.%s
 		PREWHERE %s BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')
 		WHERE %s != ''%s
-		GROUP BY value
-		ORDER BY cnt DESC
-		LIMIT %d
+		GROUP BY value ORDER BY cnt DESC LIMIT %d
 	`, params.FieldName, database, table,
 		params.TimestampField, startTimeStr, timezone, endTimeStr, timezone,
-		params.FieldName, additionalConditions,
-		limit)
+		params.FieldName, additionalConditions, limit)
 
 	result, err := c.QueryWithTimeout(ctx, query, timeoutSeconds)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query distinct values for %s: %w", params.FieldName, err)
 	}
 
-	values := make([]FieldValueInfo, 0, len(result.Logs))
-	for _, row := range result.Logs {
-		// Value can be string or pointer types depending on column nullability
-		var val string
-		switch v := row["value"].(type) {
-		case string:
-			val = v
-		case *string:
-			// Nullable string columns return *string from the driver
-			if v == nil {
-				continue // skip null values
-			}
-			val = *v
-		case []byte:
-			val = string(v)
-		case *[]byte:
-			if v == nil {
-				continue
-			}
-			val = string(*v)
-		default:
-			// For other types, try to convert to string safely
-			if v == nil {
-				continue
-			}
-			val = fmt.Sprintf("%v", v)
-		}
+	values := extractFieldValues(result)
 
-		// Skip empty values
-		if val == "" {
-			continue
-		}
-
-		cnt, okC := row["cnt"]
-		if !okC {
-			continue
-		}
-
-		// Convert count to int64
-		var count int64
-		switch v := cnt.(type) {
-		case uint64:
-			count = int64(v)
-		case int64:
-			count = v
-		case int:
-			count = int64(v)
-		case float64:
-			count = int64(v)
-		default:
-			continue
-		}
-
-		values = append(values, FieldValueInfo{
-			Value: val,
-			Count: count,
-		})
-	}
-
-	// Get total distinct count within time range
-	// Using uniq() instead of uniqExact() - faster and approximate is fine for display
-	// Also apply user's filter conditions for accurate count
-	totalQuery := fmt.Sprintf(`
-		SELECT uniq(%s) AS total
-		FROM %s.%s
-		PREWHERE %s BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')
-		WHERE %s != ''%s
-	`, params.FieldName, database, table,
-		params.TimestampField, startTimeStr, timezone, endTimeStr, timezone,
-		params.FieldName, additionalConditions)
-
-	totalResult, err := c.QueryWithTimeout(ctx, totalQuery, timeoutSeconds)
-	var totalDistinct int64 = 0
-	if err == nil && len(totalResult.Logs) > 0 {
-		if total, ok := totalResult.Logs[0]["total"]; ok {
-			switch v := total.(type) {
-			case uint64:
-				totalDistinct = int64(v)
-			case int64:
-				totalDistinct = v
-			}
-		}
-	}
+	totalDistinct := c.queryTotalDistinct(ctx, database, table, params, startTimeStr, endTimeStr, timezone, additionalConditions, timeoutSeconds)
 
 	return &FieldValuesResult{
 		FieldName:     params.FieldName,
@@ -1087,6 +938,122 @@ func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table str
 		Values:        values,
 		TotalDistinct: totalDistinct,
 	}, nil
+}
+
+func normalizeFieldValuesParams(params FieldValuesParams) (limit int, timeout *int, timezone string) {
+	limit = params.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	timeout = params.Timeout
+	if timeout == nil {
+		defaultTimeout := 10
+		timeout = &defaultTimeout
+	}
+
+	timezone = params.Timezone
+	if timezone == "" {
+		timezone = "UTC"
+	}
+	return
+}
+
+func extractFieldValues(result *models.QueryResult) []FieldValueInfo {
+	values := make([]FieldValueInfo, 0, len(result.Logs))
+	for _, row := range result.Logs {
+		val, ok := extractStringFromRow(row, "value")
+		if !ok || val == "" {
+			continue
+		}
+
+		count, ok := extractInt64FromRow(row, "cnt")
+		if !ok {
+			continue
+		}
+
+		values = append(values, FieldValueInfo{Value: val, Count: count})
+	}
+	return values
+}
+
+func extractStringFromRow(row map[string]any, key string) (string, bool) {
+	rawVal, exists := row[key]
+	if !exists {
+		return "", false
+	}
+
+	switch v := rawVal.(type) {
+	case string:
+		return v, true
+	case *string:
+		if v == nil {
+			return "", false
+		}
+		return *v, true
+	case []byte:
+		return string(v), true
+	case *[]byte:
+		if v == nil {
+			return "", false
+		}
+		return string(*v), true
+	case nil:
+		return "", false
+	default:
+		return fmt.Sprintf("%v", v), true
+	}
+}
+
+func extractInt64FromRow(row map[string]any, key string) (int64, bool) {
+	rawVal, exists := row[key]
+	if !exists {
+		return 0, false
+	}
+
+	switch v := rawVal.(type) {
+	case uint64:
+		// #nosec G115 -- count values from DB are bounded by actual row counts
+		return int64(min(v, uint64(math.MaxInt64))), true
+	case int64:
+		return v, true
+	case int:
+		return int64(v), true
+	case float64:
+		return int64(v), true
+	default:
+		return 0, false
+	}
+}
+
+func (c *Client) queryTotalDistinct(ctx context.Context, database, table string, params FieldValuesParams, startTimeStr, endTimeStr, timezone, additionalConditions string, timeoutSeconds *int) int64 {
+	query := fmt.Sprintf(`
+		SELECT uniq(%s) AS total
+		FROM %s.%s
+		PREWHERE %s BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')
+		WHERE %s != ''%s
+	`, params.FieldName, database, table,
+		params.TimestampField, startTimeStr, timezone, endTimeStr, timezone,
+		params.FieldName, additionalConditions)
+
+	result, err := c.QueryWithTimeout(ctx, query, timeoutSeconds)
+	if err != nil || len(result.Logs) == 0 {
+		return 0
+	}
+
+	if total, ok := result.Logs[0]["total"]; ok {
+		switch v := total.(type) {
+		case uint64:
+			// #nosec G115 -- distinct count values are bounded by actual row counts
+			return int64(min(v, uint64(math.MaxInt64)))
+		case int64:
+			return v
+		}
+	}
+	return 0
 }
 
 // AllFieldValuesParams holds parameters for fetching field values for filterable columns.
@@ -1212,7 +1179,7 @@ func (c *Client) GetAllLowCardinalityFieldValues(ctx context.Context, database, 
 
 // Ping checks the connectivity to the ClickHouse server and optionally verifies a table exists.
 // It uses short timeouts internally. Returns nil on success, or an error indicating the failure reason.
-func (c *Client) Ping(ctx context.Context, database string, table string) error {
+func (c *Client) Ping(ctx context.Context, database, table string) error {
 	if c.conn == nil {
 		if c.metrics != nil {
 			c.metrics.RecordConnectionValidation(false)

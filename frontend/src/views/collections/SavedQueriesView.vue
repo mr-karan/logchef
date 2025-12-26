@@ -9,6 +9,8 @@ import {
   Loader2,
   Plus,
   Search,
+  Star,
+  Link,
 } from "lucide-vue-next";
 import { formatDate } from "@/utils/format";
 import {
@@ -43,18 +45,21 @@ import { useSourcesStore } from "@/stores/sources";
 import { formatSourceName } from "@/utils/format";
 import type { SavedTeamQuery } from "@/api/savedQueries";
 import { useTeamsStore } from "@/stores/teams";
+import { useContextStore } from "@/stores/context";
 import { Badge } from "@/components/ui/badge";
 import { useSavedQueries } from "@/composables/useSavedQueries";
 import type { SaveQueryFormData } from "@/views/explore/types";
 import type { Source } from "@/api/sources";
+import { useSavedQueriesStore } from "@/stores/savedQueries";
 
 // Initialize router and services with better error handling
 const router = useRouter();
 const { toast } = useToast();
 
-// Initialize stores with error handling
 let sourcesStore = useSourcesStore();
 let teamsStore = useTeamsStore();
+let contextStore = useContextStore();
+const savedQueriesStore = useSavedQueriesStore();
 
 // Define local refs for queries and current source
 const localTeamQueries = ref<SavedTeamQuery[] | undefined>();
@@ -99,6 +104,7 @@ const {
   clearSearch,
   loadSourceQueries,
   handleSaveQuery: handleSaveQueryFromComposable,
+  updateSavedQuery,
   canManageCollections,
 } = useSavedQueries(localTeamQueries, currentSelectedSource);
 
@@ -171,13 +177,10 @@ onMounted(async () => {
     const teamIdFromUrl = router.currentRoute.value.query.team;
 
     if (teamIdFromUrl) {
-      // Set the team from URL parameter
       const teamId = parseInt(teamIdFromUrl as string);
-      teamsStore.setCurrentTeam(teamId);
-    }
-    // Set default team if none specified in URL and none selected
-    else if (!teamsStore.currentTeamId && teamsStore.teams.length > 0) {
-      teamsStore.setCurrentTeam(teamsStore.teams[0].id);
+      contextStore.selectTeam(teamId);
+    } else if (!contextStore.teamId && teamsStore.teams.length > 0) {
+      contextStore.selectTeam(teamsStore.teams[0].id);
     }
 
     // Load sources for the current team
@@ -275,14 +278,12 @@ watch(
   { immediate: true } // This will trigger immediately when component mounts
 );
 
-// Handle team change
 async function handleTeamChange(teamId: string) {
   try {
     isChangingTeam.value = true;
     urlError.value = null;
 
-    // Use the improved setCurrentTeam that handles string IDs
-    teamsStore.setCurrentTeam(teamId);
+    contextStore.selectTeam(parseInt(teamId));
 
     const currentTeamId = parseInt(teamId);
 
@@ -447,11 +448,90 @@ async function handleSaveQuery(formData: SaveQueryFormData) {
   return await handleSaveQueryFromComposable(formData);
 }
 
+// Handle update query modal submission
+async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
+  if (!teamsStore?.currentTeamId || !selectedSourceId.value) {
+    return;
+  }
+
+  try {
+    const result = await updateSavedQuery(
+      teamsStore.currentTeamId,
+      parseInt(selectedSourceId.value),
+      queryId,
+      {
+        name: formData.name,
+        description: formData.description,
+        query_content: formData.query_content,
+        query_type: formData.query_type as 'logchefql' | 'sql',
+      }
+    );
+
+    if (result.success) {
+      showSaveQueryModal.value = false;
+      editingQuery.value = null;
+      // Refresh the queries list
+      await fetchQueries();
+    }
+  } catch (error) {
+    console.error('Error updating query:', error);
+  }
+}
+
 // Create a new query with current source
 function handleCreateNewQuery() {
   createNewQuery(
     selectedSourceId.value ? parseInt(selectedSourceId.value) : undefined
   );
+}
+
+// Toggle bookmark status for a query
+async function handleToggleBookmark(query: SavedTeamQuery) {
+  if (!teamsStore?.currentTeamId || !selectedSourceId.value) {
+    return;
+  }
+
+  const result = await savedQueriesStore.toggleBookmark(
+    teamsStore.currentTeamId,
+    parseInt(selectedSourceId.value),
+    query.id
+  );
+
+  if (result.success && result.data) {
+    // Update the local query list to reflect the change
+    if (localTeamQueries.value) {
+      const index = localTeamQueries.value.findIndex((q) => q.id === query.id);
+      if (index >= 0) {
+        localTeamQueries.value[index].is_bookmarked = result.data.is_bookmarked;
+      }
+    }
+  }
+}
+
+// Copy shareable collection URL to clipboard
+async function copyCollectionUrl(query: SavedTeamQuery) {
+  if (!teamsStore?.currentTeamId || !selectedSourceId.value) {
+    return;
+  }
+
+  const url = `${window.location.origin}/logs/collection/${teamsStore.currentTeamId}/${selectedSourceId.value}/${query.id}`;
+
+  try {
+    await navigator.clipboard.writeText(url);
+    toast({
+      title: "Link Copied",
+      description: "Collection URL copied to clipboard",
+      duration: TOAST_DURATION.SUCCESS,
+    });
+  } catch (error) {
+    console.error("Failed to copy URL:", error);
+    toast({
+      title: "Error",
+      description: "Failed to copy URL to clipboard",
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR,
+    });
+  }
 }
 </script>
 
@@ -627,6 +707,7 @@ function handleCreateNewQuery() {
         <Table class="font-sans">
           <TableHeader>
             <TableRow>
+              <TableHead class="w-[50px] font-sans"></TableHead>
               <TableHead class="w-[250px] font-sans">Name</TableHead>
               <TableHead class="font-sans">Description</TableHead>
               <TableHead class="w-[100px] font-sans">Type</TableHead>
@@ -637,6 +718,24 @@ function handleCreateNewQuery() {
           </TableHeader>
           <TableBody>
             <TableRow v-for="query in filteredQueries" :key="query.id">
+              <TableCell class="w-[50px]">
+                <button
+                  v-if="canManageCollections"
+                  @click.stop="handleToggleBookmark(query)"
+                  class="p-1 rounded hover:bg-muted transition-colors"
+                  :title="query.is_bookmarked ? 'Remove bookmark' : 'Add bookmark'"
+                >
+                  <Star
+                    class="h-4 w-4 transition-transform hover:scale-110"
+                    :class="query.is_bookmarked ? 'text-amber-500 fill-amber-500' : 'text-muted-foreground'"
+                  />
+                </button>
+                <Star
+                  v-else
+                  class="h-4 w-4"
+                  :class="query.is_bookmarked ? 'text-amber-500 fill-amber-500' : 'text-muted-foreground'"
+                />
+              </TableCell>
               <TableCell class="font-medium font-sans">
                 <a @click.prevent="openQuery(query)" :href="getQueryUrl(query)"
                   class="text-primary hover:underline cursor-pointer">
@@ -676,6 +775,10 @@ function handleCreateNewQuery() {
                       <Eye class="mr-2 h-4 w-4" />
                       Open
                     </DropdownMenuItem>
+                    <DropdownMenuItem @click="copyCollectionUrl(query)">
+                      <Link class="mr-2 h-4 w-4" />
+                      Copy Link
+                    </DropdownMenuItem>
                     <DropdownMenuItem v-if="canManageCollections" @click="editQuery(query)">
                       <Pencil class="mr-2 h-4 w-4" />
                       Edit
@@ -695,7 +798,7 @@ function handleCreateNewQuery() {
 
       <!-- Edit query modal -->
       <SaveQueryModal v-if="showSaveQueryModal && editingQuery" :is-open="showSaveQueryModal"
-        :initial-data="editingQuery" :is-edit-mode="true" @close="showSaveQueryModal = false" @save="handleSaveQuery" />
+        :initial-data="editingQuery" :is-edit-mode="true" @close="showSaveQueryModal = false" @save="handleSaveQuery" @update="handleUpdateQuery" />
     </div>
   </div>
 </template>

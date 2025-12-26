@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import {
   savedQueriesApi,
   type SavedTeamQuery,
@@ -8,22 +8,30 @@ import {
 } from "@/api/savedQueries";
 import { useBaseStore } from "./base";
 import { useTeamsStore } from "./teams";
+import { useContextStore } from "./context";
 
 export interface SavedQueriesState {
   queries: SavedTeamQuery[];
   selectedQuery: SavedTeamQuery | null;
   teams: Team[];
-  selectedTeamId: number | null;
 }
 
 export const useSavedQueriesStore = defineStore("savedQueries", () => {
-  // Create base store for common functionality and error handling
   const state = useBaseStore<SavedQueriesState>({
     queries: [],
     selectedQuery: null,
     teams: [],
-    selectedTeamId: null,
   });
+
+  const contextStore = useContextStore();
+
+  watch(
+    [() => contextStore.teamId, () => contextStore.sourceId],
+    () => {
+      state.data.value.queries = [];
+      state.data.value.selectedQuery = null;
+    }
+  );
 
   // Getters
   const parseQueryContent = (query: SavedTeamQuery): SavedQueryContent => {
@@ -76,11 +84,10 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     return parseQueryContent(query);
   }
 
-  // Computed properties
   const queries = computed(() => state.data.value.queries);
   const selectedQuery = computed(() => state.data.value.selectedQuery);
   const teams = computed(() => state.data.value.teams);
-  const selectedTeamId = computed(() => state.data.value.selectedTeamId);
+  const selectedTeamId = computed(() => contextStore.teamId);
 
   const hasTeams = computed(() => (teams.value?.length || 0) > 0);
   const hasQueries = computed(() => (queries.value?.length || 0) > 0);
@@ -90,23 +97,22 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
 
   async function fetchUserTeams() {
     return await state.withLoading('fetchUserTeams', async () => {
-      return await state.callApi<Team[]>({ // Specify expected type
+      return await state.callApi<Team[]>({
         apiCall: () => savedQueriesApi.getUserTeams(),
         operationKey: 'fetchUserTeams',
         onSuccess: (response) => {
-          // response is now correctly typed as Team[] | null
-          state.data.value.teams = response ?? []; // Use nullish coalescing
-          if (response && response.length > 0 && !state.data.value.selectedTeamId) {
-            state.data.value.selectedTeamId = response[0].id;
+          state.data.value.teams = response ?? [];
+          if (response && response.length > 0 && !contextStore.teamId) {
+            contextStore.selectTeam(response[0].id);
           }
         },
-        defaultData: [] // Provide default empty array
+        defaultData: []
       });
     });
   }
 
   function setSelectedTeam(teamId: number) {
-    state.data.value.selectedTeamId = teamId;
+    contextStore.selectTeam(teamId);
   }
 
   async function fetchTeamQueries(_teamId: number) {
@@ -284,16 +290,49 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     });
   }
 
-  // Reset state function
+  async function toggleBookmark(teamId: number, sourceId: number, queryId: number) {
+    return await state.withLoading(`toggleBookmark-${teamId}-${sourceId}-${queryId}`, async () => {
+      return await state.callApi<{ is_bookmarked: boolean; message: string }>({
+        apiCall: () => savedQueriesApi.toggleBookmark(teamId, sourceId, queryId),
+        operationKey: `toggleBookmark-${teamId}-${sourceId}-${queryId}`,
+        onSuccess: (response) => {
+          if (response) {
+            // Update the bookmark status in the queries list
+            const index = state.data.value.queries.findIndex(
+              (q) => q.id === queryId
+            );
+            if (index >= 0) {
+              state.data.value.queries[index].is_bookmarked = response.is_bookmarked;
+              // Update updated_at locally so sorting reflects the change
+              state.data.value.queries[index].updated_at = new Date().toISOString();
+              // Re-sort to match backend order: bookmarked first, then by updated_at desc
+              state.data.value.queries.sort((a, b) => {
+                // Bookmarked queries come first
+                if (a.is_bookmarked !== b.is_bookmarked) {
+                  return a.is_bookmarked ? -1 : 1;
+                }
+                // Then sort by updated_at descending
+                return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+              });
+            }
+            // Update selectedQuery if it matches
+            if (state.data.value.selectedQuery?.id === queryId) {
+              state.data.value.selectedQuery.is_bookmarked = response.is_bookmarked;
+            }
+          }
+        },
+        showToast: false, // No toast for bookmark toggle - visual feedback via star icon
+      });
+    });
+  }
+
   function resetState() {
     state.data.value = {
       queries: [],
       selectedQuery: null,
       teams: [],
-      selectedTeamId: null,
     };
-    state.error.value = null; // Also reset error state
-    // state.loading map might need selective clearing depending on use case
+    state.error.value = null;
   }
 
   return {
@@ -324,6 +363,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     updateQuery,
     updateTeamSourceQuery,
     deleteQuery,
+    toggleBookmark,
     resetState,
 
     // Loading state helpers

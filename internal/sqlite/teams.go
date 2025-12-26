@@ -16,7 +16,6 @@ import (
 // CreateTeam inserts a new team record.
 // Populates the team ID and timestamps on the input model upon success.
 func (db *DB) CreateTeam(ctx context.Context, team *models.Team) error {
-	db.log.Debug("creating team record", "name", team.Name)
 
 	params := sqlc.CreateTeamParams{
 		Name:        team.Name,
@@ -46,14 +45,12 @@ func (db *DB) CreateTeam(ctx context.Context, team *models.Team) error {
 	team.CreatedAt = teamRow.CreatedAt
 	team.UpdatedAt = teamRow.UpdatedAt
 
-	db.log.Debug("team record created successfully", "team_id", team.ID)
 	return nil
 }
 
 // GetTeam retrieves a single team by its ID.
 // Returns core.ErrTeamNotFound if not found.
 func (db *DB) GetTeam(ctx context.Context, teamID models.TeamID) (*models.Team, error) {
-	db.log.Debug("getting team record", "team_id", teamID)
 
 	teamRow, err := db.queries.GetTeam(ctx, int64(teamID))
 	if err != nil {
@@ -77,7 +74,6 @@ func (db *DB) GetTeam(ctx context.Context, teamID models.TeamID) (*models.Team, 
 // UpdateTeam updates an existing team record.
 // The `updated_at` timestamp is automatically set by the query.
 func (db *DB) UpdateTeam(ctx context.Context, team *models.Team) error {
-	db.log.Debug("updating team record", "team_id", team.ID, "name", team.Name)
 
 	params := sqlc.UpdateTeamParams{
 		Name:        team.Name,
@@ -95,14 +91,12 @@ func (db *DB) UpdateTeam(ctx context.Context, team *models.Team) error {
 		return fmt.Errorf("error updating team: %w", err)
 	}
 
-	db.log.Debug("team record updated successfully", "team_id", team.ID)
 	return nil
 }
 
 // DeleteTeam removes a team record by ID.
 // Associated memberships, source links, and queries should be handled by DB constraints (CASCADE DELETE).
 func (db *DB) DeleteTeam(ctx context.Context, teamID models.TeamID) error {
-	db.log.Debug("deleting team record", "team_id", teamID)
 
 	err := db.queries.DeleteTeam(ctx, int64(teamID))
 	if err != nil {
@@ -110,13 +104,11 @@ func (db *DB) DeleteTeam(ctx context.Context, teamID models.TeamID) error {
 		return fmt.Errorf("error deleting team: %w", err)
 	}
 
-	db.log.Debug("team record deleted successfully", "team_id", teamID)
 	return nil
 }
 
 // ListTeams retrieves all teams along with their member counts.
 func (db *DB) ListTeams(ctx context.Context) ([]*models.Team, error) {
-	db.log.Debug("listing team records")
 
 	teamRows, err := db.queries.ListTeams(ctx)
 	if err != nil {
@@ -139,7 +131,6 @@ func (db *DB) ListTeams(ctx context.Context) ([]*models.Team, error) {
 		})
 	}
 
-	db.log.Debug("team records listed", "count", len(teams))
 	return teams, nil
 }
 
@@ -149,7 +140,6 @@ func (db *DB) ListTeams(ctx context.Context) ([]*models.Team, error) {
 // Note: This method currently checks for team/user existence before inserting.
 // Consider if this check is strictly necessary or if relying on FK constraints is sufficient.
 func (db *DB) AddTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) error {
-	db.log.Debug("adding team member record", "team_id", teamID, "user_id", userID, "role", role)
 
 	// Check team existence (optional, FK constraint might handle).
 	_, err := db.GetTeam(ctx, teamID)
@@ -182,14 +172,12 @@ func (db *DB) AddTeamMember(ctx context.Context, teamID models.TeamID, userID mo
 		return fmt.Errorf("error adding team member: %w", err)
 	}
 
-	db.log.Debug("team member record added successfully", "team_id", teamID, "user_id", userID)
 	return nil
 }
 
 // GetTeamMember retrieves a specific team membership record.
 // Returns nil, nil if the user is not a member of the team.
 func (db *DB) GetTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) (*models.TeamMember, error) {
-	db.log.Debug("getting team member record", "team_id", teamID, "user_id", userID)
 
 	memberRow, err := db.queries.GetTeamMember(ctx, sqlc.GetTeamMemberParams{
 		TeamID: int64(teamID),
@@ -217,15 +205,11 @@ func (db *DB) GetTeamMember(ctx context.Context, teamID models.TeamID, userID mo
 // UpdateTeamMemberRole updates the role of an existing team member.
 // Note: This method currently checks for member existence first.
 func (db *DB) UpdateTeamMemberRole(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) error {
-	db.log.Debug("updating team member role", "team_id", teamID, "user_id", userID, "new_role", role)
 
 	// Check if the member exists first (optional, UPDATE might handle non-existence gracefully).
 	_, err := db.GetTeamMember(ctx, teamID, userID)
 	if err != nil {
 		return fmt.Errorf("failed checking team member existence before update: %w", err)
-	}
-	if err == nil && false { // Placeholder if GetTeamMember returns nil,nil on not found
-		return fmt.Errorf("team member (%d, %d) not found for update", teamID, userID)
 	}
 
 	params := sqlc.UpdateTeamMemberRoleParams{
@@ -239,13 +223,11 @@ func (db *DB) UpdateTeamMemberRole(ctx context.Context, teamID models.TeamID, us
 		return fmt.Errorf("error updating team member role: %w", err)
 	}
 
-	db.log.Debug("team member role updated successfully", "team_id", teamID, "user_id", userID)
 	return nil
 }
 
 // RemoveTeamMember removes a user's membership from a team.
 func (db *DB) RemoveTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) error {
-	db.log.Debug("removing team member record", "team_id", teamID, "user_id", userID)
 
 	params := sqlc.RemoveTeamMemberParams{
 		TeamID: int64(teamID),
@@ -258,13 +240,11 @@ func (db *DB) RemoveTeamMember(ctx context.Context, teamID models.TeamID, userID
 		return fmt.Errorf("error removing team member: %w", err)
 	}
 
-	db.log.Debug("team member record removed successfully", "team_id", teamID, "user_id", userID)
 	return nil
 }
 
 // ListTeamMembers retrieves basic membership info for all members of a team.
 func (db *DB) ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error) {
-	db.log.Debug("listing team members (basic)", "team_id", teamID)
 
 	memberRows, err := db.queries.ListTeamMembers(ctx, int64(teamID))
 	if err != nil {
@@ -283,13 +263,11 @@ func (db *DB) ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]*mod
 		})
 	}
 
-	db.log.Debug("basic team members listed", "team_id", teamID, "count", len(members))
 	return members, nil
 }
 
 // ListTeamMembersWithDetails retrieves membership info including user email and full name.
 func (db *DB) ListTeamMembersWithDetails(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error) {
-	db.log.Debug("listing team members with details", "team_id", teamID)
 
 	memberRows, err := db.queries.ListTeamMembersWithDetails(ctx, int64(teamID))
 	if err != nil {
@@ -310,13 +288,11 @@ func (db *DB) ListTeamMembersWithDetails(ctx context.Context, teamID models.Team
 		})
 	}
 
-	db.log.Debug("team members with details listed", "team_id", teamID, "count", len(members))
 	return members, nil
 }
 
 // ListUserTeams retrieves all teams a specific user is a member of.
 func (db *DB) ListUserTeams(ctx context.Context, userID models.UserID) ([]*models.Team, error) {
-	db.log.Debug("listing teams for user", "user_id", userID)
 
 	teamRows, err := db.queries.ListUserTeams(ctx, int64(userID))
 	if err != nil {
@@ -339,7 +315,6 @@ func (db *DB) ListUserTeams(ctx context.Context, userID models.UserID) ([]*model
 		})
 	}
 
-	db.log.Debug("teams listed for user", "user_id", userID, "count", len(teams))
 	return teams, nil
 }
 
@@ -347,7 +322,6 @@ func (db *DB) ListUserTeams(ctx context.Context, userID models.UserID) ([]*model
 
 // AddTeamSource creates an association between a team and a data source.
 func (db *DB) AddTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error {
-	db.log.Debug("adding team source record", "team_id", teamID, "source_id", sourceID)
 
 	// Existence checks for team/source are optional here, FK constraints handle integrity.
 	// _, err := db.GetTeam(ctx, teamID) ...
@@ -368,13 +342,11 @@ func (db *DB) AddTeamSource(ctx context.Context, teamID models.TeamID, sourceID 
 		return fmt.Errorf("error adding team source: %w", err)
 	}
 
-	db.log.Debug("team source record added successfully", "team_id", teamID, "source_id", sourceID)
 	return nil
 }
 
 // RemoveTeamSource removes the association between a team and a data source.
 func (db *DB) RemoveTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error {
-	db.log.Debug("removing team source record", "team_id", teamID, "source_id", sourceID)
 
 	params := sqlc.RemoveTeamSourceParams{
 		TeamID:   int64(teamID),
@@ -387,13 +359,11 @@ func (db *DB) RemoveTeamSource(ctx context.Context, teamID models.TeamID, source
 		return fmt.Errorf("error removing team source: %w", err)
 	}
 
-	db.log.Debug("team source record removed successfully", "team_id", teamID, "source_id", sourceID)
 	return nil
 }
 
 // ListTeamSources retrieves all data sources associated with a specific team.
 func (db *DB) ListTeamSources(ctx context.Context, teamID models.TeamID) ([]*models.Source, error) {
-	db.log.Debug("listing sources for team", "team_id", teamID)
 
 	sourceRows, err := db.queries.ListTeamSources(ctx, int64(teamID))
 	if err != nil {
@@ -410,13 +380,11 @@ func (db *DB) ListTeamSources(ctx context.Context, teamID models.TeamID) ([]*mod
 		}
 	}
 
-	db.log.Debug("sources listed for team", "team_id", teamID, "count", len(sources))
 	return sources, nil
 }
 
 // ListSourceTeams retrieves all teams that have access to a specific data source.
 func (db *DB) ListSourceTeams(ctx context.Context, sourceID models.SourceID) ([]*models.Team, error) {
-	db.log.Debug("listing teams for source", "source_id", sourceID)
 
 	teamRows, err := db.queries.ListSourceTeams(ctx, int64(sourceID))
 	if err != nil {
@@ -438,13 +406,11 @@ func (db *DB) ListSourceTeams(ctx context.Context, sourceID models.SourceID) ([]
 		})
 	}
 
-	db.log.Debug("teams listed for source", "source_id", sourceID, "count", len(teams))
 	return teams, nil
 }
 
 // ListSourcesForUser lists all unique sources a user has access to across all their teams.
 func (db *DB) ListSourcesForUser(ctx context.Context, userID models.UserID) ([]*models.Source, error) {
-	db.log.Debug("listing sources accessible by user", "user_id", userID)
 
 	sourceRows, err := db.queries.ListSourcesForUser(ctx, int64(userID))
 	if err != nil {
@@ -461,13 +427,11 @@ func (db *DB) ListSourcesForUser(ctx context.Context, userID models.UserID) ([]*
 		}
 	}
 
-	db.log.Debug("sources listed for user", "user_id", userID, "count", len(sources))
 	return sources, nil
 }
 
 // GetTeamByName retrieves a team by its unique name.
 func (db *DB) GetTeamByName(ctx context.Context, name string) (*models.Team, error) {
-	db.log.Debug("getting team record by name", "name", name)
 
 	teamRow, err := db.queries.GetTeamByName(ctx, name)
 	if err != nil {
@@ -490,7 +454,6 @@ func (db *DB) GetTeamByName(ctx context.Context, name string) (*models.Team, err
 
 // TeamHasSource checks if a specific team has been granted access to a specific source.
 func (db *DB) TeamHasSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) (bool, error) {
-	db.log.Debug("checking team source access", "team_id", teamID, "source_id", sourceID)
 
 	count, err := db.queries.TeamHasSource(ctx, sqlc.TeamHasSourceParams{
 		TeamID:   int64(teamID),
@@ -506,7 +469,6 @@ func (db *DB) TeamHasSource(ctx context.Context, teamID models.TeamID, sourceID 
 
 // UserHasSourceAccess checks if a user can access a specific source through any of their team memberships.
 func (db *DB) UserHasSourceAccess(ctx context.Context, userID models.UserID, sourceID models.SourceID) (bool, error) {
-	db.log.Debug("checking user source access via teams", "user_id", userID, "source_id", sourceID)
 
 	count, err := db.queries.UserHasSourceAccess(ctx, sqlc.UserHasSourceAccessParams{
 		UserID:   int64(userID),
@@ -523,7 +485,6 @@ func (db *DB) UserHasSourceAccess(ctx context.Context, userID models.UserID, sou
 // ListTeamsForUser retrieves all teams a specific user is a member of, along with their role and team member count.
 // This function now returns the raw sqlc-generated rows, and mapping is handled in the core layer.
 func (db *DB) ListTeamsForUser(ctx context.Context, userID models.UserID) ([]sqlc.ListTeamsForUserRow, error) {
-	db.log.Debug("listing teams for user (with role and count)", "user_id", userID)
 
 	// This calls the sqlc generated function for the modified "ListTeamsForUser" query
 	teamRows, err := db.queries.ListTeamsForUser(ctx, int64(userID))
@@ -534,6 +495,5 @@ func (db *DB) ListTeamsForUser(ctx context.Context, userID models.UserID) ([]sql
 
 	// No mapping here; return the direct sqlc result.
 	// The core layer (core.ListTeamsForUser) will handle mapping to models.UserTeamDetails.
-	db.log.Debug("teams listed for user (with role and count)", "user_id", userID, "count", len(teamRows))
 	return teamRows, nil
 }

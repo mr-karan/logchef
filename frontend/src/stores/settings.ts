@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { useBaseStore } from "./base";
-import { settingsApi, type SettingsByCategory, type UpdateSettingRequest } from "@/api/settings";
+import { settingsApi, type SettingsByCategory, type SystemSetting, type UpdateSettingRequest } from "@/api/settings";
 import { computed } from "vue";
 
 interface SettingsState {
@@ -47,7 +47,7 @@ export const useSettingsStore = defineStore("settings", () => {
         operationKey: 'loadSettings',
         onSuccess: (response) => {
           console.log("Settings API response:", response);
-          state.data.value.settingsByCategory = response || [];
+          state.data.value.settingsByCategory = (response as SettingsByCategory[]) || [];
         },
         showToast: false,
       });
@@ -62,16 +62,17 @@ export const useSettingsStore = defineStore("settings", () => {
         operationKey: `loadCategory-${category}`,
         onSuccess: (response) => {
           // Update the specific category in our state
+          const settings = (response as SystemSetting[]) || [];
           const existingCategoryIndex = state.data.value.settingsByCategory.findIndex(
             (c) => c.category === category
           );
 
           if (existingCategoryIndex !== -1) {
-            state.data.value.settingsByCategory[existingCategoryIndex].settings = response || [];
+            state.data.value.settingsByCategory[existingCategoryIndex].settings = settings;
           } else {
             state.data.value.settingsByCategory.push({
               category,
-              settings: response || [],
+              settings,
             });
           }
         },

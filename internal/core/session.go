@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -51,13 +52,11 @@ func ValidateSession(ctx context.Context, db *sqlite.DB, log *slog.Logger, sessi
 		return nil, ErrSessionExpired
 	}
 
-	log.Debug("session validated successfully", "session_id", sessionID, "user_id", session.UserID)
 	return session, nil
 }
 
 // CreateSession creates a new session for a user, respecting concurrent session limits.
 func CreateSession(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID models.UserID, duration time.Duration, maxConcurrent int) (*models.Session, error) {
-	log.Debug("attempting to create session", "user_id", userID, "max_concurrent", maxConcurrent)
 
 	// Check concurrent sessions before creating a new one
 	sessionCount, err := db.CountUserSessions(ctx, userID)

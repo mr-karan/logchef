@@ -102,31 +102,6 @@ export interface HistogramResponse {
   data: HistogramDataPoint[];
 }
 
-/**
- * Helper function to prepare query parameters with proper SQL based on mode
- * This ensures we use a consistent approach for both logs and histogram queries
- */
-export function prepareQueryParams(params: {
-  query: string;
-  limit?: number;
-  window?: string;
-  groupBy?: string;
-  timezone?: string;
-  queryTimeout?: number;
-}): QueryParams {
-  const { query, limit = 100, window, groupBy, timezone, queryTimeout } = params;
-
-  // Use the raw SQL value as is - SQL transformation should happen before calling this function
-  return {
-    raw_sql: query,
-    limit,
-    window,
-    group_by: groupBy,
-    timezone,
-    query_timeout: queryTimeout
-  };
-}
-
 export const exploreApi = {
   getLogs: (sourceId: number, params: QueryParams, teamId: number, signal?: AbortSignal) => {
     if (!teamId) {

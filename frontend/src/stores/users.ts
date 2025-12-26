@@ -33,7 +33,7 @@ export const useUsersStore = defineStore("users", () => {
           console.log("User API response:", response);
           // Store the users array from the response - without trying to access response.data
           // because callApi already extracts the data property from the response
-          state.data.value.users = response || [];
+          state.data.value.users = (response as User[]) || [];
         },
         showToast: false,
       });

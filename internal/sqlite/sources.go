@@ -17,7 +17,6 @@ import (
 // It maps the domain model to the sqlc parameters and handles potential unique constraint errors.
 // The source ID and timestamps are populated back into the input source model upon success.
 func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
-	db.log.Debug("creating source record", "name", source.Name, "database", source.Connection.Database, "table", source.Connection.TableName)
 
 	// Map domain model to sqlc parameters.
 	params := sqlc.CreateSourceParams{
@@ -64,14 +63,12 @@ func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
 		source.UpdatedAt = newSource.UpdatedAt
 	}
 
-	db.log.Debug("source record created", "source_id", source.ID, "name", source.Name)
 	return nil
 }
 
 // GetSource retrieves a single source by its ID.
 // It returns models.ErrNotFound if the source does not exist.
 func (db *DB) GetSource(ctx context.Context, id models.SourceID) (*models.Source, error) {
-	db.log.Debug("getting source record", "source_id", id)
 
 	sourceRow, err := db.queries.GetSource(ctx, int64(id))
 	if err != nil {
@@ -91,7 +88,6 @@ func (db *DB) GetSource(ctx context.Context, id models.SourceID) (*models.Source
 // GetSourceByName retrieves a single source by its database and table name combination.
 // It returns models.ErrNotFound if no matching source exists.
 func (db *DB) GetSourceByName(ctx context.Context, database, tableName string) (*models.Source, error) {
-	db.log.Debug("getting source record by name", "database", database, "table", tableName)
 
 	sourceRow, err := db.queries.GetSourceByName(ctx, sqlc.GetSourceByNameParams{
 		Database:  database,
@@ -116,7 +112,6 @@ func (db *DB) GetSourceByName(ctx context.Context, database, tableName string) (
 
 // ListSources retrieves all source records from the database, ordered by creation date.
 func (db *DB) ListSources(ctx context.Context) ([]*models.Source, error) {
-	db.log.Debug("listing source records")
 
 	sourceRows, err := db.queries.ListSources(ctx)
 	if err != nil {
@@ -133,7 +128,6 @@ func (db *DB) ListSources(ctx context.Context) ([]*models.Source, error) {
 		}
 	}
 
-	db.log.Debug("source records listed", "count", len(sources))
 	return sources, nil
 }
 
@@ -141,7 +135,6 @@ func (db *DB) ListSources(ctx context.Context) ([]*models.Source, error) {
 // Note: This updates the entire record based on the provided model.
 // The `updated_at` timestamp is automatically set by the query.
 func (db *DB) UpdateSource(ctx context.Context, source *models.Source) error {
-	db.log.Debug("updating source record", "source_id", source.ID, "name", source.Name)
 
 	// Map domain model to sqlc parameters.
 	params := sqlc.UpdateSourceParams{
@@ -169,13 +162,11 @@ func (db *DB) UpdateSource(ctx context.Context, source *models.Source) error {
 	// Fetch updated timestamps? Or assume the caller will re-fetch if needed.
 	// For simplicity, we don't update the input model here.
 
-	db.log.Debug("source record updated successfully", "source_id", source.ID)
 	return nil
 }
 
 // DeleteSource removes a source record from the database by its ID.
 func (db *DB) DeleteSource(ctx context.Context, id models.SourceID) error {
-	db.log.Debug("deleting source record", "source_id", id)
 
 	err := db.queries.DeleteSource(ctx, int64(id))
 	if err != nil {
@@ -184,6 +175,5 @@ func (db *DB) DeleteSource(ctx context.Context, id models.SourceID) error {
 		return fmt.Errorf("error deleting source record: %w", err)
 	}
 
-	db.log.Debug("source record deleted successfully", "source_id", id)
 	return nil
 }

@@ -7,6 +7,13 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+type contextKey string
+
+const (
+	ctxKeyStartTime contextKey = "unified_metrics_start_time"
+	ctxKeyQueryType contextKey = "unified_metrics_query_type"
+)
+
 // ClickHouseMetrics provides a metrics collector for ClickHouse operations
 type ClickHouseMetrics struct {
 	source *models.Source
@@ -106,8 +113,8 @@ func (h *MetricsQueryHook) BeforeQuery(ctx context.Context, query string) (conte
 	queryType := DetermineQueryType(query)
 
 	// Store in context for use in AfterQuery
-	ctx = context.WithValue(ctx, "unified_metrics_start_time", time.Now())
-	ctx = context.WithValue(ctx, "unified_metrics_query_type", queryType)
+	ctx = context.WithValue(ctx, ctxKeyStartTime, time.Now())
+	ctx = context.WithValue(ctx, ctxKeyQueryType, queryType)
 
 	return ctx, nil
 }
@@ -115,7 +122,7 @@ func (h *MetricsQueryHook) BeforeQuery(ctx context.Context, query string) (conte
 // AfterQuery is called after query execution
 func (h *MetricsQueryHook) AfterQuery(ctx context.Context, query string, err error, duration time.Duration) {
 	// Extract values from context
-	queryType, _ := ctx.Value("unified_metrics_query_type").(string)
+	queryType, _ := ctx.Value(ctxKeyQueryType).(string)
 
 	if queryType == "" {
 		queryType = DetermineQueryType(query)

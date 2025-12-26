@@ -81,7 +81,7 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 
 	// Build schema from source columns
 	var schema *logchefql.Schema
-	if source.Columns != nil && len(source.Columns) > 0 {
+	if len(source.Columns) > 0 {
 		columns := make([]logchefql.ColumnInfo, len(source.Columns))
 		for i, col := range source.Columns {
 			columns[i] = logchefql.ColumnInfo{
@@ -215,7 +215,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 
 	// Build schema from source columns
 	var schema *logchefql.Schema
-	if source.Columns != nil && len(source.Columns) > 0 {
+	if len(source.Columns) > 0 {
 		columns := make([]logchefql.ColumnInfo, len(source.Columns))
 		for i, col := range source.Columns {
 			columns[i] = logchefql.ColumnInfo{

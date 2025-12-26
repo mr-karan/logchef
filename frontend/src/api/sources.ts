@@ -93,6 +93,16 @@ export interface SourceStats {
     rows_count: number;
     avg_row_size: number;
   }[];
+  table_info?: {
+    database: string;
+    name: string;
+    engine: string;
+    engine_params?: string[];
+    columns?: { name: string; type: string }[];
+    sort_keys?: string[];
+    ext_columns?: { name: string; type: string; default_expression?: string; is_nullable?: boolean; is_primary_key?: boolean; comment?: string }[];
+  };
+  ttl?: string;
 }
 
 // Field values types for sidebar exploration

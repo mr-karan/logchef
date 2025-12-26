@@ -28,9 +28,9 @@ type ServerOptions struct {
 	Config        *config.Config
 	SQLite        *sqlite.DB
 	ClickHouse    *clickhouse.Manager
-	AlertsManager *alerts.Manager      // Alerts manager for manual resolution with Alertmanager notification.
-	OIDCProvider  *auth.OIDCProvider   // OIDC provider for authentication flows.
-	FS            http.FileSystem      // Filesystem for serving static assets (frontend).
+	AlertsManager *alerts.Manager    // Alerts manager for manual resolution with Alertmanager notification.
+	OIDCProvider  *auth.OIDCProvider // OIDC provider for authentication flows.
+	FS            http.FileSystem    // Filesystem for serving static assets (frontend).
 	Logger        *slog.Logger
 	BuildInfo     string
 	Version       string
@@ -151,34 +151,32 @@ func (s *Server) setupRoutes() {
 	// --- Admin Routes ---
 	// These endpoints are only accessible to admin users for global management
 	admin := api.Group("/admin", s.requireAuth, s.requireAdmin)
-	{
-		// User Management
-		admin.Get("/users", s.handleListUsers)
-		admin.Post("/users", s.handleCreateUser)
-		admin.Get("/users/:userID", s.handleGetUser)
-		admin.Put("/users/:userID", s.handleUpdateUser)
-		admin.Delete("/users/:userID", s.handleDeleteUser)
+	// User Management
+	admin.Get("/users", s.handleListUsers)
+	admin.Post("/users", s.handleCreateUser)
+	admin.Get("/users/:userID", s.handleGetUser)
+	admin.Put("/users/:userID", s.handleUpdateUser)
+	admin.Delete("/users/:userID", s.handleDeleteUser)
 
-		// Global Team Management
-		admin.Get("/teams", s.handleListTeams)
-		admin.Post("/teams", s.handleCreateTeam)
-		admin.Delete("/teams/:teamID", s.handleDeleteTeam)
+	// Global Team Management
+	admin.Get("/teams", s.handleListTeams)
+	admin.Post("/teams", s.handleCreateTeam)
+	admin.Delete("/teams/:teamID", s.handleDeleteTeam)
 
-		// Global Source Management
-		admin.Get("/sources", s.handleListSources) // Admin endpoint for listing all sources
-		admin.Post("/sources", s.handleCreateSource)
-		admin.Post("/sources/validate", s.handleValidateSourceConnection)
-		admin.Delete("/sources/:sourceID", s.handleDeleteSource)
-		admin.Get("/sources/:sourceID/stats", s.handleGetSourceStats) // Admin-only source stats
+	// Global Source Management
+	admin.Get("/sources", s.handleListSources) // Admin endpoint for listing all sources
+	admin.Post("/sources", s.handleCreateSource)
+	admin.Post("/sources/validate", s.handleValidateSourceConnection)
+	admin.Delete("/sources/:sourceID", s.handleDeleteSource)
+	admin.Get("/sources/:sourceID/stats", s.handleGetSourceStats) // Admin-only source stats
 
-		// System Settings Management
-		admin.Get("/settings", s.handleListSettings)
-		admin.Get("/settings/category/:category", s.handleListSettingsByCategory)
-		admin.Get("/settings/:key", s.handleGetSetting)
-		admin.Put("/settings/:key", s.handleUpdateSetting)
-		admin.Delete("/settings/:key", s.handleDeleteSetting)
-		admin.Post("/settings/test-alertmanager", s.handleTestAlertmanagerConnection)
-	}
+	// System Settings Management
+	admin.Get("/settings", s.handleListSettings)
+	admin.Get("/settings/category/:category", s.handleListSettingsByCategory)
+	admin.Get("/settings/:key", s.handleGetSetting)
+	admin.Put("/settings/:key", s.handleUpdateSetting)
+	admin.Delete("/settings/:key", s.handleDeleteSetting)
+	admin.Post("/settings/test-alertmanager", s.handleTestAlertmanagerConnection)
 
 	// --- Team Routes (Access controlled by team membership) ---
 	// Regular users can view teams they belong to, team admins can manage membership and linked sources
@@ -188,25 +186,21 @@ func (s *Server) setupRoutes() {
 
 	// Team member management (requires team admin or global admin)
 	teamMembers := api.Group("/teams/:teamID/members", s.requireAuth, s.requireTeamMember)
-	{
-		teamMembers.Get("/", s.handleListTeamMembers) // Any team member can view
-		// Only team admins can add/remove members
-		teamMembers.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamMember)
-		teamMembers.Delete("/:userID", s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamMember)
-	}
+	teamMembers.Get("/", s.handleListTeamMembers) // Any team member can view
+	// Only team admins can add/remove members
+	teamMembers.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamMember)
+	teamMembers.Delete("/:userID", s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamMember)
 
 	// Team settings (requires team admin or global admin)
 	api.Put("/teams/:teamID", s.requireAuth, s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeam)
 
 	// Team Source Management (linking/unlinking)
 	teamSources := api.Group("/teams/:teamID/sources", s.requireAuth, s.requireTeamMember)
-	{
-		teamSources.Get("/", s.handleListTeamSources) // Any team member can view team sources (basic info)
+	teamSources.Get("/", s.handleListTeamSources) // Any team member can view team sources (basic info)
 
-		// Only team admins can link/unlink sources
-		teamSources.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleLinkSourceToTeam)
-		teamSources.Delete("/:sourceID", s.requireTeamAdminOrGlobalAdmin, s.handleUnlinkSourceFromTeam)
-	}
+	// Only team admins can link/unlink sources
+	teamSources.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleLinkSourceToTeam)
+	teamSources.Delete("/:sourceID", s.requireTeamAdminOrGlobalAdmin, s.handleUnlinkSourceFromTeam)
 
 	// --- Team Source Operations (requires team membership) ---
 	// These endpoints allow team members to interact with a specific source linked to their team
@@ -230,33 +224,31 @@ func (s *Server) setupRoutes() {
 		teamSourceOps.Post("/logchefql/query", s.handleLogchefQLQuery)         // Execute LogchefQL query directly
 
 		// Field value exploration for sidebar
-		teamSourceOps.Get("/fields/values", s.handleGetAllFieldValues)           // Get all LowCardinality field values
-		teamSourceOps.Get("/fields/:fieldName/values", s.handleGetFieldValues)   // Get values for a specific field
+		teamSourceOps.Get("/fields/values", s.handleGetAllFieldValues)         // Get all LowCardinality field values
+		teamSourceOps.Get("/fields/:fieldName/values", s.handleGetFieldValues) // Get values for a specific field
 
 		// Collections (Saved Queries) scoped to Team & Source
 		// Regular team members can view and use collections
 		collections := teamSourceOps.Group("/collections")
-		{
-			collections.Get("/", s.handleListTeamSourceCollections)
-			collections.Get("/:collectionID", s.handleGetTeamSourceCollection)
+		collections.Get("/", s.handleListTeamSourceCollections)
+		collections.Get("/:collectionID", s.handleGetTeamSourceCollection)
+		collections.Get("/:collectionID/resolve", s.handleResolveQuery)
 
-			// Only team editors, team admins, or global admins can manage collections
-			collections.Post("/", s.requireCollectionManagement, s.handleCreateTeamSourceCollection)
-			collections.Put("/:collectionID", s.requireCollectionManagement, s.handleUpdateTeamSourceCollection)
-			collections.Delete("/:collectionID", s.requireCollectionManagement, s.handleDeleteTeamSourceCollection)
-		}
+		// Only team editors, team admins, or global admins can manage collections
+		collections.Post("/", s.requireCollectionManagement, s.handleCreateTeamSourceCollection)
+		collections.Put("/:collectionID", s.requireCollectionManagement, s.handleUpdateTeamSourceCollection)
+		collections.Delete("/:collectionID", s.requireCollectionManagement, s.handleDeleteTeamSourceCollection)
+		collections.Patch("/:collectionID/bookmark", s.requireCollectionManagement, s.handleToggleQueryBookmark)
 
-		alerts := teamSourceOps.Group("/alerts")
-		{
-			alerts.Get("/", s.handleListAlerts)
-			alerts.Get("/:alertID", s.handleGetAlert)
-			alerts.Get("/:alertID/history", s.handleListAlertHistory)
-			alerts.Post("/test", s.handleTestAlertQuery) // Test query endpoint (accessible to all team members)
-			alerts.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleCreateAlert)
-			alerts.Put("/:alertID", s.requireTeamAdminOrGlobalAdmin, s.handleUpdateAlert)
-			alerts.Delete("/:alertID", s.requireTeamAdminOrGlobalAdmin, s.handleDeleteAlert)
-			alerts.Post("/:alertID/resolve", s.requireTeamAdminOrGlobalAdmin, s.handleResolveAlert)
-		}
+		alertRoutes := teamSourceOps.Group("/alerts")
+		alertRoutes.Get("/", s.handleListAlerts)
+		alertRoutes.Get("/:alertID", s.handleGetAlert)
+		alertRoutes.Get("/:alertID/history", s.handleListAlertHistory)
+		alertRoutes.Post("/test", s.handleTestAlertQuery) // Test query endpoint (accessible to all team members)
+		alertRoutes.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleCreateAlert)
+		alertRoutes.Put("/:alertID", s.requireTeamAdminOrGlobalAdmin, s.handleUpdateAlert)
+		alertRoutes.Delete("/:alertID", s.requireTeamAdminOrGlobalAdmin, s.handleDeleteAlert)
+		alertRoutes.Post("/:alertID/resolve", s.requireTeamAdminOrGlobalAdmin, s.handleResolveAlert)
 	}
 
 	// --- Static Asset and SPA Handling ---

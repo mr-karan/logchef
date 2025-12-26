@@ -76,7 +76,6 @@ func (s *Server) authenticateWithToken(c *fiber.Ctx, authHeader string) error {
 	c.Locals("api_token", apiToken)
 	c.Locals("auth_method", "token")
 
-	s.log.Debug("API token authentication successful", "user_id", user.ID, "token_id", apiToken.ID)
 	return c.Next()
 }
 
@@ -123,7 +122,6 @@ func (s *Server) authenticateWithSession(c *fiber.Ctx) error {
 	c.Locals("session", session)
 	c.Locals("auth_method", "session")
 
-	s.log.Debug("Session authentication successful", "user_id", user.ID, "session_id", sessionID)
 	return c.Next()
 }
 
@@ -136,9 +134,7 @@ func (s *Server) requireAdmin(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
 	}
 
-	s.log.Debug("requireAdmin check", "user_id", user.ID, "user_role", user.Role)
 	if user.Role != models.UserRoleAdmin {
-		s.log.Debug("Admin access denied", "user_id", user.ID)
 
 		// Record authorization failure
 		metrics.RecordAuthorizationFailure(c.Route().Path, user, "insufficient_role")
@@ -160,11 +156,8 @@ func (s *Server) requireTeamMember(c *fiber.Ctx) error {
 	}
 	teamIDStr := c.Params("teamID")
 
-	s.log.Debug("requireTeamMember check", "user_id", user.ID, "user_role", user.Role, "team_id", teamIDStr)
-
 	// Global admins bypass specific team membership checks.
 	if user.Role == models.UserRoleAdmin {
-		s.log.Debug("Global admin granting team member access", "user_id", user.ID, "team_id", teamIDStr)
 		c.Locals("isGlobalAdmin", true)
 		c.Locals("isTeamMember", true)
 		return c.Next()
@@ -279,11 +272,8 @@ func (s *Server) requireCollectionManagement(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
 	}
 
-	s.log.Debug("requireCollectionManagement check", "user_id", user.ID, "user_role", user.Role, "team_id", teamIDStr)
-
 	// Global admins bypass specific team role checks.
 	if user.Role == models.UserRoleAdmin {
-		s.log.Debug("Global admin granting access for collection management", "user_id", user.ID, "team_id", teamIDStr)
 		return c.Next()
 	}
 
@@ -303,7 +293,6 @@ func (s *Server) requireCollectionManagement(c *fiber.Ctx) error {
 
 	// Check if the team member is an Admin or Editor.
 	if teamMember.Role == models.TeamRoleAdmin || teamMember.Role == models.TeamRoleEditor {
-		s.log.Debug("Team editor/admin access granted for collection management", "user_id", user.ID, "team_id", teamID, "team_role", teamMember.Role)
 		return c.Next()
 	}
 

@@ -114,6 +114,16 @@ const routes: RouteRecordRaw[] = [
         }),
         meta: { title: "Alert Detail" },
       },
+      {
+        path: "collection/:teamId/:sourceId/:collectionId",
+        name: "CollectionRedirect",
+        component: () => import("@/views/collections/CollectionRedirect.vue").catch(err => {
+          error("Router", "Failed to load CollectionRedirect component", err);
+          return { default: ComponentLoadError };
+        }),
+        meta: { title: "Loading Collection..." },
+      },
+
     ],
   },
   // Management Section (Admin only)
@@ -316,10 +326,8 @@ router.beforeEach(async (to) => {
   const isAdmin = authStore.user?.role === "admin";
   const isPublic = to.matched.some((record) => record.meta.public);
 
-  // Update document title
   document.title = `${to.meta.title ? to.meta.title + " - " : ""}LogChef`;
 
-  // Handle authentication
   if (!isAuthenticated && !isPublic) {
     return {
       name: "Login",
@@ -327,18 +335,17 @@ router.beforeEach(async (to) => {
     };
   }
 
-  // Prevent authenticated users from accessing login page
   if (isAuthenticated && to.name === "Login") {
     return { path: "/" };
   }
 
-  // Handle admin routes
   if (to.matched.some((record) => record.meta.requiresAdmin) && !isAdmin) {
     return { name: "Forbidden" };
   }
 
-  // Update context store based on route params (team/source)
-  contextRouterGuard(to);
+  if (isAuthenticated && !isPublic) {
+    contextRouterGuard(to);
+  }
 });
 
 export default router;

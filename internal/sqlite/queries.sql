@@ -236,8 +236,19 @@ DELETE FROM team_queries
 WHERE id = ? AND team_id = ? AND source_id = ?;
 
 -- name: ListQueriesByTeamAndSource :many
--- List all queries for a specific team and source
-SELECT * FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY created_at DESC;
+-- List all queries for a specific team and source (bookmarked first, then by updated_at)
+SELECT * FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY is_bookmarked DESC, updated_at DESC;
+
+-- name: ToggleQueryBookmark :exec
+-- Toggle the bookmark status of a query
+UPDATE team_queries
+SET is_bookmarked = NOT is_bookmarked,
+    updated_at = datetime('now')
+WHERE id = ? AND team_id = ? AND source_id = ?;
+
+-- name: GetQueryBookmarkStatus :one
+-- Get the current bookmark status of a query
+SELECT is_bookmarked FROM team_queries WHERE id = ? AND team_id = ? AND source_id = ?;
 
 -- Additional queries for user-source and team-source access
 
@@ -451,3 +462,5 @@ ON CONFLICT(key) DO UPDATE SET
 -- name: DeleteSystemSetting :exec
 DELETE FROM system_settings
 WHERE key = ?;
+
+

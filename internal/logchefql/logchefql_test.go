@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-// Test schema based on the TypeScript test schema
 var testSchema = &Schema{
 	Columns: []ColumnInfo{
 		{Name: "timestamp", Type: "DateTime64(3)"},
@@ -21,219 +20,368 @@ var testSchema = &Schema{
 	},
 }
 
-func TestTokenizer(t *testing.T) {
-	t.Run("basic tokenization", func(t *testing.T) {
-		result := Tokenize(`severity_text = "error"`)
-
-		if len(result.Errors) != 0 {
-			t.Fatalf("expected no errors, got %v", result.Errors)
+func TestParseLogchefQL(t *testing.T) {
+	t.Run("parses simple expression", func(t *testing.T) {
+		pq, err := ParseLogchefQL(`field = "value"`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
 		}
-
-		if len(result.Tokens) != 3 {
-			t.Fatalf("expected 3 tokens, got %d", len(result.Tokens))
-		}
-
-		if result.Tokens[0].Type != TokenKey || result.Tokens[0].Value != "severity_text" {
-			t.Errorf("expected key token 'severity_text', got %v", result.Tokens[0])
-		}
-
-		if result.Tokens[1].Type != TokenOperator || result.Tokens[1].Value != "=" {
-			t.Errorf("expected operator token '=', got %v", result.Tokens[1])
-		}
-
-		if result.Tokens[2].Type != TokenValue || result.Tokens[2].Value != "error" {
-			t.Errorf("expected value token 'error', got %v", result.Tokens[2])
+		if pq == nil || pq.Where == nil {
+			t.Fatal("expected WHERE clause")
 		}
 	})
 
-	t.Run("boolean operator tokenization - and", func(t *testing.T) {
-		result := Tokenize(`severity_text = "error" and service_name = "api"`)
-
-		if len(result.Errors) != 0 {
-			t.Fatalf("expected no errors, got %v", result.Errors)
-		}
-
-		boolTokens := filterTokens(result.Tokens, TokenBool)
-		if len(boolTokens) != 1 {
-			t.Fatalf("expected 1 bool token, got %d", len(boolTokens))
-		}
-		if boolTokens[0].Value != "and" {
-			t.Errorf("expected 'and', got %s", boolTokens[0].Value)
-		}
-	})
-
-	t.Run("boolean operator tokenization - or", func(t *testing.T) {
-		result := Tokenize(`severity_text = "error" or severity_text = "warn"`)
-
-		if len(result.Errors) != 0 {
-			t.Fatalf("expected no errors, got %v", result.Errors)
-		}
-
-		boolTokens := filterTokens(result.Tokens, TokenBool)
-		if len(boolTokens) != 1 {
-			t.Fatalf("expected 1 bool token, got %d", len(boolTokens))
-		}
-		if boolTokens[0].Value != "or" {
-			t.Errorf("expected 'or', got %s", boolTokens[0].Value)
-		}
-	})
-
-	t.Run("should NOT tokenize 'order' as boolean operator", func(t *testing.T) {
-		result := Tokenize(`body ~ "order"`)
-
-		boolTokens := filterTokens(result.Tokens, TokenBool)
-		if len(boolTokens) != 0 {
-			t.Errorf("expected no bool tokens, got %d", len(boolTokens))
-		}
-	})
-
-	t.Run("should NOT tokenize 'android' as boolean operator", func(t *testing.T) {
-		result := Tokenize(`service_name = "android"`)
-
-		boolTokens := filterTokens(result.Tokens, TokenBool)
-		if len(boolTokens) != 0 {
-			t.Errorf("expected no bool tokens, got %d", len(boolTokens))
-		}
-	})
-
-	t.Run("case-insensitive boolean operators", func(t *testing.T) {
-		result := Tokenize(`severity_text = "ERROR" AND service_name = "API"`)
-
-		boolTokens := filterTokens(result.Tokens, TokenBool)
-		if len(boolTokens) != 1 {
-			t.Fatalf("expected 1 bool token, got %d", len(boolTokens))
-		}
-		if boolTokens[0].Value != "and" {
-			t.Errorf("expected 'and', got %s", boolTokens[0].Value)
-		}
-	})
-
-	t.Run("unterminated string literal detection", func(t *testing.T) {
-		result := Tokenize(`severity_text = "error`)
-
-		if len(result.Errors) == 0 {
-			t.Fatal("expected error for unterminated string")
-		}
-
-		if result.Errors[0].Code != ErrUnterminatedString {
-			t.Errorf("expected UNTERMINATED_STRING error, got %s", result.Errors[0].Code)
-		}
-	})
-
-	t.Run("properly terminated strings", func(t *testing.T) {
-		result := Tokenize(`severity_text = "error"`)
-
-		if len(result.Errors) != 0 {
-			t.Errorf("expected no errors, got %v", result.Errors)
-		}
-	})
-
-	t.Run("nested field tokenization", func(t *testing.T) {
-		result := Tokenize(`log_attributes.level = "error"`)
-
-		if len(result.Errors) != 0 {
-			t.Fatalf("expected no errors, got %v", result.Errors)
-		}
-
-		keyTokens := filterTokens(result.Tokens, TokenKey)
-		if len(keyTokens) != 1 {
-			t.Fatalf("expected 1 key token, got %d", len(keyTokens))
-		}
-		if keyTokens[0].Value != "log_attributes.level" {
-			t.Errorf("expected 'log_attributes.level', got %s", keyTokens[0].Value)
-		}
-	})
-
-	t.Run("multiple operators", func(t *testing.T) {
-		tests := []struct {
-			query string
-			op    string
-		}{
-			{`field != "value"`, "!="},
-			{`field ~ "pattern"`, "~"},
-			{`field !~ "pattern"`, "!~"},
-			{`field > 10`, ">"},
-			{`field < 10`, "<"},
-			{`field >= 10`, ">="},
-			{`field <= 10`, "<="},
-		}
-
-		for _, tc := range tests {
-			result := Tokenize(tc.query)
-			if len(result.Errors) != 0 {
-				t.Errorf("query %q: expected no errors, got %v", tc.query, result.Errors)
-				continue
-			}
-
-			opTokens := filterTokens(result.Tokens, TokenOperator)
-			if len(opTokens) != 1 {
-				t.Errorf("query %q: expected 1 operator token, got %d", tc.query, len(opTokens))
-				continue
-			}
-			if opTokens[0].Value != tc.op {
-				t.Errorf("query %q: expected operator %q, got %q", tc.query, tc.op, opTokens[0].Value)
+	t.Run("parses all comparison operators", func(t *testing.T) {
+		ops := []string{"=", "!=", "~", "!~", ">", "<", ">=", "<="}
+		for _, op := range ops {
+			query := `field ` + op + ` "value"`
+			_, err := ParseLogchefQL(query)
+			if err != nil {
+				t.Errorf("operator %q: unexpected error: %v", op, err)
 			}
 		}
 	})
 
-	t.Run("parentheses tokenization", func(t *testing.T) {
-		result := Tokenize(`(severity_text = "error") and (service_name = "api")`)
-
-		if len(result.Errors) != 0 {
-			t.Fatalf("expected no errors, got %v", result.Errors)
+	t.Run("parses numeric values", func(t *testing.T) {
+		tests := []string{
+			`field = 42`,
+			`field = 3.14`,
+			`field = -10`,
+			`field = +5`,
 		}
+		for _, query := range tests {
+			_, err := ParseLogchefQL(query)
+			if err != nil {
+				t.Errorf("query %q: unexpected error: %v", query, err)
+			}
+		}
+	})
 
-		parenTokens := filterTokens(result.Tokens, TokenParen)
-		if len(parenTokens) != 4 {
-			t.Errorf("expected 4 paren tokens, got %d", len(parenTokens))
+	t.Run("parses boolean and null values", func(t *testing.T) {
+		tests := []string{
+			`field = true`,
+			`field = false`,
+			`field = null`,
+		}
+		for _, query := range tests {
+			_, err := ParseLogchefQL(query)
+			if err != nil {
+				t.Errorf("query %q: unexpected error: %v", query, err)
+			}
+		}
+	})
+
+	t.Run("parses AND expressions", func(t *testing.T) {
+		pq, err := ParseLogchefQL(`a = "1" and b = "2"`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// For AND expression: POrExpr.Left is the PAndExpr which has the AND tails
+		if pq.Where == nil || pq.Where.Left == nil || len(pq.Where.Left.Right) != 1 {
+			t.Error("expected AND expr with one AND tail")
+		}
+	})
+
+	t.Run("parses OR expressions", func(t *testing.T) {
+		pq, err := ParseLogchefQL(`a = "1" or b = "2"`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if pq.Where == nil || len(pq.Where.Right) != 1 {
+			t.Error("expected one OR tail")
+		}
+	})
+
+	t.Run("parses mixed AND/OR with correct precedence", func(t *testing.T) {
+		_, err := ParseLogchefQL(`a = "1" or b = "2" and c = "3"`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("parses grouped expressions", func(t *testing.T) {
+		_, err := ParseLogchefQL(`(a = "1" or b = "2") and c = "3"`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("parses nested groups", func(t *testing.T) {
+		_, err := ParseLogchefQL(`((a = "1"))`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("parses case-insensitive boolean operators", func(t *testing.T) {
+		tests := []string{
+			`a = "1" AND b = "2"`,
+			`a = "1" And b = "2"`,
+			`a = "1" OR b = "2"`,
+			`a = "1" Or b = "2"`,
+		}
+		for _, query := range tests {
+			_, err := ParseLogchefQL(query)
+			if err != nil {
+				t.Errorf("query %q: unexpected error: %v", query, err)
+			}
+		}
+	})
+
+	t.Run("parses nested field access", func(t *testing.T) {
+		_, err := ParseLogchefQL(`log_attributes.level = "error"`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("parses deeply nested fields", func(t *testing.T) {
+		_, err := ParseLogchefQL(`a.b.c.d = "value"`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("parses @timestamp field (ELK convention)", func(t *testing.T) {
+		_, err := ParseLogchefQL(`@timestamp = "2024-01-01"`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("parses pipe operator with single field", func(t *testing.T) {
+		pq, err := ParseLogchefQL(`field = "value" | col1`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(pq.Select) != 1 {
+			t.Errorf("expected 1 select field, got %d", len(pq.Select))
+		}
+	})
+
+	t.Run("parses pipe operator with multiple fields", func(t *testing.T) {
+		pq, err := ParseLogchefQL(`field = "value" | col1 col2 col3`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(pq.Select) != 3 {
+			t.Errorf("expected 3 select fields, got %d", len(pq.Select))
+		}
+	})
+
+	t.Run("parses pipe-only query (no WHERE)", func(t *testing.T) {
+		pq, err := ParseLogchefQL(`| col1 col2`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if pq.Where != nil {
+			t.Error("expected no WHERE clause")
+		}
+		if len(pq.Select) != 2 {
+			t.Errorf("expected 2 select fields, got %d", len(pq.Select))
+		}
+	})
+
+	t.Run("parses single-quoted strings", func(t *testing.T) {
+		_, err := ParseLogchefQL(`field = 'value'`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("parses escaped quotes in strings", func(t *testing.T) {
+		_, err := ParseLogchefQL(`field = "value with \"quotes\""`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("parses field names with hyphens", func(t *testing.T) {
+		_, err := ParseLogchefQL(`my-field = "value"`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("parses field names with colons", func(t *testing.T) {
+		_, err := ParseLogchefQL(`my:field = "value"`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("parses quoted path segments", func(t *testing.T) {
+		pq, err := ParseLogchefQL(`log_attributes."foo bar" = "value"`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if pq.Where == nil || pq.Where.Left == nil || pq.Where.Left.Left == nil {
+			t.Fatal("expected parsed expression")
+		}
+		cmp := pq.Where.Left.Left.Comparison
+		if cmp == nil || cmp.Field == nil {
+			t.Fatal("expected comparison with field")
+		}
+		if cmp.Field.First == nil || cmp.Field.First.Ident == nil || *cmp.Field.First.Ident != "log_attributes" {
+			t.Errorf("expected first segment 'log_attributes', got %+v", cmp.Field.First)
+		}
+		if len(cmp.Field.Rest) != 1 || cmp.Field.Rest[0].Quoted == nil {
+			t.Errorf("expected one quoted rest segment, got %+v", cmp.Field.Rest)
+		}
+	})
+
+	t.Run("rejects unterminated string", func(t *testing.T) {
+		_, err := ParseLogchefQL(`field = "unterminated`)
+		if err == nil {
+			t.Error("expected error for unterminated string")
+		}
+	})
+
+	t.Run("rejects missing operator", func(t *testing.T) {
+		_, err := ParseLogchefQL(`field "value"`)
+		if err == nil {
+			t.Error("expected error for missing operator")
+		}
+	})
+
+	t.Run("rejects missing value", func(t *testing.T) {
+		_, err := ParseLogchefQL(`field =`)
+		if err == nil {
+			t.Error("expected error for missing value")
+		}
+	})
+
+	t.Run("rejects missing boolean operator between expressions", func(t *testing.T) {
+		_, err := ParseLogchefQL(`a = "1" b = "2"`)
+		if err == nil {
+			t.Error("expected error for missing boolean operator")
+		}
+	})
+
+	t.Run("rejects adjacent parentheses without boolean operator", func(t *testing.T) {
+		_, err := ParseLogchefQL(`(a = "1") (b = "2")`)
+		if err == nil {
+			t.Error("expected error for adjacent parentheses")
+		}
+	})
+
+	t.Run("rejects unclosed parenthesis", func(t *testing.T) {
+		_, err := ParseLogchefQL(`(a = "1"`)
+		if err == nil {
+			t.Error("expected error for unclosed parenthesis")
+		}
+	})
+
+	t.Run("accepts quoted field name after pipe", func(t *testing.T) {
+		pq, err := ParseLogchefQL(`a = "1" | "field with space"`)
+		if err != nil {
+			t.Fatalf("expected quoted field name to be valid, got: %v", err)
+		}
+		if len(pq.Select) != 1 {
+			t.Fatalf("expected 1 select item, got %d", len(pq.Select))
+		}
+	})
+
+	t.Run("rejects number as field after pipe", func(t *testing.T) {
+		_, err := ParseLogchefQL(`a = "1" | 123`)
+		if err == nil {
+			t.Error("expected error for number after pipe")
+		}
+	})
+
+	t.Run("rejects bare pipe with no fields", func(t *testing.T) {
+		_, err := ParseLogchefQL(`a = "1" |`)
+		if err == nil {
+			t.Error("expected error for bare pipe with no fields")
 		}
 	})
 }
 
-func TestParser(t *testing.T) {
-	t.Run("simple expression", func(t *testing.T) {
-		result := Tokenize(`severity_text = "error"`)
-		parser := NewParser(result.Tokens)
-		parseResult := parser.Parse()
+func TestConvertToAST(t *testing.T) {
+	t.Run("converts simple expression", func(t *testing.T) {
+		pq, _ := ParseLogchefQL(`field = "value"`)
+		ast := ConvertToAST(pq)
 
-		if len(parseResult.Errors) != 0 {
-			t.Fatalf("expected no errors, got %v", parseResult.Errors)
-		}
-
-		if parseResult.AST == nil {
-			t.Fatal("expected AST, got nil")
-		}
-
-		expr, ok := parseResult.AST.(*ExpressionNode)
+		expr, ok := ast.(*ExpressionNode)
 		if !ok {
-			t.Fatalf("expected ExpressionNode, got %T", parseResult.AST)
+			t.Fatalf("expected ExpressionNode, got %T", ast)
 		}
-
-		if expr.Key != "severity_text" {
-			t.Errorf("expected key 'severity_text', got %v", expr.Key)
+		if expr.Key != "field" {
+			t.Errorf("expected key 'field', got %v", expr.Key)
 		}
 		if expr.Operator != OpEquals {
-			t.Errorf("expected operator '=', got %v", expr.Operator)
+			t.Errorf("expected operator =, got %v", expr.Operator)
 		}
-		if expr.Value != "error" {
-			t.Errorf("expected value 'error', got %v", expr.Value)
+		if expr.Value != "value" {
+			t.Errorf("expected value 'value', got %v", expr.Value)
+		}
+		if !expr.Quoted {
+			t.Error("expected Quoted=true for quoted string")
 		}
 	})
 
-	t.Run("logical AND expression", func(t *testing.T) {
-		result := Tokenize(`severity_text = "error" and service_name = "api"`)
-		parser := NewParser(result.Tokens)
-		parseResult := parser.Parse()
+	t.Run("converts unquoted value correctly", func(t *testing.T) {
+		pq, _ := ParseLogchefQL(`field = error`)
+		ast := ConvertToAST(pq)
 
-		if len(parseResult.Errors) != 0 {
-			t.Fatalf("expected no errors, got %v", parseResult.Errors)
-		}
-
-		logical, ok := parseResult.AST.(*LogicalNode)
+		expr, ok := ast.(*ExpressionNode)
 		if !ok {
-			t.Fatalf("expected LogicalNode, got %T", parseResult.AST)
+			t.Fatalf("expected ExpressionNode, got %T", ast)
 		}
+		if expr.Quoted {
+			t.Error("expected Quoted=false for unquoted value")
+		}
+	})
 
+	t.Run("converts numeric value", func(t *testing.T) {
+		pq, _ := ParseLogchefQL(`count > 42`)
+		ast := ConvertToAST(pq)
+
+		expr, ok := ast.(*ExpressionNode)
+		if !ok {
+			t.Fatalf("expected ExpressionNode, got %T", ast)
+		}
+		if v, ok := expr.Value.(float64); !ok || v != 42 {
+			t.Errorf("expected numeric value 42, got %v (%T)", expr.Value, expr.Value)
+		}
+	})
+
+	t.Run("converts boolean values", func(t *testing.T) {
+		tests := []struct {
+			query string
+			want  interface{}
+		}{
+			{`field = true`, true},
+			{`field = false`, false},
+		}
+		for _, tc := range tests {
+			pq, _ := ParseLogchefQL(tc.query)
+			ast := ConvertToAST(pq)
+			expr := ast.(*ExpressionNode)
+			if expr.Value != tc.want {
+				t.Errorf("query %q: expected %v, got %v", tc.query, tc.want, expr.Value)
+			}
+		}
+	})
+
+	t.Run("converts null value", func(t *testing.T) {
+		pq, _ := ParseLogchefQL(`field = null`)
+		ast := ConvertToAST(pq)
+
+		expr := ast.(*ExpressionNode)
+		if expr.Value != nil {
+			t.Errorf("expected nil for null, got %v", expr.Value)
+		}
+	})
+
+	t.Run("converts AND expression", func(t *testing.T) {
+		pq, _ := ParseLogchefQL(`a = "1" and b = "2"`)
+		ast := ConvertToAST(pq)
+
+		logical, ok := ast.(*LogicalNode)
+		if !ok {
+			t.Fatalf("expected LogicalNode, got %T", ast)
+		}
 		if logical.Operator != BoolAnd {
 			t.Errorf("expected AND operator, got %v", logical.Operator)
 		}
@@ -242,35 +390,199 @@ func TestParser(t *testing.T) {
 		}
 	})
 
-	t.Run("grouped expression", func(t *testing.T) {
-		result := Tokenize(`(severity_text = "error")`)
-		parser := NewParser(result.Tokens)
-		parseResult := parser.Parse()
+	t.Run("converts OR expression", func(t *testing.T) {
+		pq, _ := ParseLogchefQL(`a = "1" or b = "2"`)
+		ast := ConvertToAST(pq)
 
-		if len(parseResult.Errors) != 0 {
-			t.Fatalf("expected no errors, got %v", parseResult.Errors)
-		}
-
-		group, ok := parseResult.AST.(*GroupNode)
+		logical, ok := ast.(*LogicalNode)
 		if !ok {
-			t.Fatalf("expected GroupNode, got %T", parseResult.AST)
+			t.Fatalf("expected LogicalNode, got %T", ast)
 		}
+		if logical.Operator != BoolOr {
+			t.Errorf("expected OR operator, got %v", logical.Operator)
+		}
+	})
 
+	t.Run("converts grouped expression", func(t *testing.T) {
+		pq, _ := ParseLogchefQL(`(a = "1")`)
+		ast := ConvertToAST(pq)
+
+		group, ok := ast.(*GroupNode)
+		if !ok {
+			t.Fatalf("expected GroupNode, got %T", ast)
+		}
 		if len(group.Children) != 1 {
 			t.Errorf("expected 1 child, got %d", len(group.Children))
 		}
 	})
 
-	t.Run("missing boolean operator detection", func(t *testing.T) {
-		result := Tokenize(`severity_text = "error" service_name = "api"`)
+	t.Run("converts nested field", func(t *testing.T) {
+		pq, _ := ParseLogchefQL(`log.level = "error"`)
+		ast := ConvertToAST(pq)
 
-		err := DetectMissingBooleanOperators(result.Tokens)
-		if err == nil {
-			t.Fatal("expected error for missing boolean operator")
+		expr := ast.(*ExpressionNode)
+		nf, ok := expr.Key.(NestedField)
+		if !ok {
+			t.Fatalf("expected NestedField key, got %T", expr.Key)
 		}
+		if nf.Base != "log" {
+			t.Errorf("expected base 'log', got %s", nf.Base)
+		}
+		if len(nf.Path) != 1 || nf.Path[0] != "level" {
+			t.Errorf("expected path ['level'], got %v", nf.Path)
+		}
+	})
 
-		if err.Code != ErrMissingBooleanOperator {
-			t.Errorf("expected MISSING_BOOLEAN_OPERATOR, got %s", err.Code)
+	t.Run("converts pipe with SELECT fields", func(t *testing.T) {
+		pq, _ := ParseLogchefQL(`field = "value" | col1 col2`)
+		ast := ConvertToAST(pq)
+
+		query, ok := ast.(*QueryNode)
+		if !ok {
+			t.Fatalf("expected QueryNode, got %T", ast)
+		}
+		if len(query.Select) != 2 {
+			t.Errorf("expected 2 select fields, got %d", len(query.Select))
+		}
+		if query.Select[0].Field != "col1" {
+			t.Errorf("expected first field 'col1', got %v", query.Select[0].Field)
+		}
+	})
+
+	t.Run("handles operator precedence (AND binds tighter than OR)", func(t *testing.T) {
+		pq, _ := ParseLogchefQL(`a = "1" or b = "2" and c = "3"`)
+		ast := ConvertToAST(pq)
+
+		logical, ok := ast.(*LogicalNode)
+		if !ok {
+			t.Fatalf("expected LogicalNode (OR at top), got %T", ast)
+		}
+		if logical.Operator != BoolOr {
+			t.Errorf("expected OR at top level, got %v", logical.Operator)
+		}
+		if len(logical.Children) != 2 {
+			t.Fatalf("expected 2 children, got %d", len(logical.Children))
+		}
+		andNode, ok := logical.Children[1].(*LogicalNode)
+		if !ok || andNode.Operator != BoolAnd {
+			t.Error("expected second child to be AND node")
+		}
+	})
+}
+
+func TestAllOperators(t *testing.T) {
+	tests := []struct {
+		query    string
+		op       Operator
+		contains string
+	}{
+		{`field = "value"`, OpEquals, "= 'value'"},
+		{`field != "value"`, OpNotEquals, "!= 'value'"},
+		{`field ~ "pattern"`, OpRegex, "positionCaseInsensitive"},
+		{`field !~ "pattern"`, OpNotRegex, "positionCaseInsensitive"},
+		{`field > 10`, OpGT, "> 10"},
+		{`field < 10`, OpLT, "< 10"},
+		{`field >= 10`, OpGTE, ">= 10"},
+		{`field <= 10`, OpLTE, "<= 10"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.query, func(t *testing.T) {
+			result := Translate(tc.query, nil)
+			if !result.Valid {
+				t.Fatalf("expected valid result, got error: %v", result.Error)
+			}
+			if !strings.Contains(result.SQL, tc.contains) {
+				t.Errorf("expected SQL to contain %q, got %q", tc.contains, result.SQL)
+			}
+		})
+	}
+}
+
+func TestBooleanOperatorWordBoundaries(t *testing.T) {
+	t.Run("does not treat 'order' as boolean operator", func(t *testing.T) {
+		result := Translate(`body ~ "order"`, nil)
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+	})
+
+	t.Run("does not treat 'android' as boolean operator", func(t *testing.T) {
+		result := Translate(`field = "android"`, nil)
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+	})
+
+	t.Run("does not treat 'sandbox' as boolean operator", func(t *testing.T) {
+		result := Translate(`env = "sandbox"`, nil)
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+	})
+
+	t.Run("does not treat 'coral' as boolean operator", func(t *testing.T) {
+		result := Translate(`color = "coral"`, nil)
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+	})
+}
+
+func TestStringEscaping(t *testing.T) {
+	t.Run("escapes single quotes in values", func(t *testing.T) {
+		result := Translate(`field = "it's"`, nil)
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+		if !strings.Contains(result.SQL, "it''s") {
+			t.Errorf("expected escaped single quote, got %q", result.SQL)
+		}
+	})
+
+	t.Run("handles backslash escapes", func(t *testing.T) {
+		result := Translate(`field = "path\\to\\file"`, nil)
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+	})
+
+	t.Run("handles newline in string", func(t *testing.T) {
+		result := Translate(`field = "line1\nline2"`, nil)
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+	})
+}
+
+func TestComplexQueries(t *testing.T) {
+	t.Run("complex nested AND/OR", func(t *testing.T) {
+		query := `(severity = "error" or severity = "fatal") and (service = "api" or service = "web")`
+		result := Translate(query, nil)
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+		if !strings.Contains(result.SQL, "AND") && !strings.Contains(result.SQL, "OR") {
+			t.Errorf("expected AND/OR in SQL, got %q", result.SQL)
+		}
+	})
+
+	t.Run("multiple nested fields", func(t *testing.T) {
+		query := `log.level = "error" and request.path ~ "/api"`
+		result := Translate(query, testSchema)
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+	})
+
+	t.Run("query with pipe and complex WHERE", func(t *testing.T) {
+		query := `(severity = "error" or severity = "warn") and namespace = "prod" | timestamp service body`
+		result := Translate(query, nil)
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+		if result.SelectClause == "" {
+			t.Error("expected SelectClause to be set")
 		}
 	})
 }
@@ -368,10 +680,10 @@ func TestSQLGenerator(t *testing.T) {
 			query    string
 			contains string
 		}{
-			{`severity_number > 3`, "> '3'"},
-			{`severity_number < 5`, "< '5'"},
-			{`severity_number >= 3`, ">= '3'"},
-			{`severity_number <= 5`, "<= '5'"},
+			{`severity_number > 3`, "> 3"},
+			{`severity_number < 5`, "< 5"},
+			{`severity_number >= 3`, ">= 3"},
+			{`severity_number <= 5`, "<= 5"},
 		}
 
 		for _, tc := range tests {
@@ -498,9 +810,6 @@ func TestValidate(t *testing.T) {
 		if result.Error == nil {
 			t.Error("expected error")
 		}
-		if result.Error.Code != ErrUnterminatedString {
-			t.Errorf("expected UNTERMINATED_STRING error, got %s", result.Error.Code)
-		}
 	})
 
 	t.Run("invalid query - missing boolean operator", func(t *testing.T) {
@@ -511,9 +820,6 @@ func TestValidate(t *testing.T) {
 		}
 		if result.Error == nil {
 			t.Error("expected error")
-		}
-		if result.Error.Code != ErrMissingBooleanOperator {
-			t.Errorf("expected MISSING_BOOLEAN_OPERATOR error, got %s", result.Error.Code)
 		}
 	})
 }
@@ -542,13 +848,13 @@ func TestBuildFullQuery(t *testing.T) {
 		if !strings.Contains(sql, "FROM logs.otel_logs") {
 			t.Error("expected FROM clause in query")
 		}
-		if !strings.Contains(sql, "WHERE timestamp BETWEEN") {
+		if !strings.Contains(sql, "WHERE `timestamp` BETWEEN") {
 			t.Error("expected WHERE clause with time range in query")
 		}
 		if !strings.Contains(sql, "severity_text") {
 			t.Error("expected condition in query")
 		}
-		if !strings.Contains(sql, "ORDER BY timestamp DESC") {
+		if !strings.Contains(sql, "ORDER BY `timestamp` DESC") {
 			t.Error("expected ORDER BY clause in query")
 		}
 		if !strings.Contains(sql, "LIMIT 100") {
@@ -711,15 +1017,433 @@ func TestPipeOperator(t *testing.T) {
 			t.Errorf("expected empty SelectClause for query without pipe, got %q", result.SelectClause)
 		}
 	})
+
+	t.Run("accepts quoted field name after pipe", func(t *testing.T) {
+		result := Translate(`namespace="prod" | "field_with_quotes"`, testSchema)
+
+		if !result.Valid {
+			t.Errorf("expected valid result for quoted field after pipe, got error: %v", result.Error)
+		}
+		if result.SelectClause == "" {
+			t.Error("expected non-empty SelectClause")
+		}
+	})
+
+	t.Run("rejects number as field after pipe", func(t *testing.T) {
+		result := Translate(`namespace="prod" | 123`, testSchema)
+
+		if result.Valid {
+			t.Error("expected invalid result for number after pipe")
+		}
+		if result.Error == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("accepts valid field names after pipe", func(t *testing.T) {
+		result := Translate(`namespace="prod" | service_name body`, testSchema)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+
+		if result.SelectClause == "" {
+			t.Error("expected SelectClause to be set")
+		}
+	})
 }
 
-// Helper function to filter tokens by type
-func filterTokens(tokens []Token, tokenType TokenType) []Token {
-	var result []Token
-	for _, t := range tokens {
-		if t.Type == tokenType {
-			result = append(result, t)
+func TestTrailingTokensDetection(t *testing.T) {
+	t.Run("detects trailing tokens after valid expression", func(t *testing.T) {
+		result := Validate(`a=b (c=d)`)
+
+		if result.Valid {
+			t.Error("expected invalid result for trailing tokens")
 		}
+		if result.Error == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("detects adjacent parentheses without boolean operator", func(t *testing.T) {
+		result := Validate(`(a=b) (c=d)`)
+
+		if result.Valid {
+			t.Error("expected invalid result for adjacent parentheses")
+		}
+		if result.Error == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("valid query with proper boolean operators", func(t *testing.T) {
+		result := Validate(`(a="b") and (c="d")`)
+
+		if !result.Valid {
+			t.Errorf("expected valid result, got error: %v", result.Error)
+		}
+	})
+}
+
+func TestTimeValidation(t *testing.T) {
+	t.Run("rejects invalid time format", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `field="value"`,
+			TableName:      "logs.test",
+			TimestampField: "timestamp",
+			StartTime:      "invalid-time",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "UTC",
+			Limit:          100,
+		}
+
+		_, err := BuildFullQuery(params)
+		if err == nil {
+			t.Error("expected error for invalid time format")
+		}
+		if !strings.Contains(err.Error(), "invalid time format") {
+			t.Errorf("expected 'invalid time format' error, got: %v", err)
+		}
+	})
+
+	t.Run("rejects timezone with dangerous characters", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `field="value"`,
+			TableName:      "logs.test",
+			TimestampField: "timestamp",
+			StartTime:      "2024-01-01 00:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "UTC'); DROP TABLE logs; --",
+			Limit:          100,
+		}
+
+		_, err := BuildFullQuery(params)
+		if err == nil {
+			t.Error("expected error for dangerous timezone")
+		}
+		if !strings.Contains(err.Error(), "invalid timezone") {
+			t.Errorf("expected 'invalid timezone' error, got: %v", err)
+		}
+	})
+
+	t.Run("accepts valid timezone", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `field="value"`,
+			Schema:         testSchema,
+			TableName:      "logs.test",
+			TimestampField: "timestamp",
+			StartTime:      "2024-01-01 00:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "Asia/Kolkata",
+			Limit:          100,
+		}
+
+		_, err := BuildFullQuery(params)
+		if err != nil {
+			t.Errorf("expected no error for valid timezone, got: %v", err)
+		}
+	})
+
+	t.Run("accepts timezone with colon offset", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `field="value"`,
+			Schema:         testSchema,
+			TableName:      "logs.test",
+			TimestampField: "timestamp",
+			StartTime:      "2024-01-01 00:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "UTC+05:30",
+			Limit:          100,
+		}
+
+		_, err := BuildFullQuery(params)
+		if err != nil {
+			t.Errorf("expected no error for timezone with colon offset, got: %v", err)
+		}
+	})
+
+	t.Run("rejects invalid table name", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `field="value"`,
+			TableName:      "logs'; DROP TABLE users; --",
+			TimestampField: "timestamp",
+			StartTime:      "2024-01-01 00:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "UTC",
+			Limit:          100,
+		}
+
+		_, err := BuildFullQuery(params)
+		if err == nil {
+			t.Error("expected error for invalid table name")
+		}
+		if !strings.Contains(err.Error(), "invalid table name") {
+			t.Errorf("expected 'invalid table name' error, got: %v", err)
+		}
+	})
+
+	t.Run("rejects invalid timestamp field", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `field="value"`,
+			TableName:      "logs.test",
+			TimestampField: "timestamp; DROP TABLE",
+			StartTime:      "2024-01-01 00:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "UTC",
+			Limit:          100,
+		}
+
+		_, err := BuildFullQuery(params)
+		if err == nil {
+			t.Error("expected error for invalid timestamp field")
+		}
+		if !strings.Contains(err.Error(), "invalid timestamp field") {
+			t.Errorf("expected 'invalid timestamp field' error, got: %v", err)
+		}
+	})
+
+	t.Run("accepts @timestamp field (ELK convention)", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `field="value"`,
+			Schema:         testSchema,
+			TableName:      "logs.test",
+			TimestampField: "@timestamp",
+			StartTime:      "2024-01-01 00:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "UTC",
+			Limit:          100,
+		}
+
+		sql, err := BuildFullQuery(params)
+		if err != nil {
+			t.Fatalf("expected no error for @timestamp, got: %v", err)
+		}
+
+		if !strings.Contains(sql, "`@timestamp`") {
+			t.Errorf("expected backtick-quoted @timestamp in SQL:\n%s", sql)
+		}
+	})
+
+	t.Run("quotes timestamp field in WHERE and ORDER BY", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `field="value"`,
+			Schema:         testSchema,
+			TableName:      "logs.test",
+			TimestampField: "@timestamp",
+			StartTime:      "2024-01-01 00:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "UTC",
+			Limit:          100,
+		}
+
+		sql, err := BuildFullQuery(params)
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+
+		if !strings.Contains(sql, "WHERE `@timestamp` BETWEEN") {
+			t.Errorf("expected quoted timestamp in WHERE clause:\n%s", sql)
+		}
+		if !strings.Contains(sql, "ORDER BY `@timestamp` DESC") {
+			t.Errorf("expected quoted timestamp in ORDER BY clause:\n%s", sql)
+		}
+	})
+
+	t.Run("rejects semantically invalid time (impossible date)", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `field="value"`,
+			TableName:      "logs.test",
+			TimestampField: "timestamp",
+			StartTime:      "2024-99-99 00:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "UTC",
+			Limit:          100,
+		}
+
+		_, err := BuildFullQuery(params)
+		if err == nil {
+			t.Error("expected error for impossible date 2024-99-99")
+		}
+	})
+
+	t.Run("rejects semantically invalid time (impossible hour)", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `field="value"`,
+			TableName:      "logs.test",
+			TimestampField: "timestamp",
+			StartTime:      "2024-01-01 25:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "UTC",
+			Limit:          100,
+		}
+
+		_, err := BuildFullQuery(params)
+		if err == nil {
+			t.Error("expected error for impossible hour 25:00:00")
+		}
+	})
+}
+
+func TestFieldsUsedExtraction(t *testing.T) {
+	t.Run("does not include unquoted values as fields", func(t *testing.T) {
+		result := Translate(`severity_text=error`, testSchema)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+
+		for _, field := range result.FieldsUsed {
+			if field == "error" {
+				t.Error("'error' should not be in FieldsUsed - it's a value, not a field")
+			}
+		}
+
+		found := false
+		for _, field := range result.FieldsUsed {
+			if field == "severity_text" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("severity_text should be in FieldsUsed")
+		}
+	})
+}
+
+func TestDuplicateTimestampAvoidance(t *testing.T) {
+	t.Run("does not duplicate timestamp when explicitly selected", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `field="value" | timestamp body`,
+			Schema:         testSchema,
+			TableName:      "logs.test",
+			TimestampField: "timestamp",
+			StartTime:      "2024-01-01 00:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "UTC",
+			Limit:          100,
+		}
+
+		sql, err := BuildFullQuery(params)
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+
+		fromIdx := strings.Index(sql, "\nFROM")
+		if fromIdx == -1 {
+			t.Fatalf("expected FROM clause in SQL:\n%s", sql)
+		}
+		selectClause := sql[:fromIdx]
+		timestampCount := strings.Count(selectClause, "`timestamp`")
+		if timestampCount != 1 {
+			t.Errorf("timestamp appears %d times in SELECT clause, expected 1:\n%s", timestampCount, selectClause)
+		}
+	})
+
+	t.Run("prepends timestamp when not explicitly selected", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `field="value" | body service_name`,
+			Schema:         testSchema,
+			TableName:      "logs.test",
+			TimestampField: "timestamp",
+			StartTime:      "2024-01-01 00:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "UTC",
+			Limit:          100,
+		}
+
+		sql, err := BuildFullQuery(params)
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+
+		if !strings.Contains(sql, "SELECT `timestamp`") {
+			t.Errorf("expected timestamp to be prepended:\n%s", sql)
+		}
+	})
+}
+
+func TestMapColumnFallback(t *testing.T) {
+	schemaWithMap := &Schema{
+		Columns: []ColumnInfo{
+			{Name: "timestamp", Type: "DateTime"},
+			{Name: "log_attributes", Type: "Map(LowCardinality(String), String)"},
+			{Name: "body", Type: "String"},
+		},
 	}
-	return result
+
+	t.Run("uses map column for unknown field in SELECT", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `body="test" | msg`,
+			Schema:         schemaWithMap,
+			TableName:      "logs.test",
+			TimestampField: "timestamp",
+			StartTime:      "2024-01-01 00:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "UTC",
+			Limit:          100,
+		}
+
+		sql, err := BuildFullQuery(params)
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+
+		if !strings.Contains(sql, "`log_attributes`['msg']") {
+			t.Errorf("expected msg to use map column fallback, got:\n%s", sql)
+		}
+		if !strings.Contains(sql, "AS `msg`") {
+			t.Errorf("expected alias 'msg' for map field, got:\n%s", sql)
+		}
+	})
+
+	t.Run("uses direct column for known field in SELECT", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `body="test" | body`,
+			Schema:         schemaWithMap,
+			TableName:      "logs.test",
+			TimestampField: "timestamp",
+			StartTime:      "2024-01-01 00:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "UTC",
+			Limit:          100,
+		}
+
+		sql, err := BuildFullQuery(params)
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+
+		if !strings.Contains(sql, "SELECT `timestamp`, `body`") {
+			t.Errorf("expected body to be used directly as column, got:\n%s", sql)
+		}
+	})
+
+	t.Run("handles multiple unknown fields with map fallback", func(t *testing.T) {
+		params := QueryBuildParams{
+			LogchefQL:      `body="test" | msg namespace level`,
+			Schema:         schemaWithMap,
+			TableName:      "logs.test",
+			TimestampField: "timestamp",
+			StartTime:      "2024-01-01 00:00:00",
+			EndTime:        "2024-01-01 23:59:59",
+			Timezone:       "UTC",
+			Limit:          100,
+		}
+
+		sql, err := BuildFullQuery(params)
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+
+		if !strings.Contains(sql, "`log_attributes`['msg']") {
+			t.Errorf("expected msg to use map column fallback, got:\n%s", sql)
+		}
+		if !strings.Contains(sql, "`log_attributes`['namespace']") {
+			t.Errorf("expected namespace to use map column fallback, got:\n%s", sql)
+		}
+		if !strings.Contains(sql, "`log_attributes`['level']") {
+			t.Errorf("expected level to use map column fallback, got:\n%s", sql)
+		}
+	})
 }

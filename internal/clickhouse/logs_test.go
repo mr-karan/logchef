@@ -407,7 +407,7 @@ func toLower(s string) string {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if c >= 'A' && c <= 'Z' {
-			c = c + 32
+			c += 32
 		}
 		result[i] = c
 	}

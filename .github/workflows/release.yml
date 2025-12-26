@@ -29,22 +29,13 @@ jobs:
         with:
           just-version: "1.13.0"
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          version: 10
+          bun-version: latest
 
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: "23"
-          cache: "pnpm"
-          # Specify the path to the lock file for caching
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      # Install frontend dependencies
-      - name: Install dependencies
-        run: cd frontend && pnpm install
+      - name: Install frontend dependencies
+        run: cd frontend && bun install --frozen-lockfile
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

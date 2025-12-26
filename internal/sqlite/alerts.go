@@ -306,24 +306,24 @@ func scanAlert(scanner interface {
 	Scan(dest ...any) error
 }) (*models.Alert, error) {
 	var (
-		id, teamID, sourceID                                    int64
-		name                                                    string
-		description                                             sql.NullString
-		queryType                                               string
-		query                                                   sql.NullString
-		conditionJSON                                           sql.NullString
-		lookbackSeconds                                         int
-		thresholdOperator                                       string
-		thresholdValue                                          float64
-		frequencySeconds                                        int
-		severity                                                string
-		labelsJSON                                              sql.NullString
-		annotationsJSON                                         sql.NullString
-		generatorURL                                            sql.NullString
-		isActive                                                int
-		lastState                                               string
-		lastEvaluatedAt, lastTriggeredAt                        sql.NullTime
-		createdAt, updatedAt                                    time.Time
+		id, teamID, sourceID             int64
+		name                             string
+		description                      sql.NullString
+		queryType                        string
+		query                            sql.NullString
+		conditionJSON                    sql.NullString
+		lookbackSeconds                  int
+		thresholdOperator                string
+		thresholdValue                   float64
+		frequencySeconds                 int
+		severity                         string
+		labelsJSON                       sql.NullString
+		annotationsJSON                  sql.NullString
+		generatorURL                     sql.NullString
+		isActive                         int
+		lastState                        string
+		lastEvaluatedAt, lastTriggeredAt sql.NullTime
+		createdAt, updatedAt             time.Time
 	)
 
 	if err := scanner.Scan(
@@ -363,26 +363,26 @@ func scanAlert(scanner interface {
 	}
 
 	alert := &models.Alert{
-		ID:               models.AlertID(id),
-		TeamID:           models.TeamID(teamID),
-		SourceID:         models.SourceID(sourceID),
-		Name:             name,
-		Description:      description.String,
-		QueryType:        models.AlertQueryType(queryType),
-		Query:            query.String,
-		ConditionJSON:    conditionJSON.String,
-		LookbackSeconds:  lookbackSeconds,
+		ID:                models.AlertID(id),
+		TeamID:            models.TeamID(teamID),
+		SourceID:          models.SourceID(sourceID),
+		Name:              name,
+		Description:       description.String,
+		QueryType:         models.AlertQueryType(queryType),
+		Query:             query.String,
+		ConditionJSON:     conditionJSON.String,
+		LookbackSeconds:   lookbackSeconds,
 		ThresholdOperator: models.AlertThresholdOperator(thresholdOperator),
-		ThresholdValue:   thresholdValue,
-		FrequencySeconds: frequencySeconds,
-		Severity:         models.AlertSeverity(severity),
-		Labels:           labels,
-		Annotations:      annotations,
-		GeneratorURL:     generatorURL.String,
-		IsActive:         isActive == 1,
-		LastState:        models.AlertState(lastState),
-		CreatedAt:        createdAt,
-		UpdatedAt:        updatedAt,
+		ThresholdValue:    thresholdValue,
+		FrequencySeconds:  frequencySeconds,
+		Severity:          models.AlertSeverity(severity),
+		Labels:            labels,
+		Annotations:       annotations,
+		GeneratorURL:      generatorURL.String,
+		IsActive:          isActive == 1,
+		LastState:         models.AlertState(lastState),
+		CreatedAt:         createdAt,
+		UpdatedAt:         updatedAt,
 	}
 	if lastEvaluatedAt.Valid {
 		alert.LastEvaluatedAt = &lastEvaluatedAt.Time
@@ -628,14 +628,14 @@ func scanAlertHistory(scanner interface {
 	Scan(dest ...any) error
 }) (*models.AlertHistoryEntry, error) {
 	var (
-		id, alertID             int64
-		status                  string
-		triggeredAt             time.Time
-		resolvedAt              sql.NullTime
-		value                   sql.NullFloat64
-		message                 sql.NullString
-		payload                 sql.NullString
-		createdAt               time.Time
+		id, alertID int64
+		status      string
+		triggeredAt time.Time
+		resolvedAt  sql.NullTime
+		value       sql.NullFloat64
+		message     sql.NullString
+		payload     sql.NullString
+		createdAt   time.Time
 	)
 
 	if err := scanner.Scan(

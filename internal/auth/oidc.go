@@ -42,8 +42,7 @@ type OIDCProvider struct {
 // NewOIDCProvider initializes an OIDCProvider based on the provided configuration.
 // It requires explicit AuthURL and TokenURL, but uses ProviderURL for discovery
 // to set up the ID token verifier.
-func NewOIDCProvider(oidcCfg *config.OIDCConfig, log *slog.Logger) (*OIDCProvider, error) {
-	ctx := context.Background()
+func NewOIDCProvider(ctx context.Context, oidcCfg *config.OIDCConfig, log *slog.Logger) (*OIDCProvider, error) {
 
 	var provider *oidc.Provider
 	var err error

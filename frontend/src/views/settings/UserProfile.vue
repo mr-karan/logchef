@@ -98,11 +98,11 @@ const handleCreateToken = async () => {
     
     const result = await apiTokensStore.createToken({
         name: newTokenName.value.trim(),
-        expires_at: expiresAt?.toISOString() || null
+        expires_at: expiresAt?.toISOString() ?? undefined
     })
     
     if (result.success && result.data) {
-        createdTokenData.value = result.data
+        createdTokenData.value = result.data as { token: string; api_token: any }
         showCreateTokenDialog.value = false
         showTokenDisplay.value = true
         newTokenName.value = ''
@@ -134,12 +134,14 @@ const closeTokenDisplay = () => {
 }
 
 // Token expiry utility functions
-const isTokenExpired = (expiresAt: string | null): boolean => {
+const isTokenExpired = (expiresAt: string | null | undefined): boolean => {
     if (!expiresAt) return false
     return new Date(expiresAt) < new Date()
 }
 
-const getExpiryStatus = (expiresAt: string | null) => {
+type BadgeVariant = "default" | "destructive" | "success" | "outline" | "secondary"
+
+const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; variant: BadgeVariant; isExpired: boolean } => {
     if (!expiresAt) return { text: 'Never expires', variant: 'secondary', isExpired: false }
     
     const expiry = new Date(expiresAt)

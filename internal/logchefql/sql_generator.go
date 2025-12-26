@@ -190,7 +190,7 @@ func (g *SQLGenerator) escapeSQLString(value string) string {
 	return result
 }
 
-func (g *SQLGenerator) formatValue(value interface{}, op Operator) string {
+func (g *SQLGenerator) formatValue(value interface{}, _ Operator) string {
 	if value == nil {
 		return "NULL"
 	}
@@ -225,6 +225,30 @@ func (g *SQLGenerator) getColumnType(columnName string) string {
 	return ""
 }
 
+func (g *SQLGenerator) columnExists(columnName string) bool {
+	if g.schema == nil {
+		return false
+	}
+	for _, col := range g.schema.Columns {
+		if col.Name == columnName {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *SQLGenerator) findDefaultMapColumn() string {
+	if g.schema == nil {
+		return ""
+	}
+	for _, col := range g.schema.Columns {
+		if g.isMapType(col.Type) {
+			return col.Name
+		}
+	}
+	return ""
+}
+
 func (g *SQLGenerator) isMapType(columnType string) bool {
 	lower := strings.ToLower(columnType)
 	return strings.HasPrefix(lower, "map(")
@@ -252,17 +276,16 @@ func (g *SQLGenerator) generateNestedFieldAccess(baseColumn string, path []strin
 	}
 
 	// Handle different column types
-	if g.isMapType(columnType) {
+	switch {
+	case g.isMapType(columnType):
 		return g.generateMapAccess(baseColumn, path, operator, formattedValue)
-	} else if g.isJsonType(columnType) {
+	case g.isJsonType(columnType):
 		return g.generateJsonExtraction(baseColumn, path, operator, formattedValue)
-	} else if g.isStringType(columnType) {
-		// String column might contain JSON - try JSON extraction
+	case g.isStringType(columnType):
+		return g.generateJsonExtraction(baseColumn, path, operator, formattedValue)
+	default:
 		return g.generateJsonExtraction(baseColumn, path, operator, formattedValue)
 	}
-
-	// Fallback to JSON extraction for unknown types
-	return g.generateJsonExtraction(baseColumn, path, operator, formattedValue)
 }
 
 func (g *SQLGenerator) generateMapAccess(baseColumn string, path []string, operator Operator, formattedValue string) string {
@@ -327,16 +350,18 @@ func (g *SQLGenerator) generateComparisonExpression(columnExpression string, ope
 
 func (g *SQLGenerator) generateSelectFieldExpression(selectField SelectField) string {
 	var columnExpression string
+	var nestedField *NestedField
+	var simpleFieldName string
 
-	// Check if it's a nested field
-	if nf, ok := selectField.Field.(NestedField); ok {
-		columnType := g.getColumnType(nf.Base)
+	switch f := selectField.Field.(type) {
+	case NestedField:
+		nestedField = &f
+		columnType := g.getColumnType(f.Base)
 
 		if columnType != "" && g.isMapType(columnType) {
-			// Map column: use subscript notation
-			escapedColumn := g.escapeIdentifier(nf.Base)
+			escapedColumn := g.escapeIdentifier(f.Base)
 			var escapedPath []string
-			for _, segment := range nf.Path {
+			for _, segment := range f.Path {
 				s := strings.TrimPrefix(segment, "\"")
 				s = strings.TrimSuffix(s, "\"")
 				s = strings.TrimPrefix(s, "'")
@@ -346,10 +371,9 @@ func (g *SQLGenerator) generateSelectFieldExpression(selectField SelectField) st
 			fullKey := strings.Join(escapedPath, ".")
 			columnExpression = fmt.Sprintf("%s['%s']", escapedColumn, fullKey)
 		} else {
-			// JSON or String column: use JSONExtractString
-			escapedColumn := g.escapeIdentifier(nf.Base)
+			escapedColumn := g.escapeIdentifier(f.Base)
 			var pathParams []string
-			for _, segment := range nf.Path {
+			for _, segment := range f.Path {
 				s := strings.TrimPrefix(segment, "\"")
 				s = strings.TrimSuffix(s, "\"")
 				s = strings.TrimPrefix(s, "'")
@@ -358,22 +382,29 @@ func (g *SQLGenerator) generateSelectFieldExpression(selectField SelectField) st
 			}
 			columnExpression = fmt.Sprintf("JSONExtractString(%s, %s)", escapedColumn, strings.Join(pathParams, ", "))
 		}
-	} else if fieldName, ok := selectField.Field.(string); ok {
-		// Simple field
-		columnExpression = g.escapeIdentifier(fieldName)
-	} else {
+	case string:
+		simpleFieldName = f
+		if g.columnExists(f) {
+			columnExpression = g.escapeIdentifier(f)
+		} else if mapCol := g.findDefaultMapColumn(); mapCol != "" {
+			columnExpression = fmt.Sprintf("%s['%s']", g.escapeIdentifier(mapCol), g.escapeSQLString(f))
+		} else {
+			columnExpression = g.escapeIdentifier(f)
+		}
+	default:
 		return ""
 	}
 
-	// Add alias if provided, or generate one for nested fields
-	if selectField.Alias != "" {
+	// Add alias if provided, or generate one for nested/map fields
+	switch {
+	case selectField.Alias != "":
 		return fmt.Sprintf("%s AS %s", columnExpression, g.escapeIdentifier(selectField.Alias))
-	} else if nf, ok := selectField.Field.(NestedField); ok {
-		// Auto-generate alias for nested fields
-		autoAlias := nf.Base + "_" + strings.Join(nf.Path, "_")
+	case nestedField != nil:
+		autoAlias := nestedField.Base + "_" + strings.Join(nestedField.Path, "_")
 		return fmt.Sprintf("%s AS %s", columnExpression, g.escapeIdentifier(autoAlias))
+	case simpleFieldName != "" && !g.columnExists(simpleFieldName):
+		return fmt.Sprintf("%s AS %s", columnExpression, g.escapeIdentifier(simpleFieldName))
+	default:
+		return columnExpression
 	}
-
-	return columnExpression
 }
-

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -18,7 +17,6 @@ import (
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
-	// "github.com/mr-karan/logchef/internal/logs" // Removed
 )
 
 // TimeSeriesRequest - consider if this is still needed or replaced by core/handler specific structs
@@ -206,7 +204,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		}
 		// Handle invalid query syntax errors specifically if core.QueryLogs returns them.
 		// if errors.Is(err, core.ErrInvalidQuery) ...
-		s.log.Error("failed to query logs via core function", slog.Any("error", err), "source_id", sourceID)
+		s.log.Error("failed to query logs", "error", err, "source_id", sourceID)
 		// Pass the actual error message to the client for better debugging
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to query logs: %v", err), models.DatabaseErrorType)
 	}
@@ -246,7 +244,7 @@ func (s *Server) handleCancelQuery(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusNotFound, "Query not found or already completed", models.NotFoundErrorType)
 	}
 
-	s.log.Info("Query cancelled successfully", "query_id", queryID, "user_id", user.ID)
+	s.log.Debug("query cancelled", "query_id", queryID, "user_id", user.ID)
 
 	return SendSuccess(c, fiber.StatusOK, map[string]interface{}{
 		"message":  "Query cancelled successfully",
@@ -269,7 +267,7 @@ func (s *Server) handleGetSourceSchema(c *fiber.Ctx) error {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
-		s.log.Error("failed to get source schema via core function", slog.Any("error", err), "source_id", sourceID)
+		s.log.Error("failed to get source schema", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to retrieve source schema: %v", err), models.DatabaseErrorType)
 	}
 
@@ -351,7 +349,7 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 		default:
 			// Handle other errors
-			s.log.Error("failed to get histogram data via core function", slog.Any("error", err), "source_id", sourceID)
+			s.log.Error("failed to get histogram data", "error", err, "source_id", sourceID)
 			// Pass the actual error message to the client for better debugging
 			return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to generate histogram data: %v", err), models.DatabaseErrorType)
 		}
@@ -362,117 +360,130 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 
 // handleGenerateAISQL handles the generation of SQL from natural language queries
 func (s *Server) handleGenerateAISQL(c *fiber.Ctx) error {
-	// Check if AI features are enabled in the configuration first.
-	if !s.config.AI.Enabled {
-		s.log.Warn("attempt to use AI SQL generation when AI features are disabled")
-		// Using GeneralErrorType for now, consider defining specific error types like FeatureDisabledErrorType
-		return SendErrorWithType(c, http.StatusServiceUnavailable, "AI SQL generation is not enabled on this server.", models.GeneralErrorType)
+	if err := s.validateAIConfig(); err != nil {
+		return err(c)
 	}
 
-	// Check for API Key if AI is enabled
-	if s.config.AI.APIKey == "" {
-		s.log.Error("AI features are enabled, but OpenAI API key is not configured.")
-		// Using GeneralErrorType for now, consider defining specific error types like ConfigurationErrorType
-		return SendErrorWithType(c, http.StatusServiceUnavailable, "AI SQL generation is not properly configured on this server (missing API key).", models.GeneralErrorType)
-	}
-
-	// Parse source ID from URL parameter
-	sourceIDStr := c.Params("sourceID")
-	sourceID, err := core.ParseSourceID(sourceIDStr)
+	sourceID, teamID, err := s.parseSourceTeamIDs(c)
 	if err != nil {
-		return SendErrorWithType(c, http.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
+		return err
 	}
 
-	// Parse team ID from URL parameter
-	teamIDStr := c.Params("teamID")
-	teamID, err := core.ParseTeamID(teamIDStr)
-	if err != nil {
-		return SendErrorWithType(c, http.StatusBadRequest, "Invalid team ID", models.ValidationErrorType)
-	}
-
-	// Get user claims from context
 	user := c.Locals("user").(*models.User)
 	if user == nil {
-		return SendErrorWithType(c, http.StatusUnauthorized, "Unauthorized, user context not found", models.AuthenticationErrorType)
+		return SendErrorWithType(c, http.StatusUnauthorized, "Unauthorized", models.AuthenticationErrorType)
 	}
 
-	// Verify user has access to the source
-	hasAccess, err := core.UserHasAccessToTeamSource(c.Context(), s.sqlite, s.log, user.ID, teamID, sourceID)
-	if err != nil {
+	hasAccess, accessErr := core.UserHasAccessToTeamSource(c.Context(), s.sqlite, s.log, user.ID, teamID, sourceID)
+	if accessErr != nil {
 		return SendErrorWithType(c, http.StatusInternalServerError, "Failed to verify source access", models.GeneralErrorType)
 	}
 	if !hasAccess {
 		return SendErrorWithType(c, http.StatusForbidden, "You don't have access to this source", models.AuthorizationErrorType)
 	}
 
-	// Parse request body using the new struct name
 	var req models.GenerateSQLRequest
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, http.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
-
-	// Validate request
 	if req.NaturalLanguageQuery == "" {
 		return SendErrorWithType(c, http.StatusBadRequest, "Natural language query is required", models.ValidationErrorType)
 	}
 
-	// Get the source to verify it exists and is connected
-	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, schemaJSON, tableName, err := s.getSourceSchemaForAI(c, sourceID)
+	if err != nil {
+		return err
+	}
+	_ = source
+
+	generatedSQL, err := s.callAIToGenerateSQL(c.Context(), req, schemaJSON, tableName)
+	if err != nil {
+		return err
+	}
+
+	return SendSuccess(c, http.StatusOK, models.GenerateSQLResponse{SQLQuery: generatedSQL})
+}
+
+func (s *Server) validateAIConfig() func(*fiber.Ctx) error {
+	if !s.config.AI.Enabled {
+		return func(c *fiber.Ctx) error {
+			return SendErrorWithType(c, http.StatusServiceUnavailable, "AI SQL generation is not enabled", models.GeneralErrorType)
+		}
+	}
+	if s.config.AI.APIKey == "" {
+		return func(c *fiber.Ctx) error {
+			return SendErrorWithType(c, http.StatusServiceUnavailable, "AI SQL generation is not configured (missing API key)", models.GeneralErrorType)
+		}
+	}
+	return nil
+}
+
+func (s *Server) parseSourceTeamIDs(c *fiber.Ctx) (models.SourceID, models.TeamID, error) {
+	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
+	if err != nil {
+		return 0, 0, SendErrorWithType(c, http.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
+	}
+	teamID, err := core.ParseTeamID(c.Params("teamID"))
+	if err != nil {
+		return 0, 0, SendErrorWithType(c, http.StatusBadRequest, "Invalid team ID", models.ValidationErrorType)
+	}
+	return sourceID, teamID, nil
+}
+
+func (s *Server) getSourceSchemaForAI(c *fiber.Ctx, sourceID models.SourceID) (source *models.Source, schemaJSON, tableName string, err error) {
+	source, err = core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
+			return nil, "", "", SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
-		return SendErrorWithType(c, http.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+		return nil, "", "", SendErrorWithType(c, http.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
 	}
 	if source == nil {
-		return SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		return nil, "", "", SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
 	}
 
 	if !source.IsConnected {
 		health := s.clickhouse.GetCachedHealth(sourceID)
 		if health.Status != models.HealthStatusHealthy {
-			return SendErrorWithType(c, http.StatusServiceUnavailable,
+			return nil, "", "", SendErrorWithType(c, http.StatusServiceUnavailable,
 				fmt.Sprintf("Source is not currently connected: %s", health.Error), models.ExternalServiceErrorType)
 		}
 	}
 
-	client, err := s.clickhouse.GetConnection(sourceID)
+	var client *clickhouse.Client
+	client, err = s.clickhouse.GetConnection(sourceID)
 	if err != nil {
-		s.log.Error("failed to get clickhouse client", slog.Any("error", err), "source_id", sourceID)
-		return SendErrorWithType(c, http.StatusInternalServerError, "Failed to connect to source", models.ExternalServiceErrorType)
+		return nil, "", "", SendErrorWithType(c, http.StatusInternalServerError, "Failed to connect to source", models.ExternalServiceErrorType)
 	}
 
-	tableInfo, err := client.GetTableInfo(c.Context(), source.Connection.Database, source.Connection.TableName)
+	var tableInfo *clickhouse.TableInfo
+	tableInfo, err = client.GetTableInfo(c.Context(), source.Connection.Database, source.Connection.TableName)
 	if err != nil {
-		s.log.Error("failed to get source schema", slog.Any("error", err), "source_id", sourceID)
-		return SendErrorWithType(c, http.StatusInternalServerError, "Failed to get source schema", models.ExternalServiceErrorType)
+		return nil, "", "", SendErrorWithType(c, http.StatusInternalServerError, "Failed to get source schema", models.ExternalServiceErrorType)
 	}
 
-	formattedColumns := make([]map[string]interface{}, 0, len(tableInfo.Columns))
+	schemaJSON = formatSchemaForAI(tableInfo)
+	tableName = source.GetFullTableName()
+	return source, schemaJSON, tableName, nil
+}
+
+func formatSchemaForAI(tableInfo *clickhouse.TableInfo) string {
+	columns := make([]map[string]interface{}, 0, len(tableInfo.Columns))
 	for _, col := range tableInfo.Columns {
-		formattedColumns = append(formattedColumns, map[string]interface{}{
-			"name": col.Name,
-			"type": col.Type,
-		})
+		columns = append(columns, map[string]interface{}{"name": col.Name, "type": col.Type})
 	}
-
 	if len(tableInfo.SortKeys) > 0 {
-		formattedColumns = append(formattedColumns, map[string]interface{}{
-			"name": "_sort_keys",
-			"keys": tableInfo.SortKeys,
+		columns = append(columns, map[string]interface{}{
+			"name": "_sort_keys", "keys": tableInfo.SortKeys,
 			"note": "The columns above are sort keys. Queries filtered by these columns will be faster.",
 		})
 	}
+	schemaJSON, _ := json.MarshalIndent(columns, "", "  ")
+	return string(schemaJSON)
+}
 
-	schemaJSON, err := json.MarshalIndent(formattedColumns, "", "  ")
-	if err != nil {
-		s.log.Error("failed to marshal schema to JSON", slog.Any("error", err))
-		return SendErrorWithType(c, http.StatusInternalServerError, "Failed to process schema", models.GeneralErrorType)
-	}
-
-	tableName := source.GetFullTableName()
-
-	ctx, cancel := context.WithTimeout(c.Context(), OpenAIRequestTimeout)
+func (s *Server) callAIToGenerateSQL(ctx context.Context, req models.GenerateSQLRequest, schemaJSON, tableName string) (string, error) {
+	aiCtx, cancel := context.WithTimeout(ctx, OpenAIRequestTimeout)
 	defer cancel()
 
 	aiClient, err := ai.NewClient(ai.ClientOptions{
@@ -483,32 +494,18 @@ func (s *Server) handleGenerateAISQL(c *fiber.Ctx) error {
 		Timeout:     OpenAIRequestTimeout,
 		BaseURL:     s.config.AI.BaseURL,
 	}, s.log)
-
 	if err != nil {
-		s.log.Error("failed to initialize OpenAI client", slog.Any("error", err))
-		return SendErrorWithType(c, http.StatusInternalServerError, "Failed to initialize AI client", models.ExternalServiceErrorType)
+		return "", fmt.Errorf("failed to initialize AI client: %w", err)
 	}
 
-	generatedSQL, err := aiClient.GenerateSQL(
-		ctx,
-		req.NaturalLanguageQuery,
-		string(schemaJSON),
-		tableName,
-		req.CurrentQuery,
-	)
-
+	generatedSQL, err := aiClient.GenerateSQL(aiCtx, req.NaturalLanguageQuery, schemaJSON, tableName, req.CurrentQuery)
 	if err != nil {
 		if errors.Is(err, ai.ErrInvalidSQLGeneratedByAI) {
-			s.log.Warn("AI failed to generate valid SQL", "query", req.NaturalLanguageQuery, "error", err)
-			return SendErrorWithType(c, http.StatusBadRequest, fmt.Sprintf("AI could not generate a valid SQL query from your input: %v", err), models.ValidationErrorType)
+			return "", fmt.Errorf("AI could not generate valid SQL: %w", err)
 		}
-		s.log.Error("failed to generate SQL using AI client", slog.Any("error", err))
-		return SendErrorWithType(c, http.StatusInternalServerError, fmt.Sprintf("Failed to generate SQL: %v", err), models.ExternalServiceErrorType)
+		return "", fmt.Errorf("failed to generate SQL: %w", err)
 	}
-
-	return SendSuccess(c, http.StatusOK, models.GenerateSQLResponse{
-		SQLQuery: generatedSQL,
-	})
+	return generatedSQL, nil
 }
 
 // handleGetLogContext retrieves surrounding logs around a specific timestamp.
@@ -566,7 +563,7 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
-		s.log.Error("failed to get log context via core function", slog.Any("error", err), "source_id", sourceID)
+		s.log.Error("failed to get log context", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to retrieve log context: %v", err), models.DatabaseErrorType)
 	}
 
@@ -644,14 +641,14 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
-		s.log.Error("failed to get source", slog.Any("error", err), "source_id", sourceID)
+		s.log.Error("failed to get source for field values", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
 	}
 
 	// Get ClickHouse client
 	client, err := s.clickhouse.GetConnection(sourceID)
 	if err != nil {
-		s.log.Error("failed to get clickhouse client", slog.Any("error", err), "source_id", sourceID)
+		s.log.Error("failed to get clickhouse client for field values", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to connect to source", models.ExternalServiceErrorType)
 	}
 
@@ -680,14 +677,13 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 	if err != nil {
 		// Check if the error was due to context cancellation (client disconnected)
 		if ctx.Err() == context.Canceled {
-			s.log.Debug("field values request cancelled by client", "source_id", sourceID, "field", fieldName)
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
 		}
 		if ctx.Err() == context.DeadlineExceeded {
 			s.log.Warn("field values request timed out", "source_id", sourceID, "field", fieldName, "timeout", FieldValuesTimeout)
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
 		}
-		s.log.Error("failed to get field values", slog.Any("error", err), "source_id", sourceID, "field", fieldName)
+		s.log.Error("failed to get field values", "error", err, "source_id", sourceID, "field", fieldName)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
 	}
 
@@ -746,14 +742,14 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
-		s.log.Error("failed to get source", slog.Any("error", err), "source_id", sourceID)
+		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
 	}
 
 	// Get ClickHouse client
 	client, err := s.clickhouse.GetConnection(sourceID)
 	if err != nil {
-		s.log.Error("failed to get clickhouse client", slog.Any("error", err), "source_id", sourceID)
+		s.log.Error("failed to get clickhouse client", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to connect to source", models.ExternalServiceErrorType)
 	}
 
@@ -780,14 +776,13 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 	if err != nil {
 		// Check if the error was due to context cancellation (client disconnected)
 		if ctx.Err() == context.Canceled {
-			s.log.Debug("field values request cancelled by client", "source_id", sourceID)
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
 		}
 		if ctx.Err() == context.DeadlineExceeded {
 			s.log.Warn("field values request timed out", "source_id", sourceID, "timeout", FieldValuesTimeout)
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
 		}
-		s.log.Error("failed to get all field values", slog.Any("error", err), "source_id", sourceID)
+		s.log.Error("failed to get field values", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
 	}
 

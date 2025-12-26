@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-
-	// "strconv"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/sqlite"
@@ -179,20 +177,17 @@ func CreateUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, email, ful
 		return nil, fmt.Errorf("error creating user: %w", err)
 	}
 
-	log.Info("user created successfully", "user_id", user.ID, "email", user.Email)
+	log.Debug("user created", "user_id", user.ID, "email", user.Email)
 	// The user object now contains the ID and timestamps assigned by the DB
 	return user, nil
 }
 
 // UpdateUser updates an existing user's information.
-// Only non-empty fields in the `updateData` struct are applied.
 func UpdateUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID models.UserID, updateData models.User) error {
-	// Validate the fields provided in updateData first
 	if err := validateUserUpdate(updateData); err != nil {
 		return err
 	}
 
-	// Get existing user
 	existing, err := db.GetUser(ctx, userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrUserNotFound) {
@@ -202,41 +197,46 @@ func UpdateUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID mod
 		return fmt.Errorf("error getting user for update: %w", err)
 	}
 
+	updated, err := applyUserUpdates(ctx, db, existing, updateData)
+	if err != nil {
+		return err
+	}
+
+	if !updated {
+		return nil
+	}
+
+	existing.UpdatedAt = time.Now().UTC()
+	if err := db.UpdateUser(ctx, existing); err != nil {
+		log.Error("failed to update user in db", "error", err, "user_id", userID)
+		return fmt.Errorf("error updating user: %w", err)
+	}
+
+	log.Debug("user updated", "user_id", userID)
+	return nil
+}
+
+func applyUserUpdates(ctx context.Context, db *sqlite.DB, existing *models.User, updateData models.User) (bool, error) {
 	updated := false
-	// Apply updates from updateData
+
 	if updateData.FullName != "" && updateData.FullName != existing.FullName {
 		existing.FullName = updateData.FullName
 		updated = true
 	}
-	if updateData.Role != "" && updateData.Role != existing.Role {
-		if updateData.Role != models.UserRoleAdmin && updateData.Role != models.UserRoleMember {
-			return fmt.Errorf("%w: must be '%s' or '%s'", ErrInvalidRole, models.UserRoleAdmin, models.UserRoleMember)
-		}
-		existing.Role = updateData.Role
-		updated = true
-	}
-	if updateData.Status != "" && updateData.Status != existing.Status {
-		if updateData.Status != models.UserStatusActive && updateData.Status != models.UserStatusInactive {
-			return fmt.Errorf("%w: must be '%s' or '%s'", ErrInvalidStatus, models.UserStatusActive, models.UserStatusInactive)
-		}
 
-		// Check if deactivating the last admin
-		if updateData.Status == models.UserStatusInactive && existing.Role == models.UserRoleAdmin {
-			count, err := db.CountAdminUsers(ctx) // Assuming CountAdminUsers counts *active* admins
-			if err != nil {
-				log.Error("failed to count admin users during update", "error", err, "user_id", userID)
-				return fmt.Errorf("error counting admin users: %w", err)
-			}
-			if count <= 1 {
-				return ErrCannotDeleteLastAdmin
-			}
-		}
-		existing.Status = updateData.Status
+	if changed, err := applyRoleUpdate(existing, updateData); err != nil {
+		return false, err
+	} else if changed {
 		updated = true
 	}
-	// Only update LastLoginAt if provided in updateData
+
+	if changed, err := applyStatusUpdate(ctx, db, existing, updateData); err != nil {
+		return false, err
+	} else if changed {
+		updated = true
+	}
+
 	if updateData.LastLoginAt != nil {
-		// Ensure the provided time is treated as UTC if updating
 		loginTimeUTC := updateData.LastLoginAt.UTC()
 		if existing.LastLoginAt == nil || !loginTimeUTC.Equal(existing.LastLoginAt.UTC()) {
 			existing.LastLoginAt = &loginTimeUTC
@@ -244,23 +244,39 @@ func UpdateUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID mod
 		}
 	}
 
-	// If no changes, return early
-	if !updated {
-		log.Debug("no update needed for user", "user_id", userID)
-		return nil
+	return updated, nil
+}
+
+func applyRoleUpdate(existing *models.User, updateData models.User) (bool, error) {
+	if updateData.Role == "" || updateData.Role == existing.Role {
+		return false, nil
+	}
+	if updateData.Role != models.UserRoleAdmin && updateData.Role != models.UserRoleMember {
+		return false, fmt.Errorf("%w: must be '%s' or '%s'", ErrInvalidRole, models.UserRoleAdmin, models.UserRoleMember)
+	}
+	existing.Role = updateData.Role
+	return true, nil
+}
+
+func applyStatusUpdate(ctx context.Context, db *sqlite.DB, existing *models.User, updateData models.User) (bool, error) {
+	if updateData.Status == "" || updateData.Status == existing.Status {
+		return false, nil
+	}
+	if updateData.Status != models.UserStatusActive && updateData.Status != models.UserStatusInactive {
+		return false, fmt.Errorf("%w: must be '%s' or '%s'", ErrInvalidStatus, models.UserStatusActive, models.UserStatusInactive)
 	}
 
-	// Explicitly set UpdatedAt to UTC time before saving
-	existing.UpdatedAt = time.Now().UTC()
-
-	// Update timestamp is handled by the DB layer (UpdateUser method)
-	if err := db.UpdateUser(ctx, existing); err != nil {
-		log.Error("failed to update user in db", "error", err, "user_id", userID)
-		return fmt.Errorf("error updating user: %w", err)
+	if updateData.Status == models.UserStatusInactive && existing.Role == models.UserRoleAdmin {
+		count, err := db.CountAdminUsers(ctx)
+		if err != nil {
+			return false, fmt.Errorf("error counting admin users: %w", err)
+		}
+		if count <= 1 {
+			return false, ErrCannotDeleteLastAdmin
+		}
 	}
-
-	log.Info("user updated successfully", "user_id", userID)
-	return nil
+	existing.Status = updateData.Status
+	return true, nil
 }
 
 // DeleteUser deletes a user from the database.
@@ -296,7 +312,7 @@ func DeleteUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, id models.
 	// TODO: Consider deleting user sessions as well?
 	// if err := db.DeleteUserSessions(ctx, id); err != nil { ... }
 
-	log.Info("user deleted successfully", "user_id", id)
+	log.Debug("user deleted", "user_id", id)
 	return nil
 }
 
@@ -307,28 +323,25 @@ func InitAdminUsers(ctx context.Context, db *sqlite.DB, log *slog.Logger, adminE
 		return nil
 	}
 
-	log.Info("initializing admin users", "emails", adminEmails)
+	log.Debug("initializing admin users", "count", len(adminEmails))
 	var setupErrors []error
 
 	for _, email := range adminEmails {
 		existing, err := db.GetUserByEmail(ctx, email)
 		if err != nil {
 			// Log the error type for debugging
-			log.Debug("error checking admin user", "email", email, "error", err)
 
 			// Check if it's a "not found" error, which means we need to create the user
 			if sqlite.IsNotFoundError(err) || sqlite.IsUserNotFoundError(err) {
 				// User doesn't exist, create a new admin user
-				log.Info("admin user not found, creating new admin user", "email", email)
-				newUser, createErr := CreateUser(ctx, db, log, email, "Admin User", models.UserRoleAdmin, models.UserStatusActive)
+				log.Debug("creating admin user", "email", email)
+				_, createErr := CreateUser(ctx, db, log, email, "Admin User", models.UserRoleAdmin, models.UserStatusActive)
 				if createErr != nil {
 					errMsg := fmt.Sprintf("failed to create admin user %s: %v", email, createErr)
 					log.Error(errMsg)
 					setupErrors = append(setupErrors, errors.New(errMsg))
-				} else {
-					log.Info("created new admin user successfully", "email", email, "user_id", newUser.ID)
 				}
-				continue // Move to next email
+				continue
 			}
 
 			// If it's a different error (not "not found"), log and continue
@@ -359,23 +372,22 @@ func InitAdminUsers(ctx context.Context, db *sqlite.DB, log *slog.Logger, adminE
 				} else {
 					log.Info("updated existing user to active admin", "email", email, "user_id", existing.ID)
 				}
-			} else {
-				log.Debug("admin user already configured correctly", "email", email, "user_id", existing.ID)
 			}
 		}
 	}
 
 	// After iterating, check if any admin users exist at all
 	count, err := db.CountAdminUsers(ctx)
-	if err != nil {
+	switch {
+	case err != nil:
 		errMsg := fmt.Sprintf("failed to count admin users after initialization: %v", err)
 		log.Error(errMsg)
 		setupErrors = append(setupErrors, errors.New(errMsg))
-	} else if count == 0 {
+	case count == 0:
 		errMsg := "initialization finished, but no active admin users found in the database"
 		log.Error(errMsg)
 		setupErrors = append(setupErrors, errors.New(errMsg))
-	} else {
+	default:
 		log.Info("admin users initialized successfully", "count", count)
 	}
 

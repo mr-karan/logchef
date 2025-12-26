@@ -117,12 +117,24 @@ export function useTimeRange() {
   // Handle histogram time range zooming
   const handleHistogramTimeRangeZoom = (range: { start: Date; end: Date }) => {
     try {
-      // Convert native Dates directly to CalendarDateTime
+      const currentRange = exploreStore.timeRange;
+      if (currentRange) {
+        const currentStart = calendarDateTimeToTimestamp(currentRange.start);
+        const currentEnd = calendarDateTimeToTimestamp(currentRange.end);
+        const newStart = range.start.getTime();
+        const newEnd = range.end.getTime();
+
+        const isSameRange = Math.abs((currentStart || 0) - newStart) < 1000 &&
+                            Math.abs((currentEnd || 0) - newEnd) < 1000;
+
+        if (isSameRange) {
+          return false;
+        }
+      }
+
       const start = toCalendarDateTime(fromDate(range.start, getLocalTimeZone()));
       const end = toCalendarDateTime(fromDate(range.end, getLocalTimeZone()));
 
-      // Update the store's time range using the appropriate action
-      // Use setTimeConfiguration as this is an absolute range selection
       exploreStore.setTimeConfiguration({
         absoluteRange: { start, end }
       });

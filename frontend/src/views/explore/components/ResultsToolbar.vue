@@ -40,14 +40,14 @@ const exploreStore = useExploreStore()
 const queryStats = computed(() => exploreStore.queryStats)
 
 const formattedQueryTime = computed(() => {
-  const elapsed = queryStats.value?.elapsed
-  if (!elapsed) return null
+  const executionTimeMs = queryStats.value?.execution_time_ms
+  if (!executionTimeMs) return null
   
-  // elapsed is in seconds
-  if (elapsed < 1) {
-    return `${Math.round(elapsed * 1000)}ms`
+  // execution_time_ms is in milliseconds
+  if (executionTimeMs < 1000) {
+    return `${Math.round(executionTimeMs)}ms`
   }
-  return `${elapsed.toFixed(2)}s`
+  return `${(executionTimeMs / 1000).toFixed(2)}s`
 })
 </script>
 
