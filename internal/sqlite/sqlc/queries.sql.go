@@ -190,23 +190,25 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 const createSource = `-- name: CreateSource :one
 
 INSERT INTO sources (
-    name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    name, backend_type, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, victorialogs_connection, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 RETURNING id
 `
 
 type CreateSourceParams struct {
-	Name              string         `json:"name"`
-	MetaIsAutoCreated int64          `json:"_meta_is_auto_created"`
-	MetaTsField       string         `json:"_meta_ts_field"`
-	MetaSeverityField sql.NullString `json:"_meta_severity_field"`
-	Host              string         `json:"host"`
-	Username          string         `json:"username"`
-	Password          string         `json:"password"`
-	Database          string         `json:"database"`
-	TableName         string         `json:"table_name"`
-	Description       sql.NullString `json:"description"`
-	TtlDays           int64          `json:"ttl_days"`
+	Name                   string         `json:"name"`
+	BackendType            string         `json:"backend_type"`
+	MetaIsAutoCreated      int64          `json:"_meta_is_auto_created"`
+	MetaTsField            string         `json:"_meta_ts_field"`
+	MetaSeverityField      sql.NullString `json:"_meta_severity_field"`
+	Host                   string         `json:"host"`
+	Username               string         `json:"username"`
+	Password               string         `json:"password"`
+	Database               string         `json:"database"`
+	TableName              string         `json:"table_name"`
+	Description            sql.NullString `json:"description"`
+	TtlDays                int64          `json:"ttl_days"`
+	VictorialogsConnection sql.NullString `json:"victorialogs_connection"`
 }
 
 // Sources
@@ -214,6 +216,7 @@ type CreateSourceParams struct {
 func (q *Queries) CreateSource(ctx context.Context, arg CreateSourceParams) (int64, error) {
 	row := q.queryRow(ctx, q.createSourceStmt, createSource,
 		arg.Name,
+		arg.BackendType,
 		arg.MetaIsAutoCreated,
 		arg.MetaTsField,
 		arg.MetaSeverityField,
@@ -224,6 +227,7 @@ func (q *Queries) CreateSource(ctx context.Context, arg CreateSourceParams) (int
 		arg.TableName,
 		arg.Description,
 		arg.TtlDays,
+		arg.VictorialogsConnection,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -602,7 +606,7 @@ func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
 }
 
 const getSource = `-- name: GetSource :one
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at FROM sources WHERE id = ?
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at, backend_type, victorialogs_connection FROM sources WHERE id = ?
 `
 
 // Get a single source by ID
@@ -624,12 +628,14 @@ func (q *Queries) GetSource(ctx context.Context, id int64) (Source, error) {
 		&i.TtlDays,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BackendType,
+		&i.VictorialogsConnection,
 	)
 	return i, err
 }
 
 const getSourceByName = `-- name: GetSourceByName :one
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at FROM sources WHERE database = ? AND table_name = ?
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at, backend_type, victorialogs_connection FROM sources WHERE database = ? AND table_name = ?
 `
 
 type GetSourceByNameParams struct {
@@ -656,6 +662,8 @@ func (q *Queries) GetSourceByName(ctx context.Context, arg GetSourceByNameParams
 		&i.TtlDays,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BackendType,
+		&i.VictorialogsConnection,
 	)
 	return i, err
 }
@@ -1128,7 +1136,7 @@ func (q *Queries) ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, 
 }
 
 const listSources = `-- name: ListSources :many
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at FROM sources ORDER BY created_at DESC
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at, backend_type, victorialogs_connection FROM sources ORDER BY created_at DESC
 `
 
 // Get all sources ordered by creation date
@@ -1156,6 +1164,8 @@ func (q *Queries) ListSources(ctx context.Context) ([]Source, error) {
 			&i.TtlDays,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BackendType,
+			&i.VictorialogsConnection,
 		); err != nil {
 			return nil, err
 		}
@@ -1171,7 +1181,7 @@ func (q *Queries) ListSources(ctx context.Context) ([]Source, error) {
 }
 
 const listSourcesForUser = `-- name: ListSourcesForUser :many
-SELECT DISTINCT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.host, s.username, s.password, s."database", s.table_name, s.description, s.ttl_days, s.created_at, s.updated_at FROM sources s
+SELECT DISTINCT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.host, s.username, s.password, s."database", s.table_name, s.description, s.ttl_days, s.created_at, s.updated_at, s.backend_type, s.victorialogs_connection FROM sources s
 JOIN team_sources ts ON s.id = ts.source_id
 JOIN team_members tm ON ts.team_id = tm.team_id
 WHERE tm.user_id = ?
@@ -1203,6 +1213,8 @@ func (q *Queries) ListSourcesForUser(ctx context.Context, userID int64) ([]Sourc
 			&i.TtlDays,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BackendType,
+			&i.VictorialogsConnection,
 		); err != nil {
 			return nil, err
 		}
@@ -1377,7 +1389,7 @@ func (q *Queries) ListTeamMembersWithDetails(ctx context.Context, teamID int64) 
 }
 
 const listTeamSources = `-- name: ListTeamSources :many
-SELECT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.host, s.username, s.password, s."database", s.table_name, s.description, s.ttl_days, s.created_at, s.updated_at
+SELECT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.host, s.username, s.password, s."database", s.table_name, s.description, s.ttl_days, s.created_at, s.updated_at, s.backend_type, s.victorialogs_connection
 FROM sources s
 JOIN team_sources ts ON s.id = ts.source_id
 WHERE ts.team_id = ?
@@ -1409,6 +1421,8 @@ func (q *Queries) ListTeamSources(ctx context.Context, teamID int64) ([]Source, 
 			&i.TtlDays,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BackendType,
+			&i.VictorialogsConnection,
 		); err != nil {
 			return nil, err
 		}
@@ -1796,6 +1810,7 @@ func (q *Queries) UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlert
 const updateSource = `-- name: UpdateSource :exec
 UPDATE sources
 SET name = ?,
+    backend_type = ?,
     _meta_is_auto_created = ?,
     _meta_ts_field = ?,
     _meta_severity_field = ?,
@@ -1806,29 +1821,33 @@ SET name = ?,
     table_name = ?,
     description = ?,
     ttl_days = ?,
+    victorialogs_connection = ?,
     updated_at = datetime('now')
 WHERE id = ?
 `
 
 type UpdateSourceParams struct {
-	Name              string         `json:"name"`
-	MetaIsAutoCreated int64          `json:"_meta_is_auto_created"`
-	MetaTsField       string         `json:"_meta_ts_field"`
-	MetaSeverityField sql.NullString `json:"_meta_severity_field"`
-	Host              string         `json:"host"`
-	Username          string         `json:"username"`
-	Password          string         `json:"password"`
-	Database          string         `json:"database"`
-	TableName         string         `json:"table_name"`
-	Description       sql.NullString `json:"description"`
-	TtlDays           int64          `json:"ttl_days"`
-	ID                int64          `json:"id"`
+	Name                   string         `json:"name"`
+	BackendType            string         `json:"backend_type"`
+	MetaIsAutoCreated      int64          `json:"_meta_is_auto_created"`
+	MetaTsField            string         `json:"_meta_ts_field"`
+	MetaSeverityField      sql.NullString `json:"_meta_severity_field"`
+	Host                   string         `json:"host"`
+	Username               string         `json:"username"`
+	Password               string         `json:"password"`
+	Database               string         `json:"database"`
+	TableName              string         `json:"table_name"`
+	Description            sql.NullString `json:"description"`
+	TtlDays                int64          `json:"ttl_days"`
+	VictorialogsConnection sql.NullString `json:"victorialogs_connection"`
+	ID                     int64          `json:"id"`
 }
 
 // Update an existing source
 func (q *Queries) UpdateSource(ctx context.Context, arg UpdateSourceParams) error {
 	_, err := q.exec(ctx, q.updateSourceStmt, updateSource,
 		arg.Name,
+		arg.BackendType,
 		arg.MetaIsAutoCreated,
 		arg.MetaTsField,
 		arg.MetaSeverityField,
@@ -1839,6 +1858,7 @@ func (q *Queries) UpdateSource(ctx context.Context, arg UpdateSourceParams) erro
 		arg.TableName,
 		arg.Description,
 		arg.TtlDays,
+		arg.VictorialogsConnection,
 		arg.ID,
 	)
 	return err

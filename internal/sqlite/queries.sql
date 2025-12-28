@@ -3,8 +3,8 @@
 -- name: CreateSource :one
 -- Create a new source entry
 INSERT INTO sources (
-    name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    name, backend_type, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, victorialogs_connection, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 RETURNING id;
 
 -- name: GetSource :one
@@ -23,6 +23,7 @@ SELECT * FROM sources ORDER BY created_at DESC;
 -- Update an existing source
 UPDATE sources
 SET name = ?,
+    backend_type = ?,
     _meta_is_auto_created = ?,
     _meta_ts_field = ?,
     _meta_severity_field = ?,
@@ -33,6 +34,7 @@ SET name = ?,
     table_name = ?,
     description = ?,
     ttl_days = ?,
+    victorialogs_connection = ?,
     updated_at = datetime('now')
 WHERE id = ?;
 

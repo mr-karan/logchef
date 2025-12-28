@@ -9,6 +9,7 @@ sql:
       - "internal/sqlite/migrations/000004_add_alerts.up.sql"
       - "internal/sqlite/migrations/000005_add_system_settings.up.sql"
       - "internal/sqlite/migrations/000006_add_bookmarks.up.sql"
+      - "internal/sqlite/migrations/000007_add_backend_type.up.sql"
     gen:
       go:
         package: "sqlc"

@@ -5,7 +5,26 @@ import (
 	"time"
 )
 
-// ConnectionInfo represents the connection details for a ClickHouse database
+type BackendType string
+
+const (
+	BackendClickHouse   BackendType = "clickhouse"
+	BackendVictoriaLogs BackendType = "victorialogs"
+)
+
+func (b BackendType) String() string {
+	return string(b)
+}
+
+func (b BackendType) IsValid() bool {
+	switch b {
+	case BackendClickHouse, BackendVictoriaLogs:
+		return true
+	default:
+		return false
+	}
+}
+
 type ConnectionInfo struct {
 	Host      string `json:"host"`
 	Username  string `json:"username"`
@@ -14,59 +33,74 @@ type ConnectionInfo struct {
 	TableName string `json:"table_name"`
 }
 
-// Source represents a ClickHouse data source in our system
-type Source struct {
-	ID                SourceID       `db:"id" json:"id"`
-	Name              string         `db:"name" json:"name"`
-	MetaIsAutoCreated bool           `db:"_meta_is_auto_created" json:"_meta_is_auto_created"`
-	MetaTSField       string         `db:"_meta_ts_field" json:"_meta_ts_field"`
-	MetaSeverityField string         `db:"_meta_severity_field" json:"_meta_severity_field"`
-	Connection        ConnectionInfo `db:"connection" json:"connection"`
-	Description       string         `db:"description" json:"description,omitempty"`
-	TTLDays           int            `db:"ttl_days" json:"ttl_days"`
-	Timestamps
-	IsConnected bool         `db:"-" json:"is_connected"`
-	Schema      string       `db:"-" json:"schema,omitempty"`
-	Columns     []ColumnInfo `db:"-" json:"columns,omitempty"`
-	// Enhanced schema information
-	Engine       string   `db:"-" json:"engine,omitempty"`
-	EngineParams []string `db:"-" json:"engine_params,omitempty"`
-	SortKeys     []string `db:"-" json:"sort_keys,omitempty"`
+type VictoriaLogsConnectionInfo struct {
+	URL          string            `json:"url"`
+	AccountID    string            `json:"account_id,omitempty"`
+	ProjectID    string            `json:"project_id,omitempty"`
+	StreamLabels map[string]string `json:"stream_labels,omitempty"`
 }
 
-// ConnectionInfoResponse represents the connection details for API responses, omitting sensitive fields
+type Source struct {
+	ID                SourceID    `db:"id" json:"id"`
+	Name              string      `db:"name" json:"name"`
+	BackendType       BackendType `db:"backend_type" json:"backend_type"`
+	MetaIsAutoCreated bool        `db:"_meta_is_auto_created" json:"_meta_is_auto_created"`
+	MetaTSField       string      `db:"_meta_ts_field" json:"_meta_ts_field"`
+	MetaSeverityField string      `db:"_meta_severity_field" json:"_meta_severity_field"`
+	Description       string      `db:"description" json:"description,omitempty"`
+	TTLDays           int         `db:"ttl_days" json:"ttl_days"`
+
+	Connection             ConnectionInfo              `db:"connection" json:"connection"`
+	VictoriaLogsConnection *VictoriaLogsConnectionInfo `db:"victorialogs_connection" json:"victorialogs_connection,omitempty"`
+
+	Timestamps
+	IsConnected  bool         `db:"-" json:"is_connected"`
+	Schema       string       `db:"-" json:"schema,omitempty"`
+	Columns      []ColumnInfo `db:"-" json:"columns,omitempty"`
+	Engine       string       `db:"-" json:"engine,omitempty"`
+	EngineParams []string     `db:"-" json:"engine_params,omitempty"`
+	SortKeys     []string     `db:"-" json:"sort_keys,omitempty"`
+}
+
 type ConnectionInfoResponse struct {
 	Host      string `json:"host"`
 	Database  string `json:"database"`
 	TableName string `json:"table_name"`
 }
 
-// SourceResponse represents a Source for API responses, with sensitive information removed
-type SourceResponse struct {
-	ID                SourceID               `json:"id"`
-	Name              string                 `json:"name"`
-	MetaIsAutoCreated bool                   `json:"_meta_is_auto_created"`
-	MetaTSField       string                 `json:"_meta_ts_field"`
-	MetaSeverityField string                 `json:"_meta_severity_field"`
-	Connection        ConnectionInfoResponse `json:"connection"`
-	Description       string                 `json:"description,omitempty"`
-	TTLDays           int                    `json:"ttl_days"`
-	CreatedAt         time.Time              `json:"created_at"`
-	UpdatedAt         time.Time              `json:"updated_at"`
-	IsConnected       bool                   `json:"is_connected"`
-	Schema            string                 `json:"schema,omitempty"`
-	Columns           []ColumnInfo           `json:"columns,omitempty"`
-	// Enhanced schema information
-	Engine       string   `json:"engine,omitempty"`
-	EngineParams []string `json:"engine_params,omitempty"`
-	SortKeys     []string `json:"sort_keys,omitempty"`
+type VictoriaLogsConnectionInfoResponse struct {
+	URL          string            `json:"url"`
+	AccountID    string            `json:"account_id,omitempty"`
+	ProjectID    string            `json:"project_id,omitempty"`
+	StreamLabels map[string]string `json:"stream_labels,omitempty"`
 }
 
-// ToResponse converts a Source to a SourceResponse, removing sensitive information
+type SourceResponse struct {
+	ID                     SourceID                            `json:"id"`
+	Name                   string                              `json:"name"`
+	BackendType            BackendType                         `json:"backend_type"`
+	MetaIsAutoCreated      bool                                `json:"_meta_is_auto_created"`
+	MetaTSField            string                              `json:"_meta_ts_field"`
+	MetaSeverityField      string                              `json:"_meta_severity_field"`
+	Connection             ConnectionInfoResponse              `json:"connection"`
+	VictoriaLogsConnection *VictoriaLogsConnectionInfoResponse `json:"victorialogs_connection,omitempty"`
+	Description            string                              `json:"description,omitempty"`
+	TTLDays                int                                 `json:"ttl_days"`
+	CreatedAt              time.Time                           `json:"created_at"`
+	UpdatedAt              time.Time                           `json:"updated_at"`
+	IsConnected            bool                                `json:"is_connected"`
+	Schema                 string                              `json:"schema,omitempty"`
+	Columns                []ColumnInfo                        `json:"columns,omitempty"`
+	Engine                 string                              `json:"engine,omitempty"`
+	EngineParams           []string                            `json:"engine_params,omitempty"`
+	SortKeys               []string                            `json:"sort_keys,omitempty"`
+}
+
 func (s *Source) ToResponse() *SourceResponse {
-	return &SourceResponse{
+	resp := &SourceResponse{
 		ID:                s.ID,
 		Name:              s.Name,
+		BackendType:       s.BackendType,
 		MetaIsAutoCreated: s.MetaIsAutoCreated,
 		MetaTSField:       s.MetaTSField,
 		MetaSeverityField: s.MetaSeverityField,
@@ -86,11 +120,36 @@ func (s *Source) ToResponse() *SourceResponse {
 		EngineParams: s.EngineParams,
 		SortKeys:     s.SortKeys,
 	}
+
+	if s.VictoriaLogsConnection != nil {
+		resp.VictoriaLogsConnection = &VictoriaLogsConnectionInfoResponse{
+			URL:          s.VictoriaLogsConnection.URL,
+			AccountID:    s.VictoriaLogsConnection.AccountID,
+			ProjectID:    s.VictoriaLogsConnection.ProjectID,
+			StreamLabels: s.VictoriaLogsConnection.StreamLabels,
+		}
+	}
+
+	return resp
 }
 
-// GetFullTableName returns the fully qualified table name (database.table)
 func (s *Source) GetFullTableName() string {
 	return fmt.Sprintf("%s.%s", s.Connection.Database, s.Connection.TableName)
+}
+
+func (s *Source) GetEffectiveBackendType() BackendType {
+	if s.BackendType == "" {
+		return BackendClickHouse
+	}
+	return s.BackendType
+}
+
+func (s *Source) IsClickHouse() bool {
+	return s.GetEffectiveBackendType() == BackendClickHouse
+}
+
+func (s *Source) IsVictoriaLogs() bool {
+	return s.GetEffectiveBackendType() == BackendVictoriaLogs
 }
 
 // SourceHealth represents the health status of a source
@@ -101,16 +160,17 @@ type SourceHealth struct {
 	LastChecked time.Time    `json:"last_checked"`
 }
 
-// CreateSourceRequest represents a request to create a new data source
 type CreateSourceRequest struct {
-	Name              string         `json:"name"`
-	MetaIsAutoCreated bool           `json:"meta_is_auto_created"`
-	MetaTSField       string         `json:"meta_ts_field"`
-	MetaSeverityField string         `json:"meta_severity_field"`
-	Connection        ConnectionInfo `json:"connection"`
-	Description       string         `json:"description"`
-	TTLDays           int            `json:"ttl_days"`
-	Schema            string         `json:"schema,omitempty"`
+	Name                   string                      `json:"name"`
+	BackendType            BackendType                 `json:"backend_type"`
+	MetaIsAutoCreated      bool                        `json:"meta_is_auto_created"`
+	MetaTSField            string                      `json:"meta_ts_field"`
+	MetaSeverityField      string                      `json:"meta_severity_field"`
+	Connection             ConnectionInfo              `json:"connection"`
+	VictoriaLogsConnection *VictoriaLogsConnectionInfo `json:"victorialogs_connection,omitempty"`
+	Description            string                      `json:"description"`
+	TTLDays                int                         `json:"ttl_days"`
+	Schema                 string                      `json:"schema,omitempty"`
 }
 
 // ValidateConnectionRequest represents a request to validate a connection

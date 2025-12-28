@@ -2,11 +2,12 @@ package sqlite
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3" // Import the SQLite driver
+	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -85,14 +86,15 @@ func boolToInt(b bool) int64 {
 	return 0
 }
 
-// mapSourceRowToModel maps a sqlc.Source to a models.Source
 func mapSourceRowToModel(row *sqlc.Source) *models.Source {
 	if row == nil {
 		return nil
 	}
-	return &models.Source{
+
+	source := &models.Source{
 		ID:                models.SourceID(row.ID),
 		Name:              row.Name,
+		BackendType:       models.BackendType(row.BackendType),
 		MetaIsAutoCreated: row.MetaIsAutoCreated == 1,
 		MetaTSField:       row.MetaTsField,
 		MetaSeverityField: row.MetaSeverityField.String,
@@ -110,6 +112,15 @@ func mapSourceRowToModel(row *sqlc.Source) *models.Source {
 			UpdatedAt: row.UpdatedAt,
 		},
 	}
+
+	if row.VictorialogsConnection.Valid && row.VictorialogsConnection.String != "" {
+		vlConn, err := parseVictoriaLogsConnection(row.VictorialogsConnection.String)
+		if err == nil {
+			source.VictoriaLogsConnection = vlConn
+		}
+	}
+
+	return source
 }
 
 // Note: IsConnected and Schema/Columns are populated dynamically, not from DB row.
@@ -198,4 +209,23 @@ func handleUniqueConstraintError(err error, table, column, value string) error {
 	}
 
 	return err
+}
+
+func parseVictoriaLogsConnection(jsonStr string) (*models.VictoriaLogsConnectionInfo, error) {
+	var conn models.VictoriaLogsConnectionInfo
+	if err := json.Unmarshal([]byte(jsonStr), &conn); err != nil {
+		return nil, err
+	}
+	return &conn, nil
+}
+
+func serializeVictoriaLogsConnection(conn *models.VictoriaLogsConnectionInfo) (sql.NullString, error) {
+	if conn == nil {
+		return sql.NullString{Valid: false}, nil
+	}
+	data, err := json.Marshal(conn)
+	if err != nil {
+		return sql.NullString{}, err
+	}
+	return sql.NullString{String: string(data), Valid: true}, nil
 }

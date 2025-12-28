@@ -66,20 +66,22 @@ type Session struct {
 }
 
 type Source struct {
-	ID                int64          `json:"id"`
-	Name              string         `json:"name"`
-	MetaIsAutoCreated int64          `json:"_meta_is_auto_created"`
-	MetaTsField       string         `json:"_meta_ts_field"`
-	MetaSeverityField sql.NullString `json:"_meta_severity_field"`
-	Host              string         `json:"host"`
-	Username          string         `json:"username"`
-	Password          string         `json:"password"`
-	Database          string         `json:"database"`
-	TableName         string         `json:"table_name"`
-	Description       sql.NullString `json:"description"`
-	TtlDays           int64          `json:"ttl_days"`
-	CreatedAt         time.Time      `json:"created_at"`
-	UpdatedAt         time.Time      `json:"updated_at"`
+	ID                     int64          `json:"id"`
+	Name                   string         `json:"name"`
+	MetaIsAutoCreated      int64          `json:"_meta_is_auto_created"`
+	MetaTsField            string         `json:"_meta_ts_field"`
+	MetaSeverityField      sql.NullString `json:"_meta_severity_field"`
+	Host                   string         `json:"host"`
+	Username               string         `json:"username"`
+	Password               string         `json:"password"`
+	Database               string         `json:"database"`
+	TableName              string         `json:"table_name"`
+	Description            sql.NullString `json:"description"`
+	TtlDays                int64          `json:"ttl_days"`
+	CreatedAt              time.Time      `json:"created_at"`
+	UpdatedAt              time.Time      `json:"updated_at"`
+	BackendType            string         `json:"backend_type"`
+	VictorialogsConnection sql.NullString `json:"victorialogs_connection"`
 }
 
 type SystemSetting struct {
