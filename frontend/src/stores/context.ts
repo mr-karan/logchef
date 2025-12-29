@@ -100,16 +100,21 @@ export const useContextStore = defineStore('context', {
 
     setFromRoute(teamId: number | null, sourceId: number | null) {
       console.log(`ContextStore: Setting from route - team: ${teamId}, source: ${sourceId}`)
-      this.teamId = teamId
-      this.sourceId = sourceId
       
-      if (teamId) {
-        const persisted = loadFromStorage()
-        persisted.lastTeamId = teamId
-        if (sourceId) {
-          persisted.sourcePerTeam[teamId] = sourceId
-        }
-        saveToStorage(persisted)
+      const teamChanged = teamId !== this.teamId
+      
+      if (teamChanged && teamId) {
+        this.selectTeam(teamId)
+      } else if (teamId && !this.teamId) {
+        this.selectTeam(teamId)
+      } else if (!teamId) {
+        this.teamId = null
+        this.sourceId = null
+        return
+      }
+      
+      if (sourceId && this.teamId) {
+        this.selectSource(sourceId)
       }
     },
 

@@ -45,47 +45,35 @@ import { useSourcesStore } from "@/stores/sources";
 import { formatSourceName } from "@/utils/format";
 import type { SavedTeamQuery } from "@/api/savedQueries";
 import { useTeamsStore } from "@/stores/teams";
-import { useContextStore } from "@/stores/context";
 import { Badge } from "@/components/ui/badge";
 import { useSavedQueries } from "@/composables/useSavedQueries";
+import { useContextSync } from "@/composables/useContextSync";
 import type { SaveQueryFormData } from "@/views/explore/types";
-import type { Source } from "@/api/sources";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
 
-// Initialize router and services with better error handling
 const router = useRouter();
 const { toast } = useToast();
 
-let sourcesStore = useSourcesStore();
-let teamsStore = useTeamsStore();
-let contextStore = useContextStore();
+const sourcesStore = useSourcesStore();
+const teamsStore = useTeamsStore();
 const savedQueriesStore = useSavedQueriesStore();
 
-// Define local refs for queries and current source
+const {
+  isReady: contextReady,
+  isLoading: contextLoading,
+  error: contextError,
+  teamId: contextTeamId,
+  sourceId: contextSourceId,
+  initialize: initializeContext,
+  handleTeamChange: contextHandleTeamChange,
+  handleSourceChange: contextHandleSourceChange,
+} = useContextSync({ basePath: '/logs/saved' });
+
 const localTeamQueries = ref<SavedTeamQuery[] | undefined>();
-const currentSelectedSource = ref<Source | undefined>();
-
-try {
-  sourcesStore = useSourcesStore();
-  teamsStore = useTeamsStore();
-} catch (error) {
-  console.error("Error initializing stores:", error);
-  // Create fallback objects with proper typing
-  sourcesStore = {
-    loadTeamSources: async () => ({ success: false }),
-    teamSources: [],
-    isLoading: false,
-  } as any; // Fallback to any for error case
-
-  teamsStore = {
-    loadTeams: async () => { },
-    setCurrentTeam: () => { },
-    currentTeamId: null,
-    currentTeam: null,
-    teams: [],
-    resetAdminTeams: () => { },
-  } as any; // Fallback to any for error case
-}
+const currentSelectedSource = computed(() => {
+  if (!contextSourceId.value) return undefined;
+  return sourcesStore.teamSources.find(s => s.id === contextSourceId.value);
+});
 
 // Get saved queries composable ONCE at the top level
 const {
@@ -108,16 +96,12 @@ const {
   canManageCollections,
 } = useSavedQueries(localTeamQueries, currentSelectedSource);
 
-// Local UI state
-const selectedSourceId = ref<string>("");
-const isChangingTeam = ref(false);
-const isChangingSource = ref(false);
-const urlError = ref<string | null>(null);
-const isInitialLoad = ref(true); // Flag to prevent redundant API calls
+const selectedSourceId = computed(() => 
+  contextSourceId.value ? String(contextSourceId.value) : ""
+);
 
-// Loading and empty states
 const showLoadingState = computed(() => {
-  return sourcesStore.isLoading || isChangingTeam.value;
+  return sourcesStore.isLoading || contextLoading.value;
 });
 
 const showEmptyState = computed(() => {
@@ -135,21 +119,9 @@ const selectedTeamName = computed(() => {
   return teamsStore.currentTeam.name || "Select a team";
 });
 
-// Selected source name
 const selectedSourceName = computed(() => {
-  if (!selectedSourceId.value) {
-    currentSelectedSource.value = undefined;
-    return "Select a source";
-  }
-  const source = sourcesStore.teamSources?.find(
-    (s) => s.id === parseInt(selectedSourceId.value)
-  );
-  if (source) {
-    currentSelectedSource.value = source; // Update ref here
-    return formatSourceName(source);
-  }
-  currentSelectedSource.value = undefined;
-  return "Select a source";
+  if (!currentSelectedSource.value) return "Select a source";
+  return formatSourceName(currentSelectedSource.value);
 });
 
 // Add this computed property near the other computed properties
@@ -159,73 +131,21 @@ const emptyStateMessage = computed(() =>
     : "Create a query in the Explorer and save it to your collection."
 );
 
-// Load sources and queries on mount
 onMounted(async () => {
   try {
-    // Reset admin teams and load user teams to ensure we have the correct context
     teamsStore.resetAdminTeams();
-
-    // Load user teams directly for simplicity
-    await teamsStore.loadUserTeams();
-
-    // Log store state after loading teams
-    console.log("SavedQueriesView onMounted: teamsStore.userTeams after load:", JSON.parse(JSON.stringify(teamsStore.userTeams)));
-    console.log("SavedQueriesView onMounted: teamsStore.teams (computed) after load:", JSON.parse(JSON.stringify(teamsStore.teams)));
-    console.log("SavedQueriesView onMounted: teamsStore.currentTeamId before explicit set:", teamsStore.currentTeamId);
-
-    // Check if team ID is specified in the URL query
-    const teamIdFromUrl = router.currentRoute.value.query.team;
-
-    if (teamIdFromUrl) {
-      const teamId = parseInt(teamIdFromUrl as string);
-      contextStore.selectTeam(teamId);
-    } else if (!contextStore.teamId && teamsStore.teams.length > 0) {
-      contextStore.selectTeam(teamsStore.teams[0].id);
-    }
-
-    // Load sources for the current team
-    if (teamsStore.currentTeamId) {
-      await sourcesStore.loadTeamSources(teamsStore.currentTeamId);
-    } else {
-      console.warn("No team selected, cannot load sources");
-    }
-
-    // Get the first source if available
-    if (sourcesStore.teamSources.length > 0) {
-      // Check if source ID is specified in the URL query
-      const sourceIdFromUrl = router.currentRoute.value.query.source;
-
-      if (
-        sourceIdFromUrl &&
-        sourcesStore.teamSources.some(
-          (s) => s.id === parseInt(sourceIdFromUrl as string)
-        )
-      ) {
-        selectedSourceId.value = sourceIdFromUrl as string;
-      } else {
-        selectedSourceId.value = String(sourcesStore.teamSources[0].id);
-      }
-      // Update currentSelectedSource after selectedSourceId is set
-      const src = sourcesStore.teamSources.find(s => s.id === parseInt(selectedSourceId.value));
-      if (src) currentSelectedSource.value = src;
-      else currentSelectedSource.value = undefined;
-
-      // Ensure URL always shows team and source on initial load
-      router.replace({
-        path: "/logs/saved",
-        query: {
-          team: teamsStore.currentTeamId?.toString() || "",
-          source: selectedSourceId.value,
-        },
+    await initializeContext();
+    
+    if (contextError.value) {
+      toast({
+        title: "Error",
+        description: contextError.value,
+        variant: "destructive",
+        duration: TOAST_DURATION.ERROR,
       });
-
-      // Don't explicitly call loadSourceQueries here,
-      // the watcher on selectedSourceId will handle it
     }
   } catch (error) {
     console.error("Error during SavedQueriesView mount:", error);
-    urlError.value =
-      "Error initializing the saved queries view. Please try refreshing the page.";
     toast({
       title: "Error",
       description: getErrorMessage(error),
@@ -235,198 +155,81 @@ onMounted(async () => {
   }
 });
 
-// Watch for source selection changes and team changes with safer access
 watch(
-  [
-    () => selectedSourceId.value,
-    () =>
-      teamsStore && teamsStore.currentTeamId ? teamsStore.currentTeamId : null,
-  ],
-  async ([newSourceId, newTeamId], [_oldSourceId, oldTeamId]) => {
-    // Skip fetching if either:
-    // 1. We're in the middle of a team change
-    // 2. We're in the middle of a source change
-    if (isChangingTeam.value || isChangingSource.value) {
-      return;
-    }
-
-    // If team changed, don't fetch queries yet - wait for handleTeamChange to set appropriate source
-    if (newTeamId !== oldTeamId) {
-      return;
-    }
-
-    // Only proceed if we have both a valid team and source ID
-    if (newSourceId && newTeamId) {
-      // Verify source exists in current team before fetching
-      const sourceIdNum = parseInt(newSourceId);
-      const sourceExists = sourcesStore.teamSources.some(
-        (source) => source.id === sourceIdNum
-      );
-
-      if (sourceExists) {
-        // Update currentSelectedSource ref based on newSourceId
-        const src = sourcesStore.teamSources.find(s => s.id === sourceIdNum);
-        if (src) currentSelectedSource.value = src;
-        else currentSelectedSource.value = undefined;
-
-        await fetchQueries();
-        // Mark initial load as complete after first load
-        isInitialLoad.value = false;
-      }
+  () => [contextTeamId.value, contextSourceId.value] as const,
+  async ([teamId, sourceId], oldValue) => {
+    if (!contextReady.value) return;
+    if (!teamId || !sourceId) return;
+    
+    const oldSourceId = oldValue?.[1];
+    if (sourceId !== oldSourceId) {
+      await fetchQueries();
     }
   },
-  { immediate: true } // This will trigger immediately when component mounts
+  { immediate: true }
 );
 
 async function handleTeamChange(teamId: string) {
   try {
-    isChangingTeam.value = true;
-    urlError.value = null;
-
-    contextStore.selectTeam(parseInt(teamId));
-
-    const currentTeamId = parseInt(teamId);
-
-    // Update URL to reflect the team change - use push instead of replace for proper history
-    router.push({
-      path: "/logs/saved",
-      query: { team: teamId },
-    });
-
-    // Load sources for the selected team
-    const sourcesResult = await sourcesStore.loadTeamSources(currentTeamId);
-
-    // Handle case where team has no sources
-    if (
-      !sourcesResult.success ||
-      !sourcesResult.data ||
-      sourcesResult.data.length === 0
-    ) {
-      // Clear source selection when team has no sources
-      selectedSourceId.value = "";
+    const teamIdNum = parseInt(teamId);
+    if (isNaN(teamIdNum)) return;
+    
+    await contextHandleTeamChange(teamIdNum);
+    
+    if (sourcesStore.teamSources.length === 0) {
       localTeamQueries.value = [];
-      currentSelectedSource.value = undefined;
-      return;
-    }
-
-    // Reset source selection to the first source from the new team
-    if (sourcesStore.teamSources.length > 0) {
-      const firstSource = sourcesStore.teamSources[0];
-      selectedSourceId.value = String(firstSource.id);
-      currentSelectedSource.value = firstSource;
-
-      // Update URL with the new source - use currentTeamId for safety
-      // Use push instead of replace for proper history
-      router.push({
-        path: "/logs/saved",
-        query: {
-          team: teamId,
-          source: selectedSourceId.value,
-        },
-      });
-
-      // Only fetch queries after we've properly set the selectedSourceId
-      await fetchQueries();
-    } else {
-      // No sources in this team
-      selectedSourceId.value = "";
-      if (localTeamQueries.value) localTeamQueries.value = [];
-      currentSelectedSource.value = undefined;
     }
   } catch (error) {
     console.error("Error changing team:", error);
-    urlError.value = "Error changing team. Please try again.";
     toast({
       title: "Error",
       description: getErrorMessage(error),
       variant: "destructive",
       duration: TOAST_DURATION.ERROR,
     });
-  } finally {
-    isChangingTeam.value = false;
   }
 }
 
-// Handle source change
 async function handleSourceChange(sourceId: string) {
   try {
-    isChangingSource.value = true;
-    urlError.value = null;
-
     if (!sourceId) {
-      selectedSourceId.value = "";
       localTeamQueries.value = [];
-      currentSelectedSource.value = undefined;
-
-      // Update URL to remove source parameter - use push for proper history
-      router.push({
-        path: "/logs/saved",
-        query: { team: teamsStore?.currentTeamId?.toString() || "" },
-      });
-
       return;
     }
 
-    const id = parseInt(sourceId);
-
-    // Verify the source exists in the current team's sources
-    const sourceExists = sourcesStore.teamSources.some(
-      (source) => source.id === id
-    );
-
-    if (!sourceExists) {
-      urlError.value = `Source with ID ${id} not found or not accessible by the selected team.`;
-      // If invalid source, don't update the selection
-      return;
-    }
-
-    selectedSourceId.value = sourceId;
-
-    // Update URL with the new source - use push for proper history
-    router.push({
-      path: "/logs/saved",
-      query: {
-        team: teamsStore?.currentTeamId?.toString() || "",
-        source: sourceId,
-      },
-    });
-
-    await fetchQueries();
+    const sourceIdNum = parseInt(sourceId);
+    if (isNaN(sourceIdNum)) return;
+    
+    await contextHandleSourceChange(sourceIdNum);
   } catch (error) {
     console.error("Error changing source:", error);
-    urlError.value = "Error changing source. Please try again.";
     toast({
       title: "Error",
       description: getErrorMessage(error),
       variant: "destructive",
       duration: TOAST_DURATION.ERROR,
     });
-  } finally {
-    isChangingSource.value = false;
   }
 }
 
 async function fetchQueries() {
-  if (!teamsStore?.currentTeamId || !selectedSourceId.value) {
+  if (!contextTeamId.value || !contextSourceId.value) {
     console.warn("No team or source selected, cannot load queries");
     return;
   }
 
-  const sourceId = parseInt(selectedSourceId.value);
-
-  // Double check that this source exists for the current team before making API call
   const sourceExists = sourcesStore.teamSources.some(
-    (source) => source.id === sourceId
+    (source) => source.id === contextSourceId.value
   );
 
   if (!sourceExists) {
     console.warn(
-      `Source ID ${sourceId} does not exist for team ${teamsStore.currentTeamId}, skipping query fetch`
+      `Source ID ${contextSourceId.value} does not exist for team ${contextTeamId.value}, skipping query fetch`
     );
     return;
   }
 
-  await loadSourceQueries(teamsStore.currentTeamId, sourceId);
+  await loadSourceQueries(contextTeamId.value, contextSourceId.value);
 }
 
 // Format time using the formatDate utility
@@ -436,8 +239,8 @@ function formatTime(dateStr: string): string {
 
 // Handle delete query with refresh
 async function handleDeleteQuery(query: SavedTeamQuery) {
-  const result = await deleteQuery(query); // Use directly from composable
-  if (result.success && selectedSourceId.value) {
+  const result = await deleteQuery(query);
+  if (result.success && contextSourceId.value) {
     await fetchQueries();
   }
 }
@@ -448,16 +251,13 @@ async function handleSaveQuery(formData: SaveQueryFormData) {
   return await handleSaveQueryFromComposable(formData);
 }
 
-// Handle update query modal submission
 async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
-  if (!teamsStore?.currentTeamId || !selectedSourceId.value) {
-    return;
-  }
+  if (!contextTeamId.value || !contextSourceId.value) return;
 
   try {
     const result = await updateSavedQuery(
-      teamsStore.currentTeamId,
-      parseInt(selectedSourceId.value),
+      contextTeamId.value!,
+      contextSourceId.value!,
       queryId,
       {
         name: formData.name,
@@ -478,22 +278,16 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
   }
 }
 
-// Create a new query with current source
 function handleCreateNewQuery() {
-  createNewQuery(
-    selectedSourceId.value ? parseInt(selectedSourceId.value) : undefined
-  );
+  createNewQuery(contextSourceId.value ?? undefined);
 }
 
-// Toggle bookmark status for a query
 async function handleToggleBookmark(query: SavedTeamQuery) {
-  if (!teamsStore?.currentTeamId || !selectedSourceId.value) {
-    return;
-  }
+  if (!contextTeamId.value || !contextSourceId.value) return;
 
   const result = await savedQueriesStore.toggleBookmark(
-    teamsStore.currentTeamId,
-    parseInt(selectedSourceId.value),
+    contextTeamId.value,
+    contextSourceId.value,
     query.id
   );
 
@@ -508,13 +302,10 @@ async function handleToggleBookmark(query: SavedTeamQuery) {
   }
 }
 
-// Copy shareable collection URL to clipboard
 async function copyCollectionUrl(query: SavedTeamQuery) {
-  if (!teamsStore?.currentTeamId || !selectedSourceId.value) {
-    return;
-  }
+  if (!contextTeamId.value || !contextSourceId.value) return;
 
-  const url = `${window.location.origin}/logs/collection/${teamsStore.currentTeamId}/${selectedSourceId.value}/${query.id}`;
+  const url = `${window.location.origin}/logs/collection/${contextTeamId.value}/${contextSourceId.value}/${query.id}`;
 
   try {
     await navigator.clipboard.writeText(url);
@@ -546,8 +337,8 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
     </div>
 
     <!-- Error Alert -->
-    <div v-if="urlError" class="bg-destructive/15 text-destructive px-4 py-2 rounded-md mb-2 flex items-center">
-      <span class="text-sm">{{ urlError }}</span>
+    <div v-if="contextError" class="bg-destructive/15 text-destructive px-4 py-2 rounded-md mb-2 flex items-center">
+      <span class="text-sm">{{ contextError }}</span>
     </div>
 
     <!-- Show loading state -->
@@ -569,10 +360,8 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
       <div class="border-b pb-3 mb-2">
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-2 text-sm">
-            <Select :model-value="teamsStore.currentTeamId
-              ? teamsStore.currentTeamId.toString()
-              : ''
-              " @update:model-value="handleTeamChange" class="h-8 min-w-[160px]">
+            <Select :model-value="contextTeamId ? contextTeamId.toString() : ''" 
+              @update:model-value="handleTeamChange" class="h-8 min-w-[160px]">
               <SelectTrigger>
                 <SelectValue placeholder="Select a team">{{
                   selectedTeamName
@@ -618,13 +407,11 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
           <div class="flex items-center space-x-4 text-sm">
             <div class="flex flex-col space-y-1.5">
               <label class="text-sm font-medium leading-none">Team</label>
-              <Select :model-value="teamsStore.currentTeamId
-                ? teamsStore.currentTeamId.toString()
-                : ''
-                " @update:model-value="handleTeamChange" class="h-8 min-w-[160px]" :disabled="isChangingTeam">
+              <Select :model-value="contextTeamId ? contextTeamId.toString() : ''" 
+                @update:model-value="handleTeamChange" class="h-8 min-w-[160px]" :disabled="contextLoading">
                 <SelectTrigger>
                   <SelectValue placeholder="Select a team">
-                    <span v-if="isChangingTeam">Loading...</span>
+                    <span v-if="contextLoading">Loading...</span>
                     <span v-else>{{ selectedTeamName }}</span>
                   </SelectValue>
                 </SelectTrigger>
@@ -640,13 +427,13 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
 
             <div class="flex flex-col space-y-1.5">
               <label class="text-sm font-medium leading-none">Source</label>
-              <Select :model-value="selectedSourceId" @update:model-value="handleSourceChange" :disabled="isChangingSource ||
-                !teamsStore.currentTeamId ||
+              <Select :model-value="selectedSourceId" @update:model-value="handleSourceChange" :disabled="contextLoading ||
+                !contextTeamId ||
                 (sourcesStore.teamSources || []).length === 0
                 " class="h-8 min-w-[200px]">
                 <SelectTrigger>
                   <SelectValue placeholder="Select a source">
-                    <span v-if="isChangingSource">Loading...</span>
+                    <span v-if="contextLoading">Loading...</span>
                     <span v-else>{{ selectedSourceName }}</span>
                   </SelectValue>
                 </SelectTrigger>
