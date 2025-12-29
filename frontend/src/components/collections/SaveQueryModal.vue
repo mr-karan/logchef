@@ -114,6 +114,50 @@ const isValid = computed(() => {
   return !!name.value.trim();
 });
 
+// Get the query type for display - prioritize editData/initialData when editing
+const displayQueryType = computed(() => {
+  if (props.editData?.query_type) {
+    return props.editData.query_type;
+  }
+  if (props.initialData?.query_type) {
+    return props.initialData.query_type;
+  }
+  return exploreStore.activeMode || 'sql';
+});
+
+// Get the query content for display - prioritize editData/initialData when editing from Collections
+const displayQueryContent = computed(() => {
+  // First, try to get content from editData (when editing existing query)
+  if (props.editData?.query_content) {
+    try {
+      const content = JSON.parse(props.editData.query_content);
+      if (content.content) {
+        return content.content;
+      }
+    } catch (e) {
+      console.error("Failed to parse editData query content for display", e);
+    }
+  }
+  
+  // Then try initialData (when editing with initialData + isEditMode)
+  if (props.initialData?.query_content) {
+    try {
+      const content = JSON.parse(props.initialData.query_content);
+      if (content.content) {
+        return content.content;
+      }
+    } catch (e) {
+      console.error("Failed to parse initialData query content for display", e);
+    }
+  }
+  
+  // Fall back to exploreStore (when creating new query from Explorer)
+  const activeMode = exploreStore.activeMode || 'sql';
+  return activeMode === 'logchefql' 
+    ? exploreStore.logchefqlCode || ''
+    : exploreStore.rawSql || '';
+});
+
 // Load teams and sources on mount if needed
 onMounted(async () => {
   const promises = [];
@@ -213,7 +257,8 @@ watch([() => props.initialData, () => props.editData], ([newInitialData, newEdit
 // Prepare query content with proper structure
 function prepareQueryContent(saveTimestamp: boolean): string {
   try {
-    const activeMode = exploreStore.activeMode || 'sql';
+    // Use displayQueryType to get the correct mode (from editData/initialData when editing)
+    const activeMode = displayQueryType.value;
 
     // Get initial content if available
     let content: Record<string, any> = {};
@@ -237,15 +282,8 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       }
     }
 
-    // When editing from Collections view, use existing content if exploreStore is empty
-    let queryContent = activeMode === 'logchefql'
-        ? exploreStore.logchefqlCode || ''
-        : exploreStore.rawSql || '';
-
-    // If exploreStore has no content but we have content from initial/edit data, use that
-    if (!queryContent.trim() && content.content) {
-      queryContent = content.content;
-    }
+    // Use displayQueryContent which handles fallback from editData/initialData
+    const queryContent = displayQueryContent.value;
 
     if (!queryContent.trim()) {
       throw new Error(`${activeMode === 'logchefql' ? 'LogchefQL' : 'SQL'} content is required`);
@@ -253,13 +291,30 @@ function prepareQueryContent(saveTimestamp: boolean): string {
 
     let timeRangeValue = null;
     if (saveTimestamp) {
-      if (exploreStore.selectedRelativeTime) {
-        timeRangeValue = { relative: exploreStore.selectedRelativeTime };
+      // When editing from Collections (exploreStore is empty), preserve original time range if available
+      const hasExploreStoreTimeRange = exploreStore.selectedRelativeTime || exploreStore.timeRange;
+      
+      if (hasExploreStoreTimeRange) {
+        // Use current explore store time range (user is editing from Explorer)
+        if (exploreStore.selectedRelativeTime) {
+          timeRangeValue = { relative: exploreStore.selectedRelativeTime };
+        } else {
+          timeRangeValue = {
+            absolute: {
+              start: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.start) : Date.now() - 3600000,
+              end: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.end) : Date.now()
+            }
+          };
+        }
+      } else if (content.timeRange) {
+        // Preserve original time range from saved query (editing from Collections)
+        timeRangeValue = content.timeRange;
       } else {
+        // Fallback to default time range
         timeRangeValue = {
           absolute: {
-            start: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.start) : Date.now() - 3600000,
-            end: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.end) : Date.now()
+            start: Date.now() - 3600000,
+            end: Date.now()
           }
         };
       }
@@ -269,9 +324,9 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       version: content.version || 1,
       sourceId: content.sourceId || currentSourceId.value,
       timeRange: timeRangeValue,
-      limit: exploreStore.limit,
+      limit: exploreStore.limit || content.limit || 100,
       content: queryContent,
-      variables: allVariables.value,
+      variables: allVariables.value?.length ? allVariables.value : (content.variables || []),
     };
 
     return JSON.stringify(simplifiedContent);
@@ -300,9 +355,7 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       sourceId: currentSourceId.value,
       timeRange: fallbackTimeRange,
       limit: exploreStore.limit || 100,
-      content: exploreStore.activeMode === 'logchefql' ?
-        (exploreStore.logchefqlCode || '') :
-        (exploreStore.rawSql || ''),
+      content: displayQueryContent.value || '',
       variables: allVariables?.value || []
     });
   }
@@ -354,10 +407,8 @@ async function handleSubmit(event: Event) {
   try {
     isSubmitting.value = true;
 
-    // Get the current active mode from the explore store for query_type
-    // Use the queryType prop if provided, otherwise fall back to the activeMode from the store
-    const activeMode = exploreStore.activeMode || 'sql';
-    const queryType = props.queryType || (activeMode === 'logchefql' ? 'logchefql' : 'sql');
+    // Use displayQueryType which properly handles editData/initialData when editing
+    const queryType = props.queryType || displayQueryType.value;
 
     try {
       // Prepare the query content with the proper structure
@@ -370,7 +421,7 @@ async function handleSubmit(event: Event) {
         name: name.value,
         description: description.value,
         query_content: preparedContent,
-        query_type: queryType, // Use the queryType
+        query_type: queryType,
         save_timestamp: saveTimestamp.value
       };
 
@@ -456,10 +507,10 @@ const saveDescription = 'Save your current query to your collection for future u
         <!-- Query Content Preview -->
         <div class="border rounded-md p-3">
           <div class="text-sm font-medium mb-2">
-            {{ exploreStore.activeMode === 'logchefql' ? 'LogchefQL' : 'SQL' }} Query
+            {{ displayQueryType === 'logchefql' ? 'LogchefQL' : 'SQL' }} Query
           </div>
           <pre
-            class="text-xs bg-muted p-2 rounded overflow-auto max-h-[120px] whitespace-pre-wrap break-all">{{ exploreStore.activeMode === 'logchefql' ? exploreStore.logchefqlCode : exploreStore.rawSql }}</pre>
+            class="text-xs bg-muted p-2 rounded overflow-auto max-h-[120px] whitespace-pre-wrap break-all">{{ displayQueryContent }}</pre>
         </div>
 
         <!-- Query Name -->
