@@ -13,6 +13,7 @@ ldflags := "-s -w -X 'main.buildString=" + build_info + "' -X 'main.versionStrin
 
 # Binary output
 bin := "bin/logchef.bin"
+cli_bin := "bin/logchef"
 
 # Config file - can be overridden with 'just CONFIG=other.toml target'
 config := env_var_or_default('CONFIG', 'config.toml')
@@ -60,6 +61,33 @@ run: build
 run-backend: build-backend
     @echo "Running backend server with config {{config}}..."
     {{bin}} -config {{config}}
+
+# === CLI ===
+
+# Build the CLI
+build-cli:
+    @echo "Building CLI..."
+    CGO_ENABLED=0 go build -o {{cli_bin}} -ldflags "{{ldflags}}" ./cmd/logchef
+
+# Install CLI locally
+install-cli: build-cli
+    @echo "Installing CLI to ~/go/bin..."
+    cp {{cli_bin}} ~/go/bin/logchef
+    @echo "CLI installed. Run 'logchef --help' to get started."
+
+# Run CLI tests
+test-cli:
+    @echo "Running CLI tests..."
+    go test -v ./internal/cli/... ./cmd/logchef/...
+
+# Run CLI tests with coverage
+test-cli-coverage:
+    @echo "Running CLI tests with coverage..."
+    mkdir -p coverage
+    go test -v -race -coverprofile=coverage/cli-coverage.out ./internal/cli/... ./cmd/logchef/...
+    go tool cover -html=coverage/cli-coverage.out -o coverage/cli-coverage.html
+    @echo "CLI coverage report generated at coverage/cli-coverage.html"
+    @go tool cover -func=coverage/cli-coverage.out | grep total | awk '{print "CLI coverage: " $$3}'
 
 # Run only the frontend server
 run-frontend:
