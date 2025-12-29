@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2025-12-29
+
 ### Added
 - **Bookmark Favorite Queries** - Star saved queries for quick access ([#60](https://github.com/mr-karan/logchef/pull/60))
   - Bookmarked queries appear at top of collections dropdown
@@ -236,7 +238,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/mr-karan/logchef/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/mr-karan/logchef/compare/v0.6.0...v1.0.0
 [0.6.0]: https://github.com/mr-karan/logchef/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/mr-karan/logchef/compare/v0.4.0...v0.5.0
