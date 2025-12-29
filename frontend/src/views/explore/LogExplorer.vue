@@ -251,7 +251,7 @@ const showSourceNotConnectedState = computed(() => {
 });
 
 const queryIdFromUrl = computed(
-  () => route.query.query_id as string | undefined
+  () => route.query.id as string | undefined
 );
 
 // Can save or update query?
@@ -867,24 +867,29 @@ const onSaveQueryModalSave = (formData: SaveQueryFormData) => {
   processSaveQueryFromComposable(formData);
 };
 
-// Handle query_id changes from URL, especially when component is kept alive
+// Handle saved query id changes from URL, especially when component is kept alive
 watch(
-  () => route.query.query_id,
+  () => route.query.id,
   async (newQueryId, oldQueryId) => {
     // Skip if it's the same query ID or we're initializing
     if (newQueryId === oldQueryId || isInitializing.value) {
       return;
     }
 
-    console.log(`LogExplorer: query_id changed from ${oldQueryId} to ${newQueryId}`);
+    console.log(`LogExplorer: query id changed from ${oldQueryId} to ${newQueryId}`);
 
-    // Ensure team/source in URL match current selection to avoid race conditions
-    const urlTeam = route.query.team ? parseInt(route.query.team as string) : null;
-    const urlSource = route.query.source ? parseInt(route.query.source as string) : null;
+    // If query ID was removed, clear the saved query state
+    if (!newQueryId && oldQueryId) {
+      exploreStore.setSelectedQueryId(null);
+      exploreStore.setActiveSavedQueryName(null);
+      return;
+    }
 
-    // If URL doesn't specify team/source yet, or mismatch with current, wait briefly
+    // Wait for context alignment, then recompute URL params after wait
+    let urlTeam = route.query.team ? parseInt(route.query.team as string) : null;
+    let urlSource = route.query.source ? parseInt(route.query.source as string) : null;
+
     if (!urlTeam || !urlSource || urlTeam !== currentTeamId.value || urlSource !== currentSourceId.value) {
-      // Poll for up to 500ms for context to align
       for (let i = 0; i < 5; i++) {
         await new Promise(r => setTimeout(r, 100));
         if (
@@ -895,15 +900,16 @@ watch(
           break;
         }
       }
+      // Recompute after polling to avoid stale values
+      urlTeam = route.query.team ? parseInt(route.query.team as string) : null;
+      urlSource = route.query.source ? parseInt(route.query.source as string) : null;
     }
 
-    // If we have a query ID, team ID and source ID, load the query
     if (newQueryId && urlTeam && urlSource) {
       try {
         console.log(`LogExplorer: Loading saved query ${newQueryId}`);
         isLoadingQuery.value = true;
 
-        // Fetch query details using the team/source from URL to avoid mismatches
         const fetchResult = await savedQueriesStore.fetchTeamSourceQueryDetails(
           urlTeam,
           urlSource,
@@ -911,17 +917,13 @@ watch(
         );
 
         if (fetchResult.success && savedQueriesStore.selectedQuery) {
-          // Always use no grouping by default when switching queries
           exploreStore.setGroupByField("__none__");
 
-          // Load the saved query
           const loadResult = await loadSavedQuery(savedQueriesStore.selectedQuery);
 
           if (loadResult) {
-            // Execute the query after loading
             await handleQueryExecution("query-from-url");
 
-            // Focus editor after query is loaded
             nextTick(() => {
               queryEditorRef.value?.focus(true);
             });

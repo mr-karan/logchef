@@ -7,10 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 
 	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
+
+var relativeTimeRegex = regexp.MustCompile(`^\d+[smhdw]$`)
+
+func isValidRelativeTimeFormat(s string) bool {
+	return relativeTimeRegex.MatchString(s)
+}
 
 // --- Saved Query Error Definitions ---
 
@@ -46,9 +53,20 @@ func ValidateSavedQueryContent(contentJSON string) error {
 		return fmt.Errorf("%w: limit must be positive", ErrInvalidQueryContent)
 	}
 
-	// Validate time range if present (check against the zero value of the struct)
-	// The TimeRange struct only contains Absolute times.
-	if queryContent.TimeRange != (models.SavedQueryTimeRange{}) {
+	hasRelativeTime := queryContent.TimeRange.Relative != ""
+	hasAbsoluteTime := queryContent.TimeRange.Absolute.Start != 0 || queryContent.TimeRange.Absolute.End != 0
+
+	if hasRelativeTime && hasAbsoluteTime {
+		return fmt.Errorf("%w: cannot specify both relative and absolute time range", ErrInvalidQueryContent)
+	}
+
+	if hasRelativeTime {
+		if !isValidRelativeTimeFormat(queryContent.TimeRange.Relative) {
+			return fmt.Errorf("%w: invalid relative time format (expected e.g. '15m', '1h', '7d')", ErrInvalidQueryContent)
+		}
+	}
+
+	if hasAbsoluteTime {
 		if queryContent.TimeRange.Absolute.Start <= 0 {
 			return fmt.Errorf("%w: absolute start time must be positive", ErrInvalidQueryContent)
 		}

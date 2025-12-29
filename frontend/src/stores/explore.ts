@@ -411,7 +411,7 @@ export const useExploreStore = defineStore("explore", () => {
       }
     }
 
-    const queryId = params.id || params.query_id;
+    const queryId = params.id;
     if (queryId) {
       state.data.value.selectedQueryId = queryId;
       return { needsResolve: true, queryId, shouldExecute: false };

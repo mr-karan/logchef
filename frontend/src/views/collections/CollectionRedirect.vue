@@ -38,7 +38,7 @@ onMounted(async () => {
       query: {
         team: teamId as string,
         source: sourceId as string,
-        query_id: collectionId as string,
+        id: collectionId as string,
       },
     });
   } catch (err) {

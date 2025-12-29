@@ -201,10 +201,10 @@ async function copyCollectionUrl(event: Event, query: SavedTeamQuery) {
 <template>
   <DropdownMenu v-if="isUserAuthenticated" v-model:open="isOpen">
     <DropdownMenuTrigger as-child>
-      <Button variant="outline" class="whitespace-nowrap">
-        <Save class="w-4 h-4 mr-2" />
-        <span>{{ activeSavedQueryName || 'Collections' }}</span>
-        <ChevronDown class="w-4 h-4 ml-auto" />
+      <Button variant="outline" class="max-w-[200px]">
+        <Save class="w-4 h-4 mr-2 flex-shrink-0" />
+        <span class="truncate">{{ activeSavedQueryName || 'Collections' }}</span>
+        <ChevronDown class="w-4 h-4 ml-2 flex-shrink-0" />
       </Button>
     </DropdownMenuTrigger>
     <DropdownMenuContent class="w-64" align="end">

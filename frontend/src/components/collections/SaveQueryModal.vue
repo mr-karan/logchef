@@ -215,8 +215,8 @@ onMounted(async () => {
   }
 
   // Also check URL parameters for editing existing query
-  if (route.query.query_id && !props.initialData && !props.editData) {
-    console.log(`Editing query ID ${route.query.query_id} from URL parameters (if modal state not already set)`);
+  if (route.query.id && !props.initialData && !props.editData) {
+    console.log(`Editing query ID ${route.query.id} from URL parameters (if modal state not already set)`);
   }
 });
 

@@ -49,7 +49,7 @@ export function useSavedQueries(
   const isLoadingQueryDetails = ref(false)
   const searchQuery = ref('')
 
-  const isEditingExistingQuery = computed(() => !!(route.query.id || route.query.query_id));
+  const isEditingExistingQuery = computed(() => !!route.query.id);
 
   const canManageCollections = computed(() => {
     if (!authStore.isAuthenticated || !authStore.user) {
@@ -124,7 +124,7 @@ export function useSavedQueries(
       return
     }
 
-    const queryId = route.query.id || route.query.query_id
+    const queryId = route.query.id
     if (queryId) {
       // We are editing an existing query - load the query details
       const teamId = route.query.team as string
@@ -184,7 +184,7 @@ export function useSavedQueries(
     try {
       let response;
 
-      const queryIdFromUrl = (route.query.id || route.query.query_id) as string | undefined;
+      const queryIdFromUrl = route.query.id as string | undefined;
       const isUpdate = !!editingQuery.value || !!queryIdFromUrl;
       const queryId = editingQuery.value?.id.toString() || queryIdFromUrl;
 
@@ -499,10 +499,9 @@ export function useSavedQueries(
           exploreStore.setActiveSavedQueryName(null);
           exploreStore.setSelectedQueryId(null);
 
-          if (route.query.id || route.query.query_id) {
+          if (route.query.id) {
             const currentQuery = { ...route.query };
             delete currentQuery.id;
-            delete currentQuery.query_id;
             router.replace({ query: currentQuery });
           }
         }
@@ -574,7 +573,7 @@ export function useSavedQueries(
     // Use the centralized reset function in the store
     exploreStore.resetQueryToDefaults();
 
-    // Build new query parameters without query_id
+    // Build new query parameters without saved query id
     const newQuery: Record<string, string> = {};
 
     // Keep the current team if available
