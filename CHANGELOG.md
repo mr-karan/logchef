@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Proper context propagation throughout backend (contextcheck compliance)
 - Reduced cyclomatic complexity in high-complexity functions
+- **Saved Query Navigation** - Switching between saved queries no longer shows stale content
+- **Saved Query Validation** - Backend now accepts relative-only time ranges (was: "absolute start time must be positive")
+- **Cross-Page Context** - Team/source selection preserved when navigating between Explorer, Collections, and Alerts
+- **Sidebar Navigation** - Links now include full context params (team + source)
 
 ### Contributors
 - [@rhnvrm](https://github.com/rhnvrm) - Bookmark favorite queries feature ([#60](https://github.com/mr-karan/logchef/pull/60))
