@@ -54,12 +54,18 @@ export const useContextStore = defineStore('context', {
   actions: {
     selectTeam(teamId: number) {
       console.log(`ContextStore: Selecting team ${teamId}`)
+      const previousTeamId = this.teamId
       this.teamId = teamId
       
-      const persisted = loadFromStorage()
-      const lastSourceForTeam = persisted.sourcePerTeam[teamId]
-      this.sourceId = lastSourceForTeam ?? null
+      // IMPORTANT: Clear source when team changes to prevent 403 errors
+      // The cached source may not belong to the new team. The sourcesStore
+      // will restore a valid source after loading the new team's sources.
+      if (previousTeamId !== teamId) {
+        console.log(`ContextStore: Team changed from ${previousTeamId} to ${teamId}, clearing source`)
+        this.sourceId = null
+      }
       
+      const persisted = loadFromStorage()
       persisted.lastTeamId = teamId
       saveToStorage(persisted)
     },

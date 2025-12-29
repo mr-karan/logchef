@@ -998,6 +998,43 @@ export const useExploreStore = defineStore("explore", () => {
     aiStore.clearState();
   }
 
+  const sourcesStore = useSourcesStore();
+  let lastAutoExecKey: string | null = null;
+  
+  watch(
+    () => contextStore.sourceId,
+    () => {
+      lastAutoExecKey = null;
+    }
+  );
+  
+  watch(
+    () => [sourcesStore.currentSourceDetails, state.data.value.timeRange] as const,
+    ([newDetails, timeRange]) => {
+      if (!newDetails?.id || !newDetails.is_connected) return;
+      if (!timeRange) return;
+      
+      const execKey = `${newDetails.id}-${timeRange.start.toString()}-${timeRange.end.toString()}`;
+      if (execKey === lastAutoExecKey) return;
+      
+      if (state.isLoadingOperation('executeQuery')) return;
+      if (sourcesStore.isLoadingTeamSources) return;
+      
+      const sourceInTeam = sourcesStore.teamSources.some(s => s.id === newDetails.id);
+      if (!sourceInTeam) {
+        console.log(`ExploreStore: Source ${newDetails.id} not in current team's sources, skipping auto-execute`);
+        return;
+      }
+      
+      console.log(`ExploreStore: Auto-executing query for source ${newDetails.id}`);
+      lastAutoExecKey = execKey;
+      
+      executeQuery().catch(err => {
+        console.error('ExploreStore: Auto-execute failed:', err);
+      });
+    }
+  );
+
   return {
     // State
     logs: computed(() => state.data.value.logs),

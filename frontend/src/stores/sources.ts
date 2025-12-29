@@ -131,6 +131,7 @@ export const useSourcesStore = defineStore("sources", () => {
       // Clear previous state
       state.data.value.teamSourcesError = null;
       state.data.value.teamSources = [];
+      state.data.value.currentSourceDetails = null;
 
       if (!newTeamId) {
         console.log('SourcesStore: No team selected, skipping source loading');
@@ -141,7 +142,27 @@ export const useSourcesStore = defineStore("sources", () => {
         console.log(`SourcesStore: Loading sources for team ${newTeamId}`);
         state.data.value.isLoadingTeamSources = true;
         await loadTeamSources(newTeamId);
+        
+        if (contextStore.teamId !== newTeamId) {
+          console.log(`SourcesStore: Team changed during load (now ${contextStore.teamId}), discarding results for ${newTeamId}`);
+          return;
+        }
+        
         console.log(`SourcesStore: Successfully loaded ${teamSources.value.length} sources for team ${newTeamId}`);
+        
+        if (teamSources.value.length > 0) {
+          const currentSourceId = contextStore.sourceId;
+          const currentSourceValid = currentSourceId && teamSources.value.some(s => s.id === currentSourceId);
+          
+          if (!currentSourceValid) {
+            const cachedSourceId = contextStore.getStoredSourceForTeam(newTeamId);
+            const validCachedSource = cachedSourceId && teamSources.value.some(s => s.id === cachedSourceId);
+            const targetSourceId = validCachedSource ? cachedSourceId : teamSources.value[0].id;
+            
+            console.log(`SourcesStore: Selecting source ${targetSourceId} for team ${newTeamId}`);
+            contextStore.selectSource(targetSourceId);
+          }
+        }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Failed to load sources';
         state.data.value.teamSourcesError = errorMessage;
@@ -153,31 +174,56 @@ export const useSourcesStore = defineStore("sources", () => {
     { immediate: true }
   );
 
-  // Watch source changes and auto-load details
   watch(
-    () => contextStore.sourceId,
-    async (newSourceId, oldSourceId) => {
-      // Prevent duplicate processing
+    () => [contextStore.sourceId, state.data.value.isLoadingTeamSources] as const,
+    async ([newSourceId, isLoadingTeamSources], oldValue) => {
+      const [oldSourceId, wasLoadingTeamSources] = oldValue ?? [null, false];
+      
+      const teamSourcesJustFinishedLoading = wasLoadingTeamSources && !isLoadingTeamSources;
+      if (teamSourcesJustFinishedLoading && newSourceId) {
+        console.log(`SourcesStore: Team sources loaded, processing source ${newSourceId}`);
+        lastProcessedSourceId = null;
+      }
+      
       if (newSourceId === lastProcessedSourceId) {
         return;
       }
       
       console.log(`SourcesStore: Source changed from ${oldSourceId} to ${newSourceId}`);
-      lastProcessedSourceId = newSourceId;
-
-      // Clear previous state
+      
       state.data.value.sourceDetailsError = null;
       state.data.value.currentSourceDetails = null;
 
       if (!newSourceId) {
+        lastProcessedSourceId = null;
         console.log('SourcesStore: No source selected, skipping details loading');
         return;
       }
 
-      // Don't load source details if there's no team selected (prevents race condition)
       const currentTeamId = contextStore.teamId;
       if (!currentTeamId) {
         console.log(`SourcesStore: No team selected, deferring source ${newSourceId} details loading`);
+        return;
+      }
+
+      if (isLoadingTeamSources) {
+        console.log(`SourcesStore: Team sources still loading, will process source ${newSourceId} when ready`);
+        return;
+      }
+
+      lastProcessedSourceId = newSourceId;
+
+      const sourceExistsInTeam = teamSources.value.some(s => s.id === newSourceId);
+      
+      if (teamSources.value.length === 0) {
+        console.log(`SourcesStore: Team ${currentTeamId} has no sources, cannot load source ${newSourceId}`);
+        state.data.value.sourceDetailsError = 'Team has no sources configured';
+        return;
+      }
+      
+      if (!sourceExistsInTeam) {
+        console.log(`SourcesStore: Source ${newSourceId} not in team ${currentTeamId}'s sources, selecting first available`);
+        contextStore.selectSource(teamSources.value[0].id);
         return;
       }
 
@@ -185,6 +231,12 @@ export const useSourcesStore = defineStore("sources", () => {
         console.log(`SourcesStore: Loading details for source ${newSourceId}`);
         state.data.value.isLoadingSourceDetails = true;
         await loadSourceDetails(newSourceId);
+        
+        if (contextStore.sourceId !== newSourceId || contextStore.teamId !== currentTeamId) {
+          console.log(`SourcesStore: Context changed during load, discarding details for source ${newSourceId}`);
+          return;
+        }
+        
         console.log(`SourcesStore: Successfully loaded details for source ${newSourceId}`);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Failed to load source details';
