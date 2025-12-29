@@ -11,7 +11,7 @@ Local development setup for LogChef.
 ## Quick Start
 
 ```bash
-# 1. Start infrastructure (ClickHouse, Dex, Alertmanager)
+# 1. Start infrastructure (ClickHouse, VictoriaLogs, Dex, Alertmanager)
 just dev-docker
 
 # 2. Run backend (in new terminal)
@@ -27,6 +27,8 @@ just dev-seed
 cd dev && vector -c http.toml
 # or
 cd dev && vector -c syslog.toml
+# or (for VictoriaLogs)
+cd dev && vector -c victorialogs.toml
 ```
 
 Open http://localhost:5173 and login with `dev@localhost` / `password`.
@@ -46,7 +48,7 @@ Running `just dev-seed` creates:
 
 - **User**: `dev@localhost` (admin)
 - **Team**: "Dev Team"
-- **Sources**: HTTP Access Logs, Syslog Logs (both linked to Dev Team)
+- **Sources**: HTTP Access Logs, Syslog Logs, VictoriaLogs Demo (all linked to Dev Team)
 
 ## Services
 
@@ -54,6 +56,7 @@ Running `just dev-seed` creates:
 |---------|------|-------------|
 | ClickHouse HTTP | 8123 | HTTP interface |
 | ClickHouse Native | 9000 | Native protocol |
+| VictoriaLogs | 9428 | VictoriaLogs HTTP API |
 | Dex | 5556 | OIDC provider |
 | Alertmanager | 9093 | Alert routing |
 | Webhook Receiver | 8888 | Test webhook endpoint |
@@ -84,8 +87,9 @@ cd dev && docker compose down -v
 | `docker-compose.yml` | Infrastructure services |
 | `init-clickhouse.sql` | Creates ClickHouse tables |
 | `seed.sh` | Creates team, sources, user via API |
-| `http.toml` | Vector config for HTTP demo logs |
-| `syslog.toml` | Vector config for syslog demo logs |
+| `http.toml` | Vector config for HTTP demo logs (ClickHouse) |
+| `syslog.toml` | Vector config for syslog demo logs (ClickHouse) |
+| `victorialogs.toml` | Vector config for demo logs (VictoriaLogs) |
 | `dex/config.yaml` | Dex OIDC configuration |
 | `alertmanager/alertmanager.yml` | Alertmanager routing config |
 

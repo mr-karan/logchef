@@ -1,6 +1,8 @@
 import { apiClient } from "./apiUtils";
 import type { SavedTeamQuery, Team } from "./types";
 
+export type BackendType = "clickhouse" | "victorialogs";
+
 interface ConnectionInfo {
   host: string;
   database: string;
@@ -15,13 +17,22 @@ interface ConnectionRequestInfo {
   table_name: string;
 }
 
+export interface VictoriaLogsConnectionInfo {
+  url: string;
+  account_id?: string;
+  project_id?: string;
+  stream_labels?: Record<string, string>;
+}
+
 export interface Source {
   id: number;
   name: string;
+  backend_type: BackendType;
   _meta_is_auto_created: boolean;
   _meta_ts_field: string;
   _meta_severity_field?: string;
   connection: ConnectionInfo;
+  victorialogs_connection?: VictoriaLogsConnectionInfo;
   description?: string;
   ttl_days: number;
   created_at: string;
@@ -29,10 +40,17 @@ export interface Source {
   is_connected: boolean;
   schema?: string;
   columns?: ColumnInfo[];
-  // ClickHouse specific properties
   engine?: string;
   engine_params?: string[];
   sort_keys?: string[];
+}
+
+export function isVictoriaLogsSource(source: Source): boolean {
+  return source.backend_type === "victorialogs";
+}
+
+export function isClickHouseSource(source: Source): boolean {
+  return !source.backend_type || source.backend_type === "clickhouse";
 }
 
 export interface ColumnInfo {
@@ -57,12 +75,14 @@ export interface TeamGroupedQuery {
 
 export interface CreateSourcePayload {
   name: string;
+  backend_type?: BackendType;
   meta_is_auto_created: boolean;
   meta_ts_field?: string;
   meta_severity_field?: string;
-  connection: ConnectionRequestInfo;
+  connection?: ConnectionRequestInfo;
+  victorialogs_connection?: VictoriaLogsConnectionInfo;
   description?: string;
-  ttl_days: number;
+  ttl_days?: number;
   schema?: string;
 }
 
@@ -153,8 +173,10 @@ export const sourcesApi = {
       { ...payload, team_id: teamId }
     ),
 
-  // Validation
-  validateSourceConnection: (connectionInfo: ConnectionRequestInfo & {
+  validateSourceConnection: (connectionInfo: {
+    backend_type?: BackendType;
+    connection?: ConnectionRequestInfo;
+    victorialogs_connection?: VictoriaLogsConnectionInfo;
     timestamp_field?: string;
     severity_field?: string;
   }) => apiClient.post<{ message: string }>("/admin/sources/validate", connectionInfo),

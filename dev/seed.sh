@@ -130,6 +130,38 @@ SYSLOG_ID=$(echo "$SYSLOG_RESP" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f
   fi
 fi
 
+VL_EXISTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM sources WHERE name='VictoriaLogs Demo';" 2>/dev/null || echo "0")
+if [ "$VL_EXISTS" -gt 0 ]; then
+  log "VictoriaLogs source already exists"
+  VL_ID=$(sqlite3 "$DB_PATH" "SELECT id FROM sources WHERE name='VictoriaLogs Demo' LIMIT 1;")
+else
+  log "Creating VictoriaLogs source..."
+VL_RESP=$(curl -s -X POST "$API_URL/admin/sources" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "VictoriaLogs Demo",
+    "description": "Demo VictoriaLogs data (vector -c victorialogs.toml)",
+    "backend_type": "victorialogs",
+    "meta_ts_field": "_time",
+    "victorialogs_connection": {
+      "url": "http://localhost:9428"
+    }
+  }')
+VL_ID=$(echo "$VL_RESP" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+
+  if [ -n "$VL_ID" ]; then
+    log "Created VictoriaLogs source with ID: $VL_ID"
+    curl -s -X POST "$API_URL/teams/$TEAM_ID/sources" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "{\"source_id\": $VL_ID}" > /dev/null
+    log "Linked VictoriaLogs source to team"
+  else
+    log "Failed to create VictoriaLogs source: $VL_RESP"
+  fi
+fi
+
 log "Adding dev user to team..."
 curl -s -X POST "$API_URL/teams/$TEAM_ID/members" \
   -H "Authorization: Bearer $TOKEN" \
@@ -137,5 +169,5 @@ curl -s -X POST "$API_URL/teams/$TEAM_ID/members" \
   -d '{"user_id": 1, "role": "admin"}' > /dev/null
 
 log "=== Seed Complete ==="
-log "Dev Team created with HTTP and Syslog sources."
+log "Dev Team created with HTTP, Syslog, and VictoriaLogs sources."
 log "Login with dev@localhost (password: password) to explore!"

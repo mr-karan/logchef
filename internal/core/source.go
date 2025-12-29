@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/backends"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -206,14 +207,14 @@ func validateSourceConfig(ctx context.Context, db *sqlite.DB, log *slog.Logger, 
 
 // GetSourcesWithDetails retrieves multiple sources with their full details including schema
 // This is more efficient than calling GetSource multiple times for a list of sources
-func GetSourcesWithDetails(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, sourceIDs []models.SourceID) ([]*models.Source, error) {
+func GetSourcesWithDetails(ctx context.Context, db *sqlite.DB, registry *backends.BackendRegistry, log *slog.Logger, sourceIDs []models.SourceID) ([]*models.Source, error) {
 	sources := make([]*models.Source, 0, len(sourceIDs))
 
 	for _, id := range sourceIDs {
 		source, err := db.GetSource(ctx, id)
 		if err != nil {
 			log.Warn("failed to get source", "source_id", id, "error", err)
-			continue // Skip this source but continue processing others
+			continue
 		}
 
 		if source == nil {
@@ -221,31 +222,27 @@ func GetSourcesWithDetails(ctx context.Context, db *sqlite.DB, chDB *clickhouse.
 			continue
 		}
 
-		// Attempt to get the client. If this fails, the source is not connected.
-		client, err := chDB.GetConnection(source.ID) // Use GetConnection
+		client, err := registry.GetClient(source.ID)
 		if err != nil {
 			source.IsConnected = false
 		} else {
-			// Use integrated Ping method to check both connection and table existence
-			source.IsConnected = client.Ping(ctx, source.Connection.Database, source.Connection.TableName) == nil
+			var database, tableName string
+			if source.IsClickHouse() {
+				database = source.Connection.Database
+				tableName = source.Connection.TableName
+			}
+			source.IsConnected = client.Ping(ctx, database, tableName) == nil
 
-			// Only fetch schema details if source is connected
 			if source.IsConnected {
-				// Get the comprehensive table schema information
-				tableInfo, err := client.GetTableInfo(ctx, source.Connection.Database, source.Connection.TableName)
+				tableInfo, err := client.GetTableInfo(ctx, database, tableName)
 				if err != nil {
 					log.Warn("failed to get table schema",
 						"source_id", source.ID,
 						"error", err,
 					)
 				} else {
-					// Store basic column information
 					source.Columns = tableInfo.Columns
-
-					// Store CREATE statement
 					source.Schema = tableInfo.CreateQuery
-
-					// Store enhanced schema information
 					source.Engine = tableInfo.Engine
 					source.EngineParams = tableInfo.EngineParams
 					source.SortKeys = tableInfo.SortKeys
@@ -261,7 +258,7 @@ func GetSourcesWithDetails(ctx context.Context, db *sqlite.DB, chDB *clickhouse.
 
 // ListSources returns all sources with basic connection status but without schema details.
 // This is optimized for performance in list views where the schema isn't needed.
-func ListSources(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger) ([]*models.Source, error) {
+func ListSources(ctx context.Context, db *sqlite.DB, registry *backends.BackendRegistry, log *slog.Logger) ([]*models.Source, error) {
 	// Get the basic source records from the database
 	sources, err := db.ListSources(ctx)
 	if err != nil {
@@ -278,11 +275,16 @@ func ListSources(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, l
 		// Default to not connected
 		source.IsConnected = false
 
-		// Attempt to get client and perform a health check that includes table verification
-		client, err := chDB.GetConnection(source.ID)
+		// Attempt to get client from registry and perform health check
+		client, err := registry.GetClient(source.ID)
 		if err == nil {
-			// Use integrated Ping method that checks both connection and table existence
-			source.IsConnected = client.Ping(ctx, source.Connection.Database, source.Connection.TableName) == nil
+			// Use Ping - for ClickHouse needs database/table, for VictoriaLogs passes empty strings
+			var database, tableName string
+			if source.IsClickHouse() {
+				database = source.Connection.Database
+				tableName = source.Connection.TableName
+			}
+			source.IsConnected = client.Ping(ctx, database, tableName) == nil
 		}
 
 		// Clear schema-related fields to avoid sending unnecessary data
@@ -297,10 +299,9 @@ func ListSources(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, l
 }
 
 // GetSource retrieves a source by ID including connection status and schema
-func GetSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, id models.SourceID) (*models.Source, error) {
+func GetSource(ctx context.Context, db *sqlite.DB, registry *backends.BackendRegistry, log *slog.Logger, id models.SourceID) (*models.Source, error) {
 	source, err := db.GetSource(ctx, id)
 	if err != nil {
-		// Handle specific not found error from DB layer if possible, otherwise wrap
 		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
 			return nil, ErrSourceNotFound
 		}
@@ -308,33 +309,30 @@ func GetSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log
 	}
 
 	if source == nil {
-		// This case might be handled by the DB layer returning ErrNotFound
 		return nil, ErrSourceNotFound
 	}
 
-	// Attempt to get the client. If this fails, the source is not connected.
-	client, err := chDB.GetConnection(source.ID) // Use GetConnection
+	client, err := registry.GetClient(source.ID)
 	if err != nil {
 		source.IsConnected = false
 	} else {
-		// Use integrated Ping method to check both connection and table existence
-		source.IsConnected = client.Ping(ctx, source.Connection.Database, source.Connection.TableName) == nil
+		var database, tableName string
+		if source.IsClickHouse() {
+			database = source.Connection.Database
+			tableName = source.Connection.TableName
+		}
+		source.IsConnected = client.Ping(ctx, database, tableName) == nil
 
-		// Fetch the table schema and CREATE statement only if the source is connected
 		if source.IsConnected {
-			// Get the table schema (including all metadata)
-			tableInfo, err := client.GetTableInfo(ctx, source.Connection.Database, source.Connection.TableName)
+			tableInfo, err := client.GetTableInfo(ctx, database, tableName)
 			if err != nil {
 				log.Warn("failed to get table schema",
 					"source_id", source.ID,
 					"error", err,
 				)
 			} else {
-				// Store basic columns in the source object
 				source.Columns = tableInfo.Columns
-				// Store CREATE statement from tableInfo
 				source.Schema = tableInfo.CreateQuery
-				// Store enhanced schema information
 				source.Engine = tableInfo.Engine
 				source.EngineParams = tableInfo.EngineParams
 				source.SortKeys = tableInfo.SortKeys
@@ -432,6 +430,67 @@ func CreateSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, 
 	return sourceToCreate, nil // Return the source with ID populated by CreateSource DB call
 }
 
+// CreateVictoriaLogsSource creates a new VictoriaLogs source, validates connection, and adds to registry.
+func CreateVictoriaLogsSource(ctx context.Context, db *sqlite.DB, registry *backends.BackendRegistry, log *slog.Logger, name string, vlConn *models.VictoriaLogsConnectionInfo, description, metaTSField, metaSeverityField string) (*models.Source, error) {
+	// 1. Validate inputs
+	if name == "" {
+		return nil, &ValidationError{Field: "name", Message: "source name is required"}
+	}
+	if !isValidSourceName(name) {
+		return nil, &ValidationError{Field: "name", Message: "source name must not exceed 50 characters and can only contain letters, numbers, spaces, hyphens, and underscores"}
+	}
+	if vlConn == nil || vlConn.URL == "" {
+		return nil, &ValidationError{Field: "victorialogs_connection.url", Message: "VictoriaLogs URL is required"}
+	}
+	if len(description) > 500 {
+		return nil, &ValidationError{Field: "description", Message: "description must not exceed 500 characters"}
+	}
+
+	// Default timestamp field for VictoriaLogs
+	if metaTSField == "" {
+		metaTSField = "_time"
+	}
+
+	// 2. Create source record
+	sourceToCreate := &models.Source{
+		Name:                   name,
+		BackendType:            models.BackendVictoriaLogs,
+		MetaTSField:            metaTSField,
+		MetaSeverityField:      metaSeverityField,
+		Description:            description,
+		VictoriaLogsConnection: vlConn,
+		Timestamps: models.Timestamps{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+	}
+
+	tempClient, err := registry.CreateTemporaryClient(ctx, sourceToCreate)
+	if err != nil {
+		log.Error("failed to create/validate VictoriaLogs client", "error", err, "url", vlConn.URL)
+		return nil, &ValidationError{Field: "victorialogs_connection", Message: "Failed to connect to VictoriaLogs", Err: err}
+	}
+	defer tempClient.Close()
+
+	// 4. Save to database
+	if err := db.CreateSource(ctx, sourceToCreate); err != nil {
+		log.Error("failed to create VictoriaLogs source in sqlite", "error", err)
+		return nil, fmt.Errorf("error saving source configuration: %w", err)
+	}
+
+	// 5. Add to registry
+	if err := registry.AddSource(ctx, sourceToCreate); err != nil {
+		log.Error("failed to add VictoriaLogs source to registry, rolling back", "error", err, "source_id", sourceToCreate.ID)
+		if delErr := db.DeleteSource(ctx, sourceToCreate.ID); delErr != nil {
+			log.Error("CRITICAL: failed to delete source from db during rollback", "delete_error", delErr, "source_id", sourceToCreate.ID)
+		}
+		return nil, fmt.Errorf("failed to establish connection for source: %w", err)
+	}
+
+	log.Info("VictoriaLogs source created successfully", "source_id", sourceToCreate.ID, "name", name, "url", vlConn.URL)
+	return sourceToCreate, nil
+}
+
 // UpdateSource updates an existing source's mutable fields (description, ttlDays)
 func UpdateSource(ctx context.Context, db *sqlite.DB, log *slog.Logger, id models.SourceID, description string, ttlDays int) (*models.Source, error) {
 	// 1. Validate input
@@ -488,10 +547,8 @@ func UpdateSource(ctx context.Context, db *sqlite.DB, log *slog.Logger, id model
 	return updatedSource, nil
 }
 
-// DeleteSource deletes a source from SQLite and removes its connection from the manager
-func DeleteSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, id models.SourceID) error {
-	// No input validation needed for ID
-	// 1. Validate source exists in SQLite first
+// DeleteSource deletes a source from SQLite and removes its connection from the registry
+func DeleteSource(ctx context.Context, db *sqlite.DB, registry *backends.BackendRegistry, log *slog.Logger, id models.SourceID) error {
 	source, err := db.GetSource(ctx, id)
 	if err != nil {
 		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
@@ -499,21 +556,17 @@ func DeleteSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, 
 		}
 		return fmt.Errorf("error getting source: %w", err)
 	}
-	if source == nil { // Should be covered by ErrNotFound check
+	if source == nil {
 		return ErrSourceNotFound
 	}
 
-	log.Info("deleting source", "source_id", id, "name", source.Name)
+	log.Info("deleting source", "source_id", id, "name", source.Name, "backend_type", source.GetEffectiveBackendType())
 
-	// 2. First remove from ClickHouse manager to prevent any new operations
-	if err := chDB.RemoveSource(source.ID); err != nil {
-		// Log the error but proceed with deleting from DB
-		log.Error("error removing Clickhouse connection, proceeding with DB delete", "source_id", id, "error", err)
-		// Optionally return the error if removing the connection is critical:
-		// return fmt.Errorf("error removing Clickhouse connection: %w", err)
+	if err := registry.RemoveSource(source.ID); err != nil {
+		log.Error("error removing source from backend registry, proceeding with DB delete",
+			"source_id", id, "backend_type", source.GetEffectiveBackendType(), "error", err)
 	}
 
-	// 3. Then remove from database
 	if err := db.DeleteSource(ctx, source.ID); err != nil {
 		log.Error("failed to remove source from database", "source_id", id, "error", err)
 		return fmt.Errorf("error removing from database: %w", err)
@@ -525,23 +578,24 @@ func DeleteSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, 
 
 // CheckSourceConnectionStatus checks the connection status for a given source.
 // It returns true if the source is connected and the table is queryable, false otherwise.
-func CheckSourceConnectionStatus(ctx context.Context, chDB *clickhouse.Manager, log *slog.Logger, source *models.Source) bool {
-	// No input validation needed
+func CheckSourceConnectionStatus(ctx context.Context, registry *backends.BackendRegistry, log *slog.Logger, source *models.Source) bool {
 	if source == nil {
 		return false
 	}
-	client, err := chDB.GetConnection(source.ID) // Use GetConnection
+	client, err := registry.GetClient(source.ID)
 	if err != nil {
 		return false
 	}
-	// Use the integrated Ping method
-	return client.Ping(ctx, source.Connection.Database, source.Connection.TableName) == nil
+	var database, tableName string
+	if source.IsClickHouse() {
+		database = source.Connection.Database
+		tableName = source.Connection.TableName
+	}
+	return client.Ping(ctx, database, tableName) == nil
 }
 
-// GetSourceHealth retrieves the health status of a source from the ClickHouse manager
-func GetSourceHealth(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, id models.SourceID) (models.SourceHealth, error) {
-	// No input validation needed for ID
-	// 1. Check if source exists in SQLite first to ensure it's a valid source ID
+// GetSourceHealth retrieves the health status of a source from the backend registry
+func GetSourceHealth(ctx context.Context, db *sqlite.DB, registry *backends.BackendRegistry, id models.SourceID) (models.SourceHealth, error) {
 	_, err := db.GetSource(ctx, id)
 	if err != nil {
 		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
@@ -549,15 +603,14 @@ func GetSourceHealth(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manage
 		}
 		return models.SourceHealth{}, fmt.Errorf("error getting source: %w", err)
 	}
-	// 2. Get health from ClickHouse manager and return it
-	health := chDB.GetHealth(ctx, id)
+	health := registry.GetHealth(ctx, id)
 	return health, nil
 }
 
-// InitializeSource adds a source connection to the ClickHouse manager.
+// InitializeSource adds a source connection to the backend registry.
 // It assumes the source object contains valid connection details.
-func InitializeSource(ctx context.Context, chDB *clickhouse.Manager, source *models.Source) error {
-	return chDB.AddSource(ctx, source)
+func InitializeSource(ctx context.Context, registry *backends.BackendRegistry, source *models.Source) error {
+	return registry.AddSource(ctx, source)
 }
 
 // ValidateConnection validates a connection to a ClickHouse database using temporary client
@@ -584,7 +637,30 @@ func ValidateConnection(ctx context.Context, chDB *clickhouse.Manager, log *slog
 	return &models.ConnectionValidationResult{Message: "Connection successful"}, nil
 }
 
-// ValidateConnectionWithColumns validates a connection and checks specified column types.
+func ValidateVictoriaLogsConnection(ctx context.Context, registry *backends.BackendRegistry, log *slog.Logger, vlConn *models.VictoriaLogsConnectionInfo) (*models.ConnectionValidationResult, error) {
+	if vlConn == nil || vlConn.URL == "" {
+		return nil, &ValidationError{Field: "victorialogs_connection.url", Message: "VictoriaLogs URL is required"}
+	}
+
+	tempSource := &models.Source{
+		BackendType:            models.BackendVictoriaLogs,
+		VictoriaLogsConnection: vlConn,
+	}
+
+	client, err := registry.CreateTemporaryClient(ctx, tempSource)
+	if err != nil {
+		log.Warn("VictoriaLogs connection validation failed: could not create temporary client", "error", err, "url", vlConn.URL)
+		return nil, &ValidationError{Field: "victorialogs_connection", Message: "Failed to connect to VictoriaLogs", Err: err}
+	}
+	defer client.Close()
+
+	if err := client.Ping(ctx, "", ""); err != nil {
+		return nil, &ValidationError{Field: "victorialogs_connection", Message: "VictoriaLogs connection test failed", Err: err}
+	}
+
+	return &models.ConnectionValidationResult{Message: "VictoriaLogs connection successful"}, nil
+}
+
 func ValidateConnectionWithColumns(ctx context.Context, chDB *clickhouse.Manager, log *slog.Logger, conn models.ConnectionInfo, tsField, severityField string) (*models.ConnectionValidationResult, error) {
 	// 1. Validate connection parameters format
 	if err := validateConnection(conn); err != nil {

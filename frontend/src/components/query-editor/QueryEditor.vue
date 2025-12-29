@@ -25,7 +25,7 @@
             <TabsTrigger value="clickhouse-sql">
               <div class="flex-fix">
                 <Code2 class="w-4 h-4" />
-                <span>SQL</span>
+                <span>{{ nativeQueryLabel }}</span>
               </div>
             </TabsTrigger>
           </TabsList>
@@ -41,7 +41,7 @@
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p>Generate SQL using natural language</p>
+              <p>Generate {{ nativeQueryLabel }} using natural language</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -53,8 +53,8 @@
           @load-query="handleLoadQueryFromHistory"
         />
 
-        <!-- Table name indicator (Moved & Always Visible) -->
-        <div class="text-xs text-muted-foreground ml-3">
+        <!-- Table name indicator (Only for ClickHouse) -->
+        <div v-if="!isVictoriaLogs" class="text-xs text-muted-foreground ml-3">
           <template v-if="props.tableName">
             <span class="mr-1">Table:</span>
             <code class="bg-muted px-1.5 py-0.5 rounded text-xs">{{
@@ -82,18 +82,18 @@
           </Tooltip>
         </TooltipProvider>
 
-        <!-- SQL Toggle Button - Only show when in SQL mode -->
+        <!-- Native Query Toggle Button - Only show when in native query mode -->
         <TooltipProvider v-if="props.activeMode === 'clickhouse-sql'">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="outline" size="sm" class="h-7 gap-1" @click="toggleSqlEditorVisibility">
                 <EyeOff v-if="isEditorVisible" class="h-3.5 w-3.5" />
                 <Eye v-else class="h-3.5 w-3.5" />
-                <span class="text-xs">{{ isEditorVisible ? "Hide" : "Show" }} SQL</span>
+                <span class="text-xs">{{ isEditorVisible ? "Hide" : "Show" }} {{ nativeQueryLabel }}</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p>{{ isEditorVisible ? "Hide" : "Show" }} SQL query editor</p>
+              <p>{{ isEditorVisible ? "Hide" : "Show" }} {{ nativeQueryLabel }} query editor</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -165,7 +165,7 @@
             <!-- Help Content (Keep existing template) -->
             <div class="space-y-2">
               <h4 class="text-sm font-semibold">
-                {{ props.activeMode === "logchefql" ? "LogchefQL" : "SQL" }}
+                {{ props.activeMode === "logchefql" ? "LogchefQL" : nativeQueryLabel }}
                 Syntax
               </h4>
               <div v-if="props.activeMode === 'logchefql'" class="text-xs space-y-1.5">
@@ -198,6 +198,34 @@
                     <code class="bg-muted px-1 rounded">level="error" and status>=500</code></em>
                 </div>
               </div>
+              <!-- LogsQL Help (VictoriaLogs) -->
+              <div v-else-if="isVictoriaLogs" class="text-xs space-y-1.5">
+                <div>
+                  <code class="bg-muted px-1 rounded">field_name:value</code> -
+                  Exact match
+                </div>
+                <div>
+                  <code class="bg-muted px-1 rounded">field_name:~"regex"</code> -
+                  Regex match
+                </div>
+                <div>
+                  <code class="bg-muted px-1 rounded">_time:[start, end]</code> -
+                  Time range
+                </div>
+                <div>
+                  <code class="bg-muted px-1 rounded">_msg:~"pattern"</code> -
+                  Message search
+                </div>
+                <div>
+                  <code class="bg-muted px-1 rounded">filter1 AND filter2</code> -
+                  Combine filters
+                </div>
+                <div class="pt-1">
+                  <em>Example:
+                    <code class="bg-muted px-1 rounded">level:error AND service:api</code></em>
+                </div>
+              </div>
+              <!-- SQL Help (ClickHouse) -->
               <div v-else class="text-xs space-y-1.5">
                 <div>
                   <code class="bg-muted px-1 rounded">SELECT count() FROM {{ tableName || "table" }}</code>
@@ -281,7 +309,7 @@
       </div>
     </div>
 
-    <!-- SQL Preview when editor is hidden -->
+    <!-- Native Query Preview when editor is hidden -->
     <div v-if="
       !isEditorVisible &&
       props.activeMode === 'clickhouse-sql' &&
@@ -290,7 +318,7 @@
       @click="isEditorVisible = true">
       <div class="flex items-center justify-between">
         <div class="text-muted-foreground text-xs font-medium mb-1">
-          SQL Query (collapsed)
+          {{ nativeQueryLabel }} Query (collapsed)
         </div>
         <Button variant="ghost" size="sm" class="h-6 px-2" @click.stop="isEditorVisible = true">
           <Eye class="h-3.5 w-3.5 mr-1" />
@@ -728,6 +756,7 @@ import {
 import { storeToRefs } from 'pinia';
 import { useExploreStore } from "@/stores/explore";
 import { useTeamsStore } from "@/stores/teams";
+import { useSourcesStore } from "@/stores/sources";
 import type { VariableState as VariableSetting } from '@/stores/variables';
 import { useVariableStore } from '@/stores/variables';
 import { useVariables } from "@/composables/useVariables.ts";
@@ -794,6 +823,10 @@ const isDark = useDark();
 const exploreStore = useExploreStore();
 // Access variable store
 const variableStore = useVariableStore();
+// Access sources store for backend-specific UI
+const sourcesStore = useSourcesStore();
+const nativeQueryLabel = computed(() => sourcesStore.nativeQueryLabel);
+const isVictoriaLogs = computed(() => sourcesStore.isCurrentSourceVictoriaLogs);
 
 const editorRef = shallowRef<MonacoEditor | null>(null);
 const editorContent = ref(props.value || ""); // Initialize with prop value

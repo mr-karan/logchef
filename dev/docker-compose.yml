@@ -27,6 +27,24 @@ services:
         cap_add:
             - SYS_NICE
             - IPC_LOCK
+
+    victorialogs:
+        image: victoriametrics/victoria-logs:v1.43.1
+        hostname: victorialogs
+        restart: on-failure
+        ports:
+            - '0.0.0.0:9428:9428'
+        volumes:
+            - victorialogs-data:/victoria-logs-data
+        command:
+            - '-storageDataPath=/victoria-logs-data'
+            - '-retentionPeriod=7d'
+        healthcheck:
+            test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9428/health"]
+            interval: 5s
+            timeout: 3s
+            retries: 3
+            start_period: 10s
     dex-local:
         image: dexidp/dex:v2.35.3
         ports:
@@ -64,3 +82,4 @@ volumes:
     clickhouse-data:
     clickhouse-logs:
     alertmanager-data:
+    victorialogs-data:

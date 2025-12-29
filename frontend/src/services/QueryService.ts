@@ -9,6 +9,7 @@ import type { QueryOptions, QueryResult, TimeRange } from '@/types/query';
 import { SqlManager } from './SqlManager';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
+import { isVictoriaLogsSource } from '@/api/sources';
 
 // Re-export QueryCondition for backwards compatibility
 export type { FilterCondition as QueryCondition } from '@/api/logchefql';
@@ -33,9 +34,6 @@ export class QueryService {
     } = options;
 
     // --- Input Validation ---
-    if (!tableName) {
-      return { success: false, sql: "", error: "Table name is required." };
-    }
     if (!tsField) {
       return { success: false, sql: "", error: "Timestamp field name is required." };
     }
@@ -46,13 +44,24 @@ export class QueryService {
       return { success: false, sql: "", error: "Invalid limit value." };
     }
 
-    // Convert time range to CalendarDateTime (or use directly if it already is)
     const calendarTimeRange = timeRangeToCalendarDateTime(timeRange);
     if (!calendarTimeRange) {
       return { success: false, sql: "", error: "Failed to convert time range to proper format." };
     }
 
-    // --- Prepare base query components ---
+    const teamsStore = useTeamsStore();
+    const sourcesStore = useSourcesStore();
+    const source = sourcesStore.currentSourceDetails;
+    const isVL = source && isVictoriaLogsSource(source);
+
+    if (isVL) {
+      return this.translateForVictoriaLogs(options, teamsStore.currentTeamId, source.id);
+    }
+
+    if (!tableName) {
+      return { success: false, sql: "", error: "Table name is required." };
+    }
+
     const formattedTableName = tableName.includes('`') || tableName.includes('.')
       ? tableName
       : `\`${tableName}\``;
@@ -60,11 +69,9 @@ export class QueryService {
     const formattedTsField = tsField.includes('`') ? tsField : `\`${tsField}\``;
     const orderByClause = `ORDER BY ${formattedTsField} DESC`;
 
-    // Create timezone-aware time condition
     const timeCondition = createTimeRangeCondition(tsField, timeRange, true, timezone);
     const limitClause = `LIMIT ${limit}`;
 
-    // --- Translate LogchefQL via backend ---
     const warnings: string[] = [];
     let logchefqlConditions = '';
     let selectClause = 'SELECT *';
@@ -75,12 +82,8 @@ export class QueryService {
 
     if (logchefqlQuery?.trim()) {
       try {
-        // Replace dynamic variables with placeholders while preserving variable names
         const queryForParsing = logchefqlQuery.replace(/{{(\w+)}}/g, "'__VAR_$1__'");
 
-        // Get team and source IDs for API call
-        const teamsStore = useTeamsStore();
-        const sourcesStore = useSourcesStore();
         const teamId = teamsStore.currentTeamId;
         const sourceId = sourcesStore.currentSourceDetails?.id;
 
@@ -97,11 +100,9 @@ export class QueryService {
             } else {
               logchefqlConditions = translateResult.sql || '';
               
-              // Convert __VAR_ placeholders back to {{variable}} format
               logchefqlConditions = logchefqlConditions.replace(/'__VAR_(\w+)__'/g, '{{$1}}');
               logchefqlConditions = logchefqlConditions.replace(/__VAR_(\w+)__/g, '{{$1}}');
 
-              // Add filter operation if we have conditions
               if (logchefqlConditions && !meta.operations.includes('filter')) {
                 meta.operations.push('filter');
               }
@@ -123,13 +124,11 @@ export class QueryService {
       }
     }
 
-    // --- Combine WHERE conditions ---
     let whereClause = `WHERE ${timeCondition}`;
     if (logchefqlConditions) {
       whereClause += ` AND (${logchefqlConditions})`;
     }
 
-    // --- Assemble the final query string ---
     const finalSqlParts = [
       selectClause,
       `FROM ${formattedTableName}`,
@@ -138,7 +137,6 @@ export class QueryService {
       limitClause
     ].join('\n');
 
-    // Add timezone metadata
     const userTimezone = getUserTimezone();
     meta.timeRangeInfo = {
       field: tsField,
@@ -155,6 +153,84 @@ export class QueryService {
       warnings: warnings.length > 0 ? warnings : undefined,
       meta
     };
+  }
+
+  private static async translateForVictoriaLogs(
+    options: QueryOptions,
+    teamId: number | null,
+    sourceId: number
+  ): Promise<QueryResult> {
+    const { timeRange, limit, logchefqlQuery = '', timezone } = options;
+    
+    const warnings: string[] = [];
+    const meta: NonNullable<QueryResult['meta']> = {
+      fieldsUsed: [],
+      operations: ['sort', 'limit']
+    };
+
+    if (!teamId) {
+      return { success: false, sql: "", error: "Team not available" };
+    }
+
+    try {
+      const startTime = formatDateForSQL(timeRange.start, false);
+      const endTime = formatDateForSQL(timeRange.end, false);
+
+      const response = await logchefqlApi.translate(teamId, sourceId, {
+        query: logchefqlQuery || '',
+        start_time: startTime,
+        end_time: endTime,
+        timezone: timezone || getUserTimezone(),
+        limit
+      });
+
+      if (response.data) {
+        const translateResult = response.data;
+
+        if (!translateResult.valid && translateResult.error) {
+          return {
+            success: false,
+            sql: "",
+            error: translateResult.error.message || "Failed to parse LogchefQL query."
+          };
+        }
+
+        meta.fieldsUsed = translateResult.fields_used || [];
+        meta.conditions = translateResult.conditions?.map((c: { field: string; operator: string; value: string; is_regex?: boolean }) => ({
+          field: c.field,
+          operator: c.operator,
+          value: c.value,
+          isRegex: c.is_regex
+        }));
+
+        if (meta.conditions && meta.conditions.length > 0) {
+          meta.operations.push('filter');
+        }
+
+        const userTimezone = getUserTimezone();
+        meta.timeRangeInfo = {
+          field: options.tsField,
+          startTime,
+          endTime,
+          timezone: timezone || userTimezone,
+          isTimezoneAware: true
+        };
+
+        const logsql = translateResult.full_logsql || translateResult.logsql || '';
+
+        return {
+          success: true,
+          sql: logsql,
+          error: null,
+          warnings: warnings.length > 0 ? warnings : undefined,
+          meta
+        };
+      }
+
+      return { success: false, sql: "", error: "Translation API returned no data" };
+    } catch (error: any) {
+      return { success: false, sql: "", error: `LogchefQL error: ${error.message}` };
+    }
   }
 
   /**

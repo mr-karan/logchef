@@ -10,7 +10,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { useSourcesStore } from '@/stores/sources'
-import { Code, ChevronsUpDown, Plus, Database } from 'lucide-vue-next'
+import { Code, ChevronsUpDown, Plus, Database, Activity } from 'lucide-vue-next'
+import type { BackendType } from '@/api/sources'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -39,7 +40,8 @@ interface ConnectionRequestInfo {
 }
 
 // Form state
-const tableMode = ref<'create' | 'connect'>('create') // 'create' or 'connect'
+const backendType = ref<BackendType>('clickhouse')
+const tableMode = ref<'create' | 'connect'>('create')
 const createTable = computed(() => tableMode.value === 'create')
 const sourceName = ref<string | number>('')
 const host = ref<string | number>('')
@@ -53,21 +55,60 @@ const ttlDays = ref<string | number>(90)
 const metaTSField = ref<string | number>('timestamp')
 const metaSeverityField = ref<string | number>('severity_text')
 
+// VictoriaLogs specific state
+const vlUrl = ref<string>('')
+const vlAccountId = ref<string>('')
+const vlProjectId = ref<string>('')
+
+// Computed for VictoriaLogs mode
+const isVictoriaLogs = computed(() => backendType.value === 'victorialogs')
+
+// Watch backend type to reset defaults
+watch(backendType, (newType) => {
+    if (newType === 'victorialogs') {
+        metaTSField.value = '_time'
+        metaSeverityField.value = ''
+    } else {
+        metaTSField.value = 'timestamp'
+        metaSeverityField.value = 'severity_text'
+    }
+    // Reset validation when switching
+    isValidated.value = false
+    validationResult.value = null
+})
+
 // Use connection validation with source store
 const isValidating = ref(false)
 const validationResult = ref<any>(null)
 const isValidated = ref(false)
 
 // Validate connection using source store
-const validateConnection = async (connectionInfo: ConnectionRequestInfo) => {
+const validateConnection = async (connectionInfo?: ConnectionRequestInfo) => {
     isValidating.value = true
     isValidated.value = false
     validationResult.value = null
 
     try {
-        const result = await sourcesStore.validateSourceConnection(connectionInfo)
+        let result
+        if (backendType.value === 'victorialogs') {
+            result = await sourcesStore.validateSourceConnection({
+                backend_type: 'victorialogs',
+                victorialogs_connection: {
+                    url: vlUrl.value,
+                    account_id: vlAccountId.value || undefined,
+                    project_id: vlProjectId.value || undefined,
+                }
+            })
+        } else if (connectionInfo) {
+            result = await sourcesStore.validateSourceConnection({
+                backend_type: 'clickhouse',
+                connection: connectionInfo,
+                timestamp_field: connectionInfo.timestamp_field,
+                severity_field: connectionInfo.severity_field,
+            })
+        }
 
-        if (result.success && result.data) {
+        if (result?.success && result.data) {
             validationResult.value = result.data
             isValidated.value = true
         }
@@ -141,7 +182,21 @@ function resetSchema() {
 
 // Form validation
 const isValid = computed(() => {
-    if (!sourceName.value || !host.value || !database.value || !tableName.value) return false
+    if (!sourceName.value) return false
+    
+    if (backendType.value === 'victorialogs') {
+        if (!vlUrl.value) return false
+        // Basic URL validation
+        try {
+            new URL(String(vlUrl.value))
+        } catch {
+            return false
+        }
+        return true
+    }
+    
+    // ClickHouse validation
+    if (!host.value || !database.value || !tableName.value) return false
     if (enableAuth.value && (!username.value || !password.value)) return false
     return true
 })
@@ -154,21 +209,34 @@ const handleAuthToggle = (checked: boolean) => {
 // Computed properties
 const validateButtonText = computed(() => {
     if (isValidating.value) return 'Validating...'
+    if (backendType.value === 'victorialogs') return 'Validate Connection'
     return tableMode.value === 'connect' ? 'Validate Connection & Columns' : 'Validate Connection'
 })
 
 const submitButtonText = computed(() => {
     if (isSubmitting.value) return 'Creating...'
+    
+    // VictoriaLogs mode
+    if (backendType.value === 'victorialogs') {
+        return isValidated.value ? 'Create Source' : 'Validate & Create'
+    }
+    
+    // ClickHouse "create table" mode
     if (createTable.value) return 'Create Source'
 
-    // For "Connect Existing Table" mode
+    // ClickHouse "connect existing table" mode
     if (isValidated.value) return 'Import Source'
     return 'Validate & Import'
 })
 
 // Validate connection handler
 const handleValidateConnection = async () => {
-    // Prepare connection info
+    if (backendType.value === 'victorialogs') {
+        await validateConnection()
+        return
+    }
+
+    // ClickHouse connection info
     const connectionInfo: ConnectionRequestInfo = {
         host: String(host.value),
         username: enableAuth.value ? String(username.value) : '',
@@ -177,10 +245,8 @@ const handleValidateConnection = async () => {
         table_name: String(tableName.value),
     }
 
-    // Add timestamp and severity fields if connecting to existing table
     if (tableMode.value === 'connect' && tableName.value) {
         connectionInfo.timestamp_field = String(metaTSField.value)
-        // Only add severity field if it's not empty
         if (metaSeverityField.value) {
             connectionInfo.severity_field = String(metaSeverityField.value)
         }
@@ -202,23 +268,37 @@ onMounted(async () => {
             const source = sourcesStore.sources.find(s => s.id === sourceId)
 
             if (source) {
-                // Pre-fill form with source data
+                // Pre-fill common fields
                 sourceName.value = `${source.name} (Copy)`
                 description.value = source.description || ''
-                host.value = source.connection.host
-                database.value = source.connection.database
-                tableName.value = source.connection.table_name
                 metaTSField.value = source._meta_ts_field
                 metaSeverityField.value = source._meta_severity_field || ''
-                ttlDays.value = source.ttl_days || 90
 
-                // Set table mode based on whether it was auto-created
-                tableMode.value = source._meta_is_auto_created ? 'create' : 'connect'
+                // Handle backend-specific fields
+                if (source.backend_type === 'victorialogs') {
+                    backendType.value = 'victorialogs'
+                    // Copy VictoriaLogs connection fields
+                    if (source.victorialogs_connection) {
+                        vlUrl.value = source.victorialogs_connection.url || ''
+                        vlAccountId.value = source.victorialogs_connection.account_id || ''
+                        vlProjectId.value = source.victorialogs_connection.project_id || ''
+                    }
+                } else {
+                    // ClickHouse source
+                    backendType.value = 'clickhouse'
+                    host.value = source.connection.host
+                    database.value = source.connection.database
+                    tableName.value = source.connection.table_name
+                    ttlDays.value = source.ttl_days || 90
 
-                // Note: username/password are not returned by the API for security
-                // User will need to re-enter credentials if authentication was enabled
-                // We default to auth enabled to prompt the user
-                enableAuth.value = true
+                    // Set table mode based on whether it was auto-created
+                    tableMode.value = source._meta_is_auto_created ? 'create' : 'connect'
+
+                    // Note: username/password are not returned by the API for security
+                    // User will need to re-enter credentials if authentication was enabled
+                    // We default to auth enabled to prompt the user
+                    enableAuth.value = true
+                }
             } else {
                 toast({
                     title: 'Warning',
@@ -256,8 +336,9 @@ const submitForm = async () => {
         return
     }
 
-    // For "Connect Existing Table" mode, validate first if not already validated
-    if (!createTable.value && !isValidated.value) {
+    // For VictoriaLogs or ClickHouse "Connect Existing Table" mode, validate first if not already validated
+    const needsValidation = backendType.value === 'victorialogs' || !createTable.value
+    if (needsValidation && !isValidated.value) {
         await handleValidateConnection()
         // If validation failed, don't proceed
         if (!isValidated.value) return
@@ -266,26 +347,45 @@ const submitForm = async () => {
     isSubmitting.value = true
 
     try {
-        // Create payload with proper types
-        const payload = {
-            name: String(sourceName.value),
-            meta_is_auto_created: createTable.value,
-            meta_ts_field: String(metaTSField.value),
-            meta_severity_field: metaSeverityField.value ? String(metaSeverityField.value) : "",
-            connection: {
-                host: String(host.value),
-                username: enableAuth.value ? String(username.value) : '',
-                password: enableAuth.value ? String(password.value) : '',
-                database: String(database.value),
-                table_name: String(tableName.value),
-            },
-            description: String(description.value),
-            ttl_days: Number(ttlDays.value),
-            schema: createTable.value ? actualSchema.value : undefined,
-        }
+        let result
 
-        // Use the store directly
-        const result = await sourcesStore.createSource(payload)
+        if (backendType.value === 'victorialogs') {
+            // VictoriaLogs payload
+            const payload = {
+                name: String(sourceName.value),
+                backend_type: 'victorialogs' as const,
+                meta_is_auto_created: false,
+                meta_ts_field: String(metaTSField.value) || '_time',
+                meta_severity_field: metaSeverityField.value ? String(metaSeverityField.value) : '',
+                victorialogs_connection: {
+                    url: String(vlUrl.value),
+                    account_id: vlAccountId.value || undefined,
+                    project_id: vlProjectId.value || undefined,
+                },
+                description: String(description.value),
+            }
+            result = await sourcesStore.createSource(payload)
+        } else {
+            // ClickHouse payload
+            const payload = {
+                name: String(sourceName.value),
+                backend_type: 'clickhouse' as const,
+                meta_is_auto_created: createTable.value,
+                meta_ts_field: String(metaTSField.value),
+                meta_severity_field: metaSeverityField.value ? String(metaSeverityField.value) : "",
+                connection: {
+                    host: String(host.value),
+                    username: enableAuth.value ? String(username.value) : '',
+                    password: enableAuth.value ? String(password.value) : '',
+                    database: String(database.value),
+                    table_name: String(tableName.value),
+                },
+                description: String(description.value),
+                ttl_days: Number(ttlDays.value),
+                schema: createTable.value ? actualSchema.value : undefined,
+            }
+            result = await sourcesStore.createSource(payload)
+        }
 
         if (result.success) {
             // Redirect to sources list
@@ -310,7 +410,7 @@ const submitForm = async () => {
                 <CardDescription>
                     {{ route.query.duplicateFrom
                         ? 'Create a new source based on an existing configuration'
-                        : 'Connect to a ClickHouse database and configure log ingestion' }}
+                        : 'Connect to a log storage backend and configure log exploration' }}
                 </CardDescription>
             </CardHeader>
             <CardContent>
@@ -345,8 +445,122 @@ const submitForm = async () => {
                             </div>
                         </div>
 
-                        <!-- Connection Details -->
+                        <!-- Backend Type Selection -->
                         <div class="space-y-4">
+                            <div class="flex items-center justify-between">
+                                <h3 class="text-lg font-medium">Backend Type</h3>
+                                <div class="text-sm text-muted-foreground">
+                                    Choose where your logs are stored
+                                </div>
+                            </div>
+
+                            <RadioGroup :model-value="backendType"
+                                @update:model-value="(val) => backendType = val as BackendType"
+                                class="grid grid-cols-[1fr_auto_1fr] items-start gap-4">
+                                <!-- ClickHouse Card -->
+                                <Card
+                                    :class="{ 'border-primary shadow-sm': backendType === 'clickhouse', 'border-muted-foreground/20': backendType !== 'clickhouse' }"
+                                    class="cursor-pointer transition-all hover:border-primary/70"
+                                    @click="backendType = 'clickhouse'">
+                                    <CardHeader>
+                                        <div class="flex items-center gap-2">
+                                            <RadioGroupItem value="clickhouse" id="backend-ch" />
+                                            <Database class="h-5 w-5 text-muted-foreground" />
+                                            <Label for="backend-ch" class="cursor-pointer font-medium">ClickHouse</Label>
+                                        </div>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <p class="text-sm text-muted-foreground">
+                                            SQL-based log storage with powerful analytics and efficient compression
+                                        </p>
+                                    </CardContent>
+                                </Card>
+
+                                <!-- Separator -->
+                                <div class="flex flex-col items-center justify-center h-full">
+                                    <div class="flex flex-col items-center gap-2">
+                                        <Separator orientation="vertical" class="h-8" />
+                                        <span class="text-sm text-muted-foreground px-4">or</span>
+                                        <Separator orientation="vertical" class="h-8" />
+                                    </div>
+                                </div>
+
+                                <!-- VictoriaLogs Card -->
+                                <Card
+                                    :class="{ 'border-primary shadow-sm': backendType === 'victorialogs', 'border-muted-foreground/20': backendType !== 'victorialogs' }"
+                                    class="cursor-pointer transition-all hover:border-primary/70"
+                                    @click="backendType = 'victorialogs'">
+                                    <CardHeader>
+                                        <div class="flex items-center gap-2">
+                                            <RadioGroupItem value="victorialogs" id="backend-vl" />
+                                            <Activity class="h-5 w-5 text-muted-foreground" />
+                                            <Label for="backend-vl" class="cursor-pointer font-medium">VictoriaLogs</Label>
+                                        </div>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <p class="text-sm text-muted-foreground">
+                                            High-performance log storage with LogsQL query language
+                                        </p>
+                                    </CardContent>
+                                </Card>
+                            </RadioGroup>
+                        </div>
+
+                        <!-- VictoriaLogs Connection Details -->
+                        <div v-if="isVictoriaLogs" class="space-y-4">
+                            <div class="flex items-center justify-between">
+                                <h3 class="text-lg font-medium">Connection Details</h3>
+                                <div class="text-sm text-muted-foreground">
+                                    Configure VictoriaLogs connection
+                                </div>
+                            </div>
+
+                            <div class="grid gap-2">
+                                <Label for="vl_url" class="required">URL</Label>
+                                <Input id="vl_url" v-model="vlUrl" placeholder="http://localhost:9428" required />
+                                <p class="text-sm text-muted-foreground">
+                                    The VictoriaLogs server URL including protocol and port (e.g., http://localhost:9428)
+                                </p>
+                            </div>
+
+                            <!-- Account ID and Project ID side by side -->
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="grid gap-2">
+                                    <Label for="vl_account">Account ID</Label>
+                                    <Input id="vl_account" v-model="vlAccountId" placeholder="Optional" />
+                                </div>
+
+                                <div class="grid gap-2">
+                                    <Label for="vl_project">Project ID</Label>
+                                    <Input id="vl_project" v-model="vlProjectId" placeholder="Optional" />
+                                </div>
+                            </div>
+                            <p class="text-sm text-muted-foreground">
+                                Optional: Used for multi-tenant VictoriaLogs deployments
+                            </p>
+
+                            <!-- Timestamp and Severity Fields -->
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="grid gap-2">
+                                    <Label for="vl_ts_field">Timestamp Field</Label>
+                                    <Input id="vl_ts_field" v-model="metaTSField" placeholder="_time" />
+                                    <p class="text-sm text-muted-foreground">
+                                        Field containing the log timestamp (default: _time)
+                                    </p>
+                                </div>
+
+                                <div class="grid gap-2">
+                                    <Label for="vl_severity_field">Severity Field</Label>
+                                    <Input id="vl_severity_field" v-model="metaSeverityField" placeholder="Optional" />
+                                    <p class="text-sm text-muted-foreground">
+                                        Optional: Field containing the severity level
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ClickHouse Connection Details -->
+                        <div v-if="!isVictoriaLogs" class="space-y-4">
                             <div class="flex items-center justify-between">
                                 <h3 class="text-lg font-medium">Connection Details</h3>
                                 <div class="text-sm text-muted-foreground">
@@ -409,8 +623,8 @@ const submitForm = async () => {
                             </div>
                         </div>
 
-                        <!-- Table Configuration Option -->
-                        <div class="space-y-4">
+                        <!-- Table Configuration Option (ClickHouse only) -->
+                        <div v-if="!isVictoriaLogs" class="space-y-4">
                             <div class="flex items-center justify-between">
                                 <h3 class="text-lg font-medium">Table Configuration</h3>
                                 <div class="text-sm text-muted-foreground">
@@ -572,8 +786,8 @@ const submitForm = async () => {
                             </RadioGroup>
                         </div>
 
-                        <!-- Validation Section -->
-                        <div v-if="!createTable" class="space-y-4 border-t pt-4">
+                        <!-- Validation Section (VictoriaLogs always, ClickHouse connect mode) -->
+                        <div v-if="isVictoriaLogs || !createTable" class="space-y-4 border-t pt-4">
                             <div class="flex items-center justify-between">
                                 <div class="text-sm font-medium">Validate Connection</div>
                                 <Button type="button" variant="outline" @click="handleValidateConnection"
@@ -605,8 +819,8 @@ const submitForm = async () => {
                         <Button type="button" variant="outline" @click="router.push({ name: 'Sources' })">
                             Cancel
                         </Button>
-                        <Button type="submit" :disabled="isSubmitting || !isValid || (!createTable && !isValidated)"
-                            :class="{ 'opacity-50': !isValid || (!createTable && !isValidated) }" size="lg">
+                        <Button type="submit" :disabled="isSubmitting || !isValid || ((isVictoriaLogs || !createTable) && !isValidated)"
+                            :class="{ 'opacity-50': !isValid || ((isVictoriaLogs || !createTable) && !isValidated) }" size="lg">
                             <span v-if="isSubmitting" class="mr-2">
                                 <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg"
                                     fill="none" viewBox="0 0 24 24">

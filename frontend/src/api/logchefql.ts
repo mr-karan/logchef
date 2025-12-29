@@ -36,8 +36,10 @@ export interface TranslateRequest {
 }
 
 export interface TranslateResponse {
-  sql: string;           // WHERE clause conditions only
-  full_sql?: string;     // Complete executable SQL (when time params provided)
+  sql: string;           // WHERE clause conditions only (ClickHouse)
+  logsql?: string;       // LogsQL filter conditions (VictoriaLogs)
+  full_sql?: string;     // Complete executable SQL (ClickHouse, when time params provided)
+  full_logsql?: string;  // Complete executable LogsQL (VictoriaLogs, when time params provided)
   select_clause?: string;  // Custom SELECT clause if pipe operator used
   valid: boolean;
   error?: ParseError;
@@ -68,7 +70,8 @@ export interface QueryResponse {
     bytes_read: number;
   };
   query_id?: string;
-  generated_sql?: string;  // The SQL that was executed (for "Show SQL" feature)
+  generated_sql?: string;
+  generated_logsql?: string;
 }
 
 /**

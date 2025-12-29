@@ -281,8 +281,7 @@ func (s *Server) handleGetTeamSource(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Source not linked to this team", models.AuthorizationErrorType)
 	}
 
-	// Use the core.GetSource which fetches details (connection, schema).
-	sourceDetails, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	sourceDetails, err := core.GetSource(c.Context(), s.sqlite, s.backendRegistry, s.log, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)

@@ -32,6 +32,12 @@ func (r *BackendRegistry) RegisterClickHouseManager(manager *clickhouse.Manager)
 	r.managers[models.BackendClickHouse] = NewClickHouseManagerAdapter(manager)
 }
 
+func (r *BackendRegistry) RegisterVictoriaLogsManager(manager BackendManager) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.managers[models.BackendVictoriaLogs] = manager
+}
+
 func (r *BackendRegistry) RegisterManager(backendType models.BackendType, manager BackendManager) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

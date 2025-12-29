@@ -1,0 +1,32 @@
+# Vector config for ingesting demo logs into VictoriaLogs
+# Usage: cd dev && vector -c victorialogs.toml
+
+[sources.generate_logs]
+type = "demo_logs"
+format = "json"
+interval = 0.1
+
+[transforms.remap_logs]
+type = "remap"
+inputs = ["generate_logs"]
+source = '''
+structured = parse_json!(.message)
+.timestamp = .timestamp
+._msg = structured.message
+.method = structured.method
+.host = structured.host
+.status = to_string!(structured.status)
+.bytes = to_string!(structured.bytes)
+.service = "demo-app"
+.namespace = "development"
+
+del(.message)
+del(.source_type)
+'''
+
+[sinks.victorialogs]
+type = "http"
+inputs = ["remap_logs"]
+uri = "http://localhost:9428/insert/jsonline?_stream_fields=service,namespace"
+encoding.codec = "json"
+framing.method = "newline_delimited"

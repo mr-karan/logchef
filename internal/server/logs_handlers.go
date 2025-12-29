@@ -14,6 +14,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mr-karan/logchef/internal/ai"
+	"github.com/mr-karan/logchef/internal/backends"
+	"github.com/mr-karan/logchef/internal/backends/victorialogs"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -136,8 +138,6 @@ func (qt *QueryTracker) Cleanup() {
 	}
 }
 
-// handleQueryLogs handles requests to query logs for a specific source.
-// Access is controlled by the requireSourceAccess middleware.
 func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
@@ -150,68 +150,63 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Apply default limit if not specified.
 	if req.Limit <= 0 {
-		req.Limit = 100 // Consider making this configurable.
+		req.Limit = 100
 	}
 
-	// Apply default timeout if not specified
 	if req.QueryTimeout == nil {
 		defaultTimeout := models.DefaultQueryTimeoutSeconds
 		req.QueryTimeout = &defaultTimeout
 	}
 
-	// Validate timeout
 	if err := models.ValidateQueryTimeout(req.QueryTimeout); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
-	// Get user information for query tracking
 	user := c.Locals("user").(*models.User)
 	if user == nil {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
 	}
 
-	// Get team ID from params
 	teamIDStr := c.Params("teamID")
 	teamID, err := core.ParseTeamID(teamIDStr)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
 	}
 
-	// Create a cancellable context for this query
-	queryCtx, cancel := context.WithCancel(c.Context())
-	defer cancel() // Ensure cleanup
-
-	// Add query to tracker
-	queryID := queryTracker.AddQuery(user.ID, sourceID, teamID, req.RawSQL, cancel)
-	defer queryTracker.RemoveQuery(queryID) // Ensure cleanup
-
-	// Prepare parameters for the core query function.
-	params := clickhouse.LogQueryParams{
-		RawSQL:       req.RawSQL,
-		Limit:        req.Limit,
-		QueryTimeout: req.QueryTimeout, // Always non-nil now
+	source, err := s.sqlite.GetSource(c.Context(), sourceID)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 	}
-	// StartTime, EndTime, and Timezone are no longer passed here;
-	// they are expected to be baked into the RawSQL by the frontend.
 
-	// Execute query via core function with cancellable context.
-	result, err := core.QueryLogs(queryCtx, s.sqlite, s.clickhouse, s.log, sourceID, params)
+	queryCtx, cancel := context.WithCancel(c.Context())
+	defer cancel()
+
+	queryID := queryTracker.AddQuery(user.ID, sourceID, teamID, req.RawSQL, cancel)
+	defer queryTracker.RemoveQuery(queryID)
+
+	var result *models.QueryResult
+
+	if source.IsVictoriaLogs() {
+		result, err = s.queryVictoriaLogs(queryCtx, source, req.RawSQL, req.Limit, req.QueryTimeout)
+	} else {
+		params := clickhouse.LogQueryParams{
+			RawSQL:       req.RawSQL,
+			Limit:        req.Limit,
+			QueryTimeout: req.QueryTimeout,
+		}
+		result, err = core.QueryLogs(queryCtx, s.sqlite, s.clickhouse, s.log, sourceID, params)
+	}
+
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
-		// Handle invalid query syntax errors specifically if core.QueryLogs returns them.
-		// if errors.Is(err, core.ErrInvalidQuery) ...
-		s.log.Error("failed to query logs", "error", err, "source_id", sourceID)
-		// Pass the actual error message to the client for better debugging
+		s.log.Error("failed to query logs", "error", err, "source_id", sourceID, "backend", source.BackendType)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to query logs: %v", err), models.DatabaseErrorType)
 	}
 
-	// Add query ID to the response for frontend tracking
 	if result != nil {
-		// Create a map to include the query ID with the result
 		responseWithQueryID := map[string]interface{}{
 			"query_id": queryID,
 			"data":     result.Logs,
@@ -222,6 +217,29 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)
+}
+
+func (s *Server) queryVictoriaLogs(ctx context.Context, source *models.Source, query string, limit int, timeout *int) (*models.QueryResult, error) {
+	client, err := s.backendRegistry.GetClient(source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get VictoriaLogs client: %w", err)
+	}
+
+	vlClient, ok := client.(*victorialogs.Client)
+	if !ok {
+		return nil, fmt.Errorf("unexpected client type for VictoriaLogs source")
+	}
+
+	return vlClient.QueryWithLimit(ctx, query, limit, timeout)
+}
+
+func (s *Server) getVictoriaLogsTableInfo(ctx context.Context, source *models.Source) (*backends.TableInfo, error) {
+	client, err := s.backendRegistry.GetClient(source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get VictoriaLogs client: %w", err)
+	}
+
+	return client.GetTableInfo(ctx, "", "")
 }
 
 // handleCancelQuery cancels a running query for a specific source
@@ -252,8 +270,6 @@ func (s *Server) handleCancelQuery(c *fiber.Ctx) error {
 	})
 }
 
-// handleGetSourceSchema retrieves the schema (column names and types) for a specific source.
-// Access is controlled by the requireSourceAccess middleware.
 func (s *Server) handleGetSourceSchema(c *fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
@@ -261,21 +277,34 @@ func (s *Server) handleGetSourceSchema(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
 	}
 
-	// Get schema via core function.
-	schema, err := core.GetSourceSchema(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err := s.sqlite.GetSource(c.Context(), sourceID)
 	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+	}
+
+	var schema []models.ColumnInfo
+
+	if source.IsVictoriaLogs() {
+		tableInfo, err := s.getVictoriaLogsTableInfo(c.Context(), source)
+		if err != nil {
+			s.log.Error("failed to get VictoriaLogs schema", "error", err, "source_id", sourceID)
+			return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to retrieve source schema: %v", err), models.DatabaseErrorType)
 		}
-		s.log.Error("failed to get source schema", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to retrieve source schema: %v", err), models.DatabaseErrorType)
+		schema = tableInfo.Columns
+	} else {
+		schema, err = core.GetSourceSchema(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+		if err != nil {
+			if errors.Is(err, core.ErrSourceNotFound) {
+				return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+			}
+			s.log.Error("failed to get source schema", "error", err, "source_id", sourceID)
+			return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to retrieve source schema: %v", err), models.DatabaseErrorType)
+		}
 	}
 
 	return SendSuccess(c, fiber.StatusOK, schema)
 }
 
-// handleGetHistogram generates histogram data (log counts over time intervals) for a specific source.
-// Access is controlled by the requireSourceAccess middleware.
 func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
@@ -283,63 +312,65 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
 	}
 
-	// Parse request body containing time range, window, groupBy and optional filter query
 	var req models.APIHistogramRequest
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Validate raw_sql parameter - empty SQL is not allowed
 	if strings.TrimSpace(req.RawSQL) == "" {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "raw_sql parameter is required", models.ValidationErrorType)
 	}
 
-	// Use window from the request body or default to 1 minute
 	window := req.Window
 	if window == "" {
-		window = "1m" // Default to 1 minute if not specified
+		window = "1m"
 	}
 
-	// Prepare parameters for the core histogram function.
-	params := core.HistogramParams{
-		Window: window,
-		Query:  req.RawSQL, // Pass raw SQL containing filters and time conditions
+	timezone := req.Timezone
+	if timezone == "" {
+		timezone = "UTC"
 	}
 
-	// Only add groupBy if it's not empty
-	if req.GroupBy != "" && strings.TrimSpace(req.GroupBy) != "" {
-		params.GroupBy = req.GroupBy
-	}
-
-	// Use the provided timezone or default to UTC
-	if req.Timezone != "" {
-		params.Timezone = req.Timezone
-	} else {
-		params.Timezone = "UTC"
-	}
-
-	// Apply default timeout if not specified
 	if req.QueryTimeout == nil {
 		defaultTimeout := models.DefaultQueryTimeoutSeconds
 		req.QueryTimeout = &defaultTimeout
 	}
 
-	// Validate timeout
 	if err := models.ValidateQueryTimeout(req.QueryTimeout); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
-	// Pass the query timeout (always non-nil now)
-	params.QueryTimeout = req.QueryTimeout
+	source, err := s.sqlite.GetSource(c.Context(), sourceID)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+	}
 
-	// Execute histogram query via core function.
+	if source.IsVictoriaLogs() {
+		result, err := s.getVictoriaLogsHistogram(c.Context(), source, req.RawSQL, window, req.GroupBy, timezone, req.QueryTimeout)
+		if err != nil {
+			s.log.Error("failed to get VictoriaLogs histogram data", "error", err, "source_id", sourceID)
+			return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to generate histogram data: %v", err), models.DatabaseErrorType)
+		}
+		return SendSuccess(c, fiber.StatusOK, result)
+	}
+
+	params := core.HistogramParams{
+		Window:       window,
+		Query:        req.RawSQL,
+		Timezone:     timezone,
+		QueryTimeout: req.QueryTimeout,
+	}
+
+	if req.GroupBy != "" && strings.TrimSpace(req.GroupBy) != "" {
+		params.GroupBy = req.GroupBy
+	}
+
 	result, err := core.GetHistogramData(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID, params)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
 
-		// Check for specific error types
 		switch {
 		case strings.Contains(err.Error(), "query parameter is required"):
 			return SendErrorWithType(c, fiber.StatusBadRequest, "Query parameter is required for histogram data", models.ValidationErrorType)
@@ -348,14 +379,46 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 		case strings.Contains(err.Error(), "invalid"):
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 		default:
-			// Handle other errors
 			s.log.Error("failed to get histogram data", "error", err, "source_id", sourceID)
-			// Pass the actual error message to the client for better debugging
 			return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to generate histogram data: %v", err), models.DatabaseErrorType)
 		}
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)
+}
+
+func (s *Server) getVictoriaLogsHistogram(ctx context.Context, source *models.Source, query, window, groupBy, timezone string, timeout *int) (*core.HistogramResponse, error) {
+	client, err := s.backendRegistry.GetClient(source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get VictoriaLogs client: %w", err)
+	}
+
+	params := backends.HistogramParams{
+		Query:          query,
+		Window:         window,
+		GroupBy:        groupBy,
+		Timezone:       timezone,
+		TimeoutSeconds: timeout,
+	}
+
+	result, err := client.GetHistogramData(ctx, "", source.MetaTSField, params)
+	if err != nil {
+		return nil, err
+	}
+
+	data := make([]clickhouse.HistogramData, len(result.Data))
+	for i, d := range result.Data {
+		data[i] = clickhouse.HistogramData{
+			Bucket:     d.Bucket,
+			LogCount:   d.LogCount,
+			GroupValue: d.GroupValue,
+		}
+	}
+
+	return &core.HistogramResponse{
+		Granularity: result.Granularity,
+		Data:        data,
+	}, nil
 }
 
 // handleGenerateAISQL handles the generation of SQL from natural language queries
@@ -431,7 +494,7 @@ func (s *Server) parseSourceTeamIDs(c *fiber.Ctx) (models.SourceID, models.TeamI
 }
 
 func (s *Server) getSourceSchemaForAI(c *fiber.Ctx, sourceID models.SourceID) (source *models.Source, schemaJSON, tableName string, err error) {
-	source, err = core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err = core.GetSource(c.Context(), s.sqlite, s.backendRegistry, s.log, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return nil, "", "", SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -443,7 +506,7 @@ func (s *Server) getSourceSchemaForAI(c *fiber.Ctx, sourceID models.SourceID) (s
 	}
 
 	if !source.IsConnected {
-		health := s.clickhouse.GetCachedHealth(sourceID)
+		health := s.backendRegistry.GetCachedHealth(sourceID)
 		if health.Status != models.HealthStatusHealthy {
 			return nil, "", "", SendErrorWithType(c, http.StatusServiceUnavailable,
 				fmt.Sprintf("Source is not currently connected: %s", health.Error), models.ExternalServiceErrorType)
@@ -508,9 +571,6 @@ func (s *Server) callAIToGenerateSQL(ctx context.Context, req models.GenerateSQL
 	return generatedSQL, nil
 }
 
-// handleGetLogContext retrieves surrounding logs around a specific timestamp.
-// This is similar to grep -C, showing N logs before and M logs after a target log.
-// Access is controlled by the requireSourceAccess middleware.
 func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
@@ -518,18 +578,15 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
 	}
 
-	// Parse request body
 	var req models.LogContextRequest
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Validate required fields
 	if req.Timestamp <= 0 {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Timestamp is required and must be positive", models.ValidationErrorType)
 	}
 
-	// Apply defaults for limits if not specified
 	beforeLimit := req.BeforeLimit
 	if beforeLimit <= 0 {
 		beforeLimit = 10
@@ -539,7 +596,6 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 		afterLimit = 10
 	}
 
-	// Cap limits to prevent excessive queries
 	if beforeLimit > 100 {
 		beforeLimit = 100
 	}
@@ -547,7 +603,20 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 		afterLimit = 100
 	}
 
-	// Prepare parameters for the core function
+	source, err := s.sqlite.GetSource(c.Context(), sourceID)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+	}
+
+	if source.IsVictoriaLogs() {
+		result, err := s.getVictoriaLogsContext(c.Context(), source, req.Timestamp, beforeLimit, afterLimit, req.BeforeOffset, req.AfterOffset, req.ExcludeBoundary)
+		if err != nil {
+			s.log.Error("failed to get VictoriaLogs log context", "error", err, "source_id", sourceID)
+			return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to retrieve log context: %v", err), models.DatabaseErrorType)
+		}
+		return SendSuccess(c, fiber.StatusOK, result)
+	}
+
 	params := core.LogContextParams{
 		TargetTimestamp: req.Timestamp,
 		BeforeLimit:     beforeLimit,
@@ -557,7 +626,6 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 		ExcludeBoundary: req.ExcludeBoundary,
 	}
 
-	// Execute context query via core function
 	result, err := core.GetLogContext(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID, params)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
@@ -567,7 +635,6 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to retrieve log context: %v", err), models.DatabaseErrorType)
 	}
 
-	// Return the context response
 	return SendSuccess(c, fiber.StatusOK, models.LogContextResponse{
 		TargetTimestamp: result.TargetTimestamp,
 		BeforeLogs:      result.BeforeLogs,
@@ -577,16 +644,37 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 	})
 }
 
-// handleGetFieldValues retrieves distinct values for a specific field within a time range.
-// This is optimized for LowCardinality fields but works for any field.
-// Access is controlled by the requireSourceAccess middleware.
-// Query params:
-//   - limit: max number of values to return (default 10, max 100)
-//   - type: the field type from source schema (required)
-//   - start_time: ISO8601 start time (required for performance)
-//   - end_time: ISO8601 end time (required for performance)
-//   - timezone: timezone for time conversion (optional, defaults to UTC)
-//   - logchefql: LogchefQL query string (optional, filters field values by user's query)
+func (s *Server) getVictoriaLogsContext(ctx context.Context, source *models.Source, timestamp int64, beforeLimit, afterLimit, beforeOffset, afterOffset int, excludeBoundary bool) (*models.LogContextResponse, error) {
+	client, err := s.backendRegistry.GetClient(source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get VictoriaLogs client: %w", err)
+	}
+
+	targetTime := time.UnixMilli(timestamp)
+
+	params := backends.LogContextParams{
+		TargetTime:      targetTime,
+		BeforeLimit:     beforeLimit,
+		AfterLimit:      afterLimit,
+		BeforeOffset:    beforeOffset,
+		AfterOffset:     afterOffset,
+		ExcludeBoundary: excludeBoundary,
+	}
+
+	result, err := client.GetSurroundingLogs(ctx, "", source.MetaTSField, params, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return &models.LogContextResponse{
+		TargetTimestamp: timestamp,
+		BeforeLogs:      result.BeforeLogs,
+		TargetLogs:      result.TargetLogs,
+		AfterLogs:       result.AfterLogs,
+		Stats:           result.Stats,
+	}, nil
+}
+
 func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
@@ -599,13 +687,11 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Field name is required", models.ValidationErrorType)
 	}
 
-	// Get field type from query param (frontend already has this from source details)
 	fieldType := c.Query("type", "")
 	if fieldType == "" {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Field type is required (pass from source schema)", models.ValidationErrorType)
 	}
 
-	// Parse time range parameters (required for performance)
 	startTimeStr := c.Query("start_time", "")
 	endTimeStr := c.Query("end_time", "")
 	if startTimeStr == "" || endTimeStr == "" {
@@ -623,7 +709,6 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 
 	timezone := c.Query("timezone", "UTC")
 
-	// Parse optional limit query parameter (default 10, max 100)
 	limit := c.QueryInt("limit", 10)
 	if limit <= 0 {
 		limit = 10
@@ -632,32 +717,38 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 		limit = 100
 	}
 
-	// Get optional LogchefQL query - parsed on backend for proper SQL generation
 	logchefqlQuery := c.Query("logchefql", "")
 
-	// Get source information
-	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err := s.sqlite.GetSource(c.Context(), sourceID)
 	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		s.log.Error("failed to get source for field values", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 	}
 
-	// Get ClickHouse client
+	ctx, cancel := context.WithTimeout(c.Context(), FieldValuesTimeout)
+	defer cancel()
+
+	if source.IsVictoriaLogs() {
+		result, err := s.getVictoriaLogsFieldValues(ctx, source, fieldName, fieldType, startTime, endTime, timezone, limit, logchefqlQuery)
+		if err != nil {
+			if ctx.Err() == context.Canceled {
+				return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
+			}
+			if ctx.Err() == context.DeadlineExceeded {
+				s.log.Warn("field values request timed out", "source_id", sourceID, "field", fieldName, "timeout", FieldValuesTimeout)
+				return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
+			}
+			s.log.Error("failed to get VictoriaLogs field values", "error", err, "source_id", sourceID, "field", fieldName)
+			return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
+		}
+		return SendSuccess(c, fiber.StatusOK, result)
+	}
+
 	client, err := s.clickhouse.GetConnection(sourceID)
 	if err != nil {
 		s.log.Error("failed to get clickhouse client for field values", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to connect to source", models.ExternalServiceErrorType)
 	}
 
-	// Create timeout context - this propagates to ClickHouse as max_execution_time
-	// Also allows early termination if client disconnects (e.g., user navigates away)
-	ctx, cancel := context.WithTimeout(c.Context(), FieldValuesTimeout)
-	defer cancel()
-
-	// Fetch field values with time range filter and user's LogchefQL query
 	result, err := client.GetFieldDistinctValues(
 		ctx,
 		source.Connection.Database,
@@ -670,12 +761,11 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 			EndTime:        endTime,
 			Timezone:       timezone,
 			Limit:          limit,
-			Timeout:        nil,            // Let context deadline handle timeout
-			LogchefQL:      logchefqlQuery, // Apply user's query filters
+			Timeout:        nil,
+			LogchefQL:      logchefqlQuery,
 		},
 	)
 	if err != nil {
-		// Check if the error was due to context cancellation (client disconnected)
 		if ctx.Err() == context.Canceled {
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
 		}
@@ -690,15 +780,28 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, result)
 }
 
-// handleGetAllFieldValues retrieves distinct values for all filterable fields within a time range.
-// This is useful for populating the field sidebar with filterable values.
-// Access is controlled by the requireSourceAccess middleware.
-// Query params:
-//   - limit: max number of values per field (default 10, max 100)
-//   - start_time: ISO8601 start time (required for performance)
-//   - end_time: ISO8601 end time (required for performance)
-//   - timezone: timezone for time conversion (optional, defaults to UTC)
-//   - logchefql: LogchefQL query string (optional, filters field values by user's query)
+func (s *Server) getVictoriaLogsFieldValues(ctx context.Context, source *models.Source, fieldName, fieldType string, startTime, endTime time.Time, timezone string, limit int, filterQuery string) (*backends.FieldValuesResult, error) {
+	client, err := s.backendRegistry.GetClient(source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get VictoriaLogs client: %w", err)
+	}
+
+	params := backends.FieldValuesParams{
+		FieldName:      fieldName,
+		FieldType:      fieldType,
+		TimestampField: source.MetaTSField,
+		TimeRange: backends.TimeRange{
+			Start: startTime,
+			End:   endTime,
+		},
+		Timezone:    timezone,
+		Limit:       limit,
+		FilterQuery: filterQuery,
+	}
+
+	return client.GetFieldDistinctValues(ctx, "", "", params)
+}
+
 func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
@@ -706,7 +809,6 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
 	}
 
-	// Parse time range parameters (required for performance)
 	startTimeStr := c.Query("start_time", "")
 	endTimeStr := c.Query("end_time", "")
 	if startTimeStr == "" || endTimeStr == "" {
@@ -724,7 +826,6 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 
 	timezone := c.Query("timezone", "UTC")
 
-	// Parse optional limit query parameter (default 10, max 100)
 	limit := c.QueryInt("limit", 10)
 	if limit <= 0 {
 		limit = 10
@@ -733,32 +834,38 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 		limit = 100
 	}
 
-	// Get optional LogchefQL query - parsed on backend for proper SQL generation
 	logchefqlQuery := c.Query("logchefql", "")
 
-	// Get source information
-	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err := s.sqlite.GetSource(c.Context(), sourceID)
 	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 	}
 
-	// Get ClickHouse client
+	ctx, cancel := context.WithTimeout(c.Context(), FieldValuesTimeout)
+	defer cancel()
+
+	if source.IsVictoriaLogs() {
+		result, err := s.getVictoriaLogsAllFieldValues(ctx, source, startTime, endTime, timezone, limit, logchefqlQuery)
+		if err != nil {
+			if ctx.Err() == context.Canceled {
+				return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
+			}
+			if ctx.Err() == context.DeadlineExceeded {
+				s.log.Warn("field values request timed out", "source_id", sourceID, "timeout", FieldValuesTimeout)
+				return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
+			}
+			s.log.Error("failed to get VictoriaLogs field values", "error", err, "source_id", sourceID)
+			return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
+		}
+		return SendSuccess(c, fiber.StatusOK, result)
+	}
+
 	client, err := s.clickhouse.GetConnection(sourceID)
 	if err != nil {
 		s.log.Error("failed to get clickhouse client", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to connect to source", models.ExternalServiceErrorType)
 	}
 
-	// Create timeout context - this propagates to ClickHouse as max_execution_time
-	// Also allows early termination if client disconnects (e.g., user navigates away)
-	ctx, cancel := context.WithTimeout(c.Context(), FieldValuesTimeout)
-	defer cancel()
-
-	// Fetch all filterable field values with time range filter and user's LogchefQL query
 	result, err := client.GetAllLowCardinalityFieldValues(
 		ctx,
 		source.Connection.Database,
@@ -769,12 +876,11 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 			EndTime:        endTime,
 			Timezone:       timezone,
 			Limit:          limit,
-			Timeout:        nil,            // Let context deadline handle timeout
-			LogchefQL:      logchefqlQuery, // Apply user's query filters
+			Timeout:        nil,
+			LogchefQL:      logchefqlQuery,
 		},
 	)
 	if err != nil {
-		// Check if the error was due to context cancellation (client disconnected)
 		if ctx.Err() == context.Canceled {
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
 		}
@@ -787,4 +893,24 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)
+}
+
+func (s *Server) getVictoriaLogsAllFieldValues(ctx context.Context, source *models.Source, startTime, endTime time.Time, timezone string, limit int, filterQuery string) (map[string]*backends.FieldValuesResult, error) {
+	client, err := s.backendRegistry.GetClient(source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get VictoriaLogs client: %w", err)
+	}
+
+	params := backends.AllFieldValuesParams{
+		TimestampField: source.MetaTSField,
+		TimeRange: backends.TimeRange{
+			Start: startTime,
+			End:   endTime,
+		},
+		Timezone:    timezone,
+		Limit:       limit,
+		FilterQuery: filterQuery,
+	}
+
+	return client.GetAllFilterableFieldValues(ctx, "", "", params)
 }

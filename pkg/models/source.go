@@ -173,11 +173,12 @@ type CreateSourceRequest struct {
 	Schema                 string                      `json:"schema,omitempty"`
 }
 
-// ValidateConnectionRequest represents a request to validate a connection
 type ValidateConnectionRequest struct {
-	ConnectionInfo
-	TimestampField string `json:"timestamp_field"`
-	SeverityField  string `json:"severity_field"`
+	BackendType            BackendType                 `json:"backend_type"`
+	ConnectionInfo         ConnectionInfo              `json:"connection"`
+	VictoriaLogsConnection *VictoriaLogsConnectionInfo `json:"victorialogs_connection,omitempty"`
+	TimestampField         string                      `json:"timestamp_field"`
+	SeverityField          string                      `json:"severity_field"`
 }
 
 // SourceWithTeams represents a source along with the teams that have access to it

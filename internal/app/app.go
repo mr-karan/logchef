@@ -11,6 +11,8 @@ import (
 
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/auth"
+	"github.com/mr-karan/logchef/internal/backends"
+	"github.com/mr-karan/logchef/internal/backends/victorialogs"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
@@ -21,15 +23,17 @@ import (
 
 // App represents the core application context, holding dependencies and configuration.
 type App struct {
-	Config     *config.Config
-	SQLite     *sqlite.DB
-	ClickHouse *clickhouse.Manager
-	Logger     *slog.Logger
-	server     *server.Server
-	WebFS      http.FileSystem
-	BuildInfo  string
-	Version    string
-	Alerts     *alerts.Manager
+	Config          *config.Config
+	SQLite          *sqlite.DB
+	ClickHouse      *clickhouse.Manager
+	VictoriaLogs    *victorialogs.Manager
+	BackendRegistry *backends.BackendRegistry
+	Logger          *slog.Logger
+	server          *server.Server
+	WebFS           http.FileSystem
+	BuildInfo       string
+	Version         string
+	Alerts          *alerts.Manager
 }
 
 // Options contains configuration needed when creating a new App instance.
@@ -90,8 +94,16 @@ func (a *App) Initialize(ctx context.Context) error {
 	a.Config = config.LoadRuntimeConfig(ctx, a.Config, a.SQLite)
 	a.Logger.Info("runtime configuration loaded from database and config.toml")
 
+	// Initialize backend registry for multi-backend support.
+	a.BackendRegistry = backends.NewBackendRegistry(a.Logger)
+
 	// Initialize ClickHouse connection manager.
 	a.ClickHouse = clickhouse.NewManager(a.Logger)
+	a.BackendRegistry.RegisterClickHouseManager(a.ClickHouse)
+
+	// Initialize VictoriaLogs connection manager.
+	a.VictoriaLogs = victorialogs.NewManager(a.Logger)
+	a.BackendRegistry.RegisterVictoriaLogsManager(a.VictoriaLogs)
 
 	// Initialize OIDC Provider.
 	// This is optional; if OIDC is not configured, auth features relying on it might be disabled.
@@ -105,28 +117,31 @@ func (a *App) Initialize(ctx context.Context) error {
 		}
 	}
 
-	// Load existing sources from SQLite into the ClickHouse manager
-	// to establish connections for querying.
+	// Load existing sources from SQLite into the appropriate backend manager
+	// based on their backend type.
 	sources, err := a.SQLite.ListSources(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list sources: %w", err)
 	}
 	for _, source := range sources {
+		backendType := source.GetEffectiveBackendType()
 		a.Logger.Info("initializing source connection",
 			"source_id", source.ID,
+			"backend_type", backendType,
 			"table", source.Connection.TableName)
-		if err := a.ClickHouse.AddSource(ctx, source); err != nil {
+
+		if err := a.BackendRegistry.AddSource(ctx, source); err != nil {
 			// Log failure but continue initialization.
 			// The health check system will attempt to recover these connections.
 			a.Logger.Warn("failed to initialize source connection, will attempt recovery via health checks",
 				"source_id", source.ID,
+				"backend_type", backendType,
 				"error", err)
 		}
 	}
 
-	// Start background health checks for the ClickHouse manager.
-	// Use 0 to trigger the default interval defined in the manager.
-	a.ClickHouse.StartBackgroundHealthChecks(0)
+	// Start background health checks for all backend managers.
+	a.BackendRegistry.StartBackgroundHealthChecks(0)
 
 	// Initialize alerts manager before the server so it can be used for manual resolution.
 	var alertSender alerts.AlertSender
@@ -156,15 +171,16 @@ func (a *App) Initialize(ctx context.Context) error {
 
 	// Initialize HTTP server with alerts manager for manual resolution.
 	serverOpts := server.ServerOptions{
-		Config:        a.Config,
-		SQLite:        a.SQLite,
-		ClickHouse:    a.ClickHouse,
-		AlertsManager: a.Alerts,
-		OIDCProvider:  oidcProvider,
-		FS:            a.WebFS,
-		Logger:        a.Logger,
-		BuildInfo:     a.BuildInfo,
-		Version:       a.Version,
+		Config:          a.Config,
+		SQLite:          a.SQLite,
+		ClickHouse:      a.ClickHouse,
+		BackendRegistry: a.BackendRegistry,
+		AlertsManager:   a.Alerts,
+		OIDCProvider:    oidcProvider,
+		FS:              a.WebFS,
+		Logger:          a.Logger,
+		BuildInfo:       a.BuildInfo,
+		Version:         a.Version,
 	}
 	a.server = server.New(serverOpts)
 
@@ -230,25 +246,24 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// Close ClickHouse manager (stops health checks and closes clients).
-	if a.ClickHouse != nil {
-		a.Logger.Info("shutting down ClickHouse connections")
+	// Close all backend managers via registry (stops health checks and closes clients).
+	if a.BackendRegistry != nil {
+		a.Logger.Info("shutting down backend connections")
 
-		clickhouseDone := make(chan error, 1)
+		registryDone := make(chan error, 1)
 		go func() {
-			clickhouseDone <- a.ClickHouse.Close()
+			registryDone <- a.BackendRegistry.Close()
 		}()
 
-		// Wait for ClickHouse shutdown or timeout
 		select {
-		case err := <-clickhouseDone:
+		case err := <-registryDone:
 			if err != nil {
-				a.Logger.Error("error closing clickhouse manager", "error", err)
+				a.Logger.Error("error closing backend registry", "error", err)
 			} else {
-				a.Logger.Info("ClickHouse connections closed successfully")
+				a.Logger.Info("backend connections closed successfully")
 			}
 		case <-clickhouseCtx.Done():
-			a.Logger.Warn("timeout closing ClickHouse connections, continuing")
+			a.Logger.Warn("timeout closing backend connections, continuing")
 		}
 	}
 

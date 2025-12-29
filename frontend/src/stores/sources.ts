@@ -8,6 +8,8 @@ import type {
   CreateSourcePayload,
   SourceStats,
   CreateTeamQueryRequest,
+  BackendType,
+  VictoriaLogsConnectionInfo,
 } from "@/api/sources";
 import type { APIErrorResponse } from "@/api/types";
 import { useBaseStore } from "./base";
@@ -457,15 +459,21 @@ export const useSourcesStore = defineStore("sources", () => {
   }
 
   async function validateSourceConnection(connectionInfo: {
-    host: string;
-    username: string;
-    password: string;
-    database: string;
-    table_name: string;
+    backend_type?: BackendType;
+    connection?: {
+      host: string;
+      username: string;
+      password: string;
+      database: string;
+      table_name: string;
+    };
+    victorialogs_connection?: VictoriaLogsConnectionInfo;
     timestamp_field?: string;
     severity_field?: string;
   }) {
-    const connectionKey = `${connectionInfo.host}-${connectionInfo.database}-${connectionInfo.table_name}`;
+    const connectionKey = connectionInfo.backend_type === 'victorialogs'
+      ? `vl-${connectionInfo.victorialogs_connection?.url}`
+      : `${connectionInfo.connection?.host}-${connectionInfo.connection?.database}-${connectionInfo.connection?.table_name}`;
 
     return await state.withLoading("validateSourceConnection", async () => {
       return await state.callApi({
@@ -481,6 +489,11 @@ export const useSourcesStore = defineStore("sources", () => {
 
   function isConnectionValidated(host: string, database: string, tableName: string): boolean {
     const connectionKey = `${host}-${database}-${tableName}`;
+    return validatedConnections.has(connectionKey);
+  }
+
+  function isVictoriaLogsConnectionValidated(url: string): boolean {
+    const connectionKey = `vl-${url}`;
     return validatedConnections.has(connectionKey);
   }
 
@@ -590,6 +603,24 @@ export const useSourcesStore = defineStore("sources", () => {
     });
   }
 
+  const isCurrentSourceVictoriaLogs = computed(() => {
+    const details = state.data.value.currentSourceDetails;
+    return details?.backend_type === 'victorialogs';
+  });
+
+  const isCurrentSourceClickHouse = computed(() => {
+    const details = state.data.value.currentSourceDetails;
+    return !details?.backend_type || details.backend_type === 'clickhouse';
+  });
+
+  const nativeQueryLabel = computed(() => {
+    return isCurrentSourceVictoriaLogs.value ? 'LogsQL' : 'SQL';
+  });
+
+  const supportsTableName = computed(() => {
+    return isCurrentSourceClickHouse.value;
+  });
+
   return {
     // State
     sources,
@@ -606,6 +637,12 @@ export const useSourcesStore = defineStore("sources", () => {
     hasValidCurrentSource,
     visibleSources,
     isHydrated,
+    
+    // Backend capability helpers
+    isCurrentSourceVictoriaLogs,
+    isCurrentSourceClickHouse,
+    nativeQueryLabel,
+    supportsTableName,
     
     // Centralized loading states
     isLoadingTeamSources,
@@ -650,5 +687,6 @@ export const useSourcesStore = defineStore("sources", () => {
     hydrate,
     loadAllSourcesForAdmin,
     getSourceSchema,
+    isVictoriaLogsConnectionValidated,
   };
 });

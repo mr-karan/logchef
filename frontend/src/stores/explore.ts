@@ -24,7 +24,8 @@ import { SqlManager } from '@/services/SqlManager';
 import { type TimeRange } from '@/types/query';
 import { useVariables } from "@/composables/useVariables";
 import { queryHistoryService } from "@/services/QueryHistoryService";
-import { createTimeRangeCondition } from '@/utils/time-utils';
+import { createTimeRangeCondition, formatDateForSQL } from '@/utils/time-utils';
+import { isVictoriaLogsSource } from '@/api/sources';
 
 interface SavedQuerySnapshot {
   queryContent: string;
@@ -149,6 +150,27 @@ export const useExploreStore = defineStore("explore", () => {
     const sourceDetails = sourcesStore.currentSourceDetails;
     if (!sourceDetails) {
       return null;
+    }
+
+    const isVL = isVictoriaLogsSource(sourceDetails);
+
+    if (isVL) {
+      const startTime = formatDateForSQL(timeRange.start, false);
+      const endTime = formatDateForSQL(timeRange.end, false);
+      
+      let logsql = '';
+      if (logchefqlCode?.trim()) {
+        logsql += `-- LogchefQL: ${logchefqlCode}\n`;
+      }
+      logsql += `_time:[${startTime}, ${endTime}]`;
+      logsql += ` | sort by (_time desc)`;
+      logsql += ` | limit ${limit}`;
+
+      return {
+        sql: logsql,
+        error: undefined,
+        warnings: []
+      };
     }
 
     let tableName = 'default.logs';
@@ -563,22 +585,28 @@ export const useExploreStore = defineStore("explore", () => {
     const sourcesStore = useSourcesStore();
     const sourceDetails = sourcesStore.currentSourceDetails;
     
-    let tableName = 'logs.vector_logs';
-    if (sourceDetails?.connection?.database && sourceDetails?.connection?.table_name) {
-      tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
+    if (sourceDetails && isVictoriaLogsSource(sourceDetails)) {
+      const startTime = formatDateForSQL(timeRange.start, false);
+      const endTime = formatDateForSQL(timeRange.end, false);
+      state.data.value.rawSql = `_time:[${startTime}, ${endTime}] | sort by (_time desc) | limit ${state.data.value.limit}`;
+    } else {
+      let tableName = 'logs.vector_logs';
+      if (sourceDetails?.connection?.database && sourceDetails?.connection?.table_name) {
+        tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
+      }
+      
+      const timestampField = sourceDetails?._meta_ts_field || 'timestamp';
+
+      const result = SqlManager.generateDefaultSql({
+        tableName,
+        tsField: timestampField,
+        timeRange,
+        limit: state.data.value.limit,
+        timezone: state.data.value.selectedTimezoneIdentifier || undefined
+      });
+
+      state.data.value.rawSql = result.success ? result.sql : '';
     }
-    
-    const timestampField = sourceDetails?._meta_ts_field || 'timestamp';
-
-    const result = SqlManager.generateDefaultSql({
-      tableName,
-      tsField: timestampField,
-      timeRange,
-      limit: state.data.value.limit,
-      timezone: state.data.value.selectedTimezoneIdentifier || undefined
-    });
-
-    state.data.value.rawSql = result.success ? result.sql : '';
 
     histogramStore.clearHistogramData();
 
@@ -591,6 +619,15 @@ export const useExploreStore = defineStore("explore", () => {
     if (state.data.value.timeRange) {
       const sourcesStore = useSourcesStore();
       const sourceDetails = sourcesStore.currentSourceDetails;
+      
+      if (sourceDetails && isVictoriaLogsSource(sourceDetails)) {
+        const startTime = formatDateForSQL(state.data.value.timeRange.start, false);
+        const endTime = formatDateForSQL(state.data.value.timeRange.end, false);
+        state.data.value.rawSql = `_time:[${startTime}, ${endTime}] | sort by (_time desc) | limit ${state.data.value.limit}`;
+        histogramStore.clearHistogramData();
+        _updateLastExecutedState();
+        return;
+      }
       
       let tableName = 'logs.vector_logs';
       if (sourceDetails?.connection?.database && sourceDetails?.connection?.table_name) {
@@ -742,6 +779,7 @@ export const useExploreStore = defineStore("explore", () => {
       }
 
       let sql = sqlForExecution.value;
+      const isVL = isVictoriaLogsSource(sourceDetails);
 
       const params: QueryParams = {
         raw_sql: '',
@@ -750,33 +788,40 @@ export const useExploreStore = defineStore("explore", () => {
       };
 
       if (!sql || !sql.trim()) {
-        const tsField = sourceDetails._meta_ts_field || 'timestamp';
-        
-        let tableName = 'default.logs';
-        if (sourceDetails.connection?.database && sourceDetails.connection?.table_name) {
-          tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
+        if (isVL) {
+          const timeRange = state.data.value.timeRange as TimeRange;
+          const startTime = formatDateForSQL(timeRange.start, false);
+          const endTime = formatDateForSQL(timeRange.end, false);
+          sql = `_time:[${startTime}, ${endTime}] | sort by (_time desc) | limit ${state.data.value.limit}`;
+        } else {
+          const tsField = sourceDetails._meta_ts_field || 'timestamp';
+          
+          let tableName = 'default.logs';
+          if (sourceDetails.connection?.database && sourceDetails.connection?.table_name) {
+            tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
+          }
+
+          const result = SqlManager.generateDefaultSql({
+            tableName,
+            tsField,
+            timeRange: state.data.value.timeRange as TimeRange,
+            limit: state.data.value.limit,
+            timezone: state.data.value.selectedTimezoneIdentifier || undefined
+          });
+
+          if (!result.success) {
+            return state.handleError({
+              status: "error",
+              message: "Failed to generate default query",
+              error_type: "ValidationError"
+            }, operationKey);
+          }
+
+          sql = result.sql;
         }
-
-        const result = SqlManager.generateDefaultSql({
-          tableName,
-          tsField,
-          timeRange: state.data.value.timeRange as TimeRange,
-          limit: state.data.value.limit,
-          timezone: state.data.value.selectedTimezoneIdentifier || undefined
-        });
-
-        if (!result.success) {
-          return state.handleError({
-            status: "error",
-            message: "Failed to generate default SQL",
-            error_type: "ValidationError"
-          }, operationKey);
-        }
-
-        sql = result.sql;
 
         if (state.data.value.activeMode === 'sql') {
-          state.data.value.rawSql = result.sql;
+          state.data.value.rawSql = sql;
         }
       }
 

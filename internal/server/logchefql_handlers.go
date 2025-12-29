@@ -2,9 +2,11 @@ package server
 
 import (
 	"errors"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 
+	"github.com/mr-karan/logchef/internal/backends/victorialogs"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/logchefql"
@@ -22,8 +24,10 @@ type TranslateRequest struct {
 
 // TranslateResponse represents the response for LogchefQL translation
 type TranslateResponse struct {
-	SQL        string                      `json:"sql"`                // WHERE clause conditions only
-	FullSQL    string                      `json:"full_sql,omitempty"` // Complete executable SQL (when time params provided)
+	SQL        string                      `json:"sql"`                   // WHERE clause conditions only (ClickHouse)
+	LogsQL     string                      `json:"logsql,omitempty"`      // LogsQL filter conditions (VictoriaLogs)
+	FullSQL    string                      `json:"full_sql,omitempty"`    // Complete executable SQL (ClickHouse, when time params provided)
+	FullLogsQL string                      `json:"full_logsql,omitempty"` // Complete executable LogsQL (VictoriaLogs, when time params provided)
 	Valid      bool                        `json:"valid"`
 	Error      *logchefql.ParseError       `json:"error,omitempty"`
 	Conditions []logchefql.FilterCondition `json:"conditions"`
@@ -69,8 +73,7 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 	// Check if all time params are provided for full SQL generation
 	hasTimeParams := req.StartTime != "" && req.EndTime != "" && req.Timezone != ""
 
-	// Get source information for schema
-	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err := core.GetSource(c.Context(), s.sqlite, s.backendRegistry, s.log, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -92,43 +95,79 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 		schema = &logchefql.Schema{Columns: columns}
 	}
 
-	// Translate the query
-	result := logchefql.Translate(req.Query, schema)
+	var response TranslateResponse
 
-	response := TranslateResponse{
-		SQL:        result.SQL,
-		Valid:      result.Valid,
-		Error:      result.Error,
-		Conditions: result.Conditions,
-		FieldsUsed: result.FieldsUsed,
-	}
-
-	// Ensure conditions is never nil
-	if response.Conditions == nil {
-		response.Conditions = []logchefql.FilterCondition{}
-	}
-	if response.FieldsUsed == nil {
-		response.FieldsUsed = []string{}
-	}
-
-	// Build the full SQL only if time params are provided
-	if result.Valid && hasTimeParams {
-		tableName := source.Connection.Database + "." + source.Connection.TableName
-
-		params := logchefql.QueryBuildParams{
-			LogchefQL:      req.Query,
-			Schema:         schema,
-			TableName:      tableName,
-			TimestampField: source.MetaTSField,
-			StartTime:      req.StartTime,
-			EndTime:        req.EndTime,
-			Timezone:       req.Timezone,
-			Limit:          req.Limit,
+	if source.IsVictoriaLogs() {
+		result := logchefql.TranslateToLogsQL(req.Query, schema)
+		response = TranslateResponse{
+			LogsQL:     result.LogsQL,
+			Valid:      result.Valid,
+			Error:      result.Error,
+			Conditions: result.Conditions,
+			FieldsUsed: result.FieldsUsed,
 		}
 
-		fullSQL, err := logchefql.BuildFullQuery(params)
-		if err == nil {
-			response.FullSQL = fullSQL
+		if response.Conditions == nil {
+			response.Conditions = []logchefql.FilterCondition{}
+		}
+		if response.FieldsUsed == nil {
+			response.FieldsUsed = []string{}
+		}
+
+		if result.Valid && hasTimeParams {
+			startTime, err := time.Parse("2006-01-02 15:04:05", req.StartTime)
+			if err == nil {
+				endTime, err := time.Parse("2006-01-02 15:04:05", req.EndTime)
+				if err == nil {
+					params := logchefql.LogsQLQueryBuildParams{
+						LogchefQL: req.Query,
+						Schema:    schema,
+						StartTime: startTime,
+						EndTime:   endTime,
+						Limit:     req.Limit,
+					}
+					fullLogsQL, err := logchefql.BuildFullLogsQLQuery(params)
+					if err == nil {
+						response.FullLogsQL = fullLogsQL
+					}
+				}
+			}
+		}
+	} else {
+		result := logchefql.Translate(req.Query, schema)
+		response = TranslateResponse{
+			SQL:        result.SQL,
+			Valid:      result.Valid,
+			Error:      result.Error,
+			Conditions: result.Conditions,
+			FieldsUsed: result.FieldsUsed,
+		}
+
+		if response.Conditions == nil {
+			response.Conditions = []logchefql.FilterCondition{}
+		}
+		if response.FieldsUsed == nil {
+			response.FieldsUsed = []string{}
+		}
+
+		if result.Valid && hasTimeParams {
+			tableName := source.Connection.Database + "." + source.Connection.TableName
+
+			params := logchefql.QueryBuildParams{
+				LogchefQL:      req.Query,
+				Schema:         schema,
+				TableName:      tableName,
+				TimestampField: source.MetaTSField,
+				StartTime:      req.StartTime,
+				EndTime:        req.EndTime,
+				Timezone:       req.Timezone,
+				Limit:          req.Limit,
+			}
+
+			fullSQL, err := logchefql.BuildFullQuery(params)
+			if err == nil {
+				response.FullSQL = fullSQL
+			}
 		}
 	}
 
@@ -203,8 +242,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
-	// Get source information
-	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err := core.GetSource(c.Context(), s.sqlite, s.backendRegistry, s.log, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -226,7 +264,79 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 		schema = &logchefql.Schema{Columns: columns}
 	}
 
-	// Build the full SQL query
+	user := c.Locals("user").(*models.User)
+	if user == nil {
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+	}
+
+	teamIDStr := c.Params("teamID")
+	teamID, err := core.ParseTeamID(teamIDStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
+	}
+
+	queryCtx, cancel := c.Context(), func() {}
+	defer cancel()
+
+	if source.IsVictoriaLogs() {
+		startTime, err := time.Parse(time.RFC3339, req.StartTime)
+		if err != nil {
+			startTime, err = time.Parse("2006-01-02 15:04:05", req.StartTime)
+			if err != nil {
+				return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid start_time format", models.ValidationErrorType)
+			}
+		}
+		endTime, err := time.Parse(time.RFC3339, req.EndTime)
+		if err != nil {
+			endTime, err = time.Parse("2006-01-02 15:04:05", req.EndTime)
+			if err != nil {
+				return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid end_time format", models.ValidationErrorType)
+			}
+		}
+
+		logsqlParams := logchefql.LogsQLQueryBuildParams{
+			LogchefQL: req.Query,
+			Schema:    schema,
+			StartTime: startTime,
+			EndTime:   endTime,
+			Limit:     req.Limit,
+		}
+
+		logsql, err := logchefql.BuildFullLogsQLQuery(logsqlParams)
+		if err != nil {
+			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		}
+
+		queryID := queryTracker.AddQuery(user.ID, sourceID, teamID, logsql, cancel)
+		defer queryTracker.RemoveQuery(queryID)
+
+		client, err := s.backendRegistry.GetClient(source.ID)
+		if err != nil {
+			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get VictoriaLogs client", models.DatabaseErrorType)
+		}
+
+		vlClient, ok := client.(*victorialogs.Client)
+		if !ok {
+			return SendErrorWithType(c, fiber.StatusInternalServerError, "Unexpected client type for VictoriaLogs source", models.DatabaseErrorType)
+		}
+
+		result, err := vlClient.QueryWithLimit(queryCtx, logsql, req.Limit, req.QueryTimeout)
+		if err != nil {
+			s.log.Error("failed to execute logchefql query on VictoriaLogs", "error", err, "source_id", sourceID)
+			return SendErrorWithType(c, fiber.StatusInternalServerError, "Query execution failed: "+err.Error(), models.DatabaseErrorType)
+		}
+
+		responseData := map[string]interface{}{
+			"logs":             result.Logs,
+			"columns":          result.Columns,
+			"stats":            result.Stats,
+			"query_id":         queryID,
+			"generated_logsql": logsql,
+		}
+
+		return SendSuccess(c, fiber.StatusOK, responseData)
+	}
+
 	tableName := source.Connection.Database + "." + source.Connection.TableName
 	params := logchefql.QueryBuildParams{
 		LogchefQL:      req.Query,
@@ -244,29 +354,9 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
-	// Get user information for query tracking
-	user := c.Locals("user").(*models.User)
-	if user == nil {
-		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
-	}
-
-	// Get team ID from params
-	teamIDStr := c.Params("teamID")
-	teamID, err := core.ParseTeamID(teamIDStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
-	}
-
-	// Execute the query (reuse existing query execution logic)
-	// Create a cancellable context for this query
-	queryCtx, cancel := c.Context(), func() {}
-	defer cancel()
-
-	// Add query to tracker
 	queryID := queryTracker.AddQuery(user.ID, sourceID, teamID, sql, cancel)
 	defer queryTracker.RemoveQuery(queryID)
 
-	// Execute via core function
 	queryParams := clickhouse.LogQueryParams{
 		RawSQL:       sql,
 		Limit:        req.Limit,
@@ -278,13 +368,12 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Query execution failed: "+err.Error(), models.DatabaseErrorType)
 	}
 
-	// Add query_id and generated SQL to response
 	responseData := map[string]interface{}{
 		"logs":          result.Logs,
 		"columns":       result.Columns,
 		"stats":         result.Stats,
 		"query_id":      queryID,
-		"generated_sql": sql, // For "Show SQL" feature
+		"generated_sql": sql,
 	}
 
 	return SendSuccess(c, fiber.StatusOK, responseData)

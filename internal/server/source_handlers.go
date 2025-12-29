@@ -17,13 +17,12 @@ import (
 // URL: GET /api/v1/admin/sources
 // Requires: Admin privileges
 func (s *Server) handleListSources(c *fiber.Ctx) error {
-	sources, err := core.ListSources(c.Context(), s.sqlite, s.clickhouse, s.log)
+	sources, err := core.ListSources(c.Context(), s.sqlite, s.backendRegistry, s.log)
 	if err != nil {
 		s.log.Error("failed to list sources", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Error listing sources")
 	}
 
-	// Convert sources to response objects to avoid exposing sensitive information.
 	sourceResponses := make([]*models.SourceResponse, len(sources))
 	for i, src := range sources {
 		sourceResponses[i] = src.ToResponse()
@@ -41,29 +40,47 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Set default timestamp field if not provided by user.
 	if req.MetaTSField == "" {
-		req.MetaTSField = "timestamp"
+		if req.BackendType == models.BackendVictoriaLogs {
+			req.MetaTSField = "_time"
+		} else {
+			req.MetaTSField = "timestamp"
+		}
 	}
-	// Severity field is optional.
 
-	// Call core function to validate, create table (if requested), save, and connect.
-	createdSource, err := core.CreateSource(
-		c.Context(),
-		s.sqlite,
-		s.clickhouse,
-		s.log,
-		req.Name,
-		req.MetaIsAutoCreated,
-		req.Connection,
-		req.Description,
-		req.TTLDays,
-		req.MetaTSField,
-		req.MetaSeverityField,
-		req.Schema,
-	)
+	var createdSource *models.Source
+	var err error
+
+	if req.BackendType == models.BackendVictoriaLogs {
+		createdSource, err = core.CreateVictoriaLogsSource(
+			c.Context(),
+			s.sqlite,
+			s.backendRegistry,
+			s.log,
+			req.Name,
+			req.VictoriaLogsConnection,
+			req.Description,
+			req.MetaTSField,
+			req.MetaSeverityField,
+		)
+	} else {
+		createdSource, err = core.CreateSource(
+			c.Context(),
+			s.sqlite,
+			s.clickhouse,
+			s.log,
+			req.Name,
+			req.MetaIsAutoCreated,
+			req.Connection,
+			req.Description,
+			req.TTLDays,
+			req.MetaTSField,
+			req.MetaSeverityField,
+			req.Schema,
+		)
+	}
+
 	if err != nil {
-		// Handle specific validation or creation errors from core.
 		if validationErr, ok := err.(*core.ValidationError); ok {
 			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
 		}
@@ -91,8 +108,7 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
-	// Call core function to remove from manager and delete from DB.
-	if err := core.DeleteSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID); err != nil {
+	if err := core.DeleteSource(c.Context(), s.sqlite, s.backendRegistry, s.log, sourceID); err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "Source not found")
 		}
@@ -103,9 +119,6 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Source deleted successfully"})
 }
 
-// handleValidateSourceConnection validates ClickHouse connection details provided in the request body.
-// URL: POST /api/v1/admin/sources/validate
-// Requires: Admin privileges
 func (s *Server) handleValidateSourceConnection(c *fiber.Ctx) error {
 	var req models.ValidateConnectionRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -116,25 +129,29 @@ func (s *Server) handleValidateSourceConnection(c *fiber.Ctx) error {
 	var result *models.ConnectionValidationResult
 	var coreErr error
 
-	// Choose validation type based on whether column checks are requested.
-	if req.TimestampField != "" {
-		result, coreErr = core.ValidateConnectionWithColumns(
-			c.Context(), s.clickhouse, s.log, req.ConnectionInfo,
-			req.TimestampField, req.SeverityField,
+	if req.BackendType == models.BackendVictoriaLogs {
+		result, coreErr = core.ValidateVictoriaLogsConnection(
+			c.Context(), s.backendRegistry, s.log, req.VictoriaLogsConnection,
 		)
 	} else {
-		result, coreErr = core.ValidateConnection(
-			c.Context(), s.clickhouse, s.log, req.ConnectionInfo,
-		)
+		if req.TimestampField != "" {
+			result, coreErr = core.ValidateConnectionWithColumns(
+				c.Context(), s.clickhouse, s.log, req.ConnectionInfo,
+				req.TimestampField, req.SeverityField,
+			)
+		} else {
+			result, coreErr = core.ValidateConnection(
+				c.Context(), s.clickhouse, s.log, req.ConnectionInfo,
+			)
+		}
 	}
 
 	if coreErr != nil {
-		// Handle specific validation errors.
 		if validationErr, ok := coreErr.(*core.ValidationError); ok {
 			s.log.Warn("connection validation failed", "error", validationErr.Message, "field", validationErr.Field)
 			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
 		}
-		s.log.Error("connection validation error", "error", coreErr, "host", req.Host)
+		s.log.Error("connection validation error", "error", coreErr)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error validating connection: "+coreErr.Error(), models.ExternalServiceErrorType)
 	}
 

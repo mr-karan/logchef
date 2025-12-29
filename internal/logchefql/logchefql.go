@@ -231,13 +231,54 @@ func formatConditionValue(v interface{}) string {
 }
 
 // TranslateToSQLConditions is a convenience function that returns just the SQL string.
-// Returns empty string on error.
 func TranslateToSQLConditions(query string, schema *Schema) string {
 	result := Translate(query, schema)
 	if !result.Valid {
 		return ""
 	}
 	return result.SQL
+}
+
+// TranslateToLogsQL translates a LogchefQL query to VictoriaLogs LogsQL syntax.
+func TranslateToLogsQL(query string, schema *Schema) *TranslateResult {
+	result := &TranslateResult{
+		Valid:      false,
+		Conditions: []FilterCondition{},
+		FieldsUsed: []string{},
+	}
+
+	if query == "" || strings.TrimSpace(query) == "" {
+		result.Valid = true
+		result.LogsQL = ""
+		return result
+	}
+
+	pq, err := ParseLogchefQL(query)
+	if err != nil {
+		result.Error = convertParticipleError(err)
+		return result
+	}
+
+	ast := ConvertToAST(pq)
+
+	generator := NewLogsQLGenerator(schema)
+	logsql := generator.Generate(ast)
+
+	var selectClause string
+	if queryNode, ok := ast.(*QueryNode); ok && len(queryNode.Select) > 0 {
+		selectClause = generator.GenerateSelectClause(queryNode.Select)
+	}
+
+	fieldsUsed := extractFieldsFromAST(ast)
+	conditions := extractConditionsFromAST(ast)
+
+	result.Valid = true
+	result.LogsQL = logsql
+	result.SelectClause = selectClause
+	result.FieldsUsed = fieldsUsed
+	result.Conditions = conditions
+
+	return result
 }
 
 var (
@@ -407,4 +448,41 @@ func GetConditionsFromQuery(query string) []FilterCondition {
 		return nil
 	}
 	return result.Conditions
+}
+
+type LogsQLQueryBuildParams struct {
+	LogchefQL string
+	Schema    *Schema
+	StartTime time.Time
+	EndTime   time.Time
+	Limit     int
+}
+
+func BuildFullLogsQLQuery(params LogsQLQueryBuildParams) (string, error) {
+	translateResult := TranslateToLogsQL(params.LogchefQL, params.Schema)
+	if !translateResult.Valid {
+		if translateResult.Error != nil {
+			return "", translateResult.Error
+		}
+		return "", &ParseError{Code: ErrUnexpectedToken, Message: "invalid LogchefQL query"}
+	}
+
+	var query strings.Builder
+
+	if translateResult.LogsQL != "" {
+		query.WriteString(translateResult.LogsQL)
+		query.WriteString(" ")
+	}
+
+	startStr := params.StartTime.UTC().Format(time.RFC3339)
+	endStr := params.EndTime.UTC().Format(time.RFC3339)
+	query.WriteString(fmt.Sprintf("_time:[%s, %s]", startStr, endStr))
+
+	query.WriteString(" | sort by (_time desc)")
+
+	if params.Limit > 0 {
+		query.WriteString(fmt.Sprintf(" | limit %d", params.Limit))
+	}
+
+	return query.String(), nil
 }

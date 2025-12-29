@@ -3,6 +3,7 @@ package logchefql
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 var testSchema = &Schema{
@@ -1444,6 +1445,432 @@ func TestMapColumnFallback(t *testing.T) {
 		}
 		if !strings.Contains(sql, "`log_attributes`['level']") {
 			t.Errorf("expected level to use map column fallback, got:\n%s", sql)
+		}
+	})
+}
+
+// ============================================================================
+// LogsQL Generator Tests (VictoriaLogs support)
+// ============================================================================
+
+func TestTranslateToLogsQL(t *testing.T) {
+	t.Run("simple equals expression", func(t *testing.T) {
+		result := TranslateToLogsQL(`severity_text = "error"`, nil)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+
+		expected := "severity_text:=error"
+		if result.LogsQL != expected {
+			t.Errorf("expected LogsQL %q, got %q", expected, result.LogsQL)
+		}
+	})
+
+	t.Run("not equals expression", func(t *testing.T) {
+		result := TranslateToLogsQL(`level != "debug"`, nil)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+
+		expected := "level:!=debug"
+		if result.LogsQL != expected {
+			t.Errorf("expected LogsQL %q, got %q", expected, result.LogsQL)
+		}
+	})
+
+	t.Run("regex expression", func(t *testing.T) {
+		result := TranslateToLogsQL(`body ~ "error.*timeout"`, nil)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+
+		if !strings.Contains(result.LogsQL, "body:~") {
+			t.Errorf("expected regex operator in LogsQL, got %q", result.LogsQL)
+		}
+	})
+
+	t.Run("not regex expression", func(t *testing.T) {
+		result := TranslateToLogsQL(`body !~ "debug"`, nil)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+
+		if !strings.Contains(result.LogsQL, "body:!~") {
+			t.Errorf("expected not-regex operator in LogsQL, got %q", result.LogsQL)
+		}
+	})
+
+	t.Run("comparison operators", func(t *testing.T) {
+		tests := []struct {
+			query    string
+			contains string
+		}{
+			{`count > 10`, "count:>10"},
+			{`count < 100`, "count:<100"},
+			{`count >= 5`, "count:>=5"},
+			{`count <= 50`, "count:<=50"},
+		}
+
+		for _, tc := range tests {
+			result := TranslateToLogsQL(tc.query, nil)
+			if !result.Valid {
+				t.Errorf("query %q: expected valid result, got error: %v", tc.query, result.Error)
+				continue
+			}
+			if result.LogsQL != tc.contains {
+				t.Errorf("query %q: expected %q, got %q", tc.query, tc.contains, result.LogsQL)
+			}
+		}
+	})
+
+	t.Run("AND expression uses space", func(t *testing.T) {
+		result := TranslateToLogsQL(`level = "error" and service = "api"`, nil)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+
+		if !strings.Contains(result.LogsQL, "level:=error") {
+			t.Errorf("expected level condition in LogsQL, got %q", result.LogsQL)
+		}
+		if !strings.Contains(result.LogsQL, "service:=api") {
+			t.Errorf("expected service condition in LogsQL, got %q", result.LogsQL)
+		}
+		if strings.Contains(result.LogsQL, " and ") {
+			t.Errorf("AND should use space, not 'and' keyword, got %q", result.LogsQL)
+		}
+	})
+
+	t.Run("OR expression uses or keyword with parentheses", func(t *testing.T) {
+		result := TranslateToLogsQL(`level = "error" or level = "warn"`, nil)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+
+		if !strings.Contains(result.LogsQL, " or ") {
+			t.Errorf("expected 'or' keyword in LogsQL, got %q", result.LogsQL)
+		}
+		if !strings.HasPrefix(result.LogsQL, "(") || !strings.HasSuffix(result.LogsQL, ")") {
+			t.Errorf("OR expression should be wrapped in parentheses, got %q", result.LogsQL)
+		}
+	})
+
+	t.Run("nested field access", func(t *testing.T) {
+		result := TranslateToLogsQL(`log.level = "error"`, nil)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+
+		if !strings.Contains(result.LogsQL, "log.level:=") {
+			t.Errorf("expected nested field in LogsQL, got %q", result.LogsQL)
+		}
+	})
+
+	t.Run("value with special characters is quoted", func(t *testing.T) {
+		result := TranslateToLogsQL(`message = "hello world"`, nil)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+
+		if !strings.Contains(result.LogsQL, "\"hello world\"") {
+			t.Errorf("expected quoted value with spaces in LogsQL, got %q", result.LogsQL)
+		}
+	})
+
+	t.Run("empty query returns empty LogsQL", func(t *testing.T) {
+		result := TranslateToLogsQL("", nil)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result for empty query")
+		}
+		if result.LogsQL != "" {
+			t.Errorf("expected empty LogsQL, got %q", result.LogsQL)
+		}
+	})
+
+	t.Run("whitespace only query returns empty LogsQL", func(t *testing.T) {
+		result := TranslateToLogsQL("   ", nil)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result for whitespace query")
+		}
+		if result.LogsQL != "" {
+			t.Errorf("expected empty LogsQL, got %q", result.LogsQL)
+		}
+	})
+
+	t.Run("complex query with mixed operators", func(t *testing.T) {
+		result := TranslateToLogsQL(`(level = "error" or level = "warn") and service = "api"`, nil)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+
+		if !strings.Contains(result.LogsQL, "level:=error") {
+			t.Errorf("expected level=error in LogsQL, got %q", result.LogsQL)
+		}
+		if !strings.Contains(result.LogsQL, "level:=warn") {
+			t.Errorf("expected level=warn in LogsQL, got %q", result.LogsQL)
+		}
+		if !strings.Contains(result.LogsQL, "service:=api") {
+			t.Errorf("expected service=api in LogsQL, got %q", result.LogsQL)
+		}
+		if !strings.Contains(result.LogsQL, " or ") {
+			t.Errorf("expected 'or' in LogsQL, got %q", result.LogsQL)
+		}
+	})
+
+	t.Run("extracts fields used", func(t *testing.T) {
+		result := TranslateToLogsQL(`level = "error" and service = "api"`, nil)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+
+		if len(result.FieldsUsed) != 2 {
+			t.Errorf("expected 2 fields used, got %d", len(result.FieldsUsed))
+		}
+
+		fieldsMap := make(map[string]bool)
+		for _, f := range result.FieldsUsed {
+			fieldsMap[f] = true
+		}
+
+		if !fieldsMap["level"] {
+			t.Error("expected level in fields used")
+		}
+		if !fieldsMap["service"] {
+			t.Error("expected service in fields used")
+		}
+	})
+
+	t.Run("extracts conditions", func(t *testing.T) {
+		result := TranslateToLogsQL(`level = "error" and body ~ "timeout"`, nil)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+
+		if len(result.Conditions) != 2 {
+			t.Errorf("expected 2 conditions, got %d", len(result.Conditions))
+		}
+
+		if result.Conditions[0].Field != "level" {
+			t.Errorf("expected field 'level', got %s", result.Conditions[0].Field)
+		}
+		if result.Conditions[1].IsRegex != true {
+			t.Error("expected second condition to be regex")
+		}
+	})
+
+	t.Run("invalid query returns error", func(t *testing.T) {
+		result := TranslateToLogsQL(`level = `, nil)
+
+		if result.Valid {
+			t.Error("expected invalid result for incomplete query")
+		}
+		if result.Error == nil {
+			t.Error("expected error for invalid query")
+		}
+	})
+}
+
+func TestLogsQLAllOperators(t *testing.T) {
+	tests := []struct {
+		query    string
+		contains string
+	}{
+		{`field = "value"`, "field:=value"},
+		{`field != "value"`, "field:!=value"},
+		{`field ~ "pattern"`, "field:~"},
+		{`field !~ "pattern"`, "field:!~"},
+		{`field > 10`, "field:>10"},
+		{`field < 10`, "field:<10"},
+		{`field >= 10`, "field:>=10"},
+		{`field <= 10`, "field:<=10"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.query, func(t *testing.T) {
+			result := TranslateToLogsQL(tc.query, nil)
+			if !result.Valid {
+				t.Fatalf("expected valid result, got error: %v", result.Error)
+			}
+			if !strings.Contains(result.LogsQL, tc.contains) {
+				t.Errorf("expected LogsQL to contain %q, got %q", tc.contains, result.LogsQL)
+			}
+		})
+	}
+}
+
+func TestBuildFullLogsQLQuery(t *testing.T) {
+	startTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	endTime := time.Date(2025, 1, 1, 23, 59, 59, 0, time.UTC)
+
+	t.Run("builds complete query with filter", func(t *testing.T) {
+		params := LogsQLQueryBuildParams{
+			LogchefQL: `level = "error"`,
+			StartTime: startTime,
+			EndTime:   endTime,
+			Limit:     100,
+		}
+
+		query, err := BuildFullLogsQLQuery(params)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+
+		if !strings.Contains(query, "level:=error") {
+			t.Error("expected filter condition in query")
+		}
+		if !strings.Contains(query, "_time:[") {
+			t.Error("expected time range in query")
+		}
+		if !strings.Contains(query, "2025-01-01T00:00:00Z") {
+			t.Error("expected start time in query")
+		}
+		if !strings.Contains(query, "2025-01-01T23:59:59Z") {
+			t.Error("expected end time in query")
+		}
+		if !strings.Contains(query, "| sort by (_time desc)") {
+			t.Error("expected sort clause in query")
+		}
+		if !strings.Contains(query, "| limit 100") {
+			t.Error("expected limit clause in query")
+		}
+	})
+
+	t.Run("empty LogchefQL builds query with only time range", func(t *testing.T) {
+		params := LogsQLQueryBuildParams{
+			LogchefQL: "",
+			StartTime: startTime,
+			EndTime:   endTime,
+			Limit:     50,
+		}
+
+		query, err := BuildFullLogsQLQuery(params)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+
+		if !strings.HasPrefix(query, "_time:[") {
+			t.Errorf("expected query to start with time range, got %q", query)
+		}
+		if !strings.Contains(query, "| limit 50") {
+			t.Error("expected limit clause in query")
+		}
+	})
+
+	t.Run("no limit when limit is zero", func(t *testing.T) {
+		params := LogsQLQueryBuildParams{
+			LogchefQL: `service = "api"`,
+			StartTime: startTime,
+			EndTime:   endTime,
+			Limit:     0,
+		}
+
+		query, err := BuildFullLogsQLQuery(params)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+
+		if strings.Contains(query, "| limit") {
+			t.Error("expected no limit clause when limit is 0")
+		}
+	})
+
+	t.Run("complex filter query", func(t *testing.T) {
+		params := LogsQLQueryBuildParams{
+			LogchefQL: `(level = "error" or level = "warn") and service = "api"`,
+			StartTime: startTime,
+			EndTime:   endTime,
+			Limit:     100,
+		}
+
+		query, err := BuildFullLogsQLQuery(params)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+
+		if !strings.Contains(query, "level:=error") {
+			t.Error("expected level=error in query")
+		}
+		if !strings.Contains(query, "service:=api") {
+			t.Error("expected service=api in query")
+		}
+		if !strings.Contains(query, "_time:[") {
+			t.Error("expected time range in query")
+		}
+	})
+
+	t.Run("invalid LogchefQL returns error", func(t *testing.T) {
+		params := LogsQLQueryBuildParams{
+			LogchefQL: `level = `,
+			StartTime: startTime,
+			EndTime:   endTime,
+			Limit:     100,
+		}
+
+		_, err := BuildFullLogsQLQuery(params)
+		if err == nil {
+			t.Error("expected error for invalid LogchefQL")
+		}
+	})
+
+	t.Run("query with regex operator", func(t *testing.T) {
+		params := LogsQLQueryBuildParams{
+			LogchefQL: `body ~ "error.*timeout"`,
+			StartTime: startTime,
+			EndTime:   endTime,
+			Limit:     100,
+		}
+
+		query, err := BuildFullLogsQLQuery(params)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+
+		if !strings.Contains(query, "body:~") {
+			t.Error("expected regex operator in query")
+		}
+	})
+}
+
+func TestLogsQLSelectClause(t *testing.T) {
+	t.Run("pipe operator generates select clause", func(t *testing.T) {
+		result := TranslateToLogsQL(`level = "error" | timestamp service body`, nil)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+
+		if result.SelectClause == "" {
+			t.Error("expected SelectClause to be set")
+		}
+
+		for _, field := range []string{"timestamp", "service", "body"} {
+			if !strings.Contains(result.SelectClause, field) {
+				t.Errorf("expected %s in SelectClause, got %q", field, result.SelectClause)
+			}
+		}
+	})
+
+	t.Run("query without pipe has no select clause", func(t *testing.T) {
+		result := TranslateToLogsQL(`level = "error"`, nil)
+
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+
+		if result.SelectClause != "" {
+			t.Errorf("expected empty SelectClause, got %q", result.SelectClause)
 		}
 	})
 }

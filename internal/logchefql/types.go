@@ -153,7 +153,8 @@ type FilterCondition struct {
 
 // TranslateResult represents the result of translating a LogchefQL query
 type TranslateResult struct {
-	SQL          string            `json:"sql"`                     // WHERE clause conditions only
+	SQL          string            `json:"sql"`                     // WHERE clause conditions only (ClickHouse)
+	LogsQL       string            `json:"logsql,omitempty"`        // VictoriaLogs LogsQL filter expression
 	SelectClause string            `json:"select_clause,omitempty"` // Custom SELECT clause if pipe operator used
 	Valid        bool              `json:"valid"`
 	Error        *ParseError       `json:"error,omitempty"`

@@ -2,14 +2,134 @@
 
 **Branch**: `vl`  
 **Date**: December 28, 2025  
-**Status**: Phase 1 Complete  
+**Status**: Phase 3 Complete  
 **Reference**: See `spec.md` for full specification
 
 ---
 
 ## Executive Summary
 
-Phase 1 (Backend Abstraction) of the VictoriaLogs integration is complete. The foundation is in place for adding VictoriaLogs as a second backend alongside ClickHouse. All existing ClickHouse functionality continues to work unchanged.
+Phase 3 (LogsQL Generator) of the VictoriaLogs integration is complete. LogChefQL queries can now be translated to VictoriaLogs LogsQL syntax. Combined with Phase 1 (Backend Abstraction) and Phase 2 (VictoriaLogs HTTP Client), the core backend infrastructure for VictoriaLogs support is now complete.
+
+---
+
+## Phase 3 Completed Work
+
+### New Files Created
+
+| File | Purpose |
+|------|---------|
+| `internal/logchefql/logsql_generator.go` | LogsQL generator implementing operator translation from LogChefQL AST to VictoriaLogs LogsQL syntax |
+
+### Modified Files
+
+| File | Changes |
+|------|---------|
+| `internal/logchefql/types.go` | Added `LogsQL` field to `TranslateResult` struct |
+| `internal/logchefql/logchefql.go` | Added `TranslateToLogsQL()` function and `BuildFullLogsQLQuery()` function with `LogsQLQueryBuildParams` struct |
+
+### LogsQL Generator Implementation
+
+The generator translates LogChefQL AST to VictoriaLogs LogsQL:
+
+| LogChefQL | LogsQL |
+|-----------|--------|
+| `field="value"` | `field:=value` |
+| `field!="value"` | `field:!=value` |
+| `field~"pattern"` | `field:~"pattern"` |
+| `field!~"pattern"` | `field:!~"pattern"` |
+| `field>"value"` | `field:>value` |
+| `field<"value"` | `field:<value` |
+| `field>="value"` | `field:>=value` |
+| `field<="value"` | `field:<=value` |
+| `a AND b` | `a b` (space = AND) |
+| `a OR b` | `(a or b)` |
+
+### Key Functions
+
+```go
+// Translate LogChefQL to LogsQL
+func TranslateToLogsQL(query string, schema *Schema) *TranslateResult
+
+// Build complete VictoriaLogs query with time range
+func BuildFullLogsQLQuery(params LogsQLQueryBuildParams) (string, error)
+
+// Parameters for building full LogsQL query
+type LogsQLQueryBuildParams struct {
+    LogchefQL string
+    Schema    *Schema
+    StartTime time.Time
+    EndTime   time.Time
+    Limit     int
+}
+```
+
+### Example Translation
+
+```go
+// Input LogChefQL
+level="error" AND service~"api.*"
+
+// Output LogsQL
+level:=error service:~"api.*"
+
+// Full query with time range
+level:=error service:~"api.*" _time:[2025-01-01T00:00:00Z, 2025-01-02T00:00:00Z] | sort by (_time desc) | limit 100
+```
+
+### Validation
+
+- `go build ./...` ✓
+- `go test ./internal/logchefql/...` ✓ (all 80+ tests pass)
+- `go test ./...` ✓ (all tests pass)
+
+---
+
+## Phase 2 Completed Work
+
+### New Files Created
+
+| File | Purpose |
+|------|---------|
+| `internal/backends/victorialogs/client.go` | HTTP client implementing `BackendClient` interface - handles Query, GetTableInfo, GetHistogramData, GetSurroundingLogs, GetFieldDistinctValues, Ping |
+| `internal/backends/victorialogs/manager.go` | Connection manager implementing `BackendManager` interface - handles connection pooling, health checks, source lifecycle |
+| `internal/backends/victorialogs/response.go` | Response parsing utilities - JSONL parsing, hits response, field names/values conversion |
+
+### Modified Files
+
+| File | Changes |
+|------|---------|
+| `internal/backends/registry.go` | Added `RegisterVictoriaLogsManager()` convenience method |
+| `internal/app/app.go` | Added `VictoriaLogs` manager and `BackendRegistry` fields, initializes both managers at startup, uses registry for source loading |
+
+### VictoriaLogs Client Implementation
+
+The client implements all `BackendClient` interface methods:
+
+1. **Query()** - Executes LogsQL queries via `/select/logsql/query` endpoint, parses JSONL response
+2. **GetTableInfo()** - Discovers schema via `/select/logsql/field_names` endpoint (VictoriaLogs is schemaless)
+3. **GetHistogramData()** - Retrieves histogram data via `/select/logsql/hits` endpoint with configurable step/grouping
+4. **GetSurroundingLogs()** - Implements log context using time-based LogsQL queries with `_time:` filters
+5. **GetFieldDistinctValues()** - Gets field values via `/select/logsql/field_values` endpoint
+6. **GetAllFilterableFieldValues()** - Iterates discovered fields to get values for each
+7. **Ping()** - Simple connectivity check with minimal query
+
+### Manager Implementation
+
+The manager mirrors ClickHouse manager functionality:
+- Connection pooling per source
+- Background health checks with configurable interval
+- Automatic reconnection on failures
+- Temporary client creation for validation
+
+### Key Implementation Details
+
+1. **Multi-tenancy**: Supports `AccountID` and `ProjectID` headers for VictoriaLogs multi-tenant deployments
+2. **Time handling**: Uses RFC3339 format for timestamps, handles VictoriaLogs' `[start, end)` exclusive end semantics
+3. **Response parsing**: Handles both JSON and JSONL response formats from different endpoints
+4. **Schemaless support**: Dynamically infers column types from actual data
+
+---
 
 ---
 
@@ -67,109 +187,6 @@ Phase 1 (Backend Abstraction) of the VictoriaLogs integration is complete. The f
 ---
 
 ## Remaining Phases
-
-### Phase 2: VictoriaLogs HTTP Client (spec.md section 6.2)
-
-**Goal**: Implement VictoriaLogs backend client
-
-**Files to Create**:
-
-```
-internal/backends/victorialogs/
-├── client.go        # HTTP client implementing BackendClient
-├── manager.go       # Connection management implementing BackendManager  
-├── response.go      # JSONL/JSON response parsing
-└── query_builder.go # LogsQL query construction helpers
-```
-
-**Key Implementation Tasks**:
-
-1. **HTTP Client** (`client.go`):
-   ```go
-   type Client struct {
-       httpClient *http.Client
-       baseURL    string
-       accountID  string  // Multi-tenant header
-       projectID  string  // Multi-tenant header
-       logger     *slog.Logger
-   }
-   ```
-   
-   Implement all `BackendClient` methods using VictoriaLogs HTTP API:
-   - `Query()` → `POST /select/logsql/query`
-   - `GetTableInfo()` → `GET /select/logsql/field_names` (VL is schemaless)
-   - `GetHistogramData()` → `GET /select/logsql/hits`
-   - `GetSurroundingLogs()` → Two queries with time filters (no native API)
-   - `GetFieldDistinctValues()` → `GET /select/logsql/field_values`
-   - `Ping()` → Simple query to verify connectivity
-
-2. **Response Parsing** (`response.go`):
-   - Parse JSONL streaming responses from VL query endpoint
-   - Convert to `models.QueryResult` format
-   - Extract stats from response headers
-
-3. **Manager** (`manager.go`):
-   - Implement `BackendManager` interface
-   - Simple connection management (HTTP doesn't need pooling like native protocol)
-   - Health checking via HTTP
-
-4. **Register with BackendRegistry**:
-   - Update `internal/app/app.go` to create VictoriaLogs manager
-   - Register with `BackendRegistry.RegisterManager()`
-
-**VictoriaLogs API Reference**:
-- Query: `GET/POST /select/logsql/query?query=<logsql>&start=<time>&end=<time>&limit=<n>`
-- Histogram: `GET /select/logsql/hits?query=<logsql>&start=<time>&end=<time>&step=<duration>`
-- Field names: `GET /select/logsql/field_names?query=<logsql>&start=<time>&end=<time>`
-- Field values: `GET /select/logsql/field_values?query=<logsql>&field=<name>&start=<time>&end=<time>`
-
----
-
-### Phase 3: LogsQL Generator (spec.md section 6.3)
-
-**Goal**: Translate LogChefQL to LogsQL
-
-**Files to Create**:
-
-```
-internal/logchefql/
-└── logsql_generator.go  # NEW - generates LogsQL from AST
-```
-
-**Key Implementation Tasks**:
-
-1. **Create LogsQL Generator**:
-   ```go
-   type LogsQLGenerator struct {
-       schema *Schema
-   }
-   
-   func (g *LogsQLGenerator) Generate(node ASTNode) string
-   ```
-
-2. **Operator Mapping** (from spec.md):
-
-   | LogChefQL | LogsQL |
-   |-----------|--------|
-   | `field="value"` | `field:=value` |
-   | `field!="value"` | `field:!=value` |
-   | `field~"pattern"` | `field:~"pattern"` |
-   | `field!~"pattern"` | `field:!~"pattern"` |
-   | `field>"value"` | `field:>value` |
-   | `a AND b` | `a b` (space = AND) |
-   | `a OR b` | `(a or b)` |
-
-3. **Add Translation Function**:
-   ```go
-   func TranslateToLogsQL(query string, schema *Schema) *TranslateResult
-   func BuildFullLogsQLQuery(params QueryBuildParams) (string, error)
-   ```
-
-4. **Support Raw LogsQL Mode**:
-   - Update `internal/logchefql/detect.go` to detect LogsQL
-   - Pass through raw LogsQL queries for VictoriaLogs sources
-
----
 
 ### Phase 4: API & Frontend Updates (spec.md section 6.4)
 
@@ -317,13 +334,13 @@ type BackendManager interface {
 
 ## Dependencies
 
-No new Go dependencies added in Phase 1. Phase 2 will likely only need standard library (`net/http`).
+No new Go dependencies added. Phase 2 uses only standard library (`net/http`).
 
 ---
 
 ## Migration Notes
 
-After deploying Phase 1:
+After deploying:
 1. Run database migrations: `just migrate-up` or equivalent
 2. Existing sources automatically get `backend_type = 'clickhouse'`
 3. No user action required - full backward compatibility
@@ -334,18 +351,19 @@ After deploying Phase 1:
 
 | Phase | Description | Estimate |
 |-------|-------------|----------|
-| Phase 2 | VictoriaLogs Client | 2 weeks |
-| Phase 3 | LogsQL Generator | 1-2 weeks |
+| ~~Phase 1~~ | ~~Backend Abstraction~~ | ~~2-3 weeks~~ ✓ |
+| ~~Phase 2~~ | ~~VictoriaLogs Client~~ | ~~2 weeks~~ ✓ |
+| ~~Phase 3~~ | ~~LogsQL Generator~~ | ~~1-2 weeks~~ ✓ |
 | Phase 4 | API & Frontend | 2 weeks |
 | Phase 5 | Advanced Features | 2 weeks |
 | Testing | Integration testing, docs | 1-2 weeks |
-| **Total Remaining** | | **8-10 weeks** |
+| **Total Remaining** | | **4-6 weeks** |
 
 ---
 
-## Questions for Next Agent
+## Questions for Next Phase
 
-1. Should VictoriaLogs manager maintain persistent HTTP connections or create per-request?
-2. How should we handle VictoriaLogs' schemaless nature in the UI? (fields discovered dynamically)
-3. Should we support VictoriaLogs' stream labels (`{app="nginx"}`) as a first-class concept?
-4. What's the priority for live tailing feature?
+1. How should we handle VictoriaLogs' schemaless nature in the UI? (fields discovered dynamically)
+2. Should we support VictoriaLogs' stream labels (`{app="nginx"}`) as a first-class concept?
+3. What's the priority for live tailing feature?
+4. Should raw LogsQL detection be added to `detect.go` (to pass through user-typed LogsQL), or should we always translate via LogChefQL?
