@@ -88,11 +88,37 @@ const navigateToCollections = () => {
 
 const explorerTo = computed(() => {
   const team = teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : undefined;
+  const source = exploreStore.sourceId ? exploreStore.sourceId.toString() : undefined;
+  const query: Record<string, string> = {};
+  if (team) query.team = team;
+  if (source) query.source = source;
   return {
     path: "/logs/explore",
-    query: {
-      ...(team ? { team } : {}),
-    },
+    query,
+  };
+});
+
+const alertsTo = computed(() => {
+  const team = teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : undefined;
+  const source = exploreStore.sourceId ? exploreStore.sourceId.toString() : undefined;
+  const query: Record<string, string> = {};
+  if (team) query.team = team;
+  if (source) query.source = source;
+  return {
+    path: "/logs/alerts",
+    query,
+  };
+});
+
+const collectionsTo = computed(() => {
+  const team = teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : undefined;
+  const source = exploreStore.sourceId ? exploreStore.sourceId.toString() : undefined;
+  const query: Record<string, string> = {};
+  if (team) query.team = team;
+  if (source) query.source = source;
+  return {
+    path: "/logs/saved",
+    query,
   };
 });
 
@@ -266,7 +292,7 @@ const navItems = [
                       </template>
                       <!-- Regular router links for other items -->
                       <template v-else>
-                        <router-link :to="item.url === '/logs/explore' ? explorerTo : item.url" class="flex items-center" active-class="font-medium">
+                        <router-link :to="item.url === '/logs/explore' ? explorerTo : item.url === '/logs/alerts' ? alertsTo : item.url" class="flex items-center" active-class="font-medium">
                           <component :is="item.icon" class="size-5" :class="sidebarOpen ? 'mr-3 ml-1' : 'mx-auto'" />
                           <span v-if="sidebarOpen">{{ item.title }}</span>
                         </router-link>

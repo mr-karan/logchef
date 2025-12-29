@@ -1,6 +1,5 @@
 import { apiClient } from "./apiUtils";
 import type { Source } from "./sources";
-import type { APIResponse } from "./types";
 
 export interface Team {
   id: number;
@@ -56,28 +55,28 @@ export interface TeamWithMemberCount extends Team {
 }
 
 export const teamsApi = {
-  listUserTeams: () => apiClient.get<APIResponse<UserTeamMembership[]>>("/me/teams"),
-  listAllTeams: () => apiClient.get<APIResponse<TeamWithMemberCount[]>>("/admin/teams"),
-  getTeam: (id: number) => apiClient.get<APIResponse<Team>>(`/teams/${id}`),
-  createTeam: (data: CreateTeamRequest) => apiClient.post<APIResponse<Team>>("/admin/teams", data),
+  listUserTeams: () => apiClient.get<UserTeamMembership[]>("/me/teams"),
+  listAllTeams: () => apiClient.get<TeamWithMemberCount[]>("/admin/teams"),
+  getTeam: (id: number) => apiClient.get<Team & { member_count?: number }>(`/teams/${id}`),
+  createTeam: (data: CreateTeamRequest) => apiClient.post<Team>("/admin/teams", data),
   updateTeam: (id: number, data: UpdateTeamRequest) =>
-    apiClient.put<APIResponse<Team>>(`/teams/${id}`, data),
+    apiClient.put<Team>(`/teams/${id}`, data),
   deleteTeam: (id: number) =>
-    apiClient.delete<APIResponse<{ message: string }>>(`/admin/teams/${id}`),
+    apiClient.delete<{ message: string }>(`/admin/teams/${id}`),
 
   // Team members
   listTeamMembers: (teamId: number) =>
-    apiClient.get<APIResponse<TeamMember[]>>(`/teams/${teamId}/members`),
+    apiClient.get<TeamMember[]>(`/teams/${teamId}/members`),
   addTeamMember: (teamId: number, data: AddTeamMemberRequest) =>
-    apiClient.post<APIResponse<TeamMember>>(`/teams/${teamId}/members`, data),
+    apiClient.post<TeamMember>(`/teams/${teamId}/members`, data),
   removeTeamMember: (teamId: number, userId: number) =>
-    apiClient.delete<APIResponse<{ message: string }>>(`/teams/${teamId}/members/${userId}`),
+    apiClient.delete<{ message: string }>(`/teams/${teamId}/members/${userId}`),
 
   // Team sources
   listTeamSources: (teamId: number) =>
-    apiClient.get<APIResponse<Source[]>>(`/teams/${teamId}/sources`),
+    apiClient.get<Source[]>(`/teams/${teamId}/sources`),
   addTeamSource: (teamId: number, sourceId: number) =>
-    apiClient.post<APIResponse<Source>>(`/teams/${teamId}/sources`, { source_id: sourceId }),
+    apiClient.post<Source>(`/teams/${teamId}/sources`, { source_id: sourceId }),
   removeTeamSource: (teamId: number, sourceId: number) =>
-    apiClient.delete<APIResponse<{ message: string }>>(`/teams/${teamId}/sources/${sourceId}`)
+    apiClient.delete<{ message: string }>(`/teams/${teamId}/sources/${sourceId}`)
 };

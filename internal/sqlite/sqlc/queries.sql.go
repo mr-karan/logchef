@@ -566,6 +566,24 @@ func (q *Queries) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID i
 	return i, err
 }
 
+const getQueryBookmarkStatus = `-- name: GetQueryBookmarkStatus :one
+SELECT is_bookmarked FROM team_queries WHERE id = ? AND team_id = ? AND source_id = ?
+`
+
+type GetQueryBookmarkStatusParams struct {
+	ID       int64 `json:"id"`
+	TeamID   int64 `json:"team_id"`
+	SourceID int64 `json:"source_id"`
+}
+
+// Get the current bookmark status of a query
+func (q *Queries) GetQueryBookmarkStatus(ctx context.Context, arg GetQueryBookmarkStatusParams) (bool, error) {
+	row := q.queryRow(ctx, q.getQueryBookmarkStatusStmt, getQueryBookmarkStatus, arg.ID, arg.TeamID, arg.SourceID)
+	var is_bookmarked bool
+	err := row.Scan(&is_bookmarked)
+	return is_bookmarked, err
+}
+
 const getSession = `-- name: GetSession :one
 SELECT id, user_id, expires_at, created_at FROM sessions WHERE id = ?
 `
@@ -724,7 +742,7 @@ func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (T
 }
 
 const getTeamSourceQuery = `-- name: GetTeamSourceQuery :one
-SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at FROM team_queries
+SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at, is_bookmarked FROM team_queries
 WHERE id = ? AND team_id = ? AND source_id = ?
 `
 
@@ -748,6 +766,7 @@ func (q *Queries) GetTeamSourceQuery(ctx context.Context, arg GetTeamSourceQuery
 		&i.QueryContent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsBookmarked,
 	)
 	return i, err
 }
@@ -1027,7 +1046,7 @@ func (q *Queries) ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsB
 }
 
 const listQueriesByTeamAndSource = `-- name: ListQueriesByTeamAndSource :many
-SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY created_at DESC
+SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at, is_bookmarked FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY is_bookmarked DESC, updated_at DESC
 `
 
 type ListQueriesByTeamAndSourceParams struct {
@@ -1035,7 +1054,7 @@ type ListQueriesByTeamAndSourceParams struct {
 	SourceID int64 `json:"source_id"`
 }
 
-// List all queries for a specific team and source
+// List all queries for a specific team and source (bookmarked first, then by updated_at)
 func (q *Queries) ListQueriesByTeamAndSource(ctx context.Context, arg ListQueriesByTeamAndSourceParams) ([]TeamQuery, error) {
 	rows, err := q.query(ctx, q.listQueriesByTeamAndSourceStmt, listQueriesByTeamAndSource, arg.TeamID, arg.SourceID)
 	if err != nil {
@@ -1055,6 +1074,7 @@ func (q *Queries) ListQueriesByTeamAndSource(ctx context.Context, arg ListQuerie
 			&i.QueryContent,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.IsBookmarked,
 		); err != nil {
 			return nil, err
 		}
@@ -1682,6 +1702,25 @@ func (q *Queries) TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (i
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const toggleQueryBookmark = `-- name: ToggleQueryBookmark :exec
+UPDATE team_queries
+SET is_bookmarked = NOT is_bookmarked,
+    updated_at = datetime('now')
+WHERE id = ? AND team_id = ? AND source_id = ?
+`
+
+type ToggleQueryBookmarkParams struct {
+	ID       int64 `json:"id"`
+	TeamID   int64 `json:"team_id"`
+	SourceID int64 `json:"source_id"`
+}
+
+// Toggle the bookmark status of a query
+func (q *Queries) ToggleQueryBookmark(ctx context.Context, arg ToggleQueryBookmarkParams) error {
+	_, err := q.exec(ctx, q.toggleQueryBookmarkStmt, toggleQueryBookmark, arg.ID, arg.TeamID, arg.SourceID)
+	return err
 }
 
 const updateAPITokenLastUsed = `-- name: UpdateAPITokenLastUsed :exec

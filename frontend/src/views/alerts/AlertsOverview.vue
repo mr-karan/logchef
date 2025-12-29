@@ -46,8 +46,7 @@ import ErrorAlert from "@/components/ui/ErrorAlert.vue";
 import TeamSourceSelector from "@/views/explore/components/TeamSourceSelector.vue";
 import { useAlertsStore } from "@/stores/alerts";
 import { useContextStore } from "@/stores/context";
-import { useTeamsStore } from "@/stores/teams";
-import { useSourcesStore } from "@/stores/sources";
+import { useContextSync } from "@/composables/useContextSync";
 import type { Alert } from "@/api/alerts";
 
 const router = useRouter();
@@ -55,8 +54,8 @@ const route = useRoute();
 
 const alertsStore = useAlertsStore();
 const contextStore = useContextStore();
-const teamsStore = useTeamsStore();
-const sourcesStore = useSourcesStore();
+
+const { initialize: initializeContext } = useContextSync({ basePath: '/logs/alerts' });
 
 const { alerts } = storeToRefs(alertsStore);
 
@@ -72,13 +71,14 @@ const isLoadingAlerts = computed(() => {
   return alertsStore.isLoadingOperation(`fetchAlerts-${currentTeamId.value}-${currentSourceId.value}`);
 });
 
-const loadError = computed(() => {
+const loadError = computed((): { message: string; operation?: string } | null => {
   const error = alertsStore.error;
   if (!error) return null;
-  if (typeof error === "object" && "operation" in error) {
-    return error;
-  }
-  return null;
+  // Convert APIErrorResponse to the format expected by ErrorAlert
+  return { 
+    message: error.message,
+    operation: undefined 
+  };
 });
 
 const emptyStateMessage = computed(() => {
@@ -145,12 +145,12 @@ function refreshAlerts() {
   retryLoad();
 }
 
-function mapSeverityVariant(severity: Alert["severity"]) {
+function mapSeverityVariant(severity: Alert["severity"]): "destructive" | "outline" | "secondary" {
   switch (severity) {
     case "critical":
       return "destructive";
     case "warning":
-      return "warning";
+      return "outline";
     default:
       return "secondary";
   }
@@ -208,15 +208,6 @@ function formatRelativeTime(dateStr: string | null | undefined): string {
   return formatDate(dateStr);
 }
 
-async function ensureDataLoaded() {
-  if (!teamsStore.userTeams.length) {
-    await teamsStore.loadUserTeams();
-  }
-  if (contextStore.teamId && !sourcesStore.teamSources.length) {
-    await sourcesStore.loadTeamSources(contextStore.teamId);
-  }
-}
-
 async function handleContextChange(teamId: number | null, sourceId: number | null) {
   if (!teamId) {
     alertsStore.clearAlerts();
@@ -244,14 +235,7 @@ watch(
 );
 
 onMounted(async () => {
-  await ensureDataLoaded();
-  if (!contextStore.teamId && teamsStore.teams.length > 0) {
-    router.replace({
-      name: route.name ? (route.name as string) : "AlertsOverview",
-      params: route.params,
-      query: { ...route.query, team: String(teamsStore.teams[0].id) },
-    });
-  }
+  await initializeContext();
 });
 </script>
 

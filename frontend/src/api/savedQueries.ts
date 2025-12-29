@@ -1,19 +1,17 @@
 import { apiClient } from "./apiUtils";
 
-/**
- * Saved query content structure
- */
 export interface SavedQueryContent {
   version: number;
   sourceId: number | string;
   timeRange: {
-    absolute: {
+    relative?: string;
+    absolute?: {
       start: number;
       end: number;
     };
   } | null;
   limit: number;
-  content: string; // The content of the query (either LogchefQL or SQL)
+  content: string;
 }
 
 /**
@@ -27,8 +25,17 @@ export interface SavedTeamQuery {
   description: string;
   query_type: string;
   query_content: string; // JSON string of SavedQueryContent
+  is_bookmarked: boolean;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Toggle bookmark response
+ */
+export interface ToggleBookmarkResponse {
+  is_bookmarked: boolean;
+  message: string;
 }
 
 /**
@@ -77,6 +84,11 @@ export const savedQueriesApi = {
   deleteTeamSourceQuery: (teamId: number, sourceId: number, collectionId: string) =>
     apiClient.delete<{ success: boolean }>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}`),
 
-  // For retrieving user teams
+  toggleBookmark: (teamId: number, sourceId: number, collectionId: number) =>
+    apiClient.patch<ToggleBookmarkResponse>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}/bookmark`),
+
+  resolveQuery: (teamId: number, sourceId: number, collectionId: number) =>
+    apiClient.get<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}/resolve`),
+
   getUserTeams: () => apiClient.get<Team[]>("/me/teams")
 };

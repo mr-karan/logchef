@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	// Import the SQLite driver
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // Import the SQLite driver
+
 	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )

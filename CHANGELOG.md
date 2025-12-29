@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Bookmark Favorite Queries** - Star saved queries for quick access ([#60](https://github.com/mr-karan/logchef/pull/60))
+  - Bookmarked queries appear at top of collections dropdown
+  - Copy shareable URL for any saved query
+  - Direct link format: `/logs/collection/:teamId/:sourceId/:collectionId`
+
+### Changed
+- **LogChefQL Parser Rewrite** - Replaced hand-written tokenizer with grammar-based parser using [participle](https://github.com/alecthomas/participle)
+  - Better error messages with position-aware diagnostics
+  - More maintainable and extensible grammar definitions
+  - Improved query type detection (LogChefQL vs SQL)
+- **Frontend Tooling Migration** - Switched from pnpm + Vite to Bun + rolldown-vite
+  - Build time: ~2.3s (was >55s)
+  - Dev server start: ~1s (was ~3s)
+  - Install time: ~8s (was ~25s)
+- **Frontend State Management** - Refactored stores and composables
+  - Centralized URL state synchronization
+  - Cleaner explore store with better state transitions
+  - Improved context and teams store initialization
+
+### Fixed
+- Proper context propagation throughout backend (contextcheck compliance)
+- Reduced cyclomatic complexity in high-complexity functions
+- **Saved Query Navigation** - Switching between saved queries no longer shows stale content
+- **Saved Query Validation** - Backend now accepts relative-only time ranges (was: "absolute start time must be positive")
+- **Cross-Page Context** - Team/source selection preserved when navigating between Explorer, Collections, and Alerts
+- **Sidebar Navigation** - Links now include full context params (team + source)
+
+### Contributors
+- [@rhnvrm](https://github.com/rhnvrm) - Bookmark favorite queries feature ([#60](https://github.com/mr-karan/logchef/pull/60))
+
 ## [1.0.0] - 2025-12-22
 
 The 1.0 release marks Logchef as production-ready. Eight months of development brought alerting, a proper backend query language, field exploration, and many UX improvements.

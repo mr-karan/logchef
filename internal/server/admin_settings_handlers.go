@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -14,15 +15,15 @@ import (
 
 // SystemSettingResponse represents a setting in API responses.
 type SystemSettingResponse struct {
-	Key          string `json:"key"`
-	Value        string `json:"value"`
-	ValueType    string `json:"value_type"`
-	Category     string `json:"category"`
-	Description  string `json:"description,omitempty"`
-	IsSensitive  bool   `json:"is_sensitive"`
-	MaskedValue  string `json:"masked_value,omitempty"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	Key         string `json:"key"`
+	Value       string `json:"value"`
+	ValueType   string `json:"value_type"`
+	Category    string `json:"category"`
+	Description string `json:"description,omitempty"`
+	IsSensitive bool   `json:"is_sensitive"`
+	MaskedValue string `json:"masked_value,omitempty"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 // UpdateSettingRequest represents a request to update a setting.
@@ -51,9 +52,9 @@ func (s *Server) handleListSettings(c *fiber.Ctx) error {
 
 	// Group settings by category
 	categoriesMap := make(map[string][]SystemSettingResponse)
-	for _, setting := range settings {
-		response := s.settingToResponse(setting)
-		categoriesMap[setting.Category] = append(categoriesMap[setting.Category], response)
+	for i := range settings {
+		response := s.settingToResponse(settings[i])
+		categoriesMap[settings[i].Category] = append(categoriesMap[settings[i].Category], response)
 	}
 
 	// Convert map to slice for ordered response
@@ -83,8 +84,8 @@ func (s *Server) handleListSettingsByCategory(c *fiber.Ctx) error {
 	}
 
 	var response []SystemSettingResponse
-	for _, setting := range settings {
-		response = append(response, s.settingToResponse(setting))
+	for i := range settings {
+		response = append(response, s.settingToResponse(settings[i]))
 	}
 
 	return SendSuccess(c, fiber.StatusOK, response)

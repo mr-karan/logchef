@@ -7,10 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 
 	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
+
+var relativeTimeRegex = regexp.MustCompile(`^\d+[smhdw]$`)
+
+func isValidRelativeTimeFormat(s string) bool {
+	return relativeTimeRegex.MatchString(s)
+}
 
 // --- Saved Query Error Definitions ---
 
@@ -46,9 +53,20 @@ func ValidateSavedQueryContent(contentJSON string) error {
 		return fmt.Errorf("%w: limit must be positive", ErrInvalidQueryContent)
 	}
 
-	// Validate time range if present (check against the zero value of the struct)
-	// The TimeRange struct only contains Absolute times.
-	if queryContent.TimeRange != (models.SavedQueryTimeRange{}) {
+	hasRelativeTime := queryContent.TimeRange.Relative != ""
+	hasAbsoluteTime := queryContent.TimeRange.Absolute.Start != 0 || queryContent.TimeRange.Absolute.End != 0
+
+	if hasRelativeTime && hasAbsoluteTime {
+		return fmt.Errorf("%w: cannot specify both relative and absolute time range", ErrInvalidQueryContent)
+	}
+
+	if hasRelativeTime {
+		if !isValidRelativeTimeFormat(queryContent.TimeRange.Relative) {
+			return fmt.Errorf("%w: invalid relative time format (expected e.g. '15m', '1h', '7d')", ErrInvalidQueryContent)
+		}
+	}
+
+	if hasAbsoluteTime {
 		if queryContent.TimeRange.Absolute.Start <= 0 {
 			return fmt.Errorf("%w: absolute start time must be positive", ErrInvalidQueryContent)
 		}
@@ -69,7 +87,6 @@ func ValidateSavedQueryContent(contentJSON string) error {
 
 // ListQueriesForTeamAndSource retrieves all saved queries associated with a specific team and source.
 func ListQueriesForTeamAndSource(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) ([]*models.SavedTeamQuery, error) {
-	log.Debug("listing saved queries for team and source", "team_id", teamID, "source_id", sourceID)
 
 	// Optional: Validate team and source existence first?
 	// _, err := GetTeam(ctx, db, teamID) ...
@@ -81,13 +98,11 @@ func ListQueriesForTeamAndSource(ctx context.Context, db *sqlite.DB, log *slog.L
 		return nil, fmt.Errorf("error listing saved queries: %w", err)
 	}
 
-	log.Debug("successfully listed saved queries", "team_id", teamID, "source_id", sourceID, "count", len(queries))
 	return queries, nil
 }
 
 // CreateTeamSourceQuery creates a new saved query for a team and source.
 func CreateTeamSourceQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, name, description, queryContentJSON, queryType string /*, createdBy models.UserID */) (*models.SavedTeamQuery, error) {
-	log.Debug("creating saved query", "team_id", teamID, "source_id", sourceID, "name", name, "type", queryType)
 
 	// Validate Query Type
 	if queryType == "" {
@@ -140,13 +155,12 @@ func CreateTeamSourceQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger,
 		// CreatedByUserID: createdBy, // Map if needed
 	}
 
-	log.Info("saved query created successfully", "query_id", createdQuery.ID, "team_id", teamID, "source_id", sourceID)
+	log.Debug("saved query created", "query_id", createdQuery.ID, "team_id", teamID, "source_id", sourceID)
 	return createdQuery, nil
 }
 
 // GetTeamSourceQuery retrieves a specific saved query by its ID, team ID, and source ID.
 func GetTeamSourceQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, queryID int) (*models.SavedTeamQuery, error) {
-	log.Debug("getting saved query", "query_id", queryID, "team_id", teamID, "source_id", sourceID)
 
 	query, err := db.GetTeamSourceQuery(ctx, teamID, sourceID, queryID)
 	if err != nil {
@@ -158,13 +172,11 @@ func GetTeamSourceQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, te
 		return nil, fmt.Errorf("failed to get query: %w", err)
 	}
 
-	log.Debug("successfully retrieved saved query", "query_id", queryID)
 	return query, nil
 }
 
 // UpdateTeamSourceQuery updates an existing saved query.
 func UpdateTeamSourceQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, queryID int, name, description, queryContentJSON, queryType string) (*models.SavedTeamQuery, error) {
-	log.Debug("updating saved query", "query_id", queryID, "team_id", teamID, "source_id", sourceID)
 
 	// Validate Query Type if provided
 	if queryType != "" && models.SavedQueryType(queryType) != models.SavedQueryTypeLogchefQL && models.SavedQueryType(queryType) != models.SavedQueryTypeSQL {
@@ -200,13 +212,12 @@ func UpdateTeamSourceQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger,
 		return nil, fmt.Errorf("query updated but failed to fetch result: %w", err)
 	}
 
-	log.Info("saved query updated successfully", "query_id", queryID)
+	log.Debug("saved query updated", "query_id", queryID)
 	return updatedQuery, nil
 }
 
 // DeleteTeamSourceQuery deletes a specific saved query.
 func DeleteTeamSourceQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, queryID int) error {
-	log.Info("deleting saved query", "query_id", queryID, "team_id", teamID, "source_id", sourceID)
 
 	// Optional: Check if query exists first?
 	// _, err := GetTeamSourceQuery(ctx, db, log, teamID, sourceID, queryID)
@@ -223,6 +234,6 @@ func DeleteTeamSourceQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger,
 		return fmt.Errorf("failed to delete query: %w", err)
 	}
 
-	log.Info("saved query deleted successfully", "query_id", queryID)
+	log.Debug("saved query deleted", "query_id", queryID)
 	return nil
 }

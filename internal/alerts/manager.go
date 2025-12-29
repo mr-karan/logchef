@@ -64,14 +64,14 @@ func NewManager(opts Options) *Manager {
 // Start launches the evaluation loop. It is a no-op when alerting is disabled.
 func (m *Manager) Start(ctx context.Context) {
 	if !m.cfg.Enabled {
-		m.log.Info("alerting disabled; manager will not start")
+		m.log.Debug("alerting disabled")
 		return
 	}
 	interval := m.cfg.EvaluationInterval
 	if interval <= 0 {
 		interval = time.Minute
 	}
-	m.log.Info("starting alert manager", "interval", interval)
+	m.log.Debug("starting alert manager", "interval", interval)
 
 	m.wg.Add(1)
 	go func() {
@@ -87,10 +87,10 @@ func (m *Manager) Start(ctx context.Context) {
 			case <-ticker.C:
 				m.evaluateCycle(ctx)
 			case <-m.stop:
-				m.log.Info("alert manager stopping")
+				m.log.Debug("alert manager stopping")
 				return
 			case <-ctx.Done():
-				m.log.Info("alert manager context cancelled")
+				m.log.Debug("alert manager context cancelled")
 				return
 			}
 		}
@@ -214,7 +214,7 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	shouldRetryDelivery := false
 	if alreadyActive && prevHistory.Payload != nil {
 		if deliveryFailed, ok := prevHistory.Payload["delivery_failed"].(bool); ok && deliveryFailed {
-			m.log.Info("retrying previously failed alertmanager delivery", "alert_id", alert.ID, "history_id", prevHistory.ID)
+			m.log.Debug("retrying alertmanager delivery", "alert_id", alert.ID, "history_id", prevHistory.ID)
 			shouldRetryDelivery = true
 		}
 	}
@@ -237,7 +237,7 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 		"threshold", alert.ThresholdValue,
 		"operator", alert.ThresholdOperator)
 
-	labels, annotations := m.buildAlertMetadata(alert, models.AlertStatusTriggered, value)
+	labels, annotations := m.buildAlertMetadata(ctx, alert, models.AlertStatusTriggered, value)
 
 	valueCopy := value
 	message := fmt.Sprintf("alert %s triggered with value %.4f", alert.Name, value)
@@ -273,19 +273,15 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 		historyPayload["delivery_error"] = deliveryErr.Error()
 		m.log.Warn("failed to send alert to Alertmanager", "alert_id", alert.ID, "error", deliveryErr)
 	} else {
-		m.log.Info("alert successfully sent to Alertmanager",
-			"alert_id", alert.ID,
-			"alert_name", alert.Name,
-			"alertmanager", "delivered")
+		m.log.Debug("alert sent to alertmanager", "alert_id", alert.ID, "alert_name", alert.Name)
 	}
 
 	if !shouldRetryDelivery {
 		// Insert new history entry
-		insertedHistory, insertErr := m.db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusTriggered, &valueCopy, message, historyPayload)
+		_, insertErr := m.db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusTriggered, &valueCopy, message, historyPayload)
 		if insertErr != nil {
 			m.log.Error("failed to insert alert history", "alert_id", alert.ID, "error", insertErr)
 		} else {
-			history = insertedHistory
 			if pruneErr := m.db.PruneAlertHistory(ctx, alert.ID, m.cfg.HistoryLimit); pruneErr != nil {
 				m.log.Warn("failed to prune alert history", "alert_id", alert.ID, "error", pruneErr)
 			}
@@ -335,46 +331,38 @@ func (m *Manager) handleResolved(ctx context.Context, alert *models.Alert, value
 		entry.Value = &value
 	}
 
-	labels, annotations := m.buildAlertMetadata(alert, models.AlertStatusResolved, value)
+	labels, annotations := m.buildAlertMetadata(ctx, alert, models.AlertStatusResolved, value)
 	if annotations == nil {
 		annotations = make(map[string]string, 1)
 	}
 	annotations["resolved_at"] = now.Format(time.RFC3339Nano)
 
 	if sendErr := m.sendAlertmanager(ctx, alert, entry, labels, annotations, models.AlertStatusResolved); sendErr != nil {
-		m.log.Warn("failed to send resolved alert to Alertmanager", "alert_id", alert.ID, "error", sendErr)
-		// Note: We don't track delivery failures for resolved alerts as critically
-		// since the main concern is ensuring triggered alerts reach Alertmanager
+		m.log.Warn("failed to send resolved alert to alertmanager", "alert_id", alert.ID, "error", sendErr)
 	} else {
-		m.log.Info("resolved alert successfully sent to Alertmanager",
-			"alert_id", alert.ID,
-			"alert_name", alert.Name)
+		m.log.Debug("resolved alert sent to alertmanager", "alert_id", alert.ID, "alert_name", alert.Name)
 	}
 	return nil
 }
 
-func (m *Manager) buildAlertMetadata(alert *models.Alert, status models.AlertStatus, value float64) (map[string]string, map[string]string) {
-	labels := copyStringMap(alert.Labels)
+func (m *Manager) buildAlertMetadata(ctx context.Context, alert *models.Alert, status models.AlertStatus, value float64) (labels, annotations map[string]string) {
+	labels = copyStringMap(alert.Labels)
 	if labels == nil {
 		labels = make(map[string]string, 8)
 	}
 	labels["alertname"] = alert.Name
 	labels["alert_id"] = strconv.FormatInt(int64(alert.ID), 10)
 	labels["severity"] = string(alert.Severity)
-	// Note: status is NOT included in labels because labels identify unique alert instances
-	// in Alertmanager. Changing labels creates a new alert. Status goes in annotations only.
 
-	// Fetch team and source names for more readable labels
-	if team, err := m.db.GetTeam(context.Background(), alert.TeamID); err == nil && team != nil {
+	if team, err := m.db.GetTeam(ctx, alert.TeamID); err == nil && team != nil {
 		labels["team"] = team.Name
 		labels["team_id"] = strconv.FormatInt(int64(alert.TeamID), 10)
 	} else {
-		// Fallback to just ID if fetch fails
 		labels["team_id"] = strconv.FormatInt(int64(alert.TeamID), 10)
 		m.log.Warn("failed to fetch team name for alert metadata", "team_id", alert.TeamID, "error", err)
 	}
 
-	if source, err := m.db.GetSource(context.Background(), alert.SourceID); err == nil && source != nil {
+	if source, err := m.db.GetSource(ctx, alert.SourceID); err == nil && source != nil {
 		labels["source"] = source.Name
 		labels["source_id"] = strconv.FormatInt(int64(alert.SourceID), 10)
 	} else {
@@ -383,7 +371,7 @@ func (m *Manager) buildAlertMetadata(alert *models.Alert, status models.AlertSta
 		m.log.Warn("failed to fetch source name for alert metadata", "source_id", alert.SourceID, "error", err)
 	}
 
-	annotations := copyStringMap(alert.Annotations)
+	annotations = copyStringMap(alert.Annotations)
 	if annotations == nil {
 		annotations = make(map[string]string, 8)
 	}
@@ -486,7 +474,7 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, mes
 	}
 
 	// Send resolution notification to Alertmanager
-	labels, annotations := m.buildAlertMetadata(alert, models.AlertStatusResolved, value)
+	labels, annotations := m.buildAlertMetadata(ctx, alert, models.AlertStatusResolved, value)
 	if annotations == nil {
 		annotations = make(map[string]string, 2)
 	}
@@ -494,12 +482,9 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, mes
 	annotations["resolved_by"] = "manual"
 
 	if sendErr := m.sendAlertmanager(ctx, alert, entry, labels, annotations, models.AlertStatusResolved); sendErr != nil {
-		m.log.Warn("failed to send manual resolution to Alertmanager", "alert_id", alertID, "error", sendErr)
-		// Don't fail the operation - the DB is already updated
+		m.log.Warn("failed to send manual resolution to alertmanager", "alert_id", alertID, "error", sendErr)
 	} else {
-		m.log.Info("manual alert resolution sent to Alertmanager",
-			"alert_id", alertID,
-			"alert_name", alert.Name)
+		m.log.Debug("manual resolution sent to alertmanager", "alert_id", alertID)
 	}
 
 	return nil

@@ -53,8 +53,8 @@
           @load-query="handleLoadQueryFromHistory"
         />
 
-        <!-- Table name indicator (Moved & Always Visible) -->
-        <div class="text-xs text-muted-foreground ml-3">
+        <!-- Table name indicator - hidden on small screens -->
+        <div class="text-xs text-muted-foreground ml-3 hidden md:block">
           <template v-if="props.tableName">
             <span class="mr-1">Table:</span>
             <code class="bg-muted px-1.5 py-0.5 rounded text-xs">{{
@@ -73,7 +73,7 @@
             <TooltipTrigger asChild>
               <Button variant="outline" size="sm" class="h-7 gap-1" @click="handleNewQueryClick">
                 <FilePlus2 class="h-3.5 w-3.5" />
-                <span class="text-xs">New</span>
+                <span class="text-xs hidden sm:inline">New</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
@@ -89,7 +89,7 @@
               <Button variant="outline" size="sm" class="h-7 gap-1" @click="toggleSqlEditorVisibility">
                 <EyeOff v-if="isEditorVisible" class="h-3.5 w-3.5" />
                 <Eye v-else class="h-3.5 w-3.5" />
-                <span class="text-xs">{{ isEditorVisible ? "Hide" : "Show" }} SQL</span>
+                <span class="text-xs hidden sm:inline">{{ isEditorVisible ? "Hide" : "Show" }} SQL</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
@@ -608,7 +608,6 @@ import {
   PanelRightOpen,
   PanelRightClose,
   AlertCircle,
-  FileEdit,
   FilePlus2,
   Search,
   Code2,
@@ -1954,8 +1953,7 @@ const route = useRoute();
 const router = useRouter();
 
 // Add these computed properties after other computed properties
-const activeSavedQueryName = computed(() => exploreStore.activeSavedQueryName);
-const isEditingExistingQuery = computed(() => !!route.query.query_id);
+const isEditingExistingQuery = computed(() => !!route.query.id);
 
 // Handler for loading query from history
 const handleLoadQueryFromHistory = (mode: 'logchefql' | 'sql', query: string) => {
@@ -1986,8 +1984,8 @@ const handleNewQueryClick = () => {
   // First, copy the current query parameters
   const currentQuery = { ...route.query };
 
-  // Remove query_id from URL
-  delete currentQuery.query_id;
+  // Remove saved query id from URL
+  delete currentQuery.id;
 
   // Use the centralized reset function in the store
   exploreStore.resetQueryToDefaults();
@@ -2000,12 +1998,11 @@ const handleNewQueryClick = () => {
 
   // Wait for the state reset to complete
   nextTick(() => {
-    // Explicitly remove the query_id parameter again to ensure it's gone
+    // Explicitly remove the id parameter again to ensure it's gone
     const finalQuery = { ...currentQuery };
-    delete finalQuery.query_id;
+    delete finalQuery.id;
 
-    // Replace URL with new parameters in router, disabling any redirect
-    // This is important to prevent the URL sync from adding back query_id
+    // Replace URL with new parameters in router
     router
       .replace({ query: finalQuery })
       .then(() => {

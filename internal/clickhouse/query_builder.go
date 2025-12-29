@@ -102,10 +102,11 @@ func (qb *QueryBuilder) validateTableReference(stmt *clickhouseparser.SelectQuer
 			return fmt.Errorf("query validation failed: invalid table expression in FROM clause")
 		}
 		// The actual table might be directly identified or wrapped in an alias.
-		if tid, ok := expr.Table.Expr.(*clickhouseparser.TableIdentifier); ok {
-			tableID = tid
-		} else if aliasExpr, ok := expr.Table.Expr.(*clickhouseparser.AliasExpr); ok {
-			if tid, ok := aliasExpr.Expr.(*clickhouseparser.TableIdentifier); ok {
+		switch tableExpr := expr.Table.Expr.(type) {
+		case *clickhouseparser.TableIdentifier:
+			tableID = tableExpr
+		case *clickhouseparser.AliasExpr:
+			if tid, ok := tableExpr.Expr.(*clickhouseparser.TableIdentifier); ok {
 				tableID = tid
 			}
 		}
@@ -155,18 +156,16 @@ func (qb *QueryBuilder) validateTableIdentifier(tableID *clickhouseparser.TableI
 			return fmt.Errorf("query validation failed: invalid table reference '%s.%s' (expected '%s.%s')",
 				dbName, tableName, expectedDB, expectedTable)
 		}
-	} else {
+	} else if tableName != expectedTable {
 		// No database qualifier present, just check table name.
 		// If QueryBuilder expected a specific DB, this is also arguably an error,
 		// but for now, we only enforce if the query *specifies* a different DB.
-		if tableName != expectedTable {
-			expectedFullName := expectedTable
-			if expectedDB != "" {
-				expectedFullName = expectedDB + "." + expectedTable
-			}
-			return fmt.Errorf("query validation failed: invalid table reference '%s' (expected '%s')",
-				tableName, expectedFullName)
+		expectedFullName := expectedTable
+		if expectedDB != "" {
+			expectedFullName = expectedDB + "." + expectedTable
 		}
+		return fmt.Errorf("query validation failed: invalid table reference '%s' (expected '%s')",
+			tableName, expectedFullName)
 	}
 	return nil
 }

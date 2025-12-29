@@ -11,9 +11,6 @@ export interface BaseState<T> {
   error: Ref<APIErrorResponse | null>;
 }
 
-/**
- * Creates a base store with common state management functionality
- */
 export function useBaseStore<T>(initialState: T): BaseState<T> & {
   isLoading: Ref<boolean>;
   loadingStates: Ref<Record<string, boolean>>;
@@ -49,25 +46,22 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
   // Use our new API query composable
   const { execute } = useApiQuery();
 
-  /**
-   * Centralized error handling function for stores
-   */
-  function handleError(error: Error | APIErrorResponse, operation: string) {
-    console.error(`[${operation} Error]`, error);
+  function handleError(err: Error | APIErrorResponse, operation: string): { success: false; error: APIErrorResponse } {
+    console.error(`[${operation} Error]`, err);
     
-    const errorMessage = error instanceof Error ? error.message : error.message;
-    const errorType = error instanceof Error ? 'UnknownError' : (error.error_type || 'UnknownError');
-    const errorData = error instanceof Error ? undefined : error.data;
+    const errorMessage = err instanceof Error ? err.message : err.message;
+    const errorType = err instanceof Error ? 'UnknownError' : (err.error_type || 'UnknownError');
+    const errorData = err instanceof Error ? undefined : err.data;
     
-    // Update store error state
-    error.value = {
+    const apiError: APIErrorResponse = {
+      status: 'error',
       message: errorMessage,
       error_type: errorType,
       data: errorData,
-      operation
     };
     
-    // Show toast notification
+    error.value = apiError;
+    
     const { toast } = useToast();
     toast({
       title: formatErrorTypeToTitle(errorType),
@@ -75,15 +69,9 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
       variant: 'destructive',
     });
     
-    return { 
-      success: false,
-      error: error.value
-    };
+    return { success: false as const, error: apiError };
   }
 
-  /**
-   * Simplified API call function that combines withLoading and API execution
-   */
   async function callApi<R>(options: {
     apiCall: () => Promise<any>;
     operationKey?: string;
@@ -93,27 +81,29 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
     errorMessage?: string;
     showToast?: boolean;
     defaultData?: R;
-  }) {
-    // Default showToast to true unless explicitly set to false
+  }): Promise<{ success: boolean; data?: R | null; error?: APIErrorResponse }> {
     const showToast = options.showToast !== false;
     
-    const executeApiCall = async () => {
+    const executeApiCall = async (): Promise<{ success: boolean; data?: R | null; error?: APIErrorResponse }> => {
       try {
-        const result = await execute<R>(options.apiCall, {
+        const result = await execute(options.apiCall, {
           successMessage: options.successMessage,
           errorMessage: options.errorMessage,
           showToast: showToast,
           defaultData: options.defaultData,
-          onSuccess: options.onSuccess,
+          onSuccess: options.onSuccess as ((data: unknown) => void) | undefined,
           onError: (err) => {
             error.value = err;
             options.onError?.(err);
           }
         });
         
-        return result;
+        if (result.success) {
+          return { success: true, data: result.data as R | null };
+        } else {
+          return { success: false, error: result.error ?? undefined };
+        }
       } catch (err) {
-        // Use the centralized error handler
         return handleError(err as Error | APIErrorResponse, options.operationKey || 'api');
       }
     };

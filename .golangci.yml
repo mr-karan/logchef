@@ -1,110 +1,91 @@
+version: "2"
+run:
+  tests: true
 linters:
+  enable:
+    - bodyclose
+    - contextcheck
+    - gocritic
+    - gocyclo
+    - gosec
+    - misspell
+    - revive
+    - unconvert
+    - unparam
+  disable:
+    - depguard
+    - exhaustruct
+  settings:
+    gocritic:
+      disabled-checks:
+        - hugeParam
+        - emptyStringTest
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+    gocyclo:
+      min-complexity: 20
+    gosec:
+      excludes:
+        - G104
+    govet:
+      disable:
+        - fieldalignment
+        - shadow
+      enable-all: true
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - checkPrivateReceivers
+            - disableStutteringCheck
+          severity: warning
+          disabled: false
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+        path: _test\.go
+      - linters:
+          - dupl
+          - gocyclo
+          - gosec
+        path: _test\.go
+      - linters:
+          - gosec
+        text: 'G107: Potential HTTP request made with variable url'
+      - linters:
+          - gocritic
+          - revive
+        text: 'TODO:'
+      - linters:
+          - contextcheck
+        text: Function `GetHealth` should pass the context parameter
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 3
+formatters:
   enable:
     - gofmt
     - goimports
-    - gosimple
-    - govet
-    - staticcheck
-    - errcheck
-
-    - unused
-    - bodyclose
-    - contextcheck
-    - misspell
-    - gocyclo
-    - gosec
-    - revive
-    - ineffassign
-    - unconvert
-    - unparam
-    - gocritic
-
-  disable:
-    - exhaustruct
-    - depguard
-
-linters-settings:
-  goimports:
-    local-prefixes: github.com/mr-karan/logchef
-
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-      - shadow
-
-  gocyclo:
-    min-complexity: 20
-
-  gosec:
-    excludes:
-      - G104
-
-  revive:
-    rules:
-      - name: exported
-        severity: warning
-        disabled: false
-        arguments:
-          - "checkPrivateReceivers"
-          - "disableStutteringCheck"
-
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-      - performance
-    disabled-checks:
-      - hugeParam
-      - emptyStringTest
-
-run:
-  timeout: 5m
-
-  tests: true
-
-  skip-dirs:
-    - vendor
-    - frontend
-    - design
-    - deploy
-    - dev/experiment
-
-  skip-files:
-    - ".*\\.generated\\.go$"
-
-output:
-  format: colored-line-number
-
-  print-issued-lines: true
-
-  print-linter-name: true
-
-issues:
-  max-issues-per-linter: 50
-
-  max-same-issues: 3
-
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - gosec
-        - dupl
-
-    - text: "G107: Potential HTTP request made with variable url"
-      linters:
-        - gosec
-
-    - text: "TODO:"
-      linters:
-        - revive
-        - gocritic
-
-    - text: "Function `GetHealth` should pass the context parameter"
-      linters:
-        - contextcheck
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/mr-karan/logchef
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

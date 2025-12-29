@@ -21,7 +21,7 @@ var ErrSourceAlreadyExists = fmt.Errorf("source already exists")
 // --- Source Validation Functions ---
 
 // validateSourceCreation validates source creation parameters.
-func validateSourceCreation(name string, conn models.ConnectionInfo, description string, ttlDays int, metaTSField string, metaSeverityField string) error {
+func validateSourceCreation(name string, conn models.ConnectionInfo, description string, ttlDays int, metaTSField, metaSeverityField string) error {
 	// Validate source name
 	if name == "" {
 		return &ValidationError{Field: "name", Message: "source name is required"}
@@ -224,9 +224,6 @@ func GetSourcesWithDetails(ctx context.Context, db *sqlite.DB, chDB *clickhouse.
 		// Attempt to get the client. If this fails, the source is not connected.
 		client, err := chDB.GetConnection(source.ID) // Use GetConnection
 		if err != nil {
-			log.Debug("failed to get client for source, marking as disconnected",
-				"source_id", source.ID,
-				"error", err)
 			source.IsConnected = false
 		} else {
 			// Use integrated Ping method to check both connection and table existence
@@ -252,16 +249,6 @@ func GetSourcesWithDetails(ctx context.Context, db *sqlite.DB, chDB *clickhouse.
 					source.Engine = tableInfo.Engine
 					source.EngineParams = tableInfo.EngineParams
 					source.SortKeys = tableInfo.SortKeys
-
-					// Log enhanced schema information
-					log.Debug("retrieved table information",
-						"source_id", source.ID,
-						"column_count", len(tableInfo.Columns),
-						"engine", tableInfo.Engine,
-						"engine_params", tableInfo.EngineParams,
-						"extended_cols", len(tableInfo.ExtColumns), // Assuming ExtColumns exists on TableInfo
-						"sort_keys", tableInfo.SortKeys,
-					)
 				}
 			}
 		}
@@ -328,9 +315,6 @@ func GetSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log
 	// Attempt to get the client. If this fails, the source is not connected.
 	client, err := chDB.GetConnection(source.ID) // Use GetConnection
 	if err != nil {
-		log.Debug("failed to get client for source, marking as disconnected",
-			"source_id", source.ID,
-			"error", err)
 		source.IsConnected = false
 	} else {
 		// Use integrated Ping method to check both connection and table existence
@@ -354,33 +338,15 @@ func GetSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log
 				source.Engine = tableInfo.Engine
 				source.EngineParams = tableInfo.EngineParams
 				source.SortKeys = tableInfo.SortKeys
-
-				// Log comprehensive table information for debugging
-				log.Debug("retrieved table information",
-					"source_id", source.ID,
-					"column_count", len(tableInfo.Columns),
-					"engine", tableInfo.Engine,
-					"engine_params", tableInfo.EngineParams,
-					"extended_cols", len(tableInfo.ExtColumns), // Assuming ExtColumns exists on TableInfo
-					"sort_keys", tableInfo.SortKeys,
-					"schema_length", len(tableInfo.CreateQuery),
-				)
 			}
 		}
 	}
-
-	log.Debug("source connection status",
-		"source_id", source.ID,
-		"name", source.Name,
-		"database", source.Connection.Database,
-		"table", source.Connection.TableName,
-		"is_connected", source.IsConnected)
 
 	return source, nil
 }
 
 // CreateSource creates a new source, validates connection, and optionally creates the table.
-func CreateSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, name string, autoCreateTable bool, conn models.ConnectionInfo, description string, ttlDays int, metaTSField string, metaSeverityField string, customSchema string) (*models.Source, error) {
+func CreateSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, name string, autoCreateTable bool, conn models.ConnectionInfo, description string, ttlDays int, metaTSField, metaSeverityField, customSchema string) (*models.Source, error) {
 	// 1. Validate input parameters
 	if err := validateSourceCreation(name, conn, description, ttlDays, metaTSField, metaSeverityField); err != nil {
 		return nil, err
@@ -392,9 +358,8 @@ func CreateSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, 
 		return nil, err
 	}
 
-	// 3. Create temporary client to validate ClickHouse connection and potentially create table
-	tempSourceForValidation := &models.Source{Connection: conn} // Minimal source for validation
-	tempClient, err := chDB.CreateTemporaryClient(tempSourceForValidation)
+	tempSourceForValidation := &models.Source{Connection: conn}
+	tempClient, err := chDB.CreateTemporaryClient(ctx, tempSourceForValidation)
 	if err != nil {
 		log.Error("failed to initialize temporary connection during source creation", "error", err, "host", conn.Host, "database", conn.Database)
 		return nil, &ValidationError{Field: "connection", Message: "Failed to connect to the database", Err: err}
@@ -455,7 +420,7 @@ func CreateSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, 
 	}
 
 	// 7. Add the newly created source to the ClickHouse connection manager
-	if err := chDB.AddSource(sourceToCreate); err != nil {
+	if err := chDB.AddSource(ctx, sourceToCreate); err != nil {
 		log.Error("failed to add source to connection pool after creation, attempting rollback", "error", err, "source_id", sourceToCreate.ID)
 		if delErr := db.DeleteSource(ctx, sourceToCreate.ID); delErr != nil {
 			log.Error("CRITICAL: failed to delete source from db during rollback", "delete_error", delErr, "source_id", sourceToCreate.ID)
@@ -499,11 +464,8 @@ func UpdateSource(ctx context.Context, db *sqlite.DB, log *slog.Logger, id model
 	}
 
 	if !updated {
-		log.Debug("no update needed for source", "source_id", id)
 		return source, nil // Return existing source if no changes
 	}
-
-	// source.UpdatedAt = time.Now() // Let DB handle timestamp update
 
 	// 4. Save to database
 	if err := db.UpdateSource(ctx, source); err != nil {
@@ -570,9 +532,6 @@ func CheckSourceConnectionStatus(ctx context.Context, chDB *clickhouse.Manager, 
 	}
 	client, err := chDB.GetConnection(source.ID) // Use GetConnection
 	if err != nil {
-		log.Debug("failed to get client for source status check",
-			"source_id", source.ID,
-			"error", err)
 		return false
 	}
 	// Use the integrated Ping method
@@ -591,16 +550,14 @@ func GetSourceHealth(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manage
 		return models.SourceHealth{}, fmt.Errorf("error getting source: %w", err)
 	}
 	// 2. Get health from ClickHouse manager and return it
-	health := chDB.GetHealth(id) // Assuming chDB.GetHealth exists and returns models.SourceHealth
+	health := chDB.GetHealth(ctx, id)
 	return health, nil
 }
 
 // InitializeSource adds a source connection to the ClickHouse manager.
 // It assumes the source object contains valid connection details.
 func InitializeSource(ctx context.Context, chDB *clickhouse.Manager, source *models.Source) error {
-	// No input validation needed
-	// The manager's AddSource implicitly handles initialization/connection testing
-	return chDB.AddSource(source)
+	return chDB.AddSource(ctx, source)
 }
 
 // ValidateConnection validates a connection to a ClickHouse database using temporary client
@@ -610,16 +567,13 @@ func ValidateConnection(ctx context.Context, chDB *clickhouse.Manager, log *slog
 		return nil, err
 	}
 
-	// 2. Create temporary client and attempt connection
 	tempSource := &models.Source{Connection: conn}
-	client, err := chDB.CreateTemporaryClient(tempSource)
+	client, err := chDB.CreateTemporaryClient(ctx, tempSource)
 	if err != nil {
 		log.Warn("connection validation failed: could not create temporary client", "error", err, "host", conn.Host, "database", conn.Database)
 		return nil, &ValidationError{Field: "connection", Message: "Failed to connect to the database", Err: err}
 	}
 	defer client.Close()
-
-	// 3. If table name provided, check existence
 	if conn.TableName != "" {
 		// Check table existence using client.Ping directly
 		if client.Ping(ctx, conn.Database, conn.TableName) != nil {
@@ -627,7 +581,6 @@ func ValidateConnection(ctx context.Context, chDB *clickhouse.Manager, log *slog
 		}
 	}
 
-	log.Debug("connection validation successful", "host", conn.Host, "database", conn.Database, "table", conn.TableName)
 	return &models.ConnectionValidationResult{Message: "Connection successful"}, nil
 }
 
@@ -642,16 +595,13 @@ func ValidateConnectionWithColumns(ctx context.Context, chDB *clickhouse.Manager
 		return nil, &ValidationError{Field: "tableName", Message: "Table name is required to validate columns"}
 	}
 
-	// 2. Create temporary client and attempt connection
 	tempSource := &models.Source{Connection: conn}
-	client, err := chDB.CreateTemporaryClient(tempSource)
+	client, err := chDB.CreateTemporaryClient(ctx, tempSource)
 	if err != nil {
 		log.Warn("connection validation failed: could not create temporary client", "error", err, "host", conn.Host, "database", conn.Database)
 		return nil, &ValidationError{Field: "connection", Message: "Failed to connect to the database", Err: err}
 	}
 	defer client.Close()
-
-	// 3. Check table existence (implicitly required for column validation)
 	// Check table existence using client.Ping directly
 	if client.Ping(ctx, conn.Database, conn.TableName) != nil {
 		return nil, &ValidationError{Field: "tableName", Message: fmt.Sprintf("Connection successful, but table '%s.%s' not found or inaccessible", conn.Database, conn.TableName)}
@@ -662,7 +612,6 @@ func ValidateConnectionWithColumns(ctx context.Context, chDB *clickhouse.Manager
 		return nil, err // Return the detailed validation error
 	}
 
-	log.Debug("connection and column validation successful", "host", conn.Host, "database", conn.Database, "table", conn.TableName)
 	return &models.ConnectionValidationResult{Message: "Connection and column types validated successfully"}, nil
 }
 
@@ -749,168 +698,71 @@ type SourceStats struct {
 // GetSourceStats retrieves statistics for a specific source (ClickHouse table)
 func GetSourceStats(ctx context.Context, chDB *clickhouse.Manager, log *slog.Logger, source *models.Source) (*SourceStats, error) {
 	if source == nil {
-		return nil, ErrSourceNotFound // Or fmt.Errorf("source cannot be nil")
+		return nil, ErrSourceNotFound
 	}
 
-	log.Debug("retrieving source stats",
-		"source_id", source.ID,
-		"database", source.Connection.Database,
-		"table", source.Connection.TableName,
-	)
-
-	// Get client for the source
-	client, err := chDB.GetConnection(source.ID) // Use GetConnection
+	client, err := chDB.GetConnection(source.ID)
 	if err != nil {
-		log.Error("failed to get client for source stats",
-			"error", err,
-			"source_id", source.ID,
-		)
-		// Return an error if we can't even get the client
 		return nil, fmt.Errorf("failed to get client for source %d: %w", source.ID, err)
 	}
 
-	// Get table info (schema, engine info, CREATE TABLE statement)
-	// This will automatically handle Distributed table engine detection via getBaseTableInfo
-	tableInfo, err := client.GetTableInfo(ctx, source.Connection.Database, source.Connection.TableName)
-	if err != nil {
-		log.Warn("failed to get table info, proceeding without it",
-			"error", err,
-			"source_id", source.ID,
-		)
-		// Set tableInfo to nil to indicate failure, but don't return an error
-		tableInfo = nil
-	}
+	tableInfo, _ := client.GetTableInfo(ctx, source.Connection.Database, source.Connection.TableName)
 
-	// Extract TTL information from CREATE TABLE statement if available
-	var ttlExpr string
-	if tableInfo != nil && tableInfo.CreateQuery != "" {
-		// For Distributed tables, TTL is always on the local table, not the distributed table
-		if tableInfo.Engine == "Distributed" && len(tableInfo.EngineParams) >= 3 {
-			localDB := tableInfo.EngineParams[1]
-			localTable := tableInfo.EngineParams[2]
+	ttlExpr := extractTTLFromTableInfo(ctx, client, tableInfo)
+	statsDB, statsTable := getStatsTableLocation(source, tableInfo)
 
-			// Get the local table info to check for TTL
-			localTableInfo, err := client.GetTableInfo(ctx, localDB, localTable)
-			if err == nil && localTableInfo != nil && localTableInfo.CreateQuery != "" {
-				ttlExpr = extractTTLFromCreateQuery(localTableInfo.CreateQuery)
-			}
-		} else {
-			// For non-Distributed tables, extract TTL directly
-			ttlExpr = extractTTLFromCreateQuery(tableInfo.CreateQuery)
-		}
-	}
+	tableStats, _ := client.TableStats(ctx, statsDB, statsTable)
+	columnStats, _ := client.ColumnStats(ctx, statsDB, statsTable)
+	columnStats = ensureColumnStats(columnStats, source)
 
-	// Determine which table to query for statistics
-	// For Distributed tables, try to get stats from the underlying local table
-	statsDatabase := source.Connection.Database
-	statsTable := source.Connection.TableName
-
-	if tableInfo != nil && tableInfo.Engine == "Distributed" && len(tableInfo.EngineParams) >= 3 {
-		// For Distributed tables, try to get stats from the local table
-		localDB := tableInfo.EngineParams[1]
-		localTable := tableInfo.EngineParams[2]
-
-		log.Debug("using local table for Distributed engine stats",
-			"source_id", source.ID,
-			"distributed_table", fmt.Sprintf("%s.%s", statsDatabase, statsTable),
-			"local_table", fmt.Sprintf("%s.%s", localDB, localTable),
-		)
-
-		statsDatabase = localDB
-		statsTable = localTable
-	}
-
-	// Get table stats
-	tableStats, err := client.TableStats(ctx, statsDatabase, statsTable)
-	if err != nil {
-		log.Warn("failed to get table stats, proceeding without them",
-			"error", err,
-			"source_id", source.ID,
-			"stats_table", fmt.Sprintf("%s.%s", statsDatabase, statsTable),
-		)
-		// Set tableStats to nil to indicate failure, but don't return an error yet
-		// The UI can handle displaying a message if tableStats is nil.
-		tableStats = nil
-	}
-
-	// Get column stats
-	columnStats, err := client.ColumnStats(ctx, statsDatabase, statsTable)
-	if err != nil {
-		log.Warn("failed to get column stats, attempting to build defaults from schema",
-			"error", err,
-			"source_id", source.ID,
-			"stats_table", fmt.Sprintf("%s.%s", statsDatabase, statsTable),
-		)
-		// Explicitly set columnStats to nil or an empty slice on error
-		columnStats = nil // Indicates an error occurred fetching stats
-	}
-
-	// If columnStats is nil (due to error) or empty (query returned no rows),
-	// and we have schema columns, create default empty stats for better UX.
-	if (columnStats == nil || len(columnStats) == 0) && len(source.Columns) > 0 {
-		if columnStats == nil {
-			log.Info("column stats query failed, creating default empty stats from schema",
-				"source_id", source.ID,
-				"column_count", len(source.Columns),
-			)
-		} else {
-			log.Info("no column stats found from query, creating default empty stats from schema",
-				"source_id", source.ID,
-				"column_count", len(source.Columns),
-			)
-		}
-
-		// Initialize or re-initialize columnStats slice
-		columnStats = make([]clickhouse.TableColumnStat, 0, len(source.Columns))
-
-		for _, col := range source.Columns {
-			// Ensure we append the correct type from the clickhouse package
-			columnStats = append(columnStats, clickhouse.TableColumnStat{
-				Database:     source.Connection.Database,
-				Table:        source.Connection.TableName,
-				Column:       col.Name, // Name from schema
-				Compressed:   "N/A",    // Indicate stats are unavailable/default
-				Uncompressed: "N/A",    // Indicate stats are unavailable/default
-				ComprRatio:   0,
-				RowsCount:    0, // Default to 0 if stats unavailable
-				AvgRowSize:   0, // Default to 0 if stats unavailable
-			})
-		}
-	} else if columnStats == nil {
-		// If stats failed AND we have no schema columns, initialize to empty slice
-		columnStats = []clickhouse.TableColumnStat{}
-	}
-
-	// Construct the result, allowing tableStats and tableInfo to be nil if they failed
-	stats := &SourceStats{
+	return &SourceStats{
 		TableStats:  tableStats,
 		ColumnStats: columnStats,
 		TableInfo:   tableInfo,
 		TTL:         ttlExpr,
+	}, nil
+}
+
+func extractTTLFromTableInfo(ctx context.Context, client *clickhouse.Client, tableInfo *clickhouse.TableInfo) string {
+	if tableInfo == nil || tableInfo.CreateQuery == "" {
+		return ""
 	}
 
-	// Log detailed information about what was retrieved
-	logFields := []interface{}{
-		"source_id", source.ID,
-		"column_stats_count", len(columnStats),
-		"has_table_info", tableInfo != nil,
-		"has_ttl", ttlExpr != "",
-	}
-
-	if tableInfo != nil {
-		logFields = append(logFields, "table_engine", tableInfo.Engine)
-		if len(tableInfo.EngineParams) > 0 {
-			logFields = append(logFields, "engine_params_count", len(tableInfo.EngineParams))
+	if tableInfo.Engine == "Distributed" && len(tableInfo.EngineParams) >= 3 {
+		localDB, localTable := tableInfo.EngineParams[1], tableInfo.EngineParams[2]
+		localTableInfo, err := client.GetTableInfo(ctx, localDB, localTable)
+		if err == nil && localTableInfo != nil {
+			return extractTTLFromCreateQuery(localTableInfo.CreateQuery)
 		}
+		return ""
+	}
+	return extractTTLFromCreateQuery(tableInfo.CreateQuery)
+}
+
+func getStatsTableLocation(source *models.Source, tableInfo *clickhouse.TableInfo) (database, table string) {
+	if tableInfo != nil && tableInfo.Engine == "Distributed" && len(tableInfo.EngineParams) >= 3 {
+		return tableInfo.EngineParams[1], tableInfo.EngineParams[2]
+	}
+	return source.Connection.Database, source.Connection.TableName
+}
+
+func ensureColumnStats(columnStats []clickhouse.TableColumnStat, source *models.Source) []clickhouse.TableColumnStat {
+	if len(columnStats) > 0 {
+		return columnStats
+	}
+	if len(source.Columns) == 0 {
+		return []clickhouse.TableColumnStat{}
 	}
 
-	if tableStats != nil {
-		logFields = append(logFields, "table_stats_rows", tableStats.Rows)
-		log.Debug("successfully retrieved comprehensive source stats", logFields...)
-	} else {
-		log.Debug("retrieved partial source stats (table stats failed)", logFields...)
+	stats := make([]clickhouse.TableColumnStat, 0, len(source.Columns))
+	for _, col := range source.Columns {
+		stats = append(stats, clickhouse.TableColumnStat{
+			Database:     source.Connection.Database,
+			Table:        source.Connection.TableName,
+			Column:       col.Name,
+			Compressed:   "N/A",
+			Uncompressed: "N/A",
+		})
 	}
-
-	// Return the stats object, even if some parts failed (logged warnings)
-	return stats, nil
+	return stats
 }

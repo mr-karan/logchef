@@ -10,8 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -72,7 +70,7 @@ func validateAPITokenCreation(name string) error {
 }
 
 // CreateAPIToken creates a new API token for a user
-func CreateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, config *config.AuthConfig, userID models.UserID, name string, expiresAt *time.Time) (*models.CreateAPITokenResponse, error) {
+func CreateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, authCfg *config.AuthConfig, userID models.UserID, name string, expiresAt *time.Time) (*models.CreateAPITokenResponse, error) {
 	// Validate input
 	if err := validateAPITokenCreation(name); err != nil {
 		return nil, err
@@ -92,7 +90,7 @@ func CreateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, config
 	}
 
 	// Hash token with configured secret for secure storage
-	tokenHash := hashAPIToken(token, config.APITokenSecret)
+	tokenHash := hashAPIToken(token, authCfg.APITokenSecret)
 
 	// Create prefix for display (first 12 characters)
 	prefix := token
@@ -155,8 +153,8 @@ func ListAPITokensForUser(ctx context.Context, db *sqlite.DB, userID models.User
 	}
 
 	tokens := make([]*models.APIToken, len(sqlcTokens))
-	for i, sqlcToken := range sqlcTokens {
-		tokens[i] = convertSQLCAPITokenToModel(sqlcToken)
+	for i := range sqlcTokens {
+		tokens[i] = convertSQLCAPITokenToModel(sqlcTokens[i])
 	}
 
 	return tokens, nil
@@ -188,14 +186,14 @@ func DeleteAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID
 }
 
 // AuthenticateAPIToken authenticates a token and returns the associated user
-func AuthenticateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, config *config.AuthConfig, token string) (*models.User, *models.APIToken, error) {
+func AuthenticateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, authCfg *config.AuthConfig, token string) (*models.User, *models.APIToken, error) {
 	// Validate basic token format
 	if !hasTokenPrefix(token) {
 		return nil, nil, ErrInvalidToken
 	}
 
 	// Hash the incoming token for lookup
-	tokenHash := hashAPIToken(token, config.APITokenSecret)
+	tokenHash := hashAPIToken(token, authCfg.APITokenSecret)
 
 	// Direct lookup by token hash (very efficient with unique index)
 	sqlcToken, err := db.GetAPITokenByHash(ctx, tokenHash)
@@ -222,8 +220,8 @@ func AuthenticateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, 
 		return nil, nil, ErrInvalidToken
 	}
 
-	// Convert to model and update last used (async)
 	apiToken := convertSQLCAPITokenToModel(sqlcToken)
+	//nolint:contextcheck // Background goroutine for async last-used update
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -245,7 +243,6 @@ func CleanupExpiredTokens(ctx context.Context, db *sqlite.DB, log *slog.Logger) 
 		return fmt.Errorf("failed to cleanup expired tokens: %w", err)
 	}
 
-	log.Debug("expired API tokens cleaned up successfully")
 	return nil
 }
 
@@ -256,37 +253,6 @@ func hasTokenPrefix(token string) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(token[:len(TokenPrefix)]), []byte(TokenPrefix)) == 1
-}
-
-// extractUserIDFromToken extracts the user ID from a token in format "logchef_<userID>_<randompart>"
-func extractUserIDFromToken(token string) (models.UserID, error) {
-	if !hasTokenPrefix(token) {
-		return 0, ErrInvalidToken
-	}
-
-	// Remove prefix and split by underscore
-	withoutPrefix := token[len(TokenPrefix):]
-	parts := strings.Split(withoutPrefix, "_")
-
-	if len(parts) < 2 {
-		return 0, ErrInvalidToken
-	}
-
-	// Parse user ID
-	userID, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return 0, ErrInvalidToken
-	}
-
-	return models.UserID(userID), nil
-}
-
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func convertSQLCAPITokenToModel(sqlcToken sqlc.ApiToken) *models.APIToken {

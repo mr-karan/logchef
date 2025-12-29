@@ -2,18 +2,9 @@ import type { RouteLocationNormalized } from 'vue-router'
 import { useContextStore } from '@/stores/context'
 import { useTeamsStore } from '@/stores/teams'
 
-/**
- * Keep the context store in sync with route params. The route remains the
- * single source of truth; we merely reflect it into stores and apply sensible
- * defaults without doing extra work such as fetching.
- */
 export function contextRouterGuard(to: RouteLocationNormalized) {
   const contextStore = useContextStore()
   const teamsStore = useTeamsStore()
-
-  // Parse team/source from params or query
-  let teamId: number | null = null
-  let sourceId: number | null = null
 
   const parseId = (value: unknown): number | null => {
     if (value == null) return null
@@ -21,25 +12,16 @@ export function contextRouterGuard(to: RouteLocationNormalized) {
     return Number.isNaN(parsed) ? null : parsed
   }
 
-  teamId = parseId(to.params.teamId) ?? parseId(to.query.team)
-  sourceId = parseId(to.params.sourceId) ?? parseId(to.query.source)
+  let teamId = parseId(to.params.teamId) ?? parseId(to.query.team)
+  const sourceId = parseId(to.params.sourceId) ?? parseId(to.query.source)
 
-  // If no team provided, fall back to the first known team (user or admin)
+  const storedDefaults = contextStore.getStoredDefaults()
+
   if (!teamId) {
-    const fallbackTeam = teamsStore.teams?.[0]
-    if (fallbackTeam) {
-      teamId = fallbackTeam.id
-      console.log(`ContextGuard: defaulted team to ${teamId}`)
-    }
+    teamId = storedDefaults.teamId ?? teamsStore.teams?.[0]?.id ?? null
+    console.log(`ContextGuard: No team in URL, using default: ${teamId}`)
   }
 
-  // Keep old teams store in sync for legacy consumers
-  if (teamId && teamsStore.currentTeamId !== teamId) {
-    teamsStore.setCurrentTeam(teamId)
-  }
-
-  // Reflect into context store (allows nulls)
   contextStore.setFromRoute(teamId, sourceId)
-
-  console.log(`ContextGuard: Route changed - team: ${teamId}, source: ${sourceId}`)
+  console.log(`ContextGuard: team=${teamId}, source=${sourceId}`)
 }

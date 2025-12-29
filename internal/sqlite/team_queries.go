@@ -12,7 +12,6 @@ import (
 // CreateTeamSourceQuery inserts a new saved query record associated with a team and source.
 // It populates the ID field on the input query model upon success.
 func (db *DB) CreateTeamSourceQuery(ctx context.Context, query *models.TeamQuery) error {
-	db.log.Debug("creating team source query record", "team_id", query.TeamID, "source_id", query.SourceID, "name", query.Name)
 
 	// Map domain model to sqlc parameters.
 	description := sql.NullString{String: query.Description, Valid: query.Description != ""}
@@ -36,14 +35,12 @@ func (db *DB) CreateTeamSourceQuery(ctx context.Context, query *models.TeamQuery
 	query.ID = int(id)
 	// Timestamps are handled by DB; caller doesn't need them updated here.
 
-	db.log.Debug("team source query record created", "query_id", query.ID)
 	return nil
 }
 
 // GetTeamSourceQuery retrieves a specific saved query by its ID, scoped to a team and source.
 // Returns core.ErrQueryNotFound if not found.
 func (db *DB) GetTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int) (*models.SavedTeamQuery, error) {
-	db.log.Debug("getting team source query record", "query_id", queryID, "team_id", teamID, "source_id", sourceID)
 
 	params := sqlc.GetTeamSourceQueryParams{
 		ID:       int64(queryID),
@@ -65,6 +62,7 @@ func (db *DB) GetTeamSourceQuery(ctx context.Context, teamID models.TeamID, sour
 		Description:  sqlcQuery.Description.String, // Handle NULL string
 		QueryType:    models.SavedQueryType(sqlcQuery.QueryType),
 		QueryContent: sqlcQuery.QueryContent,
+		IsBookmarked: sqlcQuery.IsBookmarked,
 		CreatedAt:    sqlcQuery.CreatedAt,
 		UpdatedAt:    sqlcQuery.UpdatedAt,
 		// CreatedByUserID is not present in the sqlc model/query.
@@ -75,7 +73,6 @@ func (db *DB) GetTeamSourceQuery(ctx context.Context, teamID models.TeamID, sour
 // Only non-empty fields in the input arguments are intended to be updated (though the current SQL updates all).
 // The `updated_at` timestamp is automatically set by the query.
 func (db *DB) UpdateTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int, name, description, queryType, queryContent string) error {
-	db.log.Debug("updating team source query record", "query_id", queryID, "team_id", teamID, "source_id", sourceID)
 
 	// Prepare parameters, handling potentially empty update values.
 	// The SQL query updates all specified fields; partial updates would require a different query or dynamic SQL.
@@ -97,13 +94,11 @@ func (db *DB) UpdateTeamSourceQuery(ctx context.Context, teamID models.TeamID, s
 		return fmt.Errorf("error updating team source query: %w", err)
 	}
 
-	db.log.Debug("team source query record updated successfully", "query_id", queryID)
 	return nil
 }
 
 // DeleteTeamSourceQuery removes a specific saved query record.
 func (db *DB) DeleteTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int) error {
-	db.log.Debug("deleting team source query record", "query_id", queryID, "team_id", teamID, "source_id", sourceID)
 
 	params := sqlc.DeleteTeamSourceQueryParams{
 		ID:       int64(queryID),
@@ -117,13 +112,11 @@ func (db *DB) DeleteTeamSourceQuery(ctx context.Context, teamID models.TeamID, s
 		return fmt.Errorf("error deleting team source query: %w", err)
 	}
 
-	db.log.Debug("team source query record deleted successfully", "query_id", queryID)
 	return nil
 }
 
 // ListQueriesByTeamAndSource retrieves all saved queries for a specific team and source, ordered by creation date.
 func (db *DB) ListQueriesByTeamAndSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) ([]*models.SavedTeamQuery, error) {
-	db.log.Debug("listing queries for team and source", "team_id", teamID, "source_id", sourceID)
 
 	params := sqlc.ListQueriesByTeamAndSourceParams{
 		TeamID:   int64(teamID),
@@ -137,20 +130,51 @@ func (db *DB) ListQueriesByTeamAndSource(ctx context.Context, teamID models.Team
 
 	// Map results to domain model slice.
 	queries := make([]*models.SavedTeamQuery, 0, len(sqlcQueries))
-	for _, sq := range sqlcQueries {
+	for i := range sqlcQueries {
 		queries = append(queries, &models.SavedTeamQuery{
-			ID:           int(sq.ID),
-			TeamID:       models.TeamID(sq.TeamID),
-			SourceID:     models.SourceID(sq.SourceID),
-			Name:         sq.Name,
-			Description:  sq.Description.String, // Handle NULL string
-			QueryType:    models.SavedQueryType(sq.QueryType),
-			QueryContent: sq.QueryContent,
-			CreatedAt:    sq.CreatedAt,
-			UpdatedAt:    sq.UpdatedAt,
+			ID:           int(sqlcQueries[i].ID),
+			TeamID:       models.TeamID(sqlcQueries[i].TeamID),
+			SourceID:     models.SourceID(sqlcQueries[i].SourceID),
+			Name:         sqlcQueries[i].Name,
+			Description:  sqlcQueries[i].Description.String,
+			QueryType:    models.SavedQueryType(sqlcQueries[i].QueryType),
+			QueryContent: sqlcQueries[i].QueryContent,
+			IsBookmarked: sqlcQueries[i].IsBookmarked,
+			CreatedAt:    sqlcQueries[i].CreatedAt,
+			UpdatedAt:    sqlcQueries[i].UpdatedAt,
 		})
 	}
 
-	db.log.Debug("team and source queries listed", "team_id", teamID, "source_id", sourceID, "count", len(queries))
 	return queries, nil
+}
+
+// ToggleQueryBookmark toggles the bookmark status of a query.
+// Returns the new bookmark status after toggling.
+func (db *DB) ToggleQueryBookmark(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int) (bool, error) {
+
+	params := sqlc.ToggleQueryBookmarkParams{
+		ID:       int64(queryID),
+		TeamID:   int64(teamID),
+		SourceID: int64(sourceID),
+	}
+
+	err := db.queries.ToggleQueryBookmark(ctx, params)
+	if err != nil {
+		db.log.Error("failed to toggle query bookmark in db", "error", err, "query_id", queryID)
+		return false, fmt.Errorf("error toggling query bookmark: %w", err)
+	}
+
+	// Get the new bookmark status
+	statusParams := sqlc.GetQueryBookmarkStatusParams{
+		ID:       int64(queryID),
+		TeamID:   int64(teamID),
+		SourceID: int64(sourceID),
+	}
+	newStatus, err := db.queries.GetQueryBookmarkStatus(ctx, statusParams)
+	if err != nil {
+		db.log.Error("failed to get query bookmark status from db", "error", err, "query_id", queryID)
+		return false, fmt.Errorf("error getting query bookmark status: %w", err)
+	}
+
+	return newStatus, nil
 }

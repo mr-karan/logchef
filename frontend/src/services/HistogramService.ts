@@ -1,25 +1,7 @@
-import { exploreApi, type HistogramResponse, type QueryParams } from '@/api/explore';
-import { isErrorResponse } from '@/api/types';
-import { useExploreStore } from '@/stores/explore';
-
 export interface HistogramData {
   bucket: string;
   log_count: number;
   group_value?: string; // Field needed for grouped histogram data
-}
-
-export interface HistogramParams {
-  sourceId: number;
-  teamId: number;
-  timeRange: {
-    start: string; // ISO string
-    end: string; // ISO string
-  };
-  query: string;  // Already prepared SQL query
-  queryType: 'logchefql' | 'sql';
-  granularity?: string; // '1m', '10m', '1h', '1d', etc.
-  groupBy?: string; // Optional field to group by
-  timezone?: string; // User's timezone identifier (e.g., 'America/New_York', 'UTC')
 }
 
 export class HistogramService {
@@ -92,102 +74,6 @@ export class HistogramService {
       console.error('Error calculating optimal granularity:', error);
       // Fall back to 1h if there's an error
       return '1h';
-    }
-  }
-
-  /**
-   * Fetch histogram data for a given source, time range, and query
-   * This expects the SQL query to already be properly prepared/transformed
-   */
-  static async fetchHistogramData(params: HistogramParams): Promise<{
-    success: boolean;
-    data?: HistogramResponse;
-    error?: { message: string; details?: string };
-  }> {
-    try {
-      console.log("HistogramService: Starting fetchHistogramData with params:", {
-        sourceId: params.sourceId,
-        teamId: params.teamId,
-        timeRange: {
-          start: params.timeRange.start,
-          end: params.timeRange.end
-        },
-        queryType: params.queryType,
-        groupBy: params.groupBy,
-        timezone: params.timezone,
-        queryLength: params.query?.length || 0
-      });
-
-      // Auto-calculate granularity if not explicitly provided
-      const granularity = params.granularity ||
-        this.calculateOptimalGranularity(params.timeRange.start, params.timeRange.end);
-
-      console.log(`Using histogram granularity: ${granularity}`);
-
-      // Get the explore store to access generatedDisplaySql
-      const exploreStore = useExploreStore();
-
-      // Always use the provided query parameter first, then try store properties as fallback
-      // This ensures we use the exact same SQL for both query and histogram endpoints
-      const sql = params.query && params.query.trim() ? params.query : exploreStore.sqlForExecution;
-
-      // Prepare query parameters for the API
-      const queryParams: QueryParams = {
-        raw_sql: sql || "", // Ensure we don't send undefined
-        limit: 100,
-        window: granularity,
-        timezone: params.timezone,
-      };
-
-      // Only include group_by if it has a non-empty value
-      if (params.groupBy && params.groupBy.trim() !== '') {
-        queryParams.group_by = params.groupBy;
-      }
-
-      console.log("HistogramService: Calling API with params:", {
-        sourceId: params.sourceId,
-        window: queryParams.window,
-        groupBy: queryParams.group_by,
-        timezone: queryParams.timezone
-      });
-
-      // Call the API with all parameters in the body
-      const response = await exploreApi.getHistogramData(
-        params.sourceId,
-        queryParams,
-        params.teamId
-      );
-
-      console.log("HistogramService: API response received",
-                 isErrorResponse(response) ? "Error" : "Success");
-
-      if (isErrorResponse(response)) {
-        console.error("HistogramService: Error response", response);
-        return {
-          success: false,
-          error: {
-            message: response.message || 'Failed to fetch histogram data',
-            details: response.error_type
-          }
-        };
-      }
-
-      console.log("HistogramService: Success response with data points:",
-                 response.data?.data?.length || 0);
-
-      return {
-        success: true,
-        data: response.data || undefined
-      };
-    } catch (error) {
-      console.error('Error in HistogramService:', error);
-      return {
-        success: false,
-        error: {
-          message: 'Failed to fetch histogram data',
-          details: error instanceof Error ? error.message : String(error)
-        }
-      };
     }
   }
 }

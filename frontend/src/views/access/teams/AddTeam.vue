@@ -80,13 +80,13 @@ const isFormValid = computed(() => {
 const handleSubmit = async () => {
     if (!isFormValid.value) return
     
-    await teamsStore.createTeam({
+    const result = await teamsStore.createTeam({
         name: teamName.value,
         description: description.value
     })
     
-    // Check for success through absence of error
-    if (!teamsStore.error?.createTeam) {
+    // Check for success
+    if (result && result.success) {
         // Reset form
         teamName.value = ''
         description.value = ''

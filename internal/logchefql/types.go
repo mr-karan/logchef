@@ -125,6 +125,10 @@ const (
 	ErrUnknownBooleanOperator = "UNKNOWN_BOOLEAN_OPERATOR"
 	ErrInvalidTokenType       = "INVALID_TOKEN_TYPE"
 	ErrMissingBooleanOperator = "MISSING_BOOLEAN_OPERATOR"
+	ErrTrailingTokens         = "TRAILING_TOKENS"
+	ErrInvalidTimeFormat      = "INVALID_TIME_FORMAT"
+	ErrInvalidTimezone        = "INVALID_TIMEZONE"
+	ErrInvalidIdentifier      = "INVALID_IDENTIFIER"
 )
 
 // ColumnInfo represents column metadata from the schema

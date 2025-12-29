@@ -1,18 +1,40 @@
 import { defineStore } from 'pinia'
 
-/**
- * Clean, minimal context store for team and source selection.
- * 
- * RULES:
- * 1. Team selection clears source (user must explicitly select source)
- * 2. No automatic fallbacks or magic
- * 3. Route is source of truth, this store is derived from route
- * 4. No complex coordination - just simple state
- */
+// Persists team/source selection. Stores last source PER TEAM so switching teams restores previous source.
+const STORAGE_KEY = 'logchef_context'
+
+interface PersistedContext {
+  lastTeamId: number | null
+  sourcePerTeam: Record<number, number>  // teamId → sourceId
+}
 
 interface ContextState {
   teamId: number | null
   sourceId: number | null
+}
+
+function loadFromStorage(): PersistedContext {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      return {
+        lastTeamId: parsed.lastTeamId ?? null,
+        sourcePerTeam: parsed.sourcePerTeam ?? {},
+      }
+    }
+  } catch (e) {
+    console.warn('ContextStore: Failed to load from localStorage', e)
+  }
+  return { lastTeamId: null, sourcePerTeam: {} }
+}
+
+function saveToStorage(data: PersistedContext): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+  } catch (e) {
+    console.warn('ContextStore: Failed to save to localStorage', e)
+  }
 }
 
 export const useContextStore = defineStore('context', {
@@ -30,18 +52,24 @@ export const useContextStore = defineStore('context', {
   },
 
   actions: {
-    /**
-     * Select a team. This clears the source - user must explicitly select a new source.
-     */
     selectTeam(teamId: number) {
-      console.log(`ContextStore: Selecting team ${teamId}, clearing source`)
+      console.log(`ContextStore: Selecting team ${teamId}`)
+      const previousTeamId = this.teamId
       this.teamId = teamId
-      this.sourceId = null // Hard reset - no automatic source selection
+      
+      // IMPORTANT: Clear source when team changes to prevent 403 errors
+      // The cached source may not belong to the new team. The sourcesStore
+      // will restore a valid source after loading the new team's sources.
+      if (previousTeamId !== teamId) {
+        console.log(`ContextStore: Team changed from ${previousTeamId} to ${teamId}, clearing source`)
+        this.sourceId = null
+      }
+      
+      const persisted = loadFromStorage()
+      persisted.lastTeamId = teamId
+      saveToStorage(persisted)
     },
 
-    /**
-     * Select a source. Team must already be selected.
-     */
     selectSource(sourceId: number) {
       if (!this.hasTeam) {
         console.warn(`ContextStore: Cannot select source ${sourceId} without team`)
@@ -49,24 +77,57 @@ export const useContextStore = defineStore('context', {
       }
       console.log(`ContextStore: Selecting source ${sourceId} for team ${this.teamId}`)
       this.sourceId = sourceId
+      
+      const persisted = loadFromStorage()
+      persisted.sourcePerTeam[this.teamId!] = sourceId
+      saveToStorage(persisted)
     },
 
-    /**
-     * Clear all context (useful for logout, etc.)
-     */
     clear() {
       console.log('ContextStore: Clearing all context')
       this.teamId = null
       this.sourceId = null
     },
 
-    /**
-     * Set context from route params (used by router guard)
-     */
+    clearStorage() {
+      console.log('ContextStore: Clearing localStorage')
+      try {
+        localStorage.removeItem(STORAGE_KEY)
+      } catch (e) {
+        console.warn('ContextStore: Failed to clear localStorage', e)
+      }
+    },
+
     setFromRoute(teamId: number | null, sourceId: number | null) {
       console.log(`ContextStore: Setting from route - team: ${teamId}, source: ${sourceId}`)
-      this.teamId = teamId
-      this.sourceId = sourceId
+      
+      const teamChanged = teamId !== this.teamId
+      
+      if (teamChanged && teamId) {
+        this.selectTeam(teamId)
+      } else if (teamId && !this.teamId) {
+        this.selectTeam(teamId)
+      } else if (!teamId) {
+        this.teamId = null
+        this.sourceId = null
+        return
+      }
+      
+      if (sourceId && this.teamId) {
+        this.selectSource(sourceId)
+      }
+    },
+
+    getStoredDefaults(): { teamId: number | null; sourceId: number | null } {
+      const persisted = loadFromStorage()
+      const teamId = persisted.lastTeamId
+      const sourceId = teamId ? (persisted.sourcePerTeam[teamId] ?? null) : null
+      return { teamId, sourceId }
+    },
+
+    getStoredSourceForTeam(teamId: number): number | null {
+      const persisted = loadFromStorage()
+      return persisted.sourcePerTeam[teamId] ?? null
     },
   },
 })
