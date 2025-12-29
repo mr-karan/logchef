@@ -79,12 +79,60 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in LogChef.</p>
     </header>
 
+    <!-- v1.1.0 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">v1.1.0</span>
+        <span class="version-date">Dec 29, 2025</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v1.1.0" class="version-link" target="_blank">Release notes →</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Bookmark Favorite Queries</strong> — Star saved queries for quick access. Bookmarked queries appear at top of collections dropdown.</li>
+          <li>Copy shareable URL for any saved query</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>LogChefQL Parser Rewrite</strong> — Grammar-based parser with better error messages</li>
+          <li><strong>Frontend Tooling</strong> — Switched to Bun + rolldown-vite. Build time: ~2.3s (was >55s)</li>
+          <li>Refactored frontend state management with centralized URL sync</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li>Saved query navigation no longer shows stale content</li>
+          <li>Team/source context preserved when navigating between pages</li>
+          <li>Sidebar links now include full context params</li>
+        </ul>
+      </div>
+
+      <div class="contributors">
+        <strong>Contributors:</strong> <a href="https://github.com/rhnvrm" target="_blank">@rhnvrm</a>
+      </div>
+    </article>
+
     <!-- v1.0.0 -->
     <article class="version">
       <div class="version-header">
         <span class="version-tag">v1.0.0</span>
         <span class="version-date">Dec 22, 2025</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.0.0" class="version-link" target="_blank">Release notes →</a>
       </div>
 
