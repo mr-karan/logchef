@@ -3,7 +3,10 @@
 // validation rules for ensuring data integrity across the application.
 package models
 
-import "time"
+import (
+	"log/slog"
+	"time"
+)
 
 // ID types for improved type safety
 type (
@@ -16,12 +19,29 @@ type (
 	// SourceID represents a unique data source identifier
 	SourceID int
 
-	// SessionID represents a unique session identifier
+	// SessionID represents a unique session identifier (redacted in logs for security)
 	SessionID string
 
 	// AlertID represents a unique alert identifier
 	AlertID int64
 )
+
+const sessionIDLogPrefix = 8
+
+func (id SessionID) Redacted() string {
+	if len(id) <= sessionIDLogPrefix {
+		return string(id)
+	}
+	return string(id)[:sessionIDLogPrefix] + "..."
+}
+
+func (id SessionID) LogValue() slog.Value {
+	return slog.StringValue(id.Redacted())
+}
+
+func (id SessionID) String() string {
+	return id.Redacted()
+}
 
 // Timestamps provides common timestamp fields used across multiple models
 type Timestamps struct {

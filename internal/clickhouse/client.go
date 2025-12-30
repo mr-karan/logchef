@@ -207,7 +207,7 @@ func (c *Client) QueryWithTimeout(ctx context.Context, query string, timeoutSeco
 	defer func() {
 		c.logger.Debug("query processing complete",
 			"duration_ms", time.Since(start).Milliseconds(),
-			"query_length", len(query),
+			"query", query,
 			"timeout_seconds", *timeoutSeconds,
 		)
 	}()
@@ -230,7 +230,6 @@ func (c *Client) QueryWithTimeout(ctx context.Context, query string, timeoutSeco
 		hookCtx = clickhouse.Context(hookCtx, clickhouse.WithSettings(clickhouse.Settings{
 			"max_execution_time": *timeoutSeconds,
 		}))
-		c.logger.Debug("applying query timeout", "timeout_seconds", *timeoutSeconds)
 
 		rows, queryErr = c.conn.Query(hookCtx, query)
 		if queryErr != nil {

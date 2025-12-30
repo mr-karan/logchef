@@ -110,7 +110,6 @@ func (m *Manager) evaluateCycle(ctx context.Context) {
 		return
 	}
 	if len(alerts) == 0 {
-		m.log.Debug("no alerts due for evaluation")
 		return
 	}
 

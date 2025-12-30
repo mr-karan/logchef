@@ -48,14 +48,7 @@ func NewStructuredQueryLoggerHook(logger *slog.Logger) *StructuredQueryLoggerHoo
 	}
 }
 
-// BeforeQuery logs query details using structured logging.
 func (h *StructuredQueryLoggerHook) BeforeQuery(ctx context.Context, query string) (context.Context, error) {
-	h.logger.Debug("executing query",
-		slog.Group("query_details",
-			slog.String("sql", query),
-			// TODO: Add more context if available (e.g., user ID, request ID from context).
-		),
-	)
 	return ctx, nil
 }
 
