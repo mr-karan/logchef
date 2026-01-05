@@ -161,6 +161,33 @@ LIMIT ${limit}`;
   }
 
   /**
+   * Extract the LIMIT value from a SQL query
+   * @param sql The SQL query to parse
+   * @returns The limit value if found, null otherwise
+   */
+  static extractLimitFromSql(sql: string): number | null {
+    if (!sql || !sql.trim()) {
+      return null;
+    }
+
+    try {
+      // Match LIMIT followed by a number, handling optional whitespace and semicolons
+      const limitRegex = /\bLIMIT\s+(\d+)\s*(?:;|\s|$)/i;
+      const match = sql.match(limitRegex);
+
+      if (match && match[1]) {
+        const limit = parseInt(match[1], 10);
+        return isNaN(limit) ? null : limit;
+      }
+
+      return null;
+    } catch (error) {
+      console.error("SqlManager: Error extracting limit from SQL:", error);
+      return null;
+    }
+  }
+
+  /**
    * Update SQL query with new limit
    * @param sql The SQL query to update
    * @param limit The new limit value

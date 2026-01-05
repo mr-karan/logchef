@@ -743,9 +743,18 @@ export const useExploreStore = defineStore("explore", () => {
 
       let sql = sqlForExecution.value;
 
+      // Extract limit from SQL if present, otherwise use store's limit
+      const sqlLimit = SqlManager.extractLimitFromSql(sql || '');
+      const effectiveLimit = sqlLimit !== null ? sqlLimit : state.data.value.limit;
+
+      // Sync store's limit with SQL's limit for UI consistency
+      if (sqlLimit !== null && sqlLimit !== state.data.value.limit) {
+        state.data.value.limit = sqlLimit;
+      }
+
       const params: QueryParams = {
         raw_sql: '',
-        limit: state.data.value.limit,
+        limit: effectiveLimit,
         query_timeout: state.data.value.queryTimeout
       };
 
