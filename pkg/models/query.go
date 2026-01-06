@@ -33,10 +33,21 @@ func (e ErrInvalidTimeout) Error() string {
 	return e.Message
 }
 
+// TemplateVariable represents a variable for SQL template substitution.
+// Variables in the SQL query (e.g., {{from_date}}) will be replaced with their values.
+type TemplateVariable struct {
+	Name  string      `json:"name"`  // Variable name (without braces)
+	Type  string      `json:"type"`  // "string", "text", "number", or "date"
+	Value interface{} `json:"value"` // The value to substitute
+}
+
 // APIQueryRequest represents the request payload for the standard log querying endpoint.
 type APIQueryRequest struct {
 	Limit  int    `json:"limit"`
 	RawSQL string `json:"raw_sql"`
+	// Variables for template substitution in the SQL query.
+	// Example: {"name": "from_date", "type": "date", "value": "2026-01-01T00:00:00Z"}
+	Variables []TemplateVariable `json:"variables,omitempty"`
 	// Query execution timeout in seconds. If not specified, uses default timeout.
 	QueryTimeout *int `json:"query_timeout,omitempty"`
 	// Sort and other general query params could be added here if needed later.
@@ -51,6 +62,8 @@ type APIHistogramRequest struct {
 	Window         string `json:"window,omitempty"`          // For histogram queries: time window size like "1m", "5m", "1h"
 	GroupBy        string `json:"group_by,omitempty"`        // For histogram queries: field to group by
 	Timezone       string `json:"timezone,omitempty"`        // Kept for histogram, optional otherwise
+	// Variables for template substitution in the SQL query.
+	Variables []TemplateVariable `json:"variables,omitempty"`
 	// Query execution timeout in seconds. If not specified, uses default timeout.
 	QueryTimeout *int `json:"query_timeout,omitempty"`
 }

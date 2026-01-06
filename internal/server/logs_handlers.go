@@ -16,6 +16,7 @@ import (
 	"github.com/mr-karan/logchef/internal/ai"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -179,17 +180,37 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
 	}
 
+	// Perform template variable substitution if variables are provided.
+	processedSQL := req.RawSQL
+	if len(req.Variables) > 0 {
+		vars := make([]template.Variable, len(req.Variables))
+		for i, v := range req.Variables {
+			vars[i] = template.Variable{
+				Name:  v.Name,
+				Type:  template.VariableType(v.Type),
+				Value: v.Value,
+			}
+		}
+
+		substituted, err := template.SubstituteVariables(req.RawSQL, vars)
+		if err != nil {
+			return SendErrorWithType(c, fiber.StatusBadRequest,
+				fmt.Sprintf("Variable substitution failed: %v", err), models.ValidationErrorType)
+		}
+		processedSQL = substituted
+	}
+
 	// Create a cancellable context for this query
 	queryCtx, cancel := context.WithCancel(c.Context())
 	defer cancel() // Ensure cleanup
 
-	// Add query to tracker
+	// Add query to tracker (use original SQL for tracking, substituted for execution)
 	queryID := queryTracker.AddQuery(user.ID, sourceID, teamID, req.RawSQL, cancel)
 	defer queryTracker.RemoveQuery(queryID) // Ensure cleanup
 
 	// Prepare parameters for the core query function.
 	params := clickhouse.LogQueryParams{
-		RawSQL:       req.RawSQL,
+		RawSQL:       processedSQL,
 		Limit:        req.Limit,
 		QueryTimeout: req.QueryTimeout, // Always non-nil now
 	}
@@ -294,6 +315,26 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "raw_sql parameter is required", models.ValidationErrorType)
 	}
 
+	// Perform template variable substitution if variables are provided.
+	processedSQL := req.RawSQL
+	if len(req.Variables) > 0 {
+		vars := make([]template.Variable, len(req.Variables))
+		for i, v := range req.Variables {
+			vars[i] = template.Variable{
+				Name:  v.Name,
+				Type:  template.VariableType(v.Type),
+				Value: v.Value,
+			}
+		}
+
+		substituted, err := template.SubstituteVariables(req.RawSQL, vars)
+		if err != nil {
+			return SendErrorWithType(c, fiber.StatusBadRequest,
+				fmt.Sprintf("Variable substitution failed: %v", err), models.ValidationErrorType)
+		}
+		processedSQL = substituted
+	}
+
 	// Use window from the request body or default to 1 minute
 	window := req.Window
 	if window == "" {
@@ -303,7 +344,7 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 	// Prepare parameters for the core histogram function.
 	params := core.HistogramParams{
 		Window: window,
-		Query:  req.RawSQL, // Pass raw SQL containing filters and time conditions
+		Query:  processedSQL, // Pass processed SQL containing filters and time conditions
 	}
 
 	// Only add groupBy if it's not empty

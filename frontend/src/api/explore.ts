@@ -36,6 +36,13 @@ export interface ColumnInfo {
   type: string;
 }
 
+// Template variable for SQL substitution
+export interface TemplateVariable {
+  name: string;
+  type: 'text' | 'number' | 'date' | 'string';
+  value: string | number;
+}
+
 // Simplified query parameters - intended for API communication
 export interface QueryParams {
   raw_sql: string;
@@ -46,6 +53,7 @@ export interface QueryParams {
   start_time?: string; // ISO formatted start time
   end_time?: string;   // ISO formatted end time
   query_timeout?: number; // Query timeout in seconds
+  variables?: TemplateVariable[]; // Template variables for SQL substitution
 }
 
 export interface QueryStats {

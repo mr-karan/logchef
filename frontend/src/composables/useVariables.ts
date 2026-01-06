@@ -1,5 +1,6 @@
 import {useVariableStore} from "@/stores/variables.ts";
 import {storeToRefs} from "pinia";
+import type { TemplateVariable } from "@/api/explore";
 
 
 
@@ -8,7 +9,7 @@ export function useVariables() {
     const { allVariables } = storeToRefs(variableStore);
 
     /**
-     * convert {{variable}} format to user input
+     * convert {{variable}} format to user input (for local/display purposes)
      * @param sql origin query
      * @returns converted query
      */
@@ -37,7 +38,22 @@ export function useVariables() {
         return sql;
     };
 
+    /**
+     * Get variables in the format expected by the API for backend substitution.
+     * This allows the backend to safely substitute variables with proper escaping.
+     * @returns Array of template variables for API use
+     */
+    const getVariablesForApi = (): TemplateVariable[] => {
+        return allVariables.value.map(v => ({
+            name: v.name,
+            type: v.type as 'text' | 'number' | 'date' | 'string',
+            value: v.value
+        }));
+    };
+
     return {
-        convertVariables
+        convertVariables,
+        getVariablesForApi,
+        allVariables
     };
 }
