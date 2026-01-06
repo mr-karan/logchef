@@ -151,11 +151,6 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Apply default limit if not specified.
-	if req.Limit <= 0 {
-		req.Limit = 100 // Consider making this configurable.
-	}
-
 	// Apply default timeout if not specified
 	if req.QueryTimeout == nil {
 		defaultTimeout := models.DefaultQueryTimeoutSeconds
