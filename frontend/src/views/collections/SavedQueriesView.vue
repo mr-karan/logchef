@@ -156,13 +156,16 @@ onMounted(async () => {
 });
 
 watch(
-  () => [contextTeamId.value, contextSourceId.value] as const,
-  async ([teamId, sourceId], oldValue) => {
-    if (!contextReady.value) return;
+  () => [contextReady.value, contextTeamId.value, contextSourceId.value] as const,
+  async ([isReady, teamId, sourceId], oldValue) => {
+    if (!isReady) return;
     if (!teamId || !sourceId) return;
     
-    const oldSourceId = oldValue?.[1];
-    if (sourceId !== oldSourceId) {
+    const [wasReady, , oldSourceId] = oldValue ?? [false, null, null];
+    // Fetch queries when:
+    // 1. Context just became ready (initial load)
+    // 2. Source ID changed (user switched source)
+    if (!wasReady || sourceId !== oldSourceId) {
       await fetchQueries();
     }
   },
