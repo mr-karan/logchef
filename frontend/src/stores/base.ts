@@ -4,7 +4,7 @@ import type { APIErrorResponse } from "@/api/types";
 import { useApiQuery } from "@/composables/useApiQuery";
 import { useLoadingState } from "@/composables/useLoadingState";
 import { useToast } from "@/composables/useToast";
-import { formatErrorTypeToTitle } from "@/api/error-handler";
+import { formatErrorTypeToTitle, isCanceledError } from "@/api/error-handler";
 
 export interface BaseState<T> {
   data: Ref<T>;
@@ -47,28 +47,38 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
   const { execute } = useApiQuery();
 
   function handleError(err: Error | APIErrorResponse, operation: string): { success: false; error: APIErrorResponse } {
+    // Handle canceled requests silently - don't show error or store in state
+    if (isCanceledError(err)) {
+      const canceledError: APIErrorResponse = {
+        status: 'error',
+        message: 'Request canceled',
+        error_type: 'CanceledError',
+      };
+      return { success: false as const, error: canceledError };
+    }
+
     console.error(`[${operation} Error]`, err);
-    
+
     const errorMessage = err instanceof Error ? err.message : err.message;
     const errorType = err instanceof Error ? 'UnknownError' : (err.error_type || 'UnknownError');
     const errorData = err instanceof Error ? undefined : err.data;
-    
+
     const apiError: APIErrorResponse = {
       status: 'error',
       message: errorMessage,
       error_type: errorType,
       data: errorData,
     };
-    
+
     error.value = apiError;
-    
+
     const { toast } = useToast();
     toast({
       title: formatErrorTypeToTitle(errorType),
       description: errorMessage,
       variant: 'destructive',
     });
-    
+
     return { success: false as const, error: apiError };
   }
 
