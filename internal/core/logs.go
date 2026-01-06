@@ -41,9 +41,10 @@ func QueryLogs(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log
 	}
 
 	// 3. Build the query (assuming LogQueryParams includes RawSQL or structured fields)
-	// Use the query builder from the clickhouse package
+	// Use the extended query builder which allows CTEs, JOINs, and subqueries
+	// while still validating that all table references point to the source table.
 	tableName := source.GetFullTableName() // e.g., "default.logs"
-	qb := clickhouse.NewQueryBuilder(tableName)
+	qb := clickhouse.NewExtendedQueryBuilder(tableName)
 
 	// TODO: Refine query building based on LogQueryParams structure
 	// Example: If params.RawSQL is provided and validated:

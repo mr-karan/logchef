@@ -4,6 +4,7 @@ import { exploreApi } from "@/api/explore";
 import { useTeamsStore } from "@/stores/teams";
 import { useContextStore } from "@/stores/context";
 import { HistogramService, type HistogramData } from '@/services/HistogramService';
+import { useVariables } from "@/composables/useVariables";
 
 interface HistogramState {
   data: HistogramData[];
@@ -91,15 +92,20 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
         windowGranularity = HistogramService.calculateOptimalGranularity(startISO, endISO);
       }
 
+      // Get variables for backend substitution
+      const { getVariablesForApi } = useVariables();
+      const variables = getVariablesForApi();
+
       const params = {
         raw_sql: sql,
         limit: 100,
         window: windowGranularity || '1m',
         timezone: timezone || undefined,
-        group_by: state.value.groupByField === "__none__" || state.value.groupByField === null 
-          ? undefined 
+        group_by: state.value.groupByField === "__none__" || state.value.groupByField === null
+          ? undefined
           : state.value.groupByField,
         query_timeout: queryTimeout,
+        variables: variables.length > 0 ? variables : undefined,
       };
 
       const response = await exploreApi.getHistogramData(sourceId, params, currentTeamId);
