@@ -2078,9 +2078,12 @@ const formatVariableValue = (variable: VariableSetting) => {
     case 'date':
       try {
         const date = new Date(variable.value);
-        return `Date: ${date.toLocaleDateString()} ${date.toLocaleTimeString()} `;
+        const yyyy = date.getFullYear();
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
+        const dd = String(date.getDate()).padStart(2, '0');
+        return `Date: ${yyyy}-${mm}-${dd}`;
       } catch {
-        return `Date: ${variable.value} `;
+        return `Date: ${variable.value}`;
       }
     case 'text':
     default:
