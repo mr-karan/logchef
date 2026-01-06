@@ -759,7 +759,6 @@ export const useExploreStore = defineStore("explore", () => {
 
       const params: QueryParams = {
         raw_sql: '',
-        limit: state.data.value.limit,
         query_timeout: state.data.value.queryTimeout
       };
 

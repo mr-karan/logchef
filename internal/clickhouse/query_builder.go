@@ -2,9 +2,17 @@ package clickhouse
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	clickhouseparser "github.com/AfterShip/clickhouse-sql-parser/parser"
+)
+
+const (
+	// DefaultLimit is applied when SQL mode has no LIMIT clause
+	DefaultLimit = 1000
+	// MaxLimit caps any LIMIT to prevent excessive result sets
+	MaxLimit = 10000
 )
 
 // QueryMode defines the validation strictness for SQL queries.
@@ -87,10 +95,7 @@ func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) 
 		// No additional validation needed.
 	}
 
-	// Add LIMIT
-	if limit > 0 {
-		qb.ensureLimit(selectQuery, limit)
-	}
+	qb.ensureLimit(selectQuery, limit)
 
 	result := stmt.String()
 	result = strings.ReplaceAll(result, placeholder, "''")
@@ -180,13 +185,34 @@ func (qb *QueryBuilder) checkDangerousOperations(stmt *clickhouseparser.SelectQu
 	return nil
 }
 
-// ensureLimit adds or replaces the LIMIT clause on a SelectQuery.
-func (qb *QueryBuilder) ensureLimit(stmt *clickhouseparser.SelectQuery, limit int) {
-	numberLiteral := &clickhouseparser.NumberLiteral{
-		Literal: fmt.Sprintf("%d", limit),
+// ensureLimit handles LIMIT clause based on query mode:
+// - If requestedLimit > 0 (LogchefQL): apply it, capped at MaxLimit
+// - If requestedLimit == 0 (SQL mode): respect user's SQL LIMIT (capped), or add DefaultLimit
+func (qb *QueryBuilder) ensureLimit(stmt *clickhouseparser.SelectQuery, requestedLimit int) {
+	if requestedLimit > 0 {
+		limit := min(requestedLimit, MaxLimit)
+		stmt.Limit = &clickhouseparser.LimitClause{
+			Limit: &clickhouseparser.NumberLiteral{Literal: fmt.Sprintf("%d", limit)},
+		}
+		return
 	}
+
+	if stmt.Limit != nil && stmt.Limit.Limit != nil {
+		existing, err := strconv.Atoi(stmt.Limit.Limit.String())
+		if err != nil {
+			return
+		}
+		if existing == 0 {
+			return
+		}
+		if existing > MaxLimit {
+			stmt.Limit.Limit = &clickhouseparser.NumberLiteral{Literal: fmt.Sprintf("%d", MaxLimit)}
+		}
+		return
+	}
+
 	stmt.Limit = &clickhouseparser.LimitClause{
-		Limit: numberLiteral,
+		Limit: &clickhouseparser.NumberLiteral{Literal: fmt.Sprintf("%d", DefaultLimit)},
 	}
 }
 
