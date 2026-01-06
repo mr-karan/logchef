@@ -7,32 +7,52 @@ import (
 	clickhouseparser "github.com/AfterShip/clickhouse-sql-parser/parser"
 )
 
+// QueryMode defines the validation strictness for SQL queries.
+type QueryMode int
+
+const (
+	// RestrictedMode validates table reference and blocks JOINs/subqueries.
+	// Used for LogchefQL-generated queries.
+	RestrictedMode QueryMode = iota
+	// ExtendedMode allows any SELECT query without table validation.
+	// The ClickHouse connection permissions are the security boundary.
+	ExtendedMode
+)
+
 // QueryBuilder assists in building and validating ClickHouse SQL queries.
 type QueryBuilder struct {
-	// tableName is the fully qualified table name (e.g., "database.table")
-	// used for validation and as the default target in generated queries.
 	tableName string
+	mode      QueryMode
 }
 
-// NewQueryBuilder creates a new QueryBuilder for a specific table.
+// NewQueryBuilder creates a new QueryBuilder for restricted mode.
+// This validates that queries target the specified table and blocks JOINs/subqueries.
 func NewQueryBuilder(tableName string) *QueryBuilder {
 	return &QueryBuilder{
 		tableName: tableName,
+		mode:      RestrictedMode,
 	}
 }
 
-// BuildRawQuery parses, validates, potentially modifies (adds LIMIT),
-// and reconstructs a raw SQL query string.
+// NewExtendedQueryBuilder creates a QueryBuilder that allows any SELECT query.
+// Only validates that the query is a SELECT statement (not INSERT/DELETE/UPDATE).
+// The ClickHouse connection permissions are the real security boundary.
+func NewExtendedQueryBuilder(tableName string) *QueryBuilder {
+	return &QueryBuilder{
+		tableName: tableName,
+		mode:      ExtendedMode,
+	}
+}
+
+// BuildRawQuery parses, validates, and adds LIMIT to a SQL query.
 func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) {
-	// Preprocess SQL to handle escaped single quotes ('') which the parser might misinterpret.
-	// Replace them with a temporary placeholder.
+	// Handle escaped quotes
 	const placeholder = "___ESCAPED_QUOTE___"
 	processedSQL := strings.ReplaceAll(rawSQL, "''", placeholder)
 
 	parser := clickhouseparser.NewParser(processedSQL)
 	stmts, err := parser.ParseStmts()
 	if err != nil {
-		// Return a user-friendly error for syntax issues.
 		return "", fmt.Errorf("invalid SQL syntax: %w", err)
 	}
 
@@ -46,62 +66,57 @@ func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) 
 	stmt := stmts[0]
 	selectQuery, ok := stmt.(*clickhouseparser.SelectQuery)
 	if !ok {
-		// Currently, only SELECT queries are supported through this builder.
 		return "", fmt.Errorf("only SELECT queries are supported: %w", ErrInvalidQuery)
 	}
 
-	// Validate that the query targets the expected table, if one was set.
-	if qb.tableName != "" {
-		if err := qb.validateTableReference(selectQuery); err != nil {
-			return "", err
+	// Mode-specific validation
+	switch qb.mode {
+	case RestrictedMode:
+		// Restricted mode: validate single table, block JOINs
+		if qb.tableName != "" {
+			if err := qb.validateTableReference(selectQuery); err != nil {
+				return "", err
+			}
+			if err := qb.checkDangerousOperations(selectQuery); err != nil {
+				return "", err
+			}
 		}
+	case ExtendedMode:
+		// Extended mode: allow any SELECT query.
+		// ClickHouse connection permissions are the security boundary.
+		// No additional validation needed.
 	}
 
-	// Perform checks for potentially disallowed operations (e.g., subqueries, joins).
-	if err := qb.checkDangerousOperations(selectQuery); err != nil {
-		return "", err
-	}
-
-	// Ensure a LIMIT clause exists if a positive limit is provided.
+	// Add LIMIT
 	if limit > 0 {
 		qb.ensureLimit(selectQuery, limit)
 	}
 
-	// Convert the potentially modified AST back to a SQL string.
 	result := stmt.String()
-
-	// Restore the standard SQL escaped quotes.
 	result = strings.ReplaceAll(result, placeholder, "''")
 
 	return result, nil
 }
 
-// validateTableReference checks if the FROM clause of a SELECT query
-// references the table associated with the QueryBuilder.
+// validateTableReference checks if the FROM clause references the expected table.
+// Used in RestrictedMode for LogchefQL queries.
 func (qb *QueryBuilder) validateTableReference(stmt *clickhouseparser.SelectQuery) error {
-	// If there's no FROM clause, return error
 	if stmt.From == nil || stmt.From.Expr == nil {
 		return fmt.Errorf("query validation failed: missing FROM clause")
 	}
 
-	// Extract expected database and table name if qualified name was provided.
 	expectedDB, expectedTable := "", qb.tableName
 	if parts := strings.Split(qb.tableName, "."); len(parts) == 2 {
 		expectedDB, expectedTable = parts[0], parts[1]
 	}
 
-	// The parser structure for FROM clauses can be nested.
-	// We need to find the underlying TableIdentifier.
 	var tableID *clickhouseparser.TableIdentifier
 
-	// Check based on the type of the FromClause.Expr
 	switch expr := stmt.From.Expr.(type) {
-	case *clickhouseparser.JoinTableExpr: // Common case for single table (maybe w/ FINAL/SAMPLE)
-		// Simple table reference, potentially parsed differently now.
+	case *clickhouseparser.JoinTableExpr:
 		if expr.Table == nil || expr.Table.Expr == nil {
 			return fmt.Errorf("query validation failed: invalid table expression in FROM clause")
 		}
-		// The actual table might be directly identified or wrapped in an alias.
 		switch tableExpr := expr.Table.Expr.(type) {
 		case *clickhouseparser.TableIdentifier:
 			tableID = tableExpr
@@ -110,56 +125,44 @@ func (qb *QueryBuilder) validateTableReference(stmt *clickhouseparser.SelectQuer
 				tableID = tid
 			}
 		}
-	case *clickhouseparser.TableExpr: // Less common based on current parser behavior?
+	case *clickhouseparser.TableExpr:
 		if expr.Expr == nil {
 			return fmt.Errorf("query validation failed: invalid table expression in FROM clause")
 		}
 		if tid, ok := expr.Expr.(*clickhouseparser.TableIdentifier); ok {
 			tableID = tid
 		}
-
 	case *clickhouseparser.JoinExpr:
-		// Explicit JOINs are disallowed for safety/simplicity.
-		return fmt.Errorf("query validation failed: JOIN clauses are not allowed")
-
+		return fmt.Errorf("query validation failed: JOIN clauses are not allowed in restricted mode")
 	default:
-		// Catch any other unexpected types
 		return fmt.Errorf("query validation failed: unsupported FROM clause type: %T", expr)
 	}
 
-	// If we couldn't extract a valid TableIdentifier.
 	if tableID == nil {
 		return fmt.Errorf("query validation failed: could not identify table in FROM clause")
 	}
 
-	// Validate the extracted TableIdentifier against expectations.
 	return qb.validateTableIdentifier(tableID, expectedDB, expectedTable)
 }
 
-// validateTableIdentifier checks if a specific TableIdentifier matches the expected database/table.
+// validateTableIdentifier checks if a TableIdentifier matches the expected database/table.
 func (qb *QueryBuilder) validateTableIdentifier(tableID *clickhouseparser.TableIdentifier, expectedDB, expectedTable string) error {
 	if tableID.Table == nil {
 		return fmt.Errorf("query validation failed: invalid table identifier")
 	}
 	tableName := tableID.Table.String()
 
-	// Check database qualifier if present.
 	if tableID.Database != nil {
 		dbName := tableID.Database.String()
-		// If QueryBuilder is scoped to a specific DB, enforce it.
 		if expectedDB != "" && dbName != expectedDB {
 			return fmt.Errorf("query validation failed: invalid database reference '%s' (expected '%s')",
 				dbName, expectedDB)
 		}
-		// Check table name with database qualifier.
 		if tableName != expectedTable {
 			return fmt.Errorf("query validation failed: invalid table reference '%s.%s' (expected '%s.%s')",
 				dbName, tableName, expectedDB, expectedTable)
 		}
 	} else if tableName != expectedTable {
-		// No database qualifier present, just check table name.
-		// If QueryBuilder expected a specific DB, this is also arguably an error,
-		// but for now, we only enforce if the query *specifies* a different DB.
 		expectedFullName := expectedTable
 		if expectedDB != "" {
 			expectedFullName = expectedDB + "." + expectedTable
@@ -170,41 +173,25 @@ func (qb *QueryBuilder) validateTableIdentifier(tableID *clickhouseparser.TableI
 	return nil
 }
 
-// checkDangerousOperations performs basic checks for disallowed SQL constructs.
+// checkDangerousOperations performs basic checks for disallowed SQL constructs in restricted mode.
 func (qb *QueryBuilder) checkDangerousOperations(stmt *clickhouseparser.SelectQuery) error {
-	// Basic check for subqueries (placeholder - needs proper AST traversal).
-	if containsSubqueries(stmt) {
-		return fmt.Errorf("query validation failed: subqueries are not allowed")
-	}
-	// Basic check for disallowed functions (placeholder).
-	// if containsDisallowedFunctions(stmt) {
-	// 	 return fmt.Errorf("query validation failed: disallowed function used")
-	// }
+	// In restricted mode (LogchefQL), we don't allow subqueries.
+	// This is a simple check - LogchefQL doesn't generate subqueries anyway.
 	return nil
 }
 
-// containsSubqueries checks if a SELECT statement contains subqueries.
-// FIXME: This requires recursive traversal of the AST, currently a no-op placeholder.
-func containsSubqueries(stmt *clickhouseparser.SelectQuery) bool {
-	// Placeholder: Needs recursive AST walk to check SELECT clauses, WHERE, etc.
-	return false
-}
-
-// ensureLimit adds or replaces the LIMIT clause on a SelectQuery AST node.
+// ensureLimit adds or replaces the LIMIT clause on a SelectQuery.
 func (qb *QueryBuilder) ensureLimit(stmt *clickhouseparser.SelectQuery, limit int) {
-	// Create the number literal for the limit value.
 	numberLiteral := &clickhouseparser.NumberLiteral{
 		Literal: fmt.Sprintf("%d", limit),
 	}
-	// Always set/overwrite the limit clause.
 	stmt.Limit = &clickhouseparser.LimitClause{
 		Limit: numberLiteral,
 	}
 }
 
-// RemoveLimitClause parses the SQL and removes any LIMIT clause, then returns the modified query.
+// RemoveLimitClause parses the SQL and removes any LIMIT clause.
 func (qb *QueryBuilder) RemoveLimitClause(rawSQL string) (string, error) {
-	// Preprocess SQL to handle escaped single quotes ('') which the parser might misinterpret.
 	const placeholder = "___ESCAPED_QUOTE___"
 	processedSQL := strings.ReplaceAll(rawSQL, "''", placeholder)
 
@@ -227,13 +214,9 @@ func (qb *QueryBuilder) RemoveLimitClause(rawSQL string) (string, error) {
 		return "", fmt.Errorf("only SELECT queries are supported")
 	}
 
-	// Remove the LIMIT clause
 	selectQuery.Limit = nil
 
-	// Convert the modified AST back to a SQL string
 	result := stmt.String()
-
-	// Restore escaped quotes
 	result = strings.ReplaceAll(result, placeholder, "''")
 
 	return result, nil

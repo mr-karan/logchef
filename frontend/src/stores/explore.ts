@@ -780,10 +780,14 @@ export const useExploreStore = defineStore("explore", () => {
         }
       }
 
-      const { convertVariables } = useVariables();
-      sql = convertVariables(sql);
+      // Pass variables to backend for server-side substitution (safer, handles escaping)
+      const { getVariablesForApi } = useVariables();
+      const variables = getVariablesForApi();
 
       params.raw_sql = sql;
+      if (variables.length > 0) {
+        params.variables = variables;
+      }
 
       let response;
       
