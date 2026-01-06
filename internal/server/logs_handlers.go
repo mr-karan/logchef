@@ -180,6 +180,16 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
 	}
 
+	// Check if SQL contains variable placeholders.
+	requiredVars := template.ExtractVariableNames(req.RawSQL)
+
+	// Validate that all required variables are provided.
+	if len(requiredVars) > 0 && len(req.Variables) == 0 {
+		return SendErrorWithType(c, fiber.StatusBadRequest,
+			fmt.Sprintf("Query contains template variables (%s) but no variables were provided. Please define variable values before executing.", strings.Join(requiredVars, ", ")),
+			models.ValidationErrorType)
+	}
+
 	// Perform template variable substitution if variables are provided.
 	processedSQL := req.RawSQL
 	if len(req.Variables) > 0 {
@@ -313,6 +323,16 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 	// Validate raw_sql parameter - empty SQL is not allowed
 	if strings.TrimSpace(req.RawSQL) == "" {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "raw_sql parameter is required", models.ValidationErrorType)
+	}
+
+	// Check if SQL contains variable placeholders.
+	requiredVars := template.ExtractVariableNames(req.RawSQL)
+
+	// Validate that all required variables are provided.
+	if len(requiredVars) > 0 && len(req.Variables) == 0 {
+		return SendErrorWithType(c, fiber.StatusBadRequest,
+			fmt.Sprintf("Query contains template variables (%s) but no variables were provided. Please define variable values before executing.", strings.Join(requiredVars, ", ")),
+			models.ValidationErrorType)
 	}
 
 	// Perform template variable substitution if variables are provided.
