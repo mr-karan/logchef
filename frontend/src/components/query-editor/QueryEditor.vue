@@ -2076,15 +2076,14 @@ const formatVariableValue = (variable: VariableSetting) => {
     case 'number':
       return `Value: ${variable.value} `;
     case 'date':
-      try {
-        const date = new Date(variable.value);
-        const yyyy = date.getFullYear();
-        const mm = String(date.getMonth() + 1).padStart(2, '0');
-        const dd = String(date.getDate()).padStart(2, '0');
-        return `Date: ${yyyy}-${mm}-${dd}`;
-      } catch {
+      const date = new Date(variable.value);
+      if (isNaN(date.getTime())) {
         return `Date: ${variable.value}`;
       }
+      const yyyy = date.getFullYear();
+      const mm = String(date.getMonth() + 1).padStart(2, '0');
+      const dd = String(date.getDate()).padStart(2, '0');
+      return `Date: ${yyyy}-${mm}-${dd}`;
     case 'text':
     default:
       const value = String(variable.value);
