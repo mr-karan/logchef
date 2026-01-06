@@ -46,7 +46,7 @@ export interface TemplateVariable {
 // Simplified query parameters - intended for API communication
 export interface QueryParams {
   raw_sql: string;
-  limit: number;
+  limit?: number;
   window?: string;
   group_by?: string;
   timezone?: string; // User's timezone identifier (e.g., 'America/New_York', 'UTC')

@@ -631,6 +631,12 @@ export const useExploreStore = defineStore("explore", () => {
   async function executeQuery() {
     const relativeTime = state.data.value.selectedRelativeTime;
 
+    // Refresh time range if using relative time to prevent stale queries
+    if (relativeTime) {
+      const { start, end } = parseRelativeTimeString(relativeTime);
+      state.data.value.timeRange = { start, end };
+    }
+
     if (state.data.value.currentQueryAbortController) {
       state.data.value.currentQueryAbortController.abort();
     }
