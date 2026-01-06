@@ -465,6 +465,16 @@ export const useExploreStore = defineStore("explore", () => {
       }
     }
 
+    // Ensure variables from SQL are initialized in the variable store
+    // This handles page reload where the variable store is empty but SQL has placeholders
+    const { ensureVariablesFromSql } = useVariables();
+    const sqlToCheck = state.data.value.activeMode === 'sql'
+      ? state.data.value.rawSql
+      : state.data.value.logchefqlCode;
+    if (sqlToCheck) {
+      ensureVariablesFromSql(sqlToCheck);
+    }
+
     _updateLastExecutedState();
 
     const hasRequiredParams = !!(sourceId.value && state.data.value.timeRange);
@@ -524,6 +534,10 @@ export const useExploreStore = defineStore("explore", () => {
         absoluteStart,
         absoluteEnd,
       };
+
+      // Ensure variables from the query content are initialized in the variable store
+      const { ensureVariablesFromSql } = useVariables();
+      ensureVariablesFromSql(queryContent);
 
       _updateLastExecutedState();
 
