@@ -1,8 +1,27 @@
-import {useVariableStore} from "@/stores/variables.ts";
+import {useVariableStore, type VariableState} from "@/stores/variables.ts";
 import {storeToRefs} from "pinia";
 import type { TemplateVariable } from "@/api/explore";
 
+// Regex to match {{variable_name}} with optional whitespace
+const VARIABLE_PATTERN = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
 
+/**
+ * Extract unique variable names from SQL string
+ */
+export function extractVariableNames(sql: string): string[] {
+    const matches = sql.matchAll(VARIABLE_PATTERN);
+    const seen = new Set<string>();
+    const names: string[] = [];
+
+    for (const match of matches) {
+        const name = match[1];
+        if (!seen.has(name)) {
+            names.push(name);
+            seen.add(name);
+        }
+    }
+    return names;
+}
 
 export function useVariables() {
     const variableStore = useVariableStore();
@@ -51,9 +70,62 @@ export function useVariables() {
         }));
     };
 
+    /**
+     * Ensure that all variables referenced in the SQL exist in the store.
+     * Creates placeholder variables with empty values for any missing ones.
+     * @param sql SQL string to extract variables from
+     * @returns Names of variables that were newly created (had no value)
+     */
+    const ensureVariablesFromSql = (sql: string): string[] => {
+        const requiredNames = extractVariableNames(sql);
+        const newlyCreated: string[] = [];
+
+        for (const name of requiredNames) {
+            const existing = variableStore.getVariableByName(name);
+            if (!existing) {
+                // Create a placeholder variable with empty value
+                const newVar: VariableState = {
+                    name,
+                    type: 'text',
+                    label: name,
+                    inputType: 'input',
+                    value: ''
+                };
+                variableStore.upsertVariable(newVar);
+                newlyCreated.push(name);
+            }
+        }
+
+        return newlyCreated;
+    };
+
+    /**
+     * Check if SQL has variables and if all required variables have non-empty values.
+     * @param sql SQL to check
+     * @returns Object with hasVariables flag and list of missing variable names
+     */
+    const validateVariablesForSql = (sql: string): { hasVariables: boolean; missingValues: string[] } => {
+        const requiredNames = extractVariableNames(sql);
+        if (requiredNames.length === 0) {
+            return { hasVariables: false, missingValues: [] };
+        }
+
+        const missingValues: string[] = [];
+        for (const name of requiredNames) {
+            const variable = variableStore.getVariableByName(name);
+            if (!variable || variable.value === '' || variable.value === null || variable.value === undefined) {
+                missingValues.push(name);
+            }
+        }
+
+        return { hasVariables: true, missingValues };
+    };
+
     return {
         convertVariables,
         getVariablesForApi,
+        ensureVariablesFromSql,
+        validateVariablesForSql,
         allVariables
     };
 }
