@@ -105,9 +105,31 @@ export function parseError(error: unknown): { title: string; message: string } {
 }
 
 /**
+ * Checks if an error is a canceled request error that should be handled silently
+ */
+export function isCanceledError(error: unknown): boolean {
+  if (error && typeof error === "object") {
+    // Check for our custom _silent flag
+    if ("_silent" in error && (error as any)._silent === true) {
+      return true;
+    }
+    // Check for CanceledError type
+    if ("error_type" in error && (error as any).error_type === "CanceledError") {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Shows a toast notification for an error
  */
 export function showErrorToast(error: unknown, customMessage?: string): void {
+  // Don't show toast for canceled requests (page navigation, reload, etc.)
+  if (isCanceledError(error)) {
+    return;
+  }
+
   const { toast } = useToast();
   const { title } = parseError(error);
   const message = customMessage || formatErrorMessage(error);

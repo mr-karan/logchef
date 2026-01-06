@@ -33,6 +33,18 @@ api.interceptors.response.use(
     return response;
   },
   async (error) => {
+    // Handle canceled requests silently - don't show error toasts for user-initiated cancellations
+    // This happens on page navigation, reload, or manual query cancellation
+    if (error.code === 'ERR_CANCELED' || error.name === 'CanceledError' || error.message === 'canceled') {
+      // Return a special error that won't trigger error toasts
+      return Promise.reject({
+        status: "error",
+        message: "Request canceled",
+        error_type: "CanceledError",
+        _silent: true, // Flag to suppress toast notifications
+      });
+    }
+
     // Create a standardized error response
     const errorResponse = error.response?.data || {
       status: "error",
