@@ -107,11 +107,11 @@ Before you can start querying logs, you need to set up a team, create a data sou
 2. Click "Add Source"
 3. Enter your Clickhouse connection details:
    ```
-   Name: Demo Logs
+   Name: Demo Syslogs
    Host: localhost (or clickhouse if using Docker)
    Port: 9000
    Database: default
-   Table: logs
+   Table: syslogs
    ```
 
 ![Logchef Source Settings View](/screenshots/logchef_source.png)
@@ -136,19 +136,14 @@ Now you're ready to explore your logs:
 Basic search:
 
 ```
-namespace="syslog"
+namespace="syslogs"
 ```
 
-Filter by severity:
-
-```
-namespace="syslog" and severity_text!="INFO"
-```
 
 Search for specific text in the log body:
 
 ```
-namespace="syslog" and body="error"
+namespace="syslogs" and body="error"
 ```
 
 ## Next Steps
