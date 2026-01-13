@@ -13,7 +13,8 @@ export function formatDate(
 ): string {
   if (!dateString) return "Never";
   try {
-    const date = new Date(dateString);
+    const normalizedDateStr = dateString.includes('T') || dateString.includes('Z') || dateString.includes('+') ? dateString : dateString.replace(' ', 'T') + 'Z';
+    const date = new Date(normalizedDateStr);
     return format(date, formatStr);
   } catch (error) {
     console.error("Error formatting date:", error);
