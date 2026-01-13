@@ -79,6 +79,47 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in LogChef.</p>
     </header>
 
+    <!-- Unreleased -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag unreleased">Unreleased</span>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Multi-Select Variables</strong> — Select multiple values that expand to <code>IN (...)</code> clauses. Perfect for filtering by multiple hosts, services, or error codes.</li>
+          <li><strong>Optional SQL Clauses</strong> — Wrap clauses in <code>[[ ... ]]</code> to auto-remove them when the variable is empty. No more "WHERE 1=1" hacks.</li>
+          <li><strong>Variable Widgets</strong> — Configure variables as text inputs, dropdowns, or multi-selects with default values.</li>
+          <li><strong>All Sources View</strong> — Browse saved queries across all sources in one place from Collections.</li>
+          <li>Smart LIMIT handling in SQL mode</li>
+          <li>Support for CTEs, JOINs, and subqueries with template variables</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li>Relative time range now refreshes before each query execution</li>
+          <li>Variable date display uses consistent YYYY-MM-DD format</li>
+          <li>Collections race condition on initial load</li>
+          <li>Scroll bar issues in explorer view</li>
+        </ul>
+      </div>
+
+      <div class="contributors">
+        <strong>Contributors:</strong>
+        <a href="https://github.com/blu3id" target="_blank">@blu3id</a>,
+        <a href="https://github.com/SValanukonda" target="_blank">@SValanukonda</a>
+      </div>
+    </article>
+
     <!-- v1.1.0 -->
     <article class="version">
       <div class="version-header">
