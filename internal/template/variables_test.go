@@ -207,6 +207,228 @@ func TestSubstituteVariables(t *testing.T) {
 	}
 }
 
+func TestProcessOptionalClauses(t *testing.T) {
+	tests := []struct {
+		name   string
+		sql    string
+		varMap map[string]Variable
+		want   string
+	}{
+		{
+			name:   "optional clause removed - variable missing",
+			sql:    "SELECT * FROM logs WHERE 1=1 [[ AND host = {{hostname}} ]]",
+			varMap: map[string]Variable{},
+			want:   "SELECT * FROM logs WHERE 1=1 ",
+		},
+		{
+			name: "optional clause kept - variable has value",
+			sql:  "SELECT * FROM logs WHERE 1=1 [[ AND host = {{hostname}} ]]",
+			varMap: map[string]Variable{
+				"hostname": {Name: "hostname", Type: TypeString, Value: "server-1"},
+			},
+			want: "SELECT * FROM logs WHERE 1=1  AND host = {{hostname}} ",
+		},
+		{
+			name: "optional clause removed - variable is empty string",
+			sql:  "SELECT * FROM logs WHERE 1=1 [[ AND host = {{hostname}} ]]",
+			varMap: map[string]Variable{
+				"hostname": {Name: "hostname", Type: TypeString, Value: ""},
+			},
+			want: "SELECT * FROM logs WHERE 1=1 ",
+		},
+		{
+			name: "optional clause removed - variable is whitespace",
+			sql:  "SELECT * FROM logs WHERE 1=1 [[ AND host = {{hostname}} ]]",
+			varMap: map[string]Variable{
+				"hostname": {Name: "hostname", Type: TypeString, Value: "   "},
+			},
+			want: "SELECT * FROM logs WHERE 1=1 ",
+		},
+		{
+			name: "optional clause removed - variable is nil",
+			sql:  "SELECT * FROM logs WHERE 1=1 [[ AND host = {{hostname}} ]]",
+			varMap: map[string]Variable{
+				"hostname": {Name: "hostname", Type: TypeString, Value: nil},
+			},
+			want: "SELECT * FROM logs WHERE 1=1 ",
+		},
+		{
+			name: "optional clause kept - zero is valid value",
+			sql:  "SELECT * FROM logs WHERE 1=1 [[ AND status = {{code}} ]]",
+			varMap: map[string]Variable{
+				"code": {Name: "code", Type: TypeNumber, Value: float64(0)},
+			},
+			want: "SELECT * FROM logs WHERE 1=1  AND status = {{code}} ",
+		},
+		{
+			name: "multiple optional clauses - mixed",
+			sql:  "SELECT * FROM logs WHERE 1=1 [[ AND host = {{host}} ]] [[ AND status = {{status}} ]]",
+			varMap: map[string]Variable{
+				"host": {Name: "host", Type: TypeString, Value: "server-1"},
+			},
+			want: "SELECT * FROM logs WHERE 1=1  AND host = {{host}}  ",
+		},
+		{
+			name: "multiple variables in one block - all provided",
+			sql:  "SELECT * FROM logs WHERE 1=1 [[ AND host = {{host}} AND status = {{status}} ]]",
+			varMap: map[string]Variable{
+				"host":   {Name: "host", Type: TypeString, Value: "server-1"},
+				"status": {Name: "status", Type: TypeNumber, Value: float64(200)},
+			},
+			want: "SELECT * FROM logs WHERE 1=1  AND host = {{host}} AND status = {{status}} ",
+		},
+		{
+			name: "multiple variables in one block - one missing removes block",
+			sql:  "SELECT * FROM logs WHERE 1=1 [[ AND host = {{host}} AND status = {{status}} ]]",
+			varMap: map[string]Variable{
+				"host": {Name: "host", Type: TypeString, Value: "server-1"},
+			},
+			want: "SELECT * FROM logs WHERE 1=1 ",
+		},
+		{
+			name:   "no optional blocks",
+			sql:    "SELECT * FROM logs WHERE host = {{hostname}}",
+			varMap: map[string]Variable{},
+			want:   "SELECT * FROM logs WHERE host = {{hostname}}",
+		},
+		{
+			name:   "optional block with no variables - kept as-is",
+			sql:    "SELECT * FROM logs WHERE 1=1 [[ AND active = true ]]",
+			varMap: map[string]Variable{},
+			want:   "SELECT * FROM logs WHERE 1=1  AND active = true ",
+		},
+		{
+			name:   "nil varMap",
+			sql:    "SELECT * FROM logs WHERE 1=1 [[ AND host = {{hostname}} ]]",
+			varMap: nil,
+			want:   "SELECT * FROM logs WHERE 1=1 ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ProcessOptionalClauses(tt.sql, tt.varMap)
+			if got != tt.want {
+				t.Errorf("ProcessOptionalClauses() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSubstituteVariablesWithOptionalClauses(t *testing.T) {
+	tests := []struct {
+		name        string
+		sql         string
+		variables   []Variable
+		want        string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "optional clause removed and required variable substituted",
+			sql:  "SELECT * FROM logs WHERE timestamp > {{from_date}} [[ AND host = {{hostname}} ]]",
+			variables: []Variable{
+				{Name: "from_date", Type: TypeDate, Value: "2026-01-01"},
+			},
+			want: "SELECT * FROM logs WHERE timestamp > '2026-01-01 00:00:00' ",
+		},
+		{
+			name: "optional clause kept and both substituted",
+			sql:  "SELECT * FROM logs WHERE timestamp > {{from_date}} [[ AND host = {{hostname}} ]]",
+			variables: []Variable{
+				{Name: "from_date", Type: TypeDate, Value: "2026-01-01"},
+				{Name: "hostname", Type: TypeString, Value: "server-1"},
+			},
+			want: "SELECT * FROM logs WHERE timestamp > '2026-01-01 00:00:00'  AND host = 'server-1' ",
+		},
+		{
+			name: "required variable outside optional block - error if missing",
+			sql:  "SELECT * FROM logs WHERE timestamp > {{from_date}} [[ AND host = {{hostname}} ]]",
+			variables: []Variable{
+				{Name: "hostname", Type: TypeString, Value: "server-1"},
+			},
+			wantErr:     true,
+			errContains: "undefined variable: {{from_date}}",
+		},
+		{
+			name: "multiple optional clauses with complex query",
+			sql: `SELECT * FROM logs 
+				WHERE timestamp > {{from_date}}
+				[[ AND host = {{host}} ]]
+				[[ AND severity = {{severity}} ]]
+				[[ AND service = {{service}} ]]
+				ORDER BY timestamp DESC`,
+			variables: []Variable{
+				{Name: "from_date", Type: TypeDate, Value: "2026-01-01"},
+				{Name: "host", Type: TypeString, Value: "prod-1"},
+				{Name: "service", Type: TypeString, Value: "api"},
+			},
+			want: `SELECT * FROM logs 
+				WHERE timestamp > '2026-01-01 00:00:00'
+				 AND host = 'prod-1' 
+				
+				 AND service = 'api' 
+				ORDER BY timestamp DESC`,
+		},
+		{
+			name: "empty value for required variable outside optional - error",
+			sql:  "SELECT * FROM logs WHERE host = {{hostname}} [[ AND status = {{status}} ]]",
+			variables: []Variable{
+				{Name: "hostname", Type: TypeString, Value: ""},
+			},
+			wantErr:     true,
+			errContains: "requires a value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := SubstituteVariables(tt.sql, tt.variables)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("SubstituteVariables() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("SubstituteVariables() error = %v, should contain %q", err, tt.errContains)
+				}
+				return
+			}
+			if got != tt.want {
+				t.Errorf("SubstituteVariables() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsValueProvided(t *testing.T) {
+	tests := []struct {
+		name  string
+		value interface{}
+		want  bool
+	}{
+		{name: "nil", value: nil, want: false},
+		{name: "empty string", value: "", want: false},
+		{name: "whitespace string", value: "   ", want: false},
+		{name: "non-empty string", value: "hello", want: true},
+		{name: "zero int", value: 0, want: true},
+		{name: "zero float64", value: float64(0), want: true},
+		{name: "non-zero int", value: 42, want: true},
+		{name: "non-zero float64", value: 3.14, want: true},
+		{name: "negative number", value: -1, want: true},
+		{name: "int64 zero", value: int64(0), want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isValueProvided(tt.value)
+			if got != tt.want {
+				t.Errorf("isValueProvided(%v) = %v, want %v", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExtractVariableNames(t *testing.T) {
 	tests := []struct {
 		name string

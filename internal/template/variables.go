@@ -34,12 +34,51 @@ var (
 	variablePattern = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}`)
 	// validNamePattern validates variable names.
 	validNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+	optionalPattern  = regexp.MustCompile(`\[\[(.+?)\]\]`)
 )
 
-// SubstituteVariables replaces {{variable}} placeholders with typed values.
-// It returns an error if a variable is undefined or has an invalid name.
+func isValueProvided(value interface{}) bool {
+	if value == nil {
+		return false
+	}
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v) != ""
+	case float64, int, int64:
+		return true
+	default:
+		return true
+	}
+}
+
+func ProcessOptionalClauses(sql string, varMap map[string]Variable) string {
+	return optionalPattern.ReplaceAllStringFunc(sql, func(match string) string {
+		submatches := optionalPattern.FindStringSubmatch(match)
+		if len(submatches) != 2 {
+			return match
+		}
+		content := submatches[1]
+
+		varMatches := variablePattern.FindAllStringSubmatch(content, -1)
+		if len(varMatches) == 0 {
+			return content
+		}
+
+		for _, varMatch := range varMatches {
+			varName := varMatch[1]
+			v, exists := varMap[varName]
+			if !exists || !isValueProvided(v.Value) {
+				return ""
+			}
+		}
+
+		return content
+	})
+}
+
 func SubstituteVariables(sql string, variables []Variable) (string, error) {
 	if len(variables) == 0 {
+		sql = ProcessOptionalClauses(sql, nil)
 		return sql, nil
 	}
 
@@ -52,21 +91,25 @@ func SubstituteVariables(sql string, variables []Variable) (string, error) {
 		varMap[v.Name] = v
 	}
 
-	// Find all variable references in the SQL.
+	// Process optional clauses first - removes blocks with missing variables
+	sql = ProcessOptionalClauses(sql, varMap)
+
 	matches := variablePattern.FindAllStringSubmatch(sql, -1)
 	if len(matches) == 0 {
 		return sql, nil
 	}
 
-	// Check that all referenced variables are defined.
 	for _, match := range matches {
 		varName := match[1]
-		if _, exists := varMap[varName]; !exists {
+		v, exists := varMap[varName]
+		if !exists {
 			return "", fmt.Errorf("undefined variable: {{%s}}", varName)
+		}
+		if !isValueProvided(v.Value) {
+			return "", fmt.Errorf("variable {{%s}} requires a value", varName)
 		}
 	}
 
-	// Perform substitution.
 	var substitutionErr error
 	result := variablePattern.ReplaceAllStringFunc(sql, func(match string) string {
 		if substitutionErr != nil {

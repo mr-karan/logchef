@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- SQL optional clauses (`[[ ... ]]`) for query variables.
+- Variable widget configuration with dropdown options and defaults.
+- Collections view to list saved queries across all sources.
+- Saved query name in the browser tab title.
+
+### Changed
+- Saved queries persist variable widget configuration and defaults.
+
+### Fixed
+- Saved query updates use the current editor content.
+- Alert timestamps use ISO8601 UTC formatting for last triggered.
+- Alert relative time formatting edge cases.
+
 ## [1.1.0] - 2025-12-29
 
 ### Added

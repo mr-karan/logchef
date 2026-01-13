@@ -244,24 +244,52 @@
           <div v-for="variable in allVariables" :key="variable.name" class="flex items-center gap-2 min-w-0">
             <!-- Variable indicator and label -->
             <div class="flex items-center gap-1.5 min-w-0 flex-shrink-0">
-              <div class="w-1.5 h-1.5 bg-primary/60 rounded-full flex-shrink-0"></div>
+              <div class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="variable.isOptional ? 'bg-muted-foreground/40' : 'bg-primary/60'"></div>
               <Label :for="`var-${variable.name}`"
-                class="text-xs font-medium text-foreground truncate cursor-pointer min-w-0"
-                :title="variable.label || variable.name">
+                class="text-xs font-medium truncate cursor-pointer min-w-0"
+                :class="variable.isOptional ? 'text-muted-foreground' : 'text-foreground'"
+                :title="(variable.label || variable.name) + (variable.isOptional ? ' (optional)' : '')">
                 {{ variable.label || variable.name }}
               </Label>
               <span class="text-xs px-1 py-0.5 bg-muted text-muted-foreground rounded font-mono flex-shrink-0">
                 {{ variable.type[0] }}
               </span>
+              <span v-if="variable.isOptional" class="text-[10px] px-1 py-0.5 bg-muted/50 text-muted-foreground/70 rounded flex-shrink-0 italic">
+                optional
+              </span>
             </div>
 
-            <!-- Compact input -->
-            <Input :id="`var-${variable.name}`" v-model="variable.value" :type="inputTypeFor(variable.type)"
-              :placeholder="getPlaceholderForType(variable.type)"
-              class="h-7 text-xs flex-1 min-w-0 border-muted-foreground/20 focus:border-primary/50 transition-colors"
+            <!-- Dropdown input -->
+            <Select v-if="variable.inputType === 'dropdown' && variable.options?.length"
+              :model-value="String(variable.value ?? '')"
+              @update:model-value="(val) => variable.value = val">
+              <SelectTrigger :id="`var-${variable.name}`" 
+                class="h-7 text-xs flex-1 min-w-0 transition-colors focus:ring-1 focus:ring-primary/50"
+                :class="{
+                  'border-primary/30 bg-primary/5': hasVariableValue(variable),
+                  'border-dashed border-muted-foreground/20': !hasVariableValue(variable) && !variable.isOptional,
+                  'border-dashed border-muted-foreground/10': !hasVariableValue(variable) && variable.isOptional
+                }">
+                <SelectValue :placeholder="variable.isOptional ? 'Select (optional)' : 'Select...'" class="truncate" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-if="variable.isOptional" value="">
+                  <span class="text-muted-foreground italic">None</span>
+                </SelectItem>
+                <SelectItem v-for="opt in variable.options" :key="opt.value" :value="opt.value">
+                  {{ opt.label || opt.value }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
+            <!-- Text/Number input (default) -->
+            <Input v-else :id="`var-${variable.name}`" v-model="variable.value" :type="inputTypeFor(variable.type)"
+              :placeholder="variable.isOptional ? 'Leave empty to omit' : getPlaceholderForType(variable.type)"
+              class="h-7 text-xs flex-1 min-w-0 focus:border-primary/50 transition-colors"
               :class="{
-                'border-primary/30 bg-primary/5': variable.value,
-                'border-dashed': !variable.value
+                'border-primary/30 bg-primary/5': hasVariableValue(variable),
+                'border-dashed border-muted-foreground/20': !hasVariableValue(variable) && !variable.isOptional,
+                'border-dashed border-muted-foreground/10': !hasVariableValue(variable) && variable.isOptional
               }" />
           </div>
         </div>
@@ -359,7 +387,7 @@
               <div class="space-y-2">
                 <Label class="text-sm font-medium flex items-center gap-2">
                   <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
-                  Variable Type
+                  Data Type
                 </Label>
                 <Select v-model="variable.type" @update:model-value="() => updateVariableType(variable)">
                   <SelectTrigger class="h-9">
@@ -388,6 +416,79 @@
                 </Select>
               </div>
 
+              <!-- Widget Type -->
+              <div class="space-y-2">
+                <Label class="text-sm font-medium flex items-center gap-2">
+                  <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
+                  Input Widget
+                </Label>
+                <Select v-model="variable.inputType" @update:model-value="() => variableStore.upsertVariable(variable)">
+                  <SelectTrigger class="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="input">
+                      <div class="flex items-center gap-2">
+                        <Type class="w-3.5 h-3.5 text-muted-foreground" />
+                        Text Input
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="dropdown">
+                      <div class="flex items-center gap-2">
+                        <ChevronDown class="w-3.5 h-3.5 text-muted-foreground" />
+                        Dropdown List
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <!-- Dropdown Options (only shown when dropdown is selected) -->
+              <div v-if="variable.inputType === 'dropdown'" class="space-y-3">
+                <Label class="text-sm font-medium flex items-center gap-2">
+                  <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
+                  Dropdown Options
+                </Label>
+
+                <div class="bg-muted/30 rounded-md p-3 border border-border/50 space-y-3">
+                  <!-- Header -->
+                  <div v-if="variable.options?.length" class="grid grid-cols-[1fr_1fr_32px] gap-2 px-1">
+                    <span
+                      class="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Value</span>
+                    <span
+                      class="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Label</span>
+                    <span></span>
+                  </div>
+
+                  <!-- Options List -->
+                  <div class="space-y-2">
+                    <div v-for="(opt, optIndex) in (variable.options || [])" :key="optIndex"
+                      class="grid grid-cols-[1fr_1fr_auto] gap-2 items-center group">
+                      <Input v-model="opt.value" placeholder="Value" class="h-8 text-xs bg-background"
+                        @input="() => variableStore.upsertVariable(variable)" />
+                      <Input v-model="opt.label" placeholder="Label" class="h-8 text-xs bg-background"
+                        @input="() => variableStore.upsertVariable(variable)" />
+                      <Button variant="ghost" size="icon"
+                        class="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        @click="removeDropdownOption(variable, optIndex)">
+                        <X class="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <Button variant="outline" size="sm"
+                    class="w-full h-8 text-xs border-dashed text-muted-foreground hover:text-foreground bg-transparent hover:bg-muted/50"
+                    @click="addDropdownOption(variable)">
+                    <Plus class="h-3.5 w-3.5 mr-1" />
+                    Add Option
+                  </Button>
+                </div>
+
+                <p class="text-xs text-muted-foreground">
+                  Enter values users can select from. Label is optional display text.
+                </p>
+              </div>
+
               <!-- Display Label -->
               <div class="space-y-2">
                 <Label class="text-sm font-medium flex items-center gap-2">
@@ -396,6 +497,37 @@
                 </Label>
                 <Input v-model="variable.label" placeholder="Enter display name..." class="h-9"
                   @input="() => variableStore.upsertVariable(variable)" />
+              </div>
+
+              <!-- Default Value -->
+              <div class="space-y-2">
+                <Label class="text-sm font-medium flex items-center gap-2">
+                  <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
+                  Default Value
+                </Label>
+                <Select v-if="variable.inputType === 'dropdown' && variable.options?.length"
+                  :model-value="String(variable.defaultValue ?? '')"
+                  @update:model-value="(val) => { variable.defaultValue = val; variableStore.upsertVariable(variable); }">
+                  <SelectTrigger class="h-9">
+                    <SelectValue placeholder="No default" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">
+                      <span class="text-muted-foreground italic">No default</span>
+                    </SelectItem>
+                    <SelectItem v-for="opt in variable.options" :key="opt.value" :value="opt.value">
+                      {{ opt.label || opt.value }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input v-else v-model="variable.defaultValue" 
+                  :type="inputTypeFor(variable.type)"
+                  :placeholder="'Default ' + variable.type + ' value'" 
+                  class="h-9"
+                  @input="() => variableStore.upsertVariable(variable)" />
+                <p class="text-xs text-muted-foreground">
+                  Pre-filled when loading the query. Leave empty for no default.
+                </p>
               </div>
 
               <!-- Current Value Preview -->
@@ -412,7 +544,6 @@
                     No value set
                   </span>
                 </div>
-
               </div>
             </div>
           </div>
@@ -617,6 +748,10 @@ import {
   Play,
   RefreshCw,
   Square,
+  Type,
+  ChevronDown,
+  X,
+  Plus,
 } from "lucide-vue-next";
 import {
   HoverCard,
@@ -730,7 +865,7 @@ import { useExploreStore } from "@/stores/explore";
 import { useTeamsStore } from "@/stores/teams";
 import type { VariableState as VariableSetting } from '@/stores/variables';
 import { useVariableStore } from '@/stores/variables';
-import { useVariables } from "@/composables/useVariables.ts";
+import { useVariables, extractVariablesWithOptional, extractVariableNames } from "@/composables/useVariables.ts";
 import { useToast } from "@/composables/useToast";
 // Keep other necessary imports like types...
 // --- Types ---
@@ -1016,36 +1151,34 @@ const runProgrammaticUpdate = (newValue: string) => {
 const detectVariables = (value: string) => {
   if (typeof value !== 'string') return;
 
-  // Extract dynamic variable names from query - handle both {{variable}} and __VAR_variable__ formats
-  const bracketMatches = [...value.matchAll(/{{\s*(\w+)\s*}}/g)].map(m => m[1]);
-  const underscoreMatches = [...value.matchAll(/__VAR_(\w+)__/g)].map(m => m[1]);
-
-  // Combine both formats and get unique variable names
-  const allMatches = [...bracketMatches, ...underscoreMatches];
-  const uniqueVariableNames = [...new Set(allMatches)];
-
-  // If allVariables is not ready, just upsert all found variables
+  // Only detect optional clauses [[ ]] in SQL mode - not applicable for LogchefQL
+  const isSqlMode = props.activeMode === 'clickhouse-sql';
+  const extractedVars = isSqlMode 
+    ? extractVariablesWithOptional(value)
+    : extractVariableNames(value).map(name => ({ name, isOptional: false }));
+  
   const currentVariables = allVariables?.value ?? [];
+  const extractedNames = extractedVars.map(v => v.name);
 
-  const existingNames = currentVariables.map(v => v.name);
-
-  // Remove variables that are no longer in the query
   for (const variable of currentVariables) {
-    if (!uniqueVariableNames.includes(variable.name)) {
+    if (!extractedNames.includes(variable.name)) {
       variableStore.removeVariable(variable.name);
     }
   }
 
-  // Add new variables that appeared in query
-  for (const name of uniqueVariableNames) {
-    if (!existingNames.includes(name)) {
+  for (const { name, isOptional } of extractedVars) {
+    const existing = variableStore.getVariableByName(name);
+    if (!existing) {
       variableStore.upsertVariable({
         name,
         type: 'text',
         label: name,
         inputType: 'input',
-        value: ''
+        value: '',
+        isOptional
       });
+    } else if (existing.isOptional !== isOptional) {
+      variableStore.upsertVariable({ ...existing, isOptional });
     }
   }
 };
@@ -2031,7 +2164,6 @@ const closeDrawer = () => {
 
 // Update variable type for multi-variable panel
 const updateVariableType = (variable: VariableSetting) => {
-  // Update default value based on new type
   switch (variable.type) {
     case 'text':
       variable.value = '';
@@ -2044,8 +2176,28 @@ const updateVariableType = (variable: VariableSetting) => {
       break;
   }
 
-  // Update in store
   variableStore.upsertVariable(variable);
+};
+
+const addDropdownOption = (variable: VariableSetting) => {
+  if (!variable.options) {
+    variable.options = [];
+  }
+  variable.options.push({ value: '', label: '' });
+  variableStore.upsertVariable(variable);
+};
+
+const removeDropdownOption = (variable: VariableSetting, index: number) => {
+  if (variable.options) {
+    variable.options.splice(index, 1);
+    variableStore.upsertVariable(variable);
+  }
+};
+
+const hasVariableValue = (variable: VariableSetting) => {
+  if (variable.value === null || variable.value === undefined) return false;
+  if (typeof variable.value === 'string') return variable.value.trim() !== '';
+  return true;
 };
 
 // Determine input type for a given variable type
