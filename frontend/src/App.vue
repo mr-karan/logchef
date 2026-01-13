@@ -6,19 +6,34 @@ import InnerApp from '@/layouts/InnerApp.vue'
 import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/theme'
-import { useColorMode } from '@vueuse/core'
+import { useColorMode, useTitle } from '@vueuse/core'
+import { useExploreStore } from '@/stores/explore'
 
 const route = useRoute()
 const themeStore = useThemeStore()
 const colorMode = useColorMode()
+const exploreStore = useExploreStore()
 
-// Initialize theme from store
 onMounted(() => {
-  // Set the color mode from our persisted preference
   colorMode.value = themeStore.preference
 })
 
-// Determine layout based on route meta
+// Dynamic page title - shows saved query name when viewing a collection
+const pageTitle = computed(() => {
+  const baseTitle = route.meta.title as string | undefined
+  const queryName = exploreStore.activeSavedQueryName
+  
+  const isExplorerRoute = route.name === 'LogExplorer' || route.path.startsWith('/logs/collection')
+  
+  if (isExplorerRoute && queryName) {
+    return `${queryName} - LogChef`
+  }
+  
+  return baseTitle ? `${baseTitle} - LogChef` : 'LogChef'
+})
+
+useTitle(pageTitle)
+
 const layout = computed(() => {
   return route.meta.layout === 'outer' ? OuterApp : InnerApp
 })
