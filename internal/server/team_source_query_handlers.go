@@ -11,8 +11,24 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// handleListTeamCollections retrieves all saved queries (collections) for a team across all sources.
+func (s *Server) handleListTeamCollections(c *fiber.Ctx) error {
+	teamIDStr := c.Params("teamID")
+
+	teamID, err := core.ParseTeamID(teamIDStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team_id parameter", models.ValidationErrorType)
+	}
+
+	queries, err := s.sqlite.ListQueriesByTeam(c.Context(), teamID)
+	if err != nil {
+		s.log.Error("failed to list team collections", "error", err, "team_id", teamID)
+		return SendError(c, fiber.StatusInternalServerError, "Failed to list collections")
+	}
+	return SendSuccess(c, fiber.StatusOK, queries)
+}
+
 // handleListTeamSourceCollections retrieves saved queries (collections) for a specific team and source.
-// Assumes requireAuth and requireTeamMember middleware have run.
 func (s *Server) handleListTeamSourceCollections(c *fiber.Ctx) error {
 	teamIDStr := c.Params("teamID")
 	sourceIDStr := c.Params("sourceID")

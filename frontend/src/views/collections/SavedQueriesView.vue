@@ -50,13 +50,17 @@ import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useContextSync } from "@/composables/useContextSync";
 import type { SaveQueryFormData } from "@/views/explore/types";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
+import { useContextStore } from "@/stores/context";
+import { useRoute } from "vue-router";
 
 const router = useRouter();
+const route = useRoute();
 const { toast } = useToast();
 
 const sourcesStore = useSourcesStore();
 const teamsStore = useTeamsStore();
 const savedQueriesStore = useSavedQueriesStore();
+const contextStore = useContextStore();
 
 const {
   isReady: contextReady,
@@ -70,10 +74,17 @@ const {
 } = useContextSync({ basePath: '/logs/saved' });
 
 const localTeamQueries = ref<SavedTeamQuery[] | undefined>();
+const isAllSourcesMode = computed(() => !contextSourceId.value);
+
 const currentSelectedSource = computed(() => {
   if (!contextSourceId.value) return undefined;
   return sourcesStore.teamSources.find(s => s.id === contextSourceId.value);
 });
+
+const getSourceName = (sourceId: number) => {
+  const source = sourcesStore.teamSources.find(s => s.id === sourceId);
+  return source ? formatSourceName(source) : `Source ${sourceId}`;
+};
 
 // Get saved queries composable ONCE at the top level
 const {
@@ -97,7 +108,7 @@ const {
 } = useSavedQueries(localTeamQueries, currentSelectedSource);
 
 const selectedSourceId = computed(() => 
-  contextSourceId.value ? String(contextSourceId.value) : ""
+  contextSourceId.value ? String(contextSourceId.value) : "all"
 );
 
 const showLoadingState = computed(() => {
@@ -120,6 +131,7 @@ const selectedTeamName = computed(() => {
 });
 
 const selectedSourceName = computed(() => {
+  if (isAllSourcesMode.value) return "All Sources";
   if (!currentSelectedSource.value) return "Select a source";
   return formatSourceName(currentSelectedSource.value);
 });
@@ -134,7 +146,19 @@ const emptyStateMessage = computed(() =>
 onMounted(async () => {
   try {
     teamsStore.resetAdminTeams();
+    
+    // Check initial source param before initialization which might auto-select a source
+    const initialSourceParam = route.query.source;
+    
     await initializeContext();
+    
+    // If no source was specified in URL, enforce All Sources mode
+    if (!initialSourceParam && contextStore.sourceId) {
+      contextStore.sourceId = null;
+      const q = { ...route.query };
+      delete q.source;
+      router.replace({ query: q });
+    }
     
     if (contextError.value) {
       toast({
@@ -159,7 +183,7 @@ watch(
   () => [contextReady.value, contextTeamId.value, contextSourceId.value] as const,
   async ([isReady, teamId, sourceId], oldValue) => {
     if (!isReady) return;
-    if (!teamId || !sourceId) return;
+    if (!teamId) return;
     
     const [wasReady, , oldSourceId] = oldValue ?? [false, null, null];
     // Fetch queries when:
@@ -179,6 +203,12 @@ async function handleTeamChange(teamId: string) {
     
     await contextHandleTeamChange(teamIdNum);
     
+    // Default to All Sources when switching teams
+    contextStore.sourceId = null;
+    const query = { ...route.query };
+    delete query.source;
+    router.replace({ query });
+    
     if (sourcesStore.teamSources.length === 0) {
       localTeamQueries.value = [];
     }
@@ -195,8 +225,18 @@ async function handleTeamChange(teamId: string) {
 
 async function handleSourceChange(sourceId: string) {
   try {
-    if (!sourceId) {
-      localTeamQueries.value = [];
+    // Handle All Sources selection
+    if (!sourceId || sourceId === "all") {
+      contextStore.sourceId = null;
+      const query = { ...route.query };
+      delete query.source;
+      await router.replace({ query });
+      
+      // Manually trigger fetch if needed, though watcher should handle it
+      // if sourceId was already null (e.g. clicking All Sources when already there)
+      if (isAllSourcesMode.value) {
+        await fetchQueries();
+      }
       return;
     }
 
@@ -216,10 +256,24 @@ async function handleSourceChange(sourceId: string) {
 }
 
 async function fetchQueries() {
-  if (!contextTeamId.value || !contextSourceId.value) {
-    console.warn("No team or source selected, cannot load queries");
+  if (!contextTeamId.value) {
+    console.warn("No team selected, cannot load queries");
     return;
   }
+
+  // All Sources Mode
+  if (isAllSourcesMode.value) {
+    const result = await savedQueriesStore.fetchTeamCollections(contextTeamId.value);
+    if (result.success) {
+      localTeamQueries.value = result.data ?? [];
+    } else {
+      localTeamQueries.value = [];
+    }
+    return;
+  }
+
+  // Specific Source Mode
+  if (!contextSourceId.value) return; // Should be covered by isAllSourcesMode check above
 
   const sourceExists = sourcesStore.teamSources.some(
     (source) => source.id === contextSourceId.value
@@ -432,15 +486,14 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
               <label class="text-sm font-medium leading-none">Source</label>
               <Select :model-value="selectedSourceId" @update:model-value="handleSourceChange" :disabled="contextLoading ||
                 !contextTeamId ||
-                (sourcesStore.teamSources || []).length === 0
+                ((sourcesStore.teamSources || []).length === 0 && !isAllSourcesMode)
                 " class="h-8 min-w-[200px]">
                 <SelectTrigger>
-                  <SelectValue placeholder="Select a source">
-                    <span v-if="contextLoading">Loading...</span>
-                    <span v-else>{{ selectedSourceName }}</span>
-                  </SelectValue>
+                  <span v-if="contextLoading">Loading...</span>
+                  <span v-else>{{ selectedSourceName }}</span>
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="all">All Sources</SelectItem>
                   <SelectItem v-for="source in sourcesStore.teamSources || []" :key="source.id"
                     :value="String(source.id)">
                     {{ formatSourceName(source) }}
@@ -499,6 +552,7 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
             <TableRow>
               <TableHead class="w-[50px] font-sans"></TableHead>
               <TableHead class="w-[250px] font-sans">Name</TableHead>
+              <TableHead v-if="isAllSourcesMode" class="w-[150px] font-sans">Source</TableHead>
               <TableHead class="font-sans">Description</TableHead>
               <TableHead class="w-[100px] font-sans">Type</TableHead>
               <TableHead class="w-[150px] font-sans">Created</TableHead>
@@ -532,6 +586,7 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
                   {{ query.name }}
                 </a>
               </TableCell>
+              <TableCell v-if="isAllSourcesMode">{{ getSourceName(query.source_id) }}</TableCell>
               <TableCell>{{ query.description || "-" }}</TableCell>
               <TableCell>
                 <Badge :class="[

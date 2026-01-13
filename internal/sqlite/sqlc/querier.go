@@ -93,6 +93,8 @@ type Querier interface {
 	ListActiveAlertsDue(ctx context.Context) ([]Alert, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
 	ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsByTeamAndSourceParams) ([]Alert, error)
+	// List all queries for a specific team across all sources (bookmarked first, then by updated_at)
+	ListQueriesByTeam(ctx context.Context, teamID int64) ([]TeamQuery, error)
 	// List all queries for a specific team and source (bookmarked first, then by updated_at)
 	ListQueriesByTeamAndSource(ctx context.Context, arg ListQueriesByTeamAndSourceParams) ([]TeamQuery, error)
 	// List all teams a data source is a member of

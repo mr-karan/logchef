@@ -60,6 +60,9 @@ export interface TeamGroupedQuery {
  * Saved Queries API client
  */
 export const savedQueriesApi = {
+  listTeamCollections: (teamId: number) =>
+    apiClient.get<SavedTeamQuery[]>(`/teams/${teamId}/collections`),
+
   listTeamSourceQueries: (teamId: number, sourceId: number) =>
     apiClient.get<SavedTeamQuery[]>(`/teams/${teamId}/sources/${sourceId}/collections`),
 
