@@ -264,6 +264,17 @@ const canSaveOrUpdateQuery = computed(() => {
   );
 });
 
+// Current query content as JSON for SaveQueryModal
+const currentQueryContentJson = computed(() => {
+  return JSON.stringify({
+    sourceId: currentSourceId.value,
+    limit: exploreStore.limit,
+    content: exploreStore.activeMode === 'logchefql' 
+      ? exploreStore.logchefqlCode 
+      : exploreStore.rawSql,
+  });
+});
+
 // Update the parsed query whenever a new query is executed
 watch(
   () => exploreStore.lastExecutedState,
@@ -1303,15 +1314,8 @@ onBeforeUnmount(() => {
 
         <!-- Save Query Modal -->
         <SaveQueryModal v-if="showSaveQueryModal" :is-open="showSaveQueryModal" :query-type="exploreStore.activeMode"
-          :edit-data="editQueryData" :query-content="JSON.stringify({
-            sourceId: currentSourceId,
-            limit: exploreStore.limit,
-            content:
-              exploreStore.activeMode === 'logchefql'
-                ? exploreStore.logchefqlCode
-                : exploreStore.rawSql,
-          })
-            " @close="showSaveQueryModal = false" @save="onSaveQueryModalSave" @update="handleUpdateQuery" />
+          :edit-data="editQueryData" :query-content="currentQueryContentJson"
+          @close="showSaveQueryModal = false" @save="onSaveQueryModalSave" @update="handleUpdateQuery" />
 
 
       </div>
