@@ -44,6 +44,10 @@ func isValueProvided(value interface{}) bool {
 	switch v := value.(type) {
 	case string:
 		return strings.TrimSpace(v) != ""
+	case []interface{}:
+		return len(v) > 0
+	case []string:
+		return len(v) > 0
 	case float64, int, int64:
 		return true
 	default:
@@ -138,12 +142,14 @@ func SubstituteVariables(sql string, variables []Variable) (string, error) {
 	return result, nil
 }
 
-// formatValue converts a variable to its SQL-safe representation.
 func formatValue(v Variable) (string, error) {
-	// Normalize type (text is alias for string).
 	varType := v.Type
 	if varType == TypeText {
 		varType = TypeString
+	}
+
+	if isArrayValue(v.Value) {
+		return formatArray(v.Value, varType)
 	}
 
 	switch varType {
@@ -154,8 +160,60 @@ func formatValue(v Variable) (string, error) {
 	case TypeDate:
 		return formatDate(v.Value)
 	default:
-		// Default to string for unknown types.
 		return formatString(v.Value)
+	}
+}
+
+func isArrayValue(value interface{}) bool {
+	switch value.(type) {
+	case []interface{}, []string:
+		return true
+	default:
+		return false
+	}
+}
+
+func formatArray(value interface{}, varType VariableType) (string, error) {
+	var items []string
+
+	switch arr := value.(type) {
+	case []interface{}:
+		for _, item := range arr {
+			formatted, err := formatSingleValue(item, varType)
+			if err != nil {
+				return "", err
+			}
+			items = append(items, formatted)
+		}
+	case []string:
+		for _, item := range arr {
+			formatted, err := formatSingleValue(item, varType)
+			if err != nil {
+				return "", err
+			}
+			items = append(items, formatted)
+		}
+	default:
+		return "", fmt.Errorf("unsupported array type: %T", value)
+	}
+
+	if len(items) == 0 {
+		return "", fmt.Errorf("empty array value")
+	}
+
+	return strings.Join(items, ", "), nil
+}
+
+func formatSingleValue(value interface{}, varType VariableType) (string, error) {
+	switch varType {
+	case TypeString, TypeText:
+		return formatString(value)
+	case TypeNumber:
+		return formatNumber(value)
+	case TypeDate:
+		return formatDate(value)
+	default:
+		return formatString(value)
 	}
 }
 

@@ -40,7 +40,7 @@ export interface ColumnInfo {
 export interface TemplateVariable {
   name: string;
   type: 'text' | 'number' | 'date' | 'string';
-  value: string | number;
+  value: string | number | string[];
 }
 
 // Simplified query parameters - intended for API communication

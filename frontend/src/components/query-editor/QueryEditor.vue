@@ -259,8 +259,48 @@
               </span>
             </div>
 
-            <!-- Dropdown input -->
-            <Select v-if="variable.inputType === 'dropdown' && variable.options?.length"
+            <!-- Multi-select dropdown -->
+            <Popover v-if="variable.inputType === 'multiselect' && variable.options?.length">
+              <PopoverTrigger as-child>
+                <Button variant="outline" :id="`var-${variable.name}`"
+                  class="h-7 text-xs flex-1 min-w-0 justify-between font-normal transition-colors"
+                  :class="{
+                    'border-primary/30 bg-primary/5': hasVariableValue(variable),
+                    'border-dashed border-muted-foreground/20': !hasVariableValue(variable) && !variable.isOptional,
+                    'border-dashed border-muted-foreground/10': !hasVariableValue(variable) && variable.isOptional
+                  }">
+                  <span class="truncate">
+                    {{ getMultiSelectDisplay(variable) }}
+                  </span>
+                  <ChevronDown class="h-3 w-3 opacity-50 flex-shrink-0 ml-1" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent class="w-[220px] p-2" align="start">
+                <ScrollArea class="max-h-[200px]">
+                  <div class="space-y-1">
+                    <div v-for="opt in variable.options" :key="opt.value"
+                      class="flex items-center gap-2 px-2 py-1.5 rounded-sm hover:bg-muted cursor-pointer"
+                      @click="toggleMultiSelectValue(variable, opt.value)">
+                      <Checkbox 
+                        :checked="isMultiSelectValueSelected(variable, opt.value)"
+                        @update:checked="toggleMultiSelectValue(variable, opt.value)"
+                        class="h-4 w-4"
+                      />
+                      <span class="text-xs">{{ opt.label || opt.value }}</span>
+                    </div>
+                  </div>
+                </ScrollArea>
+                <div v-if="getMultiSelectValues(variable).length > 0" class="border-t mt-2 pt-2">
+                  <Button variant="ghost" size="sm" class="w-full h-7 text-xs text-muted-foreground"
+                    @click="clearMultiSelectValues(variable)">
+                    Clear selection
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            <!-- Single-select dropdown -->
+            <Select v-else-if="variable.inputType === 'dropdown' && variable.options?.length"
               :model-value="String(variable.value ?? '')"
               @update:model-value="(val) => variable.value = val">
               <SelectTrigger :id="`var-${variable.name}`" 
@@ -283,7 +323,10 @@
             </Select>
 
             <!-- Text/Number input (default) -->
-            <Input v-else :id="`var-${variable.name}`" v-model="variable.value" :type="inputTypeFor(variable.type)"
+            <Input v-else :id="`var-${variable.name}`" 
+              :model-value="String(variable.value ?? '')"
+              @update:model-value="(val: string | number) => { variable.value = String(val); variableStore.upsertVariable(variable); }"
+              :type="inputTypeFor(variable.type)"
               :placeholder="variable.isOptional ? 'Leave empty to omit' : getPlaceholderForType(variable.type)"
               class="h-7 text-xs flex-1 min-w-0 focus:border-primary/50 transition-colors"
               :class="{
@@ -439,15 +482,21 @@
                         Dropdown List
                       </div>
                     </SelectItem>
+                    <SelectItem value="multiselect">
+                      <div class="flex items-center gap-2">
+                        <List class="w-3.5 h-3.5 text-muted-foreground" />
+                        Multi-Select
+                      </div>
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              <!-- Dropdown Options (only shown when dropdown is selected) -->
-              <div v-if="variable.inputType === 'dropdown'" class="space-y-3">
+              <!-- Dropdown/Multi-Select Options (shown when dropdown or multiselect is selected) -->
+              <div v-if="variable.inputType === 'dropdown' || variable.inputType === 'multiselect'" class="space-y-3">
                 <Label class="text-sm font-medium flex items-center gap-2">
                   <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
-                  Dropdown Options
+                  {{ variable.inputType === 'multiselect' ? 'Multi-Select Options' : 'Dropdown Options' }}
                 </Label>
 
                 <div class="bg-muted/30 rounded-md p-3 border border-border/50 space-y-3">
@@ -503,9 +552,28 @@
               <div class="space-y-2">
                 <Label class="text-sm font-medium flex items-center gap-2">
                   <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
-                  Default Value
+                  Default Value{{ variable.inputType === 'multiselect' ? 's' : '' }}
                 </Label>
-                <Select v-if="variable.inputType === 'dropdown' && variable.options?.length"
+                <!-- Multi-select default values -->
+                <div v-if="variable.inputType === 'multiselect' && variable.options?.length" class="space-y-2">
+                  <div class="bg-muted/30 rounded-md p-2 border border-border/50 max-h-[120px] overflow-y-auto">
+                    <div v-for="opt in variable.options" :key="opt.value"
+                      class="flex items-center gap-2 px-2 py-1 rounded-sm hover:bg-muted cursor-pointer"
+                      @click="toggleDefaultMultiSelectValue(variable, opt.value)">
+                      <Checkbox 
+                        :checked="isDefaultMultiSelectValueSelected(variable, opt.value)"
+                        @update:checked="toggleDefaultMultiSelectValue(variable, opt.value)"
+                        class="h-3.5 w-3.5"
+                      />
+                      <span class="text-xs">{{ opt.label || opt.value }}</span>
+                    </div>
+                  </div>
+                  <p class="text-xs text-muted-foreground">
+                    Select default values for multi-select. {{ getDefaultMultiSelectCount(variable) }} selected.
+                  </p>
+                </div>
+                <!-- Single-select dropdown default -->
+                <Select v-else-if="variable.inputType === 'dropdown' && variable.options?.length"
                   :model-value="String(variable.defaultValue ?? '')"
                   @update:model-value="(val) => { variable.defaultValue = val; variableStore.upsertVariable(variable); }">
                   <SelectTrigger class="h-9">
@@ -520,12 +588,14 @@
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                <Input v-else v-model="variable.defaultValue" 
+                <!-- Text/number input default -->
+                <Input v-else 
+                  :model-value="String(variable.defaultValue ?? '')"
+                  @update:model-value="(val: string | number) => { variable.defaultValue = String(val); variableStore.upsertVariable(variable); }"
                   :type="inputTypeFor(variable.type)"
                   :placeholder="'Default ' + variable.type + ' value'" 
-                  class="h-9"
-                  @input="() => variableStore.upsertVariable(variable)" />
-                <p class="text-xs text-muted-foreground">
+                  class="h-9" />
+                <p v-if="variable.inputType !== 'multiselect'" class="text-xs text-muted-foreground">
                   Pre-filled when loading the query. Leave empty for no default.
                 </p>
               </div>
@@ -537,7 +607,7 @@
                   Current Value
                 </Label>
                 <div class="px-3 py-2 bg-muted/30 rounded-md border text-sm font-mono min-h-[36px] flex items-center">
-                  <span v-if="variable.value" class="text-foreground">
+                  <span v-if="hasVariableValue(variable)" class="text-foreground">
                     {{ formatVariableValue(variable) }}
                   </span>
                   <span v-else class="text-muted-foreground italic">
@@ -752,6 +822,7 @@ import {
   ChevronDown,
   X,
   Plus,
+  List,
 } from "lucide-vue-next";
 import {
   HoverCard,
@@ -796,6 +867,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Settings } from "lucide-vue-next";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 import {
   initMonacoSetup,
@@ -2196,8 +2274,66 @@ const removeDropdownOption = (variable: VariableSetting, index: number) => {
 
 const hasVariableValue = (variable: VariableSetting) => {
   if (variable.value === null || variable.value === undefined) return false;
+  if (Array.isArray(variable.value)) return variable.value.length > 0;
   if (typeof variable.value === 'string') return variable.value.trim() !== '';
   return true;
+};
+
+// Multi-select helper functions
+const getMultiSelectDisplay = (variable: VariableSetting): string => {
+  const values = Array.isArray(variable.value) ? variable.value : [];
+  if (values.length === 0) return variable.isOptional ? 'Select (optional)' : 'Select...';
+  if (values.length === 1) {
+    const opt = variable.options?.find(o => o.value === values[0]);
+    return opt?.label || values[0];
+  }
+  return `${values.length} selected`;
+};
+
+const getMultiSelectValues = (variable: VariableSetting): string[] => {
+  return Array.isArray(variable.value) ? variable.value : [];
+};
+
+const toggleMultiSelectValue = (variable: VariableSetting, value: string) => {
+  const current = Array.isArray(variable.value) ? [...variable.value] : [];
+  const index = current.indexOf(value);
+  if (index >= 0) {
+    current.splice(index, 1);
+  } else {
+    current.push(value);
+  }
+  variable.value = current;
+  variableStore.upsertVariable(variable);
+};
+
+const isMultiSelectValueSelected = (variable: VariableSetting, value: string): boolean => {
+  return Array.isArray(variable.value) && variable.value.includes(value);
+};
+
+const clearMultiSelectValues = (variable: VariableSetting) => {
+  variable.value = [];
+  variableStore.upsertVariable(variable);
+};
+
+// Multi-select default value helpers
+const toggleDefaultMultiSelectValue = (variable: VariableSetting, value: string) => {
+  const current = Array.isArray(variable.defaultValue) ? [...variable.defaultValue] : [];
+  const index = current.indexOf(value);
+  if (index >= 0) {
+    current.splice(index, 1);
+  } else {
+    current.push(value);
+  }
+  variable.defaultValue = current;
+  variableStore.upsertVariable(variable);
+};
+
+const isDefaultMultiSelectValueSelected = (variable: VariableSetting, value: string): boolean => {
+  return Array.isArray(variable.defaultValue) && variable.defaultValue.includes(value);
+};
+
+const getDefaultMultiSelectCount = (variable: VariableSetting): number => {
+  return Array.isArray(variable.defaultValue) ? variable.defaultValue.length : 0;
 };
 
 // Determine input type for a given variable type
@@ -2224,11 +2360,22 @@ const getPlaceholderForType = (type: string) => {
 const formatVariableValue = (variable: VariableSetting) => {
   if (!variable.value) return '';
 
+  // Handle array values (multi-select)
+  if (Array.isArray(variable.value)) {
+    if (variable.value.length === 0) return '';
+    const displayValues = variable.value.slice(0, 3).map(v => {
+      const opt = variable.options?.find(o => o.value === v);
+      return opt?.label || v;
+    });
+    const suffix = variable.value.length > 3 ? `, +${variable.value.length - 3} more` : '';
+    return displayValues.join(', ') + suffix;
+  }
+
   switch (variable.type) {
     case 'number':
       return `Value: ${variable.value} `;
     case 'date':
-      const date = new Date(variable.value);
+      const date = new Date(variable.value as string);
       if (isNaN(date.getTime())) {
         return `Date: ${variable.value}`;
       }
