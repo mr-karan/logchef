@@ -1,3 +1,5 @@
+import type { VariableState } from "@/stores/variables";
+
 export interface APISuccessResponse<T> {
   status: "success";
   data: T | null;
@@ -56,16 +58,17 @@ export interface Team {
  */
 export interface SavedQueryContent {
   version: number;
-  activeTab: "filters" | "raw_sql";
   sourceId: number;
   timeRange: {
-    absolute: {
+    relative?: string;
+    absolute?: {
       start: number;
       end: number;
     };
-  };
+  } | null;
   limit: number;
-  rawSql: string;
+  content: string;
+  variables?: VariableState[];
 }
 
 export function isSuccessResponse<T>(

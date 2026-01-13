@@ -326,7 +326,7 @@ router.beforeEach(async (to) => {
   const isAdmin = authStore.user?.role === "admin";
   const isPublic = to.matched.some((record) => record.meta.public);
 
-  document.title = `${to.meta.title ? to.meta.title + " - " : ""}LogChef`;
+  // Title is now managed reactively in App.vue via useTitle
 
   if (!isAuthenticated && !isPublic) {
     return {

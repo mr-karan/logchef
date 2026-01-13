@@ -191,7 +191,7 @@ const createSource = `-- name: CreateSource :one
 
 INSERT INTO sources (
     name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 RETURNING id
 `
 
@@ -338,7 +338,7 @@ func (q *Queries) DeleteAlert(ctx context.Context, id int64) error {
 }
 
 const deleteExpiredAPITokens = `-- name: DeleteExpiredAPITokens :exec
-DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at < datetime('now')
+DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 `
 
 // Delete all expired API tokens
@@ -1045,6 +1045,45 @@ func (q *Queries) ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsB
 	return items, nil
 }
 
+const listQueriesByTeam = `-- name: ListQueriesByTeam :many
+SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at, is_bookmarked FROM team_queries WHERE team_id = ? ORDER BY is_bookmarked DESC, updated_at DESC
+`
+
+// List all queries for a specific team across all sources (bookmarked first, then by updated_at)
+func (q *Queries) ListQueriesByTeam(ctx context.Context, teamID int64) ([]TeamQuery, error) {
+	rows, err := q.query(ctx, q.listQueriesByTeamStmt, listQueriesByTeam, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TeamQuery{}
+	for rows.Next() {
+		var i TeamQuery
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.SourceID,
+			&i.Name,
+			&i.Description,
+			&i.QueryType,
+			&i.QueryContent,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.IsBookmarked,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listQueriesByTeamAndSource = `-- name: ListQueriesByTeamAndSource :many
 SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at, is_bookmarked FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY is_bookmarked DESC, updated_at DESC
 `
@@ -1611,8 +1650,8 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 const markAlertEvaluated = `-- name: MarkAlertEvaluated :exec
 UPDATE alerts
 SET last_state = 'resolved',
-    last_evaluated_at = datetime('now'),
-    updated_at = datetime('now')
+    last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?
 `
 
@@ -1624,9 +1663,9 @@ func (q *Queries) MarkAlertEvaluated(ctx context.Context, id int64) error {
 const markAlertTriggered = `-- name: MarkAlertTriggered :exec
 UPDATE alerts
 SET last_state = 'firing',
-    last_triggered_at = datetime('now'),
-    last_evaluated_at = datetime('now'),
-    updated_at = datetime('now')
+    last_triggered_at = CASE WHEN last_state = 'firing' THEN last_triggered_at ELSE strftime('%Y-%m-%dT%H:%M:%SZ', 'now') END,
+    last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?
 `
 
@@ -1669,7 +1708,7 @@ func (q *Queries) RemoveTeamSource(ctx context.Context, arg RemoveTeamSourcePara
 const resolveAlertHistory = `-- name: ResolveAlertHistory :exec
 UPDATE alert_history
 SET status = 'resolved',
-    resolved_at = datetime('now'),
+    resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
     message = ?
 WHERE id = ?
 `
@@ -1707,7 +1746,7 @@ func (q *Queries) TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (i
 const toggleQueryBookmark = `-- name: ToggleQueryBookmark :exec
 UPDATE team_queries
 SET is_bookmarked = NOT is_bookmarked,
-    updated_at = datetime('now')
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ? AND team_id = ? AND source_id = ?
 `
 
@@ -1725,8 +1764,8 @@ func (q *Queries) ToggleQueryBookmark(ctx context.Context, arg ToggleQueryBookma
 
 const updateAPITokenLastUsed = `-- name: UpdateAPITokenLastUsed :exec
 UPDATE api_tokens
-SET last_used_at = datetime('now'),
-    updated_at = datetime('now')
+SET last_used_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?
 `
 
@@ -1746,7 +1785,7 @@ SET name = ?,
     frequency_seconds = ?,
     severity = ?,
     is_active = ?,
-    updated_at = datetime('now')
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?
 `
 
@@ -1806,7 +1845,7 @@ SET name = ?,
     table_name = ?,
     description = ?,
     ttl_days = ?,
-    updated_at = datetime('now')
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?
 `
 
@@ -1894,7 +1933,7 @@ SET name = ?,
     description = ?,
     query_type = ?,
     query_content = ?,
-    updated_at = datetime('now')
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ? AND team_id = ? AND source_id = ?
 `
 
@@ -1962,13 +2001,13 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 
 const upsertSystemSetting = `-- name: UpsertSystemSetting :exec
 INSERT INTO system_settings (key, value, value_type, category, description, is_sensitive, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 ON CONFLICT(key) DO UPDATE SET
     value = excluded.value,
     value_type = excluded.value_type,
     description = excluded.description,
     is_sensitive = excluded.is_sensitive,
-    updated_at = datetime('now')
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 `
 
 type UpsertSystemSettingParams struct {

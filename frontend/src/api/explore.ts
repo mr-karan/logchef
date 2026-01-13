@@ -36,16 +36,24 @@ export interface ColumnInfo {
   type: string;
 }
 
+// Template variable for SQL substitution
+export interface TemplateVariable {
+  name: string;
+  type: 'text' | 'number' | 'date' | 'string';
+  value: string | number | string[];
+}
+
 // Simplified query parameters - intended for API communication
 export interface QueryParams {
   raw_sql: string;
-  limit: number;
+  limit?: number;
   window?: string;
   group_by?: string;
   timezone?: string; // User's timezone identifier (e.g., 'America/New_York', 'UTC')
   start_time?: string; // ISO formatted start time
   end_time?: string;   // ISO formatted end time
   query_timeout?: number; // Query timeout in seconds
+  variables?: TemplateVariable[]; // Template variables for SQL substitution
 }
 
 export interface QueryStats {

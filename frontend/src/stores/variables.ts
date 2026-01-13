@@ -1,12 +1,21 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 
+export interface VariableOption {
+    value: string;
+    label?: string;
+}
+
 export interface VariableState {
     name: string;
     type: 'text' | 'number' | 'date';
     label: string;
-    inputType: 'input' | 'dropdown' | 'search';
-    value: string | number;
+    inputType: 'input' | 'dropdown' | 'multiselect' | 'search';
+    value: string | number | string[];
+    defaultValue?: string | number | string[];
+    isOptional?: boolean;
+    isRequired?: boolean;
+    options?: VariableOption[];
 }
 
 export const useVariableStore = defineStore("variable", () => {

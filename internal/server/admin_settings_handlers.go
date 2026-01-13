@@ -1,7 +1,9 @@
 package server
 
 import (
+	"encoding/base64"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"time"
@@ -315,4 +317,91 @@ func (s *Server) handleTestAlertmanagerConnection(c *fiber.Ctx) error {
 		"message": "Successfully connected to Alertmanager",
 		"url":     req.URL,
 	})
+}
+
+// GetAlertmanagerRoutingRequest contains the optional parameters for fetching routing config.
+type GetAlertmanagerRoutingRequest struct {
+	URL                   string `json:"url,omitempty"`      // Optional: override the configured URL
+	TLSInsecureSkipVerify bool   `json:"tls_skip_verify"`    // Skip TLS verification
+	Timeout               string `json:"timeout,omitempty"`  // Duration string (e.g., "5s")
+	Username              string `json:"username,omitempty"` // Basic auth username
+	Password              string `json:"password,omitempty"` // Basic auth password
+}
+
+// handleGetAlertmanagerRouting fetches the routing configuration from Alertmanager.
+// POST /api/v1/admin/settings/alertmanager-routing
+func (s *Server) handleGetAlertmanagerRouting(c *fiber.Ctx) error {
+	var req GetAlertmanagerRoutingRequest
+	if err := c.BodyParser(&req); err != nil {
+		// Body is optional, so ignore parse errors
+		req = GetAlertmanagerRoutingRequest{}
+	}
+
+	// Use configured URL if not provided in request
+	alertmanagerURL := req.URL
+	if alertmanagerURL == "" {
+		alertmanagerURL = s.config.Alerts.AlertmanagerURL
+	}
+
+	if alertmanagerURL == "" {
+		return SendError(c, fiber.StatusBadRequest, "Alertmanager URL is not configured. Please configure it in Settings > Alerts.")
+	}
+
+	// Validate URL format
+	parsedURL, err := url.Parse(alertmanagerURL)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("invalid URL format: %v", err))
+	}
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return SendError(c, fiber.StatusBadRequest, "URL must use http or https scheme")
+	}
+
+	// Parse timeout
+	timeout := 10 * time.Second
+	if req.Timeout != "" {
+		parsedTimeout, err := time.ParseDuration(req.Timeout)
+		if err != nil {
+			return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("invalid timeout format: %v", err))
+		}
+		timeout = parsedTimeout
+	}
+
+	// Set up additional headers for basic auth if provided
+	var headers http.Header
+	if req.Username != "" && req.Password != "" {
+		headers = make(http.Header)
+		headers.Set("Authorization", "Basic "+basicAuth(req.Username, req.Password))
+	}
+
+	// Use TLS skip verify from request or config
+	tlsSkipVerify := req.TLSInsecureSkipVerify || s.config.Alerts.TLSInsecureSkipVerify
+
+	// Create a temporary Alertmanager client
+	client, err := alerts.NewAlertmanagerClient(alerts.ClientOptions{
+		BaseURL:           alertmanagerURL,
+		Timeout:           timeout,
+		SkipTLSVerify:     tlsSkipVerify,
+		Logger:            s.log,
+		AdditionalHeaders: headers,
+	})
+	if err != nil {
+		s.log.Error("failed to create alertmanager client", "error", err, "url", alertmanagerURL)
+		return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("failed to create alertmanager client: %v", err))
+	}
+
+	// Fetch routing configuration
+	routingInfo, err := client.GetRoutingConfig(c.Context())
+	if err != nil {
+		s.log.Warn("failed to fetch alertmanager routing config", "error", err, "url", alertmanagerURL)
+		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Failed to fetch Alertmanager routing: %v", err))
+	}
+
+	s.log.Info("fetched alertmanager routing config", "url", alertmanagerURL, "receivers", len(routingInfo.Receivers))
+	return SendSuccess(c, fiber.StatusOK, routingInfo)
+}
+
+// basicAuth encodes credentials for HTTP Basic Authentication.
+func basicAuth(username, password string) string {
+	auth := username + ":" + password
+	return base64.StdEncoding.EncodeToString([]byte(auth))
 }

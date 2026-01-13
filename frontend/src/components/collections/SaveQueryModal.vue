@@ -114,24 +114,41 @@ const isValid = computed(() => {
   return !!name.value.trim();
 });
 
-// Get the query type for display - prioritize editData/initialData when editing
+// Get the query type for display - prioritize props then editData/initialData
 const displayQueryType = computed(() => {
+  // Use explicit queryType prop if provided (e.g. from Explorer)
+  if (props.queryType) {
+    return props.queryType;
+  }
   if (props.editData?.query_type) {
     return props.editData.query_type;
   }
   if (props.initialData?.query_type) {
     return props.initialData.query_type;
   }
-  return exploreStore.activeMode || 'sql';
+  return exploreStore.activeMode || "sql";
 });
 
-// Get the query content for display - prioritize editData/initialData when editing from Collections
+// Get the query content for display - prioritize props then editData/initialData
 const displayQueryContent = computed(() => {
-  // First, try to get content from editData (when editing existing query)
+  // First, try to get content from queryContent prop if provided (e.g. from Explorer)
+  // This is the CURRENT editor content, so it takes priority over saved data
+  if (props.queryContent) {
+    try {
+      const content = JSON.parse(props.queryContent);
+      if (content.content !== undefined) {
+        return content.content;
+      }
+    } catch (e) {
+      console.error("Failed to parse queryContent prop for display", e);
+    }
+  }
+
+  // Then, try to get content from editData (when editing existing query from Collections view)
   if (props.editData?.query_content) {
     try {
       const content = JSON.parse(props.editData.query_content);
-      if (content.content) {
+      if (content.content !== undefined) {
         return content.content;
       }
     } catch (e) {
@@ -139,23 +156,23 @@ const displayQueryContent = computed(() => {
     }
   }
   
-  // Then try initialData (when editing with initialData + isEditMode)
+  // Then try initialData (when editing with initialData + isEditMode from Collections)
   if (props.initialData?.query_content) {
     try {
       const content = JSON.parse(props.initialData.query_content);
-      if (content.content) {
+      if (content.content !== undefined) {
         return content.content;
       }
-    } catch (e) {
-      console.error("Failed to parse initialData query content for display", e);
+    } catch (e) { 
+       console.error("Failed to parse initialData query content for display", e);
     }
   }
   
-  // Fall back to exploreStore (when creating new query from Explorer)
-  const activeMode = exploreStore.activeMode || 'sql';
-  return activeMode === 'logchefql' 
-    ? exploreStore.logchefqlCode || ''
-    : exploreStore.rawSql || '';
+  // Fall back to exploreStore (when creating new query from Explorer and props not passed)
+  const activeMode = exploreStore.activeMode || "sql";
+  return activeMode === "logchefql" 
+    ? exploreStore.logchefqlCode || ""
+    : exploreStore.rawSql || "";
 });
 
 // Load teams and sources on mount if needed

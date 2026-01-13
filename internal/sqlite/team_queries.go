@@ -115,7 +115,34 @@ func (db *DB) DeleteTeamSourceQuery(ctx context.Context, teamID models.TeamID, s
 	return nil
 }
 
-// ListQueriesByTeamAndSource retrieves all saved queries for a specific team and source, ordered by creation date.
+// ListQueriesByTeam retrieves all saved queries for a team across all sources.
+func (db *DB) ListQueriesByTeam(ctx context.Context, teamID models.TeamID) ([]*models.SavedTeamQuery, error) {
+	sqlcQueries, err := db.queries.ListQueriesByTeam(ctx, int64(teamID))
+	if err != nil {
+		db.log.Error("failed to list queries for team from db", "error", err, "team_id", teamID)
+		return nil, fmt.Errorf("error listing queries for team: %w", err)
+	}
+
+	queries := make([]*models.SavedTeamQuery, 0, len(sqlcQueries))
+	for i := range sqlcQueries {
+		queries = append(queries, &models.SavedTeamQuery{
+			ID:           int(sqlcQueries[i].ID),
+			TeamID:       models.TeamID(sqlcQueries[i].TeamID),
+			SourceID:     models.SourceID(sqlcQueries[i].SourceID),
+			Name:         sqlcQueries[i].Name,
+			Description:  sqlcQueries[i].Description.String,
+			QueryType:    models.SavedQueryType(sqlcQueries[i].QueryType),
+			QueryContent: sqlcQueries[i].QueryContent,
+			IsBookmarked: sqlcQueries[i].IsBookmarked,
+			CreatedAt:    sqlcQueries[i].CreatedAt,
+			UpdatedAt:    sqlcQueries[i].UpdatedAt,
+		})
+	}
+
+	return queries, nil
+}
+
+// ListQueriesByTeamAndSource retrieves all saved queries for a specific team and source.
 func (db *DB) ListQueriesByTeamAndSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) ([]*models.SavedTeamQuery, error) {
 
 	params := sqlc.ListQueriesByTeamAndSourceParams{

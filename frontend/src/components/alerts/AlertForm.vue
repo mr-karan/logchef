@@ -29,6 +29,7 @@ import { alertsApi } from "@/api/alerts";
 import { logchefqlApi } from "@/api/logchefql";
 import { useTeamsStore } from "@/stores/teams";
 import type { Alert, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryResponse } from "@/api/alerts";
+import AlertmanagerRoutingHelper from "./AlertmanagerRoutingHelper.vue";
 
 const props = withDefaults(defineProps<{
   open: boolean;
@@ -304,6 +305,17 @@ function removeAnnotation(id: number) {
   const index = form.annotations.findIndex((annotation) => annotation.id === id);
   if (index >= 0) {
     form.annotations.splice(index, 1);
+  }
+}
+
+function handleSelectLabels(payload: { labels: Record<string, string> }) {
+  for (const [key, value] of Object.entries(payload.labels)) {
+    const existingLabel = form.labels.find((l) => l.key === key);
+    if (existingLabel) {
+      existingLabel.value = value;
+    } else {
+      form.labels.push({ id: labelCounter.value++, key, value });
+    }
   }
 }
 
@@ -771,6 +783,9 @@ function handleSubmit() {
             <p class="text-xs text-muted-foreground mt-1">Add custom labels and annotations to control Alertmanager routing, grouping, and notification templates.</p>
           </div>
 
+          <!-- Routing Helper -->
+          <AlertmanagerRoutingHelper :disabled="isDisabled" @select-labels="handleSelectLabels" />
+
           <!-- Labels -->
           <div class="space-y-3">
             <div class="flex items-center justify-between">
@@ -1137,6 +1152,9 @@ function handleSubmit() {
         <h3 class="text-sm font-semibold">Alertmanager routing <span class="text-xs font-normal text-muted-foreground ml-1">(optional)</span></h3>
         <p class="text-xs text-muted-foreground mt-1">Add custom labels and annotations to control Alertmanager routing, grouping, and notification templates.</p>
       </div>
+
+      <!-- Routing Helper -->
+      <AlertmanagerRoutingHelper :disabled="isDisabled" @select-labels="handleSelectLabels" />
 
       <!-- Labels -->
       <div class="space-y-3">

@@ -76,15 +76,15 @@ WHERE is_active = 1
 
 	updateAlertEvaluatedQuery = `UPDATE alerts
 SET last_state = 'resolved',
-    last_evaluated_at = datetime('now'),
-    updated_at = datetime('now')
+    last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?`
 
 	updateAlertTriggeredQuery = `UPDATE alerts
 SET last_state = 'firing',
-    last_triggered_at = datetime('now'),
-    last_evaluated_at = datetime('now'),
-    updated_at = datetime('now')
+    last_triggered_at = CASE WHEN last_state = 'firing' THEN last_triggered_at ELSE strftime('%Y-%m-%dT%H:%M:%SZ', 'now') END,
+    last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?`
 
 	updateAlertQuery = `UPDATE alerts
@@ -102,7 +102,7 @@ SET name = ?,
     annotations_json = ?,
     generator_url = ?,
     is_active = ?,
-    updated_at = datetime('now')
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?`
 
 	deleteAlertQuery = `DELETE FROM alerts WHERE id = ?`
@@ -135,7 +135,7 @@ LIMIT 1`
 
 	resolveAlertHistoryQuery = `UPDATE alert_history
 SET status = 'resolved',
-    resolved_at = datetime('now'),
+    resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
     message = ?
 WHERE id = ?`
 
