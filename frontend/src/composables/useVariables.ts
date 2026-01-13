@@ -61,6 +61,17 @@ export function useVariables() {
 
     const resolveVariableValue = (variable: VariableState) => {
         const value = variable.value;
+        
+        // Handle array values (multi-select)
+        if (Array.isArray(value)) {
+            if (value.length > 0) return value;
+            // Fall back to defaultValue if current value is empty array
+            if (Array.isArray(variable.defaultValue) && variable.defaultValue.length > 0) {
+                return variable.defaultValue;
+            }
+            return value;
+        }
+        
         if (value !== '' && value !== null && value !== undefined) {
             return value;
         }
@@ -151,7 +162,12 @@ export function useVariables() {
                 continue;
             }
             const resolvedValue = resolveVariableValue(variable);
-            if (resolvedValue === '' || resolvedValue === null || resolvedValue === undefined) {
+            
+            const isEmpty = Array.isArray(resolvedValue) 
+                ? resolvedValue.length === 0
+                : resolvedValue === '' || resolvedValue === null || resolvedValue === undefined;
+            
+            if (isEmpty) {
                 missingValues.push(name);
             }
         }
