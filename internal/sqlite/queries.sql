@@ -4,7 +4,7 @@
 -- Create a new source entry
 INSERT INTO sources (
     name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 RETURNING id;
 
 -- name: GetSource :one
@@ -33,7 +33,7 @@ SET name = ?,
     table_name = ?,
     description = ?,
     ttl_days = ?,
-    updated_at = datetime('now')
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?;
 
 -- name: DeleteSource :exec
@@ -227,7 +227,7 @@ SET name = ?,
     description = ?,
     query_type = ?,
     query_content = ?,
-    updated_at = datetime('now')
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ? AND team_id = ? AND source_id = ?;
 
 -- name: DeleteTeamSourceQuery :exec
@@ -239,11 +239,15 @@ WHERE id = ? AND team_id = ? AND source_id = ?;
 -- List all queries for a specific team and source (bookmarked first, then by updated_at)
 SELECT * FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY is_bookmarked DESC, updated_at DESC;
 
+-- name: ListQueriesByTeam :many
+-- List all queries for a specific team across all sources (bookmarked first, then by updated_at)
+SELECT * FROM team_queries WHERE team_id = ? ORDER BY is_bookmarked DESC, updated_at DESC;
+
 -- name: ToggleQueryBookmark :exec
 -- Toggle the bookmark status of a query
 UPDATE team_queries
 SET is_bookmarked = NOT is_bookmarked,
-    updated_at = datetime('now')
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ? AND team_id = ? AND source_id = ?;
 
 -- name: GetQueryBookmarkStatus :one
@@ -317,8 +321,8 @@ SELECT * FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC;
 -- name: UpdateAPITokenLastUsed :exec
 -- Update the last used timestamp for an API token
 UPDATE api_tokens
-SET last_used_at = datetime('now'),
-    updated_at = datetime('now')
+SET last_used_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?;
 
 -- name: DeleteAPIToken :exec
@@ -327,7 +331,7 @@ DELETE FROM api_tokens WHERE id = ? AND user_id = ?;
 
 -- name: DeleteExpiredAPITokens :exec
 -- Delete all expired API tokens
-DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at < datetime('now');
+DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now');
 
 -- Alerts
 
@@ -368,7 +372,7 @@ SET name = ?,
     frequency_seconds = ?,
     severity = ?,
     is_active = ?,
-    updated_at = datetime('now')
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?;
 
 -- name: DeleteAlert :exec
@@ -377,16 +381,16 @@ DELETE FROM alerts WHERE id = ?;
 -- name: MarkAlertEvaluated :exec
 UPDATE alerts
 SET last_state = 'resolved',
-    last_evaluated_at = datetime('now'),
-    updated_at = datetime('now')
+    last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?;
 
 -- name: MarkAlertTriggered :exec
 UPDATE alerts
 SET last_state = 'firing',
-    last_triggered_at = datetime('now'),
-    last_evaluated_at = datetime('now'),
-    updated_at = datetime('now')
+    last_triggered_at = CASE WHEN last_state = 'firing' THEN last_triggered_at ELSE strftime('%Y-%m-%dT%H:%M:%SZ', 'now') END,
+    last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?;
 
 -- name: ListActiveAlertsDue :many
@@ -413,7 +417,7 @@ RETURNING id;
 -- name: ResolveAlertHistory :exec
 UPDATE alert_history
 SET status = 'resolved',
-    resolved_at = datetime('now'),
+    resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
     message = ?
 WHERE id = ?;
 
@@ -451,13 +455,13 @@ ORDER BY key;
 
 -- name: UpsertSystemSetting :exec
 INSERT INTO system_settings (key, value, value_type, category, description, is_sensitive, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 ON CONFLICT(key) DO UPDATE SET
     value = excluded.value,
     value_type = excluded.value_type,
     description = excluded.description,
     is_sensitive = excluded.is_sensitive,
-    updated_at = datetime('now');
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now');
 
 -- name: DeleteSystemSetting :exec
 DELETE FROM system_settings

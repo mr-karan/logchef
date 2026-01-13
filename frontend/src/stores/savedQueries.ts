@@ -115,10 +115,22 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     contextStore.selectTeam(teamId);
   }
 
+  async function fetchTeamCollections(teamId: number) {
+    return await state.withLoading(`fetchTeamCollections-${teamId}`, async () => {
+      return await state.callApi<SavedTeamQuery[]>({
+        apiCall: () => savedQueriesApi.listTeamCollections(teamId),
+        operationKey: `fetchTeamCollections-${teamId}`,
+        onSuccess: (responseData) => {
+          state.data.value.queries = responseData ?? [];
+        },
+        defaultData: [],
+        showToast: false,
+      });
+    });
+  }
+
   async function fetchTeamQueries(_teamId: number) {
-    // Note: API requires sourceId, but this function is called without it
-    // Return empty result for now - callers should use fetchTeamSourceQueries instead
-    console.warn('fetchTeamQueries: This function is deprecated, use fetchTeamSourceQueries instead');
+    console.warn('fetchTeamQueries: This function is deprecated, use fetchTeamCollections instead');
     state.data.value.queries = [];
     return { success: true, data: [] };
   }
@@ -354,10 +366,11 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     // Actions
     fetchUserTeams,
     setSelectedTeam,
+    fetchTeamCollections,
     fetchTeamQueries,
     fetchSourceQueries,
     fetchTeamSourceQueries,
-    fetchTeamSourceQueryDetails, // Expose renamed action
+    fetchTeamSourceQueryDetails,
     createQuery,
     createSourceQuery,
     updateQuery,

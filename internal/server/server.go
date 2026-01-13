@@ -195,9 +195,12 @@ func (s *Server) setupRoutes() {
 	// Team settings (requires team admin or global admin)
 	api.Put("/teams/:teamID", s.requireAuth, s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeam)
 
+	// Team-level collections (all sources)
+	api.Get("/teams/:teamID/collections", s.requireAuth, s.requireTeamMember, s.handleListTeamCollections)
+
 	// Team Source Management (linking/unlinking)
 	teamSources := api.Group("/teams/:teamID/sources", s.requireAuth, s.requireTeamMember)
-	teamSources.Get("/", s.handleListTeamSources) // Any team member can view team sources (basic info)
+	teamSources.Get("/", s.handleListTeamSources)
 
 	// Only team admins can link/unlink sources
 	teamSources.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleLinkSourceToTeam)

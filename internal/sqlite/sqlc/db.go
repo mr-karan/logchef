@@ -150,6 +150,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAlertsByTeamAndSourceStmt, err = db.PrepareContext(ctx, listAlertsByTeamAndSource); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAlertsByTeamAndSource: %w", err)
 	}
+	if q.listQueriesByTeamStmt, err = db.PrepareContext(ctx, listQueriesByTeam); err != nil {
+		return nil, fmt.Errorf("error preparing query ListQueriesByTeam: %w", err)
+	}
 	if q.listQueriesByTeamAndSourceStmt, err = db.PrepareContext(ctx, listQueriesByTeamAndSource); err != nil {
 		return nil, fmt.Errorf("error preparing query ListQueriesByTeamAndSource: %w", err)
 	}
@@ -455,6 +458,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAlertsByTeamAndSourceStmt: %w", cerr)
 		}
 	}
+	if q.listQueriesByTeamStmt != nil {
+		if cerr := q.listQueriesByTeamStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listQueriesByTeamStmt: %w", cerr)
+		}
+	}
 	if q.listQueriesByTeamAndSourceStmt != nil {
 		if cerr := q.listQueriesByTeamAndSourceStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listQueriesByTeamAndSourceStmt: %w", cerr)
@@ -686,6 +694,7 @@ type Queries struct {
 	listActiveAlertsDueStmt             *sql.Stmt
 	listAlertHistoryStmt                *sql.Stmt
 	listAlertsByTeamAndSourceStmt       *sql.Stmt
+	listQueriesByTeamStmt               *sql.Stmt
 	listQueriesByTeamAndSourceStmt      *sql.Stmt
 	listSourceTeamsStmt                 *sql.Stmt
 	listSourcesStmt                     *sql.Stmt
@@ -764,6 +773,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listActiveAlertsDueStmt:             q.listActiveAlertsDueStmt,
 		listAlertHistoryStmt:                q.listAlertHistoryStmt,
 		listAlertsByTeamAndSourceStmt:       q.listAlertsByTeamAndSourceStmt,
+		listQueriesByTeamStmt:               q.listQueriesByTeamStmt,
 		listQueriesByTeamAndSourceStmt:      q.listQueriesByTeamAndSourceStmt,
 		listSourceTeamsStmt:                 q.listSourceTeamsStmt,
 		listSourcesStmt:                     q.listSourcesStmt,
