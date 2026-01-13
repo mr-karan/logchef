@@ -8,18 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- SQL optional clauses (`[[ ... ]]`) for query variables.
-- Variable widget configuration with dropdown options and defaults.
-- Collections view to list saved queries across all sources.
-- Saved query name in the browser tab title.
+- **Multi-select variables** — Select multiple values that expand to `IN (...)` clauses in SQL.
+- **SQL optional clauses** (`[[ ... ]]`) — Wrap variable clauses to auto-remove when value is empty.
+- **Variable widget configuration** — Configure variables as text inputs, dropdowns, or multi-selects with default values.
+- **Collections "All Sources" view** — Browse saved queries across all sources in one place.
+- **Dynamic Alertmanager routing** — Helper for routing alerts based on query results.
+- Saved query name shown in browser tab title.
+- Smart LIMIT handling in SQL mode.
+- Support for CTEs, JOINs, and subqueries with template variables.
 
 ### Changed
 - Saved queries persist variable widget configuration and defaults.
+- Relative time range refreshes before each query execution.
+- Reduced log noise and redacted session IDs for security.
 
 ### Fixed
 - Saved query updates use the current editor content.
 - Alert timestamps use ISO8601 UTC formatting for last triggered.
 - Alert relative time formatting edge cases.
+- Variable date display uses consistent YYYY-MM-DD format.
+- Template variables validated and sent consistently to backend.
+- Canceled requests on page reload no longer show error toasts.
+- Collections race condition causing empty list on initial load.
+- Y-scroll bar eliminated on explorer main content area.
+- Variable datetime-local format accepts values without seconds.
 
 ## [1.1.0] - 2025-12-29
 
