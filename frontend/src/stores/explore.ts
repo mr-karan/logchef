@@ -11,6 +11,7 @@ import type {
   LogContextResponse,
   QuerySuccessResponse,
 } from "@/api/explore";
+import type { SavedQueryContent } from "@/api/savedQueries";
 import type { DateValue } from "@internationalized/date";
 import { now, getLocalTimeZone, CalendarDateTime } from "@internationalized/date";
 import { useSourcesStore } from "./sources";
@@ -23,6 +24,7 @@ import { parseRelativeTimeString, timestampToCalendarDateTime, calendarDateTimeT
 import { SqlManager } from '@/services/SqlManager';
 import { type TimeRange } from '@/types/query';
 import { useVariables } from "@/composables/useVariables";
+import { useVariableStore } from "@/stores/variables";
 import { queryHistoryService } from "@/services/QueryHistoryService";
 import { createTimeRangeCondition } from '@/utils/time-utils';
 
@@ -536,8 +538,20 @@ export const useExploreStore = defineStore("explore", () => {
       };
 
       // Ensure variables from the query content are initialized in the variable store
-      const { ensureVariablesFromSql } = useVariables();
-      ensureVariablesFromSql(queryContent);
+      const variableStore = useVariableStore();
+      if (Array.isArray(content.variables)) {
+        const normalizedVariables = (content.variables as NonNullable<SavedQueryContent['variables']>).map((variable) => {
+          const hasValue = variable.value !== '' && variable.value !== null && variable.value !== undefined;
+          if (!hasValue && variable.defaultValue !== undefined && variable.defaultValue !== null && variable.defaultValue !== '') {
+            return { ...variable, value: variable.defaultValue };
+          }
+          return variable;
+        });
+        variableStore.setAllVariable(normalizedVariables);
+      } else {
+        const { ensureVariablesFromSql } = useVariables();
+        ensureVariablesFromSql(queryContent);
+      }
 
       _updateLastExecutedState();
 

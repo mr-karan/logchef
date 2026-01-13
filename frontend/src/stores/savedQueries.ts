@@ -56,7 +56,8 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
               ? content.timeRange
               : { absolute: { start: Date.now() - 3600000, end: Date.now() } }),
         limit: typeof content.limit === 'number' ? content.limit : 100,
-        content: typeof content.content === 'string' ? content.content : ''
+        content: typeof content.content === 'string' ? content.content : '',
+        variables: Array.isArray(content.variables) ? content.variables : []
       };
 
       // Remove temporary fields before returning
@@ -74,7 +75,8 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
           absolute: { start: Date.now() - 3600000, end: Date.now() },
         },
         limit: 100,
-        content: ''
+        content: '',
+        variables: []
       };
     }
   };

@@ -1,4 +1,5 @@
 import { apiClient } from "./apiUtils";
+import type { VariableState } from "@/stores/variables";
 
 export interface SavedQueryContent {
   version: number;
@@ -12,6 +13,7 @@ export interface SavedQueryContent {
   } | null;
   limit: number;
   content: string;
+  variables?: VariableState[];
 }
 
 /**

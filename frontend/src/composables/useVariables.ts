@@ -2,14 +2,12 @@ import {useVariableStore, type VariableState} from "@/stores/variables.ts";
 import {storeToRefs} from "pinia";
 import type { TemplateVariable } from "@/api/explore";
 
-// Regex to match {{variable_name}} with optional whitespace
-const VARIABLE_PATTERN = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
+const createVariablePattern = () => /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
+// Regex to match [[ ... ]] optional clauses (non-greedy)
+const createOptionalClausePattern = () => /\[\[(.+?)\]\]/gs;
 
-/**
- * Extract unique variable names from SQL string
- */
 export function extractVariableNames(sql: string): string[] {
-    const matches = sql.matchAll(VARIABLE_PATTERN);
+    const matches = sql.matchAll(createVariablePattern());
     const seen = new Set<string>();
     const names: string[] = [];
 
@@ -23,9 +21,51 @@ export function extractVariableNames(sql: string): string[] {
     return names;
 }
 
+export interface ExtractedVariable {
+    name: string;
+    isOptional: boolean;
+}
+
+export function extractVariablesWithOptional(sql: string): ExtractedVariable[] {
+    const optionalVarNames = new Set<string>();
+    
+    const optionalMatches = sql.matchAll(createOptionalClausePattern());
+    for (const match of optionalMatches) {
+        const clauseContent = match[1];
+        const varMatches = clauseContent.matchAll(createVariablePattern());
+        for (const varMatch of varMatches) {
+            optionalVarNames.add(varMatch[1]);
+        }
+    }
+
+    const seen = new Set<string>();
+    const results: ExtractedVariable[] = [];
+    const allMatches = sql.matchAll(createVariablePattern());
+
+    for (const match of allMatches) {
+        const name = match[1];
+        if (!seen.has(name)) {
+            results.push({
+                name,
+                isOptional: optionalVarNames.has(name)
+            });
+            seen.add(name);
+        }
+    }
+    return results;
+}
+
 export function useVariables() {
     const variableStore = useVariableStore();
     const { allVariables } = storeToRefs(variableStore);
+
+    const resolveVariableValue = (variable: VariableState) => {
+        const value = variable.value;
+        if (value !== '' && value !== null && value !== undefined) {
+            return value;
+        }
+        return variable.defaultValue ?? value;
+    };
 
     /**
      * convert {{variable}} format to user input (for local/display purposes)
@@ -35,17 +75,17 @@ export function useVariables() {
     const convertVariables = (sql: string): string => {
         for (const variable of allVariables.value) {
             const key = variable.name;
-            const value = variable.value;
+            const value = resolveVariableValue(variable);
 
             const formattedValue =
                 variable.type === 'number'
                     ? value
                     : variable.type === 'date'
-                        ? `'${new Date(value).toISOString()}'`
-                        : `'${value}'`;
+                        ? (value ? `'${new Date(value as string).toISOString()}'` : "''")
+                        : `'${value ?? ''}'`;
 
             // Replace both original {{variable}} syntax and translated __VAR_variable__ placeholders
-            const originalRegex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
+            const originalRegex = new RegExp(`{{\s*${key}\s*}}`, 'g');
             const placeholderRegex = new RegExp(`'__VAR_${key}__'`, 'g');
             const unquotedPlaceholderRegex = new RegExp(`__VAR_${key}__`, 'g');
 
@@ -66,54 +106,52 @@ export function useVariables() {
         return allVariables.value.map(v => ({
             name: v.name,
             type: v.type as 'text' | 'number' | 'date' | 'string',
-            value: v.value
+            value: resolveVariableValue(v)
         }));
     };
 
-    /**
-     * Ensure that all variables referenced in the SQL exist in the store.
-     * Creates placeholder variables with empty values for any missing ones.
-     * @param sql SQL string to extract variables from
-     * @returns Names of variables that were newly created (had no value)
-     */
     const ensureVariablesFromSql = (sql: string): string[] => {
-        const requiredNames = extractVariableNames(sql);
+        const extractedVars = extractVariablesWithOptional(sql);
         const newlyCreated: string[] = [];
 
-        for (const name of requiredNames) {
+        for (const { name, isOptional } of extractedVars) {
             const existing = variableStore.getVariableByName(name);
             if (!existing) {
-                // Create a placeholder variable with empty value
                 const newVar: VariableState = {
                     name,
                     type: 'text',
                     label: name,
                     inputType: 'input',
-                    value: ''
+                    value: '',
+                    isOptional
                 };
                 variableStore.upsertVariable(newVar);
                 newlyCreated.push(name);
+            } else if (existing.isOptional !== isOptional) {
+                variableStore.upsertVariable({ ...existing, isOptional });
             }
         }
 
         return newlyCreated;
     };
 
-    /**
-     * Check if SQL has variables and if all required variables have non-empty values.
-     * @param sql SQL to check
-     * @returns Object with hasVariables flag and list of missing variable names
-     */
     const validateVariablesForSql = (sql: string): { hasVariables: boolean; missingValues: string[] } => {
-        const requiredNames = extractVariableNames(sql);
-        if (requiredNames.length === 0) {
+        const extractedVars = extractVariablesWithOptional(sql);
+        if (extractedVars.length === 0) {
             return { hasVariables: false, missingValues: [] };
         }
 
         const missingValues: string[] = [];
-        for (const name of requiredNames) {
+        for (const { name, isOptional } of extractedVars) {
+            if (isOptional) continue;
+            
             const variable = variableStore.getVariableByName(name);
-            if (!variable || variable.value === '' || variable.value === null || variable.value === undefined) {
+            if (!variable) {
+                missingValues.push(name);
+                continue;
+            }
+            const resolvedValue = resolveVariableValue(variable);
+            if (resolvedValue === '' || resolvedValue === null || resolvedValue === undefined) {
                 missingValues.push(name);
             }
         }
@@ -126,6 +164,7 @@ export function useVariables() {
         getVariablesForApi,
         ensureVariablesFromSql,
         validateVariablesForSql,
+        extractVariablesWithOptional,
         allVariables
     };
 }

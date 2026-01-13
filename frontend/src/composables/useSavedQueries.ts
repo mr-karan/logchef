@@ -5,6 +5,7 @@ import { useSavedQueriesStore } from '@/stores/savedQueries'
 import { useAuthStore } from '@/stores/auth';
 import { useTeamsStore } from '@/stores/teams'; // Corrected path
 import { useVariableStore } from '@/stores/variables'
+import type { VariableState } from '@/stores/variables'
 import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { getErrorMessage } from '@/api/types'
@@ -408,7 +409,14 @@ export function useSavedQueries(
       // save variable data into store.
       if (Array.isArray(content.variables)) {
         try {
-          variableStore.setAllVariable(content.variables);
+          const normalizedVariables = (content.variables as VariableState[]).map((variable) => {
+            const hasValue = variable.value !== '' && variable.value !== null && variable.value !== undefined;
+            if (!hasValue && variable.defaultValue !== undefined && variable.defaultValue !== null && variable.defaultValue !== '') {
+              return { ...variable, value: variable.defaultValue };
+            }
+            return variable;
+          });
+          variableStore.setAllVariable(normalizedVariables);
           console.log("Restored variables from saved query.");
         } catch (e) {
           console.error("Failed to restore variables from saved query:", e);

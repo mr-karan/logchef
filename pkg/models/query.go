@@ -128,13 +128,30 @@ const (
 	SavedQueryTypeSQL SavedQueryType = "sql"
 )
 
-// SavedQueryContent represents the content of a saved query
+type SavedQueryVariableOption struct {
+	Value string `json:"value"`
+	Label string `json:"label,omitempty"`
+}
+
+type SavedQueryVariable struct {
+	Name         string                     `json:"name"`
+	Type         string                     `json:"type"`
+	Label        string                     `json:"label"`
+	InputType    string                     `json:"inputType"`
+	Value        interface{}                `json:"value"`
+	DefaultValue interface{}                `json:"defaultValue,omitempty"`
+	IsOptional   bool                       `json:"isOptional,omitempty"`
+	IsRequired   bool                       `json:"isRequired,omitempty"`
+	Options      []SavedQueryVariableOption `json:"options,omitempty"`
+}
+
 type SavedQueryContent struct {
-	Version   int                 `json:"version"`
-	SourceID  SourceID            `json:"sourceId"`
-	TimeRange SavedQueryTimeRange `json:"timeRange"`
-	Limit     int                 `json:"limit"`
-	Content   string              `json:"content"` // Query content (SQL or LogchefQL)
+	Version   int                  `json:"version"`
+	SourceID  SourceID             `json:"sourceId"`
+	TimeRange SavedQueryTimeRange  `json:"timeRange"`
+	Limit     int                  `json:"limit"`
+	Content   string               `json:"content"`
+	Variables []SavedQueryVariable `json:"variables"`
 }
 
 // SavedTeamQuery represents a saved query associated with a team
