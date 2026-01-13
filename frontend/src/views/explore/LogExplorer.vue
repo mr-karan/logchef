@@ -1368,6 +1368,11 @@ onBeforeUnmount(() => {
   max-height: 100%;
 }
 
+/* Fix padding for main content area to eliminate y-scroll bar */
+.log-explorer-wrapper {
+  margin: -0.75rem;
+}
+
 /* Force the results section to expand fully */
 .flex-1.overflow-hidden.flex.flex-col.border-t {
   flex: 1 1 auto !important;
