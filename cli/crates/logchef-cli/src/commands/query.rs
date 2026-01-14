@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
 use clap::Args;
 use logchef_core::api::{Client, QueryRequest};
-use logchef_core::highlight::{format_log_entry, HighlightOptions, Highlighter};
+use logchef_core::highlight::{format_log_entry_with_options, FormatOptions, HighlightOptions, Highlighter};
 use logchef_core::Config;
 
 use crate::cli::GlobalArgs;
@@ -34,6 +34,9 @@ pub struct QueryArgs {
 
     #[arg(long)]
     no_highlight: bool,
+
+    #[arg(long)]
+    no_timestamp: bool,
 
     #[arg(long)]
     show_sql: bool,
@@ -152,15 +155,19 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
             let highlighter = if args.no_highlight {
                 None
             } else {
-                let options = HighlightOptions {
+                let hl_options = HighlightOptions {
                     adhoc_highlights: parse_highlight_args(&args.highlights),
                     disabled_groups: args.disable_highlights.clone(),
                 };
-                Highlighter::with_options(&config.highlights, &options).ok()
+                Highlighter::with_options(&config.highlights, &hl_options).ok()
+            };
+
+            let fmt_options = FormatOptions {
+                show_timestamp: !args.no_timestamp,
             };
 
             for entry in entries {
-                let line = format_log_entry(entry, &response.columns);
+                let line = format_log_entry_with_options(entry, &response.columns, &fmt_options);
                 if let Some(ref h) = highlighter {
                     println!("{}", h.highlight(&line));
                 } else {

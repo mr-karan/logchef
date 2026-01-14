@@ -225,19 +225,46 @@ fn default_log_level_keywords() -> Vec<KeywordConfig> {
     ]
 }
 
-pub fn format_log_entry(entry: &crate::api::LogEntry, columns: &[crate::api::Column]) -> String {
-    let priority_fields = ["_timestamp", "timestamp", "level", "severity", "msg", "message"];
+pub struct FormatOptions {
+    pub show_timestamp: bool,
+}
 
+impl Default for FormatOptions {
+    fn default() -> Self {
+        Self { show_timestamp: true }
+    }
+}
+
+pub fn format_log_entry(entry: &crate::api::LogEntry, columns: &[crate::api::Column]) -> String {
+    format_log_entry_with_options(entry, columns, &FormatOptions::default())
+}
+
+pub fn format_log_entry_with_options(
+    entry: &crate::api::LogEntry,
+    columns: &[crate::api::Column],
+    options: &FormatOptions,
+) -> String {
+    let priority_fields: &[&str] = if options.show_timestamp {
+        &["_timestamp", "timestamp", "level", "severity", "msg", "message"]
+    } else {
+        &["level", "severity", "msg", "message"]
+    };
+
+    let timestamp_fields = ["_timestamp", "timestamp"];
     let mut parts = Vec::new();
 
     for field in priority_fields {
-        if let Some(value) = entry.get(field) {
+        if let Some(value) = entry.get(*field) {
             parts.push(format_value(field, value));
         }
     }
 
     for col in columns {
-        if !priority_fields.contains(&col.name.as_str()) && !col.name.starts_with('_') {
+        let dominated_by_priority = priority_fields.contains(&col.name.as_str());
+        let is_hidden_timestamp = !options.show_timestamp && timestamp_fields.contains(&col.name.as_str());
+        let is_internal = col.name.starts_with('_');
+
+        if !dominated_by_priority && !is_hidden_timestamp && !is_internal {
             if let Some(value) = entry.get(&col.name) {
                 if !value.is_null() {
                     parts.push(format_value(&col.name, value));

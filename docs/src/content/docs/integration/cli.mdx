@@ -143,6 +143,7 @@ logchef query "level:error service:api" --since 1h
 | `--limit` | `-l` | Maximum number of results | 100 |
 | `--output` | | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
 | `--no-highlight` | | Disable syntax highlighting | `false` |
+| `--no-timestamp` | | Hide timestamp from text output | `false` |
 | `--show-sql` | | Display the generated SQL query | `false` |
 
 #### Query Examples
@@ -160,11 +161,14 @@ logchef query "method:POST status:403" --team 2 --source 2
 # Search within a time range
 logchef query "level:error" --since 1h --limit 50
 
+# Hide timestamp from output
+logchef query "level:error" --no-timestamp
+
 # Output as JSON for piping to jq
 logchef query "status:500" --output json | jq '.[] | .host'
 
-# Output as JSON Lines (one JSON object per line)
-logchef query "" --output jsonl --no-highlight > logs.jsonl
+# Output as JSON Lines (one JSON object per line, great for jq)
+logchef query "" --output jsonl | jq '.msg'
 
 # Show the SQL that will be executed
 logchef query "method:GET" --show-sql
@@ -426,19 +430,35 @@ logchef query "level:error" --team 2 --source 2
 ### Export logs to file
 
 ```bash
-logchef query "status:500" --output jsonl --no-highlight > errors.jsonl
+logchef query "status:500" --output jsonl > errors.jsonl
 ```
 
 ### Count errors with jq
 
 ```bash
-logchef query "level:error" --output json --no-highlight | jq 'length'
+logchef query "level:error" --output json | jq 'length'
+```
+
+### Extract specific fields with jq
+
+```bash
+# Get all unique hosts
+logchef query "status:500" --output jsonl | jq -r '.host' | sort -u
+
+# Pretty print messages
+logchef query "level:error" --output jsonl | jq '.msg'
 ```
 
 ### Pipe to grep for filtering
 
 ```bash
 logchef query "" --no-highlight | grep -i "database"
+```
+
+### Clean output without timestamps
+
+```bash
+logchef query "level:error" --no-timestamp --no-highlight > errors.txt
 ```
 
 ### Loop through multiple sources
