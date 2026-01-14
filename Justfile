@@ -62,32 +62,86 @@ run-backend: build-backend
     @echo "Running backend server with config {{config}}..."
     {{bin}} -config {{config}}
 
-# === CLI ===
+# === Go CLI (Legacy) ===
 
-# Build the CLI
+# Build the Go CLI
 build-cli:
-    @echo "Building CLI..."
+    @echo "Building Go CLI..."
     CGO_ENABLED=0 go build -o {{cli_bin}} -ldflags "{{ldflags}}" ./cmd/logchef
 
-# Install CLI locally
+# Install Go CLI locally
 install-cli: build-cli
-    @echo "Installing CLI to ~/go/bin..."
+    @echo "Installing Go CLI to ~/go/bin..."
     cp {{cli_bin}} ~/go/bin/logchef
     @echo "CLI installed. Run 'logchef --help' to get started."
 
-# Run CLI tests
+# Run Go CLI tests
 test-cli:
-    @echo "Running CLI tests..."
+    @echo "Running Go CLI tests..."
     go test -v ./internal/cli/... ./cmd/logchef/...
 
-# Run CLI tests with coverage
+# Run Go CLI tests with coverage
 test-cli-coverage:
-    @echo "Running CLI tests with coverage..."
+    @echo "Running Go CLI tests with coverage..."
     mkdir -p coverage
     go test -v -race -coverprofile=coverage/cli-coverage.out ./internal/cli/... ./cmd/logchef/...
     go tool cover -html=coverage/cli-coverage.out -o coverage/cli-coverage.html
     @echo "CLI coverage report generated at coverage/cli-coverage.html"
     @go tool cover -func=coverage/cli-coverage.out | grep total | awk '{print "CLI coverage: " $$3}'
+
+# === Rust CLI ===
+
+rust_cli_bin := "cli/target/release/logchef"
+rust_cli_debug := "cli/target/debug/logchef"
+
+# Build Rust CLI (release)
+build-rust-cli:
+    @echo "Building Rust CLI (release)..."
+    cd cli && cargo build --release
+
+# Build Rust CLI (debug)
+build-rust-cli-debug:
+    @echo "Building Rust CLI (debug)..."
+    cd cli && cargo build
+
+# Install Rust CLI locally
+install-rust-cli: build-rust-cli
+    @echo "Installing Rust CLI to ~/.cargo/bin..."
+    cp {{rust_cli_bin}} ~/.cargo/bin/logchef
+    @echo "Rust CLI installed. Run 'logchef --help' to get started."
+
+# Run Rust CLI tests
+test-rust-cli:
+    @echo "Running Rust CLI tests..."
+    cd cli && cargo test
+
+# Run Rust CLI with cargo clippy
+lint-rust-cli:
+    @echo "Linting Rust CLI..."
+    cd cli && cargo clippy -- -D warnings
+
+# Format Rust CLI code
+fmt-rust-cli:
+    @echo "Formatting Rust CLI..."
+    cd cli && cargo fmt
+
+# Check Rust CLI formatting
+fmt-rust-cli-check:
+    @echo "Checking Rust CLI formatting..."
+    cd cli && cargo fmt --check
+
+# Run all Rust CLI checks
+check-rust-cli: fmt-rust-cli-check lint-rust-cli test-rust-cli
+
+# Clean Rust CLI build artifacts
+clean-rust-cli:
+    @echo "Cleaning Rust CLI artifacts..."
+    cd cli && cargo clean
+
+# Quick test: run query against dev server
+test-rust-cli-query server_url="" team="" source="":
+    @echo "Testing Rust CLI query..."
+    {{rust_cli_debug}} --server {{server_url}} query "level:error" --team {{team}} --source {{source}} --limit 10
 
 # Run only the frontend server
 run-frontend:

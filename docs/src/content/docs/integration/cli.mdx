@@ -1,0 +1,457 @@
+---
+title: LogChef CLI
+description: Query and explore your logs from the terminal with the high-performance Rust-based LogChef CLI.
+---
+
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+The LogChef CLI is a powerful, high-performance terminal companion for LogChef. Built in Rust, it provides a fast and intuitive way to interact with your logs without leaving your terminal.
+
+<CardGrid stagger>
+  <Card title="Blazing Fast" icon="rocket">
+    Written in Rust for minimal overhead and maximum performance when handling large log volumes.
+  </Card>
+  <Card title="Rich Highlighting" icon="starlight">
+    Beautiful syntax highlighting for log levels, dates, IPs, and custom keywords powered by tailspin.
+  </Card>
+  <Card title="Multi-Context" icon="laptop">
+    Manage multiple LogChef instances (dev/staging/prod) with kubectl-style context switching.
+  </Card>
+  <Card title="Secure Auth" icon="lock">
+    Native support for OIDC PKCE flow, keeping your credentials secure while being easy to use.
+  </Card>
+</CardGrid>
+
+## Quick Start
+
+```bash
+# 1. Build the CLI
+cd logchef/cli && cargo build --release
+
+# 2. Add to PATH (or copy to /usr/local/bin)
+export PATH="$PATH:$(pwd)/target/release"
+
+# 3. Authenticate (auto-creates context from hostname)
+logchef auth --server https://logs.example.com
+
+# 4. Rename context to something friendly
+logchef config rename logs.example.com prod
+
+# 5. Set defaults so you don't need --team/--source every time
+logchef config set team 2
+logchef config set source 2
+
+# 6. Query logs
+logchef query "level:error" --since 1h
+```
+
+## Installation
+
+### From Source
+
+```bash
+# Clone the repository
+git clone https://github.com/mr-karan/logchef.git
+cd logchef/cli
+
+# Build the release binary
+cargo build --release
+
+# The binary is at cli/target/release/logchef
+# Copy to your PATH:
+sudo cp target/release/logchef /usr/local/bin/
+```
+
+### Using Just
+
+If you have [just](https://github.com/casey/just) installed:
+
+```bash
+# Build release binary
+just build-rust-cli
+
+# Install to ~/.cargo/bin (must be in PATH)
+just install-rust-cli
+```
+
+### Verify Installation
+
+```bash
+logchef --version
+logchef --help
+```
+
+## Authentication
+
+The CLI supports two authentication methods: browser-based OIDC and API tokens.
+
+### Browser-Based Login (OIDC)
+
+For interactive use, authenticate via your browser:
+
+```bash
+logchef auth
+```
+
+This opens your browser to complete the OIDC login flow. The token is automatically saved to your config file.
+
+```bash
+# Check authentication status
+logchef auth --status
+
+# Log out (clear stored token)
+logchef auth --logout
+```
+
+### API Token Authentication
+
+For scripts and automation, use an API token directly:
+
+```bash
+# Set token via environment variable
+export LOGCHEF_AUTH_TOKEN="logchef_1_abc123..."
+logchef query ""
+
+# Or pass token as argument
+logchef --token "logchef_1_abc123..." query ""
+
+# Or save to config file
+logchef config set auth.token "logchef_1_abc123..."
+```
+
+Generate API tokens from the LogChef web UI under your profile settings.
+
+## Command Reference
+
+### Query Logs
+
+The `query` command allows you to execute LogChefQL queries directly from your terminal.
+
+```bash
+logchef query "level:error service:api" --since 1h
+```
+
+#### Options
+
+| Option | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--team` | `-t` | Team ID or name | (from config) |
+| `--source` | `-S` | Source ID or name | (from config) |
+| `--since` | `-s` | Time range (e.g., "15m", "1h", "24h") | "15m" |
+| `--from` | | Absolute start time (ISO 8601) | |
+| `--to` | | Absolute end time (ISO 8601) | |
+| `--limit` | `-l` | Maximum number of results | 100 |
+| `--output` | | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
+| `--no-highlight` | | Disable syntax highlighting | `false` |
+| `--show-sql` | | Display the generated SQL query | `false` |
+
+#### Query Examples
+
+```bash
+# Get all logs from the last 15 minutes
+logchef query "" --team 2 --source 2
+
+# Filter by field value
+logchef query "status:500" --team 2 --source 2
+
+# Multiple conditions (AND)
+logchef query "method:POST status:403" --team 2 --source 2
+
+# Search within a time range
+logchef query "level:error" --since 1h --limit 50
+
+# Output as JSON for piping to jq
+logchef query "status:500" --output json | jq '.[] | .host'
+
+# Output as JSON Lines (one JSON object per line)
+logchef query "" --output jsonl --no-highlight > logs.jsonl
+
+# Show the SQL that will be executed
+logchef query "method:GET" --show-sql
+
+# Use absolute time range
+logchef query "" --from "2026-01-14T00:00:00Z" --to "2026-01-14T12:00:00Z"
+```
+
+#### Example Output
+
+When running a query, you'll see highlighted output with colors:
+
+```text
+2026-01-14T07:16:06.149Z host=172.100.86.236 method=PATCH status=410 bytes=45112
+2026-01-14T07:16:06.049Z host=156.89.90.123 method=PATCH status=200 bytes=42092
+2026-01-14T07:16:05.949Z host=217.33.68.177 method=POST status=403 bytes=10709
+```
+
+The highlighting includes:
+- **Timestamps** in magenta
+- **IP addresses** in cyan
+- **URLs** with protocol highlighting
+- **Key=value pairs** with dimmed keys
+- **Numbers** in cyan
+- **Log levels** color-coded (ERROR=red, WARN=yellow, INFO=green, DEBUG=blue)
+
+### Configuration
+
+Manage your CLI settings using the `config` command.
+
+```bash
+# List all contexts
+logchef config list
+
+# Switch to a different context
+logchef config use prod
+
+# Show current context configuration
+logchef config show
+
+# Set configuration values for current context
+logchef config set team 2
+logchef config set source 2
+logchef config set limit 50
+logchef config set since "1h"
+
+# Rename a context
+logchef config rename logs.example.com prod
+
+# Delete a context
+logchef config delete old-server
+```
+
+#### Multi-Context Workflow
+
+The CLI supports managing multiple LogChef instances (dev/staging/prod):
+
+```bash
+# Authenticate with prod (context auto-created from hostname)
+logchef auth --server https://logs.company.com
+logchef config rename logs.company.com prod
+
+# Authenticate with dev
+logchef auth --server http://localhost:8125
+logchef config rename localhost dev
+
+# List contexts
+logchef config list
+#     CONTEXT  SERVER                        AUTH
+#   * prod     https://logs.company.com      yes
+#     dev      http://localhost:8125         yes
+
+# Switch contexts
+logchef config use dev
+logchef query "level:debug"
+
+# One-off query to different context
+logchef --context prod query "level:error"
+```
+
+#### Recommended Setup
+
+After authenticating, set your defaults to avoid typing `--team` and `--source` every time:
+
+```bash
+# Find your team and source IDs from the web UI URL
+# e.g., /logs/explore?team=2&source=2
+
+logchef config set team 2
+logchef config set source 2
+
+# Now you can just run:
+logchef query "level:error"
+```
+
+## Configuration File
+
+The configuration is stored at `~/.config/logchef/logchef.json`:
+
+```json
+{
+  "current_context": "prod",
+  "contexts": {
+    "prod": {
+      "server_url": "https://logs.example.com",
+      "timeout_secs": 30,
+      "token": "logchef_1_...",
+      "token_expires_at": "2026-02-14T00:00:00Z",
+      "defaults": {
+        "team": "2",
+        "source": "2",
+        "limit": 100,
+        "since": "15m"
+      }
+    },
+    "dev": {
+      "server_url": "http://localhost:8125",
+      "timeout_secs": 30,
+      "token": "logchef_1_...",
+      "defaults": {}
+    }
+  },
+  "highlights": {
+    "custom_keywords": ["MYAPP", "CRITICAL"],
+    "disable_builtin": false,
+    "disabled_groups": [],
+    "custom_regexes": [
+      {
+        "pattern": "trace_id=[a-f0-9]+",
+        "color": "cyan",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  }
+}
+```
+
+### Configuration Options
+
+| Section | Key | Description |
+| :--- | :--- | :--- |
+| `current_context` | Active context | Name of the context to use by default |
+| `contexts.<name>.server_url` | Server URL | LogChef server address for this context |
+| `contexts.<name>.timeout_secs` | Timeout | HTTP request timeout in seconds |
+| `contexts.<name>.defaults.team` | Default team | Team ID to use when `--team` is omitted |
+| `contexts.<name>.defaults.source` | Default source | Source ID to use when `--source` is omitted |
+| `contexts.<name>.defaults.limit` | Default limit | Number of results when `--limit` is omitted |
+| `contexts.<name>.defaults.since` | Default time range | Time range when `--since` is omitted |
+| `highlights.custom_keywords` | Custom keywords | Words to highlight in magenta |
+| `highlights.disable_builtin` | Disable defaults | Turn off built-in log level highlighting |
+| `highlights.disabled_groups` | Disabled groups | List of highlighter groups to disable |
+| `highlights.custom_regexes` | Custom patterns | Regex patterns with custom colors |
+
+## Syntax Highlighting
+
+LogChef CLI provides automatic syntax highlighting for common log patterns, powered by [tailspin](https://github.com/bensadeh/tailspin).
+
+### Built-in Highlighting
+
+| Category | What's Highlighted | Colors |
+| :--- | :--- | :--- |
+| **Log Levels** | ERROR, FATAL, CRITICAL | Red (bold) |
+| | WARN, WARNING | Yellow |
+| | INFO | Green |
+| | DEBUG, TRACE | Blue |
+| **HTTP Methods** | GET | Green (bold) |
+| | POST | Yellow (bold) |
+| | PUT, PATCH | Magenta (bold) |
+| | DELETE | Red (bold) |
+| **Identifiers** | IPs, UUIDs, URLs | Cyan/Blue |
+| **Temporal** | Dates, timestamps | Magenta |
+| **Data** | Numbers, key=value pairs | Cyan |
+| **Booleans** | true, false, null | Cyan |
+
+### Ad-hoc Highlighting
+
+Highlight specific words on-the-fly without changing your config:
+
+```bash
+# Highlight words in specific colors
+logchef query "" --highlight red:ERROR,FAIL --highlight green:SUCCESS,OK
+
+# Available colors: red, green, yellow, blue, magenta, cyan, white, black
+# Also: bright_red, bright_green, bright_yellow, etc.
+```
+
+### Disable Highlighters
+
+Turn off specific highlighting groups for cleaner output:
+
+```bash
+# Disable date/time and number highlighting
+logchef query "" --disable-highlight dates --disable-highlight numbers
+
+# Available groups: dates, numbers, uuids, ips, urls, paths, 
+#                   pointers, keyvalue, quotes, json, keywords
+```
+
+### Custom Regex Patterns
+
+Add custom regex patterns in your config file:
+
+```json
+{
+  "highlights": {
+    "custom_regexes": [
+      {
+        "pattern": "user_id=(\\d+)",
+        "color": "cyan",
+        "bold": true
+      },
+      {
+        "pattern": "request_id=[a-f0-9-]+",
+        "color": "magenta"
+      }
+    ]
+  }
+}
+```
+
+### Disable All Highlighting
+
+For piping to other tools or file output:
+
+```bash
+logchef query "" --no-highlight > logs.txt
+logchef query "" --no-highlight | grep "ERROR"
+```
+
+## Global Options
+
+The following options can be used with any command:
+
+| Option | Environment Variable | Description |
+| :--- | :--- | :--- |
+| `--context` / `-c` | `LOGCHEF_CONTEXT` | Use a specific context |
+| `--server` | `LOGCHEF_SERVER_URL` | Override server URL (ephemeral) |
+| `--token` | `LOGCHEF_AUTH_TOKEN` | Override API token |
+| `--debug` / `-d` | | Enable detailed debug output |
+
+## Environment Variables
+
+For CI/CD pipelines and automation, you can configure the CLI entirely via environment variables:
+
+```bash
+# Option 1: Use a saved context
+export LOGCHEF_CONTEXT="prod"
+logchef query "level:error" --team 2 --source 2
+
+# Option 2: Ephemeral mode (no saved context needed)
+export LOGCHEF_SERVER_URL="https://logs.example.com"
+export LOGCHEF_AUTH_TOKEN="logchef_1_abc123..."
+logchef query "level:error" --team 2 --source 2
+```
+
+## Scripting Examples
+
+### Export logs to file
+
+```bash
+logchef query "status:500" --output jsonl --no-highlight > errors.jsonl
+```
+
+### Count errors with jq
+
+```bash
+logchef query "level:error" --output json --no-highlight | jq 'length'
+```
+
+### Pipe to grep for filtering
+
+```bash
+logchef query "" --no-highlight | grep -i "database"
+```
+
+### Loop through multiple sources
+
+```bash
+for source in 1 2 3; do
+  echo "=== Source $source ==="
+  logchef query "level:error" --source $source --limit 5
+done
+```
+
+<LinkCard
+  title="API Reference"
+  description="Learn more about the HTTP API that powers the CLI."
+  href="/integration/http-api/"
+/>

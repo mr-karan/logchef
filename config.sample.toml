@@ -28,6 +28,8 @@ client_id = "logchef"
 client_secret = "logchef-secret"
 redirect_url = "http://localhost:8125/api/v1/auth/callback"
 scopes = ["openid", "email", "profile"]
+# CLI client ID for CLI authentication (public OIDC client, PKCE flow)
+cli_client_id = "logchef-cli"
 
 # Authentication configuration
 [auth]

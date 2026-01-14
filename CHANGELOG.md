@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Rust CLI** — New cross-platform command-line interface written in Rust
+  - `logchef auth` — Browser-based OIDC authentication with PKCE flow
+  - `logchef query` — Execute LogChefQL queries with syntax highlighting (powered by [tailspin](https://github.com/bensadeh/tailspin))
+  - `logchef config` — Manage CLI configuration and multiple server contexts
+  - Multi-context support for managing dev/staging/prod instances (kubectl-style)
+  - Configurable keywords and regex patterns for log highlighting
+  - Configuration stored at `~/.config/logchef/logchef.json`
+- **CLI Token Exchange API** — `POST /api/v1/cli/token` endpoint for CLI authentication
+- **CLI OIDC Discovery** — `/api/v1/meta` now includes `oidc_issuer` and `cli_client_id` for CLI auth flow
 - **Multi-select variables** — Select multiple values that expand to `IN (...)` clauses in SQL.
 - **SQL optional clauses** (`[[ ... ]]`) — Wrap variable clauses to auto-remove when value is empty.
 - **Variable widget configuration** — Configure variables as text inputs, dropdowns, or multi-selects with default values.

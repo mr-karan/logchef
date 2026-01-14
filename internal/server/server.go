@@ -139,6 +139,9 @@ func (s *Server) setupRoutes() {
 	api.Get("/auth/callback", s.handleCallback)
 	api.Post("/auth/logout", s.handleLogout)
 
+	// --- CLI Authentication ---
+	api.Post("/cli/token", s.handleCLITokenExchange)
+
 	// --- Current User ("Me") Routes ---
 	api.Get("/me", s.requireAuth, s.handleGetCurrentUser)
 	api.Get("/me/teams", s.requireAuth, s.handleListCurrentUserTeams)

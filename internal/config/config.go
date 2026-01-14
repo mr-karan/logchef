@@ -59,6 +59,8 @@ type OIDCConfig struct {
 	ClientSecret string   `koanf:"client_secret"`
 	RedirectURL  string   `koanf:"redirect_url"`
 	Scopes       []string `koanf:"scopes"`
+
+	CLIClientID string `koanf:"cli_client_id"`
 }
 
 // AuthConfig contains authentication settings
