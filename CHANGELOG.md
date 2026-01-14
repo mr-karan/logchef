@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reduced log noise and redacted session IDs for security.
 
 ### Fixed
+- **SQLite SQLITE_BUSY errors** — Implemented dual-connection pattern (read pool + single write connection) to eliminate database lock contention under concurrent API requests.
 - Saved query updates use the current editor content.
 - Alert timestamps use ISO8601 UTC formatting for last triggered.
 - Alert relative time formatting edge cases.
@@ -41,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Collections race condition causing empty list on initial load.
 - Y-scroll bar eliminated on explorer main content area.
 - Variable datetime-local format accepts values without seconds.
+
+### Removed
+- Legacy Go CLI (`cmd/logchef/`, `internal/cli/`) — replaced by Rust CLI.
 
 ## [1.1.0] - 2025-12-29
 

@@ -204,7 +204,7 @@ func (db *DB) CreateAlert(ctx context.Context, alert *models.Alert) error {
 		return fmt.Errorf("failed to marshal annotations: %w", err)
 	}
 
-	row := db.db.QueryRowContext(ctx, insertAlertQuery,
+	row := db.writeDB.QueryRowContext(ctx, insertAlertQuery,
 		int64(alert.TeamID),
 		int64(alert.SourceID),
 		alert.Name,
@@ -264,7 +264,7 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 		return fmt.Errorf("failed to marshal annotations: %w", err)
 	}
 
-	res, err := db.db.ExecContext(ctx, updateAlertQuery,
+	res, err := db.writeDB.ExecContext(ctx, updateAlertQuery,
 		alert.Name,
 		nullableString(alert.Description),
 		string(alert.QueryType),
@@ -292,7 +292,7 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 
 // DeleteAlert removes an alert definition.
 func (db *DB) DeleteAlert(ctx context.Context, alertID models.AlertID) error {
-	res, err := db.db.ExecContext(ctx, deleteAlertQuery, int64(alertID))
+	res, err := db.writeDB.ExecContext(ctx, deleteAlertQuery, int64(alertID))
 	if err != nil {
 		return fmt.Errorf("failed to delete alert: %w", err)
 	}
@@ -395,7 +395,7 @@ func scanAlert(scanner interface {
 
 // GetAlert retrieves an alert by ID.
 func (db *DB) GetAlert(ctx context.Context, alertID models.AlertID) (*models.Alert, error) {
-	row := db.db.QueryRowContext(ctx, getAlertByIDQuery, int64(alertID))
+	row := db.readDB.QueryRowContext(ctx, getAlertByIDQuery, int64(alertID))
 	alert, err := scanAlert(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -408,7 +408,7 @@ func (db *DB) GetAlert(ctx context.Context, alertID models.AlertID) (*models.Ale
 
 // GetAlertForTeamSource retrieves an alert by ID ensuring it belongs to the specified team/source.
 func (db *DB) GetAlertForTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, alertID models.AlertID) (*models.Alert, error) {
-	row := db.db.QueryRowContext(ctx, getAlertForTeamSourceQuery, int64(alertID), int64(teamID), int64(sourceID))
+	row := db.readDB.QueryRowContext(ctx, getAlertForTeamSourceQuery, int64(alertID), int64(teamID), int64(sourceID))
 	alert, err := scanAlert(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -421,7 +421,7 @@ func (db *DB) GetAlertForTeamSource(ctx context.Context, teamID models.TeamID, s
 
 // ListAlertsByTeamAndSource returns alerts for the given team/source.
 func (db *DB) ListAlertsByTeamAndSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) ([]*models.Alert, error) {
-	rows, err := db.db.QueryContext(ctx, listAlertsByTeamSourceQuery, int64(teamID), int64(sourceID))
+	rows, err := db.readDB.QueryContext(ctx, listAlertsByTeamSourceQuery, int64(teamID), int64(sourceID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alerts: %w", err)
 	}
@@ -443,7 +443,7 @@ func (db *DB) ListAlertsByTeamAndSource(ctx context.Context, teamID models.TeamI
 
 // ListActiveAlertsDue returns alerts that need evaluation.
 func (db *DB) ListActiveAlertsDue(ctx context.Context) ([]*models.Alert, error) {
-	rows, err := db.db.QueryContext(ctx, listActiveAlertsDueQuery)
+	rows, err := db.readDB.QueryContext(ctx, listActiveAlertsDueQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active alerts: %w", err)
 	}
@@ -465,7 +465,7 @@ func (db *DB) ListActiveAlertsDue(ctx context.Context) ([]*models.Alert, error) 
 
 // MarkAlertEvaluated updates state after evaluation finishes without triggering.
 func (db *DB) MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) error {
-	_, err := db.db.ExecContext(ctx, updateAlertEvaluatedQuery, int64(alertID))
+	_, err := db.writeDB.ExecContext(ctx, updateAlertEvaluatedQuery, int64(alertID))
 	if err != nil {
 		return fmt.Errorf("failed to mark alert evaluated: %w", err)
 	}
@@ -474,7 +474,7 @@ func (db *DB) MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) er
 
 // MarkAlertTriggered updates state when an alert fires.
 func (db *DB) MarkAlertTriggered(ctx context.Context, alertID models.AlertID) error {
-	_, err := db.db.ExecContext(ctx, updateAlertTriggeredQuery, int64(alertID))
+	_, err := db.writeDB.ExecContext(ctx, updateAlertTriggeredQuery, int64(alertID))
 	if err != nil {
 		return fmt.Errorf("failed to mark alert triggered: %w", err)
 	}
@@ -498,7 +498,7 @@ func (db *DB) InsertAlertHistory(ctx context.Context, alertID models.AlertID, st
 		payloadJSON = string(buf)
 	}
 
-	row := db.db.QueryRowContext(ctx, insertAlertHistoryQuery,
+	row := db.writeDB.QueryRowContext(ctx, insertAlertHistoryQuery,
 		int64(alertID),
 		string(status),
 		valuePtr,
@@ -542,7 +542,7 @@ func (db *DB) InsertAlertHistory(ctx context.Context, alertID models.AlertID, st
 
 // GetLatestUnresolvedAlertHistory fetches the newest unresolved history entry.
 func (db *DB) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID models.AlertID) (*models.AlertHistoryEntry, error) {
-	row := db.db.QueryRowContext(ctx, getLatestUnresolvedHistoryQuery, int64(alertID))
+	row := db.readDB.QueryRowContext(ctx, getLatestUnresolvedHistoryQuery, int64(alertID))
 	entry, err := scanAlertHistory(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -555,7 +555,7 @@ func (db *DB) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID model
 
 // ResolveAlertHistory marks a history entry as resolved with an optional message.
 func (db *DB) ResolveAlertHistory(ctx context.Context, historyID int64, message string) error {
-	res, err := db.db.ExecContext(ctx, resolveAlertHistoryQuery, nullableString(message), historyID)
+	res, err := db.writeDB.ExecContext(ctx, resolveAlertHistoryQuery, nullableString(message), historyID)
 	if err != nil {
 		return fmt.Errorf("failed to resolve alert history: %w", err)
 	}
@@ -576,7 +576,7 @@ func (db *DB) UpdateAlertHistoryPayload(ctx context.Context, historyID int64, pa
 		payloadJSON = string(buf)
 	}
 
-	res, err := db.db.ExecContext(ctx, updateAlertHistoryPayloadQuery, nullableString(payloadJSON), historyID)
+	res, err := db.writeDB.ExecContext(ctx, updateAlertHistoryPayloadQuery, nullableString(payloadJSON), historyID)
 	if err != nil {
 		return fmt.Errorf("failed to update alert history payload: %w", err)
 	}
@@ -593,7 +593,7 @@ WHERE alert_id = ?
 ORDER BY triggered_at DESC, id DESC
 LIMIT ?`
 
-	rows, err := db.db.QueryContext(ctx, query, int64(alertID), limit)
+	rows, err := db.readDB.QueryContext(ctx, query, int64(alertID), limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alert history: %w", err)
 	}
@@ -618,7 +618,7 @@ func (db *DB) PruneAlertHistory(ctx context.Context, alertID models.AlertID, kee
 	if keep <= 0 {
 		return nil
 	}
-	if _, err := db.db.ExecContext(ctx, pruneAlertHistoryQuery, int64(alertID), int64(alertID), keep); err != nil {
+	if _, err := db.writeDB.ExecContext(ctx, pruneAlertHistoryQuery, int64(alertID), int64(alertID), keep); err != nil {
 		return fmt.Errorf("failed to prune alert history: %w", err)
 	}
 	return nil

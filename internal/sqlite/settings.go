@@ -13,7 +13,7 @@ import (
 
 // GetSetting retrieves a setting value from the database.
 func (db *DB) GetSetting(ctx context.Context, key string) (string, error) {
-	setting, err := db.queries.GetSystemSetting(ctx, key)
+	setting, err := db.readQueries.GetSystemSetting(ctx, key)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrNotFound
@@ -86,7 +86,7 @@ func (db *DB) GetDurationSetting(ctx context.Context, key string, defaultValue t
 
 // ListSettings retrieves all settings.
 func (db *DB) ListSettings(ctx context.Context) ([]sqlc.SystemSetting, error) {
-	settings, err := db.queries.ListSystemSettings(ctx)
+	settings, err := db.readQueries.ListSystemSettings(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list settings: %w", err)
 	}
@@ -95,7 +95,7 @@ func (db *DB) ListSettings(ctx context.Context) ([]sqlc.SystemSetting, error) {
 
 // ListSettingsByCategory retrieves settings for a specific category.
 func (db *DB) ListSettingsByCategory(ctx context.Context, category string) ([]sqlc.SystemSetting, error) {
-	settings, err := db.queries.ListSystemSettingsByCategory(ctx, category)
+	settings, err := db.readQueries.ListSystemSettingsByCategory(ctx, category)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list settings for category %s: %w", category, err)
 	}
@@ -109,7 +109,7 @@ func (db *DB) UpsertSetting(ctx context.Context, key, value, valueType, category
 		isSensitiveInt = 1
 	}
 
-	err := db.queries.UpsertSystemSetting(ctx, sqlc.UpsertSystemSettingParams{
+	err := db.writeQueries.UpsertSystemSetting(ctx, sqlc.UpsertSystemSettingParams{
 		Key:         key,
 		Value:       value,
 		ValueType:   valueType,
@@ -125,7 +125,7 @@ func (db *DB) UpsertSetting(ctx context.Context, key, value, valueType, category
 
 // DeleteSetting deletes a setting.
 func (db *DB) DeleteSetting(ctx context.Context, key string) error {
-	err := db.queries.DeleteSystemSetting(ctx, key)
+	err := db.writeQueries.DeleteSystemSetting(ctx, key)
 	if err != nil {
 		return fmt.Errorf("failed to delete setting %s: %w", key, err)
 	}
