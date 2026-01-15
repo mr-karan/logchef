@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SQL optional clauses** (`[[ ... ]]`) — Wrap variable clauses to auto-remove when value is empty.
 - **Variable widget configuration** — Configure variables as text inputs, dropdowns, or multi-selects with default values.
 - **Collections "All Sources" view** — Browse saved queries across all sources in one place.
-- **Dynamic Alertmanager routing** — Helper for routing alerts based on query results.
+- **Dynamic alert routing** — Helper for routing alerts based on query results.
 - Saved query name shown in browser tab title.
 - Smart LIMIT handling in SQL mode.
 - Support for CTEs, JOINs, and subqueries with template variables.
@@ -85,7 +85,7 @@ The 1.0 release marks Logchef as production-ready. Eight months of development b
 
 ### Highlights
 
-- **Alerting with Alertmanager** - SQL-based alerts that integrate with your existing alert routing
+- **Alerting system** - SQL-based alerts with notification delivery
 - **LogchefQL Backend Parser** - Full parsing, validation, and type-aware SQL generation in Go
 - **Field Values Sidebar** - Kibana-style field exploration with click-to-filter
 - **Query Cancellation** - Cancel long-running queries in ClickHouse, not just the UI
@@ -140,17 +140,16 @@ The 1.0 release marks Logchef as production-ready. Eight months of development b
 ## [0.6.0] - 2025-12-04
 
 ### Added
-- **Alerting System** - SQL-based alerting with Alertmanager integration
+- **Alerting System** - SQL-based alerting with notification delivery
   - Create alerts using LogchefQL or SQL queries
   - Configure thresholds, frequency, and severity
-  - Route alerts to Slack, PagerDuty, email via Alertmanager
+  - Route alerts to Slack, PagerDuty, email via webhooks and SMTP
   - Alert history with execution logs
   - Dedicated alert detail page with edit and history tabs
 - **Admin Settings UI** - Runtime configuration management via web interface
   - Manage alerts, AI, authentication, and server settings
   - Settings stored in database, override config.toml at runtime
   - Config-to-database seeding on first boot
-- Alertmanager health check functionality with test connection button
 - Duplicate source feature for quick configuration copying
 - Keyboard typeahead navigation in team member and source dropdowns
 - Alert history retention limit enforcement
@@ -168,7 +167,7 @@ The 1.0 release marks Logchef as production-ready. Eight months of development b
 - Active tab persistence when saving settings (no longer jumps to Alerts tab)
 - Number input values properly converted to strings before API submission
 - Acronyms (URL, API, AI, TLS, ID) now properly formatted in settings UI
-- Alert `delivery_failed` flag cleared after successful Alertmanager retry
+- Alert `delivery_failed` flag cleared after successful retry
 - Available users and sources now sorted alphabetically in team dialogs
 - Null check added for test query warnings in AlertForm
 - Frontend context and source loading logic improvements

@@ -30,6 +30,12 @@ cd dev && vector -c syslog.toml
 ```
 
 Open http://localhost:5173 and login with `dev@localhost` / `password`.
+Mailpit UI is available at http://localhost:8025.
+
+To test email delivery locally, configure SMTP settings to:
+- Host: `mailpit`
+- Port: `1025`
+- From: `alerts@logchef.local`
 
 ## What Gets Created
 
@@ -56,6 +62,8 @@ Running `just dev-seed` creates:
 | ClickHouse Native | 9000 | Native protocol |
 | Dex | 5556 | OIDC provider |
 | Webhook Receiver | 8888 | Test webhook endpoint |
+| Mailpit UI | 8025 | Email inbox UI |
+| Mailpit SMTP | 1025 | SMTP server |
 
 ## Useful Commands
 

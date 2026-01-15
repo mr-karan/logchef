@@ -46,6 +46,16 @@ services:
             - LOG_WITHOUT_NEWLINE=true
             - LOG_IGNORE_PATH=/ping
 
+    mailpit:
+        image: axllent/mailpit:latest
+        hostname: mailpit
+        restart: on-failure
+        ports:
+            - "8025:8025"
+            - "1025:1025"
+        environment:
+            - MP_MAX_MESSAGES=20
+
 volumes:
     clickhouse-data:
     clickhouse-logs:
