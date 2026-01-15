@@ -27,9 +27,11 @@ const (
     severity,
     labels_json,
     annotations_json,
+    recipient_user_ids_json,
+    webhook_urls_json,
     generator_url,
     is_active
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id, created_at, updated_at, last_state, last_evaluated_at, last_triggered_at`
 
 	selectAlertBase = `SELECT
@@ -48,6 +50,8 @@ RETURNING id, created_at, updated_at, last_state, last_evaluated_at, last_trigge
     severity,
     labels_json,
     annotations_json,
+    recipient_user_ids_json,
+    webhook_urls_json,
     generator_url,
     is_active,
     last_state,
@@ -100,6 +104,8 @@ SET name = ?,
     severity = ?,
     labels_json = ?,
     annotations_json = ?,
+    recipient_user_ids_json = ?,
+    webhook_urls_json = ?,
     generator_url = ?,
     is_active = ?,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
@@ -178,6 +184,50 @@ func unmarshalStringMap(raw sql.NullString) (map[string]string, error) {
 	return out, nil
 }
 
+func marshalUserIDs(ids []models.UserID) (string, error) {
+	if len(ids) == 0 {
+		return "", nil
+	}
+	buf, err := json.Marshal(ids)
+	if err != nil {
+		return "", err
+	}
+	return string(buf), nil
+}
+
+func unmarshalUserIDs(raw sql.NullString) ([]models.UserID, error) {
+	if !raw.Valid || raw.String == "" {
+		return nil, nil
+	}
+	var out []models.UserID
+	if err := json.Unmarshal([]byte(raw.String), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func marshalStringSlice(values []string) (string, error) {
+	if len(values) == 0 {
+		return "", nil
+	}
+	buf, err := json.Marshal(values)
+	if err != nil {
+		return "", err
+	}
+	return string(buf), nil
+}
+
+func unmarshalStringSlice(raw sql.NullString) ([]string, error) {
+	if !raw.Valid || raw.String == "" {
+		return nil, nil
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(raw.String), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func unmarshalPayload(raw sql.NullString) (map[string]any, error) {
 	if !raw.Valid || raw.String == "" {
 		return nil, nil
@@ -203,6 +253,14 @@ func (db *DB) CreateAlert(ctx context.Context, alert *models.Alert) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal annotations: %w", err)
 	}
+	recipientUserIDsJSON, err := marshalUserIDs(alert.RecipientUserIDs)
+	if err != nil {
+		return fmt.Errorf("failed to marshal recipient user IDs: %w", err)
+	}
+	webhookURLsJSON, err := marshalStringSlice(alert.WebhookURLs)
+	if err != nil {
+		return fmt.Errorf("failed to marshal webhook URLs: %w", err)
+	}
 
 	row := db.writeDB.QueryRowContext(ctx, insertAlertQuery,
 		int64(alert.TeamID),
@@ -219,6 +277,8 @@ func (db *DB) CreateAlert(ctx context.Context, alert *models.Alert) error {
 		string(alert.Severity),
 		nullableString(labelsJSON),
 		nullableString(annotationsJSON),
+		nullableString(recipientUserIDsJSON),
+		nullableString(webhookURLsJSON),
 		nullableString(alert.GeneratorURL),
 		boolToInt(alert.IsActive),
 	)
@@ -263,6 +323,14 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal annotations: %w", err)
 	}
+	recipientUserIDsJSON, err := marshalUserIDs(alert.RecipientUserIDs)
+	if err != nil {
+		return fmt.Errorf("failed to marshal recipient user IDs: %w", err)
+	}
+	webhookURLsJSON, err := marshalStringSlice(alert.WebhookURLs)
+	if err != nil {
+		return fmt.Errorf("failed to marshal webhook URLs: %w", err)
+	}
 
 	res, err := db.writeDB.ExecContext(ctx, updateAlertQuery,
 		alert.Name,
@@ -277,6 +345,8 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 		string(alert.Severity),
 		nullableString(labelsJSON),
 		nullableString(annotationsJSON),
+		nullableString(recipientUserIDsJSON),
+		nullableString(webhookURLsJSON),
 		nullableString(alert.GeneratorURL),
 		boolToInt(alert.IsActive),
 		int64(alert.ID),
@@ -319,6 +389,8 @@ func scanAlert(scanner interface {
 		severity                         string
 		labelsJSON                       sql.NullString
 		annotationsJSON                  sql.NullString
+		recipientUserIDsJSON             sql.NullString
+		webhookURLsJSON                  sql.NullString
 		generatorURL                     sql.NullString
 		isActive                         int
 		lastState                        string
@@ -342,6 +414,8 @@ func scanAlert(scanner interface {
 		&severity,
 		&labelsJSON,
 		&annotationsJSON,
+		&recipientUserIDsJSON,
+		&webhookURLsJSON,
 		&generatorURL,
 		&isActive,
 		&lastState,
@@ -361,6 +435,14 @@ func scanAlert(scanner interface {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode annotations: %w", err)
 	}
+	recipientUserIDs, err := unmarshalUserIDs(recipientUserIDsJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode recipient user IDs: %w", err)
+	}
+	webhookURLs, err := unmarshalStringSlice(webhookURLsJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode webhook URLs: %w", err)
+	}
 
 	alert := &models.Alert{
 		ID:                models.AlertID(id),
@@ -378,6 +460,8 @@ func scanAlert(scanner interface {
 		Severity:          models.AlertSeverity(severity),
 		Labels:            labels,
 		Annotations:       annotations,
+		RecipientUserIDs:  recipientUserIDs,
+		WebhookURLs:       webhookURLs,
 		GeneratorURL:      generatorURL.String,
 		IsActive:          isActive == 1,
 		LastState:         models.AlertState(lastState),

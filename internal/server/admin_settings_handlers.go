@@ -1,16 +1,14 @@
 package server
 
 import (
-	"encoding/base64"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 
-	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -225,183 +223,89 @@ func (s *Server) validateSettingValue(value, valueType string) error {
 
 // validateSpecificSetting performs additional validation for specific settings.
 func (s *Server) validateSpecificSetting(key, value string) error {
-	switch key {
-	case "alerts.alertmanager_url", "alerts.external_url", "alerts.frontend_url", "server.frontend_url", "ai.base_url":
-		if value != "" {
-			parsedURL, err := url.Parse(value)
-			if err != nil {
-				return fmt.Errorf("invalid URL format")
-			}
-			if parsedURL.Scheme != "" && parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-				return fmt.Errorf("URL must use http or https scheme")
-			}
-		}
-	case "alerts.history_limit", "auth.max_concurrent_sessions", "ai.max_tokens":
-		intVal, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("must be a valid integer")
-		}
-		if intVal <= 0 {
-			return fmt.Errorf("must be greater than 0")
-		}
-	case "ai.temperature":
-		floatVal, err := strconv.ParseFloat(value, 64)
-		if err != nil {
-			return fmt.Errorf("must be a valid number")
-		}
-		if floatVal < 0.0 || floatVal > 1.0 {
-			return fmt.Errorf("must be between 0.0 and 1.0")
-		}
+	validator, ok := specificSettingValidators[key]
+	if !ok {
+		return nil
+	}
+	return validator(value)
+}
+
+var specificSettingValidators = map[string]func(string) error{
+	"alerts.external_url":          validateOptionalURL,
+	"alerts.frontend_url":          validateOptionalURL,
+	"server.frontend_url":          validateOptionalURL,
+	"ai.base_url":                  validateOptionalURL,
+	"alerts.smtp_port":             validateNonNegativeInt,
+	"alerts.history_limit":         validatePositiveInt,
+	"auth.max_concurrent_sessions": validatePositiveInt,
+	"ai.max_tokens":                validatePositiveInt,
+	"alerts.smtp_security":         validateSMTPSecurity,
+	"alerts.smtp_from":             validateEmailAddress,
+	"alerts.smtp_reply_to":         validateEmailAddress,
+	"ai.temperature":               validateTemperature,
+}
+
+func validateOptionalURL(value string) error {
+	if value == "" {
+		return nil
+	}
+	parsedURL, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("invalid URL format")
+	}
+	if parsedURL.Scheme != "" && parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("URL must use http or https scheme")
 	}
 	return nil
 }
 
-// TestAlertmanagerRequest represents a request to test Alertmanager connection.
-type TestAlertmanagerRequest struct {
-	URL                   string `json:"url"`
-	TLSInsecureSkipVerify bool   `json:"tls_insecure_skip_verify"`
-	Timeout               string `json:"timeout,omitempty"` // Duration string (e.g., "5s")
+func validateNonNegativeInt(value string) error {
+	intVal, err := strconv.Atoi(value)
+	if err != nil {
+		return fmt.Errorf("must be a valid integer")
+	}
+	if intVal < 0 {
+		return fmt.Errorf("must be 0 or greater")
+	}
+	return nil
 }
 
-// handleTestAlertmanagerConnection tests connectivity to an Alertmanager instance.
-// POST /api/v1/admin/settings/test-alertmanager
-func (s *Server) handleTestAlertmanagerConnection(c *fiber.Ctx) error {
-	var req TestAlertmanagerRequest
-	if err := c.BodyParser(&req); err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid request body")
-	}
-
-	if req.URL == "" {
-		return SendError(c, fiber.StatusBadRequest, "alertmanager URL is required")
-	}
-
-	// Validate URL format
-	parsedURL, err := url.Parse(req.URL)
+func validatePositiveInt(value string) error {
+	intVal, err := strconv.Atoi(value)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("invalid URL format: %v", err))
+		return fmt.Errorf("must be a valid integer")
 	}
-	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return SendError(c, fiber.StatusBadRequest, "URL must use http or https scheme")
+	if intVal <= 0 {
+		return fmt.Errorf("must be greater than 0")
 	}
-
-	// Parse timeout
-	timeout := 5 * time.Second
-	if req.Timeout != "" {
-		parsedTimeout, err := time.ParseDuration(req.Timeout)
-		if err != nil {
-			return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("invalid timeout format: %v", err))
-		}
-		timeout = parsedTimeout
-	}
-
-	// Create a temporary Alertmanager client for testing
-	client, err := alerts.NewAlertmanagerClient(alerts.ClientOptions{
-		BaseURL:       req.URL,
-		Timeout:       timeout,
-		SkipTLSVerify: req.TLSInsecureSkipVerify,
-		Logger:        s.log,
-	})
-	if err != nil {
-		s.log.Error("failed to create alertmanager client for testing", "error", err, "url", req.URL)
-		return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("failed to create alertmanager client: %v", err))
-	}
-
-	// Perform health check
-	if err := client.HealthCheck(c.Context()); err != nil {
-		s.log.Warn("alertmanager health check failed", "error", err, "url", req.URL)
-		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Alertmanager health check failed: %v", err))
-	}
-
-	s.log.Info("alertmanager health check successful", "url", req.URL)
-	return SendSuccess(c, fiber.StatusOK, fiber.Map{
-		"message": "Successfully connected to Alertmanager",
-		"url":     req.URL,
-	})
+	return nil
 }
 
-// GetAlertmanagerRoutingRequest contains the optional parameters for fetching routing config.
-type GetAlertmanagerRoutingRequest struct {
-	URL                   string `json:"url,omitempty"`      // Optional: override the configured URL
-	TLSInsecureSkipVerify bool   `json:"tls_skip_verify"`    // Skip TLS verification
-	Timeout               string `json:"timeout,omitempty"`  // Duration string (e.g., "5s")
-	Username              string `json:"username,omitempty"` // Basic auth username
-	Password              string `json:"password,omitempty"` // Basic auth password
+func validateSMTPSecurity(value string) error {
+	if value == "" {
+		return nil
+	}
+	security := strings.ToLower(value)
+	if security != "none" && security != "starttls" && security != "tls" {
+		return fmt.Errorf("smtp_security must be none, starttls, or tls")
+	}
+	return nil
 }
 
-// handleGetAlertmanagerRouting fetches the routing configuration from Alertmanager.
-// POST /api/v1/admin/settings/alertmanager-routing
-func (s *Server) handleGetAlertmanagerRouting(c *fiber.Ctx) error {
-	var req GetAlertmanagerRoutingRequest
-	if err := c.BodyParser(&req); err != nil {
-		// Body is optional, so ignore parse errors
-		req = GetAlertmanagerRoutingRequest{}
+func validateEmailAddress(value string) error {
+	if value != "" && !strings.Contains(value, "@") {
+		return fmt.Errorf("must be a valid email address")
 	}
-
-	// Use configured URL if not provided in request
-	alertmanagerURL := req.URL
-	if alertmanagerURL == "" {
-		alertmanagerURL = s.config.Alerts.AlertmanagerURL
-	}
-
-	if alertmanagerURL == "" {
-		return SendError(c, fiber.StatusBadRequest, "Alertmanager URL is not configured. Please configure it in Settings > Alerts.")
-	}
-
-	// Validate URL format
-	parsedURL, err := url.Parse(alertmanagerURL)
-	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("invalid URL format: %v", err))
-	}
-	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return SendError(c, fiber.StatusBadRequest, "URL must use http or https scheme")
-	}
-
-	// Parse timeout
-	timeout := 10 * time.Second
-	if req.Timeout != "" {
-		parsedTimeout, err := time.ParseDuration(req.Timeout)
-		if err != nil {
-			return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("invalid timeout format: %v", err))
-		}
-		timeout = parsedTimeout
-	}
-
-	// Set up additional headers for basic auth if provided
-	var headers http.Header
-	if req.Username != "" && req.Password != "" {
-		headers = make(http.Header)
-		headers.Set("Authorization", "Basic "+basicAuth(req.Username, req.Password))
-	}
-
-	// Use TLS skip verify from request or config
-	tlsSkipVerify := req.TLSInsecureSkipVerify || s.config.Alerts.TLSInsecureSkipVerify
-
-	// Create a temporary Alertmanager client
-	client, err := alerts.NewAlertmanagerClient(alerts.ClientOptions{
-		BaseURL:           alertmanagerURL,
-		Timeout:           timeout,
-		SkipTLSVerify:     tlsSkipVerify,
-		Logger:            s.log,
-		AdditionalHeaders: headers,
-	})
-	if err != nil {
-		s.log.Error("failed to create alertmanager client", "error", err, "url", alertmanagerURL)
-		return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("failed to create alertmanager client: %v", err))
-	}
-
-	// Fetch routing configuration
-	routingInfo, err := client.GetRoutingConfig(c.Context())
-	if err != nil {
-		s.log.Warn("failed to fetch alertmanager routing config", "error", err, "url", alertmanagerURL)
-		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Failed to fetch Alertmanager routing: %v", err))
-	}
-
-	s.log.Info("fetched alertmanager routing config", "url", alertmanagerURL, "receivers", len(routingInfo.Receivers))
-	return SendSuccess(c, fiber.StatusOK, routingInfo)
+	return nil
 }
 
-// basicAuth encodes credentials for HTTP Basic Authentication.
-func basicAuth(username, password string) string {
-	auth := username + ":" + password
-	return base64.StdEncoding.EncodeToString([]byte(auth))
+func validateTemperature(value string) error {
+	floatVal, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fmt.Errorf("must be a valid number")
+	}
+	if floatVal < 0.0 || floatVal > 1.0 {
+		return fmt.Errorf("must be between 0.0 and 1.0")
+	}
+	return nil
 }

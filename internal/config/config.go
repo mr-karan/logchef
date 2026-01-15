@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"log"
-	"net/url"
 	"strings"
 	"time"
 
@@ -94,13 +93,19 @@ type AIConfig struct {
 	BaseURL string `koanf:"base_url"`
 }
 
-// AlertsConfig controls scheduling behaviour for alert rules and delivery via Alertmanager.
+// AlertsConfig controls scheduling behaviour for alert rules and delivery via email or webhooks.
 type AlertsConfig struct {
 	Enabled               bool          `koanf:"enabled"`
 	EvaluationInterval    time.Duration `koanf:"evaluation_interval"`
 	DefaultLookback       time.Duration `koanf:"default_lookback"`
 	HistoryLimit          int           `koanf:"history_limit"`
-	AlertmanagerURL       string        `koanf:"alertmanager_url"`
+	SMTPHost              string        `koanf:"smtp_host"`
+	SMTPPort              int           `koanf:"smtp_port"`
+	SMTPUsername          string        `koanf:"smtp_username"`
+	SMTPPassword          string        `koanf:"smtp_password"`
+	SMTPFrom              string        `koanf:"smtp_from"`
+	SMTPReplyTo           string        `koanf:"smtp_reply_to"`
+	SMTPSecurity          string        `koanf:"smtp_security"`
 	ExternalURL           string        `koanf:"external_url"` // Backend URL (for API access)
 	FrontendURL           string        `koanf:"frontend_url"` // Frontend URL (for web UI links)
 	RequestTimeout        time.Duration `koanf:"request_timeout"`
@@ -177,17 +182,26 @@ func Load(path string) (*Config, error) {
 	// They will be seeded from config.toml to the database on first boot, and can be managed via UI afterwards.
 	// If not specified in config.toml, database migration defaults will be used.
 
-	// Validate Alertmanager URL if provided
-	if cfg.Alerts.AlertmanagerURL != "" {
-		parsedURL, err := url.Parse(cfg.Alerts.AlertmanagerURL)
-		if err != nil {
-			return nil, fmt.Errorf("invalid alertmanager_url: %w", err)
+	if cfg.Alerts.SMTPHost != "" {
+		if cfg.Alerts.SMTPPort <= 0 {
+			return nil, fmt.Errorf("smtp_port must be greater than 0")
 		}
-		if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-			return nil, fmt.Errorf("alertmanager_url must use http or https scheme, got: %s", parsedURL.Scheme)
+		from := strings.TrimSpace(cfg.Alerts.SMTPFrom)
+		if from == "" {
+			return nil, fmt.Errorf("smtp_from is required when smtp_host is configured")
 		}
-		if parsedURL.Host == "" {
-			return nil, fmt.Errorf("alertmanager_url must include a host")
+		if !strings.Contains(from, "@") {
+			return nil, fmt.Errorf("smtp_from must be a valid email address")
+		}
+		if replyTo := strings.TrimSpace(cfg.Alerts.SMTPReplyTo); replyTo != "" && !strings.Contains(replyTo, "@") {
+			return nil, fmt.Errorf("smtp_reply_to must be a valid email address")
+		}
+	}
+	if cfg.Alerts.SMTPSecurity != "" {
+		switch strings.ToLower(cfg.Alerts.SMTPSecurity) {
+		case "none", "starttls", "tls":
+		default:
+			return nil, fmt.Errorf("smtp_security must be one of none, starttls, tls")
 		}
 	}
 

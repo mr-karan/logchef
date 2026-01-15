@@ -5,7 +5,7 @@ description: Monitor your logs continuously and get notified when critical condi
 
 import { Card, CardGrid } from "@astrojs/starlight/components";
 
-LogChef provides a powerful alerting system that continuously evaluates your log data against custom conditions. When thresholds are exceeded, alerts are automatically sent to Alertmanager, which routes notifications to your preferred channels like Slack, PagerDuty, email, or webhooks.
+LogChef provides a powerful alerting system that continuously evaluates your log data against custom conditions. When thresholds are exceeded, alerts are sent directly via email (SMTP) and webhook notifications configured per alert.
 
 The alerting system is designed for production use with built-in reliability features including retry logic, delivery failure tracking, and comprehensive error handling.
 
@@ -13,22 +13,21 @@ The alerting system is designed for production use with built-in reliability fea
 
 **What you do in LogChef:**
 1. Create an alert with a condition or SQL query and threshold (e.g., "error count > 100")
-2. LogChef evaluates your query every X seconds (you set the frequency)
-3. When threshold is exceeded, LogChef sends the alert to Alertmanager
+2. Select team members to notify and add webhook URLs in the alert form
+3. Configure SMTP settings in **Administration → System Settings → Alerts**
 
-**What Alertmanager does:**
-1. Receives alerts from LogChef
-2. Groups similar alerts together (e.g., all critical alerts from your team)
-3. Routes alerts to notification channels based on your Alertmanager configuration
-4. Sends notifications to Slack, PagerDuty, email, webhooks, etc.
+**What LogChef does:**
+1. Evaluates your query every X seconds (you set the frequency)
+2. Builds an alert notification payload with labels, annotations, and context
+3. Sends email notifications to the selected recipients
+4. Posts JSON payloads to each configured webhook URL
+5. Records delivery outcomes in alert history
 
 **Important to understand:**
-- **LogChef creates and evaluates alerts** - You define what to monitor and when to alert
-- **Alertmanager handles notifications** - It decides where notifications go and how they're grouped
-- **You configure Slack/PagerDuty in Alertmanager** - Not in LogChef
-- **LogChef shows alert history** - You can see when alerts fired and their values in the UI
-
-This separation means you can change notification channels (add Slack, remove email, etc.) without touching your alert definitions in LogChef.
+- **LogChef creates, evaluates, and delivers notifications**
+- **Email delivery uses SMTP settings configured by admins**
+- **Webhooks are defined per alert**
+- **Alert history shows when alerts fired and their delivery status**
 
 ### Quick Example
 
@@ -46,26 +45,21 @@ This separation means you can change notification channels (add Slack, remove em
 
 The generated SQL will be: `SELECT count(*) as value FROM logs WHERE (severity = 'ERROR') AND timestamp >= now() - toIntervalSecond(300)`
 
-**In Alertmanager config:**
-```yaml
-receivers:
-  - name: 'slack-alerts'
-    slack_configs:
-      - api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK'
-        channel: '#api-alerts'
-```
+**In the alert form:**
+- Team members: select the on-call recipients
+- Webhook URLs: `https://hooks.slack.com/services/YOUR/WEBHOOK`
 
-**Result:** Every minute, LogChef checks error count. If > 100, it fires the alert to Alertmanager. Alertmanager sends a message to your Slack #api-alerts channel. You can see all firings in LogChef's alert history.
+**Result:** Every minute, LogChef checks error count. If > 100, it sends emails to the selected team members and posts the webhook payload. You can see all firings in LogChef's alert history.
 
 <CardGrid stagger>
-  <Card title="Alertmanager Integration" icon="siren">
-    Native Prometheus Alertmanager support for battle-tested alert routing and notification delivery.
+  <Card title="Email & Webhook Delivery" icon="siren">
+    Send notifications directly via SMTP email and webhook endpoints.
   </Card>
   <Card title="Simple & Advanced Modes" icon="magnifier">
     Use LogChefQL for simple filter conditions, or write raw ClickHouse SQL for complex queries.
   </Card>
   <Card title="Delivery Guarantees" icon="approve-check">
-    Automatic retry logic with exponential backoff ensures alerts reach Alertmanager even during network issues.
+    Automatic retry logic with exponential backoff ensures notifications are delivered reliably.
   </Card>
   <Card title="Rich Metadata" icon="information">
     Alerts include team and source names, custom labels, annotations, and direct links to the web UI.
@@ -74,15 +68,15 @@ receivers:
 
 ## How it Works
 
-LogChef's alert manager runs in the background, continuously evaluating active alerts at the configured interval (default: 1 minute). When an alert's SQL query returns a value that exceeds the threshold, the alert fires and is sent to Alertmanager with full context including labels, annotations, and metadata.
+LogChef's alert manager runs in the background, continuously evaluating active alerts at the configured interval (default: 1 minute). When an alert's SQL query returns a value that exceeds the threshold, the alert fires and LogChef sends email and webhook notifications with full context including labels, annotations, and metadata.
 
 ### Alert Lifecycle
 
 1. **Evaluation**: Alert SQL query runs against ClickHouse
 2. **Threshold Check**: Result is compared against configured threshold
-3. **Triggered**: If threshold is met, alert fires and is sent to Alertmanager
-4. **Grouped**: Alertmanager groups similar alerts by team, source, and severity
-5. **Routed**: Notifications are sent to configured receivers (Slack, PagerDuty, etc.)
+3. **Triggered**: If threshold is met, alert fires and notification payload is built
+4. **Delivered**: Email notifications are sent to selected recipients
+5. **Webhooked**: JSON payloads are posted to configured webhook URLs
 6. **Resolved**: When conditions clear, a resolution notification is sent
 
 ## Creating Alerts
@@ -228,16 +222,24 @@ Alerting is configured through the **Administration → System Settings → Aler
 
 **Available Settings:**
 - **Enabled**: Toggle alert evaluation on/off
-- **Alertmanager URL**: Endpoint for sending alerts
-  - Test connectivity with the built-in health check button
-  - Supports HTTP Basic Auth: `https://username:password@alertmanager.example.com`
+- **SMTP Host**: Email server hostname
+- **SMTP Port**: Email server port
+- **SMTP Username**: SMTP auth username (optional)
+- **SMTP Password**: SMTP auth password (optional)
+- **SMTP From**: From address for alert emails
+- **SMTP Reply-To**: Reply-To address (optional)
+- **SMTP Security**: `none`, `starttls`, or `tls`
 - **Evaluation Interval**: How often to evaluate all alerts
 - **Default Lookback**: Default time range for alert queries
 - **History Limit**: Number of historical events to keep per alert
 - **External URL**: Backend URL for API access
 - **Frontend URL**: Frontend URL for web UI links in alert notifications
-- **Request Timeout**: HTTP timeout for Alertmanager requests
+- **Request Timeout**: HTTP timeout for alert delivery
 - **TLS Insecure Skip Verify**: Skip TLS certificate verification (development only)
+
+### Alert Recipients & Webhooks
+
+Recipients and webhook URLs are configured per alert. In the alert form, select team members to notify and add one or more webhook URLs for integrations like Slack, PagerDuty, or custom endpoints.
 
 ### Initial Configuration (First Boot)
 
@@ -257,8 +259,14 @@ default_lookback = "5m"
 # Maximum alert history entries to keep per alert (default: 100)
 history_limit = 100
 
-# Alertmanager API endpoint
-alertmanager_url = "http://alertmanager:9093"
+# SMTP configuration for email delivery
+smtp_host = "smtp.example.com"
+smtp_port = 587
+smtp_username = ""
+smtp_password = ""
+smtp_from = "alerts@example.com"
+smtp_reply_to = ""
+smtp_security = "starttls"
 
 # Backend URL for API access (used for fallback)
 external_url = "http://localhost:8125"
@@ -266,7 +274,7 @@ external_url = "http://localhost:8125"
 # Frontend URL for web UI generator links
 frontend_url = "http://localhost:5173"
 
-# HTTP request timeout for Alertmanager communication
+# HTTP request timeout for alert delivery
 request_timeout = "5s"
 
 # Skip TLS certificate verification (for development only)
@@ -274,84 +282,6 @@ tls_insecure_skip_verify = false
 ```
 
 **Note:** After first boot, changes to `[alerts]` in `config.toml` are ignored. Use the Admin Settings UI to modify alert configuration.
-
-### Alertmanager Authentication
-
-If your Alertmanager requires authentication, include credentials in the URL using HTTP Basic Auth:
-
-**Format:**
-```
-https://username:password@alertmanager.example.com
-```
-
-**Examples:**
-```
-# Basic authentication
-https://admin:secretpass@alertmanager.internal:9093
-
-# URL-encoded special characters in password
-https://admin:my%40pass%3A123@alertmanager.internal:9093
-```
-
-**Special character encoding:**
-- `@` → `%40`
-- `:` → `%3A`
-- `#` → `%23`
-- `%` → `%25`
-- Space → `%20`
-
-### Testing Connectivity
-
-Before saving Alertmanager configuration, use the **Test Connection** button in the Admin Settings UI to verify:
-- Alertmanager is reachable
-- Authentication credentials are correct
-- Network connectivity is working
-- TLS certificates are valid (or properly skipped)
-
-The health check calls Alertmanager's `/api/v2/status` endpoint and reports success or detailed error messages.
-
-### Alertmanager Configuration
-
-Configure Alertmanager to route LogChef alerts to your notification channels. Example configuration:
-
-```yaml
-global:
-  resolve_timeout: 5m
-
-route:
-  receiver: 'default-receiver'
-  group_by: ['alertname', 'severity', 'team', 'source']
-  group_wait: 10s
-  group_interval: 30s
-  repeat_interval: 12h
-
-  routes:
-    # Critical alerts to PagerDuty
-    - match:
-        severity: critical
-      receiver: 'pagerduty'
-      continue: true
-
-    # Warning alerts to Slack
-    - match:
-        severity: warning
-      receiver: 'slack-oncall'
-
-receivers:
-  - name: 'default-receiver'
-    webhook_configs:
-      - url: 'http://webhook-receiver:8080/alerts'
-
-  - name: 'pagerduty'
-    pagerduty_configs:
-      - service_key: 'YOUR_SERVICE_KEY'
-
-  - name: 'slack-oncall'
-    slack_configs:
-      - api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
-        channel: '#alerts'
-        title: 'LogChef Alert: {{ .GroupLabels.alertname }}'
-```
 
 ## Alert Labels and Annotations
 
@@ -381,7 +311,7 @@ Add custom labels to categorize and route alerts:
 }
 ```
 
-These labels can be used in Alertmanager routing rules to send alerts to appropriate teams or channels.
+These labels are included in webhook payloads and email notifications for filtering and routing on the receiver side.
 
 ### Annotations
 
@@ -446,7 +376,7 @@ LogChef maintains a complete history of all alert evaluations including:
 - **Triggered Events**: When alerts fire with the metric value
 - **Resolved Events**: When conditions clear
 - **Error Events**: Query failures or evaluation errors
-- **Delivery Status**: Whether alerts successfully reached Alertmanager
+- **Delivery Status**: Whether alerts successfully reached email/webhook endpoints
 
 **What you can see in history:**
 - **Timestamp**: When the alert was evaluated
@@ -460,14 +390,14 @@ Use alert history to:
 - See the actual query result that triggered the alert
 - Check how long conditions persisted
 - Review previous occurrences and patterns
-- Debug delivery failures to Alertmanager
+- Debug delivery failures to email/webhook endpoints
 - Verify alerts are evaluating correctly
 
 ## Reliability Features
 
 ### Retry Logic with Exponential Backoff
 
-If Alertmanager is temporarily unavailable, LogChef automatically retries alert delivery:
+If email or webhook delivery fails, LogChef automatically retries alert delivery:
 
 - **Default**: 2 retry attempts
 - **Initial Delay**: 500ms
@@ -502,19 +432,11 @@ Alert evaluations produce structured logs for observability:
 {"level":"INFO","msg":"alert triggered","alert_name":"High Error Rate","value":150,"threshold":100}
 
 // Successful delivery
-{"level":"INFO","msg":"alert successfully sent to Alertmanager","alert_id":1}
+{"level":"INFO","msg":"alert notifications sent","alert_id":1}
 
 // Alert resolved
 {"level":"INFO","msg":"alert resolved","alert_name":"High Error Rate","value":45}
 ```
-
-### Alertmanager UI
-
-Access the Alertmanager web interface to:
-- View active alerts and their current status
-- See alert grouping and routing decisions
-- Silence alerts temporarily
-- Inspect alert payloads and labels
 
 ## Best Practices
 
@@ -548,11 +470,11 @@ Access the Alertmanager web interface to:
 
 ### Production Deployment
 
-- **Use TLS**: Always enable TLS for Alertmanager communication in production
+- **Use TLS**: Enable TLS for SMTP (`smtp_security` set to `tls` or `starttls`)
 - **Set External URL**: Configure frontend_url for correct generator links
-- **Configure Receivers**: Set up PagerDuty, Slack, or email for critical alerts
+- **Configure Recipients**: Set per-alert email recipients and webhook URLs
 - **Test Notifications**: Verify alert delivery to all configured channels
-- **Monitor Alertmanager**: Ensure Alertmanager itself is monitored and has high availability
+- **Monitor Delivery**: Watch logs for email/webhook delivery failures
 
 ## Troubleshooting
 
@@ -565,8 +487,8 @@ Access the Alertmanager web interface to:
 
 ### Alerts Not Delivered
 
-1. **Check Alertmanager URL**: Verify alertmanager_url in config is correct
-2. **Test Connectivity**: Ensure LogChef can reach Alertmanager (`curl http://alertmanager:9093/-/healthy`)
+1. **Check SMTP Settings**: Verify `smtp_host`, `smtp_port`, and `smtp_from` are correct
+2. **Verify Recipients/Webhooks**: Ensure the alert has recipients or webhook URLs configured
 3. **Review Logs**: Check for delivery errors in LogChef logs
 4. **Inspect History**: Check alert history for delivery failure details
 
@@ -625,10 +547,10 @@ To create a similar alert quickly:
 
 ### Creating an On-Call Rotation
 
-1. Set up PagerDuty integration in Alertmanager
+1. Add a PagerDuty webhook URL to the alert notification settings
 2. Create critical alerts for your services
 3. Tag alerts with `severity: critical` and `team: your-team`
-4. Configure Alertmanager route to match on team label
+4. Use your webhook receiver to route based on labels if needed
 5. Test with a temporary threshold adjustment
 
 ### Building a Comprehensive Monitoring Suite

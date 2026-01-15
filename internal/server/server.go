@@ -28,7 +28,7 @@ type ServerOptions struct {
 	Config        *config.Config
 	SQLite        *sqlite.DB
 	ClickHouse    *clickhouse.Manager
-	AlertsManager *alerts.Manager    // Alerts manager for manual resolution with Alertmanager notification.
+	AlertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	OIDCProvider  *auth.OIDCProvider // OIDC provider for authentication flows.
 	FS            http.FileSystem    // Filesystem for serving static assets (frontend).
 	Logger        *slog.Logger
@@ -43,7 +43,7 @@ type Server struct {
 	config        *config.Config
 	sqlite        *sqlite.DB
 	clickhouse    *clickhouse.Manager
-	alertsManager *alerts.Manager    // Alerts manager for manual resolution with Alertmanager notification.
+	alertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	oidcProvider  *auth.OIDCProvider // Handles OIDC authentication logic.
 	fs            http.FileSystem
 	log           *slog.Logger
@@ -179,8 +179,6 @@ func (s *Server) setupRoutes() {
 	admin.Get("/settings/:key", s.handleGetSetting)
 	admin.Put("/settings/:key", s.handleUpdateSetting)
 	admin.Delete("/settings/:key", s.handleDeleteSetting)
-	admin.Post("/settings/test-alertmanager", s.handleTestAlertmanagerConnection)
-	admin.Post("/settings/alertmanager-routing", s.handleGetAlertmanagerRouting)
 
 	// --- Team Routes (Access controlled by team membership) ---
 	// Regular users can view teams they belong to, team admins can manage membership and linked sources

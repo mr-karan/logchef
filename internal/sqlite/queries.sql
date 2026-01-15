@@ -341,14 +341,22 @@ INSERT INTO alerts (
     source_id,
     name,
     description,
+    query_type,
     query,
+    condition_json,
+    lookback_seconds,
     threshold_operator,
     threshold_value,
     frequency_seconds,
     severity,
+    labels_json,
+    annotations_json,
+    recipient_user_ids_json,
+    webhook_urls_json,
+    generator_url,
     is_active
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id;
 
 -- name: GetAlert :one
@@ -366,11 +374,19 @@ ORDER BY created_at DESC;
 UPDATE alerts
 SET name = ?,
     description = ?,
+    query_type = ?,
     query = ?,
+    condition_json = ?,
+    lookback_seconds = ?,
     threshold_operator = ?,
     threshold_value = ?,
     frequency_seconds = ?,
     severity = ?,
+    labels_json = ?,
+    annotations_json = ?,
+    recipient_user_ids_json = ?,
+    webhook_urls_json = ?,
+    generator_url = ?,
     is_active = ?,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?;

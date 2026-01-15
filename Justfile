@@ -189,13 +189,9 @@ dev-ingest-logs duration="60":
     kill $pid1 $pid2 2>/dev/null
     echo "Done."
 
-# View Alertmanager webhook receiver logs (for testing alerts)
+# View webhook receiver logs (for testing alerts)
 dev-webhook-logs:
     cd dev && docker compose logs -f webhook-receiver
-
-# View Alertmanager logs
-dev-alertmanager-logs:
-    cd dev && docker compose logs -f alertmanager
 
 # Test webhook receiver is working
 dev-test-webhook:
@@ -204,13 +200,6 @@ dev-test-webhook:
         -H "Content-Type: application/json" \
         -d '{"test": "alert", "message": "This is a test webhook payload"}'
     @echo "\nCheck webhook logs with: just dev-webhook-logs"
-
-# Open Alertmanager UI in browser
-dev-alertmanager-ui:
-    @echo "Opening Alertmanager UI at http://localhost:9093"
-    @command -v xdg-open >/dev/null 2>&1 && xdg-open http://localhost:9093 || \
-     command -v open >/dev/null 2>&1 && open http://localhost:9093 || \
-     echo "Please open http://localhost:9093 in your browser"
 
 # Clean build artifacts
 clean:
@@ -233,10 +222,10 @@ fresh: clean build run
 test:
     @echo "Running tests with coverage..."
     mkdir -p coverage
-    go test -v -race -coverprofile=../coverage/coverage.out ./... && \
-    go tool cover -html=../coverage/coverage.out -o ../coverage/coverage.html
+    go test -v -race -coverprofile=coverage/coverage.out ./... && \
+    go tool cover -html=coverage/coverage.out -o coverage/coverage.html
     @echo "Coverage report generated at coverage/coverage.html"
-    @go tool cover -func=../coverage/coverage.out | grep total | awk '{print "Total coverage: " $$3}'
+    @go tool cover -func=coverage/coverage.out | grep total | awk '{print "Total coverage: " $$3}'
 
 # Run tests without coverage and race detection (faster)
 test-short:

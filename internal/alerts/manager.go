@@ -19,11 +19,6 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// AlertSender abstracts the delivery mechanism for alert notifications.
-type AlertSender interface {
-	Send(ctx context.Context, alerts []AlertPayload) error
-}
-
 // Options encapsulates the dependencies required to run the alerting manager.
 type Options struct {
 	Config     config.AlertsConfig
@@ -213,7 +208,7 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	shouldRetryDelivery := false
 	if alreadyActive && prevHistory.Payload != nil {
 		if deliveryFailed, ok := prevHistory.Payload["delivery_failed"].(bool); ok && deliveryFailed {
-			m.log.Debug("retrying alertmanager delivery", "alert_id", alert.ID, "history_id", prevHistory.ID)
+			m.log.Debug("retrying alert delivery", "alert_id", alert.ID, "history_id", prevHistory.ID)
 			shouldRetryDelivery = true
 		}
 	}
@@ -224,7 +219,7 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 
 	// If already active and delivery succeeded previously, suppress duplicate notification
 	if alreadyActive && !shouldRetryDelivery {
-		m.log.Debug("alert already active with successful delivery, suppressing duplicate alertmanager notification", "alert_id", alert.ID)
+		m.log.Debug("alert already active with successful delivery, suppressing duplicate alert notification", "alert_id", alert.ID)
 		return nil
 	}
 
@@ -241,13 +236,12 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	valueCopy := value
 	message := fmt.Sprintf("alert %s triggered with value %.4f", alert.Name, value)
 
-	// Send to Alertmanager first
 	var deliveryErr error
 	var history *models.AlertHistoryEntry
 	if shouldRetryDelivery && prevHistory != nil {
 		// Retry on existing history entry - update it with new attempt
 		history = prevHistory
-		deliveryErr = m.sendAlertmanager(ctx, alert, history, labels, annotations, models.AlertStatusTriggered)
+		deliveryErr = m.sendNotification(ctx, alert, history, labels, annotations, models.AlertStatusTriggered, value)
 	} else {
 		// Create new history entry
 		now := time.Now().UTC()
@@ -258,7 +252,7 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 			Value:       &valueCopy,
 			Message:     message,
 		}
-		deliveryErr = m.sendAlertmanager(ctx, alert, history, labels, annotations, models.AlertStatusTriggered)
+		deliveryErr = m.sendNotification(ctx, alert, history, labels, annotations, models.AlertStatusTriggered, value)
 	}
 
 	// Record history with delivery status
@@ -270,9 +264,9 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	}
 	if deliveryErr != nil {
 		historyPayload["delivery_error"] = deliveryErr.Error()
-		m.log.Warn("failed to send alert to Alertmanager", "alert_id", alert.ID, "error", deliveryErr)
+		m.log.Warn("failed to send alert notifications", "alert_id", alert.ID, "error", deliveryErr)
 	} else {
-		m.log.Debug("alert sent to alertmanager", "alert_id", alert.ID, "alert_name", alert.Name)
+		m.log.Debug("alert notifications sent", "alert_id", alert.ID, "alert_name", alert.Name)
 	}
 
 	if !shouldRetryDelivery {
@@ -336,10 +330,10 @@ func (m *Manager) handleResolved(ctx context.Context, alert *models.Alert, value
 	}
 	annotations["resolved_at"] = now.Format(time.RFC3339Nano)
 
-	if sendErr := m.sendAlertmanager(ctx, alert, entry, labels, annotations, models.AlertStatusResolved); sendErr != nil {
-		m.log.Warn("failed to send resolved alert to alertmanager", "alert_id", alert.ID, "error", sendErr)
+	if sendErr := m.sendNotification(ctx, alert, entry, labels, annotations, models.AlertStatusResolved, value); sendErr != nil {
+		m.log.Warn("failed to send resolved alert notifications", "alert_id", alert.ID, "error", sendErr)
 	} else {
-		m.log.Debug("resolved alert sent to alertmanager", "alert_id", alert.ID, "alert_name", alert.Name)
+		m.log.Debug("resolved alert notifications sent", "alert_id", alert.ID, "alert_name", alert.Name)
 	}
 	return nil
 }
@@ -393,22 +387,87 @@ func (m *Manager) buildAlertMetadata(ctx context.Context, alert *models.Alert, s
 	return labels, annotations
 }
 
-func (m *Manager) sendAlertmanager(ctx context.Context, alert *models.Alert, history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus) error {
+func (m *Manager) sendNotification(ctx context.Context, alert *models.Alert, history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus, value float64) error {
 	if m.sender == nil || history == nil {
 		return nil
 	}
 
-	payload := AlertPayload{
-		Labels:       labels,
-		Annotations:  annotations,
-		StartsAt:     history.TriggeredAt.UTC(),
-		GeneratorURL: m.generatorURL(alert),
+	notification := m.buildNotification(ctx, alert, history, labels, annotations, status, value)
+	return m.sender.Send(ctx, notification)
+}
+
+func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus, value float64) AlertNotification {
+	recipientEmails, missingRecipients, resolutionErr := m.resolveRecipientEmails(ctx, alert)
+	teamName := labels["team"]
+	sourceName := labels["source"]
+
+	return AlertNotification{
+		AlertID:                 alert.ID,
+		AlertName:               alert.Name,
+		Description:             strings.TrimSpace(alert.Description),
+		Status:                  status,
+		Severity:                alert.Severity,
+		TeamID:                  alert.TeamID,
+		TeamName:                teamName,
+		SourceID:                alert.SourceID,
+		SourceName:              sourceName,
+		Value:                   value,
+		ThresholdOp:             alert.ThresholdOperator,
+		ThresholdValue:          alert.ThresholdValue,
+		FrequencySecs:           alert.FrequencySeconds,
+		LookbackSecs:            alert.LookbackSeconds,
+		Query:                   strings.TrimSpace(alert.Query),
+		ConditionJSON:           strings.TrimSpace(alert.ConditionJSON),
+		Labels:                  copyStringMap(labels),
+		Annotations:             copyStringMap(annotations),
+		TriggeredAt:             history.TriggeredAt,
+		ResolvedAt:              history.ResolvedAt,
+		GeneratorURL:            m.generatorURL(alert),
+		Message:                 history.Message,
+		RecipientUserIDs:        append([]models.UserID(nil), alert.RecipientUserIDs...),
+		RecipientEmails:         recipientEmails,
+		MissingRecipientUserIDs: missingRecipients,
+		RecipientResolutionErr:  resolutionErr,
+		WebhookURLs:             append([]string(nil), alert.WebhookURLs...),
 	}
-	if status == models.AlertStatusResolved && history.ResolvedAt != nil {
-		resolved := history.ResolvedAt.UTC()
-		payload.EndsAt = &resolved
+}
+
+func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Alert) (recipientEmails []string, missingRecipients []models.UserID, resolutionErr string) {
+	if alert == nil || len(alert.RecipientUserIDs) == 0 {
+		return nil, nil, ""
 	}
-	return m.sender.Send(ctx, []AlertPayload{payload})
+
+	members, err := m.db.ListTeamMembersWithDetails(ctx, alert.TeamID)
+	if err != nil {
+		return nil, append([]models.UserID(nil), alert.RecipientUserIDs...), err.Error()
+	}
+
+	emailsByID := make(map[models.UserID]string, len(members))
+	for _, member := range members {
+		email := strings.TrimSpace(member.Email)
+		if email == "" {
+			continue
+		}
+		emailsByID[member.UserID] = email
+	}
+
+	seen := make(map[string]struct{}, len(alert.RecipientUserIDs))
+	emails := make([]string, 0, len(alert.RecipientUserIDs))
+	missing := make([]models.UserID, 0)
+	for _, userID := range alert.RecipientUserIDs {
+		email := emailsByID[userID]
+		if email == "" {
+			missing = append(missing, userID)
+			continue
+		}
+		if _, ok := seen[email]; ok {
+			continue
+		}
+		seen[email] = struct{}{}
+		emails = append(emails, email)
+	}
+
+	return emails, missing, ""
 }
 
 func (m *Manager) generatorURL(alert *models.Alert) string {
@@ -432,12 +491,10 @@ func (m *Manager) generatorURL(alert *models.Alert) string {
 
 type noopSender struct{}
 
-func (noopSender) Send(_ context.Context, _ []AlertPayload) error {
+func (noopSender) Send(_ context.Context, _ AlertNotification) error {
 	return nil
 }
 
-// ManualResolve allows a user to manually resolve an active alert and notifies Alertmanager.
-// This should be called when a user clicks "Resolve" in the UI.
 func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, message string) error {
 	alert, err := m.db.GetAlert(ctx, alertID)
 	if err != nil {
@@ -460,7 +517,6 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, mes
 		return fmt.Errorf("failed to resolve alert history: %w", err)
 	}
 
-	// Update the entry for Alertmanager notification
 	now := time.Now().UTC()
 	entry.Message = message
 	entry.ResolvedAt = &now
@@ -472,7 +528,6 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, mes
 		value = *entry.Value
 	}
 
-	// Send resolution notification to Alertmanager
 	labels, annotations := m.buildAlertMetadata(ctx, alert, models.AlertStatusResolved, value)
 	if annotations == nil {
 		annotations = make(map[string]string, 2)
@@ -480,10 +535,10 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, mes
 	annotations["resolved_at"] = now.Format(time.RFC3339Nano)
 	annotations["resolved_by"] = "manual"
 
-	if sendErr := m.sendAlertmanager(ctx, alert, entry, labels, annotations, models.AlertStatusResolved); sendErr != nil {
-		m.log.Warn("failed to send manual resolution to alertmanager", "alert_id", alertID, "error", sendErr)
+	if sendErr := m.sendNotification(ctx, alert, entry, labels, annotations, models.AlertStatusResolved, value); sendErr != nil {
+		m.log.Warn("failed to send manual resolution notifications", "alert_id", alertID, "error", sendErr)
 	} else {
-		m.log.Debug("manual resolution sent to alertmanager", "alert_id", alertID)
+		m.log.Debug("manual resolution notifications sent", "alert_id", alertID)
 	}
 
 	return nil

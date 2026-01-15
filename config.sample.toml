@@ -50,3 +50,20 @@ level = "info"  # Options: debug, info, warn, error
 # Additional settings (AI, alerts, sessions, etc.) can be managed via the
 # Admin Settings UI after first boot. No need to add them here unless you want
 # to customize defaults during initial deployment.
+
+[alerts]
+enabled = true
+evaluation_interval = "1m"
+default_lookback = "5m"
+history_limit = 50
+smtp_host = ""
+smtp_port = 587
+smtp_username = ""
+smtp_password = ""
+smtp_from = "alerts@logchef.local"
+smtp_reply_to = ""
+smtp_security = "starttls"
+external_url = ""
+frontend_url = ""
+request_timeout = "5s"
+tls_insecure_skip_verify = false

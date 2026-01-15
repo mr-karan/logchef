@@ -10,28 +10,30 @@ import (
 )
 
 type Alert struct {
-	ID                int64          `json:"id"`
-	TeamID            int64          `json:"team_id"`
-	SourceID          int64          `json:"source_id"`
-	Name              string         `json:"name"`
-	Description       sql.NullString `json:"description"`
-	QueryType         string         `json:"query_type"`
-	Query             sql.NullString `json:"query"`
-	ConditionJson     sql.NullString `json:"condition_json"`
-	LookbackSeconds   int64          `json:"lookback_seconds"`
-	ThresholdOperator string         `json:"threshold_operator"`
-	ThresholdValue    float64        `json:"threshold_value"`
-	FrequencySeconds  int64          `json:"frequency_seconds"`
-	Severity          string         `json:"severity"`
-	LabelsJson        sql.NullString `json:"labels_json"`
-	AnnotationsJson   sql.NullString `json:"annotations_json"`
-	GeneratorUrl      sql.NullString `json:"generator_url"`
-	IsActive          int64          `json:"is_active"`
-	LastState         string         `json:"last_state"`
-	LastEvaluatedAt   sql.NullTime   `json:"last_evaluated_at"`
-	LastTriggeredAt   sql.NullTime   `json:"last_triggered_at"`
-	CreatedAt         time.Time      `json:"created_at"`
-	UpdatedAt         time.Time      `json:"updated_at"`
+	ID                   int64          `json:"id"`
+	TeamID               int64          `json:"team_id"`
+	SourceID             int64          `json:"source_id"`
+	Name                 string         `json:"name"`
+	Description          sql.NullString `json:"description"`
+	QueryType            string         `json:"query_type"`
+	Query                sql.NullString `json:"query"`
+	ConditionJson        sql.NullString `json:"condition_json"`
+	LookbackSeconds      int64          `json:"lookback_seconds"`
+	ThresholdOperator    string         `json:"threshold_operator"`
+	ThresholdValue       float64        `json:"threshold_value"`
+	FrequencySeconds     int64          `json:"frequency_seconds"`
+	Severity             string         `json:"severity"`
+	LabelsJson           sql.NullString `json:"labels_json"`
+	AnnotationsJson      sql.NullString `json:"annotations_json"`
+	GeneratorUrl         sql.NullString `json:"generator_url"`
+	IsActive             int64          `json:"is_active"`
+	LastState            string         `json:"last_state"`
+	LastEvaluatedAt      sql.NullTime   `json:"last_evaluated_at"`
+	LastTriggeredAt      sql.NullTime   `json:"last_triggered_at"`
+	CreatedAt            time.Time      `json:"created_at"`
+	UpdatedAt            time.Time      `json:"updated_at"`
+	RecipientUserIdsJson sql.NullString `json:"recipient_user_ids_json"`
+	WebhookUrlsJson      sql.NullString `json:"webhook_urls_json"`
 }
 
 type AlertHistory struct {
