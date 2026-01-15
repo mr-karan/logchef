@@ -10,6 +10,8 @@ import (
 type MetaResponse struct {
 	Version           string `json:"version"`
 	HTTPServerTimeout string `json:"http_server_timeout"`
+	OIDCIssuer        string `json:"oidc_issuer,omitempty"`
+	CLIClientID       string `json:"cli_client_id,omitempty"`
 }
 
 // handleGetMeta returns server metadata including version and configuration
@@ -26,6 +28,11 @@ func (s *Server) handleGetMeta(c *fiber.Ctx) error {
 	meta := MetaResponse{
 		Version:           s.version,
 		HTTPServerTimeout: s.config.Server.HTTPServerTimeout.String(),
+	}
+
+	if s.oidcProvider != nil {
+		meta.OIDCIssuer = s.oidcProvider.GetIssuer()
+		meta.CLIClientID = s.config.OIDC.CLIClientID
 	}
 
 	return SendSuccess(c, fiber.StatusOK, meta)

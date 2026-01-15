@@ -22,7 +22,7 @@ func (db *DB) CreateSession(ctx context.Context, session *models.Session) error 
 		CreatedAt: time.Now(), // Pass current time, though DB default takes precedence.
 	}
 
-	err := db.queries.CreateSession(ctx, params)
+	err := db.writeQueries.CreateSession(ctx, params)
 	if err != nil {
 		db.log.Error("failed to create session record in db",
 			"error", err,
@@ -39,7 +39,7 @@ func (db *DB) CreateSession(ctx context.Context, session *models.Session) error 
 // Returns core.ErrSessionNotFound (via handleNotFoundError) if not found.
 func (db *DB) GetSession(ctx context.Context, sessionID models.SessionID) (*models.Session, error) {
 
-	sqlcSession, err := db.queries.GetSession(ctx, string(sessionID))
+	sqlcSession, err := db.readQueries.GetSession(ctx, string(sessionID))
 	if err != nil {
 		// Use handleNotFoundError for consistent not-found error handling.
 		return nil, handleNotFoundError(err, fmt.Sprintf("getting session id %s", sessionID))
@@ -60,7 +60,7 @@ func (db *DB) GetSession(ctx context.Context, sessionID models.SessionID) (*mode
 // Returns nil if the session was deleted or did not exist.
 func (db *DB) DeleteSession(ctx context.Context, sessionID models.SessionID) error {
 
-	err := db.queries.DeleteSession(ctx, string(sessionID))
+	err := db.writeQueries.DeleteSession(ctx, string(sessionID))
 	if err != nil {
 		// sqlc Delete typically doesn't return ErrNoRows. Log other errors.
 		db.log.Error("failed to delete session record from db",
@@ -75,7 +75,7 @@ func (db *DB) DeleteSession(ctx context.Context, sessionID models.SessionID) err
 // DeleteUserSessions removes all session records associated with a specific user ID.
 func (db *DB) DeleteUserSessions(ctx context.Context, userID models.UserID) error {
 
-	err := db.queries.DeleteUserSessions(ctx, int64(userID))
+	err := db.writeQueries.DeleteUserSessions(ctx, int64(userID))
 	if err != nil {
 		db.log.Error("failed to delete user sessions from db",
 			"error", err,
@@ -90,7 +90,7 @@ func (db *DB) DeleteUserSessions(ctx context.Context, userID models.UserID) erro
 func (db *DB) CountUserSessions(ctx context.Context, userID models.UserID) (int, error) {
 
 	// Count sessions where the expiration time is in the future.
-	count, err := db.queries.CountUserSessions(ctx, sqlc.CountUserSessionsParams{
+	count, err := db.readQueries.CountUserSessions(ctx, sqlc.CountUserSessionsParams{
 		UserID:    int64(userID),
 		ExpiresAt: time.Now(),
 	})

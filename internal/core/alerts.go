@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/url"
 	"strings"
 	"time"
 
@@ -61,6 +62,84 @@ func sanitizeStringMap(in map[string]string) map[string]string {
 	return out
 }
 
+func sanitizeUserIDs(in []models.UserID) []models.UserID {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[models.UserID]struct{}, len(in))
+	out := make([]models.UserID, 0, len(in))
+	for _, id := range in {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func sanitizeWebhookURLs(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		urlValue := strings.TrimSpace(raw)
+		if urlValue == "" {
+			continue
+		}
+		if _, ok := seen[urlValue]; ok {
+			continue
+		}
+		seen[urlValue] = struct{}{}
+		out = append(out, urlValue)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func validateRecipientUserIDs(ctx context.Context, db *sqlite.DB, teamID models.TeamID, recipientIDs []models.UserID) error {
+	if len(recipientIDs) == 0 {
+		return nil
+	}
+	members, err := db.ListTeamMembers(ctx, teamID)
+	if err != nil {
+		return fmt.Errorf("failed to load team members: %w", err)
+	}
+	memberIDs := make(map[models.UserID]struct{}, len(members))
+	for _, member := range members {
+		memberIDs[member.UserID] = struct{}{}
+	}
+	for _, id := range recipientIDs {
+		if _, ok := memberIDs[id]; !ok {
+			return fmt.Errorf("user %d is not a member of the team", id)
+		}
+	}
+	return nil
+}
+
+func validateWebhookURLs(urls []string) error {
+	for _, raw := range urls {
+		parsed, err := url.Parse(raw)
+		if err != nil || parsed.Host == "" {
+			return fmt.Errorf("invalid webhook URL %q", raw)
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return fmt.Errorf("webhook URL %q must use http or https", raw)
+		}
+	}
+	return nil
+}
+
 func validateAlertRequest(req *models.CreateAlertRequest) error {
 	if req.Name == "" {
 		return fmt.Errorf("name is required")
@@ -110,6 +189,14 @@ func CreateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mo
 	if queryType == "" {
 		queryType = models.AlertQueryTypeSQL
 	}
+	recipientUserIDs := sanitizeUserIDs(req.RecipientUserIDs)
+	if err := validateRecipientUserIDs(ctx, db, teamID, recipientUserIDs); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
+	}
+	webhookURLs := sanitizeWebhookURLs(req.WebhookURLs)
+	if err := validateWebhookURLs(webhookURLs); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
+	}
 	alert := &models.Alert{
 		TeamID:            teamID,
 		SourceID:          sourceID,
@@ -125,6 +212,8 @@ func CreateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mo
 		Severity:          req.Severity,
 		Labels:            sanitizeStringMap(req.Labels),
 		Annotations:       sanitizeStringMap(req.Annotations),
+		RecipientUserIDs:  recipientUserIDs,
+		WebhookURLs:       webhookURLs,
 		GeneratorURL:      strings.TrimSpace(req.GeneratorURL),
 		IsActive:          req.IsActive,
 	}
@@ -167,6 +256,16 @@ func UpdateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mo
 
 	if err := applyAlertUpdates(existing, req); err != nil {
 		return nil, err
+	}
+	if req.RecipientUserIDs != nil {
+		if err := validateRecipientUserIDs(ctx, db, teamID, existing.RecipientUserIDs); err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
+		}
+	}
+	if req.WebhookURLs != nil {
+		if err := validateWebhookURLs(existing.WebhookURLs); err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
+		}
 	}
 
 	if err := db.UpdateAlert(ctx, existing); err != nil {
@@ -270,6 +369,12 @@ func applyMetadataUpdates(alert *models.Alert, req *models.UpdateAlertRequest) {
 	}
 	if req.Annotations != nil {
 		alert.Annotations = sanitizeStringMap(*req.Annotations)
+	}
+	if req.RecipientUserIDs != nil {
+		alert.RecipientUserIDs = sanitizeUserIDs(*req.RecipientUserIDs)
+	}
+	if req.WebhookURLs != nil {
+		alert.WebhookURLs = sanitizeWebhookURLs(*req.WebhookURLs)
 	}
 	if req.GeneratorURL != nil {
 		alert.GeneratorURL = strings.TrimSpace(*req.GeneratorURL)

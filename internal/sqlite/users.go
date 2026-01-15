@@ -38,7 +38,7 @@ func (db *DB) CreateUser(ctx context.Context, user *models.User) error {
 		LastLoginAt: lastLoginTime,
 	}
 
-	id, err := db.queries.CreateUser(ctx, params)
+	id, err := db.writeQueries.CreateUser(ctx, params)
 	if err != nil {
 		if isUniqueConstraintSQLiteError(err, "users", "email") {
 			return handleUniqueConstraintError(err, "users", "email", user.Email)
@@ -51,7 +51,7 @@ func (db *DB) CreateUser(ctx context.Context, user *models.User) error {
 	user.ID = models.UserID(id)
 
 	// Fetch the created record to get accurate timestamps.
-	userRow, err := db.queries.GetUser(ctx, id) // Use the generated ID.
+	userRow, err := db.readQueries.GetUser(ctx, id) // Use the generated ID.
 	if err != nil {
 		db.log.Error("failed to get newly created user record", "error", err, "assigned_id", id)
 		// Continue successfully, but timestamps might be inaccurate.
@@ -70,7 +70,7 @@ func (db *DB) CreateUser(ctx context.Context, user *models.User) error {
 // Returns core.ErrUserNotFound if not found.
 func (db *DB) GetUser(ctx context.Context, id models.UserID) (*models.User, error) {
 
-	userRow, err := db.queries.GetUser(ctx, int64(id))
+	userRow, err := db.readQueries.GetUser(ctx, int64(id))
 	if err != nil {
 		return nil, handleNotFoundError(err, fmt.Sprintf("getting user id %d", id))
 	}
@@ -83,7 +83,7 @@ func (db *DB) GetUser(ctx context.Context, id models.UserID) (*models.User, erro
 // Returns core.ErrUserNotFound if not found.
 func (db *DB) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 
-	userRow, err := db.queries.GetUserByEmail(ctx, email)
+	userRow, err := db.readQueries.GetUserByEmail(ctx, email)
 	if err != nil {
 		return nil, handleNotFoundError(err, fmt.Sprintf("getting user email %s", email))
 	}
@@ -116,7 +116,7 @@ func (db *DB) UpdateUser(ctx context.Context, user *models.User) error {
 		ID:           int64(user.ID),
 	}
 
-	err := db.queries.UpdateUser(ctx, params)
+	err := db.writeQueries.UpdateUser(ctx, params)
 	if err != nil {
 		// Check for potential unique constraint violation on email if it was updated.
 		if IsUniqueConstraintError(err) && strings.Contains(err.Error(), "email") {
@@ -132,7 +132,7 @@ func (db *DB) UpdateUser(ctx context.Context, user *models.User) error {
 // ListUsers retrieves all user records, ordered by creation date.
 func (db *DB) ListUsers(ctx context.Context) ([]*models.User, error) {
 
-	userRows, err := db.queries.ListUsers(ctx)
+	userRows, err := db.readQueries.ListUsers(ctx)
 	if err != nil {
 		db.log.Error("failed to list users from db", "error", err)
 		return nil, fmt.Errorf("failed to list users: %w", err)
@@ -153,7 +153,7 @@ func (db *DB) ListUsers(ctx context.Context) ([]*models.User, error) {
 // CountAdminUsers counts active users with the admin role.
 func (db *DB) CountAdminUsers(ctx context.Context) (int, error) {
 
-	count, err := db.queries.CountAdminUsers(ctx, sqlc.CountAdminUsersParams{
+	count, err := db.readQueries.CountAdminUsers(ctx, sqlc.CountAdminUsersParams{
 		Role:   string(models.UserRoleAdmin),
 		Status: string(models.UserStatusActive),
 	})
@@ -168,7 +168,7 @@ func (db *DB) CountAdminUsers(ctx context.Context) (int, error) {
 // DeleteUser removes a user record by ID.
 func (db *DB) DeleteUser(ctx context.Context, id models.UserID) error {
 
-	err := db.queries.DeleteUser(ctx, int64(id))
+	err := db.writeQueries.DeleteUser(ctx, int64(id))
 	if err != nil {
 		db.log.Error("failed to delete user record from db", "error", err, "user_id", id)
 		// Consider if specific error mapping (e.g., for foreign key constraints) is needed.

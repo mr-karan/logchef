@@ -25,40 +25,6 @@ export interface UpdateSettingRequest {
   is_sensitive: boolean;
 }
 
-export interface TestAlertmanagerRequest {
-  url: string;
-  tls_insecure_skip_verify: boolean;
-  timeout?: string;
-}
-
-export interface AlertmanagerRoutingRequest {
-  url?: string;
-  tls_skip_verify?: boolean;
-  timeout?: string;
-  username?: string;
-  password?: string;
-}
-
-export interface RoutingRule {
-  receiver: string;
-  matchers: Record<string, string>;
-  priority: number;
-}
-
-export interface LabelExample {
-  receiver: string;
-  labels: Record<string, string>;
-  description: string;
-}
-
-export interface AlertmanagerRoutingInfo {
-  receivers: string[];
-  default_route: string;
-  routing_rules: RoutingRule[];
-  common_labels: string[];
-  label_examples: LabelExample[];
-}
-
 export const settingsApi = {
   listSettings: () => apiClient.get<SettingsByCategory[]>("/admin/settings"),
 
@@ -72,11 +38,5 @@ export const settingsApi = {
     apiClient.put<{ message: string; key: string }>(`/admin/settings/${key}`, data),
 
   deleteSetting: (key: string) =>
-    apiClient.delete<{ message: string }>(`/admin/settings/${key}`),
-
-  testAlertmanagerConnection: (data: TestAlertmanagerRequest) =>
-    apiClient.post<{ message: string; url: string }>("/admin/settings/test-alertmanager", data),
-
-  getAlertmanagerRouting: (data?: AlertmanagerRoutingRequest) =>
-    apiClient.post<AlertmanagerRoutingInfo>("/admin/settings/alertmanager-routing", data || {})
+    apiClient.delete<{ message: string }>(`/admin/settings/${key}`)
 };

@@ -65,6 +65,8 @@ type Alert struct {
 	Severity          AlertSeverity          `json:"severity"`
 	Labels            map[string]string      `json:"labels,omitempty"`
 	Annotations       map[string]string      `json:"annotations,omitempty"`
+	RecipientUserIDs  []UserID               `json:"recipient_user_ids,omitempty"`
+	WebhookURLs       []string               `json:"webhook_urls,omitempty"`
 	GeneratorURL      string                 `json:"generator_url,omitempty"`
 	IsActive          bool                   `json:"is_active"`
 	LastState         AlertState             `json:"last_state"`
@@ -101,6 +103,8 @@ type CreateAlertRequest struct {
 	Severity          AlertSeverity          `json:"severity"`
 	Labels            map[string]string      `json:"labels"`
 	Annotations       map[string]string      `json:"annotations"`
+	RecipientUserIDs  []UserID               `json:"recipient_user_ids"`
+	WebhookURLs       []string               `json:"webhook_urls"`
 	GeneratorURL      string                 `json:"generator_url"`
 	IsActive          bool                   `json:"is_active"`
 }
@@ -119,6 +123,8 @@ type UpdateAlertRequest struct {
 	Severity          *AlertSeverity          `json:"severity"`
 	Labels            *map[string]string      `json:"labels"`
 	Annotations       *map[string]string      `json:"annotations"`
+	RecipientUserIDs  *[]UserID               `json:"recipient_user_ids"`
+	WebhookURLs       *[]string               `json:"webhook_urls"`
 	GeneratorURL      *string                 `json:"generator_url"`
 	IsActive          *bool                   `json:"is_active"`
 }

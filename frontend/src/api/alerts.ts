@@ -20,6 +20,8 @@ export interface Alert {
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
   generator_url?: string;
+  recipient_user_ids: number[];
+  webhook_urls: string[];
   is_active: boolean;
   last_state: "firing" | "resolved";
   last_evaluated_at?: string | null;
@@ -54,6 +56,8 @@ export interface CreateAlertRequest {
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
   generator_url?: string;
+  recipient_user_ids?: number[];
+  webhook_urls?: string[];
   is_active: boolean;
 }
 
@@ -71,6 +75,8 @@ export interface UpdateAlertRequest {
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
   generator_url?: string;
+  recipient_user_ids?: number[];
+  webhook_urls?: string[];
   is_active?: boolean;
 }
 

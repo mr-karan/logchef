@@ -22,10 +22,14 @@ import (
 var migrationsFS embed.FS
 
 // DB provides access to the SQLite database and generated queries.
+// It uses separate connections for reads and writes to optimize for SQLite's
+// WAL mode which allows concurrent reads but only one writer at a time.
 type DB struct {
-	db      *sql.DB
-	queries sqlc.Querier
-	log     *slog.Logger
+	readDB       *sql.DB      // Connection pool for read operations (multiple concurrent readers)
+	writeDB      *sql.DB      // Single connection for write operations (serialized writes)
+	readQueries  sqlc.Querier // Querier bound to read connection pool
+	writeQueries sqlc.Querier // Querier bound to write connection
+	log          *slog.Logger
 }
 
 // Options holds configuration for creating a new DB instance.
@@ -39,49 +43,59 @@ type Options struct {
 func New(opts Options) (*DB, error) {
 	log := opts.Logger.With("component", "sqlite")
 
-	// --- Main Database Connection ---
-	db, err := sql.Open("sqlite", opts.Config.Path)
-	if err != nil {
-		log.Error("failed to open main database", "error", err, "path", opts.Config.Path)
-		return nil, fmt.Errorf("error opening main database: %w", err)
-	}
-
-	// Ensure DB is closed if initialization fails partway through.
-	var success bool
-	defer func() {
-		if !success {
-			log.Debug("closing main database due to initialization error")
-			_ = db.Close() // Attempt close, ignore error as we're already failing.
-		}
-	}()
-
-	// Configure connection pool settings.
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(10)
-	db.SetConnMaxLifetime(30 * time.Minute)
-	db.SetConnMaxIdleTime(5 * time.Minute)
-
-	// Apply performance and reliability PRAGMAs.
-	if err := setPragmas(db); err != nil {
-		log.Error("failed to set pragmas on main database", "error", err)
-		return nil, fmt.Errorf("error setting pragmas on main database: %w", err)
-	}
-
-	// --- Run Migrations ---
-	// Migrations are run using a separate, temporary connection to avoid
-	// interfering with the main pool during potentially long operations.
+	// Run migrations first using a temporary connection.
 	if err := setupAndRunMigrations(opts.Config.Path, log); err != nil {
-		return nil, err // Error already logged within setupAndRunMigrations
+		return nil, err
 	}
 
-	// Initialization successful.
-	success = true
-	log.Debug("sqlite initialized", "path", opts.Config.Path)
+	// Open read connection pool (concurrent readers allowed in WAL mode).
+	readDB, err := sql.Open("sqlite", opts.Config.Path)
+	if err != nil {
+		log.Error("failed to open read database", "error", err, "path", opts.Config.Path)
+		return nil, fmt.Errorf("error opening read database: %w", err)
+	}
+
+	readDB.SetMaxOpenConns(25)
+	readDB.SetMaxIdleConns(10)
+	readDB.SetConnMaxLifetime(30 * time.Minute)
+	readDB.SetConnMaxIdleTime(5 * time.Minute)
+
+	if err := setPragmas(readDB); err != nil {
+		readDB.Close()
+		log.Error("failed to set pragmas on read database", "error", err)
+		return nil, fmt.Errorf("error setting pragmas on read database: %w", err)
+	}
+
+	// Open write connection with _txlock=immediate to acquire write lock early.
+	// This prevents deadlocks when multiple goroutines compete for writes.
+	writeDSN := opts.Config.Path + "?_txlock=immediate"
+	writeDB, err := sql.Open("sqlite", writeDSN)
+	if err != nil {
+		readDB.Close()
+		log.Error("failed to open write database", "error", err, "path", opts.Config.Path)
+		return nil, fmt.Errorf("error opening write database: %w", err)
+	}
+
+	// Single connection enforces serialized writes (SQLite limitation).
+	writeDB.SetMaxOpenConns(1)
+	writeDB.SetMaxIdleConns(1)
+	writeDB.SetConnMaxLifetime(0)
+
+	if err := setPragmas(writeDB); err != nil {
+		readDB.Close()
+		writeDB.Close()
+		log.Error("failed to set pragmas on write database", "error", err)
+		return nil, fmt.Errorf("error setting pragmas on write database: %w", err)
+	}
+
+	log.Debug("sqlite initialized with read/write separation", "path", opts.Config.Path)
 
 	return &DB{
-		db:      db,
-		queries: sqlc.New(db), // Initialize sqlc querier.
-		log:     log,
+		readDB:       readDB,
+		writeDB:      writeDB,
+		readQueries:  sqlc.New(readDB),
+		writeQueries: sqlc.New(writeDB),
+		log:          log,
 	}, nil
 }
 
@@ -218,12 +232,20 @@ func runMigrations(db *sql.DB, log *slog.Logger) error {
 	return nil
 }
 
-// Close gracefully shuts down the database connection pool.
+// Close gracefully shuts down both database connections.
 func (db *DB) Close() error {
-	db.log.Debug("closing main database connection pool")
-	if err := db.db.Close(); err != nil {
-		db.log.Error("error closing main database connection pool", "error", err)
-		return fmt.Errorf("error closing database connection: %w", err)
+	db.log.Debug("closing database connections")
+	var errs []error
+	if err := db.writeDB.Close(); err != nil {
+		db.log.Error("error closing write database", "error", err)
+		errs = append(errs, err)
+	}
+	if err := db.readDB.Close(); err != nil {
+		db.log.Error("error closing read database", "error", err)
+		errs = append(errs, err)
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("error closing database connections: %v", errs)
 	}
 	return nil
 }

@@ -1,0 +1,26 @@
+[package]
+name = "logchef-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "LogChef core library - Config, API client, auth, and highlighting"
+
+[dependencies]
+tokio.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+open.workspace = true
+thiserror.workspace = true
+directories.workspace = true
+url.workspace = true
+chrono.workspace = true
+secrecy.workspace = true
+tracing.workspace = true
+tailspin.workspace = true
+urlencoding = "2"
+getrandom = "0.2"
+base64 = "0.22"
+sha2 = "0.10"

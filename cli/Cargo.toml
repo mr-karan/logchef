@@ -1,0 +1,49 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0"
+repository = "https://github.com/mr-karan/logchef"
+authors = ["Karan <karan@logchef.app>"]
+
+[workspace.dependencies]
+# Internal crates
+logchef-core = { path = "crates/logchef-core" }
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "sync", "net"] }
+
+# HTTP client
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# CLI
+clap = { version = "4", features = ["derive", "env", "string"] }
+
+# Log highlighting
+tailspin = "5"
+
+open = "5"
+
+# Utilities
+thiserror = "2"
+anyhow = "1"
+directories = "6"
+url = "2"
+chrono = { version = "0.4", features = ["serde"] }
+secrecy = { version = "0.10", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures = "0.3"
+unicode-width = "0.2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

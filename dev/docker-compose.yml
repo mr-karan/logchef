@@ -35,20 +35,6 @@ services:
         - ./dex/config.yaml:/etc/dex/config.yaml
         command: [ "dex", "serve", "/etc/dex/config.yaml" ]
 
-    alertmanager:
-        image: prom/alertmanager:latest
-        hostname: alertmanager
-        restart: on-failure
-        ports:
-            - "9093:9093"
-        volumes:
-            - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
-            - alertmanager-data:/alertmanager
-        command:
-            - '--config.file=/etc/alertmanager/alertmanager.yml'
-            - '--storage.path=/alertmanager'
-            - '--log.level=debug'
-
     webhook-receiver:
         image: mendhak/http-https-echo:31
         hostname: webhook-receiver
@@ -60,7 +46,16 @@ services:
             - LOG_WITHOUT_NEWLINE=true
             - LOG_IGNORE_PATH=/ping
 
+    mailpit:
+        image: axllent/mailpit:latest
+        hostname: mailpit
+        restart: on-failure
+        ports:
+            - "8025:8025"
+            - "1025:1025"
+        environment:
+            - MP_MAX_MESSAGES=20
+
 volumes:
     clickhouse-data:
     clickhouse-logs:
-    alertmanager-data:

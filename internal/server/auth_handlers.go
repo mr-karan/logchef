@@ -250,6 +250,103 @@ func (s *Server) handleLogout(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, nil) // Send simple success response.
 }
 
+// handleCLITokenExchange exchanges an OIDC ID token for a LogChef API token.
+// This endpoint is used by the CLI to authenticate users via browser-based OIDC flow.
+// The CLI performs the OIDC authentication and sends the resulting ID token here.
+// @Summary Exchange OIDC token for CLI API token
+// @Description Exchange an OIDC ID token for a LogChef API token for CLI use
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /cli/token [post]
+func (s *Server) handleCLITokenExchange(c *fiber.Ctx) error {
+	if s.oidcProvider == nil {
+		s.log.Error("OIDC provider not configured, cannot exchange CLI token")
+		return SendError(c, fiber.StatusInternalServerError, "Authentication provider not configured")
+	}
+
+	// Extract the OIDC ID token from the Authorization header
+	authHeader := c.Get("Authorization")
+	if authHeader == "" {
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authorization header required", models.AuthenticationErrorType)
+	}
+
+	// Expect "Bearer <id_token>" format
+	const bearerPrefix = "Bearer "
+	if len(authHeader) <= len(bearerPrefix) || authHeader[:len(bearerPrefix)] != bearerPrefix {
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "Invalid authorization header format", models.AuthenticationErrorType)
+	}
+	idTokenString := authHeader[len(bearerPrefix):]
+
+	// Verify the ID token using the OIDC provider's verifier
+	idToken, err := s.oidcProvider.VerifyIDToken(c.Context(), idTokenString)
+	if err != nil {
+		s.log.Warn("CLI token exchange: invalid ID token", "error", err)
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "Invalid or expired ID token", models.AuthenticationErrorType)
+	}
+
+	// Extract claims from the ID token
+	var claims struct {
+		Email         string `json:"email"`
+		EmailVerified bool   `json:"email_verified"`
+		Name          string `json:"name"`
+	}
+	if err := idToken.Claims(&claims); err != nil {
+		s.log.Error("CLI token exchange: failed to parse ID token claims", "error", err)
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "Failed to parse token claims", models.AuthenticationErrorType)
+	}
+
+	// Ensure email is verified
+	if !claims.EmailVerified {
+		s.log.Warn("CLI token exchange: unverified email", "email", claims.Email)
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "Email not verified", models.AuthenticationErrorType)
+	}
+
+	// Look up user in the database
+	user, err := core.GetUserByEmail(c.Context(), s.sqlite, claims.Email)
+	if err != nil {
+		if errors.Is(err, core.ErrUserNotFound) {
+			s.log.Warn("CLI token exchange: user not found", "email", claims.Email)
+			return SendErrorWithType(c, fiber.StatusUnauthorized, "User not found. Please contact your administrator.", models.AuthenticationErrorType)
+		}
+		s.log.Error("CLI token exchange: database error looking up user", "error", err, "email", claims.Email)
+		return SendError(c, fiber.StatusInternalServerError, "Failed to look up user")
+	}
+
+	// Check if user is active
+	if user.Status == models.UserStatusInactive {
+		s.log.Warn("CLI token exchange: inactive user", "user_id", user.ID, "email", user.Email)
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "User account is inactive", models.AuthenticationErrorType)
+	}
+
+	// Create a new API token for CLI use
+	tokenName := fmt.Sprintf("CLI Token (created %s)", time.Now().Format("2006-01-02 15:04"))
+	// Set expiration to 30 days from now
+	expiresAt := time.Now().Add(30 * 24 * time.Hour)
+
+	tokenResponse, err := core.CreateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, user.ID, tokenName, &expiresAt)
+	if err != nil {
+		s.log.Error("CLI token exchange: failed to create API token", "error", err, "user_id", user.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Failed to create API token")
+	}
+
+	s.log.Info("CLI token exchange: API token created successfully", "user_id", user.ID, "email", user.Email, "token_id", tokenResponse.APIToken.ID)
+
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{
+		"token":      tokenResponse.Token,
+		"expires_at": expiresAt,
+		"user": fiber.Map{
+			"id":        user.ID,
+			"email":     user.Email,
+			"full_name": user.FullName,
+			"role":      user.Role,
+		},
+	})
+}
+
 // handleGetCurrentUser retrieves information about the currently authenticated user.
 // It relies on the requireAuth middleware to populate user details in the context.
 // Supports both session-based and API token authentication.

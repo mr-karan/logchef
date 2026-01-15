@@ -17,7 +17,7 @@ LogChef separates configuration into two categories:
 - Logging configuration
 
 **Runtime Settings** - Managed via Admin Settings UI:
-- Alerting configuration (Alertmanager URL, intervals, timeouts)
+- Alerting configuration (SMTP settings, intervals, timeouts)
 - AI/LLM settings (API keys, models, endpoints)
 - Session management (duration, concurrency)
 - Frontend URL for CORS
@@ -152,19 +152,23 @@ temperature = 0.1
 
 ### Alerting
 
-Configure real-time log monitoring with Alertmanager integration through the Admin Settings UI.
+Configure real-time log monitoring with email and webhook notifications through the Admin Settings UI. Per-alert recipients and webhook URLs are managed in the alert form.
 
 **Settings available:**
 - **Enabled**: Enable/disable alert evaluation and delivery
-- **Alertmanager URL**: Prometheus Alertmanager endpoint
-  - Supports HTTP Basic Auth: `https://username:password@alertmanager.example.com`
-  - Includes health check button to test connectivity
+- **SMTP Host**: Email server hostname
+- **SMTP Port**: Email server port
+- **SMTP Username**: SMTP auth username (optional)
+- **SMTP Password**: SMTP auth password (optional)
+- **SMTP From**: From address for alert emails
+- **SMTP Reply-To**: Reply-To address (optional)
+- **SMTP Security**: `none`, `starttls`, or `tls`
 - **Evaluation Interval**: How often to check all active alerts (e.g., "1m")
 - **Default Lookback**: Default time range for alert queries (e.g., "5m")
 - **History Limit**: Number of historical events to keep per alert (default: 50)
 - **External URL**: Backend URL for API access
 - **Frontend URL**: Frontend URL for web UI links in notifications
-- **Request Timeout**: Alertmanager HTTP request timeout (default: "5s")
+- **Request Timeout**: Alert notification request timeout (default: "5s")
 - **TLS Insecure Skip Verify**: Skip TLS cert verification (dev only)
 
 **Optional `config.toml` seeding (first boot only):**
@@ -174,14 +178,20 @@ enabled = false
 evaluation_interval = "1m"
 default_lookback = "5m"
 history_limit = 50
-alertmanager_url = ""
+smtp_host = ""
+smtp_port = 587
+smtp_username = ""
+smtp_password = ""
+smtp_from = "alerts@example.com"
+smtp_reply_to = ""
+smtp_security = "starttls"
 external_url = ""
 frontend_url = ""
 request_timeout = "5s"
 tls_insecure_skip_verify = false
 ```
 
-**Note:** After first boot, manage all alert settings via **Administration → System Settings → Alerts**. The health check button allows you to test Alertmanager connectivity before saving.
+**Note:** After first boot, manage all alert settings via **Administration → System Settings → Alerts**.
 
 For alert configuration examples, notification setup, and best practices, see the [alerting feature guide](/features/alerting).
 
@@ -219,7 +229,9 @@ Environment variables are prefixed with `LOGCHEF_`. For nested keys in the TOML 
 - Configure alerting:
   ```bash
   export LOGCHEF_ALERTS__ENABLED=true
-  export LOGCHEF_ALERTS__ALERTMANAGER_URL="http://alertmanager:9093"
+  export LOGCHEF_ALERTS__SMTP_HOST="smtp.example.com"
+  export LOGCHEF_ALERTS__SMTP_PORT=587
+  export LOGCHEF_ALERTS__SMTP_FROM="alerts@example.com"
   export LOGCHEF_ALERTS__FRONTEND_URL="https://logchef.example.com"
   ```
 
@@ -236,8 +248,8 @@ For production deployments, ensure you:
 5. Adjust session duration based on your security requirements
 6. Set logging level to "info" or "warn"
 7. If using AI features, ensure `LOGCHEF_AI__API_KEY` is set securely
-8. If using alerting, configure Alertmanager and set `frontend_url` for correct generator links
-9. Enable TLS for Alertmanager communication in production
+8. If using alerting, configure SMTP settings and set `frontend_url` for correct generator links
+9. Use `smtp_security` set to `tls` or `starttls` in production
 
 ## Minimal Production Configuration
 
@@ -272,7 +284,7 @@ level = "info"
 2. Navigate to **Administration → System Settings**
 3. Configure:
    - **AI** tab: Enable AI features and add API key
-   - **Alerts** tab: Configure Alertmanager URL and settings
+   - **Alerts** tab: Configure SMTP and notification settings
    - **Authentication** tab: Set session duration and limits
    - **Server** tab: Set frontend URL if needed
 

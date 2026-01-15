@@ -11,7 +11,7 @@ Local development setup for LogChef.
 ## Quick Start
 
 ```bash
-# 1. Start infrastructure (ClickHouse, Dex, Alertmanager)
+# 1. Start infrastructure (ClickHouse, Dex)
 just dev-docker
 
 # 2. Run backend (in new terminal)
@@ -30,6 +30,12 @@ cd dev && vector -c syslog.toml
 ```
 
 Open http://localhost:5173 and login with `dev@localhost` / `password`.
+Mailpit UI is available at http://localhost:8025.
+
+To test email delivery locally, configure SMTP settings to:
+- Host: `mailpit`
+- Port: `1025`
+- From: `alerts@logchef.local`
 
 ## What Gets Created
 
@@ -55,23 +61,18 @@ Running `just dev-seed` creates:
 | ClickHouse HTTP | 8123 | HTTP interface |
 | ClickHouse Native | 9000 | Native protocol |
 | Dex | 5556 | OIDC provider |
-| Alertmanager | 9093 | Alert routing |
 | Webhook Receiver | 8888 | Test webhook endpoint |
+| Mailpit UI | 8025 | Email inbox UI |
+| Mailpit SMTP | 1025 | SMTP server |
 
 ## Useful Commands
 
 ```bash
-# View Alertmanager logs
-just dev-alertmanager-logs
-
 # View webhook receiver logs (for testing alerts)
 just dev-webhook-logs
 
 # Test webhook is working
 just dev-test-webhook
-
-# Open Alertmanager UI
-just dev-alertmanager-ui
 
 # Reset everything (delete volumes)
 cd dev && docker compose down -v
@@ -87,7 +88,6 @@ cd dev && docker compose down -v
 | `http.toml` | Vector config for HTTP demo logs |
 | `syslog.toml` | Vector config for syslog demo logs |
 | `dex/config.yaml` | Dex OIDC configuration |
-| `alertmanager/alertmanager.yml` | Alertmanager routing config |
 
 ## Troubleshooting
 

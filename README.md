@@ -20,7 +20,7 @@ LogChef is a lightweight, powerful log analytics platform designed for efficient
 
 - **Query-first log exploration**: Fast filtering with both LogChefQL and ClickHouse SQL.
 - **AI Query Assistant**: Turn natural language into SQL instantly.
-- **Real-time alerting**: Schedule rules and route alerts via Alertmanager.
+- **Real-time alerting**: Schedule rules and send email or webhook notifications.
 - **OIDC + RBAC included**: SSO and team-based access out of the box.
 - **Schema-agnostic**: Point at any ClickHouse table without migrations.
 - **Single binary**: One executable, no runtime dependencies.

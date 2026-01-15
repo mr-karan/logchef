@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/alerts"
@@ -129,22 +128,24 @@ func (a *App) Initialize(ctx context.Context) error {
 	a.ClickHouse.StartBackgroundHealthChecks(0)
 
 	// Initialize alerts manager before the server so it can be used for manual resolution.
-	var alertSender alerts.AlertSender
-	if strings.TrimSpace(a.Config.Alerts.AlertmanagerURL) == "" {
-		a.Logger.Warn("alertmanager_url not configured; alerts will not be delivered")
-	} else {
-		client, err := alerts.NewAlertmanagerClient(alerts.ClientOptions{
-			BaseURL:       a.Config.Alerts.AlertmanagerURL,
-			Timeout:       a.Config.Alerts.RequestTimeout,
-			SkipTLSVerify: a.Config.Alerts.TLSInsecureSkipVerify,
-			Logger:        a.Logger,
-		})
-		if err != nil {
-			a.Logger.Error("failed to initialize alertmanager client", "error", err)
-		} else {
-			alertSender = client
-		}
-	}
+	emailSender := alerts.NewEmailSender(alerts.EmailSenderOptions{
+		Host:          a.Config.Alerts.SMTPHost,
+		Port:          a.Config.Alerts.SMTPPort,
+		Username:      a.Config.Alerts.SMTPUsername,
+		Password:      a.Config.Alerts.SMTPPassword,
+		From:          a.Config.Alerts.SMTPFrom,
+		ReplyTo:       a.Config.Alerts.SMTPReplyTo,
+		Security:      a.Config.Alerts.SMTPSecurity,
+		Timeout:       a.Config.Alerts.RequestTimeout,
+		SkipTLSVerify: a.Config.Alerts.TLSInsecureSkipVerify,
+		Logger:        a.Logger,
+	})
+	webhookSender := alerts.NewWebhookSender(alerts.WebhookSenderOptions{
+		Timeout:       a.Config.Alerts.RequestTimeout,
+		SkipTLSVerify: a.Config.Alerts.TLSInsecureSkipVerify,
+		Logger:        a.Logger,
+	})
+	alertSender := alerts.NewMultiSender(emailSender, webhookSender)
 
 	a.Alerts = alerts.NewManager(alerts.Options{
 		Config:     a.Config.Alerts,
@@ -290,56 +291,102 @@ func (a *App) seedSystemSettings(ctx context.Context) error {
 		value       string
 		valueType   string
 		description string
+		isSensitive bool
 	}{
 		"alerts.enabled": {
 			value:       fmt.Sprintf("%t", a.Config.Alerts.Enabled),
 			valueType:   "boolean",
 			description: "Enable or disable alert evaluation",
+			isSensitive: false,
 		},
 		"alerts.evaluation_interval": {
 			value:       a.Config.Alerts.EvaluationInterval.String(),
 			valueType:   "duration",
 			description: "How often to evaluate alert rules",
+			isSensitive: false,
 		},
 		"alerts.default_lookback": {
 			value:       a.Config.Alerts.DefaultLookback.String(),
 			valueType:   "duration",
 			description: "Default lookback window for alert queries",
+			isSensitive: false,
 		},
 		"alerts.history_limit": {
 			value:       fmt.Sprintf("%d", a.Config.Alerts.HistoryLimit),
 			valueType:   "number",
 			description: "Maximum number of alert history entries to keep per alert",
+			isSensitive: false,
 		},
-		"alerts.alertmanager_url": {
-			value:       a.Config.Alerts.AlertmanagerURL,
+		"alerts.smtp_host": {
+			value:       a.Config.Alerts.SMTPHost,
 			valueType:   "string",
-			description: "Alertmanager endpoint URL for sending notifications",
+			description: "SMTP host for alert emails",
+			isSensitive: false,
+		},
+		"alerts.smtp_port": {
+			value:       fmt.Sprintf("%d", a.Config.Alerts.SMTPPort),
+			valueType:   "number",
+			description: "SMTP port for alert emails",
+			isSensitive: false,
+		},
+		"alerts.smtp_username": {
+			value:       a.Config.Alerts.SMTPUsername,
+			valueType:   "string",
+			description: "SMTP username for alert emails",
+			isSensitive: false,
+		},
+		"alerts.smtp_password": {
+			value:       a.Config.Alerts.SMTPPassword,
+			valueType:   "string",
+			description: "SMTP password for alert emails",
+			isSensitive: true,
+		},
+		"alerts.smtp_from": {
+			value:       a.Config.Alerts.SMTPFrom,
+			valueType:   "string",
+			description: "From address for alert emails",
+			isSensitive: false,
+		},
+		"alerts.smtp_reply_to": {
+			value:       a.Config.Alerts.SMTPReplyTo,
+			valueType:   "string",
+			description: "Reply-to address for alert emails",
+			isSensitive: false,
+		},
+		"alerts.smtp_security": {
+			value:       a.Config.Alerts.SMTPSecurity,
+			valueType:   "string",
+			description: "SMTP security mode (none, starttls, tls)",
+			isSensitive: false,
 		},
 		"alerts.external_url": {
 			value:       a.Config.Alerts.ExternalURL,
 			valueType:   "string",
 			description: "External URL for backend API access",
+			isSensitive: false,
 		},
 		"alerts.frontend_url": {
 			value:       a.Config.Alerts.FrontendURL,
 			valueType:   "string",
 			description: "Frontend URL for generating alert links in notifications",
+			isSensitive: false,
 		},
 		"alerts.request_timeout": {
 			value:       a.Config.Alerts.RequestTimeout.String(),
 			valueType:   "duration",
-			description: "Timeout for Alertmanager HTTP requests",
+			description: "Timeout for alert notification requests",
+			isSensitive: false,
 		},
 		"alerts.tls_insecure_skip_verify": {
 			value:       fmt.Sprintf("%t", a.Config.Alerts.TLSInsecureSkipVerify),
 			valueType:   "boolean",
-			description: "Skip TLS certificate verification for Alertmanager",
+			description: "Skip TLS certificate verification for alert notifications",
+			isSensitive: false,
 		},
 	}
 
 	for key, setting := range alertsSettings {
-		if err := a.SQLite.UpsertSetting(ctx, key, setting.value, setting.valueType, "alerts", setting.description, false); err != nil {
+		if err := a.SQLite.UpsertSetting(ctx, key, setting.value, setting.valueType, "alerts", setting.description, setting.isSensitive); err != nil {
 			a.Logger.Warn("failed to seed alert setting", "key", key, "error", err)
 		} else {
 			a.Logger.Debug("seeded alert setting", "key", key, "value", setting.value)

@@ -13,6 +13,7 @@ ldflags := "-s -w -X 'main.buildString=" + build_info + "' -X 'main.versionStrin
 
 # Binary output
 bin := "bin/logchef.bin"
+cli_bin := "bin/logchef"
 
 # Config file - can be overridden with 'just CONFIG=other.toml target'
 config := env_var_or_default('CONFIG', 'config.toml')
@@ -61,6 +62,87 @@ run-backend: build-backend
     @echo "Running backend server with config {{config}}..."
     {{bin}} -config {{config}}
 
+# === Go CLI (Legacy) ===
+
+# Build the Go CLI
+build-cli:
+    @echo "Building Go CLI..."
+    CGO_ENABLED=0 go build -o {{cli_bin}} -ldflags "{{ldflags}}" ./cmd/logchef
+
+# Install Go CLI locally
+install-cli: build-cli
+    @echo "Installing Go CLI to ~/go/bin..."
+    cp {{cli_bin}} ~/go/bin/logchef
+    @echo "CLI installed. Run 'logchef --help' to get started."
+
+# Run Go CLI tests
+test-cli:
+    @echo "Running Go CLI tests..."
+    go test -v ./internal/cli/... ./cmd/logchef/...
+
+# Run Go CLI tests with coverage
+test-cli-coverage:
+    @echo "Running Go CLI tests with coverage..."
+    mkdir -p coverage
+    go test -v -race -coverprofile=coverage/cli-coverage.out ./internal/cli/... ./cmd/logchef/...
+    go tool cover -html=coverage/cli-coverage.out -o coverage/cli-coverage.html
+    @echo "CLI coverage report generated at coverage/cli-coverage.html"
+    @go tool cover -func=coverage/cli-coverage.out | grep total | awk '{print "CLI coverage: " $$3}'
+
+# === Rust CLI ===
+
+rust_cli_bin := "cli/target/release/logchef"
+rust_cli_debug := "cli/target/debug/logchef"
+
+# Build Rust CLI (release)
+build-rust-cli:
+    @echo "Building Rust CLI (release)..."
+    cd cli && cargo build --release
+
+# Build Rust CLI (debug)
+build-rust-cli-debug:
+    @echo "Building Rust CLI (debug)..."
+    cd cli && cargo build
+
+# Install Rust CLI locally
+install-rust-cli: build-rust-cli
+    @echo "Installing Rust CLI to ~/.cargo/bin..."
+    cp {{rust_cli_bin}} ~/.cargo/bin/logchef
+    @echo "Rust CLI installed. Run 'logchef --help' to get started."
+
+# Run Rust CLI tests
+test-rust-cli:
+    @echo "Running Rust CLI tests..."
+    cd cli && cargo test
+
+# Run Rust CLI with cargo clippy
+lint-rust-cli:
+    @echo "Linting Rust CLI..."
+    cd cli && cargo clippy -- -D warnings
+
+# Format Rust CLI code
+fmt-rust-cli:
+    @echo "Formatting Rust CLI..."
+    cd cli && cargo fmt
+
+# Check Rust CLI formatting
+fmt-rust-cli-check:
+    @echo "Checking Rust CLI formatting..."
+    cd cli && cargo fmt --check
+
+# Run all Rust CLI checks
+check-rust-cli: fmt-rust-cli-check lint-rust-cli test-rust-cli
+
+# Clean Rust CLI build artifacts
+clean-rust-cli:
+    @echo "Cleaning Rust CLI artifacts..."
+    cd cli && cargo clean
+
+# Quick test: run query against dev server
+test-rust-cli-query server_url="" team="" source="":
+    @echo "Testing Rust CLI query..."
+    {{rust_cli_debug}} --server {{server_url}} query "level:error" --team {{team}} --source {{source}} --limit 10
+
 # Run only the frontend server
 run-frontend:
     cd frontend && bun run dev
@@ -107,13 +189,9 @@ dev-ingest-logs duration="60":
     kill $pid1 $pid2 2>/dev/null
     echo "Done."
 
-# View Alertmanager webhook receiver logs (for testing alerts)
+# View webhook receiver logs (for testing alerts)
 dev-webhook-logs:
     cd dev && docker compose logs -f webhook-receiver
-
-# View Alertmanager logs
-dev-alertmanager-logs:
-    cd dev && docker compose logs -f alertmanager
 
 # Test webhook receiver is working
 dev-test-webhook:
@@ -122,13 +200,6 @@ dev-test-webhook:
         -H "Content-Type: application/json" \
         -d '{"test": "alert", "message": "This is a test webhook payload"}'
     @echo "\nCheck webhook logs with: just dev-webhook-logs"
-
-# Open Alertmanager UI in browser
-dev-alertmanager-ui:
-    @echo "Opening Alertmanager UI at http://localhost:9093"
-    @command -v xdg-open >/dev/null 2>&1 && xdg-open http://localhost:9093 || \
-     command -v open >/dev/null 2>&1 && open http://localhost:9093 || \
-     echo "Please open http://localhost:9093 in your browser"
 
 # Clean build artifacts
 clean:
@@ -151,10 +222,10 @@ fresh: clean build run
 test:
     @echo "Running tests with coverage..."
     mkdir -p coverage
-    go test -v -race -coverprofile=../coverage/coverage.out ./... && \
-    go tool cover -html=../coverage/coverage.out -o ../coverage/coverage.html
+    go test -v -race -coverprofile=coverage/coverage.out ./... && \
+    go tool cover -html=coverage/coverage.out -o coverage/coverage.html
     @echo "Coverage report generated at coverage/coverage.html"
-    @go tool cover -func=../coverage/coverage.out | grep total | awk '{print "Total coverage: " $$3}'
+    @go tool cover -func=coverage/coverage.out | grep total | awk '{print "Total coverage: " $$3}'
 
 # Run tests without coverage and race detection (faster)
 test-short:
