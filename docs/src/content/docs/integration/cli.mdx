@@ -38,8 +38,8 @@ logchef auth --server https://logs.example.com
 logchef config rename logs.example.com prod
 
 # 5. Set defaults so you don't need --team/--source every time
-logchef config set team 2
-logchef config set source 2
+logchef config set team "my-team"
+logchef config set source "nginx-logs"
 
 # 6. Query logs
 logchef query "level:error" --since 1h
@@ -68,10 +68,13 @@ If you have [just](https://github.com/casey/just) installed:
 
 ```bash
 # Build release binary
-just build-rust-cli
+just build-cli
+
+# Build debug binary (faster compilation for testing)
+just build-cli-debug
 
 # Install to ~/.cargo/bin (must be in PATH)
-just install-rust-cli
+just install-cli
 ```
 
 ### Verify Installation
@@ -135,8 +138,8 @@ logchef query "level:error service:api" --since 1h
 
 | Option | Shorthand | Description | Default |
 | :--- | :--- | :--- | :--- |
-| `--team` | `-t` | Team ID or name | (from config) |
-| `--source` | `-S` | Source ID or name | (from config) |
+| `--team` | `-t` | Team name (or ID) | (from config) |
+| `--source` | `-S` | Source name (or ID) | (from config) |
 | `--since` | `-s` | Time range (e.g., "15m", "1h", "24h") | "15m" |
 | `--from` | | Absolute start time (ISO 8601) | |
 | `--to` | | Absolute end time (ISO 8601) | |
@@ -150,13 +153,13 @@ logchef query "level:error service:api" --since 1h
 
 ```bash
 # Get all logs from the last 15 minutes
-logchef query "" --team 2 --source 2
+logchef query "" --team "production" --source "nginx-logs"
 
 # Filter by field value
-logchef query "status:500" --team 2 --source 2
+logchef query "status:500" --team "production" --source "nginx-logs"
 
 # Multiple conditions (AND)
-logchef query "method:POST status:403" --team 2 --source 2
+logchef query "method:POST status:403" --team "production" --source "nginx-logs"
 
 # Search within a time range
 logchef query "level:error" --since 1h --limit 50
@@ -164,11 +167,14 @@ logchef query "level:error" --since 1h --limit 50
 # Hide timestamp from output
 logchef query "level:error" --no-timestamp
 
-# Output as JSON for piping to jq
-logchef query "status:500" --output json | jq '.[] | .host'
+# Output as JSON (returns object with logs, stats, columns)
+logchef query "status:500" --output json | jq '.logs[] | .host'
 
 # Output as JSON Lines (one JSON object per line, great for jq)
 logchef query "" --output jsonl | jq '.msg'
+
+# JSON output is jq-friendly - stats are included in the object
+logchef query "" --output json | jq '{count: .count, time_ms: .stats.execution_time_ms}'
 
 # Show the SQL that will be executed
 logchef query "method:GET" --show-sql
@@ -254,15 +260,17 @@ logchef --context prod query "level:error"
 After authenticating, set your defaults to avoid typing `--team` and `--source` every time:
 
 ```bash
-# Find your team and source IDs from the web UI URL
-# e.g., /logs/explore?team=2&source=2
-
-logchef config set team 2
-logchef config set source 2
+# Set defaults using team and source names
+logchef config set team "my-team"
+logchef config set source "nginx-logs"
 
 # Now you can just run:
 logchef query "level:error"
 ```
+
+:::tip[Name Resolution]
+The CLI caches team/source name lookups locally (`~/.cache/logchef/`) for 10 minutes, so repeated queries are fast. You can also use numeric IDs if you prefer.
+:::
 
 ## Configuration File
 
@@ -278,8 +286,8 @@ The configuration is stored at `~/.config/logchef/logchef.json`:
       "token": "logchef_1_...",
       "token_expires_at": "2026-02-14T00:00:00Z",
       "defaults": {
-        "team": "2",
-        "source": "2",
+        "team": "production",
+        "source": "nginx-logs",
         "limit": 100,
         "since": "15m"
       }
@@ -314,8 +322,8 @@ The configuration is stored at `~/.config/logchef/logchef.json`:
 | `current_context` | Active context | Name of the context to use by default |
 | `contexts.<name>.server_url` | Server URL | LogChef server address for this context |
 | `contexts.<name>.timeout_secs` | Timeout | HTTP request timeout in seconds |
-| `contexts.<name>.defaults.team` | Default team | Team ID to use when `--team` is omitted |
-| `contexts.<name>.defaults.source` | Default source | Source ID to use when `--source` is omitted |
+| `contexts.<name>.defaults.team` | Default team | Team name (or ID) to use when `--team` is omitted |
+| `contexts.<name>.defaults.source` | Default source | Source name (or ID) to use when `--source` is omitted |
 | `contexts.<name>.defaults.limit` | Default limit | Number of results when `--limit` is omitted |
 | `contexts.<name>.defaults.since` | Default time range | Time range when `--since` is omitted |
 | `highlights.custom_keywords` | Custom keywords | Words to highlight in magenta |
@@ -399,6 +407,60 @@ logchef query "" --no-highlight > logs.txt
 logchef query "" --no-highlight | grep "ERROR"
 ```
 
+## Output Formats
+
+### JSON Format (`--output json`)
+
+Returns a single JSON object containing logs, stats, and metadata:
+
+```json
+{
+  "logs": [
+    { "_timestamp": "2026-01-20T10:30:00Z", "level": "error", "msg": "..." },
+    { "_timestamp": "2026-01-20T10:29:59Z", "level": "info", "msg": "..." }
+  ],
+  "count": 2,
+  "stats": {
+    "execution_time_ms": 45,
+    "rows_read": 2,
+    "bytes_read": 1024
+  },
+  "query_id": "abc123-...",
+  "generated_sql": "SELECT * FROM ...",
+  "columns": [
+    { "name": "_timestamp", "type": "DateTime64(3)" },
+    { "name": "level", "type": "String" }
+  ]
+}
+```
+
+### JSON Lines Format (`--output jsonl`)
+
+Each log entry is output as a separate JSON object on its own line:
+
+```jsonl
+{"_timestamp":"2026-01-20T10:30:00Z","level":"error","msg":"Connection failed"}
+{"_timestamp":"2026-01-20T10:29:59Z","level":"info","msg":"Request completed"}
+```
+
+### Smart Output Detection
+
+The CLI automatically detects if output is going to a terminal (TTY) or being piped:
+
+- **Terminal**: Shows stats summary (`3 logs | 45ms | 3 rows read`)
+- **Piped**: Suppresses stats for clean output to `grep`, `jq`, etc.
+
+```bash
+# Stats shown (terminal)
+logchef query ""
+# Output: [logs...]
+# 3 logs | 45ms | 3 rows read
+
+# Stats suppressed (piped)
+logchef query "" | grep "error"
+# Output: [matching lines only, no stats]
+```
+
 ## Global Options
 
 The following options can be used with any command:
@@ -417,12 +479,12 @@ For CI/CD pipelines and automation, you can configure the CLI entirely via envir
 ```bash
 # Option 1: Use a saved context
 export LOGCHEF_CONTEXT="prod"
-logchef query "level:error" --team 2 --source 2
+logchef query "level:error" --team "production" --source "app-logs"
 
 # Option 2: Ephemeral mode (no saved context needed)
 export LOGCHEF_SERVER_URL="https://logs.example.com"
 export LOGCHEF_AUTH_TOKEN="logchef_1_abc123..."
-logchef query "level:error" --team 2 --source 2
+logchef query "level:error" --team "production" --source "app-logs"
 ```
 
 ## Scripting Examples
@@ -436,17 +498,23 @@ logchef query "status:500" --output jsonl > errors.jsonl
 ### Count errors with jq
 
 ```bash
-logchef query "level:error" --output json | jq 'length'
+logchef query "level:error" --output json | jq '.count'
 ```
 
 ### Extract specific fields with jq
 
 ```bash
-# Get all unique hosts
+# Get all unique hosts from JSON output
+logchef query "status:500" --output json | jq -r '.logs[].host' | sort -u
+
+# Get all unique hosts from JSONL output
 logchef query "status:500" --output jsonl | jq -r '.host' | sort -u
 
 # Pretty print messages
 logchef query "level:error" --output jsonl | jq '.msg'
+
+# Get query stats
+logchef query "" --output json | jq '.stats'
 ```
 
 ### Pipe to grep for filtering
@@ -464,9 +532,9 @@ logchef query "level:error" --no-timestamp --no-highlight > errors.txt
 ### Loop through multiple sources
 
 ```bash
-for source in 1 2 3; do
-  echo "=== Source $source ==="
-  logchef query "level:error" --source $source --limit 5
+for source in "nginx-logs" "app-logs" "api-logs"; do
+  echo "=== Source: $source ==="
+  logchef query "level:error" --source "$source" --limit 5
 done
 ```
 
