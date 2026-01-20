@@ -456,11 +456,8 @@ func TestAlertQuery(ctx context.Context, db *sqlite.DB, ch *clickhouse.Manager, 
 		return nil, fmt.Errorf("invalid query_type %q", req.QueryType)
 	}
 	query := strings.TrimSpace(req.Query)
-	if queryType == models.AlertQueryTypeSQL && query == "" {
-		return nil, fmt.Errorf("query is required for sql query_type")
-	}
-	if queryType == models.AlertQueryTypeCondition {
-		return nil, fmt.Errorf("condition query_type is not yet supported for testing")
+	if query == "" {
+		return nil, fmt.Errorf("query is required")
 	}
 	if req.LookbackSeconds == 0 {
 		req.LookbackSeconds = 300
