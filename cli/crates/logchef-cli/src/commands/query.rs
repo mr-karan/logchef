@@ -148,16 +148,28 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
                     .list_sources(team_id)
                     .await
                     .context("Failed to list sources")?;
-                cache.set_sources(
-                    team_id,
-                    &sources
-                        .iter()
-                        .map(|s| (s.name.clone(), s.id))
-                        .collect::<Vec<_>>(),
-                );
+
+                let mut cache_entries: Vec<(String, i64)> = sources
+                    .iter()
+                    .map(|s| (s.name.clone(), s.id))
+                    .collect();
+                for s in &sources {
+                    if let Some(table_ref) = s.table_ref() {
+                        cache_entries.push((table_ref, s.id));
+                    }
+                }
+                cache.set_sources(team_id, &cache_entries);
+
                 sources
                     .iter()
                     .find(|s| s.name.eq_ignore_ascii_case(&name))
+                    .or_else(|| {
+                        sources.iter().find(|s| {
+                            s.table_ref()
+                                .map(|r| r.eq_ignore_ascii_case(&name))
+                                .unwrap_or(false)
+                        })
+                    })
                     .map(|s| s.id)
                     .ok_or_else(|| anyhow::anyhow!("Source '{}' not found", name))?
             }

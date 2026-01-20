@@ -76,11 +76,31 @@ pub struct Source {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
+    pub connection: Option<SourceConnection>,
+    #[serde(default)]
+    pub is_connected: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SourceConnection {
+    #[serde(default)]
+    pub host: Option<String>,
+    #[serde(default)]
     pub database: Option<String>,
     #[serde(default)]
     pub table_name: Option<String>,
-    #[serde(default)]
-    pub is_connected: bool,
+}
+
+impl Source {
+    /// Returns the database.table_name reference if both are available
+    pub fn table_ref(&self) -> Option<String> {
+        self.connection
+            .as_ref()
+            .and_then(|c| match (&c.database, &c.table_name) {
+                (Some(db), Some(table)) => Some(format!("{}.{}", db, table)),
+                _ => None,
+            })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
