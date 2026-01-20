@@ -2,10 +2,13 @@ use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
 use clap::Args;
 use logchef_core::Config;
-use logchef_core::api::{Client, QueryRequest};
+use logchef_core::api::{Client, Column, QueryRequest, QueryStats};
+use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::highlight::{
     FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
 };
+use serde::Serialize;
+use std::io::IsTerminal;
 
 use crate::cli::GlobalArgs;
 
@@ -58,6 +61,18 @@ enum OutputFormat {
     Table,
 }
 
+#[derive(Serialize)]
+struct JsonOutput<'a> {
+    logs: &'a [logchef_core::api::LogEntry],
+    count: usize,
+    stats: &'a QueryStats,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    query_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generated_sql: Option<&'a str>,
+    columns: &'a [Column],
+}
+
 pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
     let config = Config::load().context("Failed to load config")?;
 
@@ -90,29 +105,64 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
         }
     }
 
-    let team_name = args
+    let team_input = args
         .team
         .or(ctx.defaults.team.clone())
         .ok_or_else(|| anyhow::anyhow!("Team not specified. Use --team or set defaults.team"))?;
 
-    let source_name = args.source.or(ctx.defaults.source.clone()).ok_or_else(|| {
+    let source_input = args.source.or(ctx.defaults.source.clone()).ok_or_else(|| {
         anyhow::anyhow!("Source not specified. Use --source or set defaults.source")
     })?;
 
-    let teams = client.list_teams().await.context("Failed to list teams")?;
-    let team = teams
-        .iter()
-        .find(|t| t.name == team_name || t.id.to_string() == team_name)
-        .ok_or_else(|| anyhow::anyhow!("Team '{}' not found", team_name))?;
+    let mut cache = Cache::new(&ctx.server_url);
 
-    let sources = client
-        .list_sources(team.id)
-        .await
-        .context("Failed to list sources")?;
-    let source = sources
-        .iter()
-        .find(|s| s.name == source_name || s.id.to_string() == source_name)
-        .ok_or_else(|| anyhow::anyhow!("Source '{}' not found", source_name))?;
+    let team_id = match parse_identifier(&team_input) {
+        Identifier::Id(id) => id,
+        Identifier::Name(name) => {
+            if let Some(id) = cache.get_team_id(&name) {
+                id
+            } else {
+                let teams = client.list_teams().await.context("Failed to list teams")?;
+                cache.set_teams(
+                    &teams
+                        .iter()
+                        .map(|t| (t.name.clone(), t.id))
+                        .collect::<Vec<_>>(),
+                );
+                teams
+                    .iter()
+                    .find(|t| t.name == name)
+                    .map(|t| t.id)
+                    .ok_or_else(|| anyhow::anyhow!("Team '{}' not found", name))?
+            }
+        }
+    };
+
+    let source_id = match parse_identifier(&source_input) {
+        Identifier::Id(id) => id,
+        Identifier::Name(name) => {
+            if let Some(id) = cache.get_source_id(team_id, &name) {
+                id
+            } else {
+                let sources = client
+                    .list_sources(team_id)
+                    .await
+                    .context("Failed to list sources")?;
+                cache.set_sources(
+                    team_id,
+                    &sources
+                        .iter()
+                        .map(|s| (s.name.clone(), s.id))
+                        .collect::<Vec<_>>(),
+                );
+                sources
+                    .iter()
+                    .find(|s| s.name == name)
+                    .map(|s| s.id)
+                    .ok_or_else(|| anyhow::anyhow!("Source '{}' not found", name))?
+            }
+        }
+    };
 
     let since = args.since.unwrap_or_else(|| ctx.defaults.since.clone());
     let limit = args.limit.unwrap_or(ctx.defaults.limit);
@@ -130,7 +180,7 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
     };
 
     let response = client
-        .query_logchefql(team.id, source.id, &request)
+        .query_logchefql(team_id, source_id, &request)
         .await
         .context("Query failed")?;
 
@@ -141,18 +191,43 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
     }
 
     let entries = response.entries();
+    let is_tty = std::io::stdout().is_terminal();
 
     match args.output {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&entries)?);
+            let output = JsonOutput {
+                logs: entries,
+                count: entries.len(),
+                stats: &response.stats,
+                query_id: response.query_id.as_deref(),
+                generated_sql: response.generated_sql.as_deref(),
+                columns: &response.columns,
+            };
+            println!("{}", serde_json::to_string_pretty(&output)?);
         }
         OutputFormat::Jsonl => {
             for entry in entries {
                 println!("{}", serde_json::to_string(entry)?);
             }
+            if is_tty {
+                eprintln!(
+                    "\n{} logs | {}ms | {} rows read",
+                    entries.len(),
+                    response.stats.execution_time_ms,
+                    response.stats.rows_read
+                );
+            }
         }
         OutputFormat::Table => {
             print_table(entries, &response.columns);
+            if is_tty {
+                eprintln!(
+                    "\n{} logs | {}ms | {} rows read",
+                    entries.len(),
+                    response.stats.execution_time_ms,
+                    response.stats.rows_read
+                );
+            }
         }
         OutputFormat::Text => {
             let highlighter = if args.no_highlight {
@@ -177,15 +252,16 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
                     println!("{}", line);
                 }
             }
+            if is_tty {
+                eprintln!(
+                    "\n{} logs | {}ms | {} rows read",
+                    entries.len(),
+                    response.stats.execution_time_ms,
+                    response.stats.rows_read
+                );
+            }
         }
     }
-
-    eprintln!(
-        "\n{} logs | {}ms | {} rows read",
-        entries.len(),
-        response.stats.execution_time_ms,
-        response.stats.rows_read
-    );
 
     Ok(())
 }

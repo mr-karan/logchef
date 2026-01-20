@@ -965,6 +965,7 @@ dependencies = [
  "chrono",
  "clap",
  "logchef-core",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

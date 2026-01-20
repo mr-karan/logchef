@@ -83,7 +83,7 @@ pub struct Source {
     pub is_connected: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Column {
     pub name: String,
     #[serde(rename = "type")]
@@ -146,7 +146,7 @@ impl QueryResponse {
 
 pub type LogEntry = HashMap<String, serde_json::Value>;
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct QueryStats {
     #[serde(default)]
     pub execution_time_ms: i64,
