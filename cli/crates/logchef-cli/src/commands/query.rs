@@ -131,7 +131,7 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
                 );
                 teams
                     .iter()
-                    .find(|t| t.name == name)
+                    .find(|t| t.name.eq_ignore_ascii_case(&name))
                     .map(|t| t.id)
                     .ok_or_else(|| anyhow::anyhow!("Team '{}' not found", name))?
             }
@@ -157,7 +157,7 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
                 );
                 sources
                     .iter()
-                    .find(|s| s.name == name)
+                    .find(|s| s.name.eq_ignore_ascii_case(&name))
                     .map(|s| s.id)
                     .ok_or_else(|| anyhow::anyhow!("Source '{}' not found", name))?
             }
