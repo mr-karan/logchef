@@ -149,10 +149,8 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
                     .await
                     .context("Failed to list sources")?;
 
-                let mut cache_entries: Vec<(String, i64)> = sources
-                    .iter()
-                    .map(|s| (s.name.clone(), s.id))
-                    .collect();
+                let mut cache_entries: Vec<(String, i64)> =
+                    sources.iter().map(|s| (s.name.clone(), s.id)).collect();
                 for s in &sources {
                     if let Some(table_ref) = s.table_ref() {
                         cache_entries.push((table_ref, s.id));
