@@ -1,77 +1,60 @@
-# Server configuration
-[server]
-# HTTP server port
-port = 8125
-# HTTP server host address
-host = "0.0.0.0"
-# URL of the frontend application
-frontend_url = "http://localhost:5173"  # Development frontend URL, empty in production
-# HTTP server timeout for requests
-http_server_timeout = "30s"
+# LogChef configuration (TOML).
+#
+# This file contains only essential bootstrap settings required to start LogChef.
+# Runtime settings (AI, alerts, auth sessions, server frontend URL) are managed
+# in the Admin UI and stored in the database.
+#
+# Values can be overridden via environment variables prefixed with LOGCHEF_.
+# Use double underscores for nesting: LOGCHEF_SERVER__PORT=8125.
 
-# SQLite database configuration
+# -----------------------------------------------------------------------------
+# Server (required)
+# -----------------------------------------------------------------------------
+[server]
+# HTTP API port.
+port = 8125
+# Bind address (0.0.0.0 listens on all interfaces).
+host = "0.0.0.0"
+# HTTP server request timeout.
+http_server_timeout = "30s"
+# Frontend URL for auth redirects and UI links is managed in the Admin UI.
+# For first boot with a separate frontend origin, set LOGCHEF_SERVER__FRONTEND_URL.
+
+# -----------------------------------------------------------------------------
+# SQLite (required)
+# -----------------------------------------------------------------------------
 [sqlite]
-# Path to the SQLite database file
+# Path to the SQLite database file (relative to the working directory).
 path = "local.db"
 
-# OpenID Connect configuration
+# -----------------------------------------------------------------------------
+# OpenID Connect (OIDC) (required)
+# -----------------------------------------------------------------------------
 [oidc]
-# URL of the OIDC provider for discovery
+# OIDC provider discovery URL.
 provider_url = "http://localhost:5556/dex"
-# Authentication endpoint URL
+# Explicit auth/token endpoints (required even when discovery is available).
 auth_url = "http://localhost:5556/dex/auth"
-# Token endpoint URL
 token_url = "http://localhost:5556/dex/token"
-# Client ID for OIDC authentication
+# OIDC client credentials for the web UI login flow.
 client_id = "logchef"
-# Client secret for OIDC authentication
+# Dev-only secret. Replace this in production.
 client_secret = "logchef-secret"
-# CLI client ID for CLI authentication (public OIDC client, PKCE flow)
+# CLI client ID for CLI authentication (public OIDC client, PKCE flow).
+# The OIDC provider must allow loopback redirects:
+# http://127.0.0.1:19876/callback ... 19878/callback
 cli_client_id = "logchef-cli"
-# Callback URL for OIDC authentication
+# Callback URL for OIDC authentication (must match provider config).
 redirect_url = "http://localhost:8125/api/v1/auth/callback"
-# OIDC scopes to request
+# OIDC scopes to request.
 scopes = ["openid", "email", "profile"]
 
-# Authentication configuration
+# -----------------------------------------------------------------------------
+# Authentication (required)
+# -----------------------------------------------------------------------------
 [auth]
-# Email addresses of admin users
+# Admin email addresses (required).
 admin_emails = ["admin@logchef.internal"]
-# Duration of user sessions
-session_duration = "8h"
-# Maximum number of concurrent sessions per user
-max_concurrent_sessions = 1
-# Secret key for API token hashing (generate with: openssl rand -hex 32)
+# Secret key for API token hashing (required; generate with: openssl rand -hex 32).
+# Dev-only value. Replace this in production.
 api_token_secret = "5679649c50fddda837449b77d9983ab5f8dba65878897e968a74e7061bf47677"
-# Default API token expiration (empty for no expiration)
-default_token_expiry = "2160h"  # 90 days = 90 * 24 = 2160 hours
-
-# Logging configuration
-[logging]
-# Log level (debug, info, warn, error)
-level = "debug"
-
-# AI SQL generation configuration
-[ai]
-# Enable/disable AI features
-enabled = true
-# API endpoint
-# Base URL for OpenAI API (leave empty for default OpenAI endpoint)
-base_url = "https://api.openai.com/v1"
-# OpenAI API key for AI SQL generation
-api_key = ""
-# Model parameters
-# Model to use (default: gpt-4o)
-model = "gpt-4o"
-# Maximum tokens to generate
-max_tokens = 1024
-# Temperature for generation (0.0-1.0, lower is more deterministic)
-temperature = 0.1
-
-# Alerting configuration
-# SMTP and notification delivery settings are configured via Admin UI (stored in database)
-[alerts]
-enabled = true
-evaluation_interval = "1m"
-default_lookback = "5m"
-history_limit = 50
