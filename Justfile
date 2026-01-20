@@ -13,7 +13,6 @@ ldflags := "-s -w -X 'main.buildString=" + build_info + "' -X 'main.versionStrin
 
 # Binary output
 bin := "bin/logchef.bin"
-cli_bin := "bin/logchef"
 
 # Config file - can be overridden with 'just CONFIG=other.toml target'
 config := env_var_or_default('CONFIG', 'config.toml')
@@ -62,86 +61,59 @@ run-backend: build-backend
     @echo "Running backend server with config {{config}}..."
     {{bin}} -config {{config}}
 
-# === Go CLI (Legacy) ===
+# === CLI (Rust) ===
 
-# Build the Go CLI
+cli_bin := "cli/target/release/logchef"
+cli_bin_debug := "cli/target/debug/logchef"
+
+# Build CLI (release)
 build-cli:
-    @echo "Building Go CLI..."
-    CGO_ENABLED=0 go build -o {{cli_bin}} -ldflags "{{ldflags}}" ./cmd/logchef
-
-# Install Go CLI locally
-install-cli: build-cli
-    @echo "Installing Go CLI to ~/go/bin..."
-    cp {{cli_bin}} ~/go/bin/logchef
-    @echo "CLI installed. Run 'logchef --help' to get started."
-
-# Run Go CLI tests
-test-cli:
-    @echo "Running Go CLI tests..."
-    go test -v ./internal/cli/... ./cmd/logchef/...
-
-# Run Go CLI tests with coverage
-test-cli-coverage:
-    @echo "Running Go CLI tests with coverage..."
-    mkdir -p coverage
-    go test -v -race -coverprofile=coverage/cli-coverage.out ./internal/cli/... ./cmd/logchef/...
-    go tool cover -html=coverage/cli-coverage.out -o coverage/cli-coverage.html
-    @echo "CLI coverage report generated at coverage/cli-coverage.html"
-    @go tool cover -func=coverage/cli-coverage.out | grep total | awk '{print "CLI coverage: " $$3}'
-
-# === Rust CLI ===
-
-rust_cli_bin := "cli/target/release/logchef"
-rust_cli_debug := "cli/target/debug/logchef"
-
-# Build Rust CLI (release)
-build-rust-cli:
-    @echo "Building Rust CLI (release)..."
+    @echo "Building CLI (release)..."
     cd cli && cargo build --release
 
-# Build Rust CLI (debug)
-build-rust-cli-debug:
-    @echo "Building Rust CLI (debug)..."
+# Build CLI (debug)
+build-cli-debug:
+    @echo "Building CLI (debug)..."
     cd cli && cargo build
 
-# Install Rust CLI locally
-install-rust-cli: build-rust-cli
-    @echo "Installing Rust CLI to ~/.cargo/bin..."
-    cp {{rust_cli_bin}} ~/.cargo/bin/logchef
-    @echo "Rust CLI installed. Run 'logchef --help' to get started."
+# Install CLI locally
+install-cli: build-cli
+    @echo "Installing CLI to ~/.cargo/bin..."
+    cp {{cli_bin}} ~/.cargo/bin/logchef
+    @echo "CLI installed. Run 'logchef --help' to get started."
 
-# Run Rust CLI tests
-test-rust-cli:
-    @echo "Running Rust CLI tests..."
+# Run CLI tests
+test-cli:
+    @echo "Running CLI tests..."
     cd cli && cargo test
 
-# Run Rust CLI with cargo clippy
-lint-rust-cli:
-    @echo "Linting Rust CLI..."
+# Run CLI with cargo clippy
+lint-cli:
+    @echo "Linting CLI..."
     cd cli && cargo clippy -- -D warnings
 
-# Format Rust CLI code
-fmt-rust-cli:
-    @echo "Formatting Rust CLI..."
+# Format CLI code
+fmt-cli:
+    @echo "Formatting CLI..."
     cd cli && cargo fmt
 
-# Check Rust CLI formatting
-fmt-rust-cli-check:
-    @echo "Checking Rust CLI formatting..."
+# Check CLI formatting
+fmt-cli-check:
+    @echo "Checking CLI formatting..."
     cd cli && cargo fmt --check
 
-# Run all Rust CLI checks
-check-rust-cli: fmt-rust-cli-check lint-rust-cli test-rust-cli
+# Run all CLI checks
+check-cli: fmt-cli-check lint-cli test-cli
 
-# Clean Rust CLI build artifacts
-clean-rust-cli:
-    @echo "Cleaning Rust CLI artifacts..."
+# Clean CLI build artifacts
+clean-cli:
+    @echo "Cleaning CLI artifacts..."
     cd cli && cargo clean
 
 # Quick test: run query against dev server
-test-rust-cli-query server_url="" team="" source="":
-    @echo "Testing Rust CLI query..."
-    {{rust_cli_debug}} --server {{server_url}} query "level:error" --team {{team}} --source {{source}} --limit 10
+test-cli-query server_url="" team="" source="":
+    @echo "Testing CLI query..."
+    {{cli_bin_debug}} --server {{server_url}} query "level:error" --team {{team}} --source {{source}} --limit 10
 
 # Run only the frontend server
 run-frontend:
