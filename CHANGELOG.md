@@ -8,11 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Rust CLI** — New cross-platform command-line interface written in Rust
+  - `logchef auth` — Browser-based OIDC authentication with PKCE flow
+  - `logchef query` — Execute LogChefQL queries with syntax highlighting (powered by [tailspin](https://github.com/bensadeh/tailspin))
+  - `logchef config` — Manage CLI configuration and multiple server contexts
+  - `logchef query --no-timestamp` — Hide timestamps in text output for cleaner exports
+  - Multi-context support for managing dev/staging/prod instances (kubectl-style)
+  - Configurable keywords and regex patterns for log highlighting
+  - Configuration stored at `~/.config/logchef/logchef.json`
+- **CLI Token Exchange API** — `POST /api/v1/cli/token` endpoint for CLI authentication
+- **CLI OIDC Discovery** — `/api/v1/meta` now includes `oidc_issuer` and `cli_client_id` for CLI auth flow
 - **Multi-select variables** — Select multiple values that expand to `IN (...)` clauses in SQL.
 - **SQL optional clauses** (`[[ ... ]]`) — Wrap variable clauses to auto-remove when value is empty.
 - **Variable widget configuration** — Configure variables as text inputs, dropdowns, or multi-selects with default values.
 - **Collections "All Sources" view** — Browse saved queries across all sources in one place.
-- **Dynamic Alertmanager routing** — Helper for routing alerts based on query results.
+- **Alert delivery via SMTP and webhooks** — Send notifications directly without Alertmanager.
 - Saved query name shown in browser tab title.
 - Smart LIMIT handling in SQL mode.
 - Support for CTEs, JOINs, and subqueries with template variables.
@@ -23,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reduced log noise and redacted session IDs for security.
 
 ### Fixed
+- **SQLite SQLITE_BUSY errors** — Implemented dual-connection pattern (read pool + single write connection) to eliminate database lock contention under concurrent API requests.
 - Saved query updates use the current editor content.
 - Alert timestamps use ISO8601 UTC formatting for last triggered.
 - Alert relative time formatting edge cases.
@@ -32,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Collections race condition causing empty list on initial load.
 - Y-scroll bar eliminated on explorer main content area.
 - Variable datetime-local format accepts values without seconds.
+
+### Removed
+- Legacy Go CLI (`cmd/logchef/`, `internal/cli/`) — replaced by Rust CLI.
 
 ## [1.1.0] - 2025-12-29
 
@@ -72,7 +86,7 @@ The 1.0 release marks Logchef as production-ready. Eight months of development b
 
 ### Highlights
 
-- **Alerting with Alertmanager** - SQL-based alerts that integrate with your existing alert routing
+- **Alerting system** - SQL-based alerts with notification delivery
 - **LogchefQL Backend Parser** - Full parsing, validation, and type-aware SQL generation in Go
 - **Field Values Sidebar** - Kibana-style field exploration with click-to-filter
 - **Query Cancellation** - Cancel long-running queries in ClickHouse, not just the UI
@@ -127,17 +141,16 @@ The 1.0 release marks Logchef as production-ready. Eight months of development b
 ## [0.6.0] - 2025-12-04
 
 ### Added
-- **Alerting System** - SQL-based alerting with Alertmanager integration
+- **Alerting System** - SQL-based alerting with notification delivery
   - Create alerts using LogchefQL or SQL queries
   - Configure thresholds, frequency, and severity
-  - Route alerts to Slack, PagerDuty, email via Alertmanager
+  - Route alerts to Slack, PagerDuty, email via webhooks and SMTP
   - Alert history with execution logs
   - Dedicated alert detail page with edit and history tabs
 - **Admin Settings UI** - Runtime configuration management via web interface
   - Manage alerts, AI, authentication, and server settings
   - Settings stored in database, override config.toml at runtime
   - Config-to-database seeding on first boot
-- Alertmanager health check functionality with test connection button
 - Duplicate source feature for quick configuration copying
 - Keyboard typeahead navigation in team member and source dropdowns
 - Alert history retention limit enforcement
@@ -155,7 +168,7 @@ The 1.0 release marks Logchef as production-ready. Eight months of development b
 - Active tab persistence when saving settings (no longer jumps to Alerts tab)
 - Number input values properly converted to strings before API submission
 - Acronyms (URL, API, AI, TLS, ID) now properly formatted in settings UI
-- Alert `delivery_failed` flag cleared after successful Alertmanager retry
+- Alert `delivery_failed` flag cleared after successful retry
 - Available users and sources now sorted alphabetically in team dialogs
 - Null check added for test query warnings in AlertForm
 - Frontend context and source loading logic improvements

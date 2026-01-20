@@ -7,10 +7,10 @@ description: Upcoming features and future plans for LogChef
 
 ### Alerting System ✅
 
-LogChef now includes a comprehensive alerting system integrated with Prometheus Alertmanager:
+LogChef now includes a comprehensive alerting system with direct email and webhook delivery:
 
 - ✅ SQL-based alert conditions with ClickHouse query support
-- ✅ Alertmanager integration for battle-tested alert routing
+- ✅ Native SMTP and webhook notifications
 - ✅ Multiple severity levels (info, warning, critical)
 - ✅ Team and source-specific alerts
 - ✅ Automatic retry logic with exponential backoff

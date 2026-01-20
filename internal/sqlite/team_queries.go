@@ -24,7 +24,7 @@ func (db *DB) CreateTeamSourceQuery(ctx context.Context, query *models.TeamQuery
 		QueryContent: query.QueryContent,
 	}
 
-	id, err := db.queries.CreateTeamSourceQuery(ctx, params)
+	id, err := db.writeQueries.CreateTeamSourceQuery(ctx, params)
 	if err != nil {
 		// Consider checking for specific constraint errors (e.g., FK violations if team/source don't exist).
 		db.log.Error("failed to create team source query record in db", "error", err, "team_id", query.TeamID, "source_id", query.SourceID)
@@ -47,7 +47,7 @@ func (db *DB) GetTeamSourceQuery(ctx context.Context, teamID models.TeamID, sour
 		TeamID:   int64(teamID),
 		SourceID: int64(sourceID),
 	}
-	sqlcQuery, err := db.queries.GetTeamSourceQuery(ctx, params)
+	sqlcQuery, err := db.readQueries.GetTeamSourceQuery(ctx, params)
 	if err != nil {
 		// Use handleNotFoundError, although a specific core.ErrQueryNotFound might be defined.
 		return nil, handleNotFoundError(err, fmt.Sprintf("getting team query id %d", queryID))
@@ -87,7 +87,7 @@ func (db *DB) UpdateTeamSourceQuery(ctx context.Context, teamID models.TeamID, s
 		SourceID:     int64(sourceID),
 	}
 
-	err := db.queries.UpdateTeamSourceQuery(ctx, params)
+	err := db.writeQueries.UpdateTeamSourceQuery(ctx, params)
 	if err != nil {
 		// sqlc Update typically doesn't return ErrNoRows. Check for other errors.
 		db.log.Error("failed to update team source query record in db", "error", err, "query_id", queryID)
@@ -105,7 +105,7 @@ func (db *DB) DeleteTeamSourceQuery(ctx context.Context, teamID models.TeamID, s
 		TeamID:   int64(teamID),
 		SourceID: int64(sourceID),
 	}
-	err := db.queries.DeleteTeamSourceQuery(ctx, params)
+	err := db.writeQueries.DeleteTeamSourceQuery(ctx, params)
 	if err != nil {
 		// sqlc Delete typically doesn't return ErrNoRows.
 		db.log.Error("failed to delete team source query record from db", "error", err, "query_id", queryID)
@@ -117,7 +117,7 @@ func (db *DB) DeleteTeamSourceQuery(ctx context.Context, teamID models.TeamID, s
 
 // ListQueriesByTeam retrieves all saved queries for a team across all sources.
 func (db *DB) ListQueriesByTeam(ctx context.Context, teamID models.TeamID) ([]*models.SavedTeamQuery, error) {
-	sqlcQueries, err := db.queries.ListQueriesByTeam(ctx, int64(teamID))
+	sqlcQueries, err := db.readQueries.ListQueriesByTeam(ctx, int64(teamID))
 	if err != nil {
 		db.log.Error("failed to list queries for team from db", "error", err, "team_id", teamID)
 		return nil, fmt.Errorf("error listing queries for team: %w", err)
@@ -149,7 +149,7 @@ func (db *DB) ListQueriesByTeamAndSource(ctx context.Context, teamID models.Team
 		TeamID:   int64(teamID),
 		SourceID: int64(sourceID),
 	}
-	sqlcQueries, err := db.queries.ListQueriesByTeamAndSource(ctx, params)
+	sqlcQueries, err := db.readQueries.ListQueriesByTeamAndSource(ctx, params)
 	if err != nil {
 		db.log.Error("failed to list queries for team and source from db", "error", err, "team_id", teamID, "source_id", sourceID)
 		return nil, fmt.Errorf("error listing queries for team and source: %w", err)
@@ -185,7 +185,7 @@ func (db *DB) ToggleQueryBookmark(ctx context.Context, teamID models.TeamID, sou
 		SourceID: int64(sourceID),
 	}
 
-	err := db.queries.ToggleQueryBookmark(ctx, params)
+	err := db.writeQueries.ToggleQueryBookmark(ctx, params)
 	if err != nil {
 		db.log.Error("failed to toggle query bookmark in db", "error", err, "query_id", queryID)
 		return false, fmt.Errorf("error toggling query bookmark: %w", err)
@@ -197,7 +197,7 @@ func (db *DB) ToggleQueryBookmark(ctx context.Context, teamID models.TeamID, sou
 		TeamID:   int64(teamID),
 		SourceID: int64(sourceID),
 	}
-	newStatus, err := db.queries.GetQueryBookmarkStatus(ctx, statusParams)
+	newStatus, err := db.readQueries.GetQueryBookmarkStatus(ctx, statusParams)
 	if err != nil {
 		db.log.Error("failed to get query bookmark status from db", "error", err, "query_id", queryID)
 		return false, fmt.Errorf("error getting query bookmark status: %w", err)
