@@ -120,14 +120,13 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 		return nil
 	}
 
-	if alert.QueryType != "" && alert.QueryType != models.AlertQueryTypeSQL {
-		m.log.Warn("unsupported alert query type; skipping evaluation", "alert_id", alert.ID, "query_type", alert.QueryType)
-		return nil
-	}
-
+	// Evaluate based on the presence of a valid SQL query, not the query_type label.
+	// The frontend generates SQL for both "sql" and "condition" modes, storing it in
+	// the Query field. The query_type is informational (indicates which UI mode was used)
+	// rather than a distinct evaluation strategy.
 	query := strings.TrimSpace(alert.Query)
 	if query == "" {
-		m.log.Warn("alert query is empty; skipping evaluation", "alert_id", alert.ID)
+		m.log.Warn("alert query is empty; skipping evaluation", "alert_id", alert.ID, "query_type", alert.QueryType)
 		return nil
 	}
 
