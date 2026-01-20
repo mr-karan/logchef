@@ -127,3 +127,54 @@ export function exportTableData<T>(
       return generateCSV(table, { fileName, includeHiddenColumns, exportType })
   }
 }
+
+export function exportRawDataToCSV(
+  data: Record<string, unknown>[],
+  columns: { id?: string; name?: string; accessorKey?: string }[],
+  options?: {
+    fileName?: string
+  }
+) {
+  const { fileName = 'export' } = options || {}
+
+  if (!data || data.length === 0) {
+    return { success: false, message: 'No data to export' }
+  }
+
+  const columnKeys = columns
+    .map(col => col.accessorKey || col.id || col.name)
+    .filter((key): key is string => !!key)
+
+  const effectiveKeys = columnKeys.length > 0 ? columnKeys : Object.keys(data[0])
+
+  const headers = effectiveKeys.map(key => `"${String(key).replace(/"/g, '""')}"`)
+
+  const csvRows = [
+    headers.join(','),
+    ...data.map(row => {
+      return effectiveKeys
+        .map(key => {
+          const value = row[key]
+          if (value === null || value === undefined) {
+            return ''
+          } else if (typeof value === 'object') {
+            return `"${JSON.stringify(value).replace(/"/g, '""')}"`
+          }
+          return `"${String(value).replace(/"/g, '""')}"`
+        })
+        .join(',')
+    })
+  ].join('\n')
+
+  const csvBlob = new Blob([csvRows], { type: 'text/csv;charset=utf-8;' })
+  const csvUrl = URL.createObjectURL(csvBlob)
+  const link = document.createElement('a')
+  link.href = csvUrl
+  link.setAttribute('download', `${fileName}.csv`)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(csvUrl)
+
+  return { success: true, message: 'CSV export completed' }
+}

@@ -19,6 +19,7 @@ import { FieldSideBar } from "@/components/field-sidebar";
 import { getErrorMessage } from "@/api/types";
 import DataTable from "./table/data-table.vue";
 import CompactLogList from "./table/CompactLogListSimple.vue";
+import { exportRawDataToCSV } from "./table/export";
 import SaveQueryModal from "@/components/collections/SaveQueryModal.vue";
 import QueryEditor from "@/components/query-editor/QueryEditor.vue";
 import { useSavedQueries } from "@/composables/useSavedQueries";
@@ -181,7 +182,7 @@ const isLoadingQuery = ref(false);
 const editQueryData = ref<SavedTeamQuery | null>(null);
 const topBarRef = ref<InstanceType<typeof ExploreTopBar> | null>(null);
 const sortKeysInfoOpen = ref(false); // State for sort keys info expandable section
-const isHistogramVisible = ref(true); // State for histogram visibility toggle
+const isHistogramVisible = ref(true);
 
 // Query execution deduplication
 const executingQueryId = ref<string | null>(null);
@@ -693,6 +694,18 @@ const openDatePicker = () => {
   if (topBarRef.value) {
     topBarRef.value.openDatePicker();
   }
+};
+
+const handleExport = () => {
+  const logs = exploreStore.logs;
+  const columns = exploreStore.columns;
+  if (!logs?.length || !columns?.length) return;
+
+  const sourceName = selectedSourceName.value || 'logs';
+  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
+  exportRawDataToCSV(logs, columns, {
+    fileName: `${sourceName}-export-${timestamp}`,
+  });
 };
 
 // Function to generate example query based on sort keys
@@ -1248,6 +1261,7 @@ onBeforeUnmount(() => {
                 :isLoading="isExecutingQuery"
                 @toggle-histogram="toggleHistogramVisibility"
                 @update:displayMode="displayMode = $event"
+                @export="handleExport"
               />
 
               <!-- Histogram visualization -->
