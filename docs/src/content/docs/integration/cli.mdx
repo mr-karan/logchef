@@ -139,7 +139,7 @@ logchef query "level:error service:api" --since 1h
 | Option | Shorthand | Description | Default |
 | :--- | :--- | :--- | :--- |
 | `--team` | `-t` | Team name (or ID) | (from config) |
-| `--source` | `-S` | Source name (or ID) | (from config) |
+| `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
 | `--since` | `-s` | Time range (e.g., "15m", "1h", "24h") | "15m" |
 | `--from` | | Absolute start time (ISO 8601) | |
 | `--to` | | Absolute end time (ISO 8601) | |
@@ -154,6 +154,9 @@ logchef query "level:error service:api" --since 1h
 ```bash
 # Get all logs from the last 15 minutes
 logchef query "" --team "production" --source "nginx-logs"
+
+# Use database.table_name format (copy from UI)
+logchef query "" --team "production" --source "logs.nomad_apps"
 
 # Filter by field value
 logchef query "status:500" --team "production" --source "nginx-logs"
@@ -268,8 +271,13 @@ logchef config set source "nginx-logs"
 logchef query "level:error"
 ```
 
-:::tip[Name Resolution]
-The CLI caches team/source name lookups locally (`~/.cache/logchef/`) for 10 minutes, so repeated queries are fast. You can also use numeric IDs if you prefer.
+:::tip[Source Resolution]
+The `--source` flag accepts multiple formats:
+- **Friendly name**: `"Kite Nomad"` (case-insensitive)
+- **Table reference**: `logs.nomad_apps` (as shown in UI, case-insensitive)  
+- **Numeric ID**: `11`
+
+Lookups are cached locally (`~/.cache/logchef/`) for 10 minutes.
 :::
 
 ## Configuration File
