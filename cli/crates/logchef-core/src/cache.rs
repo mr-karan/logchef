@@ -33,10 +33,10 @@ impl Cache {
     }
 
     fn cache_path(server_url: &str) -> PathBuf {
-        let dirs =
-            ProjectDirs::from("", "", "logchef").expect("Could not determine project directories");
-        let cache_dir = dirs.cache_dir();
-        fs::create_dir_all(cache_dir).ok();
+        let cache_dir = ProjectDirs::from("", "", "logchef")
+            .map(|dirs| dirs.cache_dir().to_path_buf())
+            .unwrap_or_else(|| std::env::temp_dir().join("logchef"));
+        fs::create_dir_all(&cache_dir).ok();
 
         let safe_name: String = server_url.replace("://", "_").replace(['/', ':', '.'], "_");
         cache_dir.join(format!("resolve_{}.json", safe_name))
@@ -117,7 +117,19 @@ impl Cache {
             }
             self.touch();
             self.save_to_disk();
+            return;
         }
+
+        let key = format!("id:{}", team_id);
+        let team = self.data.teams.entry(key).or_insert_with(|| TeamCache {
+            id: team_id,
+            sources: HashMap::new(),
+        });
+        for (name, id) in sources {
+            team.sources.insert(name.clone(), *id);
+        }
+        self.touch();
+        self.save_to_disk();
     }
 
     pub fn clear(&mut self) {

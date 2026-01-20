@@ -61,27 +61,49 @@ impl Config {
         }
 
         let content = serde_json::to_string_pretty(self)?;
+        let tmp_path = path.with_extension("json.tmp");
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
             let mut opts = fs::OpenOptions::new();
             opts.write(true).create(true).truncate(true).mode(0o600);
-            let mut file = opts.open(&path).map_err(|e| {
+            let mut file = opts.open(&tmp_path).map_err(|e| {
                 Error::config(format!(
-                    "Failed to create config file {}: {}",
+                    "Failed to create temp config file {}: {}",
+                    tmp_path.display(),
+                    e
+                ))
+            })?;
+            std::io::Write::write_all(&mut file, content.as_bytes()).map_err(|e| {
+                Error::config(format!(
+                    "Failed to write temp config file {}: {}",
+                    tmp_path.display(),
+                    e
+                ))
+            })?;
+            fs::rename(&tmp_path, &path).map_err(|e| {
+                Error::config(format!(
+                    "Failed to replace config file {}: {}",
                     path.display(),
                     e
                 ))
             })?;
-            std::io::Write::write_all(&mut file, content.as_bytes())?;
         }
 
         #[cfg(not(unix))]
         {
-            fs::write(&path, &content).map_err(|e| {
+            fs::write(&tmp_path, &content).map_err(|e| {
                 Error::config(format!(
-                    "Failed to write config file {}: {}",
+                    "Failed to write temp config file {}: {}",
+                    tmp_path.display(),
+                    e
+                ))
+            })?;
+            let _ = fs::remove_file(&path);
+            fs::rename(&tmp_path, &path).map_err(|e| {
+                Error::config(format!(
+                    "Failed to replace config file {}: {}",
                     path.display(),
                     e
                 ))

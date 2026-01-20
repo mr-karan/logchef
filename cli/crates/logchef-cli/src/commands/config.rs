@@ -58,7 +58,9 @@ fn list_contexts() -> Result<()> {
     names.sort();
 
     for name in names {
-        let ctx = config.get_context(name).unwrap();
+        let Some(ctx) = config.get_context(name) else {
+            continue;
+        };
         let current = if config.current_context_name() == Some(name) {
             "*"
         } else {
@@ -121,7 +123,16 @@ fn show_config() -> Result<()> {
         }
     };
 
-    let ctx = config.current_context().unwrap();
+    let ctx = match config.current_context() {
+        Some(ctx) => ctx,
+        None => {
+            println!(
+                "Current context '{}' not found in config. Run 'logchef auth' to set up.",
+                ctx_name
+            );
+            return Ok(());
+        }
+    };
 
     println!("Context: {}", ctx_name);
     println!("Server:  {}", ctx.server_url);
