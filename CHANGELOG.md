@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Multi-context support for managing dev/staging/prod instances (kubectl-style)
   - Configurable keywords and regex patterns for log highlighting
   - Configuration stored at `~/.config/logchef/logchef.json`
+- **CLI OIDC config** — `oidc.cli_client_id` added to `config.toml` and docs for browser-based CLI auth
 - **CLI Token Exchange API** — `POST /api/v1/cli/token` endpoint for CLI authentication
 - **CLI OIDC Discovery** — `/api/v1/meta` now includes `oidc_issuer` and `cli_client_id` for CLI auth flow
 - **Multi-select variables** — Select multiple values that expand to `IN (...)` clauses in SQL.

@@ -88,6 +88,18 @@ logchef --help
 
 The CLI supports two authentication methods: browser-based OIDC and API tokens.
 
+### Server Prerequisite (OIDC)
+
+To use browser-based auth, configure a public OIDC client for the CLI and set it in the server config:
+
+```toml
+[oidc]
+cli_client_id = "logchef-cli"
+```
+
+Your OIDC provider must allow loopback redirects for the CLI:
+`http://127.0.0.1:19876/callback` through `http://127.0.0.1:19878/callback`.
+
 ### Browser-Based Login (OIDC)
 
 For interactive use, authenticate via your browser:
