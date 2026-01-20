@@ -93,23 +93,13 @@ type AIConfig struct {
 	BaseURL string `koanf:"base_url"`
 }
 
-// AlertsConfig controls scheduling behaviour for alert rules and delivery via email or webhooks.
+// AlertsConfig controls scheduling behaviour for alert rules.
+// SMTP and other delivery settings are stored in the database and managed via Admin UI.
 type AlertsConfig struct {
-	Enabled               bool          `koanf:"enabled"`
-	EvaluationInterval    time.Duration `koanf:"evaluation_interval"`
-	DefaultLookback       time.Duration `koanf:"default_lookback"`
-	HistoryLimit          int           `koanf:"history_limit"`
-	SMTPHost              string        `koanf:"smtp_host"`
-	SMTPPort              int           `koanf:"smtp_port"`
-	SMTPUsername          string        `koanf:"smtp_username"`
-	SMTPPassword          string        `koanf:"smtp_password"`
-	SMTPFrom              string        `koanf:"smtp_from"`
-	SMTPReplyTo           string        `koanf:"smtp_reply_to"`
-	SMTPSecurity          string        `koanf:"smtp_security"`
-	ExternalURL           string        `koanf:"external_url"` // Backend URL (for API access)
-	FrontendURL           string        `koanf:"frontend_url"` // Frontend URL (for web UI links)
-	RequestTimeout        time.Duration `koanf:"request_timeout"`
-	TLSInsecureSkipVerify bool          `koanf:"tls_insecure_skip_verify"`
+	Enabled            bool          `koanf:"enabled"`
+	EvaluationInterval time.Duration `koanf:"evaluation_interval"`
+	DefaultLookback    time.Duration `koanf:"default_lookback"`
+	HistoryLimit       int           `koanf:"history_limit"`
 }
 
 const envPrefix = "LOGCHEF_"
@@ -176,33 +166,6 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.OIDC.RedirectURL == "" {
 		return nil, fmt.Errorf("redirect_url is required in OIDC configuration (either in file or %sOIDC__REDIRECT_URL)", envPrefix)
-	}
-
-	// Non-essential configuration fields (alerts, AI, auth sessions) are optional in config.toml.
-	// They will be seeded from config.toml to the database on first boot, and can be managed via UI afterwards.
-	// If not specified in config.toml, database migration defaults will be used.
-
-	if cfg.Alerts.SMTPHost != "" {
-		if cfg.Alerts.SMTPPort <= 0 {
-			return nil, fmt.Errorf("smtp_port must be greater than 0")
-		}
-		from := strings.TrimSpace(cfg.Alerts.SMTPFrom)
-		if from == "" {
-			return nil, fmt.Errorf("smtp_from is required when smtp_host is configured")
-		}
-		if !strings.Contains(from, "@") {
-			return nil, fmt.Errorf("smtp_from must be a valid email address")
-		}
-		if replyTo := strings.TrimSpace(cfg.Alerts.SMTPReplyTo); replyTo != "" && !strings.Contains(replyTo, "@") {
-			return nil, fmt.Errorf("smtp_reply_to must be a valid email address")
-		}
-	}
-	if cfg.Alerts.SMTPSecurity != "" {
-		switch strings.ToLower(cfg.Alerts.SMTPSecurity) {
-		case "none", "starttls", "tls":
-		default:
-			return nil, fmt.Errorf("smtp_security must be one of none, starttls, tls")
-		}
 	}
 
 	return &cfg, nil

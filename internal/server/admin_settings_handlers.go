@@ -322,18 +322,17 @@ type TestWebhookRequest struct {
 	WebhookURL string `json:"webhook_url"`
 }
 
-// loadSMTPConfig loads SMTP configuration from the database, falling back to static config values.
 func (s *Server) loadSMTPConfig(ctx context.Context) alerts.EmailSenderOptions {
 	return alerts.EmailSenderOptions{
-		Host:          s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_host", s.config.Alerts.SMTPHost),
-		Port:          s.sqlite.GetIntSetting(ctx, "alerts.smtp_port", s.config.Alerts.SMTPPort),
-		Username:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_username", s.config.Alerts.SMTPUsername),
-		Password:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_password", s.config.Alerts.SMTPPassword),
-		From:          s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_from", s.config.Alerts.SMTPFrom),
-		ReplyTo:       s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_reply_to", s.config.Alerts.SMTPReplyTo),
-		Security:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_security", s.config.Alerts.SMTPSecurity),
-		Timeout:       s.config.Alerts.RequestTimeout,
-		SkipTLSVerify: s.config.Alerts.TLSInsecureSkipVerify,
+		Host:          s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_host", ""),
+		Port:          s.sqlite.GetIntSetting(ctx, "alerts.smtp_port", 587),
+		Username:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_username", ""),
+		Password:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_password", ""),
+		From:          s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_from", ""),
+		ReplyTo:       s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_reply_to", ""),
+		Security:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_security", "starttls"),
+		Timeout:       s.sqlite.GetDurationSetting(ctx, "alerts.request_timeout", 5*time.Second),
+		SkipTLSVerify: s.sqlite.GetBoolSetting(ctx, "alerts.tls_insecure_skip_verify", false),
 		Logger:        s.log,
 	}
 }
@@ -437,10 +436,9 @@ func (s *Server) handleTestWebhook(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Webhook URL must use http or https scheme")
 	}
 
-	// Create webhook sender with timeout from config
 	sender := alerts.NewWebhookSender(alerts.WebhookSenderOptions{
-		Timeout:       s.config.Alerts.RequestTimeout,
-		SkipTLSVerify: s.config.Alerts.TLSInsecureSkipVerify,
+		Timeout:       s.sqlite.GetDurationSetting(c.Context(), "alerts.request_timeout", 5*time.Second),
+		SkipTLSVerify: s.sqlite.GetBoolSetting(c.Context(), "alerts.tls_insecure_skip_verify", false),
 		Logger:        s.log,
 	})
 

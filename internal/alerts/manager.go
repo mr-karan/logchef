@@ -422,7 +422,7 @@ func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, hi
 		Annotations:             copyStringMap(annotations),
 		TriggeredAt:             history.TriggeredAt,
 		ResolvedAt:              history.ResolvedAt,
-		GeneratorURL:            m.generatorURL(alert),
+		GeneratorURL:            m.generatorURL(ctx, alert),
 		Message:                 history.Message,
 		RecipientUserIDs:        append([]models.UserID(nil), alert.RecipientUserIDs...),
 		RecipientEmails:         recipientEmails,
@@ -470,22 +470,20 @@ func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Aler
 	return emails, missing, ""
 }
 
-func (m *Manager) generatorURL(alert *models.Alert) string {
+func (m *Manager) generatorURL(ctx context.Context, alert *models.Alert) string {
 	if trimmed := strings.TrimSpace(alert.GeneratorURL); trimmed != "" {
 		return trimmed
 	}
 
-	// Use frontend URL if configured, otherwise fall back to external URL
-	base := strings.TrimSpace(m.cfg.FrontendURL)
+	base := strings.TrimSpace(m.db.GetSettingWithDefault(ctx, "alerts.frontend_url", ""))
 	if base == "" {
-		base = strings.TrimSpace(m.cfg.ExternalURL)
+		base = strings.TrimSpace(m.db.GetSettingWithDefault(ctx, "alerts.external_url", ""))
 	}
 	if base == "" {
 		return ""
 	}
 
 	base = strings.TrimSuffix(base, "/")
-	// Frontend format: /logs/alerts/:alertId?team=:teamId&source=:sourceId
 	return fmt.Sprintf("%s/logs/alerts/%d?team=%d&source=%d", base, alert.ID, alert.TeamID, alert.SourceID)
 }
 

@@ -127,24 +127,9 @@ func (a *App) Initialize(ctx context.Context) error {
 	// Use 0 to trigger the default interval defined in the manager.
 	a.ClickHouse.StartBackgroundHealthChecks(0)
 
-	// Initialize alerts manager before the server so it can be used for manual resolution.
-	emailSender := alerts.NewEmailSender(alerts.EmailSenderOptions{
-		Host:          a.Config.Alerts.SMTPHost,
-		Port:          a.Config.Alerts.SMTPPort,
-		Username:      a.Config.Alerts.SMTPUsername,
-		Password:      a.Config.Alerts.SMTPPassword,
-		From:          a.Config.Alerts.SMTPFrom,
-		ReplyTo:       a.Config.Alerts.SMTPReplyTo,
-		Security:      a.Config.Alerts.SMTPSecurity,
-		Timeout:       a.Config.Alerts.RequestTimeout,
-		SkipTLSVerify: a.Config.Alerts.TLSInsecureSkipVerify,
-		Logger:        a.Logger,
-	})
-	webhookSender := alerts.NewWebhookSender(alerts.WebhookSenderOptions{
-		Timeout:       a.Config.Alerts.RequestTimeout,
-		SkipTLSVerify: a.Config.Alerts.TLSInsecureSkipVerify,
-		Logger:        a.Logger,
-	})
+	// Initialize alerts manager with dynamic senders that read config from DB
+	emailSender := alerts.NewDynamicEmailSender(a.SQLite, a.Logger)
+	webhookSender := alerts.NewDynamicWebhookSender(a.SQLite, a.Logger)
 	alertSender := alerts.NewMultiSender(emailSender, webhookSender)
 
 	a.Alerts = alerts.NewManager(alerts.Options{
@@ -318,67 +303,67 @@ func (a *App) seedSystemSettings(ctx context.Context) error {
 			isSensitive: false,
 		},
 		"alerts.smtp_host": {
-			value:       a.Config.Alerts.SMTPHost,
+			value:       "",
 			valueType:   "string",
 			description: "SMTP host for alert emails",
 			isSensitive: false,
 		},
 		"alerts.smtp_port": {
-			value:       fmt.Sprintf("%d", a.Config.Alerts.SMTPPort),
+			value:       "587",
 			valueType:   "number",
 			description: "SMTP port for alert emails",
 			isSensitive: false,
 		},
 		"alerts.smtp_username": {
-			value:       a.Config.Alerts.SMTPUsername,
+			value:       "",
 			valueType:   "string",
 			description: "SMTP username for alert emails",
 			isSensitive: false,
 		},
 		"alerts.smtp_password": {
-			value:       a.Config.Alerts.SMTPPassword,
+			value:       "",
 			valueType:   "string",
 			description: "SMTP password for alert emails",
 			isSensitive: true,
 		},
 		"alerts.smtp_from": {
-			value:       a.Config.Alerts.SMTPFrom,
+			value:       "",
 			valueType:   "string",
 			description: "From address for alert emails",
 			isSensitive: false,
 		},
 		"alerts.smtp_reply_to": {
-			value:       a.Config.Alerts.SMTPReplyTo,
+			value:       "",
 			valueType:   "string",
 			description: "Reply-to address for alert emails",
 			isSensitive: false,
 		},
 		"alerts.smtp_security": {
-			value:       a.Config.Alerts.SMTPSecurity,
+			value:       "starttls",
 			valueType:   "string",
 			description: "SMTP security mode (none, starttls, tls)",
 			isSensitive: false,
 		},
 		"alerts.external_url": {
-			value:       a.Config.Alerts.ExternalURL,
+			value:       "",
 			valueType:   "string",
 			description: "External URL for backend API access",
 			isSensitive: false,
 		},
 		"alerts.frontend_url": {
-			value:       a.Config.Alerts.FrontendURL,
+			value:       "",
 			valueType:   "string",
 			description: "Frontend URL for generating alert links in notifications",
 			isSensitive: false,
 		},
 		"alerts.request_timeout": {
-			value:       a.Config.Alerts.RequestTimeout.String(),
+			value:       "5s",
 			valueType:   "duration",
 			description: "Timeout for alert notification requests",
 			isSensitive: false,
 		},
 		"alerts.tls_insecure_skip_verify": {
-			value:       fmt.Sprintf("%t", a.Config.Alerts.TLSInsecureSkipVerify),
+			value:       "false",
 			valueType:   "boolean",
 			description: "Skip TLS certificate verification for alert notifications",
 			isSensitive: false,
