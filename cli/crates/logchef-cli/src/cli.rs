@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use crate::commands::{auth, config, query};
@@ -82,7 +82,9 @@ impl Cli {
             Some(Commands::Query(args)) => query::run(args, global).await,
             Some(Commands::Config(args)) => config::run(args).await,
             None => {
-                println!("LogChef CLI - use --help for available commands");
+                let mut cmd = Cli::command();
+                cmd.print_help()?;
+                println!();
                 Ok(())
             }
         }

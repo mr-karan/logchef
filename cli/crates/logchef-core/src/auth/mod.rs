@@ -8,7 +8,8 @@ use std::time::Duration;
 use tracing::{debug, info};
 use url::Url;
 
-const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
+const CALLBACK_TIMEOUT: Duration = Duration::from_secs(600);
+const AUTH_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct AuthFlow {
     server_url: String,
@@ -46,8 +47,8 @@ impl AuthFlow {
         let redirect_url = format!("http://127.0.0.1:{}/callback", port);
         debug!(redirect_url = %redirect_url, "Callback server listening");
 
-        let (pkce_verifier, pkce_challenge) = generate_pkce();
-        let state = generate_state();
+        let (pkce_verifier, pkce_challenge) = generate_pkce()?;
+        let state = generate_state()?;
 
         let oidc_config = self.discover_oidc_config().await?;
 
@@ -74,14 +75,21 @@ impl AuthFlow {
         let expected_state = state.clone();
 
         std::thread::spawn(move || {
-            listener
-                .set_nonblocking(false)
-                .expect("Cannot set blocking");
+            if let Err(e) = listener.set_nonblocking(false) {
+                debug!(error = %e, "Failed to set callback listener to blocking mode");
+            }
 
             for stream in listener.incoming() {
                 match stream {
                     Ok(mut stream) => {
-                        let mut reader = BufReader::new(stream.try_clone().unwrap());
+                        let reader = match stream.try_clone() {
+                            Ok(cloned) => cloned,
+                            Err(e) => {
+                                debug!(error = %e, "Failed to clone callback stream");
+                                continue;
+                            }
+                        };
+                        let mut reader = BufReader::new(reader);
                         let mut request_line = String::new();
                         if reader.read_line(&mut request_line).is_err() {
                             continue;
@@ -189,7 +197,10 @@ impl AuthFlow {
 
         debug!(url = %discovery_url, "Discovering OIDC configuration");
 
-        let response = reqwest::get(&discovery_url)
+        let client = build_http_client()?;
+        let response = client
+            .get(&discovery_url)
+            .send()
             .await
             .map_err(|e| Error::oauth(format!("Failed to fetch OIDC configuration: {}", e)))?;
 
@@ -213,7 +224,7 @@ impl AuthFlow {
         redirect_uri: &str,
         pkce_verifier: &str,
     ) -> Result<HashMap<String, serde_json::Value>> {
-        let client = reqwest::Client::new();
+        let client = build_http_client()?;
 
         let params = [
             ("grant_type", "authorization_code"),
@@ -248,25 +259,34 @@ struct OidcConfig {
     token_endpoint: String,
 }
 
-fn generate_pkce() -> (String, String) {
+fn build_http_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(AUTH_HTTP_TIMEOUT)
+        .build()
+        .map_err(|e| Error::oauth(format!("Failed to create HTTP client: {}", e)))
+}
+
+fn generate_pkce() -> Result<(String, String)> {
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     use sha2::{Digest, Sha256};
 
     let mut verifier_bytes = [0u8; 32];
-    getrandom::getrandom(&mut verifier_bytes).expect("Failed to generate random bytes");
+    getrandom::getrandom(&mut verifier_bytes)
+        .map_err(|e| Error::auth(format!("Failed to generate random bytes: {}", e)))?;
     let verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
 
     let mut hasher = Sha256::new();
     hasher.update(verifier.as_bytes());
     let challenge = URL_SAFE_NO_PAD.encode(hasher.finalize());
 
-    (verifier, challenge)
+    Ok((verifier, challenge))
 }
 
-fn generate_state() -> String {
+fn generate_state() -> Result<String> {
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 
     let mut state_bytes = [0u8; 16];
-    getrandom::getrandom(&mut state_bytes).expect("Failed to generate random bytes");
-    URL_SAFE_NO_PAD.encode(state_bytes)
+    getrandom::getrandom(&mut state_bytes)
+        .map_err(|e| Error::auth(format!("Failed to generate random bytes: {}", e)))?;
+    Ok(URL_SAFE_NO_PAD.encode(state_bytes))
 }
