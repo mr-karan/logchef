@@ -273,8 +273,11 @@ path = "/data/logchef.db"
 
 [oidc]
 provider_url = "https://dex.example.com"
+auth_url = "https://dex.example.com/auth"
+token_url = "https://dex.example.com/token"
 client_id = "logchef"
 client_secret = "your-secure-secret"
+cli_client_id = "logchef-cli"
 redirect_url = "https://logchef.example.com/api/v1/auth/callback"
 scopes = ["openid", "email", "profile"]
 
@@ -282,8 +285,6 @@ scopes = ["openid", "email", "profile"]
 admin_emails = ["admin@example.com"]
 api_token_secret = "your-secret-key-minimum-32-characters-long"
 
-[logging]
-level = "info"
 ```
 
 **After deployment:**
@@ -295,4 +296,7 @@ level = "info"
    - **Authentication** tab: Set session duration and limits
    - **Server** tab: Set frontend URL if needed
 
-See [config.sample.toml](https://github.com/mr-karan/logchef/blob/main/config.sample.toml) for a complete minimal configuration example.
+If your frontend is served from a different origin before first login, set
+`LOGCHEF_SERVER__FRONTEND_URL` in the environment to ensure auth redirects return to the UI.
+
+See [`config.toml`](https://github.com/mr-karan/logchef/blob/main/config.toml) for a fully commented configuration example.

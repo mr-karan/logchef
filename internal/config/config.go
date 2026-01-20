@@ -102,7 +102,32 @@ type AlertsConfig struct {
 	HistoryLimit       int           `koanf:"history_limit"`
 }
 
-const envPrefix = "LOGCHEF_"
+const (
+	envPrefix = "LOGCHEF_"
+
+	defaultServerPort        = 8125
+	defaultServerHost        = "0.0.0.0"
+	defaultHTTPServerTimeout = 30 * time.Second
+	defaultSQLitePath        = "local.db"
+	defaultLoggingLevel      = "info"
+
+	defaultAlertsEnabled            = true
+	defaultAlertsEvaluationInterval = time.Minute
+	defaultAlertsDefaultLookback    = 5 * time.Minute
+	defaultAlertsHistoryLimit       = 50
+
+	defaultAIEnabled     = true
+	defaultAIBaseURL     = "https://api.openai.com/v1"
+	defaultAIModel       = "gpt-4o"
+	defaultAIMaxTokens   = 1024
+	defaultAITemperature = 0.1
+
+	defaultAuthSessionDuration       = 8 * time.Hour
+	defaultAuthMaxConcurrentSessions = 1
+	defaultAuthDefaultTokenExpiry    = 2160 * time.Hour
+)
+
+var defaultOIDCScopes = []string{"openid", "email", "profile"}
 
 // Load loads the configuration from a file and environment variables.
 // Environment variables with the prefix LOGCHEF_ can override file values.
@@ -137,6 +162,7 @@ func Load(path string) (*Config, error) {
 		log.Printf("error unmarshaling config: %v", err)
 		return nil, err
 	}
+	applyDefaults(k, &cfg)
 
 	// Validate required configurations
 	if len(cfg.Auth.AdminEmails) == 0 {
@@ -169,4 +195,64 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+func applyDefaults(k *koanf.Koanf, cfg *Config) {
+	if !k.Exists("server.port") {
+		cfg.Server.Port = defaultServerPort
+	}
+	if !k.Exists("server.host") {
+		cfg.Server.Host = defaultServerHost
+	}
+	if !k.Exists("server.http_server_timeout") {
+		cfg.Server.HTTPServerTimeout = defaultHTTPServerTimeout
+	}
+	if !k.Exists("sqlite.path") {
+		cfg.SQLite.Path = defaultSQLitePath
+	}
+	if !k.Exists("logging.level") {
+		cfg.Logging.Level = defaultLoggingLevel
+	}
+	if !k.Exists("oidc.scopes") {
+		cfg.OIDC.Scopes = append([]string(nil), defaultOIDCScopes...)
+	}
+
+	if !k.Exists("alerts.enabled") {
+		cfg.Alerts.Enabled = defaultAlertsEnabled
+	}
+	if !k.Exists("alerts.evaluation_interval") {
+		cfg.Alerts.EvaluationInterval = defaultAlertsEvaluationInterval
+	}
+	if !k.Exists("alerts.default_lookback") {
+		cfg.Alerts.DefaultLookback = defaultAlertsDefaultLookback
+	}
+	if !k.Exists("alerts.history_limit") {
+		cfg.Alerts.HistoryLimit = defaultAlertsHistoryLimit
+	}
+
+	if !k.Exists("ai.enabled") {
+		cfg.AI.Enabled = defaultAIEnabled
+	}
+	if !k.Exists("ai.base_url") {
+		cfg.AI.BaseURL = defaultAIBaseURL
+	}
+	if !k.Exists("ai.model") {
+		cfg.AI.Model = defaultAIModel
+	}
+	if !k.Exists("ai.max_tokens") {
+		cfg.AI.MaxTokens = defaultAIMaxTokens
+	}
+	if !k.Exists("ai.temperature") {
+		cfg.AI.Temperature = defaultAITemperature
+	}
+
+	if !k.Exists("auth.session_duration") {
+		cfg.Auth.SessionDuration = defaultAuthSessionDuration
+	}
+	if !k.Exists("auth.max_concurrent_sessions") {
+		cfg.Auth.MaxConcurrentSessions = defaultAuthMaxConcurrentSessions
+	}
+	if !k.Exists("auth.default_token_expiry") {
+		cfg.Auth.DefaultTokenExpiry = defaultAuthDefaultTokenExpiry
+	}
 }

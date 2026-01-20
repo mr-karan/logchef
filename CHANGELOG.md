@@ -47,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 - Legacy Go CLI (`cmd/logchef/`, `internal/cli/`) — replaced by Rust CLI.
+- `config.sample.toml` — superseded by the fully commented `config.toml`.
 
 ## [1.1.0] - 2025-12-29
 
