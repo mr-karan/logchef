@@ -72,7 +72,11 @@ impl Cache {
         if self.is_expired() {
             return None;
         }
-        self.data.teams.get(name).map(|t| t.id)
+        self.data
+            .teams
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, t)| t.id)
     }
 
     pub fn get_source_id(&self, team_id: i64, source_name: &str) -> Option<i64> {
@@ -83,7 +87,12 @@ impl Cache {
             .teams
             .values()
             .find(|t| t.id == team_id)
-            .and_then(|t| t.sources.get(source_name).copied())
+            .and_then(|t| {
+                t.sources
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case(source_name))
+                    .map(|(_, id)| *id)
+            })
     }
 
     pub fn set_teams(&mut self, teams: &[(String, i64)]) {
