@@ -1,11 +1,11 @@
 package server
 
 import (
-	"encoding/base64"
+	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -225,183 +225,251 @@ func (s *Server) validateSettingValue(value, valueType string) error {
 
 // validateSpecificSetting performs additional validation for specific settings.
 func (s *Server) validateSpecificSetting(key, value string) error {
-	switch key {
-	case "alerts.alertmanager_url", "alerts.external_url", "alerts.frontend_url", "server.frontend_url", "ai.base_url":
-		if value != "" {
-			parsedURL, err := url.Parse(value)
-			if err != nil {
-				return fmt.Errorf("invalid URL format")
-			}
-			if parsedURL.Scheme != "" && parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-				return fmt.Errorf("URL must use http or https scheme")
-			}
-		}
-	case "alerts.history_limit", "auth.max_concurrent_sessions", "ai.max_tokens":
-		intVal, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("must be a valid integer")
-		}
-		if intVal <= 0 {
-			return fmt.Errorf("must be greater than 0")
-		}
-	case "ai.temperature":
-		floatVal, err := strconv.ParseFloat(value, 64)
-		if err != nil {
-			return fmt.Errorf("must be a valid number")
-		}
-		if floatVal < 0.0 || floatVal > 1.0 {
-			return fmt.Errorf("must be between 0.0 and 1.0")
-		}
+	validator, ok := specificSettingValidators[key]
+	if !ok {
+		return nil
+	}
+	return validator(value)
+}
+
+var specificSettingValidators = map[string]func(string) error{
+	"alerts.external_url":          validateOptionalURL,
+	"alerts.frontend_url":          validateOptionalURL,
+	"server.frontend_url":          validateOptionalURL,
+	"ai.base_url":                  validateOptionalURL,
+	"alerts.smtp_port":             validateNonNegativeInt,
+	"alerts.history_limit":         validatePositiveInt,
+	"auth.max_concurrent_sessions": validatePositiveInt,
+	"ai.max_tokens":                validatePositiveInt,
+	"alerts.smtp_security":         validateSMTPSecurity,
+	"alerts.smtp_from":             validateEmailAddress,
+	"alerts.smtp_reply_to":         validateEmailAddress,
+	"ai.temperature":               validateTemperature,
+}
+
+func validateOptionalURL(value string) error {
+	if value == "" {
+		return nil
+	}
+	parsedURL, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("invalid URL format")
+	}
+	if parsedURL.Scheme != "" && parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("URL must use http or https scheme")
 	}
 	return nil
 }
 
-// TestAlertmanagerRequest represents a request to test Alertmanager connection.
-type TestAlertmanagerRequest struct {
-	URL                   string `json:"url"`
-	TLSInsecureSkipVerify bool   `json:"tls_insecure_skip_verify"`
-	Timeout               string `json:"timeout,omitempty"` // Duration string (e.g., "5s")
+func validateNonNegativeInt(value string) error {
+	intVal, err := strconv.Atoi(value)
+	if err != nil {
+		return fmt.Errorf("must be a valid integer")
+	}
+	if intVal < 0 {
+		return fmt.Errorf("must be 0 or greater")
+	}
+	return nil
 }
 
-// handleTestAlertmanagerConnection tests connectivity to an Alertmanager instance.
-// POST /api/v1/admin/settings/test-alertmanager
-func (s *Server) handleTestAlertmanagerConnection(c *fiber.Ctx) error {
-	var req TestAlertmanagerRequest
-	if err := c.BodyParser(&req); err != nil {
-		return SendError(c, fiber.StatusBadRequest, "invalid request body")
-	}
-
-	if req.URL == "" {
-		return SendError(c, fiber.StatusBadRequest, "alertmanager URL is required")
-	}
-
-	// Validate URL format
-	parsedURL, err := url.Parse(req.URL)
+func validatePositiveInt(value string) error {
+	intVal, err := strconv.Atoi(value)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("invalid URL format: %v", err))
+		return fmt.Errorf("must be a valid integer")
+	}
+	if intVal <= 0 {
+		return fmt.Errorf("must be greater than 0")
+	}
+	return nil
+}
+
+func validateSMTPSecurity(value string) error {
+	if value == "" {
+		return nil
+	}
+	security := strings.ToLower(value)
+	if security != "none" && security != "starttls" && security != "tls" {
+		return fmt.Errorf("smtp_security must be none, starttls, or tls")
+	}
+	return nil
+}
+
+func validateEmailAddress(value string) error {
+	if value != "" && !strings.Contains(value, "@") {
+		return fmt.Errorf("must be a valid email address")
+	}
+	return nil
+}
+
+func validateTemperature(value string) error {
+	floatVal, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fmt.Errorf("must be a valid number")
+	}
+	if floatVal < 0.0 || floatVal > 1.0 {
+		return fmt.Errorf("must be between 0.0 and 1.0")
+	}
+	return nil
+}
+
+// TestEmailRequest represents a request to send a test email.
+type TestEmailRequest struct {
+	RecipientEmail string `json:"recipient_email"`
+}
+
+// TestWebhookRequest represents a request to send a test webhook.
+type TestWebhookRequest struct {
+	WebhookURL string `json:"webhook_url"`
+}
+
+func (s *Server) loadSMTPConfig(ctx context.Context) alerts.EmailSenderOptions {
+	return alerts.EmailSenderOptions{
+		Host:          s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_host", ""),
+		Port:          s.sqlite.GetIntSetting(ctx, "alerts.smtp_port", 587),
+		Username:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_username", ""),
+		Password:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_password", ""),
+		From:          s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_from", ""),
+		ReplyTo:       s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_reply_to", ""),
+		Security:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_security", "starttls"),
+		Timeout:       s.sqlite.GetDurationSetting(ctx, "alerts.request_timeout", 5*time.Second),
+		SkipTLSVerify: s.sqlite.GetBoolSetting(ctx, "alerts.tls_insecure_skip_verify", false),
+		Logger:        s.log,
+	}
+}
+
+// handleTestEmail sends a test email to verify SMTP configuration.
+// POST /api/v1/admin/settings/test-email
+func (s *Server) handleTestEmail(c *fiber.Ctx) error {
+	// Get current user for default recipient and audit log
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil {
+		s.log.Error("user not found in context despite requireAuth middleware")
+		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
+	}
+
+	var req TestEmailRequest
+	if err := c.BodyParser(&req); err != nil {
+		// Allow empty body - will use current user's email
+		req = TestEmailRequest{}
+	}
+
+	// Default to current user's email if not provided
+	recipientEmail := strings.TrimSpace(req.RecipientEmail)
+	if recipientEmail == "" {
+		recipientEmail = user.Email
+	}
+
+	// Validate email format
+	if !strings.Contains(recipientEmail, "@") {
+		return SendError(c, fiber.StatusBadRequest, "Invalid recipient email address")
+	}
+
+	// Load SMTP config from DB
+	smtpConfig := s.loadSMTPConfig(c.Context())
+
+	// Validate SMTP is configured
+	if smtpConfig.Host == "" || smtpConfig.Port == 0 || smtpConfig.From == "" {
+		return SendError(c, fiber.StatusBadRequest, "SMTP is not configured. Please configure smtp_host, smtp_port, and smtp_from in settings.")
+	}
+
+	// Create email sender
+	sender := alerts.NewEmailSender(smtpConfig)
+
+	// Build test notification
+	notification := alerts.AlertNotification{
+		AlertName:       "Test Alert",
+		Description:     "This is a test notification to verify your SMTP configuration.",
+		Status:          models.AlertStatusTriggered,
+		Severity:        models.AlertSeverityInfo,
+		TeamName:        "Test Team",
+		SourceName:      "Test Source",
+		Value:           1.0,
+		ThresholdOp:     models.AlertThresholdGreaterThan,
+		ThresholdValue:  0.0,
+		FrequencySecs:   60,
+		LookbackSecs:    300,
+		Query:           "SELECT 1",
+		TriggeredAt:     time.Now(),
+		Message:         "Test notification - please ignore",
+		RecipientEmails: []string{recipientEmail},
+	}
+
+	// Send test email
+	if err := sender.Send(c.Context(), notification); err != nil {
+		s.log.Error("failed to send test email", "error", err, "recipient", recipientEmail, "user", user.Email)
+		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Failed to send test email: %v", err))
+	}
+
+	s.log.Info("test email sent successfully", "recipient", recipientEmail, "user", user.Email)
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{
+		"message":   "Test email sent successfully",
+		"recipient": recipientEmail,
+	})
+}
+
+// handleTestWebhook sends a test webhook to verify webhook configuration.
+// POST /api/v1/admin/settings/test-webhook
+func (s *Server) handleTestWebhook(c *fiber.Ctx) error {
+	// Get current user for audit log
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil {
+		s.log.Error("user not found in context despite requireAuth middleware")
+		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
+	}
+
+	var req TestWebhookRequest
+	if err := c.BodyParser(&req); err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	webhookURL := strings.TrimSpace(req.WebhookURL)
+	if webhookURL == "" {
+		return SendError(c, fiber.StatusBadRequest, "Webhook URL is required")
+	}
+
+	// Validate webhook URL format
+	parsedURL, err := url.Parse(webhookURL)
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid webhook URL format")
 	}
 	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return SendError(c, fiber.StatusBadRequest, "URL must use http or https scheme")
+		return SendError(c, fiber.StatusBadRequest, "Webhook URL must use http or https scheme")
 	}
 
-	// Parse timeout
-	timeout := 5 * time.Second
-	if req.Timeout != "" {
-		parsedTimeout, err := time.ParseDuration(req.Timeout)
-		if err != nil {
-			return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("invalid timeout format: %v", err))
-		}
-		timeout = parsedTimeout
-	}
-
-	// Create a temporary Alertmanager client for testing
-	client, err := alerts.NewAlertmanagerClient(alerts.ClientOptions{
-		BaseURL:       req.URL,
-		Timeout:       timeout,
-		SkipTLSVerify: req.TLSInsecureSkipVerify,
+	sender := alerts.NewWebhookSender(alerts.WebhookSenderOptions{
+		Timeout:       s.sqlite.GetDurationSetting(c.Context(), "alerts.request_timeout", 5*time.Second),
+		SkipTLSVerify: s.sqlite.GetBoolSetting(c.Context(), "alerts.tls_insecure_skip_verify", false),
 		Logger:        s.log,
 	})
-	if err != nil {
-		s.log.Error("failed to create alertmanager client for testing", "error", err, "url", req.URL)
-		return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("failed to create alertmanager client: %v", err))
+
+	// Build test notification
+	notification := alerts.AlertNotification{
+		AlertName:      "Test Alert",
+		Description:    "This is a test notification to verify your webhook configuration.",
+		Status:         models.AlertStatusTriggered,
+		Severity:       models.AlertSeverityInfo,
+		TeamName:       "Test Team",
+		SourceName:     "Test Source",
+		Value:          1.0,
+		ThresholdOp:    models.AlertThresholdGreaterThan,
+		ThresholdValue: 0.0,
+		FrequencySecs:  60,
+		LookbackSecs:   300,
+		Query:          "SELECT 1",
+		TriggeredAt:    time.Now(),
+		Message:        "Test notification - please ignore",
+		WebhookURLs:    []string{webhookURL},
 	}
 
-	// Perform health check
-	if err := client.HealthCheck(c.Context()); err != nil {
-		s.log.Warn("alertmanager health check failed", "error", err, "url", req.URL)
-		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Alertmanager health check failed: %v", err))
+	// Send test webhook
+	if err := sender.Send(c.Context(), notification); err != nil {
+		s.log.Error("failed to send test webhook", "error", err, "url", webhookURL, "user", user.Email)
+		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Failed to send test webhook: %v", err))
 	}
 
-	s.log.Info("alertmanager health check successful", "url", req.URL)
+	s.log.Info("test webhook sent successfully", "url", webhookURL, "user", user.Email)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{
-		"message": "Successfully connected to Alertmanager",
-		"url":     req.URL,
+		"message": "Test webhook sent successfully",
+		"url":     webhookURL,
 	})
-}
-
-// GetAlertmanagerRoutingRequest contains the optional parameters for fetching routing config.
-type GetAlertmanagerRoutingRequest struct {
-	URL                   string `json:"url,omitempty"`      // Optional: override the configured URL
-	TLSInsecureSkipVerify bool   `json:"tls_skip_verify"`    // Skip TLS verification
-	Timeout               string `json:"timeout,omitempty"`  // Duration string (e.g., "5s")
-	Username              string `json:"username,omitempty"` // Basic auth username
-	Password              string `json:"password,omitempty"` // Basic auth password
-}
-
-// handleGetAlertmanagerRouting fetches the routing configuration from Alertmanager.
-// POST /api/v1/admin/settings/alertmanager-routing
-func (s *Server) handleGetAlertmanagerRouting(c *fiber.Ctx) error {
-	var req GetAlertmanagerRoutingRequest
-	if err := c.BodyParser(&req); err != nil {
-		// Body is optional, so ignore parse errors
-		req = GetAlertmanagerRoutingRequest{}
-	}
-
-	// Use configured URL if not provided in request
-	alertmanagerURL := req.URL
-	if alertmanagerURL == "" {
-		alertmanagerURL = s.config.Alerts.AlertmanagerURL
-	}
-
-	if alertmanagerURL == "" {
-		return SendError(c, fiber.StatusBadRequest, "Alertmanager URL is not configured. Please configure it in Settings > Alerts.")
-	}
-
-	// Validate URL format
-	parsedURL, err := url.Parse(alertmanagerURL)
-	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("invalid URL format: %v", err))
-	}
-	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return SendError(c, fiber.StatusBadRequest, "URL must use http or https scheme")
-	}
-
-	// Parse timeout
-	timeout := 10 * time.Second
-	if req.Timeout != "" {
-		parsedTimeout, err := time.ParseDuration(req.Timeout)
-		if err != nil {
-			return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("invalid timeout format: %v", err))
-		}
-		timeout = parsedTimeout
-	}
-
-	// Set up additional headers for basic auth if provided
-	var headers http.Header
-	if req.Username != "" && req.Password != "" {
-		headers = make(http.Header)
-		headers.Set("Authorization", "Basic "+basicAuth(req.Username, req.Password))
-	}
-
-	// Use TLS skip verify from request or config
-	tlsSkipVerify := req.TLSInsecureSkipVerify || s.config.Alerts.TLSInsecureSkipVerify
-
-	// Create a temporary Alertmanager client
-	client, err := alerts.NewAlertmanagerClient(alerts.ClientOptions{
-		BaseURL:           alertmanagerURL,
-		Timeout:           timeout,
-		SkipTLSVerify:     tlsSkipVerify,
-		Logger:            s.log,
-		AdditionalHeaders: headers,
-	})
-	if err != nil {
-		s.log.Error("failed to create alertmanager client", "error", err, "url", alertmanagerURL)
-		return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("failed to create alertmanager client: %v", err))
-	}
-
-	// Fetch routing configuration
-	routingInfo, err := client.GetRoutingConfig(c.Context())
-	if err != nil {
-		s.log.Warn("failed to fetch alertmanager routing config", "error", err, "url", alertmanagerURL)
-		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Failed to fetch Alertmanager routing: %v", err))
-	}
-
-	s.log.Info("fetched alertmanager routing config", "url", alertmanagerURL, "receivers", len(routingInfo.Receivers))
-	return SendSuccess(c, fiber.StatusOK, routingInfo)
-}
-
-// basicAuth encodes credentials for HTTP Basic Authentication.
-func basicAuth(username, password string) string {
-	auth := username + ":" + password
-	return base64.StdEncoding.EncodeToString([]byte(auth))
 }

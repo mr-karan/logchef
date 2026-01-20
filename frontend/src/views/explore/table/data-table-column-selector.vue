@@ -8,6 +8,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Columns3 } from 'lucide-vue-next'
 import { computed } from 'vue'
 import type { Table } from '@tanstack/vue-table'
 
@@ -36,9 +37,10 @@ const toggleAll = (checked: boolean) => {
 <template>
   <Popover>
     <PopoverTrigger as-child>
-      <Button variant="outline" size="sm" class="w-[150px]">
-        <span class="mr-2">Columns</span>
-        <span class="text-xs text-muted-foreground">({{ visibleColumns.length }})</span>
+      <Button variant="outline" size="sm" class="h-8 px-2 lg:w-[130px]" title="Select columns">
+        <Columns3 class="h-4 w-4" />
+        <span class="hidden lg:inline ml-1.5">Columns</span>
+        <span class="text-xs text-muted-foreground ml-1">({{ visibleColumns.length }})</span>
       </Button>
     </PopoverTrigger>
     <PopoverContent class="w-80">

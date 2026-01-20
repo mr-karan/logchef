@@ -29,16 +29,12 @@ func LoadRuntimeConfig(ctx context.Context, staticConfig *Config, store Settings
 
 	// Override with database settings for runtime-configurable values
 
-	// Alerts configuration
+	// Alerts configuration (only essential scheduling settings in config struct)
+	// SMTP and delivery settings are read directly from DB by the alerts manager
 	cfg.Alerts.Enabled = store.GetBoolSetting(ctx, "alerts.enabled", cfg.Alerts.Enabled)
 	cfg.Alerts.EvaluationInterval = store.GetDurationSetting(ctx, "alerts.evaluation_interval", cfg.Alerts.EvaluationInterval)
 	cfg.Alerts.DefaultLookback = store.GetDurationSetting(ctx, "alerts.default_lookback", cfg.Alerts.DefaultLookback)
 	cfg.Alerts.HistoryLimit = store.GetIntSetting(ctx, "alerts.history_limit", cfg.Alerts.HistoryLimit)
-	cfg.Alerts.AlertmanagerURL = store.GetSettingWithDefault(ctx, "alerts.alertmanager_url", cfg.Alerts.AlertmanagerURL)
-	cfg.Alerts.ExternalURL = store.GetSettingWithDefault(ctx, "alerts.external_url", cfg.Alerts.ExternalURL)
-	cfg.Alerts.FrontendURL = store.GetSettingWithDefault(ctx, "alerts.frontend_url", cfg.Alerts.FrontendURL)
-	cfg.Alerts.RequestTimeout = store.GetDurationSetting(ctx, "alerts.request_timeout", cfg.Alerts.RequestTimeout)
-	cfg.Alerts.TLSInsecureSkipVerify = store.GetBoolSetting(ctx, "alerts.tls_insecure_skip_verify", cfg.Alerts.TLSInsecureSkipVerify)
 
 	// AI configuration
 	cfg.AI.Enabled = store.GetBoolSetting(ctx, "ai.enabled", cfg.AI.Enabled)

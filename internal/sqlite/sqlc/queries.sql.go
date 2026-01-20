@@ -119,28 +119,44 @@ INSERT INTO alerts (
     source_id,
     name,
     description,
+    query_type,
     query,
+    condition_json,
+    lookback_seconds,
     threshold_operator,
     threshold_value,
     frequency_seconds,
     severity,
+    labels_json,
+    annotations_json,
+    recipient_user_ids_json,
+    webhook_urls_json,
+    generator_url,
     is_active
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id
 `
 
 type CreateAlertParams struct {
-	TeamID            int64          `json:"team_id"`
-	SourceID          int64          `json:"source_id"`
-	Name              string         `json:"name"`
-	Description       sql.NullString `json:"description"`
-	Query             sql.NullString `json:"query"`
-	ThresholdOperator string         `json:"threshold_operator"`
-	ThresholdValue    float64        `json:"threshold_value"`
-	FrequencySeconds  int64          `json:"frequency_seconds"`
-	Severity          string         `json:"severity"`
-	IsActive          int64          `json:"is_active"`
+	TeamID               int64          `json:"team_id"`
+	SourceID             int64          `json:"source_id"`
+	Name                 string         `json:"name"`
+	Description          sql.NullString `json:"description"`
+	QueryType            string         `json:"query_type"`
+	Query                sql.NullString `json:"query"`
+	ConditionJson        sql.NullString `json:"condition_json"`
+	LookbackSeconds      int64          `json:"lookback_seconds"`
+	ThresholdOperator    string         `json:"threshold_operator"`
+	ThresholdValue       float64        `json:"threshold_value"`
+	FrequencySeconds     int64          `json:"frequency_seconds"`
+	Severity             string         `json:"severity"`
+	LabelsJson           sql.NullString `json:"labels_json"`
+	AnnotationsJson      sql.NullString `json:"annotations_json"`
+	RecipientUserIdsJson sql.NullString `json:"recipient_user_ids_json"`
+	WebhookUrlsJson      sql.NullString `json:"webhook_urls_json"`
+	GeneratorUrl         sql.NullString `json:"generator_url"`
+	IsActive             int64          `json:"is_active"`
 }
 
 // Alerts
@@ -150,11 +166,19 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (int64
 		arg.SourceID,
 		arg.Name,
 		arg.Description,
+		arg.QueryType,
 		arg.Query,
+		arg.ConditionJson,
+		arg.LookbackSeconds,
 		arg.ThresholdOperator,
 		arg.ThresholdValue,
 		arg.FrequencySeconds,
 		arg.Severity,
+		arg.LabelsJson,
+		arg.AnnotationsJson,
+		arg.RecipientUserIdsJson,
+		arg.WebhookUrlsJson,
+		arg.GeneratorUrl,
 		arg.IsActive,
 	)
 	var id int64
@@ -469,7 +493,7 @@ func (q *Queries) GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiT
 }
 
 const getAlert = `-- name: GetAlert :one
-SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at FROM alerts WHERE id = ?
+SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json FROM alerts WHERE id = ?
 `
 
 func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
@@ -498,12 +522,14 @@ func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
 		&i.LastTriggeredAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RecipientUserIdsJson,
+		&i.WebhookUrlsJson,
 	)
 	return i, err
 }
 
 const getAlertForTeamSource = `-- name: GetAlertForTeamSource :one
-SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at FROM alerts WHERE id = ? AND team_id = ? AND source_id = ?
+SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json FROM alerts WHERE id = ? AND team_id = ? AND source_id = ?
 `
 
 type GetAlertForTeamSourceParams struct {
@@ -538,6 +564,8 @@ func (q *Queries) GetAlertForTeamSource(ctx context.Context, arg GetAlertForTeam
 		&i.LastTriggeredAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RecipientUserIdsJson,
+		&i.WebhookUrlsJson,
 	)
 	return i, err
 }
@@ -889,7 +917,7 @@ func (q *Queries) ListAPITokensForUser(ctx context.Context, userID int64) ([]Api
 }
 
 const listActiveAlertsDue = `-- name: ListActiveAlertsDue :many
-SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at FROM alerts
+SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json FROM alerts
 WHERE is_active = 1
   AND (
         last_evaluated_at IS NULL
@@ -929,6 +957,8 @@ func (q *Queries) ListActiveAlertsDue(ctx context.Context) ([]Alert, error) {
 			&i.LastTriggeredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RecipientUserIdsJson,
+			&i.WebhookUrlsJson,
 		); err != nil {
 			return nil, err
 		}
@@ -989,7 +1019,7 @@ func (q *Queries) ListAlertHistory(ctx context.Context, arg ListAlertHistoryPara
 }
 
 const listAlertsByTeamAndSource = `-- name: ListAlertsByTeamAndSource :many
-SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at FROM alerts
+SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json FROM alerts
 WHERE team_id = ? AND source_id = ?
 ORDER BY created_at DESC
 `
@@ -1031,6 +1061,8 @@ func (q *Queries) ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsB
 			&i.LastTriggeredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RecipientUserIdsJson,
+			&i.WebhookUrlsJson,
 		); err != nil {
 			return nil, err
 		}
@@ -1779,37 +1811,61 @@ const updateAlert = `-- name: UpdateAlert :exec
 UPDATE alerts
 SET name = ?,
     description = ?,
+    query_type = ?,
     query = ?,
+    condition_json = ?,
+    lookback_seconds = ?,
     threshold_operator = ?,
     threshold_value = ?,
     frequency_seconds = ?,
     severity = ?,
+    labels_json = ?,
+    annotations_json = ?,
+    recipient_user_ids_json = ?,
+    webhook_urls_json = ?,
+    generator_url = ?,
     is_active = ?,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?
 `
 
 type UpdateAlertParams struct {
-	Name              string         `json:"name"`
-	Description       sql.NullString `json:"description"`
-	Query             sql.NullString `json:"query"`
-	ThresholdOperator string         `json:"threshold_operator"`
-	ThresholdValue    float64        `json:"threshold_value"`
-	FrequencySeconds  int64          `json:"frequency_seconds"`
-	Severity          string         `json:"severity"`
-	IsActive          int64          `json:"is_active"`
-	ID                int64          `json:"id"`
+	Name                 string         `json:"name"`
+	Description          sql.NullString `json:"description"`
+	QueryType            string         `json:"query_type"`
+	Query                sql.NullString `json:"query"`
+	ConditionJson        sql.NullString `json:"condition_json"`
+	LookbackSeconds      int64          `json:"lookback_seconds"`
+	ThresholdOperator    string         `json:"threshold_operator"`
+	ThresholdValue       float64        `json:"threshold_value"`
+	FrequencySeconds     int64          `json:"frequency_seconds"`
+	Severity             string         `json:"severity"`
+	LabelsJson           sql.NullString `json:"labels_json"`
+	AnnotationsJson      sql.NullString `json:"annotations_json"`
+	RecipientUserIdsJson sql.NullString `json:"recipient_user_ids_json"`
+	WebhookUrlsJson      sql.NullString `json:"webhook_urls_json"`
+	GeneratorUrl         sql.NullString `json:"generator_url"`
+	IsActive             int64          `json:"is_active"`
+	ID                   int64          `json:"id"`
 }
 
 func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) error {
 	_, err := q.exec(ctx, q.updateAlertStmt, updateAlert,
 		arg.Name,
 		arg.Description,
+		arg.QueryType,
 		arg.Query,
+		arg.ConditionJson,
+		arg.LookbackSeconds,
 		arg.ThresholdOperator,
 		arg.ThresholdValue,
 		arg.FrequencySeconds,
 		arg.Severity,
+		arg.LabelsJson,
+		arg.AnnotationsJson,
+		arg.RecipientUserIdsJson,
+		arg.WebhookUrlsJson,
+		arg.GeneratorUrl,
 		arg.IsActive,
 		arg.ID,
 	)

@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"log"
-	"net/url"
 	"strings"
 	"time"
 
@@ -59,6 +58,8 @@ type OIDCConfig struct {
 	ClientSecret string   `koanf:"client_secret"`
 	RedirectURL  string   `koanf:"redirect_url"`
 	Scopes       []string `koanf:"scopes"`
+
+	CLIClientID string `koanf:"cli_client_id"`
 }
 
 // AuthConfig contains authentication settings
@@ -92,17 +93,13 @@ type AIConfig struct {
 	BaseURL string `koanf:"base_url"`
 }
 
-// AlertsConfig controls scheduling behaviour for alert rules and delivery via Alertmanager.
+// AlertsConfig controls scheduling behaviour for alert rules.
+// SMTP and other delivery settings are stored in the database and managed via Admin UI.
 type AlertsConfig struct {
-	Enabled               bool          `koanf:"enabled"`
-	EvaluationInterval    time.Duration `koanf:"evaluation_interval"`
-	DefaultLookback       time.Duration `koanf:"default_lookback"`
-	HistoryLimit          int           `koanf:"history_limit"`
-	AlertmanagerURL       string        `koanf:"alertmanager_url"`
-	ExternalURL           string        `koanf:"external_url"` // Backend URL (for API access)
-	FrontendURL           string        `koanf:"frontend_url"` // Frontend URL (for web UI links)
-	RequestTimeout        time.Duration `koanf:"request_timeout"`
-	TLSInsecureSkipVerify bool          `koanf:"tls_insecure_skip_verify"`
+	Enabled            bool          `koanf:"enabled"`
+	EvaluationInterval time.Duration `koanf:"evaluation_interval"`
+	DefaultLookback    time.Duration `koanf:"default_lookback"`
+	HistoryLimit       int           `koanf:"history_limit"`
 }
 
 const envPrefix = "LOGCHEF_"
@@ -169,24 +166,6 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.OIDC.RedirectURL == "" {
 		return nil, fmt.Errorf("redirect_url is required in OIDC configuration (either in file or %sOIDC__REDIRECT_URL)", envPrefix)
-	}
-
-	// Non-essential configuration fields (alerts, AI, auth sessions) are optional in config.toml.
-	// They will be seeded from config.toml to the database on first boot, and can be managed via UI afterwards.
-	// If not specified in config.toml, database migration defaults will be used.
-
-	// Validate Alertmanager URL if provided
-	if cfg.Alerts.AlertmanagerURL != "" {
-		parsedURL, err := url.Parse(cfg.Alerts.AlertmanagerURL)
-		if err != nil {
-			return nil, fmt.Errorf("invalid alertmanager_url: %w", err)
-		}
-		if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-			return nil, fmt.Errorf("alertmanager_url must use http or https scheme, got: %s", parsedURL.Scheme)
-		}
-		if parsedURL.Host == "" {
-			return nil, fmt.Errorf("alertmanager_url must include a host")
-		}
 	}
 
 	return &cfg, nil

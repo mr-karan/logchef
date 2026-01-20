@@ -1,0 +1,30 @@
+# Rust build artifacts
+/target/
+**/target/
+
+# Cargo.lock is committed for binaries, but ignore for libraries
+# Since this is a binary project, we keep Cargo.lock
+
+# IDE/Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Debug files
+*.pdb
+
+# Profiling
+*.profraw
+*.profdata
+
+# Documentation build
+/doc/
+
+# Benchmarks
+/criterion/

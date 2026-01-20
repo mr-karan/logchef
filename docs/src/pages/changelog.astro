@@ -91,6 +91,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
+          <li><strong>Rust CLI</strong> — New cross-platform CLI for LogChef with <code>auth</code>, <code>query</code>, and <code>config</code> commands.</li>
+          <li>Multi-context support for managing dev, staging, and prod instances</li>
+          <li><strong>CLI output controls</strong> — Use <code>--no-timestamp</code> to hide timestamps in text output</li>
+          <li><strong>Alerts via SMTP and webhooks</strong> — Deliver notifications directly without Alertmanager</li>
           <li><strong>Multi-Select Variables</strong> — Select multiple values that expand to <code>IN (...)</code> clauses. Perfect for filtering by multiple hosts, services, or error codes.</li>
           <li><strong>Optional SQL Clauses</strong> — Wrap clauses in <code>[[ ... ]]</code> to auto-remove them when the variable is empty. No more "WHERE 1=1" hacks.</li>
           <li><strong>Variable Widgets</strong> — Configure variables as text inputs, dropdowns, or multi-selects with default values.</li>
@@ -106,10 +110,21 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
+          <li><strong>SQLite concurrency fix</strong> — Dual-connection pattern prevents <code>SQLITE_BUSY</code> errors under load</li>
           <li>Relative time range now refreshes before each query execution</li>
           <li>Variable date display uses consistent YYYY-MM-DD format</li>
           <li>Collections race condition on initial load</li>
           <li>Scroll bar issues in explorer view</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type removed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M4 7h16M9 7V5h6v2M6 7l1 12h10l1-12"/></svg>
+          Removed
+        </div>
+        <ul class="change-list">
+          <li>Legacy Go CLI removed in favor of the Rust CLI</li>
         </ul>
       </div>
 
@@ -229,7 +244,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Alerting</strong> — Create SQL-based alerts with Alertmanager integration. Route to Slack, PagerDuty, or email.</li>
+          <li><strong>Alerting</strong> — Create SQL-based alerts with native email and webhooks. Route to Slack, PagerDuty, or email.</li>
           <li><strong>Admin Settings</strong> — Configure AI, authentication, and alerts from the web UI</li>
           <li>Duplicate sources for quick setup</li>
           <li>Keyboard navigation in dropdowns</li>

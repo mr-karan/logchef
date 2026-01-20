@@ -99,6 +99,16 @@ func (p *OIDCProvider) GetAuthURL(state string) string {
 	return p.oauthConf.AuthCodeURL(state)
 }
 
+// VerifyIDToken verifies an ID token string and returns the parsed token.
+func (p *OIDCProvider) VerifyIDToken(ctx context.Context, rawIDToken string) (*oidc.IDToken, error) {
+	return p.verifier.Verify(ctx, rawIDToken)
+}
+
+// GetIssuer returns the OIDC issuer URL.
+func (p *OIDCProvider) GetIssuer() string {
+	return p.oidcCfg.ProviderURL
+}
+
 // HandleCallback processes the OIDC callback, exchanges the code for tokens,
 // verifies the ID token, looks up or potentially creates the user in the local database,
 // and creates a local application session.

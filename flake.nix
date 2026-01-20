@@ -22,6 +22,11 @@
             pkgs.gopls
             pkgs.golangci-lint
             pkgs.sqlc
+            pkgs.rustc
+            pkgs.cargo
+            pkgs.rustfmt
+            pkgs.clippy
+            pkgs.rust-analyzer
             nodejs
             pnpm
             pkgs.just

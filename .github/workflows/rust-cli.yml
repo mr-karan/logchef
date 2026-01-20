@@ -1,0 +1,46 @@
+name: LogChef CLI
+
+on:
+  push:
+    paths:
+      - "cli/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/rust-cli.yml"
+  pull_request:
+    paths:
+      - "cli/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/rust-cli.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            cli
+
+      - name: Format
+        run: cargo fmt --check
+        working-directory: cli
+
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+        working-directory: cli
+
+      - name: Test
+        run: cargo test
+        working-directory: cli

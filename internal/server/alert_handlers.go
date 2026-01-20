@@ -133,7 +133,7 @@ func (s *Server) handleResolveAlert(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Use the alerts manager to resolve, which also notifies Alertmanager
+	// Use the alerts manager to resolve, which also delivers notifications
 	if s.alertsManager != nil {
 		if err := s.alertsManager.ManualResolve(c.Context(), alertID, strings.TrimSpace(req.Message)); err != nil {
 			if strings.Contains(err.Error(), "no active alert") {
