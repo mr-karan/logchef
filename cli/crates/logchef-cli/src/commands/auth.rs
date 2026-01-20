@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use clap::Args;
+use logchef_core::Config;
 use logchef_core::api::Client;
 use logchef_core::auth::AuthFlow;
-use logchef_core::config::{context_name_from_url, Context as CtxConfig};
-use logchef_core::Config;
+use logchef_core::config::{Context as CtxConfig, context_name_from_url};
 use std::io::{self, Write};
 
 use crate::cli::GlobalArgs;
@@ -33,7 +33,7 @@ pub async fn run(args: AuthArgs, global: GlobalArgs) -> Result<()> {
 
 fn logout(config: &mut Config, global: &GlobalArgs) -> Result<()> {
     let ctx_name = resolve_context_name(config, global)?;
-    
+
     if let Some(ctx) = config.get_context_mut(&ctx_name) {
         ctx.token = None;
         ctx.token_expires_at = None;
@@ -42,7 +42,7 @@ fn logout(config: &mut Config, global: &GlobalArgs) -> Result<()> {
     } else {
         println!("Context '{}' not found.", ctx_name);
     }
-    
+
     Ok(())
 }
 
@@ -120,7 +120,11 @@ async fn login(config: &mut Config, global: GlobalArgs) -> Result<()> {
     let ctx_name = global
         .context
         .clone()
-        .or_else(|| config.find_context_by_url(&server_url).map(|(n, _)| n.to_string()))
+        .or_else(|| {
+            config
+                .find_context_by_url(&server_url)
+                .map(|(n, _)| n.to_string())
+        })
         .unwrap_or_else(|| context_name_from_url(&server_url));
 
     let ctx = CtxConfig {

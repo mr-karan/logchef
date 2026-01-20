@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
 use clap::Args;
-use logchef_core::api::{Client, QueryRequest};
-use logchef_core::highlight::{format_log_entry_with_options, FormatOptions, HighlightOptions, Highlighter};
 use logchef_core::Config;
+use logchef_core::api::{Client, QueryRequest};
+use logchef_core::highlight::{
+    FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
+};
 
 use crate::cli::GlobalArgs;
 
@@ -60,11 +62,12 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
     let config = Config::load().context("Failed to load config")?;
 
     let resolved = resolve_context(&config, &global)?;
-    
-    let (ctx, ctx_name, is_ephemeral): (&logchef_core::config::Context, String, bool) = match &resolved {
-        ResolvedContext::Saved(ctx, name) => (*ctx, name.clone(), false),
-        ResolvedContext::Ephemeral(ctx) => (ctx, "(ephemeral)".to_string(), true),
-    };
+
+    let (ctx, ctx_name, is_ephemeral): (&logchef_core::config::Context, String, bool) =
+        match &resolved {
+            ResolvedContext::Saved(ctx, name) => (*ctx, name.clone(), false),
+            ResolvedContext::Ephemeral(ctx) => (ctx, "(ephemeral)".to_string(), true),
+        };
 
     let client = if let Some(token) = &global.token {
         Client::from_context(ctx)?.with_token(token.clone())
@@ -92,10 +95,9 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
         .or(ctx.defaults.team.clone())
         .ok_or_else(|| anyhow::anyhow!("Team not specified. Use --team or set defaults.team"))?;
 
-    let source_name = args
-        .source
-        .or(ctx.defaults.source.clone())
-        .ok_or_else(|| anyhow::anyhow!("Source not specified. Use --source or set defaults.source"))?;
+    let source_name = args.source.or(ctx.defaults.source.clone()).ok_or_else(|| {
+        anyhow::anyhow!("Source not specified. Use --source or set defaults.source")
+    })?;
 
     let teams = client.list_teams().await.context("Failed to list teams")?;
     let team = teams
@@ -115,7 +117,8 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
     let since = args.since.unwrap_or_else(|| ctx.defaults.since.clone());
     let limit = args.limit.unwrap_or(ctx.defaults.limit);
 
-    let (start_time, end_time) = parse_time_range(&since, args.from.as_deref(), args.to.as_deref())?;
+    let (start_time, end_time) =
+        parse_time_range(&since, args.from.as_deref(), args.to.as_deref())?;
 
     let request = QueryRequest {
         query: args.query.unwrap_or_default(),
@@ -131,10 +134,10 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
         .await
         .context("Query failed")?;
 
-    if args.show_sql {
-        if let Some(sql) = &response.generated_sql {
-            eprintln!("Generated SQL: {}\n", sql);
-        }
+    if args.show_sql
+        && let Some(sql) = &response.generated_sql
+    {
+        eprintln!("Generated SQL: {}\n", sql);
     }
 
     let entries = response.entries();
@@ -192,10 +195,7 @@ enum ResolvedContext<'a> {
     Ephemeral(logchef_core::config::Context),
 }
 
-fn resolve_context<'a>(
-    config: &'a Config,
-    global: &GlobalArgs,
-) -> Result<ResolvedContext<'a>> {
+fn resolve_context<'a>(config: &'a Config, global: &GlobalArgs) -> Result<ResolvedContext<'a>> {
     if let Some(name) = &global.context {
         let ctx = config
             .get_context(name)
@@ -217,15 +217,11 @@ fn resolve_context<'a>(
     let ctx = config
         .current_context()
         .ok_or_else(|| anyhow::anyhow!("Current context '{}' not found", name))?;
-    
+
     Ok(ResolvedContext::Saved(ctx, name.to_string()))
 }
 
-fn parse_time_range(
-    since: &str,
-    from: Option<&str>,
-    to: Option<&str>,
-) -> Result<(String, String)> {
+fn parse_time_range(since: &str, from: Option<&str>, to: Option<&str>) -> Result<(String, String)> {
     let format = "%Y-%m-%d %H:%M:%S";
 
     match (from, to) {
@@ -235,7 +231,10 @@ fn parse_time_range(
         (None, None) => {
             let end = Utc::now();
             let start = end - parse_duration(since)?;
-            Ok((start.format(format).to_string(), end.format(format).to_string()))
+            Ok((
+                start.format(format).to_string(),
+                end.format(format).to_string(),
+            ))
         }
     }
 }
@@ -275,7 +274,8 @@ fn parse_highlight_args(args: &[String]) -> Vec<(String, Vec<String>)> {
             let parts: Vec<&str> = arg.splitn(2, ':').collect();
             if parts.len() == 2 {
                 let color = parts[0].to_string();
-                let words: Vec<String> = parts[1].split(',').map(|s| s.trim().to_string()).collect();
+                let words: Vec<String> =
+                    parts[1].split(',').map(|s| s.trim().to_string()).collect();
                 Some((color, words))
             } else {
                 None

@@ -52,8 +52,8 @@ fn list_contexts() -> Result<()> {
         return Ok(());
     }
 
-    println!("{:<3} {:<20} {:<40} {}", "", "CONTEXT", "SERVER", "AUTH");
-    
+    println!("{:<3} {:<20} {:<40} AUTH", "", "CONTEXT", "SERVER");
+
     let mut names: Vec<_> = config.context_names();
     names.sort();
 
@@ -65,14 +65,17 @@ fn list_contexts() -> Result<()> {
             ""
         };
         let auth_status = if ctx.is_authenticated() { "yes" } else { "no" };
-        
+
         let server_display = if ctx.server_url.len() > 38 {
             format!("{}...", &ctx.server_url[..35])
         } else {
             ctx.server_url.clone()
         };
 
-        println!("{:<3} {:<20} {:<40} {}", current, name, server_display, auth_status);
+        println!(
+            "{:<3} {:<20} {:<40} {}",
+            current, name, server_display, auth_status
+        );
     }
 
     Ok(())
@@ -99,11 +102,11 @@ fn delete_context(name: &str) -> Result<()> {
     config.delete_context(name)?;
     config.save().context("Failed to save config")?;
     println!("Deleted context '{}'.", name);
-    
+
     if let Some(current) = config.current_context_name() {
         println!("Current context is now '{}'.", current);
     }
-    
+
     Ok(())
 }
 
@@ -123,7 +126,7 @@ fn show_config() -> Result<()> {
     println!("Context: {}", ctx_name);
     println!("Server:  {}", ctx.server_url);
     println!("Timeout: {}s", ctx.timeout_secs);
-    
+
     if let Some(ref token) = ctx.token {
         let masked = if token.len() > 14 {
             format!("{}****...", &token[..10])

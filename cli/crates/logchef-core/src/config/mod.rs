@@ -31,11 +31,19 @@ impl Config {
         }
 
         let content = fs::read_to_string(&path).map_err(|e| {
-            Error::config(format!("Failed to read config file {}: {}", path.display(), e))
+            Error::config(format!(
+                "Failed to read config file {}: {}",
+                path.display(),
+                e
+            ))
         })?;
 
         serde_json::from_str(&content).map_err(|e| {
-            Error::config(format!("Failed to parse config file {}: {}", path.display(), e))
+            Error::config(format!(
+                "Failed to parse config file {}: {}",
+                path.display(),
+                e
+            ))
         })
     }
 
@@ -60,7 +68,11 @@ impl Config {
             let mut opts = fs::OpenOptions::new();
             opts.write(true).create(true).truncate(true).mode(0o600);
             let mut file = opts.open(&path).map_err(|e| {
-                Error::config(format!("Failed to create config file {}: {}", path.display(), e))
+                Error::config(format!(
+                    "Failed to create config file {}: {}",
+                    path.display(),
+                    e
+                ))
             })?;
             std::io::Write::write_all(&mut file, content.as_bytes())?;
         }
@@ -68,7 +80,11 @@ impl Config {
         #[cfg(not(unix))]
         {
             fs::write(&path, &content).map_err(|e| {
-                Error::config(format!("Failed to write config file {}: {}", path.display(), e))
+                Error::config(format!(
+                    "Failed to write config file {}: {}",
+                    path.display(),
+                    e
+                ))
             })?;
         }
 
@@ -145,7 +161,10 @@ impl Config {
             return Err(Error::config(format!("Context '{}' not found", old_name)));
         }
         if self.contexts.contains_key(new_name) {
-            return Err(Error::config(format!("Context '{}' already exists", new_name)));
+            return Err(Error::config(format!(
+                "Context '{}' already exists",
+                new_name
+            )));
         }
         if let Some(context) = self.contexts.remove(old_name) {
             self.contexts.insert(new_name.to_string(), context);

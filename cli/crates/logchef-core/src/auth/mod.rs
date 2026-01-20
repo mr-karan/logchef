@@ -98,8 +98,14 @@ impl AuthFlow {
                             Err(_) => continue,
                         };
 
-                        let code = url.query_pairs().find(|(k, _)| k == "code").map(|(_, v)| v.to_string());
-                        let received_state = url.query_pairs().find(|(k, _)| k == "state").map(|(_, v)| v.to_string());
+                        let code = url
+                            .query_pairs()
+                            .find(|(k, _)| k == "code")
+                            .map(|(_, v)| v.to_string());
+                        let received_state = url
+                            .query_pairs()
+                            .find(|(k, _)| k == "state")
+                            .map(|(_, v)| v.to_string());
 
                         let response_html = if code.is_some() {
                             r#"<!DOCTYPE html>
@@ -243,7 +249,7 @@ struct OidcConfig {
 }
 
 fn generate_pkce() -> (String, String) {
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     use sha2::{Digest, Sha256};
 
     let mut verifier_bytes = [0u8; 32];
@@ -258,7 +264,7 @@ fn generate_pkce() -> (String, String) {
 }
 
 fn generate_state() -> String {
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 
     let mut state_bytes = [0u8; 16];
     getrandom::getrandom(&mut state_bytes).expect("Failed to generate random bytes");

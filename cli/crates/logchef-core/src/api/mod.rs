@@ -4,8 +4,8 @@ pub use models::*;
 
 use crate::config::Context;
 use crate::error::{Error, Result};
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
 use reqwest::Client as HttpClient;
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
 use serde::de::DeserializeOwned;
 use std::time::Duration;
 use tracing::debug;
@@ -51,10 +51,10 @@ impl Client {
         headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-        if let Some(ref token) = self.token {
-            if let Ok(value) = HeaderValue::from_str(&format!("Bearer {}", token)) {
-                headers.insert(AUTHORIZATION, value);
-            }
+        if let Some(ref token) = self.token
+            && let Ok(value) = HeaderValue::from_str(&format!("Bearer {}", token))
+        {
+            headers.insert(AUTHORIZATION, value);
         }
 
         headers
@@ -64,12 +64,7 @@ impl Client {
         let url = format!("{}{}", self.base_url, path);
         debug!(url = %url, "GET request");
 
-        let response = self
-            .http
-            .get(&url)
-            .headers(self.headers())
-            .send()
-            .await?;
+        let response = self.http.get(&url).headers(self.headers()).send().await?;
 
         self.handle_response(response).await
     }
@@ -111,9 +106,8 @@ impl Client {
         }
 
         let body = response.text().await?;
-        serde_json::from_str(&body).map_err(|e| {
-            Error::other(format!("Failed to parse response: {} (body: {})", e, body))
-        })
+        serde_json::from_str(&body)
+            .map_err(|e| Error::other(format!("Failed to parse response: {} (body: {})", e, body)))
     }
 
     pub async fn get_meta(&self) -> Result<MetaResponse> {
@@ -135,8 +129,9 @@ impl Client {
     }
 
     pub async fn list_sources(&self, team_id: i64) -> Result<Vec<Source>> {
-        let response: ApiResponse<Vec<Source>> =
-            self.get(&format!("/api/v1/teams/{}/sources", team_id)).await?;
+        let response: ApiResponse<Vec<Source>> = self
+            .get(&format!("/api/v1/teams/{}/sources", team_id))
+            .await?;
         Ok(response.data)
     }
 
@@ -176,10 +171,7 @@ impl Client {
     ) -> Result<QueryResponse> {
         let response: ApiResponse<QueryResponse> = self
             .post(
-                &format!(
-                    "/api/v1/teams/{}/sources/{}/logs/query",
-                    team_id, source_id
-                ),
+                &format!("/api/v1/teams/{}/sources/{}/logs/query", team_id, source_id),
                 request,
             )
             .await?;
@@ -195,12 +187,7 @@ impl Client {
             headers.insert(AUTHORIZATION, value);
         }
 
-        let response = self
-            .http
-            .post(&url)
-            .headers(headers)
-            .send()
-            .await?;
+        let response = self.http.post(&url).headers(headers).send().await?;
 
         let api_response: TokenExchangeApiResponse = self.handle_response(response).await?;
         Ok(api_response.data)

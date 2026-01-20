@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub current_context: Option<String>,
@@ -12,16 +12,6 @@ pub struct Config {
 
     #[serde(default)]
     pub highlights: HighlightsConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            current_context: None,
-            contexts: HashMap::new(),
-            highlights: HighlightsConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

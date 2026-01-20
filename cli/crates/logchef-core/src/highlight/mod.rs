@@ -1,10 +1,10 @@
+use tailspin::Highlighter as TailspinHighlighter;
 use tailspin::config::{
     DateTimeConfig, IpV4Config, IpV6Config, JsonConfig, KeyValueConfig, KeywordConfig,
     NumberConfig, PointerConfig, QuotesConfig, RegexConfig, UnixPathConfig, UnixProcessConfig,
     UrlConfig, UuidConfig,
 };
 use tailspin::style::{Color, Style};
-use tailspin::Highlighter as TailspinHighlighter;
 
 use crate::config::HighlightsConfig;
 use crate::error::Result;
@@ -151,19 +151,11 @@ trait StyleExt {
 
 impl StyleExt for Style {
     fn bold_if(self, cond: bool) -> Self {
-        if cond {
-            self.bold()
-        } else {
-            self
-        }
+        if cond { self.bold() } else { self }
     }
 
     fn italic_if(self, cond: bool) -> Self {
-        if cond {
-            self.italic()
-        } else {
-            self
-        }
+        if cond { self.italic() } else { self }
     }
 }
 
@@ -231,7 +223,9 @@ pub struct FormatOptions {
 
 impl Default for FormatOptions {
     fn default() -> Self {
-        Self { show_timestamp: true }
+        Self {
+            show_timestamp: true,
+        }
     }
 }
 
@@ -245,7 +239,14 @@ pub fn format_log_entry_with_options(
     options: &FormatOptions,
 ) -> String {
     let priority_fields: &[&str] = if options.show_timestamp {
-        &["_timestamp", "timestamp", "level", "severity", "msg", "message"]
+        &[
+            "_timestamp",
+            "timestamp",
+            "level",
+            "severity",
+            "msg",
+            "message",
+        ]
     } else {
         &["level", "severity", "msg", "message"]
     };
@@ -261,15 +262,17 @@ pub fn format_log_entry_with_options(
 
     for col in columns {
         let dominated_by_priority = priority_fields.contains(&col.name.as_str());
-        let is_hidden_timestamp = !options.show_timestamp && timestamp_fields.contains(&col.name.as_str());
+        let is_hidden_timestamp =
+            !options.show_timestamp && timestamp_fields.contains(&col.name.as_str());
         let is_internal = col.name.starts_with('_');
 
-        if !dominated_by_priority && !is_hidden_timestamp && !is_internal {
-            if let Some(value) = entry.get(&col.name) {
-                if !value.is_null() {
-                    parts.push(format_value(&col.name, value));
-                }
-            }
+        if !dominated_by_priority
+            && !is_hidden_timestamp
+            && !is_internal
+            && let Some(value) = entry.get(&col.name)
+            && !value.is_null()
+        {
+            parts.push(format_value(&col.name, value));
         }
     }
 
@@ -299,6 +302,8 @@ fn format_value(key: &str, value: &serde_json::Value) -> String {
         serde_json::Value::Bool(b) => format!("{}={}", key, b),
         serde_json::Value::Null => String::new(),
         serde_json::Value::Array(arr) => format!("{}={:?}", key, arr),
-        serde_json::Value::Object(obj) => format!("{}={}", key, serde_json::to_string(obj).unwrap_or_default()),
+        serde_json::Value::Object(obj) => {
+            format!("{}={}", key, serde_json::to_string(obj).unwrap_or_default())
+        }
     }
 }

@@ -11,13 +11,29 @@ pub struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    #[arg(long, short, env = "LOGCHEF_CONTEXT", global = true, help = "Use a specific context")]
+    #[arg(
+        long,
+        short,
+        env = "LOGCHEF_CONTEXT",
+        global = true,
+        help = "Use a specific context"
+    )]
     context: Option<String>,
 
-    #[arg(long, env = "LOGCHEF_SERVER_URL", global = true, help = "Override server URL")]
+    #[arg(
+        long,
+        env = "LOGCHEF_SERVER_URL",
+        global = true,
+        help = "Override server URL"
+    )]
     server: Option<String>,
 
-    #[arg(long, env = "LOGCHEF_AUTH_TOKEN", global = true, help = "Override auth token")]
+    #[arg(
+        long,
+        env = "LOGCHEF_AUTH_TOKEN",
+        global = true,
+        help = "Override auth token"
+    )]
     token: Option<String>,
 
     #[arg(long, short, global = true)]
