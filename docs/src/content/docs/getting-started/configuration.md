@@ -79,6 +79,9 @@ token_url = "http://dex:5556/dex/token"
 client_id = "logchef"
 client_secret = "logchef-secret"
 
+# CLI client ID for CLI authentication (public OIDC client, PKCE flow)
+cli_client_id = "logchef-cli"
+
 # Callback URL for OIDC authentication
 # Must match the URL configured in your OIDC provider
 redirect_url = "http://localhost:8125/api/v1/auth/callback"
@@ -86,6 +89,10 @@ redirect_url = "http://localhost:8125/api/v1/auth/callback"
 # Required OIDC scopes
 scopes = ["openid", "email", "profile"]
 ```
+
+If you plan to use the CLI, create a public OIDC client with loopback redirect URIs
+(`http://127.0.0.1:19876/callback` through `http://127.0.0.1:19878/callback`) and set
+`oidc.cli_client_id` to that client ID.
 
 ### Auth Settings
 
