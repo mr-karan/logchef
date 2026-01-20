@@ -13,7 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Pencil, Eye, EyeOff, Save, X } from 'lucide-vue-next'
+import { Pencil, Eye, EyeOff, Save, X, Mail, Webhook, Loader2 } from 'lucide-vue-next'
 import { Input } from '@/components/ui/input'
 import {
   Table,
@@ -41,19 +41,27 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { useSettingsStore } from '@/stores/settings'
+import { useAuthStore } from '@/stores/auth'
 import type { SystemSetting, UpdateSettingRequest } from '@/api/settings'
-import { settingsApi } from '@/api/settings'
 import { toast } from 'vue-sonner'
+
+const authStore = useAuthStore()
 
 const settingsStore = useSettingsStore()
 const { isLoading } = storeToRefs(settingsStore)
 
 const showEditDialog = ref(false)
 const showDeleteDialog = ref(false)
+const showTestEmailDialog = ref(false)
+const showTestWebhookDialog = ref(false)
 const settingToEdit = ref<SystemSetting | null>(null)
 const settingToDelete = ref<SystemSetting | null>(null)
 const showSensitiveValues = ref<Record<string, boolean>>({})
 const currentTab = ref('alerts')
+const testEmailRecipient = ref('')
+const testWebhookUrl = ref('')
+const isTestingEmail = ref(false)
+const isTestingWebhook = ref(false)
 
 const editForm = ref<UpdateSettingRequest>({
   value: '',
@@ -148,6 +156,44 @@ const formatKey = (key: string) => {
   }).join(' ')
 }
 
+const openTestEmailDialog = () => {
+  testEmailRecipient.value = authStore.user?.email || ''
+  showTestEmailDialog.value = true
+}
+
+const openTestWebhookDialog = () => {
+  testWebhookUrl.value = ''
+  showTestWebhookDialog.value = true
+}
+
+const handleTestEmail = async () => {
+  isTestingEmail.value = true
+  try {
+    const result = await settingsStore.testEmail(testEmailRecipient.value || undefined)
+    if (result?.success) {
+      showTestEmailDialog.value = false
+    }
+  } finally {
+    isTestingEmail.value = false
+  }
+}
+
+const handleTestWebhook = async () => {
+  if (!testWebhookUrl.value.trim()) {
+    toast.error('Webhook URL is required')
+    return
+  }
+  isTestingWebhook.value = true
+  try {
+    const result = await settingsStore.testWebhook(testWebhookUrl.value)
+    if (result?.success) {
+      showTestWebhookDialog.value = false
+    }
+  } finally {
+    isTestingWebhook.value = false
+  }
+}
+
 onMounted(() => {
   loadSettings()
 })
@@ -176,8 +222,20 @@ onMounted(() => {
 
           <!-- Alerts Tab -->
           <TabsContent value="alerts" class="space-y-4">
-            <div class="text-sm text-muted-foreground">
-              {{ getCategoryDescription('alerts') }}
+            <div class="flex items-center justify-between">
+              <div class="text-sm text-muted-foreground">
+                {{ getCategoryDescription('alerts') }}
+              </div>
+              <div class="flex gap-2">
+                <Button variant="outline" size="sm" @click="openTestEmailDialog">
+                  <Mail class="mr-2 h-4 w-4" />
+                  Test Email
+                </Button>
+                <Button variant="outline" size="sm" @click="openTestWebhookDialog">
+                  <Webhook class="mr-2 h-4 w-4" />
+                  Test Webhook
+                </Button>
+              </div>
             </div>
             <div class="rounded-md border">
               <Table>
@@ -474,5 +532,77 @@ onMounted(() => {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+
+    <!-- Test Email Dialog -->
+    <Dialog :open="showTestEmailDialog" @update:open="showTestEmailDialog = false">
+      <DialogContent class="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Test Email Configuration</DialogTitle>
+          <DialogDescription>
+            Send a test email to verify your SMTP configuration is working correctly.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2">
+            <Label for="test-email">Recipient Email</Label>
+            <Input
+              id="test-email"
+              v-model="testEmailRecipient"
+              type="email"
+              placeholder="Enter email address"
+            />
+            <p class="text-xs text-muted-foreground">
+              Leave empty to send to your own email address.
+            </p>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="showTestEmailDialog = false" :disabled="isTestingEmail">
+            Cancel
+          </Button>
+          <Button @click="handleTestEmail" :disabled="isTestingEmail">
+            <Loader2 v-if="isTestingEmail" class="mr-2 h-4 w-4 animate-spin" />
+            <Mail v-else class="mr-2 h-4 w-4" />
+            Send Test Email
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Test Webhook Dialog -->
+    <Dialog :open="showTestWebhookDialog" @update:open="showTestWebhookDialog = false">
+      <DialogContent class="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Test Webhook Configuration</DialogTitle>
+          <DialogDescription>
+            Send a test webhook to verify your webhook endpoint is receiving notifications correctly.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2">
+            <Label for="test-webhook">Webhook URL</Label>
+            <Input
+              id="test-webhook"
+              v-model="testWebhookUrl"
+              type="url"
+              placeholder="https://example.com/webhook"
+            />
+            <p class="text-xs text-muted-foreground">
+              Enter the full URL of your webhook endpoint (must use http or https).
+            </p>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="showTestWebhookDialog = false" :disabled="isTestingWebhook">
+            Cancel
+          </Button>
+          <Button @click="handleTestWebhook" :disabled="isTestingWebhook || !testWebhookUrl.trim()">
+            <Loader2 v-if="isTestingWebhook" class="mr-2 h-4 w-4 animate-spin" />
+            <Webhook v-else class="mr-2 h-4 w-4" />
+            Send Test Webhook
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch, onMounted } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import {
   Dialog,
   DialogContent,
@@ -830,7 +830,7 @@ function handleSubmit() {
                     <SelectItem v-for="member in teamMembers" :key="member.user_id" :value="String(member.user_id)">
                       <div class="flex items-center gap-2">
                         <User class="h-3 w-3" />
-                        <span>{{ member.user.name || member.user.email }}</span>
+                        <span>{{ member.full_name || member.email }}</span>
                         <span class="text-xs text-muted-foreground ml-1">({{ member.role }})</span>
                       </div>
                     </SelectItem>
@@ -843,7 +843,7 @@ function handleSubmit() {
                 <Badge v-for="userId in form.recipient_user_ids" :key="userId" variant="secondary" class="flex items-center gap-1 font-normal">
                   <User class="h-3 w-3 opacity-50" />
                   <span>
-                    {{ teamMembers.find(m => m.user_id === userId)?.user.name || teamMembers.find(m => m.user_id === userId)?.user.email || `User ${userId}` }}
+                    {{ teamMembers.find(m => m.user_id === userId)?.full_name || teamMembers.find(m => m.user_id === userId)?.email || `User ${userId}` }}
                   </span>
                   <button type="button" @click="removeRecipient(userId)" class="ml-1 hover:text-destructive">
                     <X class="h-3 w-3" />
@@ -1241,7 +1241,7 @@ function handleSubmit() {
                     <SelectItem v-for="member in teamMembers" :key="member.user_id" :value="String(member.user_id)">
                       <div class="flex items-center gap-2">
                         <User class="h-3 w-3" />
-                        <span>{{ member.user.name || member.user.email }}</span>
+                        <span>{{ member.full_name || member.email }}</span>
                         <span class="text-xs text-muted-foreground ml-1">({{ member.role }})</span>
                       </div>
                     </SelectItem>
@@ -1254,7 +1254,7 @@ function handleSubmit() {
                 <Badge v-for="userId in form.recipient_user_ids" :key="userId" variant="secondary" class="flex items-center gap-1 font-normal">
                   <User class="h-3 w-3 opacity-50" />
                   <span>
-                    {{ teamMembers.find(m => m.user_id === userId)?.user.name || teamMembers.find(m => m.user_id === userId)?.user.email || `User ${userId}` }}
+                    {{ teamMembers.find(m => m.user_id === userId)?.full_name || teamMembers.find(m => m.user_id === userId)?.email || `User ${userId}` }}
                   </span>
                   <button type="button" @click="removeRecipient(userId)" class="ml-1 hover:text-destructive">
                     <X class="h-3 w-3" />

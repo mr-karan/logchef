@@ -119,6 +119,28 @@ export const useSettingsStore = defineStore("settings", () => {
     });
   }
 
+  // Send a test email to verify SMTP configuration
+  async function testEmail(recipientEmail?: string) {
+    return await state.withLoading('testEmail', async () => {
+      return await state.callApi({
+        apiCall: () => settingsApi.testEmail({ recipient_email: recipientEmail }),
+        successMessage: "Test email sent successfully",
+        operationKey: 'testEmail',
+      });
+    });
+  }
+
+  // Send a test webhook to verify webhook configuration
+  async function testWebhook(webhookUrl: string) {
+    return await state.withLoading('testWebhook', async () => {
+      return await state.callApi({
+        apiCall: () => settingsApi.testWebhook({ webhook_url: webhookUrl }),
+        successMessage: "Test webhook sent successfully",
+        operationKey: 'testWebhook',
+      });
+    });
+  }
+
   return {
     // State
     settingsByCategory,
@@ -131,6 +153,8 @@ export const useSettingsStore = defineStore("settings", () => {
     loadSettingsForCategory,
     updateSetting,
     deleteSetting,
+    testEmail,
+    testWebhook,
 
     // Helpers
     getSettingsByCategory,

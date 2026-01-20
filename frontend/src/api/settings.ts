@@ -25,6 +25,20 @@ export interface UpdateSettingRequest {
   is_sensitive: boolean;
 }
 
+export interface TestEmailRequest {
+  recipient_email?: string;
+}
+
+export interface TestWebhookRequest {
+  webhook_url: string;
+}
+
+export interface TestNotificationResponse {
+  message: string;
+  recipient?: string;
+  url?: string;
+}
+
 export const settingsApi = {
   listSettings: () => apiClient.get<SettingsByCategory[]>("/admin/settings"),
 
@@ -38,5 +52,11 @@ export const settingsApi = {
     apiClient.put<{ message: string; key: string }>(`/admin/settings/${key}`, data),
 
   deleteSetting: (key: string) =>
-    apiClient.delete<{ message: string }>(`/admin/settings/${key}`)
+    apiClient.delete<{ message: string }>(`/admin/settings/${key}`),
+
+  testEmail: (data?: TestEmailRequest) =>
+    apiClient.post<TestNotificationResponse>('/admin/settings/test-email', data || {}),
+
+  testWebhook: (data: TestWebhookRequest) =>
+    apiClient.post<TestNotificationResponse>('/admin/settings/test-webhook', data),
 };

@@ -179,6 +179,8 @@ func (s *Server) setupRoutes() {
 	admin.Get("/settings/:key", s.handleGetSetting)
 	admin.Put("/settings/:key", s.handleUpdateSetting)
 	admin.Delete("/settings/:key", s.handleDeleteSetting)
+	admin.Post("/settings/test-email", s.handleTestEmail)
+	admin.Post("/settings/test-webhook", s.handleTestWebhook)
 
 	// --- Team Routes (Access controlled by team membership) ---
 	// Regular users can view teams they belong to, team admins can manage membership and linked sources
