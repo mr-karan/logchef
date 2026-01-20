@@ -13,6 +13,7 @@ LogChef requires:
 - **Go 1.24+** - Backend development
 - **Node.js 22+** - Frontend development
 - **pnpm** - Frontend package management
+- **Rust** - CLI development (optional, only if working on CLI)
 - **Docker** - For running ClickHouse and test infrastructure
 - **just** - Command runner for development tasks
 - **sqlc** - SQL code generation
@@ -67,9 +68,10 @@ The development environment will now activate automatically!
 The Nix flake provides:
 - Go 1.24 with gopls, golangci-lint
 - Node.js 22 with pnpm
+- Rust toolchain for CLI development
 - Development tools: just, sqlc, git
 - Infrastructure: docker, docker-compose, vector
-- Isolated Go/Node environments with proper caching
+- Isolated Go/Node/Rust environments with proper caching
 
 ### Option 2: Manual Installation
 
@@ -206,6 +208,32 @@ pnpm typecheck
 # Build for production
 pnpm build
 ```
+
+### CLI Development
+
+The CLI is written in Rust and lives in the `cli/` directory:
+
+```bash
+# Build debug version (fast compilation)
+just build-cli-debug
+
+# Build release version (optimized)
+just build-cli
+
+# Run tests
+just test-cli
+
+# Lint with clippy
+just lint-cli
+
+# Format code
+just fmt-cli
+
+# Run all CLI checks
+just check-cli
+```
+
+The debug binary is at `cli/target/debug/logchef`, release at `cli/target/release/logchef`.
 
 ### Docker Development
 
