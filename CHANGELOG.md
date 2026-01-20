@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `logchef auth` — Browser-based OIDC authentication with PKCE flow
   - `logchef query` — Execute LogChefQL queries with syntax highlighting (powered by [tailspin](https://github.com/bensadeh/tailspin))
   - `logchef config` — Manage CLI configuration and multiple server contexts
+  - `logchef query --no-timestamp` — Hide timestamps in text output for cleaner exports
   - Multi-context support for managing dev/staging/prod instances (kubectl-style)
   - Configurable keywords and regex patterns for log highlighting
   - Configuration stored at `~/.config/logchef/logchef.json`
@@ -21,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SQL optional clauses** (`[[ ... ]]`) — Wrap variable clauses to auto-remove when value is empty.
 - **Variable widget configuration** — Configure variables as text inputs, dropdowns, or multi-selects with default values.
 - **Collections "All Sources" view** — Browse saved queries across all sources in one place.
-- **Dynamic alert routing** — Helper for routing alerts based on query results.
+- **Alert delivery via SMTP and webhooks** — Send notifications directly without Alertmanager.
 - Saved query name shown in browser tab title.
 - Smart LIMIT handling in SQL mode.
 - Support for CTEs, JOINs, and subqueries with template variables.

@@ -1,0 +1,121 @@
+name: LogChef CLI Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64-musl
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset_name: linux-x86_64-musl
+            use_cross: true
+          - name: macos-x86_64
+            os: macos-13
+            target: x86_64-apple-darwin
+            asset_name: macos-x86_64
+            use_cross: false
+          - name: macos-aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+            asset_name: macos-aarch64
+            use_cross: false
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset_name: windows-x86_64
+            use_cross: false
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            cli
+
+      - name: Build (cross)
+        if: ${{ matrix.use_cross }}
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: build
+          target: ${{ matrix.target }}
+          args: "--locked --release"
+          strip: true
+
+      - name: Build (cargo)
+        if: ${{ !matrix.use_cross }}
+        run: cargo build --locked --release --target ${{ matrix.target }}
+        working-directory: cli
+
+      - name: Package (unix)
+        if: ${{ runner.os != 'Windows' }}
+        id: package
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          archive="logchef-cli_${tag}_${{ matrix.asset_name }}.tar.gz"
+          mkdir -p dist
+          tar -C "cli/target/${{ matrix.target }}/release" -czf "dist/${archive}" logchef
+          echo "archive=dist/${archive}" >> "$GITHUB_OUTPUT"
+
+      - name: Package (windows)
+        if: ${{ runner.os == 'Windows' }}
+        id: package-windows
+        shell: pwsh
+        run: |
+          $tag = "$env:GITHUB_REF_NAME"
+          $archive = "logchef-cli_${tag}_${{ matrix.asset_name }}.zip"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "cli\target\${{ matrix.target }}\release\logchef.exe" -DestinationPath "dist\$archive"
+          "archive=dist\$archive" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Upload artifact (unix)
+        if: ${{ runner.os != 'Windows' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ steps.package.outputs.archive }}
+
+      - name: Upload artifact (windows)
+        if: ${{ runner.os == 'Windows' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ steps.package-windows.outputs.archive }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**
