@@ -79,47 +79,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in LogChef.</p>
     </header>
 
-    <!-- CLI v0.1.2 -->
-    <article class="version">
-      <div class="version-header">
-        <span class="version-tag">CLI v0.1.2</span>
-        <span class="version-date">Jan 21, 2026</span>
-        <a href="https://github.com/mr-karan/logchef/releases/tag/cli-v0.1.2" class="version-link" target="_blank">Release notes →</a>
-      </div>
-
-      <div class="change-section">
-        <div class="change-type added">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-          Added
-        </div>
-        <ul class="change-list">
-          <li><strong>CLI <code>collections</code> command</strong> — List and run saved queries from the command line</li>
-          <li><strong>Interactive mode</strong> — Run <code>query</code> or <code>sql</code> without arguments for guided prompts with arrow-key navigation</li>
-          <li><strong>Copy CLI command button</strong> — Click terminal icon in explore toolbar to copy equivalent CLI command</li>
-        </ul>
-      </div>
-    </article>
-
-    <!-- CLI v0.1.1 -->
-    <article class="version">
-      <div class="version-header">
-        <span class="version-tag">CLI v0.1.1</span>
-        <span class="version-date">Jan 21, 2026</span>
-        <a href="https://github.com/mr-karan/logchef/releases/tag/cli-v0.1.1" class="version-link" target="_blank">Release notes →</a>
-      </div>
-
-      <div class="change-section">
-        <div class="change-type added">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-          Added
-        </div>
-        <ul class="change-list">
-          <li><strong>CLI <code>sql</code> command</strong> — Execute raw ClickHouse SQL queries directly from the terminal with full SQL control</li>
-        </ul>
-      </div>
-    </article>
-
-    <!-- v1.2.1 -->
+    <!-- v1.2.1 + CLI v0.1.2 -->
     <article class="version">
       <div class="version-header">
         <span class="version-tag">v1.2.1</span>
@@ -129,12 +89,24 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       </div>
 
       <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Run saved queries from CLI</strong> — New <code>logchef collections</code> command to list and execute your saved queries directly from the terminal</li>
+          <li><strong>Interactive CLI mode</strong> — Run <code>logchef query</code> or <code>logchef sql</code> without arguments and get guided prompts to select your team, source, and enter your query</li>
+          <li><strong>Copy CLI command from web</strong> — Click the terminal icon in the explore toolbar to copy the equivalent CLI command for your current query</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
         <div class="change-type fixed">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
           Fixed
         </div>
         <ul class="change-list">
-          <li><strong>Explore history URL hydration</strong> — Fixed issue where browser history navigation could fail to restore query state</li>
+          <li><strong>Browser navigation</strong> — Back and forward buttons now correctly restore your previous query and results</li>
         </ul>
       </div>
     </article>
@@ -153,16 +125,12 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Rust CLI</strong> — New cross-platform CLI for LogChef with <code>auth</code>, <code>query</code>, and <code>config</code> commands.</li>
-          <li>Multi-context support for managing dev, staging, and prod instances</li>
-          <li><strong>CLI output controls</strong> — Use <code>--no-timestamp</code> to hide timestamps in text output</li>
-          <li><strong>Alerts via SMTP and webhooks</strong> — Deliver notifications directly without Alertmanager</li>
-          <li><strong>Multi-Select Variables</strong> — Select multiple values that expand to <code>IN (...)</code> clauses. Perfect for filtering by multiple hosts, services, or error codes.</li>
-          <li><strong>Optional SQL Clauses</strong> — Wrap clauses in <code>[[ ... ]]</code> to auto-remove them when the variable is empty. No more "WHERE 1=1" hacks.</li>
-          <li><strong>Variable Widgets</strong> — Configure variables as text inputs, dropdowns, or multi-selects with default values.</li>
-          <li><strong>All Sources View</strong> — Browse saved queries across all sources in one place from Collections.</li>
-          <li>Smart LIMIT handling in SQL mode</li>
-          <li>Support for CTEs, JOINs, and subqueries with template variables</li>
+          <li><strong>LogChef CLI</strong> — Query your logs from the terminal with syntax highlighting, multi-context support, and all the features of the web UI. <a href="/integration/cli/">Learn more →</a></li>
+          <li><strong>Multi-select variables</strong> — Select multiple values for a variable and they expand to <code>IN (...)</code> clauses. Great for filtering by multiple hosts or services at once.</li>
+          <li><strong>Optional SQL clauses</strong> — Wrap SQL clauses in <code>[[ ... ]]</code> and they're automatically removed when the variable is empty. No more "WHERE 1=1" hacks.</li>
+          <li><strong>Variable dropdowns</strong> — Configure variables as text inputs, dropdowns, or multi-selects with default values.</li>
+          <li><strong>Browse all saved queries</strong> — New "All Sources" view in Collections to see saved queries across your entire team.</li>
+          <li><strong>Direct email & webhook alerts</strong> — Send alert notifications via SMTP or webhooks without needing Alertmanager.</li>
         </ul>
       </div>
 
@@ -172,21 +140,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
-          <li><strong>SQLite concurrency fix</strong> — Dual-connection pattern prevents <code>SQLITE_BUSY</code> errors under load</li>
-          <li>Relative time range now refreshes before each query execution</li>
-          <li>Variable date display uses consistent YYYY-MM-DD format</li>
-          <li>Collections race condition on initial load</li>
-          <li>Scroll bar issues in explorer view</li>
-        </ul>
-      </div>
-
-      <div class="change-section">
-        <div class="change-type removed">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M4 7h16M9 7V5h6v2M6 7l1 12h10l1-12"/></svg>
-          Removed
-        </div>
-        <ul class="change-list">
-          <li>Legacy Go CLI removed in favor of the Rust CLI</li>
+          <li><strong>No more database lock errors</strong> — Fixed intermittent "SQLITE_BUSY" errors that could occur during high traffic</li>
+          <li>Time ranges now refresh before each query (relative times like "last 1 hour" update correctly)</li>
+          <li>Collections load reliably on first visit</li>
         </ul>
       </div>
 
@@ -211,20 +167,19 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Bookmark Favorite Queries</strong> — Star saved queries for quick access. Bookmarked queries appear at top of collections dropdown.</li>
-          <li>Copy shareable URL for any saved query</li>
+          <li><strong>Bookmark your favorite queries</strong> — Star saved queries for quick access. Bookmarked queries appear at the top of the collections dropdown.</li>
+          <li><strong>Shareable query links</strong> — Copy a direct link to any saved query to share with teammates.</li>
         </ul>
       </div>
 
       <div class="change-section">
         <div class="change-type changed">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
-          Changed
+          Improved
         </div>
         <ul class="change-list">
-          <li><strong>LogChefQL Parser Rewrite</strong> — Grammar-based parser with better error messages</li>
-          <li><strong>Frontend Tooling</strong> — Switched to Bun + rolldown-vite. Build time: ~2.3s (was >55s)</li>
-          <li>Refactored frontend state management with centralized URL sync</li>
+          <li><strong>Better error messages</strong> — Query errors now show exactly where the problem is with helpful suggestions.</li>
+          <li><strong>Faster builds</strong> — Development builds are now 25x faster (2s vs 55s).</li>
         </ul>
       </div>
 
@@ -234,9 +189,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
-          <li>Saved query navigation no longer shows stale content</li>
-          <li>Team/source context preserved when navigating between pages</li>
-          <li>Sidebar links now include full context params</li>
+          <li>Switching between saved queries now shows the correct content immediately</li>
+          <li>Your team and source selection stays consistent when navigating between pages</li>
         </ul>
       </div>
 
@@ -259,34 +213,19 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Field Values Sidebar</strong> — Kibana-style field exploration. Browse fields, see top values, click to filter.</li>
-          <li><strong>Backend LogchefQL Parser</strong> — Full parsing, validation, and type-aware SQL generation in Go</li>
-          <li><strong>Query Cancellation</strong> — Cancel button or Esc key stops the query in ClickHouse, not just the UI</li>
-          <li>Auto-fit column widths by double-clicking the header resizer</li>
+          <li><strong>Field explorer sidebar</strong> — Browse all fields in your logs, see the most common values, and click to add filters. Just like Kibana's Discover.</li>
+          <li><strong>Cancel running queries</strong> — Press Escape or click Cancel to stop long-running queries. Actually cancels in ClickHouse, not just the UI.</li>
+          <li><strong>Auto-fit columns</strong> — Double-click a column header border to automatically fit the column to its content.</li>
         </ul>
       </div>
 
       <div class="change-section">
         <div class="change-type changed">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
-          Changed
+          Improved
         </div>
         <ul class="change-list">
-          <li><span class="breaking">Breaking:</span> LogchefQL parsing moved from frontend to backend</li>
-          <li>Backend is now the single source of truth for SQL generation</li>
-          <li>Improved data table with compact rows, click-to-copy, and floating cell actions</li>
-        </ul>
-      </div>
-
-      <div class="change-section">
-        <div class="change-type fixed">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
-          Fixed
-        </div>
-        <ul class="change-list">
-          <li>Histogram queries now work with MATERIALIZED timestamp columns</li>
-          <li>Surrounding logs (context modal) works with MATERIALIZED columns</li>
-          <li>Field values queries have 15s timeout to prevent query pileup</li>
+          <li><strong>Cleaner log table</strong> — Compact rows, click any cell to copy, and action buttons appear on hover.</li>
         </ul>
       </div>
     </article>
@@ -305,21 +244,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Alerting</strong> — Create SQL-based alerts with native email and webhooks. Route to Slack, PagerDuty, or email.</li>
-          <li><strong>Admin Settings</strong> — Configure AI, authentication, and alerts from the web UI</li>
-          <li>Duplicate sources for quick setup</li>
-          <li>Keyboard navigation in dropdowns</li>
-        </ul>
-      </div>
-
-      <div class="change-section">
-        <div class="change-type changed">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
-          Changed
-        </div>
-        <ul class="change-list">
-          <li>Settings now persist in database instead of config file</li>
-          <li>Redesigned alerts list with better readability</li>
+          <li><strong>Alerting</strong> — Create alerts based on your log queries. Get notified via email, Slack, PagerDuty, or any webhook when conditions are met.</li>
+          <li><strong>Admin settings UI</strong> — Configure AI, authentication, and alert settings from the web interface instead of config files.</li>
+          <li><strong>Duplicate sources</strong> — Quickly create a new source by copying an existing one.</li>
         </ul>
       </div>
     </article>
@@ -338,10 +265,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Pipe Operator</strong> — Select specific columns with <code>status="500" | timestamp method path</code></li>
-          <li><strong>Nested JSON Queries</strong> — Filter on nested fields like <code>user.address.city = "NYC"</code></li>
-          <li><strong>Query History</strong> — Access your recent queries from the editor</li>
-          <li><strong>Source Stats</strong> — View table schema, TTL settings, and sort keys</li>
+          <li><strong>Select specific columns</strong> — Use the pipe operator to show only the columns you care about: <code>status="500" | timestamp method path</code></li>
+          <li><strong>Query nested JSON</strong> — Filter on deeply nested fields: <code>user.address.city = "NYC"</code></li>
+          <li><strong>Query history</strong> — Quickly access your 10 most recent queries from the editor.</li>
+          <li><strong>Source details</strong> — View table schema, TTL settings, and sort keys for any source.</li>
         </ul>
       </div>
     </article>
@@ -360,21 +287,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Query Variables</strong> — Define reusable variables in your queries with dynamic input fields</li>
-          <li><strong>Prometheus Metrics</strong> — Monitor LogChef with comprehensive metrics</li>
-          <li><strong>Grafana Dashboard</strong> — Pre-built dashboard for monitoring</li>
-          <li><strong>Compact View</strong> — Terminal-style log display for denser viewing</li>
-        </ul>
-      </div>
-
-      <div class="change-section">
-        <div class="change-type fixed">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
-          Fixed
-        </div>
-        <ul class="change-list">
-          <li>Team switching no longer causes 403 errors</li>
-          <li>Saved queries load reliably on page refresh</li>
+          <li><strong>Query variables</strong> — Use <code>{{variable}}</code> in your queries and get input fields to fill in values. Great for reusable dashboards.</li>
+          <li><strong>Prometheus metrics</strong> — Monitor LogChef performance with built-in metrics endpoint.</li>
+          <li><strong>Grafana dashboard</strong> — Pre-built dashboard for monitoring LogChef in production.</li>
+          <li><strong>Compact view</strong> — Terminal-style log display for viewing more logs at once.</li>
         </ul>
       </div>
 
@@ -397,7 +313,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>MCP Server</strong> — Connect AI assistants like Claude to query your logs via Model Context Protocol</li>
+          <li><strong>AI assistant integration</strong> — Connect Claude or other AI assistants to query your logs using Model Context Protocol (MCP).</li>
         </ul>
       </div>
     </article>
@@ -416,14 +332,13 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>AI SQL Assistant</strong> — Describe what you want in plain English, get ClickHouse SQL</li>
-          <li><strong>API Tokens</strong> — Programmatic access for scripts and integrations</li>
-          <li>Query timeout configuration</li>
+          <li><strong>AI SQL assistant</strong> — Describe what you want in plain English and get a ClickHouse SQL query. Works with OpenAI, Claude, and compatible APIs.</li>
+          <li><strong>API tokens</strong> — Generate API tokens for programmatic access to LogChef from scripts and automation.</li>
         </ul>
       </div>
 
       <div class="contributors">
-        <strong>Contributors:</strong> 
+        <strong>Contributors:</strong>
         <a href="https://github.com/vedang" target="_blank">@vedang</a>,
         <a href="https://github.com/r--w" target="_blank">@r--w</a>,
         <a href="https://github.com/gowthamgts" target="_blank">@gowthamgts</a>
@@ -444,14 +359,13 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Initial Release
         </div>
         <ul class="change-list">
-          <li><strong>Log Explorer</strong> — Interactive log exploration with real-time filtering</li>
-          <li><strong>LogchefQL</strong> — Simple query language for filtering logs</li>
-          <li><strong>SQL Mode</strong> — Full ClickHouse SQL for advanced queries</li>
-          <li><strong>Saved Queries</strong> — Save and share queries with your team</li>
-          <li><strong>Teams & RBAC</strong> — Multi-tenant access control</li>
-          <li><strong>Histogram</strong> — Visual distribution of logs over time</li>
-          <li><strong>Dark/Light Theme</strong> — Choose your preferred appearance</li>
-          <li>Single binary, Docker Compose ready</li>
+          <li><strong>Log Explorer</strong> — Search and filter your logs in real-time with an intuitive interface.</li>
+          <li><strong>LogchefQL</strong> — Simple query language for filtering logs: <code>level="error" service="api"</code></li>
+          <li><strong>Full SQL mode</strong> — Write raw ClickHouse SQL for advanced queries, aggregations, and joins.</li>
+          <li><strong>Saved queries</strong> — Save your frequently used queries and share them with your team.</li>
+          <li><strong>Team workspaces</strong> — Organize users and sources into teams with role-based access control.</li>
+          <li><strong>Time histogram</strong> — Visual chart showing log volume over time.</li>
+          <li><strong>Dark & light themes</strong> — Choose your preferred appearance.</li>
         </ul>
       </div>
     </article>
