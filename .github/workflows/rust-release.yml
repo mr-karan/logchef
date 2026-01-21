@@ -111,8 +111,7 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            cli
+          workspaces: "cli -> cli/target"
 
       - name: Build (cross)
         if: ${{ matrix.use_cross }}
