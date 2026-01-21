@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
-use crate::commands::{auth, config, query, sql};
+use crate::commands::{auth, collections, config, query, sql};
 
 #[derive(Parser)]
 #[command(name = "logchef")]
@@ -51,6 +51,9 @@ enum Commands {
     #[command(about = "Execute a raw SQL query")]
     Sql(sql::SqlArgs),
 
+    #[command(about = "List and run saved collections")]
+    Collections(collections::CollectionsArgs),
+
     #[command(about = "Manage CLI configuration")]
     Config(config::ConfigArgs),
 }
@@ -84,6 +87,7 @@ impl Cli {
             Some(Commands::Auth(args)) => auth::run(args, global).await,
             Some(Commands::Query(args)) => query::run(args, global).await,
             Some(Commands::Sql(args)) => sql::run(args, global).await,
+            Some(Commands::Collections(args)) => collections::run(args, global).await,
             Some(Commands::Config(args)) => config::run(args).await,
             None => {
                 let mut cmd = Cli::command();

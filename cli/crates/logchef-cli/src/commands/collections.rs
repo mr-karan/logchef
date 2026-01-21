@@ -1,21 +1,24 @@
 use anyhow::{Context, Result};
+use chrono::{Duration, TimeZone, Utc};
 use clap::Args;
-use inquire::{Select, Text};
+use inquire::Select;
 use logchef_core::Config;
-use logchef_core::api::{Client, Column, QueryStats, SqlQueryRequest};
+use logchef_core::api::{
+    Client, Collection, CollectionQueryContent, Column, QueryRequest, QueryStats, SqlQueryRequest,
+};
 use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::highlight::{
     FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
 };
 use serde::Serialize;
-use std::io::{IsTerminal, Read};
+use std::io::IsTerminal;
 
 use crate::cli::GlobalArgs;
 
 #[derive(Args)]
-pub struct SqlArgs {
-    /// Raw SQL query to execute. Use '-' to read from stdin.
-    sql: Option<String>,
+pub struct CollectionsArgs {
+    /// Collection name to run (optional - lists collections if not provided)
+    name: Option<String>,
 
     /// Team ID or name
     #[arg(long, short = 't')]
@@ -25,9 +28,13 @@ pub struct SqlArgs {
     #[arg(long, short = 'S')]
     source: Option<String>,
 
-    /// Query timeout in seconds
-    #[arg(long, default_value = "30")]
-    timeout: u32,
+    /// Override time range with relative time (e.g., 15m, 1h, 24h)
+    #[arg(long, short = 's')]
+    since: Option<String>,
+
+    /// Override limit
+    #[arg(long, short = 'l')]
+    limit: Option<u32>,
 
     /// Output format
     #[arg(long, default_value = "text")]
@@ -48,6 +55,10 @@ pub struct SqlArgs {
     /// Disable specific highlight groups
     #[arg(long = "disable-highlight", value_name = "GROUP")]
     disable_highlights: Vec<String>,
+
+    /// Variable overrides (format: name=value)
+    #[arg(long = "var", short = 'V', value_name = "NAME=VALUE")]
+    variables: Vec<String>,
 }
 
 #[derive(Clone, Debug, clap::ValueEnum)]
@@ -56,6 +67,7 @@ enum OutputFormat {
     Json,
     Jsonl,
     Table,
+    List,
 }
 
 #[derive(Serialize)]
@@ -65,10 +77,12 @@ struct JsonOutput<'a> {
     stats: &'a QueryStats,
     #[serde(skip_serializing_if = "Option::is_none")]
     query_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generated_sql: Option<&'a str>,
     columns: &'a [Column],
 }
 
-pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
+pub async fn run(args: CollectionsArgs, global: GlobalArgs) -> Result<()> {
     let config = Config::load().context("Failed to load config")?;
 
     let resolved = resolve_context(&config, &global)?;
@@ -102,10 +116,15 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
 
     let mut cache = Cache::new(&ctx.server_url);
 
-    // Detect interactive mode: no sql provided, no team/source args, and running in a TTY
-    let is_interactive = args.sql.is_none()
-        && args.team.is_none()
-        && args.source.is_none()
+    // Clone args values we need before any potential moves
+    let arg_team = args.team.clone();
+    let arg_source = args.source.clone();
+    let arg_name = args.name.clone();
+
+    // Detect interactive mode
+    let is_interactive = arg_name.is_none()
+        && arg_team.is_none()
+        && arg_source.is_none()
         && ctx.defaults.team.is_none()
         && ctx.defaults.source.is_none()
         && std::io::stdin().is_terminal();
@@ -114,7 +133,7 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     let team_id = if is_interactive {
         prompt_team_interactive(&client, &mut cache).await?
     } else {
-        let team_input = args.team.or(ctx.defaults.team.clone()).ok_or_else(|| {
+        let team_input = arg_team.or(ctx.defaults.team.clone()).ok_or_else(|| {
             anyhow::anyhow!("Team not specified. Use --team or set defaults.team")
         })?;
 
@@ -145,7 +164,7 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     let source_id = if is_interactive {
         prompt_source_interactive(&client, team_id, &mut cache).await?
     } else {
-        let source_input = args.source.or(ctx.defaults.source.clone()).ok_or_else(|| {
+        let source_input = arg_source.or(ctx.defaults.source.clone()).ok_or_else(|| {
             anyhow::anyhow!("Source not specified. Use --source or set defaults.source")
         })?;
 
@@ -186,44 +205,211 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
         }
     };
 
-    // Read SQL from argument, stdin, or interactive prompt
-    let sql = if is_interactive {
-        prompt_sql_interactive()?
-    } else {
-        match args.sql {
-            Some(s) if s == "-" => {
-                let mut buffer = String::new();
-                std::io::stdin()
-                    .read_to_string(&mut buffer)
-                    .context("Failed to read SQL from stdin")?;
-                buffer.trim().to_string()
-            }
-            Some(s) => s,
-            None => {
-                anyhow::bail!(
-                    "SQL query required. Provide as argument or use '-' to read from stdin."
-                )
-            }
-        }
-    };
+    // Fetch collections
+    let collections = client
+        .list_collections(team_id, source_id)
+        .await
+        .context("Failed to list collections")?;
 
-    if sql.is_empty() {
-        anyhow::bail!("SQL query cannot be empty");
+    // If no name provided (or list output), show the list
+    if arg_name.is_none() && !is_interactive {
+        return list_collections(&collections, &args);
     }
 
-    let request = SqlQueryRequest {
-        raw_sql: sql,
-        limit: None, // User controls via SQL LIMIT clause
-        timezone: ctx.defaults.timezone.clone(),
-        start_time: None,
-        end_time: None,
-        query_timeout: Some(args.timeout),
+    // Get the collection to run
+    let collection = if is_interactive {
+        prompt_collection_interactive(&collections)?
+    } else {
+        let name = arg_name.as_ref().unwrap();
+        collections
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(name))
+            .ok_or_else(|| anyhow::anyhow!("Collection '{}' not found", name))?
+            .clone()
     };
 
-    let response = client
-        .query_sql(team_id, source_id, &request)
-        .await
-        .context("SQL query failed")?;
+    // Run the collection
+    run_collection(
+        &config,
+        &client,
+        team_id,
+        source_id,
+        &collection,
+        &args,
+        ctx,
+    )
+    .await
+}
+
+fn list_collections(collections: &[Collection], args: &CollectionsArgs) -> Result<()> {
+    if collections.is_empty() {
+        println!("No collections found for this source.");
+        return Ok(());
+    }
+
+    match args.output {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(collections)?);
+        }
+        OutputFormat::Jsonl => {
+            for c in collections {
+                println!("{}", serde_json::to_string(c)?);
+            }
+        }
+        OutputFormat::List | OutputFormat::Text | OutputFormat::Table => {
+            println!("{:<4} {:<30} {:<12} DESCRIPTION", "ID", "NAME", "TYPE");
+            println!("{}", "-".repeat(70));
+            for c in collections {
+                let desc = c.description.as_deref().unwrap_or("");
+                let desc_truncated = if desc.len() > 30 {
+                    format!("{}...", &desc[..27])
+                } else {
+                    desc.to_string()
+                };
+                println!(
+                    "{:<4} {:<30} {:<12} {}",
+                    c.id,
+                    truncate_str(&c.name, 28),
+                    c.query_type,
+                    desc_truncated
+                );
+            }
+            println!("\n{} collections", collections.len());
+        }
+    }
+
+    Ok(())
+}
+
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() > max_len {
+        format!("{}...", &s[..max_len.saturating_sub(3)])
+    } else {
+        s.to_string()
+    }
+}
+
+async fn run_collection(
+    config: &Config,
+    client: &Client,
+    team_id: i64,
+    source_id: i64,
+    collection: &Collection,
+    args: &CollectionsArgs,
+    ctx: &logchef_core::config::Context,
+) -> Result<()> {
+    // Parse the query content
+    let content: CollectionQueryContent =
+        serde_json::from_str(&collection.query_content).context("Failed to parse query content")?;
+
+    let query_str = content.content.unwrap_or_default();
+
+    // Apply variable overrides
+    let mut final_query = query_str.clone();
+    let var_overrides = parse_variable_overrides(&args.variables);
+
+    // Replace variables from collection
+    if let Some(vars) = &content.variables {
+        for var in vars {
+            let value = var_overrides
+                .get(&var.name)
+                .cloned()
+                .or_else(|| var.value.clone())
+                .unwrap_or_default();
+            // Replace {{name}} with value
+            final_query = final_query.replace(&format!("{{{{{}}}}}", var.name), &value);
+        }
+    }
+
+    // Determine time range
+    let (start_time, end_time) = if let Some(since) = &args.since {
+        // Use override
+        let end = Utc::now();
+        let start = end - parse_duration(since)?;
+        let format = "%Y-%m-%d %H:%M:%S";
+        (
+            start.format(format).to_string(),
+            end.format(format).to_string(),
+        )
+    } else if let Some(tr) = &content.time_range {
+        if let Some(rel) = &tr.relative {
+            let end = Utc::now();
+            let start = end - parse_duration(rel)?;
+            let format = "%Y-%m-%d %H:%M:%S";
+            (
+                start.format(format).to_string(),
+                end.format(format).to_string(),
+            )
+        } else if let Some(abs) = &tr.absolute {
+            let format = "%Y-%m-%d %H:%M:%S";
+            let start = Utc
+                .timestamp_millis_opt(abs.start)
+                .single()
+                .ok_or_else(|| anyhow::anyhow!("Invalid start timestamp"))?;
+            let end = Utc
+                .timestamp_millis_opt(abs.end)
+                .single()
+                .ok_or_else(|| anyhow::anyhow!("Invalid end timestamp"))?;
+            (
+                start.format(format).to_string(),
+                end.format(format).to_string(),
+            )
+        } else {
+            // Default to last 15 minutes
+            let end = Utc::now();
+            let start = end - Duration::minutes(15);
+            let format = "%Y-%m-%d %H:%M:%S";
+            (
+                start.format(format).to_string(),
+                end.format(format).to_string(),
+            )
+        }
+    } else {
+        // Default to last 15 minutes
+        let end = Utc::now();
+        let start = end - Duration::minutes(15);
+        let format = "%Y-%m-%d %H:%M:%S";
+        (
+            start.format(format).to_string(),
+            end.format(format).to_string(),
+        )
+    };
+
+    let limit = args.limit.or(content.limit).unwrap_or(100);
+
+    eprintln!(
+        "Running collection: {} ({})",
+        collection.name, collection.query_type
+    );
+
+    let response = if collection.query_type == "sql" {
+        let request = SqlQueryRequest {
+            raw_sql: final_query,
+            limit: None, // SQL queries control their own limit
+            timezone: ctx.defaults.timezone.clone(),
+            start_time: None,
+            end_time: None,
+            query_timeout: Some(30),
+        };
+        client
+            .query_sql(team_id, source_id, &request)
+            .await
+            .context("SQL query failed")?
+    } else {
+        // logchefql
+        let request = QueryRequest {
+            query: final_query,
+            start_time,
+            end_time,
+            timezone: ctx.defaults.timezone.clone(),
+            limit: Some(limit),
+            query_timeout: None,
+        };
+        client
+            .query_logchefql(team_id, source_id, &request)
+            .await
+            .context("Query failed")?
+    };
 
     let entries = response.entries();
     let is_tty = std::io::stdout().is_terminal();
@@ -235,6 +421,7 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
                 count: entries.len(),
                 stats: &response.stats,
                 query_id: response.query_id.as_deref(),
+                generated_sql: response.generated_sql.as_deref(),
                 columns: &response.columns,
             };
             println!("{}", serde_json::to_string_pretty(&output)?);
@@ -263,7 +450,7 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
                 );
             }
         }
-        OutputFormat::Text => {
+        OutputFormat::Text | OutputFormat::List => {
             let highlighter = if args.no_highlight {
                 None
             } else {
@@ -300,6 +487,19 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     Ok(())
 }
 
+fn parse_variable_overrides(vars: &[String]) -> std::collections::HashMap<String, String> {
+    vars.iter()
+        .filter_map(|v| {
+            let parts: Vec<&str> = v.splitn(2, '=').collect();
+            if parts.len() == 2 {
+                Some((parts[0].to_string(), parts[1].to_string()))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 enum ResolvedContext<'a> {
     Saved(&'a logchef_core::config::Context, String),
     Ephemeral(logchef_core::config::Context),
@@ -329,6 +529,35 @@ fn resolve_context<'a>(config: &'a Config, global: &GlobalArgs) -> Result<Resolv
         .ok_or_else(|| anyhow::anyhow!("Current context '{}' not found", name))?;
 
     Ok(ResolvedContext::Saved(ctx, name.to_string()))
+}
+
+fn parse_duration(s: &str) -> Result<Duration> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Ok(Duration::minutes(15));
+    }
+
+    let (num, unit) = if s.ends_with('m') {
+        (s.trim_end_matches('m'), "m")
+    } else if s.ends_with('h') {
+        (s.trim_end_matches('h'), "h")
+    } else if s.ends_with('d') {
+        (s.trim_end_matches('d'), "d")
+    } else if s.ends_with('w') {
+        (s.trim_end_matches('w'), "w")
+    } else {
+        (s, "m")
+    };
+
+    let num: i64 = num.parse().context("Invalid duration number")?;
+
+    match unit {
+        "m" => Ok(Duration::minutes(num)),
+        "h" => Ok(Duration::hours(num)),
+        "d" => Ok(Duration::days(num)),
+        "w" => Ok(Duration::weeks(num)),
+        _ => Ok(Duration::minutes(num)),
+    }
 }
 
 fn parse_highlight_args(args: &[String]) -> Vec<(String, Vec<String>)> {
@@ -394,7 +623,6 @@ async fn prompt_team_interactive(client: &Client, cache: &mut Cache) -> Result<i
         .prompt()
         .context("Failed to select team")?;
 
-    // Parse team ID from selection
     let team = teams
         .iter()
         .find(|t| selection.starts_with(&t.name))
@@ -446,14 +674,23 @@ async fn prompt_source_interactive(
     Ok(source.id)
 }
 
-fn prompt_sql_interactive() -> Result<String> {
-    let sql = Text::new("SQL query:")
-        .with_help_message("Full ClickHouse SQL including time filters")
-        .prompt()
-        .context("Failed to read SQL query")?;
-
-    if sql.trim().is_empty() {
-        anyhow::bail!("SQL query cannot be empty");
+fn prompt_collection_interactive(collections: &[Collection]) -> Result<Collection> {
+    if collections.is_empty() {
+        anyhow::bail!("No collections available for this source");
     }
-    Ok(sql)
+
+    let options: Vec<String> = collections
+        .iter()
+        .map(|c| format!("{} [{}]", c.name, c.query_type))
+        .collect();
+    let selection = Select::new("Select collection:", options)
+        .prompt()
+        .context("Failed to select collection")?;
+
+    let collection = collections
+        .iter()
+        .find(|c| selection.starts_with(&c.name))
+        .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+    Ok(collection.clone())
 }

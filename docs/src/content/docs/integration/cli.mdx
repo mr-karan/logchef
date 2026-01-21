@@ -45,6 +45,10 @@ logchef config set source "nginx-logs"
 logchef query "level:error" --since 1h
 ```
 
+:::tip[Copy CLI Command from Web UI]
+In the LogChef web UI, click the terminal icon (next to the share button) in the explore view to copy the equivalent CLI command for your current query. This is a quick way to transition from the web UI to the terminal.
+:::
+
 ## Installation
 
 ### From Source
@@ -161,6 +165,22 @@ logchef query "level:error service:api" --since 1h
 | `--no-timestamp` | | Hide timestamp from text output | `false` |
 | `--show-sql` | | Display the generated SQL query | `false` |
 
+#### Interactive Mode
+
+When you run `logchef query` without specifying team, source, or query, and you're in a terminal, the CLI enters interactive mode:
+
+```bash
+# Launch interactive mode
+logchef query
+
+# Prompts:
+# ? Select team: [production, staging, dev]
+# ? Select source: [nginx-logs, app-logs, api-logs]
+# ? LogChefQL query: level:error
+```
+
+This is useful for quick exploration without remembering exact team/source names.
+
 #### Query Examples
 
 ```bash
@@ -217,6 +237,20 @@ logchef sql "SELECT * FROM logs.app WHERE level='error' LIMIT 10"
 | `--no-highlight` | | Disable syntax highlighting | `false` |
 | `--no-timestamp` | | Hide timestamp from text output | `false` |
 
+#### Interactive Mode
+
+Similar to `query`, the `sql` command supports interactive mode:
+
+```bash
+# Launch interactive mode
+logchef sql
+
+# Prompts:
+# ? Select team: [production, staging, dev]
+# ? Select source: [nginx-logs, app-logs, api-logs]
+# ? SQL query: SELECT * FROM logs.app LIMIT 10
+```
+
 #### SQL Examples
 
 ```bash
@@ -270,6 +304,74 @@ The highlighting includes:
 - **Key=value pairs** with dimmed keys
 - **Numbers** in cyan
 - **Log levels** color-coded (ERROR=red, WARN=yellow, INFO=green, DEBUG=blue)
+
+### Collections
+
+The `collections` command lets you list and run saved collections (saved queries) from the LogChef web UI.
+
+```bash
+# List all collections for a source
+logchef collections --team "production" --source "nginx-logs"
+
+# Run a collection by name
+logchef collections "Error Dashboard" --team "production" --source "nginx-logs"
+```
+
+#### Options
+
+| Option | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--team` | `-t` | Team name (or ID) | (from config) |
+| `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
+| `--since` | `-s` | Override time range (e.g., "15m", "1h", "24h") | (from collection) |
+| `--from` | | Override absolute start time (ISO 8601) | |
+| `--to` | | Override absolute end time (ISO 8601) | |
+| `--limit` | `-l` | Override maximum number of results | (from collection) |
+| `--var` | | Set variable value (format: `name=value`) | |
+| `--output` | | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
+| `--no-highlight` | | Disable syntax highlighting | `false` |
+| `--no-timestamp` | | Hide timestamp from text output | `false` |
+| `--show-sql` | | Display the generated SQL query | `false` |
+
+#### Interactive Mode
+
+When run without arguments, enters interactive mode to select team, source, and collection:
+
+```bash
+# Launch interactive mode
+logchef collections
+
+# Prompts:
+# ? Select team: [production, staging, dev]
+# ? Select source: [nginx-logs, app-logs, api-logs]
+# ? Select collection: [Error Dashboard, Slow Requests, Daily Summary]
+```
+
+#### Collection Examples
+
+```bash
+# List all collections
+logchef collections -t "production" -S "nginx-logs"
+#   ID   NAME                           TYPE         DESCRIPTION
+#   1    Error Dashboard                logchefql    Track 5xx errors
+#   2    Slow Requests                  logchefql    Requests > 1s
+
+# Run a collection with default settings
+logchef collections "Error Dashboard" -t "production" -S "nginx-logs"
+
+# Override time range
+logchef collections "Error Dashboard" -t 1 -S 1 --since 1h
+
+# Set variables defined in the collection
+logchef collections "Service Logs" --var service=api --var level=error
+
+# Output as JSON
+logchef collections "Error Dashboard" --output json | jq '.count'
+```
+
+:::tip[Collections vs Query]
+Collections are saved queries with predefined settings (time ranges, limits, variables). Use them for repeatable queries you've set up in the web UI. Use `query` for ad-hoc exploration.
+:::
 
 ### Configuration
 

@@ -21,3 +21,4 @@ tracing-subscriber.workspace = true
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+inquire.workspace = true

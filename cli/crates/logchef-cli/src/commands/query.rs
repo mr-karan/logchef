@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
 use clap::Args;
+use inquire::{Select, Text};
 use logchef_core::Config;
 use logchef_core::api::{Client, Column, QueryRequest, QueryStats};
 use logchef_core::cache::{Cache, Identifier, parse_identifier};
@@ -105,71 +106,88 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
         }
     }
 
-    let team_input = args
-        .team
-        .or(ctx.defaults.team.clone())
-        .ok_or_else(|| anyhow::anyhow!("Team not specified. Use --team or set defaults.team"))?;
-
-    let source_input = args.source.or(ctx.defaults.source.clone()).ok_or_else(|| {
-        anyhow::anyhow!("Source not specified. Use --source or set defaults.source")
-    })?;
-
     let mut cache = Cache::new(&ctx.server_url);
 
-    let team_id = match parse_identifier(&team_input) {
-        Identifier::Id(id) => id,
-        Identifier::Name(name) => {
-            if let Some(id) = cache.get_team_id(&name) {
-                id
-            } else {
-                let teams = client.list_teams().await.context("Failed to list teams")?;
-                cache.set_teams(
-                    &teams
+    // Detect interactive mode: no query provided, no team/source args, and running in a TTY
+    let is_interactive = args.query.is_none()
+        && args.team.is_none()
+        && args.source.is_none()
+        && ctx.defaults.team.is_none()
+        && ctx.defaults.source.is_none()
+        && std::io::stdin().is_terminal();
+
+    // Resolve team
+    let team_id = if is_interactive {
+        prompt_team_interactive(&client, &mut cache).await?
+    } else {
+        let team_input = args.team.or(ctx.defaults.team.clone()).ok_or_else(|| {
+            anyhow::anyhow!("Team not specified. Use --team or set defaults.team")
+        })?;
+
+        match parse_identifier(&team_input) {
+            Identifier::Id(id) => id,
+            Identifier::Name(name) => {
+                if let Some(id) = cache.get_team_id(&name) {
+                    id
+                } else {
+                    let teams = client.list_teams().await.context("Failed to list teams")?;
+                    cache.set_teams(
+                        &teams
+                            .iter()
+                            .map(|t| (t.name.clone(), t.id))
+                            .collect::<Vec<_>>(),
+                    );
+                    teams
                         .iter()
-                        .map(|t| (t.name.clone(), t.id))
-                        .collect::<Vec<_>>(),
-                );
-                teams
-                    .iter()
-                    .find(|t| t.name.eq_ignore_ascii_case(&name))
-                    .map(|t| t.id)
-                    .ok_or_else(|| anyhow::anyhow!("Team '{}' not found", name))?
+                        .find(|t| t.name.eq_ignore_ascii_case(&name))
+                        .map(|t| t.id)
+                        .ok_or_else(|| anyhow::anyhow!("Team '{}' not found", name))?
+                }
             }
         }
     };
 
-    let source_id = match parse_identifier(&source_input) {
-        Identifier::Id(id) => id,
-        Identifier::Name(name) => {
-            if let Some(id) = cache.get_source_id(team_id, &name) {
-                id
-            } else {
-                let sources = client
-                    .list_sources(team_id)
-                    .await
-                    .context("Failed to list sources")?;
+    // Resolve source
+    let source_id = if is_interactive {
+        prompt_source_interactive(&client, team_id, &mut cache).await?
+    } else {
+        let source_input = args.source.or(ctx.defaults.source.clone()).ok_or_else(|| {
+            anyhow::anyhow!("Source not specified. Use --source or set defaults.source")
+        })?;
 
-                let mut cache_entries: Vec<(String, i64)> =
-                    sources.iter().map(|s| (s.name.clone(), s.id)).collect();
-                for s in &sources {
-                    if let Some(table_ref) = s.table_ref() {
-                        cache_entries.push((table_ref, s.id));
+        match parse_identifier(&source_input) {
+            Identifier::Id(id) => id,
+            Identifier::Name(name) => {
+                if let Some(id) = cache.get_source_id(team_id, &name) {
+                    id
+                } else {
+                    let sources = client
+                        .list_sources(team_id)
+                        .await
+                        .context("Failed to list sources")?;
+
+                    let mut cache_entries: Vec<(String, i64)> =
+                        sources.iter().map(|s| (s.name.clone(), s.id)).collect();
+                    for s in &sources {
+                        if let Some(table_ref) = s.table_ref() {
+                            cache_entries.push((table_ref, s.id));
+                        }
                     }
-                }
-                cache.set_sources(team_id, &cache_entries);
+                    cache.set_sources(team_id, &cache_entries);
 
-                sources
-                    .iter()
-                    .find(|s| s.name.eq_ignore_ascii_case(&name))
-                    .or_else(|| {
-                        sources.iter().find(|s| {
-                            s.table_ref()
-                                .map(|r| r.eq_ignore_ascii_case(&name))
-                                .unwrap_or(false)
+                    sources
+                        .iter()
+                        .find(|s| s.name.eq_ignore_ascii_case(&name))
+                        .or_else(|| {
+                            sources.iter().find(|s| {
+                                s.table_ref()
+                                    .map(|r| r.eq_ignore_ascii_case(&name))
+                                    .unwrap_or(false)
+                            })
                         })
-                    })
-                    .map(|s| s.id)
-                    .ok_or_else(|| anyhow::anyhow!("Source '{}' not found", name))?
+                        .map(|s| s.id)
+                        .ok_or_else(|| anyhow::anyhow!("Source '{}' not found", name))?
+                }
             }
         }
     };
@@ -180,8 +198,15 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
     let (start_time, end_time) =
         parse_time_range(&since, args.from.as_deref(), args.to.as_deref())?;
 
+    // Resolve query (prompt in interactive mode if not provided)
+    let query = if is_interactive && args.query.is_none() {
+        prompt_query_interactive()?
+    } else {
+        args.query.unwrap_or_default()
+    };
+
     let request = QueryRequest {
-        query: args.query.unwrap_or_default(),
+        query,
         start_time,
         end_time,
         timezone: ctx.defaults.timezone.clone(),
@@ -401,4 +426,78 @@ fn print_table(entries: &[logchef_core::api::LogEntry], columns: &[logchef_core:
             .collect();
         println!("{}", row.join(" | "));
     }
+}
+
+async fn prompt_team_interactive(client: &Client, cache: &mut Cache) -> Result<i64> {
+    let teams = client.list_teams().await.context("Failed to list teams")?;
+    if teams.is_empty() {
+        anyhow::bail!("No teams available");
+    }
+
+    let options: Vec<String> = teams
+        .iter()
+        .map(|t| format!("{} (ID: {})", t.name, t.id))
+        .collect();
+    let selection = Select::new("Select team:", options)
+        .prompt()
+        .context("Failed to select team")?;
+
+    // Parse team ID from selection
+    let team = teams
+        .iter()
+        .find(|t| selection.starts_with(&t.name))
+        .ok_or_else(|| anyhow::anyhow!("Team not found"))?;
+    cache.set_teams(
+        &teams
+            .iter()
+            .map(|t| (t.name.clone(), t.id))
+            .collect::<Vec<_>>(),
+    );
+    Ok(team.id)
+}
+
+async fn prompt_source_interactive(
+    client: &Client,
+    team_id: i64,
+    cache: &mut Cache,
+) -> Result<i64> {
+    let sources = client
+        .list_sources(team_id)
+        .await
+        .context("Failed to list sources")?;
+    if sources.is_empty() {
+        anyhow::bail!("No sources available for this team");
+    }
+
+    let options: Vec<String> = sources
+        .iter()
+        .map(|s| format!("{} ({})", s.name, s.table_ref().unwrap_or_default()))
+        .collect();
+    let selection = Select::new("Select source:", options)
+        .prompt()
+        .context("Failed to select source")?;
+
+    let source = sources
+        .iter()
+        .find(|s| selection.starts_with(&s.name))
+        .ok_or_else(|| anyhow::anyhow!("Source not found"))?;
+
+    let mut cache_entries: Vec<(String, i64)> =
+        sources.iter().map(|s| (s.name.clone(), s.id)).collect();
+    for s in &sources {
+        if let Some(table_ref) = s.table_ref() {
+            cache_entries.push((table_ref, s.id));
+        }
+    }
+    cache.set_sources(team_id, &cache_entries);
+
+    Ok(source.id)
+}
+
+fn prompt_query_interactive() -> Result<String> {
+    let query = Text::new("LogChefQL query:")
+        .with_help_message("e.g., level:error service:api (leave empty for all logs)")
+        .prompt()
+        .context("Failed to read query")?;
+    Ok(query)
 }

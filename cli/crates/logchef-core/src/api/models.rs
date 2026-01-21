@@ -200,3 +200,64 @@ pub struct TokenUser {
     #[serde(default)]
     pub role: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Collection {
+    pub id: i64,
+    pub team_id: i64,
+    pub source_id: i64,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub query_type: String,
+    pub query_content: String,
+    #[serde(default)]
+    pub is_bookmarked: bool,
+    #[serde(default)]
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CollectionQueryContent {
+    #[serde(default)]
+    pub version: Option<i32>,
+    #[serde(default, rename = "sourceId")]
+    pub source_id: Option<i64>,
+    #[serde(default, rename = "timeRange")]
+    pub time_range: Option<CollectionTimeRange>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub variables: Option<Vec<CollectionVariable>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CollectionTimeRange {
+    #[serde(default)]
+    pub relative: Option<String>,
+    #[serde(default)]
+    pub absolute: Option<CollectionAbsoluteTime>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CollectionAbsoluteTime {
+    pub start: i64,
+    pub end: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CollectionVariable {
+    pub name: String,
+    #[serde(default, rename = "type")]
+    pub var_type: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default, rename = "inputType")]
+    pub input_type: Option<String>,
+    #[serde(default)]
+    pub value: Option<String>,
+}

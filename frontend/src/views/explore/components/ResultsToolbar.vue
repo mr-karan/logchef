@@ -93,9 +93,9 @@ const formattedQueryTime = computed(() => {
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button 
-              variant="ghost" 
-              size="sm" 
+            <Button
+              variant="ghost"
+              size="sm"
               class="h-7 w-7 p-0"
               @click="emit('export')"
               :disabled="logsCount === 0"

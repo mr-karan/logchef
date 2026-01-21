@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use clap::Args;
+use inquire::Text;
 use logchef_core::Config;
 use logchef_core::api::Client;
 use logchef_core::auth::AuthFlow;
 use logchef_core::config::{Context as CtxConfig, context_name_from_url};
-use std::io::{self, Write};
 
 use crate::cli::GlobalArgs;
 
@@ -166,10 +166,12 @@ fn resolve_context_name(config: &Config, global: &GlobalArgs) -> Result<String> 
 }
 
 fn get_server_url(config: &Config, global: &GlobalArgs) -> Result<String> {
+    // Priority 1: Use --server flag
     if let Some(url) = &global.server {
         return Ok(url.clone());
     }
 
+    // Priority 2: Use --context flag
     if let Some(ctx_name) = &global.context {
         if let Some(ctx) = config.get_context(ctx_name) {
             return Ok(ctx.server_url.clone());
@@ -177,25 +179,21 @@ fn get_server_url(config: &Config, global: &GlobalArgs) -> Result<String> {
         anyhow::bail!("Context '{}' not found", ctx_name);
     }
 
-    if let Some(ctx) = config.current_context() {
-        print!("Server URL [{}]: ", ctx.server_url);
-        io::stdout().flush()?;
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        let input = input.trim();
-        if input.is_empty() {
-            return Ok(ctx.server_url.clone());
-        }
-        return Ok(input.to_string());
+    // Priority 3: Interactive prompt with optional default
+    let default = config.current_context().map(|ctx| ctx.server_url.clone());
+
+    let mut prompt = Text::new("LogChef server URL:");
+    if let Some(ref default_url) = default {
+        prompt = prompt
+            .with_default(default_url)
+            .with_help_message("Press Enter for default");
     }
 
-    print!("Enter LogChef server URL: ");
-    io::stdout().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let input = input.trim();
-    if input.is_empty() {
+    let input = prompt.prompt().context("Failed to read server URL")?;
+
+    if input.trim().is_empty() {
         anyhow::bail!("Server URL is required");
     }
-    Ok(input.to_string())
+
+    Ok(input.trim().to_string())
 }

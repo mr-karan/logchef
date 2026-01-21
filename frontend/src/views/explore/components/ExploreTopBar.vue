@@ -9,9 +9,10 @@ import { useExploreStore } from '@/stores/explore'
 import { useTimeRange } from '@/composables/useTimeRange'
 import { Button } from '@/components/ui/button'
 import { DateTimePicker } from '@/components/date-time-picker'
-import { ChevronRight, Share2, Settings, Clock } from 'lucide-vue-next'
+import { ChevronRight, Share2, Settings, Clock, Terminal } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
+import { generateCliCommand } from '@/utils/cliCommand'
 import { ref } from 'vue'
 import {
   Select,
@@ -143,6 +144,68 @@ function copyUrlToClipboard() {
     toast({
       title: "Copy Failed",
       description: "Failed to copy URL.",
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR
+    })
+  }
+}
+
+function copyCliCommand() {
+  if (!contextStore.teamId || !contextStore.sourceId) {
+    toast({
+      title: "Cannot copy CLI command",
+      description: "Team and source must be selected.",
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR
+    })
+    return
+  }
+
+  const tr = exploreStore.timeRange
+  const command = generateCliCommand({
+    teamId: contextStore.teamId,
+    sourceId: contextStore.sourceId,
+    mode: exploreStore.activeMode,
+    query:
+      exploreStore.activeMode === 'logchefql'
+        ? exploreStore.logchefqlCode
+        : exploreStore.rawSql,
+    relativeTime: exploreStore.selectedRelativeTime || undefined,
+    absoluteStart: tr?.start
+      ? new Date(
+          tr.start.year,
+          tr.start.month - 1,
+          tr.start.day,
+          'hour' in tr.start ? tr.start.hour : 0,
+          'minute' in tr.start ? tr.start.minute : 0,
+          'second' in tr.start ? tr.start.second : 0
+        )
+      : undefined,
+    absoluteEnd: tr?.end
+      ? new Date(
+          tr.end.year,
+          tr.end.month - 1,
+          tr.end.day,
+          'hour' in tr.end ? tr.end.hour : 0,
+          'minute' in tr.end ? tr.end.minute : 0,
+          'second' in tr.end ? tr.end.second : 0
+        )
+      : undefined,
+    limit: exploreStore.limit,
+    timeout: exploreStore.queryTimeout,
+  })
+
+  try {
+    navigator.clipboard.writeText(command)
+    toast({
+      title: "CLI command copied",
+      description: "Paste in your terminal to run the same query.",
+      duration: TOAST_DURATION.SUCCESS
+    })
+  } catch {
+    toast({
+      title: "Copy Failed",
+      description: "Failed to copy CLI command.",
       variant: "destructive",
       duration: TOAST_DURATION.ERROR
     })
@@ -284,6 +347,20 @@ defineExpose({
       <div v-if="exploreStore.lastExecutionTimestamp" class="text-xs text-muted-foreground mr-2 hidden sm:block">
         {{ new Date(exploreStore.lastExecutionTimestamp).toLocaleTimeString() }}
       </div>
+
+      <!-- Copy CLI Command Button -->
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="copyCliCommand">
+              <Terminal class="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p class="text-xs">Copy CLI command</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
 
       <!-- Share Button -->
       <TooltipProvider>

@@ -192,4 +192,14 @@ impl Client {
         let api_response: TokenExchangeApiResponse = self.handle_response(response).await?;
         Ok(api_response.data)
     }
+
+    pub async fn list_collections(&self, team_id: i64, source_id: i64) -> Result<Vec<Collection>> {
+        let response: ApiResponse<Vec<Collection>> = self
+            .get(&format!(
+                "/api/v1/teams/{}/sources/{}/collections",
+                team_id, source_id
+            ))
+            .await?;
+        Ok(response.data)
+    }
 }
