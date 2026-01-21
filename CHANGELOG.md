@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [CLI v0.1.2] - 2026-01-21
+
+### Added
+- **CLI `collections` command** — List and run saved queries from the command line
+  - `logchef collections` lists all saved queries for a team/source
+  - `logchef collections run <id>` executes a saved query with all output formats
+  - Supports filtering by bookmarked queries with `--bookmarked`
+- **CLI interactive mode** — Run `query` or `sql` without arguments for guided prompts
+  - Interactive team and source selection with arrow-key navigation
+  - Proper line editing with history support via `inquire` crate
+  - Auth command now uses `inquire` for server URL input with defaults
+- **Copy CLI command button** — Click terminal icon in explore toolbar to copy equivalent CLI command
+  - Generates `logchef query` or `logchef sql` command matching current query
+  - Includes time range, limit, and timeout parameters
+
 ## [CLI v0.1.1] - 2026-01-21
 
 ### Added
