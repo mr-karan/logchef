@@ -496,7 +496,7 @@ async fn prompt_source_interactive(
 
 fn prompt_query_interactive() -> Result<String> {
     let query = Text::new("LogChefQL query:")
-        .with_help_message("e.g., level:error service:api (leave empty for all logs)")
+        .with_help_message(r#"e.g., level="error" and service="api" (leave empty for all logs)"#)
         .prompt()
         .context("Failed to read query")?;
     Ok(query)
