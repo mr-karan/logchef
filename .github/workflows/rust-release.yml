@@ -1,9 +1,21 @@
+# LogChef CLI Release Workflow
+#
+# Triggered by pushing a tag matching "cli-v*" pattern.
+# Example: git tag -a cli-v0.1.0 -m "Release 0.1.0" && git push origin cli-v0.1.0
+#
+# Builds for:
+# - Linux x86_64 (musl, static)
+# - Linux aarch64 (musl, static)
+# - macOS x86_64
+# - macOS aarch64 (Apple Silicon)
+# - Windows x86_64
+
 name: LogChef CLI Release
 
 on:
   push:
     tags:
-      - "v*"
+      - "cli-v*"
   workflow_dispatch:
 
 permissions:
@@ -13,7 +25,45 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Validate that the tag version matches Cargo.toml
+  tag-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate tag matches Cargo.toml version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Must be a tag push
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            echo "❌ Not a tag push"
+            exit 1
+          fi
+
+          # Tag must match expected format: cli-v0.1.0 or cli-v0.1.0-alpha.1
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^cli-v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)(\.[0-9]+)?)?$ ]]; then
+            echo "❌ Tag '${GITHUB_REF_NAME}' doesn't match expected format (cli-vX.Y.Z[-prerelease])"
+            exit 1
+          fi
+
+          # Extract version from tag (strip 'cli-v' prefix)
+          tag_ver="${GITHUB_REF_NAME#cli-v}"
+
+          # Extract version from Cargo.toml
+          cargo_ver="$(grep -m1 '^version' cli/Cargo.toml | sed -E 's/version *= *"([^"]+)".*/\1/')"
+
+          # Compare
+          if [[ "${tag_ver}" != "${cargo_ver}" ]]; then
+            echo "❌ Tag version (${tag_ver}) doesn't match Cargo.toml version (${cargo_ver})"
+            exit 1
+          fi
+
+          echo "✅ Tag and Cargo.toml versions match: ${tag_ver}"
+
   build:
+    needs: tag-check
     strategy:
       fail-fast: false
       matrix:
@@ -23,16 +73,25 @@ jobs:
             target: x86_64-unknown-linux-musl
             asset_name: linux-x86_64-musl
             use_cross: true
+
+          - name: linux-aarch64-musl
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            asset_name: linux-aarch64-musl
+            use_cross: true
+
           - name: macos-x86_64
             os: macos-13
             target: x86_64-apple-darwin
             asset_name: macos-x86_64
             use_cross: false
+
           - name: macos-aarch64
             os: macos-14
             target: aarch64-apple-darwin
             asset_name: macos-aarch64
             use_cross: false
+
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -63,6 +122,7 @@ jobs:
           target: ${{ matrix.target }}
           args: "--locked --release"
           strip: true
+          working-directory: cli
 
       - name: Build (cargo)
         if: ${{ !matrix.use_cross }}
@@ -74,10 +134,19 @@ jobs:
         id: package
         run: |
           tag="${GITHUB_REF_NAME}"
-          archive="logchef-cli_${tag}_${{ matrix.asset_name }}.tar.gz"
+          version="${tag#cli-v}"
+          archive="logchef-cli_${version}_${{ matrix.asset_name }}.tar.gz"
           mkdir -p dist
+
+          # Create tarball
           tar -C "cli/target/${{ matrix.target }}/release" -czf "dist/${archive}" logchef
+
+          # Generate checksum
+          cd dist
+          sha256sum "${archive}" > "${archive}.sha256"
+
           echo "archive=dist/${archive}" >> "$GITHUB_OUTPUT"
+          echo "checksum=dist/${archive}.sha256" >> "$GITHUB_OUTPUT"
 
       - name: Package (windows)
         if: ${{ runner.os == 'Windows' }}
@@ -85,37 +154,86 @@ jobs:
         shell: pwsh
         run: |
           $tag = "$env:GITHUB_REF_NAME"
-          $archive = "logchef-cli_${tag}_${{ matrix.asset_name }}.zip"
+          $version = $tag -replace '^cli-v', ''
+          $archive = "logchef-cli_${version}_${{ matrix.asset_name }}.zip"
+
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path "cli\target\${{ matrix.target }}\release\logchef.exe" -DestinationPath "dist\$archive"
+
+          # Generate checksum
+          $hash = (Get-FileHash "dist\$archive" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $archive" | Out-File -FilePath "dist\$archive.sha256" -Encoding utf8 -NoNewline
+
           "archive=dist\$archive" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "checksum=dist\$archive.sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Upload artifact (unix)
         if: ${{ runner.os != 'Windows' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: ${{ steps.package.outputs.archive }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.checksum }}
 
       - name: Upload artifact (windows)
         if: ${{ runner.os == 'Windows' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: ${{ steps.package-windows.outputs.archive }}
+          path: |
+            ${{ steps.package-windows.outputs.archive }}
+            ${{ steps.package-windows.outputs.checksum }}
 
   release:
     needs: build
     runs-on: ubuntu-latest
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Generate combined checksums file
+        run: |
+          cd dist
+          cat *.sha256 > checksums.txt
+          echo "=== checksums.txt ==="
+          cat checksums.txt
+
+      - name: Determine if prerelease
+        id: prerelease
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#cli-v}"
+          if [[ "${version}" =~ -(alpha|beta|rc) ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract version for release name
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#cli-v}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/**
+          name: LogChef CLI v${{ steps.version.outputs.version }}
+          prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+            dist/checksums.txt
