@@ -26,6 +26,7 @@ LogChef is a lightweight, powerful log analytics platform designed for efficient
 - **Single binary**: One executable, no runtime dependencies.
 - **Comprehensive metrics**: Prometheus metrics for usage and performance.
 - **MCP integration**: Model Context Protocol server for AI assistants ([logchef-mcp](https://github.com/mr-karan/logchef-mcp)).
+- **CLI**: Query logs from your terminal with syntax highlighting and multi-context support.
 
 ## Quick Start
 
@@ -40,6 +41,47 @@ docker compose up -d
 ```
 
 Access the Logchef interface at `http://localhost:8125`.
+
+## CLI
+
+LogChef includes a powerful CLI for querying logs directly from your terminal.
+
+### Install
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/mr-karan/logchef/releases?q=cli&expanded=true):
+
+```bash
+# macOS (Apple Silicon)
+curl -LO https://github.com/mr-karan/logchef/releases/download/cli-v0.1.1/logchef-darwin-arm64.tar.gz
+
+# macOS (Intel)
+curl -LO https://github.com/mr-karan/logchef/releases/download/cli-v0.1.1/logchef-darwin-amd64.tar.gz
+
+# Linux (x86_64)
+curl -LO https://github.com/mr-karan/logchef/releases/download/cli-v0.1.1/logchef-linux-amd64.tar.gz
+
+# Linux (ARM64)
+curl -LO https://github.com/mr-karan/logchef/releases/download/cli-v0.1.1/logchef-linux-arm64.tar.gz
+
+# Extract and install
+tar -xzf logchef-*.tar.gz
+sudo mv logchef /usr/local/bin/
+```
+
+### Usage
+
+```bash
+# Authenticate with your LogChef server
+logchef auth --server https://logs.example.com
+
+# Query logs with LogChefQL
+logchef query "level:error" --since 1h
+
+# Execute raw SQL
+logchef sql "SELECT * FROM logs.app WHERE level='error' LIMIT 10"
+```
+
+For full documentation, see the [CLI Guide](https://logchef.app/integration/cli/).
 
 ## Documentation
 
