@@ -81,13 +81,13 @@ jobs:
             use_cross: true
 
           - name: macos-x86_64
-            os: macos-13
+            os: macos-15
             target: x86_64-apple-darwin
             asset_name: macos-x86_64
             use_cross: false
 
           - name: macos-aarch64
-            os: macos-14
+            os: macos-15
             target: aarch64-apple-darwin
             asset_name: macos-aarch64
             use_cross: false
