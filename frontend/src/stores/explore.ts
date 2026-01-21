@@ -405,7 +405,10 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.lastExecutionTimestamp = Date.now();
   }
 
-  function initializeFromUrl(params: Record<string, string | undefined>): { needsResolve: boolean; queryId?: string; shouldExecute: boolean } {
+  function initializeFromUrl(
+    params: Record<string, string | undefined>,
+    options?: { updateLastExecutedState?: boolean }
+  ): { needsResolve: boolean; queryId?: string; shouldExecute: boolean } {
     if (params.source) {
       const parsedSourceId = parseInt(params.source, 10);
       if (!isNaN(parsedSourceId)) {
@@ -420,12 +423,15 @@ export const useExploreStore = defineStore("explore", () => {
     }
 
     const relativeTime = params.t || params.time;
+    const startParam = params.start ?? params.start_time;
+    const endParam = params.end ?? params.end_time;
+
     if (relativeTime) {
       setRelativeTimeRange(relativeTime);
-    } else if (params.start && params.end) {
+    } else if (startParam && endParam) {
       try {
-        const startTs = parseInt(params.start, 10);
-        const endTs = parseInt(params.end, 10);
+        const startTs = parseInt(startParam, 10);
+        const endTs = parseInt(endParam, 10);
 
         if (!isNaN(startTs) && !isNaN(endTs)) {
           state.data.value.timeRange = {
@@ -477,7 +483,9 @@ export const useExploreStore = defineStore("explore", () => {
       ensureVariablesFromSql(sqlToCheck);
     }
 
-    _updateLastExecutedState();
+    if (options?.updateLastExecutedState !== false) {
+      _updateLastExecutedState();
+    }
 
     const hasRequiredParams = !!(sourceId.value && state.data.value.timeRange);
     const hasQueryContent = state.data.value.activeMode === 'sql' ? !!state.data.value.rawSql : true;

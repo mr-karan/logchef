@@ -30,6 +30,75 @@ export function useUrlState(): UrlStateReturn {
 
   const pendingQueryResolve = ref(false);
   let skipNextSync = false;
+  let pendingRouteSyncKey: string | null = null;
+
+  function getRouteQueryParams(): Record<string, string> {
+    const fullPath = route.fullPath || '';
+    const queryString = fullPath.split('?')[1] ?? '';
+    const cleanQuery = queryString.split('#')[0] ?? '';
+    const searchParams = new URLSearchParams(cleanQuery);
+    const parsed: Record<string, string> = {};
+
+    for (const [key, value] of searchParams.entries()) {
+      parsed[key] = value;
+    }
+
+    return parsed;
+  }
+
+  function normalizeQueryParams(query: Record<string, unknown>): Record<string, string | undefined> {
+    const normalized: Record<string, string | undefined> = {};
+
+    const getValue = (key: string) => {
+      const value = query[key];
+      if (Array.isArray(value)) {
+        const first = value[0];
+        return first === undefined || first === null || first === '' ? undefined : String(first);
+      }
+      if (value === undefined || value === null || value === '') {
+        return undefined;
+      }
+      return String(value);
+    };
+
+    const team = getValue('team');
+    if (team) normalized.team = team;
+    const source = getValue('source');
+    if (source) normalized.source = source;
+
+    const relativeTime = getValue('t') ?? getValue('time');
+    if (relativeTime) normalized.t = relativeTime;
+
+    const start = getValue('start') ?? getValue('start_time');
+    if (start) normalized.start = start;
+    const end = getValue('end') ?? getValue('end_time');
+    if (end) normalized.end = end;
+
+    const limit = getValue('limit');
+    if (limit) normalized.limit = limit;
+
+    const mode = getValue('mode');
+    if (mode === 'sql') {
+      normalized.mode = 'sql';
+    }
+
+    const q = getValue('q');
+    if (q) normalized.q = q;
+    const sql = getValue('sql');
+    if (sql) normalized.sql = sql;
+
+    const id = getValue('id');
+    if (id) normalized.id = id;
+
+    return normalized;
+  }
+
+  function buildQueryKey(query: Record<string, string | undefined>): string {
+    return Object.keys(query)
+      .sort()
+      .map((key) => `${key}=${query[key] ?? ''}`)
+      .join('&');
+  }
 
   function checkReadiness(): boolean {
     if (!teamsStore.teams || teamsStore.teams.length === 0) {
@@ -75,7 +144,7 @@ export function useUrlState(): UrlStateReturn {
         return;
       }
 
-      const params = route.query as Record<string, string | undefined>;
+      const params = normalizeQueryParams(getRouteQueryParams() as Record<string, unknown>);
       
       if (!params.team || !params.source) {
         const storedDefaults = contextStore.getStoredDefaults();
@@ -188,13 +257,16 @@ export function useUrlState(): UrlStateReturn {
       return;
     }
 
-    const query = exploreStore.urlQueryParameters;
-    const currentQuery = route.query;
+    const query = normalizeQueryParams(exploreStore.urlQueryParameters as Record<string, unknown>);
+    const currentQuery = normalizeQueryParams(getRouteQueryParams() as Record<string, unknown>);
 
-    const queryChanged = JSON.stringify(query) !== JSON.stringify(currentQuery);
+    const nextKey = buildQueryKey(query);
+    const currentKey = buildQueryKey(currentQuery);
 
-    if (queryChanged) {
+    if (nextKey !== currentKey) {
+      pendingRouteSyncKey = nextKey;
       router.replace({ query }).catch(err => {
+        pendingRouteSyncKey = null;
         if (err.name !== 'NavigationDuplicated') {
           console.error('useUrlState: Error updating URL:', err);
         }
@@ -208,9 +280,11 @@ export function useUrlState(): UrlStateReturn {
     }
 
     skipNextSync = true;
-    const query = exploreStore.urlQueryParameters;
+    const query = normalizeQueryParams(exploreStore.urlQueryParameters as Record<string, unknown>);
+    pendingRouteSyncKey = buildQueryKey(query);
 
     router.push({ query }).catch(err => {
+      pendingRouteSyncKey = null;
       if (err.name !== 'NavigationDuplicated') {
         console.error('useUrlState: Error pushing history:', err);
       }
@@ -229,6 +303,45 @@ export function useUrlState(): UrlStateReturn {
     ],
     () => {
       syncUrlFromStore();
+    },
+    { deep: true }
+  );
+
+  watch(
+    () => route.fullPath,
+    async () => {
+      if (state.value !== 'ready') {
+        return;
+      }
+
+      const normalized = normalizeQueryParams(getRouteQueryParams() as Record<string, unknown>);
+      const routeKey = buildQueryKey(normalized);
+
+      if (pendingRouteSyncKey && routeKey === pendingRouteSyncKey) {
+        pendingRouteSyncKey = null;
+        return;
+      }
+
+      const storeKey = buildQueryKey(
+        normalizeQueryParams(exploreStore.urlQueryParameters as Record<string, unknown>)
+      );
+      if (routeKey === storeKey) {
+        return;
+      }
+
+      if (normalized.id) {
+        return;
+      }
+
+      const result = exploreStore.initializeFromUrl(normalized, { updateLastExecutedState: false });
+
+      await waitForReadiness();
+
+      if (result.shouldExecute) {
+        exploreStore.executeQuery().catch(err => {
+          console.error('useUrlState: Error executing query from history navigation:', err);
+        });
+      }
     },
     { deep: true }
   );
