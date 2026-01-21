@@ -22,7 +22,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X "main.buildString={{ .Tag }} ({{ .ShortCommit }} {{ .Date }}, {{ .Os }}/{{ .Arch }})"
+      - -s -w -X "main.buildString={{ .Tag }} ({{ .ShortCommit }} {{ .Date }}, {{ .Os }}/{{ .Arch }})" -X "main.versionString={{ .Tag }}"
 
 archives:
   - name_template: >-
