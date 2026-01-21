@@ -51,7 +51,40 @@ In the LogChef web UI, click the terminal icon (next to the share button) in the
 
 ## Installation
 
+### Pre-built Binaries (Recommended)
+
+Download the latest CLI release for your platform from [GitHub Releases](https://github.com/mr-karan/logchef/releases?q=cli&expanded=true).
+
+| Platform | File |
+| :--- | :--- |
+| Linux x86_64 | `logchef-cli_<version>_linux-x86_64-musl.tar.gz` |
+| Linux ARM64 | `logchef-cli_<version>_linux-aarch64-musl.tar.gz` |
+| macOS Apple Silicon | `logchef-cli_<version>_macos-aarch64.tar.gz` |
+| macOS Intel | `logchef-cli_<version>_macos-x86_64.tar.gz` |
+| Windows x86_64 | `logchef-cli_<version>_windows-x86_64.zip` |
+
+```bash
+# Example: Download and install (replace VERSION with actual version)
+VERSION="0.1.2"
+
+# Linux x86_64
+curl -LO "https://github.com/mr-karan/logchef/releases/download/cli-v${VERSION}/logchef-cli_${VERSION}_linux-x86_64-musl.tar.gz"
+tar xzf logchef-cli_${VERSION}_linux-x86_64-musl.tar.gz
+sudo mv logchef /usr/local/bin/
+
+# macOS Apple Silicon
+curl -LO "https://github.com/mr-karan/logchef/releases/download/cli-v${VERSION}/logchef-cli_${VERSION}_macos-aarch64.tar.gz"
+tar xzf logchef-cli_${VERSION}_macos-aarch64.tar.gz
+sudo mv logchef /usr/local/bin/
+```
+
+:::tip[Check Latest Version]
+Visit the [CLI releases page](https://github.com/mr-karan/logchef/releases?q=cli&expanded=true) to find the latest version number.
+:::
+
 ### From Source
+
+If you prefer to build from source (requires [Rust](https://rustup.rs/)):
 
 ```bash
 # Clone the repository
