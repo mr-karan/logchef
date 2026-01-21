@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-01-21
+
+### Fixed
+- **Explore history URL hydration** — Fixed issue where browser history navigation could fail to restore query state correctly.
+
 ## [CLI v0.1.2] - 2026-01-21
 
 ### Added
@@ -304,7 +309,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/mr-karan/logchef/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/mr-karan/logchef/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/mr-karan/logchef/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/mr-karan/logchef/compare/v0.6.0...v1.0.0
