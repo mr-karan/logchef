@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [CLI v0.1.1] - 2026-01-21
+
+### Added
+- **CLI `sql` command** — Execute raw ClickHouse SQL queries directly from the terminal
+  - Full SQL control including time filters, aggregations, joins, and CTEs
+  - Read SQL from stdin with `-` for complex multi-line queries
+  - Same output formats as `query`: text, json, jsonl, table
+
+## [1.2.0] - 2026-01-21
+
 ### Added
 - **Rust CLI** — New cross-platform command-line interface written in Rust
   - `logchef auth` — Browser-based OIDC authentication with PKCE flow
@@ -279,7 +289,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/mr-karan/logchef/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/mr-karan/logchef/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/mr-karan/logchef/compare/v0.6.0...v1.0.0
 [0.6.0]: https://github.com/mr-karan/logchef/compare/v0.5.0...v0.6.0

@@ -198,6 +198,61 @@ logchef query "method:GET" --show-sql
 logchef query "" --from "2026-01-14T00:00:00Z" --to "2026-01-14T12:00:00Z"
 ```
 
+### Raw SQL Queries
+
+The `sql` command lets you execute raw ClickHouse SQL directly. Unlike `query`, you have full control over the SQL—including time filters, aggregations, and joins.
+
+```bash
+logchef sql "SELECT * FROM logs.app WHERE level='error' LIMIT 10"
+```
+
+#### Options
+
+| Option | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--team` | `-t` | Team name (or ID) | (from config) |
+| `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
+| `--timeout` | | Query timeout in seconds | 30 |
+| `--output` | | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
+| `--no-highlight` | | Disable syntax highlighting | `false` |
+| `--no-timestamp` | | Hide timestamp from text output | `false` |
+
+#### SQL Examples
+
+```bash
+# Simple query with time filter
+logchef sql "SELECT * FROM logs.app WHERE _timestamp > now() - INTERVAL 1 HOUR LIMIT 100"
+
+# Aggregation query
+logchef sql "SELECT level, count() as cnt FROM logs.app WHERE _timestamp > now() - INTERVAL 1 DAY GROUP BY level"
+
+# Read SQL from stdin (useful for complex queries)
+cat query.sql | logchef sql -
+
+# Or use heredoc
+logchef sql - <<'EOF'
+SELECT
+    toStartOfHour(_timestamp) as hour,
+    count() as requests,
+    countIf(status >= 500) as errors
+FROM logs.nginx
+WHERE _timestamp > now() - INTERVAL 24 HOUR
+GROUP BY hour
+ORDER BY hour
+EOF
+
+# Output as JSON
+logchef sql "SELECT * FROM logs.app LIMIT 5" --output json
+
+# Pipe to jq for processing
+logchef sql "SELECT host, count() as cnt FROM logs.app GROUP BY host" --output jsonl | jq -s 'sort_by(.cnt) | reverse'
+```
+
+:::tip[When to use `sql` vs `query`]
+- Use `query` (LogChefQL) for quick filtering with convenient time flags (`--since 1h`)
+- Use `sql` when you need aggregations, joins, CTEs, or full SQL control
+:::
+
 #### Example Output
 
 When running a query, you'll see highlighted output with colors:

@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
-use crate::commands::{auth, config, query};
+use crate::commands::{auth, config, query, sql};
 
 #[derive(Parser)]
 #[command(name = "logchef")]
@@ -45,8 +45,11 @@ enum Commands {
     #[command(about = "Authenticate with LogChef server")]
     Auth(auth::AuthArgs),
 
-    #[command(about = "Execute a query")]
+    #[command(about = "Execute a LogChefQL query")]
     Query(query::QueryArgs),
+
+    #[command(about = "Execute a raw SQL query")]
+    Sql(sql::SqlArgs),
 
     #[command(about = "Manage CLI configuration")]
     Config(config::ConfigArgs),
@@ -80,6 +83,7 @@ impl Cli {
         match self.command {
             Some(Commands::Auth(args)) => auth::run(args, global).await,
             Some(Commands::Query(args)) => query::run(args, global).await,
+            Some(Commands::Sql(args)) => sql::run(args, global).await,
             Some(Commands::Config(args)) => config::run(args).await,
             None => {
                 let mut cmd = Cli::command();

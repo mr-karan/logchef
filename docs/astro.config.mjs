@@ -72,6 +72,7 @@ export default defineConfig({
         {
           label: "Integration",
           items: [
+            { label: "CLI", link: "/integration/cli" },
             { label: "MCP Server", link: "/integration/mcp-server" },
             { label: "Schema Design", link: "/integration/schema-design" },
           ],
