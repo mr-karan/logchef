@@ -52,6 +52,9 @@ pub struct QueryArgs {
 
     #[arg(long = "disable-highlight", value_name = "GROUP")]
     disable_highlights: Vec<String>,
+
+    #[arg(long, default_value = "30")]
+    timeout: u32,
 }
 
 #[derive(Clone, Debug, clap::ValueEnum)]
@@ -211,7 +214,7 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
         end_time,
         timezone: ctx.defaults.timezone.clone(),
         limit: Some(limit),
-        query_timeout: None,
+        query_timeout: Some(args.timeout),
     };
 
     let response = client
