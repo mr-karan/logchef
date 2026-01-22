@@ -38,13 +38,22 @@ impl Config {
             ))
         })?;
 
-        serde_json::from_str(&content).map_err(|e| {
+        let config: Config = serde_json::from_str(&content).map_err(|e| {
             Error::config(format!(
                 "Failed to parse config file {}: {}",
                 path.display(),
                 e
             ))
-        })
+        })?;
+
+        if config.version > CONFIG_VERSION {
+            return Err(Error::config(format!(
+                "Config file version {} is newer than supported version {}. Please upgrade logchef CLI.",
+                config.version, CONFIG_VERSION
+            )));
+        }
+
+        Ok(config)
     }
 
     pub fn save(&self) -> Result<()> {

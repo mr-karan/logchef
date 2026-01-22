@@ -1035,6 +1035,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "iana-time-zone",
  "inquire",
  "logchef-core",
  "serde",

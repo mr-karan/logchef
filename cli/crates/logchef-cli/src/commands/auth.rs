@@ -4,7 +4,7 @@ use inquire::Text;
 use logchef_core::Config;
 use logchef_core::api::Client;
 use logchef_core::auth::AuthFlow;
-use logchef_core::config::{Context as CtxConfig, context_name_from_url};
+use logchef_core::config::{Context as CtxConfig, ContextDefaults, context_name_from_url};
 
 use crate::cli::GlobalArgs;
 
@@ -127,12 +127,17 @@ async fn login(config: &mut Config, global: GlobalArgs) -> Result<()> {
         })
         .unwrap_or_else(|| context_name_from_url(&server_url));
 
+    let timezone = iana_time_zone::get_timezone().ok();
+
     let ctx = CtxConfig {
         server_url: server_url.clone(),
         timeout_secs: 30,
         token: Some(result.token),
         token_expires_at: result.expires_at,
-        defaults: Default::default(),
+        defaults: ContextDefaults {
+            timezone,
+            ..Default::default()
+        },
     };
 
     config.add_or_update_context(ctx_name.clone(), ctx);
