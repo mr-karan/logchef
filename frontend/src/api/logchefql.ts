@@ -50,6 +50,12 @@ export interface ValidateResponse {
   error?: ParseError;
 }
 
+export interface TemplateVariable {
+  name: string;
+  type: 'text' | 'number' | 'date' | 'string';
+  value: string | number | string[];
+}
+
 export interface QueryRequest {
   query: string;
   start_time: string;  // ISO8601 format
@@ -57,6 +63,7 @@ export interface QueryRequest {
   timezone?: string;
   limit?: number;
   query_timeout?: number;
+  variables?: TemplateVariable[];  // Template variables for backend substitution
 }
 
 export interface QueryResponse {
@@ -102,11 +109,11 @@ export const logchefqlApi = {
    * Execute a LogchefQL query
    * The backend handles translation and execution in one step
    */
-  query: (teamId: number, sourceId: number, params: QueryRequest, signal?: AbortSignal) =>
+  query: (teamId: number, sourceId: number, params: QueryRequest, options?: { signal?: AbortSignal; timeout?: number }) =>
     apiClient.post<QueryResponse>(
       `/teams/${teamId}/sources/${sourceId}/logchefql/query`,
       params,
-      signal ? { signal } : undefined
+      options
     ),
 };
 

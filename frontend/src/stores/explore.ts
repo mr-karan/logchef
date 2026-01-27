@@ -704,11 +704,12 @@ export const useExploreStore = defineStore("explore", () => {
 
       if (state.data.value.activeMode === 'logchefql') {
         try {
-          const { convertVariables } = useVariables();
-          const queryWithVariables = convertVariables(state.data.value.logchefqlCode);
+          const { getVariablesForApi } = useVariables();
+          const variables = getVariablesForApi();
           
           const timeRange = state.data.value.timeRange as TimeRange;
           const timezone = state.data.value.selectedTimezoneIdentifier || getTimezoneIdentifier();
+          const queryTimeout = state.data.value.queryTimeout;
           
           const formatDateTime = (dt: any) => {
             if (!dt) return '';
@@ -722,13 +723,14 @@ export const useExploreStore = defineStore("explore", () => {
           };
 
           const queryResponse = await logchefqlApi.query(currentTeamId, sourceId.value, {
-            query: queryWithVariables,
+            query: state.data.value.logchefqlCode,
             start_time: formatDateTime(timeRange.start),
             end_time: formatDateTime(timeRange.end),
             timezone: timezone,
             limit: state.data.value.limit,
-            query_timeout: state.data.value.queryTimeout
-          }, abortController.signal);
+            query_timeout: queryTimeout,
+            variables: variables.length > 0 ? variables : undefined
+          }, { signal: abortController.signal, timeout: queryTimeout });
 
           if (queryResponse.data) {
             state.data.value.logs = queryResponse.data.logs || [];
