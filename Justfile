@@ -1,7 +1,7 @@
 # Just commands for LogChef Vue3 + Golang project
 
 # Build variables
-version := `git describe --tags --always`
+version := `git describe --tags --always --match 'v*'`
 last_commit := `git rev-parse --short HEAD`
 # Use UTC timestamp for consistency
 build_time := `date -u +%Y%m%dT%H%M%SZ`

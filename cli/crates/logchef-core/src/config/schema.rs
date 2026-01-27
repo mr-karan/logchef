@@ -2,8 +2,13 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub const CONFIG_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default = "default_version")]
+    pub version: u32,
+
     #[serde(default)]
     pub current_context: Option<String>,
 
@@ -12,6 +17,21 @@ pub struct Config {
 
     #[serde(default)]
     pub highlights: HighlightsConfig,
+}
+
+fn default_version() -> u32 {
+    CONFIG_VERSION
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            version: CONFIG_VERSION,
+            current_context: None,
+            contexts: HashMap::new(),
+            highlights: HighlightsConfig::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

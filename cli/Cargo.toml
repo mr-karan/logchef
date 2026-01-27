@@ -43,6 +43,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = "0.3"
 unicode-width = "0.2"
 inquire = "0.7"
+iana-time-zone = "0.1"
 
 [profile.release]
 lto = true
