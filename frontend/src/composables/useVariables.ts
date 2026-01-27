@@ -78,31 +78,33 @@ export function useVariables() {
         return variable.defaultValue ?? value;
     };
 
-    /**
-     * convert {{variable}} format to user input (for local/display purposes)
-     * @param sql origin query
-     * @returns converted query
-     */
+    const escapeSqlString = (value: string): string => {
+        return value.replace(/'/g, "''");
+    };
+
     const convertVariables = (sql: string): string => {
         for (const variable of allVariables.value) {
             const key = variable.name;
             const value = resolveVariableValue(variable);
 
-            const formattedValue =
-                variable.type === 'number'
-                    ? value
-                    : variable.type === 'date'
-                        ? (value ? `'${new Date(value as string).toISOString()}'` : "''")
-                        : `'${value ?? ''}'`;
+            let formattedValue: string;
+            if (variable.type === 'number') {
+                formattedValue = String(value);
+            } else if (variable.type === 'date') {
+                const dateStr = value ? new Date(value as string).toISOString() : '';
+                formattedValue = `'${escapeSqlString(dateStr)}'`;
+            } else {
+                formattedValue = `'${escapeSqlString(String(value ?? ''))}'`;
+            }
 
-            // Replace both original {{variable}} syntax and translated __VAR_variable__ placeholders
-            const originalRegex = new RegExp(`{{\s*${key}\s*}}`, 'g');
+            // Fixed regex: use \\s for whitespace matching in template literals
+            const originalRegex = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g');
             const placeholderRegex = new RegExp(`'__VAR_${key}__'`, 'g');
             const unquotedPlaceholderRegex = new RegExp(`__VAR_${key}__`, 'g');
 
-            sql = sql.replace(originalRegex, formattedValue as string);
-            sql = sql.replace(placeholderRegex, formattedValue as string);
-            sql = sql.replace(unquotedPlaceholderRegex, formattedValue as string);
+            sql = sql.replace(originalRegex, formattedValue);
+            sql = sql.replace(placeholderRegex, formattedValue);
+            sql = sql.replace(unquotedPlaceholderRegex, formattedValue);
         }
 
         return sql;

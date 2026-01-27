@@ -25,14 +25,16 @@ export function formatTimezoneForSQL(timezone: string = getUserTimezone()): stri
  * Formats a DateValue for SQL display with consistent format and quotes
  * @param dateTime The DateValue to format
  * @param addQuotes Whether to add quotes around the date string
+ * @param timezone Optional timezone to use for conversion (defaults to local timezone)
  * @returns Formatted date string ready for SQL usage
  */
-export function formatDateForSQL(dateTime: DateValue | null | undefined, addQuotes = true): string {
+export function formatDateForSQL(dateTime: DateValue | null | undefined, addQuotes = true, timezone?: string): string {
   if (!dateTime) return "now()";
 
   try {
-    // Convert to JS Date with proper timezone handling
-    const jsDate = dateTime.toDate(getLocalTimeZone());
+    // Convert to JS Date using the specified timezone (or local as fallback)
+    const effectiveTimezone = timezone || getLocalTimeZone();
+    const jsDate = dateTime.toDate(effectiveTimezone);
 
     // Format as YYYY-MM-DD HH:MM:SS
     const formatted = format(jsDate, 'yyyy-MM-dd HH:mm:ss');
@@ -66,18 +68,18 @@ export function createTimeRangeCondition(
   // Ensure field name has backticks if needed
   const formattedField = tsField.includes('`') ? tsField : `\`${tsField}\``;
 
-  // Format the dates with toDateTime function
-  const startFormatted = formatDateForSQL(timeRange.start);
-  const endFormatted = formatDateForSQL(timeRange.end);
+  // Use provided timezone or get user's local timezone as fallback
+  const effectiveTimezone = timezone || getUserTimezone();
+
+  // Format the dates using the same timezone that will be used in the SQL condition
+  // This ensures the date string matches the timezone interpretation in toDateTime()
+  const startFormatted = formatDateForSQL(timeRange.start, true, effectiveTimezone);
+  const endFormatted = formatDateForSQL(timeRange.end, true, effectiveTimezone);
 
   if (includeTimezone) {
-    // Use provided timezone or get user's local timezone as fallback
-    const effectiveTimezone = formatTimezoneForSQL(timezone || getUserTimezone());
-
-    // Create simplified timezone-aware condition with single toDateTime call
-    return `${formattedField} BETWEEN toDateTime(${startFormatted}, '${effectiveTimezone}') AND toDateTime(${endFormatted}, '${effectiveTimezone}')`;
+    const sqlTimezone = formatTimezoneForSQL(effectiveTimezone);
+    return `${formattedField} BETWEEN toDateTime(${startFormatted}, '${sqlTimezone}') AND toDateTime(${endFormatted}, '${sqlTimezone}')`;
   } else {
-    // Create standard condition without timezone
     return `${formattedField} BETWEEN toDateTime(${startFormatted}) AND toDateTime(${endFormatted})`;
   }
 }

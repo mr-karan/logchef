@@ -728,7 +728,7 @@ export const useExploreStore = defineStore("explore", () => {
             timezone: timezone,
             limit: state.data.value.limit,
             query_timeout: state.data.value.queryTimeout
-          });
+          }, abortController.signal);
 
           if (queryResponse.data) {
             state.data.value.logs = queryResponse.data.logs || [];
@@ -780,6 +780,10 @@ export const useExploreStore = defineStore("explore", () => {
             message: `LogchefQL query error: ${error.message}`,
             error_type: "DatabaseError"
           }, operationKey);
+        } finally {
+          state.data.value.currentQueryAbortController = null;
+          state.data.value.currentQueryId = null;
+          state.data.value.isCancellingQuery = false;
         }
       }
 
@@ -1067,11 +1071,9 @@ export const useExploreStore = defineStore("explore", () => {
       
       const sourceInTeam = sourcesStore.teamSources.some(s => s.id === newDetails.id);
       if (!sourceInTeam) {
-        console.log(`ExploreStore: Source ${newDetails.id} not in current team's sources, skipping auto-execute`);
         return;
       }
       
-      console.log(`ExploreStore: Auto-executing query for source ${newDetails.id}`);
       lastAutoExecKey = execKey;
       
       executeQuery().catch(err => {

@@ -102,10 +102,11 @@ export const logchefqlApi = {
    * Execute a LogchefQL query
    * The backend handles translation and execution in one step
    */
-  query: (teamId: number, sourceId: number, params: QueryRequest) =>
+  query: (teamId: number, sourceId: number, params: QueryRequest, signal?: AbortSignal) =>
     apiClient.post<QueryResponse>(
       `/teams/${teamId}/sources/${sourceId}/logchefql/query`,
-      params
+      params,
+      signal ? { signal } : undefined
     ),
 };
 

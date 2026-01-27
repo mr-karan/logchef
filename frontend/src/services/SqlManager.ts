@@ -80,9 +80,6 @@ LIMIT ${limit}`;
         // 2. It's using a standard toDateTime BETWEEN format
         if (fieldFromAnalysis.toLowerCase() === tsFieldForRegex.toLowerCase() &&
             analysis.timeRangeInfo.format === 'toDateTime-between') {
-
-          console.log("SqlManager: Found standard toDateTime BETWEEN format that can be safely replaced");
-
           // Create a precise pattern based on the analyzed time range
           const specificBetweenPattern = new RegExp(
             `\`?${tsFieldForRegex}\`?\\s+BETWEEN\\s+toDateTime\\(['"].*?['"](?:,\\s*['"].*?['"])?\\)\\s+AND\\s+toDateTime\\(['"].*?['"](?:,\\s*['"].*?['"])?\\)`,
@@ -91,22 +88,17 @@ LIMIT ${limit}`;
 
           if (specificBetweenPattern.test(updatedSql)) {
             updatedSql = updatedSql.replace(specificBetweenPattern, newTimeCondition);
-            console.log("SqlManager: Replaced standard toDateTime BETWEEN time range");
             conditionEffectivelyReplaced = true;
           }
         } else if (analysis.timeRangeInfo.format === 'now-interval' ||
                    analysis.timeRangeInfo.format === 'other') {
-          // For complex time formats, don't attempt to replace
-          console.log(`SqlManager: Found ${analysis.timeRangeInfo.format} time condition format, preserving user query`);
-          // Still consider the time condition handled, just not replaced
+          // For complex time formats, don't attempt to replace - preserve user query
           conditionEffectivelyReplaced = true;
         }
       }
 
       // Case 2: No time condition found, add one
       if (!conditionEffectivelyReplaced && !analysis?.hasTimeFilter) {
-        console.log("SqlManager: No time condition found, adding new time condition");
-
         // Check if there's a WHERE clause
         if (updatedSql.toUpperCase().includes('WHERE')) {
           // Add condition to existing WHERE
@@ -123,7 +115,6 @@ LIMIT ${limit}`;
               ' ' + whereContent + (whereContent ? ' AND ' : '') + newTimeCondition +
               updatedSql.substring(whereEndPos);
 
-            console.log("SqlManager: Added time condition to existing WHERE clause");
             conditionEffectivelyReplaced = true;
           }
         } else {
@@ -136,22 +127,14 @@ LIMIT ${limit}`;
               updatedSql.substring(0, match.index) +
               ` WHERE ${newTimeCondition}` +
               updatedSql.substring(match.index);
-            console.log("SqlManager: Added new WHERE clause with time condition before clauses");
             conditionEffectivelyReplaced = true;
           } else {
             // If no clauses, add WHERE at the end
             updatedSql = `${updatedSql.trim()} WHERE ${newTimeCondition}`;
-            console.log("SqlManager: Added new WHERE clause with time condition at the end");
             conditionEffectivelyReplaced = true;
           }
         }
       }
-
-      console.log("original SQL:", sql);
-      console.log("parsed timestamp field:", tsField);
-      console.log("new time condition will be inserted:", timeRange);
-      console.log("newTimeCondition ",newTimeCondition);
-      console.log("tsFieldForRegex",tsFieldForRegex);
 
       return updatedSql;
     } catch (error) {
