@@ -4,6 +4,11 @@
 -- Remove obsolete alertmanager setting
 DELETE FROM system_settings WHERE key = 'alerts.alertmanager_url';
 
+-- Update TLS setting description (was referencing Alertmanager)
+UPDATE system_settings
+SET description = 'Skip TLS certificate verification for alert notifications'
+WHERE key = 'alerts.tls_insecure_skip_verify';
+
 -- Add SMTP settings for email notifications (if they don't exist)
 INSERT OR IGNORE INTO system_settings (key, value, value_type, category, description, is_sensitive)
 VALUES

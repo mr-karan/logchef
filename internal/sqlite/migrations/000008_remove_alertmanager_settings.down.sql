@@ -15,3 +15,8 @@ DELETE FROM system_settings WHERE key IN (
 -- Restore alertmanager setting
 INSERT OR IGNORE INTO system_settings (key, value, value_type, category, description, is_sensitive)
 VALUES ('alerts.alertmanager_url', '', 'string', 'alerts', 'Alertmanager endpoint URL for sending notifications', 0);
+
+-- Restore old TLS description
+UPDATE system_settings
+SET description = 'Skip TLS certificate verification for Alertmanager'
+WHERE key = 'alerts.tls_insecure_skip_verify';
