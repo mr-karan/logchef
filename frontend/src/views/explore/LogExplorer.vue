@@ -214,6 +214,10 @@ const showLoadingState = computed(
   () => isInitializing.value && !initializationError.value
 );
 
+const isInitialQueryPending = computed(() => {
+  return canExecuteQuery.value && !exploreStore.hasExecutedQuery && !isExecutingQuery.value;
+});
+
 const showNoTeamsState = computed(
   () =>
     !isInitializing.value &&
@@ -1258,7 +1262,7 @@ onBeforeUnmount(() => {
                 :availableFields="availableFields"
                 :displayMode="displayMode"
                 :logsCount="exploreStore.logs?.length || 0"
-                :isLoading="isExecutingQuery"
+                :isLoading="isExecutingQuery || isInitialQueryPending"
                 @toggle-histogram="toggleHistogramVisibility"
                 @update:displayMode="displayMode = $event"
                 @export="handleExport"
@@ -1284,7 +1288,7 @@ onBeforeUnmount(() => {
               <!-- Results Area -->
               <div class="flex-1 overflow-hidden relative bg-background">
                 <!-- Results Table -->
-                <template v-if="exploreStore.logs?.length > 0 || isExecutingQuery">
+                <template v-if="exploreStore.logs?.length > 0 || isExecutingQuery || isInitialQueryPending">
                   <!-- Render DataTable or CompactLogList based on display mode -->
                   <component
                     v-if="exploreStore.columns?.length > 0"
@@ -1293,7 +1297,7 @@ onBeforeUnmount(() => {
                     :columns="exploreStore.columns as any"
                     :data="exploreStore.logs"
                     :stats="exploreStore.queryStats"
-                    :is-loading="isExecutingQuery"
+                    :is-loading="isExecutingQuery || isInitialQueryPending"
                     :source-id="String(exploreStore.sourceId)"
                     :team-id="teamsStore.currentTeamId"
                     :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
@@ -1308,7 +1312,7 @@ onBeforeUnmount(() => {
                   />
 
                   <!-- Loading placeholder -->
-                  <div v-else-if="isExecutingQuery"
+                  <div v-else-if="isExecutingQuery || isInitialQueryPending"
                     class="absolute inset-0 flex items-center justify-center bg-background/70 z-10">
                     <p class="text-muted-foreground animate-pulse">
                       Loading results...
@@ -1317,9 +1321,8 @@ onBeforeUnmount(() => {
                 </template>
 
                 <!-- Empty Results State Component -->
-                <EmptyResultsState v-else :has-executed-query="!!exploreStore.lastExecutedState &&
-                  !exploreStore.logs?.length
-                  " :can-execute-query="canExecuteQuery" @run-default-query="handleQueryExecution('default-query')"
+                <EmptyResultsState v-else :has-executed-query="exploreStore.hasExecutedQuery"
+                  :can-execute-query="canExecuteQuery" @run-default-query="handleQueryExecution('default-query')"
                   @open-date-picker="openDatePicker" />
               </div>
             </div>

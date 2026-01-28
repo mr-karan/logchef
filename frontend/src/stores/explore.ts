@@ -70,6 +70,7 @@ export interface ExploreState {
     sourceId: number;
   };
   lastExecutionTimestamp: number | null;
+  hasExecutedQuery: boolean;
   selectedTimezoneIdentifier: string | null;
   generatedDisplaySql: string | null;
   queryTimeout: number;
@@ -101,6 +102,7 @@ export const useExploreStore = defineStore("explore", () => {
     logchefqlCode: "",
     activeMode: "logchefql",
     lastExecutionTimestamp: null,
+    hasExecutedQuery: false,
     selectedQueryId: null,
     activeSavedQueryName: null,
     savedQuerySnapshot: null,
@@ -341,6 +343,7 @@ export const useExploreStore = defineStore("explore", () => {
     
     state.data.value.lastExecutionTimestamp = null;
     state.data.value.lastExecutedState = undefined;
+    state.data.value.hasExecutedQuery = false;
 
     if (state.data.value.activeMode === 'sql') {
       state.data.value.rawSql = '';
@@ -578,6 +581,7 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.selectedQueryId = null;
     state.data.value.activeSavedQueryName = null;
     state.data.value.savedQuerySnapshot = null;
+    state.data.value.hasExecutedQuery = false;
   }
 
   function resetQueryToDefaults() {
@@ -702,6 +706,9 @@ export const useExploreStore = defineStore("explore", () => {
           error_type: "ValidationError"
         }, operationKey);
       }
+
+      // Mark that a query execution attempt has started (used for initial loading UX)
+      state.data.value.hasExecutedQuery = true;
 
       if (state.data.value.activeMode === 'logchefql') {
         try {
@@ -1106,6 +1113,7 @@ export const useExploreStore = defineStore("explore", () => {
     queryId: computed(() => state.data.value.queryId),
     lastExecutedState: computed(() => state.data.value.lastExecutedState),
     lastExecutionTimestamp: computed(() => state.data.value.lastExecutionTimestamp),
+    hasExecutedQuery: computed(() => state.data.value.hasExecutedQuery),
     selectedQueryId: computed(() => state.data.value.selectedQueryId),
     activeSavedQueryName: computed(() => state.data.value.activeSavedQueryName),
     selectedTimezoneIdentifier: computed(() => state.data.value.selectedTimezoneIdentifier),

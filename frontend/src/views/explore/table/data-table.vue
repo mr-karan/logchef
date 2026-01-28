@@ -100,6 +100,13 @@ const columnOrder = ref<string[]>([])
 const draggingColumnId = ref<string | null>(null)
 const dragOverColumnId = ref<string | null>(null)
 
+const enforceTimestampFirst = (order: string[]): string[] => {
+    const tsField = timestampFieldName.value;
+    if (!tsField) return order;
+    if (!order.includes(tsField)) return order;
+    return [tsField, ...order.filter(id => id !== tsField)];
+};
+
 // --- Local Storage State Management ---
 const storageKey = computed(() => {
     if (props.teamId == null || !props.sourceId) return null; // Check for null teamId explicitly
@@ -150,6 +157,7 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
         const filteredSavedOrder = savedOrder.filter(id => currentColumnIds.includes(id));
         const newColumnIds = currentColumnIds.filter(id => !filteredSavedOrder.includes(id));
         initialOrder = [...filteredSavedOrder, ...newColumnIds];
+        initialOrder = enforceTimestampFirst(initialOrder);
 
         // Process column sizing and visibility from saved state
         const savedSizing = savedState.columnSizing || {};
@@ -179,6 +187,7 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
         } else {
             initialOrder = currentColumnIds; // Timestamp column doesn't exist, use default order
         }
+        initialOrder = enforceTimestampFirst(initialOrder);
 
         // Set default sizing and visibility for all current columns
         currentColumnIds.forEach(id => {
@@ -443,7 +452,12 @@ const table = useVueTable({
     onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
     onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
     onColumnSizingChange: updaterOrValue => valueUpdater(updaterOrValue, columnSizing),
-    onColumnOrderChange: updaterOrValue => valueUpdater(updaterOrValue, columnOrder),
+    onColumnOrderChange: updaterOrValue => {
+        const nextValue = typeof updaterOrValue === 'function'
+            ? updaterOrValue(columnOrder.value)
+            : updaterOrValue;
+        columnOrder.value = enforceTimestampFirst(nextValue);
+    },
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
@@ -572,6 +586,10 @@ function arrayMove<T>(arr: T[], fromIndex: number, toIndex: number): T[] {
 }
 
 const onDragStart = (event: DragEvent, columnId: string) => {
+    if (columnId === timestampFieldName.value) {
+        event.preventDefault();
+        return;
+    }
     draggingColumnId.value = columnId;
     if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = 'move';
@@ -692,13 +710,14 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                         width: isLastVisibleColumn(header.column.id) ? undefined : `${header.getSize()}px`,
                                         minWidth: `${header.column.columnDef.minSize ?? defaultColumn.minSize}px`,
                                         flex: isLastVisibleColumn(header.column.id) ? '1 1 auto' : undefined,
-                                    }" draggable="true" @dragstart="onDragStart($event, header.column.id)"
+                                    }" :draggable="header.column.id !== timestampFieldName"
+                                    @dragstart="onDragStart($event, header.column.id)"
                                     @dragenter="onDragEnter($event, header.column.id)" @dragover="onDragOver($event)"
                                     @dragleave="onDragLeave($event, header.column.id)"
                                     @drop="onDrop($event, header.column.id)" @dragend="onDragEnd">
                                     <div class="flex items-center h-full px-3">
                                         <!-- Drag Handle -->
-                                        <span
+                                        <span v-if="header.column.id !== timestampFieldName"
                                             class="flex items-center justify-center flex-shrink-0 w-5 h-full mr-1 cursor-grab text-muted-foreground/50 group-hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                                             title="Drag to reorder column">
                                             <GripVertical class="h-4 w-4" />
