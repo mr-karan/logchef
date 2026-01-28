@@ -91,9 +91,9 @@ async function copyToClipboard() {
         <div class="relative">
             <div class="border rounded-sm bg-muted/5 mt-0.5 relative w-full overflow-hidden">
                 <pre :class="{ 'max-h-[500px]': !isExpanded }"
-                    class="text-xs font-mono pt-8 px-1.5 overflow-y-auto overflow-x-auto whitespace-pre"><code
+                    class="text-xs font-mono pt-8 px-1.5 overflow-y-auto overflow-x-auto whitespace-pre-wrap break-words"><code
                         v-html="formatJSON(value)"
-                        class="whitespace-pre"
+                        class="whitespace-pre-wrap break-words"
                     /></pre>
             </div>
             <!-- Expand/collapse overlay -->
