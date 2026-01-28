@@ -21,7 +21,46 @@ const emit = defineEmits<{
 const { toast } = useToast()
 const isExpanded = ref(props.expanded ?? false)
 const isCopied = ref(false)
-const isWrapped = ref(true)
+
+const MAX_EMBEDDED_JSON_LENGTH = 20000
+const MAX_PARSE_DEPTH = 6
+
+const parseEmbeddedJson = (value: any, depth = 0, seen = new WeakSet<object>()): any => {
+    if (depth > MAX_PARSE_DEPTH) return value
+
+    if (typeof value === 'string') {
+        const trimmed = value.trim()
+        if (
+            trimmed.length > 0 &&
+            trimmed.length <= MAX_EMBEDDED_JSON_LENGTH &&
+            (trimmed.startsWith('{') || trimmed.startsWith('['))
+        ) {
+            try {
+                const parsed = JSON.parse(trimmed)
+                return parseEmbeddedJson(parsed, depth + 1, seen)
+            } catch {
+                return value
+            }
+        }
+        return value
+    }
+
+    if (value && typeof value === 'object') {
+        if (seen.has(value)) return value
+        seen.add(value)
+        if (Array.isArray(value)) {
+            return value.map((item) => parseEmbeddedJson(item, depth + 1, seen))
+        }
+
+        const entries = Object.entries(value).map(([key, val]) => [
+            key,
+            parseEmbeddedJson(val, depth + 1, seen),
+        ])
+        return Object.fromEntries(entries)
+    }
+
+    return value
+}
 
 // Initialize highlight.js with JSON language
 hljs.registerLanguage('json', json)
@@ -29,12 +68,10 @@ hljs.registerLanguage('json', json)
 // Format JSON with indentation and highlighting
 function formatJSON(data: any): string {
     try {
-        // Ensure proper formatting even if data is already a string
-        const jsonObject = typeof data === 'string' ? JSON.parse(data) : data
-        const jsonString = JSON.stringify(jsonObject, null, 2)
+        const normalized = parseEmbeddedJson(data)
+        const jsonString = JSON.stringify(normalized, null, 2)
         return hljs.highlight(jsonString, { language: 'json' }).value
     } catch (e) {
-        // Fallback in case of parsing errors
         const jsonString = JSON.stringify(data, null, 2)
         return hljs.highlight(jsonString, { language: 'json' }).value
     }
@@ -79,19 +116,6 @@ async function copyToClipboard() {
                 {{ isCopied ? 'Copied!' : 'Copy' }}
             </Button>
 
-            <Button
-                variant="secondary"
-                size="sm"
-                @click.stop.prevent="isWrapped = !isWrapped"
-                class="h-5 px-2 shadow-sm transition-all duration-200 hover:shadow active:scale-95 cursor-pointer text-xs"
-                :class="{
-                    'bg-muted text-foreground': isWrapped,
-                    'hover:bg-muted': !isWrapped
-                }"
-            >
-                {{ isWrapped ? 'Wrap: On' : 'Wrap: Off' }}
-            </Button>
-
             <!-- Context button -->
             <Button v-if="showContextButton" variant="secondary" size="sm" @click.stop.prevent="emit('showContext')"
                 class="h-5 px-1.5 shadow-sm transition-all duration-200 hover:shadow hover:bg-muted active:scale-95 cursor-pointer text-xs">
@@ -104,18 +128,11 @@ async function copyToClipboard() {
         <!-- todo: add contenteditable to the pre tag -->
         <div class="relative">
             <div class="border rounded-sm bg-muted/5 mt-0.5 relative w-full overflow-hidden">
-                <pre
-                    :class="[
-                        !isExpanded ? 'max-h-[500px]' : '',
-                        isWrapped ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'
-                    ]"
-                    class="text-xs font-mono pt-8 px-1.5 overflow-y-auto overflow-x-auto"
-                >
-                    <code
+                <pre :class="{ 'max-h-[500px]': !isExpanded }"
+                    class="text-xs font-mono pt-8 px-1.5 overflow-y-auto overflow-x-auto whitespace-pre-wrap break-words"><code
                         v-html="formatJSON(value)"
-                        :class="isWrapped ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'"
-                    />
-                </pre>
+                        class="whitespace-pre-wrap break-words"
+                    /></pre>
             </div>
             <!-- Expand/collapse overlay -->
             <div v-if="!isExpanded && formatJSON(value).split('\n').length > 20"
