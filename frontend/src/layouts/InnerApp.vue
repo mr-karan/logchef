@@ -305,12 +305,14 @@ const navItems = [
           </SidebarGroup>
 
           <!-- Admin Navigation -->
-          <SidebarGroup v-if="authStore.user?.role === 'admin'" class="mt-4">
+          <!-- Show for global admins OR team admins -->
+          <SidebarGroup v-if="authStore.user?.role === 'admin' || teamsStore.isAnyTeamAdmin" class="mt-4">
             <SidebarGroupLabel v-if="sidebarOpen">Administration</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 <template v-for="item in adminNavItems" :key="item.title">
-                  <SidebarMenuItem>
+                  <!-- Global admins see all items, team admins only see "Teams" -->
+                  <SidebarMenuItem v-if="authStore.user?.role === 'admin' || item.title === 'Teams'">
                     <SidebarMenuButton asChild :tooltip="item.title"
                       class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
                       <router-link :to="item.url === '/logs/saved' ? collectionsTo : item.url" class="flex items-center" active-class="font-medium">

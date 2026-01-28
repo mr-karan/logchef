@@ -145,6 +145,37 @@ func (s *Server) requireAdmin(c *fiber.Ctx) error {
 	return c.Next()
 }
 
+// requireAnyTeamAdmin is middleware that ensures the authenticated user is an admin of at least one team,
+// or is a global admin. This is used for endpoints that should be accessible to team admins
+// without requiring a specific team context (e.g., listing users to add to teams).
+// It assumes requireAuth has already run.
+func (s *Server) requireAnyTeamAdmin(c *fiber.Ctx) error {
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil {
+		s.log.Error("user not found in context for any team admin check")
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
+	}
+
+	// Global admins bypass specific team admin checks.
+	if user.Role == models.UserRoleAdmin {
+		return c.Next()
+	}
+
+	// Check if the user is an admin of any team.
+	isAnyAdmin, err := core.IsAnyTeamAdmin(c.Context(), s.sqlite, user.ID)
+	if err != nil {
+		s.log.Error("failed to check if user is any team admin", "error", err, "user_id", user.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team admin status")
+	}
+
+	if !isAnyAdmin {
+		s.log.Warn("User is not an admin of any team", "user_id", user.ID)
+		return SendErrorWithType(c, fiber.StatusForbidden, "Team admin privileges required", models.AuthorizationErrorType)
+	}
+
+	return c.Next()
+}
+
 // requireTeamMember is middleware that ensures the authenticated user is a member of the team
 // specified by the ':teamID' path parameter, or is a global admin.
 // It assumes requireAuth has already run.
