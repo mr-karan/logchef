@@ -511,8 +511,9 @@ onMounted(() => {
     if (!tableContainerRef.value) return
 
     const resizeObserver = new ResizeObserver(() => {
-        // Force a layout update when container size changes
-        table.setColumnSizing({ ...columnSizing.value })
+        // Track container width for flex-grow calculations
+        // Actual column resizing is handled via CSS flex on the last column
+        // This avoids mutating columnSizing state which would persist unwanted changes
     })
 
     resizeObserver.observe(tableContainerRef.value)
@@ -638,6 +639,14 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
     emit('drill-down', { column: columnName, value, operator });
 };
 
+// Helper to check if a header/cell is the last visible column (for flex-grow)
+const isLastVisibleColumn = (columnId: string): boolean => {
+    if (!table) return false;
+    const visibleColumns = table.getVisibleLeafColumns();
+    if (visibleColumns.length === 0) return false;
+    return visibleColumns[visibleColumns.length - 1].id === columnId;
+};
+
 </script>
 
 <template>
@@ -677,10 +686,12 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
                                         getColumnType(header.column) === 'severity' ? 'font-semibold' : '',
                                         header.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
                                         header.column.id === draggingColumnId ? 'opacity-50 bg-primary/10' : '',
-                                        header.column.id === dragOverColumnId ? 'border-l-2 border-l-primary' : ''
+                                        header.column.id === dragOverColumnId ? 'border-l-2 border-l-primary' : '',
+                                        isLastVisibleColumn(header.column.id) ? 'last-visible-column' : ''
                                     ]" :style="{
-                                        width: `${header.getSize()}px`,
+                                        width: isLastVisibleColumn(header.column.id) ? undefined : `${header.getSize()}px`,
                                         minWidth: `${header.column.columnDef.minSize ?? defaultColumn.minSize}px`,
+                                        flex: isLastVisibleColumn(header.column.id) ? '1 1 auto' : undefined,
                                     }" draggable="true" @dragstart="onDragStart($event, header.column.id)"
                                     @dragenter="onDragEnter($event, header.column.id)" @dragover="onDragOver($event)"
                                     @dragleave="onDragLeave($event, header.column.id)"
@@ -743,9 +754,11 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
                                         :class="[
                                             cell.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
                                             copiedCellId === cell.id ? 'bg-emerald-500/10' : '',
+                                            isLastVisibleColumn(cell.column.id) ? 'last-visible-column' : '',
                                         ]" :style="{
-                                            width: `${cell.column.getSize()}px`,
+                                            width: isLastVisibleColumn(cell.column.id) ? undefined : `${cell.column.getSize()}px`,
                                             minWidth: `${cell.column.columnDef.minSize ?? defaultColumn.minSize}px`,
+                                            flex: isLastVisibleColumn(cell.column.id) ? '1 1 auto' : undefined,
                                         }">
                                         <div class="cell-content-wrapper w-full overflow-hidden whitespace-nowrap text-ellipsis"
                                             :title="formatCellValue(cell.getValue())">
@@ -1453,5 +1466,31 @@ td>.flex>.cell-content :deep(.timestamp-separator) {
     background-color: hsl(var(--highlight, 60 90% 55%));
     color: hsl(var(--highlight-foreground, 0 0% 0%));
     box-shadow: 0 0 0 1px hsl(var(--highlight, 60 90% 55%) / 0.7);
+}
+
+/* Last visible column flex-grow to fill available space when sidebar closes */
+.table-fixed th.last-visible-column,
+.table-fixed td.last-visible-column {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: var(--column-min-width, 50px);
+}
+
+/* Ensure the table row uses flexbox for columns to support flex-grow */
+.table-fixed thead tr,
+.table-fixed tbody tr {
+    display: flex;
+    width: 100%;
+}
+
+/* Ensure all th and td in flex rows behave correctly */
+.table-fixed th,
+.table-fixed td {
+    flex-shrink: 0;
+}
+
+.table-fixed th.last-visible-column,
+.table-fixed td.last-visible-column {
+    flex-shrink: 1;
 }
 </style>
