@@ -93,35 +93,7 @@ api.interceptors.response.use(
       return Promise.reject(errorResponse);
     }
 
-    // Handle forbidden errors
-    if (error.response?.status === 403) {
-      // Create a custom error object with the specific message and error type
-      const forbiddenError = {
-        status: "error",
-        message: "You don't have permission to access this resource.",
-        error_type: "AuthorizationError",
-      };
-
-      // Handle demo instance specific errors
-      if (error.response?.data?.error_type === "DEMO_INSTANCE") {
-        const demoError = {
-          status: "error",
-          message: error.response.data.message || "This operation is not permitted in demo mode",
-          error_type: "DemoModeError",
-        };
-        showErrorToast(demoError);
-        return Promise.reject(demoError);
-      }
-
-      // Only show toast if not a CSRF error (which is handled separately)
-      if (error.response?.data?.code !== "CSRF_TOKEN_MISMATCH") {
-        showErrorToast(forbiddenError);
-        router.push({ name: "Forbidden" });
-      }
-      return Promise.reject(forbiddenError);
-    }
-
-    // Handle CSRF token errors
+    // Handle CSRF token errors (must be checked BEFORE generic 403 handler)
     if (
       error.response?.status === 403 &&
       error.response?.data?.code === "CSRF_TOKEN_MISMATCH"
@@ -135,6 +107,30 @@ api.interceptors.response.use(
       };
       showErrorToast(csrfError);
       return Promise.reject(csrfError);
+    }
+
+    // Handle forbidden errors
+    if (error.response?.status === 403) {
+      // Handle demo instance specific errors
+      if (error.response?.data?.error_type === "DEMO_INSTANCE") {
+        const demoError = {
+          status: "error",
+          message: error.response.data.message || "This operation is not permitted in demo mode",
+          error_type: "DemoModeError",
+        };
+        showErrorToast(demoError);
+        return Promise.reject(demoError);
+      }
+
+      // Create a custom error object with the specific message and error type
+      const forbiddenError = {
+        status: "error",
+        message: "You don't have permission to access this resource.",
+        error_type: "AuthorizationError",
+      };
+      showErrorToast(forbiddenError);
+      router.push({ name: "Forbidden" });
+      return Promise.reject(forbiddenError);
     }
 
     // For other errors, we'll let the calling code handle them

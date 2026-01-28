@@ -172,6 +172,18 @@ const formatTimestamp = (timestamp: any) => {
   return date.toLocaleString(undefined, options)
 }
 
+// HTML escape utility to prevent XSS attacks
+const escapeHtml = (text: string): string => {
+  const htmlEscapeMap: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }
+  return text.replace(/[&<>"']/g, char => htmlEscapeMap[char])
+}
+
 // Format value for logfmt
 const formatLogfmtValue = (value: any): string => {
   if (value === null || value === undefined) return 'null'
@@ -189,7 +201,7 @@ const formatLogfmtValue = (value: any): string => {
   return `"${JSON.stringify(value).replace(/"/g, '\\"')}"`
 }
 
-// Build message from log entry in logfmt format
+// Build message from log entry in logfmt format (returns raw text for tooltips/matching)
 const buildMessage = (row: Record<string, any>) => {
   // Try common message fields first
   const messageFields = ['message', 'msg', 'log', 'text', 'body']
@@ -230,18 +242,45 @@ const buildMessage = (row: Record<string, any>) => {
     .join(' ') || 'empty'
 }
 
-// Highlight text based on regex patterns
+// Highlight text based on regex patterns (works with pre-escaped HTML from highlightLogfmt)
+// Uses a safe approach that doesn't break existing HTML structure
 const highlightText = (text: string, field: string) => {
   const highlight = props.regexHighlights[field]
   if (!highlight || !text) return text
   
+  if (highlight.isNegated) {
+    return text // Don't highlight negated patterns visually
+  }
+  
   try {
-    const regex = new RegExp(highlight.pattern, 'gi')
-    if (highlight.isNegated) {
-      return text // Don't highlight negated patterns visually
-    }
-    return text.replace(regex, '<mark class="bg-yellow-200 dark:bg-yellow-800 px-0.5 rounded">$&</mark>')
+    // Escape the pattern to prevent regex injection, then create regex
+    // The text is already HTML-escaped, so we escape the pattern for literal matching
+    const escapedPattern = highlight.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    // Also need to match the HTML-escaped version of the pattern
+    const htmlEscapedPattern = escapeHtml(highlight.pattern).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    
+    // Try to match both the original pattern (for non-HTML chars) and escaped pattern
+    const combinedPattern = escapedPattern === htmlEscapedPattern 
+      ? escapedPattern 
+      : `(?:${escapedPattern}|${htmlEscapedPattern})`
+    
+    const regex = new RegExp(combinedPattern, 'gi')
+    
+    // Only highlight text outside of HTML tags to avoid breaking existing markup
+    // Split by HTML tags, highlight text parts, rejoin
+    const parts = text.split(/(<[^>]+>)/g)
+    const highlighted = parts.map(part => {
+      // If it's an HTML tag, leave it alone
+      if (part.startsWith('<') && part.endsWith('>')) {
+        return part
+      }
+      // Otherwise, apply highlighting to text content
+      return part.replace(regex, '<mark class="bg-yellow-200 dark:bg-yellow-800 px-0.5 rounded">$&</mark>')
+    }).join('')
+    
+    return highlighted
   } catch (e) {
+    // If regex is invalid, return the text as-is (already escaped by highlightLogfmt)
     return text
   }
 }
@@ -282,16 +321,20 @@ const getSeverityClasses = (severity: string) => {
   }
 }
 
-// Enhanced logfmt syntax highlighting
+// Enhanced logfmt syntax highlighting (with XSS protection)
 const highlightLogfmt = (text: string) => {
   if (!text) return text
+  
+  // First escape HTML to prevent XSS attacks
+  const escapedText = escapeHtml(text)
   
   // key=value where value is either:
   //   • "quoted string with possible escaped quotes", or
   //   • bare token without spaces
   // Example handled: foo="bar baz", foo="{\"a\":\"b\"}", foo=123
-  return text.replace(
-    /(\w+)=("(?:\\.|[^"])*"|[^\s]+)/g,
+  // Note: We're matching on escaped text, so HTML entities are safe
+  return escapedText.replace(
+    /(\w+)=(&quot;(?:\\.|[^&]|&(?!quot;))*&quot;|[^\s]+)/g,
     (_match, key, val) =>
       `<span class="text-sky-600 dark:text-sky-400">${key}</span>` +
       `<span class="text-muted-foreground">=</span>` +

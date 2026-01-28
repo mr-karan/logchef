@@ -9,10 +9,10 @@
         "@dnd-kit/sortable": "^10.0.0",
         "@dnd-kit/utilities": "^3.2.2",
         "@guolao/vue-monaco-editor": "^1.6.0",
-        "@internationalized/date": "^3.10.0",
+        "@internationalized/date": "^3.10.1",
         "@tanstack/vue-table": "^8.21.3",
         "@types/echarts": "^5.0.0",
-        "@types/lodash": "^4.17.16",
+        "@types/lodash": "^4.17.21",
         "@types/lodash-es": "^4.17.12",
         "@types/nearley": "^2.11.5",
         "@unovis/ts": "^1.6.2",
@@ -26,30 +26,29 @@
         "echarts": "^5.6.0",
         "highlight.js": "^11.11.1",
         "lodash": "^4.17.21",
-        "lodash-es": "^4.17.21",
+        "lodash-es": "^4.17.22",
         "lucide-vue-next": "^0.474.0",
         "monaco-editor": "^0.52.2",
-        "node-sql-parser": "^5.3.13",
         "pinia": "^3.0.4",
         "radix-vue": "^1.9.17",
-        "reka-ui": "^2.6.1",
+        "reka-ui": "^2.7.0",
         "tailwind-merge": "^3.4.0",
         "tailwind-scrollbar": "^4.0.2",
         "tailwindcss-animate": "^1.0.7",
         "vaul-vue": "^0.3.0",
         "vee-validate": "^4.15.1",
-        "vue": "^3.5.25",
+        "vue": "^3.5.26",
         "vue-json-pretty": "^2.6.0",
         "vue-router": "^4.6.4",
         "vue-sonner": "^2.0.9",
         "zod": "^3.25.76",
       },
       "devDependencies": {
-        "@types/node": "^22.19.2",
+        "@types/node": "^22.19.3",
         "@vitejs/plugin-vue": "^5.2.4",
         "@vitest/coverage-v8": "2.1.9",
         "@vue/tsconfig": "^0.7.0",
-        "autoprefixer": "^10.4.22",
+        "autoprefixer": "^10.4.23",
         "esbuild": "^0.27.2",
         "jsdom": "^25.0.1",
         "rolldown-vite": "^7.3.0",
@@ -441,8 +440,6 @@
 
     "@types/pbf": ["@types/pbf@3.0.5", "", {}, "sha512-j3pOPiEcWZ34R6a6mN07mUkM4o4Lwf6hPNt8eilOeZhTFbxFXmKhvXl9Y28jotFPaI1bpPDJsbCprUoNke6OrA=="],
 
-    "@types/pegjs": ["@types/pegjs@0.10.6", "", {}, "sha512-eLYXDbZWXh2uxf+w8sXS8d6KSoXTswfps6fvCUuVAGN8eRpfe7h9eSRydxiSJvo9Bf+GzifsDOr9TMQlmJdmkw=="],
-
     "@types/prismjs": ["@types/prismjs@1.26.5", "", {}, "sha512-AUZTa7hQ2KY5L7AmtSiqxlhWxb4ina0yd8hNbl4TWuqnv/pFP0nDMb3YrfSBf4hJVGLh2YEIBfKaBW/9UEl6IQ=="],
 
     "@types/supercluster": ["@types/supercluster@5.0.3", "", { "dependencies": { "@types/geojson": "*" } }, "sha512-XMSqQEr7YDuNtFwSgaHHOjsbi0ZGL62V9Js4CW45RBuRYlNWSW/KDqN+RFFE7HdHcGhJPtN0klKvw06r9Kg7rg=="],
@@ -566,8 +563,6 @@
     "balanced-match": ["balanced-match@1.0.2", "", {}, "sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw=="],
 
     "baseline-browser-mapping": ["baseline-browser-mapping@2.9.11", "", { "bin": { "baseline-browser-mapping": "dist/cli.js" } }, "sha512-Sg0xJUNDU1sJNGdfGWhVHX0kkZ+HWcvmVymJbj6NSgZZmW/8S9Y2HQ5euytnIgakgxN6papOAWiwDo1ctFDcoQ=="],
-
-    "big-integer": ["big-integer@1.6.52", "", {}, "sha512-QxD8cf2eVqJOOz63z6JIN9BzvVs/dlySa5HGSBH5xtR8dPteIRQnBxxKqkNTiT6jbDTF6jAfrd4oMcND9RGbQg=="],
 
     "binary-extensions": ["binary-extensions@2.3.0", "", {}, "sha512-Ceh+7ox5qe7LJuLHoY0feh3pHuUDHAcRUeyL2VYghZwfpkNIy/+8Ocg0a3UuSoYzavmylwuLWQOf3hl0jjMMIw=="],
 
@@ -970,8 +965,6 @@
     "nanoid": ["nanoid@5.1.6", "", { "bin": { "nanoid": "bin/nanoid.js" } }, "sha512-c7+7RQ+dMB5dPwwCp4ee1/iV/q2P6aK1mTZcfr1BTuVlyW9hJYiMPybJCcnBlQtuSmTIWNeazm/zqNoZSSElBg=="],
 
     "node-releases": ["node-releases@2.0.27", "", {}, "sha512-nmh3lCkYZ3grZvqcCH+fjmQ7X+H0OeZgP40OierEaAptX4XofMh5kwNbWh7lBduUzCcV/8kZ+NDLCwm2iorIlA=="],
-
-    "node-sql-parser": ["node-sql-parser@5.3.13", "", { "dependencies": { "@types/pegjs": "^0.10.0", "big-integer": "^1.6.48" } }, "sha512-heyWv3lLjKHpcBDMUSR+R0DohRYZTYq+Ro3hJ4m9Ia8ccdKbL5UijIaWr2L4co+bmmFuvBVZ4v23QW2PqvBFAA=="],
 
     "normalize-path": ["normalize-path@3.0.0", "", {}, "sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA=="],
 

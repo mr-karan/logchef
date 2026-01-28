@@ -205,6 +205,15 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "New Source", requiresAdmin: true },
       },
       {
+        path: "sources/edit/:sourceId",
+        name: "EditSource",
+        component: () => import("@/views/sources/AddSource.vue").catch(err => {
+          error("Router", "Failed to load AddSource component", err);
+          return { default: ComponentLoadError };
+        }),
+        meta: { title: "Edit Source", requiresAdmin: true },
+      },
+      {
         path: "sources/stats",
         name: "SourceStats",
         component: () => import("@/views/sources/SourceStats.vue").catch(err => {

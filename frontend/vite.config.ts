@@ -93,7 +93,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
             if (id.includes("date-fns") || id.includes("@internationalized/date")) {
               return "date-utils";
             }
-            // Other vendor libs (including node-sql-parser with its lodash dependency)
+            // Other vendor libs
             if (id.includes("node_modules")) {
               return "vendor";
             }

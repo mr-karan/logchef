@@ -27,6 +27,11 @@ const route = useRoute()
 const { toast } = useToast()
 const sourcesStore = useSourcesStore()
 
+// Edit mode detection
+const isEditMode = computed(() => !!route.params.sourceId)
+const editingSourceId = computed(() => route.params.sourceId ? Number(route.params.sourceId) : null)
+const isLoadingSource = ref(false)
+
 // Define types for our API requests and responses
 interface ConnectionRequestInfo {
     host: string;
@@ -158,7 +163,8 @@ const validateButtonText = computed(() => {
 })
 
 const submitButtonText = computed(() => {
-    if (isSubmitting.value) return 'Creating...'
+    if (isSubmitting.value) return isEditMode.value ? 'Updating...' : 'Creating...'
+    if (isEditMode.value) return 'Update Source'
     if (createTable.value) return 'Create Source'
 
     // For "Connect Existing Table" mode
@@ -192,33 +198,67 @@ const handleValidateConnection = async () => {
 // Duplicate source handling
 const isDuplicating = ref(false)
 
+const prefillFormFromSource = (source: any, isCopy: boolean = false) => {
+    sourceName.value = isCopy ? `${source.name} (Copy)` : source.name
+    description.value = source.description || ''
+    host.value = source.connection.host
+    database.value = source.connection.database
+    tableName.value = source.connection.table_name
+    metaTSField.value = source._meta_ts_field
+    metaSeverityField.value = source._meta_severity_field || ''
+    ttlDays.value = source.ttl_days || 90
+    tableMode.value = source._meta_is_auto_created ? 'create' : 'connect'
+    
+    // Set auth fields
+    const hasAuth = !!source.connection.username
+    enableAuth.value = hasAuth
+    if (hasAuth) {
+        username.value = source.connection.username
+        password.value = source.connection.password || ''
+    }
+}
+
 onMounted(async () => {
+    // Handle edit mode
+    if (isEditMode.value && editingSourceId.value) {
+        isLoadingSource.value = true
+        try {
+            await sourcesStore.loadAllSourcesForAdmin()
+            const source = sourcesStore.sources.find(s => s.id === editingSourceId.value)
+            if (source) {
+                prefillFormFromSource(source, false)
+            } else {
+                toast({
+                    title: 'Error',
+                    description: 'Source not found',
+                    variant: 'destructive',
+                    duration: TOAST_DURATION.ERROR,
+                })
+                router.push({ name: 'Sources' })
+            }
+        } catch (error) {
+            console.error('Error loading source for editing:', error)
+            toast({
+                title: 'Error',
+                description: 'Failed to load source data',
+                variant: 'destructive',
+                duration: TOAST_DURATION.ERROR,
+            })
+        } finally {
+            isLoadingSource.value = false
+        }
+        return
+    }
+
+    // Handle duplicate mode
     const duplicateFromId = route.query.duplicateFrom
     if (duplicateFromId) {
         isDuplicating.value = true
         try {
-            // Get the source from the store (it should already be loaded)
             const sourceId = Number(duplicateFromId)
             const source = sourcesStore.sources.find(s => s.id === sourceId)
-
             if (source) {
-                // Pre-fill form with source data
-                sourceName.value = `${source.name} (Copy)`
-                description.value = source.description || ''
-                host.value = source.connection.host
-                database.value = source.connection.database
-                tableName.value = source.connection.table_name
-                metaTSField.value = source._meta_ts_field
-                metaSeverityField.value = source._meta_severity_field || ''
-                ttlDays.value = source.ttl_days || 90
-
-                // Set table mode based on whether it was auto-created
-                tableMode.value = source._meta_is_auto_created ? 'create' : 'connect'
-
-                // Note: username/password are not returned by the API for security
-                // User will need to re-enter credentials if authentication was enabled
-                // We default to auth enabled to prompt the user
-                enableAuth.value = true
+                prefillFormFromSource(source, true)
             } else {
                 toast({
                     title: 'Warning',
@@ -256,45 +296,72 @@ const submitForm = async () => {
         return
     }
 
-    // For "Connect Existing Table" mode, validate first if not already validated
-    if (!createTable.value && !isValidated.value) {
+    // For "Connect Existing Table" mode (create only), validate first if not already validated
+    if (!isEditMode.value && !createTable.value && !isValidated.value) {
         await handleValidateConnection()
-        // If validation failed, don't proceed
         if (!isValidated.value) return
     }
 
     isSubmitting.value = true
 
     try {
-        // Create payload with proper types
-        const payload = {
-            name: String(sourceName.value),
-            meta_is_auto_created: createTable.value,
-            meta_ts_field: String(metaTSField.value),
-            meta_severity_field: metaSeverityField.value ? String(metaSeverityField.value) : "",
-            connection: {
+        if (isEditMode.value && editingSourceId.value) {
+            // Update mode - build partial update payload
+            const updatePayload: Record<string, any> = {
+                name: String(sourceName.value),
+                description: String(description.value),
+                ttl_days: Number(ttlDays.value),
                 host: String(host.value),
-                username: enableAuth.value ? String(username.value) : '',
-                password: enableAuth.value ? String(password.value) : '',
                 database: String(database.value),
                 table_name: String(tableName.value),
-            },
-            description: String(description.value),
-            ttl_days: Number(ttlDays.value),
-            schema: createTable.value ? actualSchema.value : undefined,
-        }
+            }
 
-        // Use the store directly
-        const result = await sourcesStore.createSource(payload)
+            if (enableAuth.value) {
+                updatePayload.username = String(username.value)
+                updatePayload.password = String(password.value)
+            }
 
-        if (result.success) {
-            // Redirect to sources list
-            router.push({ name: 'Sources' })
+            const result = await sourcesStore.updateSource(editingSourceId.value, updatePayload)
+
+            if (result.success) {
+                toast({
+                    title: 'Success',
+                    description: 'Source updated successfully',
+                    duration: TOAST_DURATION.SUCCESS,
+                })
+                router.push({ name: 'Sources' })
+            } else {
+                formError.value = result.error
+            }
         } else {
-            formError.value = result.error
+            // Create mode
+            const payload = {
+                name: String(sourceName.value),
+                meta_is_auto_created: createTable.value,
+                meta_ts_field: String(metaTSField.value),
+                meta_severity_field: metaSeverityField.value ? String(metaSeverityField.value) : "",
+                connection: {
+                    host: String(host.value),
+                    username: enableAuth.value ? String(username.value) : '',
+                    password: enableAuth.value ? String(password.value) : '',
+                    database: String(database.value),
+                    table_name: String(tableName.value),
+                },
+                description: String(description.value),
+                ttl_days: Number(ttlDays.value),
+                schema: createTable.value ? actualSchema.value : undefined,
+            }
+
+            const result = await sourcesStore.createSource(payload)
+
+            if (result.success) {
+                router.push({ name: 'Sources' })
+            } else {
+                formError.value = result.error
+            }
         }
     } catch (error) {
-        console.error("Error creating source:", error)
+        console.error("Error saving source:", error)
         formError.value = error instanceof Error ? error.message : 'Unknown error'
     } finally {
         isSubmitting.value = false
@@ -306,15 +373,27 @@ const submitForm = async () => {
     <div class="container mx-auto max-w-4xl px-4 py-8">
         <Card>
             <CardHeader>
-                <CardTitle>{{ route.query.duplicateFrom ? 'Duplicate Source' : 'Add Source' }}</CardTitle>
+                <CardTitle>{{ isEditMode ? 'Edit Source' : (route.query.duplicateFrom ? 'Duplicate Source' : 'Add Source') }}</CardTitle>
                 <CardDescription>
-                    {{ route.query.duplicateFrom
-                        ? 'Create a new source based on an existing configuration'
-                        : 'Connect to a ClickHouse database and configure log ingestion' }}
+                    {{ isEditMode
+                        ? 'Update source configuration and connection settings'
+                        : (route.query.duplicateFrom
+                            ? 'Create a new source based on an existing configuration'
+                            : 'Connect to a ClickHouse database and configure log ingestion') }}
                 </CardDescription>
             </CardHeader>
             <CardContent>
-                <form @submit.prevent="submitForm" class="space-y-6">
+                <!-- Loading state while fetching source for edit mode -->
+                <div v-if="isLoadingSource" class="flex items-center justify-center py-12">
+                    <div class="flex items-center gap-3">
+                        <svg class="animate-spin h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span class="text-muted-foreground">Loading source data...</span>
+                    </div>
+                </div>
+                <form v-else @submit.prevent="submitForm" class="space-y-6">
                     <div class="space-y-6">
                         <!-- Basic Info -->
                         <div class="space-y-4">
@@ -409,8 +488,8 @@ const submitForm = async () => {
                             </div>
                         </div>
 
-                        <!-- Table Configuration Option -->
-                        <div class="space-y-4">
+                        <!-- Table Configuration Option - hidden in edit mode -->
+                        <div v-if="!isEditMode" class="space-y-4">
                             <div class="flex items-center justify-between">
                                 <h3 class="text-lg font-medium">Table Configuration</h3>
                                 <div class="text-sm text-muted-foreground">
@@ -572,8 +651,25 @@ const submitForm = async () => {
                             </RadioGroup>
                         </div>
 
-                        <!-- Validation Section -->
-                        <div v-if="!createTable" class="space-y-4 border-t pt-4">
+                        <!-- TTL Days field - shown in edit mode (since Table Configuration is hidden) -->
+                        <div v-if="isEditMode" class="space-y-4">
+                            <div class="flex items-center justify-between">
+                                <h3 class="text-lg font-medium">Data Retention</h3>
+                                <div class="text-sm text-muted-foreground">
+                                    Configure how long logs are retained
+                                </div>
+                            </div>
+                            <div class="grid gap-2">
+                                <Label for="ttl_days_edit">TTL Days</Label>
+                                <Input id="ttl_days_edit" v-model="ttlDays" type="number" min="1" class="max-w-xs" />
+                                <p class="text-sm text-muted-foreground">
+                                    Number of days to keep logs before automatic deletion
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Validation Section - only for connect mode in create flow -->
+                        <div v-if="!isEditMode && !createTable" class="space-y-4 border-t pt-4">
                             <div class="flex items-center justify-between">
                                 <div class="text-sm font-medium">Validate Connection</div>
                                 <Button type="button" variant="outline" @click="handleValidateConnection"
@@ -605,8 +701,8 @@ const submitForm = async () => {
                         <Button type="button" variant="outline" @click="router.push({ name: 'Sources' })">
                             Cancel
                         </Button>
-                        <Button type="submit" :disabled="isSubmitting || !isValid || (!createTable && !isValidated)"
-                            :class="{ 'opacity-50': !isValid || (!createTable && !isValidated) }" size="lg">
+                        <Button type="submit" :disabled="isSubmitting || !isValid || (!isEditMode && !createTable && !isValidated)"
+                            :class="{ 'opacity-50': !isValid || (!isEditMode && !createTable && !isValidated) }" size="lg">
                             <span v-if="isSubmitting" class="mr-2">
                                 <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg"
                                     fill="none" viewBox="0 0 24 24">

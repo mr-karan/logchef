@@ -101,16 +101,6 @@ export function useQuery() {
     return dirtyState;
   });
 
-  // Validate SQL query syntax
-  const validateSQL = (sql: string): boolean => {
-    return SqlManager.validateSql(sql).valid;
-  };
-
-  // Get detailed SQL validation results
-  const validateSQLWithErrorDetails = (sql: string) => {
-    return SqlManager.validateSql(sql);
-  };
-
   // Validate LogchefQL query via backend API
   const validateLogchefQL = async (query: string): Promise<{ valid: boolean; error?: string }> => {
     try {
@@ -320,19 +310,6 @@ export function useQuery() {
             error: validation.error || 'Invalid LogchefQL syntax'
           };
         }
-      } else if (mode === 'sql' && query.trim()) {
-        // For SQL, apply variable substitution then validate
-        const queryWithVars = convertVariables(query);
-        const validation = SqlManager.validateSql(queryWithVars);
-        if (!validation.valid) {
-          console.log("useQuery: SQL validation failed:", validation.error);
-          queryError.value = validation.error || 'Invalid SQL syntax';
-          return {
-            success: false,
-            sql: queryWithVars,
-            error: validation.error || 'Invalid SQL syntax'
-          };
-        }
       }
 
       if (mode === 'sql') {
@@ -429,8 +406,6 @@ export function useQuery() {
 
     // Actions
     changeMode,
-    validateSQL,
-    validateSQLWithErrorDetails,
     validateLogchefQL,
     handleTimeRangeUpdate,
     handleLimitUpdate,

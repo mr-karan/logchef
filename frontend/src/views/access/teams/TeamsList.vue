@@ -27,12 +27,17 @@ import { type Team } from '@/api/teams'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import AddTeam from './AddTeam.vue'
 import { useTeamsStore } from '@/stores/teams'
+import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/utils/format'
 
 const router = useRouter()
 const { toast } = useToast()
 const teamsStore = useTeamsStore()
+const authStore = useAuthStore()
+
+// Check if user is a global admin
+const isGlobalAdmin = computed(() => authStore.user?.role === 'admin')
 
 // Improved loading state
 const isLoading = ref(true)
@@ -54,9 +59,10 @@ const filteredTeams = computed(() => {
 });
 
 // Get processed teams with default values
+// Uses managedTeams which returns adminTeams for global admins,
+// or filtered userTeams (where role is admin) for team admins
 const teamsWithDefaults = computed(() => {
-    // Map adminTeams to include defaults if needed, similar to getTeamsWithDefaults
-    return teamsStore.adminTeams.map(team => ({
+    return teamsStore.managedTeams.map(team => ({
         ...team,
         name: team.name || `Team ${team.id}`,
         description: team.description || '',
@@ -110,7 +116,12 @@ const handleTeamCreated = (_teamId?: number) => {
 const loadTeams = async () => {
     try {
         isLoading.value = true
-        await teamsStore.loadAdminTeams(true)
+        // Global admins load all teams, team admins load their user teams
+        if (isGlobalAdmin.value) {
+            await teamsStore.loadAdminTeams(true)
+        } else {
+            await teamsStore.loadUserTeams()
+        }
     } catch (error) {
         console.error('Error loading teams:', error)
         toast({
@@ -136,10 +147,11 @@ onMounted(() => {
                     <div>
                         <CardTitle>Teams</CardTitle>
                         <CardDescription>
-                            Groups of users that have common dashboard and permission needs
+                            {{ isGlobalAdmin ? 'Groups of users that have common dashboard and permission needs' : 'Teams you administer' }}
                         </CardDescription>
                     </div>
-                    <AddTeam @team-created="handleTeamCreated" />
+                    <!-- Only global admins can create teams -->
+                    <AddTeam v-if="isGlobalAdmin" @team-created="handleTeamCreated" />
                 </div>
             </CardHeader>
             <CardContent>
@@ -163,8 +175,11 @@ onMounted(() => {
                             <Plus class="h-6 w-6" />
                         </div>
                         <h3 class="text-lg font-semibold mb-1">No teams found</h3>
-                        <p class="text-muted-foreground mb-4">Create your first team to get started</p>
-                        <AddTeam @team-created="handleTeamCreated">
+                        <p class="text-muted-foreground mb-4">
+                            {{ isGlobalAdmin ? 'Create your first team to get started' : 'You are not an admin of any teams' }}
+                        </p>
+                        <!-- Only global admins can create teams -->
+                        <AddTeam v-if="isGlobalAdmin" @team-created="handleTeamCreated">
                             <Button>
                                 <Plus class="mr-2 h-4 w-4" />
                                 Create Your First Team
@@ -220,7 +235,8 @@ onMounted(() => {
                                                 </TooltipContent>
                                             </Tooltip>
 
-                                            <Tooltip>
+                                            <!-- Only global admins can delete teams -->
+                                            <Tooltip v-if="isGlobalAdmin">
                                                 <TooltipTrigger asChild>
                                                     <Button variant="destructive" size="icon"
                                                         @click="handleDelete(team)">

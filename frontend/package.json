@@ -40,7 +40,6 @@
     "lodash-es": "^4.17.22",
     "lucide-vue-next": "^0.474.0",
     "monaco-editor": "^0.52.2",
-    "node-sql-parser": "^5.3.13",
     "pinia": "^3.0.4",
     "radix-vue": "^1.9.17",
     "reka-ui": "^2.7.0",

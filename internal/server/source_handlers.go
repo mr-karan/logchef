@@ -103,6 +103,39 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Source deleted successfully"})
 }
 
+// handleUpdateSource updates a data source's configuration.
+// URL: PUT /api/v1/admin/sources/:sourceID
+// Requires: Admin privileges
+func (s *Server) handleUpdateSource(c *fiber.Ctx) error {
+	sourceIDStr := c.Params("sourceID")
+	if sourceIDStr == "" {
+		return SendError(c, fiber.StatusBadRequest, "Source ID is required")
+	}
+	sourceID, err := core.ParseSourceID(sourceIDStr)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
+
+	var req models.UpdateSourceRequest
+	if err := c.BodyParser(&req); err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
+	}
+
+	updatedSource, err := core.UpdateSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID, &req)
+	if err != nil {
+		if errors.Is(err, core.ErrSourceNotFound) {
+			return SendError(c, fiber.StatusNotFound, "Source not found")
+		}
+		if validationErr, ok := err.(*core.ValidationError); ok {
+			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
+		}
+		s.log.Error("failed to update source", "error", err, "source_id", sourceID)
+		return SendError(c, fiber.StatusInternalServerError, "Error updating source: "+err.Error())
+	}
+
+	return SendSuccess(c, fiber.StatusOK, updatedSource.ToResponse())
+}
+
 // handleValidateSourceConnection validates ClickHouse connection details provided in the request body.
 // URL: POST /api/v1/admin/sources/validate
 // Requires: Admin privileges

@@ -151,6 +151,11 @@ func (s *Server) setupRoutes() {
 	api.Post("/me/tokens", s.requireAuth, s.handleCreateAPIToken)
 	api.Delete("/me/tokens/:tokenID", s.requireAuth, s.handleDeleteAPIToken)
 
+	// --- User Listing (for team admins to add members) ---
+	// This endpoint is accessible to team admins (users who are admin of at least one team)
+	// or global admins, to allow them to select users when adding members to their teams.
+	api.Get("/users", s.requireAuth, s.requireAnyTeamAdmin, s.handleListUsers)
+
 	// --- Admin Routes ---
 	// These endpoints are only accessible to admin users for global management
 	admin := api.Group("/admin", s.requireAuth, s.requireAdmin)
@@ -170,6 +175,7 @@ func (s *Server) setupRoutes() {
 	admin.Get("/sources", s.handleListSources) // Admin endpoint for listing all sources
 	admin.Post("/sources", s.handleCreateSource)
 	admin.Post("/sources/validate", s.handleValidateSourceConnection)
+	admin.Put("/sources/:sourceID", s.handleUpdateSource)
 	admin.Delete("/sources/:sourceID", s.handleDeleteSource)
 	admin.Get("/sources/:sourceID/stats", s.handleGetSourceStats) // Admin-only source stats
 

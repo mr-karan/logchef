@@ -509,6 +509,21 @@ func IsTeamAdmin(ctx context.Context, db *sqlite.DB, teamID models.TeamID, userI
 	return member != nil && member.Role == models.TeamRoleAdmin, nil
 }
 
+// IsAnyTeamAdmin checks if a user is an admin of ANY team.
+// This is used to determine if a user should have access to team management features.
+func IsAnyTeamAdmin(ctx context.Context, db *sqlite.DB, userID models.UserID) (bool, error) {
+	teams, err := db.ListTeamsForUser(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("error listing teams for user: %w", err)
+	}
+	for _, team := range teams {
+		if team.Role == string(models.TeamRoleAdmin) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // TeamHasSourceAccess checks if a specific team has access to a specific source.
 func TeamHasSourceAccess(ctx context.Context, db *sqlite.DB, teamID models.TeamID, sourceID models.SourceID) (bool, error) {
 	hasAccess, err := db.TeamHasSource(ctx, teamID, sourceID)

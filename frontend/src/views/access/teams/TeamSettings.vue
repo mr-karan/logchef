@@ -37,6 +37,7 @@ import {
 import { useUsersStore } from "@/stores/users"
 import { useSourcesStore } from "@/stores/sources"
 import { useTeamsStore } from "@/stores/teams"
+import { useAuthStore } from "@/stores/auth"
 import { formatDate, formatSourceName } from '@/utils/format'
 
 const route = useRoute()
@@ -47,8 +48,13 @@ const { toast } = useToast()
 const usersStore = useUsersStore()
 const sourcesStore = useSourcesStore()
 const teamsStore = useTeamsStore()
+const authStore = useAuthStore()
+
 // Get the teamId from route params
 const teamId = computed(() => Number(route.params.id))
+
+// Check if user is a global admin
+const isGlobalAdmin = computed(() => authStore.user?.role === 'admin')
 
 // Single loading state for better UX
 const isLoading = ref(true)
@@ -222,16 +228,19 @@ onMounted(async () => {
         isLoading.value = true
 
         // Load basic data in parallel for better performance
-        await Promise.all([
-            // Load admin teams first to ensure we have the team in the store
-            teamsStore.loadAdminTeams(),
+        // Global admins load all teams, team admins load their user teams
+        const teamsLoadPromise = isGlobalAdmin.value
+            ? teamsStore.loadAdminTeams()
+            : teamsStore.loadUserTeams()
 
-            // Load these in parallel for efficiency
+        await Promise.all([
+            teamsLoadPromise,
+            // Load users and sources in parallel for efficiency
             usersStore.loadUsers(),
             sourcesStore.loadSources()
         ])
 
-        // Get detailed team info after confirming admin teams are loaded
+        // Get detailed team info after confirming teams are loaded
         await teamsStore.getTeam(id)
 
         // Load team-specific data in parallel
