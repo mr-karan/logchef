@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, watch } from "vue";
 import { exploreApi } from "@/api/explore";
 import { logchefqlApi } from "@/api/logchefql";
+import { isCanceledError } from "@/api/error-handler";
 import type {
   ColumnInfo,
   QueryStats,
@@ -777,6 +778,9 @@ export const useExploreStore = defineStore("explore", () => {
             }, operationKey);
           }
         } catch (error: any) {
+          if (isCanceledError(error) || error?.name === 'AbortError' || error?.name === 'CanceledError') {
+            return { success: false, data: null, error: { message: 'Request canceled', error_type: 'CanceledError' } };
+          }
           return state.handleError({
             status: "error",
             message: `LogchefQL query error: ${error.message}`,

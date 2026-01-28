@@ -1,21 +1,15 @@
-import { analyzeQuery, validateSQLWithDetails } from '@/utils/clickhouse-sql';
+import { analyzeQuery } from '@/utils/clickhouse-sql';
 import type { TimeRange } from '@/types/query';
 import { createTimeRangeCondition } from '@/utils/time-utils';
 
 /**
  * SqlManager provides a centralized service for all SQL-related operations
- * including parsing, validation, and query modifications
+ * including query generation and modifications.
+ * Note: SQL validation is handled by the backend (ClickHouse) - client-side
+ * validation was removed as it couldn't handle template syntax and used
+ * a PostgreSQL parser that doesn't match ClickHouse syntax.
  */
 export class SqlManager {
-  /**
-   * Validates SQL syntax
-   * @param sql The SQL query to validate
-   * @returns Validation result with detailed error info
-   */
-  static validateSql(sql: string) {
-    return validateSQLWithDetails(sql);
-  }
-
   /**
    * Generate default SQL query based on provided parameters
    * @param params Parameters for SQL generation
@@ -239,21 +233,7 @@ LIMIT ${limit}`;
     }
 
     try {
-      // Note: Variable substitution should be handled by the caller (useQuery.ts)
-      // before calling this method for proper separation of concerns
-
-      // Step 1: Validate SQL first
-      const validation = this.validateSql(sql);
-      if (!validation.valid) {
-        return {
-          success: false,
-          sql,
-          error: validation.error || 'Invalid SQL syntax',
-          warnings: []
-        };
-      }
-
-      // Step 2: Update time range if needed
+      // Update time range if needed
       let processedSql = this.updateTimeRange({
         sql,
         tsField,

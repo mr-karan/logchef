@@ -404,7 +404,7 @@
         </SheetDescription>
       </SheetHeader>
 
-      <div v-if="allVariables && allVariables.length > 0" class="space-y-6 max-h-[70vh] overflow-y-auto pr-2">
+      <div v-if="allVariables && allVariables.length > 0" class="space-y-6 overflow-y-auto pr-2" style="max-height: calc(100vh - 180px);">
         <div v-for="(variable, index) in allVariables" :key="variable.name" class="space-y-4">
           <!-- Enhanced Variable Card -->
           <div class="border border-border rounded-lg p-4 bg-card hover:shadow-sm transition-all duration-200">
@@ -935,7 +935,6 @@ function detectAutocompleteState(text: string): { state: AutocompleteState; key:
   return { state: AutocompleteState.INITIAL, key: '', value: '' };
 }
 import {
-  validateSQLWithDetails,
   SQL_KEYWORDS,
 } from "@/utils/clickhouse-sql";
 import { storeToRefs } from 'pinia';
@@ -1566,12 +1565,8 @@ const submitQuery = async () => {
           console.warn("LogchefQL validation API error:", validationErr);
           isValid = true;
         }
-      } else {
-        const validation = validateSQLWithDetails(queryForValidation);
-        isValid = validation.valid;
-        console.log("Invalid SQL syntax. : " + isValid);
-        if (!isValid) validationError.value = validation.error || "Invalid SQL syntax.";
       }
+      // SQL mode: skip client-side validation, let backend (ClickHouse) handle it
     }
 
     if (!isValid) return;
@@ -2339,7 +2334,6 @@ const getDefaultMultiSelectCount = (variable: VariableSetting): number => {
 // Determine input type for a given variable type
 const inputTypeFor = (type: string) => {
   if (type === 'number') return 'number';
-  if (type === 'date') return 'datetime-local';
   return 'text';
 };
 
@@ -2349,7 +2343,7 @@ const getPlaceholderForType = (type: string) => {
     case 'number':
       return 'Enter a number...';
     case 'date':
-      return 'Select date and time...';
+      return '2026-01-28 14:30:00';
     case 'text':
     default:
       return 'Enter text value...';
