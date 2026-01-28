@@ -170,6 +170,7 @@ func (s *Server) setupRoutes() {
 	admin.Get("/sources", s.handleListSources) // Admin endpoint for listing all sources
 	admin.Post("/sources", s.handleCreateSource)
 	admin.Post("/sources/validate", s.handleValidateSourceConnection)
+	admin.Put("/sources/:sourceID", s.handleUpdateSource)
 	admin.Delete("/sources/:sourceID", s.handleDeleteSource)
 	admin.Get("/sources/:sourceID/stats", s.handleGetSourceStats) // Admin-only source stats
 

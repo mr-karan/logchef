@@ -34,9 +34,11 @@ type Source struct {
 	SortKeys     []string `db:"-" json:"sort_keys,omitempty"`
 }
 
-// ConnectionInfoResponse represents the connection details for API responses, omitting sensitive fields
+// ConnectionInfoResponse represents the connection details for API responses
 type ConnectionInfoResponse struct {
 	Host      string `json:"host"`
+	Username  string `json:"username,omitempty"`
+	Password  string `json:"password,omitempty"`
 	Database  string `json:"database"`
 	TableName string `json:"table_name"`
 }
@@ -72,6 +74,8 @@ func (s *Source) ToResponse() *SourceResponse {
 		MetaSeverityField: s.MetaSeverityField,
 		Connection: ConnectionInfoResponse{
 			Host:      s.Connection.Host,
+			Username:  s.Connection.Username,
+			Password:  s.Connection.Password,
 			Database:  s.Connection.Database,
 			TableName: s.Connection.TableName,
 		},
@@ -118,6 +122,25 @@ type ValidateConnectionRequest struct {
 	ConnectionInfo
 	TimestampField string `json:"timestamp_field"`
 	SeverityField  string `json:"severity_field"`
+}
+
+// UpdateSourceRequest represents a request to update a data source.
+// All fields are pointers to allow partial updates - nil means "don't change".
+type UpdateSourceRequest struct {
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+	TTLDays     *int    `json:"ttl_days,omitempty"`
+	Host        *string `json:"host,omitempty"`
+	Username    *string `json:"username,omitempty"`
+	Password    *string `json:"password,omitempty"`
+	Database    *string `json:"database,omitempty"`
+	TableName   *string `json:"table_name,omitempty"`
+}
+
+// HasConnectionChanges returns true if any connection-related fields are being updated.
+// When connection changes, re-validation is required.
+func (r *UpdateSourceRequest) HasConnectionChanges() bool {
+	return r.Host != nil || r.Username != nil || r.Password != nil || r.Database != nil || r.TableName != nil
 }
 
 // SourceWithTeams represents a source along with the teams that have access to it
