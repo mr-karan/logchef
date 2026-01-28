@@ -954,6 +954,17 @@ const isLastVisibleColumn = (columnId: string): boolean => {
     max-height: 32px;
 }
 
+/* Allow expanded JSON rows to grow naturally */
+.table-fixed tbody tr.expanded-json-row {
+    height: auto;
+    max-height: none;
+}
+
+/* Expanded row content should wrap normally */
+.table-fixed tbody tr.expanded-json-row td {
+    white-space: normal !important;
+}
+
 /* Make table row alternating colors more visible */
 .table-fixed tbody tr:nth-child(odd) {
     background-color: hsl(var(--muted) / 0.05);
@@ -1477,10 +1488,19 @@ td>.flex>.cell-content :deep(.timestamp-separator) {
 }
 
 /* Ensure the table row uses flexbox for columns to support flex-grow */
+/* Use flex rows for consistent column sizing and fill behavior */
 .table-fixed thead tr,
 .table-fixed tbody tr {
     display: flex;
     width: 100%;
+}
+
+/* Expanded JSON row should stretch full width despite flex layout */
+.table-fixed tbody tr.expanded-json-row td {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    border-right: none;
 }
 
 /* Ensure all th and td in flex rows behave correctly */

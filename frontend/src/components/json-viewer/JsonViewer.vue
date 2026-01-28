@@ -21,6 +21,7 @@ const emit = defineEmits<{
 const { toast } = useToast()
 const isExpanded = ref(props.expanded ?? false)
 const isCopied = ref(false)
+const isWrapped = ref(true)
 
 // Initialize highlight.js with JSON language
 hljs.registerLanguage('json', json)
@@ -78,6 +79,19 @@ async function copyToClipboard() {
                 {{ isCopied ? 'Copied!' : 'Copy' }}
             </Button>
 
+            <Button
+                variant="secondary"
+                size="sm"
+                @click.stop.prevent="isWrapped = !isWrapped"
+                class="h-5 px-2 shadow-sm transition-all duration-200 hover:shadow active:scale-95 cursor-pointer text-xs"
+                :class="{
+                    'bg-muted text-foreground': isWrapped,
+                    'hover:bg-muted': !isWrapped
+                }"
+            >
+                {{ isWrapped ? 'Wrap: On' : 'Wrap: Off' }}
+            </Button>
+
             <!-- Context button -->
             <Button v-if="showContextButton" variant="secondary" size="sm" @click.stop.prevent="emit('showContext')"
                 class="h-5 px-1.5 shadow-sm transition-all duration-200 hover:shadow hover:bg-muted active:scale-95 cursor-pointer text-xs">
@@ -90,11 +104,18 @@ async function copyToClipboard() {
         <!-- todo: add contenteditable to the pre tag -->
         <div class="relative">
             <div class="border rounded-sm bg-muted/5 mt-0.5 relative w-full overflow-hidden">
-                <pre :class="{ 'max-h-[500px]': !isExpanded }"
-                    class="text-xs font-mono pt-8 px-1.5 overflow-y-auto overflow-x-auto whitespace-pre-wrap break-words"><code
+                <pre
+                    :class="[
+                        !isExpanded ? 'max-h-[500px]' : '',
+                        isWrapped ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'
+                    ]"
+                    class="text-xs font-mono pt-8 px-1.5 overflow-y-auto overflow-x-auto"
+                >
+                    <code
                         v-html="formatJSON(value)"
-                        class="whitespace-pre-wrap break-words"
-                    /></pre>
+                        :class="isWrapped ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'"
+                    />
+                </pre>
             </div>
             <!-- Expand/collapse overlay -->
             <div v-if="!isExpanded && formatJSON(value).split('\n').length > 20"
