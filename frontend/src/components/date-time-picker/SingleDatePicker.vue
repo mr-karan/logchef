@@ -217,6 +217,9 @@ function setNow() {
   } else {
     draftValue.value = `${year}-${month}-${day}`;
   }
+  
+  // Automatically apply the "Now" value
+  applyValue();
 }
 
 function clear() {

@@ -48,6 +48,7 @@ export function useSavedQueries(
   const editingQuery = ref<SavedTeamQuery | null>(null)
   const isLoading = ref(false)
   const isLoadingQueryDetails = ref(false)
+  const openingQueryId = ref<number | null>(null)
   const searchQuery = ref('')
 
   const isEditingExistingQuery = computed(() => !!route.query.id);
@@ -466,15 +467,37 @@ export function useSavedQueries(
     return `/logs/collection/${query.team_id}/${query.source_id}/${query.id}`
   }
 
-  function openQuery(query: SavedTeamQuery) {
-    router.push({
-      path: '/logs/explore',
-      query: {
-        team: query.team_id.toString(),
-        source: query.source_id.toString(),
-        id: query.id.toString(),
-      },
-    })
+  async function openQuery(query: SavedTeamQuery) {
+    if (openingQueryId.value !== null) {
+      return
+    }
+
+    openingQueryId.value = query.id
+
+    try {
+      await router.push({
+        path: '/logs/explore',
+        query: {
+          team: query.team_id.toString(),
+          source: query.source_id.toString(),
+          id: query.id.toString(),
+        },
+      })
+    } catch (error: unknown) {
+      const err = error as { name?: string }
+      const isExpectedNavigationError = err?.name === 'NavigationDuplicated' || err?.name === 'NavigationCancelled'
+      if (!isExpectedNavigationError) {
+        console.error('Error navigating to query:', error)
+        toast({
+          title: 'Navigation Error',
+          description: 'Failed to open the query. Please try again.',
+          variant: 'destructive',
+          duration: TOAST_DURATION.ERROR,
+        })
+      }
+    } finally {
+      openingQueryId.value = null
+    }
   }
 
   // Handle edit query
@@ -690,6 +713,7 @@ export function useSavedQueries(
     editingQuery,
     isLoading,
     isLoadingQueryDetails,
+    openingQueryId,
     queries: queriesRef, // Return the queriesRef instead of direct parameter
     filteredQueries,
     hasQueries,

@@ -322,6 +322,16 @@
               </SelectContent>
             </Select>
 
+            <!-- Date picker input -->
+            <SingleDatePicker 
+              v-else-if="variable.type === 'date' && variable.inputType === 'datepicker'"
+              :model-value="variable.value ? String(variable.value) : null"
+              @update:model-value="(val) => { variable.value = val ?? ''; variableStore.upsertVariable(variable); }"
+              :include-time="true"
+              :placeholder="variable.isOptional ? 'Select date (optional)' : 'Select date...'"
+              class="flex-1 min-w-0"
+            />
+
             <!-- Text/Number input (default) -->
             <Input v-else :id="`var-${variable.name}`" 
               :model-value="String(variable.value ?? '')"
@@ -465,24 +475,34 @@
                   <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
                   Input Widget
                 </Label>
-                <Select v-model="variable.inputType" @update:model-value="() => variableStore.upsertVariable(variable)">
+                <Select 
+                  v-model="variable.inputType" 
+                  @update:model-value="() => variableStore.upsertVariable(variable)"
+                  :disabled="variable.type === 'date'"
+                >
                   <SelectTrigger class="h-9">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="input">
+                    <SelectItem v-if="variable.type !== 'date'" value="input">
                       <div class="flex items-center gap-2">
                         <Type class="w-3.5 h-3.5 text-muted-foreground" />
                         Text Input
                       </div>
                     </SelectItem>
-                    <SelectItem value="dropdown">
+                    <SelectItem v-if="variable.type === 'date'" value="datepicker">
+                      <div class="flex items-center gap-2">
+                        <CalendarIcon class="w-3.5 h-3.5 text-muted-foreground" />
+                        Date Picker
+                      </div>
+                    </SelectItem>
+                    <SelectItem v-if="variable.type !== 'date'" value="dropdown">
                       <div class="flex items-center gap-2">
                         <ChevronDown class="w-3.5 h-3.5 text-muted-foreground" />
                         Dropdown List
                       </div>
                     </SelectItem>
-                    <SelectItem value="multiselect">
+                    <SelectItem v-if="variable.type !== 'date'" value="multiselect">
                       <div class="flex items-center gap-2">
                         <List class="w-3.5 h-3.5 text-muted-foreground" />
                         Multi-Select
@@ -588,6 +608,15 @@
                     </SelectItem>
                   </SelectContent>
                 </Select>
+                <!-- Date picker default -->
+                <SingleDatePicker 
+                  v-else-if="variable.type === 'date' && variable.inputType === 'datepicker'"
+                  :model-value="variable.defaultValue ? String(variable.defaultValue) : null"
+                  @update:model-value="(val) => { variable.defaultValue = val ?? ''; variableStore.upsertVariable(variable); }"
+                  :include-time="true"
+                  placeholder="Select default date..."
+                  class="w-full"
+                />
                 <!-- Text/number input default -->
                 <Input v-else 
                   :model-value="String(variable.defaultValue ?? '')"
@@ -823,6 +852,7 @@ import {
   X,
   Plus,
   List,
+  CalendarIcon,
 } from "lucide-vue-next";
 import {
   HoverCard,
@@ -874,6 +904,7 @@ import {
 } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { SingleDatePicker } from "@/components/date-time-picker";
 
 import {
   initMonacoSetup,
@@ -2240,12 +2271,23 @@ const updateVariableType = (variable: VariableSetting) => {
   switch (variable.type) {
     case 'text':
       variable.value = '';
+      variable.inputType = 'input';
       break;
     case 'number':
       variable.value = 0;
+      variable.inputType = 'input';
       break;
     case 'date':
-      variable.value = new Date().toISOString();
+      // Use local datetime format instead of UTC ISO8601
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const seconds = String(now.getSeconds()).padStart(2, '0');
+      variable.value = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+      variable.inputType = 'datepicker';
       break;
   }
 
@@ -2373,10 +2415,15 @@ const formatVariableValue = (variable: VariableSetting) => {
       if (isNaN(date.getTime())) {
         return `Date: ${variable.value}`;
       }
-      const yyyy = date.getFullYear();
-      const mm = String(date.getMonth() + 1).padStart(2, '0');
-      const dd = String(date.getDate()).padStart(2, '0');
-      return `Date: ${yyyy}-${mm}-${dd}`;
+      return date.toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
     case 'text':
     default:
       const value = String(variable.value);

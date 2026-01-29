@@ -91,6 +91,7 @@ const {
   showSaveQueryModal,
   editingQuery,
   isLoading,
+  openingQueryId,
   filteredQueries,
   hasQueries,
   totalQueryCount,
@@ -561,7 +562,11 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            <TableRow v-for="query in filteredQueries" :key="query.id">
+            <TableRow 
+              v-for="query in filteredQueries" 
+              :key="query.id"
+              :class="{ 'bg-muted/50': openingQueryId === query.id }"
+            >
               <TableCell class="w-[50px]">
                 <button
                   v-if="canManageCollections"
@@ -581,8 +586,22 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
                 />
               </TableCell>
               <TableCell class="font-medium font-sans">
-                <a @click.prevent="openQuery(query)" :href="getQueryUrl(query)"
-                  class="text-primary hover:underline cursor-pointer">
+                <a 
+                  @click.prevent="openingQueryId === null && openQuery(query)" 
+                  :href="getQueryUrl(query)"
+                  class="inline-flex items-center gap-2"
+                  :class="[
+                    openingQueryId === null 
+                      ? 'text-primary hover:underline cursor-pointer' 
+                      : openingQueryId === query.id 
+                        ? 'text-primary cursor-wait' 
+                        : 'text-muted-foreground cursor-not-allowed'
+                  ]"
+                >
+                  <Loader2 
+                    v-if="openingQueryId === query.id" 
+                    class="h-4 w-4 animate-spin" 
+                  />
                   {{ query.name }}
                 </a>
               </TableCell>
@@ -616,9 +635,13 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem @click="openQuery(query)">
-                      <Eye class="mr-2 h-4 w-4" />
-                      Open
+                    <DropdownMenuItem 
+                      @click="openingQueryId === null && openQuery(query)"
+                      :disabled="openingQueryId !== null"
+                    >
+                      <Loader2 v-if="openingQueryId === query.id" class="mr-2 h-4 w-4 animate-spin" />
+                      <Eye v-else class="mr-2 h-4 w-4" />
+                      {{ openingQueryId === query.id ? 'Opening...' : 'Open' }}
                     </DropdownMenuItem>
                     <DropdownMenuItem @click="copyCollectionUrl(query)">
                       <Link class="mr-2 h-4 w-4" />
