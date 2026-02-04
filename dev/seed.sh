@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 API_URL="${LOGCHEF_API_URL:-http://localhost:8125/api/v1}"
@@ -26,116 +26,68 @@ if [ ! -f "$DB_PATH" ]; then
   exit 1
 fi
 
-log "Bootstrapping admin user and API token..."
+log "Setting up dev user and API token..."
 
 TOKEN="logchef_1_devsetuptoken00000000000000"
 TOKEN_HASH="6d86767ef4a9f4fc202e0ae56d2102c3be9b1353c95519c5ed4622c4cf66dc9b"
 
-sqlite3 "$DB_PATH" "INSERT OR IGNORE INTO users (id, email, full_name, role, status) VALUES (1, 'dev@localhost', 'Dev Admin', 'admin', 'active');"
-log "Created user: dev@localhost"
+sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO users (id, email, full_name, role, status) VALUES (1, 'dev@localhost', 'Dev Admin', 'admin', 'active');"
+log "User: dev@localhost (admin)"
 
 sqlite3 "$DB_PATH" "INSERT OR IGNORE INTO api_tokens (user_id, name, token_hash, prefix) VALUES (1, 'Dev Setup Token', '$TOKEN_HASH', 'logchef_1_de...');"
-log "Created API token"
+log "API token ready"
 
-log "Waiting for backend to be ready..."
-for i in {1..30}; do
-  if curl -s "$API_URL/health" > /dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
-
-TEAM_ID=$(sqlite3 "$DB_PATH" "SELECT id FROM teams WHERE name='Dev Team' LIMIT 1;" 2>/dev/null)
-if [ -n "$TEAM_ID" ]; then
-  log "Dev Team already exists with ID: $TEAM_ID"
+log "Checking backend status..."
+if curl -s "$API_URL/health" > /dev/null 2>&1; then
+  log "Backend is running"
 else
-  log "Creating Dev Team..."
-  TEAM_RESP=$(curl -s -X POST "$API_URL/admin/teams" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{"name": "Dev Team", "description": "Local development team"}')
-  TEAM_ID=$(echo "$TEAM_RESP" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
-
-  if [ -z "$TEAM_ID" ]; then
-    log "Failed to create team: $TEAM_RESP"
-    exit 1
-  fi
-  log "Created team with ID: $TEAM_ID"
+  log "Backend not running (seeding directly via SQLite)"
 fi
 
-HTTP_EXISTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM sources WHERE name='HTTP Access Logs';" 2>/dev/null || echo "0")
-if [ "$HTTP_EXISTS" -gt 0 ]; then
-  log "HTTP source already exists"
-  HTTP_ID=$(sqlite3 "$DB_PATH" "SELECT id FROM sources WHERE name='HTTP Access Logs' LIMIT 1;")
-else
-  log "Creating HTTP Logs source..."
-  HTTP_RESP=$(curl -s -X POST "$API_URL/admin/sources" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "HTTP Access Logs",
-    "description": "Demo HTTP access logs (vector -c http.toml)",
-    "meta_ts_field": "timestamp",
-    "connection": {
-      "host": "localhost:9000",
-      "database": "default",
-      "table_name": "http"
-    }
-  }')
-HTTP_ID=$(echo "$HTTP_RESP" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+log "Creating Dev Team..."
+sqlite3 "$DB_PATH" "INSERT OR IGNORE INTO teams (id, name, description) VALUES (1, 'Dev Team', 'Local development team');"
+TEAM_ID=1
+log "Team: Dev Team (ID: $TEAM_ID)"
 
-  if [ -n "$HTTP_ID" ]; then
-    log "Created HTTP source with ID: $HTTP_ID"
-    curl -s -X POST "$API_URL/teams/$TEAM_ID/sources" \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "{\"source_id\": $HTTP_ID}" > /dev/null
-    log "Linked HTTP source to team"
-  else
-    log "Failed to create HTTP source: $HTTP_RESP"
-  fi
-fi
+log "Setting up sources..."
 
-SYSLOG_EXISTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM sources WHERE name='Syslog Logs';" 2>/dev/null || echo "0")
-if [ "$SYSLOG_EXISTS" -gt 0 ]; then
-  log "Syslog source already exists"
-  SYSLOG_ID=$(sqlite3 "$DB_PATH" "SELECT id FROM sources WHERE name='Syslog Logs' LIMIT 1;")
-else
-  log "Creating Syslog source..."
-SYSLOG_RESP=$(curl -s -X POST "$API_URL/admin/sources" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Syslog Logs",
-    "description": "Demo syslog data (vector -c syslog.toml)",
-    "meta_ts_field": "timestamp",
-    "meta_severity_field": "lvl",
-    "connection": {
-      "host": "localhost:9000",
-      "database": "default",
-      "table_name": "syslogs"
-    }
-  }')
-SYSLOG_ID=$(echo "$SYSLOG_RESP" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+sqlite3 "$DB_PATH" "DELETE FROM sources WHERE database='default' AND table_name IN ('http', 'syslogs');"
 
-  if [ -n "$SYSLOG_ID" ]; then
-    log "Created Syslog source with ID: $SYSLOG_ID"
-    curl -s -X POST "$API_URL/teams/$TEAM_ID/sources" \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "{\"source_id\": $SYSLOG_ID}" > /dev/null
-    log "Linked Syslog source to team"
-  else
-    log "Failed to create Syslog source: $SYSLOG_RESP"
-  fi
-fi
+sqlite3 "$DB_PATH" "INSERT INTO sources (name, description, _meta_is_auto_created, _meta_ts_field, host, username, password, database, table_name)
+VALUES ('HTTP Access Logs', 'Demo HTTP access logs (vector -c http.toml)', 0, 'timestamp', '127.0.0.1:9000', 'default', '', 'default', 'http');"
+HTTP_ID=$(sqlite3 "$DB_PATH" "SELECT id FROM sources WHERE database='default' AND table_name='http';")
+log "Source: HTTP Access Logs (ID: $HTTP_ID) -> default.http"
+
+sqlite3 "$DB_PATH" "INSERT INTO sources (name, description, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name)
+VALUES ('Syslog Logs', 'Demo syslog data (vector -c syslog.toml)', 0, 'timestamp', 'lvl', '127.0.0.1:9000', 'default', '', 'default', 'syslogs');"
+SYSLOG_ID=$(sqlite3 "$DB_PATH" "SELECT id FROM sources WHERE database='default' AND table_name='syslogs';")
+log "Source: Syslog Logs (ID: $SYSLOG_ID) -> default.syslogs"
+
+log "Linking sources to Dev Team..."
+sqlite3 "$DB_PATH" "INSERT OR IGNORE INTO team_sources (team_id, source_id) VALUES ($TEAM_ID, $HTTP_ID);"
+sqlite3 "$DB_PATH" "INSERT OR IGNORE INTO team_sources (team_id, source_id) VALUES ($TEAM_ID, $SYSLOG_ID);"
 
 log "Adding dev user to team..."
-curl -s -X POST "$API_URL/teams/$TEAM_ID/members" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": 1, "role": "admin"}' > /dev/null
+sqlite3 "$DB_PATH" "INSERT OR IGNORE INTO team_members (team_id, user_id, role) VALUES ($TEAM_ID, 1, 'admin');"
 
+log "Adding admin@logchef.internal to team (if exists)..."
+ADMIN_ID=$(sqlite3 "$DB_PATH" "SELECT id FROM users WHERE email='admin@logchef.internal';")
+if [ -n "$ADMIN_ID" ]; then
+  sqlite3 "$DB_PATH" "INSERT OR IGNORE INTO team_members (team_id, user_id, role) VALUES ($TEAM_ID, $ADMIN_ID, 'admin');"
+  log "Admin user added to Dev Team"
+fi
+
+log ""
 log "=== Seed Complete ==="
-log "Dev Team created with HTTP and Syslog sources."
-log "Login with dev@localhost (password: password) to explore!"
+log ""
+log "Dev environment ready:"
+log "  User:    dev@localhost (password: password)"
+log "  Team:    Dev Team"
+log "  Sources: HTTP Access Logs (default.http)"
+log "           Syslog Logs (default.syslogs)"
+log ""
+log "Next steps:"
+log "  1. Start backend: just run-backend"
+log "  2. Start frontend: just run-frontend"
+log "  3. Ingest logs: just dev-ingest-logs"
+log "  4. Open http://localhost:5173"

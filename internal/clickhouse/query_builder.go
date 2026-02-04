@@ -11,8 +11,6 @@ import (
 const (
 	// DefaultLimit is applied when SQL mode has no LIMIT clause
 	DefaultLimit = 1000
-	// MaxLimit caps any LIMIT to prevent excessive result sets
-	MaxLimit = 10000
 )
 
 // QueryMode defines the validation strictness for SQL queries.
@@ -31,24 +29,27 @@ const (
 type QueryBuilder struct {
 	tableName string
 	mode      QueryMode
+	maxLimit  int
 }
 
 // NewQueryBuilder creates a new QueryBuilder for restricted mode.
 // This validates that queries target the specified table and blocks JOINs/subqueries.
-func NewQueryBuilder(tableName string) *QueryBuilder {
+func NewQueryBuilder(tableName string, maxLimit int) *QueryBuilder {
 	return &QueryBuilder{
 		tableName: tableName,
 		mode:      RestrictedMode,
+		maxLimit:  maxLimit,
 	}
 }
 
 // NewExtendedQueryBuilder creates a QueryBuilder that allows any SELECT query.
 // Only validates that the query is a SELECT statement (not INSERT/DELETE/UPDATE).
 // The ClickHouse connection permissions are the real security boundary.
-func NewExtendedQueryBuilder(tableName string) *QueryBuilder {
+func NewExtendedQueryBuilder(tableName string, maxLimit int) *QueryBuilder {
 	return &QueryBuilder{
 		tableName: tableName,
 		mode:      ExtendedMode,
+		maxLimit:  maxLimit,
 	}
 }
 
@@ -186,11 +187,14 @@ func (qb *QueryBuilder) checkDangerousOperations(stmt *clickhouseparser.SelectQu
 }
 
 // ensureLimit handles LIMIT clause based on query mode:
-// - If requestedLimit > 0 (LogchefQL): apply it, capped at MaxLimit
+// - If requestedLimit > 0 (LogchefQL): apply it, capped at maxLimit
 // - If requestedLimit == 0 (SQL mode): respect user's SQL LIMIT (capped), or add DefaultLimit
 func (qb *QueryBuilder) ensureLimit(stmt *clickhouseparser.SelectQuery, requestedLimit int) {
 	if requestedLimit > 0 {
-		limit := min(requestedLimit, MaxLimit)
+		limit := requestedLimit
+		if qb.maxLimit > 0 && limit > qb.maxLimit {
+			limit = qb.maxLimit
+		}
 		stmt.Limit = &clickhouseparser.LimitClause{
 			Limit: &clickhouseparser.NumberLiteral{Literal: fmt.Sprintf("%d", limit)},
 		}
@@ -205,8 +209,8 @@ func (qb *QueryBuilder) ensureLimit(stmt *clickhouseparser.SelectQuery, requeste
 		if existing == 0 {
 			return
 		}
-		if existing > MaxLimit {
-			stmt.Limit.Limit = &clickhouseparser.NumberLiteral{Literal: fmt.Sprintf("%d", MaxLimit)}
+		if qb.maxLimit > 0 && existing > qb.maxLimit {
+			stmt.Limit.Limit = &clickhouseparser.NumberLiteral{Literal: fmt.Sprintf("%d", qb.maxLimit)}
 		}
 		return
 	}

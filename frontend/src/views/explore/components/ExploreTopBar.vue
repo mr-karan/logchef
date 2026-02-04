@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { DateTimePicker } from '@/components/date-time-picker'
 import { ChevronRight, Share2, Settings, Clock, Terminal } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
+import { useLimitOptions } from '@/composables/useLimitOptions'
 import { TOAST_DURATION } from '@/lib/constants'
 import { generateCliCommand } from '@/utils/cliCommand'
 import { ref } from 'vue'
@@ -51,6 +52,7 @@ const sourcesStore = useSourcesStore()
 const exploreStore = useExploreStore()
 
 const { timeRange, quickRangeLabelToRelativeTime, getHumanReadableTimeRange: _getHumanReadableTimeRange } = useTimeRange()
+const { limitOptions } = useLimitOptions()
 
 // Team/Source state
 const currentTeamId = computed(() => contextStore.teamId)
@@ -330,7 +332,7 @@ defineExpose({
           <DropdownMenuLabel class="text-xs">Results Limit</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem 
-            v-for="limit in [100, 500, 1000, 2000, 5000, 10000]" 
+            v-for="limit in limitOptions" 
             :key="limit"
             @click="handleLimitChange(limit)" 
             :class="{ 'bg-muted': currentLimit === limit }"

@@ -286,7 +286,7 @@ function clear() {
           
           <div v-if="includeTime" class="space-y-1.5">
             <label class="text-xs text-muted-foreground flex items-center gap-1">
-              <Clock class="h-3 w-3" />
+              <Clock class="h-3 w-3 text-muted-foreground" />
               Time
             </label>
             <Input

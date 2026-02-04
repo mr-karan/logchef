@@ -369,7 +369,7 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function setLimit(newLimit: number) {
-    if (newLimit > 0 && newLimit <= 10000) {
+    if (newLimit > 0) {
       state.data.value.limit = newLimit;
       clearSavedQueryIfDirty();
     }
@@ -744,7 +744,7 @@ export const useExploreStore = defineStore("explore", () => {
             state.data.value.logs = queryResponse.data.logs || [];
             state.data.value.columns = queryResponse.data.columns || [];
             state.data.value.queryStats = queryResponse.data.stats || DEFAULT_QUERY_STATS;
-            
+
             if (queryResponse.data.query_id) {
               state.data.value.currentQueryId = queryResponse.data.query_id;
             }
@@ -778,21 +778,19 @@ export const useExploreStore = defineStore("explore", () => {
 
             return { success: true, data: queryResponse.data, error: null };
           } else {
-            return state.handleError({
-              status: "error",
-              message: "Query execution failed",
-              error_type: "DatabaseError"
-            }, operationKey);
+            // Set error without toast - QueryError component displays it inline
+            const apiError = { status: "error" as const, message: "Query execution failed", error_type: "DatabaseError" };
+            state.error.value = apiError;
+            return { success: false, data: null, error: apiError };
           }
         } catch (error: any) {
           if (isCanceledError(error) || error?.name === 'AbortError' || error?.name === 'CanceledError') {
             return { success: false, data: null, error: { message: 'Request canceled', error_type: 'CanceledError' } };
           }
-          return state.handleError({
-            status: "error",
-            message: `LogchefQL query error: ${error.message}`,
-            error_type: "DatabaseError"
-          }, operationKey);
+          // Set error without toast - QueryError component displays it inline
+          const apiError = { status: "error" as const, message: `LogchefQL query error: ${error.message}`, error_type: "DatabaseError" };
+          state.error.value = apiError;
+          return { success: false, data: null, error: apiError };
         } finally {
           state.data.value.currentQueryAbortController = null;
           state.data.value.currentQueryId = null;
@@ -852,6 +850,7 @@ export const useExploreStore = defineStore("explore", () => {
       try {
         response = await state.callApi({
           apiCall: async () => exploreApi.getLogs(sourceId.value, params, currentTeamId, abortController.signal),
+          showToast: false, // Errors shown inline via QueryError component
           onSuccess: (data: QuerySuccessResponse | null) => {
             if (data && (data.data || data.logs)) {
               state.data.value.logs = data.data || data.logs || [];
@@ -1020,8 +1019,11 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   // Histogram delegation
-  function setGroupByField(field: string | null) {
+  async function setGroupByField(field: string | null) {
     histogramStore.setGroupByField(field);
+    if (isHistogramEligible.value && state.data.value.hasExecutedQuery) {
+      await fetchHistogramData();
+    }
   }
 
   async function fetchHistogramData(granularity?: string) {

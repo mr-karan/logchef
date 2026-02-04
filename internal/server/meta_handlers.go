@@ -12,6 +12,7 @@ type MetaResponse struct {
 	HTTPServerTimeout string `json:"http_server_timeout"`
 	OIDCIssuer        string `json:"oidc_issuer,omitempty"`
 	CLIClientID       string `json:"cli_client_id,omitempty"`
+	MaxQueryLimit     int    `json:"max_query_limit"`
 }
 
 // handleGetMeta returns server metadata including version and configuration
@@ -28,6 +29,7 @@ func (s *Server) handleGetMeta(c *fiber.Ctx) error {
 	meta := MetaResponse{
 		Version:           s.version,
 		HTTPServerTimeout: s.config.Server.HTTPServerTimeout.String(),
+		MaxQueryLimit:     s.config.Query.MaxLimit,
 	}
 
 	if s.oidcProvider != nil {

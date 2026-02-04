@@ -776,9 +776,10 @@ func parseTTLExpression(ttlPart string) string {
 // SourceStats represents the combined statistics for a ClickHouse table
 // Use types directly from the clickhouse package
 type SourceStats struct {
-	TableStats  *clickhouse.TableStat        `json:"table_stats"`   // Use pointer to allow nil if stats fail completely
-	ColumnStats []clickhouse.TableColumnStat `json:"column_stats"`  // Slice is sufficient, empty if stats fail
-	TableInfo   *clickhouse.TableInfo        `json:"table_info"`    // Schema, engine, and metadata information
+	TableStats  *clickhouse.TableStat        `json:"table_stats"`  // Use pointer to allow nil if stats fail completely
+	ColumnStats []clickhouse.TableColumnStat `json:"column_stats"` // Slice is sufficient, empty if stats fail
+	TableInfo   *clickhouse.TableInfo        `json:"table_info"`   // Schema, engine, and metadata information
+	Ingestion   *clickhouse.IngestionStats   `json:"ingestion_stats,omitempty"`
 	TTL         string                       `json:"ttl,omitempty"` // TTL information extracted from CREATE TABLE
 }
 
@@ -800,12 +801,14 @@ func GetSourceStats(ctx context.Context, chDB *clickhouse.Manager, log *slog.Log
 
 	tableStats, _ := client.TableStats(ctx, statsDB, statsTable)
 	columnStats, _ := client.ColumnStats(ctx, statsDB, statsTable)
+	ingestionStats, _ := client.IngestionStats(ctx, statsDB, statsTable, source.MetaTSField)
 	columnStats = ensureColumnStats(columnStats, source)
 
 	return &SourceStats{
 		TableStats:  tableStats,
 		ColumnStats: columnStats,
 		TableInfo:   tableInfo,
+		Ingestion:   ingestionStats,
 		TTL:         ttlExpr,
 	}, nil
 }

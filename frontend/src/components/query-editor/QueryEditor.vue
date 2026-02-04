@@ -1092,14 +1092,12 @@ const currentPlaceholder = computed(() => {
 const editorHeight = computed(() => {
   const content = editorContent.value || "";
   const lines = (content.match(/\n/g) || []).length + 1;
-  const baseLineHeight = 21; // Match monaco options
-  const padding = 16; // Match monaco options (top + bottom)
+  const baseLineHeight = 21;
+  const padding = 16;
   const minHeight = props.activeMode === "logchefql" ? 45 : 90;
-  // Calculate height based on lines, ensuring minHeight is respected
-  // Add a small buffer for better spacing, especially for single line
-  const calculatedHeight =
-    padding + lines * baseLineHeight + (lines > 1 ? 0 : 4);
-  return Math.max(minHeight, calculatedHeight);
+  const maxHeight = 300;
+  const calculatedHeight = padding + lines * baseLineHeight + (lines > 1 ? 0 : 4);
+  return Math.min(maxHeight, Math.max(minHeight, calculatedHeight));
 });
 
 // Reactive Monaco options (base + dynamic updates)

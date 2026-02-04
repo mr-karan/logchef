@@ -93,6 +93,14 @@ export interface SourceStats {
     rows_count: number;
     avg_row_size: number;
   }[];
+  ingestion_stats?: {
+    rows_1h: number;
+    rows_24h: number;
+    rows_7d: number;
+    latest_ts?: string | null;
+    hourly_buckets: { bucket: string; rows: number }[];
+    daily_buckets: { bucket: string; rows: number }[];
+  };
   table_info?: {
     database: string;
     name: string;

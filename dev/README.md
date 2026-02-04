@@ -11,22 +11,17 @@ Local development setup for LogChef.
 ## Quick Start
 
 ```bash
-# 1. Start infrastructure (ClickHouse, Dex)
-just dev-docker
+# One-time setup (starts docker, creates tables, seeds data)
+just dev-setup
 
-# 2. Run backend (in new terminal)
+# Run backend (terminal 1)
 just run-backend
 
-# 3. Run frontend (in new terminal)
+# Run frontend (terminal 2)
 just run-frontend
 
-# 4. Seed dev data - creates team, sources, user (in new terminal)
-just dev-seed
-
-# 5. Ingest sample logs (in new terminal)
-cd dev && vector -c http.toml
-# or
-cd dev && vector -c syslog.toml
+# Ingest sample logs (terminal 3)
+just dev-ingest-logs
 ```
 
 Open http://localhost:5173 and login with `dev@localhost` / `password`.
@@ -68,14 +63,20 @@ Running `just dev-seed` creates:
 ## Useful Commands
 
 ```bash
+# Quick reset (truncate logs, recreate SQLite data)
+just dev-reset
+
+# Full clean (stop docker, remove volumes, delete DB)
+just dev-clean
+
+# Re-seed without full reset
+just dev-seed
+
 # View webhook receiver logs (for testing alerts)
 just dev-webhook-logs
 
 # Test webhook is working
 just dev-test-webhook
-
-# Reset everything (delete volumes)
-cd dev && docker compose down -v
 ```
 
 ## Files
@@ -84,7 +85,7 @@ cd dev && docker compose down -v
 |------|---------|
 | `docker-compose.yml` | Infrastructure services |
 | `init-clickhouse.sql` | Creates ClickHouse tables |
-| `seed.sh` | Creates team, sources, user via API |
+| `seed.sh` | Creates team, sources, user (idempotent) |
 | `http.toml` | Vector config for HTTP demo logs |
 | `syslog.toml` | Vector config for syslog demo logs |
 | `dex/config.yaml` | Dex OIDC configuration |

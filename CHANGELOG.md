@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Configurable query result limit** — New `[query]` config section with `max_limit` setting (default: 1,000,000 rows). Allows admins to increase export limits based on infrastructure capacity. Frontend dropdown now shows options up to 1M rows.
+
+### Changed
+- Query limit options now dynamically loaded from server config instead of hardcoded values.
+- SQL editor now has max height (300px) with scrollbar for lengthy queries.
+
+### Fixed
+- Histogram now auto-refreshes when changing Group By column selection.
+- Time icon in date picker now visible in dark mode.
+
 ## [1.2.1] - 2026-01-21
 
 ### Fixed

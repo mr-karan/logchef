@@ -7,6 +7,7 @@ import type { APIErrorResponse } from "@/api/types";
 interface MetaState {
   version: string | null;
   httpServerTimeout: string | null;
+  maxQueryLimit: number;
   isInitialized: boolean;
 }
 
@@ -14,12 +15,14 @@ export const useMetaStore = defineStore("meta", () => {
   const state = useBaseStore<MetaState>({
     version: null,
     httpServerTimeout: null,
+    maxQueryLimit: 1000000,
     isInitialized: false,
   });
 
   // Computed properties
   const version = computed(() => state.data.value.version);
   const httpServerTimeout = computed(() => state.data.value.httpServerTimeout);
+  const maxQueryLimit = computed(() => state.data.value.maxQueryLimit);
   const isInitialized = computed(() => state.data.value.isInitialized);
   const error = computed(() => state.error.value);
 
@@ -39,11 +42,8 @@ export const useMetaStore = defineStore("meta", () => {
             if (response) {
               state.data.value.version = response.version;
               state.data.value.httpServerTimeout = response.http_server_timeout;
+              state.data.value.maxQueryLimit = response.max_query_limit;
               state.data.value.isInitialized = true;
-              console.log("Meta loaded successfully:", {
-                version: response.version,
-                httpServerTimeout: response.http_server_timeout,
-              });
             }
           },
           onError: (error) => {
@@ -62,12 +62,14 @@ export const useMetaStore = defineStore("meta", () => {
   function clearState() {
     state.data.value.version = null;
     state.data.value.httpServerTimeout = null;
+    state.data.value.maxQueryLimit = 1000000;
     state.data.value.isInitialized = false;
   }
 
   return {
     version,
     httpServerTimeout,
+    maxQueryLimit,
     isInitialized,
     error,
     loadMeta,

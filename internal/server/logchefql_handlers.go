@@ -290,6 +290,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 	queryParams := clickhouse.LogQueryParams{
 		RawSQL:       sql,
 		Limit:        req.Limit,
+		MaxLimit:     s.config.Query.MaxLimit,
 		QueryTimeout: req.QueryTimeout,
 	}
 	result, err := core.QueryLogs(queryCtx, s.sqlite, s.clickhouse, s.log, sourceID, queryParams)

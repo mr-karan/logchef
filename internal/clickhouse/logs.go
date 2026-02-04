@@ -13,8 +13,9 @@ import (
 
 // LogQueryParams defines parameters for querying logs.
 type LogQueryParams struct {
-	Limit  int
-	RawSQL string
+	Limit    int
+	MaxLimit int
+	RawSQL   string
 	// Query execution timeout in seconds. If not specified, uses default timeout.
 	QueryTimeout *int
 }
@@ -115,7 +116,7 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName, timestampField
 		return nil, err
 	}
 
-	qb := NewQueryBuilder(tableName)
+	qb := NewQueryBuilder(tableName, 0)
 	baseQuery, err := qb.RemoveLimitClause(params.Query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process base query: %w", err)
