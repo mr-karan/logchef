@@ -2,7 +2,7 @@
 name: logchef
 description: Query application logs via LogChef CLI. Use when investigating production incidents, debugging errors, analyzing log patterns, or correlating events across services.
 argument-hint: "[service name] [time range]"
-allowed-tools: Bash(logchef *), Bash(jq *), Bash(date *), Bash(grep *), Bash(sort *), Bash(uniq *), Bash(wc *), Bash(head *), Bash(tail *), Bash(awk *), Read, Grep
+allowed-tools: Bash(logchef *), Bash(jq *), Bash(date *), Bash(grep *), Bash(sort *), Bash(uniq *), Bash(wc *), Bash(head *), Bash(tail *), Bash(awk *), Bash(mktemp *), Bash(rm *), Read, Grep
 ---
 
 # LogChef Log Analysis
@@ -303,6 +303,107 @@ logchef query 'level="error"' --no-highlight | grep "pattern"
 # Show generated SQL
 logchef query 'level="error"' --show-sql
 ```
+
+## Data Safety Rules
+
+Logs contain secrets and PII and can be massive. Use **progressive disclosure** to avoid context overload and accidental exposure.
+
+### Hard Guardrails (MUST)
+
+| Rule | Rationale |
+|------|-----------|
+| **Always bound time** | Start with 15m, expand gradually (15m → 1h → 6h → 24h) |
+| **Always scope** | Include at least one filter besides time (service/level/host/trace_id) |
+| **Always use `--limit`** | Default max 50 rows; for raw samples, prefer ≤20 |
+| **Max 20 raw lines in context** | Everything else must be aggregated or summarized |
+| **Never include secrets in context** | Redact tokens, passwords, auth headers, keys, emails, IPs |
+
+### Query Shaping (SHOULD)
+
+- **Prefer aggregations** - `COUNT()`, `GROUP BY`, time buckets to understand volume first
+- **Prefer minimal fields** - timestamp, level, service, short message, trace_id; avoid full JSON payloads
+- **Prefer "top offenders"** - Top 5-10 groups, not full distributions
+- **Avoid high-cardinality GROUP BY** - Don't group by user_id/session_id/full_path as first step
+
+### Safe Sampling for Large Datasets
+
+```bash
+# Export to temp file, sample locally, delete after
+OUT="$(mktemp /tmp/logchef.XXXXXX.jsonl)"
+logchef query '...' --limit 500 --output jsonl > "$OUT"
+wc -l "$OUT"        # Check total count
+head -20 "$OUT"     # Sample first 20 (only if non-sensitive)
+rm -f "$OUT"        # Clean up
+```
+
+**Never paste full exported logs into context** - only redacted, small samples.
+
+---
+
+## Investigation Protocol
+
+Follow this order to avoid context floods and find issues efficiently:
+
+### 1. Scope
+Set environment + tight time window (default 15m) + severity filter.
+```bash
+logchef sql "SELECT count() FROM logs.app 
+WHERE _timestamp >= now() - INTERVAL 15 MINUTE 
+  AND service='api' AND level='error'" -t TEAM -S SOURCE
+```
+
+### 2. Confirm Presence
+Run a COUNT to verify volume before pulling any raw data.
+
+### 3. Shape
+Group by a small dimension to find dominant error class (top 5-10).
+```bash
+logchef sql "SELECT msg, count() as cnt FROM logs.app 
+WHERE _timestamp >= now() - INTERVAL 15 MINUTE 
+  AND level='error'
+GROUP BY msg ORDER BY cnt DESC LIMIT 10" -t TEAM -S SOURCE
+```
+
+### 4. Sample
+Fetch a small sample (≤20 rows) of the dominant class with minimal fields.
+```bash
+logchef query 'level="error" and msg~"connection refused"' \
+  --since 15m --limit 10 -t TEAM -S SOURCE
+```
+
+### 5. Pivot
+Use trace_id/request_id to pull correlated logs for a single incident.
+```bash
+logchef query 'trace_id="abc123"' --since 1h --limit 50 -t TEAM -S SOURCE
+```
+
+### 6. Expand
+Only if necessary, widen time range and re-run counts first.
+
+---
+
+## Anti-Patterns (DO NOT)
+
+| Anti-Pattern | Why It's Bad |
+|--------------|--------------|
+| Unbounded queries (no time range / no limit) | Scans entire dataset, timeouts, context flood |
+| `SELECT *` / all fields | Pulls sensitive data, bloats context |
+| Pasting raw log dumps into chat | Context overflow, exposes secrets |
+| `GROUP BY user_id/session_id` as first step | High cardinality = thousands of rows |
+| Exporting logs to shared locations | Data leak risk |
+| Wide regex on full message early | Slow, broad scan; narrow by level/service first |
+
+---
+
+## Override Protocol
+
+If a safety rule must be violated:
+1. **State explicitly** what you're doing and why it's necessary
+2. **Minimize exposure** - smallest time range, fewest fields, lowest limit possible
+3. **Redact before sharing** - replace secrets with `[REDACTED]`
+4. **Clean up** - delete any exported files after analysis
+
+---
 
 ## Performance Tips
 
