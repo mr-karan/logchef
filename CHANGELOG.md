@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-02-05
+
 ### Added
 - **Configurable query result limit** — New `[query]` config section with `max_limit` setting (default: 1,000,000 rows). Allows admins to increase export limits based on infrastructure capacity. Frontend dropdown now shows options up to 1M rows.
 - **User preferences persistence** — Theme, timezone, display mode, and fields panel state now persist across sessions. Preferences sync automatically and load on login.
@@ -326,7 +328,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/mr-karan/logchef/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/mr-karan/logchef/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/mr-karan/logchef/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/mr-karan/logchef/compare/v1.0.0...v1.1.0
