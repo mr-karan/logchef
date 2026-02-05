@@ -31,15 +31,23 @@ logchef config set source "my-source"
 ## Time Formats
 
 ```bash
-# Relative time (recommended)
+# Relative time (recommended - avoids timezone issues)
 --since 1h
 --since 15m
 --since 24h
 
-# Absolute time (ISO 8601 or YYYY-MM-DD HH:MM:SS)
---from "2026-01-22 09:15:00" --to "2026-01-22 10:00:00"
+# Absolute time with explicit timezone (ISO 8601)
+--from "2026-01-22T09:15:00+05:30" --to "2026-01-22T10:00:00+05:30"
 --from "2026-01-22T09:15:00Z" --to "2026-01-22T10:00:00Z"
+
+# Absolute time without timezone (uses server's configured timezone)
+--from "2026-01-22 09:15:00" --to "2026-01-22 10:00:00"
 ```
+
+**Timezone handling:**
+- Infer user's timezone from system (`date +%Z`) or ask if unclear
+- Use ISO 8601 with offset (e.g., `+05:30`, `Z`) for precision
+- Relative times (`--since`) are timezone-agnostic and preferred
 
 ## LogChefQL Syntax
 
