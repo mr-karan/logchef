@@ -26,8 +26,15 @@ const isLoadingStats = computed(() =>
 )
 
 const statsError = computed(() => {
-  // Just check if there's any error in the store when we're not loading
-  if (!isLoadingStats.value && storeError.value && selectedSourceId.value) {
+  // Only show a fatal error when nothing could be loaded for the selected source
+  const hasAnyStats = !!(
+    stats.value.tableStats ||
+    stats.value.tableInfo ||
+    stats.value.ingestion ||
+    (stats.value.columnStats && stats.value.columnStats.length > 0)
+  )
+
+  if (!isLoadingStats.value && storeError.value && selectedSourceId.value && !hasAnyStats) {
     return 'Failed to load source statistics. Please try again.';
   }
   return null;

@@ -6,7 +6,28 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/ClickHouse/clickhouse-go/v2"
 )
+
+const (
+	// Keep stats queries fast so one slow sub-query doesn't block the whole response.
+	tableStatsTimeoutSeconds     = 10
+	columnStatsTimeoutSeconds    = 5
+	ingestionStatsTimeoutSeconds = 5
+)
+
+func statsQueryContext(ctx context.Context, timeoutSeconds int) (context.Context, context.CancelFunc) {
+	if timeoutSeconds <= 0 {
+		return ctx, func() {}
+	}
+
+	queryCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+	queryCtx = clickhouse.Context(queryCtx, clickhouse.WithSettings(clickhouse.Settings{
+		"max_execution_time": timeoutSeconds,
+	}))
+	return queryCtx, cancel
+}
 
 // TableColumnStat represents statistics for a single column in a ClickHouse table,
 // typically retrieved from system.parts_columns.
@@ -71,7 +92,10 @@ func (c *Client) ColumnStats(ctx context.Context, database, table string) ([]Tab
 		ORDER BY size DESC
 	`, database, table)
 
-	rows, err := c.conn.Query(ctx, query)
+	queryCtx, cancel := statsQueryContext(ctx, columnStatsTimeoutSeconds)
+	defer cancel()
+
+	rows, err := c.conn.Query(queryCtx, query)
 	if err != nil {
 		return nil, fmt.Errorf("error executing column stats query: %w", err)
 	}
@@ -131,7 +155,10 @@ func (c *Client) TableStats(ctx context.Context, database, table string) (*Table
 		ORDER BY size DESC
 	`, database, table) // Note: ORDER BY might not be necessary if only one row is expected.
 
-	rows, err := c.conn.Query(ctx, query)
+	queryCtx, cancel := statsQueryContext(ctx, tableStatsTimeoutSeconds)
+	defer cancel()
+
+	rows, err := c.conn.Query(queryCtx, query)
 	if err != nil {
 		return nil, fmt.Errorf("error executing table stats query: %w", err)
 	}
@@ -203,6 +230,7 @@ func (c *Client) IngestionStats(ctx context.Context, database, table, timestampF
 		HourlyBuckets: []IngestionBucket{},
 		DailyBuckets:  []IngestionBucket{},
 	}
+	anySuccess := false
 
 	summaryQuery := fmt.Sprintf(`
 		SELECT
@@ -213,22 +241,33 @@ func (c *Client) IngestionStats(ctx context.Context, database, table, timestampF
 		FROM %s
 	`, tsField, tsField, tsField, tsField, qualifiedTable)
 
-	summaryRows, err := c.conn.Query(ctx, summaryQuery)
-	if err != nil {
-		return nil, fmt.Errorf("error executing ingestion summary query: %w", err)
-	}
-	defer summaryRows.Close()
+	if err := func() error {
+		summaryCtx, cancel := statsQueryContext(ctx, ingestionStatsTimeoutSeconds)
+		defer cancel()
 
-	if summaryRows.Next() {
-		var latest *time.Time
-		if err := summaryRows.Scan(&latest, &stats.Rows1h, &stats.Rows24h, &stats.Rows7d); err != nil {
-			return nil, fmt.Errorf("error scanning ingestion summary row: %w", err)
+		summaryRows, err := c.conn.Query(summaryCtx, summaryQuery)
+		if err != nil {
+			return fmt.Errorf("error executing ingestion summary query: %w", err)
 		}
-		stats.LatestTS = latest
-	}
+		defer summaryRows.Close()
 
-	if err := summaryRows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating ingestion summary rows: %w", err)
+		if summaryRows.Next() {
+			var latest *time.Time
+			if err := summaryRows.Scan(&latest, &stats.Rows1h, &stats.Rows24h, &stats.Rows7d); err != nil {
+				return fmt.Errorf("error scanning ingestion summary row: %w", err)
+			}
+			stats.LatestTS = latest
+		}
+
+		if err := summaryRows.Err(); err != nil {
+			return fmt.Errorf("error iterating ingestion summary rows: %w", err)
+		}
+
+		return nil
+	}(); err != nil {
+		c.logger.Debug("failed to load ingestion summary stats", "error", err, "database", database, "table", table)
+	} else {
+		anySuccess = true
 	}
 
 	hourlyQuery := fmt.Sprintf(`
@@ -241,23 +280,34 @@ func (c *Client) IngestionStats(ctx context.Context, database, table, timestampF
 		ORDER BY bucket ASC
 	`, tsField, qualifiedTable, tsField)
 
-	hourlyRows, err := c.conn.Query(ctx, hourlyQuery)
-	if err != nil {
-		return nil, fmt.Errorf("error executing hourly ingestion query: %w", err)
-	}
-	defer hourlyRows.Close()
+	if err := func() error {
+		hourlyCtx, cancel := statsQueryContext(ctx, ingestionStatsTimeoutSeconds)
+		defer cancel()
 
-	for hourlyRows.Next() {
-		var bucket time.Time
-		var rows uint64
-		if err := hourlyRows.Scan(&bucket, &rows); err != nil {
-			return nil, fmt.Errorf("error scanning hourly ingestion row: %w", err)
+		hourlyRows, err := c.conn.Query(hourlyCtx, hourlyQuery)
+		if err != nil {
+			return fmt.Errorf("error executing hourly ingestion query: %w", err)
 		}
-		stats.HourlyBuckets = append(stats.HourlyBuckets, IngestionBucket{Bucket: bucket, Rows: rows})
-	}
+		defer hourlyRows.Close()
 
-	if err := hourlyRows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating hourly ingestion rows: %w", err)
+		for hourlyRows.Next() {
+			var bucket time.Time
+			var rows uint64
+			if err := hourlyRows.Scan(&bucket, &rows); err != nil {
+				return fmt.Errorf("error scanning hourly ingestion row: %w", err)
+			}
+			stats.HourlyBuckets = append(stats.HourlyBuckets, IngestionBucket{Bucket: bucket, Rows: rows})
+		}
+
+		if err := hourlyRows.Err(); err != nil {
+			return fmt.Errorf("error iterating hourly ingestion rows: %w", err)
+		}
+
+		return nil
+	}(); err != nil {
+		c.logger.Debug("failed to load hourly ingestion buckets", "error", err, "database", database, "table", table)
+	} else {
+		anySuccess = true
 	}
 
 	dailyQuery := fmt.Sprintf(`
@@ -270,23 +320,38 @@ func (c *Client) IngestionStats(ctx context.Context, database, table, timestampF
 		ORDER BY bucket ASC
 	`, tsField, qualifiedTable, tsField)
 
-	dailyRows, err := c.conn.Query(ctx, dailyQuery)
-	if err != nil {
-		return nil, fmt.Errorf("error executing daily ingestion query: %w", err)
-	}
-	defer dailyRows.Close()
+	if err := func() error {
+		dailyCtx, cancel := statsQueryContext(ctx, ingestionStatsTimeoutSeconds)
+		defer cancel()
 
-	for dailyRows.Next() {
-		var bucket time.Time
-		var rows uint64
-		if err := dailyRows.Scan(&bucket, &rows); err != nil {
-			return nil, fmt.Errorf("error scanning daily ingestion row: %w", err)
+		dailyRows, err := c.conn.Query(dailyCtx, dailyQuery)
+		if err != nil {
+			return fmt.Errorf("error executing daily ingestion query: %w", err)
 		}
-		stats.DailyBuckets = append(stats.DailyBuckets, IngestionBucket{Bucket: bucket, Rows: rows})
+		defer dailyRows.Close()
+
+		for dailyRows.Next() {
+			var bucket time.Time
+			var rows uint64
+			if err := dailyRows.Scan(&bucket, &rows); err != nil {
+				return fmt.Errorf("error scanning daily ingestion row: %w", err)
+			}
+			stats.DailyBuckets = append(stats.DailyBuckets, IngestionBucket{Bucket: bucket, Rows: rows})
+		}
+
+		if err := dailyRows.Err(); err != nil {
+			return fmt.Errorf("error iterating daily ingestion rows: %w", err)
+		}
+
+		return nil
+	}(); err != nil {
+		c.logger.Debug("failed to load daily ingestion buckets", "error", err, "database", database, "table", table)
+	} else {
+		anySuccess = true
 	}
 
-	if err := dailyRows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating daily ingestion rows: %w", err)
+	if !anySuccess {
+		return nil, fmt.Errorf("ingestion stats unavailable")
 	}
 
 	return stats, nil
