@@ -1,22 +1,15 @@
 use anyhow::{Context, Result};
 use clap::Args;
-use inquire::{Select, Text};
+use inquire::Select;
 use logchef_core::Config;
-use logchef_core::api::{Client, Column, QueryStats, SqlQueryRequest};
+use logchef_core::api::{Client, Column};
 use logchef_core::cache::{Cache, Identifier, parse_identifier};
-use logchef_core::highlight::{
-    FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
-};
-use serde::Serialize;
-use std::io::{IsTerminal, Read};
+use std::io::IsTerminal;
 
 use crate::cli::GlobalArgs;
 
 #[derive(Args)]
-pub struct SqlArgs {
-    /// Raw SQL query to execute. Use '-' to read from stdin.
-    sql: Option<String>,
-
+pub struct SchemaArgs {
     /// Team ID or name
     #[arg(long, short = 't')]
     team: Option<String>,
@@ -25,29 +18,9 @@ pub struct SqlArgs {
     #[arg(long, short = 'S')]
     source: Option<String>,
 
-    /// Query timeout in seconds
-    #[arg(long, default_value = "30")]
-    timeout: u32,
-
     /// Output format
     #[arg(long, default_value = "text")]
     output: OutputFormat,
-
-    /// Disable syntax highlighting
-    #[arg(long)]
-    no_highlight: bool,
-
-    /// Hide timestamp column in text output
-    #[arg(long)]
-    no_timestamp: bool,
-
-    /// Custom highlight rules (format: COLOR:word1,word2)
-    #[arg(long = "highlight", value_name = "COLOR:WORDS")]
-    highlights: Vec<String>,
-
-    /// Disable specific highlight groups
-    #[arg(long = "disable-highlight", value_name = "GROUP")]
-    disable_highlights: Vec<String>,
 }
 
 #[derive(Clone, Debug, clap::ValueEnum)]
@@ -58,19 +31,8 @@ enum OutputFormat {
     Table,
 }
 
-#[derive(Serialize)]
-struct JsonOutput<'a> {
-    logs: &'a [logchef_core::api::LogEntry],
-    count: usize,
-    stats: &'a QueryStats,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    query_id: Option<&'a str>,
-    columns: &'a [Column],
-}
-
-pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
+pub async fn run(args: SchemaArgs, global: GlobalArgs) -> Result<()> {
     let config = Config::load().context("Failed to load config")?;
-
     let resolved = resolve_context(&config, &global)?;
 
     let (ctx, ctx_name, is_ephemeral): (&logchef_core::config::Context, String, bool) =
@@ -102,15 +64,12 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
 
     let mut cache = Cache::new(&ctx.server_url);
 
-    // Detect interactive mode: no sql provided, no team/source args, and running in a TTY
-    let is_interactive = args.sql.is_none()
-        && args.team.is_none()
+    let is_interactive = args.team.is_none()
         && args.source.is_none()
         && ctx.defaults.team.is_none()
         && ctx.defaults.source.is_none()
         && std::io::stdin().is_terminal();
 
-    // Resolve team
     let team_id = if is_interactive {
         prompt_team_interactive(&client, &mut cache).await?
     } else {
@@ -143,7 +102,6 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
         }
     };
 
-    // Resolve source
     let source_id = if is_interactive {
         prompt_source_interactive(&client, team_id, &mut cache).await?
     } else {
@@ -190,114 +148,28 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
         }
     };
 
-    // Read SQL from argument, stdin, or interactive prompt
-    let sql = if is_interactive {
-        prompt_sql_interactive()?
-    } else {
-        match args.sql {
-            Some(s) if s == "-" => {
-                let mut buffer = String::new();
-                std::io::stdin()
-                    .read_to_string(&mut buffer)
-                    .context("Failed to read SQL from stdin")?;
-                buffer.trim().to_string()
-            }
-            Some(s) => s,
-            None => {
-                anyhow::bail!(
-                    "SQL query required. Provide as argument or use '-' to read from stdin."
-                )
-            }
-        }
-    };
-
-    if sql.is_empty() {
-        anyhow::bail!("SQL query cannot be empty");
-    }
-
-    let request = SqlQueryRequest {
-        raw_sql: sql,
-        limit: None, // User controls via SQL LIMIT clause
-        timezone: ctx.defaults.timezone.clone(),
-        start_time: None,
-        end_time: None,
-        query_timeout: Some(args.timeout),
-    };
-
-    let response = client
-        .query_sql(team_id, source_id, &request)
+    let columns = client
+        .get_schema(team_id, source_id)
         .await
-        .context("SQL query failed")?;
+        .context("Failed to get schema")?;
 
-    let entries = response.entries();
-    let is_tty = std::io::stdout().is_terminal();
+    if columns.is_empty() {
+        println!("No columns found for this source.");
+        return Ok(());
+    }
 
     match args.output {
         OutputFormat::Json => {
-            let output = JsonOutput {
-                logs: entries,
-                count: entries.len(),
-                stats: &response.stats,
-                query_id: response.query_id.as_deref(),
-                columns: &response.columns,
-            };
-            println!("{}", serde_json::to_string_pretty(&output)?);
+            println!("{}", serde_json::to_string_pretty(&columns)?);
         }
         OutputFormat::Jsonl => {
-            for entry in entries {
-                println!("{}", serde_json::to_string(entry)?);
-            }
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
+            for col in columns {
+                println!("{}", serde_json::to_string(&col)?);
             }
         }
-        OutputFormat::Table => {
-            print_table(entries, &response.columns);
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
-        }
-        OutputFormat::Text => {
-            let highlighter = if args.no_highlight {
-                None
-            } else {
-                let hl_options = HighlightOptions {
-                    adhoc_highlights: parse_highlight_args(&args.highlights),
-                    disabled_groups: args.disable_highlights.clone(),
-                };
-                Highlighter::with_options(&config.highlights, &hl_options).ok()
-            };
-
-            let fmt_options = FormatOptions {
-                show_timestamp: !args.no_timestamp,
-            };
-
-            for entry in entries {
-                let line = format_log_entry_with_options(entry, &response.columns, &fmt_options);
-                if let Some(ref h) = highlighter {
-                    println!("{}", h.highlight(&line));
-                } else {
-                    println!("{}", line);
-                }
-            }
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+        OutputFormat::Text | OutputFormat::Table => {
+            print_schema_table(&columns);
+            println!("\n{} columns", columns.len());
         }
     }
 
@@ -335,55 +207,6 @@ fn resolve_context<'a>(config: &'a Config, global: &GlobalArgs) -> Result<Resolv
     Ok(ResolvedContext::Saved(ctx, name.to_string()))
 }
 
-fn parse_highlight_args(args: &[String]) -> Vec<(String, Vec<String>)> {
-    args.iter()
-        .filter_map(|arg| {
-            let parts: Vec<&str> = arg.splitn(2, ':').collect();
-            if parts.len() == 2 {
-                let color = parts[0].to_string();
-                let words: Vec<String> =
-                    parts[1].split(',').map(|s| s.trim().to_string()).collect();
-                Some((color, words))
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-fn print_table(entries: &[logchef_core::api::LogEntry], columns: &[logchef_core::api::Column]) {
-    if entries.is_empty() {
-        println!("No results");
-        return;
-    }
-
-    let display_cols: Vec<_> = columns
-        .iter()
-        .filter(|c| !c.name.starts_with('_') || c.name == "_timestamp")
-        .take(6)
-        .collect();
-
-    let header: Vec<_> = display_cols.iter().map(|c| c.name.as_str()).collect();
-    println!("{}", header.join(" | "));
-    println!("{}", "-".repeat(80));
-
-    for entry in entries {
-        let row: Vec<_> = display_cols
-            .iter()
-            .map(|c| {
-                entry
-                    .get(&c.name)
-                    .map(|v| match v {
-                        serde_json::Value::String(s) => s.clone(),
-                        _ => v.to_string(),
-                    })
-                    .unwrap_or_default()
-            })
-            .collect();
-        println!("{}", row.join(" | "));
-    }
-}
-
 async fn prompt_team_interactive(client: &Client, cache: &mut Cache) -> Result<i64> {
     let teams = client.list_teams().await.context("Failed to list teams")?;
     if teams.is_empty() {
@@ -398,7 +221,6 @@ async fn prompt_team_interactive(client: &Client, cache: &mut Cache) -> Result<i
         .prompt()
         .context("Failed to select team")?;
 
-    // Parse team ID from selection
     let team = teams
         .iter()
         .find(|t| selection.starts_with(&t.name))
@@ -450,14 +272,10 @@ async fn prompt_source_interactive(
     Ok(source.id)
 }
 
-fn prompt_sql_interactive() -> Result<String> {
-    let sql = Text::new("SQL query:")
-        .with_help_message("Full ClickHouse SQL including time filters")
-        .prompt()
-        .context("Failed to read SQL query")?;
-
-    if sql.trim().is_empty() {
-        anyhow::bail!("SQL query cannot be empty");
+fn print_schema_table(columns: &[Column]) {
+    println!("{:<30} TYPE", "NAME");
+    println!("{}", "-".repeat(60));
+    for col in columns {
+        println!("{:<30} {}", col.name, col.column_type);
     }
-    Ok(sql)
 }

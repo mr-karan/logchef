@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [CLI v0.1.4] - 2026-02-05
+
+### Added
+- **CLI `teams` command** — List teams available to your account.
+- **CLI `sources` command** — List sources for a team with IDs and `database.table` references.
+- **CLI `schema` command** — Show columns and types for a source without running SQL.
+
+### Changed
+- CLI errors for missing team/source now suggest `logchef teams` and `logchef sources --team <team>`.
 
 ## [1.3.0] - 2026-02-05
 

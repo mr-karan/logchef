@@ -79,6 +79,36 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in LogChef.</p>
     </header>
 
+    <!-- CLI v0.1.4 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">CLI v0.1.4</span>
+        <span class="version-date">2026-02-05</span>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>CLI team discovery</strong> — New <code>logchef teams</code> command to list teams and IDs</li>
+          <li><strong>CLI source discovery</strong> — New <code>logchef sources</code> command to list sources for a team</li>
+          <li><strong>CLI schema view</strong> — New <code>logchef schema</code> command to show columns and types for a source</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Improved
+        </div>
+        <ul class="change-list">
+          <li><strong>CLI guidance</strong> — Missing team/source errors now suggest <code>logchef teams</code> and <code>logchef sources --team &lt;team&gt;</code></li>
+        </ul>
+      </div>
+    </article>
+
     <!-- v1.3.0 -->
     <article class="version">
       <div class="version-header">

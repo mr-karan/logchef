@@ -45,6 +45,14 @@ logchef config set source "nginx-logs"
 logchef query 'level="error"' --since 1h
 ```
 
+Tip: Discover teams and sources with:
+
+```bash
+logchef teams
+logchef sources --team "production"
+logchef schema --team "production" --source "nginx-logs"
+```
+
 :::tip[Copy CLI Command from Web UI]
 In the LogChef web UI, click the terminal icon (next to the share button) in the explore view to copy the equivalent CLI command for your current query. This is a quick way to transition from the web UI to the terminal.
 :::
@@ -65,7 +73,7 @@ Download the latest CLI release for your platform from [GitHub Releases](https:/
 
 ```bash
 # Example: Download and install (replace VERSION with actual version)
-VERSION="0.1.2"
+VERSION="0.1.4"
 
 # Linux x86_64
 curl -LO "https://github.com/mr-karan/logchef/releases/download/cli-v${VERSION}/logchef-cli_${VERSION}_linux-x86_64-musl.tar.gz"
@@ -405,6 +413,51 @@ logchef collections "Error Dashboard" --output json | jq '.count'
 :::tip[Collections vs Query]
 Collections are saved queries with predefined settings (time ranges, limits, variables). Use them for repeatable queries you've set up in the web UI. Use `query` for ad-hoc exploration.
 :::
+
+### Teams
+
+List teams available to your account:
+
+```bash
+logchef teams
+```
+
+#### Options
+
+| Option | Description | Default |
+| :--- | :--- | :--- |
+| `--output` | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
+
+### Sources
+
+List sources for a team:
+
+```bash
+logchef sources --team "production"
+```
+
+#### Options
+
+| Option | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--team` | `-t` | Team name (or ID) | (from config) |
+| `--output` | | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
+
+### Schema
+
+Show the schema (columns and types) for a source:
+
+```bash
+logchef schema --team "production" --source "nginx-logs"
+```
+
+#### Options
+
+| Option | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--team` | `-t` | Team name (or ID) | (from config) |
+| `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
+| `--output` | | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
 
 ### Configuration
 

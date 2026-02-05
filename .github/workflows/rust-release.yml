@@ -122,6 +122,7 @@ jobs:
           args: "--locked --release"
           strip: true
           working-directory: cli
+          use-rust-cache: false
 
       - name: Build (cargo)
         if: ${{ !matrix.use_cross }}

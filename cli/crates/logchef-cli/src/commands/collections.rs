@@ -134,7 +134,9 @@ pub async fn run(args: CollectionsArgs, global: GlobalArgs) -> Result<()> {
         prompt_team_interactive(&client, &mut cache).await?
     } else {
         let team_input = arg_team.or(ctx.defaults.team.clone()).ok_or_else(|| {
-            anyhow::anyhow!("Team not specified. Use --team or set defaults.team")
+            anyhow::anyhow!(
+                "Team not specified. Use --team or set defaults.team. List teams with 'logchef teams'."
+            )
         })?;
 
         match parse_identifier(&team_input) {
@@ -165,7 +167,9 @@ pub async fn run(args: CollectionsArgs, global: GlobalArgs) -> Result<()> {
         prompt_source_interactive(&client, team_id, &mut cache).await?
     } else {
         let source_input = arg_source.or(ctx.defaults.source.clone()).ok_or_else(|| {
-            anyhow::anyhow!("Source not specified. Use --source or set defaults.source")
+            anyhow::anyhow!(
+                "Source not specified. Use --source or set defaults.source. List sources with 'logchef sources --team <team>'."
+            )
         })?;
 
         match parse_identifier(&source_input) {
