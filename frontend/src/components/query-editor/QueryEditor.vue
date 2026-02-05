@@ -241,9 +241,9 @@
       <!-- Compact Variables List -->
       <div class="bg-muted/20 border border-border/30 rounded-md p-2">
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-          <div v-for="variable in allVariables" :key="variable.name" class="flex items-center gap-2 min-w-0">
+          <div v-for="variable in allVariables" :key="variable.name" class="flex flex-col gap-1.5 min-w-0">
             <!-- Variable indicator and label -->
-            <div class="flex items-center gap-1.5 min-w-0 flex-shrink-0">
+            <div class="flex items-center gap-1.5 min-w-0">
               <div class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="variable.isOptional ? 'bg-muted-foreground/40' : 'bg-primary/60'"></div>
               <Label :for="`var-${variable.name}`"
                 class="text-xs font-medium truncate cursor-pointer min-w-0"
@@ -263,7 +263,7 @@
             <Popover v-if="variable.inputType === 'multiselect' && variable.options?.length">
               <PopoverTrigger as-child>
                 <Button variant="outline" :id="`var-${variable.name}`"
-                  class="h-7 text-xs flex-1 min-w-0 justify-between font-normal transition-colors"
+                  class="h-7 text-xs w-full justify-between font-normal transition-colors"
                   :class="{
                     'border-primary/30 bg-primary/5': hasVariableValue(variable),
                     'border-dashed border-muted-foreground/20': !hasVariableValue(variable) && !variable.isOptional,
@@ -304,7 +304,7 @@
               :model-value="String(variable.value ?? '')"
               @update:model-value="(val) => variable.value = val">
               <SelectTrigger :id="`var-${variable.name}`" 
-                class="h-7 text-xs flex-1 min-w-0 transition-colors focus:ring-1 focus:ring-primary/50"
+                class="h-7 text-xs w-full transition-colors focus:ring-1 focus:ring-primary/50"
                 :class="{
                   'border-primary/30 bg-primary/5': hasVariableValue(variable),
                   'border-dashed border-muted-foreground/20': !hasVariableValue(variable) && !variable.isOptional,
@@ -329,7 +329,7 @@
               @update:model-value="(val) => { variable.value = val ?? ''; variableStore.upsertVariable(variable); }"
               :include-time="true"
               :placeholder="variable.isOptional ? 'Select date (optional)' : 'Select date...'"
-              class="flex-1 min-w-0"
+              class="w-full"
             />
 
             <!-- Text/Number input (default) -->
@@ -338,7 +338,7 @@
               @update:model-value="(val: string | number) => { variable.value = String(val); variableStore.upsertVariable(variable); }"
               :type="inputTypeFor(variable.type)"
               :placeholder="variable.isOptional ? 'Leave empty to omit' : getPlaceholderForType(variable.type)"
-              class="h-7 text-xs flex-1 min-w-0 focus:border-primary/50 transition-colors"
+              class="h-7 text-xs w-full focus:border-primary/50 transition-colors"
               :class="{
                 'border-primary/30 bg-primary/5': hasVariableValue(variable),
                 'border-dashed border-muted-foreground/20': !hasVariableValue(variable) && !variable.isOptional,

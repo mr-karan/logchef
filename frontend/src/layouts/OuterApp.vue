@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Sun, Moon, Monitor } from 'lucide-vue-next'
-import { useThemeStore } from '@/stores/theme'
+import { useThemeStore, type ThemeMode } from '@/stores/theme'
+import { usePreferencesStore } from '@/stores/preferences'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -17,6 +18,12 @@ import {
 import { computed } from 'vue'
 
 const themeStore = useThemeStore()
+const preferencesStore = usePreferencesStore()
+
+const setThemePreference = (mode: ThemeMode) => {
+  themeStore.setTheme(mode)
+  preferencesStore.updatePreferences({ theme: mode }, { syncTheme: false })
+}
 
 const tooltipText = computed(() => {
   switch (themeStore.preference) {
@@ -53,15 +60,15 @@ const tooltipText = computed(() => {
             </TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem @click="themeStore.setTheme('light')" :disabled="themeStore.preference === 'light'">
+            <DropdownMenuItem @click="setThemePreference('light')" :disabled="themeStore.preference === 'light'">
               <Sun class="mr-2 h-4 w-4" />
               <span>Light</span>
             </DropdownMenuItem>
-            <DropdownMenuItem @click="themeStore.setTheme('dark')" :disabled="themeStore.preference === 'dark'">
+            <DropdownMenuItem @click="setThemePreference('dark')" :disabled="themeStore.preference === 'dark'">
               <Moon class="mr-2 h-4 w-4" />
               <span>Dark</span>
             </DropdownMenuItem>
-            <DropdownMenuItem @click="themeStore.setTheme('auto')" :disabled="themeStore.preference === 'auto'">
+            <DropdownMenuItem @click="setThemePreference('auto')" :disabled="themeStore.preference === 'auto'">
               <Monitor class="mr-2 h-4 w-4" />
               <span>System</span>
             </DropdownMenuItem>

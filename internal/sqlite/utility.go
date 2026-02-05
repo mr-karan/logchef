@@ -152,11 +152,16 @@ func handleNotFoundError(err error, prefix string) error {
 
 	if errors.Is(err, sql.ErrNoRows) {
 		// Map to specific resource error types
+		// Note: Order matters - check more specific patterns first (e.g., "query" before "team"
+		// since "team query" should match query, not team)
 		if strings.Contains(prefix, "user") {
 			if strings.Contains(prefix, "email") {
 				return wrapError(ErrUserNotFound, "getting user email %s", strings.TrimPrefix(prefix, "getting user email "))
 			}
 			return wrapError(ErrUserNotFound, prefix)
+		}
+		if strings.Contains(prefix, "query") {
+			return wrapError(ErrQueryNotFound, prefix)
 		}
 		if strings.Contains(prefix, "team") {
 			return wrapError(ErrTeamNotFound, prefix)
@@ -166,9 +171,6 @@ func handleNotFoundError(err error, prefix string) error {
 		}
 		if strings.Contains(prefix, "session") {
 			return wrapError(ErrSessionNotFound, prefix)
-		}
-		if strings.Contains(prefix, "query") {
-			return wrapError(ErrQueryNotFound, prefix)
 		}
 		// Generic not found error
 		return wrapError(ErrNotFound, prefix)

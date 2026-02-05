@@ -7,6 +7,7 @@ import {
   onBeforeUnmount,
   nextTick,
 } from "vue";
+import { storeToRefs } from "pinia";
 import { useRouter, useRoute } from "vue-router";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/composables/useToast";
@@ -15,6 +16,7 @@ import { useExploreStore } from "@/stores/explore";
 import { useTeamsStore } from "@/stores/teams";
 import { useSourcesStore } from "@/stores/sources";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
+import { usePreferencesStore } from "@/stores/preferences";
 import { FieldSideBar } from "@/components/field-sidebar";
 import { getErrorMessage } from "@/api/types";
 import DataTable from "./table/data-table.vue";
@@ -51,6 +53,8 @@ const exploreStore = useExploreStore();
 const teamsStore = useTeamsStore();
 const sourcesStore = useSourcesStore();
 const savedQueriesStore = useSavedQueriesStore();
+const preferencesStore = usePreferencesStore();
+const { preferences } = storeToRefs(preferencesStore);
 const { toast } = useToast();
 
 const urlState = useUrlState();
@@ -170,9 +174,12 @@ const lastParsedQuery = ref<{
 
 // Basic state
 // Sidebar defaults to open, but respects user's saved preference
-const showFieldsPanel = ref(
-  localStorage.getItem('logchef_fields_panel') !== 'closed'
-);
+const showFieldsPanel = computed({
+  get: () => preferences.value.fields_panel_open,
+  set: (value: boolean) => {
+    preferencesStore.updatePreferences({ fields_panel_open: value });
+  },
+});
 const queryEditorRef = ref<ComponentPublicInstance<{
   focus: (revealLastPosition?: boolean) => void;
   code?: { value: string };
@@ -189,25 +196,15 @@ const executingQueryId = ref<string | null>(null);
 const lastQueryTime = ref<number>(0);
 
 // Display related refs
-const displayTimezone = computed(() =>
-  localStorage.getItem("logchef_timezone") === "utc" ? "utc" : "local"
-);
+const displayTimezone = computed(() => preferences.value.timezone);
 
 // Display mode for table vs compact view (table is default)
-const storedDisplayMode = localStorage.getItem("logchef_display_mode");
-const displayMode = ref<'table' | 'compact'>(
-  storedDisplayMode === 'compact' ? 'compact' : 'table'
-);
-
-// Watch display mode changes and persist to localStorage
-watch(displayMode, (newMode) => {
-  localStorage.setItem("logchef_display_mode", newMode);
-}, { immediate: false });
-
-// Persist fields panel preference
-watch(showFieldsPanel, (isOpen) => {
-  localStorage.setItem('logchef_fields_panel', isOpen ? 'open' : 'closed');
-}, { immediate: false });
+const displayMode = computed({
+  get: () => preferences.value.display_mode,
+  set: (value: 'table' | 'compact') => {
+    preferencesStore.updatePreferences({ display_mode: value });
+  },
+});
 
 // UI state computed properties
 const showLoadingState = computed(

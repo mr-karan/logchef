@@ -16,6 +16,7 @@ import {
     type ColumnResizeMode,
 } from '@tanstack/vue-table'
 import { ref, computed, onMounted, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import { GripVertical, Copy, Equal, EqualNot, Clock, ChevronUp, ChevronDown } from 'lucide-vue-next'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
@@ -28,6 +29,7 @@ import { useExploreStore } from '@/stores/explore'
 import type { Source } from '@/api/sources'
 import { useSourcesStore } from '@/stores/sources'
 import TableControls from './TableControls.vue'
+import { usePreferencesStore } from '@/stores/preferences'
 
 interface Props {
     columns: ColumnDef<Record<string, any>>[]
@@ -95,7 +97,14 @@ const globalFilter = ref('')
 const columnSizing = ref<ColumnSizingState>({})
 const columnResizeMode = ref<ColumnResizeMode>('onChange')
 const isResizing = ref(false)
-const displayTimezone = ref<'local' | 'utc'>(localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local')
+const preferencesStore = usePreferencesStore()
+const { preferences } = storeToRefs(preferencesStore)
+const displayTimezone = computed({
+    get: () => preferences.value.timezone,
+    set: (value: 'local' | 'utc') => {
+        preferencesStore.updatePreferences({ timezone: value })
+    }
+})
 const columnOrder = ref<string[]>([])
 const draggingColumnId = ref<string | null>(null)
 const dragOverColumnId = ref<string | null>(null)
@@ -254,10 +263,7 @@ watch([columnOrder, columnSizing, columnVisibility], () => {
     }
 }, { deep: true });
 
-// Save timezone preference whenever it changes
-watch(displayTimezone, (newValue) => {
-    localStorage.setItem('logchef_timezone', newValue)
-})
+// Save timezone preference via preferences store
 
 // Helper function for cell handling
 function formatCellValue(value: any): string {

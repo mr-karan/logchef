@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, onMounted } from "vue";
+import { storeToRefs } from "pinia";
 import {
   Card,
   CardContent,
@@ -7,114 +8,163 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { usePreferencesStore } from "@/stores/preferences";
+import { useThemeStore, type ThemeMode } from "@/stores/theme";
+import type { DisplayModePreference, TimezonePreference } from "@/api/preferences";
 
-// Preferences
-const emailNotifications = ref(true);
-const darkMode = ref(false);
-const compactMode = ref(false);
-const autoRefresh = ref(true);
-const refreshInterval = ref(30);
+const preferencesStore = usePreferencesStore();
+const themeStore = useThemeStore();
+const { preferences } = storeToRefs(preferencesStore);
 
-const handleUpdatePreferences = () => {
-  // TODO: Implement preferences update
-};
+onMounted(() => {
+  preferencesStore.loadPreferences();
+});
+
+const isSaving = computed(
+  () =>
+    preferencesStore.isLoadingOperation("updatePreferences") ||
+    preferencesStore.isLoadingOperation("syncPreferences")
+);
+
+const themePreference = computed({
+  get: () => themeStore.preference,
+  set: (value: ThemeMode) => {
+    themeStore.setTheme(value);
+    preferencesStore.updatePreferences({ theme: value }, { syncTheme: false });
+  },
+});
+
+const timezonePreference = computed({
+  get: () => preferences.value.timezone,
+  set: (value: TimezonePreference) => {
+    preferencesStore.updatePreferences({ timezone: value });
+  },
+});
+
+const displayModePreference = computed({
+  get: () => preferences.value.display_mode,
+  set: (value: DisplayModePreference) => {
+    preferencesStore.updatePreferences({ display_mode: value });
+  },
+});
+
+const fieldsPanelOpen = computed({
+  get: () => preferences.value.fields_panel_open,
+  set: (value: boolean) => {
+    preferencesStore.updatePreferences({ fields_panel_open: value });
+  },
+});
 </script>
 
 <template>
   <div class="space-y-6">
-    <!-- Header -->
-    <div>
-      <h1 class="text-2xl font-bold tracking-tight">Preferences</h1>
-      <p class="text-muted-foreground mt-2">
-        Customize your application experience
-      </p>
-      <p class="text-destructive mt-2">
-        Note: These settings are currently placeholders and are not functional.
-        They will be implemented in a future release.
+    <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight">Preferences</h1>
+        <p class="text-muted-foreground mt-2">
+          Tune the interface to match how you explore logs every day.
+        </p>
+      </div>
+      <p class="text-xs text-muted-foreground">
+        {{ isSaving ? "Saving changes…" : "Changes save automatically." }}
       </p>
     </div>
 
     <Card>
       <CardHeader>
-        <CardTitle>User Preferences</CardTitle>
-        <CardDescription> Customize your experience </CardDescription>
+        <CardTitle>Appearance</CardTitle>
+        <CardDescription>Choose how LogChef looks across sessions.</CardDescription>
       </CardHeader>
-      <CardContent>
-        <form @submit.prevent="handleUpdatePreferences" class="space-y-6">
-          <!-- Notifications -->
-          <div class="space-y-4">
-            <h3 class="text-lg font-medium">Notifications</h3>
-            <div class="flex items-center justify-between">
-              <div class="space-y-0.5">
-                <Label>Email Notifications</Label>
-                <p class="text-sm text-muted-foreground">
-                  Receive email notifications for important updates
-                </p>
+      <CardContent class="space-y-6">
+        <div class="space-y-3">
+          <Label class="text-sm font-medium">Theme</Label>
+          <RadioGroup v-model="themePreference" class="grid gap-3 md:grid-cols-3">
+            <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
+              <RadioGroupItem value="light" class="mt-1" />
+              <div>
+                <p class="text-sm font-medium">Light</p>
+                <p class="text-xs text-muted-foreground">Bright workspace with crisp contrast.</p>
               </div>
-              <Switch v-model="emailNotifications" />
-            </div>
-          </div>
-
-          <Separator />
-
-          <!-- Display -->
-          <div class="space-y-4">
-            <h3 class="text-lg font-medium">Display</h3>
-            <div class="flex items-center justify-between">
-              <div class="space-y-0.5">
-                <Label>Dark Mode</Label>
-                <p class="text-sm text-muted-foreground">
-                  Enable dark mode for the interface
-                </p>
+            </Label>
+            <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
+              <RadioGroupItem value="dark" class="mt-1" />
+              <div>
+                <p class="text-sm font-medium">Dark</p>
+                <p class="text-xs text-muted-foreground">Reduce glare for long analysis sessions.</p>
               </div>
-              <Switch v-model="darkMode" />
-            </div>
-            <div class="flex items-center justify-between">
-              <div class="space-y-0.5">
-                <Label>Compact Mode</Label>
-                <p class="text-sm text-muted-foreground">
-                  Show more content with reduced spacing
-                </p>
+            </Label>
+            <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
+              <RadioGroupItem value="auto" class="mt-1" />
+              <div>
+                <p class="text-sm font-medium">System</p>
+                <p class="text-xs text-muted-foreground">Match your operating system preference.</p>
               </div>
-              <Switch v-model="compactMode" />
-            </div>
+            </Label>
+          </RadioGroup>
+        </div>
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>Log Explorer</CardTitle>
+        <CardDescription>Set defaults for log viewing and navigation.</CardDescription>
+      </CardHeader>
+      <CardContent class="space-y-6">
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="space-y-2">
+            <Label for="timezone">Default Timezone</Label>
+            <Select v-model="timezonePreference">
+              <SelectTrigger id="timezone">
+                <SelectValue placeholder="Select timezone" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="local">Local time</SelectItem>
+                <SelectItem value="utc">UTC</SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-xs text-muted-foreground">Controls how timestamps are displayed.</p>
           </div>
+        </div>
 
-          <Separator />
+        <Separator />
 
-          <!-- Auto Refresh -->
-          <div class="space-y-4">
-            <h3 class="text-lg font-medium">Auto Refresh</h3>
-            <div class="flex items-center justify-between">
-              <div class="space-y-0.5">
-                <Label>Enable Auto Refresh</Label>
-                <p class="text-sm text-muted-foreground">
-                  Automatically refresh log data
-                </p>
+        <div class="space-y-3">
+          <Label class="text-sm font-medium">Default View Mode</Label>
+          <RadioGroup v-model="displayModePreference" class="grid gap-3 md:grid-cols-2">
+            <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
+              <RadioGroupItem value="table" class="mt-1" />
+              <div>
+                <p class="text-sm font-medium">Table</p>
+                <p class="text-xs text-muted-foreground">Columnar layout with full field visibility.</p>
               </div>
-              <Switch v-model="autoRefresh" />
-            </div>
-            <div v-if="autoRefresh" class="grid gap-2">
-              <Label for="refresh_interval">Refresh Interval (seconds)</Label>
-              <Input
-                id="refresh_interval"
-                v-model="refreshInterval"
-                type="number"
-                min="5"
-                max="300"
-              />
-            </div>
-          </div>
+            </Label>
+            <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
+              <RadioGroupItem value="compact" class="mt-1" />
+              <div>
+                <p class="text-sm font-medium">Compact</p>
+                <p class="text-xs text-muted-foreground">Dense, streaming-style logs for quick scans.</p>
+              </div>
+            </Label>
+          </RadioGroup>
+        </div>
 
-          <div class="flex justify-end">
-            <Button type="submit">Save Preferences</Button>
+        <Separator />
+
+        <div class="flex items-center justify-between">
+          <div class="space-y-0.5">
+            <Label>Show Fields Panel by default</Label>
+            <p class="text-sm text-muted-foreground">
+              Keep the fields and filters panel open when exploring logs.
+            </p>
           </div>
-        </form>
+          <Switch v-model="fieldsPanelOpen" />
+        </div>
       </CardContent>
     </Card>
   </div>

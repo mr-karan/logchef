@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Configurable query result limit** — New `[query]` config section with `max_limit` setting (default: 1,000,000 rows). Allows admins to increase export limits based on infrastructure capacity. Frontend dropdown now shows options up to 1M rows.
+- **User preferences persistence** — Theme, timezone, display mode, and fields panel state now persist across sessions. Preferences sync automatically and load on login.
 
 ### Changed
 - Query limit options now dynamically loaded from server config instead of hardcoded values.

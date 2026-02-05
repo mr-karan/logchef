@@ -10,6 +10,7 @@ sql:
       - "internal/sqlite/migrations/000005_add_system_settings.up.sql"
       - "internal/sqlite/migrations/000006_add_bookmarks.up.sql"
       - "internal/sqlite/migrations/000007_add_alert_notifications.up.sql"
+      - "internal/sqlite/migrations/000009_add_user_preferences.up.sql"
     gen:
       go:
         package: "sqlc"

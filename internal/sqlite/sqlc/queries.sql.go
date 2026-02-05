@@ -843,6 +843,25 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	return i, err
 }
 
+const getUserPreferences = `-- name: GetUserPreferences :one
+
+SELECT user_id, preferences_json, created_at, updated_at FROM user_preferences WHERE user_id = ?
+`
+
+// User Preferences
+// Get user preferences by user ID
+func (q *Queries) GetUserPreferences(ctx context.Context, userID int64) (UserPreference, error) {
+	row := q.queryRow(ctx, q.getUserPreferencesStmt, getUserPreferences, userID)
+	var i UserPreference
+	err := row.Scan(
+		&i.UserID,
+		&i.PreferencesJson,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const insertAlertHistory = `-- name: InsertAlertHistory :one
 
 INSERT INTO alert_history (
@@ -2084,6 +2103,25 @@ func (q *Queries) UpsertSystemSetting(ctx context.Context, arg UpsertSystemSetti
 		arg.Description,
 		arg.IsSensitive,
 	)
+	return err
+}
+
+const upsertUserPreferences = `-- name: UpsertUserPreferences :exec
+INSERT INTO user_preferences (user_id, preferences_json, created_at, updated_at)
+VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+ON CONFLICT(user_id) DO UPDATE SET
+    preferences_json = excluded.preferences_json,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+`
+
+type UpsertUserPreferencesParams struct {
+	UserID          int64  `json:"user_id"`
+	PreferencesJson string `json:"preferences_json"`
+}
+
+// Insert or update user preferences
+func (q *Queries) UpsertUserPreferences(ctx context.Context, arg UpsertUserPreferencesParams) error {
+	_, err := q.exec(ctx, q.upsertUserPreferencesStmt, upsertUserPreferences, arg.UserID, arg.PreferencesJson)
 	return err
 }
 

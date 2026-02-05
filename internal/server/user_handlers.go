@@ -308,3 +308,64 @@ func (s *Server) handleDeleteAPIToken(c *fiber.Ctx) error {
 
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "API token deleted successfully"})
 }
+
+// --- Current User Preferences Handlers ---
+
+// UserPreferencesResponse represents user preferences in API responses.
+type UserPreferencesResponse struct {
+	Preferences models.UserPreferences `json:"preferences"`
+	IsDefault   bool                   `json:"is_default"`
+}
+
+// handleGetUserPreferences retrieves preferences for the authenticated user.
+// URL: GET /api/v1/me/preferences
+// Requires: User authentication (requireAuth middleware)
+func (s *Server) handleGetUserPreferences(c *fiber.Ctx) error {
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil {
+		s.log.Error("user not found in context despite requireAuth middleware")
+		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
+	}
+
+	preferences, isDefault, err := core.GetUserPreferences(c.Context(), s.sqlite, user.ID)
+	if err != nil {
+		s.log.Error("failed to get user preferences", "error", err, "user_id", user.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user preferences")
+	}
+
+	return SendSuccess(c, fiber.StatusOK, UserPreferencesResponse{
+		Preferences: preferences,
+		IsDefault:   isDefault,
+	})
+}
+
+// handleUpdateUserPreferences updates preferences for the authenticated user.
+// URL: PUT /api/v1/me/preferences
+// Requires: User authentication (requireAuth middleware)
+func (s *Server) handleUpdateUserPreferences(c *fiber.Ctx) error {
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil {
+		s.log.Error("user not found in context despite requireAuth middleware")
+		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
+	}
+
+	var req models.UpdateUserPreferencesRequest
+	if err := c.BodyParser(&req); err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	preferences, err := core.UpdateUserPreferences(c.Context(), s.sqlite, user.ID, req)
+	if err != nil {
+		if valErr, ok := err.(*core.ValidationError); ok {
+			return SendError(c, fiber.StatusBadRequest, valErr.Error())
+		}
+
+		s.log.Error("failed to update user preferences", "error", err, "user_id", user.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Error updating user preferences")
+	}
+
+	return SendSuccess(c, fiber.StatusOK, UserPreferencesResponse{
+		Preferences: preferences,
+		IsDefault:   false,
+	})
+}

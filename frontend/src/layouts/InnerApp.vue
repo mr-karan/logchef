@@ -55,19 +55,30 @@ import {
 } from "lucide-vue-next";
 
 import { useAuthStore } from "@/stores/auth";
-import { useThemeStore } from "@/stores/theme";
+import { useThemeStore, type ThemeMode } from "@/stores/theme";
+import { usePreferencesStore } from "@/stores/preferences";
 import { useMetaStore } from "@/stores/meta";
-import { ref, watch, computed } from "vue";
+import { ref, watch, computed, onMounted } from "vue";
 import { useTeamsStore } from "@/stores/teams";
 import { useExploreStore } from "@/stores/explore";
 import { useRouter } from "vue-router";
 
 const authStore = useAuthStore();
 const themeStore = useThemeStore();
+const preferencesStore = usePreferencesStore();
 const metaStore = useMetaStore();
 const teamsStore = useTeamsStore();
 const exploreStore = useExploreStore();
 const router = useRouter();
+
+const setThemePreference = (mode: ThemeMode) => {
+  themeStore.setTheme(mode);
+  preferencesStore.updatePreferences({ theme: mode }, { syncTheme: false });
+};
+
+onMounted(() => {
+  preferencesStore.loadPreferences();
+});
 
 // Function to navigate to collections with clean URL  
 const navigateToCollections = () => {
@@ -399,7 +410,7 @@ const navItems = [
                             <Button variant="outline" size="icon" class="w-9 px-0 flex-1 rounded-md" :class="{
                               'bg-primary text-primary-foreground':
                                 themeStore.preference === 'light',
-                            }" @click="themeStore.setTheme('light')">
+                            }" @click="setThemePreference('light')">
                               <Sun class="h-5 w-5" />
                             </Button>
                           </TooltipTrigger>
@@ -414,7 +425,7 @@ const navItems = [
                             <Button variant="outline" size="icon" class="w-9 px-0 flex-1 rounded-md" :class="{
                               'bg-primary text-primary-foreground':
                                 themeStore.preference === 'dark',
-                            }" @click="themeStore.setTheme('dark')">
+                            }" @click="setThemePreference('dark')">
                               <Moon class="h-5 w-5" />
                             </Button>
                           </TooltipTrigger>
@@ -429,7 +440,7 @@ const navItems = [
                             <Button variant="outline" size="icon" class="w-9 px-0 flex-1 rounded-md" :class="{
                               'bg-primary text-primary-foreground':
                                 themeStore.preference === 'auto',
-                            }" @click="themeStore.setTheme('auto')">
+                            }" @click="setThemePreference('auto')">
                               <Monitor class="h-5 w-5" />
                             </Button>
                           </TooltipTrigger>

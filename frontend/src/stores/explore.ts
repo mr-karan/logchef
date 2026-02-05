@@ -21,6 +21,7 @@ import { useContextStore } from "@/stores/context";
 import { useBaseStore } from "./base";
 import { useExploreHistogramStore } from "./exploreHistogram";
 import { useExploreAIStore } from "./exploreAI";
+import { usePreferencesStore } from "@/stores/preferences";
 import { parseRelativeTimeString, timestampToCalendarDateTime, calendarDateTimeToTimestamp } from "@/utils/time";
 import { SqlManager } from '@/services/SqlManager';
 import { type TimeRange } from '@/types/query';
@@ -87,6 +88,7 @@ const DEFAULT_QUERY_STATS: QueryStats = {
 
 export const useExploreStore = defineStore("explore", () => {
   const contextStore = useContextStore();
+  const preferencesStore = usePreferencesStore();
   const histogramStore = useExploreHistogramStore();
   const aiStore = useExploreAIStore();
   
@@ -325,7 +327,7 @@ export const useExploreStore = defineStore("explore", () => {
 
   function getTimezoneIdentifier(): string {
     return state.data.value.selectedTimezoneIdentifier ||
-      (localStorage.getItem('logchef_timezone') === 'utc' ? 'UTC' : getLocalTimeZone());
+      (preferencesStore.preferences.timezone === 'utc' ? 'UTC' : getLocalTimeZone());
   }
 
   function setTimezoneIdentifier(timezone: string) {
