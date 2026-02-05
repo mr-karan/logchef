@@ -42,7 +42,7 @@ logchef config set team "my-team"
 logchef config set source "nginx-logs"
 
 # 6. Query logs
-logchef query "level:error" --since 1h
+logchef query 'level="error"' --since 1h
 ```
 
 :::tip[Copy CLI Command from Web UI]
@@ -180,7 +180,7 @@ Generate API tokens from the LogChef web UI under your profile settings.
 The `query` command allows you to execute LogChefQL queries directly from your terminal.
 
 ```bash
-logchef query "level:error service:api" --since 1h
+logchef query 'level="error" and service="api"' --since 1h
 ```
 
 #### Options
@@ -209,7 +209,7 @@ logchef query
 # Prompts:
 # ? Select team: [production, staging, dev]
 # ? Select source: [nginx-logs, app-logs, api-logs]
-# ? LogChefQL query: level:error
+# ? LogChefQL query: level="error"
 ```
 
 This is useful for quick exploration without remembering exact team/source names.
@@ -224,19 +224,19 @@ logchef query "" --team "production" --source "nginx-logs"
 logchef query "" --team "production" --source "logs.nomad_apps"
 
 # Filter by field value
-logchef query "status:500" --team "production" --source "nginx-logs"
+logchef query 'status=500' --team "production" --source "nginx-logs"
 
 # Multiple conditions (AND)
-logchef query "method:POST status:403" --team "production" --source "nginx-logs"
+logchef query 'method="POST" and status=403' --team "production" --source "nginx-logs"
 
 # Search within a time range
-logchef query "level:error" --since 1h --limit 50
+logchef query 'level="error"' --since 1h --limit 50
 
 # Hide timestamp from output
-logchef query "level:error" --no-timestamp
+logchef query 'level="error"' --no-timestamp
 
 # Output as JSON (returns object with logs, stats, columns)
-logchef query "status:500" --output json | jq '.logs[] | .host'
+logchef query 'status=500' --output json | jq '.logs[] | .host'
 
 # Output as JSON Lines (one JSON object per line, great for jq)
 logchef query "" --output jsonl | jq '.msg'
@@ -245,7 +245,7 @@ logchef query "" --output jsonl | jq '.msg'
 logchef query "" --output json | jq '{count: .count, time_ms: .stats.execution_time_ms}'
 
 # Show the SQL that will be executed
-logchef query "method:GET" --show-sql
+logchef query 'method="GET"' --show-sql
 
 # Use absolute time range
 logchef query "" --from "2026-01-14T00:00:00Z" --to "2026-01-14T12:00:00Z"
@@ -454,10 +454,10 @@ logchef config list
 
 # Switch contexts
 logchef config use dev
-logchef query "level:debug"
+logchef query 'level="debug"'
 
 # One-off query to different context
-logchef --context prod query "level:error"
+logchef --context prod query 'level="error"'
 ```
 
 #### Recommended Setup
@@ -470,7 +470,7 @@ logchef config set team "my-team"
 logchef config set source "nginx-logs"
 
 # Now you can just run:
-logchef query "level:error"
+logchef query 'level="error"'
 ```
 
 :::tip[Source Resolution]
@@ -689,12 +689,12 @@ For CI/CD pipelines and automation, you can configure the CLI entirely via envir
 ```bash
 # Option 1: Use a saved context
 export LOGCHEF_CONTEXT="prod"
-logchef query "level:error" --team "production" --source "app-logs"
+logchef query 'level="error"' --team "production" --source "app-logs"
 
 # Option 2: Ephemeral mode (no saved context needed)
 export LOGCHEF_SERVER_URL="https://logs.example.com"
 export LOGCHEF_AUTH_TOKEN="logchef_1_abc123..."
-logchef query "level:error" --team "production" --source "app-logs"
+logchef query 'level="error"' --team "production" --source "app-logs"
 ```
 
 ## Scripting Examples
@@ -702,26 +702,26 @@ logchef query "level:error" --team "production" --source "app-logs"
 ### Export logs to file
 
 ```bash
-logchef query "status:500" --output jsonl > errors.jsonl
+logchef query 'status=500' --output jsonl > errors.jsonl
 ```
 
 ### Count errors with jq
 
 ```bash
-logchef query "level:error" --output json | jq '.count'
+logchef query 'level="error"' --output json | jq '.count'
 ```
 
 ### Extract specific fields with jq
 
 ```bash
 # Get all unique hosts from JSON output
-logchef query "status:500" --output json | jq -r '.logs[].host' | sort -u
+logchef query 'status=500' --output json | jq -r '.logs[].host' | sort -u
 
 # Get all unique hosts from JSONL output
-logchef query "status:500" --output jsonl | jq -r '.host' | sort -u
+logchef query 'status=500' --output jsonl | jq -r '.host' | sort -u
 
 # Pretty print messages
-logchef query "level:error" --output jsonl | jq '.msg'
+logchef query 'level="error"' --output jsonl | jq '.msg'
 
 # Get query stats
 logchef query "" --output json | jq '.stats'
@@ -736,7 +736,7 @@ logchef query "" --no-highlight | grep -i "database"
 ### Clean output without timestamps
 
 ```bash
-logchef query "level:error" --no-timestamp --no-highlight > errors.txt
+logchef query 'level="error"' --no-timestamp --no-highlight > errors.txt
 ```
 
 ### Loop through multiple sources
@@ -744,7 +744,7 @@ logchef query "level:error" --no-timestamp --no-highlight > errors.txt
 ```bash
 for source in "nginx-logs" "app-logs" "api-logs"; do
   echo "=== Source: $source ==="
-  logchef query "level:error" --source "$source" --limit 5
+  logchef query 'level="error"' --source "$source" --limit 5
 done
 ```
 
