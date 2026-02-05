@@ -2,7 +2,7 @@
 name: logchef
 description: Query application logs via LogChef CLI. Use when investigating production incidents, debugging errors, analyzing log patterns, or correlating events across services.
 argument-hint: "[service name] [time range]"
-allowed-tools: Bash(logchef *), Bash(date *), Read, Grep
+allowed-tools: Bash(logchef *), Bash(jq *), Bash(date *), Bash(grep *), Bash(sort *), Bash(uniq *), Bash(wc *), Bash(head *), Bash(tail *), Bash(awk *), Read, Grep
 ---
 
 # LogChef Log Analysis
