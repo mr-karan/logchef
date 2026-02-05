@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Configurable query result limit** — New `[query]` config section with `max_limit` setting (default: 1,000,000 rows). Allows admins to increase export limits based on infrastructure capacity. Frontend dropdown now shows options up to 1M rows.
 - **User preferences persistence** — Theme, timezone, display mode, and fields panel state now persist across sessions. Preferences sync automatically and load on login.
+- **Team admins can manage their teams** — Team admins now have access to team settings and member management without requiring global admin privileges.
+- **Source editing and duplication** — Edit existing source configurations and duplicate sources for quick setup of similar data sources.
 
 ### Changed
 - Query limit options now dynamically loaded from server config instead of hardcoded values.
@@ -18,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Histogram now auto-refreshes when changing Group By column selection.
 - Time icon in date picker now visible in dark mode.
+- Date picker Now button auto-applies and fixes initial date format issues.
+- JSON strings embedded in log fields now auto-parse for better readability.
+- Table auto-resizes when filter sidebar closes.
 
 ## [1.2.1] - 2026-01-21
 
