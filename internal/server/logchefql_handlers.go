@@ -8,6 +8,7 @@ import (
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/logchefql"
+	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -170,12 +171,13 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 
 	// Parse request
 	var req struct {
-		Query        string `json:"query"`
-		StartTime    string `json:"start_time"`    // ISO8601 format
-		EndTime      string `json:"end_time"`      // ISO8601 format
-		Timezone     string `json:"timezone"`      // Timezone for time conversion
-		Limit        int    `json:"limit"`         // Result limit
-		QueryTimeout *int   `json:"query_timeout"` // Optional timeout in seconds
+		Query        string                    `json:"query"`
+		StartTime    string                    `json:"start_time"`    // ISO8601 format
+		EndTime      string                    `json:"end_time"`      // ISO8601 format
+		Timezone     string                    `json:"timezone"`      // Timezone for time conversion
+		Limit        int                       `json:"limit"`         // Result limit
+		QueryTimeout *int                      `json:"query_timeout"` // Optional timeout in seconds
+		Variables    []models.TemplateVariable `json:"variables,omitempty"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
@@ -226,10 +228,28 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 		schema = &logchefql.Schema{Columns: columns}
 	}
 
+	// Substitute variables in the query if provided
+	query := req.Query
+	if len(req.Variables) > 0 {
+		vars := make([]template.Variable, len(req.Variables))
+		for i, v := range req.Variables {
+			vars[i] = template.Variable{
+				Name:  v.Name,
+				Type:  template.VariableType(v.Type),
+				Value: v.Value,
+			}
+		}
+		substituted, err := template.SubstituteVariables(query, vars)
+		if err != nil {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Variable substitution failed: "+err.Error(), models.ValidationErrorType)
+		}
+		query = substituted
+	}
+
 	// Build the full SQL query
 	tableName := source.Connection.Database + "." + source.Connection.TableName
 	params := logchefql.QueryBuildParams{
-		LogchefQL:      req.Query,
+		LogchefQL:      query,
 		Schema:         schema,
 		TableName:      tableName,
 		TimestampField: source.MetaTSField,
@@ -270,6 +290,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 	queryParams := clickhouse.LogQueryParams{
 		RawSQL:       sql,
 		Limit:        req.Limit,
+		MaxLimit:     s.config.Query.MaxLimit,
 		QueryTimeout: req.QueryTimeout,
 	}
 	result, err := core.QueryLogs(queryCtx, s.sqlite, s.clickhouse, s.log, sourceID, queryParams)

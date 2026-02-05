@@ -1,21 +1,15 @@
-import { analyzeQuery, validateSQLWithDetails } from '@/utils/clickhouse-sql';
+import { analyzeQuery } from '@/utils/clickhouse-sql';
 import type { TimeRange } from '@/types/query';
 import { createTimeRangeCondition } from '@/utils/time-utils';
 
 /**
  * SqlManager provides a centralized service for all SQL-related operations
- * including parsing, validation, and query modifications
+ * including query generation and modifications.
+ * Note: SQL validation is handled by the backend (ClickHouse) - client-side
+ * validation was removed as it couldn't handle template syntax and used
+ * a PostgreSQL parser that doesn't match ClickHouse syntax.
  */
 export class SqlManager {
-  /**
-   * Validates SQL syntax
-   * @param sql The SQL query to validate
-   * @returns Validation result with detailed error info
-   */
-  static validateSql(sql: string) {
-    return validateSQLWithDetails(sql);
-  }
-
   /**
    * Generate default SQL query based on provided parameters
    * @param params Parameters for SQL generation
@@ -80,9 +74,6 @@ LIMIT ${limit}`;
         // 2. It's using a standard toDateTime BETWEEN format
         if (fieldFromAnalysis.toLowerCase() === tsFieldForRegex.toLowerCase() &&
             analysis.timeRangeInfo.format === 'toDateTime-between') {
-
-          console.log("SqlManager: Found standard toDateTime BETWEEN format that can be safely replaced");
-
           // Create a precise pattern based on the analyzed time range
           const specificBetweenPattern = new RegExp(
             `\`?${tsFieldForRegex}\`?\\s+BETWEEN\\s+toDateTime\\(['"].*?['"](?:,\\s*['"].*?['"])?\\)\\s+AND\\s+toDateTime\\(['"].*?['"](?:,\\s*['"].*?['"])?\\)`,
@@ -91,22 +82,17 @@ LIMIT ${limit}`;
 
           if (specificBetweenPattern.test(updatedSql)) {
             updatedSql = updatedSql.replace(specificBetweenPattern, newTimeCondition);
-            console.log("SqlManager: Replaced standard toDateTime BETWEEN time range");
             conditionEffectivelyReplaced = true;
           }
         } else if (analysis.timeRangeInfo.format === 'now-interval' ||
                    analysis.timeRangeInfo.format === 'other') {
-          // For complex time formats, don't attempt to replace
-          console.log(`SqlManager: Found ${analysis.timeRangeInfo.format} time condition format, preserving user query`);
-          // Still consider the time condition handled, just not replaced
+          // For complex time formats, don't attempt to replace - preserve user query
           conditionEffectivelyReplaced = true;
         }
       }
 
       // Case 2: No time condition found, add one
       if (!conditionEffectivelyReplaced && !analysis?.hasTimeFilter) {
-        console.log("SqlManager: No time condition found, adding new time condition");
-
         // Check if there's a WHERE clause
         if (updatedSql.toUpperCase().includes('WHERE')) {
           // Add condition to existing WHERE
@@ -123,7 +109,6 @@ LIMIT ${limit}`;
               ' ' + whereContent + (whereContent ? ' AND ' : '') + newTimeCondition +
               updatedSql.substring(whereEndPos);
 
-            console.log("SqlManager: Added time condition to existing WHERE clause");
             conditionEffectivelyReplaced = true;
           }
         } else {
@@ -136,22 +121,14 @@ LIMIT ${limit}`;
               updatedSql.substring(0, match.index) +
               ` WHERE ${newTimeCondition}` +
               updatedSql.substring(match.index);
-            console.log("SqlManager: Added new WHERE clause with time condition before clauses");
             conditionEffectivelyReplaced = true;
           } else {
             // If no clauses, add WHERE at the end
             updatedSql = `${updatedSql.trim()} WHERE ${newTimeCondition}`;
-            console.log("SqlManager: Added new WHERE clause with time condition at the end");
             conditionEffectivelyReplaced = true;
           }
         }
       }
-
-      console.log("original SQL:", sql);
-      console.log("parsed timestamp field:", tsField);
-      console.log("new time condition will be inserted:", timeRange);
-      console.log("newTimeCondition ",newTimeCondition);
-      console.log("tsFieldForRegex",tsFieldForRegex);
 
       return updatedSql;
     } catch (error) {
@@ -256,21 +233,7 @@ LIMIT ${limit}`;
     }
 
     try {
-      // Note: Variable substitution should be handled by the caller (useQuery.ts)
-      // before calling this method for proper separation of concerns
-
-      // Step 1: Validate SQL first
-      const validation = this.validateSql(sql);
-      if (!validation.valid) {
-        return {
-          success: false,
-          sql,
-          error: validation.error || 'Invalid SQL syntax',
-          warnings: []
-        };
-      }
-
-      // Step 2: Update time range if needed
+      // Update time range if needed
       let processedSql = this.updateTimeRange({
         sql,
         tsField,

@@ -241,9 +241,9 @@
       <!-- Compact Variables List -->
       <div class="bg-muted/20 border border-border/30 rounded-md p-2">
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-          <div v-for="variable in allVariables" :key="variable.name" class="flex items-center gap-2 min-w-0">
+          <div v-for="variable in allVariables" :key="variable.name" class="flex flex-col gap-1.5 min-w-0">
             <!-- Variable indicator and label -->
-            <div class="flex items-center gap-1.5 min-w-0 flex-shrink-0">
+            <div class="flex items-center gap-1.5 min-w-0">
               <div class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="variable.isOptional ? 'bg-muted-foreground/40' : 'bg-primary/60'"></div>
               <Label :for="`var-${variable.name}`"
                 class="text-xs font-medium truncate cursor-pointer min-w-0"
@@ -263,7 +263,7 @@
             <Popover v-if="variable.inputType === 'multiselect' && variable.options?.length">
               <PopoverTrigger as-child>
                 <Button variant="outline" :id="`var-${variable.name}`"
-                  class="h-7 text-xs flex-1 min-w-0 justify-between font-normal transition-colors"
+                  class="h-7 text-xs w-full justify-between font-normal transition-colors"
                   :class="{
                     'border-primary/30 bg-primary/5': hasVariableValue(variable),
                     'border-dashed border-muted-foreground/20': !hasVariableValue(variable) && !variable.isOptional,
@@ -304,7 +304,7 @@
               :model-value="String(variable.value ?? '')"
               @update:model-value="(val) => variable.value = val">
               <SelectTrigger :id="`var-${variable.name}`" 
-                class="h-7 text-xs flex-1 min-w-0 transition-colors focus:ring-1 focus:ring-primary/50"
+                class="h-7 text-xs w-full transition-colors focus:ring-1 focus:ring-primary/50"
                 :class="{
                   'border-primary/30 bg-primary/5': hasVariableValue(variable),
                   'border-dashed border-muted-foreground/20': !hasVariableValue(variable) && !variable.isOptional,
@@ -322,13 +322,23 @@
               </SelectContent>
             </Select>
 
+            <!-- Date picker input -->
+            <SingleDatePicker 
+              v-else-if="variable.type === 'date' && variable.inputType === 'datepicker'"
+              :model-value="variable.value ? String(variable.value) : null"
+              @update:model-value="(val) => { variable.value = val ?? ''; variableStore.upsertVariable(variable); }"
+              :include-time="true"
+              :placeholder="variable.isOptional ? 'Select date (optional)' : 'Select date...'"
+              class="w-full"
+            />
+
             <!-- Text/Number input (default) -->
             <Input v-else :id="`var-${variable.name}`" 
               :model-value="String(variable.value ?? '')"
               @update:model-value="(val: string | number) => { variable.value = String(val); variableStore.upsertVariable(variable); }"
               :type="inputTypeFor(variable.type)"
               :placeholder="variable.isOptional ? 'Leave empty to omit' : getPlaceholderForType(variable.type)"
-              class="h-7 text-xs flex-1 min-w-0 focus:border-primary/50 transition-colors"
+              class="h-7 text-xs w-full focus:border-primary/50 transition-colors"
               :class="{
                 'border-primary/30 bg-primary/5': hasVariableValue(variable),
                 'border-dashed border-muted-foreground/20': !hasVariableValue(variable) && !variable.isOptional,
@@ -404,7 +414,7 @@
         </SheetDescription>
       </SheetHeader>
 
-      <div v-if="allVariables && allVariables.length > 0" class="space-y-6 max-h-[70vh] overflow-y-auto pr-2">
+      <div v-if="allVariables && allVariables.length > 0" class="space-y-6 overflow-y-auto pr-2" style="max-height: calc(100vh - 180px);">
         <div v-for="(variable, index) in allVariables" :key="variable.name" class="space-y-4">
           <!-- Enhanced Variable Card -->
           <div class="border border-border rounded-lg p-4 bg-card hover:shadow-sm transition-all duration-200">
@@ -465,24 +475,34 @@
                   <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
                   Input Widget
                 </Label>
-                <Select v-model="variable.inputType" @update:model-value="() => variableStore.upsertVariable(variable)">
+                <Select 
+                  v-model="variable.inputType" 
+                  @update:model-value="() => variableStore.upsertVariable(variable)"
+                  :disabled="variable.type === 'date'"
+                >
                   <SelectTrigger class="h-9">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="input">
+                    <SelectItem v-if="variable.type !== 'date'" value="input">
                       <div class="flex items-center gap-2">
                         <Type class="w-3.5 h-3.5 text-muted-foreground" />
                         Text Input
                       </div>
                     </SelectItem>
-                    <SelectItem value="dropdown">
+                    <SelectItem v-if="variable.type === 'date'" value="datepicker">
+                      <div class="flex items-center gap-2">
+                        <CalendarIcon class="w-3.5 h-3.5 text-muted-foreground" />
+                        Date Picker
+                      </div>
+                    </SelectItem>
+                    <SelectItem v-if="variable.type !== 'date'" value="dropdown">
                       <div class="flex items-center gap-2">
                         <ChevronDown class="w-3.5 h-3.5 text-muted-foreground" />
                         Dropdown List
                       </div>
                     </SelectItem>
-                    <SelectItem value="multiselect">
+                    <SelectItem v-if="variable.type !== 'date'" value="multiselect">
                       <div class="flex items-center gap-2">
                         <List class="w-3.5 h-3.5 text-muted-foreground" />
                         Multi-Select
@@ -588,6 +608,15 @@
                     </SelectItem>
                   </SelectContent>
                 </Select>
+                <!-- Date picker default -->
+                <SingleDatePicker 
+                  v-else-if="variable.type === 'date' && variable.inputType === 'datepicker'"
+                  :model-value="variable.defaultValue ? String(variable.defaultValue) : null"
+                  @update:model-value="(val) => { variable.defaultValue = val ?? ''; variableStore.upsertVariable(variable); }"
+                  :include-time="true"
+                  placeholder="Select default date..."
+                  class="w-full"
+                />
                 <!-- Text/number input default -->
                 <Input v-else 
                   :model-value="String(variable.defaultValue ?? '')"
@@ -823,6 +852,7 @@ import {
   X,
   Plus,
   List,
+  CalendarIcon,
 } from "lucide-vue-next";
 import {
   HoverCard,
@@ -874,6 +904,7 @@ import {
 } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { SingleDatePicker } from "@/components/date-time-picker";
 
 import {
   initMonacoSetup,
@@ -935,7 +966,6 @@ function detectAutocompleteState(text: string): { state: AutocompleteState; key:
   return { state: AutocompleteState.INITIAL, key: '', value: '' };
 }
 import {
-  validateSQLWithDetails,
   SQL_KEYWORDS,
 } from "@/utils/clickhouse-sql";
 import { storeToRefs } from 'pinia';
@@ -1062,14 +1092,12 @@ const currentPlaceholder = computed(() => {
 const editorHeight = computed(() => {
   const content = editorContent.value || "";
   const lines = (content.match(/\n/g) || []).length + 1;
-  const baseLineHeight = 21; // Match monaco options
-  const padding = 16; // Match monaco options (top + bottom)
+  const baseLineHeight = 21;
+  const padding = 16;
   const minHeight = props.activeMode === "logchefql" ? 45 : 90;
-  // Calculate height based on lines, ensuring minHeight is respected
-  // Add a small buffer for better spacing, especially for single line
-  const calculatedHeight =
-    padding + lines * baseLineHeight + (lines > 1 ? 0 : 4);
-  return Math.max(minHeight, calculatedHeight);
+  const maxHeight = 300;
+  const calculatedHeight = padding + lines * baseLineHeight + (lines > 1 ? 0 : 4);
+  return Math.min(maxHeight, Math.max(minHeight, calculatedHeight));
 });
 
 // Reactive Monaco options (base + dynamic updates)
@@ -1566,12 +1594,8 @@ const submitQuery = async () => {
           console.warn("LogchefQL validation API error:", validationErr);
           isValid = true;
         }
-      } else {
-        const validation = validateSQLWithDetails(queryForValidation);
-        isValid = validation.valid;
-        console.log("Invalid SQL syntax. : " + isValid);
-        if (!isValid) validationError.value = validation.error || "Invalid SQL syntax.";
       }
+      // SQL mode: skip client-side validation, let backend (ClickHouse) handle it
     }
 
     if (!isValid) return;
@@ -2245,12 +2269,23 @@ const updateVariableType = (variable: VariableSetting) => {
   switch (variable.type) {
     case 'text':
       variable.value = '';
+      variable.inputType = 'input';
       break;
     case 'number':
       variable.value = 0;
+      variable.inputType = 'input';
       break;
     case 'date':
-      variable.value = new Date().toISOString();
+      // Use local datetime format instead of UTC ISO8601
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const seconds = String(now.getSeconds()).padStart(2, '0');
+      variable.value = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+      variable.inputType = 'datepicker';
       break;
   }
 
@@ -2339,7 +2374,6 @@ const getDefaultMultiSelectCount = (variable: VariableSetting): number => {
 // Determine input type for a given variable type
 const inputTypeFor = (type: string) => {
   if (type === 'number') return 'number';
-  if (type === 'date') return 'datetime-local';
   return 'text';
 };
 
@@ -2349,7 +2383,7 @@ const getPlaceholderForType = (type: string) => {
     case 'number':
       return 'Enter a number...';
     case 'date':
-      return 'Select date and time...';
+      return '2026-01-28 14:30:00';
     case 'text':
     default:
       return 'Enter text value...';
@@ -2379,10 +2413,15 @@ const formatVariableValue = (variable: VariableSetting) => {
       if (isNaN(date.getTime())) {
         return `Date: ${variable.value}`;
       }
-      const yyyy = date.getFullYear();
-      const mm = String(date.getMonth() + 1).padStart(2, '0');
-      const dd = String(date.getDate()).padStart(2, '0');
-      return `Date: ${yyyy}-${mm}-${dd}`;
+      return date.toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
     case 'text':
     default:
       const value = String(variable.value);

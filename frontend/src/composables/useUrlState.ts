@@ -139,7 +139,19 @@ export function useUrlState(): UrlStateReturn {
       }
 
       if (teamsStore.teams.length === 0) {
-        error.value = 'No teams available or accessible.';
+        // Check if we got an error from the API (e.g., 500) vs genuinely no teams
+        if (teamsStore.error) {
+          const apiError = teamsStore.error;
+          if (apiError.message?.includes('500') || apiError.error_type === 'ServerError') {
+            error.value = 'Unable to load teams. The server may be experiencing issues.';
+          } else if (apiError.error_type === 'AuthenticationError') {
+            error.value = 'Please log in to access teams.';
+          } else {
+            error.value = apiError.message || 'Failed to load teams.';
+          }
+        } else {
+          error.value = 'You don\'t have access to any teams yet. Contact your administrator.';
+        }
         state.value = 'error';
         return;
       }
@@ -179,8 +191,10 @@ export function useUrlState(): UrlStateReturn {
         pendingQueryResolve.value = true;
 
         try {
-          const teamId = teamsStore.currentTeamId;
-          const sourceId = exploreStore.sourceId;
+          // Use team/source from URL params, not from store state
+          // The stores might not be updated yet or might have different values
+          const teamId = params.team ? parseInt(params.team, 10) : teamsStore.currentTeamId;
+          const sourceId = params.source ? parseInt(params.source, 10) : exploreStore.sourceId;
 
           if (teamId && sourceId) {
             const response = await savedQueriesApi.resolveQuery(

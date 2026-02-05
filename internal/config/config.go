@@ -22,6 +22,13 @@ type Config struct {
 	Logging    LoggingConfig    `koanf:"logging"`
 	AI         AIConfig         `koanf:"ai"`
 	Alerts     AlertsConfig     `koanf:"alerts"`
+	Query      QueryConfig      `koanf:"query"`
+}
+
+// QueryConfig contains settings for query execution
+type QueryConfig struct {
+	// MaxLimit caps any LIMIT clause to prevent excessive result sets (default: 1000000)
+	MaxLimit int `koanf:"max_limit"`
 }
 
 // ServerConfig contains HTTP server settings
@@ -125,6 +132,8 @@ const (
 	defaultAuthSessionDuration       = 8 * time.Hour
 	defaultAuthMaxConcurrentSessions = 1
 	defaultAuthDefaultTokenExpiry    = 2160 * time.Hour
+
+	defaultQueryMaxLimit = 1000000
 )
 
 var defaultOIDCScopes = []string{"openid", "email", "profile"}
@@ -254,5 +263,9 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) {
 	}
 	if !k.Exists("auth.default_token_expiry") {
 		cfg.Auth.DefaultTokenExpiry = defaultAuthDefaultTokenExpiry
+	}
+
+	if !k.Exists("query.max_limit") {
+		cfg.Query.MaxLimit = defaultQueryMaxLimit
 	}
 }

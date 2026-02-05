@@ -14,7 +14,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Plus, Trash2, Copy } from 'lucide-vue-next'
+import { Plus, Trash2, Copy, Pencil } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { type Source } from '@/api/sources'
 import {
@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { useSourcesStore } from '@/stores/sources'
+import SourceSparkline from '@/components/visualizations/SourceSparkline.vue'
 
 const router = useRouter()
 // This route is only accessible by admins
@@ -56,8 +57,18 @@ const handleDuplicate = (source: Source) => {
     router.push({ name: 'NewSource', query: { duplicateFrom: source.id } })
 }
 
+const handleEdit = (source: Source) => {
+    router.push({ name: 'EditSource', params: { sourceId: source.id } })
+}
+
 const retryLoading = async () => {
     await loadSources()
+}
+
+const fetchSourceIngestionStats = async () => {
+    await Promise.all(
+        sourcesStore.sources.map((source) => sourcesStore.getSourceStats(source.id))
+    )
 }
 
 // Load sources for admin view
@@ -84,6 +95,7 @@ const confirmDelete = async () => {
 onMounted(async () => {
     // Load admin sources
     await loadSources()
+    await fetchSourceIngestionStats()
 })
 
 // Import formatDate from utils
@@ -125,6 +137,7 @@ import { formatDate } from '@/utils/format'
                         <TableHeader>
                             <TableRow>
                                 <TableHead class="w-[200px]">Source Name</TableHead>
+                                <TableHead class="w-[200px]">Ingestion (24h)</TableHead>
                                 <TableHead class="w-[150px]">Table Auto Created</TableHead>
                                 <TableHead class="w-[150px]">Timestamp Column</TableHead>
                                 <TableHead class="w-[300px]">Connection</TableHead>
@@ -142,6 +155,18 @@ import { formatDate } from '@/utils/format'
                                     </a>
                                     <div v-if="source.description" class="text-sm text-muted-foreground">
                                         {{ source.description }}
+                                    </div>
+                                </TableCell>
+                                <TableCell>
+                                    <div class="space-y-1 min-w-[180px]">
+                                        <div class="text-xs text-muted-foreground">
+                                            {{ sourcesStore.getSourceStatsById(source.id)?.ingestion_stats?.rows_24h?.toLocaleString() || '0' }} rows
+                                        </div>
+                                        <SourceSparkline
+                                            v-if="sourcesStore.getSourceStatsById(source.id)?.ingestion_stats"
+                                            :data="sourcesStore.getSourceStatsById(source.id)?.ingestion_stats?.hourly_buckets || []"
+                                            :height="36"
+                                        />
                                     </div>
                                 </TableCell>
                                 <TableCell>
@@ -179,6 +204,10 @@ import { formatDate } from '@/utils/format'
                                 <TableCell>{{ formatDate(source.created_at) }}</TableCell>
                                 <TableCell class="text-right">
                                     <div class="flex items-center justify-end gap-2">
+                                        <Button variant="outline" size="icon" @click="handleEdit(source)"
+                                                title="Edit source">
+                                            <Pencil class="h-4 w-4" />
+                                        </Button>
                                         <Button variant="outline" size="icon" @click="handleDuplicate(source)"
                                                 title="Duplicate source">
                                             <Copy class="h-4 w-4" />

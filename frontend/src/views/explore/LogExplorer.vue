@@ -7,6 +7,7 @@ import {
   onBeforeUnmount,
   nextTick,
 } from "vue";
+import { storeToRefs } from "pinia";
 import { useRouter, useRoute } from "vue-router";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/composables/useToast";
@@ -15,6 +16,7 @@ import { useExploreStore } from "@/stores/explore";
 import { useTeamsStore } from "@/stores/teams";
 import { useSourcesStore } from "@/stores/sources";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
+import { usePreferencesStore } from "@/stores/preferences";
 import { FieldSideBar } from "@/components/field-sidebar";
 import { getErrorMessage } from "@/api/types";
 import DataTable from "./table/data-table.vue";
@@ -51,6 +53,8 @@ const exploreStore = useExploreStore();
 const teamsStore = useTeamsStore();
 const sourcesStore = useSourcesStore();
 const savedQueriesStore = useSavedQueriesStore();
+const preferencesStore = usePreferencesStore();
+const { preferences } = storeToRefs(preferencesStore);
 const { toast } = useToast();
 
 const urlState = useUrlState();
@@ -170,9 +174,12 @@ const lastParsedQuery = ref<{
 
 // Basic state
 // Sidebar defaults to open, but respects user's saved preference
-const showFieldsPanel = ref(
-  localStorage.getItem('logchef_fields_panel') !== 'closed'
-);
+const showFieldsPanel = computed({
+  get: () => preferences.value.fields_panel_open,
+  set: (value: boolean) => {
+    preferencesStore.updatePreferences({ fields_panel_open: value });
+  },
+});
 const queryEditorRef = ref<ComponentPublicInstance<{
   focus: (revealLastPosition?: boolean) => void;
   code?: { value: string };
@@ -189,34 +196,29 @@ const executingQueryId = ref<string | null>(null);
 const lastQueryTime = ref<number>(0);
 
 // Display related refs
-const displayTimezone = computed(() =>
-  localStorage.getItem("logchef_timezone") === "utc" ? "utc" : "local"
-);
+const displayTimezone = computed(() => preferences.value.timezone);
 
 // Display mode for table vs compact view (table is default)
-const storedDisplayMode = localStorage.getItem("logchef_display_mode");
-const displayMode = ref<'table' | 'compact'>(
-  storedDisplayMode === 'compact' ? 'compact' : 'table'
-);
-
-// Watch display mode changes and persist to localStorage
-watch(displayMode, (newMode) => {
-  localStorage.setItem("logchef_display_mode", newMode);
-}, { immediate: false });
-
-// Persist fields panel preference
-watch(showFieldsPanel, (isOpen) => {
-  localStorage.setItem('logchef_fields_panel', isOpen ? 'open' : 'closed');
-}, { immediate: false });
+const displayMode = computed({
+  get: () => preferences.value.display_mode,
+  set: (value: 'table' | 'compact') => {
+    preferencesStore.updatePreferences({ display_mode: value });
+  },
+});
 
 // UI state computed properties
 const showLoadingState = computed(
   () => isInitializing.value && !initializationError.value
 );
 
+const isInitialQueryPending = computed(() => {
+  return canExecuteQuery.value && !exploreStore.hasExecutedQuery && !isExecutingQuery.value;
+});
+
 const showNoTeamsState = computed(
   () =>
     !isInitializing.value &&
+    !initializationError.value &&
     (!availableTeams.value || availableTeams.value.length === 0)
 );
 
@@ -1006,15 +1008,51 @@ onBeforeUnmount(() => {
         <p class="text-muted-foreground animate-pulse">Loading Explorer...</p>
       </div>
 
+      <!-- Initialization Error State -->
+      <div v-else-if="initializationError"
+        class="flex flex-col items-center justify-center h-[calc(100vh-12rem)] gap-4 text-center px-4">
+        <div class="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+            class="text-muted-foreground">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+        </div>
+        <h2 class="text-xl font-semibold">Unable to Load Explorer</h2>
+        <p class="text-muted-foreground max-w-md">{{ initializationError }}</p>
+        <div class="flex gap-3">
+          <Button variant="outline" @click="urlState.initialize()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2">
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+              <path d="M3 3v5h5"></path>
+              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+              <path d="M16 21h5v-5"></path>
+            </svg>
+            Retry
+          </Button>
+        </div>
+      </div>
+
       <!-- No Teams State -->
       <div v-else-if="showNoTeamsState"
-        class="flex flex-col items-center justify-center h-[calc(100vh-12rem)] gap-4 text-center">
-        <h2 class="text-2xl font-semibold">No Teams Available</h2>
+        class="flex flex-col items-center justify-center h-[calc(100vh-12rem)] gap-4 text-center px-4">
+        <div class="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+            class="text-muted-foreground">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+        </div>
+        <h2 class="text-xl font-semibold">No Teams Available</h2>
         <p class="text-muted-foreground max-w-md">
-          You need to be part of a team to explore logs. Contact your
-          administrator.
+          You need to be part of a team to explore logs. Contact your administrator to get access.
         </p>
-        <Button variant="outline" @click="router.push({ name: 'LogExplorer' })">Go to Dashboard</Button>
       </div>
 
       <!-- No Sources State (Team Selected) -->
@@ -1085,13 +1123,6 @@ onBeforeUnmount(() => {
 
       <!-- Main Explorer View -->
       <div v-else class="flex flex-col h-screen overflow-hidden">
-        <!-- URL Error -->
-        <div v-if="initializationError"
-          class="absolute top-0 left-0 right-0 bg-destructive/15 text-destructive px-4 py-2 z-10 flex items-center justify-between">
-          <span class="text-sm">{{ initializationError }}</span>
-          <Button variant="ghost" size="sm" @click="initializationError = null" class="h-7 px-2">Dismiss</Button>
-        </div>
-
         <!-- Streamlined Top Bar -->
         <ExploreTopBar ref="topBarRef" />
 
@@ -1258,7 +1289,7 @@ onBeforeUnmount(() => {
                 :availableFields="availableFields"
                 :displayMode="displayMode"
                 :logsCount="exploreStore.logs?.length || 0"
-                :isLoading="isExecutingQuery"
+                :isLoading="isExecutingQuery || isInitialQueryPending"
                 @toggle-histogram="toggleHistogramVisibility"
                 @update:displayMode="displayMode = $event"
                 @export="handleExport"
@@ -1284,7 +1315,7 @@ onBeforeUnmount(() => {
               <!-- Results Area -->
               <div class="flex-1 overflow-hidden relative bg-background">
                 <!-- Results Table -->
-                <template v-if="exploreStore.logs?.length > 0 || isExecutingQuery">
+                <template v-if="exploreStore.logs?.length > 0 || isExecutingQuery || isInitialQueryPending">
                   <!-- Render DataTable or CompactLogList based on display mode -->
                   <component
                     v-if="exploreStore.columns?.length > 0"
@@ -1293,7 +1324,7 @@ onBeforeUnmount(() => {
                     :columns="exploreStore.columns as any"
                     :data="exploreStore.logs"
                     :stats="exploreStore.queryStats"
-                    :is-loading="isExecutingQuery"
+                    :is-loading="isExecutingQuery || isInitialQueryPending"
                     :source-id="String(exploreStore.sourceId)"
                     :team-id="teamsStore.currentTeamId"
                     :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
@@ -1308,7 +1339,7 @@ onBeforeUnmount(() => {
                   />
 
                   <!-- Loading placeholder -->
-                  <div v-else-if="isExecutingQuery"
+                  <div v-else-if="isExecutingQuery || isInitialQueryPending"
                     class="absolute inset-0 flex items-center justify-center bg-background/70 z-10">
                     <p class="text-muted-foreground animate-pulse">
                       Loading results...
@@ -1317,9 +1348,8 @@ onBeforeUnmount(() => {
                 </template>
 
                 <!-- Empty Results State Component -->
-                <EmptyResultsState v-else :has-executed-query="!!exploreStore.lastExecutedState &&
-                  !exploreStore.logs?.length
-                  " :can-execute-query="canExecuteQuery" @run-default-query="handleQueryExecution('default-query')"
+                <EmptyResultsState v-else :has-executed-query="exploreStore.hasExecutedQuery"
+                  :can-execute-query="canExecuteQuery" @run-default-query="handleQueryExecution('default-query')"
                   @open-date-picker="openDatePicker" />
               </div>
             </div>

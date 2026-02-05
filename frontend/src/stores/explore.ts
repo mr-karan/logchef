@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, watch } from "vue";
 import { exploreApi } from "@/api/explore";
 import { logchefqlApi } from "@/api/logchefql";
+import { isCanceledError } from "@/api/error-handler";
 import type {
   ColumnInfo,
   QueryStats,
@@ -20,6 +21,7 @@ import { useContextStore } from "@/stores/context";
 import { useBaseStore } from "./base";
 import { useExploreHistogramStore } from "./exploreHistogram";
 import { useExploreAIStore } from "./exploreAI";
+import { usePreferencesStore } from "@/stores/preferences";
 import { parseRelativeTimeString, timestampToCalendarDateTime, calendarDateTimeToTimestamp } from "@/utils/time";
 import { SqlManager } from '@/services/SqlManager';
 import { type TimeRange } from '@/types/query';
@@ -69,6 +71,7 @@ export interface ExploreState {
     sourceId: number;
   };
   lastExecutionTimestamp: number | null;
+  hasExecutedQuery: boolean;
   selectedTimezoneIdentifier: string | null;
   generatedDisplaySql: string | null;
   queryTimeout: number;
@@ -85,6 +88,7 @@ const DEFAULT_QUERY_STATS: QueryStats = {
 
 export const useExploreStore = defineStore("explore", () => {
   const contextStore = useContextStore();
+  const preferencesStore = usePreferencesStore();
   const histogramStore = useExploreHistogramStore();
   const aiStore = useExploreAIStore();
   
@@ -100,6 +104,7 @@ export const useExploreStore = defineStore("explore", () => {
     logchefqlCode: "",
     activeMode: "logchefql",
     lastExecutionTimestamp: null,
+    hasExecutedQuery: false,
     selectedQueryId: null,
     activeSavedQueryName: null,
     savedQuerySnapshot: null,
@@ -322,7 +327,7 @@ export const useExploreStore = defineStore("explore", () => {
 
   function getTimezoneIdentifier(): string {
     return state.data.value.selectedTimezoneIdentifier ||
-      (localStorage.getItem('logchef_timezone') === 'utc' ? 'UTC' : getLocalTimeZone());
+      (preferencesStore.preferences.timezone === 'utc' ? 'UTC' : getLocalTimeZone());
   }
 
   function setTimezoneIdentifier(timezone: string) {
@@ -340,6 +345,7 @@ export const useExploreStore = defineStore("explore", () => {
     
     state.data.value.lastExecutionTimestamp = null;
     state.data.value.lastExecutedState = undefined;
+    state.data.value.hasExecutedQuery = false;
 
     if (state.data.value.activeMode === 'sql') {
       state.data.value.rawSql = '';
@@ -365,7 +371,7 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function setLimit(newLimit: number) {
-    if (newLimit > 0 && newLimit <= 10000) {
+    if (newLimit > 0) {
       state.data.value.limit = newLimit;
       clearSavedQueryIfDirty();
     }
@@ -577,6 +583,7 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.selectedQueryId = null;
     state.data.value.activeSavedQueryName = null;
     state.data.value.savedQuerySnapshot = null;
+    state.data.value.hasExecutedQuery = false;
   }
 
   function resetQueryToDefaults() {
@@ -702,13 +709,17 @@ export const useExploreStore = defineStore("explore", () => {
         }, operationKey);
       }
 
+      // Mark that a query execution attempt has started (used for initial loading UX)
+      state.data.value.hasExecutedQuery = true;
+
       if (state.data.value.activeMode === 'logchefql') {
         try {
-          const { convertVariables } = useVariables();
-          const queryWithVariables = convertVariables(state.data.value.logchefqlCode);
+          const { getVariablesForApi } = useVariables();
+          const variables = getVariablesForApi();
           
           const timeRange = state.data.value.timeRange as TimeRange;
           const timezone = state.data.value.selectedTimezoneIdentifier || getTimezoneIdentifier();
+          const queryTimeout = state.data.value.queryTimeout;
           
           const formatDateTime = (dt: any) => {
             if (!dt) return '';
@@ -722,19 +733,20 @@ export const useExploreStore = defineStore("explore", () => {
           };
 
           const queryResponse = await logchefqlApi.query(currentTeamId, sourceId.value, {
-            query: queryWithVariables,
+            query: state.data.value.logchefqlCode,
             start_time: formatDateTime(timeRange.start),
             end_time: formatDateTime(timeRange.end),
             timezone: timezone,
             limit: state.data.value.limit,
-            query_timeout: state.data.value.queryTimeout
-          });
+            query_timeout: queryTimeout,
+            variables: variables.length > 0 ? variables : undefined
+          }, { signal: abortController.signal, timeout: queryTimeout });
 
           if (queryResponse.data) {
             state.data.value.logs = queryResponse.data.logs || [];
             state.data.value.columns = queryResponse.data.columns || [];
             state.data.value.queryStats = queryResponse.data.stats || DEFAULT_QUERY_STATS;
-            
+
             if (queryResponse.data.query_id) {
               state.data.value.currentQueryId = queryResponse.data.query_id;
             }
@@ -768,18 +780,23 @@ export const useExploreStore = defineStore("explore", () => {
 
             return { success: true, data: queryResponse.data, error: null };
           } else {
-            return state.handleError({
-              status: "error",
-              message: "Query execution failed",
-              error_type: "DatabaseError"
-            }, operationKey);
+            // Set error without toast - QueryError component displays it inline
+            const apiError = { status: "error" as const, message: "Query execution failed", error_type: "DatabaseError" };
+            state.error.value = apiError;
+            return { success: false, data: null, error: apiError };
           }
         } catch (error: any) {
-          return state.handleError({
-            status: "error",
-            message: `LogchefQL query error: ${error.message}`,
-            error_type: "DatabaseError"
-          }, operationKey);
+          if (isCanceledError(error) || error?.name === 'AbortError' || error?.name === 'CanceledError') {
+            return { success: false, data: null, error: { message: 'Request canceled', error_type: 'CanceledError' } };
+          }
+          // Set error without toast - QueryError component displays it inline
+          const apiError = { status: "error" as const, message: `LogchefQL query error: ${error.message}`, error_type: "DatabaseError" };
+          state.error.value = apiError;
+          return { success: false, data: null, error: apiError };
+        } finally {
+          state.data.value.currentQueryAbortController = null;
+          state.data.value.currentQueryId = null;
+          state.data.value.isCancellingQuery = false;
         }
       }
 
@@ -835,6 +852,7 @@ export const useExploreStore = defineStore("explore", () => {
       try {
         response = await state.callApi({
           apiCall: async () => exploreApi.getLogs(sourceId.value, params, currentTeamId, abortController.signal),
+          showToast: false, // Errors shown inline via QueryError component
           onSuccess: (data: QuerySuccessResponse | null) => {
             if (data && (data.data || data.logs)) {
               state.data.value.logs = data.data || data.logs || [];
@@ -1003,8 +1021,11 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   // Histogram delegation
-  function setGroupByField(field: string | null) {
+  async function setGroupByField(field: string | null) {
     histogramStore.setGroupByField(field);
+    if (isHistogramEligible.value && state.data.value.hasExecutedQuery) {
+      await fetchHistogramData();
+    }
   }
 
   async function fetchHistogramData(granularity?: string) {
@@ -1067,11 +1088,9 @@ export const useExploreStore = defineStore("explore", () => {
       
       const sourceInTeam = sourcesStore.teamSources.some(s => s.id === newDetails.id);
       if (!sourceInTeam) {
-        console.log(`ExploreStore: Source ${newDetails.id} not in current team's sources, skipping auto-execute`);
         return;
       }
       
-      console.log(`ExploreStore: Auto-executing query for source ${newDetails.id}`);
       lastAutoExecKey = execKey;
       
       executeQuery().catch(err => {
@@ -1098,6 +1117,7 @@ export const useExploreStore = defineStore("explore", () => {
     queryId: computed(() => state.data.value.queryId),
     lastExecutedState: computed(() => state.data.value.lastExecutedState),
     lastExecutionTimestamp: computed(() => state.data.value.lastExecutionTimestamp),
+    hasExecutedQuery: computed(() => state.data.value.hasExecutedQuery),
     selectedQueryId: computed(() => state.data.value.selectedQueryId),
     activeSavedQueryName: computed(() => state.data.value.activeSavedQueryName),
     selectedTimezoneIdentifier: computed(() => state.data.value.selectedTimezoneIdentifier),

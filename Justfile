@@ -138,6 +138,9 @@ setup-docs-domain:
 dev-docker:
     cd dev && docker compose up
 
+dev-docker-detach:
+    cd dev && docker compose up -d
+
 dev-init-tables:
     @echo "Creating ClickHouse tables..."
     docker exec -i dev-clickhouse-local-1 clickhouse-client -n < dev/init-clickhouse.sql
@@ -145,11 +148,46 @@ dev-init-tables:
 dev-seed: dev-init-tables
     cd dev && ./seed.sh
 
+dev-setup:
+    #!/usr/bin/env bash
+    set -e
+    echo "=== LogChef Dev Setup ==="
+    echo "Starting infrastructure..."
+    cd dev && docker compose up -d
+    echo "Waiting for ClickHouse..."
+    for i in {1..30}; do
+      if docker exec dev-clickhouse-local-1 clickhouse-client --query "SELECT 1" > /dev/null 2>&1; then
+        echo "ClickHouse ready"
+        break
+      fi
+      sleep 1
+    done
+    cd ..
+    just dev-seed
+    echo ""
+    echo "=== Setup Complete ==="
+    echo "Run: just run-backend   (terminal 1)"
+    echo "Run: just run-frontend  (terminal 2)"
+    echo "Open: http://localhost:5173"
+
+dev-reset:
+    #!/usr/bin/env bash
+    set -e
+    echo "=== LogChef Dev Reset ==="
+    echo "Truncating ClickHouse tables..."
+    docker exec dev-clickhouse-local-1 clickhouse-client --query "TRUNCATE TABLE IF EXISTS default.http"
+    docker exec dev-clickhouse-local-1 clickhouse-client --query "TRUNCATE TABLE IF EXISTS default.syslogs"
+    echo "Resetting SQLite data..."
+    rm -f local.db local.db-shm local.db-wal
+    echo "Re-seeding requires backend to create DB first."
+    echo "Run: just run-backend (briefly, then Ctrl+C)"
+    echo "Then: just dev-seed"
+
 dev-clean:
     @echo "Stopping containers, removing volumes, and deleting local database..."
     cd dev && docker compose down -v
     rm -f local.db local.db-shm local.db-wal
-    @echo "Clean complete. Run 'just dev-docker' then 'just dev-seed' to start fresh."
+    @echo "Clean complete. Run 'just dev-setup' to start fresh."
 
 dev-ingest-logs duration="60":
     #!/usr/bin/env bash

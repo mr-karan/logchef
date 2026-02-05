@@ -10,7 +10,7 @@ export interface VariableState {
     name: string;
     type: 'text' | 'number' | 'date';
     label: string;
-    inputType: 'input' | 'dropdown' | 'multiselect' | 'search';
+    inputType: 'input' | 'dropdown' | 'multiselect' | 'search' | 'datepicker';
     value: string | number | string[];
     defaultValue?: string | number | string[];
     isOptional?: boolean;

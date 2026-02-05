@@ -217,6 +217,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 	params := clickhouse.LogQueryParams{
 		RawSQL:       processedSQL,
 		Limit:        req.Limit,
+		MaxLimit:     s.config.Query.MaxLimit,
 		QueryTimeout: req.QueryTimeout, // Always non-nil now
 	}
 	// StartTime, EndTime, and Timezone are no longer passed here;

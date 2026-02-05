@@ -16,6 +16,7 @@ import {
     type ColumnResizeMode,
 } from '@tanstack/vue-table'
 import { ref, computed, onMounted, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import { GripVertical, Copy, Equal, EqualNot, Clock, ChevronUp, ChevronDown } from 'lucide-vue-next'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
@@ -28,6 +29,7 @@ import { useExploreStore } from '@/stores/explore'
 import type { Source } from '@/api/sources'
 import { useSourcesStore } from '@/stores/sources'
 import TableControls from './TableControls.vue'
+import { usePreferencesStore } from '@/stores/preferences'
 
 interface Props {
     columns: ColumnDef<Record<string, any>>[]
@@ -95,10 +97,24 @@ const globalFilter = ref('')
 const columnSizing = ref<ColumnSizingState>({})
 const columnResizeMode = ref<ColumnResizeMode>('onChange')
 const isResizing = ref(false)
-const displayTimezone = ref<'local' | 'utc'>(localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local')
+const preferencesStore = usePreferencesStore()
+const { preferences } = storeToRefs(preferencesStore)
+const displayTimezone = computed({
+    get: () => preferences.value.timezone,
+    set: (value: 'local' | 'utc') => {
+        preferencesStore.updatePreferences({ timezone: value })
+    }
+})
 const columnOrder = ref<string[]>([])
 const draggingColumnId = ref<string | null>(null)
 const dragOverColumnId = ref<string | null>(null)
+
+const enforceTimestampFirst = (order: string[]): string[] => {
+    const tsField = timestampFieldName.value;
+    if (!tsField) return order;
+    if (!order.includes(tsField)) return order;
+    return [tsField, ...order.filter(id => id !== tsField)];
+};
 
 // --- Local Storage State Management ---
 const storageKey = computed(() => {
@@ -150,6 +166,7 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
         const filteredSavedOrder = savedOrder.filter(id => currentColumnIds.includes(id));
         const newColumnIds = currentColumnIds.filter(id => !filteredSavedOrder.includes(id));
         initialOrder = [...filteredSavedOrder, ...newColumnIds];
+        initialOrder = enforceTimestampFirst(initialOrder);
 
         // Process column sizing and visibility from saved state
         const savedSizing = savedState.columnSizing || {};
@@ -179,6 +196,7 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
         } else {
             initialOrder = currentColumnIds; // Timestamp column doesn't exist, use default order
         }
+        initialOrder = enforceTimestampFirst(initialOrder);
 
         // Set default sizing and visibility for all current columns
         currentColumnIds.forEach(id => {
@@ -245,10 +263,7 @@ watch([columnOrder, columnSizing, columnVisibility], () => {
     }
 }, { deep: true });
 
-// Save timezone preference whenever it changes
-watch(displayTimezone, (newValue) => {
-    localStorage.setItem('logchef_timezone', newValue)
-})
+// Save timezone preference via preferences store
 
 // Helper function for cell handling
 function formatCellValue(value: any): string {
@@ -443,7 +458,12 @@ const table = useVueTable({
     onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
     onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
     onColumnSizingChange: updaterOrValue => valueUpdater(updaterOrValue, columnSizing),
-    onColumnOrderChange: updaterOrValue => valueUpdater(updaterOrValue, columnOrder),
+    onColumnOrderChange: updaterOrValue => {
+        const nextValue = typeof updaterOrValue === 'function'
+            ? updaterOrValue(columnOrder.value)
+            : updaterOrValue;
+        columnOrder.value = enforceTimestampFirst(nextValue);
+    },
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
@@ -511,8 +531,9 @@ onMounted(() => {
     if (!tableContainerRef.value) return
 
     const resizeObserver = new ResizeObserver(() => {
-        // Force a layout update when container size changes
-        table.setColumnSizing({ ...columnSizing.value })
+        // Track container width for flex-grow calculations
+        // Actual column resizing is handled via CSS flex on the last column
+        // This avoids mutating columnSizing state which would persist unwanted changes
     })
 
     resizeObserver.observe(tableContainerRef.value)
@@ -571,6 +592,10 @@ function arrayMove<T>(arr: T[], fromIndex: number, toIndex: number): T[] {
 }
 
 const onDragStart = (event: DragEvent, columnId: string) => {
+    if (columnId === timestampFieldName.value) {
+        event.preventDefault();
+        return;
+    }
     draggingColumnId.value = columnId;
     if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = 'move';
@@ -638,6 +663,14 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
     emit('drill-down', { column: columnName, value, operator });
 };
 
+// Helper to check if a header/cell is the last visible column (for flex-grow)
+const isLastVisibleColumn = (columnId: string): boolean => {
+    if (!table) return false;
+    const visibleColumns = table.getVisibleLeafColumns();
+    if (visibleColumns.length === 0) return false;
+    return visibleColumns[visibleColumns.length - 1].id === columnId;
+};
+
 </script>
 
 <template>
@@ -677,17 +710,20 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
                                         getColumnType(header.column) === 'severity' ? 'font-semibold' : '',
                                         header.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
                                         header.column.id === draggingColumnId ? 'opacity-50 bg-primary/10' : '',
-                                        header.column.id === dragOverColumnId ? 'border-l-2 border-l-primary' : ''
+                                        header.column.id === dragOverColumnId ? 'border-l-2 border-l-primary' : '',
+                                        isLastVisibleColumn(header.column.id) ? 'last-visible-column' : ''
                                     ]" :style="{
-                                        width: `${header.getSize()}px`,
+                                        width: isLastVisibleColumn(header.column.id) ? undefined : `${header.getSize()}px`,
                                         minWidth: `${header.column.columnDef.minSize ?? defaultColumn.minSize}px`,
-                                    }" draggable="true" @dragstart="onDragStart($event, header.column.id)"
+                                        flex: isLastVisibleColumn(header.column.id) ? '1 1 auto' : undefined,
+                                    }" :draggable="header.column.id !== timestampFieldName"
+                                    @dragstart="onDragStart($event, header.column.id)"
                                     @dragenter="onDragEnter($event, header.column.id)" @dragover="onDragOver($event)"
                                     @dragleave="onDragLeave($event, header.column.id)"
                                     @drop="onDrop($event, header.column.id)" @dragend="onDragEnd">
                                     <div class="flex items-center h-full px-3">
                                         <!-- Drag Handle -->
-                                        <span
+                                        <span v-if="header.column.id !== timestampFieldName"
                                             class="flex items-center justify-center flex-shrink-0 w-5 h-full mr-1 cursor-grab text-muted-foreground/50 group-hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                                             title="Drag to reorder column">
                                             <GripVertical class="h-4 w-4" />
@@ -743,9 +779,11 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
                                         :class="[
                                             cell.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
                                             copiedCellId === cell.id ? 'bg-emerald-500/10' : '',
+                                            isLastVisibleColumn(cell.column.id) ? 'last-visible-column' : '',
                                         ]" :style="{
-                                            width: `${cell.column.getSize()}px`,
+                                            width: isLastVisibleColumn(cell.column.id) ? undefined : `${cell.column.getSize()}px`,
                                             minWidth: `${cell.column.columnDef.minSize ?? defaultColumn.minSize}px`,
+                                            flex: isLastVisibleColumn(cell.column.id) ? '1 1 auto' : undefined,
                                         }">
                                         <div class="cell-content-wrapper w-full overflow-hidden whitespace-nowrap text-ellipsis"
                                             :title="formatCellValue(cell.getValue())">
@@ -939,6 +977,17 @@ const handleDrillDown = (columnName: string, value: any, operator: string = '=')
 .table-fixed tbody tr {
     height: 32px;
     max-height: 32px;
+}
+
+/* Allow expanded JSON rows to grow naturally */
+.table-fixed tbody tr.expanded-json-row {
+    height: auto;
+    max-height: none;
+}
+
+/* Expanded row content should wrap normally */
+.table-fixed tbody tr.expanded-json-row td {
+    white-space: normal !important;
 }
 
 /* Make table row alternating colors more visible */
@@ -1453,5 +1502,40 @@ td>.flex>.cell-content :deep(.timestamp-separator) {
     background-color: hsl(var(--highlight, 60 90% 55%));
     color: hsl(var(--highlight-foreground, 0 0% 0%));
     box-shadow: 0 0 0 1px hsl(var(--highlight, 60 90% 55%) / 0.7);
+}
+
+/* Last visible column flex-grow to fill available space when sidebar closes */
+.table-fixed th.last-visible-column,
+.table-fixed td.last-visible-column {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: var(--column-min-width, 50px);
+}
+
+/* Ensure the table row uses flexbox for columns to support flex-grow */
+/* Use flex rows for consistent column sizing and fill behavior */
+.table-fixed thead tr,
+.table-fixed tbody tr {
+    display: flex;
+    width: 100%;
+}
+
+/* Expanded JSON row should stretch full width despite flex layout */
+.table-fixed tbody tr.expanded-json-row td {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    border-right: none;
+}
+
+/* Ensure all th and td in flex rows behave correctly */
+.table-fixed th,
+.table-fixed td {
+    flex-shrink: 0;
+}
+
+.table-fixed th.last-visible-column,
+.table-fixed td.last-visible-column {
+    flex-shrink: 1;
 }
 </style>

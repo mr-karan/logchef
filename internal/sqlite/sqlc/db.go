@@ -135,6 +135,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getUserByEmailStmt, err = db.PrepareContext(ctx, getUserByEmail); err != nil {
 		return nil, fmt.Errorf("error preparing query GetUserByEmail: %w", err)
 	}
+	if q.getUserPreferencesStmt, err = db.PrepareContext(ctx, getUserPreferences); err != nil {
+		return nil, fmt.Errorf("error preparing query GetUserPreferences: %w", err)
+	}
 	if q.insertAlertHistoryStmt, err = db.PrepareContext(ctx, insertAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query InsertAlertHistory: %w", err)
 	}
@@ -239,6 +242,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.upsertSystemSettingStmt, err = db.PrepareContext(ctx, upsertSystemSetting); err != nil {
 		return nil, fmt.Errorf("error preparing query UpsertSystemSetting: %w", err)
+	}
+	if q.upsertUserPreferencesStmt, err = db.PrepareContext(ctx, upsertUserPreferences); err != nil {
+		return nil, fmt.Errorf("error preparing query UpsertUserPreferences: %w", err)
 	}
 	if q.userHasSourceAccessStmt, err = db.PrepareContext(ctx, userHasSourceAccess); err != nil {
 		return nil, fmt.Errorf("error preparing query UserHasSourceAccess: %w", err)
@@ -433,6 +439,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getUserByEmailStmt: %w", cerr)
 		}
 	}
+	if q.getUserPreferencesStmt != nil {
+		if cerr := q.getUserPreferencesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getUserPreferencesStmt: %w", cerr)
+		}
+	}
 	if q.insertAlertHistoryStmt != nil {
 		if cerr := q.insertAlertHistoryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing insertAlertHistoryStmt: %w", cerr)
@@ -608,6 +619,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing upsertSystemSettingStmt: %w", cerr)
 		}
 	}
+	if q.upsertUserPreferencesStmt != nil {
+		if cerr := q.upsertUserPreferencesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing upsertUserPreferencesStmt: %w", cerr)
+		}
+	}
 	if q.userHasSourceAccessStmt != nil {
 		if cerr := q.userHasSourceAccessStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing userHasSourceAccessStmt: %w", cerr)
@@ -689,6 +705,7 @@ type Queries struct {
 	getTeamSourceQueryStmt              *sql.Stmt
 	getUserStmt                         *sql.Stmt
 	getUserByEmailStmt                  *sql.Stmt
+	getUserPreferencesStmt              *sql.Stmt
 	insertAlertHistoryStmt              *sql.Stmt
 	listAPITokensForUserStmt            *sql.Stmt
 	listActiveAlertsDueStmt             *sql.Stmt
@@ -724,6 +741,7 @@ type Queries struct {
 	updateTeamSourceQueryStmt           *sql.Stmt
 	updateUserStmt                      *sql.Stmt
 	upsertSystemSettingStmt             *sql.Stmt
+	upsertUserPreferencesStmt           *sql.Stmt
 	userHasSourceAccessStmt             *sql.Stmt
 }
 
@@ -768,6 +786,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getTeamSourceQueryStmt:              q.getTeamSourceQueryStmt,
 		getUserStmt:                         q.getUserStmt,
 		getUserByEmailStmt:                  q.getUserByEmailStmt,
+		getUserPreferencesStmt:              q.getUserPreferencesStmt,
 		insertAlertHistoryStmt:              q.insertAlertHistoryStmt,
 		listAPITokensForUserStmt:            q.listAPITokensForUserStmt,
 		listActiveAlertsDueStmt:             q.listActiveAlertsDueStmt,
@@ -803,6 +822,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateTeamSourceQueryStmt:           q.updateTeamSourceQueryStmt,
 		updateUserStmt:                      q.updateUserStmt,
 		upsertSystemSettingStmt:             q.upsertSystemSettingStmt,
+		upsertUserPreferencesStmt:           q.upsertUserPreferencesStmt,
 		userHasSourceAccessStmt:             q.userHasSourceAccessStmt,
 	}
 }

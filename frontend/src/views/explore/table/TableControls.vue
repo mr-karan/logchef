@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Download, Timer, Rows4, RefreshCw, Search } from 'lucide-vue-next'
@@ -14,6 +15,7 @@ import {
 import { exportTableData } from './export'
 import type { Table } from '@tanstack/vue-table'
 import type { QueryStats } from '@/api/explore'
+import { usePreferencesStore } from '@/stores/preferences'
 
 interface Props {
   table: Table<any>
@@ -43,10 +45,17 @@ const emit = defineEmits<{
   'update:globalFilter': [value: string]
 }>()
 
+const preferencesStore = usePreferencesStore()
+const { preferences } = storeToRefs(preferencesStore)
+
 // Local state
-const displayTimezone = ref<'local' | 'utc'>(
-  localStorage.getItem('logchef_timezone') === 'utc' ? 'utc' : 'local'
-)
+const displayTimezone = computed({
+  get: () => preferences.value.timezone,
+  set: (value: 'local' | 'utc') => {
+    preferencesStore.updatePreferences({ timezone: value })
+    emit('update:timezone', value)
+  }
+})
 
 const globalFilter = computed({
   get: () => props.table.getState().globalFilter ?? '',
@@ -59,11 +68,7 @@ const globalFilter = computed({
 // Column order state
 const columnOrder = computed(() => props.table.getState().columnOrder)
 
-// Save timezone preference
-watch(displayTimezone, (newValue) => {
-  localStorage.setItem('logchef_timezone', newValue)
-  emit('update:timezone', newValue)
-})
+// Save timezone preference handled via preferences store
 
 // Helper function to format execution time
 function formatExecutionTime(ms: number): string {

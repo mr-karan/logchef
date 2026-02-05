@@ -33,6 +33,9 @@ go.work.sum
 CLAUDE.md
 DEVELOPMENT_GOALS.md
 
+# Sisyphus work tracking (local only)
+.sisyphus/
+
 # Local dev files
 *.db*
 .vscode/

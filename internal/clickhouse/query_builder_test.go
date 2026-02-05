@@ -7,7 +7,7 @@ import (
 
 func TestExtendedQueryBuilder(t *testing.T) {
 	// Extended mode allows any SELECT query - ClickHouse permissions are the security boundary
-	qb := NewExtendedQueryBuilder("mydb.logs")
+	qb := NewExtendedQueryBuilder("mydb.logs", 10000)
 
 	tests := []struct {
 		name    string
@@ -91,7 +91,7 @@ func TestExtendedQueryBuilder(t *testing.T) {
 
 func TestRestrictedQueryBuilder(t *testing.T) {
 	// Restricted mode validates table reference and blocks JOINs
-	qb := NewQueryBuilder("mydb.logs")
+	qb := NewQueryBuilder("mydb.logs", 10000)
 
 	tests := []struct {
 		name    string
@@ -164,7 +164,7 @@ func TestRestrictedQueryBuilder(t *testing.T) {
 }
 
 func TestQueryBuilderLimit(t *testing.T) {
-	qb := NewExtendedQueryBuilder("mydb.logs")
+	qb := NewExtendedQueryBuilder("mydb.logs", 10000)
 
 	tests := []struct {
 		name      string

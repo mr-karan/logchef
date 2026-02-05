@@ -80,6 +80,20 @@ SELECT COUNT(*) FROM users WHERE role = ? AND status = ?;
 -- Delete a user by ID
 DELETE FROM users WHERE id = ?;
 
+-- User Preferences
+
+-- name: GetUserPreferences :one
+-- Get user preferences by user ID
+SELECT * FROM user_preferences WHERE user_id = ?;
+
+-- name: UpsertUserPreferences :exec
+-- Insert or update user preferences
+INSERT INTO user_preferences (user_id, preferences_json, created_at, updated_at)
+VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+ON CONFLICT(user_id) DO UPDATE SET
+    preferences_json = excluded.preferences_json,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now');
+
 -- Sessions
 
 -- name: CreateSession :exec
@@ -482,5 +496,4 @@ ON CONFLICT(key) DO UPDATE SET
 -- name: DeleteSystemSetting :exec
 DELETE FROM system_settings
 WHERE key = ?;
-
 

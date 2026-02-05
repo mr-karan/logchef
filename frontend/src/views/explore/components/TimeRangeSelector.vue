@@ -5,6 +5,7 @@ import { DateTimePicker } from "@/components/date-time-picker";
 import { useTimeRange } from "@/composables/useTimeRange";
 import { useExploreStore } from "@/stores/explore";
 import { useQuery } from "@/composables/useQuery";
+import { useLimitOptions } from "@/composables/useLimitOptions";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,6 +20,7 @@ import { SqlManager } from "@/services/SqlManager";
 const exploreStore = useExploreStore();
 const { timeRange, quickRangeLabelToRelativeTime } = useTimeRange();
 const { isDirty, dirtyReason } = useQuery();
+const { limitOptions } = useLimitOptions();
 
 // Reference to the DateTimePicker component
 const dateTimePickerRef = ref<InstanceType<typeof DateTimePicker> | null>(null);
@@ -233,7 +235,7 @@ defineExpose({
       <DropdownMenuContent align="end">
         <DropdownMenuLabel>Results Limit</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem v-for="limit in [100, 500, 1000, 2000, 5000, 10000]" :key="limit"
+        <DropdownMenuItem v-for="limit in limitOptions" :key="limit"
           @click="handleLimitChange(limit)" :disabled="currentLimit === limit">
           {{ limit.toLocaleString() }} rows
         </DropdownMenuItem>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
+import { storeToRefs } from "pinia";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -20,6 +21,7 @@ import {
   parseDateTime,
 } from "@internationalized/date";
 import { cn } from "@/lib/utils";
+import { usePreferencesStore } from "@/stores/preferences";
 
 interface Props {
   modelValue?: DateRange | null;
@@ -44,9 +46,14 @@ const showToCalendar = ref(false);
 const quickRangeSearch = ref("");
 
 // Timezone state
-const timezonePreference = ref(
-  localStorage.getItem("logchef_timezone") || "local"
-);
+const preferencesStore = usePreferencesStore();
+const { preferences } = storeToRefs(preferencesStore);
+const timezonePreference = computed({
+  get: () => preferences.value.timezone,
+  set: (value: "local" | "utc") => {
+    preferencesStore.updatePreferences({ timezone: value });
+  },
+});
 const currentTimezoneId = computed(() =>
   timezonePreference.value === "local" ? getLocalTimeZone() : "UTC"
 );
@@ -71,6 +78,10 @@ const draftState = ref({
   from: "now-1h",
   to: "now",
 });
+
+const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_TIME_NO_SECONDS_REGEX = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/;
+const DATE_TIME_WITH_SECONDS_REGEX = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/;
 
 // Quick ranges organized by category
 const quickRanges = [
@@ -139,7 +150,6 @@ watch(
 watch(
   () => timezonePreference.value,
   (newValue) => {
-    localStorage.setItem("logchef_timezone", newValue);
     emit("update:timezone", newValue === "local" ? getLocalTimeZone() : "UTC");
   }
 );
@@ -154,6 +164,43 @@ function formatDateTime(date: ZonedDateTime | null | undefined): string {
   } catch (e) {
     return "";
   }
+}
+
+function normalizeAbsoluteInput(value: string, defaultTime = "00:00:00"): string {
+  const trimmed = value.trim();
+
+  if (!trimmed) return trimmed;
+  if (trimmed === "now" || trimmed.startsWith("now-")) return trimmed;
+
+  if (DATE_ONLY_REGEX.test(trimmed)) {
+    return `${trimmed} ${defaultTime}`;
+  }
+
+  if (DATE_TIME_NO_SECONDS_REGEX.test(trimmed)) {
+    return `${trimmed.replace("T", " ")}:00`;
+  }
+
+  if (DATE_TIME_WITH_SECONDS_REGEX.test(trimmed)) {
+    return trimmed.replace("T", " ");
+  }
+
+  return trimmed;
+}
+
+function normalizeDraftInput(type: "from" | "to") {
+  const defaultTime = type === "to" ? "23:59:59" : "00:00:00";
+  const normalized = normalizeAbsoluteInput(draftState.value[type], defaultTime);
+  if (normalized !== draftState.value[type]) {
+    draftState.value[type] = normalized;
+  }
+}
+
+function applyDefaultTime(type: "from" | "to", defaultTime = "00:00:00") {
+  const trimmed = draftState.value[type].trim();
+  const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})(?:[ T].*)?$/);
+  if (!match) return;
+
+  draftState.value[type] = `${match[1]} ${defaultTime}`;
 }
 
 function parseRelativeTime(input: string): ZonedDateTime | null {
@@ -180,16 +227,12 @@ function parseRelativeTime(input: string): ZonedDateTime | null {
   
   // Try to parse as absolute datetime
   try {
-    // Handle "YYYY-MM-DD HH:mm:ss" format
-    const parts = trimmed.split(' ');
-    if (parts.length === 2) {
-      const dateString = `${parts[0]}T${parts[1]}`;
-      const calendarDate = parseDateTime(dateString);
-      return toZoned(calendarDate, currentTimezoneId.value);
-    }
-    // Handle "YYYY-MM-DD" format (assume start of day)
-    if (parts.length === 1 && parts[0].match(/^\d{4}-\d{2}-\d{2}$/)) {
-      const dateString = `${parts[0]}T00:00:00`;
+    // Handle "YYYY-MM-DD", "YYYY-MM-DD HH:mm", or "YYYY-MM-DD HH:mm:ss"
+    const absoluteMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2})(?::(\d{2}))?)?$/);
+    if (absoluteMatch) {
+      const datePart = absoluteMatch[1];
+      const timePart = absoluteMatch[2] ? `${absoluteMatch[2]}:${absoluteMatch[3] ?? "00"}` : "00:00:00";
+      const dateString = `${datePart}T${timePart}`;
       const calendarDate = parseDateTime(dateString);
       return toZoned(calendarDate, currentTimezoneId.value);
     }
@@ -216,6 +259,9 @@ function applyQuickRange(range: typeof quickRanges[number]) {
 }
 
 function applyAbsoluteRange() {
+  normalizeDraftInput("from");
+  normalizeDraftInput("to");
+
   const start = parseRelativeTime(draftState.value.from);
   const end = parseRelativeTime(draftState.value.to);
   
@@ -260,8 +306,10 @@ function applyRecentRange(range: { from: string; to: string }) {
 function handleCalendarSelect(type: 'from' | 'to', date: DateValue | undefined | null) {
   if (!date) return;
   const zonedDate = toZoned(date as CalendarDateTime, currentTimezoneId.value);
-  const formatted = formatDateTime(zonedDate).split(' ')[0] + ' 00:00:00';
+  const defaultTime = type === "to" ? "23:59:59" : "00:00:00";
+  const formatted = `${formatDateTime(zonedDate).split(' ')[0]} ${defaultTime}`;
   draftState.value[type] = formatted;
+  normalizeDraftInput(type);
   
   if (type === 'from') {
     showFromCalendar.value = false;
@@ -348,8 +396,10 @@ defineExpose({
                 <Input
                   v-model="draftState.from"
                   class="h-8 text-sm font-mono pr-8"
-                  placeholder="now-1h or YYYY-MM-DD HH:mm:ss"
+                  placeholder="now-1h or YYYY-MM-DD (time optional)"
                   @keydown.enter="applyAbsoluteRange"
+                  @blur="normalizeDraftInput('from')"
+                  @dblclick="applyDefaultTime('from', '00:00:00')"
                 />
                 <Popover v-model:open="showFromCalendar">
                   <PopoverTrigger as-child>
@@ -374,8 +424,10 @@ defineExpose({
                 <Input
                   v-model="draftState.to"
                   class="h-8 text-sm font-mono pr-8"
-                  placeholder="now or YYYY-MM-DD HH:mm:ss"
+                  placeholder="now or YYYY-MM-DD (time optional)"
                   @keydown.enter="applyAbsoluteRange"
+                  @blur="normalizeDraftInput('to')"
+                  @dblclick="applyDefaultTime('to', '23:59:59')"
                 />
                 <Popover v-model:open="showToCalendar">
                   <PopoverTrigger as-child>

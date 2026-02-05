@@ -15,7 +15,9 @@ export interface UpdateUserRequest {
 }
 
 export const usersApi = {
-  listUsers: () => apiClient.get<User[]>("/admin/users"),
+  // Note: /users is accessible to any authenticated user to allow team admins
+  // to select users when adding members to their teams.
+  listUsers: () => apiClient.get<User[]>("/users"),
   getUser: (id: string) => apiClient.get<{ user: User }>(`/admin/users/${id}`),
   createUser: (data: CreateUserRequest) => apiClient.post<User>("/admin/users", data),
   updateUser: (id: string, data: UpdateUserRequest) =>

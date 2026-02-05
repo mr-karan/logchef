@@ -9,6 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Button } from '@/components/ui/button'
 import { useSourcesStore } from '@/stores/sources'
 import { storeToRefs } from 'pinia'
+import SourceSparkline from '@/components/visualizations/SourceSparkline.vue'
+import { formatDate } from '@/utils/format'
 
 const sourcesStore = useSourcesStore()
 const { toast } = useToast()
@@ -37,7 +39,8 @@ const stats = computed(() => {
     tableStats: null,
     columnStats: null,
     tableInfo: null,
-    ttl: null
+    ttl: null,
+    ingestion: null
   }
 
   const sourceStats = sourcesStore.getSourceStatsById(parseInt(selectedSourceId.value))
@@ -45,7 +48,25 @@ const stats = computed(() => {
     tableStats: sourceStats?.table_stats || null,
     columnStats: sourceStats?.column_stats || null,
     tableInfo: sourceStats?.table_info || null,
-    ttl: sourceStats?.ttl || null
+    ttl: sourceStats?.ttl || null,
+    ingestion: sourceStats?.ingestion_stats || null
+  }
+})
+
+const ingestionSummary = computed(() => {
+  if (!stats.value.ingestion) {
+    return null
+  }
+
+  const latest = stats.value.ingestion.latest_ts
+    ? formatDate(stats.value.ingestion.latest_ts)
+    : 'Never'
+
+  return {
+    rows1h: stats.value.ingestion.rows_1h ?? 0,
+    rows24h: stats.value.ingestion.rows_24h ?? 0,
+    rows7d: stats.value.ingestion.rows_7d ?? 0,
+    latest,
   }
 })
 
@@ -182,6 +203,52 @@ const fetchSourceStats = async () => {
               <div class="bg-muted p-3 rounded-md">
                 <div class="text-sm text-muted-foreground">Uncompressed Size</div>
                 <div class="text-2xl font-bold">{{ stats.tableStats.uncompressed }}</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <!-- Ingestion Stats Card -->
+        <Card v-if="stats.ingestion" class="mb-6">
+          <CardHeader>
+            <CardTitle>Ingestion Activity</CardTitle>
+            <CardDescription>
+              Recent rows ingested and trends
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <div class="bg-muted p-3 rounded-md">
+                <div class="text-sm text-muted-foreground">Rows last 1h</div>
+                <div class="text-2xl font-bold">{{ ingestionSummary?.rows1h.toLocaleString() }}</div>
+              </div>
+              <div class="bg-muted p-3 rounded-md">
+                <div class="text-sm text-muted-foreground">Rows last 24h</div>
+                <div class="text-2xl font-bold">{{ ingestionSummary?.rows24h.toLocaleString() }}</div>
+              </div>
+              <div class="bg-muted p-3 rounded-md">
+                <div class="text-sm text-muted-foreground">Rows last 7d</div>
+                <div class="text-2xl font-bold">{{ ingestionSummary?.rows7d.toLocaleString() }}</div>
+              </div>
+              <div class="bg-muted p-3 rounded-md">
+                <div class="text-sm text-muted-foreground">Latest ingest</div>
+                <div class="text-sm font-medium">{{ ingestionSummary?.latest }}</div>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div class="space-y-2">
+                <div class="text-sm text-muted-foreground">Last 24 hours (hourly)</div>
+                <SourceSparkline
+                  :data="stats.ingestion.hourly_buckets"
+                  :height="56"
+                />
+              </div>
+              <div class="space-y-2">
+                <div class="text-sm text-muted-foreground">Last 30 days (daily)</div>
+                <SourceSparkline
+                  :data="stats.ingestion.daily_buckets"
+                  :height="56"
+                />
               </div>
             </div>
           </CardContent>

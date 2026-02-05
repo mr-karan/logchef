@@ -86,6 +86,9 @@ type Querier interface {
 	GetUser(ctx context.Context, id int64) (User, error)
 	// Get a user by email
 	GetUserByEmail(ctx context.Context, email string) (User, error)
+	// User Preferences
+	// Get user preferences by user ID
+	GetUserPreferences(ctx context.Context, userID int64) (UserPreference, error)
 	// Alert history queries
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (int64, error)
 	// List all API tokens for a user
@@ -146,6 +149,8 @@ type Querier interface {
 	// Update a user
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
 	UpsertSystemSetting(ctx context.Context, arg UpsertSystemSettingParams) error
+	// Insert or update user preferences
+	UpsertUserPreferences(ctx context.Context, arg UpsertUserPreferencesParams) error
 	// Check if a user has access to a source through any team
 	UserHasSourceAccess(ctx context.Context, arg UserHasSourceAccessParams) (int64, error)
 }

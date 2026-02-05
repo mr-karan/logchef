@@ -563,6 +563,22 @@ export const useTeamsStore = defineStore("teams", () => {
     }
   );
 
+  // Check if user is admin in ANY team (for showing administration sidebar)
+  const isAnyTeamAdmin = computed(() => {
+    return state.data.value.userTeams.some(team => team.role === 'admin');
+  });
+
+  // Get teams the user can manage (for team admins who are not global admins)
+  // Global admins should use adminTeams, team admins get filtered userTeams
+  const managedTeams = computed(() => {
+    // If global admin and adminTeams are loaded, use those
+    if (authStore.user?.role === 'admin' && state.data.value.adminTeams.length > 0) {
+      return state.data.value.adminTeams;
+    }
+    // Otherwise, return teams where user is an admin
+    return state.data.value.userTeams.filter(team => team.role === 'admin');
+  });
+
   return {
     // State
     userTeams,
@@ -593,6 +609,8 @@ export const useTeamsStore = defineStore("teams", () => {
     getSourcesNotInTeam,
     userBelongsToTeam,
     getUserRoleInTeam,
+    isAnyTeamAdmin,
+    managedTeams,
 
     // State Management
     clearState,

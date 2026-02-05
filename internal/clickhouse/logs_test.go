@@ -156,7 +156,7 @@ func TestRemoveLimitClause(t *testing.T) {
 		},
 	}
 
-	qb := NewQueryBuilder("logs")
+	qb := NewQueryBuilder("logs", 0)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

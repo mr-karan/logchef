@@ -120,6 +120,21 @@ Configure application logging:
 level = "info"
 ```
 
+### Query Settings
+
+Control query execution limits. Useful for environments where large data exports are needed.
+
+```toml
+[query]
+# Maximum rows per query result. Default: 1000000 (1 million).
+# Increase if your ClickHouse cluster can handle larger exports.
+max_limit = 1000000
+```
+
+The UI will show limit options up to this value (100, 500, 1K, 2K, 5K, 10K, 50K, 100K, 200K, 500K, 1M).
+
+**Environment variable:** `LOGCHEF_QUERY__MAX_LIMIT=500000`
+
 ## Runtime Configuration (Admin Settings UI)
 
 The following settings are managed through the web interface at **Administration → System Settings** after first boot. You can optionally set initial values in `config.toml` which will be seeded to the database on first boot.

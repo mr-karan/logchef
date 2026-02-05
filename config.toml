@@ -58,3 +58,11 @@ admin_emails = ["admin@logchef.internal"]
 # Secret key for API token hashing (required; generate with: openssl rand -hex 32).
 # Dev-only value. Replace this in production.
 api_token_secret = "5679649c50fddda837449b77d9983ab5f8dba65878897e968a74e7061bf47677"
+
+# -----------------------------------------------------------------------------
+# Query Settings (optional)
+# -----------------------------------------------------------------------------
+[query]
+# Maximum rows returned per query. Increase for large exports if your
+# ClickHouse cluster can handle it. Default: 1000000 (1 million).
+# max_limit = 1000000

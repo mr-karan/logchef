@@ -68,18 +68,6 @@ func validateSourceCreation(name string, conn models.ConnectionInfo, description
 	return nil
 }
 
-// validateSourceUpdate validates source update parameters.
-func validateSourceUpdate(description string, ttlDays int) error {
-	// Description can be empty, but check length if provided
-	if len(description) > 500 {
-		return &ValidationError{Field: "description", Message: "description must not exceed 500 characters"}
-	}
-	if ttlDays < -1 {
-		return &ValidationError{Field: "ttlDays", Message: "TTL days must be -1 (no TTL) or a non-negative number"}
-	}
-	return nil
-}
-
 // validateConnection validates connection parameters for a connection test.
 func validateConnection(conn models.ConnectionInfo) error {
 	// Validate host
@@ -432,14 +420,105 @@ func CreateSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, 
 	return sourceToCreate, nil // Return the source with ID populated by CreateSource DB call
 }
 
-// UpdateSource updates an existing source's mutable fields (description, ttlDays)
-func UpdateSource(ctx context.Context, db *sqlite.DB, log *slog.Logger, id models.SourceID, description string, ttlDays int) (*models.Source, error) {
-	// 1. Validate input
-	if err := validateSourceUpdate(description, ttlDays); err != nil {
-		return nil, err
+// applySourceMetadataUpdates applies name, description, and TTL updates to a source.
+// Returns true if any field was updated.
+func applySourceMetadataUpdates(source *models.Source, req *models.UpdateSourceRequest) (bool, error) {
+	updated := false
+
+	if req.Name != nil && *req.Name != source.Name {
+		if *req.Name == "" {
+			return false, &ValidationError{Field: "name", Message: "name cannot be empty"}
+		}
+		source.Name = *req.Name
+		updated = true
 	}
 
-	// 2. Get existing source
+	if req.Description != nil && *req.Description != source.Description {
+		if len(*req.Description) > 500 {
+			return false, &ValidationError{Field: "description", Message: "description must not exceed 500 characters"}
+		}
+		source.Description = *req.Description
+		updated = true
+	}
+
+	if req.TTLDays != nil && *req.TTLDays != source.TTLDays {
+		if *req.TTLDays < -1 {
+			return false, &ValidationError{Field: "ttl_days", Message: "TTL days must be -1 (no TTL) or a non-negative number"}
+		}
+		source.TTLDays = *req.TTLDays
+		updated = true
+	}
+
+	return updated, nil
+}
+
+// applySourceConnectionUpdates applies connection field updates to a source.
+// Returns the new connection info and whether any connection field changed.
+func applySourceConnectionUpdates(source *models.Source, req *models.UpdateSourceRequest) (models.ConnectionInfo, bool) {
+	newConn := source.Connection
+	changed := false
+
+	if req.Host != nil && *req.Host != source.Connection.Host {
+		newConn.Host = *req.Host
+		changed = true
+	}
+	if req.Username != nil && *req.Username != source.Connection.Username {
+		newConn.Username = *req.Username
+		changed = true
+	}
+	if req.Password != nil {
+		newConn.Password = *req.Password
+		changed = true
+	}
+	if req.Database != nil && *req.Database != source.Connection.Database {
+		newConn.Database = *req.Database
+		changed = true
+	}
+	if req.TableName != nil && *req.TableName != source.Connection.TableName {
+		newConn.TableName = *req.TableName
+		changed = true
+	}
+
+	return newConn, changed
+}
+
+// validateAndTestConnection validates connection parameters and tests connectivity.
+func validateAndTestConnection(ctx context.Context, chDB *clickhouse.Manager, log *slog.Logger, conn models.ConnectionInfo) error {
+	if err := validateConnection(conn); err != nil {
+		return err
+	}
+
+	tempSource := &models.Source{Connection: conn}
+	tempClient, err := chDB.CreateTemporaryClient(ctx, tempSource)
+	if err != nil {
+		log.Error("failed to validate new connection", "error", err, "host", conn.Host)
+		return &ValidationError{Field: "connection", Message: "Failed to connect with new credentials", Err: err}
+	}
+	defer tempClient.Close()
+
+	if err := tempClient.Ping(ctx, conn.Database, conn.TableName); err != nil {
+		return &ValidationError{Field: "connection", Message: fmt.Sprintf("Table '%s.%s' not accessible with new credentials", conn.Database, conn.TableName), Err: err}
+	}
+
+	return nil
+}
+
+// refreshSourceConnectionPool removes old connection and adds new one to the pool.
+func refreshSourceConnectionPool(ctx context.Context, chDB *clickhouse.Manager, log *slog.Logger, id models.SourceID, source *models.Source) error {
+	if err := chDB.RemoveSource(id); err != nil {
+		log.Warn("failed to remove old connection from pool", "error", err, "source_id", id)
+	}
+	if err := chDB.AddSource(ctx, source); err != nil {
+		log.Error("failed to add updated source to connection pool", "error", err, "source_id", id)
+		return fmt.Errorf("failed to refresh connection pool: %w", err)
+	}
+	log.Info("connection pool refreshed for source", "source_id", id)
+	return nil
+}
+
+// UpdateSource updates an existing source's mutable fields using partial update semantics.
+// Connection changes trigger re-validation and pool refresh.
+func UpdateSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, id models.SourceID, req *models.UpdateSourceRequest) (*models.Source, error) {
 	source, err := db.GetSource(ctx, id)
 	if err != nil {
 		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
@@ -447,40 +526,48 @@ func UpdateSource(ctx context.Context, db *sqlite.DB, log *slog.Logger, id model
 		}
 		return nil, fmt.Errorf("error getting source: %w", err)
 	}
-
 	if source == nil {
 		return nil, ErrSourceNotFound
 	}
 
-	// 3. Update fields if they have changed
-	updated := false
-	if description != source.Description {
-		source.Description = description
-		updated = true
-	}
-	if ttlDays != source.TTLDays {
-		source.TTLDays = ttlDays
-		updated = true
+	// Apply metadata updates
+	metadataUpdated, err := applySourceMetadataUpdates(source, req)
+	if err != nil {
+		return nil, err
 	}
 
-	if !updated {
-		return source, nil // Return existing source if no changes
+	// Apply connection updates
+	newConn, connectionChanged := applySourceConnectionUpdates(source, req)
+
+	// Validate and test new connection if changed
+	if connectionChanged {
+		if err := validateAndTestConnection(ctx, chDB, log, newConn); err != nil {
+			return nil, err
+		}
+		source.Connection = newConn
 	}
 
-	// 4. Save to database
+	if !metadataUpdated && !connectionChanged {
+		return source, nil
+	}
+
+	// Save to database
 	if err := db.UpdateSource(ctx, source); err != nil {
-		log.Error("failed to update source in sqlite",
-			"error", err,
-			"source_id", id,
-		)
+		log.Error("failed to update source in sqlite", "error", err, "source_id", id)
 		return nil, fmt.Errorf("error updating source configuration: %w", err)
 	}
 
-	// 5. Fetch the updated source again to get potentially updated fields (like updated_at)
+	// Refresh connection pool if connection changed
+	if connectionChanged {
+		if err := refreshSourceConnectionPool(ctx, chDB, log, id, source); err != nil {
+			return nil, err
+		}
+	}
+
+	// Fetch updated source
 	updatedSource, err := db.GetSource(ctx, id)
 	if err != nil {
 		log.Error("failed to get updated source after successful update", "source_id", id, "error", err)
-		// Return the source object we tried to save, but log the fetch error
 		return source, nil
 	}
 
@@ -689,9 +776,10 @@ func parseTTLExpression(ttlPart string) string {
 // SourceStats represents the combined statistics for a ClickHouse table
 // Use types directly from the clickhouse package
 type SourceStats struct {
-	TableStats  *clickhouse.TableStat        `json:"table_stats"`   // Use pointer to allow nil if stats fail completely
-	ColumnStats []clickhouse.TableColumnStat `json:"column_stats"`  // Slice is sufficient, empty if stats fail
-	TableInfo   *clickhouse.TableInfo        `json:"table_info"`    // Schema, engine, and metadata information
+	TableStats  *clickhouse.TableStat        `json:"table_stats"`  // Use pointer to allow nil if stats fail completely
+	ColumnStats []clickhouse.TableColumnStat `json:"column_stats"` // Slice is sufficient, empty if stats fail
+	TableInfo   *clickhouse.TableInfo        `json:"table_info"`   // Schema, engine, and metadata information
+	Ingestion   *clickhouse.IngestionStats   `json:"ingestion_stats,omitempty"`
 	TTL         string                       `json:"ttl,omitempty"` // TTL information extracted from CREATE TABLE
 }
 
@@ -713,12 +801,14 @@ func GetSourceStats(ctx context.Context, chDB *clickhouse.Manager, log *slog.Log
 
 	tableStats, _ := client.TableStats(ctx, statsDB, statsTable)
 	columnStats, _ := client.ColumnStats(ctx, statsDB, statsTable)
+	ingestionStats, _ := client.IngestionStats(ctx, statsDB, statsTable, source.MetaTSField)
 	columnStats = ensureColumnStats(columnStats, source)
 
 	return &SourceStats{
 		TableStats:  tableStats,
 		ColumnStats: columnStats,
 		TableInfo:   tableInfo,
+		Ingestion:   ingestionStats,
 		TTL:         ttlExpr,
 	}, nil
 }
