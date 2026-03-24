@@ -110,6 +110,14 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName, timestampField
 	if timezone == "" {
 		timezone = "UTC"
 	}
+	if err := ValidateTimezone(timezone); err != nil {
+		return nil, fmt.Errorf("invalid timezone: %w", err)
+	}
+	if params.GroupBy != "" {
+		if err := ValidateIdentifier(params.GroupBy); err != nil {
+			return nil, fmt.Errorf("invalid group_by field: %w", err)
+		}
+	}
 
 	intervalFunc, err := windowToIntervalFunc(params.Window, timestampField, timezone)
 	if err != nil {
@@ -269,9 +277,14 @@ func (c *Client) ensureTimestampInQuery(query, timestampField string) (string, e
 	upperQuery := strings.ToUpper(strings.TrimSpace(query))
 	escapedTsField := fmt.Sprintf("`%s`", timestampField)
 
-	// Check if timestamp field is already explicitly mentioned in SELECT clause
-	if strings.Contains(upperQuery, strings.ToUpper(timestampField)) {
-		// Timestamp field is already present, return as-is
+	// Check if timestamp field is already explicitly mentioned in the SELECT clause only.
+	// We look only before the first FROM keyword to avoid false positives from WHERE/ORDER BY.
+	selectClause := upperQuery
+	if fromIdx := strings.Index(upperQuery, "FROM"); fromIdx > 0 {
+		selectClause = upperQuery[:fromIdx]
+	}
+	if strings.Contains(selectClause, strings.ToUpper(timestampField)) {
+		// Timestamp field is already in SELECT clause, return as-is
 		return query, nil
 	}
 

@@ -912,8 +912,10 @@ export const useExploreStore = defineStore("explore", () => {
         }
       } finally {
         state.data.value.currentQueryAbortController = null;
-        state.data.value.currentQueryId = null;
-        state.data.value.isCancellingQuery = false;
+        // Only clear queryId if not mid-cancellation — cancelQuery needs it for backend KILL QUERY
+        if (!state.data.value.isCancellingQuery) {
+          state.data.value.currentQueryId = null;
+        }
       }
 
       return response;
@@ -952,6 +954,9 @@ export const useExploreStore = defineStore("explore", () => {
       }
     } catch (error) {
       console.error("An error occurred during the cancellation process:", error);
+    } finally {
+      state.data.value.currentQueryId = null;
+      state.data.value.isCancellingQuery = false;
     }
   }
 
@@ -1079,10 +1084,16 @@ export const useExploreStore = defineStore("explore", () => {
     ([newDetails, timeRange]) => {
       if (!newDetails?.id || !newDetails.is_connected) return;
       if (!timeRange) return;
-      
+
       const execKey = `${newDetails.id}-${timeRange.start.toString()}-${timeRange.end.toString()}`;
       if (execKey === lastAutoExecKey) return;
-      
+
+      // Skip if a query was already executed (e.g., by URL state initialization)
+      if (state.data.value.hasExecutedQuery && lastAutoExecKey === null) {
+        lastAutoExecKey = execKey;
+        return;
+      }
+
       if (state.isLoadingOperation('executeQuery')) return;
       if (sourcesStore.isLoadingTeamSources) return;
       

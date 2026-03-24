@@ -42,13 +42,15 @@ const statsError = computed(() => {
 
 // Computed properties for stats data
 const stats = computed(() => {
-  if (!selectedSourceId.value) return {
-    tableStats: null,
-    columnStats: null,
-    tableInfo: null,
-    ttl: null,
-    ingestion: null
+  const empty = {
+    tableStats: null as any,
+    columnStats: null as any[] | null,
+    tableInfo: null as any,
+    ttl: null as any,
+    ingestion: null as any
   }
+
+  if (!selectedSourceId.value) return empty
 
   const sourceStats = sourcesStore.getSourceStatsById(parseInt(selectedSourceId.value))
   return {

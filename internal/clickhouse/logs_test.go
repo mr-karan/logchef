@@ -18,10 +18,10 @@ func TestEnsureTimestampInQuery(t *testing.T) {
 		wantErr        bool
 	}{
 		{
-			name:           "SELECT * adds timestamp field for MATERIALIZED columns",
+			name:           "SELECT * with timestamp only in WHERE - adds to SELECT",
 			query:          "SELECT * FROM logs.nginx_access_logs WHERE parsed_timestamp > now()",
 			timestampField: "parsed_timestamp",
-			wantUnchanged:  true, // timestamp already in query
+			wantContains:   "SELECT *, `parsed_timestamp`",
 		},
 		{
 			name:           "SELECT * without timestamp field adds it",
@@ -42,10 +42,10 @@ func TestEnsureTimestampInQuery(t *testing.T) {
 			wantUnchanged:  true,
 		},
 		{
-			name:           "timestamp in WHERE clause - no change needed",
+			name:           "timestamp only in WHERE clause - adds to SELECT",
 			query:          "SELECT * FROM logs WHERE parsed_timestamp BETWEEN now() - 1h AND now()",
 			timestampField: "parsed_timestamp",
-			wantUnchanged:  true,
+			wantContains:   "SELECT *, `parsed_timestamp`",
 		},
 		{
 			name:           "specific columns without timestamp - adds it",

@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
@@ -256,7 +257,8 @@ func ListSources(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, l
 		return nil, fmt.Errorf("error listing sources: %w", err)
 	}
 
-	// Check connection status for each source
+	// Check connection status for all sources in parallel
+	var wg sync.WaitGroup
 	for i := range sources {
 		source := sources[i]
 		if source == nil {
@@ -266,20 +268,23 @@ func ListSources(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, l
 		// Default to not connected
 		source.IsConnected = false
 
-		// Attempt to get client and perform a health check that includes table verification
-		client, err := chDB.GetConnection(source.ID)
-		if err == nil {
-			// Use integrated Ping method that checks both connection and table existence
-			source.IsConnected = client.Ping(ctx, source.Connection.Database, source.Connection.TableName) == nil
-		}
-
 		// Clear schema-related fields to avoid sending unnecessary data
 		source.Columns = nil
 		source.Schema = ""
 		source.Engine = ""
 		source.EngineParams = nil
 		source.SortKeys = nil
+
+		wg.Add(1)
+		go func(s *models.Source) {
+			defer wg.Done()
+			client, err := chDB.GetConnection(s.ID)
+			if err == nil {
+				s.IsConnected = client.Ping(ctx, s.Connection.Database, s.Connection.TableName) == nil
+			}
+		}(source)
 	}
+	wg.Wait()
 
 	return sources, nil
 }

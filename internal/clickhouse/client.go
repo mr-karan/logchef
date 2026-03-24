@@ -900,7 +900,19 @@ func buildLogchefQLConditionsSQL(query string) string {
 
 // GetFieldDistinctValues retrieves the top N distinct values for a field within a time range.
 func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table string, params FieldValuesParams) (*FieldValuesResult, error) {
+	// Validate inputs that will be interpolated into SQL
+	if err := ValidateIdentifier(params.FieldName); err != nil {
+		return nil, fmt.Errorf("invalid field name: %w", err)
+	}
+	if err := ValidateIdentifier(params.TimestampField); err != nil {
+		return nil, fmt.Errorf("invalid timestamp field: %w", err)
+	}
+
 	limit, timeoutSeconds, timezone := normalizeFieldValuesParams(params)
+
+	if err := ValidateTimezone(timezone); err != nil {
+		return nil, fmt.Errorf("invalid timezone: %w", err)
+	}
 
 	c.logger.Debug("fetching distinct values for field",
 		"database", database, "table", table, "field", params.FieldName,

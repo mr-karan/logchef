@@ -84,8 +84,8 @@ const showNotFoundState = computed(() =>
     searchQuery.value.trim() !== ''
 );
 
-const handleDelete = (team: Team) => {
-    teamToDelete.value = team
+const handleDelete = (team: typeof teamsWithDefaults.value[number]) => {
+    teamToDelete.value = team as Team
     showDeleteDialog.value = true
 }
 

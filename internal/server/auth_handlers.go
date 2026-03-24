@@ -176,6 +176,19 @@ func (s *Server) handleLogin(c *fiber.Ctx) error {
 		Path:     "/",
 	})
 
+	// Persist the requested redirect path through the OIDC round-trip.
+	if redirectPath := c.Query("redirect", ""); redirectPath != "" {
+		c.Cookie(&fiber.Cookie{
+			Name:     "logchef_redirect",
+			Value:    redirectPath,
+			Expires:  time.Now().Add(stateCookieTTL),
+			HTTPOnly: true,
+			Secure:   true,
+			SameSite: fiber.CookieSameSiteLaxMode,
+			Path:     "/",
+		})
+	}
+
 	authURL := s.oidcProvider.GetAuthURL(state)
 	return c.Redirect(authURL, fiber.StatusTemporaryRedirect)
 }
@@ -227,8 +240,13 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 		Path:     "/",
 	})
 
-	// Redirect back to the frontend, possibly to a specific path requested before login.
-	redirectPath := c.Query("redirect", "/logs/explore") // Default redirect
+	// Redirect back to the frontend, restoring the path requested before login.
+	redirectPath := c.Cookies("logchef_redirect")
+	if redirectPath == "" {
+		redirectPath = "/logs/explore"
+	}
+	// Clear the redirect cookie
+	c.Cookie(&fiber.Cookie{Name: "logchef_redirect", Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: true, SameSite: fiber.CookieSameSiteLaxMode, Path: "/"})
 	return s.redirectToFrontend(c, redirectPath, nil)
 }
 

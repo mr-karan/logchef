@@ -51,7 +51,7 @@ func (s *Server) authenticateWithToken(c *fiber.Ctx, authHeader string) error {
 	token := strings.TrimPrefix(authHeader, "Bearer ")
 	if token == authHeader || token == "" {
 		metrics.RecordAuthAttempt("token", false, nil)
-		return SendErrorWithType(c, fiber.StatusForbidden, "Invalid Authorization header format", models.AuthenticationErrorType)
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "Invalid Authorization header format", models.AuthenticationErrorType)
 	}
 
 	// Authenticate token and get associated user
@@ -61,7 +61,7 @@ func (s *Server) authenticateWithToken(c *fiber.Ctx, authHeader string) error {
 
 		// Handle specific token errors
 		if errors.Is(err, core.ErrInvalidToken) || errors.Is(err, core.ErrTokenExpired) {
-			return SendErrorWithType(c, fiber.StatusForbidden, "Invalid or expired token", models.AuthenticationErrorType)
+			return SendErrorWithType(c, fiber.StatusUnauthorized, "Invalid or expired token", models.AuthenticationErrorType)
 		}
 
 		s.log.Error("error authenticating API token", "error", err)
@@ -85,7 +85,7 @@ func (s *Server) authenticateWithSession(c *fiber.Ctx) error {
 	sessionIDStr := c.Cookies(sessionCookieName)
 	if sessionIDStr == "" {
 		metrics.RecordSessionOperation("validate", false, nil)
-		return SendErrorWithType(c, fiber.StatusForbidden, "Authentication required", models.AuthenticationErrorType)
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication required", models.AuthenticationErrorType)
 	}
 	sessionID := models.SessionID(sessionIDStr)
 
@@ -94,9 +94,9 @@ func (s *Server) authenticateWithSession(c *fiber.Ctx) error {
 	if err != nil {
 		metrics.RecordSessionOperation("validate", false, nil)
 
-		// Handle specific session errors by returning 403.
+		// Handle specific session errors by returning 401 (not authenticated).
 		if errors.Is(err, core.ErrSessionNotFound) || errors.Is(err, core.ErrSessionExpired) {
-			return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthenticationErrorType)
+			return SendErrorWithType(c, fiber.StatusUnauthorized, err.Error(), models.AuthenticationErrorType)
 		}
 		// Log unexpected errors during validation.
 		s.log.Error("error validating session via core function", "error", err, "session_id", sessionID)
@@ -106,9 +106,9 @@ func (s *Server) authenticateWithSession(c *fiber.Ctx) error {
 	// Retrieve associated user information.
 	user, err := core.GetUser(c.Context(), s.sqlite, session.UserID)
 	if err != nil {
-		// If user not found for a valid session, treat as an auth issue or internal error.
+		// If user not found for a valid session, treat as an auth issue.
 		if errors.Is(err, core.ErrUserNotFound) {
-			return SendErrorWithType(c, fiber.StatusForbidden, "User associated with session not found", models.AuthenticationErrorType)
+			return SendErrorWithType(c, fiber.StatusUnauthorized, "User associated with session not found", models.AuthenticationErrorType)
 		}
 		s.log.Error("error getting user for session via core function", "error", err, "user_id", session.UserID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error retrieving user data", models.GeneralErrorType)

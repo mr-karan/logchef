@@ -99,7 +99,7 @@ const tooltipTriggers = computed(() => ({
 }))
 
 // Inject gradient into SVG after mount
-const containerRef = ref<InstanceType<typeof VisXYContainer> | null>(null)
+const containerRef = ref<{ $el: HTMLElement } | null>(null)
 
 onMounted(() => {
   // Find the SVG and inject our gradient definition

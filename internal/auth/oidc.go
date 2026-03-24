@@ -77,12 +77,12 @@ func NewOIDCProvider(ctx context.Context, oidcCfg *config.OIDCConfig, log *slog.
 	}
 
 	// Configure ID token verification.
+	// Validate audience (ClientID) to prevent token confusion attacks.
 	// Skip issuer validation to allow flexibility in provider URLs (e.g., internal vs external).
 	verifier := provider.Verifier(&oidc.Config{
-		ClientID:          oidcCfg.ClientID,
-		SkipClientIDCheck: true, // Client ID is implicitly checked by the OAuth2 exchange.
-		SkipExpiryCheck:   false,
-		SkipIssuerCheck:   true,
+		ClientID:        oidcCfg.ClientID,
+		SkipExpiryCheck: false,
+		SkipIssuerCheck: true,
 	})
 
 	return &OIDCProvider{
