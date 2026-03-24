@@ -221,133 +221,7 @@
     </div>
 
     <!-- Compact Variable Editor -->
-    <div v-if="allVariables && allVariables.length > 0" class="mb-3">
-      <!-- Variables Header -->
-      <div class="flex items-center justify-between mb-2 px-1">
-        <div class="flex items-center gap-2">
-          <div class="w-1 h-3 bg-primary rounded-full"></div>
-          <span class="text-xs font-medium text-foreground">Variables</span>
-          <span class="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-            {{ allVariables.length }}
-          </span>
-        </div>
-        <Button variant="ghost" size="sm" class="h-6 px-2 text-xs" @click="openAllVariableSettings"
-          title="Configure variables">
-          <Settings class="h-3 w-3 mr-1" />
-          Configure
-        </Button>
-      </div>
-
-      <!-- Compact Variables List -->
-      <div class="bg-muted/20 border border-border/30 rounded-md p-2">
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-          <div v-for="variable in allVariables" :key="variable.name" class="flex flex-col gap-1.5 min-w-0">
-            <!-- Variable indicator and label -->
-            <div class="flex items-center gap-1.5 min-w-0">
-              <div class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="variable.isOptional ? 'bg-muted-foreground/40' : 'bg-primary/60'"></div>
-              <Label :for="`var-${variable.name}`"
-                class="text-xs font-medium truncate cursor-pointer min-w-0"
-                :class="variable.isOptional ? 'text-muted-foreground' : 'text-foreground'"
-                :title="(variable.label || variable.name) + (variable.isOptional ? ' (optional)' : '')">
-                {{ variable.label || variable.name }}
-              </Label>
-              <span class="text-xs px-1 py-0.5 bg-muted text-muted-foreground rounded font-mono flex-shrink-0">
-                {{ variable.type[0] }}
-              </span>
-              <span v-if="variable.isOptional" class="text-[10px] px-1 py-0.5 bg-muted/50 text-muted-foreground/70 rounded flex-shrink-0 italic">
-                optional
-              </span>
-            </div>
-
-            <!-- Multi-select dropdown -->
-            <Popover v-if="variable.inputType === 'multiselect' && variable.options?.length">
-              <PopoverTrigger as-child>
-                <Button variant="outline" :id="`var-${variable.name}`"
-                  class="h-7 text-xs w-full justify-between font-normal transition-colors"
-                  :class="{
-                    'border-primary/30 bg-primary/5': hasVariableValue(variable),
-                    'border-dashed border-muted-foreground/20': !hasVariableValue(variable) && !variable.isOptional,
-                    'border-dashed border-muted-foreground/10': !hasVariableValue(variable) && variable.isOptional
-                  }">
-                  <span class="truncate">
-                    {{ getMultiSelectDisplay(variable) }}
-                  </span>
-                  <ChevronDown class="h-3 w-3 opacity-50 flex-shrink-0 ml-1" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent class="w-[220px] p-2" align="start">
-                <ScrollArea class="max-h-[200px]">
-                  <div class="space-y-1">
-                    <div v-for="opt in variable.options" :key="opt.value"
-                      class="flex items-center gap-2 px-2 py-1.5 rounded-sm hover:bg-muted cursor-pointer"
-                      @click="toggleMultiSelectValue(variable, opt.value)">
-                      <Checkbox 
-                        :checked="isMultiSelectValueSelected(variable, opt.value)"
-                        @update:checked="toggleMultiSelectValue(variable, opt.value)"
-                        class="h-4 w-4"
-                      />
-                      <span class="text-xs">{{ opt.label || opt.value }}</span>
-                    </div>
-                  </div>
-                </ScrollArea>
-                <div v-if="getMultiSelectValues(variable).length > 0" class="border-t mt-2 pt-2">
-                  <Button variant="ghost" size="sm" class="w-full h-7 text-xs text-muted-foreground"
-                    @click="clearMultiSelectValues(variable)">
-                    Clear selection
-                  </Button>
-                </div>
-              </PopoverContent>
-            </Popover>
-
-            <!-- Single-select dropdown -->
-            <Select v-else-if="variable.inputType === 'dropdown' && variable.options?.length"
-              :model-value="String(variable.value ?? '')"
-              @update:model-value="(val) => variable.value = val">
-              <SelectTrigger :id="`var-${variable.name}`" 
-                class="h-7 text-xs w-full transition-colors focus:ring-1 focus:ring-primary/50"
-                :class="{
-                  'border-primary/30 bg-primary/5': hasVariableValue(variable),
-                  'border-dashed border-muted-foreground/20': !hasVariableValue(variable) && !variable.isOptional,
-                  'border-dashed border-muted-foreground/10': !hasVariableValue(variable) && variable.isOptional
-                }">
-                <SelectValue :placeholder="variable.isOptional ? 'Select (optional)' : 'Select...'" class="truncate" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-if="variable.isOptional" value="">
-                  <span class="text-muted-foreground italic">None</span>
-                </SelectItem>
-                <SelectItem v-for="opt in variable.options" :key="opt.value" :value="opt.value">
-                  {{ opt.label || opt.value }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-
-            <!-- Date picker input -->
-            <SingleDatePicker 
-              v-else-if="variable.type === 'date' && variable.inputType === 'datepicker'"
-              :model-value="variable.value ? String(variable.value) : null"
-              @update:model-value="(val) => { variable.value = val ?? ''; variableStore.upsertVariable(variable); }"
-              :include-time="true"
-              :placeholder="variable.isOptional ? 'Select date (optional)' : 'Select date...'"
-              class="w-full"
-            />
-
-            <!-- Text/Number input (default) -->
-            <Input v-else :id="`var-${variable.name}`" 
-              :model-value="String(variable.value ?? '')"
-              @update:model-value="(val: string | number) => { variable.value = String(val); variableStore.upsertVariable(variable); }"
-              :type="inputTypeFor(variable.type)"
-              :placeholder="variable.isOptional ? 'Leave empty to omit' : getPlaceholderForType(variable.type)"
-              class="h-7 text-xs w-full focus:border-primary/50 transition-colors"
-              :class="{
-                'border-primary/30 bg-primary/5': hasVariableValue(variable),
-                'border-dashed border-muted-foreground/20': !hasVariableValue(variable) && !variable.isOptional,
-                'border-dashed border-muted-foreground/10': !hasVariableValue(variable) && variable.isOptional
-              }" />
-          </div>
-        </div>
-      </div>
-    </div>
+    <VariablesPanel @open-config="showVariablesConfig = true" />
 
     <!-- Monaco Editor Container -->
     <div class="editor-wrapper" :class="{ 'is-focused': editorFocused }"
@@ -400,418 +274,22 @@
     </div>
   </div>
 
-  <!-- Enhanced Variable Settings Sheet -->
-  <Sheet :open="showVariablesConfig" @update:open="(open) => !open && closeDrawer()">
-    <SheetContent class="w-[480px] max-w-[90vw]">
-      <SheetHeader class="pb-6">
-        <SheetTitle class="text-lg flex items-center gap-2">
-          <div class="w-2 h-2 bg-primary rounded-full"></div>
-          <Settings class="h-5 w-5" />
-          Variable Configuration
-        </SheetTitle>
-        <SheetDescription class="text-sm">
-          Configure variables used in your query. Variables are replaced with actual values when the query runs.
-        </SheetDescription>
-      </SheetHeader>
-
-      <div v-if="allVariables && allVariables.length > 0" class="space-y-6 overflow-y-auto pr-2" style="max-height: calc(100vh - 180px);">
-        <div v-for="(variable, index) in allVariables" :key="variable.name" class="space-y-4">
-          <!-- Enhanced Variable Card -->
-          <div class="border border-border rounded-lg p-4 bg-card hover:shadow-sm transition-all duration-200">
-            <!-- Variable Header -->
-            <div class="flex items-center justify-between mb-4">
-              <div class="flex items-center gap-3">
-                <div class="w-2 h-2 bg-primary/60 rounded-full flex-shrink-0"></div>
-                <div>
-                  <h4 class="font-medium text-foreground">{{ variable.name }}</h4>
-                  <p class="text-xs text-muted-foreground">Variable {{ index + 1 }} of {{ allVariables.length }}</p>
-                </div>
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="text-xs px-2 py-1 bg-muted text-muted-foreground rounded font-mono">
-                  {{ variable.type }}
-                </span>
-              </div>
-            </div>
-
-            <!-- Variable Configuration -->
-            <div class="space-y-4">
-              <!-- Variable Type -->
-              <div class="space-y-2">
-                <Label class="text-sm font-medium flex items-center gap-2">
-                  <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
-                  Data Type
-                </Label>
-                <Select v-model="variable.type" @update:model-value="() => updateVariableType(variable)">
-                  <SelectTrigger class="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="text">
-                      <div class="flex items-center gap-2">
-                        <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
-                        Text
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="number">
-                      <div class="flex items-center gap-2">
-                        <div class="w-2 h-2 bg-green-500 rounded-full"></div>
-                        Number
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="date">
-                      <div class="flex items-center gap-2">
-                        <div class="w-2 h-2 bg-purple-500 rounded-full"></div>
-                        Date
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <!-- Widget Type -->
-              <div class="space-y-2">
-                <Label class="text-sm font-medium flex items-center gap-2">
-                  <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
-                  Input Widget
-                </Label>
-                <Select 
-                  v-model="variable.inputType" 
-                  @update:model-value="() => variableStore.upsertVariable(variable)"
-                  :disabled="variable.type === 'date'"
-                >
-                  <SelectTrigger class="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem v-if="variable.type !== 'date'" value="input">
-                      <div class="flex items-center gap-2">
-                        <Type class="w-3.5 h-3.5 text-muted-foreground" />
-                        Text Input
-                      </div>
-                    </SelectItem>
-                    <SelectItem v-if="variable.type === 'date'" value="datepicker">
-                      <div class="flex items-center gap-2">
-                        <CalendarIcon class="w-3.5 h-3.5 text-muted-foreground" />
-                        Date Picker
-                      </div>
-                    </SelectItem>
-                    <SelectItem v-if="variable.type !== 'date'" value="dropdown">
-                      <div class="flex items-center gap-2">
-                        <ChevronDown class="w-3.5 h-3.5 text-muted-foreground" />
-                        Dropdown List
-                      </div>
-                    </SelectItem>
-                    <SelectItem v-if="variable.type !== 'date'" value="multiselect">
-                      <div class="flex items-center gap-2">
-                        <List class="w-3.5 h-3.5 text-muted-foreground" />
-                        Multi-Select
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <!-- Dropdown/Multi-Select Options (shown when dropdown or multiselect is selected) -->
-              <div v-if="variable.inputType === 'dropdown' || variable.inputType === 'multiselect'" class="space-y-3">
-                <Label class="text-sm font-medium flex items-center gap-2">
-                  <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
-                  {{ variable.inputType === 'multiselect' ? 'Multi-Select Options' : 'Dropdown Options' }}
-                </Label>
-
-                <div class="bg-muted/30 rounded-md p-3 border border-border/50 space-y-3">
-                  <!-- Header -->
-                  <div v-if="variable.options?.length" class="grid grid-cols-[1fr_1fr_32px] gap-2 px-1">
-                    <span
-                      class="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Value</span>
-                    <span
-                      class="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Label</span>
-                    <span></span>
-                  </div>
-
-                  <!-- Options List -->
-                  <div class="space-y-2">
-                    <div v-for="(opt, optIndex) in (variable.options || [])" :key="optIndex"
-                      class="grid grid-cols-[1fr_1fr_auto] gap-2 items-center group">
-                      <Input v-model="opt.value" placeholder="Value" class="h-8 text-xs bg-background"
-                        @input="() => variableStore.upsertVariable(variable)" />
-                      <Input v-model="opt.label" placeholder="Label" class="h-8 text-xs bg-background"
-                        @input="() => variableStore.upsertVariable(variable)" />
-                      <Button variant="ghost" size="icon"
-                        class="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                        @click="removeDropdownOption(variable, optIndex)">
-                        <X class="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <Button variant="outline" size="sm"
-                    class="w-full h-8 text-xs border-dashed text-muted-foreground hover:text-foreground bg-transparent hover:bg-muted/50"
-                    @click="addDropdownOption(variable)">
-                    <Plus class="h-3.5 w-3.5 mr-1" />
-                    Add Option
-                  </Button>
-                </div>
-
-                <p class="text-xs text-muted-foreground">
-                  Enter values users can select from. Label is optional display text.
-                </p>
-              </div>
-
-              <!-- Display Label -->
-              <div class="space-y-2">
-                <Label class="text-sm font-medium flex items-center gap-2">
-                  <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
-                  Display Label
-                </Label>
-                <Input v-model="variable.label" placeholder="Enter display name..." class="h-9"
-                  @input="() => variableStore.upsertVariable(variable)" />
-              </div>
-
-              <!-- Default Value -->
-              <div class="space-y-2">
-                <Label class="text-sm font-medium flex items-center gap-2">
-                  <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
-                  Default Value{{ variable.inputType === 'multiselect' ? 's' : '' }}
-                </Label>
-                <!-- Multi-select default values -->
-                <div v-if="variable.inputType === 'multiselect' && variable.options?.length" class="space-y-2">
-                  <div class="bg-muted/30 rounded-md p-2 border border-border/50 max-h-[120px] overflow-y-auto">
-                    <div v-for="opt in variable.options" :key="opt.value"
-                      class="flex items-center gap-2 px-2 py-1 rounded-sm hover:bg-muted cursor-pointer"
-                      @click="toggleDefaultMultiSelectValue(variable, opt.value)">
-                      <Checkbox 
-                        :checked="isDefaultMultiSelectValueSelected(variable, opt.value)"
-                        @update:checked="toggleDefaultMultiSelectValue(variable, opt.value)"
-                        class="h-3.5 w-3.5"
-                      />
-                      <span class="text-xs">{{ opt.label || opt.value }}</span>
-                    </div>
-                  </div>
-                  <p class="text-xs text-muted-foreground">
-                    Select default values for multi-select. {{ getDefaultMultiSelectCount(variable) }} selected.
-                  </p>
-                </div>
-                <!-- Single-select dropdown default -->
-                <Select v-else-if="variable.inputType === 'dropdown' && variable.options?.length"
-                  :model-value="String(variable.defaultValue ?? '')"
-                  @update:model-value="(val) => { variable.defaultValue = val; variableStore.upsertVariable(variable); }">
-                  <SelectTrigger class="h-9">
-                    <SelectValue placeholder="No default" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">
-                      <span class="text-muted-foreground italic">No default</span>
-                    </SelectItem>
-                    <SelectItem v-for="opt in variable.options" :key="opt.value" :value="opt.value">
-                      {{ opt.label || opt.value }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <!-- Date picker default -->
-                <SingleDatePicker 
-                  v-else-if="variable.type === 'date' && variable.inputType === 'datepicker'"
-                  :model-value="variable.defaultValue ? String(variable.defaultValue) : null"
-                  @update:model-value="(val) => { variable.defaultValue = val ?? ''; variableStore.upsertVariable(variable); }"
-                  :include-time="true"
-                  placeholder="Select default date..."
-                  class="w-full"
-                />
-                <!-- Text/number input default -->
-                <Input v-else 
-                  :model-value="String(variable.defaultValue ?? '')"
-                  @update:model-value="(val: string | number) => { variable.defaultValue = String(val); variableStore.upsertVariable(variable); }"
-                  :type="inputTypeFor(variable.type)"
-                  :placeholder="'Default ' + variable.type + ' value'" 
-                  class="h-9" />
-                <p v-if="variable.inputType !== 'multiselect'" class="text-xs text-muted-foreground">
-                  Pre-filled when loading the query. Leave empty for no default.
-                </p>
-              </div>
-
-              <!-- Current Value Preview -->
-              <div class="space-y-2">
-                <Label class="text-sm font-medium flex items-center gap-2">
-                  <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
-                  Current Value
-                </Label>
-                <div class="px-3 py-2 bg-muted/30 rounded-md border text-sm font-mono min-h-[36px] flex items-center">
-                  <span v-if="hasVariableValue(variable)" class="text-foreground">
-                    {{ formatVariableValue(variable) }}
-                  </span>
-                  <span v-else class="text-muted-foreground italic">
-                    No value set
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-
-        </div>
-      </div>
-
-      <!-- Enhanced Empty State -->
-      <div v-else class="text-center py-12 text-muted-foreground">
-        <div class="w-12 h-12 bg-muted/50 rounded-full flex items-center justify-center mx-auto mb-4">
-          <Settings class="h-6 w-6 opacity-50" />
-        </div>
-        <p class="text-sm font-medium mb-2">No variables found in your query</p>
-        <p class="text-xs">Use <code class="bg-muted px-1.5 py-0.5 rounded">&#123;&#123;variable_name&#125;&#125;</code>
-          syntax to create variables</p>
-        <div class="mt-4 text-xs text-muted-foreground/60">
-          <p>Example: <code class="bg-muted px-1.5 py-0.5 rounded">namespace=&#123;&#123;env&#125;&#125;</code></p>
-        </div>
-      </div>
-    </SheetContent>
-  </Sheet>
+  <!-- Variable Configuration Sheet -->
+  <VariableConfigSheet
+    :open="showVariablesConfig"
+    @update:open="showVariablesConfig = $event"
+  />
 
   <!-- AI SQL Assistant Dialog -->
-  <Dialog :open="showAiDialog" @update:open="showAiDialog = $event">
-    <DialogContent class="sm:max-w-3xl max-h-[90vh] overflow-hidden">
-      <!-- Header -->
-      <DialogHeader class="border-b pb-4">
-        <DialogTitle class="flex items-center gap-3">
-          <Wand2 class="h-6 w-6 text-purple-600" />
-          <span class="text-xl font-semibold text-foreground">AI SQL Assistant</span>
-        </DialogTitle>
-        <DialogDescription class="text-muted-foreground mt-2">
-          Describe the data you want to retrieve in natural language, and I'll generate SQL for you.
-        </DialogDescription>
-      </DialogHeader>
-      
-      <div class="flex flex-col gap-6 py-4 overflow-y-auto max-h-[60vh]">
-        <!-- Input Section -->
-        <div class="space-y-3">
-          <Label class="text-sm font-medium text-foreground">What data are you looking for?</Label>
-          <Textarea 
-            ref="aiTextareaRef"
-            v-model="aiNaturalQuery"
-            placeholder="show logs from syslog namespace for the Scarface service from the past 12 hours."
-            class="min-h-[120px] resize-y border-2 border-input focus-visible:border-purple-500 focus-visible:ring-2 focus-visible:ring-purple-500 shadow-sm"
-            @keydown.meta.enter="handleAiSubmit"
-            @keydown.ctrl.enter="handleAiSubmit"
-          />
-          <div class="flex items-center justify-between text-xs text-muted-foreground">
-            <div>
-              Press <kbd class="px-1.5 py-0.5 bg-muted rounded font-mono">Ctrl+Enter</kbd> to generate
-            </div>
-            <details class="text-xs">
-              <summary class="cursor-pointer hover:text-foreground font-medium">Examples</summary>
-              <div class="absolute z-10 mt-2 right-0 bg-popover border border-border rounded-md shadow-lg p-3 w-80">
-                <div class="space-y-2">
-                  <div 
-                    @click="setExamplePrompt('Show me all error logs from the past hour')"
-                    class="cursor-pointer p-2 hover:bg-muted rounded text-sm border border-border"
-                  >
-                    Show me all error logs from the past hour
-                  </div>
-                  <div 
-                    @click="setExamplePrompt('Count log entries by level for today')"
-                    class="cursor-pointer p-2 hover:bg-muted rounded text-sm border border-border"
-                  >
-                    Count log entries by level for today
-                  </div>
-                  <div 
-                    @click="setExamplePrompt('Find logs containing authentication failed in the past 24 hours')"
-                    class="cursor-pointer p-2 hover:bg-muted rounded text-sm border border-border"
-                  >
-                    Find logs containing "authentication failed" in the past 24 hours
-                  </div>
-                  <div 
-                    @click="setExamplePrompt('Show top 10 most frequent error messages this week')"
-                    class="cursor-pointer p-2 hover:bg-muted rounded text-sm border border-border"
-                  >
-                    Show top 10 most frequent error messages this week
-                  </div>
-                </div>
-              </div>
-            </details>
-          </div>
-        </div>
-
-        <!-- Generated SQL Section -->
-        <div class="space-y-3">
-          <div class="flex items-center gap-2">
-            <span class="text-sm font-medium text-foreground">Generated SQL</span>
-            <div v-if="isGeneratingAi" class="flex items-center gap-2 text-xs text-muted-foreground">
-              <div class="w-3 h-3 border-2 border-border border-t-purple-500 rounded-full animate-spin"></div>
-              Generating...
-            </div>
-          </div>
-          
-          <!-- SQL Preview Container -->
-          <div class="bg-muted/40 border-2 border-border rounded-md overflow-hidden shadow-sm">
-            <!-- Loading State -->
-            <div v-if="isGeneratingAi" class="p-4 space-y-2">
-              <div class="h-4 bg-muted rounded animate-pulse"></div>
-              <div class="h-4 bg-muted rounded animate-pulse w-3/4"></div>
-              <div class="h-4 bg-muted rounded animate-pulse w-1/2"></div>
-            </div>
-            
-            <!-- Empty State -->
-            <div v-else-if="!generatedSql && !aiError" class="p-8 text-center text-muted-foreground">
-              <Wand2 class="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p class="text-sm">Your generated SQL will appear here</p>
-            </div>
-            
-            <!-- Generated SQL Display -->
-            <div v-else-if="generatedSql" class="relative">
-              <pre class="p-4 text-sm font-mono text-foreground overflow-auto max-h-60 whitespace-pre-wrap leading-relaxed"><code>{{ generatedSql }}</code></pre>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                class="absolute top-2 right-2 h-6 w-6 p-0"
-                @click="copyToClipboard(generatedSql)"
-                title="Copy to clipboard"
-              >
-                <div class="h-3 w-3">📋</div>
-              </Button>
-            </div>
-            
-            <!-- Error State -->
-            <div v-else-if="aiError" class="p-4 text-sm text-destructive bg-destructive/10 border-l-4 border-destructive/40">
-              <div class="flex items-start gap-2">
-                <AlertCircle class="h-4 w-4 flex-shrink-0 mt-0.5" />
-                <div>
-                  <div class="font-medium">Generation Failed</div>
-                  <div class="text-xs mt-1 text-destructive/80">{{ aiError }}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Footer Actions -->
-      <DialogFooter class="border-t pt-4 flex justify-between items-center">
-        <Button variant="outline" @click="resetAiDialog">
-          Cancel
-        </Button>
-        
-        <div class="flex gap-2">
-          <Button 
-            variant="outline"
-            @click="handleAiSubmit" 
-            :disabled="!aiNaturalQuery.trim() || isGeneratingAi"
-            class="border-purple-200 text-purple-700 hover:bg-purple-50"
-          >
-            <Wand2 v-if="!isGeneratingAi" class="h-4 w-4 mr-2" />
-            <div v-if="isGeneratingAi" class="w-4 h-4 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin mr-2"></div>
-            {{ isGeneratingAi ? 'Generating...' : (generatedSql ? 'Regenerate' : 'Generate SQL') }}
-          </Button>
-          
-          <Button 
-            @click="insertGeneratedSql" 
-            :disabled="!generatedSql || isGeneratingAi"
-            class="bg-purple-600 hover:bg-purple-700 text-white font-medium"
-          >
-            Insert into Editor
-          </Button>
-        </div>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+  <AiSqlDialog
+    :open="showAiDialog"
+    :is-generating="isGeneratingAi"
+    :error="aiError"
+    :generated-sql="generatedSql"
+    @update:open="showAiDialog = $event"
+    @submit="handleAiDialogSubmit"
+    @insert="handleAiInsert"
+  />
 
 
 </template>
@@ -847,12 +325,6 @@ import {
   Play,
   RefreshCw,
   Square,
-  Type,
-  ChevronDown,
-  X,
-  Plus,
-  List,
-  CalendarIcon,
 } from "lucide-vue-next";
 import {
   HoverCard,
@@ -862,6 +334,9 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import SavedQueriesDropdown from "@/components/collections/SavedQueriesDropdown.vue";
 import QueryHistoryDropdown from "./QueryHistoryDropdown.vue";
+import AiSqlDialog from "./AiSqlDialog.vue";
+import VariableConfigSheet from "./VariableConfigSheet.vue";
+import VariablesPanel from "./VariablesPanel.vue";
 import type { SavedTeamQuery } from "@/api/savedQueries";
 import { useRoute, useRouter } from "vue-router";
 import { Button } from "@/components/ui/button";
@@ -871,40 +346,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Settings } from "lucide-vue-next";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Checkbox } from "@/components/ui/checkbox";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { SingleDatePicker } from "@/components/date-time-picker";
 
 import {
   initMonacoSetup,
@@ -971,10 +412,8 @@ import {
 import { storeToRefs } from 'pinia';
 import { useExploreStore } from "@/stores/explore";
 import { useTeamsStore } from "@/stores/teams";
-import type { VariableState as VariableSetting } from '@/stores/variables';
 import { useVariableStore } from '@/stores/variables';
 import { useVariables, extractVariablesWithOptional, extractVariableNames } from "@/composables/useVariables.ts";
-import { useToast } from "@/composables/useToast";
 // Keep other necessary imports like types...
 // --- Types ---
 type EditorMode = "logchefql" | "clickhouse-sql";
@@ -990,29 +429,35 @@ type MonacoCompletionItem = monaco.languages.CompletionItem;
 type MonacoRange = monaco.IRange;
 
 // --- Props and Emits ---
-const props = defineProps({
-  sourceId: { type: Number, required: true },
-  schema: {
-    type: Object as () => Record<string, { type: string }>,
-    required: true,
-  },
-  activeMode: { type: String as () => EditorMode, required: true },
-  value: { type: String, default: "" },
-  placeholder: { type: String, default: "" },
-  tsField: { type: String, default: "timestamp" },
-  tableName: { type: String, required: true },
-  showFieldsPanel: { type: Boolean, default: false },
-  // SavedQueriesDropdown props
-  teamId: { type: Number, required: true },
-  useCurrentTeam: { type: Boolean, default: true },
-  // Additional props to prevent Vue warnings
-  class: { type: String, default: "" },
-  // Run button integration
-  isExecuting: { type: Boolean, default: false },
-  canExecute: { type: Boolean, default: true },
-  showRunButton: { type: Boolean, default: true },
-  // Cancel button integration
-  isCancelling: { type: Boolean, default: false },
+interface QueryEditorProps {
+  sourceId: number
+  schema: Record<string, { type: string }>
+  activeMode: EditorMode
+  tableName: string
+  teamId: number
+  value?: string
+  placeholder?: string
+  tsField?: string
+  showFieldsPanel?: boolean
+  useCurrentTeam?: boolean
+  class?: string
+  isExecuting?: boolean
+  canExecute?: boolean
+  showRunButton?: boolean
+  isCancelling?: boolean
+}
+
+const props = withDefaults(defineProps<QueryEditorProps>(), {
+  value: '',
+  placeholder: '',
+  tsField: 'timestamp',
+  showFieldsPanel: false,
+  useCurrentTeam: true,
+  class: '',
+  isExecuting: false,
+  canExecute: true,
+  showRunButton: true,
+  isCancelling: false,
 });
 
 const emit = defineEmits<{
@@ -1049,31 +494,16 @@ const isEditorVisible = ref(true); // New state for SQL editor visibility
 
 // dynamic variables list
 const { allVariables } = storeToRefs(variableStore);
-// Selected variable for sheet editing
-const selectedVariable = ref<VariableSetting | null>(null);
 // Show variables configuration panel
 const showVariablesConfig = ref(false);
 
 // AI SQL generation state
 const showAiDialog = ref(false);
-const aiNaturalQuery = ref('');
 
 // Get AI state from store
 const isGeneratingAi = computed(() => exploreStore.isGeneratingAISQL);
 const aiError = computed(() => exploreStore.aiSqlError);
 const generatedSql = computed(() => exploreStore.generatedAiSql);
-
-// AI textarea ref for auto-focus
-const aiTextareaRef = ref<HTMLTextAreaElement | null>(null);
-
-// Auto-focus when dialog opens
-watch(showAiDialog, (isOpen) => {
-  if (isOpen) {
-    nextTick(() => {
-      aiTextareaRef.value?.focus();
-    });
-  }
-});
 
 // --- Computed Properties ---
 const theme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
@@ -2253,260 +1683,24 @@ const handleNewQueryClick = () => {
       });
   });
 };
-// Open sheet to edit all variables
-const openAllVariableSettings = () => {
-  showVariablesConfig.value = true;
+// AI dialog handler — forward submit to parent
+const handleAiDialogSubmit = (payload: { naturalLanguageQuery: string; currentQuery: string }) => {
+  emit('generateAiSql', {
+    naturalLanguageQuery: payload.naturalLanguageQuery,
+    currentQuery: editorContent.value || '',
+  });
 };
 
-// Close the sheet UI
-const closeDrawer = () => {
-  selectedVariable.value = null;
-  showVariablesConfig.value = false;
-};
-
-// Update variable type for multi-variable panel
-const updateVariableType = (variable: VariableSetting) => {
-  switch (variable.type) {
-    case 'text':
-      variable.value = '';
-      variable.inputType = 'input';
-      break;
-    case 'number':
-      variable.value = 0;
-      variable.inputType = 'input';
-      break;
-    case 'date':
-      // Use local datetime format instead of UTC ISO8601
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const day = String(now.getDate()).padStart(2, '0');
-      const hours = String(now.getHours()).padStart(2, '0');
-      const minutes = String(now.getMinutes()).padStart(2, '0');
-      const seconds = String(now.getSeconds()).padStart(2, '0');
-      variable.value = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-      variable.inputType = 'datepicker';
-      break;
-  }
-
-  variableStore.upsertVariable(variable);
-};
-
-const addDropdownOption = (variable: VariableSetting) => {
-  if (!variable.options) {
-    variable.options = [];
-  }
-  variable.options.push({ value: '', label: '' });
-  variableStore.upsertVariable(variable);
-};
-
-const removeDropdownOption = (variable: VariableSetting, index: number) => {
-  if (variable.options) {
-    variable.options.splice(index, 1);
-    variableStore.upsertVariable(variable);
-  }
-};
-
-const hasVariableValue = (variable: VariableSetting) => {
-  if (variable.value === null || variable.value === undefined) return false;
-  if (Array.isArray(variable.value)) return variable.value.length > 0;
-  if (typeof variable.value === 'string') return variable.value.trim() !== '';
-  return true;
-};
-
-// Multi-select helper functions
-const getMultiSelectDisplay = (variable: VariableSetting): string => {
-  const values = Array.isArray(variable.value) ? variable.value : [];
-  if (values.length === 0) return variable.isOptional ? 'Select (optional)' : 'Select...';
-  if (values.length === 1) {
-    const opt = variable.options?.find(o => o.value === values[0]);
-    return opt?.label || values[0];
-  }
-  return `${values.length} selected`;
-};
-
-const getMultiSelectValues = (variable: VariableSetting): string[] => {
-  return Array.isArray(variable.value) ? variable.value : [];
-};
-
-const toggleMultiSelectValue = (variable: VariableSetting, value: string) => {
-  const current = Array.isArray(variable.value) ? [...variable.value] : [];
-  const index = current.indexOf(value);
-  if (index >= 0) {
-    current.splice(index, 1);
-  } else {
-    current.push(value);
-  }
-  variable.value = current;
-  variableStore.upsertVariable(variable);
-};
-
-const isMultiSelectValueSelected = (variable: VariableSetting, value: string): boolean => {
-  return Array.isArray(variable.value) && variable.value.includes(value);
-};
-
-const clearMultiSelectValues = (variable: VariableSetting) => {
-  variable.value = [];
-  variableStore.upsertVariable(variable);
-};
-
-// Multi-select default value helpers
-const toggleDefaultMultiSelectValue = (variable: VariableSetting, value: string) => {
-  const current = Array.isArray(variable.defaultValue) ? [...variable.defaultValue] : [];
-  const index = current.indexOf(value);
-  if (index >= 0) {
-    current.splice(index, 1);
-  } else {
-    current.push(value);
-  }
-  variable.defaultValue = current;
-  variableStore.upsertVariable(variable);
-};
-
-const isDefaultMultiSelectValueSelected = (variable: VariableSetting, value: string): boolean => {
-  return Array.isArray(variable.defaultValue) && variable.defaultValue.includes(value);
-};
-
-const getDefaultMultiSelectCount = (variable: VariableSetting): number => {
-  return Array.isArray(variable.defaultValue) ? variable.defaultValue.length : 0;
-};
-
-// Determine input type for a given variable type
-const inputTypeFor = (type: string) => {
-  if (type === 'number') return 'number';
-  return 'text';
-};
-
-// Get placeholder text for variable type
-const getPlaceholderForType = (type: string) => {
-  switch (type) {
-    case 'number':
-      return 'Enter a number...';
-    case 'date':
-      return '2026-01-28 14:30:00';
-    case 'text':
-    default:
-      return 'Enter text value...';
-  }
-};
-
-// Format variable value for display
-const formatVariableValue = (variable: VariableSetting) => {
-  if (!variable.value) return '';
-
-  // Handle array values (multi-select)
-  if (Array.isArray(variable.value)) {
-    if (variable.value.length === 0) return '';
-    const displayValues = variable.value.slice(0, 3).map(v => {
-      const opt = variable.options?.find(o => o.value === v);
-      return opt?.label || v;
-    });
-    const suffix = variable.value.length > 3 ? `, +${variable.value.length - 3} more` : '';
-    return displayValues.join(', ') + suffix;
-  }
-
-  switch (variable.type) {
-    case 'number':
-      return `Value: ${variable.value} `;
-    case 'date':
-      const date = new Date(variable.value as string);
-      if (isNaN(date.getTime())) {
-        return `Date: ${variable.value}`;
-      }
-      return date.toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-      });
-    case 'text':
-    default:
-      const value = String(variable.value);
-      return value.length > 20 ? `"${value.substring(0, 20)}..."` : `"${value}"`;
-  }
-};
-
-// AI SQL generation handler
-const handleAiSubmit = async () => {
-  if (!aiNaturalQuery.value.trim()) return;
-  
-  try {
-    // Emit the generate-ai-sql event with the natural language query
-    emit('generateAiSql', { 
-      naturalLanguageQuery: aiNaturalQuery.value.trim(),
-      currentQuery: editorContent.value || '' 
-    });
-  } catch (error) {
-    console.error('Failed to emit generateAiSql event:', error);
-  }
-};
-
-// Insert generated SQL into editor
-const insertGeneratedSql = () => {
-  if (!generatedSql.value) return;
-  
-  // Update editor content with generated SQL
-  editorContent.value = generatedSql.value;
-  
-  // Emit the change event
-  handleEditorChange(generatedSql.value);
-  
-  // Close dialog and reset state
-  resetAiDialog();
-  
-  // Focus the editor after insertion
+// AI dialog handler — insert generated SQL into editor
+const handleAiInsert = (sql: string) => {
+  editorContent.value = sql;
+  handleEditorChange(sql);
+  showAiDialog.value = false;
+  exploreStore.clearAiSqlState();
   nextTick(() => {
     focusEditor(true);
   });
 };
-
-// Reset AI dialog state
-const resetAiDialog = () => {
-  showAiDialog.value = false;
-  aiNaturalQuery.value = '';
-  // Clear store state
-  exploreStore.clearAiSqlState();
-};
-
-// Set example prompt
-const setExamplePrompt = (prompt: string) => {
-  aiNaturalQuery.value = prompt;
-  // Auto-focus the textarea after setting example
-  nextTick(() => {
-    aiTextareaRef.value?.focus();
-  });
-};
-
-// Copy to clipboard helper
-const copyToClipboard = async (text: string) => {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch (error) {
-    console.error('Failed to copy to clipboard:', error);
-    const { toast } = useToast();
-    toast({
-      title: "Copy failed",
-      description: "Unable to copy to clipboard",
-      variant: "destructive",
-      duration: 3000,
-    });
-  }
-};
-
-// Watch for changes to selected variable and update the store
-watch(
-  () => selectedVariable.value,
-  (newVariable) => {
-    if (newVariable) {
-      // Update the variable in the store when it changes
-      variableStore.upsertVariable(newVariable);
-    }
-  },
-  { deep: true }
-);
 
 </script>
 
