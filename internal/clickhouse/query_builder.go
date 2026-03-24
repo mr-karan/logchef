@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	// DefaultLimit is applied when SQL mode has no LIMIT clause
+	// DefaultLimit is a conservative fallback used only when maxLimit is not configured.
 	DefaultLimit = 1000
 )
 
@@ -188,7 +188,7 @@ func (qb *QueryBuilder) checkDangerousOperations(stmt *clickhouseparser.SelectQu
 
 // ensureLimit handles LIMIT clause based on query mode:
 // - If requestedLimit > 0 (LogchefQL): apply it, capped at maxLimit
-// - If requestedLimit == 0 (SQL mode): respect user's SQL LIMIT (capped), or add DefaultLimit
+// - If requestedLimit == 0 (SQL mode): respect user's SQL LIMIT (capped), or add maxLimit
 func (qb *QueryBuilder) ensureLimit(stmt *clickhouseparser.SelectQuery, requestedLimit int) {
 	if requestedLimit > 0 {
 		limit := requestedLimit
@@ -215,8 +215,13 @@ func (qb *QueryBuilder) ensureLimit(stmt *clickhouseparser.SelectQuery, requeste
 		return
 	}
 
+	defaultLimit := qb.maxLimit
+	if defaultLimit <= 0 {
+		defaultLimit = DefaultLimit
+	}
+
 	stmt.Limit = &clickhouseparser.LimitClause{
-		Limit: &clickhouseparser.NumberLiteral{Literal: fmt.Sprintf("%d", DefaultLimit)},
+		Limit: &clickhouseparser.NumberLiteral{Literal: fmt.Sprintf("%d", defaultLimit)},
 	}
 }
 

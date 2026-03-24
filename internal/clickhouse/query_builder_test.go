@@ -199,3 +199,29 @@ func TestQueryBuilderLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestQueryBuilderDefaultLimitFromMaxLimit(t *testing.T) {
+	qb := NewExtendedQueryBuilder("mydb.logs", 1000000)
+
+	result, err := qb.BuildRawQuery("SELECT * FROM mydb.logs", 0)
+	if err != nil {
+		t.Fatalf("BuildRawQuery() error = %v", err)
+	}
+
+	if !strings.Contains(result, "LIMIT 1000000") {
+		t.Fatalf("BuildRawQuery() = %q, should contain %q", result, "LIMIT 1000000")
+	}
+}
+
+func TestQueryBuilderDefaultLimitFallback(t *testing.T) {
+	qb := NewExtendedQueryBuilder("mydb.logs", 0)
+
+	result, err := qb.BuildRawQuery("SELECT * FROM mydb.logs", 0)
+	if err != nil {
+		t.Fatalf("BuildRawQuery() error = %v", err)
+	}
+
+	if !strings.Contains(result, "LIMIT 1000") {
+		t.Fatalf("BuildRawQuery() = %q, should contain %q", result, "LIMIT 1000")
+	}
+}

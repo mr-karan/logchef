@@ -292,8 +292,8 @@ function clear() {
             <Input
               type="time"
               step="1"
-              :value="timeValue"
-              class="h-8 text-sm font-mono"
+              :model-value="timeValue"
+              class="single-date-time-input h-8 text-sm font-mono"
               @input="handleTimeChange"
             />
           </div>
@@ -328,3 +328,17 @@ function clear() {
     </Popover>
   </div>
 </template>
+
+<style>
+.single-date-time-input {
+  color-scheme: light;
+}
+
+.dark .single-date-time-input {
+  color-scheme: dark;
+}
+
+.dark .single-date-time-input::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
+</style>
