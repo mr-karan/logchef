@@ -74,7 +74,8 @@ const {
 } = useContextSync({ basePath: '/logs/saved' });
 
 const localTeamQueries = ref<SavedTeamQuery[] | undefined>();
-const isAllSourcesMode = computed(() => !contextSourceId.value);
+const isAllTeamsMode = ref(false);
+const isAllSourcesMode = computed(() => isAllTeamsMode.value || !contextSourceId.value);
 
 const currentSelectedSource = computed(() => {
   if (!contextSourceId.value) return undefined;
@@ -125,6 +126,7 @@ const showEmptyState = computed(() => {
 
 // Selected team name with better null handling
 const selectedTeamName = computed(() => {
+  if (isAllTeamsMode.value) return "All Teams";
   if (!teamsStore || !teamsStore.currentTeam) {
     return "Select a team";
   }
@@ -199,11 +201,23 @@ watch(
 
 async function handleTeamChange(teamId: string) {
   try {
+    // Handle "All Teams" selection
+    if (teamId === "all") {
+      isAllTeamsMode.value = true;
+      localTeamQueries.value = [];
+      const result = await savedQueriesStore.fetchMyCollections();
+      if (result.success) {
+        localTeamQueries.value = result.data ?? [];
+      }
+      return;
+    }
+
+    isAllTeamsMode.value = false;
     const teamIdNum = parseInt(teamId);
     if (isNaN(teamIdNum)) return;
-    
+
     await contextHandleTeamChange(teamIdNum);
-    
+
     // Default to All Sources when switching teams
     contextStore.sourceId = null;
     const query = { ...route.query };
@@ -257,6 +271,9 @@ async function handleSourceChange(sourceId: string) {
 }
 
 async function fetchQueries() {
+  // All Teams mode — already fetched in handleTeamChange
+  if (isAllTeamsMode.value) return;
+
   if (!contextTeamId.value) {
     console.warn("No team selected, cannot load queries");
     return;
@@ -341,11 +358,13 @@ function handleCreateNewQuery() {
 }
 
 async function handleToggleBookmark(query: SavedTeamQuery) {
-  if (!contextTeamId.value || !contextSourceId.value) return;
+  const teamId = query.team_id || contextTeamId.value;
+  const sourceId = query.source_id || contextSourceId.value;
+  if (!teamId || !sourceId) return;
 
   const result = await savedQueriesStore.toggleBookmark(
-    contextTeamId.value,
-    contextSourceId.value,
+    teamId,
+    sourceId,
     query.id
   );
 
@@ -361,9 +380,11 @@ async function handleToggleBookmark(query: SavedTeamQuery) {
 }
 
 async function copyCollectionUrl(query: SavedTeamQuery) {
-  if (!contextTeamId.value || !contextSourceId.value) return;
+  const teamId = query.team_id || contextTeamId.value;
+  const sourceId = query.source_id || contextSourceId.value;
+  if (!teamId || !sourceId) return;
 
-  const url = `${window.location.origin}/logs/collection/${contextTeamId.value}/${contextSourceId.value}/${query.id}`;
+  const url = `${window.location.origin}/logs/collection/${teamId}/${sourceId}/${query.id}`;
 
   try {
     await navigator.clipboard.writeText(url);
@@ -388,7 +409,7 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
   <div class="container py-6 space-y-6">
     <div class="flex justify-between items-center">
       <h1 class="text-2xl font-bold tracking-tight">Collections</h1>
-      <Button v-if="canManageCollections" @click="handleCreateNewQuery">
+      <Button v-if="canManageCollections && !isAllTeamsMode" @click="handleCreateNewQuery">
         <Plus class="mr-2 h-4 w-4" />
         Add to Collection
       </Button>
@@ -465,7 +486,7 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
           <div class="flex items-center space-x-4 text-sm">
             <div class="flex flex-col space-y-1.5">
               <label class="text-sm font-medium leading-none">Team</label>
-              <Select :model-value="contextTeamId ? contextTeamId.toString() : ''" 
+              <Select :model-value="isAllTeamsMode ? 'all' : (contextTeamId ? contextTeamId.toString() : '')"
                 @update:model-value="handleTeamChange" class="h-8 min-w-[160px]" :disabled="contextLoading">
                 <SelectTrigger>
                   <SelectValue placeholder="Select a team">
@@ -474,6 +495,7 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="all">All Teams</SelectItem>
                   <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id.toString()">
                     {{ team.name }}
                   </SelectItem>
@@ -485,7 +507,7 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
 
             <div class="flex flex-col space-y-1.5">
               <label class="text-sm font-medium leading-none">Source</label>
-              <Select :model-value="selectedSourceId" @update:model-value="handleSourceChange" :disabled="contextLoading ||
+              <Select :model-value="selectedSourceId" @update:model-value="handleSourceChange" :disabled="isAllTeamsMode || contextLoading ||
                 !contextTeamId ||
                 ((sourcesStore.teamSources || []).length === 0 && !isAllSourcesMode)
                 " class="h-8 min-w-[200px]">
@@ -535,7 +557,7 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
           <Button v-if="searchQuery" variant="outline" @click="clearSearch">
             Clear Search
           </Button>
-          <Button v-if="canManageCollections && !searchQuery" @click="handleCreateNewQuery">
+          <Button v-if="canManageCollections && !searchQuery && !isAllTeamsMode" @click="handleCreateNewQuery">
             Add to Collection
           </Button>
         </div>
@@ -553,6 +575,7 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
             <TableRow>
               <TableHead class="w-[50px] font-sans"></TableHead>
               <TableHead class="w-[250px] font-sans">Name</TableHead>
+              <TableHead v-if="isAllTeamsMode" class="w-[120px] font-sans">Team</TableHead>
               <TableHead v-if="isAllSourcesMode" class="w-[150px] font-sans">Source</TableHead>
               <TableHead class="font-sans">Description</TableHead>
               <TableHead class="w-[100px] font-sans">Type</TableHead>
@@ -605,7 +628,8 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
                   {{ query.name }}
                 </a>
               </TableCell>
-              <TableCell v-if="isAllSourcesMode">{{ getSourceName(query.source_id) }}</TableCell>
+              <TableCell v-if="isAllTeamsMode">{{ query.team_name || `Team ${query.team_id}` }}</TableCell>
+              <TableCell v-if="isAllSourcesMode">{{ query.source_name || getSourceName(query.source_id) }}</TableCell>
               <TableCell>{{ query.description || "-" }}</TableCell>
               <TableCell>
                 <Badge :class="[

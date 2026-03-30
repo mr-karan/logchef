@@ -100,6 +100,8 @@ type Querier interface {
 	ListQueriesByTeam(ctx context.Context, teamID int64) ([]TeamQuery, error)
 	// List all queries for a specific team and source (bookmarked first, then by updated_at)
 	ListQueriesByTeamAndSource(ctx context.Context, arg ListQueriesByTeamAndSourceParams) ([]TeamQuery, error)
+	// List all saved queries across all teams a user belongs to, with team and source names
+	ListQueriesForUser(ctx context.Context, userID int64) ([]ListQueriesForUserRow, error)
 	// List all teams a data source is a member of
 	ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, error)
 	// Get all sources ordered by creation date

@@ -268,6 +268,28 @@ WHERE id = ? AND team_id = ? AND source_id = ?;
 -- Get the current bookmark status of a query
 SELECT is_bookmarked FROM team_queries WHERE id = ? AND team_id = ? AND source_id = ?;
 
+-- name: ListQueriesForUser :many
+-- List all saved queries across all teams a user belongs to, with team and source names
+SELECT
+    tq.id,
+    tq.team_id,
+    tq.source_id,
+    tq.name,
+    tq.description,
+    tq.query_type,
+    tq.query_content,
+    tq.created_at,
+    tq.updated_at,
+    tq.is_bookmarked,
+    t.name AS team_name,
+    s.name AS source_name
+FROM team_queries tq
+JOIN team_members tm ON tm.team_id = tq.team_id
+JOIN teams t ON t.id = tq.team_id
+JOIN sources s ON s.id = tq.source_id
+WHERE tm.user_id = ?
+ORDER BY tq.is_bookmarked DESC, tq.updated_at DESC;
+
 -- Additional queries for user-source and team-source access
 
 -- name: TeamHasSource :one

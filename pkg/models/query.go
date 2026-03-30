@@ -166,6 +166,8 @@ type SavedTeamQuery struct {
 	IsBookmarked bool           `json:"is_bookmarked" db:"is_bookmarked"`
 	CreatedAt    time.Time      `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at" db:"updated_at"`
+	TeamName     string         `json:"team_name,omitempty"`
+	SourceName   string         `json:"source_name,omitempty"`
 }
 
 // CreateTeamQueryRequest represents a request to create a team query

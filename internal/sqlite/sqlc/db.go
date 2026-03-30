@@ -159,6 +159,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listQueriesByTeamAndSourceStmt, err = db.PrepareContext(ctx, listQueriesByTeamAndSource); err != nil {
 		return nil, fmt.Errorf("error preparing query ListQueriesByTeamAndSource: %w", err)
 	}
+	if q.listQueriesForUserStmt, err = db.PrepareContext(ctx, listQueriesForUser); err != nil {
+		return nil, fmt.Errorf("error preparing query ListQueriesForUser: %w", err)
+	}
 	if q.listSourceTeamsStmt, err = db.PrepareContext(ctx, listSourceTeams); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSourceTeams: %w", err)
 	}
@@ -479,6 +482,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listQueriesByTeamAndSourceStmt: %w", cerr)
 		}
 	}
+	if q.listQueriesForUserStmt != nil {
+		if cerr := q.listQueriesForUserStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listQueriesForUserStmt: %w", cerr)
+		}
+	}
 	if q.listSourceTeamsStmt != nil {
 		if cerr := q.listSourceTeamsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listSourceTeamsStmt: %w", cerr)
@@ -713,6 +721,7 @@ type Queries struct {
 	listAlertsByTeamAndSourceStmt       *sql.Stmt
 	listQueriesByTeamStmt               *sql.Stmt
 	listQueriesByTeamAndSourceStmt      *sql.Stmt
+	listQueriesForUserStmt              *sql.Stmt
 	listSourceTeamsStmt                 *sql.Stmt
 	listSourcesStmt                     *sql.Stmt
 	listSourcesForUserStmt              *sql.Stmt
@@ -794,6 +803,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listAlertsByTeamAndSourceStmt:       q.listAlertsByTeamAndSourceStmt,
 		listQueriesByTeamStmt:               q.listQueriesByTeamStmt,
 		listQueriesByTeamAndSourceStmt:      q.listQueriesByTeamAndSourceStmt,
+		listQueriesForUserStmt:              q.listQueriesForUserStmt,
 		listSourceTeamsStmt:                 q.listSourceTeamsStmt,
 		listSourcesStmt:                     q.listSourcesStmt,
 		listSourcesForUserStmt:              q.listSourcesForUserStmt,

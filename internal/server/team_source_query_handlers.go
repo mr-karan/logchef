@@ -11,6 +11,18 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// handleListCurrentUserCollections retrieves all saved queries across all teams the user belongs to.
+func (s *Server) handleListCurrentUserCollections(c *fiber.Ctx) error {
+	user := c.Locals("user").(*models.User)
+
+	queries, err := s.sqlite.ListQueriesForUser(c.Context(), user.ID)
+	if err != nil {
+		s.log.Error("failed to list user collections", "error", err, "user_id", user.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Failed to list collections")
+	}
+	return SendSuccess(c, fiber.StatusOK, queries)
+}
+
 // handleListTeamCollections retrieves all saved queries (collections) for a team across all sources.
 func (s *Server) handleListTeamCollections(c *fiber.Ctx) error {
 	teamIDStr := c.Params("teamID")

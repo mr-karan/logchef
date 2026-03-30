@@ -1179,6 +1179,80 @@ func (q *Queries) ListQueriesByTeamAndSource(ctx context.Context, arg ListQuerie
 	return items, nil
 }
 
+const listQueriesForUser = `-- name: ListQueriesForUser :many
+SELECT
+    tq.id,
+    tq.team_id,
+    tq.source_id,
+    tq.name,
+    tq.description,
+    tq.query_type,
+    tq.query_content,
+    tq.created_at,
+    tq.updated_at,
+    tq.is_bookmarked,
+    t.name AS team_name,
+    s.name AS source_name
+FROM team_queries tq
+JOIN team_members tm ON tm.team_id = tq.team_id
+JOIN teams t ON t.id = tq.team_id
+JOIN sources s ON s.id = tq.source_id
+WHERE tm.user_id = ?
+ORDER BY tq.is_bookmarked DESC, tq.updated_at DESC
+`
+
+type ListQueriesForUserRow struct {
+	ID           int64          `json:"id"`
+	TeamID       int64          `json:"team_id"`
+	SourceID     int64          `json:"source_id"`
+	Name         string         `json:"name"`
+	Description  sql.NullString `json:"description"`
+	QueryType    string         `json:"query_type"`
+	QueryContent string         `json:"query_content"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	IsBookmarked bool           `json:"is_bookmarked"`
+	TeamName     string         `json:"team_name"`
+	SourceName   string         `json:"source_name"`
+}
+
+// List all saved queries across all teams a user belongs to, with team and source names
+func (q *Queries) ListQueriesForUser(ctx context.Context, userID int64) ([]ListQueriesForUserRow, error) {
+	rows, err := q.query(ctx, q.listQueriesForUserStmt, listQueriesForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListQueriesForUserRow{}
+	for rows.Next() {
+		var i ListQueriesForUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.SourceID,
+			&i.Name,
+			&i.Description,
+			&i.QueryType,
+			&i.QueryContent,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.IsBookmarked,
+			&i.TeamName,
+			&i.SourceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSourceTeams = `-- name: ListSourceTeams :many
 SELECT t.id, t.name, t.description, t.created_at, t.updated_at
 FROM teams t

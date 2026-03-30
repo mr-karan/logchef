@@ -30,6 +30,8 @@ export interface SavedTeamQuery {
   is_bookmarked: boolean;
   created_at: string;
   updated_at: string;
+  team_name?: string;
+  source_name?: string;
 }
 
 /**
@@ -94,6 +96,9 @@ export const savedQueriesApi = {
 
   resolveQuery: (teamId: number, sourceId: number, collectionId: number) =>
     apiClient.get<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}/resolve`),
+
+  listMyCollections: () =>
+    apiClient.get<SavedTeamQuery[]>("/me/collections"),
 
   getUserTeams: () => apiClient.get<Team[]>("/me/teams")
 };

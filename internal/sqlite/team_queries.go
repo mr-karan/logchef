@@ -205,3 +205,32 @@ func (db *DB) ToggleQueryBookmark(ctx context.Context, teamID models.TeamID, sou
 
 	return newStatus, nil
 }
+
+// ListQueriesForUser retrieves all saved queries across all teams a user belongs to.
+func (db *DB) ListQueriesForUser(ctx context.Context, userID models.UserID) ([]*models.SavedTeamQuery, error) {
+	sqlcQueries, err := db.readQueries.ListQueriesForUser(ctx, int64(userID))
+	if err != nil {
+		db.log.Error("failed to list queries for user from db", "error", err, "user_id", userID)
+		return nil, fmt.Errorf("error listing queries for user: %w", err)
+	}
+
+	queries := make([]*models.SavedTeamQuery, 0, len(sqlcQueries))
+	for i := range sqlcQueries {
+		queries = append(queries, &models.SavedTeamQuery{
+			ID:           int(sqlcQueries[i].ID),
+			TeamID:       models.TeamID(sqlcQueries[i].TeamID),
+			SourceID:     models.SourceID(sqlcQueries[i].SourceID),
+			Name:         sqlcQueries[i].Name,
+			Description:  sqlcQueries[i].Description.String,
+			QueryType:    models.SavedQueryType(sqlcQueries[i].QueryType),
+			QueryContent: sqlcQueries[i].QueryContent,
+			IsBookmarked: sqlcQueries[i].IsBookmarked,
+			CreatedAt:    sqlcQueries[i].CreatedAt,
+			UpdatedAt:    sqlcQueries[i].UpdatedAt,
+			TeamName:     sqlcQueries[i].TeamName,
+			SourceName:   sqlcQueries[i].SourceName,
+		})
+	}
+
+	return queries, nil
+}
