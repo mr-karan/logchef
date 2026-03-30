@@ -3,7 +3,7 @@ title: Query Examples
 description: Practical examples for common log analytics scenarios
 ---
 
-This guide provides practical examples for common log analytics scenarios using LogChef. Each example includes both the LogchefQL syntax and the equivalent SQL query.
+This guide provides practical examples for common log analytics scenarios using Logchef. Each example includes both the LogchefQL syntax and the equivalent SQL query.
 
 ## Error Analysis
 

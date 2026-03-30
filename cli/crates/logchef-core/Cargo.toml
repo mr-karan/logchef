@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "LogChef core library - Config, API client, auth, and highlighting"
+description = "Logchef core library - Config, API client, auth, and highlighting"
 
 [dependencies]
 tokio.workspace = true

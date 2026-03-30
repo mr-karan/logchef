@@ -1,12 +1,12 @@
 name: Bug Report
-description: Report a bug or unexpected behavior in LogChef
+description: Report a bug or unexpected behavior in Logchef
 title: "[Bug]: "
 labels: ["bug", "triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        ## LogChef Bug Report
+        ## Logchef Bug Report
         Thanks for taking the time to fill out this bug report!
         Please provide as much information as possible to help us diagnose and fix the issue.
 
@@ -47,7 +47,7 @@ body:
       label: Environment
       description: Information about your setup
       placeholder: |
-        - LogChef version: [e.g. v0.1.0]
+        - Logchef version: [e.g. v0.1.0]
         - OS: [e.g. Ubuntu 22.04, macOS 13.0]
         - Browser: [e.g. Chrome 109, Safari 16]
         - Deployment method: [e.g. Docker, binary]

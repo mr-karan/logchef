@@ -1,6 +1,6 @@
-# LogChef configuration (TOML).
+# Logchef configuration (TOML).
 #
-# This file contains only essential bootstrap settings required to start LogChef.
+# This file contains only essential bootstrap settings required to start Logchef.
 # Runtime settings (AI, alerts, auth sessions, server frontend URL) are managed
 # in the Admin UI and stored in the database.
 #

@@ -1,4 +1,4 @@
-# LogChef Frontend
+# Logchef Frontend
 
 Vue 3 + TypeScript frontend built with modern, high-performance tooling.
 

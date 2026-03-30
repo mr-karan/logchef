@@ -1,4 +1,4 @@
-name: LogChef CLI
+name: Logchef CLI
 
 on:
   push:

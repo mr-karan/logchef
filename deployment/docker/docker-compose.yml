@@ -166,7 +166,7 @@ configs:
         - id: logchef
           redirectURIs:
             - "http://localhost:8125/api/v1/auth/callback"
-          name: "LogChef"
+          name: "Logchef"
           secret: logchef-secret
 
       oauth2:

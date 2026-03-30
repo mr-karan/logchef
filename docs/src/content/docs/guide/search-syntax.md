@@ -1,9 +1,9 @@
 ---
 title: Search Syntax
-description: Learn how to use LogChef's simple yet powerful search syntax
+description: Learn how to use Logchef's simple yet powerful search syntax
 ---
 
-LogChef provides a simple yet powerful search syntax called **LogchefQL** that makes it easy to find exactly what you're looking for in your logs.
+Logchef provides a simple yet powerful search syntax called **LogchefQL** that makes it easy to find exactly what you're looking for in your logs.
 
 ## Basic Syntax
 
@@ -191,7 +191,7 @@ body~"error" and log_attributes.request.method="POST"
 
 ## Under the Hood
 
-When you use LogchefQL, LogChef converts it to optimized ClickHouse SQL queries:
+When you use LogchefQL, Logchef converts it to optimized ClickHouse SQL queries:
 
 - The `~` and `!~` operators use ClickHouse's `positionCaseInsensitive` function for efficient partial matches
 - Nested field access on Map columns uses subscript notation: `column['key']`

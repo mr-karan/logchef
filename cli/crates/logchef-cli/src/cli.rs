@@ -6,7 +6,7 @@ use crate::commands::{auth, collections, config, query, schema, sources, sql, te
 
 #[derive(Parser)]
 #[command(name = "logchef")]
-#[command(author, version, about = "LogChef CLI - A sophisticated log viewer", long_about = None)]
+#[command(author, version, about = "Logchef CLI - A sophisticated log viewer", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -42,10 +42,10 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "Authenticate with LogChef server")]
+    #[command(about = "Authenticate with Logchef server")]
     Auth(auth::AuthArgs),
 
-    #[command(about = "Execute a LogChefQL query")]
+    #[command(about = "Execute a LogchefQL query")]
     Query(query::QueryArgs),
 
     #[command(about = "Execute a raw SQL query")]

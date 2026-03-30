@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: Upcoming features and future plans for LogChef
+description: Upcoming features and future plans for Logchef
 ---
 
 ## Recently Released
 
 ### Alerting System ✅
 
-LogChef now includes a comprehensive alerting system with direct email and webhook delivery:
+Logchef now includes a comprehensive alerting system with direct email and webhook delivery:
 
 - ✅ SQL-based alert conditions with ClickHouse query support
 - ✅ Native SMTP and webhook notifications
@@ -24,7 +24,7 @@ LogChef now includes a comprehensive alerting system with direct email and webho
 
 ## Upcoming Features
 
-Here's what we're planning to add to LogChef in future releases:
+Here's what we're planning to add to Logchef in future releases:
 
 ## Integration Features
 

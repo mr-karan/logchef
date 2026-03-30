@@ -64,7 +64,7 @@ var SwaggerInfo = &swag.Spec{
 	Host:             "localhost:8080",
 	BasePath:         "/api/v1",
 	Schemes:          []string{"http", "https"},
-	Title:            "LogChef API",
+	Title:            "Logchef API",
 	Description:      "Log analytics and exploration platform for collecting, querying, and visualizing log data",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,

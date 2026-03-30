@@ -1,15 +1,15 @@
 ---
 title: Development Setup
-description: Complete guide to setting up your LogChef development environment
+description: Complete guide to setting up your Logchef development environment
 ---
 
 # Development Setup
 
-This guide covers multiple ways to set up your LogChef development environment.
+This guide covers multiple ways to set up your Logchef development environment.
 
 ## Prerequisites
 
-LogChef requires:
+Logchef requires:
 - **Go 1.24+** - Backend development
 - **Node.js 22+** - Frontend development
 - **pnpm** - Frontend package management
@@ -34,7 +34,7 @@ cd logchef
 # Enter the development shell
 nix develop
 
-# You should see: "👉 Ready to build LogChef. Try: just build or just dev-docker"
+# You should see: "👉 Ready to build Logchef. Try: just build or just dev-docker"
 ```
 
 #### Using direnv (Automatic activation)
@@ -147,7 +147,7 @@ just build-backend
 just build-frontend
 ```
 
-### 4. Run LogChef
+### 4. Run Logchef
 
 ```bash
 # Run with development config
@@ -158,7 +158,7 @@ just run-backend
 just run-frontend  # In another terminal
 ```
 
-Access LogChef at `http://localhost:8125`
+Access Logchef at `http://localhost:8125`
 
 ## Development Workflow
 

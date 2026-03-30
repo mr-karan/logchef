@@ -10,7 +10,7 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// Metrics system with meaningful labels for monitoring LogChef usage
+// Metrics system with meaningful labels for monitoring Logchef usage
 
 // RecordHTTPRequest records HTTP request metrics with optional user context
 func RecordHTTPRequest(method, endpoint string, statusCode int, duration time.Duration, responseSize int64, user *models.User) {

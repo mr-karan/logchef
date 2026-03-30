@@ -1,27 +1,27 @@
 ---
 title: Architecture
-description: Comprehensive overview of LogChef's architecture, components, and data flow
+description: Comprehensive overview of Logchef's architecture, components, and data flow
 ---
 
 ## Architectural Overview
 
-LogChef is architected as a specialized query and visualization layer on top of ClickHouse. Its design emphasizes a clear separation of concerns:
+Logchef is architected as a specialized query and visualization layer on top of ClickHouse. Its design emphasizes a clear separation of concerns:
 
 - **Query Engine**: Core focus on transforming user queries into optimized ClickHouse SQL
 - **No Ingestion Pipeline**: The architecture intentionally excludes log collection, focusing exclusively on the query interface
 - **ClickHouse Integration**: Deep integration with ClickHouse's query capabilities while maintaining schema flexibility
 
-This architectural approach allows LogChef to leverage the existing ecosystem of log collection tools while providing a specialized interface for exploring logs once they're in ClickHouse.
+This architectural approach allows Logchef to leverage the existing ecosystem of log collection tools while providing a specialized interface for exploring logs once they're in ClickHouse.
 
 ## System Overview
 
-![LogChef Architecture Diagram](./logchef-architecture.png)
+![Logchef Architecture Diagram](./logchef-architecture.png)
 
 ### Technology Stack
 
 #### Backend
 
-- **Go**: LogChef's core backend is written in Go, providing high performance, concurrency, and efficient resource utilization
+- **Go**: Logchef's core backend is written in Go, providing high performance, concurrency, and efficient resource utilization
 - **SQLite**: Lightweight database used for metadata storage of users, teams, sources, and saved queries
 - **ClickHouse**: High-performance columnar database optimized for analytical queries on log data
 
@@ -52,14 +52,14 @@ This architectural approach allows LogChef to leverage the existing ecosystem of
 
 ## Data Flow
 
-1. **Log Ingestion** (external to LogChef):
+1. **Log Ingestion** (external to Logchef):
 
    - Various collectors (Vector, Filebeat, etc.) send logs to ClickHouse
    - Each collector handles its own schema mapping and transformations
 
-2. **Log Querying** (LogChef's domain):
+2. **Log Querying** (Logchef's domain):
    - Users construct queries via the UI (simple syntax or SQL)
-   - LogChef translates simple syntax to optimized ClickHouse SQL
+   - Logchef translates simple syntax to optimized ClickHouse SQL
    - Queries are executed against the appropriate ClickHouse source(s)
    - Results are processed, formatted, and displayed in the UI
 
@@ -76,7 +76,7 @@ SQLite manages all system configuration and relationships:
 
 ### ClickHouse Log Storage
 
-LogChef connects to multiple remote ClickHouse databases as sources:
+Logchef connects to multiple remote ClickHouse databases as sources:
 
 - **Schema Flexibility**: Sources can:
 
@@ -90,7 +90,7 @@ LogChef connects to multiple remote ClickHouse databases as sources:
 
 ## Deployment Considerations
 
-- **Single Binary**: LogChef runs as a lightweight single binary with minimal resource requirements
+- **Single Binary**: Logchef runs as a lightweight single binary with minimal resource requirements
 - **Stateless Operation**: Core application is stateless for horizontal scaling (only SQLite metadata is persistent)
 - **Proxying**: Can be deployed behind reverse proxies like Nginx or Caddy
 

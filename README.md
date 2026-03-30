@@ -11,14 +11,14 @@
 </p>
 
 <p align="center">
-  <img alt="LogChef Log Explorer" src="docs/public/screenshots/hero-light.png">
+  <img alt="Logchef Log Explorer" src="docs/public/screenshots/hero-light.png">
 </p>
 
-LogChef is a lightweight, powerful log analytics platform designed for efficient log management and analysis. It operates as a single binary, utilizing ClickHouse for high-performance log storage and querying. LogChef provides an intuitive interface for exploring log data, making it suitable for development teams seeking a robust and scalable solution.
+Logchef is a lightweight, powerful log analytics platform designed for efficient log management and analysis. It operates as a single binary, utilizing ClickHouse for high-performance log storage and querying. Logchef provides an intuitive interface for exploring log data, making it suitable for development teams seeking a robust and scalable solution.
 
 ## Features
 
-- **Query-first log exploration**: Fast filtering with both LogChefQL and ClickHouse SQL.
+- **Query-first log exploration**: Fast filtering with both LogchefQL and ClickHouse SQL.
 - **AI Query Assistant**: Turn natural language into SQL instantly.
 - **Real-time alerting**: Schedule rules and send email or webhook notifications.
 - **OIDC + RBAC included**: SSO and team-based access out of the box.
@@ -44,7 +44,7 @@ Access the Logchef interface at `http://localhost:8125`.
 
 ## CLI
 
-LogChef includes a powerful CLI for querying logs directly from your terminal.
+Logchef includes a powerful CLI for querying logs directly from your terminal.
 
 ### Install
 
@@ -71,10 +71,10 @@ sudo mv logchef /usr/local/bin/
 ### Usage
 
 ```bash
-# Authenticate with your LogChef server
+# Authenticate with your Logchef server
 logchef auth --server https://logs.example.com
 
-# Query logs with LogChefQL
+# Query logs with LogchefQL
 logchef query "level:error" --since 1h
 
 # Execute raw SQL
@@ -119,7 +119,7 @@ For questions or help, open an issue or start a discussion on GitHub.
 
 ## License
 
-LogChef is distributed under the terms of the AGPLv3 License.
+Logchef is distributed under the terms of the AGPLv3 License.
 
 ### Credits
 

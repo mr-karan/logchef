@@ -94,7 +94,7 @@ func isValidColumnName(name string) bool {
 	return isValidTableName(name)
 }
 
-// isValidSourceName checks if the name is valid for use as a LogChef source name.
+// isValidSourceName checks if the name is valid for use as a Logchef source name.
 func isValidSourceName(name string) bool {
 	// More relaxed than table name validation - allows spaces, hyphens.
 	// Check length constraint

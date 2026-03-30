@@ -1,6 +1,6 @@
-# Contributing to LogChef
+# Contributing to Logchef
 
-Thank you for your interest in contributing to LogChef! We welcome contributions from the community.
+Thank you for your interest in contributing to Logchef! We welcome contributions from the community.
 
 ## Getting Started
 
@@ -35,7 +35,7 @@ just build
 just CONFIG=dev/config.toml run
 ```
 
-Access LogChef at `http://localhost:8125`
+Access Logchef at `http://localhost:8125`
 
 ## Development Workflow
 
@@ -199,8 +199,8 @@ just test-short
 
 ## License
 
-By contributing to LogChef, you agree that your contributions will be licensed under the AGPLv3 License.
+By contributing to Logchef, you agree that your contributions will be licensed under the AGPLv3 License.
 
 ## Recognition
 
-Contributors will be recognized in our release notes and README. Thank you for helping make LogChef better!
+Contributors will be recognized in our release notes and README. Thank you for helping make Logchef better!

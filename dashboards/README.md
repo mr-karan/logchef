@@ -1,12 +1,12 @@
-# LogChef Grafana Dashboards
+# Logchef Grafana Dashboards
 
-This directory contains the official Grafana dashboards for LogChef monitoring and observability.
+This directory contains the official Grafana dashboards for Logchef monitoring and observability.
 
 ## Available Dashboards
 
 ### Main Dashboard
 - **File**: `logchef-monitoring.json`
-- **Description**: Primary LogChef monitoring dashboard with comprehensive metrics
+- **Description**: Primary Logchef monitoring dashboard with comprehensive metrics
 - **Features**:
   - HTTP request rates and latency percentiles
   - ClickHouse connection status monitoring
@@ -52,7 +52,7 @@ The dashboard includes the following key panels:
 ### Customization
 - Update the datasource UID placeholder to match your Prometheus instance
 - Adjust refresh intervals and time ranges as needed
-- Modify panel queries based on your specific LogChef deployment
+- Modify panel queries based on your specific Logchef deployment
 
 ## Metrics Dependencies
 

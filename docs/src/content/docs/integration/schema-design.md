@@ -1,9 +1,9 @@
 ---
 title: Schema Design
-description: Understanding LogChef's log schema design and optimization
+description: Understanding Logchef's log schema design and optimization
 ---
 
-LogChef provides optimized schemas for different types of logs while maintaining the flexibility to work with any Clickhouse table structure. LogChef is designed to work with any Clickhouse schema, requiring only a timestamp field. However, if you don't have an existing schema or wish to quickly start ingesting logs without worrying about the schema details, you can use the built-in schemas LogChef provides.
+Logchef provides optimized schemas for different types of logs while maintaining the flexibility to work with any Clickhouse table structure. Logchef is designed to work with any Clickhouse schema, requiring only a timestamp field. However, if you don't have an existing schema or wish to quickly start ingesting logs without worrying about the schema details, you can use the built-in schemas Logchef provides.
 
 ## OpenTelemetry Schema
 
@@ -67,7 +67,7 @@ ORDER BY (namespace, service_name, timestamp)
 
 ### Field Descriptions
 
-- **`timestamp`**: The time the log event occurred. Must be `DateTime` or `DateTime64`. This is the **only strictly required field** for LogChef to function.
+- **`timestamp`**: The time the log event occurred. Must be `DateTime` or `DateTime64`. This is the **only strictly required field** for Logchef to function.
 - **`severity_text` / `severity_number`**: Represents the log level (e.g., 'INFO', 'ERROR'). Using `LowCardinality(String)` for `severity_text` is highly recommended for performance.
 - **`service_name` / `namespace`**: Identifies the origin of the log. `LowCardinality(String)` improves query speed.
 - **`body`**: The primary content of the log message.
@@ -76,13 +76,13 @@ ORDER BY (namespace, service_name, timestamp)
 
 ## Using Custom Schemas
 
-LogChef works with any Clickhouse table structure. When connecting to an existing table:
+Logchef works with any Clickhouse table structure. When connecting to an existing table:
 
-1. LogChef automatically detects the schema
+1. Logchef automatically detects the schema
 2. Adapts its query interface to your fields
 3. Provides appropriate operators based on field types
 
-Remember, you are **not required** to use LogChef's schemas. LogChef can connect to any existing Clickhouse table as long as it has a `timestamp` column (`DateTime` or `DateTime64`). For optimal query performance with custom schemas, consider using `LowCardinality(String)` for frequently repeated text fields and a `Map` type for flexible attributes.
+Remember, you are **not required** to use Logchef's schemas. Logchef can connect to any existing Clickhouse table as long as it has a `timestamp` column (`DateTime` or `DateTime64`). For optimal query performance with custom schemas, consider using `LowCardinality(String)` for frequently repeated text fields and a `Map` type for flexible attributes.
 
 ## Best Practices
 

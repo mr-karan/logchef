@@ -92,7 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Rust CLI** — New cross-platform command-line interface written in Rust
   - `logchef auth` — Browser-based OIDC authentication with PKCE flow
-  - `logchef query` — Execute LogChefQL queries with syntax highlighting (powered by [tailspin](https://github.com/bensadeh/tailspin))
+  - `logchef query` — Execute LogchefQL queries with syntax highlighting (powered by [tailspin](https://github.com/bensadeh/tailspin))
   - `logchef config` — Manage CLI configuration and multiple server contexts
   - `logchef query --no-timestamp` — Hide timestamps in text output for cleaner exports
   - Multi-context support for managing dev/staging/prod instances (kubectl-style)
@@ -140,10 +140,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Direct link format: `/logs/collection/:teamId/:sourceId/:collectionId`
 
 ### Changed
-- **LogChefQL Parser Rewrite** - Replaced hand-written tokenizer with grammar-based parser using [participle](https://github.com/alecthomas/participle)
+- **LogchefQL Parser Rewrite** - Replaced hand-written tokenizer with grammar-based parser using [participle](https://github.com/alecthomas/participle)
   - Better error messages with position-aware diagnostics
   - More maintainable and extensible grammar definitions
-  - Improved query type detection (LogChefQL vs SQL)
+  - Improved query type detection (LogchefQL vs SQL)
 - **Frontend Tooling Migration** - Switched from pnpm + Vite to Bun + rolldown-vite
   - Build time: ~2.3s (was >55s)
   - Dev server start: ~1s (was ~3s)
@@ -283,7 +283,7 @@ The 1.0 release marks Logchef as production-ready. Eight months of development b
 ### Added
 - **Query Variables** - Use `{{variable_name}}` in LogchefQL or SQL, input fields appear for each variable
 - **Prometheus Metrics** - Comprehensive metrics with meaningful labels for monitoring
-- **Grafana Dashboard** - Pre-built dashboard for LogChef monitoring
+- **Grafana Dashboard** - Pre-built dashboard for Logchef monitoring
 - **Compact Log Viewer** - Terminal-style compact view for log exploration
 - Enhanced AI SQL Assistant with current query context
 - Histogram toggle in UI
@@ -301,7 +301,7 @@ The 1.0 release marks Logchef as production-ready. Eight months of development b
 - Team switching race conditions and 403 errors
 - Saved queries load when team sources aren't fully loaded yet
 - Collections navigation route in SavedQueriesDropdown
-- Handle LogChef QL variables properly in query translation
+- Handle Logchef QL variables properly in query translation
 - Vue warnings in QueryEditor component
 - Docker compose missing API token config
 
@@ -321,7 +321,7 @@ The 1.0 release marks Logchef as production-ready. Eight months of development b
 - **API Token Authentication** - Programmatic access via API tokens
 - Query timeout settings and version info display
 - TeamEditor role for saving queries to collections
-- LogChef logo and credits
+- Logchef logo and credits
 
 ### Changed
 - AI assistant includes current query context for better suggestions

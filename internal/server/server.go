@@ -51,7 +51,7 @@ type Server struct {
 	version       string
 }
 
-// @title LogChef API
+// @title Logchef API
 // @version 1.0
 // @description Log analytics and exploration platform for collecting, querying, and visualizing log data
 // @termsOfService http://example.com/terms/
@@ -75,7 +75,7 @@ func New(opts ServerOptions) *Server {
 
 	// Initialize Fiber app with custom error handler.
 	app := fiber.New(fiber.Config{
-		AppName:               "LogChef API v1",
+		AppName:               "Logchef API v1",
 		DisableStartupMessage: true, // Avoid default Fiber banner.
 		ReadTimeout:           opts.Config.Server.HTTPServerTimeout,
 		WriteTimeout:          opts.Config.Server.HTTPServerTimeout,

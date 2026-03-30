@@ -1,12 +1,12 @@
 name: Performance Issue
-description: Report a performance problem or bottleneck in LogChef
+description: Report a performance problem or bottleneck in Logchef
 title: "[Performance]: "
 labels: ["performance", "triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        ## LogChef Performance Issue
+        ## Logchef Performance Issue
         Thanks for reporting a performance issue!
         Please provide as much information as possible to help us diagnose and fix the problem.
 
@@ -15,7 +15,7 @@ body:
     attributes:
       label: Describe the performance issue
       description: A clear and concise description of what the performance problem is.
-      placeholder: LogChef becomes unresponsive when querying over 1 million log entries...
+      placeholder: Logchef becomes unresponsive when querying over 1 million log entries...
     validations:
       required: true
 
@@ -25,7 +25,7 @@ body:
       label: Environment
       description: Information about your setup
       placeholder: |
-        - LogChef version: [e.g. v0.1.0]
+        - Logchef version: [e.g. v0.1.0]
         - OS: [e.g. Ubuntu 22.04, macOS 13.0]
         - Deployment method: [e.g. Docker, binary]
         - System resources: [e.g. 4 CPUs, 8GB RAM]
@@ -39,7 +39,7 @@ body:
       label: Steps to reproduce
       description: How can we reproduce this performance issue?
       placeholder: |
-        1. Set up LogChef with X configuration
+        1. Set up Logchef with X configuration
         2. Import Y amount of data
         3. Perform Z operation
         4. Observe slow performance

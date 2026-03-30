@@ -118,7 +118,7 @@ impl AuthFlow {
                         let response_html = if code.is_some() {
                             r#"<!DOCTYPE html>
 <html>
-<head><title>LogChef CLI</title></head>
+<head><title>Logchef CLI</title></head>
 <body style="font-family: system-ui; text-align: center; padding-top: 50px;">
 <h1>Authentication Successful!</h1>
 <p>You can close this window and return to the terminal.</p>
@@ -127,7 +127,7 @@ impl AuthFlow {
                         } else {
                             r#"<!DOCTYPE html>
 <html>
-<head><title>LogChef CLI</title></head>
+<head><title>Logchef CLI</title></head>
 <body style="font-family: system-ui; text-align: center; padding-top: 50px;">
 <h1>Authentication Failed</h1>
 <p>Please try again.</p>
@@ -177,7 +177,7 @@ impl AuthFlow {
             .and_then(|v| v.as_str())
             .ok_or_else(|| Error::oauth("No ID token in response"))?;
 
-        info!("Exchanging OIDC token for LogChef API token...");
+        info!("Exchanging OIDC token for Logchef API token...");
 
         let api_client = Client::new(&self.server_url, 30)?;
         let exchange_response = api_client.exchange_token(id_token).await?;

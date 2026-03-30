@@ -1,4 +1,4 @@
-# LogChef CLI Release Workflow
+# Logchef CLI Release Workflow
 #
 # Triggered by pushing a tag matching "cli-v*" pattern.
 # Example: git tag -a cli-v0.1.0 -m "Release 0.1.0" && git push origin cli-v0.1.0
@@ -10,7 +10,7 @@
 # - macOS aarch64 (Apple Silicon)
 # - Windows x86_64
 
-name: LogChef CLI Release
+name: Logchef CLI Release
 
 on:
   push:
@@ -229,7 +229,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: LogChef CLI v${{ steps.version.outputs.version }}
+          name: Logchef CLI v${{ steps.version.outputs.version }}
           prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
           generate_release_notes: true
           files: |

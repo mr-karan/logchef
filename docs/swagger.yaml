@@ -11,7 +11,7 @@ info:
     name: MIT
     url: https://opensource.org/licenses/MIT
   termsOfService: http://example.com/terms/
-  title: LogChef API
+  title: Logchef API
   version: "1.0"
 paths:
   /health:

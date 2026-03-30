@@ -12,7 +12,7 @@ staticClients:
   - id: logchef
     redirectURIs:
       - "http://localhost:8125/api/v1/auth/callback"
-    name: "LogChef"
+    name: "Logchef"
     secret: logchef-secret
 
   - id: logchef-cli
@@ -20,7 +20,7 @@ staticClients:
       - "http://127.0.0.1:19876/callback"
       - "http://127.0.0.1:19877/callback"
       - "http://127.0.0.1:19878/callback"
-    name: "LogChef CLI"
+    name: "Logchef CLI"
     public: true
 
 oauth2:

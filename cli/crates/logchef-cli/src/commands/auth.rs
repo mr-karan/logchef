@@ -96,7 +96,7 @@ async fn login(config: &mut Config, global: GlobalArgs) -> Result<()> {
         .await
         .context("Failed to connect to server")?;
 
-    println!("Connected to LogChef {}", meta.data.version);
+    println!("Connected to Logchef {}", meta.data.version);
 
     if !meta.data.oidc_enabled() {
         anyhow::bail!(
@@ -187,7 +187,7 @@ fn get_server_url(config: &Config, global: &GlobalArgs) -> Result<String> {
     // Priority 3: Interactive prompt with optional default
     let default = config.current_context().map(|ctx| ctx.server_url.clone());
 
-    let mut prompt = Text::new("LogChef server URL:");
+    let mut prompt = Text::new("Logchef server URL:");
     if let Some(ref default_url) = default {
         prompt = prompt
             .with_default(default_url)

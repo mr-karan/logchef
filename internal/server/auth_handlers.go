@@ -268,11 +268,11 @@ func (s *Server) handleLogout(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, nil) // Send simple success response.
 }
 
-// handleCLITokenExchange exchanges an OIDC ID token for a LogChef API token.
+// handleCLITokenExchange exchanges an OIDC ID token for a Logchef API token.
 // This endpoint is used by the CLI to authenticate users via browser-based OIDC flow.
 // The CLI performs the OIDC authentication and sends the resulting ID token here.
 // @Summary Exchange OIDC token for CLI API token
-// @Description Exchange an OIDC ID token for a LogChef API token for CLI use
+// @Description Exchange an OIDC ID token for a Logchef API token for CLI use
 // @Tags auth
 // @Accept json
 // @Produce json

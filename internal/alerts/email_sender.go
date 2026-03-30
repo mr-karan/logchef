@@ -110,7 +110,7 @@ func (s *EmailSender) Send(ctx context.Context, notification AlertNotification) 
 }
 
 func (s *EmailSender) buildMessage(notification AlertNotification, recipient string) []byte {
-	subject := fmt.Sprintf("[LogChef] %s (%s) %s", notification.AlertName, strings.ToUpper(string(notification.Severity)), strings.ToUpper(string(notification.Status)))
+	subject := fmt.Sprintf("[Logchef] %s (%s) %s", notification.AlertName, strings.ToUpper(string(notification.Severity)), strings.ToUpper(string(notification.Status)))
 	body := s.buildBody(notification)
 	headers := []string{
 		fmt.Sprintf("From: %s", s.from),

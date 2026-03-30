@@ -1,12 +1,12 @@
 name: Documentation Improvement
-description: Suggest an improvement to LogChef documentation
+description: Suggest an improvement to Logchef documentation
 title: "[Docs]: "
 labels: ["documentation"]
 body:
   - type: markdown
     attributes:
       value: |
-        ## LogChef Documentation Improvement
+        ## Logchef Documentation Improvement
         Thanks for helping us improve our documentation!
         Clear and accurate documentation is essential for any project.
 

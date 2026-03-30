@@ -1,6 +1,6 @@
 # Development Environment
 
-Local development setup for LogChef.
+Local development setup for Logchef.
 
 ## Prerequisites
 

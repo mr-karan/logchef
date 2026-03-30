@@ -1,12 +1,12 @@
 name: Feature Request
-description: Suggest an idea or enhancement for LogChef
+description: Suggest an idea or enhancement for Logchef
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        ## LogChef Feature Request
+        ## Logchef Feature Request
         Thanks for taking the time to suggest a new feature!
         Please provide as much detail as possible to help us understand your idea.
 
@@ -24,7 +24,7 @@ body:
     attributes:
       label: Describe the solution you'd like
       description: A clear and concise description of what you want to happen.
-      placeholder: I would like LogChef to be able to...
+      placeholder: I would like Logchef to be able to...
     validations:
       required: true
 

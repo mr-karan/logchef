@@ -1,11 +1,11 @@
 ---
 name: logchef
-description: Query and analyze LogChef logs from the terminal using the LogChef CLI. Use for incident triage, debugging errors, exploring LogChefQL filters, running ClickHouse SQL, and executing saved collections.
+description: Query and analyze Logchef logs from the terminal using the Logchef CLI. Use for incident triage, debugging errors, exploring LogchefQL filters, running ClickHouse SQL, and executing saved collections.
 ---
 
-# LogChef CLI
+# Logchef CLI
 
-Use the LogChef CLI to query logs safely and accurately.
+Use the Logchef CLI to query logs safely and accurately.
 
 **Quick Start**
 1. Authenticate with OIDC: `logchef auth --server https://logs.example.com`
@@ -16,7 +16,7 @@ Use the LogChef CLI to query logs safely and accurately.
 | Command | Use |
 | --- | --- |
 | `logchef auth` | Authenticate (browser-based OIDC) |
-| `logchef query '...'` | Run LogChefQL filters with time flags |
+| `logchef query '...'` | Run LogchefQL filters with time flags |
 | `logchef sql '...'` | Run raw ClickHouse SQL (use `LIMIT` in SQL) |
 | `logchef collections` | List or run saved collections |
 | `logchef teams` | List teams available to you |
@@ -48,7 +48,7 @@ Expect `--limit` default to `100` for `logchef query` unless overridden via `log
 Use `LIMIT` in SQL because `logchef sql` does not accept `--limit` or `--since`.
 Expect collections to use their saved time range and limit unless overridden.
 
-**LogChefQL Basics**
+**LogchefQL Basics**
 Quote the entire query with single quotes to avoid shell piping and expansion.
 Use `=` `!=` `>` `<` `>=` `<=` for comparisons.
 Use `~` and `!~` for case-insensitive substring match (not regex).
@@ -115,7 +115,7 @@ logchef query 'level="error"' --no-highlight | grep -i "timeout"
 `--from requires --to` → always set both `--from` and `--to`.
 `invalid time format` → use `YYYY-MM-DD HH:MM:SS` (no `T`, no `Z`, no offset).
 `SQL query required` → pass SQL as an argument or use `-` to read from stdin.
-Shell pipe errors → wrap LogChefQL in single quotes.
+Shell pipe errors → wrap LogchefQL in single quotes.
 
 **Safety Rules**
 Always bound time (start with `15m`, expand gradually).

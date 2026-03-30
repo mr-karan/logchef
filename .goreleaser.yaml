@@ -52,7 +52,7 @@ dockers:
     build_flag_templates:
       - --platform=linux/amd64
       - --label=org.opencontainers.image.title={{ .ProjectName }}
-      - --label=org.opencontainers.image.description="LogChef - Self-hosted logging"
+      - --label=org.opencontainers.image.description="Logchef - Self-hosted logging"
       - --label=org.opencontainers.image.url=https://github.com/{{ .Env.GITHUB_ORG }}/{{ .ProjectName }}
       - --label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_ORG }}/{{ .ProjectName }}
       - --label=org.opencontainers.image.version={{ .Version }}
@@ -71,7 +71,7 @@ dockers:
     build_flag_templates:
       - --platform=linux/arm64/v8
       - --label=org.opencontainers.image.title={{ .ProjectName }}
-      - --label=org.opencontainers.image.description="LogChef - Self-hosted logging"
+      - --label=org.opencontainers.image.description="Logchef - Self-hosted logging"
       - --label=org.opencontainers.image.url=https://github.com/{{ .Env.GITHUB_ORG }}/{{ .ProjectName }}
       - --label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_ORG }}/{{ .ProjectName }}
       - --label=org.opencontainers.image.version={{ .Version }}

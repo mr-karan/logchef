@@ -3,13 +3,13 @@ title: Declarative Provisioning
 description: Manage teams, sources, and access control via config files
 ---
 
-LogChef supports declarative provisioning — define your teams, data sources, and access control in a TOML config file instead of (or alongside) the web UI. This enables GitOps workflows where infrastructure config is version-controlled and deployed automatically.
+Logchef supports declarative provisioning — define your teams, data sources, and access control in a TOML config file instead of (or alongside) the web UI. This enables GitOps workflows where infrastructure config is version-controlled and deployed automatically.
 
 ## How It Works
 
 Provisioning uses a **managed vs unmanaged** strategy:
 
-- **Managed resources** — Declared in your provisioning config. LogChef creates, updates, and optionally deletes them on startup. The API rejects manual edits to managed resources.
+- **Managed resources** — Declared in your provisioning config. Logchef creates, updates, and optionally deletes them on startup. The API rejects manual edits to managed resources.
 - **Unmanaged resources** — Created via the UI. Provisioning ignores them entirely.
 
 This means you can gradually adopt provisioning: start by declaring a few sources, and leave everything else UI-managed.
@@ -53,9 +53,9 @@ members = [
 file = "provisioning.toml"
 ```
 
-### 3. Start LogChef
+### 3. Start Logchef
 
-On startup, LogChef reconciles the declared state with the database. With `dry_run = true`, it logs what it *would* do without making changes:
+On startup, Logchef reconciles the declared state with the database. With `dry_run = true`, it logs what it *would* do without making changes:
 
 ```
 INFO provisioning dry-run complete, rolling back transaction
@@ -122,7 +122,7 @@ database = "logs"
 table_name = "otel_logs"
 ```
 
-Set the environment variable before starting LogChef:
+Set the environment variable before starting Logchef:
 ```bash
 export LOGCHEF_CH_PROD_PASSWORD="actual-password"
 ```
@@ -134,7 +134,7 @@ password = "{{ "{{.ch_prod_password}}" }}"
 
 ## Adopt Existing Resources
 
-When you first enable provisioning on an existing LogChef instance, resources declared in config are matched against existing database records **by name**:
+When you first enable provisioning on an existing Logchef instance, resources declared in config are matched against existing database records **by name**:
 
 - A source named "Production Logs" in config matches an existing source named "Production Logs" in the DB
 - Matched resources are adopted (marked as managed) and updated to match config

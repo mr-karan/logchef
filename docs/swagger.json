@@ -6,7 +6,7 @@
     "swagger": "2.0",
     "info": {
         "description": "Log analytics and exploration platform for collecting, querying, and visualizing log data",
-        "title": "LogChef API",
+        "title": "Logchef API",
         "termsOfService": "http://example.com/terms/",
         "contact": {
             "name": "API Support",

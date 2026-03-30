@@ -1,13 +1,13 @@
 ---
 title: Configuration
-description: Configure LogChef to match your environment
+description: Configure Logchef to match your environment
 ---
 
-LogChef uses a minimal TOML configuration file for bootstrap settings, with runtime configuration managed through the Admin Settings UI. This guide explains the essential configuration options and how to manage non-essential settings through the web interface.
+Logchef uses a minimal TOML configuration file for bootstrap settings, with runtime configuration managed through the Admin Settings UI. This guide explains the essential configuration options and how to manage non-essential settings through the web interface.
 
 ## Configuration Architecture
 
-LogChef separates configuration into two categories:
+Logchef separates configuration into two categories:
 
 **Essential (Bootstrap) Settings** - Required in `config.toml`:
 - Server connection details (port, host)
@@ -22,11 +22,11 @@ LogChef separates configuration into two categories:
 - Session management (duration, concurrency)
 - Frontend URL for CORS
 
-On first boot, LogChef seeds the database with values from `config.toml`. After that, runtime settings are stored in the database and managed through the Admin Settings UI at **Administration → System Settings**.
+On first boot, Logchef seeds the database with values from `config.toml`. After that, runtime settings are stored in the database and managed through the Admin Settings UI at **Administration → System Settings**.
 
 ## Essential Configuration
 
-These settings must be present in `config.toml` for LogChef to start:
+These settings must be present in `config.toml` for Logchef to start:
 
 ## Server Settings
 
@@ -275,7 +275,7 @@ For production deployments, ensure you:
 
 ## Minimal Production Configuration
 
-This example shows the **essential configuration** required to run LogChef. All other settings (AI, alerting, sessions) are managed via the Admin Settings UI.
+This example shows the **essential configuration** required to run Logchef. All other settings (AI, alerting, sessions) are managed via the Admin Settings UI.
 
 ```toml
 [server]

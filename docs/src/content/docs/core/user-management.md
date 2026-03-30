@@ -1,13 +1,13 @@
 ---
 title: User Management
-description: Understanding Sources, Teams, and access control in LogChef
+description: Understanding Sources, Teams, and access control in Logchef
 ---
 
-LogChef implements a team-based access control system that helps organize and secure your log data. This guide explains the core concepts of user management and how to effectively use them.
+Logchef implements a team-based access control system that helps organize and secure your log data. This guide explains the core concepts of user management and how to effectively use them.
 
 ## Sources
 
-A Source in LogChef represents a distinct log stream that maps directly to a table in ClickHouse. Think of Sources as individual channels of log data that you can query independently.
+A Source in Logchef represents a distinct log stream that maps directly to a table in ClickHouse. Think of Sources as individual channels of log data that you can query independently.
 
 ### Key Aspects of Sources
 
@@ -26,7 +26,7 @@ kubernetes-events     → Kubernetes cluster events
 
 ## Teams
 
-Teams are the primary mechanism for managing access control in LogChef. They create logical groupings of users and determine which Sources they can access.
+Teams are the primary mechanism for managing access control in Logchef. They create logical groupings of users and determine which Sources they can access.
 
 ![Logchef Teams View](/screenshots/logchef_teams.png)
 
@@ -50,7 +50,7 @@ DevOps Team         → Access to deployment logs, monitoring
 
 ## Access Control Flow
 
-1. When a user logs in, LogChef identifies their Team memberships
+1. When a user logs in, Logchef identifies their Team memberships
 2. The UI only displays Sources associated with the user's Teams
 3. All queries are automatically filtered based on Team permissions
 4. Users cannot access or query Sources outside their Team's scope

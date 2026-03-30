@@ -1,6 +1,6 @@
 blank_issues_enabled: true
 contact_links:
-  - name: LogChef Documentation
+  - name: Logchef Documentation
     url: https://logchef.app
     about: Check our documentation before creating an issue
   - name: GitHub Discussions

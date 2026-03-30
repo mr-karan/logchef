@@ -1,7 +1,7 @@
 package config
 
 // ProvisioningConfig declares the desired state for teams, sources, and access control.
-// When absent from config.toml, provisioning is disabled and LogChef operates in UI-only mode.
+// When absent from config.toml, provisioning is disabled and Logchef operates in UI-only mode.
 type ProvisioningConfig struct {
 	// File is an optional path to a separate provisioning.toml file.
 	// If relative, resolved against the main config.toml directory.

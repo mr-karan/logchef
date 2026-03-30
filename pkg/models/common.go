@@ -1,4 +1,4 @@
-// Package models defines the core data structures used throughout LogChef.
+// Package models defines the core data structures used throughout Logchef.
 // It includes database entity models, API request/response structures, and
 // validation rules for ensuring data integrity across the application.
 package models
