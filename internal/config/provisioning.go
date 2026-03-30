@@ -3,6 +3,11 @@ package config
 // ProvisioningConfig declares the desired state for teams, sources, and access control.
 // When absent from config.toml, provisioning is disabled and LogChef operates in UI-only mode.
 type ProvisioningConfig struct {
+	// File is an optional path to a separate provisioning.toml file.
+	// If relative, resolved against the main config.toml directory.
+	// When set, the provisioning config is loaded from this file instead of inline.
+	File string `koanf:"file"`
+
 	// ManageSources enables declarative management of ClickHouse data sources.
 	// When true, sources listed in Sources are created/updated/adopted and marked managed.
 	ManageSources bool `koanf:"manage_sources"`

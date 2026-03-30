@@ -70,6 +70,11 @@ api_token_secret = "5679649c50fddda837449b77d9983ab5f8dba65878897e968a74e7061bf4
 # -----------------------------------------------------------------------------
 # Provisioning (optional) — Declarative config for teams, sources, access
 # -----------------------------------------------------------------------------
+# Load provisioning from a separate file (recommended for prod):
+# [provisioning]
+# file = "provisioning.toml"
+#
+# Or inline (for dev/simple setups):
 # [provisioning]
 # manage_sources = true
 # manage_teams = true
@@ -81,6 +86,7 @@ api_token_secret = "5679649c50fddda837449b77d9983ab5f8dba65878897e968a74e7061bf4
 # host = "clickhouse:9000"
 # username = "default"
 # password = "secret"
+# secret_ref = "LOGCHEF_SOURCE_MY_LOGS_PASSWORD"
 # database = "logs"
 # table_name = "otel_logs"
 # meta_ts_field = "timestamp"
