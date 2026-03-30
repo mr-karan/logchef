@@ -5,9 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.0] - 2026-03-30
 
 ### Added
+- **Declarative provisioning** — Define teams, sources, and access control in a TOML config file for GitOps-style management. Resources declared in config are tagged "managed" and fully controlled by config; UI-created resources are left alone. Supports dry-run mode, separate `provisioning.toml` file, and an admin export endpoint (`GET /admin/provisioning/export`). API rejects mutations on managed resources.
 - **All Teams collections view** — Browse saved queries across all your teams from a single page. New "All Teams" option in the team dropdown on the Collections page shows queries with Team and Source columns.
 - **SQL input validation** — Timezone, field name, and group-by inputs are now validated before SQL interpolation, preventing injection attacks on ClickHouse queries.
 
@@ -360,7 +361,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/mr-karan/logchef/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/mr-karan/logchef/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/mr-karan/logchef/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/mr-karan/logchef/compare/v1.1.0...v1.2.0

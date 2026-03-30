@@ -79,6 +79,54 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in LogChef.</p>
     </header>
 
+    <!-- v1.4.0 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">v1.4.0</span>
+        <span class="version-date">Mar 30, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v1.4.0" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Declarative provisioning</strong> &mdash; Define teams, sources, and access control in a TOML config file. Supports GitOps workflows, dry-run mode, managed vs unmanaged resources, and a separate <code>provisioning.toml</code> file.</li>
+          <li><strong>All Teams collections</strong> &mdash; Browse saved queries across all your teams from a single page with the new "All Teams" option in the team dropdown.</li>
+          <li><strong>SQL input validation</strong> &mdash; Timezone, field name, and group-by inputs are validated before ClickHouse query interpolation.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Improved
+        </div>
+        <ul class="change-list">
+          <li><strong>Parallel health checks</strong> &mdash; Admin source listing now pings all sources concurrently instead of serially</li>
+          <li><strong>OIDC security</strong> &mdash; ID token audience validation enabled; auth failures return proper 401 status</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>Query cancellation</strong> &mdash; LogchefQL queries now properly cancel end-to-end (was a no-op)</li>
+          <li><strong>SQL mode integrity</strong> &mdash; Time/limit changes no longer silently rewrite raw SQL queries</li>
+          <li><strong>Histogram accuracy</strong> &mdash; Timestamp field detection limited to SELECT clause only</li>
+          <li><strong>Post-login redirect</strong> &mdash; Users return to their original page after OIDC login</li>
+          <li><strong>Calendar UX</strong> &mdash; Date picker highlights today with default times (00:00:00 / 23:59:59)</li>
+          <li><strong>No duplicate queries</strong> &mdash; Page load no longer fires the same query twice</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- CLI v0.1.4 -->
     <article class="version">
       <div class="version-header">
@@ -114,7 +162,6 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <div class="version-header">
         <span class="version-tag">v1.3.0</span>
         <span class="version-date">Feb 5, 2026</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.3.0" class="version-link" target="_blank">Release notes →</a>
       </div>
 
