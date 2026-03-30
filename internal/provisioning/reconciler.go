@@ -352,7 +352,14 @@ func reconcileTeamMembers(ctx context.Context, qtx *sqlc.Queries, teamID int64, 
 				return fmt.Errorf("failed to add member %q to team: %w", email, err)
 			}
 		} else {
-			// User exists — ensure team membership with correct role
+			// User exists — mark as managed if referenced by config
+			if user.Managed == 0 {
+				if err := qtx.SetUserManaged(ctx, sqlc.SetUserManagedParams{Managed: 1, ID: user.ID}); err != nil {
+					return fmt.Errorf("failed to set user %q as managed: %w", email, err)
+				}
+			}
+
+			// Ensure team membership with correct role
 			existingMember, hasMembership := currentByEmail[user.Email]
 			if !hasMembership {
 				// Add membership

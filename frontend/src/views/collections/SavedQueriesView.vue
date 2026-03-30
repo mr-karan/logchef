@@ -204,6 +204,8 @@ async function handleTeamChange(teamId: string) {
     // Handle "All Teams" selection
     if (teamId === "all") {
       isAllTeamsMode.value = true;
+      // Clear stale team/source context so permission checks don't use the previous team
+      contextStore.sourceId = null;
       localTeamQueries.value = [];
       const result = await savedQueriesStore.fetchMyCollections();
       if (result.success) {

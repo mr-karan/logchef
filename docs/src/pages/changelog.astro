@@ -94,20 +94,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Declarative provisioning</strong> &mdash; Define teams, sources, and access control in a TOML config file. Supports GitOps workflows, dry-run mode, managed vs unmanaged resources, and a separate <code>provisioning.toml</code> file.</li>
+          <li><strong>Declarative provisioning</strong> &mdash; Define teams, sources, and access control in a TOML config file for GitOps workflows. Supports dry-run mode, managed vs unmanaged resources, and a separate <code>provisioning.toml</code> file. <a href="/getting-started/provisioning/">Learn more &rarr;</a></li>
           <li><strong>All Teams collections</strong> &mdash; Browse saved queries across all your teams from a single page with the new "All Teams" option in the team dropdown.</li>
-          <li><strong>SQL input validation</strong> &mdash; Timezone, field name, and group-by inputs are validated before ClickHouse query interpolation.</li>
-        </ul>
-      </div>
-
-      <div class="change-section">
-        <div class="change-type changed">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
-          Improved
-        </div>
-        <ul class="change-list">
-          <li><strong>Parallel health checks</strong> &mdash; Admin source listing now pings all sources concurrently instead of serially</li>
-          <li><strong>OIDC security</strong> &mdash; ID token audience validation enabled; auth failures return proper 401 status</li>
         </ul>
       </div>
 
