@@ -1,183 +1,86 @@
 ---
 title: Query Interface
-description: Learn how to use Logchef's powerful query interface
+description: Two query modes, time controls, and result views.
 ---
 
-Logchef provides a powerful query interface that combines the flexibility of SQL with an intuitive visual builder. This guide will help you master log querying in Logchef.
+Logchef has two query modes: **LogchefQL** for quick filtering and **SQL** for full ClickHouse access.
 
-## Query Builder
+## LogchefQL Mode
 
-The query builder consists of three main components:
+Type filter expressions directly. Time range and LIMIT are handled by the UI controls.
 
-1. Visual Query Builder
-2. SQL Editor
-3. Results View
+```
+severity_text = "ERROR"
+service = "api" and status_code >= 500
+body ~ "timeout"
+```
 
-### Visual Query Builder
+See [Search Syntax](/guide/search-syntax) for the full reference.
 
-The visual builder lets you construct queries without writing SQL:
+## SQL Mode
 
-- **Time Range**: Select predefined ranges or specify custom intervals
-- **Fields**: Choose which log fields to display
-- **Filters**: Add conditions to filter your logs
-- **Group By**: Aggregate logs by specific fields
-- **Sort**: Order results by timestamp or other fields
-- **Limit**: Control the number of results returned
-
-### SQL Editor
-
-For advanced users, the SQL editor provides full access to Clickhouse's SQL capabilities:
+Write raw ClickHouse SQL. You control everything — time filters, aggregations, joins, CTEs.
 
 ```sql
 SELECT
-  toStartOfInterval(timestamp, INTERVAL 5 MINUTE) as time_bucket,
-  level,
+  toStartOfInterval(timestamp, INTERVAL 5 MINUTE) as bucket,
   count() as count
 FROM logs
-WHERE
-  timestamp >= now() - INTERVAL 1 HOUR
-  AND level IN ('error', 'warning')
-GROUP BY
-  time_bucket,
-  level
-ORDER BY
-  time_bucket DESC
+WHERE timestamp >= now() - INTERVAL 1 HOUR
+  AND severity_text = 'ERROR'
+GROUP BY bucket
+ORDER BY bucket DESC
 ```
+
+Switch between modes using the **Search / SQL** tabs in the editor.
+
+## Time Controls
+
+- **Quick ranges** — Last 5m, 15m, 1h, 24h, 7d, etc.
+- **Absolute range** — Type dates directly or pick from the calendar
+- **Relative syntax** — `now-1h`, `now-7d` in the input fields
+- **Timezone** — Toggle between browser local and UTC
+
+In LogchefQL mode, the time range is applied automatically. In SQL mode, the time picker is informational — you manage time filters in your SQL.
 
 ## Query Cancellation
 
-Long-running queries can be cancelled at any time:
+Press **Esc** or click **Cancel** to stop a running query. This cancels the query in ClickHouse too, not just the HTTP request.
 
-- Click the **Cancel** button that appears during query execution
-- Press the **Esc** key while a query is running
+## Results
 
-Cancellation also stops the query in ClickHouse, freeing server resources immediately. This is useful when you accidentally run an expensive query or realize you need to modify your search criteria.
+### Table View
 
-### Results View
+- Click any cell to copy its value
+- Double-click a column header divider to auto-fit width
+- Expand rows with the chevron to see full log details
+- Toggle between standard and compact (terminal-style) view
 
-Results can be viewed in multiple formats:
+### Histogram
 
-- **Table View**: Traditional tabular format
-- **JSON View**: Raw JSON format
-- **Time Series**: Visualize time-based data
-- **Logs View**: Optimized for log reading with syntax highlighting
+The time histogram shows log volume distribution. Click and drag to zoom into a time range. Use **Group By** to segment by a field (e.g., severity).
 
-#### Table Interactions
+### Export
 
-The results table includes several convenience features:
+Export results as CSV — all rows, visible rows, filtered rows, or current page.
 
-- **Click any cell** to copy its value to clipboard (visual feedback confirms the copy)
-- **Double-click a column header divider** to auto-fit the column width to its content
-- **Expand/collapse rows** using the chevron indicator on each row to see full log details
-- **Cell action buttons** appear in a floating overlay when you hover over cells
+## Query Variables
 
-## Common Query Patterns
-
-### Error Analysis
-
-Find error patterns in your logs:
+Use `{{variable_name}}` in SQL to create input fields:
 
 ```sql
-SELECT
-  error_type,
-  count() as error_count,
-  arrayJoin(groupArray(message)) as sample_messages
-FROM logs
-WHERE
-  level = 'error'
-  AND timestamp >= now() - INTERVAL 24 HOUR
-GROUP BY
-  error_type
-ORDER BY
-  error_count DESC
-LIMIT 10
+SELECT * FROM logs
+WHERE service = {{ service }}
+  AND severity_text = {{ level }}
+LIMIT {{ limit }}
 ```
 
-### Response Time Analysis
+Variables support text, number, date, dropdown, and multi-select input types. Wrap optional clauses in `[[ ]]` to auto-remove them when the variable is empty.
 
-Analyze API response times:
+## Query History
 
-```sql
-SELECT
-  path,
-  count() as requests,
-  avg(response_time) as avg_response_time,
-  quantile(0.95)(response_time) as p95_response_time
-FROM logs
-WHERE
-  timestamp >= now() - INTERVAL 1 HOUR
-  AND type = 'access_log'
-GROUP BY
-  path
-HAVING
-  requests > 100
-ORDER BY
-  avg_response_time DESC
-```
+The editor dropdown shows your 10 most recent queries per source. Click any to reload it.
 
-### Log Volume Analysis
+## Saved Queries
 
-Monitor log volume trends:
-
-```sql
-SELECT
-  toStartOfHour(timestamp) as hour,
-  service,
-  count() as log_count
-FROM logs
-WHERE
-  timestamp >= now() - INTERVAL 24 HOUR
-GROUP BY
-  hour,
-  service
-ORDER BY
-  hour DESC,
-  log_count DESC
-```
-
-## Advanced Features
-
-### Saved Queries
-
-Save frequently used queries:
-
-1. Write your query
-2. Click "Save Query"
-3. Give it a name and description
-4. Optionally share with team members
-
-### Query Variables
-
-Use variables in your queries:
-
-```sql
-SELECT
-  *
-FROM logs
-WHERE
-  timestamp >= {start_time}
-  AND timestamp <= {end_time}
-  AND service = {service_name:String}
-```
-
-### Query Scheduling
-
-Schedule queries to run periodically:
-
-1. Save your query
-2. Click "Schedule"
-3. Set interval (hourly, daily, etc.)
-4. Configure notifications
-
-## Performance Tips
-
-1. **Use Time Filters**: Always include timestamp filters
-2. **Limit Results**: Use LIMIT clause for large queries
-3. **Optimize Joins**: Prefer pre-aggregation when possible
-4. **Use Materialized Views**: For common query patterns
-
-## Next Steps
-
-- Learn about [Dashboards](/docs/user-guide/dashboards)
-- Set up [Alerts](/docs/user-guide/alerts)
-- Explore [Advanced SQL Features](/docs/user-guide/advanced-sql)
+Save frequently used queries to your team's collection via the **Save** button. Saved queries preserve the time range, variables, and mode.

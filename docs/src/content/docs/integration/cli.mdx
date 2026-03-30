@@ -1,26 +1,11 @@
 ---
-title: LogChef CLI
-description: Query and explore your logs from the terminal with the high-performance Rust-based LogChef CLI.
+title: CLI
+description: Query logs from the terminal.
 ---
 
-import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+import { LinkCard } from "@astrojs/starlight/components";
 
-The LogChef CLI is a powerful, high-performance terminal companion for LogChef. Built in Rust, it provides a fast and intuitive way to interact with your logs without leaving your terminal.
-
-<CardGrid stagger>
-  <Card title="Blazing Fast" icon="rocket">
-    Written in Rust for minimal overhead and maximum performance when handling large log volumes.
-  </Card>
-  <Card title="Rich Highlighting" icon="starlight">
-    Beautiful syntax highlighting for log levels, dates, IPs, and custom keywords powered by tailspin.
-  </Card>
-  <Card title="Multi-Context" icon="laptop">
-    Manage multiple LogChef instances (dev/staging/prod) with kubectl-style context switching.
-  </Card>
-  <Card title="Secure Auth" icon="lock">
-    Native support for OIDC PKCE flow, keeping your credentials secure while being easy to use.
-  </Card>
-</CardGrid>
+A Rust CLI for querying logs from the terminal. Supports LogchefQL, raw SQL, syntax highlighting (via [tailspin](https://github.com/bensadeh/tailspin)), multi-context management (dev/staging/prod), and OIDC PKCE authentication.
 
 ## Quick Start
 
