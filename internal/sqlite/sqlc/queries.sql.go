@@ -630,7 +630,7 @@ func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
 }
 
 const getSource = `-- name: GetSource :one
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at FROM sources WHERE id = ?
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE id = ?
 `
 
 // Get a single source by ID
@@ -652,12 +652,14 @@ func (q *Queries) GetSource(ctx context.Context, id int64) (Source, error) {
 		&i.TtlDays,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Managed,
+		&i.SecretRef,
 	)
 	return i, err
 }
 
 const getSourceByName = `-- name: GetSourceByName :one
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at FROM sources WHERE database = ? AND table_name = ?
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE database = ? AND table_name = ?
 `
 
 type GetSourceByNameParams struct {
@@ -684,6 +686,37 @@ func (q *Queries) GetSourceByName(ctx context.Context, arg GetSourceByNameParams
 		&i.TtlDays,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Managed,
+		&i.SecretRef,
+	)
+	return i, err
+}
+
+const getSourceByNameForProvisioning = `-- name: GetSourceByNameForProvisioning :one
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE name = ?
+`
+
+// Get source by name for provisioning lookup
+func (q *Queries) GetSourceByNameForProvisioning(ctx context.Context, name string) (Source, error) {
+	row := q.queryRow(ctx, q.getSourceByNameForProvisioningStmt, getSourceByNameForProvisioning, name)
+	var i Source
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.MetaIsAutoCreated,
+		&i.MetaTsField,
+		&i.MetaSeverityField,
+		&i.Host,
+		&i.Username,
+		&i.Password,
+		&i.Database,
+		&i.TableName,
+		&i.Description,
+		&i.TtlDays,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Managed,
+		&i.SecretRef,
 	)
 	return i, err
 }
@@ -712,7 +745,7 @@ func (q *Queries) GetSystemSetting(ctx context.Context, key string) (SystemSetti
 }
 
 const getTeam = `-- name: GetTeam :one
-SELECT id, name, description, created_at, updated_at FROM teams WHERE id = ?
+SELECT id, name, description, created_at, updated_at, managed FROM teams WHERE id = ?
 `
 
 // Get a team by ID
@@ -725,12 +758,13 @@ func (q *Queries) GetTeam(ctx context.Context, id int64) (Team, error) {
 		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Managed,
 	)
 	return i, err
 }
 
 const getTeamByName = `-- name: GetTeamByName :one
-SELECT id, name, description, created_at, updated_at FROM teams WHERE name = ?
+SELECT id, name, description, created_at, updated_at, managed FROM teams WHERE name = ?
 `
 
 // Get a team by its name
@@ -743,6 +777,7 @@ func (q *Queries) GetTeamByName(ctx context.Context, name string) (Team, error) 
 		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Managed,
 	)
 	return i, err
 }
@@ -800,7 +835,7 @@ func (q *Queries) GetTeamSourceQuery(ctx context.Context, arg GetTeamSourceQuery
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at FROM users WHERE id = ?
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed FROM users WHERE id = ?
 `
 
 // Get a user by ID
@@ -817,12 +852,13 @@ func (q *Queries) GetUser(ctx context.Context, id int64) (User, error) {
 		&i.LastActiveAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Managed,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at FROM users WHERE email = ?
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed FROM users WHERE email = ?
 `
 
 // Get a user by email
@@ -839,6 +875,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.LastActiveAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Managed,
 	)
 	return i, err
 }
@@ -895,6 +932,42 @@ func (q *Queries) InsertAlertHistory(ctx context.Context, arg InsertAlertHistory
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const isSourceManaged = `-- name: IsSourceManaged :one
+SELECT managed FROM sources WHERE id = ?
+`
+
+// Check if a source is managed
+func (q *Queries) IsSourceManaged(ctx context.Context, id int64) (int64, error) {
+	row := q.queryRow(ctx, q.isSourceManagedStmt, isSourceManaged, id)
+	var managed int64
+	err := row.Scan(&managed)
+	return managed, err
+}
+
+const isTeamManaged = `-- name: IsTeamManaged :one
+SELECT managed FROM teams WHERE id = ?
+`
+
+// Check if a team is managed
+func (q *Queries) IsTeamManaged(ctx context.Context, id int64) (int64, error) {
+	row := q.queryRow(ctx, q.isTeamManagedStmt, isTeamManaged, id)
+	var managed int64
+	err := row.Scan(&managed)
+	return managed, err
+}
+
+const isUserManaged = `-- name: IsUserManaged :one
+SELECT managed FROM users WHERE id = ?
+`
+
+// Check if a user is managed
+func (q *Queries) IsUserManaged(ctx context.Context, id int64) (int64, error) {
+	row := q.queryRow(ctx, q.isUserManagedStmt, isUserManaged, id)
+	var managed int64
+	err := row.Scan(&managed)
+	return managed, err
 }
 
 const listAPITokensForUser = `-- name: ListAPITokensForUser :many
@@ -1096,6 +1169,127 @@ func (q *Queries) ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsB
 	return items, nil
 }
 
+const listManagedSources = `-- name: ListManagedSources :many
+
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE managed = 1 ORDER BY id
+`
+
+// Provisioning Queries
+// Get all sources managed by provisioning config
+func (q *Queries) ListManagedSources(ctx context.Context) ([]Source, error) {
+	rows, err := q.query(ctx, q.listManagedSourcesStmt, listManagedSources)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Source{}
+	for rows.Next() {
+		var i Source
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.MetaIsAutoCreated,
+			&i.MetaTsField,
+			&i.MetaSeverityField,
+			&i.Host,
+			&i.Username,
+			&i.Password,
+			&i.Database,
+			&i.TableName,
+			&i.Description,
+			&i.TtlDays,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Managed,
+			&i.SecretRef,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listManagedTeams = `-- name: ListManagedTeams :many
+SELECT id, name, description, created_at, updated_at, managed FROM teams WHERE managed = 1 ORDER BY id
+`
+
+// Get all teams managed by provisioning config
+func (q *Queries) ListManagedTeams(ctx context.Context) ([]Team, error) {
+	rows, err := q.query(ctx, q.listManagedTeamsStmt, listManagedTeams)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Team{}
+	for rows.Next() {
+		var i Team
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Managed,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listManagedUsers = `-- name: ListManagedUsers :many
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed FROM users WHERE managed = 1 ORDER BY id
+`
+
+// Get all users managed by provisioning config
+func (q *Queries) ListManagedUsers(ctx context.Context) ([]User, error) {
+	rows, err := q.query(ctx, q.listManagedUsersStmt, listManagedUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []User{}
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.FullName,
+			&i.Role,
+			&i.Status,
+			&i.LastLoginAt,
+			&i.LastActiveAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Managed,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listQueriesByTeam = `-- name: ListQueriesByTeam :many
 SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at, is_bookmarked FROM team_queries WHERE team_id = ? ORDER BY is_bookmarked DESC, updated_at DESC
 `
@@ -1179,8 +1373,82 @@ func (q *Queries) ListQueriesByTeamAndSource(ctx context.Context, arg ListQuerie
 	return items, nil
 }
 
+const listQueriesForUser = `-- name: ListQueriesForUser :many
+SELECT
+    tq.id,
+    tq.team_id,
+    tq.source_id,
+    tq.name,
+    tq.description,
+    tq.query_type,
+    tq.query_content,
+    tq.created_at,
+    tq.updated_at,
+    tq.is_bookmarked,
+    t.name AS team_name,
+    s.name AS source_name
+FROM team_queries tq
+JOIN team_members tm ON tm.team_id = tq.team_id
+JOIN teams t ON t.id = tq.team_id
+JOIN sources s ON s.id = tq.source_id
+WHERE tm.user_id = ?
+ORDER BY tq.is_bookmarked DESC, tq.updated_at DESC
+`
+
+type ListQueriesForUserRow struct {
+	ID           int64          `json:"id"`
+	TeamID       int64          `json:"team_id"`
+	SourceID     int64          `json:"source_id"`
+	Name         string         `json:"name"`
+	Description  sql.NullString `json:"description"`
+	QueryType    string         `json:"query_type"`
+	QueryContent string         `json:"query_content"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	IsBookmarked bool           `json:"is_bookmarked"`
+	TeamName     string         `json:"team_name"`
+	SourceName   string         `json:"source_name"`
+}
+
+// List all saved queries across all teams a user belongs to, with team and source names
+func (q *Queries) ListQueriesForUser(ctx context.Context, userID int64) ([]ListQueriesForUserRow, error) {
+	rows, err := q.query(ctx, q.listQueriesForUserStmt, listQueriesForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListQueriesForUserRow{}
+	for rows.Next() {
+		var i ListQueriesForUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.SourceID,
+			&i.Name,
+			&i.Description,
+			&i.QueryType,
+			&i.QueryContent,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.IsBookmarked,
+			&i.TeamName,
+			&i.SourceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSourceTeams = `-- name: ListSourceTeams :many
-SELECT t.id, t.name, t.description, t.created_at, t.updated_at
+SELECT t.id, t.name, t.description, t.created_at, t.updated_at, t.managed
 FROM teams t
 JOIN team_sources ts ON t.id = ts.team_id
 WHERE ts.source_id = ?
@@ -1203,6 +1471,7 @@ func (q *Queries) ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, 
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Managed,
 		); err != nil {
 			return nil, err
 		}
@@ -1218,7 +1487,7 @@ func (q *Queries) ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, 
 }
 
 const listSources = `-- name: ListSources :many
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at FROM sources ORDER BY created_at DESC
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources ORDER BY created_at DESC
 `
 
 // Get all sources ordered by creation date
@@ -1246,6 +1515,8 @@ func (q *Queries) ListSources(ctx context.Context) ([]Source, error) {
 			&i.TtlDays,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Managed,
+			&i.SecretRef,
 		); err != nil {
 			return nil, err
 		}
@@ -1261,7 +1532,7 @@ func (q *Queries) ListSources(ctx context.Context) ([]Source, error) {
 }
 
 const listSourcesForUser = `-- name: ListSourcesForUser :many
-SELECT DISTINCT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.host, s.username, s.password, s."database", s.table_name, s.description, s.ttl_days, s.created_at, s.updated_at FROM sources s
+SELECT DISTINCT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.host, s.username, s.password, s."database", s.table_name, s.description, s.ttl_days, s.created_at, s.updated_at, s.managed, s.secret_ref FROM sources s
 JOIN team_sources ts ON s.id = ts.source_id
 JOIN team_members tm ON ts.team_id = tm.team_id
 WHERE tm.user_id = ?
@@ -1293,6 +1564,8 @@ func (q *Queries) ListSourcesForUser(ctx context.Context, userID int64) ([]Sourc
 			&i.TtlDays,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Managed,
+			&i.SecretRef,
 		); err != nil {
 			return nil, err
 		}
@@ -1467,7 +1740,7 @@ func (q *Queries) ListTeamMembersWithDetails(ctx context.Context, teamID int64) 
 }
 
 const listTeamSources = `-- name: ListTeamSources :many
-SELECT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.host, s.username, s.password, s."database", s.table_name, s.description, s.ttl_days, s.created_at, s.updated_at
+SELECT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.host, s.username, s.password, s."database", s.table_name, s.description, s.ttl_days, s.created_at, s.updated_at, s.managed, s.secret_ref
 FROM sources s
 JOIN team_sources ts ON s.id = ts.source_id
 WHERE ts.team_id = ?
@@ -1499,6 +1772,8 @@ func (q *Queries) ListTeamSources(ctx context.Context, teamID int64) ([]Source, 
 			&i.TtlDays,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Managed,
+			&i.SecretRef,
 		); err != nil {
 			return nil, err
 		}
@@ -1514,7 +1789,7 @@ func (q *Queries) ListTeamSources(ctx context.Context, teamID int64) ([]Source, 
 }
 
 const listTeams = `-- name: ListTeams :many
-SELECT t.id, t.name, t.description, t.created_at, t.updated_at, COUNT(tm.user_id) as member_count
+SELECT t.id, t.name, t.description, t.created_at, t.updated_at, t.managed, COUNT(tm.user_id) as member_count
 FROM teams t
 LEFT JOIN team_members tm ON t.id = tm.team_id
 GROUP BY t.id
@@ -1527,6 +1802,7 @@ type ListTeamsRow struct {
 	Description sql.NullString `json:"description"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
+	Managed     int64          `json:"managed"`
 	MemberCount int64          `json:"member_count"`
 }
 
@@ -1546,6 +1822,7 @@ func (q *Queries) ListTeams(ctx context.Context) ([]ListTeamsRow, error) {
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Managed,
 			&i.MemberCount,
 		); err != nil {
 			return nil, err
@@ -1623,7 +1900,7 @@ func (q *Queries) ListTeamsForUser(ctx context.Context, userID int64) ([]ListTea
 }
 
 const listUserTeams = `-- name: ListUserTeams :many
-SELECT t.id, t.name, t.description, t.created_at, t.updated_at
+SELECT t.id, t.name, t.description, t.created_at, t.updated_at, t.managed
 FROM teams t
 JOIN team_members tm ON t.id = tm.team_id
 WHERE tm.user_id = ?
@@ -1646,6 +1923,7 @@ func (q *Queries) ListUserTeams(ctx context.Context, userID int64) ([]Team, erro
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Managed,
 		); err != nil {
 			return nil, err
 		}
@@ -1661,7 +1939,7 @@ func (q *Queries) ListUserTeams(ctx context.Context, userID int64) ([]Team, erro
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at FROM users ORDER BY created_at ASC
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed FROM users ORDER BY created_at ASC
 `
 
 // List all users
@@ -1684,6 +1962,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.LastActiveAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Managed,
 		); err != nil {
 			return nil, err
 		}
@@ -1771,6 +2050,52 @@ type ResolveAlertHistoryParams struct {
 
 func (q *Queries) ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) error {
 	_, err := q.exec(ctx, q.resolveAlertHistoryStmt, resolveAlertHistory, arg.Message, arg.ID)
+	return err
+}
+
+const setSourceManaged = `-- name: SetSourceManaged :exec
+UPDATE sources SET managed = ?, secret_ref = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?
+`
+
+type SetSourceManagedParams struct {
+	Managed   int64          `json:"managed"`
+	SecretRef sql.NullString `json:"secret_ref"`
+	ID        int64          `json:"id"`
+}
+
+// Mark a source as managed/unmanaged and set secret_ref
+func (q *Queries) SetSourceManaged(ctx context.Context, arg SetSourceManagedParams) error {
+	_, err := q.exec(ctx, q.setSourceManagedStmt, setSourceManaged, arg.Managed, arg.SecretRef, arg.ID)
+	return err
+}
+
+const setTeamManaged = `-- name: SetTeamManaged :exec
+UPDATE teams SET managed = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?
+`
+
+type SetTeamManagedParams struct {
+	Managed int64 `json:"managed"`
+	ID      int64 `json:"id"`
+}
+
+// Mark a team as managed/unmanaged
+func (q *Queries) SetTeamManaged(ctx context.Context, arg SetTeamManagedParams) error {
+	_, err := q.exec(ctx, q.setTeamManagedStmt, setTeamManaged, arg.Managed, arg.ID)
+	return err
+}
+
+const setUserManaged = `-- name: SetUserManaged :exec
+UPDATE users SET managed = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?
+`
+
+type SetUserManagedParams struct {
+	Managed int64 `json:"managed"`
+	ID      int64 `json:"id"`
+}
+
+// Mark a user as managed/unmanaged
+func (q *Queries) SetUserManaged(ctx context.Context, arg SetUserManagedParams) error {
+	_, err := q.exec(ctx, q.setUserManagedStmt, setUserManaged, arg.Managed, arg.ID)
 	return err
 }
 

@@ -33,6 +33,9 @@ const (
 
 	// DemoInstanceErrorType indicates an operation not permitted in demo mode
 	DemoInstanceErrorType ErrorType = "DEMO_INSTANCE"
+
+	// ManagedResourceErrorType indicates a mutation attempted on a config-managed resource
+	ManagedResourceErrorType ErrorType = "ManagedResourceError"
 )
 
 // ErrorResponse represents a standardized error response

@@ -109,6 +109,8 @@ func mapSourceRowToModel(row *sqlc.Source) *models.Source {
 			CreatedAt: row.CreatedAt,
 			UpdatedAt: row.UpdatedAt,
 		},
+		Managed:   row.Managed == 1,
+		SecretRef: row.SecretRef.String,
 	}
 }
 

@@ -51,6 +51,7 @@ type User struct {
 	LastLoginAt  *time.Time `json:"last_login_at,omitempty" db:"last_login_at"`
 	LastActiveAt *time.Time `json:"last_active_at,omitempty" db:"last_active_at"`
 	Timestamps
+	Managed bool `json:"managed" db:"managed"`
 }
 
 // CreateUserRequest represents a request to create a new user
@@ -83,6 +84,7 @@ type Team struct {
 	Description string `db:"description" json:"description"`
 	MemberCount int    `db:"-" json:"member_count"`
 	Timestamps
+	Managed bool `db:"managed" json:"managed"`
 }
 
 // TeamMember represents a user's membership in a team

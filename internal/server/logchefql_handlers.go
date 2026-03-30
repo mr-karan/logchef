@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 
 	"github.com/gofiber/fiber/v2"
@@ -279,8 +280,8 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 
 	// Execute the query (reuse existing query execution logic)
 	// Create a cancellable context for this query
-	queryCtx, cancel := c.Context(), func() {}
-	defer cancel()
+	queryCtx, cancel := context.WithCancel(c.Context())
+	defer cancel() // Ensure cleanup
 
 	// Add query to tracker
 	queryID := queryTracker.AddQuery(user.ID, sourceID, teamID, sql, cancel)

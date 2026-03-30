@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,7 +23,8 @@ type Config struct {
 	Logging    LoggingConfig    `koanf:"logging"`
 	AI         AIConfig         `koanf:"ai"`
 	Alerts     AlertsConfig     `koanf:"alerts"`
-	Query      QueryConfig      `koanf:"query"`
+	Query        QueryConfig        `koanf:"query"`
+	Provisioning ProvisioningConfig `koanf:"provisioning"`
 }
 
 // QueryConfig contains settings for query execution
@@ -172,6 +174,27 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	applyDefaults(k, &cfg)
+
+	// Load separate provisioning file if specified.
+	if cfg.Provisioning.File != "" {
+		provPath := cfg.Provisioning.File
+		// Resolve relative paths against the config file directory.
+		if !filepath.IsAbs(provPath) {
+			provPath = filepath.Join(filepath.Dir(path), provPath)
+		}
+		pk := koanf.New(".")
+		if err := pk.Load(file.Provider(provPath), toml.Parser()); err != nil {
+			return nil, fmt.Errorf("error loading provisioning file %q: %w", provPath, err)
+		}
+		log.Printf("loaded provisioning config from: %s", provPath)
+		// Unmarshal from root — the standalone file uses top-level keys
+		// (manage_sources, [[sources]], [[teams]]) without a [provisioning] prefix.
+		if err := pk.Unmarshal("", &cfg.Provisioning); err != nil {
+			return nil, fmt.Errorf("error parsing provisioning file: %w", err)
+		}
+		// Preserve the file path
+		cfg.Provisioning.File = provPath
+	}
 
 	// Validate required configurations
 	if len(cfg.Auth.AdminEmails) == 0 {

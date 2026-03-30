@@ -14,8 +14,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useSourcesStore } from "@/stores/sources";
-import { SqlManager } from "@/services/SqlManager";
 
 const exploreStore = useExploreStore();
 const { timeRange, quickRangeLabelToRelativeTime } = useTimeRange();
@@ -78,11 +76,6 @@ const handleDateRangeChange = (value: any) => {
       // Set the relative time in the store (which also sets the absolute time range)
       exploreStore.setRelativeTimeRange(relativeTime);
 
-      // Update SQL if needed - ensure query includes time constraints
-      if (exploreStore.activeMode === 'sql') {
-        updateSqlForTimeChange();
-      }
-
       // Debug dirty state and force UI update
       setTimeout(() => {
         const dirtyState = isDirty.value;
@@ -105,11 +98,6 @@ const handleDateRangeChange = (value: any) => {
   console.log("TimeRangeSelector: Setting absolute time range");
   timeRange.value = value;
 
-  // Update SQL if needed - ensure query includes time constraints
-  if (exploreStore.activeMode === 'sql') {
-    updateSqlForTimeChange();
-  }
-
   // Debug dirty state and force UI update
   setTimeout(() => {
     const dirtyState = isDirty.value;
@@ -124,40 +112,6 @@ const handleDateRangeChange = (value: any) => {
   }, 100);
 };
 
-// Add new function to intelligently update SQL when time changes
-const updateSqlForTimeChange = () => {
-  // Only update SQL if we're in SQL mode and have source details
-  if (exploreStore.activeMode !== 'sql' || !timeRange.value) {
-    return;
-  }
-
-  // Get the current SQL and source details
-  const currentSql = exploreStore.rawSql;
-  const sourceDetails = useSourcesStore().currentSourceDetails;
-
-  if (!sourceDetails || !currentSql) {
-    return;
-  }
-
-  try {
-    // Use SqlManager to update time range in SQL
-    const updatedSql = SqlManager.updateTimeRange({
-      sql: currentSql,
-      tsField: sourceDetails._meta_ts_field || 'timestamp',
-      timeRange: timeRange.value,
-      timezone: exploreStore.selectedTimezoneIdentifier || undefined
-    });
-
-    // Update SQL if it was changed
-    if (updatedSql !== currentSql) {
-      exploreStore.setRawSql(updatedSql);
-      console.log("TimeRangeSelector: SQL updated for new time range");
-    }
-  } catch (err) {
-    console.error("Error updating SQL for time range:", err);
-  }
-};
-
 // Handler for timezone changes from DateTimePicker
 const handleTimezoneChange = (timezoneId: string) => {
   console.log("TimeRangeSelector: Timezone changed to", timezoneId);
@@ -168,37 +122,6 @@ const handleTimezoneChange = (timezoneId: string) => {
 const handleLimitChange = (limit: number) => {
   console.log("TimeRangeSelector: Setting new limit:", limit);
   exploreStore.setLimit(limit);
-
-  // Update SQL query when in SQL mode
-  if (exploreStore.activeMode === 'sql') {
-    updateSqlForLimitChange(limit);
-  }
-};
-
-// Add new function to update SQL when limit changes
-const updateSqlForLimitChange = (newLimit: number) => {
-  // Only update SQL if we're in SQL mode
-  if (exploreStore.activeMode !== 'sql') {
-    return;
-  }
-
-  const currentSql = exploreStore.rawSql;
-  if (!currentSql.trim()) {
-    return;
-  }
-
-  try {
-    // Use SqlManager to update limit in SQL
-    const updatedSql = SqlManager.updateLimit(currentSql, newLimit);
-
-    // Update SQL if it was changed
-    if (updatedSql !== currentSql) {
-      exploreStore.setRawSql(updatedSql);
-      console.log("TimeRangeSelector: Updated SQL query with new limit");
-    }
-  } catch (error) {
-    console.error("Error updating SQL with new limit:", error);
-  }
 };
 
 // Function to open date picker programmatically

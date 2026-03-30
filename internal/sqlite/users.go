@@ -200,5 +200,6 @@ func mapUserRowToModel(row sqlc.User) *models.User {
 			CreatedAt: row.CreatedAt,
 			UpdatedAt: row.UpdatedAt,
 		},
+		Managed: row.Managed == 1,
 	}
 }

@@ -82,6 +82,8 @@ type Source struct {
 	TtlDays           int64          `json:"ttl_days"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
+	Managed           int64          `json:"managed"`
+	SecretRef         sql.NullString `json:"secret_ref"`
 }
 
 type SystemSetting struct {
@@ -101,6 +103,7 @@ type Team struct {
 	Description sql.NullString `json:"description"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
+	Managed     int64          `json:"managed"`
 }
 
 type TeamMember struct {
@@ -139,6 +142,7 @@ type User struct {
 	LastActiveAt sql.NullTime `json:"last_active_at"`
 	CreatedAt    time.Time    `json:"created_at"`
 	UpdatedAt    time.Time    `json:"updated_at"`
+	Managed      int64        `json:"managed"`
 }
 
 type UserPreference struct {

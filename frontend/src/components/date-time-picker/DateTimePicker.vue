@@ -14,6 +14,7 @@ import type { DateRange } from "radix-vue";
 import {
   getLocalTimeZone,
   now,
+  today,
   ZonedDateTime,
   toZoned,
   CalendarDateTime,
@@ -58,7 +59,8 @@ const currentTimezoneId = computed(() =>
   timezonePreference.value === "local" ? getLocalTimeZone() : "UTC"
 );
 
-// Date state
+// Date state — today is used to focus/highlight the current date in calendars
+const todayDate = today(currentTimezoneId.value);
 const currentTime = now(currentTimezoneId.value);
 const dateRange = ref<{ start: DateValue; end: DateValue }>({
   start: currentTime.subtract({ minutes: 15 }),
@@ -410,6 +412,7 @@ defineExpose({
                   <PopoverContent class="w-auto p-0" side="right" align="start">
                     <Calendar
                       class="rounded-md border"
+                      :placeholder="todayDate"
                       @update:model-value="(date) => handleCalendarSelect('from', date)"
                     />
                   </PopoverContent>
@@ -438,6 +441,7 @@ defineExpose({
                   <PopoverContent class="w-auto p-0" side="right" align="start">
                     <Calendar
                       class="rounded-md border"
+                      :placeholder="todayDate"
                       @update:model-value="(date) => handleCalendarSelect('to', date)"
                     />
                   </PopoverContent>

@@ -51,7 +51,7 @@ func (s *Server) authenticateWithToken(c *fiber.Ctx, authHeader string) error {
 	token := strings.TrimPrefix(authHeader, "Bearer ")
 	if token == authHeader || token == "" {
 		metrics.RecordAuthAttempt("token", false, nil)
-		return SendErrorWithType(c, fiber.StatusForbidden, "Invalid Authorization header format", models.AuthenticationErrorType)
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "Invalid Authorization header format", models.AuthenticationErrorType)
 	}
 
 	// Authenticate token and get associated user
@@ -61,7 +61,7 @@ func (s *Server) authenticateWithToken(c *fiber.Ctx, authHeader string) error {
 
 		// Handle specific token errors
 		if errors.Is(err, core.ErrInvalidToken) || errors.Is(err, core.ErrTokenExpired) {
-			return SendErrorWithType(c, fiber.StatusForbidden, "Invalid or expired token", models.AuthenticationErrorType)
+			return SendErrorWithType(c, fiber.StatusUnauthorized, "Invalid or expired token", models.AuthenticationErrorType)
 		}
 
 		s.log.Error("error authenticating API token", "error", err)
@@ -85,7 +85,7 @@ func (s *Server) authenticateWithSession(c *fiber.Ctx) error {
 	sessionIDStr := c.Cookies(sessionCookieName)
 	if sessionIDStr == "" {
 		metrics.RecordSessionOperation("validate", false, nil)
-		return SendErrorWithType(c, fiber.StatusForbidden, "Authentication required", models.AuthenticationErrorType)
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication required", models.AuthenticationErrorType)
 	}
 	sessionID := models.SessionID(sessionIDStr)
 
@@ -94,9 +94,9 @@ func (s *Server) authenticateWithSession(c *fiber.Ctx) error {
 	if err != nil {
 		metrics.RecordSessionOperation("validate", false, nil)
 
-		// Handle specific session errors by returning 403.
+		// Handle specific session errors by returning 401 (not authenticated).
 		if errors.Is(err, core.ErrSessionNotFound) || errors.Is(err, core.ErrSessionExpired) {
-			return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthenticationErrorType)
+			return SendErrorWithType(c, fiber.StatusUnauthorized, err.Error(), models.AuthenticationErrorType)
 		}
 		// Log unexpected errors during validation.
 		s.log.Error("error validating session via core function", "error", err, "session_id", sessionID)
@@ -106,9 +106,9 @@ func (s *Server) authenticateWithSession(c *fiber.Ctx) error {
 	// Retrieve associated user information.
 	user, err := core.GetUser(c.Context(), s.sqlite, session.UserID)
 	if err != nil {
-		// If user not found for a valid session, treat as an auth issue or internal error.
+		// If user not found for a valid session, treat as an auth issue.
 		if errors.Is(err, core.ErrUserNotFound) {
-			return SendErrorWithType(c, fiber.StatusForbidden, "User associated with session not found", models.AuthenticationErrorType)
+			return SendErrorWithType(c, fiber.StatusUnauthorized, "User associated with session not found", models.AuthenticationErrorType)
 		}
 		s.log.Error("error getting user for session via core function", "error", err, "user_id", session.UserID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error retrieving user data", models.GeneralErrorType)
@@ -142,6 +142,63 @@ func (s *Server) requireAdmin(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Admin access required", models.AuthorizationErrorType)
 	}
 
+	return c.Next()
+}
+
+// requireSourceNotManaged rejects mutations on config-managed sources.
+func (s *Server) requireSourceNotManaged(c *fiber.Ctx) error {
+	sourceIDStr := c.Params("sourceID")
+	if sourceIDStr == "" {
+		return c.Next()
+	}
+	sourceID, err := core.ParseSourceID(sourceIDStr)
+	if err != nil {
+		return c.Next() // let handler deal with bad ID
+	}
+	managed, err := s.sqlite.IsSourceManaged(c.Context(), sourceID)
+	if err == nil && managed {
+		return SendErrorWithType(c, fiber.StatusForbidden,
+			"This source is managed by provisioning config and cannot be modified via API",
+			models.ManagedResourceErrorType)
+	}
+	return c.Next()
+}
+
+// requireTeamNotManaged rejects mutations on config-managed teams.
+func (s *Server) requireTeamNotManaged(c *fiber.Ctx) error {
+	teamIDStr := c.Params("teamID")
+	if teamIDStr == "" {
+		return c.Next()
+	}
+	teamID, err := core.ParseTeamID(teamIDStr)
+	if err != nil {
+		return c.Next()
+	}
+	managed, err := s.sqlite.IsTeamManaged(c.Context(), teamID)
+	if err == nil && managed {
+		return SendErrorWithType(c, fiber.StatusForbidden,
+			"This team is managed by provisioning config and cannot be modified via API",
+			models.ManagedResourceErrorType)
+	}
+	return c.Next()
+}
+
+// requireUserNotManaged rejects mutations on config-managed users.
+func (s *Server) requireUserNotManaged(c *fiber.Ctx) error {
+	userIDStr := c.Params("userID")
+	if userIDStr == "" {
+		return c.Next()
+	}
+	userID, err := core.ParseUserID(userIDStr)
+	if err != nil {
+		return c.Next()
+	}
+	managed, err := s.sqlite.IsUserManaged(c.Context(), userID)
+	if err == nil && managed {
+		return SendErrorWithType(c, fiber.StatusForbidden,
+			"This user is managed by provisioning config and cannot be modified via API",
+			models.ManagedResourceErrorType)
+	}
 	return c.Next()
 }
 

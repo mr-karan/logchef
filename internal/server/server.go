@@ -145,6 +145,7 @@ func (s *Server) setupRoutes() {
 	// --- Current User ("Me") Routes ---
 	api.Get("/me", s.requireAuth, s.handleGetCurrentUser)
 	api.Get("/me/teams", s.requireAuth, s.handleListCurrentUserTeams)
+	api.Get("/me/collections", s.requireAuth, s.handleListCurrentUserCollections)
 	api.Get("/me/preferences", s.requireAuth, s.handleGetUserPreferences)
 	api.Put("/me/preferences", s.requireAuth, s.handleUpdateUserPreferences)
 
@@ -171,15 +172,18 @@ func (s *Server) setupRoutes() {
 	// Global Team Management
 	admin.Get("/teams", s.handleListTeams)
 	admin.Post("/teams", s.handleCreateTeam)
-	admin.Delete("/teams/:teamID", s.handleDeleteTeam)
+	admin.Delete("/teams/:teamID", s.requireTeamNotManaged, s.handleDeleteTeam)
 
 	// Global Source Management
 	admin.Get("/sources", s.handleListSources) // Admin endpoint for listing all sources
 	admin.Post("/sources", s.handleCreateSource)
 	admin.Post("/sources/validate", s.handleValidateSourceConnection)
-	admin.Put("/sources/:sourceID", s.handleUpdateSource)
-	admin.Delete("/sources/:sourceID", s.handleDeleteSource)
+	admin.Put("/sources/:sourceID", s.requireSourceNotManaged, s.handleUpdateSource)
+	admin.Delete("/sources/:sourceID", s.requireSourceNotManaged, s.handleDeleteSource)
 	admin.Get("/sources/:sourceID/stats", s.handleGetSourceStats) // Admin-only source stats
+
+	// Provisioning Export
+	admin.Get("/provisioning/export", s.handleExportProvisioning)
 
 	// System Settings Management
 	admin.Get("/settings", s.handleListSettings)
@@ -200,11 +204,11 @@ func (s *Server) setupRoutes() {
 	teamMembers := api.Group("/teams/:teamID/members", s.requireAuth, s.requireTeamMember)
 	teamMembers.Get("/", s.handleListTeamMembers) // Any team member can view
 	// Only team admins can add/remove members
-	teamMembers.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamMember)
-	teamMembers.Delete("/:userID", s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamMember)
+	teamMembers.Post("/", s.requireTeamNotManaged, s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamMember)
+	teamMembers.Delete("/:userID", s.requireTeamNotManaged, s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamMember)
 
 	// Team settings (requires team admin or global admin)
-	api.Put("/teams/:teamID", s.requireAuth, s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeam)
+	api.Put("/teams/:teamID", s.requireAuth, s.requireTeamNotManaged, s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeam)
 
 	// Team-level collections (all sources)
 	api.Get("/teams/:teamID/collections", s.requireAuth, s.requireTeamMember, s.handleListTeamCollections)

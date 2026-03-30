@@ -131,6 +131,20 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     });
   }
 
+  async function fetchMyCollections() {
+    return await state.withLoading('fetchMyCollections', async () => {
+      return await state.callApi<SavedTeamQuery[]>({
+        apiCall: () => savedQueriesApi.listMyCollections(),
+        operationKey: 'fetchMyCollections',
+        onSuccess: (responseData) => {
+          state.data.value.queries = responseData ?? [];
+        },
+        defaultData: [],
+        showToast: false,
+      });
+    });
+  }
+
   async function fetchTeamQueries(_teamId: number) {
     console.warn('fetchTeamQueries: This function is deprecated, use fetchTeamCollections instead');
     state.data.value.queries = [];
@@ -369,6 +383,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     fetchUserTeams,
     setSelectedTeam,
     fetchTeamCollections,
+    fetchMyCollections,
     fetchTeamQueries,
     fetchSourceQueries,
     fetchTeamSourceQueries,

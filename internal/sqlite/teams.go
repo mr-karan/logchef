@@ -66,7 +66,7 @@ func (db *DB) GetTeam(ctx context.Context, teamID models.TeamID) (*models.Team, 
 			CreatedAt: teamRow.CreatedAt,
 			UpdatedAt: teamRow.UpdatedAt,
 		},
-		// MemberCount is handled by ListTeams query.
+		Managed: teamRow.Managed == 1,
 	}
 	return team, nil
 }
@@ -448,6 +448,7 @@ func (db *DB) GetTeamByName(ctx context.Context, name string) (*models.Team, err
 			CreatedAt: teamRow.CreatedAt,
 			UpdatedAt: teamRow.UpdatedAt,
 		},
+		Managed: teamRow.Managed == 1,
 	}
 	return team, nil
 }
