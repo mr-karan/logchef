@@ -13,6 +13,7 @@ import (
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/provisioning"
 	"github.com/mr-karan/logchef/internal/server"
 	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/pkg/logger"
@@ -101,6 +102,19 @@ func (a *App) Initialize(ctx context.Context) error {
 			// oidcProvider will be nil; dependent features should handle this.
 		} else {
 			return fmt.Errorf("failed to initialize OIDC provider: %w", err)
+		}
+	}
+
+	// Run declarative provisioning reconciliation if configured.
+	if a.Config.Provisioning.Enabled() {
+		a.Logger.Info("running provisioning reconciliation",
+			"manage_sources", a.Config.Provisioning.ManageSources,
+			"manage_teams", a.Config.Provisioning.ManageTeams,
+			"prune", a.Config.Provisioning.Prune,
+			"dry_run", a.Config.Provisioning.DryRun,
+		)
+		if err := provisioning.Reconcile(ctx, &a.Config.Provisioning, a.SQLite, a.ClickHouse, a.Logger, a.Config.Auth.AdminEmails); err != nil {
+			return fmt.Errorf("provisioning reconciliation failed: %w", err)
 		}
 	}
 

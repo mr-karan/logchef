@@ -32,6 +32,9 @@ type Source struct {
 	Engine       string   `db:"-" json:"engine,omitempty"`
 	EngineParams []string `db:"-" json:"engine_params,omitempty"`
 	SortKeys     []string `db:"-" json:"sort_keys,omitempty"`
+	// Provisioning
+	Managed   bool   `db:"managed" json:"managed"`
+	SecretRef string `db:"secret_ref" json:"secret_ref,omitempty"`
 }
 
 // ConnectionInfoResponse represents the connection details for API responses

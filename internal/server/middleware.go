@@ -145,6 +145,63 @@ func (s *Server) requireAdmin(c *fiber.Ctx) error {
 	return c.Next()
 }
 
+// requireSourceNotManaged rejects mutations on config-managed sources.
+func (s *Server) requireSourceNotManaged(c *fiber.Ctx) error {
+	sourceIDStr := c.Params("sourceID")
+	if sourceIDStr == "" {
+		return c.Next()
+	}
+	sourceID, err := core.ParseSourceID(sourceIDStr)
+	if err != nil {
+		return c.Next() // let handler deal with bad ID
+	}
+	managed, err := s.sqlite.IsSourceManaged(c.Context(), sourceID)
+	if err == nil && managed {
+		return SendErrorWithType(c, fiber.StatusForbidden,
+			"This source is managed by provisioning config and cannot be modified via API",
+			models.ManagedResourceErrorType)
+	}
+	return c.Next()
+}
+
+// requireTeamNotManaged rejects mutations on config-managed teams.
+func (s *Server) requireTeamNotManaged(c *fiber.Ctx) error {
+	teamIDStr := c.Params("teamID")
+	if teamIDStr == "" {
+		return c.Next()
+	}
+	teamID, err := core.ParseTeamID(teamIDStr)
+	if err != nil {
+		return c.Next()
+	}
+	managed, err := s.sqlite.IsTeamManaged(c.Context(), teamID)
+	if err == nil && managed {
+		return SendErrorWithType(c, fiber.StatusForbidden,
+			"This team is managed by provisioning config and cannot be modified via API",
+			models.ManagedResourceErrorType)
+	}
+	return c.Next()
+}
+
+// requireUserNotManaged rejects mutations on config-managed users.
+func (s *Server) requireUserNotManaged(c *fiber.Ctx) error {
+	userIDStr := c.Params("userID")
+	if userIDStr == "" {
+		return c.Next()
+	}
+	userID, err := core.ParseUserID(userIDStr)
+	if err != nil {
+		return c.Next()
+	}
+	managed, err := s.sqlite.IsUserManaged(c.Context(), userID)
+	if err == nil && managed {
+		return SendErrorWithType(c, fiber.StatusForbidden,
+			"This user is managed by provisioning config and cannot be modified via API",
+			models.ManagedResourceErrorType)
+	}
+	return c.Next()
+}
+
 // requireAnyTeamAdmin is middleware that ensures the authenticated user is an admin of at least one team,
 // or is a global admin. This is used for endpoints that should be accessible to team admins
 // without requiring a specific team context (e.g., listing users to add to teams).

@@ -519,3 +519,45 @@ ON CONFLICT(key) DO UPDATE SET
 DELETE FROM system_settings
 WHERE key = ?;
 
+-- Provisioning Queries
+
+-- name: ListManagedSources :many
+-- Get all sources managed by provisioning config
+SELECT * FROM sources WHERE managed = 1 ORDER BY id;
+
+-- name: ListManagedTeams :many
+-- Get all teams managed by provisioning config
+SELECT * FROM teams WHERE managed = 1 ORDER BY id;
+
+-- name: ListManagedUsers :many
+-- Get all users managed by provisioning config
+SELECT * FROM users WHERE managed = 1 ORDER BY id;
+
+-- name: SetSourceManaged :exec
+-- Mark a source as managed/unmanaged and set secret_ref
+UPDATE sources SET managed = ?, secret_ref = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?;
+
+-- name: SetTeamManaged :exec
+-- Mark a team as managed/unmanaged
+UPDATE teams SET managed = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?;
+
+-- name: SetUserManaged :exec
+-- Mark a user as managed/unmanaged
+UPDATE users SET managed = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?;
+
+-- name: IsSourceManaged :one
+-- Check if a source is managed
+SELECT managed FROM sources WHERE id = ?;
+
+-- name: IsTeamManaged :one
+-- Check if a team is managed
+SELECT managed FROM teams WHERE id = ?;
+
+-- name: IsUserManaged :one
+-- Check if a user is managed
+SELECT managed FROM users WHERE id = ?;
+
+-- name: GetSourceByNameForProvisioning :one
+-- Get source by name for provisioning lookup
+SELECT * FROM sources WHERE name = ?;
+

@@ -66,3 +66,28 @@ api_token_secret = "5679649c50fddda837449b77d9983ab5f8dba65878897e968a74e7061bf4
 # Maximum rows returned per query. Increase for large exports if your
 # ClickHouse cluster can handle it. Default: 1000000 (1 million).
 # max_limit = 1000000
+
+# -----------------------------------------------------------------------------
+# Provisioning (optional) — Declarative config for teams, sources, access
+# -----------------------------------------------------------------------------
+# [provisioning]
+# manage_sources = true
+# manage_teams = true
+# prune = false
+# dry_run = true
+#
+# [[provisioning.sources]]
+# name = "My Logs"
+# host = "clickhouse:9000"
+# username = "default"
+# password = "secret"
+# database = "logs"
+# table_name = "otel_logs"
+# meta_ts_field = "timestamp"
+#
+# [[provisioning.teams]]
+# name = "Platform"
+# sources = ["My Logs"]
+# members = [
+#   { email = "admin@example.com", role = "admin" },
+# ]

@@ -72,6 +72,8 @@ type Querier interface {
 	GetSource(ctx context.Context, id int64) (Source, error)
 	// Get a single source by table name and database
 	GetSourceByName(ctx context.Context, arg GetSourceByNameParams) (Source, error)
+	// Get source by name for provisioning lookup
+	GetSourceByNameForProvisioning(ctx context.Context, name string) (Source, error)
 	// System Settings Queries
 	GetSystemSetting(ctx context.Context, key string) (SystemSetting, error)
 	// Get a team by ID
@@ -91,11 +93,24 @@ type Querier interface {
 	GetUserPreferences(ctx context.Context, userID int64) (UserPreference, error)
 	// Alert history queries
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (int64, error)
+	// Check if a source is managed
+	IsSourceManaged(ctx context.Context, id int64) (int64, error)
+	// Check if a team is managed
+	IsTeamManaged(ctx context.Context, id int64) (int64, error)
+	// Check if a user is managed
+	IsUserManaged(ctx context.Context, id int64) (int64, error)
 	// List all API tokens for a user
 	ListAPITokensForUser(ctx context.Context, userID int64) ([]ApiToken, error)
 	ListActiveAlertsDue(ctx context.Context) ([]Alert, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
 	ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsByTeamAndSourceParams) ([]Alert, error)
+	// Provisioning Queries
+	// Get all sources managed by provisioning config
+	ListManagedSources(ctx context.Context) ([]Source, error)
+	// Get all teams managed by provisioning config
+	ListManagedTeams(ctx context.Context) ([]Team, error)
+	// Get all users managed by provisioning config
+	ListManagedUsers(ctx context.Context) ([]User, error)
 	// List all queries for a specific team across all sources (bookmarked first, then by updated_at)
 	ListQueriesByTeam(ctx context.Context, teamID int64) ([]TeamQuery, error)
 	// List all queries for a specific team and source (bookmarked first, then by updated_at)
@@ -131,6 +146,12 @@ type Querier interface {
 	// Remove a data source from a team
 	RemoveTeamSource(ctx context.Context, arg RemoveTeamSourceParams) error
 	ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) error
+	// Mark a source as managed/unmanaged and set secret_ref
+	SetSourceManaged(ctx context.Context, arg SetSourceManagedParams) error
+	// Mark a team as managed/unmanaged
+	SetTeamManaged(ctx context.Context, arg SetTeamManagedParams) error
+	// Mark a user as managed/unmanaged
+	SetUserManaged(ctx context.Context, arg SetUserManagedParams) error
 	// Additional queries for user-source and team-source access
 	// Check if a team has access to a source
 	TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (int64, error)

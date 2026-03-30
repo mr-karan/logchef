@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"errors"
@@ -248,4 +249,15 @@ func (db *DB) Close() error {
 		return fmt.Errorf("error closing database connections: %v", errs)
 	}
 	return nil
+}
+
+// BeginWriteTx starts a transaction on the write connection.
+// The caller is responsible for calling Commit() or Rollback().
+func (db *DB) BeginWriteTx(ctx context.Context) (*sql.Tx, error) {
+	return db.writeDB.BeginTx(ctx, nil)
+}
+
+// WriteQueriesWithTx returns a sqlc Queries instance bound to the given transaction.
+func (db *DB) WriteQueriesWithTx(tx *sql.Tx) *sqlc.Queries {
+	return sqlc.New(tx)
 }

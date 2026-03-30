@@ -114,6 +114,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getSourceByNameStmt, err = db.PrepareContext(ctx, getSourceByName); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSourceByName: %w", err)
 	}
+	if q.getSourceByNameForProvisioningStmt, err = db.PrepareContext(ctx, getSourceByNameForProvisioning); err != nil {
+		return nil, fmt.Errorf("error preparing query GetSourceByNameForProvisioning: %w", err)
+	}
 	if q.getSystemSettingStmt, err = db.PrepareContext(ctx, getSystemSetting); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSystemSetting: %w", err)
 	}
@@ -141,6 +144,15 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.insertAlertHistoryStmt, err = db.PrepareContext(ctx, insertAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query InsertAlertHistory: %w", err)
 	}
+	if q.isSourceManagedStmt, err = db.PrepareContext(ctx, isSourceManaged); err != nil {
+		return nil, fmt.Errorf("error preparing query IsSourceManaged: %w", err)
+	}
+	if q.isTeamManagedStmt, err = db.PrepareContext(ctx, isTeamManaged); err != nil {
+		return nil, fmt.Errorf("error preparing query IsTeamManaged: %w", err)
+	}
+	if q.isUserManagedStmt, err = db.PrepareContext(ctx, isUserManaged); err != nil {
+		return nil, fmt.Errorf("error preparing query IsUserManaged: %w", err)
+	}
 	if q.listAPITokensForUserStmt, err = db.PrepareContext(ctx, listAPITokensForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAPITokensForUser: %w", err)
 	}
@@ -152,6 +164,15 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listAlertsByTeamAndSourceStmt, err = db.PrepareContext(ctx, listAlertsByTeamAndSource); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAlertsByTeamAndSource: %w", err)
+	}
+	if q.listManagedSourcesStmt, err = db.PrepareContext(ctx, listManagedSources); err != nil {
+		return nil, fmt.Errorf("error preparing query ListManagedSources: %w", err)
+	}
+	if q.listManagedTeamsStmt, err = db.PrepareContext(ctx, listManagedTeams); err != nil {
+		return nil, fmt.Errorf("error preparing query ListManagedTeams: %w", err)
+	}
+	if q.listManagedUsersStmt, err = db.PrepareContext(ctx, listManagedUsers); err != nil {
+		return nil, fmt.Errorf("error preparing query ListManagedUsers: %w", err)
 	}
 	if q.listQueriesByTeamStmt, err = db.PrepareContext(ctx, listQueriesByTeam); err != nil {
 		return nil, fmt.Errorf("error preparing query ListQueriesByTeam: %w", err)
@@ -212,6 +233,15 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.resolveAlertHistoryStmt, err = db.PrepareContext(ctx, resolveAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query ResolveAlertHistory: %w", err)
+	}
+	if q.setSourceManagedStmt, err = db.PrepareContext(ctx, setSourceManaged); err != nil {
+		return nil, fmt.Errorf("error preparing query SetSourceManaged: %w", err)
+	}
+	if q.setTeamManagedStmt, err = db.PrepareContext(ctx, setTeamManaged); err != nil {
+		return nil, fmt.Errorf("error preparing query SetTeamManaged: %w", err)
+	}
+	if q.setUserManagedStmt, err = db.PrepareContext(ctx, setUserManaged); err != nil {
+		return nil, fmt.Errorf("error preparing query SetUserManaged: %w", err)
 	}
 	if q.teamHasSourceStmt, err = db.PrepareContext(ctx, teamHasSource); err != nil {
 		return nil, fmt.Errorf("error preparing query TeamHasSource: %w", err)
@@ -407,6 +437,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getSourceByNameStmt: %w", cerr)
 		}
 	}
+	if q.getSourceByNameForProvisioningStmt != nil {
+		if cerr := q.getSourceByNameForProvisioningStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getSourceByNameForProvisioningStmt: %w", cerr)
+		}
+	}
 	if q.getSystemSettingStmt != nil {
 		if cerr := q.getSystemSettingStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getSystemSettingStmt: %w", cerr)
@@ -452,6 +487,21 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing insertAlertHistoryStmt: %w", cerr)
 		}
 	}
+	if q.isSourceManagedStmt != nil {
+		if cerr := q.isSourceManagedStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing isSourceManagedStmt: %w", cerr)
+		}
+	}
+	if q.isTeamManagedStmt != nil {
+		if cerr := q.isTeamManagedStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing isTeamManagedStmt: %w", cerr)
+		}
+	}
+	if q.isUserManagedStmt != nil {
+		if cerr := q.isUserManagedStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing isUserManagedStmt: %w", cerr)
+		}
+	}
 	if q.listAPITokensForUserStmt != nil {
 		if cerr := q.listAPITokensForUserStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAPITokensForUserStmt: %w", cerr)
@@ -470,6 +520,21 @@ func (q *Queries) Close() error {
 	if q.listAlertsByTeamAndSourceStmt != nil {
 		if cerr := q.listAlertsByTeamAndSourceStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAlertsByTeamAndSourceStmt: %w", cerr)
+		}
+	}
+	if q.listManagedSourcesStmt != nil {
+		if cerr := q.listManagedSourcesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listManagedSourcesStmt: %w", cerr)
+		}
+	}
+	if q.listManagedTeamsStmt != nil {
+		if cerr := q.listManagedTeamsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listManagedTeamsStmt: %w", cerr)
+		}
+	}
+	if q.listManagedUsersStmt != nil {
+		if cerr := q.listManagedUsersStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listManagedUsersStmt: %w", cerr)
 		}
 	}
 	if q.listQueriesByTeamStmt != nil {
@@ -570,6 +635,21 @@ func (q *Queries) Close() error {
 	if q.resolveAlertHistoryStmt != nil {
 		if cerr := q.resolveAlertHistoryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing resolveAlertHistoryStmt: %w", cerr)
+		}
+	}
+	if q.setSourceManagedStmt != nil {
+		if cerr := q.setSourceManagedStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing setSourceManagedStmt: %w", cerr)
+		}
+	}
+	if q.setTeamManagedStmt != nil {
+		if cerr := q.setTeamManagedStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing setTeamManagedStmt: %w", cerr)
+		}
+	}
+	if q.setUserManagedStmt != nil {
+		if cerr := q.setUserManagedStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing setUserManagedStmt: %w", cerr)
 		}
 	}
 	if q.teamHasSourceStmt != nil {
@@ -706,6 +786,7 @@ type Queries struct {
 	getSessionStmt                      *sql.Stmt
 	getSourceStmt                       *sql.Stmt
 	getSourceByNameStmt                 *sql.Stmt
+	getSourceByNameForProvisioningStmt  *sql.Stmt
 	getSystemSettingStmt                *sql.Stmt
 	getTeamStmt                         *sql.Stmt
 	getTeamByNameStmt                   *sql.Stmt
@@ -715,10 +796,16 @@ type Queries struct {
 	getUserByEmailStmt                  *sql.Stmt
 	getUserPreferencesStmt              *sql.Stmt
 	insertAlertHistoryStmt              *sql.Stmt
+	isSourceManagedStmt                 *sql.Stmt
+	isTeamManagedStmt                   *sql.Stmt
+	isUserManagedStmt                   *sql.Stmt
 	listAPITokensForUserStmt            *sql.Stmt
 	listActiveAlertsDueStmt             *sql.Stmt
 	listAlertHistoryStmt                *sql.Stmt
 	listAlertsByTeamAndSourceStmt       *sql.Stmt
+	listManagedSourcesStmt              *sql.Stmt
+	listManagedTeamsStmt                *sql.Stmt
+	listManagedUsersStmt                *sql.Stmt
 	listQueriesByTeamStmt               *sql.Stmt
 	listQueriesByTeamAndSourceStmt      *sql.Stmt
 	listQueriesForUserStmt              *sql.Stmt
@@ -739,6 +826,9 @@ type Queries struct {
 	removeTeamMemberStmt                *sql.Stmt
 	removeTeamSourceStmt                *sql.Stmt
 	resolveAlertHistoryStmt             *sql.Stmt
+	setSourceManagedStmt                *sql.Stmt
+	setTeamManagedStmt                  *sql.Stmt
+	setUserManagedStmt                  *sql.Stmt
 	teamHasSourceStmt                   *sql.Stmt
 	toggleQueryBookmarkStmt             *sql.Stmt
 	updateAPITokenLastUsedStmt          *sql.Stmt
@@ -788,6 +878,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getSessionStmt:                      q.getSessionStmt,
 		getSourceStmt:                       q.getSourceStmt,
 		getSourceByNameStmt:                 q.getSourceByNameStmt,
+		getSourceByNameForProvisioningStmt:  q.getSourceByNameForProvisioningStmt,
 		getSystemSettingStmt:                q.getSystemSettingStmt,
 		getTeamStmt:                         q.getTeamStmt,
 		getTeamByNameStmt:                   q.getTeamByNameStmt,
@@ -797,10 +888,16 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getUserByEmailStmt:                  q.getUserByEmailStmt,
 		getUserPreferencesStmt:              q.getUserPreferencesStmt,
 		insertAlertHistoryStmt:              q.insertAlertHistoryStmt,
+		isSourceManagedStmt:                 q.isSourceManagedStmt,
+		isTeamManagedStmt:                   q.isTeamManagedStmt,
+		isUserManagedStmt:                   q.isUserManagedStmt,
 		listAPITokensForUserStmt:            q.listAPITokensForUserStmt,
 		listActiveAlertsDueStmt:             q.listActiveAlertsDueStmt,
 		listAlertHistoryStmt:                q.listAlertHistoryStmt,
 		listAlertsByTeamAndSourceStmt:       q.listAlertsByTeamAndSourceStmt,
+		listManagedSourcesStmt:              q.listManagedSourcesStmt,
+		listManagedTeamsStmt:                q.listManagedTeamsStmt,
+		listManagedUsersStmt:                q.listManagedUsersStmt,
 		listQueriesByTeamStmt:               q.listQueriesByTeamStmt,
 		listQueriesByTeamAndSourceStmt:      q.listQueriesByTeamAndSourceStmt,
 		listQueriesForUserStmt:              q.listQueriesForUserStmt,
@@ -821,6 +918,9 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		removeTeamMemberStmt:                q.removeTeamMemberStmt,
 		removeTeamSourceStmt:                q.removeTeamSourceStmt,
 		resolveAlertHistoryStmt:             q.resolveAlertHistoryStmt,
+		setSourceManagedStmt:                q.setSourceManagedStmt,
+		setTeamManagedStmt:                  q.setTeamManagedStmt,
+		setUserManagedStmt:                  q.setUserManagedStmt,
 		teamHasSourceStmt:                   q.teamHasSourceStmt,
 		toggleQueryBookmarkStmt:             q.toggleQueryBookmarkStmt,
 		updateAPITokenLastUsedStmt:          q.updateAPITokenLastUsedStmt,

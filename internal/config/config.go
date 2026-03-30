@@ -22,7 +22,8 @@ type Config struct {
 	Logging    LoggingConfig    `koanf:"logging"`
 	AI         AIConfig         `koanf:"ai"`
 	Alerts     AlertsConfig     `koanf:"alerts"`
-	Query      QueryConfig      `koanf:"query"`
+	Query        QueryConfig        `koanf:"query"`
+	Provisioning ProvisioningConfig `koanf:"provisioning"`
 }
 
 // QueryConfig contains settings for query execution
