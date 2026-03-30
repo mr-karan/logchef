@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **All Teams collections view** — Browse saved queries across all your teams from a single page. New "All Teams" option in the team dropdown on the Collections page shows queries with Team and Source columns.
+- **SQL input validation** — Timezone, field name, and group-by inputs are now validated before SQL interpolation, preventing injection attacks on ClickHouse queries.
+
+### Changed
+- **Auth returns 401 for expired sessions** — Backend now returns HTTP 401 (not 403) for authentication failures, so the frontend correctly redirects to login instead of showing a Forbidden page.
+- **Parallel source health checks** — Admin source listing now pings all sources concurrently instead of serially, reducing page load time proportional to source count.
+- **OIDC audience validation enabled** — ID token verifier now validates the audience claim to prevent token confusion attacks.
+
+### Fixed
+- **Query cancellation works end-to-end** — LogchefQL queries now use a proper cancellable context (was no-op). Frontend preserves the query ID during cancellation so backend `KILL QUERY` can execute.
+- **SQL mode no longer rewrites user queries** — Time range and limit changes no longer silently modify raw SQL in SQL mode, respecting the user's query as written.
+- **Histogram timestamp detection** — The timestamp field check now inspects only the SELECT clause instead of the full query, preventing false positives when the field appears in WHERE/ORDER BY.
+- **No duplicate query on page load** — The auto-execute watcher now skips if URL state initialization already triggered a query.
+- **Post-login redirect preserved** — The requested page is now stored in a cookie through the OIDC round-trip, so users return to their original page after login.
+- **Calendar highlights today** — Date picker calendar now opens focused on today's date with default times (00:00:00 for From, 23:59:59 for To).
+- **Bookmark index covers sort** — New migration adds `updated_at` to the bookmark index for efficient sorted queries.
+- **Frontend type errors fixed** — Resolved 3 pre-existing TypeScript errors in SourceSparkline, TeamsList, and SourceStats.
+- **QueryEditor decomposed** — Extracted AiSqlDialog, VariableConfigSheet, and VariablesPanel into focused components (2645→1839 lines).
+- **Context store migrated** — Converted from Options API to Composition API setup function for consistency.
+- **QueryEditor props typed** — Replaced runtime prop definitions with TypeScript interface.
+
 ## [CLI v0.1.4] - 2026-02-05
 
 ### Added
