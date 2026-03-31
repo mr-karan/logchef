@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/auth"
@@ -79,6 +80,7 @@ func New(opts ServerOptions) *Server {
 		DisableStartupMessage: true, // Avoid default Fiber banner.
 		ReadTimeout:           opts.Config.Server.HTTPServerTimeout,
 		WriteTimeout:          opts.Config.Server.HTTPServerTimeout,
+		IdleTimeout:           30 * time.Second, // Free idle keep-alive connection buffers quickly
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			if e, ok := err.(*fiber.Error); ok {

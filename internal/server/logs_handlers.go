@@ -58,6 +58,16 @@ var queryTracker = &QueryTracker{
 	queries: make(map[string]*ActiveQuery),
 }
 
+func init() {
+	// Periodic cleanup of stale query tracker entries every 5 minutes
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		for range ticker.C {
+			queryTracker.Cleanup()
+		}
+	}()
+}
+
 // AddQuery adds a new active query to the tracker
 func (qt *QueryTracker) AddQuery(userID models.UserID, sourceID models.SourceID, teamID models.TeamID, sql string, cancel context.CancelFunc) string {
 	qt.mu.Lock()
