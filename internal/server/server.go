@@ -208,11 +208,11 @@ func (s *Server) setupRoutes() {
 	// Team member management (requires team admin or global admin)
 	teamMembers := api.Group("/teams/:teamID/members", s.requireAuth, s.requireTeamMember)
 	teamMembers.Get("/", s.handleListTeamMembers) // Any team member can view
-	// Only team admins can add/remove members
-	teamMembers.Post("/", s.requireTeamNotManaged, s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamMember)
-	teamMembers.Delete("/:userID", s.requireTeamNotManaged, s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamMember)
+	// Team admins can add/remove members even on managed teams (day-to-day operations)
+	teamMembers.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamMember)
+	teamMembers.Delete("/:userID", s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamMember)
 
-	// Team settings (requires team admin or global admin)
+	// Team settings — managed guard only on structural changes (rename/description)
 	api.Put("/teams/:teamID", s.requireAuth, s.requireTeamNotManaged, s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeam)
 
 	// Team-level collections (all sources)
