@@ -10,12 +10,12 @@ export default defineConfig({
   },
   integrations: [
     starlight({
-      title: "LogChef",
+      title: "Logchef",
       logo: {
         src: "./public/logo.svg",
-        alt: "LogChef",
+        alt: "Logchef",
       },
-      description: "Modern, high-performance log analytics platform",
+      description: "Log analytics platform for ClickHouse",
       customCss: ["./src/assets/custom.css"],
       social: {
         github: "https://github.com/mr-karan/logchef",
@@ -47,26 +47,29 @@ export default defineConfig({
       ],
       sidebar: [
         {
-          label: "Introduction",
+          label: "Getting Started",
           items: [
             { label: "Quick Start", link: "/getting-started/quickstart" },
+            { label: "Configuration", link: "/getting-started/configuration" },
             { label: "Architecture", link: "/core/architecture" },
           ],
         },
         {
-          label: "Setup & Configuration",
+          label: "Querying Logs",
           items: [
-            {
-              label: "Configuration Guide",
-              link: "/getting-started/configuration",
-            },
+            { label: "Query Interface", link: "/user-guide/query-interface" },
+            { label: "LogchefQL Syntax", link: "/guide/search-syntax" },
+            { label: "SQL Examples", link: "/guide/examples" },
+            { label: "Field Sidebar", link: "/features/field-sidebar" },
           ],
         },
         {
-          label: "Tutorials",
+          label: "Features",
           items: [
-            { label: "Shipping Logs with Vector (OTEL)", link: "/tutorials/vector-otel" },
-            { label: "NGINX Logs in ClickHouse", link: "/tutorials/nginx-logs" },
+            { label: "Alerting", link: "/features/alerting" },
+            { label: "AI SQL Generation", link: "/features/ai-sql-generation" },
+            { label: "User Management", link: "/core/user-management" },
+            { label: "Provisioning", link: "/getting-started/provisioning" },
           ],
         },
         {
@@ -78,29 +81,19 @@ export default defineConfig({
           ],
         },
         {
-          label: "Using LogChef",
+          label: "Tutorials",
           items: [
-            { label: "Query Interface", link: "/user-guide/query-interface" },
-            { label: "Field Sidebar", link: "/features/field-sidebar" },
-            { label: "Alerting", link: "/features/alerting" },
-            { label: "AI SQL Generation", link: "/features/ai-sql-generation" },
-            { label: "Search Guide", link: "/guide/search-syntax" },
-            { label: "Query Examples", link: "/guide/examples" },
-            { label: "User Management", link: "/core/user-management" },
+            { label: "Vector + OTEL Logs", link: "/tutorials/vector-otel" },
+            { label: "NGINX Logs", link: "/tutorials/nginx-logs" },
           ],
         },
         {
           label: "Operations",
           items: [
             { label: "Metrics Reference", link: "/operations/metrics" },
+            { label: "Contributing", link: "/contributing/setup" },
           ],
         },
-        // {
-        //   label: "Project",
-        //   items: [
-        //     { label: "Roadmap", link: "/contributing/roadmap" },
-        //   ],
-        // },
       ],
     }),
   ],
