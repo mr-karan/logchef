@@ -67,7 +67,7 @@ func CreateSession(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID 
 
 	// If limit is reached or exceeded, delete existing sessions
 	if sessionCount >= maxConcurrent {
-		log.Info("deleting existing sessions due to max concurrent sessions limit",
+		log.Debug("deleting existing sessions due to max concurrent sessions limit",
 			"user_id", userID,
 			"current_sessions", sessionCount,
 			"max_sessions", maxConcurrent,
@@ -109,17 +109,17 @@ func RevokeSession(ctx context.Context, db *sqlite.DB, log *slog.Logger, session
 		log.Error("failed to delete session from db", "error", err, "session_id", sessionID)
 		return fmt.Errorf("database error revoking session: %w", err)
 	}
-	log.Info("session revoked successfully", "session_id", sessionID)
+	log.Debug("session revoked", "session_id", sessionID)
 	return nil
 }
 
 // RevokeUserSessions deletes all sessions for a specific user.
 func RevokeUserSessions(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID models.UserID) error {
-	log.Info("revoking all sessions for user", "user_id", userID)
+	log.Debug("revoking all sessions for user", "user_id", userID)
 	if err := db.DeleteUserSessions(ctx, userID); err != nil {
 		log.Error("failed to delete user sessions from db", "error", err, "user_id", userID)
 		return fmt.Errorf("database error revoking user sessions: %w", err)
 	}
-	log.Info("all sessions revoked for user", "user_id", userID)
+	log.Debug("all sessions revoked for user", "user_id", userID)
 	return nil
 }
