@@ -182,6 +182,5 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db *sqlite.DB, log *s
 		return nil, nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	p.log.Info("user logged in successfully via OIDC callback", "user_id", user.ID, "session_id", session.ID)
 	return user, session, nil
 }

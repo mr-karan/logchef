@@ -28,7 +28,7 @@ func ValidateSession(ctx context.Context, db *sqlite.DB, log *slog.Logger, sessi
 	if err != nil {
 		// Check if the specific DB error indicates not found
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) { // Assuming db might return models.ErrNotFound too
-			log.Warn("session not found in db", "session_id", sessionID)
+			log.Debug("session not found in db", "session_id", sessionID)
 			return nil, ErrSessionNotFound
 		}
 		// Log other unexpected DB errors
@@ -38,13 +38,13 @@ func ValidateSession(ctx context.Context, db *sqlite.DB, log *slog.Logger, sessi
 
 	// Double check for nil just in case db layer doesn't return ErrNotFound
 	if session == nil {
-		log.Warn("session not found in db (nil returned)", "session_id", sessionID)
+		log.Debug("session not found in db (nil returned)", "session_id", sessionID)
 		return nil, ErrSessionNotFound
 	}
 
 	// Check for expiration
 	if time.Now().After(session.ExpiresAt) {
-		log.Info("session expired", "session_id", sessionID, "expires_at", session.ExpiresAt)
+		log.Debug("session expired", "session_id", sessionID, "expires_at", session.ExpiresAt)
 		// Attempt to delete the expired session (best effort)
 		if delErr := db.DeleteSession(ctx, sessionID); delErr != nil {
 			log.Warn("failed to delete expired session", "error", delErr, "session_id", sessionID)
@@ -93,7 +93,7 @@ func CreateSession(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID 
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	log.Info("new session created successfully", "session_id", session.ID, "user_id", userID)
+	log.Debug("session created", "session_id", session.ID, "user_id", userID)
 	return session, nil
 }
 

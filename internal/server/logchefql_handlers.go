@@ -300,6 +300,21 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Query execution failed: "+err.Error(), models.DatabaseErrorType)
 	}
 
+	// Log successful query execution
+	if result != nil {
+		user := c.Locals("user").(*models.User)
+		s.log.Info("query.execute",
+			"user", user.Email,
+			"team_id", teamID,
+			"source_id", sourceID,
+			"mode", "logchefql",
+			"query_id", queryID,
+			"rows", len(result.Logs),
+			"duration_ms", result.Stats.ExecutionTimeMs,
+			"limit", req.Limit,
+		)
+	}
+
 	// Add query_id and generated SQL to response
 	responseData := map[string]interface{}{
 		"logs":          result.Logs,

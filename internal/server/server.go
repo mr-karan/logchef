@@ -102,6 +102,9 @@ func New(opts ServerOptions) *Server {
 	// Add metrics middleware
 	app.Use(metrics.Middleware())
 
+	// Add request logging middleware
+	app.Use(requestLogger(log))
+
 	// Create the Server instance, injecting dependencies.
 	s := &Server{
 		app:           app,

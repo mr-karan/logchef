@@ -75,6 +75,10 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Error creating source: %v", err), models.DatabaseErrorType)
 	}
 
+	if actor, ok := c.Locals("user").(*models.User); ok {
+		s.log.Info("source.create", "actor", actor.Email, "source", createdSource.Name, "source_id", createdSource.ID,
+			"database", createdSource.Connection.Database, "table", createdSource.Connection.TableName)
+	}
 	return SendSuccess(c, fiber.StatusCreated, createdSource.ToResponse())
 }
 

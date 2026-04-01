@@ -222,12 +222,19 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 	c.Cookie(&fiber.Cookie{Name: stateCookieName, Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: true, SameSite: fiber.CookieSameSiteLaxMode, Path: "/"}) // Correct constant
 
 	// Process the OIDC callback using the provider and core functions.
-	_, session, err := s.oidcProvider.HandleCallback(c.Context(), s.sqlite, s.log, &s.config.Auth, code, state)
+	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.sqlite, s.log, &s.config.Auth, code, state)
 	if err != nil {
 		// HandleCallback logs internal errors; map to frontend redirect error.
 		s.log.Error("OIDC callback handling failed", "error", err)
 		return s.redirectToFrontend(c, "", err)
 	}
+
+	s.log.Info("user.login",
+		"email", loginUser.Email,
+		"user_id", loginUser.ID,
+		"name", loginUser.FullName,
+		"role", loginUser.Role,
+	)
 
 	// Set the application session cookie.
 	c.Cookie(&fiber.Cookie{

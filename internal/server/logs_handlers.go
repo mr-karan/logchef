@@ -246,6 +246,21 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to query logs: %v", err), models.DatabaseErrorType)
 	}
 
+	// Log successful query execution
+	if result != nil {
+		user := c.Locals("user").(*models.User)
+		s.log.Info("query.execute",
+			"user", user.Email,
+			"team_id", teamID,
+			"source_id", sourceID,
+			"mode", "sql",
+			"query_id", queryID,
+			"rows", len(result.Logs),
+			"duration_ms", result.Stats.ExecutionTimeMs,
+			"limit", req.Limit,
+		)
+	}
+
 	// Add query ID to the response for frontend tracking
 	if result != nil {
 		// Create a map to include the query ID with the result

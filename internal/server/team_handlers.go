@@ -67,6 +67,9 @@ func (s *Server) handleCreateTeam(c *fiber.Ctx) error {
 		s.log.Error("failed to create team", "error", err, "name", req.Name)
 		return SendError(c, fiber.StatusInternalServerError, "Error creating team")
 	}
+	if actor, ok := c.Locals("user").(*models.User); ok {
+		s.log.Info("team.create", "actor", actor.Email, "team", team.Name, "team_id", team.ID)
+	}
 	return SendSuccess(c, fiber.StatusCreated, team)
 }
 
@@ -192,6 +195,9 @@ func (s *Server) handleAddTeamMember(c *fiber.Ctx) error {
 		// Handle potential already-exists non-error case implicitly (core function returns nil)
 		s.log.Error("failed to add team member", "error", err, "team_id", teamID, "user_id", req.UserID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to add team member")
+	}
+	if actor, ok := c.Locals("user").(*models.User); ok {
+		s.log.Info("team.member.add", "actor", actor.Email, "team_id", teamID, "member_id", req.UserID, "role", req.Role)
 	}
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team member added successfully"})
 }
