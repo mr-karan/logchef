@@ -76,7 +76,7 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 	}
 
 	if actor, ok := c.Locals("user").(*models.User); ok {
-		s.log.Info("source.create", "actor", actor.Email, "source", createdSource.Name, "source_id", createdSource.ID,
+		s.log.Info("source.create", "actor", actor.Email, "source_name", createdSource.Name, "source_id", createdSource.ID,
 			"database", createdSource.Connection.Database, "table", createdSource.Connection.TableName)
 	}
 	return SendSuccess(c, fiber.StatusCreated, createdSource.ToResponse())
