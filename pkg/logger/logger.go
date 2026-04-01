@@ -2,14 +2,14 @@
 package logger
 
 import (
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 )
 
 // New creates a new logger with the specified level.
-// Source is logged as "source":"file.go:123" (short form).
+// Source paths are shortened to basename (e.g., "middleware.go")
+// while keeping the structured source object intact.
 func New(debug bool) *slog.Logger {
 	logLevel := slog.LevelInfo
 	if debug {
@@ -19,13 +19,15 @@ func New(debug bool) *slog.Logger {
 	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level:     logLevel,
 		AddSource: true,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			// Shorten source from full path to "file.go:line"
-			if a.Key == slog.SourceKey {
-				if src, ok := a.Value.Any().(*slog.Source); ok {
-					a.Value = slog.StringValue(fmt.Sprintf("%s:%d", filepath.Base(src.File), src.Line))
-				}
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+			if a.Key != slog.SourceKey {
+				return a
 			}
+			src, ok := a.Value.Any().(*slog.Source)
+			if !ok || src == nil || src.File == "" {
+				return a
+			}
+			src.File = filepath.Base(src.File)
 			return a
 		},
 	})
