@@ -4,7 +4,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
 <BaseLayout title="Logchef — Log Explorer for ClickHouse" activeNav="home">
   <style>
-    main { max-width: 1200px; margin: 0 auto; }
+    main { max-width: 1200px; margin: 0 auto; overflow: clip; }
 
     .hero {
       position: relative;
@@ -83,7 +83,6 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       position: relative;
       justify-self: start;
       width: min(1320px, 80vw);
-      margin-right: calc(50% - 50vw);
     }
     .hero-glow {
       position: absolute;

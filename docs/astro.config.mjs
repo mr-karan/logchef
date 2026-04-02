@@ -17,9 +17,9 @@ export default defineConfig({
       },
       description: "Log analytics platform for ClickHouse",
       customCss: ["./src/assets/custom.css"],
-      social: {
-        github: "https://github.com/mr-karan/logchef",
-      },
+      social: [
+        { icon: "github", label: "GitHub", href: "https://github.com/mr-karan/logchef" },
+      ],
       head: [
         // Umami Analytics
         {
