@@ -1,136 +1,49 @@
 ---
-title: Model Context Protocol (MCP) Server
-description: Connect AI assistants to your LogChef instance using the LogChef MCP server for natural language log analysis.
+title: MCP Server
+description: Connect AI coding assistants to Logchef for natural language log analysis using the Model Context Protocol.
 ---
 
-import { Card, CardGrid } from "@astrojs/starlight/components";
+import { Card, CardGrid, Tabs, TabItem, LinkCard } from "@astrojs/starlight/components";
 
-The LogChef MCP server enables AI assistants to interact with your LogChef deployment through the [Model Context Protocol](https://modelcontextprotocol.io/). This integration makes log analysis and troubleshooting accessible through natural conversation with AI assistants like Claude Desktop.
+The [Logchef MCP server](https://github.com/mr-karan/logchef-mcp) lets AI assistants query logs, explore schemas, manage alerts, and administer your Logchef deployment through the [Model Context Protocol](https://modelcontextprotocol.io/). It exposes 37 tools across 10 categories, plus resources and guided investigation prompts.
 
-<CardGrid stagger>
-  <Card title="Natural Language Queries" icon="chat">
-    Ask AI assistants to query your logs using plain English. No need to remember SQL syntax or field names.
-  </Card>
-  <Card title="Schema Discovery" icon="magnifier">
-    AI assistants can explore your log structure and understand what data is available in your sources.
-  </Card>
-  <Card title="Team Management" icon="puzzle">
-    Manage teams, users, and source access through conversational AI interaction.
-  </Card>
-  <Card title="Saved Query Collections" icon="bookmark">
-    Create and organize frequently-used queries through AI assistance.
-  </Card>
-</CardGrid>
+## Prerequisites
 
-## What You Can Do
+Before configuring your client, you need:
 
-With the LogChef MCP server, you can ask AI assistants to help you:
+1. **A running Logchef instance** -- the MCP server connects to Logchef's HTTP API.
+2. **An API token** -- generate one from your Logchef profile settings page. The token determines what data the MCP server can access.
 
-- **Explore your log infrastructure:** See what teams you belong to and what log sources are available
-- **Query logs effectively:** Execute ClickHouse SQL queries to find specific log entries, errors, or patterns
-- **Understand your data:** Get schema information to know what fields are available in your logs
-- **Analyze log patterns:** Generate histograms and time-series data for trend analysis
-- **Manage saved queries:** Create and organize collections of frequently-used queries
-- **Administer teams and users:** Handle team membership, user management, and source configuration (admin users)
+## Quick Start
 
-## Example Conversations
+Pick your client and follow the setup instructions.
 
-Here are some examples of how you might interact with AI assistants through the MCP server:
-
-**Discovery:**
-> "What log sources do I have access to?"
-
-**Troubleshooting:**
-> "Find all 500 errors in the last hour from the web service logs"
-
-**Analysis:**
-> "Show me a histogram of log volume over the past day"
-
-**Investigation:**
-> "What are the most common error messages in the database logs?"
-
-**Query Management:**
-> "Create a saved query for tracking API response times above 1 second"
-
-## Installation and Setup
-
-### Prerequisites
-
-- A running LogChef instance
-- A valid LogChef API token with appropriate permissions
-- An AI assistant that supports MCP (like Claude Desktop)
-
-### Generating an API Token
-
-1. Log into your LogChef instance
-2. Navigate to your profile settings
-3. Create a new API token with the permissions you need
-4. Copy the token for use in the MCP server configuration
-
-### Installation Options
-
-#### Option 1: Docker (Recommended)
-
-For most users, Docker provides the easiest setup:
+<Tabs>
+  <TabItem label="Claude Code">
 
 ```bash
-# Pull the latest image
-docker pull logchef-mcp
-
-# For Claude Desktop integration (STDIO mode)
-docker run --rm -i \
-  -e LOGCHEF_URL=http://localhost:8125 \
-  -e LOGCHEF_API_KEY=<your_api_token> \
-  logchef-mcp -t stdio
+claude mcp add logchef -- logchef-mcp
 ```
 
-#### Option 2: Binary Download
-
-Download the latest release from the [releases page](https://github.com/mr-karan/logchef-mcp/releases) and place it in your `$PATH`.
-
-#### Option 3: Build from Source
-
-If you have Go installed:
+Set the required environment variables before launching Claude Code:
 
 ```bash
-git clone https://github.com/mr-karan/logchef-mcp.git
-cd logchef-mcp
-go build -o logchef-mcp ./cmd/logchef-mcp
+export LOGCHEF_URL=https://your-logchef-instance.com
+export LOGCHEF_API_KEY=your_api_token
 ```
 
-### Claude Desktop Configuration
+Or pass them inline:
 
-Add the MCP server to your Claude Desktop configuration:
-
-**Using Docker:**
-
-```json
-{
-  "mcpServers": {
-    "logchef": {
-      "command": "docker",
-      "args": [
-        "run",
-        "--rm",
-        "-i",
-        "-e",
-        "LOGCHEF_URL",
-        "-e",
-        "LOGCHEF_API_KEY",
-        "logchef-mcp",
-        "-t",
-        "stdio"
-      ],
-      "env": {
-        "LOGCHEF_URL": "http://localhost:8125",
-        "LOGCHEF_API_KEY": "<your_api_token>"
-      }
-    }
-  }
-}
+```bash
+LOGCHEF_URL=https://your-logchef-instance.com \
+LOGCHEF_API_KEY=your_api_token \
+claude
 ```
 
-**Using Binary:**
+  </TabItem>
+  <TabItem label="Claude Desktop">
+
+Add to `claude_desktop_config.json`:
 
 ```json
 {
@@ -139,182 +52,371 @@ Add the MCP server to your Claude Desktop configuration:
       "command": "logchef-mcp",
       "args": [],
       "env": {
-        "LOGCHEF_URL": "http://localhost:8125",
-        "LOGCHEF_API_KEY": "<your_api_token>"
+        "LOGCHEF_URL": "https://your-logchef-instance.com",
+        "LOGCHEF_API_KEY": "your_api_token"
       }
     }
   }
 }
 ```
 
+:::tip[Full path]
+If you see `Error: spawn logchef-mcp ENOENT`, specify the full path to the binary (e.g., `/usr/local/bin/logchef-mcp`).
+:::
+
+  </TabItem>
+  <TabItem label="Cursor">
+
+Add to your Cursor MCP configuration (`.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "logchef": {
+      "command": "logchef-mcp",
+      "args": [],
+      "env": {
+        "LOGCHEF_URL": "https://your-logchef-instance.com",
+        "LOGCHEF_API_KEY": "your_api_token"
+      }
+    }
+  }
+}
+```
+
+  </TabItem>
+  <TabItem label="VS Code / Copilot">
+
+Add to `.vscode/settings.json`:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "logchef": {
+        "command": "logchef-mcp",
+        "args": [],
+        "env": {
+          "LOGCHEF_URL": "https://your-logchef-instance.com",
+          "LOGCHEF_API_KEY": "your_api_token"
+        }
+      }
+    }
+  }
+}
+```
+
+For a remote MCP server running in HTTP mode:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "logchef": {
+        "type": "http",
+        "url": "http://localhost:8000/mcp",
+        "headers": {
+          "X-Logchef-URL": "https://your-logchef-instance.com",
+          "X-Logchef-API-Key": "your_api_token"
+        }
+      }
+    }
+  }
+}
+```
+
+  </TabItem>
+  <TabItem label="Codex CLI">
+
+```bash
+export LOGCHEF_URL=https://your-logchef-instance.com
+export LOGCHEF_API_KEY=your_api_token
+
+codex --mcp-config '{"logchef":{"command":"logchef-mcp","args":[]}}'
+```
+
+  </TabItem>
+  <TabItem label="Windsurf">
+
+Add to your Windsurf MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "logchef": {
+      "command": "logchef-mcp",
+      "args": [],
+      "env": {
+        "LOGCHEF_URL": "https://your-logchef-instance.com",
+        "LOGCHEF_API_KEY": "your_api_token"
+      }
+    }
+  }
+}
+```
+
+  </TabItem>
+  <TabItem label="Docker">
+
+Use the pre-built container image for any client that supports stdio:
+
+```json
+{
+  "mcpServers": {
+    "logchef": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-e", "LOGCHEF_URL",
+        "-e", "LOGCHEF_API_KEY",
+        "ghcr.io/mr-karan/logchef-mcp:latest",
+        "-t", "stdio"
+      ],
+      "env": {
+        "LOGCHEF_URL": "https://your-logchef-instance.com",
+        "LOGCHEF_API_KEY": "your_api_token"
+      }
+    }
+  }
+}
+```
+
+The `-t stdio` flag is required because the Docker image defaults to SSE mode.
+
+For SSE or HTTP mode (multi-client scenarios):
+
+```bash
+# SSE mode
+docker run --rm -p 8000:8000 \
+  -e LOGCHEF_URL=https://your-logchef-instance.com \
+  -e LOGCHEF_API_KEY=your_api_token \
+  ghcr.io/mr-karan/logchef-mcp:latest
+
+# Streamable HTTP mode
+docker run --rm -p 8000:8000 \
+  -e LOGCHEF_URL=https://your-logchef-instance.com \
+  -e LOGCHEF_API_KEY=your_api_token \
+  ghcr.io/mr-karan/logchef-mcp:latest -t streamable-http
+```
+
+  </TabItem>
+</Tabs>
+
+## Installation
+
+The MCP server is a standalone Go binary distributed separately from Logchef.
+
+**Pre-built binaries** -- download from the [releases page](https://github.com/mr-karan/logchef-mcp/releases) and place in your `$PATH`.
+
+**Docker** -- `docker pull ghcr.io/mr-karan/logchef-mcp:latest`
+
+**Build from source** (requires Go):
+
+```bash
+git clone https://github.com/mr-karan/logchef-mcp.git
+cd logchef-mcp
+go build -o logchef-mcp ./cmd/logchef-mcp
+```
+
 ## Available Tools
 
-The MCP server provides tools organized into categories that can be selectively enabled:
+37 tools organized into 10 categories. Each tool includes MCP annotations indicating whether it is read-only, non-destructive, or destructive.
 
-### Profile & Metadata
-- `get_profile` - Get current user information
-- `get_teams` - List user's team memberships
-- `get_meta` - Get server version and metadata
+### Profile and Metadata
+
+| Tool | Description |
+|------|-------------|
+| `get_profile` | Get current user profile, including email, role, and API token info |
+| `get_teams` | List teams you belong to with your role and member counts |
+| `get_meta` | Server version and configuration details |
 
 ### Source Management
-- `get_sources` - List all accessible log sources
-- `get_team_sources` - List sources for a specific team
 
-### Log Analysis
-- `query_logs` - Execute ClickHouse SQL queries
-- `get_source_schema` - Get table schema information
-- `get_log_histogram` - Generate histogram data
-- `get_collections` - List saved query collections
-- `create_collection` - Create new saved queries
-- `update_collection` - Modify existing collections
-- `delete_collection` - Remove saved queries
+| Tool | Description |
+|------|-------------|
+| `get_sources` | All sources accessible to you, aggregated across all team memberships |
+| `get_team_sources` | Sources belonging to a specific team |
 
-### Administration (Admin Users Only)
-- Team management (create, update, delete teams)
-- User management (create, update, delete users)
-- Source management (create, validate, delete sources)
-- API token management
+### Log Querying
 
-## Transport Modes
+| Tool | Description |
+|------|-------------|
+| `query_logs` | Execute raw ClickHouse SQL against a log source (max 100 rows) |
+| `get_source_schema` | Get column names and ClickHouse types for a source |
+| `get_log_histogram` | Time-series histogram of log volume with optional grouping |
+| `get_collections` | List saved query collections for a team/source |
+| `get_collection` | Get a specific saved query by ID |
+| `create_collection` | Save a new query collection |
+| `update_collection` | Update an existing saved query |
+| `delete_collection` | Delete a saved query permanently |
 
-The MCP server supports multiple transport modes:
+### LogchefQL
 
-### STDIO Mode (Default)
-Direct integration with AI assistants like Claude Desktop:
+| Tool | Description |
+|------|-------------|
+| `query_logchefql` | Execute a LogchefQL query (max 500 rows) |
+| `translate_logchefql` | Translate LogchefQL to ClickHouse SQL without executing |
+| `validate_logchefql` | Check LogchefQL syntax for errors without executing |
 
-```bash
-logchef-mcp -t stdio
-```
+### Investigation
 
-### Server-Sent Events (SSE)
-Run as HTTP server for web-based clients:
+| Tool | Description |
+|------|-------------|
+| `get_field_values` | Top distinct values for a field in a time range |
+| `get_log_context` | Surrounding log entries before/after a timestamp |
+| `list_alerts` | All alert rules configured for a source |
+| `get_alert_history` | Evaluation history for a specific alert |
 
-```bash
-logchef-mcp -t sse
-# Server runs on http://localhost:8000/sse
-```
+### Analysis
 
-### Streamable HTTP
-Independent server for multiple client connections:
+| Tool | Description |
+|------|-------------|
+| `compare_windows` | Run the same query across two time windows and compare row counts |
+| `top_values` | Get top values for multiple fields in one call |
 
-```bash
-logchef-mcp -t streamable-http
-# Server runs on http://localhost:8000/mcp
-```
+### Discovery
+
+| Tool | Description |
+|------|-------------|
+| `generate_query` | Generate a ClickHouse SQL query from natural language (requires AI enabled on Logchef) |
+| `get_all_field_dimensions` | Get top values for all LowCardinality fields in one call |
+
+### Telemetry
+
+| Tool | Description |
+|------|-------------|
+| `get_query_telemetry` | Recent query performance from ClickHouse `system.query_log` |
+
+### Administration (admin only)
+
+| Tool | Description |
+|------|-------------|
+| `list_all_teams` | List all teams |
+| `get_team` | Get team details |
+| `create_team` | Create a new team |
+| `update_team` | Update team name/description |
+| `delete_team` | Delete a team permanently |
+| `list_team_members` | List members of a team |
+| `add_team_member` | Add a user to a team with a role |
+| `remove_team_member` | Remove a user from a team |
+| `link_source_to_team` | Grant a team access to a source |
+| `unlink_source_from_team` | Revoke a team's access to a source |
+| `list_all_users` | List all users |
+| `get_user` | Get user details |
+| `create_user` | Create a user |
+| `update_user` | Update user info |
+| `delete_user` | Delete a user |
+| `list_all_sources` | List all sources |
+| `create_source` | Create a ClickHouse log source |
+| `validate_source_connection` | Test ClickHouse connectivity |
+| `delete_source` | Delete a source |
+| `get_admin_source_stats` | ClickHouse table stats -- row count, sizes, compression |
+| `list_api_tokens` | List your API tokens |
+| `create_api_token` | Create a new API token |
+| `delete_api_token` | Delete an API token |
+
+## Resources
+
+Resources provide read-only data that AI assistants can access without explicit tool calls.
+
+| URI Template | Description |
+|-------------|-------------|
+| `logchef://team/{team_id}/source/{source_id}/schema` | ClickHouse schema for a source |
+| `logchef://team/{team_id}/source/{source_id}/collections` | List of saved queries |
+| `logchef://team/{team_id}/source/{source_id}/collection/{collection_id}` | A single saved query |
+
+## Prompts
+
+Prompts provide guided multi-step investigation workflows.
+
+### `investigate_error_spike`
+
+Walks through error spike diagnosis: schema discovery, error volume assessment, pattern identification, timeline correlation, and root cause analysis.
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `team_id` | Yes | Team ID |
+| `source_id` | Yes | Source ID |
+| `time_range` | No | e.g., "last 1h" (defaults to last 1 hour) |
+
+### `investigate_alert`
+
+Investigates a specific alert: review configuration, check evaluation history, reproduce the alert query, explore context, and summarize findings.
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `team_id` | Yes | Team ID |
+| `source_id` | Yes | Source ID |
+| `alert_id` | Yes | Alert ID |
 
 ## Tool Configuration
 
-You can selectively enable tool categories:
+Disable tool categories you do not need to reduce the tool surface exposed to the AI assistant:
 
 ```bash
-# Enable only profile and log analysis tools
-logchef-mcp --enabled-tools "profile,logs"
+# Disable individual categories
+logchef-mcp --disable-admin --disable-telemetry
 
-# Disable admin tools
-logchef-mcp --disable-admin
+# Or enable only specific categories
+logchef-mcp --enabled-tools "profile,sources,logs,logchefql"
 ```
 
-Available categories: `profile`, `sources`, `logs`, `admin`
+Available `--disable-*` flags:
 
-## Authentication Options
+| Flag | Category disabled |
+|------|-------------------|
+| `--disable-profile` | Profile and metadata tools |
+| `--disable-sources` | Source management tools |
+| `--disable-logs` | Log querying and collection tools |
+| `--disable-logchefql` | LogchefQL tools |
+| `--disable-investigate` | Investigation tools |
+| `--disable-admin` | Administration tools |
+| `--disable-analysis` | Analysis tools |
+| `--disable-telemetry` | Telemetry tools |
+| `--disable-discover` | Discovery tools |
 
-### Environment Variables
+The `--enabled-tools` flag accepts a comma-separated list of category names: `profile`, `sources`, `logs`, `logchefql`, `investigate`, `admin`, `analysis`, `telemetry`, `discover`. When used, only the listed categories are enabled.
+
+## Authentication
+
+### Stdio mode (Claude Code, Claude Desktop, Cursor, etc.)
+
+Credentials are passed as environment variables:
+
 ```bash
-export LOGCHEF_URL=http://localhost:8125
-export LOGCHEF_API_KEY=your_token_here
+export LOGCHEF_URL=https://your-logchef-instance.com
+export LOGCHEF_API_KEY=your_api_token
 ```
 
-### HTTP Headers (SSE/HTTP modes)
-For server modes, credentials can be passed via headers:
-- `X-Logchef-URL`: LogChef instance URL
-- `X-Logchef-API-Key`: API token
+### SSE and HTTP modes (remote server)
 
-## Debug Mode
+When running the MCP server as a remote HTTP service, clients can pass credentials via HTTP headers instead of environment variables. This is useful when the server handles multiple clients with different Logchef instances.
 
-Enable detailed logging for troubleshooting:
+| Header | Description |
+|--------|-------------|
+| `X-Logchef-URL` | Logchef instance URL |
+| `X-Logchef-API-Key` | API token |
+
+If headers are not provided, the server falls back to environment variables.
+
+## Transport Modes
+
+| Mode | Flag | Endpoint | Use case |
+|------|------|----------|----------|
+| Stdio | `-t stdio` (default for binary) | -- | Direct integration with desktop clients |
+| SSE | `-t sse` | `http://localhost:8000/sse` | Web-based or remote clients |
+| Streamable HTTP | `-t streamable-http` | `http://localhost:8000/mcp` | Multi-client remote setups |
+
+## Debugging
+
+Enable detailed HTTP request/response logging:
 
 ```bash
 logchef-mcp -debug
 ```
 
-This provides HTTP request/response logging between the MCP server and LogChef API.
-
-## Working with AI Assistants
-
-The MCP server enables powerful natural language interactions:
-
-### Discovery Workflow
-1. **"What log sources do I have access to?"** → AI uses `get_sources`
-2. **"What data is in the nginx source?"** → AI calls `get_source_schema`
-3. **"Show me recent errors"** → AI constructs and executes ClickHouse queries
-
-### Practical Examples
-
-**Troubleshooting:**
-> "Find all 500 errors in the last hour from the web service logs"
-
-**Analysis:**
-> "Show me a histogram of log volume over the past day grouped by service"
-
-**Investigation:**
-> "What are the most common error messages in logs containing 'database'?"
-
-**Monitoring:**
-> "Create a saved query for tracking API response times above 2 seconds"
-
-### AI-Assisted Query Building
-
-The AI assistant understands ClickHouse SQL and can help you:
-- Build complex queries with proper syntax
-- Optimize queries for better performance
-- Explain available fields in your log data
-- Suggest useful queries based on common log analysis patterns
-
-Since LogChef uses ClickHouse as the storage backend, you get the full power of ClickHouse's analytical capabilities through natural language interaction.
-
-## Security Considerations
-
-- **API Token Scope**: Create API tokens with minimal required permissions
-- **Network Access**: Ensure the MCP server can reach your LogChef instance
-- **Tool Categories**: Disable admin tools if not needed to reduce attack surface
-- **Environment Variables**: Store sensitive credentials securely
-
-## Troubleshooting
-
-### Common Issues
-
-**Connection Errors:**
-- Verify `LOGCHEF_URL` is correct and accessible
-- Check API token permissions
-- Ensure LogChef instance is running
-
-**Permission Errors:**
-- Verify API token has required permissions
-- Check team membership for source access
-- Confirm admin status for administrative operations
-
-**Tool Availability:**
-- Check enabled tool categories
-- Verify LogChef version compatibility
-- Review API token scope
-
-### Debug Output
-
-Use debug mode to see detailed HTTP interactions:
-
-```bash
-logchef-mcp -debug -t stdio
-```
-
-## Repository and Development
-
-The LogChef MCP server is open source and available at:
-[https://github.com/mr-karan/logchef-mcp](https://github.com/mr-karan/logchef-mcp)
-
-Contributions are welcome! The project includes:
-- Comprehensive tool coverage of LogChef APIs
-- Multiple transport mode support
-- Flexible authentication options
-- Production-ready Docker images
-
-For development setup and contribution guidelines, see the repository documentation.
+<LinkCard
+  title="logchef-mcp on GitHub"
+  description="Source code, releases, and issue tracker."
+  href="https://github.com/mr-karan/logchef-mcp"
+/>
