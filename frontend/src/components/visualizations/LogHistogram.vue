@@ -199,6 +199,8 @@ const {
   onPointerDown,
   onPointerMove,
   onPointerUp,
+  onPointerCancel,
+  onLostPointerCapture,
   onContextMenu,
 } = useHistogramBrush(chartWrapperRef, chartRange, CHART_MARGIN);
 
@@ -272,6 +274,8 @@ function formatXAxisTick(value: number | Date) {
         @pointerdown="onPointerDown"
         @pointermove="onPointerMove"
         @pointerup="handlePointerUp"
+        @pointercancel="onPointerCancel"
+        @lostpointercapture="onLostPointerCapture"
         @contextmenu="onContextMenu"
       >
         <VisXYContainer

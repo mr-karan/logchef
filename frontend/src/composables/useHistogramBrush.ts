@@ -23,9 +23,17 @@ export function useHistogramBrush(
   /** Plot area insets matching VisXYContainer margin: { top, right, bottom, left } */
   plotInsets: { top: number; right: number; bottom: number; left: number },
 ) {
+  const isPointerDown = ref(false);
   const isDragging = ref(false);
+  const activePointerId = ref<number | null>(null);
   const startX = ref(0);
   const currentX = ref(0);
+
+  function resetInteraction() {
+    isPointerDown.value = false;
+    activePointerId.value = null;
+    isDragging.value = false;
+  }
 
   // Selection box position in pixels relative to the plot area
   const selectionStyle = computed(() => {
@@ -75,25 +83,45 @@ export function useHistogramBrush(
     const plotHeight = containerRef.value!.getBoundingClientRect().height - plotInsets.top - plotInsets.bottom;
     if (plotY < 0 || plotY > plotHeight) return;
 
+    isPointerDown.value = true;
+    activePointerId.value = e.pointerId;
     startX.value = plotX;
     currentX.value = plotX;
-    isDragging.value = true;
-
-    // Capture pointer to track moves even outside the element
-    containerRef.value!.setPointerCapture(e.pointerId);
   }
 
   function onPointerMove(e: PointerEvent) {
-    if (!isDragging.value) return;
+    if (!isPointerDown.value || activePointerId.value !== e.pointerId) return;
+
+    if (e.buttons === 0) {
+      resetInteraction();
+      return;
+    }
+
     currentX.value = clientXToPlotX(e.clientX);
+
+    if (!isDragging.value) {
+      const dragPx = Math.abs(currentX.value - startX.value);
+      if (dragPx < MIN_DRAG_PX) {
+        return;
+      }
+
+      isDragging.value = true;
+      containerRef.value?.setPointerCapture(e.pointerId);
+    }
   }
 
   function onPointerUp(e: PointerEvent): BrushTimeRange | null {
-    if (!isDragging.value) return null;
-    isDragging.value = false;
+    if (!isPointerDown.value || activePointerId.value !== e.pointerId) return null;
 
-    if (containerRef.value) {
+    const wasDragging = isDragging.value;
+    resetInteraction();
+
+    if (wasDragging && containerRef.value) {
       containerRef.value.releasePointerCapture(e.pointerId);
+    }
+
+    if (!wasDragging) {
+      return null;
     }
 
     const dragPx = Math.abs(currentX.value - startX.value);
@@ -111,16 +139,24 @@ export function useHistogramBrush(
   }
 
   function onKeyDown(e: KeyboardEvent) {
-    if (e.key === "Escape" && isDragging.value) {
-      isDragging.value = false;
+    if (e.key === "Escape" && (isDragging.value || isPointerDown.value)) {
+      resetInteraction();
     }
   }
 
   function onContextMenu(e: Event) {
-    if (isDragging.value) {
-      isDragging.value = false;
+    if (isDragging.value || isPointerDown.value) {
+      resetInteraction();
       e.preventDefault();
     }
+  }
+
+  function onPointerCancel() {
+    resetInteraction();
+  }
+
+  function onLostPointerCapture() {
+    resetInteraction();
   }
 
   // Register/cleanup global escape listener
@@ -137,6 +173,8 @@ export function useHistogramBrush(
     onPointerDown,
     onPointerMove,
     onPointerUp,
+    onPointerCancel,
+    onLostPointerCapture,
     onContextMenu,
   };
 }
