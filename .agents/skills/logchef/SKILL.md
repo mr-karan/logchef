@@ -1,143 +1,197 @@
 ---
 name: logchef
-description: Query and analyze Logchef logs from the terminal using the Logchef CLI. Use for incident triage, debugging errors, exploring LogchefQL filters, running ClickHouse SQL, and executing saved collections.
+description: "LogChef CLI and LogchefQL query syntax for log analytics. Use this skill when querying logs via the logchef CLI, writing LogchefQL search filters, running ClickHouse SQL against log sources, managing saved collections, troubleshooting query errors, or learning LogchefQL syntax. Also use when the user mentions logchef, LogchefQL, log search, or wants to analyze logs from ClickHouse-backed sources."
 ---
 
-# Logchef CLI
+# LogChef CLI & LogchefQL
 
-Use the Logchef CLI to query logs safely and accurately.
+LogChef is a log analytics platform backed by ClickHouse. The CLI lets you query logs, run SQL, and manage saved collections from the terminal.
 
-**Quick Start**
-1. Authenticate with OIDC: `logchef auth --server https://logs.example.com`
-2. Set defaults: `logchef config set team "my-team"` and `logchef config set source "nginx-logs"`
-3. Query logs: `logchef query 'level="error"' --since 15m --limit 20`
-
-**Command Cheat Sheet**
-| Command | Use |
-| --- | --- |
-| `logchef auth` | Authenticate (browser-based OIDC) |
-| `logchef query '...'` | Run LogchefQL filters with time flags |
-| `logchef sql '...'` | Run raw ClickHouse SQL (use `LIMIT` in SQL) |
-| `logchef collections` | List or run saved collections |
-| `logchef teams` | List teams available to you |
-| `logchef sources` | List sources for a team |
-| `logchef schema` | Show columns/types for a source |
-| `logchef config ...` | Manage contexts and defaults |
-
-**Auth And Context**
-Use `logchef auth --server <url>` to create a context and store a token.
-Use `logchef auth --status` and `logchef auth --logout` to check or clear auth.
-Use `--context <name>` or `LOGCHEF_CONTEXT` to target a specific context.
-Use `--server <url>` and `--token <token>` (or `LOGCHEF_SERVER_URL` and `LOGCHEF_AUTH_TOKEN`) for one-off, ephemeral use.
-Use `logchef config list` to view contexts and `logchef config use <name>` to switch.
-Avoid `logchef config set auth.token` because it is not supported by the CLI.
-
-**Required Context**
-Provide `--team` and `--source` on every command unless defaults are set.
-Set defaults with `logchef config set team <name_or_id>` and `logchef config set source <name_or_id>`.
-Use interactive mode by running `logchef query` or `logchef sql` with no args in a TTY and no defaults.
-Use case-insensitive names, numeric IDs, or `database.table` as the `--source` value.
-Discover names and IDs with `logchef teams` and `logchef sources --team <name_or_id>`.
-
-**Time Range And Limit**
-Use `--since` on `logchef query` and `logchef collections` for relative ranges with `m`, `h`, `d`, or `w` (default is `15m` for `query`).
-Use `--from` and `--to` together for absolute ranges on `logchef query` only.
-Use the exact format `YYYY-MM-DD HH:MM:SS` for `--from` and `--to`.
-Set timezone with `logchef config set timezone "UTC"` (or IANA name like `America/Los_Angeles`) and provide absolute times in that timezone.
-Expect `--limit` default to `100` for `logchef query` unless overridden via `logchef config set limit <n>`.
-Use `LIMIT` in SQL because `logchef sql` does not accept `--limit` or `--since`.
-Expect collections to use their saved time range and limit unless overridden.
-
-**LogchefQL Basics**
-Quote the entire query with single quotes to avoid shell piping and expansion.
-Use `=` `!=` `>` `<` `>=` `<=` for comparisons.
-Use `~` and `!~` for case-insensitive substring match (not regex).
-Use `and` / `or` with parentheses for grouping.
-Use `| field1 field2` to select output columns.
-Quote values with spaces or special characters.
-Quote field names that contain dots or special characters.
+## Quick Start
 
 ```bash
-# Exact match
-logchef query 'level="error" and service="api"' --since 15m
-
-# Substring match (case-insensitive)
-logchef query 'msg~"timeout"' --since 1h --limit 20
-
-# Field selection with pipe (note the single quotes)
-logchef query 'status>=500 and path~"/v1/" | _timestamp status path msg' --since 30m
-
-# Field name with dots
-logchef query 'k8s.labels."app.kubernetes.io/name"="api"' --since 1h
+logchef auth --server https://logs.example.com   # authenticate via OIDC
+logchef config set team "my-team"                 # set default team
+logchef config set source "app-logs"              # set default source
+logchef query 'level="error"' --since 15m         # search logs
 ```
 
-**SQL Usage**
-Use `logchef sql` for aggregations, joins, or complex logic.
-Always include a time filter on the timestamp column (often `_timestamp`).
-Use `LIMIT` in SQL to control result size.
-Use `-` to read SQL from stdin for longer queries.
+## Commands
+
+| Command | Purpose |
+|---------|---------|
+| `logchef auth --server <url>` | Authenticate via browser OIDC |
+| `logchef auth --status` | Check auth status |
+| `logchef query '<logchefql>'` | Search with LogchefQL |
+| `logchef sql '<sql>'` | Run raw ClickHouse SQL |
+| `logchef collections` | List/run saved queries |
+| `logchef teams` | List available teams |
+| `logchef sources -t <team>` | List sources for a team |
+| `logchef schema -t <team> -S <source>` | Show table columns and types |
+| `logchef config list` | View configured contexts |
+| `logchef config set <key> <value>` | Set defaults (team, source, limit, timezone) |
+
+Every command needs `--team` (`-t`) and `--source` (`-S`) unless defaults are set. Values can be names, numeric IDs, or `database.table`.
+
+## Time Range
+
+### Relative (--since)
+
+Use `--since` / `-s` with `m` (minutes), `h` (hours), `d` (days), or `w` (weeks). Default: `15m`.
 
 ```bash
-logchef sql "SELECT level, count() AS cnt FROM logs.app WHERE _timestamp > now() - INTERVAL 1 HOUR GROUP BY level ORDER BY cnt DESC LIMIT 10"
+logchef query 'level="error"' -s 1h
+logchef query 'status>=500' -s 7d
+```
 
+Seconds (`s`) and fractional values are **not supported**.
+
+### Absolute (--from / --to)
+
+Both flags are required together. Format: `'YYYY-MM-DD HH:MM:SS'` (space-separated, no `T` or `Z`).
+
+```bash
+logchef query 'level="error"' --from '2026-01-20 09:00:00' --to '2026-01-20 09:30:00'
+```
+
+Set timezone: `logchef config set timezone "Asia/Kolkata"`
+
+### Limit
+
+Default is `100` for `logchef query`. Override with `--limit` / `-l`. For SQL mode, use `LIMIT` in the query itself.
+
+## LogchefQL Syntax
+
+Wrap queries in **single quotes** to prevent shell expansion.
+
+### Operators
+
+| Operator | Meaning | Example |
+|----------|---------|---------|
+| `=` | Exact match | `level="error"` |
+| `!=` | Not equals | `level!="debug"` |
+| `~` | Contains (case-insensitive) | `msg~"timeout"` |
+| `!~` | Does not contain | `path!~"health"` |
+| `>` `<` `>=` `<=` | Numeric comparison | `status>=500` |
+
+The `~` and `!~` operators use ClickHouse's `positionCaseInsensitive` for efficient substring matching — they are **not** regex.
+
+### Values
+
+- Simple values need no quotes: `status=200`, `level=error`
+- Values with spaces **must** be quoted: `msg~"connection refused"`
+- Field names with dots use quotes: `log_attributes."user.name"="alice"`
+
+### Combining Conditions
+
+Use `and` / `or` (case-insensitive) with parentheses for grouping:
+
+```bash
+logchef query 'level="error" and service="api"' -s 15m
+logchef query '(service="auth" or service="users") and level="error"' -s 1h
+```
+
+**Standalone text search does not work** — every expression needs `field operator value`:
+```bash
+# WRONG: logchef query 'timeout'
+# RIGHT:
+logchef query 'msg~"timeout"' -s 15m
+```
+
+### Nested Field Access
+
+Access Map columns, JSON fields, or nested JSON in string columns with dot notation:
+
+```bash
+logchef query 'log_attributes.user_id="12345"' -s 15m
+logchef query 'log_attributes.request.method="POST" and msg~"error"' -s 1h
+```
+
+### Field Selection (Pipe Operator)
+
+Select specific columns with `|` at the end:
+
+```bash
+logchef query 'level="error" | _timestamp level msg' -s 15m
+logchef query '| service_name msg' -s 5m   # no filter, just select fields
+```
+
+## SQL Mode
+
+Use `logchef sql` for aggregations, joins, negation, or anything beyond LogchefQL. Always include a time filter and `LIMIT`.
+
+```bash
+# Top error messages
+logchef sql "SELECT msg, count() AS cnt FROM logs.app WHERE _timestamp > now() - INTERVAL 1 HOUR AND level='error' GROUP BY msg ORDER BY cnt DESC LIMIT 10"
+
+# Read from stdin
 cat query.sql | logchef sql -
 ```
 
-**Collections**
-List collections: `logchef collections --team "production" --source "nginx-logs"`.
-Run a collection by name: `logchef collections "Error Dashboard" --team "production" --source "nginx-logs"`.
-Override time range: `--since 1h`.
-Override limit: `--limit 50`.
-Override variables: `--var name=value` (repeatable).
+## Collections (Saved Queries)
 
-**Teams, Sources, Schema**
-List teams: `logchef teams`.
-List sources for a team: `logchef sources --team "production"`.
-Show columns/types: `logchef schema --team "production" --source "nginx-logs"`.
+```bash
+logchef collections                              # list saved queries
+logchef collections "Error Dashboard"            # run by name
+logchef collections "Error Dashboard" -s 1h      # override time range
+logchef collections "Error Dashboard" --var env=prod  # override variables
+```
 
-**Output And Highlighting**
+## Output Formats
+
 Use `--output text|json|jsonl|table` on `query`, `sql`, and `collections`.
-Use `--output list` on `collections` when listing.
-Use `--no-highlight` and `--no-timestamp` for clean piping.
-Use `--highlight color:WORD1,WORD2` and `--disable-highlight GROUP` for ad-hoc formatting.
-Use `--show-sql` on `logchef query` to display the generated SQL.
 
 ```bash
-logchef query 'status=500' --output json | jq '.count'
-logchef query 'status=500' --output jsonl | jq '.msg'
-logchef query 'level="error"' --no-highlight | grep -i "timeout"
+logchef query 'status=500' --output json | jq '.msg'
+logchef query 'level="error"' --output jsonl --no-highlight | grep "timeout"
 ```
 
-**Common Errors And Fixes**
-`No context configured` → run `logchef auth --server <url>` or set `LOGCHEF_SERVER_URL` and `LOGCHEF_AUTH_TOKEN`.
-`Team not specified` → pass `--team` or run `logchef config set team <name_or_id>`.
-`Source not specified` → pass `--source` or run `logchef config set source <name_or_id>`.
-`--from requires --to` → always set both `--from` and `--to`.
-`invalid time format` → use `YYYY-MM-DD HH:MM:SS` (no `T`, no `Z`, no offset).
-`SQL query required` → pass SQL as an argument or use `-` to read from stdin.
-Shell pipe errors → wrap LogchefQL in single quotes.
+Useful flags: `--no-highlight`, `--no-timestamp`, `--show-sql` (shows generated SQL for LogchefQL queries).
 
-**Safety Rules**
-Always bound time (start with `15m`, expand gradually).
-Always scope with at least one filter besides time (service, level, host, trace_id).
-Always use `--limit` for `query` and `collections`.
-Keep raw samples small (≤20 lines) and redact secrets or PII.
-Prefer aggregations before pulling raw logs.
+## Investigation Workflow
 
-**Investigation Workflow**
-1. Count volume with a narrow window.
-2. Group by a small dimension to find dominant errors.
-3. Sample a few representative logs.
-4. Pivot on `trace_id` or `request_id`.
-5. Expand time range only after counts look reasonable.
+1. **Check schema** to know available columns: `logchef schema -t <team> -S <source>`
+2. **Count volume** with SQL in a narrow window
+3. **Group by dimension** to find dominant patterns
+4. **Sample representative logs** with `--limit 10`
+5. **Pivot on trace/request ID** for specific issues
+6. **Expand time range** only after counts look reasonable
 
 ```bash
-# Count errors (SQL)
-logchef sql "SELECT count() AS cnt FROM logs.app WHERE _timestamp > now() - INTERVAL 15 MINUTE AND level='error'"
+# 1. Schema
+logchef schema -t prod -S app-logs
 
-# Top error messages (SQL)
-logchef sql "SELECT msg, count() AS cnt FROM logs.app WHERE _timestamp > now() - INTERVAL 15 MINUTE AND msg ILIKE '%error%' GROUP BY msg ORDER BY cnt DESC LIMIT 10"
+# 2. Count errors
+logchef sql "SELECT count() FROM logs.app WHERE _timestamp > now() - INTERVAL 15 MINUTE AND level='error'"
 
-# Sample specific error
-logchef query 'msg~"connection refused"' --since 15m --limit 10
+# 3. Group by service
+logchef sql "SELECT service, count() AS cnt FROM logs.app WHERE _timestamp > now() - INTERVAL 15 MINUTE AND level='error' GROUP BY service ORDER BY cnt DESC LIMIT 10"
+
+# 4. Sample
+logchef query 'service="payment-api" and level="error"' -s 15m -l 10
+
+# 5. Trace
+logchef query 'log_attributes.trace_id="abc123"' -s 1h
 ```
+
+## Common Errors
+
+| Error | Fix |
+|-------|-----|
+| `No context configured` | Run `logchef auth --server <url>` |
+| `Team not specified` | Use `-t` or `logchef config set team <id>` |
+| `Source not specified` | Use `-S` or `logchef config set source <id>` |
+| `--from requires --to` | Both flags must be provided together |
+| `invalid time format` | Use `'YYYY-MM-DD HH:MM:SS'` (no T, no Z) |
+| `Invalid duration number` | Use integer + unit: `1m`, `1h`, `1d`, `1w` (no seconds) |
+| `unexpected token "<EOF>"` | Queries need `field op value`, not bare text |
+| `SQL query required` | Pass SQL as arg or pipe via `-` |
+| Shell expansion issues | Wrap LogchefQL in single quotes |
+
+## Safety
+
+- Start with short time ranges (`15m`) and expand gradually
+- Always include at least one filter beyond time
+- Keep raw log samples small (≤20 rows) and redact secrets/PII
+- Prefer SQL aggregations before pulling raw logs
+- Use `--show-sql` to verify LogchefQL generates what you expect
