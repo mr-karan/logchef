@@ -160,7 +160,6 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
 
     if (savedState && savedState.columnOrder && savedState.columnOrder.length > 0) {
         // --- Use Saved State ---
-        console.log("Loading table state from localStorage for key:", storageKey.value);
         // Validate saved order against current columns
         const savedOrder = savedState.columnOrder;
         const filteredSavedOrder = savedOrder.filter(id => currentColumnIds.includes(id));
@@ -186,7 +185,6 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
         });
     } else {
         // --- Generate Default State ---
-        console.log("No saved state found or no column order, generating default table state for key:", storageKey.value);
         // Generate default order with timestamp first
         const tsField = timestampFieldName.value; // Get the current timestamp field name
         const otherColumns = currentColumnIds.filter(id => id !== tsField);

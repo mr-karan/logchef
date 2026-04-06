@@ -119,13 +119,12 @@ export const useSourcesStore = defineStore("sources", () => {
   // Watch team changes and auto-load sources
   watch(
     () => contextStore.teamId,
-    async (newTeamId, oldTeamId) => {
+    async (newTeamId, _oldTeamId) => {
       // Prevent duplicate processing
       if (newTeamId === lastProcessedTeamId) {
         return;
       }
-      
-      console.log(`SourcesStore: Team changed from ${oldTeamId} to ${newTeamId}`);
+
       lastProcessedTeamId = newTeamId;
       
       // Clear previous state
@@ -134,22 +133,17 @@ export const useSourcesStore = defineStore("sources", () => {
       state.data.value.currentSourceDetails = null;
 
       if (!newTeamId) {
-        console.log('SourcesStore: No team selected, skipping source loading');
         return;
       }
 
       try {
-        console.log(`SourcesStore: Loading sources for team ${newTeamId}`);
         state.data.value.isLoadingTeamSources = true;
         await loadTeamSources(newTeamId);
-        
+
         if (contextStore.teamId !== newTeamId) {
-          console.log(`SourcesStore: Team changed during load (now ${contextStore.teamId}), discarding results for ${newTeamId}`);
           return;
         }
-        
-        console.log(`SourcesStore: Successfully loaded ${teamSources.value.length} sources for team ${newTeamId}`);
-        
+
         if (teamSources.value.length > 0) {
           const currentSourceId = contextStore.sourceId;
           const currentSourceValid = currentSourceId && teamSources.value.some(s => s.id === currentSourceId);
@@ -158,8 +152,7 @@ export const useSourcesStore = defineStore("sources", () => {
             const cachedSourceId = contextStore.getStoredSourceForTeam(newTeamId);
             const validCachedSource = cachedSourceId && teamSources.value.some(s => s.id === cachedSourceId);
             const targetSourceId = validCachedSource ? cachedSourceId : teamSources.value[0].id;
-            
-            console.log(`SourcesStore: Selecting source ${targetSourceId} for team ${newTeamId}`);
+
             contextStore.selectSource(targetSourceId);
           }
         }
@@ -177,67 +170,55 @@ export const useSourcesStore = defineStore("sources", () => {
   watch(
     () => [contextStore.sourceId, state.data.value.isLoadingTeamSources] as const,
     async ([newSourceId, isLoadingTeamSources], oldValue) => {
-      const [oldSourceId, wasLoadingTeamSources] = oldValue ?? [null, false];
-      
+      const [_oldSourceId, wasLoadingTeamSources] = oldValue ?? [null, false];
+
       const teamSourcesJustFinishedLoading = wasLoadingTeamSources && !isLoadingTeamSources;
       if (teamSourcesJustFinishedLoading && newSourceId) {
-        console.log(`SourcesStore: Team sources loaded, processing source ${newSourceId}`);
         lastProcessedSourceId = null;
       }
-      
+
       if (newSourceId === lastProcessedSourceId) {
         return;
       }
-      
-      console.log(`SourcesStore: Source changed from ${oldSourceId} to ${newSourceId}`);
-      
+
       state.data.value.sourceDetailsError = null;
       state.data.value.currentSourceDetails = null;
 
       if (!newSourceId) {
         lastProcessedSourceId = null;
-        console.log('SourcesStore: No source selected, skipping details loading');
         return;
       }
 
       const currentTeamId = contextStore.teamId;
       if (!currentTeamId) {
-        console.log(`SourcesStore: No team selected, deferring source ${newSourceId} details loading`);
         return;
       }
 
       if (isLoadingTeamSources) {
-        console.log(`SourcesStore: Team sources still loading, will process source ${newSourceId} when ready`);
         return;
       }
 
       lastProcessedSourceId = newSourceId;
 
       const sourceExistsInTeam = teamSources.value.some(s => s.id === newSourceId);
-      
+
       if (teamSources.value.length === 0) {
-        console.log(`SourcesStore: Team ${currentTeamId} has no sources, cannot load source ${newSourceId}`);
         state.data.value.sourceDetailsError = 'Team has no sources configured';
         return;
       }
-      
+
       if (!sourceExistsInTeam) {
-        console.log(`SourcesStore: Source ${newSourceId} not in team ${currentTeamId}'s sources, selecting first available`);
         contextStore.selectSource(teamSources.value[0].id);
         return;
       }
 
       try {
-        console.log(`SourcesStore: Loading details for source ${newSourceId}`);
         state.data.value.isLoadingSourceDetails = true;
         await loadSourceDetails(newSourceId);
-        
+
         if (contextStore.sourceId !== newSourceId || contextStore.teamId !== currentTeamId) {
-          console.log(`SourcesStore: Context changed during load, discarding details for source ${newSourceId}`);
           return;
         }
-        
-        console.log(`SourcesStore: Successfully loaded details for source ${newSourceId}`);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Failed to load source details';
         state.data.value.sourceDetailsError = errorMessage;
@@ -284,12 +265,6 @@ export const useSourcesStore = defineStore("sources", () => {
         operationKey: `loadTeamSources-${teamId}`,
         onSuccess: async (data) => {
           state.data.value.teamSources = data ?? [];
-          console.log(`loadTeamSources: Loaded ${state.data.value.teamSources.length} sources for team ${teamId}`);
-          if (state.data.value.teamSources.length === 0) {
-            console.log(`loadTeamSources: Team ${teamId} genuinely has no sources configured`);
-          } else {
-            console.log(`loadTeamSources: Team ${teamId} sources:`, state.data.value.teamSources.map(s => `${s.id}:${s.name}`));
-          }
         },
         defaultData: [],
         showToast: false,
@@ -489,8 +464,7 @@ export const useSourcesStore = defineStore("sources", () => {
           if (!data) return;
 
           state.data.value.currentSourceDetails = data as Source;
-          console.log(`Loaded source details for source ${sourceId}`);
-          
+
           // Update the source in teamSources as well (like the existing getSource does)
           const index = state.data.value.teamSources.findIndex((s) => s.id === sourceId);
           if (index >= 0) {

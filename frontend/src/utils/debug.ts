@@ -2,7 +2,20 @@
  * Debug utility for conditional logging based on environment
  */
 
-const isProduction = process.env.NODE_ENV === 'production';
+function safeLocalStorageFlag(key: string): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(key) === "true";
+  } catch {
+    return false;
+  }
+}
+
+const isDebugLoggingEnabled =
+  import.meta.env.DEV || safeLocalStorageFlag("logchef:debug");
 
 /**
  * Log debug messages only in non-production environments
@@ -11,7 +24,7 @@ const isProduction = process.env.NODE_ENV === 'production';
  * @param args Additional arguments to log
  */
 export function debug(namespace: string, message: string, ...args: any[]): void {
-  if (!isProduction) {
+  if (isDebugLoggingEnabled) {
     console.log(`[${namespace}]`, message, ...args);
   }
 }

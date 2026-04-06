@@ -45,7 +45,7 @@ export const useContextStore = defineStore('context', () => {
   )
 
   function selectTeam(newTeamId: number) {
-    console.log(`ContextStore: Selecting team ${newTeamId}`)
+    
     const previousTeamId = teamId.value
     teamId.value = newTeamId
 
@@ -53,7 +53,6 @@ export const useContextStore = defineStore('context', () => {
     // The cached source may not belong to the new team. The sourcesStore
     // will restore a valid source after loading the new team's sources.
     if (previousTeamId !== newTeamId) {
-      console.log(`ContextStore: Team changed from ${previousTeamId} to ${newTeamId}, clearing source`)
       sourceId.value = null
     }
 
@@ -67,7 +66,6 @@ export const useContextStore = defineStore('context', () => {
       console.warn(`ContextStore: Cannot select source ${newSourceId} without team`)
       return
     }
-    console.log(`ContextStore: Selecting source ${newSourceId} for team ${teamId.value}`)
     sourceId.value = newSourceId
 
     const persisted = loadFromStorage()
@@ -91,7 +89,6 @@ export const useContextStore = defineStore('context', () => {
   }
 
   function setFromRoute(routeTeamId: number | null, routeSourceId: number | null) {
-    console.log(`ContextStore: Setting from route - team: ${routeTeamId}, source: ${routeSourceId}`)
 
     const teamChanged = routeTeamId !== teamId.value
 

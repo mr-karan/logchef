@@ -42,12 +42,6 @@ export class HistogramService {
       const end = new Date(endTime).getTime();
       const diffMs = end - start;
       const diffSeconds = diffMs / 1000;
-      const diffMinutes = diffSeconds / 60;
-      const diffHours = diffMinutes / 60;
-      const diffDays = diffHours / 24;
-
-      // Log time range details for debugging
-      console.log(`Time range span: ${diffDays.toFixed(2)} days, ${diffHours.toFixed(2)} hours, ${diffMinutes.toFixed(2)} minutes`);
 
       // Calculate ideal interval to achieve target bucket count
       const idealIntervalSeconds = diffSeconds / this.TARGET_BUCKETS;
@@ -61,12 +55,6 @@ export class HistogramService {
           break;
         }
       }
-
-      // Calculate how many buckets this interval will produce
-      const estimatedBuckets = diffSeconds / selectedInterval.seconds;
-
-      console.log(`Selected interval: ${selectedInterval.label} (${selectedInterval.seconds}s), ` +
-                 `which will produce ~${Math.ceil(estimatedBuckets)} buckets`);
 
       // Return the label format expected by the backend
       return selectedInterval.label;

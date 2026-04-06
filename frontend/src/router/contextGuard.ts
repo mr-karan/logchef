@@ -19,9 +19,7 @@ export function contextRouterGuard(to: RouteLocationNormalized) {
 
   if (!teamId) {
     teamId = storedDefaults.teamId ?? teamsStore.teams?.[0]?.id ?? null
-    console.log(`ContextGuard: No team in URL, using default: ${teamId}`)
   }
 
   contextStore.setFromRoute(teamId, sourceId)
-  console.log(`ContextGuard: team=${teamId}, source=${sourceId}`)
 }
