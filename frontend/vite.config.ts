@@ -16,7 +16,17 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
 
   // Conditionally load visualizer only when analyzing
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const plugins: Plugin[] = [vue() as any];
+  const plugins: Plugin[] = [
+    vue() as any,
+    {
+      name: "strip-monaco-entry-preloads",
+      transformIndexHtml(html) {
+        return html
+          .replace(/\n\s*<link rel="modulepreload" crossorigin href="\/assets\/monaco[^"]+\.js">/g, "")
+          .replace(/\n\s*<link rel="stylesheet" crossorigin href="\/assets\/monaco[^"]+\.css">/g, "");
+      },
+    } as Plugin,
+  ];
 
   if (isAnalyze) {
     // Dynamic import for visualizer - only loaded when needed
@@ -71,10 +81,6 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
             // Monaco editor - largest dependency, separate chunk
             if (id.includes("monaco-editor")) {
               return "monaco-editor";
-            }
-            // ECharts - tree-shaken but still substantial
-            if (id.includes("echarts")) {
-              return "echarts";
             }
             // Vue ecosystem - changes less frequently
             if (id.includes("node_modules/vue") || 

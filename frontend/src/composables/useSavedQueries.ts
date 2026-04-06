@@ -598,8 +598,6 @@ export function useSavedQueries(
 
   // Create a new query in the explorer
   function createNewQuery(sourceId?: number) {
-    console.log("Creating new query in useSavedQueries...");
-
     // Reset the query state to defaults
     // Use the centralized reset function in the store
     exploreStore.resetQueryToDefaults();
@@ -634,18 +632,9 @@ export function useSavedQueries(
     newQuery.mode = exploreStore.activeMode;
 
     // Apply the new URL - use push instead of replace to preserve history
-    router.push({
+    return router.push({
       path: '/logs/explore',
       query: newQuery
-    }).then(() => {
-      // Focus the editor after navigation completes
-      setTimeout(() => {
-        // Try to find the QueryEditor component
-        const queryEditor = document.querySelector('.monaco-editor');
-        if (queryEditor) {
-          (queryEditor as HTMLElement).focus();
-        }
-      }, 50);
     });
   }
 

@@ -5,26 +5,9 @@ import "@unovis/ts/styles";
 import App from "./App.vue";
 import router from "./router";
 import { useAuthStore } from "@/stores/auth";
-import { initMonacoSetup, disposeAllMonacoResources } from "@/utils/monaco";
-
-// Track Monaco initialization state
-let monacoInitialized = false;
-
-// Register cleanup function for Monaco resources on page unload
-window.addEventListener('beforeunload', () => {
-  console.log("Cleaning up Monaco resources before unload");
-  disposeAllMonacoResources();
-});
 
 async function initializeApp() {
   try {
-    // Initialize Monaco editor setup only once
-    if (!monacoInitialized) {
-      console.log("Initializing Monaco setup globally");
-      initMonacoSetup();
-      monacoInitialized = true;
-    }
-
     // Create app instance
     const app = createApp(App);
 

@@ -19,6 +19,7 @@ import {
 interface ModelCacheEntry {
   model: monaco.editor.ITextModel;
   lastUsed: number;
+  viewState?: monaco.editor.ICodeEditorViewState | null;
 }
 
 // Global model cache with source/language specific entries
@@ -100,16 +101,14 @@ export function getSingleLineModeOptions(): Partial<monaco.editor.IStandaloneEdi
 
 // Track initialization state
 let setupComplete = false;
+let setupPromise: Promise<void> | null = null;
 
 // Initialize Monaco only once
 export function initMonacoSetup() {
   // Skip if already initialized
   if (setupComplete) {
-    console.log("Monaco setup already initialized, skipping");
     return;
   }
-
-  console.log("Initializing Monaco environment and languages");
 
   // Configure Monaco worker setup (ensure this runs only once)
   if (!window.MonacoEnvironment) {
@@ -187,6 +186,20 @@ export function initMonacoSetup() {
   }
 }
 
+export function ensureMonacoSetup(): Promise<void> {
+  if (setupComplete) {
+    return Promise.resolve();
+  }
+
+  if (!setupPromise) {
+    setupPromise = Promise.resolve().then(() => {
+      initMonacoSetup();
+    });
+  }
+
+  return setupPromise;
+}
+
 // Get or create a model from global cache
 export function getOrCreateModel(value: string, language: string, sourceId?: number, key?: string): monaco.editor.ITextModel {
   // Create a unique cache key
@@ -199,13 +212,13 @@ export function getOrCreateModel(value: string, language: string, sourceId?: num
     try {
       // Check if model is disposed - if so, we'll need to recreate it
       if (entry.model.isDisposed()) {
-        console.log(`Model for ${cacheKey} was disposed, recreating it`);
         // Create new model since the cached one was disposed
         const newModel = monaco.editor.createModel(value, language);
         // Update cache entry
         globalModelCache.set(cacheKey, {
           model: newModel,
-          lastUsed: Date.now()
+          lastUsed: Date.now(),
+          viewState: entry.viewState,
         });
         return newModel;
       }
@@ -225,7 +238,8 @@ export function getOrCreateModel(value: string, language: string, sourceId?: num
       // Update cache entry
       globalModelCache.set(cacheKey, {
         model: newModel,
-        lastUsed: Date.now()
+        lastUsed: Date.now(),
+        viewState: entry.viewState,
       });
       return newModel;
     }
@@ -240,10 +254,30 @@ export function getOrCreateModel(value: string, language: string, sourceId?: num
   // Add new model to cache
   globalModelCache.set(cacheKey, {
     model,
-    lastUsed: Date.now()
+    lastUsed: Date.now(),
+    viewState: null,
   });
 
   return model;
+}
+
+export function saveEditorViewState(
+  key: string,
+  viewState: monaco.editor.ICodeEditorViewState | null
+) {
+  const entry = globalModelCache.get(key);
+  if (!entry) {
+    return;
+  }
+
+  entry.viewState = viewState;
+  entry.lastUsed = Date.now();
+}
+
+export function restoreEditorViewState(
+  key: string
+): monaco.editor.ICodeEditorViewState | null {
+  return globalModelCache.get(key)?.viewState ?? null;
 }
 
 // Register an editor instance for global management
@@ -268,19 +302,12 @@ export function lightweightEditorDisposal(editor: monaco.editor.IStandaloneCodeE
     editor.updateOptions({ readOnly: true });
 
     // Get model info before hiding the editor
-    const model = editor.getModel();
-    const modelId = model?.id;
-
     // Make it invisible
     const domNode = editor.getDomNode();
     if (domNode) {
       // Use visibility to maintain layout, not display:none which can cause issues
       domNode.style.visibility = 'hidden';
     }
-
-    // Important: Do NOT detach the model from the editor
-    // Just log that we're preserving it
-    console.log(`Lightweight disposal completed, preserved model: ${modelId}`);
 
     return true;
   } catch (e) {
@@ -312,12 +339,10 @@ export function reactivateEditor(editor: monaco.editor.IStandaloneCodeEditor, la
 
       // Reattach model to editor
       editor.setModel(model);
-      console.log(`Reattached model to editor for ${modelKey}`);
     }
 
     // Force layout refresh to ensure proper rendering
     editor.layout();
-    console.log('Editor successfully reactivated with model:', editor.getModel()?.id);
     return true;
   } catch (e) {
     console.error("Error reactivating editor:", e);
@@ -347,8 +372,6 @@ function pruneModelCache() {
     }
     globalModelCache.delete(key);
   }
-
-  console.log(`Pruned ${entriesToRemove.length} models from cache. Cache size: ${globalModelCache.size}`);
 }
 
 // Update LogChefQL autocomplete fields
