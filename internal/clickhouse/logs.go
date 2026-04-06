@@ -261,6 +261,18 @@ func extractGroupValue(row map[string]any) (string, bool) {
 	switch v := groupVal.(type) {
 	case string:
 		return v, true
+	case *string:
+		if v == nil {
+			return "null", true
+		}
+		return *v, true
+	case []byte:
+		return string(v), true
+	case *[]byte:
+		if v == nil {
+			return "null", true
+		}
+		return string(*v), true
 	case nil:
 		return "null", true
 	default:

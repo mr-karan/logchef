@@ -288,6 +288,61 @@ func TestWindowToIntervalFuncUsesGenericSecondBucketFunction(t *testing.T) {
 	}
 }
 
+func TestExtractGroupValueDereferencesPointerTypes(t *testing.T) {
+	stringValue := "checkout"
+	byteValue := []byte("payments")
+
+	tests := []struct {
+		name string
+		row  map[string]any
+		want string
+		ok   bool
+	}{
+		{
+			name: "plain string",
+			row:  map[string]any{"group_value": "orders"},
+			want: "orders",
+			ok:   true,
+		},
+		{
+			name: "string pointer",
+			row:  map[string]any{"group_value": &stringValue},
+			want: "checkout",
+			ok:   true,
+		},
+		{
+			name: "byte slice",
+			row:  map[string]any{"group_value": []byte("oms")},
+			want: "oms",
+			ok:   true,
+		},
+		{
+			name: "byte slice pointer",
+			row:  map[string]any{"group_value": &byteValue},
+			want: "payments",
+			ok:   true,
+		},
+		{
+			name: "nil pointer becomes null",
+			row:  map[string]any{"group_value": (*string)(nil)},
+			want: "null",
+			ok:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := extractGroupValue(tt.row)
+			if ok != tt.ok {
+				t.Fatalf("ok mismatch: got %v want %v", ok, tt.ok)
+			}
+			if got != tt.want {
+				t.Fatalf("value mismatch: got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestLogQueryParams tests query parameter validation
 func TestLogQueryParams(t *testing.T) {
 	tests := []struct {
