@@ -152,7 +152,9 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName, timestampField
 func windowToIntervalFunc(window TimeWindow, timestampField, timezone string) (string, error) {
 	switch window {
 	case TimeWindow1s:
-		return fmt.Sprintf("toStartOfSecond(%s, '%s')", timestampField, timezone), nil
+		// toStartOfSecond only supports DateTime64 in some ClickHouse builds.
+		// Use toStartOfInterval for 1s so both DateTime and DateTime64 sources work.
+		return fmt.Sprintf("toStartOfInterval(%s, INTERVAL 1 SECOND, '%s')", timestampField, timezone), nil
 	case TimeWindow5s, TimeWindow10s, TimeWindow15s, TimeWindow30s:
 		seconds := strings.TrimSuffix(string(window), "s")
 		return fmt.Sprintf("toStartOfInterval(%s, INTERVAL %s SECOND, '%s')", timestampField, seconds, timezone), nil

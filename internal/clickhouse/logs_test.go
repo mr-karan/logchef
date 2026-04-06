@@ -273,6 +273,21 @@ func TestTimeWindowParsing(t *testing.T) {
 	}
 }
 
+func TestWindowToIntervalFuncUsesGenericSecondBucketFunction(t *testing.T) {
+	intervalExpr, err := windowToIntervalFunc(TimeWindow1s, "_timestamp", "UTC")
+	if err != nil {
+		t.Fatalf("windowToIntervalFunc returned error: %v", err)
+	}
+
+	if !containsIgnoreCase(intervalExpr, "toStartOfInterval") {
+		t.Fatalf("expected toStartOfInterval for 1s window, got: %s", intervalExpr)
+	}
+
+	if containsIgnoreCase(intervalExpr, "toStartOfSecond") {
+		t.Fatalf("expected 1s window to avoid toStartOfSecond, got: %s", intervalExpr)
+	}
+}
+
 // TestLogQueryParams tests query parameter validation
 func TestLogQueryParams(t *testing.T) {
 	tests := []struct {
