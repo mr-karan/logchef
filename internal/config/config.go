@@ -39,6 +39,17 @@ type ServerConfig struct {
 	Host              string        `koanf:"host"`
 	FrontendURL       string        `koanf:"frontend_url"`
 	HTTPServerTimeout time.Duration `koanf:"http_server_timeout"`
+	// SecureCookie controls the Secure flag on auth cookies.
+	// Set to false for local development over HTTP. Defaults to true.
+	SecureCookie *bool `koanf:"secure_cookie"`
+}
+
+// IsSecureCookie returns whether cookies should have the Secure flag set.
+func (s *ServerConfig) IsSecureCookie() bool {
+	if s.SecureCookie == nil {
+		return true
+	}
+	return *s.SecureCookie
 }
 
 // SQLiteConfig contains SQLite database settings
@@ -114,11 +125,12 @@ type AlertsConfig struct {
 const (
 	envPrefix = "LOGCHEF_"
 
-	defaultServerPort        = 8125
-	defaultServerHost        = "0.0.0.0"
-	defaultHTTPServerTimeout = 30 * time.Second
-	defaultSQLitePath        = "local.db"
-	defaultLoggingLevel      = "info"
+	defaultServerPort         = 8125
+	defaultServerHost         = "0.0.0.0"
+	defaultHTTPServerTimeout  = 30 * time.Second
+	defaultServerSecureCookie = true
+	defaultSQLitePath         = "local.db"
+	defaultLoggingLevel       = "info"
 
 	defaultAlertsEnabled            = true
 	defaultAlertsEvaluationInterval = time.Minute
@@ -238,6 +250,10 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) {
 	}
 	if !k.Exists("server.http_server_timeout") {
 		cfg.Server.HTTPServerTimeout = defaultHTTPServerTimeout
+	}
+	if !k.Exists("server.secure_cookie") {
+		defaultVal := defaultServerSecureCookie
+		cfg.Server.SecureCookie = &defaultVal
 	}
 	if !k.Exists("sqlite.path") {
 		cfg.SQLite.Path = defaultSQLitePath

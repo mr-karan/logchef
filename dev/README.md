@@ -24,7 +24,7 @@ just run-frontend
 just dev-ingest-logs
 ```
 
-Open http://localhost:5173 and login with `dev@localhost` / `password`.
+Open http://localhost:5173 and login with `admin@logchef.internal` / `password`.
 Mailpit UI is available at http://localhost:8025.
 
 To test email delivery locally, configure SMTP settings to:

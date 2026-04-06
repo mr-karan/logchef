@@ -1,0 +1,37 @@
+# Dev environment provisioning config.
+# Ensures OIDC users get linked to teams on startup.
+
+manage_sources = true
+manage_teams = true
+prune = false
+dry_run = false
+
+[[sources]]
+name = "HTTP Access Logs"
+host = "127.0.0.1:9000"
+username = "default"
+password = ""
+database = "default"
+table_name = "http"
+meta_ts_field = "timestamp"
+description = "Demo HTTP access logs (vector -c http.toml)"
+
+[[sources]]
+name = "Syslog Logs"
+host = "127.0.0.1:9000"
+username = "default"
+password = ""
+database = "default"
+table_name = "syslogs"
+meta_ts_field = "timestamp"
+meta_severity_field = "lvl"
+description = "Demo syslog data (vector -c syslog.toml)"
+
+[[teams]]
+name = "Dev Team"
+description = "Local development team"
+sources = ["HTTP Access Logs", "Syslog Logs"]
+members = [
+  { email = "admin@logchef.internal", role = "admin" },
+  { email = "demo@logchef.internal", role = "member" },
+]

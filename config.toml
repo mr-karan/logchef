@@ -17,6 +17,8 @@ port = 8125
 host = "0.0.0.0"
 # HTTP server request timeout.
 http_server_timeout = "30s"
+# Secure cookie flag (set to false for local HTTP development).
+secure_cookie = false
 # Frontend URL for auth redirects and UI links is managed in the Admin UI.
 # For first boot with a separate frontend origin, set LOGCHEF_SERVER__FRONTEND_URL.
 
@@ -70,30 +72,5 @@ api_token_secret = "5679649c50fddda837449b77d9983ab5f8dba65878897e968a74e7061bf4
 # -----------------------------------------------------------------------------
 # Provisioning (optional) — Declarative config for teams, sources, access
 # -----------------------------------------------------------------------------
-# Load provisioning from a separate file (recommended for prod):
-# [provisioning]
-# file = "provisioning.toml"
-#
-# Or inline (for dev/simple setups):
-# [provisioning]
-# manage_sources = true
-# manage_teams = true
-# prune = false
-# dry_run = true
-#
-# [[provisioning.sources]]
-# name = "My Logs"
-# host = "clickhouse:9000"
-# username = "default"
-# password = "secret"
-# secret_ref = "LOGCHEF_SOURCE_MY_LOGS_PASSWORD"
-# database = "logs"
-# table_name = "otel_logs"
-# meta_ts_field = "timestamp"
-#
-# [[provisioning.teams]]
-# name = "Platform"
-# sources = ["My Logs"]
-# members = [
-#   { email = "admin@example.com", role = "admin" },
-# ]
+[provisioning]
+file = "dev/provisioning.toml"
