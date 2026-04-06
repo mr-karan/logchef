@@ -4,7 +4,6 @@ import {
   computed,
   watch,
   onMounted,
-  onBeforeUnmount,
   nextTick,
 } from "vue";
 import { storeToRefs } from "pinia";
@@ -67,8 +66,6 @@ const {
   activeMode,
   queryError,
   sqlWarnings: _sqlWarnings,
-  isDirty,
-  dirtyReason,
   isExecutingQuery,
   canExecuteQuery,
   changeMode,
@@ -111,21 +108,16 @@ const availableFields = computed(() => {
 
 // Simple loading state for UI (replacement for isChangingContext)
 const isChangingContext = computed(() => {
-  console.log('Checking isChangingContext...');
   const teamLoading = sourcesStore.isLoadingTeamSources;
   const sourceLoading = sourcesStore.isLoadingSourceDetails;
-  console.log(`Store loading states: team=${teamLoading}, source=${sourceLoading}`);
-  const result = teamLoading || sourceLoading;
-  console.log(`isChangingContext result: ${result}`);
-  return result;
+  return teamLoading || sourceLoading;
 });
 
 // Simple team/source change handlers using router
 function handleTeamChange(teamIdStr: string) {
   const teamId = parseInt(teamIdStr);
   if (isNaN(teamId)) return;
-  
-  console.log(`LogExplorer: Changing team to ${teamId}`);
+
   router.replace({
     query: {
       ...route.query,
@@ -138,8 +130,7 @@ function handleTeamChange(teamIdStr: string) {
 function handleSourceChange(sourceIdStr: string) {
   const sourceId = parseInt(sourceIdStr);
   if (isNaN(sourceId)) return;
-  
-  console.log(`LogExplorer: Changing source to ${sourceId}`);
+
   router.replace({
     query: {
       ...route.query,
@@ -393,38 +384,18 @@ const handleQueryExecution = async (debouncingKey = "") => {
     const shouldDebounce = lastExecTime > 0 && timeSinceLastQuery < 300 && !isSourceChange;
 
     if (isExecutingQuery.value || shouldDebounce) {
-      console.log(
-        `LogExplorer: Skipping query execution - ${
-          isExecutingQuery.value ? "already executing" : "too soon after previous query"
-        }`
-      );
       return;
     }
-
-    // Log the current dirty state for debugging
-    console.log(
-      `LogExplorer: Executing query (${executionId}), current dirty state:`,
-      isDirty.value ? "dirty" : "clean",
-      "dirtyReason:",
-      JSON.stringify(dirtyReason.value)
-    );
 
     // Set executing state
     executingQueryId.value = executionId;
     lastQueryTime.value = now;
 
-    // Execute the query using the executeQuery function from useQuery composable,
-    // which now delegates to exploreStore
-    console.log(`LogExplorer: Executing query with ID ${executionId}`);
     const result = await executeQuery();
 
-    // Handle coordination errors with auto-retry
     if (result && !result.success && result.error && 'error_type' in result.error && result.error.error_type === 'CoordinationError') {
-      console.log(`LogExplorer: Coordination error detected, scheduling retry in 100ms`);
-      // Don't clear execution state yet, let the retry handle it
       setTimeout(() => {
         if (executingQueryId.value === executionId) {
-          console.log(`LogExplorer: Retrying query after coordination error`);
           handleQueryExecution(`${debouncingKey}-retry`);
         }
       }, 100);
@@ -434,16 +405,9 @@ const handleQueryExecution = async (debouncingKey = "") => {
     if (result && result.success && !isInitializing.value) {
       urlState.pushHistoryEntry();
 
-      // Update SQL and mark as not dirty AFTER successful execution
       if (activeMode.value === 'sql') {
         handleTimeRangeUpdate();
       }
-
-      // Log the dirty state after execution
-      console.log(
-        `LogExplorer: Query executed successfully, new dirty state:`,
-        isDirty.value ? "dirty" : "clean"
-      );
     }
 
     // Clear execution state
@@ -464,7 +428,6 @@ const handleQueryExecution = async (debouncingKey = "") => {
 
 // Function to cancel the currently running query
 const handleCancelQuery = async () => {
-  console.log("LogExplorer: Cancel query requested");
   await exploreStore.cancelQuery();
   executingQueryId.value = null;
 };
@@ -883,7 +846,6 @@ const filteredSortKeys = computed(() => {
 
 // New handler for save-as-new request from QueryEditor
 const handleRequestSaveAsNew = () => {
-  console.log("LogExplorer: handleRequestSaveAsNew triggered");
   editQueryData.value = null; // Ensure modal opens in "new query" mode
   openSaveModalFlow(); // Call the composable's function to open the modal
 };
@@ -901,8 +863,6 @@ watch(
     if (newQueryId === oldQueryId || isInitializing.value) {
       return;
     }
-
-    console.log(`LogExplorer: query id changed from ${oldQueryId} to ${newQueryId}`);
 
     // If query ID was removed, clear the saved query state
     if (!newQueryId && oldQueryId) {
@@ -933,7 +893,6 @@ watch(
 
     if (newQueryId && urlTeam && urlSource) {
       try {
-        console.log(`LogExplorer: Loading saved query ${newQueryId}`);
         isLoadingQuery.value = true;
 
         const fetchResult = await savedQueriesStore.fetchTeamSourceQueryDetails(
@@ -990,12 +949,6 @@ onMounted(async () => {
       variant: "destructive",
       duration: TOAST_DURATION.ERROR,
     });
-  }
-});
-
-onBeforeUnmount(() => {
-  if (import.meta.env.MODE !== "production") {
-    console.log("LogExplorer unmounted");
   }
 });
 </script>
@@ -1297,11 +1250,7 @@ onBeforeUnmount(() => {
 
               <!-- Histogram visualization -->
               <div v-if="isHistogramVisible" class="px-4 py-2 border-b">
-                <HistogramVisualization 
-                  :group-by="exploreStore.groupByField" 
-                  @zoom-time-range="onHistogramTimeRangeZoom"
-                  @update:timeRange="onHistogramTimeRangeZoom" 
-                />
+                <HistogramVisualization @zoom-time-range="onHistogramTimeRangeZoom" />
               </div>
             </div>
 

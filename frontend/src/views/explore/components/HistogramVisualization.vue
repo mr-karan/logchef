@@ -2,21 +2,14 @@
 import { computed } from 'vue'
 import { useExploreStore } from '@/stores/explore'
 import LogHistogram from '@/components/visualizations/LogHistogram.vue'
-import type { DateValue } from '@internationalized/date'
 
 interface TimeRangeEvent {
   start: Date;
   end: Date;
 }
 
-interface DateValueRangeEvent {
-  start: DateValue;
-  end: DateValue;
-}
-
 const emit = defineEmits<{
   (e: 'zoom-time-range', range: TimeRangeEvent): void
-  (e: 'update:timeRange', range: TimeRangeEvent): void
 }>()
 
 const exploreStore = useExploreStore()
@@ -32,13 +25,6 @@ const isHistogramEligible = computed(() => exploreStore.isHistogramEligible)
 const handleZoomTimeRange = (range: TimeRangeEvent) => {
   emit('zoom-time-range', range)
 }
-
-const handleTimeRangeUpdate = (range: DateValueRangeEvent) => {
-  // Convert DateValue to Date for the parent component
-  const start = new Date(range.start.year, range.start.month - 1, range.start.day)
-  const end = new Date(range.end.year, range.end.month - 1, range.end.day)
-  emit('update:timeRange', { start, end })
-}
 </script>
 
 <template>
@@ -50,7 +36,6 @@ const handleTimeRangeUpdate = (range: DateValueRangeEvent) => {
       :is-loading="isExecutingQuery"
       :group-by="groupByField"
       @zoom-time-range="handleZoomTimeRange"
-      @update:timeRange="handleTimeRangeUpdate"
     />
   </div>
   
