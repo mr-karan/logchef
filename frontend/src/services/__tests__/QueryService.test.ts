@@ -23,6 +23,8 @@ vi.mock('@/api/logchefql', () => ({
 }));
 
 import { logchefqlApi } from '@/api/logchefql';
+import { useTeamsStore } from '@/stores/teams';
+import { useSourcesStore } from '@/stores/sources';
 
 describe('QueryService', () => {
   const testOptions = {
@@ -37,6 +39,8 @@ describe('QueryService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(useTeamsStore).mockImplementation(() => ({ currentTeamId: 1 } as any));
+    vi.mocked(useSourcesStore).mockImplementation(() => ({ currentSourceDetails: { id: 1 } } as any));
   });
 
   afterEach(() => {
