@@ -182,6 +182,7 @@ func (c *Client) buildHistogramQuery(baseQuery, timestampField, intervalFunc, gr
 	}
 
 	if groupBy != "" && strings.TrimSpace(groupBy) != "" {
+		quotedGroupBy := quoteIdentifier(groupBy)
 		return fmt.Sprintf(`
 			WITH top_groups AS (
 				SELECT %s AS group_value, count(*) AS total_logs
@@ -192,7 +193,7 @@ func (c *Client) buildHistogramQuery(baseQuery, timestampField, intervalFunc, gr
 			FROM (%s) AS raw_logs
 			WHERE %s GLOBAL IN (SELECT group_value FROM top_groups)
 			GROUP BY bucket, group_value ORDER BY bucket ASC, log_count DESC
-		`, groupBy, modifiedQuery, intervalFunc, groupBy, modifiedQuery, groupBy), nil
+		`, quotedGroupBy, modifiedQuery, intervalFunc, quotedGroupBy, modifiedQuery, quotedGroupBy), nil
 	}
 
 	return fmt.Sprintf(`

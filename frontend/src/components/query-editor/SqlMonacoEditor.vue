@@ -23,12 +23,23 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, shallowRef, watch, type Component } from "vue";
 import { SQL_KEYWORDS } from "@/utils/clickhouse-sql";
+import { useFieldValuesStore } from "@/stores/exploreFieldValues";
+import {
+  parseLogchefQLContext,
+  isValueSuggestableField,
+  isNumericFieldType,
+  formatFieldDetail,
+  formatCountShort,
+  buildValueInsertText,
+  filterValuesByPartial,
+} from "@/utils/logchefql-autocomplete";
 
 interface SqlMonacoEditorProps {
   value: string;
   theme: string;
   language: "clickhouse-sql" | "logchefql";
   schema: Record<string, { type: string }>;
+  teamId: number;
   sourceId: number;
   tableName: string;
   isExecuting: boolean;
@@ -92,6 +103,8 @@ const monacoOptions = computed(() => {
     wordWrap: "on" as const,
     folding: true,
     scrollBeyondLastLine: false,
+    suggest: { showIcons: false },
+    quickSuggestions: { other: true, comments: false, strings: props.language === "logchefql" },
   };
 });
 
@@ -168,86 +181,6 @@ function syncEditorValue(nextValue: string) {
 // --- LogchefQL Autocomplete ---
 type DepsType = NonNullable<ReturnType<typeof getMonacoDependencies>>;
 
-function isInsideOpenQuote(text: string): boolean {
-  let inDouble = false;
-  let inSingle = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    const prev = i > 0 ? text[i - 1] : "";
-    if (prev === "\\" && !(i >= 2 && text[i - 2] === "\\")) continue;
-    if (ch === '"' && !inSingle) inDouble = !inDouble;
-    if (ch === "'" && !inDouble) inSingle = !inSingle;
-  }
-  return inDouble || inSingle;
-}
-
-// Field names can contain word chars, hyphens, and dots (e.g., user-identifier, host.name)
-const FIELD_RE_SRC = "[\\w][\\w.-]*";
-const QUOTED_RE_SRC = '(?:"[^"]*"|' + "'[^']*'" + ')';
-const OP_RE_SRC = "(?:!=|!~|>=|<=|[=~><])";
-const CONDITION_RE_SRC = "(" + FIELD_RE_SRC + ")\\s*" + OP_RE_SRC + "\\s*(?:" + QUOTED_RE_SRC + "|\\S+?)";
-
-function parseLogchefQLContext(text: string, fields: string[]): {
-  suggest: "fields" | "operators" | "boolean" | "none";
-  key: string;
-  partial: string;
-} {
-  const trimmed = text.trimEnd();
-  if (!trimmed) return { suggest: "fields", key: "", partial: "" };
-
-  // 1. Inside an open quote → nothing
-  if (isInsideOpenQuote(text)) {
-    return { suggest: "none", key: "", partial: "" };
-  }
-
-  // 2. After "and " or "or " with trailing space → fields
-  if (/\b(?:and|or)\s+$/i.test(text)) {
-    return { suggest: "fields", key: "", partial: "" };
-  }
-
-  const condRe = new RegExp(CONDITION_RE_SRC + "$");
-  const fieldIdRe = new RegExp("(" + FIELD_RE_SRC + ")$");
-
-  // 3. Ends with a complete condition
-  if (condRe.test(trimmed)) {
-    const last = trimmed[trimmed.length - 1];
-    if (last === '"' || last === "'") return { suggest: "boolean", key: "", partial: "" };
-    if (/\s$/.test(text)) return { suggest: "boolean", key: "", partial: "" };
-    return { suggest: "none", key: "", partial: "" };
-  }
-
-  // 4. field + operator (no value yet): host= or host!=
-  const fieldOpRe = new RegExp("(" + FIELD_RE_SRC + ")\\s*" + OP_RE_SRC + "\\s*$");
-  const fieldOpMatch = trimmed.match(fieldOpRe);
-  if (fieldOpMatch) {
-    return { suggest: "none", key: fieldOpMatch[1], partial: "" };
-  }
-
-  // 5. Trailing word after space: could be partial field, partial boolean, or exact field
-  const tailRe = new RegExp("\\s(" + FIELD_RE_SRC + ")$");
-  const tailWordMatch = trimmed.match(tailRe);
-  if (tailWordMatch) {
-    const beforeWord = trimmed.slice(0, tailWordMatch.index!).trimEnd();
-    const endsWithCondition = condRe.test(beforeWord) || /\b(?:and|or)$/i.test(beforeWord);
-    if (endsWithCondition) {
-      if (fields.includes(tailWordMatch[1])) {
-        return { suggest: "operators", key: tailWordMatch[1], partial: "" };
-      }
-      return { suggest: "fields", key: "", partial: tailWordMatch[1] };
-    }
-  }
-
-  // 6. Bare word: typing a field name
-  const wordMatch = trimmed.match(fieldIdRe);
-  if (wordMatch) {
-    const word = wordMatch[1];
-    if (fields.includes(word)) return { suggest: "operators", key: word, partial: "" };
-    return { suggest: "fields", key: "", partial: word };
-  }
-
-  return { suggest: "fields", key: "", partial: "" };
-}
-
 function registerCompletionProvider() {
   const deps = getMonacoDependencies();
   if (!deps) return;
@@ -265,6 +198,8 @@ function registerCompletionProvider() {
 }
 
 function registerLogchefQLCompletionProvider(deps: DepsType) {
+  const fieldValuesStore = useFieldValuesStore();
+
   return deps.monaco.languages.registerCompletionItemProvider("logchefql", {
     provideCompletionItems: async (model, position) => {
       const textBeforeCursor = model.getValueInRange({
@@ -286,23 +221,28 @@ function registerLogchefQLCompletionProvider(deps: DepsType) {
       switch (ctx.suggest) {
         case "fields":
           return {
-            suggestions: fieldNames.value.map((name, i) => ({
-              label: name,
-              kind: deps.monaco.languages.CompletionItemKind.Field,
-              insertText: name,
-              range: replaceRange,
-              detail: props.schema[name]?.type || "Unknown",
-              sortText: String(i).padStart(3, "0"),
-              command: { id: "editor.action.triggerSuggest", title: "Re-trigger" },
-            })),
+            suggestions: fieldNames.value.map((name, i) => {
+              const fieldType = props.schema[name]?.type || "Unknown";
+              const summary = fieldValuesStore.getFieldSummary(props.sourceId, name);
+              return {
+                label: name,
+                kind: deps.monaco.languages.CompletionItemKind.Field,
+                insertText: name,
+                range: replaceRange,
+                detail: formatFieldDetail(fieldType, summary?.totalDistinct ?? null),
+                sortText: String(i).padStart(3, "0"),
+                command: { id: "editor.action.triggerSuggest", title: "Re-trigger" },
+              };
+            }),
           };
+
         case "operators": {
           const fieldType = props.schema[ctx.key]?.type?.toLowerCase() || "";
-          const isNumeric = fieldType.includes("int") || fieldType.includes("float");
+          const numeric = isNumericFieldType(fieldType);
           const ops = [
             { label: "=", detail: "equals" },
             { label: "!=", detail: "not equals" },
-            ...(!isNumeric ? [{ label: "~", detail: "regex match" }, { label: "!~", detail: "regex not match" }] : []),
+            ...(!numeric ? [{ label: "~", detail: "regex match" }, { label: "!~", detail: "regex not match" }] : []),
             { label: ">", detail: "greater than" },
             { label: "<", detail: "less than" },
             { label: ">=", detail: "greater or equal" },
@@ -310,12 +250,36 @@ function registerLogchefQLCompletionProvider(deps: DepsType) {
           ];
           return {
             suggestions: ops.map((op, i) => ({
-              label: op.label, kind: deps.monaco.languages.CompletionItemKind.Operator,
+              label: op.label, kind: deps.monaco.languages.CompletionItemKind.Text,
               insertText: op.label, range: insertRange,
               detail: op.detail, sortText: String(i).padStart(2, "0"),
+              command: { id: "editor.action.triggerSuggest", title: "Re-trigger" },
             })),
           };
         }
+
+        case "values": {
+          const fieldType = props.schema[ctx.key]?.type || "";
+          if (!isValueSuggestableField(fieldType)) {
+            return { suggestions: [] };
+          }
+
+          // Only use cached data from the sidebar — never make network calls during autocomplete.
+          // The sidebar populates the shared store when fields are loaded/expanded.
+          const summary = fieldValuesStore.getFieldSummary(props.sourceId, ctx.key);
+          if (!summary) {
+            return { suggestions: [] };
+          }
+
+          // Find cached values: scan store entries for this field + source
+          const cached = fieldValuesStore.findCachedValues(props.sourceId, ctx.key);
+          if (!cached || cached.values.length === 0) {
+            return { suggestions: [] };
+          }
+
+          return buildValueSuggestions(deps, cached.values, ctx, fieldType, position);
+        }
+
         case "boolean":
           return {
             suggestions: [
@@ -323,13 +287,46 @@ function registerLogchefQLCompletionProvider(deps: DepsType) {
               { label: "or", kind: deps.monaco.languages.CompletionItemKind.Keyword, insertText: "or ", range: replaceRange, sortText: "1" },
             ],
           };
+
         case "none":
         default:
           return { suggestions: [] };
       }
     },
-    triggerCharacters: [" "],
+    triggerCharacters: [" ", "=", "!", "~", ">", "<", '"', "'"],
   });
+}
+
+function buildValueSuggestions(
+  deps: DepsType,
+  values: Array<{ value: string; count: number }>,
+  ctx: { key: string; partial: string; quote: '"' | "'" | null; operator: string },
+  fieldType: string,
+  position: { lineNumber: number; column: number },
+): { suggestions: MonacoCompletionItem[] } {
+  const filtered = filterValuesByPartial(values, ctx.partial, fieldType);
+
+  const suggestions = filtered.map((v, i) => {
+    const insertText = buildValueInsertText(v.value, fieldType, ctx.quote);
+
+    return {
+      label: { label: v.value, description: formatCountShort(v.count) } as any,
+      kind: deps.monaco.languages.CompletionItemKind.Value,
+      insertText,
+      range: {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        // Replace from start of partial text to cursor
+        startColumn: position.column - ctx.partial.length,
+        endColumn: position.column,
+      } as MonacoRange,
+      sortText: String(i).padStart(3, "0"),
+      filterText: v.value,
+      detail: fieldType.replace(/LowCardinality\(([^)]+)\)/gi, '$1').replace(/Nullable\(([^)]+)\)/gi, '$1'),
+    } as MonacoCompletionItem;
+  });
+
+  return { suggestions };
 }
 
 function registerSQLCompletionProvider(deps: DepsType) {
@@ -487,13 +484,12 @@ watch(
 );
 
 watch(
-  () => props.schema,
+  () => Object.keys(props.schema ?? {}).join(","),
   () => {
     if (editorRef.value && !isDisposing.value) {
       registerCompletionProvider();
     }
-  },
-  { deep: true }
+  }
 );
 
 watch(

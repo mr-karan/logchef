@@ -233,7 +233,7 @@
         :data-placeholder="currentPlaceholder"
         data-mode="clickhouse-sql"
       >
-        <div v-if="sqlEditorRequested && sqlEditorLoadError" class="sql-editor-error">
+        <div v-if="sqlEditorLoadError" class="sql-editor-error">
           <p class="sql-editor-error__title">Unable to load SQL editor</p>
           <p class="sql-editor-error__description">{{ sqlEditorLoadError }}</p>
           <Button size="sm" variant="outline" @click="retrySqlEditorLoad">
@@ -243,12 +243,13 @@
 
         <component
           :is="SqlMonacoEditorComponent"
-          v-else-if="sqlEditorRequested && SqlMonacoEditorComponent"
+          v-else-if="SqlMonacoEditorComponent"
           ref="sqlEditorRef"
           :value="editorContent"
           :theme="theme"
           :language="props.activeMode"
           :schema="props.schema"
+          :team-id="props.teamId"
           :source-id="props.sourceId"
           :table-name="props.tableName"
           :is-executing="props.isExecuting"
@@ -260,7 +261,7 @@
           @focus-change="editorFocused = $event"
         />
 
-        <SqlMonacoSkeleton v-else-if="sqlEditorRequested && isSqlEditorLoading" />
+        <SqlMonacoSkeleton v-else-if="isSqlEditorLoading" />
       </div>
     </div>
 
@@ -329,7 +330,9 @@ import {
   nextTick,
   onBeforeUnmount,
   onMounted,
+  markRaw,
   ref,
+  shallowRef,
   watch,
   type ComponentPublicInstance,
 } from "vue";
@@ -448,13 +451,11 @@ const editorContent = ref(props.value || "");
 const editorFocused = ref(false);
 const validationError = ref<string | null>(null);
 const isEditorVisible = ref(true);
-const sqlEditorRequested = ref(true);
 const pendingSqlFocus = ref<boolean | null>(null);
 const isSqlEditorLoading = ref(false);
 const sqlEditorLoadError = ref<string | null>(null);
-const logchefqlInputRef = ref<HTMLTextAreaElement | null>(null);
 const sqlEditorRef = ref<SqlEditorPublicInstance | null>(null);
-const SqlMonacoEditorComponent = ref<Component | null>(null);
+const SqlMonacoEditorComponent = shallowRef<Component | null>(null);
 
 const { allVariables } = storeToRefs(variableStore);
 const showVariablesConfig = ref(false);
@@ -477,9 +478,9 @@ const currentPlaceholder = computed(() => {
 const editorHeight = computed(() => {
   const content = editorContent.value || "";
   const lines = (content.match(/\n/g) || []).length + 1;
-  const baseLineHeight = 21;
-  const padding = 16;
-  const minHeight = props.activeMode === "logchefql" ? 45 : 90;
+  const baseLineHeight = 20; // Must match Monaco lineHeight
+  const padding = 16; // Monaco top+bottom padding (8+8)
+  const minHeight = props.activeMode === "logchefql" ? 52 : 90;
   const maxHeight = 300;
   const calculatedHeight = padding + lines * baseLineHeight + (lines > 1 ? 0 : 4);
   return Math.min(maxHeight, Math.max(minHeight, calculatedHeight));
@@ -566,7 +567,6 @@ watch(
     validationError.value = null;
 
     if (newMode === "clickhouse-sql") {
-      sqlEditorRequested.value = true;
       void ensureSqlEditorLoaded();
     } else {
       isEditorVisible.value = true;
@@ -644,7 +644,6 @@ const submitQuery = async () => {
 };
 
 const focusEditor = (revealLastPosition = false) => {
-  sqlEditorRequested.value = true;
   pendingSqlFocus.value = revealLastPosition;
   void ensureSqlEditorLoaded();
 
@@ -680,7 +679,7 @@ async function ensureSqlEditorLoaded() {
 
   try {
     const module = (await loadSqlEditor()) as { default: Component };
-    SqlMonacoEditorComponent.value = module.default;
+    SqlMonacoEditorComponent.value = markRaw(module.default);
   } catch (error) {
     sqlEditorLoadError.value =
       error instanceof Error
@@ -695,28 +694,6 @@ function retrySqlEditorLoad() {
   SqlMonacoEditorComponent.value = null;
   void ensureSqlEditorLoaded();
 }
-
-const handleLogchefqlInput = (event: Event) => {
-  handleEditorChange((event.target as HTMLTextAreaElement).value);
-};
-
-const handleLogchefqlKeydown = (event: KeyboardEvent) => {
-  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-    event.preventDefault();
-    void submitQuery();
-    return;
-  }
-
-  if (
-    event.key === "Enter" &&
-    !event.ctrlKey &&
-    !event.metaKey &&
-    !event.altKey &&
-    !event.shiftKey
-  ) {
-    event.preventDefault();
-  }
-};
 
 const handleSqlEditorChange = (value: string) => {
   handleEditorChange(value);

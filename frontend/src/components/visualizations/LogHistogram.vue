@@ -118,12 +118,12 @@ function buildTooltipHtml(datum: HistogramChartRow): string {
   }
 
   const totalHtml = model.series.length > 1
-    ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:0.5rem;padding-bottom:0.5rem;border-bottom:1px solid hsl(var(--border));font-size:0.75rem;color:hsl(var(--muted-foreground));">
+    ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:0.5rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border);font-size:0.75rem;color:var(--muted-foreground);">
         <span>Total</span><strong>${totalCount.toLocaleString()}</strong>
        </div>`
     : "";
 
-  return `<div style="min-width:160px;padding:0.625rem 0.75rem;background:hsl(var(--popover));color:hsl(var(--popover-foreground));border-radius:0.5rem;border:1px solid hsl(var(--border));box-shadow:0 4px 12px rgba(0,0,0,0.12);font-size:0.8125rem;line-height:1.5;">
+  return `<div style="min-width:160px;padding:0.625rem 0.75rem;background:var(--popover);color:var(--popover-foreground);border-radius:0.5rem;border:1px solid var(--border);box-shadow:0 4px 12px rgba(0,0,0,0.12);font-size:0.8125rem;line-height:1.5;">
     <div style="margin-bottom:0.375rem;font-size:0.75rem;font-weight:600;">${timeLabel}</div>
     ${totalHtml}
     <div style="display:flex;flex-direction:column;gap:0.25rem;">${seriesHtml}</div>
@@ -286,7 +286,7 @@ function formatXAxisTick(value: number | Date) {
         >
           <VisAxis
             type="x"
-            :x="(row: HistogramChartRow) => row.ts"
+            :x="(row: HistogramChartRow) => row?.ts"
             :tick-line="false"
             :domain-line="false"
             :grid-line="false"
@@ -303,7 +303,7 @@ function formatXAxisTick(value: number | Date) {
             :num-ticks="5"
           />
           <VisStackedBar
-            :x="(row: HistogramChartRow) => row.ts"
+            :x="(row: HistogramChartRow) => row?.ts"
             :y="seriesAccessors"
             :color="seriesColors"
             :rounded-corners="4"
@@ -316,7 +316,7 @@ function formatXAxisTick(value: number | Date) {
           />
           <ChartTooltip />
           <ChartCrosshair
-            :x="(row: HistogramChartRow) => row.ts"
+            :x="(row: HistogramChartRow) => row?.ts"
             :y-stacked="seriesAccessors"
             :color="seriesColors"
             :template="tooltipTemplate"
@@ -347,8 +347,8 @@ function formatXAxisTick(value: number | Date) {
   position: relative;
   width: 100%;
   border-radius: 0.75rem;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
+  border: 1px solid var(--border);
+  background-color: var(--card);
   box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
   overflow: hidden;
   margin-bottom: 1rem;
@@ -363,7 +363,7 @@ function formatXAxisTick(value: number | Date) {
 }
 
 .log-histogram__subtitle {
-  color: hsl(var(--muted-foreground));
+  color: var(--muted-foreground);
   font-size: 0.75rem;
 }
 
@@ -401,18 +401,18 @@ function formatXAxisTick(value: number | Date) {
   align-items: center;
   justify-content: center;
   gap: 0.75rem;
-  background-color: hsl(var(--card) / 0.88);
+  background-color: color-mix(in oklch, var(--card) 88%, transparent);
   z-index: 10;
   font-size: 0.875rem;
-  color: hsl(var(--muted-foreground));
+  color: var(--muted-foreground);
   backdrop-filter: blur(2px);
 }
 
 .loading-spinner {
   width: 1.75rem;
   height: 1.75rem;
-  border: 3px solid hsl(var(--muted));
-  border-top-color: hsl(var(--primary));
+  border: 3px solid var(--muted);
+  border-top-color: var(--primary);
   border-radius: 9999px;
   animation: spinner 0.9s ease-in-out infinite;
 }
@@ -423,7 +423,7 @@ function formatXAxisTick(value: number | Date) {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: hsl(var(--muted-foreground));
+  color: var(--muted-foreground);
   font-size: 0.875rem;
   gap: 0.5rem;
   opacity: 0.8;

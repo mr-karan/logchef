@@ -239,10 +239,10 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
-		// Handle invalid query syntax errors specifically if core.QueryLogs returns them.
-		// if errors.Is(err, core.ErrInvalidQuery) ...
+		if clickhouse.IsValidationError(err) {
+			return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
+		}
 		s.log.Error("failed to query logs", "error", err, "source_id", sourceID)
-		// Pass the actual error message to the client for better debugging
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to query logs: %v", err), models.DatabaseErrorType)
 	}
 
@@ -765,6 +765,9 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 			s.log.Warn("field values request timed out", "source_id", sourceID, "field", fieldName, "timeout", FieldValuesTimeout)
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
 		}
+		if clickhouse.IsValidationError(err) {
+			return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
+		}
 		s.log.Error("failed to get field values", "error", err, "source_id", sourceID, "field", fieldName)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
 	}
@@ -863,6 +866,9 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 		if ctx.Err() == context.DeadlineExceeded {
 			s.log.Warn("field values request timed out", "source_id", sourceID, "timeout", FieldValuesTimeout)
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
+		}
+		if clickhouse.IsValidationError(err) {
+			return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
 		}
 		s.log.Error("failed to get field values", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)

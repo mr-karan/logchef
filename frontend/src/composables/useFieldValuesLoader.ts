@@ -1,5 +1,6 @@
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import { sourcesApi, type FieldValuesResult } from '@/api/sources'
+import { useFieldValuesStore } from '@/stores/exploreFieldValues'
 
 // Field loading states
 export type FieldStatus = 'idle' | 'loading' | 'loaded' | 'error' | 'click-to-load'
@@ -72,29 +73,41 @@ const isComplexType = (type: string): boolean => {
 }
 
 /**
- * Check if a field type is a priority field (LowCardinality or Enum)
- * These fields are always fast to query and should auto-load
- * Excludes complex types like Map, Array, Tuple even if they contain LowCardinality
+ * Check if a field type is a priority field that should auto-load.
+ * LowCardinality and Enum are always fast (dictionary-backed).
+ * Numeric types (UInt/Int/Float) are fast for GROUP BY even at high cardinality,
+ * and the backend has timeout protection.
  */
 export const isPriorityField = (type: string): boolean => {
-  // Exclude complex types first - they can't show distinct values
   if (isComplexType(type)) {
     return false
   }
-  return type.includes('LowCardinality') || type.startsWith('Enum')
+  if (type.includes('LowCardinality') || type.startsWith('Enum')) {
+    return true
+  }
+  // Numeric types — fast GROUP BY in ClickHouse
+  const lower = type.toLowerCase()
+    .replace(/lowcardinality\(([^)]+)\)/g, '$1')
+    .replace(/nullable\(([^)]+)\)/g, '$1')
+  return /^u?int\d/.test(lower) || /^float\d/.test(lower) || /^decimal/.test(lower)
 }
 
 /**
- * Check if a field type requires click-to-load (regular String fields)
- * These may be high cardinality and slow
+ * Check if a field type requires click-to-load.
+ * These may be high cardinality and slow, so they only load on user action.
+ * Includes String fields and numeric types (e.g., status UInt16 often has low actual cardinality).
  */
 export const isClickToLoadField = (type: string): boolean => {
-  // Exclude complex types that can't show distinct values
   if (isComplexType(type)) {
     return false
   }
-  // Regular String fields - require click to load
-  return type === 'String' || type === 'Nullable(String)'
+  const lower = type.toLowerCase()
+    .replace(/lowcardinality\(([^)]+)\)/g, '$1')
+    .replace(/nullable\(([^)]+)\)/g, '$1')
+  return lower === 'string' ||
+    /^u?int\d/.test(lower) ||
+    /^float\d/.test(lower) ||
+    /^decimal/.test(lower)
 }
 
 /**
@@ -160,6 +173,9 @@ export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<L
     const controller = new AbortController()
     abortControllers.value.set(fieldName, controller)
 
+    // Snapshot query before async work to avoid TOCTOU race
+    const logchefql = opts.getLogchefQL()
+
     // Set loading state immediately
     setFieldState(fieldName, { status: 'loading' })
 
@@ -179,7 +195,7 @@ export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<L
             timeRange.endTime,
             opts.timezone,
             opts.limit || 10,
-            opts.getLogchefQL(),
+            logchefql,
             controller.signal
           )
 
@@ -189,6 +205,19 @@ export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<L
               status: 'loaded',
               values: response.data
             })
+
+            // Populate the shared store for editor autocomplete
+            try {
+              const store = useFieldValuesStore()
+              store.populateFromFetch(
+                opts.teamId!, opts.sourceId!, fieldName,
+                timeRange.startTime, timeRange.endTime,
+                logchefql || '',
+                response.data,
+              )
+            } catch {
+              // Store not available yet, ignore
+            }
           }
         } catch (error: any) {
           // Ignore abort errors silently

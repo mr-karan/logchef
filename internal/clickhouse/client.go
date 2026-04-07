@@ -923,15 +923,23 @@ func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table str
 	endTimeStr := params.EndTime.UTC().Format("2006-01-02 15:04:05")
 	additionalConditions := buildLogchefQLConditionsSQL(params.LogchefQL)
 
+	quotedField := quoteIdentifier(params.FieldName)
+
+	// For string-like fields, exclude empty strings. For numeric fields, no such filter.
+	emptyFilter := fmt.Sprintf("%s != ''", quotedField)
+	if isNumericColumnType(params.FieldType) {
+		emptyFilter = "1"
+	}
+
 	query := fmt.Sprintf(`
 		SELECT %s AS value, count() AS cnt
 		FROM %s.%s
 		PREWHERE %s BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')
-		WHERE %s != ''%s
+		WHERE %s%s
 		GROUP BY value ORDER BY cnt DESC LIMIT %d
-	`, params.FieldName, database, table,
+	`, quotedField, database, table,
 		params.TimestampField, startTimeStr, timezone, endTimeStr, timezone,
-		params.FieldName, additionalConditions, limit)
+		emptyFilter, additionalConditions, limit)
 
 	result, err := c.QueryWithTimeout(ctx, query, timeoutSeconds)
 	if err != nil {
@@ -1041,14 +1049,20 @@ func extractInt64FromRow(row map[string]any, key string) (int64, bool) {
 }
 
 func (c *Client) queryTotalDistinct(ctx context.Context, database, table string, params FieldValuesParams, startTimeStr, endTimeStr, timezone, additionalConditions string, timeoutSeconds *int) int64 {
+	quotedField := quoteIdentifier(params.FieldName)
+	emptyFilter := fmt.Sprintf("%s != ''", quotedField)
+	if isNumericColumnType(params.FieldType) {
+		emptyFilter = "1"
+	}
+
 	query := fmt.Sprintf(`
 		SELECT uniq(%s) AS total
 		FROM %s.%s
 		PREWHERE %s BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')
-		WHERE %s != ''%s
-	`, params.FieldName, database, table,
+		WHERE %s%s
+	`, quotedField, database, table,
 		params.TimestampField, startTimeStr, timezone, endTimeStr, timezone,
-		params.FieldName, additionalConditions)
+		emptyFilter, additionalConditions)
 
 	result, err := c.QueryWithTimeout(ctx, query, timeoutSeconds)
 	if err != nil || len(result.Logs) == 0 {
@@ -1078,11 +1092,30 @@ type AllFieldValuesParams struct {
 	LogchefQL      string    // Optional: LogchefQL query string - parsed on backend for proper SQL generation
 }
 
+// isNumericColumnType returns true for integer, float, and decimal types.
+// Handles any nesting order of LowCardinality/Nullable wrappers.
+func isNumericColumnType(colType string) bool {
+	clean := strings.ToLower(colType)
+	// Strip all wrapper layers regardless of order
+	for {
+		prev := clean
+		clean = strings.TrimPrefix(clean, "lowcardinality(")
+		clean = strings.TrimPrefix(clean, "nullable(")
+		clean = strings.TrimSuffix(clean, ")")
+		if clean == prev {
+			break
+		}
+	}
+
+	return strings.HasPrefix(clean, "uint") ||
+		strings.HasPrefix(clean, "int") ||
+		strings.HasPrefix(clean, "float") ||
+		strings.HasPrefix(clean, "decimal")
+}
+
 // isFilterableColumnType returns true if the column type is suitable for distinct value queries.
-// LowCardinality fields are always fast. String fields are included with timeout protection.
+// LowCardinality fields are always fast. String and numeric fields are included with timeout protection.
 func isFilterableColumnType(colType string) bool {
-	// Exclude complex types that can't be compared to empty string
-	// Map, Array, Tuple, JSON types are not suitable for simple distinct value queries
 	lowerType := strings.ToLower(colType)
 	if strings.HasPrefix(lowerType, "map(") ||
 		strings.HasPrefix(lowerType, "array(") ||
@@ -1092,18 +1125,24 @@ func isFilterableColumnType(colType string) bool {
 		return false
 	}
 
-	// LowCardinality fields - always fast due to dictionary
+	// DateTime types are not useful for distinct value filtering
+	if strings.HasPrefix(lowerType, "datetime") || lowerType == "date" || lowerType == "date32" {
+		return false
+	}
+
 	if strings.Contains(colType, "LowCardinality") {
 		return true
 	}
 
-	// Regular String fields - may be slow for high cardinality, but we use timeout
 	if colType == "String" || colType == "Nullable(String)" {
 		return true
 	}
 
-	// Enum types - always fast, finite set of values
 	if strings.HasPrefix(colType, "Enum") {
+		return true
+	}
+
+	if isNumericColumnType(colType) {
 		return true
 	}
 
