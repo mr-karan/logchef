@@ -1,48 +1,44 @@
-import { createVNode, render, type Component } from "vue";
-import type { ChartConfig } from "./types";
+import type { ChartConfig } from "."
+import { isClient } from "@vueuse/core"
+import { useId } from "reka-ui"
+import { h, render } from "vue"
 
-export function componentToString<TProps extends Record<string, unknown>>(
-  config: ChartConfig,
-  component: Component,
-  baseProps?: TProps,
-) {
-  const cache = new Map<string, string>();
+// Simple cache using a Map to store serialized object keys
+const cache = new Map<string, string>()
 
-  return (
-    payload: unknown,
-    x: number | Date,
-    data?: unknown[],
-    leftNearestDatumIndex?: number,
-  ) => {
-    if (typeof document === "undefined") {
-      return "";
-    }
+// Convert object to a consistent string key
+function serializeKey(key: Record<string, any>): string {
+  return JSON.stringify(key, Object.keys(key).sort())
+}
 
-    const cacheKey = JSON.stringify({ payload, x, leftNearestDatumIndex });
-    const cached = cache.get(cacheKey);
-    if (cached) {
-      return cached;
-    }
+interface Constructor<P = any> {
+  __isFragment?: never
+  __isTeleport?: never
+  __isSuspense?: never
+  new (...args: any[]): {
+    $props: P
+  }
+}
 
-    const container = document.createElement("div");
-    const vnode = createVNode(component as never, {
-      ...(baseProps ?? {}),
-      config,
-      payload,
-      x,
-      data,
-      leftNearestDatumIndex,
-    });
+export function componentToString<P>(config: ChartConfig, component: Constructor<P>, props?: P) {
+  if (!isClient)
+    return
 
-    render(vnode, container);
-    const html = container.innerHTML;
-    render(null, container);
+  // This function will be called once during mount lifecycle
+  const id = useId()
 
-    if (cache.size > 200) {
-      cache.clear();
-    }
+  // https://unovis.dev/docs/auxiliary/Crosshair#component-props
+  return (_data: any, x: number | Date) => {
+    const data = "data" in _data ? _data.data : _data
+    const serializedKey = `${id}-${serializeKey(data)}`
+    const cachedContent = cache.get(serializedKey)
+    if (cachedContent)
+      return cachedContent
 
-    cache.set(cacheKey, html);
-    return html;
-  };
+    const vnode = h<unknown>(component, { ...props, payload: data, config, x })
+    const div = document.createElement("div")
+    render(vnode, div)
+    cache.set(serializedKey, div.innerHTML)
+    return div.innerHTML
+  }
 }

@@ -226,22 +226,7 @@
     <!-- Query Editor Container -->
     <div class="editor-wrapper" :class="{ 'is-focused': editorFocused }"
       v-show="isEditorVisible || props.activeMode === 'logchefql'">
-      <textarea
-        v-if="props.activeMode === 'logchefql'"
-        ref="logchefqlInputRef"
-        class="query-input"
-        :value="editorContent"
-        :placeholder="currentPlaceholder"
-        :style="{ height: `${editorHeight}px` }"
-        spellcheck="false"
-        @input="handleLogchefqlInput"
-        @keydown="handleLogchefqlKeydown"
-        @focus="editorFocused = true"
-        @blur="editorFocused = false"
-      />
-
       <div
-        v-else
         class="editor-container"
         :class="{ 'is-empty': isEditorEmpty }"
         :style="{ height: `${editorHeight}px` }"
@@ -262,6 +247,7 @@
           ref="sqlEditorRef"
           :value="editorContent"
           :theme="theme"
+          :language="props.activeMode"
           :schema="props.schema"
           :source-id="props.sourceId"
           :table-name="props.tableName"
@@ -462,7 +448,7 @@ const editorContent = ref(props.value || "");
 const editorFocused = ref(false);
 const validationError = ref<string | null>(null);
 const isEditorVisible = ref(true);
-const sqlEditorRequested = ref(props.activeMode === "clickhouse-sql");
+const sqlEditorRequested = ref(true);
 const pendingSqlFocus = ref<boolean | null>(null);
 const isSqlEditorLoading = ref(false);
 const sqlEditorLoadError = ref<string | null>(null);
@@ -658,36 +644,17 @@ const submitQuery = async () => {
 };
 
 const focusEditor = (revealLastPosition = false) => {
-  if (props.activeMode === "clickhouse-sql") {
-    sqlEditorRequested.value = true;
-    pendingSqlFocus.value = revealLastPosition;
-    void ensureSqlEditorLoaded();
-
-    nextTick(() => {
-      if (!sqlEditorRef.value) {
-        return;
-      }
-
-      sqlEditorRef.value.focus(revealLastPosition);
-      pendingSqlFocus.value = null;
-    });
-    return;
-  }
+  sqlEditorRequested.value = true;
+  pendingSqlFocus.value = revealLastPosition;
+  void ensureSqlEditorLoaded();
 
   nextTick(() => {
-    const input = logchefqlInputRef.value;
-    if (!input) {
+    if (!sqlEditorRef.value) {
       return;
     }
 
-    input.focus();
-
-    if (!revealLastPosition) {
-      return;
-    }
-
-    const cursorPosition = input.value.length;
-    input.setSelectionRange(cursorPosition, cursorPosition);
+    sqlEditorRef.value.focus(revealLastPosition);
+    pendingSqlFocus.value = null;
   });
 };
 
@@ -767,6 +734,7 @@ const handleSqlEditorReady = () => {
 
 onMounted(() => {
   document.addEventListener('keydown', handleEscapeKey);
+  void ensureSqlEditorLoaded();
 });
 
 onBeforeUnmount(() => {

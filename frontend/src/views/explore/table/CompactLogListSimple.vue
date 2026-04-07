@@ -489,6 +489,7 @@ const handleClick = (event: MouseEvent, rowId: string) => {
 </template>
 
 <style scoped>
+@reference "@/assets/index.css";
 /* Ensure consistent spacing */
 .font-mono {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Monaco, Consolas, "Liberation Mono", "Courier New", monospace;

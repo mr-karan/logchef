@@ -7,10 +7,6 @@ import {
   SQL_TYPES,
 } from "./clickhouse-sql/language";
 import {
-  registerEnhancedLogChefQL,
-  updateLogChefQLFields,
-  updateLogChefQLFieldsFromSchema,
-  updateLogChefQLFieldsFromSchemaAndSamples,
   type FieldInfo,
   type ClickHouseColumn
 } from "./logchefql-minimal";
@@ -178,8 +174,6 @@ export function initMonacoSetup() {
   // Register languages (ensure this runs only once)
   if (!monaco.languages.getLanguages().some(lang => lang.id === 'logchefql')) {
     registerLogchefQL();
-    // Register enhanced autocomplete after basic language setup
-    registerEnhancedLogChefQL();
   }
   if (!monaco.languages.getLanguages().some(lang => lang.id === 'clickhouse-sql')) {
     registerClickhouseSQL();
@@ -372,24 +366,6 @@ function pruneModelCache() {
     }
     globalModelCache.delete(key);
   }
-}
-
-// Update LogChefQL autocomplete fields
-export function updateLogChefQLAutocompleteFields(fields: FieldInfo[]) {
-  updateLogChefQLFields(fields);
-}
-
-// Update LogChefQL autocomplete fields from ClickHouse schema
-export function updateLogChefQLFieldsFromClickHouseSchema(columns: ClickHouseColumn[]) {
-  updateLogChefQLFieldsFromSchema(columns);
-}
-
-// Update LogChefQL autocomplete fields from schema and log samples
-export function updateLogChefQLFieldsFromSchemaAndLogSamples(
-  columns: ClickHouseColumn[],
-  logSampleFields: FieldInfo[] = []
-) {
-  updateLogChefQLFieldsFromSchemaAndSamples(columns, logSampleFields);
 }
 
 // Export types for external use

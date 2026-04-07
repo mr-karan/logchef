@@ -1,75 +1,59 @@
+<script lang="ts">
+import type { HTMLAttributes } from "vue"
+import type { ChartConfig } from "."
+import { useId } from "reka-ui"
+import { computed, toRefs } from "vue"
+import { cn } from "@/lib/utils"
+import { provideChartContext } from "."
+import ChartStyle from "./ChartStyle.vue"
+</script>
+
 <script setup lang="ts">
-import { computed, provide, toRef, useId } from "vue";
-import { cn } from "@/lib/utils";
-import ChartStyle from "./ChartStyle.vue";
-import { chartContextKey, type ChartConfig } from "./types";
+const props = defineProps<{
+  id?: HTMLAttributes["id"]
+  class?: HTMLAttributes["class"]
+  config: ChartConfig
+  cursor?: boolean
+}>()
 
-interface ChartContainerProps {
-  id?: string;
-  config: ChartConfig;
-  class?: string;
-  cursor?: boolean;
-}
+defineSlots<{
+  default: {
+    id: string
+    config: ChartConfig
+  }
+}>()
 
-const props = withDefaults(defineProps<ChartContainerProps>(), {
-  id: undefined,
-  class: undefined,
-  cursor: true,
-});
+const { config } = toRefs(props)
+const uniqueId = useId()
+const chartId = computed(() => `chart-${props.id || uniqueId.replace(/:/g, "")}`)
 
-const generatedId = useId();
-const containerId = computed(() => props.id ?? `chart-${generatedId}`);
-const configRef = toRef(props, "config");
-
-provide(chartContextKey, {
-  id: containerId.value,
-  config: configRef,
-});
-
-const containerStyle = computed(() => ({
-  "--vis-tooltip-padding": "0px",
-  "--vis-tooltip-background-color": "hsl(var(--popover))",
-  "--vis-tooltip-border-color": "hsl(var(--border))",
-  "--vis-tooltip-text-color": "hsl(var(--popover-foreground))",
-  "--vis-tooltip-shadow-color": "rgba(0, 0, 0, 0.12)",
-  "--vis-tooltip-backdrop-filter": "blur(12px)",
-  "--vis-crosshair-circle-stroke-color": "hsl(var(--border))",
-  "--vis-crosshair-line-stroke-width": "1",
-  "--vis-font-family": "Inter, ui-sans-serif, system-ui, sans-serif",
-  cursor: props.cursor ? "default" : "inherit",
-}));
+provideChartContext({
+  id: uniqueId,
+  config,
+})
 </script>
 
 <template>
   <div
-    :data-chart="containerId"
-    :class="cn('chart-container relative flex w-full min-w-0 flex-col justify-center text-xs', props.class)"
-    :style="containerStyle"
+    data-slot="chart"
+    :data-chart="chartId"
+    :class="cn(
+      `[&_.tick_text]:!fill-muted-foreground [&_.tick_line]:!stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border flex flex-col aspect-video justify-center text-xs [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-sector]:outline-hidden [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-surface]:outline-hidden [&_[data-vis-xy-container]]:h-full [&_[data-vis-single-container]]:h-full h-full [&_[data-vis-xy-container]]:w-full [&_[data-vis-single-container]]:w-full w-full `,
+      props.class,
+    )"
+    :style="{
+      '--vis-tooltip-padding': '0px',
+      '--vis-tooltip-background-color': 'transparent',
+      '--vis-tooltip-border-color': 'transparent',
+      '--vis-tooltip-text-color': 'none',
+      '--vis-tooltip-shadow-color': 'none',
+      '--vis-tooltip-backdrop-filter': 'none',
+      '--vis-crosshair-circle-stroke-color': '#0000',
+      '--vis-crosshair-line-stroke-width': cursor ? '1px' : '0px',
+      '--vis-font-family': 'var(--font-sans)',
+    }"
   >
-    <ChartStyle :id="containerId" :config="props.config" />
-    <slot :id="containerId" :config="props.config" />
+    <slot :id="uniqueId" :config="config" />
+    <ChartStyle :id="chartId" />
   </div>
 </template>
-
-<style scoped>
-.chart-container :deep(.vis-tooltip) {
-  border-radius: 0.75rem;
-  border: 1px solid hsl(var(--border));
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
-  overflow: hidden;
-}
-
-.chart-container :deep(.vis-axis-grid-line) {
-  stroke: hsl(var(--border));
-  stroke-dasharray: 3 3;
-  opacity: 0.7;
-}
-
-.chart-container :deep(.vis-axis-tick text) {
-  fill: hsl(var(--muted-foreground));
-}
-
-.chart-container :deep(.vis-crosshair-line) {
-  stroke: hsl(var(--border));
-}
-</style>

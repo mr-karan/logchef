@@ -10,7 +10,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Calendar } from "@/components/ui/calendar";
 import { CalendarIcon, Clock, ChevronDown, Search } from "lucide-vue-next";
-import type { DateRange } from "radix-vue";
+import type { DateRange } from "reka-ui";
 import {
   getLocalTimeZone,
   now,

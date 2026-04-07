@@ -692,7 +692,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
             <!-- Add v-if="table" here -->
             <div v-if="table && table.getRowModel().rows?.length" class="absolute inset-0">
                 <div
-                    class="w-full h-full overflow-auto scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent transition-opacity duration-150">
+                    class="w-full h-full overflow-auto transition-opacity duration-150" style="scrollbar-width: thin; scrollbar-color: rgba(156, 163, 175, 0.5) transparent;">
                     <table ref="tableRef" class="table-fixed border-separate border-spacing-0 text-sm shadow-sm"
                         :data-resizing="isResizing">
                         <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">

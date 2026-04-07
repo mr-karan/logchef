@@ -1,7 +1,6 @@
 import { fileURLToPath, URL } from "node:url";
 import vue from "@vitejs/plugin-vue";
-import autoprefixer from "autoprefixer";
-import tailwind from "tailwindcss";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, loadEnv, type Plugin, type UserConfig } from "rolldown-vite";
 import { resolve } from "path";
 
@@ -17,6 +16,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
   // Conditionally load visualizer only when analyzing
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const plugins: Plugin[] = [
+    tailwindcss() as any,
     vue() as any,
     {
       name: "strip-monaco-entry-preloads",
@@ -44,9 +44,6 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
 
   return {
     css: {
-      postcss: {
-        plugins: [tailwind(), autoprefixer()],
-      },
       devSourcemap: false,
     },
     plugins,
@@ -89,9 +86,8 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
                 id.includes("node_modules/vue-router")) {
               return "vue-vendor";
             }
-            // UI libraries - radix, reka, etc.
-            if (id.includes("radix-vue") || 
-                id.includes("reka-ui") ||
+            // UI libraries - reka, etc.
+            if (id.includes("reka-ui") ||
                 id.includes("vaul-vue")) {
               return "ui-vendor";
             }

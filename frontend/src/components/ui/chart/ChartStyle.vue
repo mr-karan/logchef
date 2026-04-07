@@ -1,48 +1,42 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import type { ChartConfig } from "./types";
+import type { HTMLAttributes } from "vue"
+import { Primitive } from "reka-ui"
+import { computed } from "vue"
+import { THEMES, useChart } from "."
 
-interface ChartStyleProps {
-  id: string;
-  config: ChartConfig;
-}
+defineProps<{
+  id?: HTMLAttributes["id"]
+}>()
 
-const props = defineProps<ChartStyleProps>();
+const { config } = useChart()
 
-const styleText = computed(() => {
-  const lightDeclarations: string[] = [];
-  const darkDeclarations: string[] = [];
-
-  for (const [key, item] of Object.entries(props.config)) {
-    if (item.theme) {
-      lightDeclarations.push(`--color-${key}: ${item.theme.light};`);
-      darkDeclarations.push(`--color-${key}: ${item.theme.dark};`);
-      continue;
-    }
-
-    if (item.color) {
-      lightDeclarations.push(`--color-${key}: ${item.color};`);
-      darkDeclarations.push(`--color-${key}: ${item.color};`);
-    }
-  }
-
-  if (lightDeclarations.length === 0 && darkDeclarations.length === 0) {
-    return "";
-  }
-
-  const selector = `[data-chart="${props.id}"]`;
-
-  return [
-    `${selector} { ${lightDeclarations.join(" ")} }`,
-    darkDeclarations.length > 0 ? `.dark ${selector} { ${darkDeclarations.join(" ")} }` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-});
+const colorConfig = computed(() => {
+  return Object.entries(config.value).filter(
+    ([, config]) => config.theme || config.color,
+  )
+})
 </script>
 
 <template>
-  <component :is="'style'" v-if="styleText">
-    {{ styleText }}
-  </component>
+  <Primitive
+    v-if="colorConfig.length"
+    as="style"
+  >
+    {{ Object.entries(THEMES)
+      .map(
+        ([theme, prefix]) => `
+${prefix} [data-chart=${id}] {
+${colorConfig
+  .map(([key, itemConfig]) => {
+    const color
+      = itemConfig.theme?.[theme as keyof typeof itemConfig.theme]
+      || itemConfig.color
+    return color ? `  --color-${key}: ${color};` : null
+  })
+        .join("\n")}
+}
+`,
+      )
+      .join("\n") }}
+  </Primitive>
 </template>

@@ -4,7 +4,7 @@
     v-if="isMonacoReady && MonacoEditorComponent"
     v-model:value="editorValue"
     :theme="props.theme"
-    language="clickhouse-sql"
+    :language="props.language"
     :options="monacoOptions"
     class="h-full w-full"
     @mount="handleMount"
@@ -27,6 +27,7 @@ import { SQL_KEYWORDS } from "@/utils/clickhouse-sql";
 interface SqlMonacoEditorProps {
   value: string;
   theme: string;
+  language: "clickhouse-sql" | "logchefql";
   schema: Record<string, { type: string }>;
   sourceId: number;
   tableName: string;
@@ -64,7 +65,7 @@ const loadError = ref<string | null>(null);
 
 const fieldNames = computed(() => Object.keys(props.schema ?? {}));
 const modelCacheKey = computed(
-  () => `clickhouse-sql-${props.sourceId ?? "default"}`
+  () => `${props.language}-${props.sourceId ?? "default"}`
 );
 
 const monacoOptions = computed(() => {
@@ -164,78 +165,210 @@ function syncEditorValue(nextValue: string) {
   });
 }
 
+// --- LogchefQL Autocomplete ---
+type DepsType = NonNullable<ReturnType<typeof getMonacoDependencies>>;
+
+function isInsideOpenQuote(text: string): boolean {
+  let inDouble = false;
+  let inSingle = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const prev = i > 0 ? text[i - 1] : "";
+    if (prev === "\\" && !(i >= 2 && text[i - 2] === "\\")) continue;
+    if (ch === '"' && !inSingle) inDouble = !inDouble;
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+  }
+  return inDouble || inSingle;
+}
+
+// Field names can contain word chars, hyphens, and dots (e.g., user-identifier, host.name)
+const FIELD_RE_SRC = "[\\w][\\w.-]*";
+const QUOTED_RE_SRC = '(?:"[^"]*"|' + "'[^']*'" + ')';
+const OP_RE_SRC = "(?:!=|!~|>=|<=|[=~><])";
+const CONDITION_RE_SRC = "(" + FIELD_RE_SRC + ")\\s*" + OP_RE_SRC + "\\s*(?:" + QUOTED_RE_SRC + "|\\S+?)";
+
+function parseLogchefQLContext(text: string, fields: string[]): {
+  suggest: "fields" | "operators" | "boolean" | "none";
+  key: string;
+  partial: string;
+} {
+  const trimmed = text.trimEnd();
+  if (!trimmed) return { suggest: "fields", key: "", partial: "" };
+
+  // 1. Inside an open quote → nothing
+  if (isInsideOpenQuote(text)) {
+    return { suggest: "none", key: "", partial: "" };
+  }
+
+  // 2. After "and " or "or " with trailing space → fields
+  if (/\b(?:and|or)\s+$/i.test(text)) {
+    return { suggest: "fields", key: "", partial: "" };
+  }
+
+  const condRe = new RegExp(CONDITION_RE_SRC + "$");
+  const fieldIdRe = new RegExp("(" + FIELD_RE_SRC + ")$");
+
+  // 3. Ends with a complete condition
+  if (condRe.test(trimmed)) {
+    const last = trimmed[trimmed.length - 1];
+    if (last === '"' || last === "'") return { suggest: "boolean", key: "", partial: "" };
+    if (/\s$/.test(text)) return { suggest: "boolean", key: "", partial: "" };
+    return { suggest: "none", key: "", partial: "" };
+  }
+
+  // 4. field + operator (no value yet): host= or host!=
+  const fieldOpRe = new RegExp("(" + FIELD_RE_SRC + ")\\s*" + OP_RE_SRC + "\\s*$");
+  const fieldOpMatch = trimmed.match(fieldOpRe);
+  if (fieldOpMatch) {
+    return { suggest: "none", key: fieldOpMatch[1], partial: "" };
+  }
+
+  // 5. Trailing word after space: could be partial field, partial boolean, or exact field
+  const tailRe = new RegExp("\\s(" + FIELD_RE_SRC + ")$");
+  const tailWordMatch = trimmed.match(tailRe);
+  if (tailWordMatch) {
+    const beforeWord = trimmed.slice(0, tailWordMatch.index!).trimEnd();
+    const endsWithCondition = condRe.test(beforeWord) || /\b(?:and|or)$/i.test(beforeWord);
+    if (endsWithCondition) {
+      if (fields.includes(tailWordMatch[1])) {
+        return { suggest: "operators", key: tailWordMatch[1], partial: "" };
+      }
+      return { suggest: "fields", key: "", partial: tailWordMatch[1] };
+    }
+  }
+
+  // 6. Bare word: typing a field name
+  const wordMatch = trimmed.match(fieldIdRe);
+  if (wordMatch) {
+    const word = wordMatch[1];
+    if (fields.includes(word)) return { suggest: "operators", key: word, partial: "" };
+    return { suggest: "fields", key: "", partial: word };
+  }
+
+  return { suggest: "fields", key: "", partial: "" };
+}
+
 function registerCompletionProvider() {
   const deps = getMonacoDependencies();
-  if (!deps) {
-    return;
-  }
+  if (!deps) return;
 
   if (completionProvider.value) {
     completionProvider.value.dispose();
     completionProvider.value = null;
   }
 
-  completionProvider.value = deps.monaco.languages.registerCompletionItemProvider(
-    "clickhouse-sql",
-    {
-      provideCompletionItems: async (model, position) => {
-        const wordInfo = model.getWordUntilPosition(position);
-        const range: MonacoRange = {
-          startLineNumber: position.lineNumber,
-          endLineNumber: position.lineNumber,
-          startColumn: wordInfo.startColumn,
-          endColumn: wordInfo.endColumn,
-        };
+  if (props.language === "logchefql") {
+    completionProvider.value = registerLogchefQLCompletionProvider(deps);
+  } else {
+    completionProvider.value = registerSQLCompletionProvider(deps);
+  }
+}
 
-        const lineStartToPosition: MonacoRange = {
-          startLineNumber: position.lineNumber,
-          endLineNumber: position.lineNumber,
-          startColumn: 1,
-          endColumn: position.column,
-        };
+function registerLogchefQLCompletionProvider(deps: DepsType) {
+  return deps.monaco.languages.registerCompletionItemProvider("logchefql", {
+    provideCompletionItems: async (model, position) => {
+      const textBeforeCursor = model.getValueInRange({
+        startLineNumber: 1, startColumn: 1,
+        endLineNumber: position.lineNumber, endColumn: position.column,
+      });
+      const wordInfo = model.getWordUntilPosition(position);
+      const replaceRange: MonacoRange = {
+        startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
+        startColumn: wordInfo.startColumn, endColumn: wordInfo.endColumn,
+      };
+      const insertRange: MonacoRange = {
+        startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
+        startColumn: position.column, endColumn: position.column,
+      };
 
-        const textBeforeCursor = model.getValueInRange(lineStartToPosition);
-        let suggestions: MonacoCompletionItem[] = [];
+      const ctx = parseLogchefQLContext(textBeforeCursor, fieldNames.value);
 
-        if (/\bFROM\s+$/i.test(textBeforeCursor) && props.tableName) {
-          suggestions.push({
-            label: props.tableName,
-            kind: deps.monaco.languages.CompletionItemKind.Folder,
-            insertText: props.tableName,
-            range,
-            detail: "Current log table",
-          });
-        }
-
-        if (fieldNames.value.length > 0) {
-          suggestions = suggestions.concat(
-            fieldNames.value.map((field) => ({
-              label: field,
+      switch (ctx.suggest) {
+        case "fields":
+          return {
+            suggestions: fieldNames.value.map((name, i) => ({
+              label: name,
               kind: deps.monaco.languages.CompletionItemKind.Field,
-              insertText: field,
-              range,
-              detail: props.schema[field]?.type || "unknown",
-            }))
-          );
+              insertText: name,
+              range: replaceRange,
+              detail: props.schema[name]?.type || "Unknown",
+              sortText: String(i).padStart(3, "0"),
+              command: { id: "editor.action.triggerSuggest", title: "Re-trigger" },
+            })),
+          };
+        case "operators": {
+          const fieldType = props.schema[ctx.key]?.type?.toLowerCase() || "";
+          const isNumeric = fieldType.includes("int") || fieldType.includes("float");
+          const ops = [
+            { label: "=", detail: "equals" },
+            { label: "!=", detail: "not equals" },
+            ...(!isNumeric ? [{ label: "~", detail: "regex match" }, { label: "!~", detail: "regex not match" }] : []),
+            { label: ">", detail: "greater than" },
+            { label: "<", detail: "less than" },
+            { label: ">=", detail: "greater or equal" },
+            { label: "<=", detail: "less or equal" },
+          ];
+          return {
+            suggestions: ops.map((op, i) => ({
+              label: op.label, kind: deps.monaco.languages.CompletionItemKind.Operator,
+              insertText: op.label, range: insertRange,
+              detail: op.detail, sortText: String(i).padStart(2, "0"),
+            })),
+          };
         }
+        case "boolean":
+          return {
+            suggestions: [
+              { label: "and", kind: deps.monaco.languages.CompletionItemKind.Keyword, insertText: "and ", range: replaceRange, sortText: "0" },
+              { label: "or", kind: deps.monaco.languages.CompletionItemKind.Keyword, insertText: "or ", range: replaceRange, sortText: "1" },
+            ],
+          };
+        case "none":
+        default:
+          return { suggestions: [] };
+      }
+    },
+    triggerCharacters: [" "],
+  });
+}
 
-        const typedPrefix = wordInfo.word.toUpperCase();
-        suggestions = suggestions.concat(
-          SQL_KEYWORDS.filter((keyword) => keyword.startsWith(typedPrefix)).map(
-            (keyword) => ({
-              label: keyword,
-              kind: deps.monaco.languages.CompletionItemKind.Keyword,
-              insertText: `${keyword} `,
-              range,
-            })
-          )
-        );
+function registerSQLCompletionProvider(deps: DepsType) {
+  return deps.monaco.languages.registerCompletionItemProvider("clickhouse-sql", {
+    provideCompletionItems: async (model, position) => {
+      const wordInfo = model.getWordUntilPosition(position);
+      const range: MonacoRange = {
+        startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
+        startColumn: wordInfo.startColumn, endColumn: wordInfo.endColumn,
+      };
+      const textBeforeCursor = model.getValueInRange({
+        startLineNumber: position.lineNumber, startColumn: 1,
+        endLineNumber: position.lineNumber, endColumn: position.column,
+      });
+      let suggestions: MonacoCompletionItem[] = [];
 
-        return { suggestions };
-      },
-      triggerCharacters: [" ", "\n", ".", "(", ",", "=", ">", "<", "!"],
-    }
-  );
+      if (/\bFROM\s+$/i.test(textBeforeCursor) && props.tableName) {
+        suggestions.push({
+          label: props.tableName, kind: deps.monaco.languages.CompletionItemKind.Folder,
+          insertText: props.tableName, range, detail: "Current log table",
+        });
+      }
+      if (fieldNames.value.length > 0) {
+        suggestions = suggestions.concat(fieldNames.value.map((field) => ({
+          label: field, kind: deps.monaco.languages.CompletionItemKind.Field,
+          insertText: field, range, detail: props.schema[field]?.type || "unknown",
+        })));
+      }
+      const typedPrefix = wordInfo.word.toUpperCase();
+      suggestions = suggestions.concat(
+        SQL_KEYWORDS.filter((kw) => kw.startsWith(typedPrefix)).map((kw) => ({
+          label: kw, kind: deps.monaco.languages.CompletionItemKind.Keyword,
+          insertText: kw + " ", range,
+        }))
+      );
+      return { suggestions };
+    },
+    triggerCharacters: [" ", "\n", ".", "(", ","],
+  });
 }
 
 async function initializeEditor(editor: MonacoEditor) {
@@ -248,7 +381,7 @@ async function initializeEditor(editor: MonacoEditor) {
 
   const model = deps.monacoUtils.getOrCreateModel(
     editorValue.value,
-    "clickhouse-sql",
+    props.language,
     props.sourceId,
     modelCacheKey.value
   );
@@ -354,6 +487,16 @@ watch(
 );
 
 watch(
+  () => props.schema,
+  () => {
+    if (editorRef.value && !isDisposing.value) {
+      registerCompletionProvider();
+    }
+  },
+  { deep: true }
+);
+
+watch(
   () => props.isExecuting,
   (isExecuting) => {
     editorRef.value?.updateOptions({ readOnly: isExecuting });
@@ -396,14 +539,14 @@ watch(
     }
 
     if (oldSourceId !== undefined) {
-      saveCurrentViewState(`clickhouse-sql-${oldSourceId ?? "default"}`);
+      saveCurrentViewState(`${props.language}-${oldSourceId ?? "default"}`);
     }
 
     const model = deps.monacoUtils.getOrCreateModel(
       editorValue.value,
-      "clickhouse-sql",
+      props.language,
       newSourceId,
-      `clickhouse-sql-${newSourceId ?? "default"}`
+      `${props.language}-${newSourceId ?? "default"}`
     );
 
     editor.setModel(model);
@@ -447,7 +590,7 @@ onActivated(() => {
 
   deps.monacoUtils.reactivateEditor(
     editorRef.value,
-    "clickhouse-sql",
+    props.language,
     editorValue.value,
     props.sourceId
   );
@@ -542,12 +685,12 @@ defineExpose({
 
 .sql-editor-load-error__description {
   font-size: 0.75rem;
-  color: hsl(var(--muted-foreground));
+  color: var(--muted-foreground);
 }
 
 .sql-editor-load-error__button {
   width: fit-content;
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--border);
   border-radius: 0.375rem;
   padding: 0.375rem 0.75rem;
   font-size: 0.75rem;
