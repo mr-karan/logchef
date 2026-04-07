@@ -33,6 +33,7 @@ import {
   SidebarMenuButton,
   SidebarProvider,
   SidebarRail,
+  SidebarTrigger,
 } from "@/components/ui/sidebar";
 
 import {
@@ -48,8 +49,6 @@ import {
   Sun,
   Moon,
   Monitor,
-  PanelLeft,
-  PanelRight,
   Bell,
   Wrench,
 } from "lucide-vue-next";
@@ -74,6 +73,11 @@ const router = useRouter();
 const setThemePreference = (mode: ThemeMode) => {
   themeStore.setTheme(mode);
   preferencesStore.updatePreferences({ theme: mode }, { syncTheme: false });
+};
+
+const cycleTheme = () => {
+  const next: Record<ThemeMode, ThemeMode> = { light: 'dark', dark: 'auto', auto: 'light' };
+  setThemePreference(next[themeStore.preference]);
 };
 
 onMounted(() => {
@@ -141,9 +145,9 @@ const getSavedState = () => {
       .find((row) => row.startsWith("sidebar_state="))
       ?.split("=")[1];
 
-    return savedState === "false" ? false : true;
+    return savedState === "true";
   }
-  return true;
+  return false;
 };
 
 // Manage sidebar state locally with persistence
@@ -156,10 +160,6 @@ watch(sidebarOpen, (newValue) => {
   }
 });
 
-// Toggle sidebar function
-const toggleSidebar = () => {
-  sidebarOpen.value = !sidebarOpen.value;
-};
 
 // Helper function to get user initials
 function getUserInitials(name: string | undefined): string {
@@ -244,41 +244,22 @@ const navItems = [
   <div class="h-screen w-screen flex overflow-hidden">
     <SidebarProvider v-model:open="sidebarOpen" :defaultOpen="sidebarOpen">
       <Sidebar collapsible="icon"
-        class="flex-none z-50 bg-[hsl(var(--sidebar-background))] text-[hsl(var(--sidebar-foreground))] h-screen"
+        class="flex-none z-50 h-screen"
         :class="{ 'w-64': sidebarOpen, 'w-[72px]': !sidebarOpen }">
-        <SidebarHeader class="pt-4 pb-2">
-          <!-- Layout when expanded - horizontal -->
-          <div v-if="sidebarOpen" class="flex items-center justify-between px-3">
-            <div class="flex items-center">
-              <div class="grid flex-1 text-left leading-tight ml-3">
-                <span class="truncate text-lg font-semibold">LogChef</span>
-                <span v-if="metaStore.version" class="truncate text-xs opacity-60">
-                  {{ metaStore.version }}
-                </span>
-              </div>
-            </div>
-
-            <Button variant="ghost" size="icon"
-              class="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              @click="toggleSidebar" title="Collapse sidebar">
-              <PanelLeft class="h-4 w-4" />
-            </Button>
-          </div>
-
-          <!-- Layout when collapsed - vertical -->
-          <div v-else class="flex flex-col items-center px-3 space-y-2">
-            <div
-              class="flex aspect-square size-10 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground font-semibold"
-              :title="metaStore.version ? `LogChef v${metaStore.version}` : 'LogChef'">
-              LC
-            </div>
-
-            <Button variant="ghost" size="icon"
-              class="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              @click="toggleSidebar" title="Expand sidebar">
-              <PanelRight class="h-4 w-4" />
-            </Button>
-          </div>
+        <SidebarHeader>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton size="lg" :tooltip="metaStore.version ? `LogChef v${metaStore.version}` : 'LogChef'">
+                <div class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground font-semibold text-sm">
+                  LC
+                </div>
+                <div class="grid flex-1 text-left text-sm leading-tight">
+                  <span class="truncate font-semibold">LogChef</span>
+                  <span v-if="metaStore.version" class="truncate text-xs opacity-60">{{ metaStore.version }}</span>
+                </div>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
         </SidebarHeader>
 
         <SidebarContent>
@@ -361,12 +342,20 @@ const navItems = [
         <SidebarFooter class="border-t border-sidebar-border pt-2">
           <SidebarMenu>
             <SidebarMenuItem>
+              <SidebarMenuButton size="sm" @click="cycleTheme" :tooltip="themeStore.preference === 'light' ? 'Light mode' : themeStore.preference === 'dark' ? 'Dark mode' : 'System'">
+                <Sun v-if="themeStore.preference === 'light'" class="size-4" />
+                <Moon v-else-if="themeStore.preference === 'dark'" class="size-4" />
+                <Monitor v-else class="size-4" />
+                <span>{{ themeStore.preference === 'light' ? 'Light' : themeStore.preference === 'dark' ? 'Dark' : 'System' }}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <SidebarMenuButton size="lg"
                     class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground hover:bg-primary hover:text-primary-foreground">
-                    <Avatar class="h-9 w-9 rounded-full border-2 border-sidebar-primary">
-                      <AvatarFallback class="rounded-full bg-sidebar-primary text-sidebar-primary-foreground">
+                    <Avatar class="h-8 w-8 rounded-lg">
+                      <AvatarFallback class="rounded-lg bg-sidebar-primary text-sidebar-primary-foreground text-xs">
                         {{ getUserInitials(authStore.user?.full_name) }}
                       </AvatarFallback>
                     </Avatar>
@@ -401,58 +390,6 @@ const navItems = [
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuLabel>Theme</DropdownMenuLabel>
-                  <div class="px-2 py-1.5">
-                    <div class="flex items-center justify-between space-x-2">
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button variant="outline" size="icon" class="w-9 px-0 flex-1 rounded-md" :class="{
-                              'bg-primary text-primary-foreground':
-                                themeStore.preference === 'light',
-                            }" @click="setThemePreference('light')">
-                              <Sun class="h-5 w-5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>Light mode</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button variant="outline" size="icon" class="w-9 px-0 flex-1 rounded-md" :class="{
-                              'bg-primary text-primary-foreground':
-                                themeStore.preference === 'dark',
-                            }" @click="setThemePreference('dark')">
-                              <Moon class="h-5 w-5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>Dark mode</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button variant="outline" size="icon" class="w-9 px-0 flex-1 rounded-md" :class="{
-                              'bg-primary text-primary-foreground':
-                                themeStore.preference === 'auto',
-                            }" @click="setThemePreference('auto')">
-                              <Monitor class="h-5 w-5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>System preference</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </div>
-                  </div>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel>Account</DropdownMenuLabel>
                   <DropdownMenuItem asChild>
                     <router-link to="/profile" class="cursor-pointer">
                       <UserCircle2 class="mr-2 h-4 w-4" />
