@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Rich value autocomplete in LogchefQL editor** — After typing `host=`, the editor instantly suggests top field values with occurrence counts (e.g., `cdn.logchef.dev (1.7K)`). Suggestions come from the sidebar's cached field data — no additional network calls during typing. Supports partial matching inside quotes, auto-quoting string values, and proper escaping of special characters.
+- **Numeric field values in sidebar** — Fields like `status` (UInt16) and `bytes` (UInt32) now appear as filterable fields and auto-load their top values alongside LowCardinality fields.
+- **Shared field values cache** — New Pinia store (`exploreFieldValues`) allows the sidebar and editor to share field value data, eliminating redundant API calls.
+
+### Changed
+- **Tailwind CSS v4 migration** — Upgraded from Tailwind v3 to v4 with oklch color system, `@theme` directives, and `@tailwindcss/vite` plugin (replaces PostCSS).
+- **shadcn-vue Vega theme** — Switched from new-york to Vega style with Zinc base and Blue accent. Small border radius for a sharper, more technical look.
+- **Sidebar defaults to collapsed** — Icon-only mode maximizes screen real estate for log viewing. Expand via rail hover or `Cmd+B`.
+- **Theme toggle moved to sidebar footer** — Single-click cycle (Light → Dark → System) instead of buried in dropdown menu.
+- **Histogram charts use Unovis** — Migrated from custom chart to Unovis with brush-drag zoom, crosshair tooltips, and stacked bar support.
+- **Monaco editor lazy-loaded** — SQL editor loads on demand, reducing initial bundle for LogchefQL-only users.
+- **Bolder chart colors** — Blue chart gradient shifted one step darker for better visibility on both light and dark backgrounds.
+
+### Fixed
+- **Hyphenated field names work everywhere** — Fields like `user-identifier` are now backtick-quoted in all SQL queries (field values, histograms, group-by). Previously caused `user - identifier` subtraction errors.
+- **Validation errors return 400, not 500** — Invalid field names, timezones, and identifiers now return proper HTTP 400 Bad Request with `ValidationError` type instead of 500 Internal Server Error.
+- **Histogram tooltip styling** — Fixed broken tooltip background/border after TW4 migration (`hsl(var(--...))` → `var(--...)`).
+- **Histogram crosshair null guard** — Added optional chaining (`row?.ts`) to prevent crash when data is empty.
+- **Editor line height mismatch** — Fixed LogchefQL editor height calculation (`baseLineHeight: 21` → `20` to match Monaco's `lineHeight`).
+- **1-second histogram buckets** — Support for sub-minute bucket intervals in ClickHouse.
+- **Brush zoom restored** — Click-to-zoom on histogram bars works alongside brush-drag selection.
+- **Grouped histogram string values** — Fixed dereferencing of grouped string values in histogram data.
+- **Session cookie handling** — Fixed local dev cookie configuration and team provisioning.
+- **Team admin permissions** — Team admins can now manage members on managed (provisioned) teams.
+- **Idle connection cleanup** — Added `IdleTimeout` and periodic `QueryTracker` cleanup to prevent connection leaks.
+- **Noisy logs reduced** — Session management logs downgraded to DEBUG; structured slog source shortened to `file:line`.
+- **Cursor pointer restored** — Added `cursor-pointer` base rule for all interactive elements (TW4 preflight removed it).
+
 ## [1.4.0] - 2026-03-30
 
 ### Added
@@ -361,7 +392,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/mr-karan/logchef/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/mr-karan/logchef/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/mr-karan/logchef/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/mr-karan/logchef/compare/v1.2.0...v1.2.1

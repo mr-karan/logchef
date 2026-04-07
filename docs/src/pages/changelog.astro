@@ -79,6 +79,54 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in Logchef.</p>
     </header>
 
+    <!-- Unreleased -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag unreleased">Unreleased</span>
+        <span class="version-badge">Next</span>
+        <a href="https://github.com/mr-karan/logchef/compare/v1.4.0...HEAD" class="version-link" target="_blank">Compare &rarr;</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Smart value autocomplete</strong> &mdash; Type <code>host=</code> in LogchefQL and get instant value suggestions with occurrence counts from the field sidebar. Works inside quotes, auto-wraps strings, and escapes special characters.</li>
+          <li><strong>Numeric field exploration</strong> &mdash; Fields like <code>status</code> (UInt16) now auto-load their top values in the sidebar, just like LowCardinality fields.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Improved
+        </div>
+        <ul class="change-list">
+          <li><strong>New visual theme</strong> &mdash; Upgraded to Tailwind CSS v4 with Vega/Zinc/Blue theme, sharper borders, and bolder chart colors</li>
+          <li><strong>Sidebar collapsed by default</strong> &mdash; More screen space for logs. Expand via rail hover or <code>Cmd+B</code></li>
+          <li><strong>Theme toggle</strong> &mdash; One-click light/dark/system cycle in the sidebar footer</li>
+          <li><strong>Histogram redesign</strong> &mdash; New Unovis-based charts with brush-drag zoom and crosshair tooltips</li>
+          <li><strong>Lazy-loaded Monaco editor</strong> &mdash; SQL editor loads on demand for faster initial page load</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>Hyphenated field names</strong> &mdash; Fields like <code>user-identifier</code> now work correctly in all queries (was causing SQL subtraction errors)</li>
+          <li><strong>Better error codes</strong> &mdash; Invalid field names and query parameters now return HTTP 400 instead of 500</li>
+          <li><strong>Histogram reliability</strong> &mdash; Fixed tooltip styling, null data crashes, 1-second bucket support, and brush zoom interaction</li>
+          <li><strong>Team admin permissions</strong> &mdash; Team admins can now manage members on provisioned teams</li>
+          <li><strong>Connection cleanup</strong> &mdash; Added idle timeout and periodic query tracker cleanup</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- v1.4.0 -->
     <article class="version">
       <div class="version-header">
