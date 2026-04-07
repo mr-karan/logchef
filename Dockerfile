@@ -82,12 +82,14 @@ WORKDIR /app
 # Copy the built binary from the builder stage
 COPY --from=builder /app/bin/logchef.bin .
 
-# Copy the default config file
-COPY config.toml .
+# Install the default config at the same path Dockerfile.goreleaser uses so
+# both image variants can be substituted for one another in deployments.
+RUN mkdir -p /etc/logchef
+COPY config.toml /etc/logchef/config.toml
 
 # Expose the application port (update if necessary based on config.toml)
 EXPOSE 8125
 
 # Run the binary
 ENTRYPOINT ["/app/logchef.bin"]
-CMD ["-config", "/app/config.toml"]
+CMD ["-config", "/etc/logchef/config.toml"]
