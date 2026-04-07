@@ -342,12 +342,12 @@ const highlightLogfmt = (text: string) => {
   )
 }
 
-// Pre-computed rows for performance - using table's paginated data
+// Pre-computed rows for performance - compact mode should render the full
+// filtered dataset as a scrollable log stream, not the current page only.
 const renderedRows = computed(() => {
-  // Use paginated and filtered rows from the table
-  const paginatedRows = table.getRowModel().rows
+  const filteredRows = table.getFilteredRowModel().rows
   
-  return paginatedRows.map((tableRow) => {
+  return filteredRows.map((tableRow) => {
     const row = tableRow.original
     const ts = formatTimestamp(row[props.timestampField])
     const sev = row[props.severityField] || ''
@@ -400,7 +400,7 @@ const handleClick = (event: MouseEvent, rowId: string) => {
 </script>
 
 <template>
-  <div class="h-full flex flex-col">
+  <div class="h-full min-h-0 flex flex-col">
     <!-- Shared Table Controls -->
     <TableControls 
       v-if="table"
@@ -408,12 +408,13 @@ const handleClick = (event: MouseEvent, rowId: string) => {
       :stats="stats"
       :is-loading="isLoading"
       :show-column-selector="false"
+      :show-pagination="false"
       @update:timezone="displayTimezone = $event"
       @update:globalFilter="globalFilter = $event"
     />
     
     <!-- Compact log list container -->
-    <ScrollArea class="flex-1 font-mono text-xs">
+    <ScrollArea class="min-h-0 flex-1 font-mono text-xs">
       <div v-if="renderedRows.length > 0" class="space-y-0">
         <!-- Log rows with enhanced layout -->
         <div
