@@ -1,4 +1,27 @@
 # syntax=docker/dockerfile:1
+
+# --- Frontend builder stage (Bun) ---
+# Vite is configured to write its build output to ../cmd/server/ui (relative to
+# frontend/) so the Go binary can embed it. We mirror that layout here so the
+# resolved path lands inside this stage's /app workdir.
+FROM oven/bun:1-debian AS frontend-builder
+
+WORKDIR /app
+
+# Install dependencies first for better layer caching
+COPY frontend/package.json frontend/bun.lock ./frontend/
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    cd frontend && bun install --frozen-lockfile
+
+# Copy frontend sources plus the cmd/server/ui scaffolding (index.html etc.)
+COPY frontend/ ./frontend/
+COPY cmd/server/ui/ ./cmd/server/ui/
+
+# Build — output goes to /app/cmd/server/ui via vite's outDir
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    cd frontend && bun run build
+
+# --- Backend builder stage (Go) ---
 FROM golang:1.24.2-bullseye AS builder
 
 # Declare build arguments
@@ -6,25 +29,11 @@ ARG APP_VERSION=unknown
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 
-# Install Node.js and pnpm prerequisites (separate update from install for better caching)
-RUN apt-get update
-
-# Install necessary dependencies
-ENV NODE_VERSION=23.11.0
-ENV PNPM_VERSION=10.7.1
+# Install build prerequisites
 ENV SQLC_VERSION=1.29.0
-RUN apt-get install -y curl wget xz-utils libsqlite3-dev \
+RUN apt-get update \
+    && apt-get install -y curl wget xz-utils libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
-
-# Install Node.js & pnpm - architecture aware
-RUN ARCH=$([ "$TARGETARCH" = "amd64" ] && echo "x64" || echo "arm64") \
-    && NODE_URL=https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${ARCH}.tar.xz \
-    && wget -qO /tmp/node.tar.xz ${NODE_URL} \
-    && mkdir -p /usr/local/lib/nodejs \
-    && tar -xJf /tmp/node.tar.xz -C /usr/local/lib/nodejs --strip-components=1 \
-    && rm /tmp/node.tar.xz
-ENV PATH="/usr/local/lib/nodejs/bin:$PATH"
-RUN npm install -g pnpm@$PNPM_VERSION
 
 # Download and install sqlc binary directly (instead of go install)
 RUN wget -qO /tmp/sqlc.tar.gz https://downloads.sqlc.dev/sqlc_${SQLC_VERSION}_linux_${TARGETARCH}.tar.gz \
@@ -42,21 +51,14 @@ RUN --mount=type=bind,source=go.mod,target=go.mod \
     --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
-# Install frontend dependencies using cache mounts
-RUN --mount=type=bind,source=frontend/package.json,target=frontend/package.json \
-    --mount=type=bind,source=frontend/pnpm-lock.yaml,target=frontend/pnpm-lock.yaml \
-    --mount=type=cache,target=/root/.local/share/pnpm/store \
-    cd frontend && pnpm install --frozen-lockfile
-
 # Copy all files
 COPY . .
 
+# Bring in the prebuilt frontend assets from the frontend-builder stage
+COPY --from=frontend-builder /app/cmd/server/ui ./cmd/server/ui
+
 # Generate sqlc code
 RUN sqlc generate
-
-# Build frontend with cache
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
-    cd frontend && pnpm build
 
 # Set GOCACHE location for build caching
 ENV GOCACHE=/root/.cache/go-build
