@@ -162,6 +162,14 @@ dev-setup:
       fi
       sleep 1
     done
+    echo "Waiting for VictoriaLogs..."
+    for i in {1..30}; do
+      if curl -fsS http://localhost:9428/health > /dev/null 2>&1; then
+        echo "VictoriaLogs ready"
+        break
+      fi
+      sleep 1
+    done
     cd ..
     just dev-seed
     echo ""
@@ -193,6 +201,7 @@ dev-ingest-logs duration="60":
     #!/usr/bin/env bash
     echo "Ingesting logs for {{duration}}s..."
     cd dev
+    ./ingest-victorialogs.sh
     vector -c http.toml & pid1=$!
     vector -c syslog.toml & pid2=$!
     sleep {{duration}}

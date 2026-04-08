@@ -8,29 +8,45 @@ dry_run = false
 
 [[sources]]
 name = "HTTP Access Logs"
+source_type = "clickhouse"
+meta_ts_field = "timestamp"
+description = "Demo HTTP access logs (vector -c http.toml)"
+
+[sources.connection]
 host = "127.0.0.1:9000"
 username = "default"
 password = ""
 database = "default"
 table_name = "http"
-meta_ts_field = "timestamp"
-description = "Demo HTTP access logs (vector -c http.toml)"
 
 [[sources]]
 name = "Syslog Logs"
+source_type = "clickhouse"
+meta_ts_field = "timestamp"
+meta_severity_field = "lvl"
+description = "Demo syslog data (vector -c syslog.toml)"
+
+[sources.connection]
 host = "127.0.0.1:9000"
 username = "default"
 password = ""
 database = "default"
 table_name = "syslogs"
-meta_ts_field = "timestamp"
-meta_severity_field = "lvl"
-description = "Demo syslog data (vector -c syslog.toml)"
+
+[[sources]]
+name = "VictoriaLogs Demo"
+source_type = "victorialogs"
+meta_ts_field = "_time"
+meta_severity_field = "level"
+description = "Local VictoriaLogs datasource for LogsQL and datasource UI testing"
+
+[sources.connection]
+base_url = "http://127.0.0.1:9428"
 
 [[teams]]
 name = "Dev Team"
 description = "Local development team"
-sources = ["HTTP Access Logs", "Syslog Logs"]
+sources = ["HTTP Access Logs", "Syslog Logs", "VictoriaLogs Demo"]
 members = [
   { email = "admin@logchef.internal", role = "admin" },
   { email = "demo@logchef.internal", role = "member" },

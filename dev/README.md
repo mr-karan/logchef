@@ -26,6 +26,7 @@ just dev-ingest-logs
 
 Open http://localhost:5173 and login with `admin@logchef.internal` / `password`.
 Mailpit UI is available at http://localhost:8025.
+VictoriaLogs health should be available at http://localhost:9428/health.
 
 To test email delivery locally, configure SMTP settings to:
 - Host: `mailpit`
@@ -47,7 +48,8 @@ Running `just dev-seed` creates:
 
 - **User**: `dev@localhost` (admin)
 - **Team**: "Dev Team"
-- **Sources**: HTTP Access Logs, Syslog Logs (both linked to Dev Team)
+- **Sources**: HTTP Access Logs, Syslog Logs, VictoriaLogs Demo (all linked to Dev Team)
+- **VictoriaLogs sample data**: `just dev-ingest-logs` now inserts a small set of demo logs into the local VictoriaLogs instance in addition to the ClickHouse demo streams
 
 ## Services
 
@@ -55,6 +57,7 @@ Running `just dev-seed` creates:
 |---------|------|-------------|
 | ClickHouse HTTP | 8123 | HTTP interface |
 | ClickHouse Native | 9000 | Native protocol |
+| VictoriaLogs | 9428 | Local VictoriaLogs API |
 | Dex | 5556 | OIDC provider |
 | Webhook Receiver | 8888 | Test webhook endpoint |
 | Mailpit UI | 8025 | Email inbox UI |
@@ -86,6 +89,8 @@ just dev-test-webhook
 | `docker-compose.yml` | Infrastructure services |
 | `init-clickhouse.sql` | Creates ClickHouse tables |
 | `seed.sh` | Creates team, sources, user (idempotent) |
+| `provisioning.toml` | Example datasource-aware provisioning config for dev |
+| `ingest-victorialogs.sh` | Sends sample JSONL logs to the local VictoriaLogs instance |
 | `http.toml` | Vector config for HTTP demo logs |
 | `syslog.toml` | Vector config for syslog demo logs |
 | `dex/config.yaml` | Dex OIDC configuration |
@@ -106,3 +111,8 @@ just dev-init-tables
 **Vector can't connect?**
 - Ensure ClickHouse is healthy: `curl http://localhost:8123/ping`
 - Check table exists: `curl "http://localhost:8123/?query=SHOW+TABLES"`
+
+**VictoriaLogs source is empty?**
+- Run `just dev-ingest-logs` to send sample JSONL data into VictoriaLogs and demo streams into ClickHouse.
+- Validate the service is up with: `curl http://localhost:9428/health`
+- Re-send only the VictoriaLogs sample payload with: `cd dev && ./ingest-victorialogs.sh`
