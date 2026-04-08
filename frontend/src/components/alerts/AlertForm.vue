@@ -31,6 +31,7 @@ import { useTeamsStore } from "@/stores/teams";
 import type { Alert, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryResponse } from "@/api/alerts";
 import { X, Plus, User, Bell } from "lucide-vue-next";
 import { Badge } from "@/components/ui/badge";
+import { getQueryLanguageLabel, isVictoriaLogsSource, resolveAlertMetadata } from "@/lib/queryMetadata";
 
 // Extended types for local usage until API types are updated
 interface ExtendedCreateAlertRequest extends CreateAlertRequest {
@@ -63,6 +64,9 @@ const emit = defineEmits<{
 const alertsStore = useAlertsStore();
 const sourcesStore = useSourcesStore();
 const teamsStore = useTeamsStore();
+const sourceType = computed(() => sourcesStore.currentSourceDetails?.source_type || "clickhouse");
+const supportsConditionEditor = computed(() => !isVictoriaLogsSource(sourceType.value));
+const nativeEditorLabel = computed(() => getQueryLanguageLabel(isVictoriaLogsSource(sourceType.value) ? "logsql" : "clickhouse-sql"));
 
 // Get current source table name for SQL generation
 const currentTableName = computed(() => sourcesStore.getCurrentSourceTableName || "logs");
@@ -70,7 +74,7 @@ const currentTableName = computed(() => sourcesStore.getCurrentSourceTableName |
 const form = reactive({
   name: "",
   description: "",
-  query_type: "condition" as Alert["query_type"], // Default to LogChefQL mode
+  query_type: "condition" as Alert["query_type"],
   query: "",
   condition_json: "", // LogChefQL condition string
   aggregate_function: "count" as "count" | "sum" | "avg" | "min" | "max",
@@ -95,6 +99,12 @@ const conditionError = ref<string | null>(null);
 // Get source details for schema-aware parsing (same pattern as explore page)
 const sourceDetails = computed(() => sourcesStore.currentSourceDetails);
 const timestampField = computed(() => sourceDetails.value?._meta_ts_field || "timestamp");
+const alertMetadata = computed(() =>
+  resolveAlertMetadata({
+    query_type: form.query_type,
+    source_type: sourceType.value,
+  })
+);
 
 // Generate ClickHouse lookback expression based on lookback_seconds
 const lookbackExpression = computed(() => {
@@ -121,6 +131,11 @@ watch(() => props.teamId, (id) => {
 
 // Translate LogChefQL condition to SQL using backend API
 async function translateCondition() {
+  if (!supportsConditionEditor.value) {
+    conditionError.value = null;
+    generatedSQL.value = "";
+    return;
+  }
   if (form.query_type !== "condition" || !form.condition_json.trim()) {
     conditionError.value = null;
     generatedSQL.value = "";
@@ -372,7 +387,7 @@ function resetForm(alert: Alert | null) {
   if (!alert) {
     form.name = "";
     form.description = "";
-    form.query_type = "condition";
+    form.query_type = supportsConditionEditor.value ? "condition" : "sql";
     form.query = "";
     form.condition_json = "";
     form.aggregate_function = "count";
@@ -396,7 +411,7 @@ function resetForm(alert: Alert | null) {
   
   form.name = alert.name;
   form.description = alert.description ?? "";
-  form.query_type = alert.query_type;
+  form.query_type = supportsConditionEditor.value ? alert.query_type : "sql";
   form.query = alert.query;
   form.condition_json = alert.condition_json ?? "";
   form.aggregate_function = "count";
@@ -431,7 +446,10 @@ async function handleTestQuery() {
   try {
     const result = await alertsApi.testAlertQuery(props.teamId, props.sourceId, {
       query_type: form.query_type,
+      query_language: alertMetadata.value.queryLanguage,
+      editor_mode: alertMetadata.value.editorMode,
       query: form.query.trim(),
+      condition_json: form.query_type === "condition" ? form.condition_json.trim() : undefined,
       lookback_seconds: form.lookback_seconds,
       threshold_operator: form.threshold_operator,
       threshold_value: form.threshold_value,
@@ -473,6 +491,14 @@ watch(
   { immediate: false }
 );
 
+watch(sourceType, () => {
+  if (!supportsConditionEditor.value && form.query_type === "condition") {
+    form.query_type = "sql";
+    conditionError.value = null;
+    generatedSQL.value = "";
+  }
+});
+
 watch(
   () => [form.query, form.threshold_operator, form.threshold_value],
   () => {
@@ -506,6 +532,8 @@ function handleSubmit() {
     name: form.name.trim(),
     description: form.description.trim(),
     query_type: form.query_type,
+    query_language: alertMetadata.value.queryLanguage,
+    editor_mode: alertMetadata.value.editorMode,
     query: form.query.trim(),
     condition_json: form.query_type === "condition" ? form.condition_json.trim() : undefined,
     lookback_seconds: Number(form.lookback_seconds),
@@ -579,14 +607,14 @@ function handleSubmit() {
               <p class="text-xs text-muted-foreground mt-1">
                 {{ form.query_type === 'condition' 
                   ? 'Write a simple filter condition. The time filter is auto-applied.' 
-                  : 'Write a SQL query that returns a single numeric value.' }}
+                  : `Write a ${nativeEditorLabel} query that returns a single numeric value.` }}
               </p>
             </div>
             <!-- Query Type Toggle -->
             <Tabs :model-value="form.query_type" @update:model-value="(v: any) => form.query_type = v" class="w-auto">
               <TabsList class="h-8">
-                <TabsTrigger value="condition" class="text-xs px-3 h-7">LogChefQL</TabsTrigger>
-                <TabsTrigger value="sql" class="text-xs px-3 h-7">SQL</TabsTrigger>
+                <TabsTrigger v-if="supportsConditionEditor" value="condition" class="text-xs px-3 h-7">LogChefQL</TabsTrigger>
+                <TabsTrigger value="sql" class="text-xs px-3 h-7">{{ nativeEditorLabel }}</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -990,14 +1018,14 @@ function handleSubmit() {
               <p class="text-xs text-muted-foreground mt-1">
                 {{ form.query_type === 'condition' 
                   ? 'Write a simple filter condition. The time filter is auto-applied.' 
-                  : 'Write a SQL query that returns a single numeric value.' }}
+                  : `Write a ${nativeEditorLabel} query that returns a single numeric value.` }}
               </p>
             </div>
             <!-- Query Type Toggle -->
             <Tabs :model-value="form.query_type" @update:model-value="(v: any) => form.query_type = v" class="w-auto">
               <TabsList class="h-8">
-                <TabsTrigger value="condition" class="text-xs px-3 h-7">LogChefQL</TabsTrigger>
-                <TabsTrigger value="sql" class="text-xs px-3 h-7">SQL</TabsTrigger>
+                <TabsTrigger v-if="supportsConditionEditor" value="condition" class="text-xs px-3 h-7">LogChefQL</TabsTrigger>
+                <TabsTrigger value="sql" class="text-xs px-3 h-7">{{ nativeEditorLabel }}</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>

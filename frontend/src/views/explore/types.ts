@@ -20,6 +20,8 @@ export interface SaveQueryFormData {
   description: string;
   source_id: number;
   query_type: 'logchefql' | 'sql';
+  query_language: 'logchefql' | 'clickhouse-sql' | 'logsql';
+  editor_mode: 'builder' | 'native';
   query_content: string;
 }
 

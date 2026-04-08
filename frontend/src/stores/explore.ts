@@ -29,6 +29,7 @@ import { useVariables } from "@/composables/useVariables";
 import { useVariableStore } from "@/stores/variables";
 import { queryHistoryService } from "@/services/QueryHistoryService";
 import { createTimeRangeCondition } from '@/utils/time-utils';
+import { getExploreModeForQueryLanguage, resolveSavedQueryMetadata } from "@/lib/queryMetadata";
 
 interface SavedQuerySnapshot {
   queryContent: string;
@@ -514,13 +515,21 @@ export const useExploreStore = defineStore("explore", () => {
     id: number;
     name: string;
     query_type: string;
+    query_language?: string;
+    editor_mode?: string;
     query_content: string;
   }): { shouldExecute: boolean } {
     try {
       const content = JSON.parse(data.query_content);
-      const isLogchefQL = data.query_type === 'logchefql';
+      const metadata = resolveSavedQueryMetadata({
+        query_type: data.query_type,
+        query_language: data.query_language,
+        editor_mode: data.editor_mode,
+        source_type: sourcesStore.currentSourceDetails?.source_type ?? "clickhouse",
+      });
+      const isLogchefQL = metadata.queryLanguage === 'logchefql';
 
-      state.data.value.activeMode = normalizeModeForSource(isLogchefQL ? 'logchefql' : 'sql');
+      state.data.value.activeMode = normalizeModeForSource(getExploreModeForQueryLanguage(metadata.queryLanguage));
       state.data.value.activeSavedQueryName = data.name;
       state.data.value.selectedQueryId = data.id.toString();
 

@@ -34,6 +34,8 @@ type Alert struct {
 	UpdatedAt            time.Time      `json:"updated_at"`
 	RecipientUserIdsJson sql.NullString `json:"recipient_user_ids_json"`
 	WebhookUrlsJson      sql.NullString `json:"webhook_urls_json"`
+	QueryLanguage        string         `json:"query_language"`
+	EditorMode           string         `json:"editor_mode"`
 }
 
 type AlertHistory struct {
@@ -112,16 +114,18 @@ type TeamMember struct {
 }
 
 type TeamQuery struct {
-	ID           int64          `json:"id"`
-	TeamID       int64          `json:"team_id"`
-	SourceID     int64          `json:"source_id"`
-	Name         string         `json:"name"`
-	Description  sql.NullString `json:"description"`
-	QueryType    string         `json:"query_type"`
-	QueryContent string         `json:"query_content"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	IsBookmarked bool           `json:"is_bookmarked"`
+	ID            int64          `json:"id"`
+	TeamID        int64          `json:"team_id"`
+	SourceID      int64          `json:"source_id"`
+	Name          string         `json:"name"`
+	Description   sql.NullString `json:"description"`
+	QueryType     string         `json:"query_type"`
+	QueryContent  string         `json:"query_content"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+	IsBookmarked  bool           `json:"is_bookmarked"`
+	QueryLanguage string         `json:"query_language"`
+	EditorMode    string         `json:"editor_mode"`
 }
 
 type TeamSource struct {

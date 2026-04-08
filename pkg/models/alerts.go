@@ -33,12 +33,102 @@ const (
 )
 
 // AlertQueryType represents the underlying evaluation strategy.
+// Deprecated: use QueryLanguage + AlertEditorMode for new logic.
 type AlertQueryType string
 
 const (
 	AlertQueryTypeSQL       AlertQueryType = "sql"
 	AlertQueryTypeCondition AlertQueryType = "condition"
 )
+
+// AlertEditorMode captures which alert authoring workflow created the alert.
+type AlertEditorMode string
+
+const (
+	AlertEditorModeCondition AlertEditorMode = "condition"
+	AlertEditorModeNative    AlertEditorMode = "native"
+)
+
+func NormalizeAlertEditorMode(mode AlertEditorMode) AlertEditorMode {
+	switch mode {
+	case AlertEditorModeCondition:
+		return AlertEditorModeCondition
+	case AlertEditorModeNative:
+		return AlertEditorModeNative
+	default:
+		return mode
+	}
+}
+
+func (m AlertEditorMode) Valid() bool {
+	switch NormalizeAlertEditorMode(m) {
+	case AlertEditorModeCondition, AlertEditorModeNative:
+		return true
+	default:
+		return false
+	}
+}
+
+func LegacyAlertQueryTypeFromEditorMode(mode AlertEditorMode) AlertQueryType {
+	if NormalizeAlertEditorMode(mode) == AlertEditorModeCondition {
+		return AlertQueryTypeCondition
+	}
+	return AlertQueryTypeSQL
+}
+
+func ResolveAlertMetadata(queryType AlertQueryType, language QueryLanguage, mode AlertEditorMode) (QueryLanguage, AlertEditorMode, error) {
+	normalizedLanguage := NormalizeQueryLanguage(language)
+	normalizedMode := NormalizeAlertEditorMode(mode)
+
+	if normalizedLanguage == "" {
+		switch queryType {
+		case "", AlertQueryTypeSQL, AlertQueryTypeCondition:
+			normalizedLanguage = QueryLanguageClickHouseSQL
+		default:
+			return "", "", ErrInvalidAlertQueryType{Value: string(queryType)}
+		}
+	}
+
+	if normalizedLanguage != QueryLanguageClickHouseSQL && normalizedLanguage != QueryLanguageLogsQL {
+		return "", "", ErrInvalidAlertQueryType{Value: string(normalizedLanguage)}
+	}
+
+	if normalizedMode == "" {
+		switch queryType {
+		case AlertQueryTypeCondition:
+			normalizedMode = AlertEditorModeCondition
+		case "", AlertQueryTypeSQL:
+			normalizedMode = AlertEditorModeNative
+		default:
+			return "", "", ErrInvalidAlertQueryType{Value: string(queryType)}
+		}
+	}
+
+	if !normalizedMode.Valid() {
+		return "", "", ErrInvalidAlertQueryType{Value: string(mode)}
+	}
+
+	if normalizedMode == AlertEditorModeCondition && normalizedLanguage != QueryLanguageClickHouseSQL {
+		return "", "", ErrInvalidAlertQueryType{Value: string(normalizedLanguage)}
+	}
+	if normalizedLanguage == QueryLanguageLogsQL && normalizedMode != AlertEditorModeNative {
+		return "", "", ErrInvalidAlertQueryType{Value: string(mode)}
+	}
+
+	if queryType != "" && queryType != LegacyAlertQueryTypeFromEditorMode(normalizedMode) {
+		return "", "", ErrInvalidAlertQueryType{Value: string(queryType)}
+	}
+
+	return normalizedLanguage, normalizedMode, nil
+}
+
+type ErrInvalidAlertQueryType struct {
+	Value string
+}
+
+func (e ErrInvalidAlertQueryType) Error() string {
+	return "invalid alert query configuration: " + e.Value
+}
 
 // AlertState captures the persisted lifecycle state of an alert rule.
 type AlertState string
@@ -56,6 +146,8 @@ type Alert struct {
 	Name              string                 `json:"name"`
 	Description       string                 `json:"description,omitempty"`
 	QueryType         AlertQueryType         `json:"query_type"`
+	QueryLanguage     QueryLanguage          `json:"query_language"`
+	EditorMode        AlertEditorMode        `json:"editor_mode"`
 	Query             string                 `json:"query"`
 	ConditionJSON     string                 `json:"condition_json,omitempty"`
 	LookbackSeconds   int                    `json:"lookback_seconds"`
@@ -93,7 +185,9 @@ type AlertHistoryEntry struct {
 type CreateAlertRequest struct {
 	Name              string                 `json:"name"`
 	Description       string                 `json:"description"`
-	QueryType         AlertQueryType         `json:"query_type"`
+	QueryType         AlertQueryType         `json:"query_type,omitempty"`
+	QueryLanguage     QueryLanguage          `json:"query_language,omitempty"`
+	EditorMode        AlertEditorMode        `json:"editor_mode,omitempty"`
 	Query             string                 `json:"query"`
 	ConditionJSON     string                 `json:"condition_json"`
 	LookbackSeconds   int                    `json:"lookback_seconds"`
@@ -113,7 +207,9 @@ type CreateAlertRequest struct {
 type UpdateAlertRequest struct {
 	Name              *string                 `json:"name"`
 	Description       *string                 `json:"description"`
-	QueryType         *AlertQueryType         `json:"query_type"`
+	QueryType         *AlertQueryType         `json:"query_type,omitempty"`
+	QueryLanguage     *QueryLanguage          `json:"query_language,omitempty"`
+	EditorMode        *AlertEditorMode        `json:"editor_mode,omitempty"`
 	Query             *string                 `json:"query"`
 	ConditionJSON     *string                 `json:"condition_json"`
 	LookbackSeconds   *int                    `json:"lookback_seconds"`
@@ -136,7 +232,9 @@ type ResolveAlertRequest struct {
 
 // TestAlertQueryRequest allows testing an alert query before saving.
 type TestAlertQueryRequest struct {
-	QueryType         AlertQueryType         `json:"query_type"`
+	QueryType         AlertQueryType         `json:"query_type,omitempty"`
+	QueryLanguage     QueryLanguage          `json:"query_language,omitempty"`
+	EditorMode        AlertEditorMode        `json:"editor_mode,omitempty"`
 	Query             string                 `json:"query"`
 	ConditionJSON     string                 `json:"condition_json"`
 	LookbackSeconds   int                    `json:"lookback_seconds"`

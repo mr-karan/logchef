@@ -52,6 +52,7 @@ import type { SaveQueryFormData } from "@/views/explore/types";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
 import { useContextStore } from "@/stores/context";
 import { useRoute } from "vue-router";
+import { getQueryLanguageLabel, resolveSavedQueryMetadata } from "@/lib/queryMetadata";
 
 const router = useRouter();
 const route = useRoute();
@@ -145,6 +146,31 @@ const emptyStateMessage = computed(() =>
     ? "No queries match your search."
     : "Create a query in the Explorer and save it to your collection."
 );
+
+function getSavedQueryBadge(query: SavedTeamQuery) {
+  const metadata = resolveSavedQueryMetadata({
+    query_type: query.query_type,
+    query_language: query.query_language,
+    editor_mode: query.editor_mode,
+  });
+
+  if (metadata.queryLanguage === "logchefql") {
+    return {
+      className: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+      label: 'Search',
+    };
+  }
+  if (metadata.queryLanguage === "logsql") {
+    return {
+      className: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
+      label: getQueryLanguageLabel(metadata.queryLanguage),
+    };
+  }
+  return {
+    className: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+    label: getQueryLanguageLabel(metadata.queryLanguage),
+  };
+}
 
 onMounted(async () => {
   try {
@@ -341,6 +367,8 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
         description: formData.description,
         query_content: formData.query_content,
         query_type: formData.query_type as 'logchefql' | 'sql',
+        query_language: formData.query_language,
+        editor_mode: formData.editor_mode,
       }
     );
 
@@ -636,19 +664,9 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
               <TableCell>
                 <Badge :class="[
                   'px-2.5 py-0.5 text-xs font-medium rounded-full',
-                  query.query_type === 'logchefql'
-                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                    : query.query_type === 'sql'
-                      ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                      : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+                  getSavedQueryBadge(query).className,
                 ]">
-                  {{
-                    query.query_type === "logchefql"
-                      ? "Search"
-                      : query.query_type === "sql"
-                        ? "SQL"
-                        : query.query_type
-                  }}
+                  {{ getSavedQueryBadge(query).label }}
                 </Badge>
               </TableCell>
               <TableCell>{{ formatTime(query.created_at) }}</TableCell>

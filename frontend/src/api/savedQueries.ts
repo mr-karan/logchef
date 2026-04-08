@@ -1,5 +1,6 @@
 import { apiClient } from "./apiUtils";
 import type { VariableState } from "@/stores/variables";
+import type { QueryLanguage, SavedQueryEditorMode, LegacySavedQueryType } from "@/lib/queryMetadata";
 
 export interface SavedQueryContent {
   version: number;
@@ -25,7 +26,9 @@ export interface SavedTeamQuery {
   source_id: number;
   name: string;
   description: string;
-  query_type: string;
+  query_type: LegacySavedQueryType;
+  query_language: QueryLanguage;
+  editor_mode: SavedQueryEditorMode;
   query_content: string; // JSON string of SavedQueryContent
   is_bookmarked: boolean;
   created_at: string;
@@ -76,7 +79,9 @@ export const savedQueriesApi = {
   createTeamSourceQuery: (teamId: number, sourceId: number, query: {
     name: string;
     description: string;
-    query_type: string;
+    query_type?: LegacySavedQueryType;
+    query_language: QueryLanguage;
+    editor_mode: SavedQueryEditorMode;
     query_content: string;
   }) => apiClient.post<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections`, query),
 

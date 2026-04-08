@@ -13,6 +13,7 @@ import type { SaveQueryFormData } from '@/views/explore/types'
 import type { SavedTeamQuery } from '@/api/savedQueries'
 import { getLocalTimeZone, CalendarDateTime, type DateValue } from '@internationalized/date'
 import type { Source } from "@/api/sources";
+import { getExploreModeForQueryLanguage, resolveSavedQueryMetadata } from "@/lib/queryMetadata";
 
 // Add this helper function before the useSavedQueries function definition
 function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): number | null {
@@ -212,6 +213,8 @@ export function useSavedQueries(
               name: formData.name,
               description: formData.description,
               query_type: formData.query_type,
+              query_language: formData.query_language,
+              editor_mode: formData.editor_mode,
               query_content: formData.query_content
             }
         );
@@ -249,6 +252,8 @@ export function useSavedQueries(
                   name: formData.name,
                   description: formData.description,
                   query_type: formData.query_type,
+                  query_language: formData.query_language,
+                  editor_mode: formData.editor_mode,
                   query_content: formData.query_content
                 }
             );
@@ -276,7 +281,9 @@ export function useSavedQueries(
               formData.name,
               formData.description,
               parsedContent, // Pass the parsed content object
-              formData.query_type // Add the query_type parameter
+              formData.query_type,
+              formData.query_language,
+              formData.editor_mode
           );
           console.log('Created new query via createSourceQuery:', response);
         }
@@ -341,14 +348,20 @@ export function useSavedQueries(
 
     try {
       const content = JSON.parse(queryData.query_content)
-      const isLogchefQL = queryData.query_type === 'logchefql'
+      const metadata = resolveSavedQueryMetadata({
+        query_type: queryData.query_type,
+        query_language: queryData.query_language,
+        editor_mode: queryData.editor_mode,
+        source_type: _currentSource?.value?.source_type,
+      })
+      const isLogchefQL = metadata.queryLanguage === 'logchefql'
       const queryToLoad = content.content || ''
 
       // Reset state
       exploreStore.clearError()
 
       // Set the correct mode based on the saved query type
-      exploreStore.setActiveMode(isLogchefQL ? 'logchefql' : 'sql')
+      exploreStore.setActiveMode(getExploreModeForQueryLanguage(metadata.queryLanguage))
 
       // Set content
       if (isLogchefQL) {
@@ -656,7 +669,9 @@ export function useSavedQueries(
         name?: string;
         description?: string;
         query_content: string; // Content is required for update here
-        query_type: 'logchefql' | 'sql'; // Type is required
+        query_type: 'logchefql' | 'sql';
+        query_language: 'logchefql' | 'clickhouse-sql' | 'logsql';
+        editor_mode: 'builder' | 'native';
       }
   ) {
     console.log(`useSavedQueries: Updating query ${queryId} for team ${teamId}, source ${sourceId}`);
@@ -667,6 +682,8 @@ export function useSavedQueries(
         description: updateData.description, // Pass along if provided
         query_content: updateData.query_content,
         query_type: updateData.query_type,
+        query_language: updateData.query_language,
+        editor_mode: updateData.editor_mode,
       };
 
       // Call the specific store action for updating a team-source query

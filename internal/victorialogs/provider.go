@@ -38,6 +38,18 @@ func (p *Provider) Type() models.SourceType {
 	return models.SourceTypeVictoriaLogs
 }
 
+func (p *Provider) SupportedQueryLanguages() []models.QueryLanguage {
+	return []models.QueryLanguage{models.QueryLanguageLogsQL}
+}
+
+func (p *Provider) SupportedSavedQueryEditorModes() []models.SavedQueryEditorMode {
+	return []models.SavedQueryEditorMode{models.SavedQueryEditorModeNative}
+}
+
+func (p *Provider) SupportedAlertEditorModes() []models.AlertEditorMode {
+	return []models.AlertEditorMode{models.AlertEditorModeNative}
+}
+
 func (p *Provider) PrepareSource(ctx context.Context, req *models.CreateSourceRequest) (*models.Source, error) {
 	if req == nil {
 		return nil, fmt.Errorf("create source request is required")

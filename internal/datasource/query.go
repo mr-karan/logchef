@@ -64,6 +64,7 @@ type LogContextResult struct {
 }
 
 type AlertQueryRequest struct {
+	Language     models.QueryLanguage
 	Query        string
 	QueryTimeout *int
 }

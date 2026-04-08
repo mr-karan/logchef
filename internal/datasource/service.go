@@ -11,6 +11,9 @@ import (
 
 type Provider interface {
 	Type() models.SourceType
+	SupportedQueryLanguages() []models.QueryLanguage
+	SupportedSavedQueryEditorModes() []models.SavedQueryEditorMode
+	SupportedAlertEditorModes() []models.AlertEditorMode
 	PrepareSource(context.Context, *models.CreateSourceRequest) (*models.Source, error)
 	ValidateConnection(context.Context, *models.ValidateConnectionRequest) (*models.ConnectionValidationResult, error)
 	UpdateSource(context.Context, *models.Source, *models.UpdateSourceRequest) (*SourceUpdateResult, error)
@@ -125,6 +128,44 @@ func (s *Service) ValidateConnection(ctx context.Context, req *models.ValidateCo
 	}
 
 	return provider.ValidateConnection(ctx, req)
+}
+
+func (s *Service) ValidateSavedQuerySupport(ctx context.Context, sourceID models.SourceID, language models.QueryLanguage, mode models.SavedQueryEditorMode) error {
+	source, provider, err := s.sourceAndProvider(ctx, sourceID)
+	if err != nil {
+		return err
+	}
+
+	normalizedLanguage := models.NormalizeQueryLanguage(language)
+	if !supportsQueryLanguage(provider.SupportedQueryLanguages(), normalizedLanguage) {
+		return fmt.Errorf("%s does not support saved query language %q", source.SourceType, normalizedLanguage)
+	}
+
+	normalizedMode := models.NormalizeSavedQueryEditorMode(mode)
+	if !supportsSavedQueryEditorMode(provider.SupportedSavedQueryEditorModes(), normalizedMode) {
+		return fmt.Errorf("%s does not support saved query editor mode %q", source.SourceType, normalizedMode)
+	}
+
+	return nil
+}
+
+func (s *Service) ValidateAlertSupport(ctx context.Context, sourceID models.SourceID, language models.QueryLanguage, mode models.AlertEditorMode) error {
+	source, provider, err := s.sourceAndProvider(ctx, sourceID)
+	if err != nil {
+		return err
+	}
+
+	normalizedLanguage := models.NormalizeQueryLanguage(language)
+	if !supportsQueryLanguage(provider.SupportedQueryLanguages(), normalizedLanguage) {
+		return fmt.Errorf("%s does not support alert query language %q", source.SourceType, normalizedLanguage)
+	}
+
+	normalizedMode := models.NormalizeAlertEditorMode(mode)
+	if !supportsAlertEditorMode(provider.SupportedAlertEditorModes(), normalizedMode) {
+		return fmt.Errorf("%s does not support alert editor mode %q", source.SourceType, normalizedMode)
+	}
+
+	return nil
 }
 
 func (s *Service) QueryLogs(ctx context.Context, sourceID models.SourceID, req QueryRequest) (*models.QueryResult, error) {
@@ -266,4 +307,31 @@ func (s *Service) sourceAndProvider(ctx context.Context, sourceID models.SourceI
 	}
 
 	return source, provider, nil
+}
+
+func supportsQueryLanguage(supported []models.QueryLanguage, language models.QueryLanguage) bool {
+	for _, candidate := range supported {
+		if models.NormalizeQueryLanguage(candidate) == language {
+			return true
+		}
+	}
+	return false
+}
+
+func supportsSavedQueryEditorMode(supported []models.SavedQueryEditorMode, mode models.SavedQueryEditorMode) bool {
+	for _, candidate := range supported {
+		if models.NormalizeSavedQueryEditorMode(candidate) == mode {
+			return true
+		}
+	}
+	return false
+}
+
+func supportsAlertEditorMode(supported []models.AlertEditorMode, mode models.AlertEditorMode) bool {
+	for _, candidate := range supported {
+		if models.NormalizeAlertEditorMode(candidate) == mode {
+			return true
+		}
+	}
+	return false
 }

@@ -225,8 +225,8 @@ ORDER BY t.name;
 
 -- name: CreateTeamSourceQuery :one
 -- Create a new query for a team and source
-INSERT INTO team_queries (team_id, source_id, name, description, query_type, query_content)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO team_queries (team_id, source_id, name, description, query_type, query_language, editor_mode, query_content)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id;
 
 -- name: GetTeamSourceQuery :one
@@ -240,6 +240,8 @@ UPDATE team_queries
 SET name = ?,
     description = ?,
     query_type = ?,
+    query_language = ?,
+    editor_mode = ?,
     query_content = ?,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ? AND team_id = ? AND source_id = ?;
@@ -277,6 +279,8 @@ SELECT
     tq.name,
     tq.description,
     tq.query_type,
+    tq.query_language,
+    tq.editor_mode,
     tq.query_content,
     tq.created_at,
     tq.updated_at,
@@ -378,6 +382,8 @@ INSERT INTO alerts (
     name,
     description,
     query_type,
+    query_language,
+    editor_mode,
     query,
     condition_json,
     lookback_seconds,
@@ -392,7 +398,7 @@ INSERT INTO alerts (
     generator_url,
     is_active
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id;
 
 -- name: GetAlert :one
@@ -411,6 +417,8 @@ UPDATE alerts
 SET name = ?,
     description = ?,
     query_type = ?,
+    query_language = ?,
+    editor_mode = ?,
     query = ?,
     condition_json = ?,
     lookback_seconds = ?,

@@ -385,6 +385,9 @@ func (p *Provider) EvaluateAlert(ctx context.Context, source *models.Source, req
 	if err != nil {
 		return nil, err
 	}
+	if language := models.NormalizeQueryLanguage(req.Language); language != "" && language != models.QueryLanguageLogsQL {
+		return nil, fmt.Errorf("victorialogs alerts require %q, got %q", models.QueryLanguageLogsQL, language)
+	}
 
 	query := strings.TrimSpace(req.Query)
 	if query == "" {

@@ -54,9 +54,7 @@ func (s *Server) handleListTeamSourceCollections(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source_id parameter", models.ValidationErrorType)
 	}
 
-	// LINTER_ISSUE: Linter incorrectly reports core.ListQueriesByTeamAndSource as undefined.
-	// Using direct sqlite call as workaround.
-	queries, err := s.sqlite.ListQueriesByTeamAndSource(c.Context(), teamID, sourceID)
+	queries, err := core.ListQueriesForTeamAndSource(c.Context(), s.sqlite, s.log, teamID, sourceID)
 	if err != nil {
 		s.log.Error("failed to list collections", "error", err, "team_id", teamID, "source_id", sourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to list collections")
@@ -80,19 +78,15 @@ func (s *Server) handleCreateTeamSourceCollection(c *fiber.Ctx) error {
 	}
 
 	// Parse request body.
-	var req struct {
-		Name         string `json:"name"`
-		Description  string `json:"description"`
-		QueryType    string `json:"query_type"`
-		QueryContent string `json:"query_content"`
-	}
+	var req models.CreateTeamQueryRequest
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Validate required fields.
-	if req.Name == "" || req.QueryType == "" || req.QueryContent == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Missing required fields (name, queryType, queryContent)", models.ValidationErrorType)
+	req.SourceID = sourceID
+
+	if req.Name == "" || req.QueryContent == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Missing required fields (name, queryContent)", models.ValidationErrorType)
 	}
 
 	// Authorization Check: Ensure the team actually has access to the source.
@@ -106,22 +100,14 @@ func (s *Server) handleCreateTeamSourceCollection(c *fiber.Ctx) error {
 	}
 
 	// Create query using core function.
-	createdQuery, err := core.CreateTeamSourceQuery(
-		c.Context(),
-		s.sqlite,
-		s.log,
-		teamID,
-		sourceID,
-		req.Name,
-		req.Description,
-		req.QueryContent,
-		req.QueryType,
-		// Pass creator ID if core function supports it in the future.
-	)
+	createdQuery, err := core.CreateTeamSourceQuery(c.Context(), s.sqlite, s.datasources, s.log, teamID, sourceID, &req)
 
 	if err != nil {
 		s.log.Error("failed to create collection", "error", err, "team_id", teamID, "source_id", sourceID)
-		if errors.Is(err, core.ErrQueryTypeRequired) || errors.Is(err, core.ErrInvalidQueryType) || errors.Is(err, core.ErrInvalidQueryContent) {
+		if errors.Is(err, core.ErrQueryTypeRequired) ||
+			errors.Is(err, core.ErrInvalidQueryType) ||
+			errors.Is(err, core.ErrInvalidQueryContent) ||
+			errors.Is(err, core.ErrUnsupportedSavedQueryDefinition) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create collection", models.GeneralErrorType)
@@ -153,12 +139,9 @@ func (s *Server) handleGetTeamSourceCollection(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid Collection ID format", models.ValidationErrorType)
 	}
 
-	// Call the sqlite method directly for now due to linter issues with core.handleNotFoundError
-	query, err := s.sqlite.GetTeamSourceQuery(c.Context(), teamID, sourceID, collectionID)
+	query, err := core.GetTeamSourceQuery(c.Context(), s.sqlite, s.log, teamID, sourceID, collectionID)
 	if err != nil {
-		// LINTER_ISSUE: Cannot reliably check core.ErrQueryNotFound due to potential resolution issues.
-		// Checking for sql.ErrNoRows from the underlying db call instead.
-		if errors.Is(err, sql.ErrNoRows) { // Check for underlying DB error
+		if errors.Is(err, core.ErrQueryNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Collection not found", models.NotFoundErrorType)
 		}
 		s.log.Error("failed to get collection", "error", err, "collection_id", collectionID)
@@ -192,67 +175,23 @@ func (s *Server) handleUpdateTeamSourceCollection(c *fiber.Ctx) error {
 	}
 
 	// Parse request body.
-	var req struct {
-		Name         *string `json:"name"`
-		Description  *string `json:"description"`
-		QueryType    *string `json:"query_type"`
-		QueryContent *string `json:"query_content"`
-	}
+	var req models.UpdateTeamQueryRequest
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Prepare update data - pass empty strings for omitted fields.
-	name := ""
-	if req.Name != nil {
-		name = *req.Name
-	}
-	description := ""
-	if req.Description != nil {
-		description = *req.Description
-	}
-	queryType := ""
-	if req.QueryType != nil {
-		queryType = *req.QueryType
-	}
-	queryContent := ""
-	if req.QueryContent != nil {
-		queryContent = *req.QueryContent
-	}
-
-	// Validate Content and Type before sending to DB.
-	if queryType != "" && models.SavedQueryType(queryType) != models.SavedQueryTypeLogchefQL && models.SavedQueryType(queryType) != models.SavedQueryTypeSQL {
-		return SendErrorWithType(c, fiber.StatusBadRequest, core.ErrInvalidQueryType.Error(), models.ValidationErrorType)
-	}
-	if queryContent != "" {
-		if err := core.ValidateSavedQueryContent(queryContent); err != nil {
-			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
-		}
-	}
-
-	// Call sqlite update function.
-	// Middleware ensures user has appropriate team admin rights.
-	err = s.sqlite.UpdateTeamSourceQuery(
-		c.Context(),
-		teamID,
-		sourceID,
-		collectionID,
-		name, description, queryType, queryContent,
-	)
+	updatedQuery, err := core.UpdateTeamSourceQuery(c.Context(), s.sqlite, s.datasources, s.log, teamID, sourceID, collectionID, &req)
 	if err != nil {
-		// Check if the underlying error was potentially ErrNoRows.
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, core.ErrQueryNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Collection not found", models.NotFoundErrorType)
+		}
+		if errors.Is(err, core.ErrInvalidQueryType) ||
+			errors.Is(err, core.ErrInvalidQueryContent) ||
+			errors.Is(err, core.ErrUnsupportedSavedQueryDefinition) {
+			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 		}
 		s.log.Error("failed to update collection", "error", err, "collection_id", collectionID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update collection", models.GeneralErrorType)
-	}
-
-	// Fetch and return updated query.
-	updatedQuery, err := s.sqlite.GetTeamSourceQuery(c.Context(), teamID, sourceID, collectionID)
-	if err != nil {
-		s.log.Error("failed to fetch updated collection", "error", err, "collection_id", collectionID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Collection updated but failed to retrieve latest state", models.GeneralErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, updatedQuery)
@@ -322,9 +261,9 @@ func (s *Server) handleResolveQuery(c *fiber.Ctx) error {
 	}
 
 	// Get the saved query from database
-	query, err := s.sqlite.GetTeamSourceQuery(c.Context(), teamID, sourceID, collectionID)
+	query, err := core.GetTeamSourceQuery(c.Context(), s.sqlite, s.log, teamID, sourceID, collectionID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, core.ErrQueryNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Collection not found", models.NotFoundErrorType)
 		}
 		s.log.Error("failed to get collection", "error", err, "collection_id", collectionID)
@@ -340,6 +279,8 @@ func (s *Server) handleResolveQuery(c *fiber.Ctx) error {
 		"name":          query.Name,
 		"description":   query.Description,
 		"query_type":    query.QueryType,
+		"query_language": query.QueryLanguage,
+		"editor_mode":   query.EditorMode,
 		"query_content": query.QueryContent,
 		"is_bookmarked": query.IsBookmarked,
 		"created_at":    query.CreatedAt,

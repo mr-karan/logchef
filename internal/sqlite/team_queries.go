@@ -16,12 +16,14 @@ func (db *DB) CreateTeamSourceQuery(ctx context.Context, query *models.TeamQuery
 	// Map domain model to sqlc parameters.
 	description := sql.NullString{String: query.Description, Valid: query.Description != ""}
 	params := sqlc.CreateTeamSourceQueryParams{
-		TeamID:       int64(query.TeamID),
-		SourceID:     int64(query.SourceID),
-		Name:         query.Name,
-		Description:  description,
-		QueryType:    string(query.QueryType),
-		QueryContent: query.QueryContent,
+		TeamID:        int64(query.TeamID),
+		SourceID:      int64(query.SourceID),
+		Name:          query.Name,
+		Description:   description,
+		QueryType:     string(query.QueryType),
+		QueryLanguage: string(query.QueryLanguage),
+		EditorMode:    string(query.EditorMode),
+		QueryContent:  query.QueryContent,
 	}
 
 	id, err := db.writeQueries.CreateTeamSourceQuery(ctx, params)
@@ -36,6 +38,32 @@ func (db *DB) CreateTeamSourceQuery(ctx context.Context, query *models.TeamQuery
 	// Timestamps are handled by DB; caller doesn't need them updated here.
 
 	return nil
+}
+
+func savedTeamQueryFromSQLC(sqlcQuery sqlc.TeamQuery) (*models.SavedTeamQuery, error) {
+	queryLanguage, editorMode, err := models.ResolveSavedQueryMetadata(
+		models.SavedQueryType(sqlcQuery.QueryType),
+		models.QueryLanguage(sqlcQuery.QueryLanguage),
+		models.SavedQueryEditorMode(sqlcQuery.EditorMode),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &models.SavedTeamQuery{
+		ID:            int(sqlcQuery.ID),
+		TeamID:        models.TeamID(sqlcQuery.TeamID),
+		SourceID:      models.SourceID(sqlcQuery.SourceID),
+		Name:          sqlcQuery.Name,
+		Description:   sqlcQuery.Description.String,
+		QueryType:     models.SavedQueryType(sqlcQuery.QueryType),
+		QueryLanguage: queryLanguage,
+		EditorMode:    editorMode,
+		QueryContent:  sqlcQuery.QueryContent,
+		IsBookmarked:  sqlcQuery.IsBookmarked,
+		CreatedAt:     sqlcQuery.CreatedAt,
+		UpdatedAt:     sqlcQuery.UpdatedAt,
+	}, nil
 }
 
 // GetTeamSourceQuery retrieves a specific saved query by its ID, scoped to a team and source.
@@ -54,37 +82,27 @@ func (db *DB) GetTeamSourceQuery(ctx context.Context, teamID models.TeamID, sour
 	}
 
 	// Map sqlc result to the SavedTeamQuery domain model.
-	return &models.SavedTeamQuery{
-		ID:           int(sqlcQuery.ID),
-		TeamID:       models.TeamID(sqlcQuery.TeamID),
-		SourceID:     models.SourceID(sqlcQuery.SourceID),
-		Name:         sqlcQuery.Name,
-		Description:  sqlcQuery.Description.String, // Handle NULL string
-		QueryType:    models.SavedQueryType(sqlcQuery.QueryType),
-		QueryContent: sqlcQuery.QueryContent,
-		IsBookmarked: sqlcQuery.IsBookmarked,
-		CreatedAt:    sqlcQuery.CreatedAt,
-		UpdatedAt:    sqlcQuery.UpdatedAt,
-		// CreatedByUserID is not present in the sqlc model/query.
-	}, nil
+	return savedTeamQueryFromSQLC(sqlcQuery)
 }
 
 // UpdateTeamSourceQuery updates an existing saved query record.
 // Only non-empty fields in the input arguments are intended to be updated (though the current SQL updates all).
 // The `updated_at` timestamp is automatically set by the query.
-func (db *DB) UpdateTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int, name, description, queryType, queryContent string) error {
+func (db *DB) UpdateTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int, name, description, queryType, queryLanguage, editorMode, queryContent string) error {
 
 	// Prepare parameters, handling potentially empty update values.
 	// The SQL query updates all specified fields; partial updates would require a different query or dynamic SQL.
 	desc := sql.NullString{String: description, Valid: description != ""} // Handle empty description correctly.
 	params := sqlc.UpdateTeamSourceQueryParams{
-		Name:         name,
-		Description:  desc,
-		QueryType:    queryType,
-		QueryContent: queryContent,
-		ID:           int64(queryID),
-		TeamID:       int64(teamID),
-		SourceID:     int64(sourceID),
+		Name:          name,
+		Description:   desc,
+		QueryType:     queryType,
+		QueryLanguage: queryLanguage,
+		EditorMode:    editorMode,
+		QueryContent:  queryContent,
+		ID:            int64(queryID),
+		TeamID:        int64(teamID),
+		SourceID:      int64(sourceID),
 	}
 
 	err := db.writeQueries.UpdateTeamSourceQuery(ctx, params)
@@ -125,18 +143,11 @@ func (db *DB) ListQueriesByTeam(ctx context.Context, teamID models.TeamID) ([]*m
 
 	queries := make([]*models.SavedTeamQuery, 0, len(sqlcQueries))
 	for i := range sqlcQueries {
-		queries = append(queries, &models.SavedTeamQuery{
-			ID:           int(sqlcQueries[i].ID),
-			TeamID:       models.TeamID(sqlcQueries[i].TeamID),
-			SourceID:     models.SourceID(sqlcQueries[i].SourceID),
-			Name:         sqlcQueries[i].Name,
-			Description:  sqlcQueries[i].Description.String,
-			QueryType:    models.SavedQueryType(sqlcQueries[i].QueryType),
-			QueryContent: sqlcQueries[i].QueryContent,
-			IsBookmarked: sqlcQueries[i].IsBookmarked,
-			CreatedAt:    sqlcQueries[i].CreatedAt,
-			UpdatedAt:    sqlcQueries[i].UpdatedAt,
-		})
+		query, err := savedTeamQueryFromSQLC(sqlcQueries[i])
+		if err != nil {
+			return nil, fmt.Errorf("invalid saved query metadata for query id %d: %w", sqlcQueries[i].ID, err)
+		}
+		queries = append(queries, query)
 	}
 
 	return queries, nil
@@ -158,18 +169,11 @@ func (db *DB) ListQueriesByTeamAndSource(ctx context.Context, teamID models.Team
 	// Map results to domain model slice.
 	queries := make([]*models.SavedTeamQuery, 0, len(sqlcQueries))
 	for i := range sqlcQueries {
-		queries = append(queries, &models.SavedTeamQuery{
-			ID:           int(sqlcQueries[i].ID),
-			TeamID:       models.TeamID(sqlcQueries[i].TeamID),
-			SourceID:     models.SourceID(sqlcQueries[i].SourceID),
-			Name:         sqlcQueries[i].Name,
-			Description:  sqlcQueries[i].Description.String,
-			QueryType:    models.SavedQueryType(sqlcQueries[i].QueryType),
-			QueryContent: sqlcQueries[i].QueryContent,
-			IsBookmarked: sqlcQueries[i].IsBookmarked,
-			CreatedAt:    sqlcQueries[i].CreatedAt,
-			UpdatedAt:    sqlcQueries[i].UpdatedAt,
-		})
+		query, err := savedTeamQueryFromSQLC(sqlcQueries[i])
+		if err != nil {
+			return nil, fmt.Errorf("invalid saved query metadata for query id %d: %w", sqlcQueries[i].ID, err)
+		}
+		queries = append(queries, query)
 	}
 
 	return queries, nil
@@ -216,19 +220,29 @@ func (db *DB) ListQueriesForUser(ctx context.Context, userID models.UserID) ([]*
 
 	queries := make([]*models.SavedTeamQuery, 0, len(sqlcQueries))
 	for i := range sqlcQueries {
+		queryLanguage, editorMode, err := models.ResolveSavedQueryMetadata(
+			models.SavedQueryType(sqlcQueries[i].QueryType),
+			models.QueryLanguage(sqlcQueries[i].QueryLanguage),
+			models.SavedQueryEditorMode(sqlcQueries[i].EditorMode),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("invalid saved query metadata for query id %d: %w", sqlcQueries[i].ID, err)
+		}
 		queries = append(queries, &models.SavedTeamQuery{
-			ID:           int(sqlcQueries[i].ID),
-			TeamID:       models.TeamID(sqlcQueries[i].TeamID),
-			SourceID:     models.SourceID(sqlcQueries[i].SourceID),
-			Name:         sqlcQueries[i].Name,
-			Description:  sqlcQueries[i].Description.String,
-			QueryType:    models.SavedQueryType(sqlcQueries[i].QueryType),
-			QueryContent: sqlcQueries[i].QueryContent,
-			IsBookmarked: sqlcQueries[i].IsBookmarked,
-			CreatedAt:    sqlcQueries[i].CreatedAt,
-			UpdatedAt:    sqlcQueries[i].UpdatedAt,
-			TeamName:     sqlcQueries[i].TeamName,
-			SourceName:   sqlcQueries[i].SourceName,
+			ID:            int(sqlcQueries[i].ID),
+			TeamID:        models.TeamID(sqlcQueries[i].TeamID),
+			SourceID:      models.SourceID(sqlcQueries[i].SourceID),
+			Name:          sqlcQueries[i].Name,
+			Description:   sqlcQueries[i].Description.String,
+			QueryType:     models.SavedQueryType(sqlcQueries[i].QueryType),
+			QueryLanguage: queryLanguage,
+			EditorMode:    editorMode,
+			QueryContent:  sqlcQueries[i].QueryContent,
+			IsBookmarked:  sqlcQueries[i].IsBookmarked,
+			CreatedAt:     sqlcQueries[i].CreatedAt,
+			UpdatedAt:     sqlcQueries[i].UpdatedAt,
+			TeamName:      sqlcQueries[i].TeamName,
+			SourceName:    sqlcQueries[i].SourceName,
 		})
 	}
 

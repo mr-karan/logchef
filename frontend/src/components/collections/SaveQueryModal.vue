@@ -23,6 +23,7 @@ import { useRoute } from 'vue-router';
 import { TOAST_DURATION } from '@/lib/constants';
 import { useToast } from '@/composables/useToast';
 import {storeToRefs} from "pinia";
+import { getQueryLanguageLabel, resolveSavedQueryMetadata } from '@/lib/queryMetadata';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -109,6 +110,11 @@ const sourceName = computed(() => {
   return source ? (source.name || source.connection.table_name) : '';
 });
 
+const currentSourceType = computed(() => {
+  const currentSource = sourcesStore.teamSources.find(s => s.id === currentSourceId.value);
+  return currentSource?.source_type || sourcesStore.currentSourceDetails?.source_type || 'clickhouse';
+});
+
 // Form validation
 const isValid = computed(() => {
   return !!name.value.trim();
@@ -128,6 +134,17 @@ const displayQueryType = computed(() => {
   }
   return exploreStore.activeMode || "sql";
 });
+
+const resolvedQueryMetadata = computed(() =>
+  resolveSavedQueryMetadata({
+    query_type: displayQueryType.value,
+    query_language: props.editData?.query_language || props.initialData?.query_language,
+    editor_mode: props.editData?.editor_mode || props.initialData?.editor_mode,
+    source_type: currentSourceType.value,
+  })
+);
+
+const displayQueryLanguageLabel = computed(() => getQueryLanguageLabel(resolvedQueryMetadata.value.queryLanguage));
 
 // Get the query content for display - prioritize props then editData/initialData
 const displayQueryContent = computed(() => {
@@ -303,7 +320,7 @@ function prepareQueryContent(saveTimestamp: boolean): string {
     const queryContent = displayQueryContent.value;
 
     if (!queryContent.trim()) {
-      throw new Error(`${activeMode === 'logchefql' ? 'LogchefQL' : 'SQL'} content is required`);
+      throw new Error(`${activeMode === 'logchefql' ? 'LogchefQL' : displayQueryLanguageLabel.value} content is required`);
     }
 
     let timeRangeValue = null;
@@ -425,7 +442,7 @@ async function handleSubmit(event: Event) {
     isSubmitting.value = true;
 
     // Use displayQueryType which properly handles editData/initialData when editing
-    const queryType = props.queryType || displayQueryType.value;
+    const queryMetadata = resolvedQueryMetadata.value;
 
     try {
       // Prepare the query content with the proper structure
@@ -438,7 +455,9 @@ async function handleSubmit(event: Event) {
         name: name.value,
         description: description.value,
         query_content: preparedContent,
-        query_type: queryType,
+        query_type: queryMetadata.queryType,
+        query_language: queryMetadata.queryLanguage,
+        editor_mode: queryMetadata.editorMode,
         save_timestamp: saveTimestamp.value
       };
 
@@ -524,7 +543,7 @@ const saveDescription = 'Save your current query to your collection for future u
         <!-- Query Content Preview -->
         <div class="border rounded-md p-3">
           <div class="text-sm font-medium mb-2">
-            {{ displayQueryType === 'logchefql' ? 'LogchefQL' : 'SQL' }} Query
+            {{ displayQueryLanguageLabel }} Query
           </div>
           <pre
             class="text-xs bg-muted p-2 rounded overflow-auto max-h-[120px] whitespace-pre-wrap break-all">{{ displayQueryContent }}</pre>

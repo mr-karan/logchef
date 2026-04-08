@@ -17,6 +17,7 @@ import { formatDate } from "@/utils/format";
 import { useAlertHistoryStore } from "@/stores/alertHistory";
 import { useAlertsStore } from "@/stores/alerts";
 import type { Alert } from "@/api/alerts";
+import { getQueryLanguageLabel, resolveAlertMetadata } from "@/lib/queryMetadata";
 
 const props = defineProps<{
   open: boolean;
@@ -52,7 +53,13 @@ const hasActiveIncident = computed(() => {
 
 const alertSummary = computed(() => {
   if (!props.alert) return "";
-  return `${props.alert.query_type === "sql" ? "SQL query" : "Log condition"} • ${props.alert.threshold_operator} ${props.alert.threshold_value}, every ${props.alert.frequency_seconds}s`;
+  const metadata = resolveAlertMetadata({
+    query_type: props.alert.query_type,
+    query_language: props.alert.query_language,
+    editor_mode: props.alert.editor_mode,
+  });
+  const queryLabel = metadata.editorMode === "condition" ? "Log condition" : `${getQueryLanguageLabel(metadata.queryLanguage)} query`;
+  return `${queryLabel} • ${props.alert.threshold_operator} ${props.alert.threshold_value}, every ${props.alert.frequency_seconds}s`;
 });
 
 async function ensureHistoryLoaded() {

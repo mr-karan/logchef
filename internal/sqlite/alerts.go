@@ -12,12 +12,14 @@ import (
 )
 
 const (
-	insertAlertQuery = `INSERT INTO alerts (
+insertAlertQuery = `INSERT INTO alerts (
     team_id,
     source_id,
     name,
     description,
     query_type,
+    query_language,
+    editor_mode,
     query,
     condition_json,
     lookback_seconds,
@@ -31,7 +33,7 @@ const (
     webhook_urls_json,
     generator_url,
     is_active
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id, created_at, updated_at, last_state, last_evaluated_at, last_triggered_at`
 
 	selectAlertBase = `SELECT
@@ -41,6 +43,8 @@ RETURNING id, created_at, updated_at, last_state, last_evaluated_at, last_trigge
     name,
     description,
     query_type,
+    query_language,
+    editor_mode,
     query,
     condition_json,
     lookback_seconds,
@@ -91,10 +95,12 @@ SET last_state = 'firing',
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?`
 
-	updateAlertQuery = `UPDATE alerts
+updateAlertQuery = `UPDATE alerts
 SET name = ?,
     description = ?,
     query_type = ?,
+    query_language = ?,
+    editor_mode = ?,
     query = ?,
     condition_json = ?,
     lookback_seconds = ?,
@@ -268,6 +274,8 @@ func (db *DB) CreateAlert(ctx context.Context, alert *models.Alert) error {
 		alert.Name,
 		nullableString(alert.Description),
 		string(alert.QueryType),
+		string(alert.QueryLanguage),
+		string(alert.EditorMode),
 		nullableString(alert.Query),
 		nullableString(alert.ConditionJSON),
 		alert.LookbackSeconds,
@@ -336,6 +344,8 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 		alert.Name,
 		nullableString(alert.Description),
 		string(alert.QueryType),
+		string(alert.QueryLanguage),
+		string(alert.EditorMode),
 		nullableString(alert.Query),
 		nullableString(alert.ConditionJSON),
 		alert.LookbackSeconds,
@@ -380,6 +390,8 @@ func scanAlert(scanner interface {
 		name                             string
 		description                      sql.NullString
 		queryType                        string
+		queryLanguage                    string
+		editorMode                       string
 		query                            sql.NullString
 		conditionJSON                    sql.NullString
 		lookbackSeconds                  int
@@ -405,6 +417,8 @@ func scanAlert(scanner interface {
 		&name,
 		&description,
 		&queryType,
+		&queryLanguage,
+		&editorMode,
 		&query,
 		&conditionJSON,
 		&lookbackSeconds,
@@ -443,6 +457,14 @@ func scanAlert(scanner interface {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode webhook URLs: %w", err)
 	}
+	resolvedLanguage, resolvedEditorMode, err := models.ResolveAlertMetadata(
+		models.AlertQueryType(queryType),
+		models.QueryLanguage(queryLanguage),
+		models.AlertEditorMode(editorMode),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode alert metadata: %w", err)
+	}
 
 	alert := &models.Alert{
 		ID:                models.AlertID(id),
@@ -451,6 +473,8 @@ func scanAlert(scanner interface {
 		Name:              name,
 		Description:       description.String,
 		QueryType:         models.AlertQueryType(queryType),
+		QueryLanguage:     resolvedLanguage,
+		EditorMode:        resolvedEditorMode,
 		Query:             query.String,
 		ConditionJSON:     conditionJSON.String,
 		LookbackSeconds:   lookbackSeconds,

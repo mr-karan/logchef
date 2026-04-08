@@ -1,8 +1,9 @@
 import { apiClient } from "./apiUtils";
+import type { AlertEditorMode, LegacyAlertQueryType, QueryLanguage } from "@/lib/queryMetadata";
 
 export type AlertThresholdOperator = "gt" | "gte" | "lt" | "lte" | "eq" | "neq";
 export type AlertSeverity = "info" | "warning" | "critical";
-export type AlertQueryType = "sql" | "condition";
+export type AlertQueryType = LegacyAlertQueryType;
 export interface Alert {
   id: number;
   team_id: number;
@@ -10,6 +11,8 @@ export interface Alert {
   name: string;
   description?: string;
   query_type: AlertQueryType;
+  query_language: QueryLanguage;
+  editor_mode: AlertEditorMode;
   query: string;
   condition_json?: string;
   lookback_seconds: number;
@@ -45,7 +48,9 @@ export interface AlertHistoryEntry {
 export interface CreateAlertRequest {
   name: string;
   description?: string;
-  query_type: AlertQueryType;
+  query_type?: AlertQueryType;
+  query_language?: QueryLanguage;
+  editor_mode?: AlertEditorMode;
   query: string;
   condition_json?: string;
   lookback_seconds: number;
@@ -65,6 +70,8 @@ export interface UpdateAlertRequest {
   name?: string;
   description?: string;
   query_type?: AlertQueryType;
+  query_language?: QueryLanguage;
+  editor_mode?: AlertEditorMode;
   query?: string;
   condition_json?: string;
   lookback_seconds?: number;
@@ -86,7 +93,9 @@ export interface ResolveAlertRequest {
 
 export interface TestAlertQueryRequest {
   query: string;
-  query_type: AlertQueryType;
+  query_type?: AlertQueryType;
+  query_language?: QueryLanguage;
+  editor_mode?: AlertEditorMode;
   condition_json?: string;
   lookback_seconds?: number;
   threshold_operator: AlertThresholdOperator;

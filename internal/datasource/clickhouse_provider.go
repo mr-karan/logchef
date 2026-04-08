@@ -29,6 +29,27 @@ func (p *ClickHouseProvider) Type() models.SourceType {
 	return models.SourceTypeClickHouse
 }
 
+func (p *ClickHouseProvider) SupportedQueryLanguages() []models.QueryLanguage {
+	return []models.QueryLanguage{
+		models.QueryLanguageLogchefQL,
+		models.QueryLanguageClickHouseSQL,
+	}
+}
+
+func (p *ClickHouseProvider) SupportedSavedQueryEditorModes() []models.SavedQueryEditorMode {
+	return []models.SavedQueryEditorMode{
+		models.SavedQueryEditorModeBuilder,
+		models.SavedQueryEditorModeNative,
+	}
+}
+
+func (p *ClickHouseProvider) SupportedAlertEditorModes() []models.AlertEditorMode {
+	return []models.AlertEditorMode{
+		models.AlertEditorModeCondition,
+		models.AlertEditorModeNative,
+	}
+}
+
 func (p *ClickHouseProvider) PrepareSource(ctx context.Context, req *models.CreateSourceRequest) (*models.Source, error) {
 	if req == nil {
 		return nil, fmt.Errorf("create source request is required")
@@ -530,6 +551,9 @@ func (p *ClickHouseProvider) GetSourceStats(ctx context.Context, source *models.
 func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.Source, req AlertQueryRequest) (*models.QueryResult, error) {
 	if source == nil {
 		return nil, fmt.Errorf("source is required")
+	}
+	if language := models.NormalizeQueryLanguage(req.Language); language != "" && language != models.QueryLanguageClickHouseSQL {
+		return nil, fmt.Errorf("clickhouse alerts require %q, got %q", models.QueryLanguageClickHouseSQL, language)
 	}
 	if req.QueryTimeout == nil {
 		defaultTimeout := models.DefaultQueryTimeoutSeconds

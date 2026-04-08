@@ -120,6 +120,8 @@ INSERT INTO alerts (
     name,
     description,
     query_type,
+    query_language,
+    editor_mode,
     query,
     condition_json,
     lookback_seconds,
@@ -134,7 +136,7 @@ INSERT INTO alerts (
     generator_url,
     is_active
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id
 `
 
@@ -144,6 +146,8 @@ type CreateAlertParams struct {
 	Name                 string         `json:"name"`
 	Description          sql.NullString `json:"description"`
 	QueryType            string         `json:"query_type"`
+	QueryLanguage        string         `json:"query_language"`
+	EditorMode           string         `json:"editor_mode"`
 	Query                sql.NullString `json:"query"`
 	ConditionJson        sql.NullString `json:"condition_json"`
 	LookbackSeconds      int64          `json:"lookback_seconds"`
@@ -167,6 +171,8 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (int64
 		arg.Name,
 		arg.Description,
 		arg.QueryType,
+		arg.QueryLanguage,
+		arg.EditorMode,
 		arg.Query,
 		arg.ConditionJson,
 		arg.LookbackSeconds,
@@ -277,18 +283,20 @@ func (q *Queries) CreateTeam(ctx context.Context, arg CreateTeamParams) (int64, 
 
 const createTeamSourceQuery = `-- name: CreateTeamSourceQuery :one
 
-INSERT INTO team_queries (team_id, source_id, name, description, query_type, query_content)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO team_queries (team_id, source_id, name, description, query_type, query_language, editor_mode, query_content)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id
 `
 
 type CreateTeamSourceQueryParams struct {
-	TeamID       int64          `json:"team_id"`
-	SourceID     int64          `json:"source_id"`
-	Name         string         `json:"name"`
-	Description  sql.NullString `json:"description"`
-	QueryType    string         `json:"query_type"`
-	QueryContent string         `json:"query_content"`
+	TeamID        int64          `json:"team_id"`
+	SourceID      int64          `json:"source_id"`
+	Name          string         `json:"name"`
+	Description   sql.NullString `json:"description"`
+	QueryType     string         `json:"query_type"`
+	QueryLanguage string         `json:"query_language"`
+	EditorMode    string         `json:"editor_mode"`
+	QueryContent  string         `json:"query_content"`
 }
 
 // Team Queries
@@ -300,6 +308,8 @@ func (q *Queries) CreateTeamSourceQuery(ctx context.Context, arg CreateTeamSourc
 		arg.Name,
 		arg.Description,
 		arg.QueryType,
+		arg.QueryLanguage,
+		arg.EditorMode,
 		arg.QueryContent,
 	)
 	var id int64
@@ -493,7 +503,7 @@ func (q *Queries) GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiT
 }
 
 const getAlert = `-- name: GetAlert :one
-SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json FROM alerts WHERE id = ?
+SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json, query_language, editor_mode FROM alerts WHERE id = ?
 `
 
 func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
@@ -524,12 +534,14 @@ func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
 		&i.UpdatedAt,
 		&i.RecipientUserIdsJson,
 		&i.WebhookUrlsJson,
+		&i.QueryLanguage,
+		&i.EditorMode,
 	)
 	return i, err
 }
 
 const getAlertForTeamSource = `-- name: GetAlertForTeamSource :one
-SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json FROM alerts WHERE id = ? AND team_id = ? AND source_id = ?
+SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json, query_language, editor_mode FROM alerts WHERE id = ? AND team_id = ? AND source_id = ?
 `
 
 type GetAlertForTeamSourceParams struct {
@@ -566,6 +578,8 @@ func (q *Queries) GetAlertForTeamSource(ctx context.Context, arg GetAlertForTeam
 		&i.UpdatedAt,
 		&i.RecipientUserIdsJson,
 		&i.WebhookUrlsJson,
+		&i.QueryLanguage,
+		&i.EditorMode,
 	)
 	return i, err
 }
@@ -794,7 +808,7 @@ func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (T
 }
 
 const getTeamSourceQuery = `-- name: GetTeamSourceQuery :one
-SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at, is_bookmarked FROM team_queries
+SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at, is_bookmarked, query_language, editor_mode FROM team_queries
 WHERE id = ? AND team_id = ? AND source_id = ?
 `
 
@@ -819,6 +833,8 @@ func (q *Queries) GetTeamSourceQuery(ctx context.Context, arg GetTeamSourceQuery
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.IsBookmarked,
+		&i.QueryLanguage,
+		&i.EditorMode,
 	)
 	return i, err
 }
@@ -998,7 +1014,7 @@ func (q *Queries) ListAPITokensForUser(ctx context.Context, userID int64) ([]Api
 }
 
 const listActiveAlertsDue = `-- name: ListActiveAlertsDue :many
-SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json FROM alerts
+SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json, query_language, editor_mode FROM alerts
 WHERE is_active = 1
   AND (
         last_evaluated_at IS NULL
@@ -1040,6 +1056,8 @@ func (q *Queries) ListActiveAlertsDue(ctx context.Context) ([]Alert, error) {
 			&i.UpdatedAt,
 			&i.RecipientUserIdsJson,
 			&i.WebhookUrlsJson,
+			&i.QueryLanguage,
+			&i.EditorMode,
 		); err != nil {
 			return nil, err
 		}
@@ -1100,7 +1118,7 @@ func (q *Queries) ListAlertHistory(ctx context.Context, arg ListAlertHistoryPara
 }
 
 const listAlertsByTeamAndSource = `-- name: ListAlertsByTeamAndSource :many
-SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json FROM alerts
+SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json, query_language, editor_mode FROM alerts
 WHERE team_id = ? AND source_id = ?
 ORDER BY created_at DESC
 `
@@ -1144,6 +1162,8 @@ func (q *Queries) ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsB
 			&i.UpdatedAt,
 			&i.RecipientUserIdsJson,
 			&i.WebhookUrlsJson,
+			&i.QueryLanguage,
+			&i.EditorMode,
 		); err != nil {
 			return nil, err
 		}
@@ -1278,7 +1298,7 @@ func (q *Queries) ListManagedUsers(ctx context.Context) ([]User, error) {
 }
 
 const listQueriesByTeam = `-- name: ListQueriesByTeam :many
-SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at, is_bookmarked FROM team_queries WHERE team_id = ? ORDER BY is_bookmarked DESC, updated_at DESC
+SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at, is_bookmarked, query_language, editor_mode FROM team_queries WHERE team_id = ? ORDER BY is_bookmarked DESC, updated_at DESC
 `
 
 // List all queries for a specific team across all sources (bookmarked first, then by updated_at)
@@ -1302,6 +1322,8 @@ func (q *Queries) ListQueriesByTeam(ctx context.Context, teamID int64) ([]TeamQu
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.IsBookmarked,
+			&i.QueryLanguage,
+			&i.EditorMode,
 		); err != nil {
 			return nil, err
 		}
@@ -1317,7 +1339,7 @@ func (q *Queries) ListQueriesByTeam(ctx context.Context, teamID int64) ([]TeamQu
 }
 
 const listQueriesByTeamAndSource = `-- name: ListQueriesByTeamAndSource :many
-SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at, is_bookmarked FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY is_bookmarked DESC, updated_at DESC
+SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at, is_bookmarked, query_language, editor_mode FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY is_bookmarked DESC, updated_at DESC
 `
 
 type ListQueriesByTeamAndSourceParams struct {
@@ -1346,6 +1368,8 @@ func (q *Queries) ListQueriesByTeamAndSource(ctx context.Context, arg ListQuerie
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.IsBookmarked,
+			&i.QueryLanguage,
+			&i.EditorMode,
 		); err != nil {
 			return nil, err
 		}
@@ -1368,6 +1392,8 @@ SELECT
     tq.name,
     tq.description,
     tq.query_type,
+    tq.query_language,
+    tq.editor_mode,
     tq.query_content,
     tq.created_at,
     tq.updated_at,
@@ -1383,18 +1409,20 @@ ORDER BY tq.is_bookmarked DESC, tq.updated_at DESC
 `
 
 type ListQueriesForUserRow struct {
-	ID           int64          `json:"id"`
-	TeamID       int64          `json:"team_id"`
-	SourceID     int64          `json:"source_id"`
-	Name         string         `json:"name"`
-	Description  sql.NullString `json:"description"`
-	QueryType    string         `json:"query_type"`
-	QueryContent string         `json:"query_content"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	IsBookmarked bool           `json:"is_bookmarked"`
-	TeamName     string         `json:"team_name"`
-	SourceName   string         `json:"source_name"`
+	ID            int64          `json:"id"`
+	TeamID        int64          `json:"team_id"`
+	SourceID      int64          `json:"source_id"`
+	Name          string         `json:"name"`
+	Description   sql.NullString `json:"description"`
+	QueryType     string         `json:"query_type"`
+	QueryLanguage string         `json:"query_language"`
+	EditorMode    string         `json:"editor_mode"`
+	QueryContent  string         `json:"query_content"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+	IsBookmarked  bool           `json:"is_bookmarked"`
+	TeamName      string         `json:"team_name"`
+	SourceName    string         `json:"source_name"`
 }
 
 // List all saved queries across all teams a user belongs to, with team and source names
@@ -1414,6 +1442,8 @@ func (q *Queries) ListQueriesForUser(ctx context.Context, userID int64) ([]ListQ
 			&i.Name,
 			&i.Description,
 			&i.QueryType,
+			&i.QueryLanguage,
+			&i.EditorMode,
 			&i.QueryContent,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -2137,6 +2167,8 @@ UPDATE alerts
 SET name = ?,
     description = ?,
     query_type = ?,
+    query_language = ?,
+    editor_mode = ?,
     query = ?,
     condition_json = ?,
     lookback_seconds = ?,
@@ -2158,6 +2190,8 @@ type UpdateAlertParams struct {
 	Name                 string         `json:"name"`
 	Description          sql.NullString `json:"description"`
 	QueryType            string         `json:"query_type"`
+	QueryLanguage        string         `json:"query_language"`
+	EditorMode           string         `json:"editor_mode"`
 	Query                sql.NullString `json:"query"`
 	ConditionJson        sql.NullString `json:"condition_json"`
 	LookbackSeconds      int64          `json:"lookback_seconds"`
@@ -2179,6 +2213,8 @@ func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) error 
 		arg.Name,
 		arg.Description,
 		arg.QueryType,
+		arg.QueryLanguage,
+		arg.EditorMode,
 		arg.Query,
 		arg.ConditionJson,
 		arg.LookbackSeconds,
@@ -2313,19 +2349,23 @@ UPDATE team_queries
 SET name = ?,
     description = ?,
     query_type = ?,
+    query_language = ?,
+    editor_mode = ?,
     query_content = ?,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ? AND team_id = ? AND source_id = ?
 `
 
 type UpdateTeamSourceQueryParams struct {
-	Name         string         `json:"name"`
-	Description  sql.NullString `json:"description"`
-	QueryType    string         `json:"query_type"`
-	QueryContent string         `json:"query_content"`
-	ID           int64          `json:"id"`
-	TeamID       int64          `json:"team_id"`
-	SourceID     int64          `json:"source_id"`
+	Name          string         `json:"name"`
+	Description   sql.NullString `json:"description"`
+	QueryType     string         `json:"query_type"`
+	QueryLanguage string         `json:"query_language"`
+	EditorMode    string         `json:"editor_mode"`
+	QueryContent  string         `json:"query_content"`
+	ID            int64          `json:"id"`
+	TeamID        int64          `json:"team_id"`
+	SourceID      int64          `json:"source_id"`
 }
 
 // Update a query for a team and source
@@ -2334,6 +2374,8 @@ func (q *Queries) UpdateTeamSourceQuery(ctx context.Context, arg UpdateTeamSourc
 		arg.Name,
 		arg.Description,
 		arg.QueryType,
+		arg.QueryLanguage,
+		arg.EditorMode,
 		arg.QueryContent,
 		arg.ID,
 		arg.TeamID,

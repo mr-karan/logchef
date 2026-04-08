@@ -33,6 +33,51 @@ func (e ErrInvalidTimeout) Error() string {
 	return e.Message
 }
 
+type ErrInvalidSavedQueryConfiguration struct {
+	Message string
+}
+
+func (e ErrInvalidSavedQueryConfiguration) Error() string {
+	return e.Message
+}
+
+// QueryLanguage captures the executable language of a query across datasources.
+type QueryLanguage string
+
+const (
+	QueryLanguageLogchefQL     QueryLanguage = "logchefql"
+	QueryLanguageClickHouseSQL QueryLanguage = "clickhouse-sql"
+	QueryLanguageLogsQL        QueryLanguage = "logsql"
+)
+
+func NormalizeQueryLanguage(language QueryLanguage) QueryLanguage {
+	switch QueryLanguage(string(language)) {
+	case QueryLanguage("sql"):
+		return QueryLanguageClickHouseSQL
+	case QueryLanguageLogchefQL:
+		return QueryLanguageLogchefQL
+	case QueryLanguageClickHouseSQL:
+		return QueryLanguageClickHouseSQL
+	case QueryLanguageLogsQL:
+		return QueryLanguageLogsQL
+	default:
+		return language
+	}
+}
+
+func (l QueryLanguage) Valid() bool {
+	switch NormalizeQueryLanguage(l) {
+	case QueryLanguageLogchefQL, QueryLanguageClickHouseSQL, QueryLanguageLogsQL:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l QueryLanguage) String() string {
+	return string(NormalizeQueryLanguage(l))
+}
+
 // TemplateVariable represents a variable for SQL template substitution.
 // Variables in the SQL query (e.g., {{from_date}}) will be replaced with their values.
 type TemplateVariable struct {
@@ -124,6 +169,7 @@ type SavedQueryTimeRange struct {
 }
 
 // SavedQueryType represents the type of saved query
+// Deprecated: use QueryLanguage + SavedQueryEditorMode for new logic.
 type SavedQueryType string
 
 const (
@@ -133,6 +179,101 @@ const (
 	// SavedQueryTypeSQL represents a query saved in SQL format
 	SavedQueryTypeSQL SavedQueryType = "sql"
 )
+
+// SavedQueryEditorMode captures the UI/editor that authored the saved query.
+type SavedQueryEditorMode string
+
+const (
+	SavedQueryEditorModeBuilder SavedQueryEditorMode = "builder"
+	SavedQueryEditorModeNative  SavedQueryEditorMode = "native"
+)
+
+func NormalizeSavedQueryEditorMode(mode SavedQueryEditorMode) SavedQueryEditorMode {
+	switch mode {
+	case SavedQueryEditorModeBuilder:
+		return SavedQueryEditorModeBuilder
+	case SavedQueryEditorModeNative:
+		return SavedQueryEditorModeNative
+	default:
+		return mode
+	}
+}
+
+func (m SavedQueryEditorMode) Valid() bool {
+	switch NormalizeSavedQueryEditorMode(m) {
+	case SavedQueryEditorModeBuilder, SavedQueryEditorModeNative:
+		return true
+	default:
+		return false
+	}
+}
+
+func LegacySavedQueryTypeFromLanguage(language QueryLanguage) SavedQueryType {
+	if NormalizeQueryLanguage(language) == QueryLanguageLogchefQL {
+		return SavedQueryTypeLogchefQL
+	}
+	return SavedQueryTypeSQL
+}
+
+func DefaultSavedQueryEditorModeForLanguage(language QueryLanguage) SavedQueryEditorMode {
+	if NormalizeQueryLanguage(language) == QueryLanguageLogchefQL {
+		return SavedQueryEditorModeBuilder
+	}
+	return SavedQueryEditorModeNative
+}
+
+func ResolveSavedQueryMetadata(queryType SavedQueryType, language QueryLanguage, mode SavedQueryEditorMode) (QueryLanguage, SavedQueryEditorMode, error) {
+	normalizedType := queryType
+	normalizedLanguage := NormalizeQueryLanguage(language)
+	normalizedMode := NormalizeSavedQueryEditorMode(mode)
+
+	if normalizedLanguage == "" {
+		switch normalizedType {
+		case SavedQueryTypeLogchefQL:
+			normalizedLanguage = QueryLanguageLogchefQL
+		case "", SavedQueryTypeSQL:
+			normalizedLanguage = QueryLanguageClickHouseSQL
+		default:
+			return "", "", ErrInvalidSavedQueryConfiguration{Message: "invalid saved query type"}
+		}
+	}
+
+	if !normalizedLanguage.Valid() {
+		return "", "", ErrInvalidSavedQueryConfiguration{Message: "invalid saved query language"}
+	}
+
+	if normalizedMode == "" {
+		if normalizedType != "" {
+			switch normalizedType {
+			case SavedQueryTypeLogchefQL:
+				normalizedMode = SavedQueryEditorModeBuilder
+			case SavedQueryTypeSQL:
+				normalizedMode = SavedQueryEditorModeNative
+			default:
+				return "", "", ErrInvalidSavedQueryConfiguration{Message: "invalid saved query type"}
+			}
+		} else {
+			normalizedMode = DefaultSavedQueryEditorModeForLanguage(normalizedLanguage)
+		}
+	}
+
+	if !normalizedMode.Valid() {
+		return "", "", ErrInvalidSavedQueryConfiguration{Message: "invalid saved query editor mode"}
+	}
+
+	if normalizedMode == SavedQueryEditorModeBuilder && normalizedLanguage != QueryLanguageLogchefQL {
+		return "", "", ErrInvalidSavedQueryConfiguration{Message: "builder mode requires LogchefQL"}
+	}
+	if normalizedMode == SavedQueryEditorModeNative && normalizedLanguage == QueryLanguageLogchefQL {
+		return "", "", ErrInvalidSavedQueryConfiguration{Message: "native mode requires a datasource-native query language"}
+	}
+
+	if normalizedType != "" && normalizedType != LegacySavedQueryTypeFromLanguage(normalizedLanguage) {
+		return "", "", ErrInvalidSavedQueryConfiguration{Message: "query_type does not match query_language"}
+	}
+
+	return normalizedLanguage, normalizedMode, nil
+}
 
 type SavedQueryVariableOption struct {
 	Value string `json:"value"`
@@ -162,36 +303,42 @@ type SavedQueryContent struct {
 
 // SavedTeamQuery represents a saved query associated with a team
 type SavedTeamQuery struct {
-	ID           int            `json:"id" db:"id"`
-	TeamID       TeamID         `json:"team_id" db:"team_id"`
-	SourceID     SourceID       `json:"source_id" db:"source_id"`
-	Name         string         `json:"name" db:"name"`
-	Description  string         `json:"description" db:"description"`
-	QueryType    SavedQueryType `json:"query_type" db:"query_type"`
-	QueryContent string         `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
-	IsBookmarked bool           `json:"is_bookmarked" db:"is_bookmarked"`
-	CreatedAt    time.Time      `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at" db:"updated_at"`
-	TeamName     string         `json:"team_name,omitempty"`
-	SourceName   string         `json:"source_name,omitempty"`
+	ID            int                  `json:"id" db:"id"`
+	TeamID        TeamID               `json:"team_id" db:"team_id"`
+	SourceID      SourceID             `json:"source_id" db:"source_id"`
+	Name          string               `json:"name" db:"name"`
+	Description   string               `json:"description" db:"description"`
+	QueryType     SavedQueryType       `json:"query_type" db:"query_type"`
+	QueryLanguage QueryLanguage        `json:"query_language" db:"query_language"`
+	EditorMode    SavedQueryEditorMode `json:"editor_mode" db:"editor_mode"`
+	QueryContent  string               `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
+	IsBookmarked  bool                 `json:"is_bookmarked" db:"is_bookmarked"`
+	CreatedAt     time.Time            `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time            `json:"updated_at" db:"updated_at"`
+	TeamName      string               `json:"team_name,omitempty"`
+	SourceName    string               `json:"source_name,omitempty"`
 }
 
 // CreateTeamQueryRequest represents a request to create a team query
 type CreateTeamQueryRequest struct {
-	Name         string         `json:"name" validate:"required"`
-	Description  string         `json:"description"`
-	SourceID     SourceID       `json:"source_id" validate:"required"`
-	QueryType    SavedQueryType `json:"query_type" validate:"required"`
-	QueryContent string         `json:"query_content" validate:"required"`
+	Name          string               `json:"name" validate:"required"`
+	Description   string               `json:"description"`
+	SourceID      SourceID             `json:"source_id" validate:"required"`
+	QueryType     SavedQueryType       `json:"query_type,omitempty"`
+	QueryLanguage QueryLanguage        `json:"query_language,omitempty"`
+	EditorMode    SavedQueryEditorMode `json:"editor_mode,omitempty"`
+	QueryContent  string               `json:"query_content" validate:"required"`
 }
 
 // UpdateTeamQueryRequest represents a request to update a team query
 type UpdateTeamQueryRequest struct {
-	Name         string         `json:"name"`
-	Description  string         `json:"description"`
-	SourceID     SourceID       `json:"source_id"`
-	QueryType    SavedQueryType `json:"query_type"`
-	QueryContent string         `json:"query_content"`
+	Name          *string               `json:"name,omitempty"`
+	Description   *string               `json:"description,omitempty"`
+	SourceID      *SourceID             `json:"source_id,omitempty"`
+	QueryType     *SavedQueryType       `json:"query_type,omitempty"`
+	QueryLanguage *QueryLanguage        `json:"query_language,omitempty"`
+	EditorMode    *SavedQueryEditorMode `json:"editor_mode,omitempty"`
+	QueryContent  *string               `json:"query_content,omitempty"`
 }
 
 // SavedQuery represents a generic saved query

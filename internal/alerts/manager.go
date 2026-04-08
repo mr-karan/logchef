@@ -120,13 +120,9 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 		return nil
 	}
 
-	// Evaluate based on the presence of a valid SQL query, not the query_type label.
-	// The frontend generates SQL for both "sql" and "condition" modes, storing it in
-	// the Query field. The query_type is informational (indicates which UI mode was used)
-	// rather than a distinct evaluation strategy.
 	query := strings.TrimSpace(alert.Query)
 	if query == "" {
-		m.log.Warn("alert query is empty; skipping evaluation", "alert_id", alert.ID, "query_type", alert.QueryType)
+		m.log.Warn("alert query is empty; skipping evaluation", "alert_id", alert.ID, "query_language", alert.QueryLanguage, "editor_mode", alert.EditorMode)
 		return nil
 	}
 
@@ -138,6 +134,7 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 
 	timeout := models.DefaultQueryTimeoutSeconds
 	result, err := m.datasource.EvaluateAlert(ctx, alert.SourceID, datasource.AlertQueryRequest{
+		Language:     alert.QueryLanguage,
 		Query:        query,
 		QueryTimeout: &timeout,
 	})
@@ -181,10 +178,12 @@ func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert
 
 	errorMessage := fmt.Sprintf("Evaluation failed: %v", evalErr)
 	errorPayload := map[string]any{
-		"error":      evalErr.Error(),
-		"query_type": string(alert.QueryType),
-		"query":      alert.Query,
-		"status":     string(models.AlertStatusError),
+		"error":          evalErr.Error(),
+		"query_type":     string(alert.QueryType),
+		"query_language": string(alert.QueryLanguage),
+		"editor_mode":    string(alert.EditorMode),
+		"query":          alert.Query,
+		"status":         string(models.AlertStatusError),
 	}
 
 	_, err := m.db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusError, nil, errorMessage, errorPayload)
