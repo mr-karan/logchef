@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -17,28 +16,31 @@ import (
 // It maps the domain model to the sqlc parameters and handles potential unique constraint errors.
 // The source ID and timestamps are populated back into the input source model upon success.
 func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
+	if err := source.SyncConnectionConfig(); err != nil {
+		return fmt.Errorf("prepare source connection config: %w", err)
+	}
 
 	// Map domain model to sqlc parameters.
 	params := sqlc.CreateSourceParams{
 		Name:              source.Name,
 		MetaIsAutoCreated: boolToInt(source.MetaIsAutoCreated),
+		SourceType:        source.SourceType.String(),
 		MetaTsField:       source.MetaTSField,
 		MetaSeverityField: sql.NullString{String: source.MetaSeverityField, Valid: source.MetaSeverityField != ""},
-		Host:              source.Connection.Host,
-		Username:          source.Connection.Username,
-		Password:          source.Connection.Password,
-		Database:          source.Connection.Database,
-		TableName:         source.Connection.TableName,
+		ConnectionConfig:  string(source.ConnectionConfig),
+		IdentityKey:       source.IdentityKey,
 		Description:       sql.NullString{String: source.Description, Valid: source.Description != ""},
 		TtlDays:           int64(source.TTLDays),
+		Managed:           boolToInt(source.Managed),
+		SecretRef:         sql.NullString{String: source.SecretRef, Valid: source.SecretRef != ""},
 	}
 
 	// Execute the generated query.
 	id, err := db.writeQueries.CreateSource(ctx, params)
 	if err != nil {
 		// Provide a more specific error message for unique constraint violations.
-		if IsUniqueConstraintError(err) && (strings.Contains(err.Error(), "database") || strings.Contains(err.Error(), "table_name")) {
-			return handleUniqueConstraintError(err, "sources", "database_table", fmt.Sprintf("%s.%s", source.Connection.Database, source.Connection.TableName))
+		if IsUniqueConstraintError(err) {
+			return handleUniqueConstraintError(err, "sources", "identity_key", source.IdentityKey)
 		}
 		db.log.Error("failed to create source record in db", "error", err)
 		return fmt.Errorf("error creating source record: %w", err)
@@ -85,27 +87,23 @@ func (db *DB) GetSource(ctx context.Context, id models.SourceID) (*models.Source
 	return source, nil
 }
 
-// GetSourceByName retrieves a single source by its database and table name combination.
+// GetSourceByIdentityKey retrieves a single source by its provider-computed identity key.
 // It returns models.ErrNotFound if no matching source exists.
-func (db *DB) GetSourceByName(ctx context.Context, database, tableName string) (*models.Source, error) {
-
-	sourceRow, err := db.readQueries.GetSourceByName(ctx, sqlc.GetSourceByNameParams{
-		Database:  database,
-		TableName: tableName,
-	})
+func (db *DB) GetSourceByIdentityKey(ctx context.Context, identityKey string) (*models.Source, error) {
+	sourceRow, err := db.readQueries.GetSourceByIdentityKey(ctx, identityKey)
 	if err != nil {
 		// Explicitly map ErrNoRows to models.ErrNotFound for clarity.
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, models.ErrNotFound // Use the model-defined error
 		}
-		db.log.Error("failed to get source by name from db", "error", err, "database", database, "table", tableName)
-		return nil, fmt.Errorf("error getting source by name: %w", err)
+		db.log.Error("failed to get source by identity key from db", "error", err, "identity_key", identityKey)
+		return nil, fmt.Errorf("error getting source by identity key: %w", err)
 	}
 
 	// Map sqlc result to domain model.
 	source := mapSourceRowToModel(&sourceRow)
 	if source == nil {
-		return nil, fmt.Errorf("internal error: source row for %s.%s mapped to nil", database, tableName)
+		return nil, fmt.Errorf("internal error: source row for identity %s mapped to nil", identityKey)
 	}
 	return source, nil
 }
@@ -135,20 +133,23 @@ func (db *DB) ListSources(ctx context.Context) ([]*models.Source, error) {
 // Note: This updates the entire record based on the provided model.
 // The `updated_at` timestamp is automatically set by the query.
 func (db *DB) UpdateSource(ctx context.Context, source *models.Source) error {
+	if err := source.SyncConnectionConfig(); err != nil {
+		return fmt.Errorf("prepare source connection config: %w", err)
+	}
 
 	// Map domain model to sqlc parameters.
 	params := sqlc.UpdateSourceParams{
 		Name:              source.Name,
 		MetaIsAutoCreated: boolToInt(source.MetaIsAutoCreated),
+		SourceType:        source.SourceType.String(),
 		MetaTsField:       source.MetaTSField,
 		MetaSeverityField: sql.NullString{String: source.MetaSeverityField, Valid: source.MetaSeverityField != ""},
-		Host:              source.Connection.Host,
-		Username:          source.Connection.Username,
-		Password:          source.Connection.Password,
-		Database:          source.Connection.Database,
-		TableName:         source.Connection.TableName,
+		ConnectionConfig:  string(source.ConnectionConfig),
+		IdentityKey:       source.IdentityKey,
 		Description:       sql.NullString{String: source.Description, Valid: source.Description != ""},
 		TtlDays:           int64(source.TTLDays),
+		Managed:           boolToInt(source.Managed),
+		SecretRef:         sql.NullString{String: source.SecretRef, Valid: source.SecretRef != ""},
 		ID:                int64(source.ID),
 	}
 

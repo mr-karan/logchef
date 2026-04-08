@@ -3,17 +3,17 @@
 -- name: CreateSource :one
 -- Create a new source entry
 INSERT INTO sources (
-    name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), ?, ?)
 RETURNING id;
 
 -- name: GetSource :one
 -- Get a single source by ID
 SELECT * FROM sources WHERE id = ?;
 
--- name: GetSourceByName :one
--- Get a single source by table name and database
-SELECT * FROM sources WHERE database = ? AND table_name = ?;
+-- name: GetSourceByIdentityKey :one
+-- Get a single source by provider-computed identity key
+SELECT * FROM sources WHERE identity_key = ?;
 
 -- name: ListSources :many
 -- Get all sources ordered by creation date
@@ -24,15 +24,15 @@ SELECT * FROM sources ORDER BY created_at DESC;
 UPDATE sources
 SET name = ?,
     _meta_is_auto_created = ?,
+    source_type = ?,
     _meta_ts_field = ?,
     _meta_severity_field = ?,
-    host = ?,
-    username = ?,
-    password = ?,
-    database = ?,
-    table_name = ?,
+    connection_config = ?,
+    identity_key = ?,
     description = ?,
     ttl_days = ?,
+    managed = ?,
+    secret_ref = ?,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?;
 
@@ -560,4 +560,3 @@ SELECT managed FROM users WHERE id = ?;
 -- name: GetSourceByNameForProvisioning :one
 -- Get source by name for provisioning lookup
 SELECT * FROM sources WHERE name = ?;
-

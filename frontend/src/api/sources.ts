@@ -15,6 +15,12 @@ interface ConnectionRequestInfo {
   table_name: string;
 }
 
+interface ValidateConnectionRequestInfo extends ConnectionRequestInfo {
+  source_type?: string;
+  timestamp_field?: string;
+  severity_field?: string;
+}
+
 export interface Source {
   id: number;
   name: string;
@@ -162,10 +168,19 @@ export const sourcesApi = {
     ),
 
   // Validation
-  validateSourceConnection: (connectionInfo: ConnectionRequestInfo & {
-    timestamp_field?: string;
-    severity_field?: string;
-  }) => apiClient.post<{ message: string }>("/admin/sources/validate", connectionInfo),
+  validateSourceConnection: (connectionInfo: ValidateConnectionRequestInfo) =>
+    apiClient.post<{ message: string }>("/admin/sources/validate", {
+      source_type: connectionInfo.source_type || "clickhouse",
+      connection: {
+        host: connectionInfo.host,
+        username: connectionInfo.username,
+        password: connectionInfo.password,
+        database: connectionInfo.database,
+        table_name: connectionInfo.table_name,
+      },
+      timestamp_field: connectionInfo.timestamp_field,
+      severity_field: connectionInfo.severity_field,
+    }),
 
   // Field values for sidebar exploration
   // Time range is required for performance (avoids full table scan)

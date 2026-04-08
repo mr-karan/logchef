@@ -151,8 +151,9 @@ func reconcileSources(ctx context.Context, qtx *sqlc.Queries, cfg *config.Provis
 
 			sourceIDs[cfgSrc.Name] = id
 			*toConnect = append(*toConnect, models.Source{
-				ID:   models.SourceID(id),
-				Name: cfgSrc.Name,
+				ID:         models.SourceID(id),
+				Name:       cfgSrc.Name,
+				SourceType: models.SourceTypeClickHouse,
 				Connection: models.ConnectionInfo{
 					Host:      cfgSrc.Host,
 					Username:  cfgSrc.Username,
@@ -486,45 +487,74 @@ func validateSourceConnection(ctx context.Context, chMgr *clickhouse.Manager, sr
 }
 
 func buildCreateSourceParams(src config.ProvisionSource) sqlc.CreateSourceParams {
+	source := buildProvisionedSourceModel(src)
+	_ = source.SyncConnectionConfig()
+
 	return sqlc.CreateSourceParams{
 		Name:              src.Name,
 		MetaIsAutoCreated: 0,
+		SourceType:        source.SourceType.String(),
 		MetaTsField:       src.MetaTSField,
 		MetaSeverityField: sql.NullString{String: src.MetaSeverityField, Valid: src.MetaSeverityField != ""},
-		Host:              src.Host,
-		Username:          src.Username,
-		Password:          src.Password,
-		Database:          src.Database,
-		TableName:         src.TableName,
+		ConnectionConfig:  string(source.ConnectionConfig),
+		IdentityKey:       source.IdentityKey,
 		Description:       sql.NullString{String: src.Description, Valid: src.Description != ""},
 		TtlDays:           int64(src.TTLDays),
+		Managed:           0,
+		SecretRef:         sql.NullString{},
 	}
 }
 
 func updateSourceFromConfig(ctx context.Context, qtx *sqlc.Queries, sourceID int64, src config.ProvisionSource) error {
+	source := buildProvisionedSourceModel(src)
+	_ = source.SyncConnectionConfig()
+
 	return qtx.UpdateSource(ctx, sqlc.UpdateSourceParams{
 		Name:              src.Name,
-		Host:              src.Host,
-		Username:          src.Username,
-		Password:          src.Password,
-		Database:          src.Database,
-		TableName:         src.TableName,
-		Description:       sql.NullString{String: src.Description, Valid: src.Description != ""},
-		TtlDays:           int64(src.TTLDays),
+		MetaIsAutoCreated: 0,
+		SourceType:        source.SourceType.String(),
 		MetaTsField:       src.MetaTSField,
 		MetaSeverityField: sql.NullString{String: src.MetaSeverityField, Valid: src.MetaSeverityField != ""},
+		ConnectionConfig:  string(source.ConnectionConfig),
+		IdentityKey:       source.IdentityKey,
+		Description:       sql.NullString{String: src.Description, Valid: src.Description != ""},
+		TtlDays:           int64(src.TTLDays),
+		Managed:           1,
+		SecretRef:         sql.NullString{String: src.SecretRef, Valid: src.SecretRef != ""},
 		ID:                sourceID,
 	})
 }
 
 func sourceNeedsUpdate(existing sqlc.Source, desired config.ProvisionSource) bool {
-	return existing.Host != desired.Host ||
-		existing.Username != desired.Username ||
-		existing.Password != desired.Password ||
-		existing.Database != desired.Database ||
-		existing.TableName != desired.TableName ||
+	source := buildProvisionedSourceModel(desired)
+	_ = source.SyncConnectionConfig()
+
+	return existing.SourceType != source.SourceType.String() ||
+		existing.ConnectionConfig != string(source.ConnectionConfig) ||
+		existing.IdentityKey != source.IdentityKey ||
 		existing.Description.String != desired.Description ||
 		int(existing.TtlDays) != desired.TTLDays ||
 		existing.MetaTsField != desired.MetaTSField ||
 		existing.MetaSeverityField.String != desired.MetaSeverityField
+}
+
+func buildProvisionedSourceModel(src config.ProvisionSource) models.Source {
+	return models.Source{
+		Name:              src.Name,
+		SourceType:        models.SourceTypeClickHouse,
+		MetaIsAutoCreated: false,
+		MetaTSField:       src.MetaTSField,
+		MetaSeverityField: src.MetaSeverityField,
+		Connection: models.ConnectionInfo{
+			Host:      src.Host,
+			Username:  src.Username,
+			Password:  src.Password,
+			Database:  src.Database,
+			TableName: src.TableName,
+		},
+		Description: src.Description,
+		TTLDays:     src.TTLDays,
+		Managed:     true,
+		SecretRef:   src.SecretRef,
+	}
 }

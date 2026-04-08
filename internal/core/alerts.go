@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/clickhouse"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -444,7 +444,7 @@ func ResolveAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID 
 }
 
 // TestAlertQuery executes a test query to validate alert configuration and show performance metrics.
-func TestAlertQuery(ctx context.Context, db *sqlite.DB, ch *clickhouse.Manager, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, req *models.TestAlertQueryRequest) (*models.TestAlertQueryResponse, error) {
+func TestAlertQuery(ctx context.Context, db *sqlite.DB, ds *datasource.Service, teamID models.TeamID, sourceID models.SourceID, req *models.TestAlertQueryRequest) (*models.TestAlertQueryResponse, error) {
 	if req == nil {
 		return nil, fmt.Errorf("test query request is required")
 	}
@@ -475,16 +475,17 @@ func TestAlertQuery(ctx context.Context, db *sqlite.DB, ch *clickhouse.Manager, 
 		return nil, fmt.Errorf("failed to load source: %w", err)
 	}
 
-	// Get ClickHouse connection
-	client, err := ch.GetConnection(sourceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to obtain ClickHouse connection: %w", err)
+	if ds == nil {
+		return nil, fmt.Errorf("datasource service is required")
 	}
 
 	// Execute query with timing
 	timeout := models.DefaultQueryTimeoutSeconds
 	startTime := time.Now()
-	result, err := client.QueryWithTimeout(ctx, query, &timeout)
+	result, err := ds.EvaluateAlert(ctx, sourceID, datasource.AlertQueryRequest{
+		Query:        query,
+		QueryTimeout: &timeout,
+	})
 	executionTime := time.Since(startTime)
 
 	if err != nil {

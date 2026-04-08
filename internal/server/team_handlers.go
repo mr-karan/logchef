@@ -239,7 +239,7 @@ func (s *Server) handleListTeamSources(c *fiber.Ctx) error {
 	}
 
 	// Get source info, including connection status, linked to the team using the updated core function.
-	sources, err := core.ListTeamSources(c.Context(), s.sqlite, s.clickhouse, s.log, teamID)
+	sources, err := core.ListTeamSources(c.Context(), s.sqlite, s.datasources, s.log, teamID)
 	if err != nil {
 		if errors.Is(err, core.ErrTeamNotFound) {
 			// Team not found is a valid case, return empty list.
@@ -288,7 +288,7 @@ func (s *Server) handleGetTeamSource(c *fiber.Ctx) error {
 	}
 
 	// Use the core.GetSource which fetches details (connection, schema).
-	sourceDetails, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	sourceDetails, err := core.GetSource(c.Context(), s.sqlite, s.datasources, s.clickhouse, s.log, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)

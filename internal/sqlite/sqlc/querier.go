@@ -70,8 +70,8 @@ type Querier interface {
 	GetSession(ctx context.Context, id string) (Session, error)
 	// Get a single source by ID
 	GetSource(ctx context.Context, id int64) (Source, error)
-	// Get a single source by table name and database
-	GetSourceByName(ctx context.Context, arg GetSourceByNameParams) (Source, error)
+	// Get a single source by provider-computed identity key
+	GetSourceByIdentityKey(ctx context.Context, identityKey string) (Source, error)
 	// Get source by name for provisioning lookup
 	GetSourceByNameForProvisioning(ctx context.Context, name string) (Source, error)
 	// System Settings Queries

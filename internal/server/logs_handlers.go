@@ -16,6 +16,7 @@ import (
 	"github.com/mr-karan/logchef/internal/ai"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -224,20 +225,23 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 	defer queryTracker.RemoveQuery(queryID) // Ensure cleanup
 
 	// Prepare parameters for the core query function.
-	params := clickhouse.LogQueryParams{
-		RawSQL:       processedSQL,
+	params := datasource.QueryRequest{
+		RawQuery:     processedSQL,
 		Limit:        req.Limit,
 		MaxLimit:     s.config.Query.MaxLimit,
-		QueryTimeout: req.QueryTimeout, // Always non-nil now
+		QueryTimeout: req.QueryTimeout,
 	}
 	// StartTime, EndTime, and Timezone are no longer passed here;
 	// they are expected to be baked into the RawSQL by the frontend.
 
 	// Execute query via core function with cancellable context.
-	result, err := core.QueryLogs(queryCtx, s.sqlite, s.clickhouse, s.log, sourceID, params)
+	result, err := core.QueryLogs(queryCtx, s.datasources, sourceID, params)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		}
+		if errors.Is(err, datasource.ErrOperationNotSupported) {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Querying is not supported for this source type yet", models.ValidationErrorType)
 		}
 		if clickhouse.IsValidationError(err) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
@@ -314,10 +318,13 @@ func (s *Server) handleGetSourceSchema(c *fiber.Ctx) error {
 	}
 
 	// Get schema via core function.
-	schema, err := core.GetSourceSchema(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	schema, err := core.GetSourceSchema(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		}
+		if errors.Is(err, datasource.ErrOperationNotSupported) {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Schema inspection is not supported for this source type yet", models.ValidationErrorType)
 		}
 		s.log.Error("failed to get source schema", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to retrieve source schema: %v", err), models.DatabaseErrorType)
@@ -415,10 +422,13 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 	params.QueryTimeout = req.QueryTimeout
 
 	// Execute histogram query via core function.
-	result, err := core.GetHistogramData(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID, params)
+	result, err := core.GetHistogramData(c.Context(), s.datasources, sourceID, params)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		}
+		if errors.Is(err, datasource.ErrOperationNotSupported) {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Histogram is not supported for this source type yet", models.ValidationErrorType)
 		}
 
 		// Check for specific error types
@@ -513,7 +523,7 @@ func (s *Server) parseSourceTeamIDs(c *fiber.Ctx) (models.SourceID, models.TeamI
 }
 
 func (s *Server) getSourceSchemaForAI(c *fiber.Ctx, sourceID models.SourceID) (source *models.Source, schemaJSON, tableName string, err error) {
-	source, err = core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err = core.GetSource(c.Context(), s.sqlite, s.datasources, s.clickhouse, s.log, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return nil, "", "", SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -522,6 +532,9 @@ func (s *Server) getSourceSchemaForAI(c *fiber.Ctx, sourceID models.SourceID) (s
 	}
 	if source == nil {
 		return nil, "", "", SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
+	}
+	if !source.IsClickHouse() {
+		return nil, "", "", SendErrorWithType(c, http.StatusBadRequest, "AI SQL generation is only supported for ClickHouse sources", models.ValidationErrorType)
 	}
 
 	if !source.IsConnected {
@@ -640,10 +653,13 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 	}
 
 	// Execute context query via core function
-	result, err := core.GetLogContext(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID, params)
+	result, err := core.GetLogContext(c.Context(), s.datasources, sourceID, params)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		}
+		if errors.Is(err, datasource.ErrOperationNotSupported) {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Log context is not supported for this source type yet", models.ValidationErrorType)
 		}
 		s.log.Error("failed to get log context", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to retrieve log context: %v", err), models.DatabaseErrorType)
@@ -718,13 +734,16 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 	logchefqlQuery := c.Query("logchefql", "")
 
 	// Get source information
-	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err := core.GetSource(c.Context(), s.sqlite, s.datasources, s.clickhouse, s.log, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
 		s.log.Error("failed to get source for field values", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+	}
+	if !source.IsClickHouse() {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Field values are only supported for ClickHouse sources in this phase", models.ValidationErrorType)
 	}
 
 	// Get ClickHouse client
@@ -822,13 +841,16 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 	logchefqlQuery := c.Query("logchefql", "")
 
 	// Get source information
-	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err := core.GetSource(c.Context(), s.sqlite, s.datasources, s.clickhouse, s.log, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
 		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+	}
+	if !source.IsClickHouse() {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Field values are only supported for ClickHouse sources in this phase", models.ValidationErrorType)
 	}
 
 	// Get ClickHouse client

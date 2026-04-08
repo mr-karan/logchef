@@ -51,16 +51,33 @@ log "Team: Dev Team (ID: $TEAM_ID)"
 
 log "Setting up sources..."
 
-sqlite3 "$DB_PATH" "DELETE FROM sources WHERE database='default' AND table_name IN ('http', 'syslogs');"
+sqlite3 "$DB_PATH" "DELETE FROM sources WHERE identity_key IN ('clickhouse:127.0.0.1:9000/default/http', 'clickhouse:127.0.0.1:9000/default/syslogs');"
 
-sqlite3 "$DB_PATH" "INSERT INTO sources (name, description, _meta_is_auto_created, _meta_ts_field, host, username, password, database, table_name)
-VALUES ('HTTP Access Logs', 'Demo HTTP access logs (vector -c http.toml)', 0, 'timestamp', '127.0.0.1:9000', 'default', '', 'default', 'http');"
-HTTP_ID=$(sqlite3 "$DB_PATH" "SELECT id FROM sources WHERE database='default' AND table_name='http';")
+sqlite3 "$DB_PATH" "INSERT INTO sources (name, description, _meta_is_auto_created, source_type, _meta_ts_field, connection_config, identity_key)
+VALUES (
+  'HTTP Access Logs',
+  'Demo HTTP access logs (vector -c http.toml)',
+  0,
+  'clickhouse',
+  'timestamp',
+  json_object('host', '127.0.0.1:9000', 'username', 'default', 'password', '', 'database', 'default', 'table_name', 'http'),
+  'clickhouse:127.0.0.1:9000/default/http'
+);"
+HTTP_ID=$(sqlite3 "$DB_PATH" "SELECT id FROM sources WHERE identity_key='clickhouse:127.0.0.1:9000/default/http';")
 log "Source: HTTP Access Logs (ID: $HTTP_ID) -> default.http"
 
-sqlite3 "$DB_PATH" "INSERT INTO sources (name, description, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name)
-VALUES ('Syslog Logs', 'Demo syslog data (vector -c syslog.toml)', 0, 'timestamp', 'lvl', '127.0.0.1:9000', 'default', '', 'default', 'syslogs');"
-SYSLOG_ID=$(sqlite3 "$DB_PATH" "SELECT id FROM sources WHERE database='default' AND table_name='syslogs';")
+sqlite3 "$DB_PATH" "INSERT INTO sources (name, description, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key)
+VALUES (
+  'Syslog Logs',
+  'Demo syslog data (vector -c syslog.toml)',
+  0,
+  'clickhouse',
+  'timestamp',
+  'lvl',
+  json_object('host', '127.0.0.1:9000', 'username', 'default', 'password', '', 'database', 'default', 'table_name', 'syslogs'),
+  'clickhouse:127.0.0.1:9000/default/syslogs'
+);"
+SYSLOG_ID=$(sqlite3 "$DB_PATH" "SELECT id FROM sources WHERE identity_key='clickhouse:127.0.0.1:9000/default/syslogs';")
 log "Source: Syslog Logs (ID: $SYSLOG_ID) -> default.syslogs"
 
 log "Linking sources to Dev Team..."

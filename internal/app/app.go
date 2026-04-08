@@ -13,23 +13,26 @@ import (
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/provisioning"
 	"github.com/mr-karan/logchef/internal/server"
 	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/victorialogs"
 	"github.com/mr-karan/logchef/pkg/logger"
 )
 
 // App represents the core application context, holding dependencies and configuration.
 type App struct {
-	Config     *config.Config
-	SQLite     *sqlite.DB
-	ClickHouse *clickhouse.Manager
-	Logger     *slog.Logger
-	server     *server.Server
-	WebFS      http.FileSystem
-	BuildInfo  string
-	Version    string
-	Alerts     *alerts.Manager
+	Config      *config.Config
+	SQLite      *sqlite.DB
+	ClickHouse  *clickhouse.Manager
+	Datasources *datasource.Service
+	Logger      *slog.Logger
+	server      *server.Server
+	WebFS       http.FileSystem
+	BuildInfo   string
+	Version     string
+	Alerts      *alerts.Manager
 }
 
 // Options contains configuration needed when creating a new App instance.
@@ -92,6 +95,9 @@ func (a *App) Initialize(ctx context.Context) error {
 
 	// Initialize ClickHouse connection manager.
 	a.ClickHouse = clickhouse.NewManager(a.Logger)
+	a.Datasources = datasource.NewService(a.SQLite, a.Logger)
+	a.Datasources.Register(datasource.NewClickHouseProvider(a.ClickHouse, a.Logger))
+	a.Datasources.Register(victorialogs.NewProvider(a.Logger))
 
 	// Initialize OIDC Provider.
 	// This is optional; if OIDC is not configured, auth features relying on it might be disabled.
@@ -118,23 +124,10 @@ func (a *App) Initialize(ctx context.Context) error {
 		}
 	}
 
-	// Load existing sources from SQLite into the ClickHouse manager
+	// Load existing sources from SQLite into their registered datasource providers
 	// to establish connections for querying.
-	sources, err := a.SQLite.ListSources(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to list sources: %w", err)
-	}
-	for _, source := range sources {
-		a.Logger.Info("initializing source connection",
-			"source_id", source.ID,
-			"table", source.Connection.TableName)
-		if err := a.ClickHouse.AddSource(ctx, source); err != nil {
-			// Log failure but continue initialization.
-			// The health check system will attempt to recover these connections.
-			a.Logger.Warn("failed to initialize source connection, will attempt recovery via health checks",
-				"source_id", source.ID,
-				"error", err)
-		}
+	if err := a.Datasources.InitializeAllSources(ctx); err != nil {
+		return fmt.Errorf("failed to initialize datasource connections: %w", err)
 	}
 
 	// Start background health checks for the ClickHouse manager.
@@ -147,11 +140,11 @@ func (a *App) Initialize(ctx context.Context) error {
 	alertSender := alerts.NewMultiSender(emailSender, webhookSender)
 
 	a.Alerts = alerts.NewManager(alerts.Options{
-		Config:     a.Config.Alerts,
-		DB:         a.SQLite,
-		ClickHouse: a.ClickHouse,
-		Logger:     a.Logger,
-		Sender:     alertSender,
+		Config:      a.Config.Alerts,
+		DB:          a.SQLite,
+		Datasources: a.Datasources,
+		Logger:      a.Logger,
+		Sender:      alertSender,
 	})
 
 	// Initialize HTTP server with alerts manager for manual resolution.
@@ -159,6 +152,7 @@ func (a *App) Initialize(ctx context.Context) error {
 		Config:        a.Config,
 		SQLite:        a.SQLite,
 		ClickHouse:    a.ClickHouse,
+		Datasources:   a.Datasources,
 		AlertsManager: a.Alerts,
 		OIDCProvider:  oidcProvider,
 		FS:            a.WebFS,

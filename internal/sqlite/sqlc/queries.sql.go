@@ -214,23 +214,23 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 const createSource = `-- name: CreateSource :one
 
 INSERT INTO sources (
-    name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), ?, ?)
 RETURNING id
 `
 
 type CreateSourceParams struct {
 	Name              string         `json:"name"`
 	MetaIsAutoCreated int64          `json:"_meta_is_auto_created"`
+	SourceType        string         `json:"source_type"`
 	MetaTsField       string         `json:"_meta_ts_field"`
 	MetaSeverityField sql.NullString `json:"_meta_severity_field"`
-	Host              string         `json:"host"`
-	Username          string         `json:"username"`
-	Password          string         `json:"password"`
-	Database          string         `json:"database"`
-	TableName         string         `json:"table_name"`
+	ConnectionConfig  string         `json:"connection_config"`
+	IdentityKey       string         `json:"identity_key"`
 	Description       sql.NullString `json:"description"`
 	TtlDays           int64          `json:"ttl_days"`
+	Managed           int64          `json:"managed"`
+	SecretRef         sql.NullString `json:"secret_ref"`
 }
 
 // Sources
@@ -239,15 +239,15 @@ func (q *Queries) CreateSource(ctx context.Context, arg CreateSourceParams) (int
 	row := q.queryRow(ctx, q.createSourceStmt, createSource,
 		arg.Name,
 		arg.MetaIsAutoCreated,
+		arg.SourceType,
 		arg.MetaTsField,
 		arg.MetaSeverityField,
-		arg.Host,
-		arg.Username,
-		arg.Password,
-		arg.Database,
-		arg.TableName,
+		arg.ConnectionConfig,
+		arg.IdentityKey,
 		arg.Description,
 		arg.TtlDays,
+		arg.Managed,
+		arg.SecretRef,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -630,7 +630,7 @@ func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
 }
 
 const getSource = `-- name: GetSource :one
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE id = ?
+SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE id = ?
 `
 
 // Get a single source by ID
@@ -641,13 +641,11 @@ func (q *Queries) GetSource(ctx context.Context, id int64) (Source, error) {
 		&i.ID,
 		&i.Name,
 		&i.MetaIsAutoCreated,
+		&i.SourceType,
 		&i.MetaTsField,
 		&i.MetaSeverityField,
-		&i.Host,
-		&i.Username,
-		&i.Password,
-		&i.Database,
-		&i.TableName,
+		&i.ConnectionConfig,
+		&i.IdentityKey,
 		&i.Description,
 		&i.TtlDays,
 		&i.CreatedAt,
@@ -658,30 +656,23 @@ func (q *Queries) GetSource(ctx context.Context, id int64) (Source, error) {
 	return i, err
 }
 
-const getSourceByName = `-- name: GetSourceByName :one
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE database = ? AND table_name = ?
+const getSourceByIdentityKey = `-- name: GetSourceByIdentityKey :one
+SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE identity_key = ?
 `
 
-type GetSourceByNameParams struct {
-	Database  string `json:"database"`
-	TableName string `json:"table_name"`
-}
-
-// Get a single source by table name and database
-func (q *Queries) GetSourceByName(ctx context.Context, arg GetSourceByNameParams) (Source, error) {
-	row := q.queryRow(ctx, q.getSourceByNameStmt, getSourceByName, arg.Database, arg.TableName)
+// Get a single source by provider-computed identity key
+func (q *Queries) GetSourceByIdentityKey(ctx context.Context, identityKey string) (Source, error) {
+	row := q.queryRow(ctx, q.getSourceByIdentityKeyStmt, getSourceByIdentityKey, identityKey)
 	var i Source
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.MetaIsAutoCreated,
+		&i.SourceType,
 		&i.MetaTsField,
 		&i.MetaSeverityField,
-		&i.Host,
-		&i.Username,
-		&i.Password,
-		&i.Database,
-		&i.TableName,
+		&i.ConnectionConfig,
+		&i.IdentityKey,
 		&i.Description,
 		&i.TtlDays,
 		&i.CreatedAt,
@@ -693,7 +684,7 @@ func (q *Queries) GetSourceByName(ctx context.Context, arg GetSourceByNameParams
 }
 
 const getSourceByNameForProvisioning = `-- name: GetSourceByNameForProvisioning :one
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE name = ?
+SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE name = ?
 `
 
 // Get source by name for provisioning lookup
@@ -704,13 +695,11 @@ func (q *Queries) GetSourceByNameForProvisioning(ctx context.Context, name strin
 		&i.ID,
 		&i.Name,
 		&i.MetaIsAutoCreated,
+		&i.SourceType,
 		&i.MetaTsField,
 		&i.MetaSeverityField,
-		&i.Host,
-		&i.Username,
-		&i.Password,
-		&i.Database,
-		&i.TableName,
+		&i.ConnectionConfig,
+		&i.IdentityKey,
 		&i.Description,
 		&i.TtlDays,
 		&i.CreatedAt,
@@ -1171,7 +1160,7 @@ func (q *Queries) ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsB
 
 const listManagedSources = `-- name: ListManagedSources :many
 
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE managed = 1 ORDER BY id
+SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE managed = 1 ORDER BY id
 `
 
 // Provisioning Queries
@@ -1189,13 +1178,11 @@ func (q *Queries) ListManagedSources(ctx context.Context) ([]Source, error) {
 			&i.ID,
 			&i.Name,
 			&i.MetaIsAutoCreated,
+			&i.SourceType,
 			&i.MetaTsField,
 			&i.MetaSeverityField,
-			&i.Host,
-			&i.Username,
-			&i.Password,
-			&i.Database,
-			&i.TableName,
+			&i.ConnectionConfig,
+			&i.IdentityKey,
 			&i.Description,
 			&i.TtlDays,
 			&i.CreatedAt,
@@ -1487,7 +1474,7 @@ func (q *Queries) ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, 
 }
 
 const listSources = `-- name: ListSources :many
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, "database", table_name, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources ORDER BY created_at DESC
+SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources ORDER BY created_at DESC
 `
 
 // Get all sources ordered by creation date
@@ -1504,13 +1491,11 @@ func (q *Queries) ListSources(ctx context.Context) ([]Source, error) {
 			&i.ID,
 			&i.Name,
 			&i.MetaIsAutoCreated,
+			&i.SourceType,
 			&i.MetaTsField,
 			&i.MetaSeverityField,
-			&i.Host,
-			&i.Username,
-			&i.Password,
-			&i.Database,
-			&i.TableName,
+			&i.ConnectionConfig,
+			&i.IdentityKey,
 			&i.Description,
 			&i.TtlDays,
 			&i.CreatedAt,
@@ -1532,7 +1517,7 @@ func (q *Queries) ListSources(ctx context.Context) ([]Source, error) {
 }
 
 const listSourcesForUser = `-- name: ListSourcesForUser :many
-SELECT DISTINCT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.host, s.username, s.password, s."database", s.table_name, s.description, s.ttl_days, s.created_at, s.updated_at, s.managed, s.secret_ref FROM sources s
+SELECT DISTINCT s.id, s.name, s._meta_is_auto_created, s.source_type, s._meta_ts_field, s._meta_severity_field, s.connection_config, s.identity_key, s.description, s.ttl_days, s.created_at, s.updated_at, s.managed, s.secret_ref FROM sources s
 JOIN team_sources ts ON s.id = ts.source_id
 JOIN team_members tm ON ts.team_id = tm.team_id
 WHERE tm.user_id = ?
@@ -1553,13 +1538,11 @@ func (q *Queries) ListSourcesForUser(ctx context.Context, userID int64) ([]Sourc
 			&i.ID,
 			&i.Name,
 			&i.MetaIsAutoCreated,
+			&i.SourceType,
 			&i.MetaTsField,
 			&i.MetaSeverityField,
-			&i.Host,
-			&i.Username,
-			&i.Password,
-			&i.Database,
-			&i.TableName,
+			&i.ConnectionConfig,
+			&i.IdentityKey,
 			&i.Description,
 			&i.TtlDays,
 			&i.CreatedAt,
@@ -1740,7 +1723,7 @@ func (q *Queries) ListTeamMembersWithDetails(ctx context.Context, teamID int64) 
 }
 
 const listTeamSources = `-- name: ListTeamSources :many
-SELECT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.host, s.username, s.password, s."database", s.table_name, s.description, s.ttl_days, s.created_at, s.updated_at, s.managed, s.secret_ref
+SELECT s.id, s.name, s._meta_is_auto_created, s.source_type, s._meta_ts_field, s._meta_severity_field, s.connection_config, s.identity_key, s.description, s.ttl_days, s.created_at, s.updated_at, s.managed, s.secret_ref
 FROM sources s
 JOIN team_sources ts ON s.id = ts.source_id
 WHERE ts.team_id = ?
@@ -1761,13 +1744,11 @@ func (q *Queries) ListTeamSources(ctx context.Context, teamID int64) ([]Source, 
 			&i.ID,
 			&i.Name,
 			&i.MetaIsAutoCreated,
+			&i.SourceType,
 			&i.MetaTsField,
 			&i.MetaSeverityField,
-			&i.Host,
-			&i.Username,
-			&i.Password,
-			&i.Database,
-			&i.TableName,
+			&i.ConnectionConfig,
+			&i.IdentityKey,
 			&i.Description,
 			&i.TtlDays,
 			&i.CreatedAt,
@@ -2236,15 +2217,15 @@ const updateSource = `-- name: UpdateSource :exec
 UPDATE sources
 SET name = ?,
     _meta_is_auto_created = ?,
+    source_type = ?,
     _meta_ts_field = ?,
     _meta_severity_field = ?,
-    host = ?,
-    username = ?,
-    password = ?,
-    database = ?,
-    table_name = ?,
+    connection_config = ?,
+    identity_key = ?,
     description = ?,
     ttl_days = ?,
+    managed = ?,
+    secret_ref = ?,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?
 `
@@ -2252,15 +2233,15 @@ WHERE id = ?
 type UpdateSourceParams struct {
 	Name              string         `json:"name"`
 	MetaIsAutoCreated int64          `json:"_meta_is_auto_created"`
+	SourceType        string         `json:"source_type"`
 	MetaTsField       string         `json:"_meta_ts_field"`
 	MetaSeverityField sql.NullString `json:"_meta_severity_field"`
-	Host              string         `json:"host"`
-	Username          string         `json:"username"`
-	Password          string         `json:"password"`
-	Database          string         `json:"database"`
-	TableName         string         `json:"table_name"`
+	ConnectionConfig  string         `json:"connection_config"`
+	IdentityKey       string         `json:"identity_key"`
 	Description       sql.NullString `json:"description"`
 	TtlDays           int64          `json:"ttl_days"`
+	Managed           int64          `json:"managed"`
+	SecretRef         sql.NullString `json:"secret_ref"`
 	ID                int64          `json:"id"`
 }
 
@@ -2269,15 +2250,15 @@ func (q *Queries) UpdateSource(ctx context.Context, arg UpdateSourceParams) erro
 	_, err := q.exec(ctx, q.updateSourceStmt, updateSource,
 		arg.Name,
 		arg.MetaIsAutoCreated,
+		arg.SourceType,
 		arg.MetaTsField,
 		arg.MetaSeverityField,
-		arg.Host,
-		arg.Username,
-		arg.Password,
-		arg.Database,
-		arg.TableName,
+		arg.ConnectionConfig,
+		arg.IdentityKey,
 		arg.Description,
 		arg.TtlDays,
+		arg.Managed,
+		arg.SecretRef,
 		arg.ID,
 	)
 	return err

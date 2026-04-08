@@ -42,7 +42,7 @@ var (
 	ErrTeamExists = fmt.Errorf("%w: team with this name already exists", ErrUniqueConstraint)
 
 	// ErrSourceExists is returned when a source with the same database/table already exists
-	ErrSourceExists = fmt.Errorf("%w: source with this database/table already exists", ErrUniqueConstraint)
+	ErrSourceExists = fmt.Errorf("%w: source with this identity already exists", ErrUniqueConstraint)
 )
 
 // IsNotFoundError checks if an error is any type of not found error
@@ -90,21 +90,17 @@ func mapSourceRowToModel(row *sqlc.Source) *models.Source {
 	if row == nil {
 		return nil
 	}
-	return &models.Source{
+	source := &models.Source{
 		ID:                models.SourceID(row.ID),
 		Name:              row.Name,
 		MetaIsAutoCreated: row.MetaIsAutoCreated == 1,
+		SourceType:        models.SourceType(row.SourceType),
 		MetaTSField:       row.MetaTsField,
 		MetaSeverityField: row.MetaSeverityField.String,
 		Description:       row.Description.String,
 		TTLDays:           int(row.TtlDays),
-		Connection: models.ConnectionInfo{
-			Host:      row.Host,
-			Username:  row.Username,
-			Password:  row.Password,
-			Database:  row.Database,
-			TableName: row.TableName,
-		},
+		ConnectionConfig:  []byte(row.ConnectionConfig),
+		IdentityKey:       row.IdentityKey,
 		Timestamps: models.Timestamps{
 			CreatedAt: row.CreatedAt,
 			UpdatedAt: row.UpdatedAt,
@@ -112,6 +108,10 @@ func mapSourceRowToModel(row *sqlc.Source) *models.Source {
 		Managed:   row.Managed == 1,
 		SecretRef: row.SecretRef.String,
 	}
+
+	_ = source.HydrateConnection()
+
+	return source
 }
 
 // Note: IsConnected and Schema/Columns are populated dynamically, not from DB row.
@@ -194,7 +194,7 @@ func handleUniqueConstraintError(err error, table, column, value string) error {
 			return wrapError(ErrUserExists, "email %s", value)
 		case table == "teams" && column == "name":
 			return wrapError(ErrTeamExists, "name %s", value)
-		case table == "sources" && (column == "name" || column == "database_table"):
+		case table == "sources" && (column == "name" || column == "identity_key"):
 			return wrapError(ErrSourceExists, value)
 		default:
 			return wrapError(ErrUniqueConstraint, "%s.%s: %s", table, column, value)

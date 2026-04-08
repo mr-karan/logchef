@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/clickhouse"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -365,7 +365,7 @@ func RemoveTeamMember(ctx context.Context, db *sqlite.DB, log *slog.Logger, team
 
 // ListTeamSources returns basic information for all sources associated with a specific team,
 // including their connection status fetched from the ClickHouse manager's cache.
-func ListTeamSources(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, teamID models.TeamID) ([]*models.Source, error) {
+func ListTeamSources(ctx context.Context, db *sqlite.DB, ds *datasource.Service, log *slog.Logger, teamID models.TeamID) ([]*models.Source, error) {
 	// First, validate the team exists
 	_, err := GetTeam(ctx, db, teamID) // Use existing GetTeam function
 	if err != nil {
@@ -394,19 +394,13 @@ func ListTeamSources(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manage
 		if source == nil { // Safety check
 			continue
 		}
-		// Get the cached health status from the manager
-		health := chDB.GetCachedHealth(source.ID)
-		// Update the IsConnected field based on the cached status
-		source.IsConnected = (health.Status == models.HealthStatusHealthy)
+		source.IsConnected = ds.CheckSourceConnectionStatus(ctx, source)
 
 		// Optionally log if status is unhealthy for debugging
 		if !source.IsConnected {
-			log.Debug("retrieved unhealthy status from cache for source",
+			log.Debug("source reported unhealthy during team source listing",
 				"source_id", source.ID,
 				"team_id", teamID,
-				"cached_status", health.Status,
-				"last_checked", health.LastChecked,
-				"error", health.Error,
 			)
 		}
 	}

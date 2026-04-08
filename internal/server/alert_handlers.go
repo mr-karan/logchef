@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -206,8 +207,11 @@ func (s *Server) handleTestAlertQuery(c *fiber.Ctx) error {
 		req.LookbackSeconds = int(s.config.Alerts.DefaultLookback.Seconds())
 	}
 
-	result, err := core.TestAlertQuery(c.Context(), s.sqlite, s.clickhouse, s.log, teamID, sourceID, &req)
+	result, err := core.TestAlertQuery(c.Context(), s.sqlite, s.datasources, teamID, sourceID, &req)
 	if err != nil {
+		if errors.Is(err, datasource.ErrOperationNotSupported) {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Alert evaluation is not supported for this source type yet", models.ValidationErrorType)
+		}
 		s.log.Error("failed to test alert query", "team_id", teamID, "source_id", sourceID, "error", err)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, err.Error(), models.GeneralErrorType)
 	}

@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -21,18 +21,18 @@ import (
 
 // Options encapsulates the dependencies required to run the alerting manager.
 type Options struct {
-	Config     config.AlertsConfig
-	DB         *sqlite.DB
-	ClickHouse *clickhouse.Manager
-	Logger     *slog.Logger
-	Sender     AlertSender
+	Config      config.AlertsConfig
+	DB          *sqlite.DB
+	Datasources *datasource.Service
+	Logger      *slog.Logger
+	Sender      AlertSender
 }
 
 // Manager coordinates alert evaluation and dispatches notifications when thresholds are met.
 type Manager struct {
 	cfg        config.AlertsConfig
 	db         *sqlite.DB
-	clickhouse *clickhouse.Manager
+	datasource *datasource.Service
 	log        *slog.Logger
 	sender     AlertSender
 
@@ -49,7 +49,7 @@ func NewManager(opts Options) *Manager {
 	return &Manager{
 		cfg:        opts.Config,
 		db:         opts.DB,
-		clickhouse: opts.ClickHouse,
+		datasource: opts.Datasources,
 		log:        opts.Logger.With("component", "alert_manager"),
 		sender:     sender,
 		stop:       make(chan struct{}),
@@ -130,14 +130,17 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 		return nil
 	}
 
-	client, err := m.clickhouse.GetConnection(alert.SourceID)
-	if err != nil {
-		m.recordEvaluationError(ctx, alert, fmt.Errorf("failed to obtain ClickHouse connection: %w", err))
-		return fmt.Errorf("failed to obtain ClickHouse connection: %w", err)
+	if m.datasource == nil {
+		err := fmt.Errorf("datasource service is not configured")
+		m.recordEvaluationError(ctx, alert, err)
+		return err
 	}
 
 	timeout := models.DefaultQueryTimeoutSeconds
-	result, err := client.QueryWithTimeout(ctx, query, &timeout)
+	result, err := m.datasource.EvaluateAlert(ctx, alert.SourceID, datasource.AlertQueryRequest{
+		Query:        query,
+		QueryTimeout: &timeout,
+	})
 	if err != nil {
 		m.recordEvaluationError(ctx, alert, fmt.Errorf("alert query failed: %w", err))
 		return fmt.Errorf("alert query failed: %w", err)

@@ -11,6 +11,7 @@ import (
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/internal/sqlite"
 
@@ -29,6 +30,7 @@ type ServerOptions struct {
 	Config        *config.Config
 	SQLite        *sqlite.DB
 	ClickHouse    *clickhouse.Manager
+	Datasources   *datasource.Service
 	AlertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	OIDCProvider  *auth.OIDCProvider // OIDC provider for authentication flows.
 	FS            http.FileSystem    // Filesystem for serving static assets (frontend).
@@ -44,6 +46,7 @@ type Server struct {
 	config        *config.Config
 	sqlite        *sqlite.DB
 	clickhouse    *clickhouse.Manager
+	datasources   *datasource.Service
 	alertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	oidcProvider  *auth.OIDCProvider // Handles OIDC authentication logic.
 	fs            http.FileSystem
@@ -111,6 +114,7 @@ func New(opts ServerOptions) *Server {
 		config:        opts.Config,
 		sqlite:        opts.SQLite,
 		clickhouse:    opts.ClickHouse,
+		datasources:   opts.Datasources,
 		alertsManager: opts.AlertsManager,
 		oidcProvider:  opts.OIDCProvider,
 		fs:            opts.FS,

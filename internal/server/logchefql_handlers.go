@@ -6,8 +6,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -72,13 +72,16 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 	hasTimeParams := req.StartTime != "" && req.EndTime != "" && req.Timezone != ""
 
 	// Get source information for schema
-	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err := core.GetSource(c.Context(), s.sqlite, s.datasources, s.clickhouse, s.log, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
 		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+	}
+	if !source.IsClickHouse() {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is only supported for ClickHouse sources", models.ValidationErrorType)
 	}
 
 	// Build schema from source columns
@@ -207,13 +210,16 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 	}
 
 	// Get source information
-	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err := core.GetSource(c.Context(), s.sqlite, s.datasources, s.clickhouse, s.log, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
 		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+	}
+	if !source.IsClickHouse() {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is only supported for ClickHouse sources", models.ValidationErrorType)
 	}
 
 	// Build schema from source columns
@@ -288,14 +294,17 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 	defer queryTracker.RemoveQuery(queryID)
 
 	// Execute via core function
-	queryParams := clickhouse.LogQueryParams{
-		RawSQL:       sql,
+	queryParams := datasource.QueryRequest{
+		RawQuery:     sql,
 		Limit:        req.Limit,
 		MaxLimit:     s.config.Query.MaxLimit,
 		QueryTimeout: req.QueryTimeout,
 	}
-	result, err := core.QueryLogs(queryCtx, s.sqlite, s.clickhouse, s.log, sourceID, queryParams)
+	result, err := core.QueryLogs(queryCtx, s.datasources, sourceID, queryParams)
 	if err != nil {
+		if errors.Is(err, datasource.ErrOperationNotSupported) {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Querying is not supported for this source type yet", models.ValidationErrorType)
+		}
 		s.log.Error("failed to execute logchefql query", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Query execution failed: "+err.Error(), models.DatabaseErrorType)
 	}

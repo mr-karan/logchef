@@ -111,8 +111,8 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getSourceStmt, err = db.PrepareContext(ctx, getSource); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSource: %w", err)
 	}
-	if q.getSourceByNameStmt, err = db.PrepareContext(ctx, getSourceByName); err != nil {
-		return nil, fmt.Errorf("error preparing query GetSourceByName: %w", err)
+	if q.getSourceByIdentityKeyStmt, err = db.PrepareContext(ctx, getSourceByIdentityKey); err != nil {
+		return nil, fmt.Errorf("error preparing query GetSourceByIdentityKey: %w", err)
 	}
 	if q.getSourceByNameForProvisioningStmt, err = db.PrepareContext(ctx, getSourceByNameForProvisioning); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSourceByNameForProvisioning: %w", err)
@@ -432,9 +432,9 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getSourceStmt: %w", cerr)
 		}
 	}
-	if q.getSourceByNameStmt != nil {
-		if cerr := q.getSourceByNameStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing getSourceByNameStmt: %w", cerr)
+	if q.getSourceByIdentityKeyStmt != nil {
+		if cerr := q.getSourceByIdentityKeyStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getSourceByIdentityKeyStmt: %w", cerr)
 		}
 	}
 	if q.getSourceByNameForProvisioningStmt != nil {
@@ -785,7 +785,7 @@ type Queries struct {
 	getQueryBookmarkStatusStmt          *sql.Stmt
 	getSessionStmt                      *sql.Stmt
 	getSourceStmt                       *sql.Stmt
-	getSourceByNameStmt                 *sql.Stmt
+	getSourceByIdentityKeyStmt          *sql.Stmt
 	getSourceByNameForProvisioningStmt  *sql.Stmt
 	getSystemSettingStmt                *sql.Stmt
 	getTeamStmt                         *sql.Stmt
@@ -877,7 +877,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getQueryBookmarkStatusStmt:          q.getQueryBookmarkStatusStmt,
 		getSessionStmt:                      q.getSessionStmt,
 		getSourceStmt:                       q.getSourceStmt,
-		getSourceByNameStmt:                 q.getSourceByNameStmt,
+		getSourceByIdentityKeyStmt:          q.getSourceByIdentityKeyStmt,
 		getSourceByNameForProvisioningStmt:  q.getSourceByNameForProvisioningStmt,
 		getSystemSettingStmt:                q.getSystemSettingStmt,
 		getTeamStmt:                         q.getTeamStmt,
