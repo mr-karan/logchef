@@ -132,7 +132,7 @@ project_id = "34"
 query = "{app=\"payments\"} kubernetes.namespace:=prod"
 ```
 
-Legacy flat ClickHouse fields (`host`, `database`, `table_name`, `username`, `password`) are still accepted for backward compatibility, but new configs should use `source_type` plus the nested `connection` block.
+The provisioning format is now nested and datasource-native. ClickHouse sources must use `source_type` plus the nested `connection` block rather than top-level `host` / `database` / `table_name` fields.
 
 ### Team Fields
 

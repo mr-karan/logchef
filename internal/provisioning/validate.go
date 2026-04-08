@@ -172,7 +172,6 @@ func ResolveSecrets(cfg *config.ProvisioningConfig) {
 			if err == nil {
 				if conn.Password == "" && source.SecretRef != "" {
 					conn.Password = os.Getenv(source.SecretRef)
-					source.Password = conn.Password
 				}
 				_ = source.SetConnectionConfig(conn)
 			}

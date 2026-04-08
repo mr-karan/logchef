@@ -47,8 +47,7 @@ func (c *ProvisioningConfig) Enabled() bool {
 }
 
 // ProvisionSource declares a datasource to manage. New configs should use
-// source_type + connection. Flat ClickHouse fields remain as a compatibility shim
-// for older provisioning files.
+// source_type + connection.
 type ProvisionSource struct {
 	// Name is the unique identifier and display name for this source.
 	Name string `koanf:"name" json:"name"`
@@ -58,13 +57,6 @@ type ProvisionSource struct {
 
 	// Connection stores provider-specific connection details.
 	Connection map[string]any `koanf:"connection" json:"connection,omitempty"`
-
-	// Legacy ClickHouse connection details.
-	Host      string `koanf:"host" json:"host,omitempty"`
-	Username  string `koanf:"username" json:"username,omitempty"`
-	Password  string `koanf:"password" json:"password,omitempty"`
-	Database  string `koanf:"database" json:"database,omitempty"`
-	TableName string `koanf:"table_name" json:"table_name,omitempty"`
 
 	// SecretRef stores the environment variable or file path that provided the password.
 	// Used by the export command to generate round-trippable config (passwords are never exported).
@@ -83,24 +75,18 @@ func (s *ProvisionSource) NormalizedSourceType() models.SourceType {
 
 func (s *ProvisionSource) ClickHouseConnection() (models.ConnectionInfo, error) {
 	var conn models.ConnectionInfo
-	if len(s.Connection) > 0 {
-		payload, err := json.Marshal(s.Connection)
-		if err != nil {
-			return conn, fmt.Errorf("marshal clickhouse connection config: %w", err)
-		}
-		if err := json.Unmarshal(payload, &conn); err != nil {
-			return conn, fmt.Errorf("unmarshal clickhouse connection config: %w", err)
-		}
-		return conn, nil
+	if len(s.Connection) == 0 {
+		return conn, fmt.Errorf("clickhouse source %q requires a connection block", s.Name)
 	}
 
-	return models.ConnectionInfo{
-		Host:      s.Host,
-		Username:  s.Username,
-		Password:  s.Password,
-		Database:  s.Database,
-		TableName: s.TableName,
-	}, nil
+	payload, err := json.Marshal(s.Connection)
+	if err != nil {
+		return conn, fmt.Errorf("marshal clickhouse connection config: %w", err)
+	}
+	if err := json.Unmarshal(payload, &conn); err != nil {
+		return conn, fmt.Errorf("unmarshal clickhouse connection config: %w", err)
+	}
+	return conn, nil
 }
 
 func (s *ProvisionSource) SetConnectionConfig(connection any) error {

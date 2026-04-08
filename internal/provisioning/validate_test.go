@@ -17,7 +17,15 @@ func TestValidateConfig_ValidSources(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,
 		Sources: []config.ProvisionSource{
-			{Name: "src1", Host: "host:9000", Database: "db", TableName: "tbl", Password: "pass"},
+			{
+				Name: "src1",
+				Connection: map[string]any{
+					"host":       "host:9000",
+					"database":   "db",
+					"table_name": "tbl",
+					"password":   "pass",
+				},
+			},
 		},
 	}
 	if err := ValidateConfig(cfg); err != nil {
@@ -77,8 +85,8 @@ func TestValidateConfig_DuplicateSourceNames(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,
 		Sources: []config.ProvisionSource{
-			{Name: "src1", Host: "host:9000", Database: "db", TableName: "tbl1", Password: "pass"},
-			{Name: "src1", Host: "host:9000", Database: "db", TableName: "tbl2", Password: "pass"},
+			{Name: "src1", Connection: map[string]any{"host": "host:9000", "database": "db", "table_name": "tbl1", "password": "pass"}},
+			{Name: "src1", Connection: map[string]any{"host": "host:9000", "database": "db", "table_name": "tbl2", "password": "pass"}},
 		},
 	}
 	if err := ValidateConfig(cfg); err == nil {
@@ -103,7 +111,7 @@ func TestValidateConfig_EmptySourceName(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,
 		Sources: []config.ProvisionSource{
-			{Name: "", Host: "host:9000", Database: "db", TableName: "tbl"},
+			{Name: "", Connection: map[string]any{"host": "host:9000", "database": "db", "table_name": "tbl"}},
 		},
 	}
 	err := ValidateConfig(cfg)
@@ -117,7 +125,7 @@ func TestValidateConfig_ValidTeams(t *testing.T) {
 		ManageSources: true,
 		ManageTeams:   true,
 		Sources: []config.ProvisionSource{
-			{Name: "src1", Host: "host:9000", Database: "db", TableName: "tbl", Password: "pass"},
+			{Name: "src1", Connection: map[string]any{"host": "host:9000", "database": "db", "table_name": "tbl", "password": "pass"}},
 		},
 		Teams: []config.ProvisionTeam{
 			{
@@ -153,7 +161,7 @@ func TestValidateConfig_InvalidSourceRef(t *testing.T) {
 		ManageSources: true,
 		ManageTeams:   true,
 		Sources: []config.ProvisionSource{
-			{Name: "src1", Host: "host:9000", Database: "db", TableName: "tbl", Password: "pass"},
+			{Name: "src1", Connection: map[string]any{"host": "host:9000", "database": "db", "table_name": "tbl", "password": "pass"}},
 		},
 		Teams: []config.ProvisionTeam{
 			{Name: "team1", Sources: []string{"nonexistent"}},
