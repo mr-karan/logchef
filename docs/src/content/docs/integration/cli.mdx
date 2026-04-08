@@ -3,8 +3,6 @@ title: CLI
 description: Query logs from the terminal.
 ---
 
-import { LinkCard } from "@astrojs/starlight/components";
-
 A Rust CLI for querying logs from the terminal. Supports LogchefQL, raw SQL, syntax highlighting (via [tailspin](https://github.com/bensadeh/tailspin)), multi-context management (dev/staging/prod), and OIDC PKCE authentication.
 
 ## Quick Start
@@ -786,8 +784,3 @@ for source in "nginx-logs" "app-logs" "api-logs"; do
 done
 ```
 
-<LinkCard
-  title="API Reference"
-  description="Learn more about the HTTP API that powers the CLI."
-  href="/integration/http-api/"
-/>
