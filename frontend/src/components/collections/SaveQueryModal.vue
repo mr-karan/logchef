@@ -110,9 +110,9 @@ const sourceName = computed(() => {
   return source ? (source.name || source.connection.table_name) : '';
 });
 
-const currentSourceType = computed(() => {
+const currentSourceDescriptor = computed(() => {
   const currentSource = sourcesStore.teamSources.find(s => s.id === currentSourceId.value);
-  return currentSource?.source_type || sourcesStore.currentSourceDetails?.source_type || 'clickhouse';
+  return currentSource || sourcesStore.currentSourceDetails || null;
 });
 
 // Form validation
@@ -140,7 +140,8 @@ const resolvedQueryMetadata = computed(() =>
     query_type: displayQueryType.value,
     query_language: props.editData?.query_language || props.initialData?.query_language,
     editor_mode: props.editData?.editor_mode || props.initialData?.editor_mode,
-    source_type: currentSourceType.value,
+    source_type: currentSourceDescriptor.value?.source_type,
+    query_languages: currentSourceDescriptor.value?.query_languages,
   })
 );
 

@@ -529,6 +529,7 @@ export const useExploreStore = defineStore("explore", () => {
         query_language: data.query_language,
         editor_mode: data.editor_mode,
         source_type: sourcesStore.currentSourceDetails?.source_type ?? "clickhouse",
+        query_languages: sourcesStore.currentSourceDetails?.query_languages ?? [],
       });
       const isLogchefQL = metadata.queryLanguage === 'logchefql';
 

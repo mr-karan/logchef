@@ -40,6 +40,7 @@ import {
   useFieldValuesLoader,
   isFilterableField as isFilterableFieldType
 } from '@/composables/useFieldValuesLoader'
+import { supportsQueryLanguage } from '@/lib/queryMetadata'
 
 // Define field type for auto-completion
 interface FieldInfo {
@@ -66,14 +67,12 @@ const { convertVariables } = useVariables()
 
 // Get the current datasource-native query for filtering field values.
 const getCurrentFilterQuery = (): string => {
-  const sourceType = sourcesStore.currentSourceDetails?.source_type
-
   if (exploreStore.activeMode === 'logchefql') {
     const query = exploreStore.logchefqlCode || ''
     return query ? convertVariables(query) : ''
   }
 
-  if (sourceType === 'victorialogs') {
+  if (!supportsQueryLanguage(sourcesStore.currentSourceDetails, 'logchefql')) {
     const query = exploreStore.rawSql || ''
     return query ? convertVariables(query) : ''
   }

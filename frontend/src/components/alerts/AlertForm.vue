@@ -104,6 +104,7 @@ const alertMetadata = computed(() =>
   resolveAlertMetadata({
     query_type: form.query_type,
     source_type: sourceType.value,
+    query_languages: currentSource.value?.query_languages,
   })
 );
 
