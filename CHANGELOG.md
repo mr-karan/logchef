@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.5.0] - 2026-04-08
 
 ### Added
 - **Rich value autocomplete in LogchefQL editor** — After typing `host=`, the editor instantly suggests top field values with occurrence counts (e.g., `cdn.logchef.dev (1.7K)`). Suggestions come from the sidebar's cached field data — no additional network calls during typing. Supports partial matching inside quotes, auto-quoting string values, and proper escaping of special characters.
@@ -392,8 +392,7 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v1.4.1...HEAD
-[1.4.1]: https://github.com/mr-karan/logchef/compare/v1.4.0...v1.4.1
+[1.5.0]: https://github.com/mr-karan/logchef/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/mr-karan/logchef/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/mr-karan/logchef/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/mr-karan/logchef/compare/v1.2.0...v1.2.1
