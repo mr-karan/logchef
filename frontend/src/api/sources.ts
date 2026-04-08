@@ -1,28 +1,40 @@
 import { apiClient } from "./apiUtils";
 import type { SavedTeamQuery, Team } from "./types";
 
-interface ConnectionInfo {
-  host?: string;
+export interface ClickHouseConnectionInfo {
+  host: string;
   username?: string;
   password?: string;
-  database?: string;
-  table_name?: string;
-  base_url?: string;
-  auth?: Record<string, unknown>;
-  tenant?: Record<string, unknown>;
-  scope?: Record<string, unknown>;
-}
-
-interface ConnectionRequestInfo {
-  host: string;
-  username: string;
-  password: string;
   database: string;
   table_name: string;
 }
 
-interface ValidateConnectionRequestInfo extends ConnectionRequestInfo {
+export interface VictoriaLogsConnectionInfo {
+  base_url: string;
+  auth?: {
+    mode?: string;
+    username?: string;
+    password?: string;
+    token?: string;
+  };
+  tenant?: {
+    account_id?: string;
+    project_id?: string;
+  };
+  scope?: {
+    query?: string;
+  };
+  headers?: Record<string, string>;
+}
+
+export type SourceConnectionInfo =
+  | ClickHouseConnectionInfo
+  | VictoriaLogsConnectionInfo
+  | Record<string, unknown>;
+
+export interface ValidateConnectionRequestInfo {
   source_type?: string;
+  connection: SourceConnectionInfo;
   timestamp_field?: string;
   severity_field?: string;
 }
@@ -36,7 +48,7 @@ export interface Source {
   capabilities?: string[];
   _meta_ts_field: string;
   _meta_severity_field?: string;
-  connection: ConnectionInfo;
+  connection: SourceConnectionInfo;
   description?: string;
   ttl_days: number;
   created_at: string;
@@ -76,7 +88,7 @@ export interface CreateSourcePayload {
   meta_is_auto_created: boolean;
   meta_ts_field?: string;
   meta_severity_field?: string;
-  connection: ConnectionRequestInfo;
+  connection: SourceConnectionInfo;
   description?: string;
   ttl_days: number;
   schema?: string;
@@ -88,7 +100,7 @@ export interface UpdateSourcePayload {
   ttl_days?: number;
   meta_ts_field?: string;
   meta_severity_field?: string;
-  connection?: ConnectionRequestInfo;
+  connection?: SourceConnectionInfo;
 }
 
 export interface CreateTeamQueryRequest {
@@ -190,13 +202,7 @@ export const sourcesApi = {
   validateSourceConnection: (connectionInfo: ValidateConnectionRequestInfo) =>
     apiClient.post<{ message: string }>("/admin/sources/validate", {
       source_type: connectionInfo.source_type || "clickhouse",
-      connection: {
-        host: connectionInfo.host,
-        username: connectionInfo.username,
-        password: connectionInfo.password,
-        database: connectionInfo.database,
-        table_name: connectionInfo.table_name,
-      },
+      connection: connectionInfo.connection,
       timestamp_field: connectionInfo.timestamp_field,
       severity_field: connectionInfo.severity_field,
     }),

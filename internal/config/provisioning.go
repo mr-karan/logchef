@@ -1,5 +1,12 @@
 package config
 
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/mr-karan/logchef/pkg/models"
+)
+
 // ProvisioningConfig declares the desired state for teams, sources, and access control.
 // When absent from config.toml, provisioning is disabled and Logchef operates in UI-only mode.
 type ProvisioningConfig struct {
@@ -25,13 +32,13 @@ type ProvisioningConfig struct {
 	// The transaction is rolled back after computing the diff.
 	DryRun bool `koanf:"dry_run"`
 
-	// Sources declares ClickHouse data sources to manage.
+	// Sources declares datasource definitions to manage.
 	// Each source is identified by its Name (must be unique).
-	Sources []ProvisionSource `koanf:"sources"`
+	Sources []ProvisionSource `koanf:"sources" json:"sources,omitempty"`
 
 	// Teams declares teams with their memberships and source access.
 	// Each team is identified by its Name (must be unique).
-	Teams []ProvisionTeam `koanf:"teams"`
+	Teams []ProvisionTeam `koanf:"teams" json:"teams,omitempty"`
 }
 
 // Enabled returns true if any provisioning management is configured.
@@ -39,53 +46,134 @@ func (c *ProvisioningConfig) Enabled() bool {
 	return c.ManageSources || c.ManageTeams
 }
 
-// ProvisionSource declares a ClickHouse data source.
+// ProvisionSource declares a datasource to manage. New configs should use
+// source_type + connection. Flat ClickHouse fields remain as a compatibility shim
+// for older provisioning files.
 type ProvisionSource struct {
 	// Name is the unique identifier and display name for this source.
-	Name string `koanf:"name"`
+	Name string `koanf:"name" json:"name"`
 
-	// ClickHouse connection details.
-	Host     string `koanf:"host"`
-	Username string `koanf:"username"`
-	Password string `koanf:"password"`
-	Database string `koanf:"database"`
-	TableName string `koanf:"table_name"`
+	// SourceType identifies the datasource provider. Defaults to clickhouse.
+	SourceType models.SourceType `koanf:"source_type" json:"source_type,omitempty"`
+
+	// Connection stores provider-specific connection details.
+	Connection map[string]any `koanf:"connection" json:"connection,omitempty"`
+
+	// Legacy ClickHouse connection details.
+	Host      string `koanf:"host" json:"host,omitempty"`
+	Username  string `koanf:"username" json:"username,omitempty"`
+	Password  string `koanf:"password" json:"password,omitempty"`
+	Database  string `koanf:"database" json:"database,omitempty"`
+	TableName string `koanf:"table_name" json:"table_name,omitempty"`
 
 	// SecretRef stores the environment variable or file path that provided the password.
 	// Used by the export command to generate round-trippable config (passwords are never exported).
 	// If set and Password is empty, the value is resolved from the environment at startup.
-	SecretRef string `koanf:"secret_ref"`
+	SecretRef string `koanf:"secret_ref" json:"secret_ref,omitempty"`
 
-	Description       string `koanf:"description"`
-	TTLDays           int    `koanf:"ttl_days"`
-	MetaTSField       string `koanf:"meta_ts_field"`
-	MetaSeverityField string `koanf:"meta_severity_field"`
+	Description       string `koanf:"description" json:"description,omitempty"`
+	TTLDays           int    `koanf:"ttl_days" json:"ttl_days,omitempty"`
+	MetaTSField       string `koanf:"meta_ts_field" json:"meta_ts_field,omitempty"`
+	MetaSeverityField string `koanf:"meta_severity_field" json:"meta_severity_field,omitempty"`
 }
 
-// ResolvedPassword returns the password, resolving from SecretRef env var if needed.
-func (s *ProvisionSource) ResolvedPassword() string {
-	if s.Password != "" {
-		return s.Password
+func (s *ProvisionSource) NormalizedSourceType() models.SourceType {
+	return models.NormalizeSourceType(s.SourceType)
+}
+
+func (s *ProvisionSource) ClickHouseConnection() (models.ConnectionInfo, error) {
+	var conn models.ConnectionInfo
+	if len(s.Connection) > 0 {
+		payload, err := json.Marshal(s.Connection)
+		if err != nil {
+			return conn, fmt.Errorf("marshal clickhouse connection config: %w", err)
+		}
+		if err := json.Unmarshal(payload, &conn); err != nil {
+			return conn, fmt.Errorf("unmarshal clickhouse connection config: %w", err)
+		}
+		return conn, nil
 	}
-	return "" // caller must resolve from env using SecretRef
+
+	return models.ConnectionInfo{
+		Host:      s.Host,
+		Username:  s.Username,
+		Password:  s.Password,
+		Database:  s.Database,
+		TableName: s.TableName,
+	}, nil
+}
+
+func (s *ProvisionSource) SetConnectionConfig(connection any) error {
+	payload, err := json.Marshal(connection)
+	if err != nil {
+		return fmt.Errorf("marshal connection config: %w", err)
+	}
+
+	var connectionMap map[string]any
+	if err := json.Unmarshal(payload, &connectionMap); err != nil {
+		return fmt.Errorf("unmarshal connection config into map: %w", err)
+	}
+
+	s.Connection = connectionMap
+	return nil
+}
+
+func (s *ProvisionSource) ConnectionPayload() (json.RawMessage, error) {
+	if len(s.Connection) > 0 {
+		payload, err := json.Marshal(s.Connection)
+		if err != nil {
+			return nil, fmt.Errorf("marshal connection config: %w", err)
+		}
+		return payload, nil
+	}
+
+	switch s.NormalizedSourceType() {
+	case models.SourceTypeClickHouse:
+		conn, err := s.ClickHouseConnection()
+		if err != nil {
+			return nil, err
+		}
+		payload, err := json.Marshal(conn)
+		if err != nil {
+			return nil, fmt.Errorf("marshal clickhouse connection config: %w", err)
+		}
+		return payload, nil
+	case models.SourceTypeVictoriaLogs:
+		return nil, fmt.Errorf("victorialogs source %q requires a connection block", s.Name)
+	default:
+		return nil, fmt.Errorf("unsupported source type %q", s.SourceType)
+	}
+}
+
+func (s *ProvisionSource) VictoriaLogsConnection() (models.VictoriaLogsConnectionInfo, error) {
+	var conn models.VictoriaLogsConnectionInfo
+	payload, err := s.ConnectionPayload()
+	if err != nil {
+		return conn, err
+	}
+
+	if err := json.Unmarshal(payload, &conn); err != nil {
+		return conn, fmt.Errorf("unmarshal victorialogs connection config: %w", err)
+	}
+	return conn, nil
 }
 
 // ProvisionTeam declares a team with members and source links.
 type ProvisionTeam struct {
 	// Name is the unique identifier and display name for this team.
-	Name        string `koanf:"name"`
-	Description string `koanf:"description"`
+	Name        string `koanf:"name" json:"name"`
+	Description string `koanf:"description" json:"description,omitempty"`
 
 	// Sources lists source Names that this team should have access to.
-	Sources []string `koanf:"sources"`
+	Sources []string `koanf:"sources" json:"sources,omitempty"`
 
 	// Members declares the team membership with roles.
-	Members []ProvisionMember `koanf:"members"`
+	Members []ProvisionMember `koanf:"members" json:"members,omitempty"`
 }
 
 // ProvisionMember declares a team member by email with a role.
 type ProvisionMember struct {
-	Email string `koanf:"email"`
+	Email string `koanf:"email" json:"email"`
 	// Role is the team-level role: "admin", "editor", or "member".
-	Role string `koanf:"role"`
+	Role string `koanf:"role" json:"role,omitempty"`
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // ValidateConfig checks the provisioning config for internal consistency.
@@ -41,18 +42,57 @@ func validateSources(cfg *config.ProvisioningConfig) []string {
 		}
 		seen[src.Name] = true
 
-		if src.Host == "" {
-			errs = append(errs, fmt.Sprintf("%s: host is required", prefix))
-		}
-		if src.Database == "" {
-			errs = append(errs, fmt.Sprintf("%s: database is required", prefix))
-		}
-		if src.TableName == "" {
-			errs = append(errs, fmt.Sprintf("%s: table_name is required", prefix))
+		sourceType := src.NormalizedSourceType()
+		if !sourceType.Valid() {
+			errs = append(errs, fmt.Sprintf("%s: unsupported source_type %q", prefix, src.SourceType))
+			continue
 		}
 
-		// Resolve password from secret_ref if needed
-		if src.Password == "" && src.SecretRef != "" {
+		switch sourceType {
+		case models.SourceTypeClickHouse:
+			conn, err := src.ClickHouseConnection()
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("%s: %v", prefix, err))
+				continue
+			}
+			if strings.TrimSpace(conn.Host) == "" {
+				errs = append(errs, fmt.Sprintf("%s: clickhouse host is required", prefix))
+			}
+			if strings.TrimSpace(conn.Database) == "" {
+				errs = append(errs, fmt.Sprintf("%s: clickhouse database is required", prefix))
+			}
+			if strings.TrimSpace(conn.TableName) == "" {
+				errs = append(errs, fmt.Sprintf("%s: clickhouse table_name is required", prefix))
+			}
+		case models.SourceTypeVictoriaLogs:
+			conn, err := src.VictoriaLogsConnection()
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("%s: %v", prefix, err))
+				continue
+			}
+			if strings.TrimSpace(conn.BaseURL) == "" {
+				errs = append(errs, fmt.Sprintf("%s: victorialogs connection.base_url is required", prefix))
+			}
+
+			switch normalizedAuthMode(conn.Auth.Mode) {
+			case "", "none":
+			case "basic":
+				if strings.TrimSpace(conn.Auth.Username) == "" {
+					errs = append(errs, fmt.Sprintf("%s: victorialogs basic auth requires connection.auth.username", prefix))
+				}
+				if strings.TrimSpace(conn.Auth.Password) == "" && src.SecretRef == "" {
+					errs = append(errs, fmt.Sprintf("%s: victorialogs basic auth requires connection.auth.password or secret_ref", prefix))
+				}
+			case "bearer":
+				if strings.TrimSpace(conn.Auth.Token) == "" && src.SecretRef == "" {
+					errs = append(errs, fmt.Sprintf("%s: victorialogs bearer auth requires connection.auth.token or secret_ref", prefix))
+				}
+			default:
+				errs = append(errs, fmt.Sprintf("%s: unsupported victorialogs auth mode %q", prefix, conn.Auth.Mode))
+			}
+		}
+
+		if src.SecretRef != "" && sourceSecretValueMissing(src, sourceType) {
 			val := os.Getenv(src.SecretRef)
 			if val == "" {
 				errs = append(errs, fmt.Sprintf("%s: secret_ref %q env var is empty or not set", prefix, src.SecretRef))
@@ -123,12 +163,40 @@ func validateTeams(cfg *config.ProvisioningConfig) []string {
 // Must be called after ValidateConfig.
 func ResolveSecrets(cfg *config.ProvisioningConfig) {
 	for i := range cfg.Sources {
-		if cfg.Sources[i].Password == "" && cfg.Sources[i].SecretRef != "" {
-			cfg.Sources[i].Password = os.Getenv(cfg.Sources[i].SecretRef)
-		}
-		// Apply defaults
-		if cfg.Sources[i].MetaTSField == "" {
-			cfg.Sources[i].MetaTSField = "timestamp"
+		source := &cfg.Sources[i]
+		source.SourceType = source.NormalizedSourceType()
+
+		switch source.SourceType {
+		case models.SourceTypeClickHouse:
+			conn, err := source.ClickHouseConnection()
+			if err == nil {
+				if conn.Password == "" && source.SecretRef != "" {
+					conn.Password = os.Getenv(source.SecretRef)
+					source.Password = conn.Password
+				}
+				_ = source.SetConnectionConfig(conn)
+			}
+			if source.MetaTSField == "" {
+				source.MetaTSField = "timestamp"
+			}
+		case models.SourceTypeVictoriaLogs:
+			conn, err := source.VictoriaLogsConnection()
+			if err == nil {
+				switch normalizedAuthMode(conn.Auth.Mode) {
+				case "bearer":
+					if conn.Auth.Token == "" && source.SecretRef != "" {
+						conn.Auth.Token = os.Getenv(source.SecretRef)
+					}
+				case "basic":
+					if conn.Auth.Password == "" && source.SecretRef != "" {
+						conn.Auth.Password = os.Getenv(source.SecretRef)
+					}
+				}
+				_ = source.SetConnectionConfig(conn)
+			}
+			if source.MetaTSField == "" {
+				source.MetaTSField = "_time"
+			}
 		}
 	}
 
@@ -139,5 +207,35 @@ func ResolveSecrets(cfg *config.ProvisioningConfig) {
 				cfg.Teams[i].Members[j].Role = "member"
 			}
 		}
+	}
+}
+
+func normalizedAuthMode(mode string) string {
+	return strings.ToLower(strings.TrimSpace(mode))
+}
+
+func sourceSecretValueMissing(src config.ProvisionSource, sourceType models.SourceType) bool {
+	switch sourceType {
+	case models.SourceTypeClickHouse:
+		conn, err := src.ClickHouseConnection()
+		if err != nil {
+			return false
+		}
+		return strings.TrimSpace(conn.Password) == ""
+	case models.SourceTypeVictoriaLogs:
+		conn, err := src.VictoriaLogsConnection()
+		if err != nil {
+			return false
+		}
+		switch normalizedAuthMode(conn.Auth.Mode) {
+		case "bearer":
+			return strings.TrimSpace(conn.Auth.Token) == ""
+		case "basic":
+			return strings.TrimSpace(conn.Auth.Password) == ""
+		default:
+			return false
+		}
+	default:
+		return false
 	}
 }

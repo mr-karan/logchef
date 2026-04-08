@@ -25,6 +25,54 @@ func TestValidateConfig_ValidSources(t *testing.T) {
 	}
 }
 
+func TestValidateConfig_ValidSourceWithNestedClickHouseConnection(t *testing.T) {
+	cfg := &config.ProvisioningConfig{
+		ManageSources: true,
+		Sources: []config.ProvisionSource{
+			{
+				Name:       "src1",
+				SourceType: "clickhouse",
+				Connection: map[string]any{
+					"host":       "host:9000",
+					"database":   "db",
+					"table_name": "tbl",
+					"username":   "default",
+					"password":   "pass",
+				},
+			},
+		},
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Errorf("valid nested clickhouse source config should pass: %v", err)
+	}
+}
+
+func TestValidateConfig_ValidVictoriaLogsSource(t *testing.T) {
+	cfg := &config.ProvisioningConfig{
+		ManageSources: true,
+		Sources: []config.ProvisionSource{
+			{
+				Name:       "payments",
+				SourceType: "victorialogs",
+				Connection: map[string]any{
+					"base_url": "https://logs.example.com",
+					"auth": map[string]any{
+						"mode":  "bearer",
+						"token": "secret",
+					},
+					"tenant": map[string]any{
+						"account_id": "12",
+						"project_id": "34",
+					},
+				},
+			},
+		},
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Errorf("valid victorialogs source config should pass: %v", err)
+	}
+}
+
 func TestValidateConfig_DuplicateSourceNames(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,
@@ -239,6 +287,25 @@ func TestResolveSecrets_DefaultMetaTSField(t *testing.T) {
 	ResolveSecrets(cfg)
 	if cfg.Sources[0].MetaTSField != "timestamp" {
 		t.Errorf("expected default MetaTSField 'timestamp', got %q", cfg.Sources[0].MetaTSField)
+	}
+}
+
+func TestResolveSecrets_DefaultVictoriaLogsMetaTSField(t *testing.T) {
+	cfg := &config.ProvisioningConfig{
+		ManageSources: true,
+		Sources: []config.ProvisionSource{
+			{
+				Name:       "payments",
+				SourceType: "victorialogs",
+				Connection: map[string]any{
+					"base_url": "https://logs.example.com",
+				},
+			},
+		},
+	}
+	ResolveSecrets(cfg)
+	if cfg.Sources[0].MetaTSField != "_time" {
+		t.Errorf("expected default MetaTSField '_time', got %q", cfg.Sources[0].MetaTSField)
 	}
 }
 

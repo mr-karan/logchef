@@ -1,731 +1,553 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
-import { useToast } from '@/composables/useToast'
-import { TOAST_DURATION } from '@/lib/constants'
-import { useSourcesStore } from '@/stores/sources'
-import { Code, ChevronsUpDown, Plus, Database } from 'lucide-vue-next'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Separator } from '@/components/ui/separator'
+import { computed, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/composables/useToast";
+import { TOAST_DURATION } from "@/lib/constants";
+import { useSourcesStore } from "@/stores/sources";
+import type { Source } from "@/api/sources";
+import ClickHouseSourceForm from "./components/ClickHouseSourceForm.vue";
+import VictoriaLogsSourceForm from "./components/VictoriaLogsSourceForm.vue";
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-} from '@/components/ui/dialog'
+  buildClickHouseConnection,
+  buildClickHouseValidationRequest,
+  buildVictoriaLogsConnection,
+  buildVictoriaLogsValidationRequest,
+  clickHouseFormStateFromSource,
+  createDefaultClickHouseFormState,
+  createDefaultVictoriaLogsFormState,
+  generateClickHouseSchema,
+  serializeConnectionSnapshot,
+  sourceTypeFromSource,
+  victoriaLogsFormStateFromSource,
+  type ClickHouseSourceFormState,
+  type DatasourceType,
+  type VictoriaLogsSourceFormState,
+} from "./components/sourceFormModels";
 
-const router = useRouter()
-const route = useRoute()
-const { toast } = useToast()
-const sourcesStore = useSourcesStore()
+const router = useRouter();
+const route = useRoute();
+const { toast } = useToast();
+const sourcesStore = useSourcesStore();
 
-// Edit mode detection
-const isEditMode = computed(() => !!route.params.sourceId)
-const editingSourceId = computed(() => route.params.sourceId ? Number(route.params.sourceId) : null)
-const isLoadingSource = ref(false)
+const isEditMode = computed(() => Boolean(route.params.sourceId));
+const editingSourceId = computed(() => (route.params.sourceId ? Number(route.params.sourceId) : null));
+const duplicateFromId = computed(() => {
+  const raw = route.query.duplicateFrom;
+  return typeof raw === "string" ? Number(raw) : null;
+});
 
-// Define types for our API requests and responses
-interface ConnectionRequestInfo {
-    host: string;
-    username: string;
-    password: string;
-    database: string;
-    table_name: string;
-    timestamp_field?: string;
-    severity_field?: string;
-}
+const isLoadingSource = ref(false);
+const isSubmitting = ref(false);
+const formError = ref<string | null>(null);
 
-// Form state
-const tableMode = ref<'create' | 'connect'>('create') // 'create' or 'connect'
-const createTable = computed(() => tableMode.value === 'create')
-const sourceName = ref<string | number>('')
-const host = ref<string | number>('')
-const enableAuth = ref<boolean>(false)
-const username = ref<string | number>('')
-const password = ref<string | number>('')
-const database = ref<string | number>('')
-const tableName = ref<string | number>('')
-const description = ref<string | number>('')
-const ttlDays = ref<string | number>(90)
-const metaTSField = ref<string | number>('timestamp')
-const metaSeverityField = ref<string | number>('severity_text')
+const sourceType = ref<DatasourceType>("clickhouse");
+const sourceName = ref("");
+const description = ref("");
+const clickHouseForm = ref<ClickHouseSourceFormState>(createDefaultClickHouseFormState());
+const victoriaLogsForm = ref<VictoriaLogsSourceFormState>(createDefaultVictoriaLogsFormState());
+const victoriaLogsTTLDays = ref("0");
 
-// Use connection validation with source store
-const isValidating = ref(false)
-const validationResult = ref<any>(null)
-const isValidated = ref(false)
+const isValidating = ref(false);
+const validationMessage = ref<string | null>(null);
+const isValidated = ref(false);
+const originalConnectionSnapshot = ref("");
 
-// Validate connection using source store
-const validateConnection = async (connectionInfo: ConnectionRequestInfo) => {
-    isValidating.value = true
-    isValidated.value = false
-    validationResult.value = null
+const currentConnectionSnapshot = computed(() =>
+  sourceType.value === "clickhouse"
+    ? serializeConnectionSnapshot(buildClickHouseConnection(clickHouseForm.value))
+    : serializeConnectionSnapshot(buildVictoriaLogsConnection(victoriaLogsForm.value))
+);
 
-    try {
-        const result = await sourcesStore.validateSourceConnection(connectionInfo)
+const activeValidationFingerprint = computed(() =>
+  sourceType.value === "clickhouse"
+    ? JSON.stringify(buildClickHouseValidationRequest(clickHouseForm.value))
+    : JSON.stringify(buildVictoriaLogsValidationRequest(victoriaLogsForm.value))
+);
 
-        if (result.success && result.data) {
-            validationResult.value = result.data
-            isValidated.value = true
-        }
-    } catch (error) {
-        console.error("Validation error:", error)
-    } finally {
-        isValidating.value = false
-    }
-}
+const activeSchema = computed(() => generateClickHouseSchema(clickHouseForm.value));
+const hasConnectionChanges = computed(() => currentConnectionSnapshot.value !== originalConnectionSnapshot.value);
 
-// Schema preview
-const tableSchema = `CREATE TABLE IF NOT EXISTS {{database_name}}.{{table_name}}
-(
-    timestamp DateTime64(3) CODEC(DoubleDelta, LZ4),
-    trace_id String CODEC(ZSTD(1)),
-    span_id String CODEC(ZSTD(1)),
-    trace_flags UInt32 CODEC(ZSTD(1)),
-    severity_text LowCardinality(String) CODEC(ZSTD(1)),
-    severity_number Int32 CODEC(ZSTD(1)),
-    service_name LowCardinality(String) CODEC(ZSTD(1)),
-    namespace LowCardinality(String) CODEC(ZSTD(1)),
-    body String CODEC(ZSTD(1)),
-    log_attributes Map(LowCardinality(String), String) CODEC(ZSTD(1)),
+const pageTitle = computed(() => {
+  if (isEditMode.value) {
+    return "Edit Source";
+  }
+  if (duplicateFromId.value) {
+    return "Duplicate Source";
+  }
+  return "Add Source";
+});
 
-    INDEX idx_trace_id trace_id TYPE bloom_filter(0.001) GRANULARITY 1,
-    INDEX idx_severity_text severity_text TYPE set(100) GRANULARITY 4,
-    INDEX idx_log_attributes_keys mapKeys(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_log_attributes_values mapValues(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_body body TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1
-)
-ENGINE = MergeTree()
-PARTITION BY toDate(timestamp)
-ORDER BY (namespace, service_name, timestamp)
-TTL toDateTime(timestamp) + INTERVAL {{ttl_day}} DAY
-SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;`
-
-// Schema state
-const isEditingSchema = ref(false)
-const editedSchema = ref('')
-
-// Function to generate the default schema
-function generateSchema() {
-    const db = database.value ? String(database.value) : 'your_database'
-    const table = tableName.value ? String(tableName.value) : 'your_table'
-    let schema = tableSchema
-
-    // Replace placeholders with actual values
-    schema = schema.replace(/{{database_name}}/g, db)
-    schema = schema.replace(/{{table_name}}/g, table)
-    schema = schema.replace(/{{ttl_day}}/g, String(ttlDays.value))
-
-    return schema
-}
-
-// Watch for changes and update schema
-watch([database, tableName, ttlDays], () => {
-    // Always regenerate the schema with current values
-    editedSchema.value = generateSchema()
-}, { immediate: true })
-
-// Computed property for the actual schema to use
-const actualSchema = computed(() => {
-    return editedSchema.value || generateSchema()
-})
-
-// Function to reset schema to default
-function resetSchema() {
-    editedSchema.value = generateSchema()
-    isEditingSchema.value = false
-}
-
-// Form validation
-const isValid = computed(() => {
-    if (!sourceName.value || !host.value || !database.value || !tableName.value) return false
-    if (enableAuth.value && (!username.value || !password.value)) return false
-    return true
-})
-
-// Event handlers
-const handleAuthToggle = (checked: boolean) => {
-    enableAuth.value = checked
-}
-
-// Computed properties
-const validateButtonText = computed(() => {
-    if (isValidating.value) return 'Validating...'
-    return tableMode.value === 'connect' ? 'Validate Connection & Columns' : 'Validate Connection'
-})
+const pageDescription = computed(() => {
+  if (isEditMode.value) {
+    return "Update datasource configuration and connection settings.";
+  }
+  if (duplicateFromId.value) {
+    return "Create a new datasource using an existing configuration as the starting point.";
+  }
+  return "Create a datasource and choose the backend LogChef should query.";
+});
 
 const submitButtonText = computed(() => {
-    if (isSubmitting.value) return isEditMode.value ? 'Updating...' : 'Creating...'
-    if (isEditMode.value) return 'Update Source'
-    if (createTable.value) return 'Create Source'
+  if (isSubmitting.value) {
+    return isEditMode.value ? "Updating..." : "Creating...";
+  }
+  if (isEditMode.value) {
+    return "Update Source";
+  }
+  if (sourceType.value === "clickhouse" && clickHouseForm.value.tableMode === "connect" && !isValidated.value) {
+    return "Validate & Import";
+  }
+  if (sourceType.value === "clickhouse" && clickHouseForm.value.tableMode === "connect") {
+    return "Import Source";
+  }
+  return "Create Source";
+});
 
-    // For "Connect Existing Table" mode
-    if (isValidated.value) return 'Import Source'
-    return 'Validate & Import'
-})
+const isValid = computed(() => {
+  if (!sourceName.value.trim()) {
+    return false;
+  }
 
-// Validate connection handler
-const handleValidateConnection = async () => {
-    // Prepare connection info
-    const connectionInfo: ConnectionRequestInfo = {
-        host: String(host.value),
-        username: enableAuth.value ? String(username.value) : '',
-        password: enableAuth.value ? String(password.value) : '',
-        database: String(database.value),
-        table_name: String(tableName.value),
+  if (sourceType.value === "clickhouse") {
+    const state = clickHouseForm.value;
+    if (!state.host.trim() || !state.database.trim() || !state.tableName.trim()) {
+      return false;
     }
-
-    // Add timestamp and severity fields if connecting to existing table
-    if (tableMode.value === 'connect' && tableName.value) {
-        connectionInfo.timestamp_field = String(metaTSField.value)
-        // Only add severity field if it's not empty
-        if (metaSeverityField.value) {
-            connectionInfo.severity_field = String(metaSeverityField.value)
-        }
+    if (state.enableAuth && !state.username.trim()) {
+      return false;
     }
+    if (state.enableAuth && (!isEditMode.value || hasConnectionChanges.value) && !state.password) {
+      return false;
+    }
+    if (state.tableMode === "connect" && !state.metaTSField.trim()) {
+      return false;
+    }
+    if (state.tableMode === "create" && !state.ttlDays.trim()) {
+      return false;
+    }
+    return true;
+  }
 
-    await validateConnection(connectionInfo)
+  const state = victoriaLogsForm.value;
+  if (!state.baseURL.trim() || !state.metaTSField.trim()) {
+    return false;
+  }
+  if (state.authMode === "basic") {
+    if (!state.username.trim()) {
+      return false;
+    }
+    if ((!isEditMode.value || hasConnectionChanges.value) && !state.password) {
+      return false;
+    }
+  }
+  if (state.authMode === "bearer" && (!isEditMode.value || hasConnectionChanges.value) && !state.token) {
+    return false;
+  }
+  return true;
+});
+
+watch(activeValidationFingerprint, (_next, previous) => {
+  if (previous === undefined) {
+    return;
+  }
+  isValidated.value = false;
+  validationMessage.value = null;
+});
+
+watch(sourceType, () => {
+  formError.value = null;
+  isValidated.value = false;
+  validationMessage.value = null;
+});
+
+function handleSourceTypeChange(value: string) {
+  sourceType.value = value === "victorialogs" ? "victorialogs" : "clickhouse";
 }
 
-// Duplicate source handling
-const isDuplicating = ref(false)
+function setOriginalConnectionSnapshot() {
+  originalConnectionSnapshot.value = currentConnectionSnapshot.value;
+}
 
-const prefillFormFromSource = (source: any, isCopy: boolean = false) => {
-    sourceName.value = isCopy ? `${source.name} (Copy)` : source.name
-    description.value = source.description || ''
-    host.value = source.connection.host
-    database.value = source.connection.database
-    tableName.value = source.connection.table_name
-    metaTSField.value = source._meta_ts_field
-    metaSeverityField.value = source._meta_severity_field || ''
-    ttlDays.value = source.ttl_days || 90
-    tableMode.value = source._meta_is_auto_created ? 'create' : 'connect'
-    
-    // Set auth fields
-    const hasAuth = !!source.connection.username
-    enableAuth.value = hasAuth
-    if (hasAuth) {
-        username.value = source.connection.username
-        password.value = source.connection.password || ''
+async function loadSourceForPrefill(sourceId: number): Promise<Source | null> {
+  await sourcesStore.loadAllSourcesForAdmin();
+  return sourcesStore.sources.find((source) => source.id === sourceId) || null;
+}
+
+function prefillFormFromSource(source: Source, isCopy = false) {
+  sourceType.value = sourceTypeFromSource(source);
+  sourceName.value = isCopy ? `${source.name} (Copy)` : source.name;
+  description.value = source.description || "";
+
+  if (sourceType.value === "clickhouse") {
+    clickHouseForm.value = clickHouseFormStateFromSource(source);
+    victoriaLogsForm.value = createDefaultVictoriaLogsFormState();
+    victoriaLogsTTLDays.value = "0";
+  } else {
+    victoriaLogsForm.value = victoriaLogsFormStateFromSource(source);
+    victoriaLogsTTLDays.value = String(source.ttl_days ?? 0);
+    clickHouseForm.value = createDefaultClickHouseFormState();
+  }
+
+  formError.value = null;
+  isValidated.value = false;
+  validationMessage.value = null;
+  setOriginalConnectionSnapshot();
+}
+
+async function handleValidateConnection() {
+  isValidating.value = true;
+  isValidated.value = false;
+  validationMessage.value = null;
+
+  try {
+    const request =
+      sourceType.value === "clickhouse"
+        ? buildClickHouseValidationRequest(clickHouseForm.value)
+        : buildVictoriaLogsValidationRequest(victoriaLogsForm.value);
+
+    const result = await sourcesStore.validateSourceConnection(request);
+    if (result.success && result.data) {
+      validationMessage.value = result.data.message;
+      isValidated.value = true;
     }
+  } catch (error) {
+    console.error("Validation error:", error);
+  } finally {
+    isValidating.value = false;
+  }
+}
+
+async function submitForm() {
+  if (!isValid.value) {
+    toast({
+      title: "Error",
+      description: "Please fill in all required fields",
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR,
+    });
+    return;
+  }
+
+  if (!isEditMode.value && sourceType.value === "clickhouse" && clickHouseForm.value.tableMode === "connect" && !isValidated.value) {
+    await handleValidateConnection();
+    if (!isValidated.value) {
+      return;
+    }
+  }
+
+  if (isEditMode.value && sourceType.value === "victorialogs" && hasConnectionChanges.value) {
+    const authMode = victoriaLogsForm.value.authMode;
+    if (authMode === "basic" && !victoriaLogsForm.value.password) {
+      formError.value = "Re-enter the VictoriaLogs password before saving connection changes.";
+      return;
+    }
+    if (authMode === "bearer" && !victoriaLogsForm.value.token) {
+      formError.value = "Re-enter the VictoriaLogs bearer token before saving connection changes.";
+      return;
+    }
+  }
+
+  isSubmitting.value = true;
+  formError.value = null;
+
+  try {
+    if (isEditMode.value && editingSourceId.value) {
+      const updatePayload: Record<string, unknown> = {
+        name: sourceName.value.trim(),
+        description: description.value.trim(),
+      };
+
+      if (sourceType.value === "clickhouse") {
+        updatePayload.ttl_days = Number(clickHouseForm.value.ttlDays || 0);
+        updatePayload.meta_ts_field = clickHouseForm.value.metaTSField.trim();
+        updatePayload.meta_severity_field = clickHouseForm.value.metaSeverityField.trim();
+        if (hasConnectionChanges.value) {
+          updatePayload.connection = buildClickHouseConnection(clickHouseForm.value);
+        }
+      } else {
+        updatePayload.ttl_days = Number(victoriaLogsTTLDays.value || 0);
+        updatePayload.meta_ts_field = victoriaLogsForm.value.metaTSField.trim();
+        updatePayload.meta_severity_field = victoriaLogsForm.value.metaSeverityField.trim();
+        if (hasConnectionChanges.value) {
+          updatePayload.connection = buildVictoriaLogsConnection(victoriaLogsForm.value);
+        }
+      }
+
+      const result = await sourcesStore.updateSource(editingSourceId.value, updatePayload);
+      if (result.success) {
+        toast({
+          title: "Success",
+          description: "Source updated successfully",
+          duration: TOAST_DURATION.SUCCESS,
+        });
+        router.push({ name: "Sources" });
+      } else {
+        formError.value = result.error || "Failed to update source";
+      }
+      return;
+    }
+
+    const payload =
+      sourceType.value === "clickhouse"
+        ? {
+            name: sourceName.value.trim(),
+            source_type: "clickhouse",
+            meta_is_auto_created: clickHouseForm.value.tableMode === "create",
+            meta_ts_field: clickHouseForm.value.metaTSField.trim(),
+            meta_severity_field: clickHouseForm.value.metaSeverityField.trim(),
+            connection: buildClickHouseConnection(clickHouseForm.value),
+            description: description.value.trim(),
+            ttl_days: Number(clickHouseForm.value.ttlDays || 0),
+            schema: clickHouseForm.value.tableMode === "create"
+              ? clickHouseForm.value.schema || activeSchema.value
+              : undefined,
+          }
+        : {
+            name: sourceName.value.trim(),
+            source_type: "victorialogs",
+            meta_is_auto_created: false,
+            meta_ts_field: victoriaLogsForm.value.metaTSField.trim(),
+            meta_severity_field: victoriaLogsForm.value.metaSeverityField.trim(),
+            connection: buildVictoriaLogsConnection(victoriaLogsForm.value),
+            description: description.value.trim(),
+            ttl_days: Number(victoriaLogsTTLDays.value || 0),
+          };
+
+    const result = await sourcesStore.createSource(payload);
+    if (result.success) {
+      router.push({ name: "Sources" });
+    } else {
+      formError.value = result.error || "Failed to create source";
+    }
+  } catch (error) {
+    console.error("Error saving source:", error);
+    formError.value = error instanceof Error ? error.message : "Unknown error";
+  } finally {
+    isSubmitting.value = false;
+  }
 }
 
 onMounted(async () => {
-    // Handle edit mode
-    if (isEditMode.value && editingSourceId.value) {
-        isLoadingSource.value = true
-        try {
-            await sourcesStore.loadAllSourcesForAdmin()
-            const source = sourcesStore.sources.find(s => s.id === editingSourceId.value)
-            if (source) {
-                prefillFormFromSource(source, false)
-            } else {
-                toast({
-                    title: 'Error',
-                    description: 'Source not found',
-                    variant: 'destructive',
-                    duration: TOAST_DURATION.ERROR,
-                })
-                router.push({ name: 'Sources' })
-            }
-        } catch (error) {
-            console.error('Error loading source for editing:', error)
-            toast({
-                title: 'Error',
-                description: 'Failed to load source data',
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
-            })
-        } finally {
-            isLoadingSource.value = false
-        }
-        return
-    }
-
-    // Handle duplicate mode
-    const duplicateFromId = route.query.duplicateFrom
-    if (duplicateFromId) {
-        isDuplicating.value = true
-        try {
-            const sourceId = Number(duplicateFromId)
-            const source = sourcesStore.sources.find(s => s.id === sourceId)
-            if (source) {
-                prefillFormFromSource(source, true)
-            } else {
-                toast({
-                    title: 'Warning',
-                    description: 'Could not find source to duplicate',
-                    variant: 'destructive',
-                    duration: TOAST_DURATION.ERROR,
-                })
-            }
-        } catch (error) {
-            console.error('Error loading source for duplication:', error)
-            toast({
-                title: 'Error',
-                description: 'Failed to load source data for duplication',
-                variant: 'destructive',
-                duration: TOAST_DURATION.ERROR,
-            })
-        } finally {
-            isDuplicating.value = false
-        }
-    }
-})
-
-// Form state
-const isSubmitting = ref(false)
-const formError = ref<any>(null)
-
-const submitForm = async () => {
-    if (!isValid.value) {
-        toast({
-            title: 'Error',
-            description: 'Please fill in all required fields',
-            variant: 'destructive',
-            duration: TOAST_DURATION.ERROR,
-        })
-        return
-    }
-
-    // For "Connect Existing Table" mode (create only), validate first if not already validated
-    if (!isEditMode.value && !createTable.value && !isValidated.value) {
-        await handleValidateConnection()
-        if (!isValidated.value) return
-    }
-
-    isSubmitting.value = true
-
+  if (isEditMode.value && editingSourceId.value) {
+    isLoadingSource.value = true;
     try {
-        if (isEditMode.value && editingSourceId.value) {
-            // Update mode - build partial update payload
-            const updatePayload: Record<string, any> = {
-                name: String(sourceName.value),
-                description: String(description.value),
-                ttl_days: Number(ttlDays.value),
-                meta_ts_field: String(metaTSField.value),
-                meta_severity_field: metaSeverityField.value ? String(metaSeverityField.value) : "",
-                connection: {
-                    host: String(host.value),
-                    database: String(database.value),
-                    table_name: String(tableName.value),
-                    username: enableAuth.value ? String(username.value) : '',
-                    password: enableAuth.value ? String(password.value) : '',
-                },
-            }
-
-            const result = await sourcesStore.updateSource(editingSourceId.value, updatePayload)
-
-            if (result.success) {
-                toast({
-                    title: 'Success',
-                    description: 'Source updated successfully',
-                    duration: TOAST_DURATION.SUCCESS,
-                })
-                router.push({ name: 'Sources' })
-            } else {
-                formError.value = result.error
-            }
-        } else {
-            // Create mode
-            const payload = {
-                name: String(sourceName.value),
-                meta_is_auto_created: createTable.value,
-                meta_ts_field: String(metaTSField.value),
-                meta_severity_field: metaSeverityField.value ? String(metaSeverityField.value) : "",
-                connection: {
-                    host: String(host.value),
-                    username: enableAuth.value ? String(username.value) : '',
-                    password: enableAuth.value ? String(password.value) : '',
-                    database: String(database.value),
-                    table_name: String(tableName.value),
-                },
-                description: String(description.value),
-                ttl_days: Number(ttlDays.value),
-                schema: createTable.value ? actualSchema.value : undefined,
-            }
-
-            const result = await sourcesStore.createSource(payload)
-
-            if (result.success) {
-                router.push({ name: 'Sources' })
-            } else {
-                formError.value = result.error
-            }
-        }
+      const source = await loadSourceForPrefill(editingSourceId.value);
+      if (!source) {
+        toast({
+          title: "Error",
+          description: "Source not found",
+          variant: "destructive",
+          duration: TOAST_DURATION.ERROR,
+        });
+        router.push({ name: "Sources" });
+        return;
+      }
+      prefillFormFromSource(source, false);
     } catch (error) {
-        console.error("Error saving source:", error)
-        formError.value = error instanceof Error ? error.message : 'Unknown error'
+      console.error("Error loading source for editing:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load source data",
+        variant: "destructive",
+        duration: TOAST_DURATION.ERROR,
+      });
     } finally {
-        isSubmitting.value = false
+      isLoadingSource.value = false;
     }
-}
+    return;
+  }
+
+  if (duplicateFromId.value) {
+    isLoadingSource.value = true;
+    try {
+      const source = await loadSourceForPrefill(duplicateFromId.value);
+      if (source) {
+        prefillFormFromSource(source, true);
+      } else {
+        toast({
+          title: "Warning",
+          description: "Could not find source to duplicate",
+          variant: "destructive",
+          duration: TOAST_DURATION.ERROR,
+        });
+      }
+    } catch (error) {
+      console.error("Error loading source for duplication:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load source data for duplication",
+        variant: "destructive",
+        duration: TOAST_DURATION.ERROR,
+      });
+    } finally {
+      isLoadingSource.value = false;
+      setOriginalConnectionSnapshot();
+    }
+    return;
+  }
+
+  setOriginalConnectionSnapshot();
+});
 </script>
 
 <template>
-    <div class="container mx-auto max-w-4xl px-4 py-8">
-        <Card>
-            <CardHeader>
-                <CardTitle>{{ isEditMode ? 'Edit Source' : (route.query.duplicateFrom ? 'Duplicate Source' : 'Add Source') }}</CardTitle>
-                <CardDescription>
-                    {{ isEditMode
-                        ? 'Update source configuration and connection settings'
-                        : (route.query.duplicateFrom
-                            ? 'Create a new source based on an existing configuration'
-                            : 'Connect to a ClickHouse database and configure log ingestion') }}
-                </CardDescription>
-            </CardHeader>
-            <CardContent>
-                <!-- Loading state while fetching source for edit mode -->
-                <div v-if="isLoadingSource" class="flex items-center justify-center py-12">
-                    <div class="flex items-center gap-3">
-                        <svg class="animate-spin h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        <span class="text-muted-foreground">Loading source data...</span>
-                    </div>
+  <div class="container mx-auto max-w-4xl px-4 py-8">
+    <Card>
+      <CardHeader>
+        <CardTitle>{{ pageTitle }}</CardTitle>
+        <CardDescription>{{ pageDescription }}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div v-if="isLoadingSource" class="flex items-center justify-center py-12">
+          <div class="flex items-center gap-3">
+            <svg class="h-5 w-5 animate-spin text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span class="text-muted-foreground">Loading source data...</span>
+          </div>
+        </div>
+
+        <form v-else class="space-y-6" @submit.prevent="submitForm">
+          <div class="space-y-6">
+            <div class="space-y-4">
+              <div class="flex items-center justify-between">
+                <h3 class="text-lg font-medium">Basic Information</h3>
+                <div class="text-sm text-muted-foreground">
+                  Define source identity and provider
                 </div>
-                <form v-else @submit.prevent="submitForm" class="space-y-6">
-                    <div class="space-y-6">
-                        <!-- Basic Info -->
-                        <div class="space-y-4">
-                            <div class="flex items-center justify-between">
-                                <h3 class="text-lg font-medium">Basic Information</h3>
-                                <div class="text-sm text-muted-foreground">
-                                    Define your source details
-                                </div>
-                            </div>
+              </div>
 
-                            <div class="grid gap-2">
-                                <Label for="source_name" class="required">Source Name</Label>
-                                <Input id="source_name" v-model="sourceName" placeholder="My Application Logs"
-                                    maxlength="50" required />
-                                <p class="text-sm text-muted-foreground">
-                                    A descriptive name (up to 50 characters) to identify this data source
-                                </p>
-                            </div>
+              <div v-if="!isEditMode" class="space-y-3">
+                <Label class="required">Datasource Type</Label>
+                <RadioGroup
+                  :model-value="sourceType"
+                  class="grid gap-3 md:grid-cols-2"
+                  @update:model-value="handleSourceTypeChange"
+                >
+                  <Card
+                    :class="{ 'border-primary shadow-sm': sourceType === 'clickhouse', 'border-muted-foreground/20': sourceType !== 'clickhouse' }"
+                    class="cursor-pointer transition-all hover:border-primary/70"
+                    @click="sourceType = 'clickhouse'"
+                  >
+                    <CardContent class="flex items-start gap-3 p-5">
+                      <RadioGroupItem value="clickhouse" id="source_type_clickhouse" />
+                      <div class="space-y-1">
+                        <Label for="source_type_clickhouse" class="cursor-pointer font-medium">ClickHouse</Label>
+                        <p class="text-sm text-muted-foreground">
+                          Native LogChefQL and SQL with optional auto-created tables.
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
 
-                            <div class="grid gap-2">
-                                <Label for="description">Description</Label>
-                                <Textarea id="description" v-model="description"
-                                    placeholder="Optional description of what this source contains" rows="2"
-                                    maxlength="500" />
-                                <p class="text-sm text-muted-foreground">
-                                    Optional: Add details about what kind of logs this source will contain
-                                </p>
-                            </div>
-                        </div>
+                  <Card
+                    :class="{ 'border-primary shadow-sm': sourceType === 'victorialogs', 'border-muted-foreground/20': sourceType !== 'victorialogs' }"
+                    class="cursor-pointer transition-all hover:border-primary/70"
+                    @click="sourceType = 'victorialogs'"
+                  >
+                    <CardContent class="flex items-start gap-3 p-5">
+                      <RadioGroupItem value="victorialogs" id="source_type_victorialogs" />
+                      <div class="space-y-1">
+                        <Label for="source_type_victorialogs" class="cursor-pointer font-medium">VictoriaLogs</Label>
+                        <p class="text-sm text-muted-foreground">
+                          Native LogsQL against VictoriaLogs with tenant and scope controls.
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </RadioGroup>
+              </div>
 
-                        <!-- Connection Details -->
-                        <div class="space-y-4">
-                            <div class="flex items-center justify-between">
-                                <h3 class="text-lg font-medium">Connection Details</h3>
-                                <div class="text-sm text-muted-foreground">
-                                    Configure ClickHouse connection
-                                </div>
-                            </div>
+              <div v-else class="grid gap-2 md:max-w-sm">
+                <Label>Datasource Type</Label>
+                <Input :model-value="sourceType === 'clickhouse' ? 'ClickHouse' : 'VictoriaLogs'" disabled />
+              </div>
 
-                            <div class="grid gap-2">
-                                <Label for="host" class="required">Host and Port</Label>
-                                <Input id="host" v-model="host" placeholder="localhost:9000" required />
-                                <p class="text-sm text-muted-foreground">
-                                    Enter the ClickHouse server host and port in the format host:port (e.g.,
-                                    localhost:9000). Port 9000 is the default TCP protocol port used by ClickHouse.
-                                </p>
-                            </div>
+              <div class="grid gap-2">
+                <Label for="source_name" class="required">Source Name</Label>
+                <Input
+                  id="source_name"
+                  v-model="sourceName"
+                  placeholder="My Application Logs"
+                  maxlength="50"
+                />
+              </div>
 
-                            <!-- Database and Table Name side by side -->
-                            <div class="grid grid-cols-2 gap-4">
-                                <div class="grid gap-2">
-                                    <Label for="database" class="required">Database</Label>
-                                    <Input id="database" v-model="database" placeholder="default" required />
-                                </div>
+              <div class="grid gap-2">
+                <Label for="description">Description</Label>
+                <Textarea
+                  id="description"
+                  v-model="description"
+                  rows="2"
+                  maxlength="500"
+                  placeholder="Optional description of what this source contains"
+                />
+              </div>
+            </div>
 
-                                <div class="grid gap-2">
-                                    <Label for="table_name" class="required">Table Name</Label>
-                                    <Input id="table_name" v-model="tableName" placeholder="app_logs" required />
-                                </div>
-                            </div>
-                            <p class="text-sm text-muted-foreground">
-                                The database and table where your logs will be stored in ClickHouse
-                            </p>
+            <ClickHouseSourceForm
+              v-if="sourceType === 'clickhouse'"
+              v-model="clickHouseForm"
+              :is-edit-mode="isEditMode"
+              :is-validating="isValidating"
+              :is-validated="isValidated"
+              :validation-message="validationMessage"
+              @validate="handleValidateConnection"
+            />
 
-                            <!-- Auth Toggle -->
-                            <div class="space-y-4">
-                                <div class="flex items-center justify-between bg-muted/50 p-3 rounded-md">
-                                    <div class="space-y-0.5">
-                                        <Label class="text-base">Authentication</Label>
-                                        <p class="text-sm text-muted-foreground">
-                                            Enable if your ClickHouse server requires authentication
-                                        </p>
-                                    </div>
-                                    <Switch :checked="enableAuth" @update:checked="handleAuthToggle" />
-                                </div>
+            <VictoriaLogsSourceForm
+              v-else
+              v-model="victoriaLogsForm"
+              :is-edit-mode="isEditMode"
+              :is-validating="isValidating"
+              :is-validated="isValidated"
+              :validation-message="validationMessage"
+              @validate="handleValidateConnection"
+            />
+          </div>
 
-                                <!-- Auth Fields - Only shown when authentication is enabled -->
-                                <div v-show="enableAuth"
-                                    class="grid gap-4 md:grid-cols-2 border-l-2 border-primary/20 pl-3 animate-in fade-in slide-in-from-top-2">
-                                    <div class="grid gap-2">
-                                        <Label for="username" class="required">Username</Label>
-                                        <Input id="username" v-model="username" placeholder="default"
-                                            :required="enableAuth" />
-                                    </div>
+          <div
+            v-if="formError"
+            class="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive"
+          >
+            {{ formError }}
+          </div>
 
-                                    <div class="grid gap-2">
-                                        <Label for="password" class="required">Password</Label>
-                                        <Input id="password" v-model="password" type="password"
-                                            :required="enableAuth" />
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Table Configuration Option - hidden in edit mode -->
-                        <div v-if="!isEditMode" class="space-y-4">
-                            <div class="flex items-center justify-between">
-                                <h3 class="text-lg font-medium">Table Configuration</h3>
-                                <div class="text-sm text-muted-foreground">
-                                    Choose how to handle your log data table
-                                </div>
-                            </div>
-
-                            <RadioGroup :model-value="tableMode"
-                                @update:model-value="(val) => tableMode = val as 'create' | 'connect'"
-                                class="grid grid-cols-[1fr_auto_1fr] items-start gap-4">
-                                <!-- Create Table Card -->
-                                <Card
-                                    :class="{ 'border-primary shadow-sm': tableMode === 'create', 'border-muted-foreground/20': tableMode !== 'create' }"
-                                    class="cursor-pointer transition-all hover:border-primary/70"
-                                    @click="tableMode = 'create' as const">
-                                    <CardHeader>
-                                        <div class="flex items-center gap-2">
-                                            <RadioGroupItem value="create" id="create" />
-                                            <Label for="create" class="cursor-pointer font-medium">Create New
-                                                Table</Label>
-                                        </div>
-                                    </CardHeader>
-                                    <CardContent class="space-y-4">
-                                        <div class="flex items-start gap-4">
-                                            <Plus class="h-5 w-5 mt-1 text-muted-foreground" />
-                                            <div class="space-y-1">
-                                                <p class="text-sm font-medium">Let LogChef create the table</p>
-                                                <p class="text-sm text-muted-foreground">Optimized schema with
-                                                    OTLP-compatible fields and efficient compression</p>
-                                            </div>
-                                        </div>
-
-                                        <!-- TTL Days for Create Table -->
-                                        <div class="grid gap-2 mt-4 border-t pt-4">
-                                            <Label for="ttl_days">TTL Days</Label>
-                                            <Input id="ttl_days" v-model="ttlDays" type="number" min="1" />
-                                            <p class="text-sm text-muted-foreground">
-                                                Number of days to keep logs before automatic deletion
-                                            </p>
-                                        </div>
-
-                                        <!-- Schema Preview -->
-                                        <Dialog>
-                                            <DialogTrigger asChild>
-                                                <Button variant="outline"
-                                                    class="w-full flex items-center justify-between">
-                                                    <div class="flex items-center gap-2">
-                                                        <Code class="h-4 w-4" />
-                                                        <span>View Auto-Generated Schema</span>
-                                                    </div>
-                                                    <ChevronsUpDown class="h-4 w-4" />
-                                                </Button>
-                                            </DialogTrigger>
-                                            <DialogContent class="sm:max-w-[800px]">
-                                                <DialogHeader>
-                                                    <DialogTitle>Table Schema</DialogTitle>
-                                                    <DialogDescription>
-                                                        This schema will be used to create your table. You can edit it
-                                                        if needed.
-                                                    </DialogDescription>
-                                                </DialogHeader>
-
-                                                <div class="space-y-4 py-4">
-                                                    <div class="flex items-center justify-between">
-                                                        <div class="space-y-1">
-                                                            <h4 class="text-sm font-medium leading-none">Schema
-                                                                Definition</h4>
-                                                            <p class="text-sm text-muted-foreground">
-                                                                The CREATE TABLE statement that will be executed
-                                                            </p>
-                                                        </div>
-                                                        <div class="flex items-center gap-2">
-                                                            <Button variant="outline" size="sm" @click="resetSchema"
-                                                                :disabled="!isEditingSchema">
-                                                                Reset to Default
-                                                            </Button>
-                                                            <Button variant="outline" size="sm"
-                                                                @click="isEditingSchema = !isEditingSchema">
-                                                                {{ isEditingSchema ? 'Preview' : 'Edit' }}
-                                                            </Button>
-                                                        </div>
-                                                    </div>
-
-                                                    <!-- Schema Content -->
-                                                    <div v-if="!isEditingSchema" class="rounded-md bg-muted p-4">
-                                                        <pre
-                                                            class="text-sm text-muted-foreground whitespace-pre-wrap">{{ actualSchema }}</pre>
-                                                    </div>
-                                                    <Textarea v-else v-model="editedSchema"
-                                                        :placeholder="generateSchema()" class="font-mono text-sm"
-                                                        rows="20" />
-                                                </div>
-                                            </DialogContent>
-                                        </Dialog>
-                                    </CardContent>
-                                </Card>
-
-                                <!-- Separator -->
-                                <div class="flex flex-col items-center justify-center h-full">
-                                    <div class="flex flex-col items-center gap-2">
-                                        <Separator orientation="vertical" class="h-8" />
-                                        <span class="text-sm text-muted-foreground px-4">or</span>
-                                        <Separator orientation="vertical" class="h-8" />
-                                    </div>
-                                </div>
-
-                                <!-- Connect Table Card -->
-                                <Card
-                                    :class="{ 'border-primary shadow-sm': tableMode === 'connect', 'border-muted-foreground/20': tableMode !== 'connect' }"
-                                    class="cursor-pointer transition-all hover:border-primary/70"
-                                    @click="tableMode = 'connect' as const">
-                                    <CardHeader>
-                                        <div class="flex items-center gap-2">
-                                            <RadioGroupItem value="connect" id="connect" />
-                                            <Label for="connect" class="cursor-pointer font-medium">Connect Existing
-                                                Table</Label>
-                                        </div>
-                                    </CardHeader>
-                                    <CardContent class="space-y-4">
-                                        <div class="flex items-start gap-4">
-                                            <Database class="h-5 w-5 mt-1 text-muted-foreground" />
-                                            <div class="space-y-1">
-                                                <p class="text-sm font-medium">Use an existing table</p>
-                                                <p class="text-sm text-muted-foreground">Connect to an existing
-                                                    ClickHouse
-                                                    table where your logs are already being ingested. You'll need to
-                                                    specify which fields contain the timestamp and severity.</p>
-                                            </div>
-                                        </div>
-
-                                        <!-- Timestamp and Severity Fields Input -->
-                                        <div v-if="tableMode === 'connect'" class="mt-4 border-t pt-4 space-y-4">
-                                            <div class="grid gap-2">
-                                                <Label for="meta_ts_field" class="required">Timestamp Field Name</Label>
-                                                <Input id="meta_ts_field" v-model="metaTSField" placeholder="timestamp"
-                                                    required />
-                                                <p class="text-sm text-muted-foreground mt-1">
-                                                    Specify the field name that contains the timestamp in your table.
-                                                    Must
-                                                    be of
-                                                    type DateTime or DateTime64.
-                                                </p>
-                                            </div>
-
-                                            <div class="grid gap-2">
-                                                <Label for="meta_severity_field">Severity Field
-                                                    Name (Optional)</Label>
-                                                <Input id="meta_severity_field" v-model="metaSeverityField"
-                                                    placeholder="severity_text" />
-                                                <p class="text-sm text-muted-foreground mt-1">
-                                                    Optionally specify the field name that contains the severity level
-                                                    in
-                                                    your table. Leave empty if not needed.
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </CardContent>
-                                </Card>
-                            </RadioGroup>
-                        </div>
-
-                        <!-- TTL Days field - shown in edit mode (since Table Configuration is hidden) -->
-                        <div v-if="isEditMode" class="space-y-4">
-                            <div class="flex items-center justify-between">
-                                <h3 class="text-lg font-medium">Data Retention</h3>
-                                <div class="text-sm text-muted-foreground">
-                                    Configure how long logs are retained
-                                </div>
-                            </div>
-                            <div class="grid gap-2">
-                                <Label for="ttl_days_edit">TTL Days</Label>
-                                <Input id="ttl_days_edit" v-model="ttlDays" type="number" min="1" class="max-w-xs" />
-                                <p class="text-sm text-muted-foreground">
-                                    Number of days to keep logs before automatic deletion
-                                </p>
-                            </div>
-                        </div>
-
-                        <!-- Validation Section - only for connect mode in create flow -->
-                        <div v-if="!isEditMode && !createTable" class="space-y-4 border-t pt-4">
-                            <div class="flex items-center justify-between">
-                                <div class="text-sm font-medium">Validate Connection</div>
-                                <Button type="button" variant="outline" @click="handleValidateConnection"
-                                    :disabled="isValidating || isValidated" size="sm">
-                                    <span v-if="isValidating" class="mr-2">
-                                        <svg class="animate-spin h-4 w-4 text-primary"
-                                            xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
-                                                stroke-width="4"></circle>
-                                            <path class="opacity-75" fill="currentColor"
-                                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
-                                            </path>
-                                        </svg>
-                                    </span>
-                                    <span v-else-if="isValidated" class="mr-2">✓</span>
-                                    {{ isValidated ? 'Validated' : validateButtonText }}
-                                </Button>
-                            </div>
-
-                            <!-- Validation Success Result -->
-                            <div v-if="validationResult"
-                                class="p-3 rounded-md text-sm bg-green-50 text-green-800 border border-green-200">
-                                {{ validationResult.message }}
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="flex justify-end space-x-4 border-t pt-6 mt-6">
-                        <Button type="button" variant="outline" @click="router.push({ name: 'Sources' })">
-                            Cancel
-                        </Button>
-                        <Button type="submit" :disabled="isSubmitting || !isValid || (!isEditMode && !createTable && !isValidated)"
-                            :class="{ 'opacity-50': !isValid || (!isEditMode && !createTable && !isValidated) }" size="lg">
-                            <span v-if="isSubmitting" class="mr-2">
-                                <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg"
-                                    fill="none" viewBox="0 0 24 24">
-                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
-                                        stroke-width="4"></circle>
-                                    <path class="opacity-75" fill="currentColor"
-                                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
-                                    </path>
-                                </svg>
-                            </span>
-                            {{ submitButtonText }}
-                        </Button>
-                    </div>
-                </form>
-            </CardContent>
-        </Card>
-    </div>
+          <div class="mt-6 flex justify-end space-x-4 border-t pt-6">
+            <Button type="button" variant="outline" @click="router.push({ name: 'Sources' })">
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              size="lg"
+              :disabled="isSubmitting || !isValid || (!isEditMode && sourceType === 'clickhouse' && clickHouseForm.tableMode === 'connect' && !isValidated)"
+              :class="{ 'opacity-50': !isValid || (!isEditMode && sourceType === 'clickhouse' && clickHouseForm.tableMode === 'connect' && !isValidated) }"
+            >
+              <span v-if="isSubmitting" class="mr-2">
+                <svg class="h-4 w-4 animate-spin text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </span>
+              {{ submitButtonText }}
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  </div>
 </template>
 
 <style scoped>
 .required::after {
-    content: " *";
-    color: hsl(var(--destructive));
+  content: " *";
+  color: hsl(var(--destructive));
 }
 </style>

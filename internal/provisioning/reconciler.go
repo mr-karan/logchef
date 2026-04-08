@@ -3,7 +3,6 @@ package provisioning
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -130,7 +129,11 @@ func reconcileSources(ctx context.Context, qtx *sqlc.Queries, cfg *config.Provis
 					return nil, fmt.Errorf("failed to set source %q as managed: %w", cfgSrc.Name, err)
 				}
 				sourceIDs[cfgSrc.Name] = unmanaged.ID
-				*toConnect = append(*toConnect, buildProvisionedSourceModelWithID(unmanaged.ID, cfgSrc))
+				sourceModel, err := buildProvisionedSourceModelWithID(unmanaged.ID, cfgSrc)
+				if err != nil {
+					return nil, fmt.Errorf("failed to build provisioned source %q: %w", cfgSrc.Name, err)
+				}
+				*toConnect = append(*toConnect, sourceModel)
 				continue
 			}
 
@@ -143,7 +146,11 @@ func reconcileSources(ctx context.Context, qtx *sqlc.Queries, cfg *config.Provis
 					"name", cfgSrc.Name, "error", err)
 			}
 
-			id, err := qtx.CreateSource(ctx, buildCreateSourceParams(cfgSrc))
+			createParams, err := buildCreateSourceParams(cfgSrc)
+			if err != nil {
+				return nil, fmt.Errorf("failed to build source params for %q: %w", cfgSrc.Name, err)
+			}
+			id, err := qtx.CreateSource(ctx, createParams)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create source %q: %w", cfgSrc.Name, err)
 			}
@@ -156,15 +163,27 @@ func reconcileSources(ctx context.Context, qtx *sqlc.Queries, cfg *config.Provis
 			}
 
 			sourceIDs[cfgSrc.Name] = id
-			*toConnect = append(*toConnect, buildProvisionedSourceModelWithID(id, cfgSrc))
+			sourceModel, err := buildProvisionedSourceModelWithID(id, cfgSrc)
+			if err != nil {
+				return nil, fmt.Errorf("failed to build provisioned source %q: %w", cfgSrc.Name, err)
+			}
+			*toConnect = append(*toConnect, sourceModel)
 		} else {
 			// Update existing managed source if fields changed
-			if sourceNeedsUpdate(existing, cfgSrc) {
+			needsUpdate, err := sourceNeedsUpdate(existing, cfgSrc)
+			if err != nil {
+				return nil, fmt.Errorf("failed to compare managed source %q: %w", cfgSrc.Name, err)
+			}
+			if needsUpdate {
 				log.Info("updating managed source", "name", cfgSrc.Name)
 				if err := updateSourceFromConfig(ctx, qtx, existing.ID, cfgSrc); err != nil {
 					return nil, fmt.Errorf("failed to update source %q: %w", cfgSrc.Name, err)
 				}
-				*toConnect = append(*toConnect, buildProvisionedSourceModelWithID(existing.ID, cfgSrc))
+				sourceModel, err := buildProvisionedSourceModelWithID(existing.ID, cfgSrc)
+				if err != nil {
+					return nil, fmt.Errorf("failed to build provisioned source %q: %w", cfgSrc.Name, err)
+				}
+				*toConnect = append(*toConnect, sourceModel)
 			}
 			sourceIDs[cfgSrc.Name] = existing.ID
 		}
@@ -458,20 +477,16 @@ func reconcileTeamSources(ctx context.Context, qtx *sqlc.Queries, teamID int64, 
 // Helper functions
 
 func validateSourceConnection(ctx context.Context, ds *datasource.Service, src config.ProvisionSource, log *slog.Logger) error {
-	payload, err := json.Marshal(models.ConnectionInfo{
-		Host:      src.Host,
-		Username:  src.Username,
-		Password:  src.Password,
-		Database:  src.Database,
-		TableName: src.TableName,
-	})
+	payload, err := src.ConnectionPayload()
 	if err != nil {
 		return fmt.Errorf("marshal connection config: %w", err)
 	}
 
 	_, err = ds.ValidateConnection(ctx, &models.ValidateConnectionRequest{
-		SourceType: models.SourceTypeClickHouse,
+		SourceType:     src.NormalizedSourceType(),
 		Connection: payload,
+		TimestampField: src.MetaTSField,
+		SeverityField:  src.MetaSeverityField,
 	})
 	if err != nil {
 		log.Debug("provisioning datasource validation failed", "source", src.Name, "error", err)
@@ -480,48 +495,54 @@ func validateSourceConnection(ctx context.Context, ds *datasource.Service, src c
 	return nil
 }
 
-func buildCreateSourceParams(src config.ProvisionSource) sqlc.CreateSourceParams {
-	source := buildProvisionedSourceModel(src)
-	_ = source.SyncConnectionConfig()
+func buildCreateSourceParams(src config.ProvisionSource) (sqlc.CreateSourceParams, error) {
+	source, err := buildProvisionedSourceModel(src)
+	if err != nil {
+		return sqlc.CreateSourceParams{}, err
+	}
 
 	return sqlc.CreateSourceParams{
 		Name:              src.Name,
 		MetaIsAutoCreated: 0,
 		SourceType:        source.SourceType.String(),
-		MetaTsField:       src.MetaTSField,
-		MetaSeverityField: sql.NullString{String: src.MetaSeverityField, Valid: src.MetaSeverityField != ""},
+		MetaTsField:       source.MetaTSField,
+		MetaSeverityField: sql.NullString{String: source.MetaSeverityField, Valid: source.MetaSeverityField != ""},
 		ConnectionConfig:  string(source.ConnectionConfig),
 		IdentityKey:       source.IdentityKey,
-		Description:       sql.NullString{String: src.Description, Valid: src.Description != ""},
-		TtlDays:           int64(src.TTLDays),
+		Description:       sql.NullString{String: source.Description, Valid: source.Description != ""},
+		TtlDays:           int64(source.TTLDays),
 		Managed:           0,
 		SecretRef:         sql.NullString{},
-	}
+	}, nil
 }
 
 func updateSourceFromConfig(ctx context.Context, qtx *sqlc.Queries, sourceID int64, src config.ProvisionSource) error {
-	source := buildProvisionedSourceModel(src)
-	_ = source.SyncConnectionConfig()
+	source, err := buildProvisionedSourceModel(src)
+	if err != nil {
+		return err
+	}
 
 	return qtx.UpdateSource(ctx, sqlc.UpdateSourceParams{
-		Name:              src.Name,
+		Name:              source.Name,
 		MetaIsAutoCreated: 0,
 		SourceType:        source.SourceType.String(),
-		MetaTsField:       src.MetaTSField,
-		MetaSeverityField: sql.NullString{String: src.MetaSeverityField, Valid: src.MetaSeverityField != ""},
+		MetaTsField:       source.MetaTSField,
+		MetaSeverityField: sql.NullString{String: source.MetaSeverityField, Valid: source.MetaSeverityField != ""},
 		ConnectionConfig:  string(source.ConnectionConfig),
 		IdentityKey:       source.IdentityKey,
-		Description:       sql.NullString{String: src.Description, Valid: src.Description != ""},
-		TtlDays:           int64(src.TTLDays),
+		Description:       sql.NullString{String: source.Description, Valid: source.Description != ""},
+		TtlDays:           int64(source.TTLDays),
 		Managed:           1,
 		SecretRef:         sql.NullString{String: src.SecretRef, Valid: src.SecretRef != ""},
 		ID:                sourceID,
 	})
 }
 
-func sourceNeedsUpdate(existing sqlc.Source, desired config.ProvisionSource) bool {
-	source := buildProvisionedSourceModel(desired)
-	_ = source.SyncConnectionConfig()
+func sourceNeedsUpdate(existing sqlc.Source, desired config.ProvisionSource) (bool, error) {
+	source, err := buildProvisionedSourceModel(desired)
+	if err != nil {
+		return false, err
+	}
 
 	return existing.SourceType != source.SourceType.String() ||
 		existing.ConnectionConfig != string(source.ConnectionConfig) ||
@@ -529,32 +550,47 @@ func sourceNeedsUpdate(existing sqlc.Source, desired config.ProvisionSource) boo
 		existing.Description.String != desired.Description ||
 		int(existing.TtlDays) != desired.TTLDays ||
 		existing.MetaTsField != desired.MetaTSField ||
-		existing.MetaSeverityField.String != desired.MetaSeverityField
+		existing.MetaSeverityField.String != desired.MetaSeverityField ||
+		existing.SecretRef.String != desired.SecretRef, nil
 }
 
-func buildProvisionedSourceModel(src config.ProvisionSource) models.Source {
-	return models.Source{
+func buildProvisionedSourceModel(src config.ProvisionSource) (models.Source, error) {
+	connectionPayload, err := src.ConnectionPayload()
+	if err != nil {
+		return models.Source{}, fmt.Errorf("build provisioned source %q: %w", src.Name, err)
+	}
+
+	source := models.Source{
 		Name:              src.Name,
-		SourceType:        models.SourceTypeClickHouse,
+		SourceType:        src.NormalizedSourceType(),
 		MetaIsAutoCreated: false,
 		MetaTSField:       src.MetaTSField,
 		MetaSeverityField: src.MetaSeverityField,
-		Connection: models.ConnectionInfo{
-			Host:      src.Host,
-			Username:  src.Username,
-			Password:  src.Password,
-			Database:  src.Database,
-			TableName: src.TableName,
-		},
-		Description: src.Description,
-		TTLDays:     src.TTLDays,
-		Managed:     true,
-		SecretRef:   src.SecretRef,
+		ConnectionConfig:  connectionPayload,
+		Description:       src.Description,
+		TTLDays:           src.TTLDays,
+		Managed:           true,
+		SecretRef:         src.SecretRef,
 	}
+	if source.IsClickHouse() {
+		conn, err := src.ClickHouseConnection()
+		if err != nil {
+			return models.Source{}, err
+		}
+		source.Connection = conn
+	}
+	if err := source.SyncConnectionConfig(); err != nil {
+		return models.Source{}, err
+	}
+
+	return source, nil
 }
 
-func buildProvisionedSourceModelWithID(id int64, src config.ProvisionSource) models.Source {
-	source := buildProvisionedSourceModel(src)
+func buildProvisionedSourceModelWithID(id int64, src config.ProvisionSource) (models.Source, error) {
+	source, err := buildProvisionedSourceModel(src)
+	if err != nil {
+		return models.Source{}, err
+	}
 	source.ID = models.SourceID(id)
-	return source
+	return source, nil
 }

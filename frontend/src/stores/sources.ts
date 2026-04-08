@@ -9,6 +9,7 @@ import type {
   UpdateSourcePayload,
   SourceStats,
   CreateTeamQueryRequest,
+  ValidateConnectionRequestInfo,
 } from "@/api/sources";
 import type { APIErrorResponse } from "@/api/types";
 import { useBaseStore } from "./base";
@@ -483,16 +484,8 @@ export const useSourcesStore = defineStore("sources", () => {
     });
   }
 
-  async function validateSourceConnection(connectionInfo: {
-    host: string;
-    username: string;
-    password: string;
-    database: string;
-    table_name: string;
-    timestamp_field?: string;
-    severity_field?: string;
-  }) {
-    const connectionKey = `${connectionInfo.host}-${connectionInfo.database}-${connectionInfo.table_name}`;
+  async function validateSourceConnection(connectionInfo: ValidateConnectionRequestInfo) {
+    const connectionKey = JSON.stringify(connectionInfo);
 
     return await state.withLoading("validateSourceConnection", async () => {
       return await state.callApi({
