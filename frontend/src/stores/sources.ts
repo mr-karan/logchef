@@ -6,6 +6,7 @@ import { sourcesApi } from "@/api/sources";
 import type {
   Source,
   CreateSourcePayload,
+  UpdateSourcePayload,
   SourceStats,
   CreateTeamQueryRequest,
 } from "@/api/sources";
@@ -538,7 +539,7 @@ export const useSourcesStore = defineStore("sources", () => {
   // Use the centralized error handler from base store
 
   // Update source
-  async function updateSource(id: number, payload: Partial<Source>) {
+  async function updateSource(id: number, payload: UpdateSourcePayload) {
     return await state.withLoading(`updateSource-${id}`, async () => {
       return await state.callApi({
         apiCall: () => sourcesApi.updateSource(id, payload),

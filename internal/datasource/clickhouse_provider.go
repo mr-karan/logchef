@@ -162,6 +162,111 @@ func (p *ClickHouseProvider) ValidateConnection(ctx context.Context, req *models
 	return &models.ConnectionValidationResult{Message: "Connection successful"}, nil
 }
 
+func (p *ClickHouseProvider) UpdateSource(ctx context.Context, source *models.Source, req *models.UpdateSourceRequest) (*SourceUpdateResult, error) {
+	if source == nil {
+		return nil, fmt.Errorf("source is required")
+	}
+	if req == nil {
+		return nil, fmt.Errorf("update source request is required")
+	}
+
+	changed, err := ApplyCommonSourceUpdates(source, req)
+	if err != nil {
+		return nil, err
+	}
+
+	metaChanged := req.MetaTSField != nil || req.MetaSeverityField != nil
+	connectionChanged := req.HasConnectionChanges()
+	var client *clickhouse.Client
+
+	if connectionChanged {
+		conn, err := p.connectionFromConfig(req.Connection)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateClickHouseConnection("connection.", true, conn.Host, conn.Username, conn.Password, conn.Database, conn.TableName); err != nil {
+			return nil, err
+		}
+
+		tempSource := &models.Source{SourceType: models.SourceTypeClickHouse, Connection: conn}
+		client, err = p.manager.CreateTemporaryClient(ctx, tempSource)
+		if err != nil {
+			return nil, &ValidationError{Field: "connection", Message: "Failed to connect with new credentials", Err: err}
+		}
+		defer client.Close()
+
+		if err := client.Ping(ctx, conn.Database, conn.TableName); err != nil {
+			return nil, &ValidationError{
+				Field:   "connection",
+				Message: fmt.Sprintf("Table '%s.%s' not accessible with new credentials", conn.Database, conn.TableName),
+				Err:     err,
+			}
+		}
+
+		source.Connection = conn
+		changed = true
+	}
+
+	if metaChanged || connectionChanged {
+		if client == nil {
+			existingClient, err := p.manager.GetConnection(source.ID)
+			if err != nil {
+				return nil, fmt.Errorf("get connection for source %d: %w", source.ID, err)
+			}
+			client = existingClient
+		}
+
+		if err := p.validateColumnTypes(ctx, client, source.Connection.Database, source.Connection.TableName, source.MetaTSField, source.MetaSeverityField); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := source.SyncConnectionConfig(); err != nil {
+		return nil, err
+	}
+
+	return &SourceUpdateResult{
+		Source:       source,
+		Changed:      changed,
+		Reinitialize: connectionChanged,
+	}, nil
+}
+
+func (p *ClickHouseProvider) PopulateSourceDetails(ctx context.Context, source *models.Source) error {
+	if source == nil {
+		return fmt.Errorf("source is required")
+	}
+
+	source.Columns = nil
+	source.Schema = ""
+	source.Engine = ""
+	source.EngineParams = nil
+	source.SortKeys = nil
+
+	if !source.IsConnected {
+		return nil
+	}
+
+	client, err := p.manager.GetConnection(source.ID)
+	if err != nil {
+		p.log.Warn("failed to get clickhouse connection for source details", "source_id", source.ID, "error", err)
+		return nil
+	}
+
+	tableInfo, err := client.GetTableInfo(ctx, source.Connection.Database, source.Connection.TableName)
+	if err != nil {
+		p.log.Warn("failed to get clickhouse table info", "source_id", source.ID, "error", err)
+		return nil
+	}
+
+	source.Columns = tableInfo.Columns
+	source.Schema = tableInfo.CreateQuery
+	source.Engine = tableInfo.Engine
+	source.EngineParams = tableInfo.EngineParams
+	source.SortKeys = tableInfo.SortKeys
+	return nil
+}
+
 func (p *ClickHouseProvider) QueryLogs(ctx context.Context, source *models.Source, req QueryRequest) (*models.QueryResult, error) {
 	if source == nil {
 		return nil, fmt.Errorf("source is required")
@@ -299,6 +404,129 @@ func (p *ClickHouseProvider) LogContext(ctx context.Context, source *models.Sour
 	}, nil
 }
 
+func (p *ClickHouseProvider) GetFieldValues(ctx context.Context, source *models.Source, req FieldValuesRequest) (*FieldValuesResult, error) {
+	if source == nil {
+		return nil, fmt.Errorf("source is required")
+	}
+	if strings.TrimSpace(req.TimestampField) == "" {
+		req.TimestampField = source.MetaTSField
+	}
+
+	client, err := p.manager.GetConnection(source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to source %d: %w", source.ID, err)
+	}
+
+	result, err := client.GetFieldDistinctValues(ctx, source.Connection.Database, source.Connection.TableName, clickhouse.FieldValuesParams{
+		FieldName:      req.FieldName,
+		FieldType:      req.FieldType,
+		TimestampField: req.TimestampField,
+		StartTime:      req.StartTime,
+		EndTime:        req.EndTime,
+		Timezone:       req.Timezone,
+		Limit:          req.Limit,
+		Timeout:        req.Timeout,
+		LogchefQL:      req.QueryText,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get field values: %w", err)
+	}
+
+	values := make([]FieldValueInfo, 0, len(result.Values))
+	for _, value := range result.Values {
+		values = append(values, FieldValueInfo{
+			Value: value.Value,
+			Count: value.Count,
+		})
+	}
+
+	return &FieldValuesResult{
+		FieldName:        result.FieldName,
+		FieldType:        result.FieldType,
+		IsLowCardinality: result.IsLowCard,
+		Values:           values,
+		TotalDistinct:    result.TotalDistinct,
+	}, nil
+}
+
+func (p *ClickHouseProvider) GetAllFieldValues(ctx context.Context, source *models.Source, req AllFieldValuesRequest) (AllFieldValuesResult, error) {
+	if source == nil {
+		return nil, fmt.Errorf("source is required")
+	}
+	if strings.TrimSpace(req.TimestampField) == "" {
+		req.TimestampField = source.MetaTSField
+	}
+
+	client, err := p.manager.GetConnection(source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to source %d: %w", source.ID, err)
+	}
+
+	result, err := client.GetAllFilterableFieldValues(ctx, source.Connection.Database, source.Connection.TableName, clickhouse.AllFieldValuesParams{
+		TimestampField: req.TimestampField,
+		StartTime:      req.StartTime,
+		EndTime:        req.EndTime,
+		Timezone:       req.Timezone,
+		Limit:          req.Limit,
+		Timeout:        req.Timeout,
+		LogchefQL:      req.QueryText,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get field values: %w", err)
+	}
+
+	mapped := make(AllFieldValuesResult, len(result))
+	for fieldName, fieldResult := range result {
+		if fieldResult == nil {
+			continue
+		}
+		values := make([]FieldValueInfo, 0, len(fieldResult.Values))
+		for _, value := range fieldResult.Values {
+			values = append(values, FieldValueInfo{
+				Value: value.Value,
+				Count: value.Count,
+			})
+		}
+		mapped[fieldName] = &FieldValuesResult{
+			FieldName:        fieldResult.FieldName,
+			FieldType:        fieldResult.FieldType,
+			IsLowCardinality: fieldResult.IsLowCard,
+			Values:           values,
+			TotalDistinct:    fieldResult.TotalDistinct,
+		}
+	}
+
+	return mapped, nil
+}
+
+func (p *ClickHouseProvider) GetSourceStats(ctx context.Context, source *models.Source) (*SourceStats, error) {
+	if source == nil {
+		return nil, fmt.Errorf("source is required")
+	}
+
+	client, err := p.manager.GetConnection(source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get client for source %d: %w", source.ID, err)
+	}
+
+	tableInfo, _ := client.GetTableInfo(ctx, source.Connection.Database, source.Connection.TableName)
+	ttlExpr := extractTTLFromTableInfo(ctx, client, tableInfo)
+	statsDB, statsTable := getStatsTableLocation(source, tableInfo)
+
+	tableStats, _ := client.TableStats(ctx, statsDB, statsTable)
+	columnStats, _ := client.ColumnStats(ctx, statsDB, statsTable)
+	ingestionStats, _ := client.IngestionStats(ctx, statsDB, statsTable, source.MetaTSField)
+	columnStats = ensureColumnStats(columnStats, source)
+
+	return &SourceStats{
+		TableStats:  mapTableStat(tableStats),
+		ColumnStats: mapColumnStats(columnStats),
+		TableInfo:   mapTableInfo(tableInfo),
+		Ingestion:   mapIngestionStats(ingestionStats),
+		TTL:         ttlExpr,
+	}, nil
+}
+
 func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.Source, req AlertQueryRequest) (*models.QueryResult, error) {
 	if source == nil {
 		return nil, fmt.Errorf("source is required")
@@ -410,4 +638,198 @@ func parseTimeWindow(window string) (clickhouse.TimeWindow, error) {
 		return tw, nil
 	}
 	return "", fmt.Errorf("invalid histogram window: %s", window)
+}
+
+func extractTTLFromTableInfo(ctx context.Context, client *clickhouse.Client, tableInfo *clickhouse.TableInfo) string {
+	if tableInfo == nil || tableInfo.CreateQuery == "" {
+		return ""
+	}
+
+	if tableInfo.Engine == "Distributed" && len(tableInfo.EngineParams) >= 3 {
+		localDB, localTable := tableInfo.EngineParams[1], tableInfo.EngineParams[2]
+		localTableInfo, err := client.GetTableInfo(ctx, localDB, localTable)
+		if err == nil && localTableInfo != nil {
+			return extractTTLFromCreateQuery(localTableInfo.CreateQuery)
+		}
+		return ""
+	}
+	return extractTTLFromCreateQuery(tableInfo.CreateQuery)
+}
+
+func extractTTLFromCreateQuery(createQuery string) string {
+	if createQuery == "" {
+		return ""
+	}
+
+	ttlIndex := strings.Index(strings.ToUpper(createQuery), " TTL ")
+	if ttlIndex == -1 {
+		return ""
+	}
+
+	return parseTTLExpression(createQuery[ttlIndex+5:])
+}
+
+func parseTTLExpression(ttlPart string) string {
+	if ttlPart == "" {
+		return ""
+	}
+
+	parenCount := 0
+	endIndex := len(ttlPart)
+
+	for i, char := range ttlPart {
+		switch char {
+		case '(':
+			parenCount++
+		case ')':
+			parenCount--
+			if parenCount == 0 {
+				remaining := strings.TrimSpace(ttlPart[i+1:])
+				upperRemaining := strings.ToUpper(remaining)
+				if strings.HasPrefix(upperRemaining, "SETTINGS") ||
+					strings.HasPrefix(upperRemaining, "DELETE") ||
+					strings.HasPrefix(upperRemaining, "TO DISK") ||
+					strings.HasPrefix(upperRemaining, "TO VOLUME") ||
+					remaining == "" {
+					endIndex = i
+					break
+				}
+			}
+		case ' ':
+			if parenCount == 0 {
+				remaining := strings.TrimSpace(ttlPart[i:])
+				upperRemaining := strings.ToUpper(remaining)
+				if strings.HasPrefix(upperRemaining, "SETTINGS") ||
+					strings.HasPrefix(upperRemaining, "DELETE") ||
+					strings.HasPrefix(upperRemaining, "TO DISK") ||
+					strings.HasPrefix(upperRemaining, "TO VOLUME") {
+					endIndex = i
+					break
+				}
+			}
+		}
+	}
+
+	ttlExpr := strings.TrimSpace(ttlPart[:endIndex])
+	return strings.TrimRight(ttlExpr, ",")
+}
+
+func getStatsTableLocation(source *models.Source, tableInfo *clickhouse.TableInfo) (database, table string) {
+	if tableInfo != nil && tableInfo.Engine == "Distributed" && len(tableInfo.EngineParams) >= 3 {
+		return tableInfo.EngineParams[1], tableInfo.EngineParams[2]
+	}
+	return source.Connection.Database, source.Connection.TableName
+}
+
+func ensureColumnStats(columnStats []clickhouse.TableColumnStat, source *models.Source) []clickhouse.TableColumnStat {
+	if len(columnStats) > 0 {
+		return columnStats
+	}
+	if len(source.Columns) == 0 {
+		return []clickhouse.TableColumnStat{}
+	}
+
+	stats := make([]clickhouse.TableColumnStat, 0, len(source.Columns))
+	for _, col := range source.Columns {
+		stats = append(stats, clickhouse.TableColumnStat{
+			Database:     source.Connection.Database,
+			Table:        source.Connection.TableName,
+			Column:       col.Name,
+			Compressed:   "N/A",
+			Uncompressed: "N/A",
+		})
+	}
+	return stats
+}
+
+func mapTableInfo(tableInfo *clickhouse.TableInfo) *SourceTableInfo {
+	if tableInfo == nil {
+		return nil
+	}
+
+	extColumns := make([]SourceExtendedColumnInfo, 0, len(tableInfo.ExtColumns))
+	for _, col := range tableInfo.ExtColumns {
+		extColumns = append(extColumns, SourceExtendedColumnInfo{
+			Name:              col.Name,
+			Type:              col.Type,
+			IsNullable:        col.IsNullable,
+			IsPrimaryKey:      col.IsPrimaryKey,
+			DefaultExpression: col.DefaultExpression,
+			Comment:           col.Comment,
+		})
+	}
+
+	return &SourceTableInfo{
+		Database:     tableInfo.Database,
+		Name:         tableInfo.Name,
+		Engine:       tableInfo.Engine,
+		EngineParams: tableInfo.EngineParams,
+		Columns:      tableInfo.Columns,
+		ExtColumns:   extColumns,
+		SortKeys:     tableInfo.SortKeys,
+		CreateQuery:  tableInfo.CreateQuery,
+	}
+}
+
+func mapTableStat(stat *clickhouse.TableStat) *TableStat {
+	if stat == nil {
+		return nil
+	}
+	return &TableStat{
+		Database:     stat.Database,
+		Table:        stat.Table,
+		Compressed:   stat.Compressed,
+		Uncompressed: stat.Uncompressed,
+		ComprRate:    stat.ComprRate,
+		Rows:         stat.Rows,
+		PartCount:    stat.PartCount,
+	}
+}
+
+func mapColumnStats(stats []clickhouse.TableColumnStat) []TableColumnStat {
+	mapped := make([]TableColumnStat, 0, len(stats))
+	for _, stat := range stats {
+		mapped = append(mapped, TableColumnStat{
+			Database:     stat.Database,
+			Table:        stat.Table,
+			Column:       stat.Column,
+			Compressed:   stat.Compressed,
+			Uncompressed: stat.Uncompressed,
+			ComprRatio:   stat.ComprRatio,
+			RowsCount:    stat.RowsCount,
+			AvgRowSize:   stat.AvgRowSize,
+		})
+	}
+	return mapped
+}
+
+func mapIngestionStats(stats *clickhouse.IngestionStats) *IngestionStats {
+	if stats == nil {
+		return nil
+	}
+
+	hourly := make([]IngestionBucket, 0, len(stats.HourlyBuckets))
+	for _, bucket := range stats.HourlyBuckets {
+		hourly = append(hourly, IngestionBucket{
+			Bucket: bucket.Bucket,
+			Rows:   bucket.Rows,
+		})
+	}
+
+	daily := make([]IngestionBucket, 0, len(stats.DailyBuckets))
+	for _, bucket := range stats.DailyBuckets {
+		daily = append(daily, IngestionBucket{
+			Bucket: bucket.Bucket,
+			Rows:   bucket.Rows,
+		})
+	}
+
+	return &IngestionStats{
+		Rows1h:        stats.Rows1h,
+		Rows24h:       stats.Rows24h,
+		Rows7d:        stats.Rows7d,
+		LatestTS:      stats.LatestTS,
+		HourlyBuckets: hourly,
+		DailyBuckets:  daily,
+	}
 }

@@ -15,8 +15,8 @@
         <Tabs :model-value="props.activeMode"
           @update:model-value="(value: string | number) => $emit('update:activeMode', asEditorMode(value), true)"
           class="w-auto">
-          <TabsList class="grid grid-cols-2 w-fit">
-            <TabsTrigger value="logchefql">
+          <TabsList :class="['grid w-fit', supportsLogchefQL ? 'grid-cols-2' : 'grid-cols-1']">
+            <TabsTrigger v-if="supportsLogchefQL" value="logchefql">
               <div class="flex-fix">
                 <Search class="w-4 h-4" />
                 <span>Search</span>
@@ -25,14 +25,14 @@
             <TabsTrigger value="clickhouse-sql">
               <div class="flex-fix">
                 <Code2 class="w-4 h-4" />
-                <span>SQL</span>
+                <span>{{ nativeEditorLabel }}</span>
               </div>
             </TabsTrigger>
           </TabsList>
         </Tabs>
 
         <!-- AI Assistant Button -->
-        <TooltipProvider>
+        <TooltipProvider v-if="supportsAiAssistant">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="outline" size="sm" class="h-7 gap-1.5" @click="showAiDialog = true">
@@ -60,6 +60,10 @@
             <code class="bg-muted px-1.5 py-0.5 rounded text-xs">{{
               props.tableName
             }}</code>
+          </template>
+          <template v-else-if="isVictoriaLogsSource">
+            <span class="mr-1">Datasource:</span>
+            <code class="bg-muted px-1.5 py-0.5 rounded text-xs">VictoriaLogs</code>
           </template>
           <span v-else class="italic text-orange-500">No table selected</span>
         </div>
@@ -89,11 +93,11 @@
               <Button variant="outline" size="sm" class="h-7 gap-1" @click="toggleSqlEditorVisibility">
                 <EyeOff v-if="isEditorVisible" class="h-3.5 w-3.5" />
                 <Eye v-else class="h-3.5 w-3.5" />
-                <span class="text-xs hidden sm:inline">{{ isEditorVisible ? "Hide" : "Show" }} SQL</span>
+                <span class="text-xs hidden sm:inline">{{ isEditorVisible ? "Hide" : "Show" }} {{ nativeEditorLabel }}</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p>{{ isEditorVisible ? "Hide" : "Show" }} SQL query editor</p>
+              <p>{{ isEditorVisible ? "Hide" : "Show" }} {{ nativeEditorLabel }} query editor</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -165,7 +169,7 @@
             <!-- Help Content (Keep existing template) -->
             <div class="space-y-2">
               <h4 class="text-sm font-semibold">
-                {{ props.activeMode === "logchefql" ? "LogchefQL" : "SQL" }}
+                {{ props.activeMode === "logchefql" ? "LogchefQL" : nativeEditorLabel }}
                 Syntax
               </h4>
               <div v-if="props.activeMode === 'logchefql'" class="text-xs space-y-1.5">
@@ -196,6 +200,27 @@
                 <div class="pt-1">
                   <em>Example:
                     <code class="bg-muted px-1 rounded">level="error" and status>=500</code></em>
+                </div>
+              </div>
+              <div v-else-if="isVictoriaLogsSource" class="text-xs space-y-1.5">
+                <div>
+                  <code class="bg-muted px-1 rounded">level:="error"</code> -
+                  Exact match
+                </div>
+                <div>
+                  <code class="bg-muted px-1 rounded">*timeout*</code> -
+                  Message substring search
+                </div>
+                <div>
+                  <code class="bg-muted px-1 rounded">service:="api" level:="error"</code> -
+                  Combine filters
+                </div>
+                <div>
+                  <code class="bg-muted px-1 rounded">| stats by (level) count()</code> -
+                  Pipe operators
+                </div>
+                <div class="pt-1">
+                  <em>Use native VictoriaLogs LogsQL. Time range is applied separately from the picker.</em>
                 </div>
               </div>
               <div v-else class="text-xs space-y-1.5">
@@ -231,7 +256,7 @@
         :class="{ 'is-empty': isEditorEmpty }"
         :style="{ height: `${editorHeight}px` }"
         :data-placeholder="currentPlaceholder"
-        data-mode="clickhouse-sql"
+        :data-mode="isVictoriaLogsSource ? 'logsql' : 'clickhouse-sql'"
       >
         <div v-if="sqlEditorLoadError" class="sql-editor-error">
           <p class="sql-editor-error__title">Unable to load SQL editor</p>
@@ -274,7 +299,7 @@
       @click="isEditorVisible = true">
       <div class="flex items-center justify-between">
         <div class="text-muted-foreground text-xs font-medium mb-1">
-          SQL Query (collapsed)
+          {{ nativeEditorLabel }} Query (collapsed)
         </div>
         <Button variant="ghost" size="sm" class="h-6 px-2" @click.stop="isEditorVisible = true">
           <Eye class="h-3.5 w-3.5 mr-1" />
@@ -395,6 +420,7 @@ const sqlEditorModules = import.meta.glob("./SqlMonacoEditor.vue");
 
 interface QueryEditorProps {
   sourceId: number
+  sourceType?: string
   schema: Record<string, { type: string }>
   activeMode: EditorMode
   tableName: string
@@ -413,6 +439,7 @@ interface QueryEditorProps {
 
 const props = withDefaults(defineProps<QueryEditorProps>(), {
   value: '',
+  sourceType: 'clickhouse',
   placeholder: '',
   tsField: 'timestamp',
   showFieldsPanel: false,
@@ -466,13 +493,19 @@ const generatedSql = computed(() => exploreStore.generatedAiSql);
 
 const theme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
 const isEditorEmpty = computed(() => !editorContent.value?.trim());
+const isVictoriaLogsSource = computed(() => props.sourceType === "victorialogs");
+const supportsLogchefQL = computed(() => !isVictoriaLogsSource.value);
+const supportsAiAssistant = computed(() => !isVictoriaLogsSource.value);
+const nativeEditorLabel = computed(() => (isVictoriaLogsSource.value ? "LogsQL" : "SQL"));
 
 const currentPlaceholder = computed(() => {
   if (props.placeholder) return props.placeholder;
 
   return props.activeMode === "logchefql"
     ? 'Enter search criteria (e.g., lvl="ERROR" and namespace~"sys")'
-    : `Enter ClickHouse SQL query (e.g., SELECT * FROM ${props.tableName || "your_table"} WHERE ...)`;
+    : isVictoriaLogsSource.value
+      ? 'Enter LogsQL query (e.g., level:="error" service:="api")'
+      : `Enter ClickHouse SQL query (e.g., SELECT * FROM ${props.tableName || "your_table"} WHERE ...)`;
 });
 
 const editorHeight = computed(() => {
@@ -900,8 +933,9 @@ const handleAiInsert = (sql: string) => {
     "Liberation Mono", "Courier New", monospace;
 }
 
-/* Adjust placeholder position - keep it consistent in both modes */
-.editor-container.is-empty[data-mode="clickhouse-sql"]::before {
+/* Adjust placeholder position - keep it consistent in native query modes */
+.editor-container.is-empty[data-mode="clickhouse-sql"]::before,
+.editor-container.is-empty[data-mode="logsql"]::before {
   left: 16px;
 }
 

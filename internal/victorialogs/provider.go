@@ -27,9 +27,7 @@ type Provider struct {
 
 func NewProvider(log *slog.Logger) *Provider {
 	return &Provider{
-		client: &http.Client{
-			Timeout: defaultHealthTimeout,
-		},
+		client:  &http.Client{},
 		log:     log.With("component", "victorialogs_provider"),
 		sources: make(map[models.SourceID]models.VictoriaLogsConnectionInfo),
 		health:  make(map[models.SourceID]models.SourceHealth),
@@ -115,24 +113,45 @@ func (p *Provider) ValidateConnection(ctx context.Context, req *models.ValidateC
 	return &models.ConnectionValidationResult{Message: "Connection successful"}, nil
 }
 
-func (p *Provider) QueryLogs(context.Context, *models.Source, datasource.QueryRequest) (*models.QueryResult, error) {
-	return nil, fmt.Errorf("victorialogs query execution is not implemented yet: %w", datasource.ErrOperationNotSupported)
-}
+func (p *Provider) UpdateSource(ctx context.Context, source *models.Source, req *models.UpdateSourceRequest) (*datasource.SourceUpdateResult, error) {
+	if source == nil {
+		return nil, fmt.Errorf("source is required")
+	}
+	if req == nil {
+		return nil, fmt.Errorf("update source request is required")
+	}
 
-func (p *Provider) GetSourceSchema(context.Context, *models.Source) ([]models.ColumnInfo, error) {
-	return nil, fmt.Errorf("victorialogs schema inspection is not implemented yet: %w", datasource.ErrOperationNotSupported)
-}
+	changed, err := datasource.ApplyCommonSourceUpdates(source, req)
+	if err != nil {
+		return nil, err
+	}
 
-func (p *Provider) Histogram(context.Context, *models.Source, datasource.HistogramRequest) (*datasource.HistogramResult, error) {
-	return nil, fmt.Errorf("victorialogs histogram is not implemented yet: %w", datasource.ErrOperationNotSupported)
-}
+	connectionChanged := req.HasConnectionChanges()
+	if connectionChanged {
+		conn, err := p.connectionFromConfig(req.Connection)
+		if err != nil {
+			return nil, err
+		}
+		if err := datasource.ValidateVictoriaLogsConnection("connection.", conn.BaseURL); err != nil {
+			return nil, err
+		}
+		if _, err := p.checkHealth(ctx, source.ID, conn); err != nil {
+			return nil, &datasource.ValidationError{Field: "connection", Message: "Failed to connect to VictoriaLogs", Err: err}
+		}
 
-func (p *Provider) LogContext(context.Context, *models.Source, datasource.LogContextRequest) (*datasource.LogContextResult, error) {
-	return nil, fmt.Errorf("victorialogs log context is not implemented yet: %w", datasource.ErrOperationNotSupported)
-}
+		source.ConnectionConfig = req.Connection
+		changed = true
+	}
 
-func (p *Provider) EvaluateAlert(context.Context, *models.Source, datasource.AlertQueryRequest) (*models.QueryResult, error) {
-	return nil, fmt.Errorf("victorialogs alert evaluation is not implemented yet: %w", datasource.ErrOperationNotSupported)
+	if err := source.SyncConnectionConfig(); err != nil {
+		return nil, err
+	}
+
+	return &datasource.SourceUpdateResult{
+		Source:       source,
+		Changed:      changed,
+		Reinitialize: connectionChanged,
+	}, nil
 }
 
 func (p *Provider) InitializeSource(ctx context.Context, source *models.Source) error {
@@ -244,12 +263,19 @@ func (p *Provider) checkHealth(ctx context.Context, sourceID models.SourceID, co
 		return false, fmt.Errorf("victorialogs base_url is required")
 	}
 
+	healthCtx := ctx
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		healthCtx, cancel = context.WithTimeout(ctx, defaultHealthTimeout)
+		defer cancel()
+	}
+
 	healthURL, err := url.JoinPath(conn.BaseURL, "/health")
 	if err != nil {
 		return false, fmt.Errorf("invalid victorialogs base_url: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+	req, err := http.NewRequestWithContext(healthCtx, http.MethodGet, healthURL, nil)
 	if err != nil {
 		return false, fmt.Errorf("create victorialogs health request: %w", err)
 	}

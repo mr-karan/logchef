@@ -1,11 +1,11 @@
 package server
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/gofiber/fiber/v2"
@@ -17,7 +17,7 @@ import (
 // URL: GET /api/v1/admin/sources
 // Requires: Admin privileges
 func (s *Server) handleListSources(c *fiber.Ctx) error {
-	sources, err := core.ListSources(c.Context(), s.sqlite, s.datasources, s.log)
+	sources, err := core.ListSources(c.Context(), s.sqlite, s.datasources)
 	if err != nil {
 		s.log.Error("failed to list sources", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Error listing sources")
@@ -86,7 +86,7 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 	}
 
 	// Call core function to remove from manager and delete from DB.
-	if err := core.DeleteSource(c.Context(), s.sqlite, s.datasources, s.log, sourceID); err != nil {
+	if err := core.DeleteSource(c.Context(), s.datasources, sourceID); err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "Source not found")
 		}
@@ -115,10 +115,13 @@ func (s *Server) handleUpdateSource(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	updatedSource, err := core.UpdateSource(c.Context(), s.sqlite, s.datasources, s.clickhouse, s.log, sourceID, &req)
+	updatedSource, err := core.UpdateSource(c.Context(), s.datasources, sourceID, &req)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "Source not found")
+		}
+		if errors.Is(err, core.ErrSourceAlreadyExists) {
+			return SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ConflictErrorType)
 		}
 		if validationErr, ok := err.(*core.ValidationError); ok {
 			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
@@ -169,21 +172,14 @@ func (s *Server) handleGetSourceStats(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
-	// Get the source model first (needed by GetSourceStats).
-	src, err := s.sqlite.GetSource(c.Context(), sourceID)
-	if err != nil {
-		if errors.Is(err, models.ErrNotFound) || errors.Is(err, sql.ErrNoRows) {
-			return SendError(c, fiber.StatusNotFound, "Source not found")
-		}
-		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
-		return SendError(c, fiber.StatusInternalServerError, "Error getting source details")
-	}
-
 	// Get stats using the core function.
-	stats, err := core.GetSourceStats(c.Context(), s.clickhouse, s.log, src)
+	stats, err := core.GetSourceStats(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "Source not found when getting stats")
+		}
+		if errors.Is(err, datasource.ErrOperationNotSupported) {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Source stats are not supported for this source type yet", models.ValidationErrorType)
 		}
 		s.log.Error("failed to get source stats", "error", err, "source_id", sourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Error getting source stats: "+err.Error())

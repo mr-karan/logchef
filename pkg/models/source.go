@@ -1,6 +1,7 @@
 package models
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -338,20 +339,18 @@ type ValidateConnectionRequest struct {
 // UpdateSourceRequest represents a request to update a data source.
 // All fields are pointers to allow partial updates - nil means "don't change".
 type UpdateSourceRequest struct {
-	Name        *string `json:"name,omitempty"`
-	Description *string `json:"description,omitempty"`
-	TTLDays     *int    `json:"ttl_days,omitempty"`
-	Host        *string `json:"host,omitempty"`
-	Username    *string `json:"username,omitempty"`
-	Password    *string `json:"password,omitempty"`
-	Database    *string `json:"database,omitempty"`
-	TableName   *string `json:"table_name,omitempty"`
+	Name              *string         `json:"name,omitempty"`
+	Description       *string         `json:"description,omitempty"`
+	TTLDays           *int            `json:"ttl_days,omitempty"`
+	MetaTSField       *string         `json:"meta_ts_field,omitempty"`
+	MetaSeverityField *string         `json:"meta_severity_field,omitempty"`
+	Connection        json.RawMessage `json:"connection,omitempty"`
 }
 
 // HasConnectionChanges returns true if any connection-related fields are being updated.
 // When connection changes, re-validation is required.
 func (r *UpdateSourceRequest) HasConnectionChanges() bool {
-	return r.Host != nil || r.Username != nil || r.Password != nil || r.Database != nil || r.TableName != nil
+	return len(bytes.TrimSpace(r.Connection)) > 0
 }
 
 // SourceWithTeams represents a source along with the teams that have access to it.

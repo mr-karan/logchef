@@ -20,7 +20,7 @@ export interface LoaderOptions {
   teamId: number | undefined
   sourceId: number | undefined
   getTimeRange: () => { startTime: string; endTime: string } | null
-  getLogchefQL: () => string
+  getFilterQuery: () => string
   timezone?: string
   limit?: number
 }
@@ -174,7 +174,7 @@ export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<L
     abortControllers.value.set(fieldName, controller)
 
     // Snapshot query before async work to avoid TOCTOU race
-    const logchefql = opts.getLogchefQL()
+    const filterQuery = opts.getFilterQuery()
 
     // Set loading state immediately
     setFieldState(fieldName, { status: 'loading' })
@@ -195,7 +195,7 @@ export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<L
             timeRange.endTime,
             opts.timezone,
             opts.limit || 10,
-            logchefql,
+            filterQuery,
             controller.signal
           )
 
@@ -212,7 +212,7 @@ export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<L
               store.populateFromFetch(
                 opts.teamId!, opts.sourceId!, fieldName,
                 timeRange.startTime, timeRange.endTime,
-                logchefql || '',
+                filterQuery || '',
                 response.data,
               )
             } catch {

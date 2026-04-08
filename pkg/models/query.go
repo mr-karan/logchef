@@ -45,6 +45,10 @@ type TemplateVariable struct {
 type APIQueryRequest struct {
 	Limit  int    `json:"limit"`
 	RawSQL string `json:"raw_sql"`
+	// Optional ISO8601/RFC3339 time range for datasource-native query execution.
+	StartTime string `json:"start_time,omitempty"`
+	EndTime   string `json:"end_time,omitempty"`
+	Timezone  string `json:"timezone,omitempty"`
 	// Variables for template substitution in the SQL query.
 	// Example: {"name": "from_date", "type": "date", "value": "2026-01-01T00:00:00Z"}
 	Variables []TemplateVariable `json:"variables,omitempty"`
@@ -57,6 +61,8 @@ type APIQueryRequest struct {
 type APIHistogramRequest struct {
 	StartTimestamp int64  `json:"start_timestamp,omitempty"` // Legacy - Unix timestamp in milliseconds
 	EndTimestamp   int64  `json:"end_timestamp,omitempty"`   // Legacy - Unix timestamp in milliseconds
+	StartTime      string `json:"start_time,omitempty"`      // ISO8601/RFC3339 time range start
+	EndTime        string `json:"end_time,omitempty"`        // ISO8601/RFC3339 time range end
 	Limit          int    `json:"limit"`                     // Limit might influence histogram sampling/performance
 	RawSQL         string `json:"raw_sql"`                   // Contains non-time filters
 	Window         string `json:"window,omitempty"`          // For histogram queries: time window size like "1m", "5m", "1h"

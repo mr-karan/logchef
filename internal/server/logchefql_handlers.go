@@ -72,7 +72,7 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 	hasTimeParams := req.StartTime != "" && req.EndTime != "" && req.Timezone != ""
 
 	// Get source information for schema
-	source, err := core.GetSource(c.Context(), s.sqlite, s.datasources, s.clickhouse, s.log, sourceID)
+	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -118,7 +118,7 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 
 	// Build the full SQL only if time params are provided
 	if result.Valid && hasTimeParams {
-		tableName := source.Connection.Database + "." + source.Connection.TableName
+		tableName := source.GetFullTableName()
 
 		params := logchefql.QueryBuildParams{
 			LogchefQL:      req.Query,
@@ -210,7 +210,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 	}
 
 	// Get source information
-	source, err := core.GetSource(c.Context(), s.sqlite, s.datasources, s.clickhouse, s.log, sourceID)
+	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -254,7 +254,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 	}
 
 	// Build the full SQL query
-	tableName := source.Connection.Database + "." + source.Connection.TableName
+	tableName := source.GetFullTableName()
 	params := logchefql.QueryBuildParams{
 		LogchefQL:      query,
 		Schema:         schema,

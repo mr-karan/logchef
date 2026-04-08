@@ -42,7 +42,7 @@ const handleZoomTimeRange = (range: TimeRangeEvent) => {
   <!-- Show message when histogram is not available -->
   <div v-else class="histogram-unavailable-message">
     <div class="flex items-center justify-center h-16 text-sm text-muted-foreground">
-      <span>📊 Histogram is only available for LogchefQL queries</span>
+      <span>Histogram is not available for this query mode</span>
     </div>
   </div>
 </template>

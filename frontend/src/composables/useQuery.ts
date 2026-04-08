@@ -129,9 +129,15 @@ export function useQuery() {
   const changeMode = async (newMode: EditorMode, _isModeSwitchOnly: boolean = false) => {
     // Clear any validation errors when changing modes
     queryError.value = '';
+    const sourceType = sourcesStore.currentSourceDetails?.source_type;
+
+    if (sourceType === 'victorialogs' && newMode === 'logchefql') {
+      exploreStore.setActiveMode('sql');
+      return;
+    }
 
     // If switching to SQL mode
-    if (newMode === 'sql' && activeMode.value === 'logchefql') {
+    if (newMode === 'sql' && activeMode.value === 'logchefql' && sourceType !== 'victorialogs') {
       // First, check if we have the actual generated SQL from a previous execution
       if (exploreStore.generatedDisplaySql) {
         exploreStore.setRawSql(exploreStore.generatedDisplaySql);

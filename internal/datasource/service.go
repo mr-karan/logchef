@@ -13,10 +13,15 @@ type Provider interface {
 	Type() models.SourceType
 	PrepareSource(context.Context, *models.CreateSourceRequest) (*models.Source, error)
 	ValidateConnection(context.Context, *models.ValidateConnectionRequest) (*models.ConnectionValidationResult, error)
+	UpdateSource(context.Context, *models.Source, *models.UpdateSourceRequest) (*SourceUpdateResult, error)
+	PopulateSourceDetails(context.Context, *models.Source) error
 	QueryLogs(context.Context, *models.Source, QueryRequest) (*models.QueryResult, error)
 	GetSourceSchema(context.Context, *models.Source) ([]models.ColumnInfo, error)
 	Histogram(context.Context, *models.Source, HistogramRequest) (*HistogramResult, error)
 	LogContext(context.Context, *models.Source, LogContextRequest) (*LogContextResult, error)
+	GetFieldValues(context.Context, *models.Source, FieldValuesRequest) (*FieldValuesResult, error)
+	GetAllFieldValues(context.Context, *models.Source, AllFieldValuesRequest) (AllFieldValuesResult, error)
+	GetSourceStats(context.Context, *models.Source) (*SourceStats, error)
 	EvaluateAlert(context.Context, *models.Source, AlertQueryRequest) (*models.QueryResult, error)
 	InitializeSource(context.Context, *models.Source) error
 	RemoveSource(models.SourceID) error
@@ -160,6 +165,30 @@ func (s *Service) EvaluateAlert(ctx context.Context, sourceID models.SourceID, r
 		return nil, err
 	}
 	return provider.EvaluateAlert(ctx, source, req)
+}
+
+func (s *Service) GetFieldValues(ctx context.Context, sourceID models.SourceID, req FieldValuesRequest) (*FieldValuesResult, error) {
+	source, provider, err := s.sourceAndProvider(ctx, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	return provider.GetFieldValues(ctx, source, req)
+}
+
+func (s *Service) GetAllFieldValues(ctx context.Context, sourceID models.SourceID, req AllFieldValuesRequest) (AllFieldValuesResult, error) {
+	source, provider, err := s.sourceAndProvider(ctx, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	return provider.GetAllFieldValues(ctx, source, req)
+}
+
+func (s *Service) GetSourceStats(ctx context.Context, sourceID models.SourceID) (*SourceStats, error) {
+	source, provider, err := s.sourceAndProvider(ctx, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	return provider.GetSourceStats(ctx, source)
 }
 
 func (s *Service) RemoveSource(source *models.Source) error {

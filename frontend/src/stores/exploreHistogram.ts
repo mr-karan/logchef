@@ -43,18 +43,18 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
   }
 
   async function fetchHistogramData(options: {
-    sql: string;
+    queryText: string;
     timeRange: { start: any; end: any } | null;
     timezone?: string;
     queryTimeout?: number;
     granularity?: string;
   }) {
-    const { sql, timeRange, timezone, queryTimeout, granularity } = options;
+    const { queryText, timeRange, timezone, queryTimeout, granularity } = options;
 
-    if (!sql) {
+    if (!queryText) {
       clearHistogramData();
-      state.value.error = "Run a LogchefQL query first to see the histogram";
-      return { success: false, error: { message: "Run a LogchefQL query first" } };
+      state.value.error = "Run a query first to see the histogram";
+      return { success: false, error: { message: "Run a query first" } };
     }
 
     state.value.isLoading = true;
@@ -76,20 +76,35 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
       }
 
       let windowGranularity = granularity;
+      let startISO: string | undefined;
+      let endISO: string | undefined;
       if (!windowGranularity && timeRange) {
-        const startISO = new Date(
+        startISO = new Date(
           timeRange.start.year, timeRange.start.month - 1, timeRange.start.day,
           'hour' in timeRange.start ? timeRange.start.hour : 0,
           'minute' in timeRange.start ? timeRange.start.minute : 0,
           'second' in timeRange.start ? timeRange.start.second : 0
         ).toISOString();
-        const endISO = new Date(
+        endISO = new Date(
           timeRange.end.year, timeRange.end.month - 1, timeRange.end.day,
           'hour' in timeRange.end ? timeRange.end.hour : 0,
           'minute' in timeRange.end ? timeRange.end.minute : 0,
           'second' in timeRange.end ? timeRange.end.second : 0
         ).toISOString();
         windowGranularity = HistogramService.calculateOptimalGranularity(startISO, endISO);
+      } else if (timeRange) {
+        startISO = new Date(
+          timeRange.start.year, timeRange.start.month - 1, timeRange.start.day,
+          'hour' in timeRange.start ? timeRange.start.hour : 0,
+          'minute' in timeRange.start ? timeRange.start.minute : 0,
+          'second' in timeRange.start ? timeRange.start.second : 0
+        ).toISOString();
+        endISO = new Date(
+          timeRange.end.year, timeRange.end.month - 1, timeRange.end.day,
+          'hour' in timeRange.end ? timeRange.end.hour : 0,
+          'minute' in timeRange.end ? timeRange.end.minute : 0,
+          'second' in timeRange.end ? timeRange.end.second : 0
+        ).toISOString();
       }
 
       // Get variables for backend substitution
@@ -97,10 +112,12 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
       const variables = getVariablesForApi();
 
       const params = {
-        raw_sql: sql,
+        raw_sql: queryText,
         limit: 100,
         window: windowGranularity || '1m',
         timezone: timezone || undefined,
+        start_time: startISO,
+        end_time: endISO,
         group_by: state.value.groupByField === "__none__" || state.value.groupByField === null
           ? undefined
           : state.value.groupByField,

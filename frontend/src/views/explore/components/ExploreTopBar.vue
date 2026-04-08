@@ -83,9 +83,10 @@ const quickRangeLabelFromRelativeTime = (relativeTime: string): string | null =>
 // Limit options
 const currentLimit = computed(() => exploreStore.limit)
 
-// Mode-specific behavior
-// In SQL mode, time/limit controls are disabled - user controls these in their query
-const isSqlMode = computed(() => exploreStore.activeMode === 'sql')
+// ClickHouse native SQL owns its own time/LIMIT clauses. VictoriaLogs native mode does not.
+const isNativeSqlMode = computed(() =>
+  exploreStore.activeMode === 'sql' && sourcesStore.currentSourceDetails?.source_type !== 'victorialogs'
+)
 
 // Query timeout
 const timeoutOptions = [
@@ -278,8 +279,8 @@ defineExpose({
       <div class="h-5 w-px bg-border" />
 
       <!-- Date/Time Picker -->
-      <!-- Disabled in SQL mode - users control time range in their query -->
-      <TooltipProvider v-if="isSqlMode">
+      <!-- Disabled only for ClickHouse native SQL mode -->
+      <TooltipProvider v-if="isNativeSqlMode">
         <Tooltip>
           <TooltipTrigger asChild>
             <div class="cursor-not-allowed">
@@ -307,8 +308,8 @@ defineExpose({
       />
 
       <!-- Limit Dropdown -->
-      <!-- Disabled in SQL mode - users control LIMIT in their query -->
-      <TooltipProvider v-if="isSqlMode">
+      <!-- Disabled only for ClickHouse native SQL mode -->
+      <TooltipProvider v-if="isNativeSqlMode">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="sm" class="h-7 text-xs px-2 gap-1 opacity-50 cursor-not-allowed" disabled>
@@ -409,4 +410,3 @@ defineExpose({
     </div>
   </div>
 </template>
-

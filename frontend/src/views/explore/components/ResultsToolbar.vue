@@ -38,6 +38,7 @@ const emit = defineEmits<{
 const exploreStore = useExploreStore()
 
 const queryStats = computed(() => exploreStore.queryStats)
+const isHistogramEligible = computed(() => exploreStore.isHistogramEligible)
 
 const formattedQueryTime = computed(() => {
   const executionTimeMs = queryStats.value?.execution_time_ms
@@ -56,7 +57,8 @@ const formattedQueryTime = computed(() => {
     <!-- Left: Histogram toggle + Stats -->
     <div class="flex items-center gap-3">
       <!-- Histogram Toggle -->
-      <button 
+      <button
+        v-if="isHistogramEligible"
         class="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
         @click="emit('toggle-histogram')"
         :title="isHistogramVisible ? 'Hide histogram' : 'Show histogram'"
@@ -66,7 +68,7 @@ const formattedQueryTime = computed(() => {
         <span class="font-medium">Histogram</span>
       </button>
 
-      <div class="h-4 w-px bg-border" />
+      <div v-if="isHistogramEligible" class="h-4 w-px bg-border" />
 
       <!-- Stats -->
       <div class="flex items-center gap-2 text-muted-foreground">
@@ -83,9 +85,10 @@ const formattedQueryTime = computed(() => {
     </div>
 
     <!-- Center: Group By -->
-    <div class="flex items-center">
+    <div v-if="isHistogramEligible" class="flex items-center">
       <GroupBySelector :available-fields="availableFields" />
     </div>
+    <div v-else />
 
     <!-- Right: View Toggles + Export -->
     <div class="flex items-center gap-1">
@@ -150,4 +153,3 @@ const formattedQueryTime = computed(() => {
     </div>
   </div>
 </template>
-

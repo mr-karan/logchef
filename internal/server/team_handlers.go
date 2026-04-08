@@ -288,7 +288,7 @@ func (s *Server) handleGetTeamSource(c *fiber.Ctx) error {
 	}
 
 	// Use the core.GetSource which fetches details (connection, schema).
-	sourceDetails, err := core.GetSource(c.Context(), s.sqlite, s.datasources, s.clickhouse, s.log, sourceID)
+	sourceDetails, err := core.GetSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)

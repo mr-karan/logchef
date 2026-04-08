@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/sqlite"
@@ -59,6 +58,29 @@ func GetLogContext(ctx context.Context, ds *datasource.Service, sourceID models.
 	return result, nil
 }
 
-func UnsupportedDatasourceOperation(operation string) error {
-	return fmt.Errorf("%s: %w", operation, datasource.ErrOperationNotSupported)
+type FieldValuesParams = datasource.FieldValuesRequest
+type FieldValuesResult = datasource.FieldValuesResult
+type AllFieldValuesParams = datasource.AllFieldValuesRequest
+type AllFieldValuesResult = datasource.AllFieldValuesResult
+
+func GetFieldValues(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, params FieldValuesParams) (*FieldValuesResult, error) {
+	result, err := ds.GetFieldValues(ctx, sourceID, params)
+	if err != nil {
+		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
+			return nil, ErrSourceNotFound
+		}
+		return nil, err
+	}
+	return result, nil
+}
+
+func GetAllFieldValues(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, params AllFieldValuesParams) (AllFieldValuesResult, error) {
+	result, err := ds.GetAllFieldValues(ctx, sourceID, params)
+	if err != nil {
+		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
+			return nil, ErrSourceNotFound
+		}
+		return nil, err
+	}
+	return result, nil
 }

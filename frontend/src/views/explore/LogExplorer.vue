@@ -81,6 +81,7 @@ const contextStore = useContextStore();
 // Team/source management - now centralized in sourcesStore
 const availableSources = computed(() => sourcesStore.teamSources);
 const sourceDetails = computed(() => sourcesStore.currentSourceDetails);
+const isVictoriaLogsSource = computed(() => sourceDetails.value?.source_type === 'victorialogs');
 const hasValidSource = computed(() => sourcesStore.hasValidCurrentSource);
 const isLoadingTeamSources = computed(() => sourcesStore.isLoadingTeamSources);
 const isLoadingSourceDetails = computed(() => sourcesStore.isLoadingSourceDetails);
@@ -777,8 +778,49 @@ const handleGenerateAISQL = async ({ naturalLanguageQuery }: { naturalLanguageQu
   }
 };
 
+const formatLogsqlValue = (value: string) => {
+  if (/^-?(?:\d+|\d*\.\d+)$/.test(value) || /^(?:true|false)$/i.test(value)) {
+    return value;
+  }
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+};
+
+const appendLogsqlExpression = (query: string, expression: string) => {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return expression;
+  }
+
+  const pipeIndex = trimmed.indexOf('|');
+  if (pipeIndex === -1) {
+    return `${trimmed} ${expression}`;
+  }
+
+  const base = trimmed.slice(0, pipeIndex).trimEnd();
+  const pipeSection = trimmed.slice(pipeIndex).trimStart();
+  const nextBase = base ? `${base} ${expression}` : expression;
+  return `${nextBase} ${pipeSection}`;
+};
+
 // Handle adding a field filter from the sidebar
 const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!=') => {
+  if (isVictoriaLogsSource.value) {
+    const exactFilter = `${field}:=${formatLogsqlValue(value)}`;
+    const filterExpression = operator === '!=' ? `NOT ${exactFilter}` : exactFilter;
+    const currentQuery = exploreStore.rawSql?.trim() || '';
+
+    exploreStore.setRawSql(appendLogsqlExpression(currentQuery, filterExpression));
+
+    if (activeMode.value !== 'sql') {
+      changeMode('sql');
+    }
+
+    nextTick(() => {
+      queryEditorRef.value?.focus(true);
+    });
+    return;
+  }
+
   // Build the filter expression
   const needsQuotes = !/^\d+$/.test(value); // Only numbers don't need quotes
   const quotedValue = needsQuotes ? `"${value.replace(/"/g, '\\"')}"` : value;
@@ -811,6 +853,20 @@ const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!='
 
 // Handle field name click from sidebar - inserts field name into query
 const handleFieldClick = (fieldName: string) => {
+  if (isVictoriaLogsSource.value) {
+    const currentQuery = exploreStore.rawSql?.trim() || '';
+    exploreStore.setRawSql(appendLogsqlExpression(currentQuery, `${fieldName}:=`));
+
+    if (activeMode.value !== 'sql') {
+      changeMode('sql');
+    }
+
+    nextTick(() => {
+      queryEditorRef.value?.focus(true);
+    });
+    return;
+  }
+
   // Get current query
   const currentQuery = exploreStore.logchefqlCode?.trim() || '';
   
@@ -1125,6 +1181,7 @@ onMounted(async () => {
                   <QueryEditor 
                     ref="queryEditorRef" 
                     :sourceId="currentSourceId" 
+                    :sourceType="sourceDetails?.source_type || 'clickhouse'"
                     :teamId="currentTeamId ?? 0" 
                     :schema="(sourceDetails?.columns || []).reduce((acc: Record<string, { type: string }>, col) => {
                       if (col.name && col.type) {
@@ -1134,9 +1191,6 @@ onMounted(async () => {
                     }, {})"
                     :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
                     :value="exploreStore.activeMode === 'logchefql' ? logchefQuery : sqlQuery"
-                    :placeholder="exploreStore.activeMode === 'logchefql'
-                      ? 'Enter search criteria (e.g., lvl=&quot;ERROR&quot; and namespace~&quot;sys&quot;)'
-                      : 'Enter SQL query...'"
                     :tsField="sourceDetails?._meta_ts_field || 'timestamp'"
                     :tableName="sourcesStore.getCurrentSourceTableName || ''" 
                     :showFieldsPanel="showFieldsPanel"

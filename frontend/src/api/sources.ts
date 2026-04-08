@@ -2,9 +2,15 @@ import { apiClient } from "./apiUtils";
 import type { SavedTeamQuery, Team } from "./types";
 
 interface ConnectionInfo {
-  host: string;
-  database: string;
-  table_name: string;
+  host?: string;
+  username?: string;
+  password?: string;
+  database?: string;
+  table_name?: string;
+  base_url?: string;
+  auth?: Record<string, unknown>;
+  tenant?: Record<string, unknown>;
+  scope?: Record<string, unknown>;
 }
 
 interface ConnectionRequestInfo {
@@ -25,6 +31,7 @@ export interface Source {
   id: number;
   name: string;
   _meta_is_auto_created: boolean;
+  source_type: string;
   _meta_ts_field: string;
   _meta_severity_field?: string;
   connection: ConnectionInfo;
@@ -63,6 +70,7 @@ export interface TeamGroupedQuery {
 
 export interface CreateSourcePayload {
   name: string;
+  source_type?: string;
   meta_is_auto_created: boolean;
   meta_ts_field?: string;
   meta_severity_field?: string;
@@ -70,6 +78,15 @@ export interface CreateSourcePayload {
   description?: string;
   ttl_days: number;
   schema?: string;
+}
+
+export interface UpdateSourcePayload {
+  name?: string;
+  description?: string;
+  ttl_days?: number;
+  meta_ts_field?: string;
+  meta_severity_field?: string;
+  connection?: ConnectionRequestInfo;
 }
 
 export interface CreateTeamQueryRequest {
@@ -145,7 +162,7 @@ export const sourcesApi = {
     apiClient.get<Source>(`/teams/${teamId}/sources/${sourceId}`),
   createSource: (payload: CreateSourcePayload) =>
     apiClient.post<Source>("/admin/sources", payload),
-  updateSource: (id: number, payload: Partial<Source>) =>
+  updateSource: (id: number, payload: UpdateSourcePayload) =>
     apiClient.put<Source>(`/admin/sources/${id}`, payload),
   deleteSource: (id: number) =>
     apiClient.delete<{ message: string }>(`/admin/sources/${id}`),
@@ -184,7 +201,7 @@ export const sourcesApi = {
 
   // Field values for sidebar exploration
   // Time range is required for performance (avoids full table scan)
-  // LogchefQL query is optional - filters field values based on user's query
+  // Query is optional - filters field values based on the current datasource-native query
   getFieldValues: (
     teamId: number,
     sourceId: number,
@@ -194,7 +211,7 @@ export const sourcesApi = {
     endTime: string,    // ISO8601 format
     timezone?: string,
     limit?: number,
-    logchefql?: string,  // Optional LogchefQL query to filter field values
+    query?: string,      // Optional datasource-native query to filter field values
     signal?: AbortSignal // Optional abort signal for request cancellation
   ) => {
     let url = `/teams/${teamId}/sources/${sourceId}/fields/${encodeURIComponent(fieldName)}/values?` +
@@ -205,8 +222,8 @@ export const sourcesApi = {
     if (timezone) {
       url += `&timezone=${encodeURIComponent(timezone)}`;
     }
-    if (logchefql) {
-      url += `&logchefql=${encodeURIComponent(logchefql)}`;
+    if (query) {
+      url += `&query=${encodeURIComponent(query)}`;
     }
     return apiClient.get<FieldValuesResult>(url, { signal });
   },
@@ -217,7 +234,7 @@ export const sourcesApi = {
     endTime: string,    // ISO8601 format
     timezone?: string,
     limit?: number,
-    logchefql?: string,  // Optional LogchefQL query to filter field values
+    query?: string,      // Optional datasource-native query to filter field values
     signal?: AbortSignal // Optional abort signal for request cancellation
   ) => {
     let url = `/teams/${teamId}/sources/${sourceId}/fields/values?` +
@@ -227,8 +244,8 @@ export const sourcesApi = {
     if (timezone) {
       url += `&timezone=${encodeURIComponent(timezone)}`;
     }
-    if (logchefql) {
-      url += `&logchefql=${encodeURIComponent(logchefql)}`;
+    if (query) {
+      url += `&query=${encodeURIComponent(query)}`;
     }
     return apiClient.get<AllFieldValuesResult>(url, { signal });
   },

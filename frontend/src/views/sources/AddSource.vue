@@ -311,14 +311,15 @@ const submitForm = async () => {
                 name: String(sourceName.value),
                 description: String(description.value),
                 ttl_days: Number(ttlDays.value),
-                host: String(host.value),
-                database: String(database.value),
-                table_name: String(tableName.value),
-            }
-
-            if (enableAuth.value) {
-                updatePayload.username = String(username.value)
-                updatePayload.password = String(password.value)
+                meta_ts_field: String(metaTSField.value),
+                meta_severity_field: metaSeverityField.value ? String(metaSeverityField.value) : "",
+                connection: {
+                    host: String(host.value),
+                    database: String(database.value),
+                    table_name: String(tableName.value),
+                    username: enableAuth.value ? String(username.value) : '',
+                    password: enableAuth.value ? String(password.value) : '',
+                },
             }
 
             const result = await sourcesStore.updateSource(editingSourceId.value, updatePayload)

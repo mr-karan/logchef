@@ -88,6 +88,7 @@ const DEFAULT_QUERY_STATS: QueryStats = {
 
 export const useExploreStore = defineStore("explore", () => {
   const contextStore = useContextStore();
+  const sourcesStore = useSourcesStore();
   const preferencesStore = usePreferencesStore();
   const histogramStore = useExploreHistogramStore();
   const aiStore = useExploreAIStore();
@@ -141,8 +142,22 @@ export const useExploreStore = defineStore("explore", () => {
     isExecutingQuery.value
   );
 
+  const getCurrentSourceType = () => sourcesStore.currentSourceDetails?.source_type || "clickhouse";
+  const isVictoriaLogsSource = (sourceType = getCurrentSourceType()) => sourceType === "victorialogs";
+  const getDefaultModeForSource = (sourceType = getCurrentSourceType()): "logchefql" | "sql" =>
+    isVictoriaLogsSource(sourceType) ? "sql" : "logchefql";
+  const normalizeModeForSource = (
+    mode: "logchefql" | "sql",
+    sourceType = getCurrentSourceType(),
+  ): "logchefql" | "sql" => (mode === "logchefql" && isVictoriaLogsSource(sourceType) ? "sql" : mode);
+  const isNativeHistogramSource = (sourceType = getCurrentSourceType()) => isVictoriaLogsSource(sourceType);
+
   const isHistogramEligible = computed(() => {
-    return state.data.value.activeMode === 'logchefql';
+    const sourceType = getCurrentSourceType();
+    return (
+      state.data.value.activeMode === 'logchefql' ||
+      (state.data.value.activeMode === 'sql' && isNativeHistogramSource(sourceType))
+    );
   });
 
   const _buildDisplaySql = () => {
@@ -152,7 +167,6 @@ export const useExploreStore = defineStore("explore", () => {
       return null;
     }
 
-    const sourcesStore = useSourcesStore();
     const sourceDetails = sourcesStore.currentSourceDetails;
     if (!sourceDetails) {
       return null;
@@ -346,12 +360,8 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.lastExecutionTimestamp = null;
     state.data.value.lastExecutedState = undefined;
     state.data.value.hasExecutedQuery = false;
-
-    if (state.data.value.activeMode === 'sql') {
-      state.data.value.rawSql = '';
-    } else {
-      state.data.value.logchefqlCode = '';
-    }
+    state.data.value.rawSql = '';
+    state.data.value.logchefqlCode = '';
   }
 
   function setSource(newSourceId: number) {
@@ -395,8 +405,9 @@ export const useExploreStore = defineStore("explore", () => {
 
   function setActiveMode(mode: 'logchefql' | 'sql') {
     const currentMode = state.data.value.activeMode;
-    if (mode === currentMode) return;
-    state.data.value.activeMode = mode;
+    const normalizedMode = normalizeModeForSource(mode);
+    if (normalizedMode === currentMode) return;
+    state.data.value.activeMode = normalizedMode;
   }
 
   function _updateLastExecutedState() {
@@ -461,7 +472,7 @@ export const useExploreStore = defineStore("explore", () => {
     }
 
     if (params.mode) {
-      const mode = params.mode === 'sql' ? 'sql' : 'logchefql';
+      const mode = normalizeModeForSource(params.mode === 'sql' ? 'sql' : 'logchefql');
       state.data.value.activeMode = mode;
 
       if (mode === 'logchefql' && params.q) {
@@ -471,10 +482,10 @@ export const useExploreStore = defineStore("explore", () => {
       }
     } else {
       if (params.q) {
-        state.data.value.activeMode = 'logchefql';
+        state.data.value.activeMode = normalizeModeForSource('logchefql');
         state.data.value.logchefqlCode = params.q;
       } else if (params.sql) {
-        state.data.value.activeMode = 'sql';
+        state.data.value.activeMode = normalizeModeForSource('sql');
         state.data.value.rawSql = params.sql;
       }
     }
@@ -509,7 +520,7 @@ export const useExploreStore = defineStore("explore", () => {
       const content = JSON.parse(data.query_content);
       const isLogchefQL = data.query_type === 'logchefql';
 
-      state.data.value.activeMode = isLogchefQL ? 'logchefql' : 'sql';
+      state.data.value.activeMode = normalizeModeForSource(isLogchefQL ? 'logchefql' : 'sql');
       state.data.value.activeSavedQueryName = data.name;
       state.data.value.selectedQueryId = data.id.toString();
 
@@ -579,7 +590,7 @@ export const useExploreStore = defineStore("explore", () => {
   function _clearQueryContent() {
     state.data.value.logchefqlCode = '';
     state.data.value.rawSql = '';
-    state.data.value.activeMode = 'logchefql';
+    state.data.value.activeMode = getDefaultModeForSource();
     state.data.value.selectedQueryId = null;
     state.data.value.activeSavedQueryName = null;
     state.data.value.savedQuerySnapshot = null;
@@ -603,25 +614,25 @@ export const useExploreStore = defineStore("explore", () => {
 
     _clearQueryContent();
 
-    const sourcesStore = useSourcesStore();
     const sourceDetails = sourcesStore.currentSourceDetails;
     
-    let tableName = 'logs.vector_logs';
-    if (sourceDetails?.connection?.database && sourceDetails?.connection?.table_name) {
-      tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
+    if (!isVictoriaLogsSource(sourceDetails?.source_type)) {
+      let tableName = 'logs.vector_logs';
+      if (sourceDetails?.connection?.database && sourceDetails?.connection?.table_name) {
+        tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
+      }
+
+      const timestampField = sourceDetails?._meta_ts_field || 'timestamp';
+      const result = SqlManager.generateDefaultSql({
+        tableName,
+        tsField: timestampField,
+        timeRange,
+        limit: state.data.value.limit,
+        timezone: state.data.value.selectedTimezoneIdentifier || undefined
+      });
+
+      state.data.value.rawSql = result.success ? result.sql : '';
     }
-    
-    const timestampField = sourceDetails?._meta_ts_field || 'timestamp';
-
-    const result = SqlManager.generateDefaultSql({
-      tableName,
-      tsField: timestampField,
-      timeRange,
-      limit: state.data.value.limit,
-      timezone: state.data.value.selectedTimezoneIdentifier || undefined
-    });
-
-    state.data.value.rawSql = result.success ? result.sql : '';
 
     histogramStore.clearHistogramData();
 
@@ -632,25 +643,26 @@ export const useExploreStore = defineStore("explore", () => {
     _clearQueryContent();
 
     if (state.data.value.timeRange) {
-      const sourcesStore = useSourcesStore();
       const sourceDetails = sourcesStore.currentSourceDetails;
       
-      let tableName = 'logs.vector_logs';
-      if (sourceDetails?.connection?.database && sourceDetails?.connection?.table_name) {
-        tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
+      if (!isVictoriaLogsSource(sourceDetails?.source_type)) {
+        let tableName = 'logs.vector_logs';
+        if (sourceDetails?.connection?.database && sourceDetails?.connection?.table_name) {
+          tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
+        }
+
+        const timestampField = sourceDetails?._meta_ts_field || 'timestamp';
+
+        const result = SqlManager.generateDefaultSql({
+          tableName,
+          tsField: timestampField,
+          timeRange: state.data.value.timeRange,
+          limit: state.data.value.limit,
+          timezone: state.data.value.selectedTimezoneIdentifier || undefined
+        });
+
+        state.data.value.rawSql = result.success ? result.sql : '';
       }
-      
-      const timestampField = sourceDetails?._meta_ts_field || 'timestamp';
-
-      const result = SqlManager.generateDefaultSql({
-        tableName,
-        tsField: timestampField,
-        timeRange: state.data.value.timeRange,
-        limit: state.data.value.limit,
-        timezone: state.data.value.selectedTimezoneIdentifier || undefined
-      });
-
-      state.data.value.rawSql = result.success ? result.sql : '';
     }
 
     histogramStore.clearHistogramData();
@@ -686,7 +698,6 @@ export const useExploreStore = defineStore("explore", () => {
         return state.handleError({ status: "error", message: "No team selected", error_type: "ValidationError" }, operationKey);
       }
 
-      const sourcesStore = useSourcesStore();
       const sourceDetails = sourcesStore.currentSourceDetails;
 
       if (!sourceDetails || sourceDetails.id !== sourceId.value) {
@@ -776,7 +787,7 @@ export const useExploreStore = defineStore("explore", () => {
 
             state.data.value.lastExecutionTimestamp = Date.now();
 
-            fetchHistogramData();
+            void fetchHistogramData();
 
             return { success: true, data: queryResponse.data, error: null };
           } else {
@@ -801,40 +812,59 @@ export const useExploreStore = defineStore("explore", () => {
       }
 
       let sql = sqlForExecution.value;
+      const activeTimeRange = state.data.value.timeRange as TimeRange;
+      const activeTimezone = state.data.value.selectedTimezoneIdentifier || getTimezoneIdentifier();
+
+      const toISOString = (dt: any) => {
+        if (!dt) return '';
+        return new Date(
+          dt.year,
+          dt.month - 1,
+          dt.day,
+          'hour' in dt ? dt.hour : 0,
+          'minute' in dt ? dt.minute : 0,
+          'second' in dt ? dt.second : 0
+        ).toISOString();
+      };
 
       const params: QueryParams = {
         raw_sql: '',
-        query_timeout: state.data.value.queryTimeout
+        query_timeout: state.data.value.queryTimeout,
+        start_time: activeTimeRange?.start ? toISOString(activeTimeRange.start) : undefined,
+        end_time: activeTimeRange?.end ? toISOString(activeTimeRange.end) : undefined,
+        timezone: activeTimezone,
       };
 
       if (!sql || !sql.trim()) {
-        const tsField = sourceDetails._meta_ts_field || 'timestamp';
-        
-        let tableName = 'default.logs';
-        if (sourceDetails.connection?.database && sourceDetails.connection?.table_name) {
-          tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
-        }
+        if (sourceDetails.source_type !== 'victorialogs') {
+          const tsField = sourceDetails._meta_ts_field || 'timestamp';
 
-        const result = SqlManager.generateDefaultSql({
-          tableName,
-          tsField,
-          timeRange: state.data.value.timeRange as TimeRange,
-          limit: state.data.value.limit,
-          timezone: state.data.value.selectedTimezoneIdentifier || undefined
-        });
+          let tableName = 'default.logs';
+          if (sourceDetails.connection?.database && sourceDetails.connection?.table_name) {
+            tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
+          }
 
-        if (!result.success) {
-          return state.handleError({
-            status: "error",
-            message: "Failed to generate default SQL",
-            error_type: "ValidationError"
-          }, operationKey);
-        }
+          const result = SqlManager.generateDefaultSql({
+            tableName,
+            tsField,
+            timeRange: activeTimeRange,
+            limit: state.data.value.limit,
+            timezone: state.data.value.selectedTimezoneIdentifier || undefined
+          });
 
-        sql = result.sql;
+          if (!result.success) {
+            return state.handleError({
+              status: "error",
+              message: "Failed to generate default SQL",
+              error_type: "ValidationError"
+            }, operationKey);
+          }
 
-        if (state.data.value.activeMode === 'sql') {
-          state.data.value.rawSql = result.sql;
+          sql = result.sql;
+
+          if (state.data.value.activeMode === 'sql') {
+            state.data.value.rawSql = result.sql;
+          }
         }
       }
 
@@ -898,6 +928,10 @@ export const useExploreStore = defineStore("explore", () => {
 
             if (relativeTime) {
               state.data.value.selectedRelativeTime = relativeTime;
+            }
+
+            if (isHistogramEligible.value) {
+              void fetchHistogramData();
             }
           },
           operationKey: operationKey,
@@ -1036,17 +1070,23 @@ export const useExploreStore = defineStore("explore", () => {
   async function fetchHistogramData(granularity?: string) {
     if (!isHistogramEligible.value) {
       histogramStore.clearHistogramData();
-      return { success: false, error: { message: "Histogram is only available for LogchefQL queries" } };
+      return { success: false, error: { message: "Histogram is not available for this query mode" } };
     }
 
-    const sql = state.data.value.generatedDisplaySql;
-    if (!sql) {
+    let queryText = "";
+    if (state.data.value.activeMode === 'logchefql') {
+      queryText = state.data.value.generatedDisplaySql || "";
+    } else if (isNativeHistogramSource()) {
+      queryText = state.data.value.rawSql?.trim() || "*";
+    }
+
+    if (!queryText) {
       histogramStore.clearHistogramData();
-      return { success: false, error: { message: "Run a LogchefQL query first" } };
+      return { success: false, error: { message: "Run a query first to see the histogram" } };
     }
 
     return histogramStore.fetchHistogramData({
-      sql,
+      queryText,
       timeRange: state.data.value.timeRange,
       timezone: state.data.value.selectedTimezoneIdentifier || undefined,
       queryTimeout: state.data.value.queryTimeout,
@@ -1069,7 +1109,6 @@ export const useExploreStore = defineStore("explore", () => {
     aiStore.clearState();
   }
 
-  const sourcesStore = useSourcesStore();
   let lastAutoExecKey: string | null = null;
   
   watch(
@@ -1077,6 +1116,27 @@ export const useExploreStore = defineStore("explore", () => {
     () => {
       lastAutoExecKey = null;
     }
+  );
+
+  watch(
+    () => sourcesStore.currentSourceDetails?.source_type,
+    (sourceType) => {
+      if (!sourceType) {
+        return;
+      }
+
+      if (isVictoriaLogsSource(sourceType) && state.data.value.activeMode === 'logchefql') {
+        if (!state.data.value.rawSql && state.data.value.logchefqlCode.trim()) {
+          state.data.value.rawSql = state.data.value.logchefqlCode;
+        }
+        state.data.value.logchefqlCode = '';
+        state.data.value.activeMode = 'sql';
+        return;
+      }
+
+      state.data.value.activeMode = normalizeModeForSource(state.data.value.activeMode, sourceType);
+    },
+    { immediate: true }
   );
   
   watch(

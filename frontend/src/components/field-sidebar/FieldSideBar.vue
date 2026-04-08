@@ -32,6 +32,7 @@ import {
   Loader2,
 } from 'lucide-vue-next'
 import { useExploreStore } from '@/stores/explore'
+import { useSourcesStore } from '@/stores/sources'
 import { getLocalTimeZone } from '@internationalized/date'
 import { cn } from '@/lib/utils'
 import { useVariables } from '@/composables/useVariables'
@@ -60,17 +61,24 @@ const props = withDefaults(defineProps<{
 
 // Get time range and query from explore store
 const exploreStore = useExploreStore()
+const sourcesStore = useSourcesStore()
 const { convertVariables } = useVariables()
 
-// Get the current LogchefQL query for filtering field values
-const getCurrentLogchefQL = (): string => {
-  // Only pass LogchefQL in logchefql mode - SQL mode doesn't filter sidebar
-  if (exploreStore.activeMode !== 'logchefql') {
-    return ''
+// Get the current datasource-native query for filtering field values.
+const getCurrentFilterQuery = (): string => {
+  const sourceType = sourcesStore.currentSourceDetails?.source_type
+
+  if (exploreStore.activeMode === 'logchefql') {
+    const query = exploreStore.logchefqlCode || ''
+    return query ? convertVariables(query) : ''
   }
-  const query = exploreStore.logchefqlCode || ''
-  // Replace any variables before sending to backend
-  return query ? convertVariables(query) : ''
+
+  if (sourceType === 'victorialogs') {
+    const query = exploreStore.rawSql || ''
+    return query ? convertVariables(query) : ''
+  }
+
+  return ''
 }
 
 // Emits
@@ -89,7 +97,7 @@ const loaderOptions = computed(() => ({
   teamId: props.teamId,
   sourceId: props.sourceId,
   getTimeRange: getTimeRangeForApi,
-  getLogchefQL: getCurrentLogchefQL,
+  getFilterQuery: getCurrentFilterQuery,
   timezone: undefined,
   limit: 10
 }))

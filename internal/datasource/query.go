@@ -16,12 +16,17 @@ func unsupportedOperationError(sourceType models.SourceType, operation string) e
 
 type QueryRequest struct {
 	RawQuery     string
+	StartTime    *time.Time
+	EndTime      *time.Time
+	Timezone     string
 	Limit        int
 	MaxLimit     int
 	QueryTimeout *int
 }
 
 type HistogramRequest struct {
+	StartTime    *time.Time
+	EndTime      *time.Time
 	Window       string
 	Query        string
 	GroupBy      string
