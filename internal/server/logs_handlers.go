@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mr-karan/logchef/internal/ai"
-	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/template"
@@ -250,7 +249,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		if errors.Is(err, datasource.ErrOperationNotSupported) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, "Querying is not supported for this source type yet", models.ValidationErrorType)
 		}
-		if clickhouse.IsValidationError(err) {
+		if datasource.IsValidationError(err) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
 		}
 		s.log.Error("failed to query logs", "error", err, "source_id", sourceID)
@@ -589,7 +588,7 @@ func (s *Server) getSourceSchemaForAI(c *fiber.Ctx, sourceID models.SourceID) (s
 	if source == nil {
 		return nil, "", "", SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
 	}
-	if !source.IsClickHouse() {
+	if !source.HasCapability(string(datasource.CapabilityAISQLGeneration)) {
 		return nil, "", "", SendErrorWithType(c, http.StatusBadRequest, "AI SQL generation is only supported for ClickHouse sources", models.ValidationErrorType)
 	}
 
@@ -737,7 +736,7 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 		if errors.Is(err, datasource.ErrOperationNotSupported) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, "Field values are not supported for this source type yet", models.ValidationErrorType)
 		}
-		if clickhouse.IsValidationError(err) {
+		if datasource.IsValidationError(err) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
 		}
 		s.log.Error("failed to get field values", "error", err, "source_id", sourceID, "field", fieldName)
@@ -824,7 +823,7 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 		if errors.Is(err, datasource.ErrOperationNotSupported) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, "Field values are not supported for this source type yet", models.ValidationErrorType)
 		}
-		if clickhouse.IsValidationError(err) {
+		if datasource.IsValidationError(err) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
 		}
 		s.log.Error("failed to get field values", "error", err, "source_id", sourceID)

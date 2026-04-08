@@ -38,6 +38,14 @@ func (p *Provider) Type() models.SourceType {
 	return models.SourceTypeVictoriaLogs
 }
 
+func (p *Provider) Capabilities() []datasource.Capability {
+	return []datasource.Capability{
+		datasource.CapabilitySchemaInspection,
+		datasource.CapabilityHistogram,
+		datasource.CapabilityFieldValues,
+	}
+}
+
 func (p *Provider) SupportedQueryLanguages() []models.QueryLanguage {
 	return []models.QueryLanguage{models.QueryLanguageLogsQL}
 }

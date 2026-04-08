@@ -27,6 +27,7 @@ import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useUrlState } from "@/composables/useUrlState";
 import { useQuery } from "@/composables/useQuery";
 import { useTimeRange } from "@/composables/useTimeRange";
+import { supportsQueryLanguage } from "@/lib/queryMetadata";
 
 import { useContextStore } from "@/stores/context";
 import type { ComponentPublicInstance } from "vue";
@@ -81,7 +82,7 @@ const contextStore = useContextStore();
 // Team/source management - now centralized in sourcesStore
 const availableSources = computed(() => sourcesStore.teamSources);
 const sourceDetails = computed(() => sourcesStore.currentSourceDetails);
-const isVictoriaLogsSource = computed(() => sourceDetails.value?.source_type === 'victorialogs');
+const supportsLogchefQL = computed(() => supportsQueryLanguage(sourceDetails.value, 'logchefql'));
 const hasValidSource = computed(() => sourcesStore.hasValidCurrentSource);
 const isLoadingTeamSources = computed(() => sourcesStore.isLoadingTeamSources);
 const isLoadingSourceDetails = computed(() => sourcesStore.isLoadingSourceDetails);
@@ -806,7 +807,7 @@ const appendLogsqlExpression = (query: string, expression: string) => {
 
 // Handle adding a field filter from the sidebar
 const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!=') => {
-  if (isVictoriaLogsSource.value) {
+  if (!supportsLogchefQL.value) {
     const exactFilter = `${field}:=${formatLogsqlValue(value)}`;
     const filterExpression = operator === '!=' ? `NOT ${exactFilter}` : exactFilter;
     const currentQuery = exploreStore.rawSql?.trim() || '';
@@ -855,7 +856,7 @@ const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!='
 
 // Handle field name click from sidebar - inserts field name into query
 const handleFieldClick = (fieldName: string) => {
-  if (isVictoriaLogsSource.value) {
+  if (!supportsLogchefQL.value) {
     const currentQuery = exploreStore.rawSql?.trim() || '';
     exploreStore.setRawSql(appendLogsqlExpression(currentQuery, `${fieldName}:=`));
 
@@ -1184,6 +1185,8 @@ onMounted(async () => {
                     ref="queryEditorRef" 
                     :sourceId="currentSourceId" 
                     :sourceType="sourceDetails?.source_type || 'clickhouse'"
+                    :queryLanguages="sourceDetails?.query_languages || []"
+                    :capabilities="sourceDetails?.capabilities || []"
                     :teamId="currentTeamId ?? 0" 
                     :schema="(sourceDetails?.columns || []).reduce((acc: Record<string, { type: string }>, col) => {
                       if (col.name && col.type) {

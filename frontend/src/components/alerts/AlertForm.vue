@@ -31,7 +31,7 @@ import { useTeamsStore } from "@/stores/teams";
 import type { Alert, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryResponse } from "@/api/alerts";
 import { X, Plus, User, Bell } from "lucide-vue-next";
 import { Badge } from "@/components/ui/badge";
-import { getQueryLanguageLabel, isVictoriaLogsSource, resolveAlertMetadata } from "@/lib/queryMetadata";
+import { getNativeQueryLanguageForSource, getQueryLanguageLabel, resolveAlertMetadata, supportsQueryLanguage } from "@/lib/queryMetadata";
 
 // Extended types for local usage until API types are updated
 interface ExtendedCreateAlertRequest extends CreateAlertRequest {
@@ -64,9 +64,10 @@ const emit = defineEmits<{
 const alertsStore = useAlertsStore();
 const sourcesStore = useSourcesStore();
 const teamsStore = useTeamsStore();
-const sourceType = computed(() => sourcesStore.currentSourceDetails?.source_type || "clickhouse");
-const supportsConditionEditor = computed(() => !isVictoriaLogsSource(sourceType.value));
-const nativeEditorLabel = computed(() => getQueryLanguageLabel(isVictoriaLogsSource(sourceType.value) ? "logsql" : "clickhouse-sql"));
+const currentSource = computed(() => sourcesStore.currentSourceDetails);
+const sourceType = computed(() => currentSource.value?.source_type || "clickhouse");
+const supportsConditionEditor = computed(() => supportsQueryLanguage(currentSource.value, "logchefql"));
+const nativeEditorLabel = computed(() => getQueryLanguageLabel(getNativeQueryLanguageForSource(currentSource.value)));
 
 // Get current source table name for SQL generation
 const currentTableName = computed(() => sourcesStore.getCurrentSourceTableName || "logs");

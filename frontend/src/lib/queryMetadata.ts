@@ -4,12 +4,66 @@ export type AlertEditorMode = "condition" | "native";
 export type LegacySavedQueryType = "logchefql" | "sql";
 export type LegacyAlertQueryType = "condition" | "sql";
 
-export function isVictoriaLogsSource(sourceType?: string | null): boolean {
-  return sourceType === "victorialogs";
+type SourceDescriptor =
+  | {
+      source_type?: string | null;
+      query_languages?: string[] | null;
+      capabilities?: string[] | null;
+    }
+  | string
+  | null
+  | undefined;
+
+function getSourceType(source: SourceDescriptor): string | null {
+  return typeof source === "string" ? source : source?.source_type ?? null;
 }
 
-export function getNativeQueryLanguageForSource(sourceType?: string | null): QueryLanguage {
-  return isVictoriaLogsSource(sourceType) ? "logsql" : "clickhouse-sql";
+function getSupportedQueryLanguages(source: SourceDescriptor): QueryLanguage[] {
+  const explicit = typeof source === "string" ? null : source?.query_languages;
+  if (explicit && explicit.length > 0) {
+    return explicit.filter(
+      (language): language is QueryLanguage =>
+        language === "logchefql" || language === "clickhouse-sql" || language === "logsql"
+    );
+  }
+
+  return getSourceType(source) === "victorialogs"
+    ? ["logsql"]
+    : ["logchefql", "clickhouse-sql"];
+}
+
+export function supportsQueryLanguage(source: SourceDescriptor, language: QueryLanguage): boolean {
+  return getSupportedQueryLanguages(source).includes(language);
+}
+
+export function hasSourceCapability(source: SourceDescriptor, capability: string): boolean {
+  const explicit = typeof source === "string" ? null : source?.capabilities;
+  if (explicit && explicit.length > 0) {
+    return explicit.includes(capability);
+  }
+
+  const sourceType = getSourceType(source);
+  if (sourceType === "victorialogs") {
+    return capability === "histogram" || capability === "field_values" || capability === "schema_inspection";
+  }
+  if (sourceType === "clickhouse" || sourceType == null) {
+    return (
+      capability === "histogram" ||
+      capability === "field_values" ||
+      capability === "schema_inspection" ||
+      capability === "source_stats" ||
+      capability === "ai_sql_generation"
+    );
+  }
+  return false;
+}
+
+export function isVictoriaLogsSource(source: SourceDescriptor): boolean {
+  return getNativeQueryLanguageForSource(source) === "logsql";
+}
+
+export function getNativeQueryLanguageForSource(source: SourceDescriptor): QueryLanguage {
+  return supportsQueryLanguage(source, "logsql") ? "logsql" : "clickhouse-sql";
 }
 
 export function legacySavedQueryTypeFromLanguage(language: QueryLanguage): LegacySavedQueryType {

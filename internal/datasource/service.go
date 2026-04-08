@@ -11,6 +11,7 @@ import (
 
 type Provider interface {
 	Type() models.SourceType
+	Capabilities() []Capability
 	SupportedQueryLanguages() []models.QueryLanguage
 	SupportedSavedQueryEditorModes() []models.SavedQueryEditorMode
 	SupportedAlertEditorModes() []models.AlertEditorMode
@@ -36,6 +37,16 @@ type Service struct {
 	log       *slog.Logger
 	providers map[models.SourceType]Provider
 }
+
+type Capability string
+
+const (
+	CapabilitySchemaInspection Capability = "schema_inspection"
+	CapabilityHistogram        Capability = "histogram"
+	CapabilityFieldValues      Capability = "field_values"
+	CapabilitySourceStats      Capability = "source_stats"
+	CapabilityAISQLGeneration  Capability = "ai_sql_generation"
+)
 
 func NewService(db *sqlite.DB, log *slog.Logger) *Service {
 	return &Service{
@@ -112,6 +123,11 @@ func (s *Service) CreateSource(ctx context.Context, req *models.CreateSourceRequ
 		}
 		return nil, fmt.Errorf("initialize source: %w", err)
 	}
+
+	if err := s.ApplySourceMetadata(source); err != nil {
+		return nil, err
+	}
+	source.IsConnected = provider.CheckSourceConnectionStatus(ctx, source)
 
 	return source, nil
 }
@@ -257,6 +273,38 @@ func (s *Service) GetSourceHealth(ctx context.Context, sourceID models.SourceID)
 	}
 
 	return provider.GetSourceHealth(ctx, sourceID), nil
+}
+
+func (s *Service) ApplySourceMetadata(source *models.Source) error {
+	if source == nil {
+		return fmt.Errorf("source is required")
+	}
+
+	provider, err := s.ProviderForSource(source)
+	if err != nil {
+		return err
+	}
+
+	queryLanguages := provider.SupportedQueryLanguages()
+	source.QueryLanguages = make([]models.QueryLanguage, 0, len(queryLanguages))
+	for _, language := range queryLanguages {
+		normalized := models.NormalizeQueryLanguage(language)
+		if normalized == "" {
+			continue
+		}
+		source.QueryLanguages = append(source.QueryLanguages, normalized)
+	}
+
+	capabilities := provider.Capabilities()
+	source.Capabilities = make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		if capability == "" {
+			continue
+		}
+		source.Capabilities = append(source.Capabilities, string(capability))
+	}
+
+	return nil
 }
 
 func (s *Service) InitializeAllSources(ctx context.Context) error {

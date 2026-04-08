@@ -119,7 +119,7 @@ func (a *App) Initialize(ctx context.Context) error {
 			"prune", a.Config.Provisioning.Prune,
 			"dry_run", a.Config.Provisioning.DryRun,
 		)
-		if err := provisioning.Reconcile(ctx, &a.Config.Provisioning, a.SQLite, a.ClickHouse, a.Logger, a.Config.Auth.AdminEmails); err != nil {
+		if err := provisioning.Reconcile(ctx, &a.Config.Provisioning, a.SQLite, a.Datasources, a.Logger, a.Config.Auth.AdminEmails); err != nil {
 			return fmt.Errorf("provisioning reconciliation failed: %w", err)
 		}
 	}
@@ -151,7 +151,6 @@ func (a *App) Initialize(ctx context.Context) error {
 	serverOpts := server.ServerOptions{
 		Config:        a.Config,
 		SQLite:        a.SQLite,
-		ClickHouse:    a.ClickHouse,
 		Datasources:   a.Datasources,
 		AlertsManager: a.Alerts,
 		OIDCProvider:  oidcProvider,

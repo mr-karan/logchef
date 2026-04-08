@@ -3,12 +3,13 @@ package provisioning
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 
-	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -17,7 +18,7 @@ import (
 // Reconcile applies the provisioning config to the database.
 // It runs in a single SQLite write transaction. On dry_run, the transaction is rolled back.
 // adminEmails is used to determine global admin role precedence.
-func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db *sqlite.DB, chMgr *clickhouse.Manager, log *slog.Logger, adminEmails []string) error {
+func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db *sqlite.DB, ds *datasource.Service, log *slog.Logger, adminEmails []string) error {
 	if !cfg.Enabled() {
 		return nil
 	}
@@ -45,12 +46,12 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db *sqlite.D
 
 	qtx := db.WriteQueriesWithTx(tx)
 
-	// Track sources created/updated for post-commit ClickHouse connection setup
+	// Track sources created/updated for post-commit datasource connection setup.
 	var sourcesToConnect []models.Source
 
 	// Phase 1: Sources
 	if cfg.ManageSources {
-		sources, err := reconcileSources(ctx, qtx, cfg, chMgr, log, &sourcesToConnect)
+		sources, err := reconcileSources(ctx, qtx, cfg, ds, log, &sourcesToConnect)
 		if err != nil {
 			return fmt.Errorf("source reconciliation failed: %w", err)
 		}
@@ -76,10 +77,14 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db *sqlite.D
 
 	log.Info("provisioning reconciliation committed successfully")
 
-	// Post-commit: establish ClickHouse connections for new/updated sources
+	// Post-commit: establish datasource connections for new/updated sources
 	for i := range sourcesToConnect {
-		if err := chMgr.AddSource(ctx, &sourcesToConnect[i]); err != nil {
-			log.Warn("failed to establish ClickHouse connection for provisioned source",
+		if err := ds.RemoveSource(&sourcesToConnect[i]); err != nil {
+			log.Debug("failed to clear existing datasource connection during provisioning",
+				"source_id", sourcesToConnect[i].ID, "name", sourcesToConnect[i].Name, "error", err)
+		}
+		if err := ds.InitializeSource(ctx, &sourcesToConnect[i]); err != nil {
+			log.Warn("failed to establish datasource connection for provisioned source",
 				"source_id", sourcesToConnect[i].ID, "name", sourcesToConnect[i].Name, "error", err)
 		}
 	}
@@ -87,7 +92,7 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db *sqlite.D
 	return nil
 }
 
-func reconcileSources(ctx context.Context, qtx *sqlc.Queries, cfg *config.ProvisioningConfig, chMgr *clickhouse.Manager, log *slog.Logger, toConnect *[]models.Source) (map[string]int64, error) {
+func reconcileSources(ctx context.Context, qtx *sqlc.Queries, cfg *config.ProvisioningConfig, ds *datasource.Service, log *slog.Logger, toConnect *[]models.Source) (map[string]int64, error) {
 	// Load existing managed sources
 	existingManaged, err := qtx.ListManagedSources(ctx)
 	if err != nil {
@@ -125,15 +130,16 @@ func reconcileSources(ctx context.Context, qtx *sqlc.Queries, cfg *config.Provis
 					return nil, fmt.Errorf("failed to set source %q as managed: %w", cfgSrc.Name, err)
 				}
 				sourceIDs[cfgSrc.Name] = unmanaged.ID
+				*toConnect = append(*toConnect, buildProvisionedSourceModelWithID(unmanaged.ID, cfgSrc))
 				continue
 			}
 
 			// Create new source
 			log.Info("creating managed source", "name", cfgSrc.Name)
 
-			// Validate ClickHouse connection before creating
-			if err := validateSourceConnection(ctx, chMgr, cfgSrc, log); err != nil {
-				log.Warn("ClickHouse validation failed for source, creating anyway",
+			// Validate datasource connectivity before creating.
+			if err := validateSourceConnection(ctx, ds, cfgSrc, log); err != nil {
+				log.Warn("datasource validation failed for provisioned source, creating anyway",
 					"name", cfgSrc.Name, "error", err)
 			}
 
@@ -150,18 +156,7 @@ func reconcileSources(ctx context.Context, qtx *sqlc.Queries, cfg *config.Provis
 			}
 
 			sourceIDs[cfgSrc.Name] = id
-			*toConnect = append(*toConnect, models.Source{
-				ID:         models.SourceID(id),
-				Name:       cfgSrc.Name,
-				SourceType: models.SourceTypeClickHouse,
-				Connection: models.ConnectionInfo{
-					Host:      cfgSrc.Host,
-					Username:  cfgSrc.Username,
-					Password:  cfgSrc.Password,
-					Database:  cfgSrc.Database,
-					TableName: cfgSrc.TableName,
-				},
-			})
+			*toConnect = append(*toConnect, buildProvisionedSourceModelWithID(id, cfgSrc))
 		} else {
 			// Update existing managed source if fields changed
 			if sourceNeedsUpdate(existing, cfgSrc) {
@@ -169,6 +164,7 @@ func reconcileSources(ctx context.Context, qtx *sqlc.Queries, cfg *config.Provis
 				if err := updateSourceFromConfig(ctx, qtx, existing.ID, cfgSrc); err != nil {
 					return nil, fmt.Errorf("failed to update source %q: %w", cfgSrc.Name, err)
 				}
+				*toConnect = append(*toConnect, buildProvisionedSourceModelWithID(existing.ID, cfgSrc))
 			}
 			sourceIDs[cfgSrc.Name] = existing.ID
 		}
@@ -461,28 +457,26 @@ func reconcileTeamSources(ctx context.Context, qtx *sqlc.Queries, teamID int64, 
 
 // Helper functions
 
-func validateSourceConnection(ctx context.Context, chMgr *clickhouse.Manager, src config.ProvisionSource, log *slog.Logger) error {
-	tempSource := &models.Source{
-		Name: src.Name,
-		Connection: models.ConnectionInfo{
-			Host:      src.Host,
-			Username:  src.Username,
-			Password:  src.Password,
-			Database:  src.Database,
-			TableName: src.TableName,
-		},
-	}
-
-	client, err := chMgr.CreateTemporaryClient(ctx, tempSource)
+func validateSourceConnection(ctx context.Context, ds *datasource.Service, src config.ProvisionSource, log *slog.Logger) error {
+	payload, err := json.Marshal(models.ConnectionInfo{
+		Host:      src.Host,
+		Username:  src.Username,
+		Password:  src.Password,
+		Database:  src.Database,
+		TableName: src.TableName,
+	})
 	if err != nil {
-		return fmt.Errorf("connection failed: %w", err)
-	}
-	defer client.Close()
-
-	if err := client.Ping(ctx, src.Database, src.TableName); err != nil {
-		return fmt.Errorf("ping failed: %w", err)
+		return fmt.Errorf("marshal connection config: %w", err)
 	}
 
+	_, err = ds.ValidateConnection(ctx, &models.ValidateConnectionRequest{
+		SourceType: models.SourceTypeClickHouse,
+		Connection: payload,
+	})
+	if err != nil {
+		log.Debug("provisioning datasource validation failed", "source", src.Name, "error", err)
+		return err
+	}
 	return nil
 }
 
@@ -557,4 +551,10 @@ func buildProvisionedSourceModel(src config.ProvisionSource) models.Source {
 		Managed:     true,
 		SecretRef:   src.SecretRef,
 	}
+}
+
+func buildProvisionedSourceModelWithID(id int64, src config.ProvisionSource) models.Source {
+	source := buildProvisionedSourceModel(src)
+	source.ID = models.SourceID(id)
+	return source
 }

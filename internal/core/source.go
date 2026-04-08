@@ -37,6 +37,9 @@ func ListSources(ctx context.Context, db *sqlite.DB, ds *datasource.Service) ([]
 		source.Engine = ""
 		source.EngineParams = nil
 		source.SortKeys = nil
+		if err := ds.ApplySourceMetadata(source); err != nil {
+			return nil, fmt.Errorf("error annotating source features: %w", err)
+		}
 
 		wg.Add(1)
 		go func(s *models.Source) {

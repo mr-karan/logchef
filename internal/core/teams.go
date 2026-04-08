@@ -364,7 +364,7 @@ func RemoveTeamMember(ctx context.Context, db *sqlite.DB, log *slog.Logger, team
 // --- Team Source Functions ---
 
 // ListTeamSources returns basic information for all sources associated with a specific team,
-// including their connection status fetched from the ClickHouse manager's cache.
+// including provider-derived feature metadata and current connection status.
 func ListTeamSources(ctx context.Context, db *sqlite.DB, ds *datasource.Service, log *slog.Logger, teamID models.TeamID) ([]*models.Source, error) {
 	// First, validate the team exists
 	_, err := GetTeam(ctx, db, teamID) // Use existing GetTeam function
@@ -393,6 +393,9 @@ func ListTeamSources(ctx context.Context, db *sqlite.DB, ds *datasource.Service,
 	for _, source := range sources {
 		if source == nil { // Safety check
 			continue
+		}
+		if err := ds.ApplySourceMetadata(source); err != nil {
+			return nil, fmt.Errorf("error annotating source features: %w", err)
 		}
 		source.IsConnected = ds.CheckSourceConnectionStatus(ctx, source)
 

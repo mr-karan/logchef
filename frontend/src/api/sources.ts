@@ -32,6 +32,8 @@ export interface Source {
   name: string;
   _meta_is_auto_created: boolean;
   source_type: string;
+  query_languages?: string[];
+  capabilities?: string[];
   _meta_ts_field: string;
   _meta_severity_field?: string;
   connection: ConnectionInfo;

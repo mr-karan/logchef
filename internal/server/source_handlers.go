@@ -61,11 +61,7 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 			"source_name", createdSource.Name,
 			"source_id", createdSource.ID,
 			"source_type", createdSource.SourceType,
-		}
-		if createdSource.IsClickHouse() {
-			attrs = append(attrs, "database", createdSource.Connection.Database, "table", createdSource.Connection.TableName)
-		} else {
-			attrs = append(attrs, "identity_key", createdSource.IdentityKey)
+			"identity_key", createdSource.IdentityKey,
 		}
 		s.log.Info("source.create", attrs...)
 	}

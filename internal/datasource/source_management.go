@@ -14,6 +14,9 @@ func (s *Service) GetSource(ctx context.Context, sourceID models.SourceID) (*mod
 	if err != nil {
 		return nil, err
 	}
+	if err := s.ApplySourceMetadata(source); err != nil {
+		return nil, err
+	}
 
 	source.IsConnected = provider.CheckSourceConnectionStatus(ctx, source)
 	if err := provider.PopulateSourceDetails(ctx, source); err != nil {

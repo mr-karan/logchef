@@ -404,6 +404,7 @@ import { useTeamsStore } from "@/stores/teams";
 import { useVariableStore } from '@/stores/variables';
 import { useVariables, extractVariablesWithOptional, extractVariableNames } from "@/composables/useVariables.ts";
 import SqlMonacoSkeleton from "./SqlMonacoSkeleton.vue";
+import { getNativeQueryLanguageForSource, hasSourceCapability, supportsQueryLanguage } from "@/lib/queryMetadata";
 
 type EditorMode = "logchefql" | "clickhouse-sql";
 type EditorChangeEvent = {
@@ -421,6 +422,8 @@ const sqlEditorModules = import.meta.glob("./SqlMonacoEditor.vue");
 interface QueryEditorProps {
   sourceId: number
   sourceType?: string
+  queryLanguages?: string[]
+  capabilities?: string[]
   schema: Record<string, { type: string }>
   activeMode: EditorMode
   tableName: string
@@ -440,6 +443,8 @@ interface QueryEditorProps {
 const props = withDefaults(defineProps<QueryEditorProps>(), {
   value: '',
   sourceType: 'clickhouse',
+  queryLanguages: () => [],
+  capabilities: () => [],
   placeholder: '',
   tsField: 'timestamp',
   showFieldsPanel: false,
@@ -493,10 +498,15 @@ const generatedSql = computed(() => exploreStore.generatedAiSql);
 
 const theme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
 const isEditorEmpty = computed(() => !editorContent.value?.trim());
-const isVictoriaLogsSource = computed(() => props.sourceType === "victorialogs");
-const supportsLogchefQL = computed(() => !isVictoriaLogsSource.value);
-const supportsAiAssistant = computed(() => !isVictoriaLogsSource.value);
-const nativeEditorLabel = computed(() => (isVictoriaLogsSource.value ? "LogsQL" : "SQL"));
+const sourceDescriptor = computed(() => ({
+  source_type: props.sourceType,
+  query_languages: props.queryLanguages,
+  capabilities: props.capabilities,
+}));
+const isVictoriaLogsSource = computed(() => getNativeQueryLanguageForSource(sourceDescriptor.value) === "logsql");
+const supportsLogchefQL = computed(() => supportsQueryLanguage(sourceDescriptor.value, "logchefql"));
+const supportsAiAssistant = computed(() => hasSourceCapability(sourceDescriptor.value, "ai_sql_generation"));
+const nativeEditorLabel = computed(() => (getNativeQueryLanguageForSource(sourceDescriptor.value) === "logsql" ? "LogsQL" : "SQL"));
 
 const currentPlaceholder = computed(() => {
   if (props.placeholder) return props.placeholder;

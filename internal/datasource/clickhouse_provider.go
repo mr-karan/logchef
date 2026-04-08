@@ -29,6 +29,16 @@ func (p *ClickHouseProvider) Type() models.SourceType {
 	return models.SourceTypeClickHouse
 }
 
+func (p *ClickHouseProvider) Capabilities() []Capability {
+	return []Capability{
+		CapabilitySchemaInspection,
+		CapabilityHistogram,
+		CapabilityFieldValues,
+		CapabilitySourceStats,
+		CapabilityAISQLGeneration,
+	}
+}
+
 func (p *ClickHouseProvider) SupportedQueryLanguages() []models.QueryLanguage {
 	return []models.QueryLanguage{
 		models.QueryLanguageLogchefQL,

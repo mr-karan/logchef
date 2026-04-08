@@ -80,7 +80,7 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
 	}
-	if !source.IsClickHouse() {
+	if !source.SupportsQueryLanguage(models.QueryLanguageLogchefQL) {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is only supported for ClickHouse sources", models.ValidationErrorType)
 	}
 
@@ -218,7 +218,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
 	}
-	if !source.IsClickHouse() {
+	if !source.SupportsQueryLanguage(models.QueryLanguageLogchefQL) {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is only supported for ClickHouse sources", models.ValidationErrorType)
 	}
 

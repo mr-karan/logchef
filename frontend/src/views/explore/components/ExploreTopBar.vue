@@ -43,6 +43,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { getNativeQueryLanguageForSource } from '@/lib/queryMetadata'
 
 const router = useRouter()
 const { toast } = useToast()
@@ -85,7 +86,7 @@ const currentLimit = computed(() => exploreStore.limit)
 
 // ClickHouse native SQL owns its own time/LIMIT clauses. VictoriaLogs native mode does not.
 const isNativeSqlMode = computed(() =>
-  exploreStore.activeMode === 'sql' && sourcesStore.currentSourceDetails?.source_type !== 'victorialogs'
+  exploreStore.activeMode === 'sql' && getNativeQueryLanguageForSource(sourcesStore.currentSourceDetails) === 'clickhouse-sql'
 )
 
 // Query timeout

@@ -91,6 +91,8 @@ type Source struct {
 	Engine       string   `db:"-" json:"engine,omitempty"`
 	EngineParams []string `db:"-" json:"engine_params,omitempty"`
 	SortKeys     []string `db:"-" json:"sort_keys,omitempty"`
+	QueryLanguages []QueryLanguage `db:"-" json:"query_languages,omitempty"`
+	Capabilities   []string        `db:"-" json:"capabilities,omitempty"`
 	// Provisioning
 	Managed   bool   `db:"managed" json:"managed"`
 	SecretRef string `db:"secret_ref" json:"secret_ref,omitempty"`
@@ -213,6 +215,29 @@ func (s *Source) IsVictoriaLogs() bool {
 	return NormalizeSourceType(s.SourceType) == SourceTypeVictoriaLogs
 }
 
+func (s *Source) SupportsQueryLanguage(language QueryLanguage) bool {
+	normalized := NormalizeQueryLanguage(language)
+	for _, candidate := range s.QueryLanguages {
+		if NormalizeQueryLanguage(candidate) == normalized {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Source) HasCapability(capability string) bool {
+	needle := strings.TrimSpace(capability)
+	if needle == "" {
+		return false
+	}
+	for _, candidate := range s.Capabilities {
+		if strings.TrimSpace(candidate) == needle {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Source) VictoriaLogsConnection() (VictoriaLogsConnectionInfo, error) {
 	var conn VictoriaLogsConnectionInfo
 	if !s.IsVictoriaLogs() {
@@ -276,6 +301,8 @@ type SourceResponse struct {
 	Engine       string   `json:"engine,omitempty"`
 	EngineParams []string `json:"engine_params,omitempty"`
 	SortKeys     []string `json:"sort_keys,omitempty"`
+	QueryLanguages []QueryLanguage `json:"query_languages,omitempty"`
+	Capabilities   []string        `json:"capabilities,omitempty"`
 }
 
 // ToResponse converts a Source to a SourceResponse, removing sensitive information.
@@ -299,6 +326,8 @@ func (s *Source) ToResponse() *SourceResponse {
 		Engine:            s.Engine,
 		EngineParams:      s.EngineParams,
 		SortKeys:          s.SortKeys,
+		QueryLanguages:    s.QueryLanguages,
+		Capabilities:      s.Capabilities,
 	}
 }
 

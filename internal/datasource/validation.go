@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/mr-karan/logchef/internal/clickhouse"
 )
 
 var ErrSourceAlreadyExists = errors.New("source already exists")
@@ -24,6 +26,11 @@ func (e *ValidationError) Error() string {
 		return fmt.Sprintf("%s: %s (%v)", e.Field, e.Message, e.Err)
 	}
 	return fmt.Sprintf("%s: %s", e.Field, e.Message)
+}
+
+func IsValidationError(err error) bool {
+	var validationErr *ValidationError
+	return errors.As(err, &validationErr) || clickhouse.IsValidationError(err)
 }
 
 func isLetter(r rune) bool {

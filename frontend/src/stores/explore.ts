@@ -27,7 +27,12 @@ import { useVariables } from "@/composables/useVariables";
 import { useVariableStore } from "@/stores/variables";
 import { queryHistoryService } from "@/services/QueryHistoryService";
 import { createTimeRangeCondition } from '@/utils/time-utils';
-import { getExploreModeForQueryLanguage, resolveSavedQueryMetadata } from "@/lib/queryMetadata";
+import {
+  getExploreModeForQueryLanguage,
+  getNativeQueryLanguageForSource,
+  resolveSavedQueryMetadata,
+  supportsQueryLanguage,
+} from "@/lib/queryMetadata";
 
 interface SavedQuerySnapshot {
   queryContent: string;
@@ -141,21 +146,21 @@ export const useExploreStore = defineStore("explore", () => {
     isExecutingQuery.value
   );
 
-  const getCurrentSourceType = () => sourcesStore.currentSourceDetails?.source_type || "clickhouse";
-  const isVictoriaLogsSource = (sourceType = getCurrentSourceType()) => sourceType === "victorialogs";
-  const getDefaultModeForSource = (sourceType = getCurrentSourceType()): "logchefql" | "sql" =>
-    isVictoriaLogsSource(sourceType) ? "sql" : "logchefql";
+  const getCurrentSource = () => sourcesStore.currentSourceDetails ?? null;
+  const supportsLogchefQLForSource = (source = getCurrentSource()) => supportsQueryLanguage(source, "logchefql");
+  const getDefaultModeForSource = (source = getCurrentSource()): "logchefql" | "sql" =>
+    supportsLogchefQLForSource(source) ? "logchefql" : "sql";
   const normalizeModeForSource = (
     mode: "logchefql" | "sql",
-    sourceType = getCurrentSourceType(),
-  ): "logchefql" | "sql" => (mode === "logchefql" && isVictoriaLogsSource(sourceType) ? "sql" : mode);
-  const isNativeHistogramSource = (sourceType = getCurrentSourceType()) => isVictoriaLogsSource(sourceType);
+    source = getCurrentSource(),
+  ): "logchefql" | "sql" => (mode === "logchefql" && !supportsLogchefQLForSource(source) ? "sql" : mode);
+  const isNativeHistogramSource = (source = getCurrentSource()) => getNativeQueryLanguageForSource(source) === "logsql";
 
   const isHistogramEligible = computed(() => {
-    const sourceType = getCurrentSourceType();
+    const source = getCurrentSource();
     return (
       state.data.value.activeMode === 'logchefql' ||
-      (state.data.value.activeMode === 'sql' && isNativeHistogramSource(sourceType))
+      (state.data.value.activeMode === 'sql' && isNativeHistogramSource(source))
     );
   });
 
@@ -623,7 +628,7 @@ export const useExploreStore = defineStore("explore", () => {
 
     const sourceDetails = sourcesStore.currentSourceDetails;
     
-    if (!isVictoriaLogsSource(sourceDetails?.source_type)) {
+    if (supportsLogchefQLForSource(sourceDetails)) {
       let tableName = 'logs.vector_logs';
       if (sourceDetails?.connection?.database && sourceDetails?.connection?.table_name) {
         tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
@@ -652,7 +657,7 @@ export const useExploreStore = defineStore("explore", () => {
     if (state.data.value.timeRange) {
       const sourceDetails = sourcesStore.currentSourceDetails;
       
-      if (!isVictoriaLogsSource(sourceDetails?.source_type)) {
+      if (supportsLogchefQLForSource(sourceDetails)) {
         let tableName = 'logs.vector_logs';
         if (sourceDetails?.connection?.database && sourceDetails?.connection?.table_name) {
           tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
@@ -843,7 +848,7 @@ export const useExploreStore = defineStore("explore", () => {
       };
 
       if (!sql || !sql.trim()) {
-        if (sourceDetails.source_type !== 'victorialogs') {
+        if (supportsLogchefQLForSource(sourceDetails)) {
           const tsField = sourceDetails._meta_ts_field || 'timestamp';
 
           let tableName = 'default.logs';
@@ -1101,13 +1106,13 @@ export const useExploreStore = defineStore("explore", () => {
   );
 
   watch(
-    () => sourcesStore.currentSourceDetails?.source_type,
-    (sourceType) => {
-      if (!sourceType) {
+    () => sourcesStore.currentSourceDetails,
+    (source) => {
+      if (!source) {
         return;
       }
 
-      if (isVictoriaLogsSource(sourceType) && state.data.value.activeMode === 'logchefql') {
+      if (!supportsLogchefQLForSource(source) && state.data.value.activeMode === 'logchefql') {
         if (!state.data.value.rawSql && state.data.value.logchefqlCode.trim()) {
           state.data.value.rawSql = state.data.value.logchefqlCode;
         }
@@ -1116,7 +1121,7 @@ export const useExploreStore = defineStore("explore", () => {
         return;
       }
 
-      state.data.value.activeMode = normalizeModeForSource(state.data.value.activeMode, sourceType);
+      state.data.value.activeMode = normalizeModeForSource(state.data.value.activeMode, source);
     },
     { immediate: true }
   );
