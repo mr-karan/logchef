@@ -44,20 +44,6 @@ func GetHistogramData(ctx context.Context, ds *datasource.Service, sourceID mode
 	return result, nil
 }
 
-type LogContextParams = datasource.LogContextRequest
-type LogContextResponse = datasource.LogContextResult
-
-func GetLogContext(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, params LogContextParams) (*LogContextResponse, error) {
-	result, err := ds.LogContext(ctx, sourceID, params)
-	if err != nil {
-		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
-			return nil, ErrSourceNotFound
-		}
-		return nil, err
-	}
-	return result, nil
-}
-
 type FieldValuesParams = datasource.FieldValuesRequest
 type FieldValuesResult = datasource.FieldValuesResult
 type AllFieldValuesParams = datasource.AllFieldValuesRequest

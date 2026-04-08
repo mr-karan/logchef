@@ -95,8 +95,6 @@ VictoriaLogs already exposes the primitives needed for a strong MVP:
 - `/select/logsql/field_values` for discovered values
 - `/select/logsql/stats_query` for instant numeric evaluation
 - `/select/logsql/stats_query_range` for range aggregations
-- `stream_context` pipe for surrounding log context
-
 This means LogChef does not need to emulate ClickHouse behavior for VictoriaLogs. It needs a provider layer.
 
 ## Decision
@@ -321,7 +319,6 @@ const (
     CapabilityNativeQuery      Capability = "native_query"
     CapabilityFieldDiscovery   Capability = "field_discovery"
     CapabilityHistogram        Capability = "histogram"
-    CapabilityLogContext       Capability = "log_context"
     CapabilityAlertEvaluation  Capability = "alert_evaluation"
     CapabilityAutoCreate       Capability = "auto_create"
     CapabilityAISQLGeneration  Capability = "ai_sql_generation"
@@ -338,8 +335,6 @@ type Provider interface {
 
     QueryLogs(context.Context, *models.Source, QueryRequest) (*models.QueryResult, error)
     Histogram(context.Context, *models.Source, HistogramRequest) (*HistogramResult, error)
-    LogContext(context.Context, *models.Source, LogContextRequest) (*LogContextResult, error)
-
     FieldNames(context.Context, *models.Source, DiscoveryRequest) ([]FieldInfo, error)
     FieldValues(context.Context, *models.Source, FieldValuesRequest) (*FieldValuesResult, error)
 
@@ -417,7 +412,6 @@ This package should implement:
 | histogram | `/select/logsql/hits` |
 | field names | `/select/logsql/field_names` |
 | field values | `/select/logsql/field_values` |
-| context | `stream_context` pipe |
 | instant numeric alert eval | `/select/logsql/stats_query` |
 | range numeric preview | `/select/logsql/stats_query_range` |
 
@@ -574,7 +568,6 @@ Suggested response:
     "native_query",
     "field_discovery",
     "histogram",
-    "log_context",
     "alert_evaluation"
   ],
   "describe": {
@@ -653,7 +646,6 @@ Keep existing route paths where possible:
 
 - `POST /teams/:teamID/sources/:sourceID/logs/query`
 - `POST /teams/:teamID/sources/:sourceID/logs/histogram`
-- `POST /teams/:teamID/sources/:sourceID/logs/context`
 - `GET /teams/:teamID/sources/:sourceID/fields/values`
 
 But change payload semantics to provider-neutral query envelopes.
@@ -910,13 +902,7 @@ Likely files:
 
 At this point, basic log exploration works for VictoriaLogs.
 
-#### PR 7: VictoriaLogs log context and row locator support
-
-- add row locator metadata to query results
-- use `stream_context` for VictoriaLogs
-- keep ClickHouse context behavior unchanged
-
-#### PR 8: Alert evaluation abstraction
+#### PR 7: Alert evaluation abstraction
 
 - route alerts through datasource service
 - add `alerts.query_language`
@@ -931,7 +917,7 @@ Likely files:
 - `frontend/src/views/alerts/AlertCreate.vue`
 - `frontend/src/views/alerts/AlertDetail.vue`
 
-#### PR 9: Saved queries migration
+#### PR 8: Saved queries migration
 
 - add `team_queries.query_language`
 - migrate old saved query type values
@@ -945,7 +931,7 @@ Likely files:
 - `frontend/src/components/collections/SaveQueryModal.vue`
 - `frontend/src/stores/savedQueries.ts`
 
-#### PR 10: Dev env, documentation, cleanup
+#### PR 9: Dev env, documentation, cleanup
 
 - local VictoriaLogs service
 - seed/example source

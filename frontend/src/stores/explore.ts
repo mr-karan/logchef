@@ -8,8 +8,6 @@ import type {
   QueryStats,
   FilterCondition,
   QueryParams,
-  LogContextRequest,
-  LogContextResponse,
   QuerySuccessResponse,
 } from "@/api/explore";
 import type { SavedQueryContent } from "@/api/savedQueries";
@@ -1039,31 +1037,6 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.activeSavedQueryName = name;
   }
 
-  async function getLogContext(sourceId: number, params: LogContextRequest) {
-    const operationKey = `getLogContext-${sourceId}`;
-    return await state.withLoading(operationKey, async () => {
-      if (!sourceId) {
-        return state.handleError(
-          { status: "error", message: "Source ID is required", error_type: "ValidationError" },
-          operationKey
-        );
-      }
-      const teamsStore = useTeamsStore();
-      const currentTeamId = teamsStore.currentTeamId;
-      if (!currentTeamId) {
-        return state.handleError(
-          { status: "error", message: "No team selected.", error_type: "ValidationError" },
-          operationKey
-        );
-      }
-      return await state.callApi<LogContextResponse>({
-        apiCall: () => exploreApi.getLogContext(sourceId, params, currentTeamId),
-        operationKey: operationKey,
-        showToast: false,
-      });
-    });
-  }
-
   function clearError() {
     state.error.value = null;
   }
@@ -1243,7 +1216,6 @@ export const useExploreStore = defineStore("explore", () => {
     hydrateFromResolvedQuery,
     executeQuery,
     cancelQuery,
-    getLogContext,
     clearError,
     setGroupByField,
     setTimezoneIdentifier,

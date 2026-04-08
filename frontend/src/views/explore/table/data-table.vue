@@ -18,8 +18,7 @@ import {
 import { ref, computed, onMounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
-import { GripVertical, Copy, Equal, EqualNot, Clock, ChevronUp, ChevronDown } from 'lucide-vue-next'
-import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
+import { GripVertical, Copy, Equal, EqualNot, ChevronUp, ChevronDown } from 'lucide-vue-next'
 import { valueUpdater } from '@/lib/utils'
 import type { QueryStats } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
@@ -77,17 +76,6 @@ const tableColumns = ref<CustomColumnDef[]>([])
 // Table state
 const sorting = ref<SortingState>([])
 const expanded = ref<ExpandedState>({})
-
-// Context modal state
-const showContextModal = ref(false)
-const contextLog = ref<Record<string, any> | null>(null)
-
-
-// Open context modal for a log
-const openContextModal = (log: Record<string, any>) => {
-    contextLog.value = log
-    showContextModal.value = true
-}
 const columnVisibility = ref<VisibilityState>({})
 const pagination = ref<PaginationState>({
     pageIndex: 0,
@@ -831,15 +819,6 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                                     <ChevronUp class="h-3 w-3" />
                                                     <span>Collapse</span>
                                                 </button>
-                                                <Button 
-                                                    variant="outline" 
-                                                    size="sm" 
-                                                    class="h-7 text-xs"
-                                                    @click.stop="openContextModal(row.original)"
-                                                >
-                                                    <Clock class="h-3 w-3 mr-1" />
-                                                    Show Context
-                                                </Button>
                                             </div>
                                             <JsonViewer :value="row.original" :expanded="false" class="text-xs" />
                                         </div>
@@ -860,17 +839,6 @@ const isLastVisibleColumn = (columnId: string): boolean => {
             </div>
         </div>
     </div>
-
-    <!-- Log Context Modal -->
-    <LogTimelineModal
-        v-if="contextLog"
-        :is-open="showContextModal"
-        :source-id="props.sourceId"
-        :team-id="props.teamId ?? 0"
-        :log="contextLog"
-        :timestamp-field="timestampFieldName"
-        @update:is-open="showContextModal = $event"
-    />
 </template>
 
 <style scoped>

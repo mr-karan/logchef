@@ -21,7 +21,6 @@ type Provider interface {
 	QueryLogs(context.Context, *models.Source, QueryRequest) (*models.QueryResult, error)
 	GetSourceSchema(context.Context, *models.Source) ([]models.ColumnInfo, error)
 	Histogram(context.Context, *models.Source, HistogramRequest) (*HistogramResult, error)
-	LogContext(context.Context, *models.Source, LogContextRequest) (*LogContextResult, error)
 	GetFieldValues(context.Context, *models.Source, FieldValuesRequest) (*FieldValuesResult, error)
 	GetAllFieldValues(context.Context, *models.Source, AllFieldValuesRequest) (AllFieldValuesResult, error)
 	GetSourceStats(context.Context, *models.Source) (*SourceStats, error)
@@ -190,14 +189,6 @@ func (s *Service) Histogram(ctx context.Context, sourceID models.SourceID, req H
 		return nil, err
 	}
 	return provider.Histogram(ctx, source, req)
-}
-
-func (s *Service) LogContext(ctx context.Context, sourceID models.SourceID, req LogContextRequest) (*LogContextResult, error) {
-	source, provider, err := s.sourceAndProvider(ctx, sourceID)
-	if err != nil {
-		return nil, err
-	}
-	return provider.LogContext(ctx, source, req)
 }
 
 func (s *Service) EvaluateAlert(ctx context.Context, sourceID models.SourceID, req AlertQueryRequest) (*models.QueryResult, error) {

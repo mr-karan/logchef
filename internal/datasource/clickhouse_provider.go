@@ -381,50 +381,6 @@ func (p *ClickHouseProvider) Histogram(ctx context.Context, source *models.Sourc
 	}, nil
 }
 
-func (p *ClickHouseProvider) LogContext(ctx context.Context, source *models.Source, req LogContextRequest) (*LogContextResult, error) {
-	if source == nil {
-		return nil, fmt.Errorf("source is required")
-	}
-	if source.MetaTSField == "" {
-		return nil, fmt.Errorf("source %d does not have a timestamp field configured", source.ID)
-	}
-	if req.QueryTimeout == nil {
-		defaultTimeout := models.DefaultQueryTimeoutSeconds
-		req.QueryTimeout = &defaultTimeout
-	}
-
-	client, err := p.manager.GetConnection(source.ID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting database connection for source %d: %w", source.ID, err)
-	}
-
-	result, err := client.GetSurroundingLogs(
-		ctx,
-		source.GetFullTableName(),
-		source.MetaTSField,
-		clickhouse.LogContextParams{
-			TargetTime:      time.UnixMilli(req.TargetTimestamp),
-			BeforeLimit:     req.BeforeLimit,
-			AfterLimit:      req.AfterLimit,
-			BeforeOffset:    req.BeforeOffset,
-			AfterOffset:     req.AfterOffset,
-			ExcludeBoundary: req.ExcludeBoundary,
-		},
-		req.QueryTimeout,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("error retrieving log context for source %d: %w", source.ID, err)
-	}
-
-	return &LogContextResult{
-		TargetTimestamp: req.TargetTimestamp,
-		BeforeLogs:      result.BeforeLogs,
-		TargetLogs:      result.TargetLogs,
-		AfterLogs:       result.AfterLogs,
-		Stats:           result.Stats,
-	}, nil
-}
-
 func (p *ClickHouseProvider) GetFieldValues(ctx context.Context, source *models.Source, req FieldValuesRequest) (*FieldValuesResult, error) {
 	if source == nil {
 		return nil, fmt.Errorf("source is required")

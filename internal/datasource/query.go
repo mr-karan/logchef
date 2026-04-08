@@ -45,24 +45,6 @@ type HistogramResult struct {
 	Data        []HistogramBucket `json:"data"`
 }
 
-type LogContextRequest struct {
-	TargetTimestamp int64
-	BeforeLimit     int
-	AfterLimit      int
-	BeforeOffset    int
-	AfterOffset     int
-	ExcludeBoundary bool
-	QueryTimeout    *int
-}
-
-type LogContextResult struct {
-	TargetTimestamp int64                    `json:"target_timestamp"`
-	BeforeLogs      []map[string]interface{} `json:"before_logs"`
-	TargetLogs      []map[string]interface{} `json:"target_logs"`
-	AfterLogs       []map[string]interface{} `json:"after_logs"`
-	Stats           models.QueryStats        `json:"stats"`
-}
-
 type AlertQueryRequest struct {
 	Language     models.QueryLanguage
 	Query        string

@@ -80,24 +80,6 @@ export interface QueryErrorResponse {
 
 export type QueryResponse = QuerySuccessResponse | QueryErrorResponse;
 
-// Log context types
-export interface LogContextRequest {
-  timestamp: number;
-  before_limit: number;
-  after_limit: number;
-  before_offset?: number;     // Offset for before query (for pagination)
-  after_offset?: number;      // Offset for after query (for pagination)
-  exclude_boundary?: boolean; // When true, excludes logs at exact timestamp (for pagination)
-}
-
-export interface LogContextResponse {
-  target_timestamp: number;
-  before_logs: Record<string, any>[];
-  target_logs: Record<string, any>[];
-  after_logs: Record<string, any>[];
-  stats: QueryStats;
-}
-
 // Histogram data types
 export interface HistogramDataPoint {
   bucket: string;
@@ -149,16 +131,6 @@ export const exploreApi = {
       `/teams/${teamId}/sources/${sourceId}/logs/histogram`,
       histogramParams,
       { timeout, signal }
-    );
-  },
-
-  getLogContext: (sourceId: number, params: LogContextRequest, teamId: number) => {
-    if (!teamId) {
-      throw new Error("Team ID is required for getting log context");
-    }
-    return apiClient.post<LogContextResponse>(
-      `/teams/${teamId}/sources/${sourceId}/logs/context`,
-      params
     );
   },
 

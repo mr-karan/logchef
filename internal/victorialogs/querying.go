@@ -258,10 +258,6 @@ func (p *Provider) Histogram(ctx context.Context, source *models.Source, req dat
 	}, nil
 }
 
-func (p *Provider) LogContext(context.Context, *models.Source, datasource.LogContextRequest) (*datasource.LogContextResult, error) {
-	return nil, fmt.Errorf("victorialogs log context requires stream-aware row locators: %w", datasource.ErrOperationNotSupported)
-}
-
 func (p *Provider) GetFieldValues(ctx context.Context, source *models.Source, req datasource.FieldValuesRequest) (*datasource.FieldValuesResult, error) {
 	conn, err := p.connectionForSource(source)
 	if err != nil {
