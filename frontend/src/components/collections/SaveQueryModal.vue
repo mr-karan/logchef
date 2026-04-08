@@ -23,7 +23,7 @@ import { useRoute } from 'vue-router';
 import { TOAST_DURATION } from '@/lib/constants';
 import { useToast } from '@/composables/useToast';
 import {storeToRefs} from "pinia";
-import { getQueryLanguageLabel, resolveSavedQueryMetadata } from '@/lib/queryMetadata';
+import { getExploreModeForQueryLanguage, getQueryLanguageLabel, resolveSavedQueryMetadata } from '@/lib/queryMetadata';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -120,30 +120,21 @@ const isValid = computed(() => {
   return !!name.value.trim();
 });
 
-// Get the query type for display - prioritize props then editData/initialData
-const displayQueryType = computed(() => {
-  // Use explicit queryType prop if provided (e.g. from Explorer)
-  if (props.queryType) {
-    return props.queryType;
-  }
-  if (props.editData?.query_type) {
-    return props.editData.query_type;
-  }
-  if (props.initialData?.query_type) {
-    return props.initialData.query_type;
-  }
-  return exploreStore.activeMode || "sql";
-});
-
 const resolvedQueryMetadata = computed(() =>
   resolveSavedQueryMetadata({
-    query_type: displayQueryType.value,
     query_language: props.editData?.query_language || props.initialData?.query_language,
     editor_mode: props.editData?.editor_mode || props.initialData?.editor_mode,
     source_type: currentSourceDescriptor.value?.source_type,
     query_languages: currentSourceDescriptor.value?.query_languages,
   })
 );
+
+const displayQueryMode = computed(() => {
+  if (props.queryType) {
+    return props.queryType;
+  }
+  return getExploreModeForQueryLanguage(resolvedQueryMetadata.value.queryLanguage);
+});
 
 const displayQueryLanguageLabel = computed(() => getQueryLanguageLabel(resolvedQueryMetadata.value.queryLanguage));
 
@@ -292,8 +283,8 @@ watch([() => props.initialData, () => props.editData], ([newInitialData, newEdit
 // Prepare query content with proper structure
 function prepareQueryContent(saveTimestamp: boolean): string {
   try {
-    // Use displayQueryType to get the correct mode (from editData/initialData when editing)
-    const activeMode = displayQueryType.value;
+    // Use displayQueryMode to get the correct mode (from editData/initialData when editing)
+    const activeMode = displayQueryMode.value;
 
     // Get initial content if available
     let content: Record<string, any> = {};
@@ -442,7 +433,6 @@ async function handleSubmit(event: Event) {
   try {
     isSubmitting.value = true;
 
-    // Use displayQueryType which properly handles editData/initialData when editing
     const queryMetadata = resolvedQueryMetadata.value;
 
     try {
@@ -456,7 +446,6 @@ async function handleSubmit(event: Event) {
         name: name.value,
         description: description.value,
         query_content: preparedContent,
-        query_type: queryMetadata.queryType,
         query_language: queryMetadata.queryLanguage,
         editor_mode: queryMetadata.editorMode,
         save_timestamp: saveTimestamp.value

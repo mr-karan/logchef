@@ -24,11 +24,11 @@ func isValidRelativeTimeFormat(s string) bool {
 // --- Saved Query Error Definitions ---
 
 var (
-	ErrQueryNotFound                    = fmt.Errorf("saved query not found")
-	ErrQueryTypeRequired                = fmt.Errorf("query type is required")
-	ErrInvalidQueryType                 = fmt.Errorf("invalid query configuration")
-	ErrInvalidQueryContent              = fmt.Errorf("invalid query content format or values")
-	ErrUnsupportedSavedQueryDefinition  = fmt.Errorf("saved query configuration is not supported for this source")
+	ErrQueryNotFound                   = fmt.Errorf("saved query not found")
+	ErrQueryLanguageRequired           = fmt.Errorf("query language is required")
+	ErrInvalidQueryDefinition          = fmt.Errorf("invalid query configuration")
+	ErrInvalidQueryContent             = fmt.Errorf("invalid query content format or values")
+	ErrUnsupportedSavedQueryDefinition = fmt.Errorf("saved query configuration is not supported for this source")
 )
 
 // --- Saved Query Content Validation ---
@@ -88,20 +88,20 @@ func ValidateSavedQueryContent(contentJSON string) error {
 
 // --- Saved Query Management Functions ---
 
-func resolveSavedQueryMetadata(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, queryType models.SavedQueryType, queryLanguage models.QueryLanguage, editorMode models.SavedQueryEditorMode) (models.SavedQueryType, models.QueryLanguage, models.SavedQueryEditorMode, error) {
-	normalizedLanguage, normalizedMode, err := models.ResolveSavedQueryMetadata(queryType, queryLanguage, editorMode)
+func resolveSavedQueryMetadata(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, queryLanguage models.QueryLanguage, editorMode models.SavedQueryEditorMode) (models.QueryLanguage, models.SavedQueryEditorMode, error) {
+	normalizedLanguage, normalizedMode, err := models.ResolveSavedQueryMetadata(queryLanguage, editorMode)
 	if err != nil {
-		return "", "", "", fmt.Errorf("%w: %v", ErrInvalidQueryType, err)
+		return "", "", fmt.Errorf("%w: %v", ErrInvalidQueryDefinition, err)
 	}
 
 	if ds == nil {
-		return "", "", "", fmt.Errorf("datasource service is required")
+		return "", "", fmt.Errorf("datasource service is required")
 	}
 	if err := ds.ValidateSavedQuerySupport(ctx, sourceID, normalizedLanguage, normalizedMode); err != nil {
-		return "", "", "", fmt.Errorf("%w: %v", ErrUnsupportedSavedQueryDefinition, err)
+		return "", "", fmt.Errorf("%w: %v", ErrUnsupportedSavedQueryDefinition, err)
 	}
 
-	return models.LegacySavedQueryTypeFromLanguage(normalizedLanguage), normalizedLanguage, normalizedMode, nil
+	return normalizedLanguage, normalizedMode, nil
 }
 
 // ListQueriesForTeamAndSource retrieves all saved queries associated with a specific team and source.
@@ -125,8 +125,8 @@ func CreateTeamSourceQuery(ctx context.Context, db *sqlite.DB, ds *datasource.Se
 	if req == nil {
 		return nil, ErrInvalidQueryContent
 	}
-	if req.QueryType == "" && req.QueryLanguage == "" {
-		return nil, ErrQueryTypeRequired
+	if req.QueryLanguage == "" && req.EditorMode == "" {
+		return nil, ErrQueryLanguageRequired
 	}
 	if strings.TrimSpace(req.Name) == "" {
 		return nil, fmt.Errorf("%w: name is required", ErrInvalidQueryContent)
@@ -137,7 +137,7 @@ func CreateTeamSourceQuery(ctx context.Context, db *sqlite.DB, ds *datasource.Se
 	name := strings.TrimSpace(req.Name)
 	description := strings.TrimSpace(req.Description)
 
-	legacyQueryType, queryLanguage, editorMode, err := resolveSavedQueryMetadata(ctx, ds, sourceID, req.QueryType, req.QueryLanguage, req.EditorMode)
+	queryLanguage, editorMode, err := resolveSavedQueryMetadata(ctx, ds, sourceID, req.QueryLanguage, req.EditorMode)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +154,6 @@ func CreateTeamSourceQuery(ctx context.Context, db *sqlite.DB, ds *datasource.Se
 		Name:          name,
 		Description:   description,
 		QueryContent:  req.QueryContent,
-		QueryType:     legacyQueryType,
 		QueryLanguage: queryLanguage,
 		EditorMode:    editorMode,
 	}
@@ -170,7 +169,6 @@ func CreateTeamSourceQuery(ctx context.Context, db *sqlite.DB, ds *datasource.Se
 		SourceID:      sourceID,
 		Name:          name,
 		Description:   description,
-		QueryType:     legacyQueryType,
 		QueryLanguage: queryLanguage,
 		EditorMode:    editorMode,
 		QueryContent:  req.QueryContent,
@@ -234,10 +232,6 @@ func UpdateTeamSourceQuery(ctx context.Context, db *sqlite.DB, ds *datasource.Se
 		}
 	}
 
-	queryType := existingQuery.QueryType
-	if req.QueryType != nil {
-		queryType = *req.QueryType
-	}
 	queryLanguage := existingQuery.QueryLanguage
 	if req.QueryLanguage != nil {
 		queryLanguage = *req.QueryLanguage
@@ -247,12 +241,12 @@ func UpdateTeamSourceQuery(ctx context.Context, db *sqlite.DB, ds *datasource.Se
 		editorMode = *req.EditorMode
 	}
 
-	legacyQueryType, normalizedLanguage, normalizedMode, err := resolveSavedQueryMetadata(ctx, ds, sourceID, queryType, queryLanguage, editorMode)
+	normalizedLanguage, normalizedMode, err := resolveSavedQueryMetadata(ctx, ds, sourceID, queryLanguage, editorMode)
 	if err != nil {
 		return nil, err
 	}
 
-	err = db.UpdateTeamSourceQuery(ctx, teamID, sourceID, queryID, name, description, string(legacyQueryType), string(normalizedLanguage), string(normalizedMode), queryContentJSON)
+	err = db.UpdateTeamSourceQuery(ctx, teamID, sourceID, queryID, name, description, string(normalizedLanguage), string(normalizedMode), queryContentJSON)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			log.Warn("saved query not found for update", "query_id", queryID, "team_id", teamID, "source_id", sourceID)

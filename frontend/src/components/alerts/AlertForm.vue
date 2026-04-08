@@ -75,7 +75,7 @@ const currentTableName = computed(() => sourcesStore.getCurrentSourceTableName |
 const form = reactive({
   name: "",
   description: "",
-  query_type: "condition" as Alert["query_type"],
+  editor_mode: "condition" as "condition" | "native",
   query: "",
   condition_json: "", // LogChefQL condition string
   aggregate_function: "count" as "count" | "sum" | "avg" | "min" | "max",
@@ -102,7 +102,7 @@ const sourceDetails = computed(() => sourcesStore.currentSourceDetails);
 const timestampField = computed(() => sourceDetails.value?._meta_ts_field || "timestamp");
 const alertMetadata = computed(() =>
   resolveAlertMetadata({
-    query_type: form.query_type,
+    editor_mode: form.editor_mode,
     source_type: sourceType.value,
     query_languages: currentSource.value?.query_languages,
   })
@@ -138,7 +138,7 @@ async function translateCondition() {
     generatedSQL.value = "";
     return;
   }
-  if (form.query_type !== "condition" || !form.condition_json.trim()) {
+  if (form.editor_mode !== "condition" || !form.condition_json.trim()) {
     conditionError.value = null;
     generatedSQL.value = "";
     return;
@@ -190,7 +190,7 @@ watch(
   () => {
     if (translateDebounceTimer) clearTimeout(translateDebounceTimer);
     translateDebounceTimer = setTimeout(() => {
-      if (form.query_type === "condition") {
+      if (form.editor_mode === "condition") {
         translateCondition();
       }
     }, 300);
@@ -199,7 +199,7 @@ watch(
 
 // Sync generated SQL to query field when using condition mode
 watch(generatedSQL, (sql) => {
-  if (form.query_type === "condition" && sql) {
+  if (form.editor_mode === "condition" && sql) {
     form.query = sql;
   }
 });
@@ -221,7 +221,7 @@ function getQueryTemplates() {
     {
       name: "High Error Count",
       description: "Alert when error count exceeds threshold in lookback window",
-      queryType: "sql" as const,
+      editorMode: "native" as const,
       query: `SELECT count(*) as value
 FROM ${tableName}
 WHERE severity = 'ERROR'
@@ -230,7 +230,7 @@ WHERE severity = 'ERROR'
     {
       name: "Critical Logs",
       description: "Alert on any critical severity logs",
-      queryType: "sql" as const,
+      editorMode: "native" as const,
       query: `SELECT count(*) as value
 FROM ${tableName}
 WHERE severity = 'CRITICAL'
@@ -239,7 +239,7 @@ WHERE severity = 'CRITICAL'
     {
       name: "High Response Time",
       description: "Alert when average response time is high",
-      queryType: "sql" as const,
+      editorMode: "native" as const,
       query: `SELECT avg(response_time) as value
 FROM ${tableName}
 WHERE \`${tsField}\` >= ${lookback}`,
@@ -247,7 +247,7 @@ WHERE \`${tsField}\` >= ${lookback}`,
     {
       name: "Failed Requests",
       description: "Alert on HTTP 5xx status codes",
-      queryType: "sql" as const,
+      editorMode: "native" as const,
       query: `SELECT count(*) as value
 FROM ${tableName}
 WHERE status_code >= 500
@@ -256,7 +256,7 @@ WHERE status_code >= 500
     {
       name: "Low Success Rate",
       description: "Alert when success rate drops below threshold",
-      queryType: "sql" as const,
+      editorMode: "native" as const,
       query: `SELECT (countIf(status_code < 400) * 100.0 / count(*)) as value
 FROM ${tableName}
 WHERE \`${tsField}\` >= ${lookback}`,
@@ -324,7 +324,7 @@ const isValid = computed(() => {
   const hasLookback = form.lookback_seconds > 0;
   
   // For condition mode, check if condition is valid and generates SQL
-  if (form.query_type === "condition") {
+  if (form.editor_mode === "condition") {
     return hasName && hasThreshold && hasFrequency && hasLookback && 
            !!form.condition_json.trim() && !conditionError.value && !!generatedSQL.value;
   }
@@ -389,7 +389,7 @@ function resetForm(alert: Alert | null) {
   if (!alert) {
     form.name = "";
     form.description = "";
-    form.query_type = supportsConditionEditor.value ? "condition" : "sql";
+    form.editor_mode = supportsConditionEditor.value ? "condition" : "native";
     form.query = "";
     form.condition_json = "";
     form.aggregate_function = "count";
@@ -413,7 +413,7 @@ function resetForm(alert: Alert | null) {
   
   form.name = alert.name;
   form.description = alert.description ?? "";
-  form.query_type = supportsConditionEditor.value ? alert.query_type : "sql";
+  form.editor_mode = supportsConditionEditor.value ? alert.editor_mode : "native";
   form.query = alert.query;
   form.condition_json = alert.condition_json ?? "";
   form.aggregate_function = "count";
@@ -447,11 +447,10 @@ async function handleTestQuery() {
 
   try {
     const result = await alertsApi.testAlertQuery(props.teamId, props.sourceId, {
-      query_type: form.query_type,
       query_language: alertMetadata.value.queryLanguage,
       editor_mode: alertMetadata.value.editorMode,
       query: form.query.trim(),
-      condition_json: form.query_type === "condition" ? form.condition_json.trim() : undefined,
+      condition_json: form.editor_mode === "condition" ? form.condition_json.trim() : undefined,
       lookback_seconds: form.lookback_seconds,
       threshold_operator: form.threshold_operator,
       threshold_value: form.threshold_value,
@@ -465,7 +464,7 @@ async function handleTestQuery() {
 }
 
 function applyTemplate(template: ReturnType<typeof getQueryTemplates>[0]) {
-  form.query_type = template.queryType;
+  form.editor_mode = template.editorMode;
   form.query = template.query;
   testQueryResult.value = null;
   testQueryError.value = null;
@@ -494,8 +493,8 @@ watch(
 );
 
 watch(sourceType, () => {
-  if (!supportsConditionEditor.value && form.query_type === "condition") {
-    form.query_type = "sql";
+  if (!supportsConditionEditor.value && form.editor_mode === "condition") {
+    form.editor_mode = "native";
     conditionError.value = null;
     generatedSQL.value = "";
   }
@@ -533,11 +532,10 @@ function handleSubmit() {
   const basePayload = {
     name: form.name.trim(),
     description: form.description.trim(),
-    query_type: form.query_type,
     query_language: alertMetadata.value.queryLanguage,
     editor_mode: alertMetadata.value.editorMode,
     query: form.query.trim(),
-    condition_json: form.query_type === "condition" ? form.condition_json.trim() : undefined,
+    condition_json: form.editor_mode === "condition" ? form.condition_json.trim() : undefined,
     lookback_seconds: Number(form.lookback_seconds),
     threshold_operator: form.threshold_operator,
     threshold_value: Number(form.threshold_value),
@@ -607,22 +605,22 @@ function handleSubmit() {
             <div>
               <h3 class="text-sm font-semibold">Evaluation query</h3>
               <p class="text-xs text-muted-foreground mt-1">
-                {{ form.query_type === 'condition' 
+                {{ form.editor_mode === 'condition'
                   ? 'Write a simple filter condition. The time filter is auto-applied.' 
                   : `Write a ${nativeEditorLabel} query that returns a single numeric value.` }}
               </p>
             </div>
             <!-- Query Type Toggle -->
-            <Tabs :model-value="form.query_type" @update:model-value="(v: any) => form.query_type = v" class="w-auto">
+            <Tabs :model-value="form.editor_mode" @update:model-value="(v: any) => form.editor_mode = v" class="w-auto">
               <TabsList class="h-8">
                 <TabsTrigger v-if="supportsConditionEditor" value="condition" class="text-xs px-3 h-7">LogChefQL</TabsTrigger>
-                <TabsTrigger value="sql" class="text-xs px-3 h-7">{{ nativeEditorLabel }}</TabsTrigger>
+                <TabsTrigger value="native" class="text-xs px-3 h-7">{{ nativeEditorLabel }}</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
 
           <!-- LogChefQL Mode -->
-          <template v-if="form.query_type === 'condition'">
+          <template v-if="form.editor_mode === 'condition'">
             <!-- Condition Templates -->
             <div class="space-y-2">
               <Label for="condition-template">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
@@ -1018,22 +1016,22 @@ function handleSubmit() {
             <div>
               <h3 class="text-sm font-semibold">Evaluation query</h3>
               <p class="text-xs text-muted-foreground mt-1">
-                {{ form.query_type === 'condition' 
+                {{ form.editor_mode === 'condition'
                   ? 'Write a simple filter condition. The time filter is auto-applied.' 
                   : `Write a ${nativeEditorLabel} query that returns a single numeric value.` }}
               </p>
             </div>
             <!-- Query Type Toggle -->
-            <Tabs :model-value="form.query_type" @update:model-value="(v: any) => form.query_type = v" class="w-auto">
+            <Tabs :model-value="form.editor_mode" @update:model-value="(v: any) => form.editor_mode = v" class="w-auto">
               <TabsList class="h-8">
                 <TabsTrigger v-if="supportsConditionEditor" value="condition" class="text-xs px-3 h-7">LogChefQL</TabsTrigger>
-                <TabsTrigger value="sql" class="text-xs px-3 h-7">{{ nativeEditorLabel }}</TabsTrigger>
+                <TabsTrigger value="native" class="text-xs px-3 h-7">{{ nativeEditorLabel }}</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
 
           <!-- LogChefQL Mode -->
-          <template v-if="form.query_type === 'condition'">
+          <template v-if="form.editor_mode === 'condition'">
             <!-- Condition Templates -->
             <div class="space-y-2">
               <Label for="condition-template-inline">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>

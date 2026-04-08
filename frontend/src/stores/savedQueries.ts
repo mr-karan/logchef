@@ -6,7 +6,7 @@ import {
   type Team,
   type SavedQueryContent,
 } from "@/api/savedQueries";
-import type { QueryLanguage, SavedQueryEditorMode, LegacySavedQueryType } from "@/lib/queryMetadata";
+import type { QueryLanguage, SavedQueryEditorMode } from "@/lib/queryMetadata";
 import { useBaseStore } from "./base";
 import { useTeamsStore } from "./teams";
 import { useContextStore } from "./context";
@@ -219,19 +219,15 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     name: string,
     description: string,
     queryContent: SavedQueryContent,
-    queryType: LegacySavedQueryType,
     queryLanguage: QueryLanguage,
     editorMode: SavedQueryEditorMode
   ) {
     return await state.withLoading(`createSourceQuery-${teamId}-${sourceId}`, async () => {
-      // Make a clean copy of the queryContent without any query_type field
       const apiQueryContent = { ...queryContent };
 
-      // Ensure we use the explicit queryType parameter
       const query = {
         name,
         description,
-        query_type: queryType,
         query_language: queryLanguage,
         editor_mode: editorMode,
         query_content: JSON.stringify(apiQueryContent),

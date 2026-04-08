@@ -54,7 +54,6 @@ const hasActiveIncident = computed(() => {
 const alertSummary = computed(() => {
   if (!props.alert) return "";
   const metadata = resolveAlertMetadata({
-    query_type: props.alert.query_type,
     query_language: props.alert.query_language,
     editor_mode: props.alert.editor_mode,
   });

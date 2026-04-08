@@ -274,7 +274,7 @@ fn list_collections(collections: &[Collection], args: &CollectionsArgs) -> Resul
                     "{:<4} {:<30} {:<12} {}",
                     c.id,
                     truncate_str(&c.name, 28),
-                    c.query_type,
+                    collection_query_label(c),
                     desc_truncated
                 );
             }
@@ -283,6 +283,14 @@ fn list_collections(collections: &[Collection], args: &CollectionsArgs) -> Resul
     }
 
     Ok(())
+}
+
+fn collection_query_label(collection: &Collection) -> &str {
+    match collection.query_language.as_str() {
+        "logchefql" => "logchefql",
+        "logsql" => "logsql",
+        _ => "sql",
+    }
 }
 
 fn truncate_str(s: &str, max_len: usize) -> String {
@@ -383,24 +391,11 @@ async fn run_collection(
 
     eprintln!(
         "Running collection: {} ({})",
-        collection.name, collection.query_type
+        collection.name,
+        collection_query_label(collection)
     );
 
-    let response = if collection.query_type == "sql" {
-        let request = SqlQueryRequest {
-            raw_sql: final_query,
-            limit: None, // SQL queries control their own limit
-            timezone: ctx.defaults.timezone.clone(),
-            start_time: None,
-            end_time: None,
-            query_timeout: Some(30),
-        };
-        client
-            .query_sql(team_id, source_id, &request)
-            .await
-            .context("SQL query failed")?
-    } else {
-        // logchefql
+    let response = if collection.query_language == "logchefql" {
         let request = QueryRequest {
             query: final_query,
             start_time,
@@ -413,6 +408,19 @@ async fn run_collection(
             .query_logchefql(team_id, source_id, &request)
             .await
             .context("Query failed")?
+    } else {
+        let request = SqlQueryRequest {
+            query_text: final_query,
+            limit: Some(limit),
+            timezone: ctx.defaults.timezone.clone(),
+            start_time: Some(start_time),
+            end_time: Some(end_time),
+            query_timeout: Some(30),
+        };
+        client
+            .query_sql(team_id, source_id, &request)
+            .await
+            .context("Native query failed")?
     };
 
     let entries = response.entries();
@@ -685,7 +693,7 @@ fn prompt_collection_interactive(collections: &[Collection]) -> Result<Collectio
 
     let options: Vec<String> = collections
         .iter()
-        .map(|c| format!("{} [{}]", c.name, c.query_type))
+        .map(|c| format!("{} [{}]", c.name, collection_query_label(c)))
         .collect();
     let selection = Select::new("Select collection:", options)
         .prompt()

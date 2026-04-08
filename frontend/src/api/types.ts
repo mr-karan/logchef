@@ -39,7 +39,6 @@ export interface SavedTeamQuery {
   source_id: number;
   name: string;
   description: string;
-  query_type?: string;
   query_language?: string;
   editor_mode?: string;
   query_content: string;

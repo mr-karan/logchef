@@ -212,7 +212,6 @@ export function useSavedQueries(
               // Payload includes only relevant fields for updateTeamSourceQuery
               name: formData.name,
               description: formData.description,
-              query_type: formData.query_type,
               query_language: formData.query_language,
               editor_mode: formData.editor_mode,
               query_content: formData.query_content
@@ -251,7 +250,6 @@ export function useSavedQueries(
                 {
                   name: formData.name,
                   description: formData.description,
-                  query_type: formData.query_type,
                   query_language: formData.query_language,
                   editor_mode: formData.editor_mode,
                   query_content: formData.query_content
@@ -281,7 +279,6 @@ export function useSavedQueries(
               formData.name,
               formData.description,
               parsedContent, // Pass the parsed content object
-              formData.query_type,
               formData.query_language,
               formData.editor_mode
           );
@@ -349,7 +346,6 @@ export function useSavedQueries(
     try {
       const content = JSON.parse(queryData.query_content)
       const metadata = resolveSavedQueryMetadata({
-        query_type: queryData.query_type,
         query_language: queryData.query_language,
         editor_mode: queryData.editor_mode,
         source_type: _currentSource?.value?.source_type,
@@ -669,7 +665,6 @@ export function useSavedQueries(
         name?: string;
         description?: string;
         query_content: string; // Content is required for update here
-        query_type: 'logchefql' | 'sql';
         query_language: 'logchefql' | 'clickhouse-sql' | 'logsql';
         editor_mode: 'builder' | 'native';
       }
@@ -681,7 +676,6 @@ export function useSavedQueries(
         name: updateData.name, // Pass along if provided
         description: updateData.description, // Pass along if provided
         query_content: updateData.query_content,
-        query_type: updateData.query_type,
         query_language: updateData.query_language,
         editor_mode: updateData.editor_mode,
       };

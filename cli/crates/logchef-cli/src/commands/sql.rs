@@ -216,7 +216,7 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     }
 
     let request = SqlQueryRequest {
-        raw_sql: sql,
+        query_text: sql,
         limit: None, // User controls via SQL LIMIT clause
         timezone: ctx.defaults.timezone.clone(),
         start_time: None,

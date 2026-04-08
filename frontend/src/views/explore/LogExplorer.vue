@@ -612,7 +612,6 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
       {
         name: formData.name,
         description: formData.description,
-        query_type: formData.query_type,
         query_language: formData.query_language,
         editor_mode: formData.editor_mode,
         query_content: formData.query_content,

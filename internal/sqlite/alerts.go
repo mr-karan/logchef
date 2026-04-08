@@ -12,12 +12,11 @@ import (
 )
 
 const (
-insertAlertQuery = `INSERT INTO alerts (
+	insertAlertQuery = `INSERT INTO alerts (
     team_id,
     source_id,
     name,
     description,
-    query_type,
     query_language,
     editor_mode,
     query,
@@ -42,7 +41,6 @@ RETURNING id, created_at, updated_at, last_state, last_evaluated_at, last_trigge
     source_id,
     name,
     description,
-    query_type,
     query_language,
     editor_mode,
     query,
@@ -95,10 +93,9 @@ SET last_state = 'firing',
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?`
 
-updateAlertQuery = `UPDATE alerts
+	updateAlertQuery = `UPDATE alerts
 SET name = ?,
     description = ?,
-    query_type = ?,
     query_language = ?,
     editor_mode = ?,
     query = ?,
@@ -273,7 +270,6 @@ func (db *DB) CreateAlert(ctx context.Context, alert *models.Alert) error {
 		int64(alert.SourceID),
 		alert.Name,
 		nullableString(alert.Description),
-		string(alert.QueryType),
 		string(alert.QueryLanguage),
 		string(alert.EditorMode),
 		nullableString(alert.Query),
@@ -343,7 +339,6 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 	res, err := db.writeDB.ExecContext(ctx, updateAlertQuery,
 		alert.Name,
 		nullableString(alert.Description),
-		string(alert.QueryType),
 		string(alert.QueryLanguage),
 		string(alert.EditorMode),
 		nullableString(alert.Query),
@@ -389,7 +384,6 @@ func scanAlert(scanner interface {
 		id, teamID, sourceID             int64
 		name                             string
 		description                      sql.NullString
-		queryType                        string
 		queryLanguage                    string
 		editorMode                       string
 		query                            sql.NullString
@@ -416,7 +410,6 @@ func scanAlert(scanner interface {
 		&sourceID,
 		&name,
 		&description,
-		&queryType,
 		&queryLanguage,
 		&editorMode,
 		&query,
@@ -458,7 +451,6 @@ func scanAlert(scanner interface {
 		return nil, fmt.Errorf("failed to decode webhook URLs: %w", err)
 	}
 	resolvedLanguage, resolvedEditorMode, err := models.ResolveAlertMetadata(
-		models.AlertQueryType(queryType),
 		models.QueryLanguage(queryLanguage),
 		models.AlertEditorMode(editorMode),
 	)
@@ -472,7 +464,6 @@ func scanAlert(scanner interface {
 		SourceID:          models.SourceID(sourceID),
 		Name:              name,
 		Description:       description.String,
-		QueryType:         models.AlertQueryType(queryType),
 		QueryLanguage:     resolvedLanguage,
 		EditorMode:        resolvedEditorMode,
 		Query:             query.String,

@@ -45,7 +45,7 @@ export interface TemplateVariable {
 
 // Simplified query parameters - intended for API communication
 export interface QueryParams {
-  raw_sql: string;
+  query_text: string;
   limit?: number;
   window?: string;
   group_by?: string;

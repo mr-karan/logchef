@@ -49,7 +49,7 @@ type ActiveQuery struct {
 	SourceID  models.SourceID
 	TeamID    models.TeamID
 	StartTime time.Time
-	SQL       string
+	QueryText string
 	Cancel    context.CancelFunc
 }
 
@@ -69,7 +69,7 @@ func init() {
 }
 
 // AddQuery adds a new active query to the tracker
-func (qt *QueryTracker) AddQuery(userID models.UserID, sourceID models.SourceID, teamID models.TeamID, sql string, cancel context.CancelFunc) string {
+func (qt *QueryTracker) AddQuery(userID models.UserID, sourceID models.SourceID, teamID models.TeamID, queryText string, cancel context.CancelFunc) string {
 	qt.mu.Lock()
 	defer qt.mu.Unlock()
 
@@ -80,7 +80,7 @@ func (qt *QueryTracker) AddQuery(userID models.UserID, sourceID models.SourceID,
 		SourceID:  sourceID,
 		TeamID:    teamID,
 		StartTime: time.Now(),
-		SQL:       sql,
+		QueryText: queryText,
 		Cancel:    cancel,
 	}
 
@@ -185,8 +185,8 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
 	}
 
-	// Check if SQL contains variable placeholders.
-	requiredVars := template.ExtractVariableNames(req.RawSQL)
+	// Check if the query contains variable placeholders.
+	requiredVars := template.ExtractVariableNames(req.QueryText)
 
 	// Validate that all required variables are provided.
 	if len(requiredVars) > 0 && len(req.Variables) == 0 {
@@ -196,7 +196,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 	}
 
 	// Perform template variable substitution if variables are provided.
-	processedSQL := req.RawSQL
+	processedQuery := req.QueryText
 	if len(req.Variables) > 0 {
 		vars := make([]template.Variable, len(req.Variables))
 		for i, v := range req.Variables {
@@ -207,25 +207,25 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 			}
 		}
 
-		substituted, err := template.SubstituteVariables(req.RawSQL, vars)
+		substituted, err := template.SubstituteVariables(req.QueryText, vars)
 		if err != nil {
 			return SendErrorWithType(c, fiber.StatusBadRequest,
 				fmt.Sprintf("Variable substitution failed: %v", err), models.ValidationErrorType)
 		}
-		processedSQL = substituted
+		processedQuery = substituted
 	}
 
 	// Create a cancellable context for this query
 	queryCtx, cancel := context.WithCancel(c.Context())
 	defer cancel() // Ensure cleanup
 
-	// Add query to tracker (use original SQL for tracking, substituted for execution)
-	queryID := queryTracker.AddQuery(user.ID, sourceID, teamID, req.RawSQL, cancel)
+	// Add query to tracker (use original query text for tracking, substituted for execution)
+	queryID := queryTracker.AddQuery(user.ID, sourceID, teamID, req.QueryText, cancel)
 	defer queryTracker.RemoveQuery(queryID) // Ensure cleanup
 
 	// Prepare parameters for the core query function.
 	params := datasource.QueryRequest{
-		RawQuery:     processedSQL,
+		RawQuery:     processedQuery,
 		Timezone:     req.Timezone,
 		Limit:        req.Limit,
 		MaxLimit:     s.config.Query.MaxLimit,
@@ -354,13 +354,13 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Validate raw_sql parameter - empty SQL is not allowed
-	if strings.TrimSpace(req.RawSQL) == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "raw_sql parameter is required", models.ValidationErrorType)
+	// Validate query_text parameter - empty queries are not allowed
+	if strings.TrimSpace(req.QueryText) == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "query_text parameter is required", models.ValidationErrorType)
 	}
 
-	// Check if SQL contains variable placeholders.
-	requiredVars := template.ExtractVariableNames(req.RawSQL)
+	// Check if the query contains variable placeholders.
+	requiredVars := template.ExtractVariableNames(req.QueryText)
 
 	// Validate that all required variables are provided.
 	if len(requiredVars) > 0 && len(req.Variables) == 0 {
@@ -370,7 +370,7 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 	}
 
 	// Perform template variable substitution if variables are provided.
-	processedSQL := req.RawSQL
+	processedQuery := req.QueryText
 	if len(req.Variables) > 0 {
 		vars := make([]template.Variable, len(req.Variables))
 		for i, v := range req.Variables {
@@ -381,12 +381,12 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 			}
 		}
 
-		substituted, err := template.SubstituteVariables(req.RawSQL, vars)
+		substituted, err := template.SubstituteVariables(req.QueryText, vars)
 		if err != nil {
 			return SendErrorWithType(c, fiber.StatusBadRequest,
 				fmt.Sprintf("Variable substitution failed: %v", err), models.ValidationErrorType)
 		}
-		processedSQL = substituted
+		processedQuery = substituted
 	}
 
 	// Use window from the request body or default to 1 minute
@@ -398,7 +398,7 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 	// Prepare parameters for the core histogram function.
 	params := core.HistogramParams{
 		Window:   window,
-		Query:    processedSQL, // Pass processed SQL containing filters and time conditions
+		Query:    processedQuery, // Pass processed query text containing filters and time conditions
 		Timezone: req.Timezone,
 	}
 

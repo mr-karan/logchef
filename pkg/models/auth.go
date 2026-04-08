@@ -115,7 +115,6 @@ type TeamQuery struct {
 	SourceID      SourceID             `json:"source_id" db:"source_id"`
 	Name          string               `json:"name" db:"name"`
 	Description   string               `json:"description" db:"description"`
-	QueryType     SavedQueryType       `json:"query_type" db:"query_type"`
 	QueryLanguage QueryLanguage        `json:"query_language" db:"query_language"`
 	EditorMode    SavedQueryEditorMode `json:"editor_mode" db:"editor_mode"`
 	QueryContent  string               `json:"query_content" db:"query_content"`

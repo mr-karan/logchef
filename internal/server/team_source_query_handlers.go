@@ -104,8 +104,8 @@ func (s *Server) handleCreateTeamSourceCollection(c *fiber.Ctx) error {
 
 	if err != nil {
 		s.log.Error("failed to create collection", "error", err, "team_id", teamID, "source_id", sourceID)
-		if errors.Is(err, core.ErrQueryTypeRequired) ||
-			errors.Is(err, core.ErrInvalidQueryType) ||
+		if errors.Is(err, core.ErrQueryLanguageRequired) ||
+			errors.Is(err, core.ErrInvalidQueryDefinition) ||
 			errors.Is(err, core.ErrInvalidQueryContent) ||
 			errors.Is(err, core.ErrUnsupportedSavedQueryDefinition) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -185,7 +185,7 @@ func (s *Server) handleUpdateTeamSourceCollection(c *fiber.Ctx) error {
 		if errors.Is(err, core.ErrQueryNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Collection not found", models.NotFoundErrorType)
 		}
-		if errors.Is(err, core.ErrInvalidQueryType) ||
+		if errors.Is(err, core.ErrInvalidQueryDefinition) ||
 			errors.Is(err, core.ErrInvalidQueryContent) ||
 			errors.Is(err, core.ErrUnsupportedSavedQueryDefinition) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -273,18 +273,17 @@ func (s *Server) handleResolveQuery(c *fiber.Ctx) error {
 	// Return the full query details for hydration
 	// The frontend will use this to populate the explorer state
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{
-		"id":            query.ID,
-		"team_id":       query.TeamID,
-		"source_id":     query.SourceID,
-		"name":          query.Name,
-		"description":   query.Description,
-		"query_type":    query.QueryType,
+		"id":             query.ID,
+		"team_id":        query.TeamID,
+		"source_id":      query.SourceID,
+		"name":           query.Name,
+		"description":    query.Description,
 		"query_language": query.QueryLanguage,
-		"editor_mode":   query.EditorMode,
-		"query_content": query.QueryContent,
-		"is_bookmarked": query.IsBookmarked,
-		"created_at":    query.CreatedAt,
-		"updated_at":    query.UpdatedAt,
+		"editor_mode":    query.EditorMode,
+		"query_content":  query.QueryContent,
+		"is_bookmarked":  query.IsBookmarked,
+		"created_at":     query.CreatedAt,
+		"updated_at":     query.UpdatedAt,
 	})
 }
 

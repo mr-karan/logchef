@@ -20,7 +20,6 @@ func (db *DB) CreateTeamSourceQuery(ctx context.Context, query *models.TeamQuery
 		SourceID:      int64(query.SourceID),
 		Name:          query.Name,
 		Description:   description,
-		QueryType:     string(query.QueryType),
 		QueryLanguage: string(query.QueryLanguage),
 		EditorMode:    string(query.EditorMode),
 		QueryContent:  query.QueryContent,
@@ -42,7 +41,6 @@ func (db *DB) CreateTeamSourceQuery(ctx context.Context, query *models.TeamQuery
 
 func savedTeamQueryFromSQLC(sqlcQuery sqlc.TeamQuery) (*models.SavedTeamQuery, error) {
 	queryLanguage, editorMode, err := models.ResolveSavedQueryMetadata(
-		models.SavedQueryType(sqlcQuery.QueryType),
 		models.QueryLanguage(sqlcQuery.QueryLanguage),
 		models.SavedQueryEditorMode(sqlcQuery.EditorMode),
 	)
@@ -56,7 +54,6 @@ func savedTeamQueryFromSQLC(sqlcQuery sqlc.TeamQuery) (*models.SavedTeamQuery, e
 		SourceID:      models.SourceID(sqlcQuery.SourceID),
 		Name:          sqlcQuery.Name,
 		Description:   sqlcQuery.Description.String,
-		QueryType:     models.SavedQueryType(sqlcQuery.QueryType),
 		QueryLanguage: queryLanguage,
 		EditorMode:    editorMode,
 		QueryContent:  sqlcQuery.QueryContent,
@@ -88,7 +85,7 @@ func (db *DB) GetTeamSourceQuery(ctx context.Context, teamID models.TeamID, sour
 // UpdateTeamSourceQuery updates an existing saved query record.
 // Only non-empty fields in the input arguments are intended to be updated (though the current SQL updates all).
 // The `updated_at` timestamp is automatically set by the query.
-func (db *DB) UpdateTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int, name, description, queryType, queryLanguage, editorMode, queryContent string) error {
+func (db *DB) UpdateTeamSourceQuery(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, queryID int, name, description, queryLanguage, editorMode, queryContent string) error {
 
 	// Prepare parameters, handling potentially empty update values.
 	// The SQL query updates all specified fields; partial updates would require a different query or dynamic SQL.
@@ -96,7 +93,6 @@ func (db *DB) UpdateTeamSourceQuery(ctx context.Context, teamID models.TeamID, s
 	params := sqlc.UpdateTeamSourceQueryParams{
 		Name:          name,
 		Description:   desc,
-		QueryType:     queryType,
 		QueryLanguage: queryLanguage,
 		EditorMode:    editorMode,
 		QueryContent:  queryContent,
@@ -221,7 +217,6 @@ func (db *DB) ListQueriesForUser(ctx context.Context, userID models.UserID) ([]*
 	queries := make([]*models.SavedTeamQuery, 0, len(sqlcQueries))
 	for i := range sqlcQueries {
 		queryLanguage, editorMode, err := models.ResolveSavedQueryMetadata(
-			models.SavedQueryType(sqlcQueries[i].QueryType),
 			models.QueryLanguage(sqlcQueries[i].QueryLanguage),
 			models.SavedQueryEditorMode(sqlcQueries[i].EditorMode),
 		)
@@ -234,7 +229,6 @@ func (db *DB) ListQueriesForUser(ctx context.Context, userID models.UserID) ([]*
 			SourceID:      models.SourceID(sqlcQueries[i].SourceID),
 			Name:          sqlcQueries[i].Name,
 			Description:   sqlcQueries[i].Description.String,
-			QueryType:     models.SavedQueryType(sqlcQueries[i].QueryType),
 			QueryLanguage: queryLanguage,
 			EditorMode:    editorMode,
 			QueryContent:  sqlcQueries[i].QueryContent,

@@ -15,6 +15,7 @@ sql:
       - "internal/sqlite/migrations/000011_add_managed_column.up.sql"
       - "internal/sqlite/migrations/000012_datasource_sources.up.sql"
       - "internal/sqlite/migrations/000013_query_languages.up.sql"
+      - "internal/sqlite/migrations/000014_remove_legacy_query_type.up.sql"
     gen:
       go:
         package: "sqlc"

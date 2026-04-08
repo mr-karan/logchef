@@ -143,7 +143,7 @@ func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID mo
 		return fmt.Errorf("name is required")
 	}
 
-	queryLanguage, editorMode, err := models.ResolveAlertMetadata(alert.QueryType, alert.QueryLanguage, alert.EditorMode)
+	queryLanguage, editorMode, err := models.ResolveAlertMetadata(alert.QueryLanguage, alert.EditorMode)
 	if err != nil {
 		return err
 	}
@@ -154,7 +154,6 @@ func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID mo
 		return err
 	}
 
-	alert.QueryType = models.LegacyAlertQueryTypeFromEditorMode(editorMode)
 	alert.QueryLanguage = queryLanguage
 	alert.EditorMode = editorMode
 	alert.Name = strings.TrimSpace(alert.Name)
@@ -208,7 +207,6 @@ func CreateAlert(ctx context.Context, db *sqlite.DB, ds *datasource.Service, log
 		SourceID:          sourceID,
 		Name:              req.Name,
 		Description:       req.Description,
-		QueryType:         req.QueryType,
 		QueryLanguage:     req.QueryLanguage,
 		EditorMode:        req.EditorMode,
 		Query:             req.Query,
@@ -318,9 +316,6 @@ func applyAlertUpdates(alert *models.Alert, req *models.UpdateAlertRequest) erro
 }
 
 func applyQueryTypeUpdate(alert *models.Alert, req *models.UpdateAlertRequest) error {
-	if req.QueryType != nil {
-		alert.QueryType = *req.QueryType
-	}
 	if req.QueryLanguage != nil {
 		alert.QueryLanguage = *req.QueryLanguage
 	}
@@ -466,7 +461,6 @@ func TestAlertQuery(ctx context.Context, db *sqlite.DB, ds *datasource.Service, 
 	tempAlert := &models.Alert{
 		SourceID:          sourceID,
 		Name:              "test-alert",
-		QueryType:         req.QueryType,
 		QueryLanguage:     req.QueryLanguage,
 		EditorMode:        req.EditorMode,
 		Query:             req.Query,

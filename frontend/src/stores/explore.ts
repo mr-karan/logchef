@@ -517,7 +517,6 @@ export const useExploreStore = defineStore("explore", () => {
   function hydrateFromResolvedQuery(data: {
     id: number;
     name: string;
-    query_type: string;
     query_language?: string;
     editor_mode?: string;
     query_content: string;
@@ -525,7 +524,6 @@ export const useExploreStore = defineStore("explore", () => {
     try {
       const content = JSON.parse(data.query_content);
       const metadata = resolveSavedQueryMetadata({
-        query_type: data.query_type,
         query_language: data.query_language,
         editor_mode: data.editor_mode,
         source_type: sourcesStore.currentSourceDetails?.source_type ?? "clickhouse",
@@ -841,7 +839,7 @@ export const useExploreStore = defineStore("explore", () => {
       };
 
       const params: QueryParams = {
-        raw_sql: '',
+        query_text: '',
         query_timeout: state.data.value.queryTimeout,
         start_time: activeTimeRange?.start ? toISOString(activeTimeRange.start) : undefined,
         end_time: activeTimeRange?.end ? toISOString(activeTimeRange.end) : undefined,
@@ -885,7 +883,7 @@ export const useExploreStore = defineStore("explore", () => {
       const { getVariablesForApi } = useVariables();
       const variables = getVariablesForApi();
 
-      params.raw_sql = sql;
+      params.query_text = sql;
       if (variables.length > 0) {
         params.variables = variables;
       }

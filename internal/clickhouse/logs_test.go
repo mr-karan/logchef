@@ -353,16 +353,16 @@ func TestLogQueryParams(t *testing.T) {
 		{
 			name: "valid params with SQL",
 			params: LogQueryParams{
-				Limit:  100,
-				RawSQL: "SELECT * FROM logs",
+				Limit:     100,
+				QueryText: "SELECT * FROM logs",
 			},
 			wantErr: false,
 		},
 		{
 			name: "zero limit is valid (uses default)",
 			params: LogQueryParams{
-				Limit:  0,
-				RawSQL: "SELECT * FROM logs",
+				Limit:     0,
+				QueryText: "SELECT * FROM logs",
 			},
 			wantErr: false,
 		},
@@ -370,7 +370,7 @@ func TestLogQueryParams(t *testing.T) {
 			name: "with timeout",
 			params: LogQueryParams{
 				Limit:        100,
-				RawSQL:       "SELECT * FROM logs",
+				QueryText:    "SELECT * FROM logs",
 				QueryTimeout: intPtr(30),
 			},
 			wantErr: false,
@@ -380,8 +380,8 @@ func TestLogQueryParams(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Structural validation - these params should be valid
-			if tt.params.RawSQL == "" && !tt.wantErr {
-				t.Errorf("expected RawSQL to be set for valid params")
+			if tt.params.QueryText == "" && !tt.wantErr {
+				t.Errorf("expected QueryText to be set for valid params")
 			}
 		})
 	}

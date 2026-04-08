@@ -88,13 +88,13 @@ type TemplateVariable struct {
 
 // APIQueryRequest represents the request payload for the standard log querying endpoint.
 type APIQueryRequest struct {
-	Limit  int    `json:"limit"`
-	RawSQL string `json:"raw_sql"`
+	Limit     int    `json:"limit"`
+	QueryText string `json:"query_text"`
 	// Optional ISO8601/RFC3339 time range for datasource-native query execution.
 	StartTime string `json:"start_time,omitempty"`
 	EndTime   string `json:"end_time,omitempty"`
 	Timezone  string `json:"timezone,omitempty"`
-	// Variables for template substitution in the SQL query.
+	// Variables for template substitution in the query text.
 	// Example: {"name": "from_date", "type": "date", "value": "2026-01-01T00:00:00Z"}
 	Variables []TemplateVariable `json:"variables,omitempty"`
 	// Query execution timeout in seconds. If not specified, uses default timeout.
@@ -109,11 +109,11 @@ type APIHistogramRequest struct {
 	StartTime      string `json:"start_time,omitempty"`      // ISO8601/RFC3339 time range start
 	EndTime        string `json:"end_time,omitempty"`        // ISO8601/RFC3339 time range end
 	Limit          int    `json:"limit"`                     // Limit might influence histogram sampling/performance
-	RawSQL         string `json:"raw_sql"`                   // Contains non-time filters
+	QueryText      string `json:"query_text"`                // Contains non-time filters
 	Window         string `json:"window,omitempty"`          // For histogram queries: time window size like "1m", "5m", "1h"
 	GroupBy        string `json:"group_by,omitempty"`        // For histogram queries: field to group by
 	Timezone       string `json:"timezone,omitempty"`        // Kept for histogram, optional otherwise
-	// Variables for template substitution in the SQL query.
+	// Variables for template substitution in the query text.
 	Variables []TemplateVariable `json:"variables,omitempty"`
 	// Query execution timeout in seconds. If not specified, uses default timeout.
 	QueryTimeout *int `json:"query_timeout,omitempty"`
@@ -133,8 +133,8 @@ const (
 	// SavedQueryTabFilters represents the filters tab
 	SavedQueryTabFilters SavedQueryTab = "filters"
 
-	// SavedQueryTabRawSQL represents the raw SQL tab
-	SavedQueryTabRawSQL SavedQueryTab = "raw_sql"
+	// SavedQueryTabNativeQuery represents the datasource-native query tab.
+	SavedQueryTabNativeQuery SavedQueryTab = "native_query"
 )
 
 // SavedQueryTimeRange represents a time range for a saved query
@@ -147,18 +147,6 @@ type SavedQueryTimeRange struct {
 		End   int64 `json:"end"`   // Unix timestamp in milliseconds
 	} `json:"absolute"`
 }
-
-// SavedQueryType represents the type of saved query
-// Deprecated: use QueryLanguage + SavedQueryEditorMode for new logic.
-type SavedQueryType string
-
-const (
-	// SavedQueryTypeLogchefQL represents a query saved in LogchefQL format
-	SavedQueryTypeLogchefQL SavedQueryType = "logchefql"
-
-	// SavedQueryTypeSQL represents a query saved in SQL format
-	SavedQueryTypeSQL SavedQueryType = "sql"
-)
 
 // SavedQueryEditorMode captures the UI/editor that authored the saved query.
 type SavedQueryEditorMode string
@@ -188,13 +176,6 @@ func (m SavedQueryEditorMode) Valid() bool {
 	}
 }
 
-func LegacySavedQueryTypeFromLanguage(language QueryLanguage) SavedQueryType {
-	if NormalizeQueryLanguage(language) == QueryLanguageLogchefQL {
-		return SavedQueryTypeLogchefQL
-	}
-	return SavedQueryTypeSQL
-}
-
 func DefaultSavedQueryEditorModeForLanguage(language QueryLanguage) SavedQueryEditorMode {
 	if NormalizeQueryLanguage(language) == QueryLanguageLogchefQL {
 		return SavedQueryEditorModeBuilder
@@ -202,19 +183,16 @@ func DefaultSavedQueryEditorModeForLanguage(language QueryLanguage) SavedQueryEd
 	return SavedQueryEditorModeNative
 }
 
-func ResolveSavedQueryMetadata(queryType SavedQueryType, language QueryLanguage, mode SavedQueryEditorMode) (QueryLanguage, SavedQueryEditorMode, error) {
-	normalizedType := queryType
+func ResolveSavedQueryMetadata(language QueryLanguage, mode SavedQueryEditorMode) (QueryLanguage, SavedQueryEditorMode, error) {
 	normalizedLanguage := NormalizeQueryLanguage(language)
 	normalizedMode := NormalizeSavedQueryEditorMode(mode)
 
 	if normalizedLanguage == "" {
-		switch normalizedType {
-		case SavedQueryTypeLogchefQL:
+		switch normalizedMode {
+		case SavedQueryEditorModeBuilder:
 			normalizedLanguage = QueryLanguageLogchefQL
-		case "", SavedQueryTypeSQL:
-			normalizedLanguage = QueryLanguageClickHouseSQL
 		default:
-			return "", "", ErrInvalidSavedQueryConfiguration{Message: "invalid saved query type"}
+			return "", "", ErrInvalidSavedQueryConfiguration{Message: "query_language is required"}
 		}
 	}
 
@@ -223,18 +201,7 @@ func ResolveSavedQueryMetadata(queryType SavedQueryType, language QueryLanguage,
 	}
 
 	if normalizedMode == "" {
-		if normalizedType != "" {
-			switch normalizedType {
-			case SavedQueryTypeLogchefQL:
-				normalizedMode = SavedQueryEditorModeBuilder
-			case SavedQueryTypeSQL:
-				normalizedMode = SavedQueryEditorModeNative
-			default:
-				return "", "", ErrInvalidSavedQueryConfiguration{Message: "invalid saved query type"}
-			}
-		} else {
-			normalizedMode = DefaultSavedQueryEditorModeForLanguage(normalizedLanguage)
-		}
+		normalizedMode = DefaultSavedQueryEditorModeForLanguage(normalizedLanguage)
 	}
 
 	if !normalizedMode.Valid() {
@@ -246,10 +213,6 @@ func ResolveSavedQueryMetadata(queryType SavedQueryType, language QueryLanguage,
 	}
 	if normalizedMode == SavedQueryEditorModeNative && normalizedLanguage == QueryLanguageLogchefQL {
 		return "", "", ErrInvalidSavedQueryConfiguration{Message: "native mode requires a datasource-native query language"}
-	}
-
-	if normalizedType != "" && normalizedType != LegacySavedQueryTypeFromLanguage(normalizedLanguage) {
-		return "", "", ErrInvalidSavedQueryConfiguration{Message: "query_type does not match query_language"}
 	}
 
 	return normalizedLanguage, normalizedMode, nil
@@ -288,7 +251,6 @@ type SavedTeamQuery struct {
 	SourceID      SourceID             `json:"source_id" db:"source_id"`
 	Name          string               `json:"name" db:"name"`
 	Description   string               `json:"description" db:"description"`
-	QueryType     SavedQueryType       `json:"query_type" db:"query_type"`
 	QueryLanguage QueryLanguage        `json:"query_language" db:"query_language"`
 	EditorMode    SavedQueryEditorMode `json:"editor_mode" db:"editor_mode"`
 	QueryContent  string               `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
@@ -304,7 +266,6 @@ type CreateTeamQueryRequest struct {
 	Name          string               `json:"name" validate:"required"`
 	Description   string               `json:"description"`
 	SourceID      SourceID             `json:"source_id" validate:"required"`
-	QueryType     SavedQueryType       `json:"query_type,omitempty"`
 	QueryLanguage QueryLanguage        `json:"query_language,omitempty"`
 	EditorMode    SavedQueryEditorMode `json:"editor_mode,omitempty"`
 	QueryContent  string               `json:"query_content" validate:"required"`
@@ -315,7 +276,6 @@ type UpdateTeamQueryRequest struct {
 	Name          *string               `json:"name,omitempty"`
 	Description   *string               `json:"description,omitempty"`
 	SourceID      *SourceID             `json:"source_id,omitempty"`
-	QueryType     *SavedQueryType       `json:"query_type,omitempty"`
 	QueryLanguage *QueryLanguage        `json:"query_language,omitempty"`
 	EditorMode    *SavedQueryEditorMode `json:"editor_mode,omitempty"`
 	QueryContent  *string               `json:"query_content,omitempty"`

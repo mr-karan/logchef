@@ -1,8 +1,6 @@
 export type QueryLanguage = "logchefql" | "clickhouse-sql" | "logsql";
 export type SavedQueryEditorMode = "builder" | "native";
 export type AlertEditorMode = "condition" | "native";
-export type LegacySavedQueryType = "logchefql" | "sql";
-export type LegacyAlertQueryType = "condition" | "sql";
 
 type SourceDescriptor =
   | {
@@ -66,33 +64,23 @@ export function getNativeQueryLanguageForSource(source: SourceDescriptor): Query
   return supportsQueryLanguage(source, "logsql") ? "logsql" : "clickhouse-sql";
 }
 
-export function legacySavedQueryTypeFromLanguage(language: QueryLanguage): LegacySavedQueryType {
-  return language === "logchefql" ? "logchefql" : "sql";
-}
-
-export function legacyAlertQueryTypeFromEditorMode(mode: AlertEditorMode): LegacyAlertQueryType {
-  return mode === "condition" ? "condition" : "sql";
-}
-
 export function resolveSavedQueryMetadata(input: {
   query_language?: string | null;
   editor_mode?: string | null;
-  query_type?: string | null;
   source_type?: string | null;
   query_languages?: string[] | null;
-}): { queryLanguage: QueryLanguage; editorMode: SavedQueryEditorMode; queryType: LegacySavedQueryType } {
+}): { queryLanguage: QueryLanguage; editorMode: SavedQueryEditorMode } {
   const source = {
     source_type: input.source_type ?? null,
     query_languages: input.query_languages ?? null,
   };
   const explicitLanguage = input.query_language;
   const explicitEditorMode = input.editor_mode;
-  const legacyType = input.query_type;
 
   let queryLanguage: QueryLanguage;
   if (explicitLanguage === "logchefql" || explicitLanguage === "clickhouse-sql" || explicitLanguage === "logsql") {
     queryLanguage = explicitLanguage;
-  } else if (legacyType === "logchefql") {
+  } else if (explicitEditorMode === "builder") {
     queryLanguage = "logchefql";
   } else {
     queryLanguage = getNativeQueryLanguageForSource(source);
@@ -105,32 +93,26 @@ export function resolveSavedQueryMetadata(input: {
     editorMode = queryLanguage === "logchefql" ? "builder" : "native";
   }
 
-  return {
-    queryLanguage,
-    editorMode,
-    queryType: legacySavedQueryTypeFromLanguage(queryLanguage),
-  };
+  return { queryLanguage, editorMode };
 }
 
 export function resolveAlertMetadata(input: {
   query_language?: string | null;
   editor_mode?: string | null;
-  query_type?: string | null;
   source_type?: string | null;
   query_languages?: string[] | null;
-}): { queryLanguage: QueryLanguage; editorMode: AlertEditorMode; queryType: LegacyAlertQueryType } {
+}): { queryLanguage: QueryLanguage; editorMode: AlertEditorMode } {
   const source = {
     source_type: input.source_type ?? null,
     query_languages: input.query_languages ?? null,
   };
   const explicitLanguage = input.query_language;
   const explicitEditorMode = input.editor_mode;
-  const legacyType = input.query_type;
 
   let queryLanguage: QueryLanguage;
   if (explicitLanguage === "clickhouse-sql" || explicitLanguage === "logsql") {
     queryLanguage = explicitLanguage;
-  } else if (legacyType === "condition") {
+  } else if (explicitEditorMode === "condition") {
     queryLanguage = "clickhouse-sql";
   } else {
     queryLanguage = getNativeQueryLanguageForSource(source);
@@ -139,8 +121,6 @@ export function resolveAlertMetadata(input: {
   let editorMode: AlertEditorMode;
   if (explicitEditorMode === "condition" || explicitEditorMode === "native") {
     editorMode = explicitEditorMode;
-  } else if (legacyType === "condition") {
-    editorMode = "condition";
   } else {
     editorMode = "native";
   }
@@ -149,11 +129,7 @@ export function resolveAlertMetadata(input: {
     editorMode = "native";
   }
 
-  return {
-    queryLanguage,
-    editorMode,
-    queryType: legacyAlertQueryTypeFromEditorMode(editorMode),
-  };
+  return { queryLanguage, editorMode };
 }
 
 export function getQueryLanguageLabel(language: string | null | undefined): string {

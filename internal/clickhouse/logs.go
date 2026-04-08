@@ -13,9 +13,9 @@ import (
 
 // LogQueryParams defines parameters for querying logs.
 type LogQueryParams struct {
-	Limit    int
-	MaxLimit int
-	RawSQL   string
+	Limit     int
+	MaxLimit  int
+	QueryText string
 	// Query execution timeout in seconds. If not specified, uses default timeout.
 	QueryTimeout *int
 }

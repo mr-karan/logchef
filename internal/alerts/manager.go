@@ -179,7 +179,6 @@ func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert
 	errorMessage := fmt.Sprintf("Evaluation failed: %v", evalErr)
 	errorPayload := map[string]any{
 		"error":          evalErr.Error(),
-		"query_type":     string(alert.QueryType),
 		"query_language": string(alert.QueryLanguage),
 		"editor_mode":    string(alert.EditorMode),
 		"query":          alert.Query,

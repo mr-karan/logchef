@@ -149,7 +149,6 @@ const emptyStateMessage = computed(() =>
 
 function getSavedQueryBadge(query: SavedTeamQuery) {
   const metadata = resolveSavedQueryMetadata({
-    query_type: query.query_type,
     query_language: query.query_language,
     editor_mode: query.editor_mode,
   });
@@ -366,7 +365,6 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
         name: formData.name,
         description: formData.description,
         query_content: formData.query_content,
-        query_type: formData.query_type as 'logchefql' | 'sql',
         query_language: formData.query_language,
         editor_mode: formData.editor_mode,
       }

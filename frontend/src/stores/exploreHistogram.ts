@@ -112,7 +112,7 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
       const variables = getVariablesForApi();
 
       const params = {
-        raw_sql: queryText,
+        query_text: queryText,
         limit: 100,
         window: windowGranularity || '1m',
         timezone: timezone || undefined,

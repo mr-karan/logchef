@@ -125,7 +125,7 @@ pub struct QueryRequest {
 
 #[derive(Debug, Serialize)]
 pub struct SqlQueryRequest {
-    pub raw_sql: String,
+    pub query_text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -209,7 +209,8 @@ pub struct Collection {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
-    pub query_type: String,
+    pub query_language: String,
+    pub editor_mode: String,
     pub query_content: String,
     #[serde(default)]
     pub is_bookmarked: bool,
