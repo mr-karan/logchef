@@ -2,6 +2,23 @@
 
 Local development setup for Logchef.
 
+## VictoriaLogs Reference
+
+The local VictoriaLogs setup here is aligned with VictoriaMetrics' official Docker deployment examples:
+
+- Official deployment guide: [VictoriaLogs Docker deployment](https://github.com/VictoriaMetrics/VictoriaLogs/tree/master/deployment/docker)
+- Official single-node compose: [compose-vl-single.yml](https://github.com/VictoriaMetrics/VictoriaLogs/blob/master/deployment/docker/compose-vl-single.yml)
+- Official Vector example: [vector-vl-single.yml](https://github.com/VictoriaMetrics/VictoriaLogs/blob/master/deployment/docker/vector-vl-single.yml)
+
+The upstream single-node example exposes VictoriaLogs on `http://localhost:9428`, routes VMUI through `vmauth` on `http://localhost:8427/select/vmui/`, and uses Vector to push logs over HTTP into VictoriaLogs.
+
+Logchef's local dev environment intentionally keeps this lighter:
+
+- it runs the VictoriaLogs server itself on `:9428`
+- it does not run the full upstream `vmauth`, Grafana, `vmalert`, and VictoriaMetrics sidecar stack
+- it seeds a LogChef datasource pointing at the local VictoriaLogs instance
+- it ships a tiny ingestion helper for sample data instead of mirroring the full upstream Vector topology
+
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/)
@@ -27,6 +44,7 @@ just dev-ingest-logs
 Open http://localhost:5173 and login with `admin@logchef.internal` / `password`.
 Mailpit UI is available at http://localhost:8025.
 VictoriaLogs health should be available at http://localhost:9428/health.
+This local setup does not expose the upstream VMUI path on `:8427`, because `vmauth` is not part of Logchef's dev compose.
 
 To test email delivery locally, configure SMTP settings to:
 - Host: `mailpit`
@@ -116,3 +134,4 @@ just dev-init-tables
 - Run `just dev-ingest-logs` to send sample JSONL data into VictoriaLogs and demo streams into ClickHouse.
 - Validate the service is up with: `curl http://localhost:9428/health`
 - Re-send only the VictoriaLogs sample payload with: `cd dev && ./ingest-victorialogs.sh`
+- If you want the full upstream VictoriaLogs demo stack with VMUI, Grafana, `vmauth`, and `vmalert`, use the official compose files linked above instead of Logchef's trimmed local dev compose.
