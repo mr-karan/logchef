@@ -77,7 +77,7 @@ logchef auth --server https://logs.example.com
 # Query logs with LogchefQL
 logchef query "level:error" --since 1h
 
-# Execute raw SQL
+# Execute raw ClickHouse SQL
 logchef sql "SELECT * FROM logs.app WHERE level='error' LIMIT 10"
 ```
 

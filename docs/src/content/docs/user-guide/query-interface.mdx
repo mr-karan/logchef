@@ -3,7 +3,15 @@ title: Query Interface
 description: Two query modes, time controls, and result views.
 ---
 
-Logchef has two query modes: **LogchefQL** for quick filtering and **SQL** for full ClickHouse access.
+Logchef has two query modes:
+
+- **LogchefQL** for quick filtering across supported log sources
+- **Native mode** for the source's native query language
+
+The native mode label depends on the datasource:
+
+- **SQL** for ClickHouse sources
+- **LogsQL** for VictoriaLogs sources
 
 ## LogchefQL Mode
 
@@ -15,9 +23,16 @@ service = "api" and status_code >= 500
 body ~ "timeout"
 ```
 
+LogchefQL compiles to the backend's native query language before execution:
+
+- ClickHouse sources compile to SQL
+- VictoriaLogs sources compile to LogsQL
+
 See [Search Syntax](/guide/search-syntax) for the full reference.
 
-## SQL Mode
+## Native Mode
+
+### ClickHouse SQL
 
 Write raw ClickHouse SQL. You control everything — time filters, aggregations, joins, CTEs.
 
@@ -32,7 +47,15 @@ GROUP BY bucket
 ORDER BY bucket DESC
 ```
 
-Switch between modes using the **Search / SQL** tabs in the editor.
+### VictoriaLogs LogsQL
+
+Write raw LogsQL when you want VictoriaLogs-specific pipes and capabilities directly.
+
+```text
+service:="api" level:="error" | fields _time, _msg, service, level
+```
+
+Switch between modes using the **LogchefQL / SQL** tabs for ClickHouse or the **LogchefQL / LogsQL** tabs for VictoriaLogs.
 
 ## Time Controls
 
@@ -41,11 +64,16 @@ Switch between modes using the **Search / SQL** tabs in the editor.
 - **Relative syntax** — `now-1h`, `now-7d` in the input fields
 - **Timezone** — Toggle between browser local and UTC
 
-In LogchefQL mode, the time range is applied automatically. In SQL mode, the time picker is informational — you manage time filters in your SQL.
+In LogchefQL mode, the time range is applied automatically.
+
+In native mode:
+
+- ClickHouse SQL treats the time picker as informational — you manage time filters in your SQL.
+- VictoriaLogs LogsQL applies the selected time range outside the query text.
 
 ## Query Cancellation
 
-Press **Esc** or click **Cancel** to stop a running query. This cancels the query in ClickHouse too, not just the HTTP request.
+Press **Esc** or click **Cancel** to stop a running query. This cancels the backend query, not just the HTTP request.
 
 ## Results
 
@@ -66,7 +94,7 @@ Export results as CSV — all rows, visible rows, filtered rows, or current page
 
 ## Query Variables
 
-Use `{{variable_name}}` in SQL to create input fields:
+Use `{{variable_name}}` in native SQL to create input fields:
 
 ```sql
 SELECT * FROM logs
@@ -76,6 +104,8 @@ LIMIT {{ limit }}
 ```
 
 Variables support text, number, date, dropdown, and multi-select input types. Wrap optional clauses in `[[ ]]` to auto-remove them when the variable is empty.
+
+Variable support is currently designed around SQL-native workflows.
 
 ## Query History
 

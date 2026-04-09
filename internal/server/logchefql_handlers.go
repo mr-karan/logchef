@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -72,16 +73,42 @@ func parseLogchefQLTimeRange(startTime, endTime, timezone string) (*time.Time, *
 		return nil, nil, err
 	}
 
-	start, err := time.ParseInLocation("2006-01-02 15:04:05", startTime, loc)
+	start, err := parseLogchefQLTimeValue(startTime, loc)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("invalid start_time: %w", err)
 	}
-	end, err := time.ParseInLocation("2006-01-02 15:04:05", endTime, loc)
+	end, err := parseLogchefQLTimeValue(endTime, loc)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("invalid end_time: %w", err)
 	}
 
 	return &start, &end, nil
+}
+
+func parseLogchefQLTimeValue(value string, loc *time.Location) (time.Time, error) {
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+	} {
+		var (
+			parsed time.Time
+			err    error
+		)
+
+		switch layout {
+		case time.RFC3339Nano, time.RFC3339:
+			parsed, err = time.Parse(layout, value)
+		default:
+			parsed, err = time.ParseInLocation(layout, value, loc)
+		}
+		if err == nil {
+			return parsed, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("unsupported time format %q", value)
 }
 
 // handleLogchefQLTranslate translates a LogchefQL query to SQL.
@@ -222,8 +249,8 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 	// Parse request
 	var req struct {
 		Query        string                    `json:"query"`
-		StartTime    string                    `json:"start_time"`    // ISO8601 format
-		EndTime      string                    `json:"end_time"`      // ISO8601 format
+		StartTime    string                    `json:"start_time"`    // Accepts "2006-01-02 15:04:05" and ISO8601/RFC3339
+		EndTime      string                    `json:"end_time"`      // Accepts "2006-01-02 15:04:05" and ISO8601/RFC3339
 		Timezone     string                    `json:"timezone"`      // Timezone for time conversion
 		Limit        int                       `json:"limit"`         // Result limit
 		QueryTimeout *int                      `json:"query_timeout"` // Optional timeout in seconds

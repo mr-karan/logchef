@@ -3,7 +3,7 @@
  * 
  * This module provides the frontend API for interacting with the LogchefQL
  * backend endpoints. The backend handles all query parsing, validation, and
- * SQL generation - the frontend just sends LogchefQL strings and receives
+ * native query generation - the frontend just sends LogchefQL strings and receives
  * results.
  */
 
@@ -37,8 +37,8 @@ export interface TranslateRequest {
 }
 
 export interface TranslateResponse {
-  sql: string;           // WHERE clause conditions only
-  full_sql?: string;     // Complete executable SQL (when time params provided)
+  sql: string;           // WHERE clause conditions only (ClickHouse translation compatibility)
+  full_sql?: string;     // Complete executable SQL (ClickHouse only, when time params provided)
   generated_query?: string;
   generated_query_language?: QueryLanguage;
   select_clause?: string;  // Custom SELECT clause if pipe operator used
@@ -61,8 +61,8 @@ export interface TemplateVariable {
 
 export interface QueryRequest {
   query: string;
-  start_time: string;  // ISO8601 format
-  end_time: string;    // ISO8601 format
+  start_time: string;  // Explore time picker format ("YYYY-MM-DD HH:mm:ss"); server also accepts ISO8601
+  end_time: string;    // Explore time picker format ("YYYY-MM-DD HH:mm:ss"); server also accepts ISO8601
   timezone?: string;
   limit?: number;
   query_timeout?: number;
@@ -78,7 +78,7 @@ export interface QueryResponse {
     bytes_read: number;
   };
   query_id?: string;
-  generated_sql?: string;  // The SQL that was executed (for "Show SQL" feature)
+  generated_sql?: string;  // Deprecated compatibility field for generated_query
   generated_query?: string;
   generated_query_language?: QueryLanguage;
 }
@@ -88,11 +88,11 @@ export interface QueryResponse {
  */
 export const logchefqlApi = {
   /**
-   * Translate a LogchefQL query to SQL
-   * Returns the SQL string, validity status, and extracted metadata
+   * Translate a LogchefQL query to the source's native query language
+   * Returns legacy SQL compatibility fields plus the generated native query metadata
    * 
    * When start_time, end_time, timezone, and limit are provided,
-   * also returns full_sql with the complete executable query
+   * also returns full_sql with the complete executable ClickHouse query
    */
   translate: (teamId: number, sourceId: number, request: TranslateRequest) =>
     apiClient.post<TranslateResponse>(

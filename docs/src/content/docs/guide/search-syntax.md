@@ -5,6 +5,11 @@ description: Learn how to use Logchef's simple yet powerful search syntax
 
 Logchef provides a simple yet powerful search syntax called **LogchefQL** that makes it easy to find exactly what you're looking for in your logs.
 
+LogchefQL is the quick-filter language shared across supported datasources:
+
+- **ClickHouse** sources compile LogchefQL to SQL
+- **VictoriaLogs** sources compile LogchefQL to LogsQL
+
 ## Basic Syntax
 
 The basic syntax follows a simple key-value pattern:
@@ -191,7 +196,11 @@ body~"error" and log_attributes.request.method="POST"
 
 ## Under the Hood
 
-When you use LogchefQL, Logchef converts it to optimized ClickHouse SQL queries:
+When you use LogchefQL, Logchef converts it to the selected datasource's native query language before execution.
+
+### ClickHouse
+
+For ClickHouse sources, LogchefQL converts to optimized SQL queries:
 
 - The `~` and `!~` operators use ClickHouse's `positionCaseInsensitive` function for efficient partial matches
 - Nested field access on Map columns uses subscript notation: `column['key']`
@@ -233,11 +242,35 @@ ORDER BY timestamp DESC
 LIMIT 100
 ```
 
-## SQL Mode
+### VictoriaLogs
 
-For advanced queries that go beyond LogchefQL's capabilities, you can switch to **SQL Mode** in the query editor. This gives you full access to ClickHouse SQL, including:
+For VictoriaLogs sources, the same LogchefQL expression compiles to LogsQL.
 
-- Aggregations (`COUNT`, `SUM`, `AVG`, etc.)
+For example:
+
+```text
+level="error" and service="payments" | _msg service level
+```
+
+Compiles to:
+
+```text
+(level:="error") AND (service:="payments") | fields _time, _msg, service, level
+```
+
+Logchef applies the selected time range separately when executing LogsQL queries.
+
+## Native Mode
+
+For advanced queries that go beyond LogchefQL's capabilities, you can switch to the datasource's **native mode** in the query editor:
+
+- **SQL** for ClickHouse
+- **LogsQL** for VictoriaLogs
+
+Native mode gives you direct access to backend-specific capabilities, including:
+
+- ClickHouse aggregations (`COUNT`, `SUM`, `AVG`, etc.)
+- VictoriaLogs-specific LogsQL pipes and processing operators
 - Subqueries
 - Joins
 - Custom functions
