@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -24,12 +25,14 @@ type TranslateRequest struct {
 
 // TranslateResponse represents the response for LogchefQL translation
 type TranslateResponse struct {
-	SQL        string                      `json:"sql"`                // WHERE clause conditions only
-	FullSQL    string                      `json:"full_sql,omitempty"` // Complete executable SQL (when time params provided)
-	Valid      bool                        `json:"valid"`
-	Error      *logchefql.ParseError       `json:"error,omitempty"`
-	Conditions []logchefql.FilterCondition `json:"conditions"`
-	FieldsUsed []string                    `json:"fields_used"`
+	SQL                    string                      `json:"sql"`                // WHERE clause conditions only
+	FullSQL                string                      `json:"full_sql,omitempty"` // Complete executable SQL (when time params provided)
+	GeneratedQuery         string                      `json:"generated_query,omitempty"`
+	GeneratedQueryLanguage models.QueryLanguage        `json:"generated_query_language,omitempty"`
+	Valid                  bool                        `json:"valid"`
+	Error                  *logchefql.ParseError       `json:"error,omitempty"`
+	Conditions             []logchefql.FilterCondition `json:"conditions"`
+	FieldsUsed             []string                    `json:"fields_used"`
 }
 
 // ValidateRequest represents the request body for LogchefQL validation
@@ -41,6 +44,44 @@ type ValidateRequest struct {
 type ValidateResponse struct {
 	Valid bool                  `json:"valid"`
 	Error *logchefql.ParseError `json:"error,omitempty"`
+}
+
+func buildLogchefQLSchema(source *models.Source) *logchefql.Schema {
+	if source == nil || len(source.Columns) == 0 {
+		return nil
+	}
+
+	columns := make([]logchefql.ColumnInfo, len(source.Columns))
+	for i, col := range source.Columns {
+		columns[i] = logchefql.ColumnInfo{
+			Name: col.Name,
+			Type: col.Type,
+		}
+	}
+	return &logchefql.Schema{Columns: columns}
+}
+
+func parseLogchefQLTimeRange(startTime, endTime, timezone string) (*time.Time, *time.Time, error) {
+	locationName := timezone
+	if locationName == "" {
+		locationName = "UTC"
+	}
+
+	loc, err := time.LoadLocation(locationName)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	start, err := time.ParseInLocation("2006-01-02 15:04:05", startTime, loc)
+	if err != nil {
+		return nil, nil, err
+	}
+	end, err := time.ParseInLocation("2006-01-02 15:04:05", endTime, loc)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return &start, &end, nil
 }
 
 // handleLogchefQLTranslate translates a LogchefQL query to SQL.
@@ -81,31 +122,57 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
 	}
 	if !source.SupportsQueryLanguage(models.QueryLanguageLogchefQL) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is only supported for ClickHouse sources", models.ValidationErrorType)
+		return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
 	}
 
-	// Build schema from source columns
-	var schema *logchefql.Schema
-	if len(source.Columns) > 0 {
-		columns := make([]logchefql.ColumnInfo, len(source.Columns))
-		for i, col := range source.Columns {
-			columns[i] = logchefql.ColumnInfo{
-				Name: col.Name,
-				Type: col.Type,
-			}
-		}
-		schema = &logchefql.Schema{Columns: columns}
-	}
+	schema := buildLogchefQLSchema(source)
 
 	// Translate the query
-	result := logchefql.Translate(req.Query, schema)
+	var response TranslateResponse
+	if source.IsVictoriaLogs() {
+		result := logchefql.TranslateToLogsQL(req.Query, &logchefql.LogsQLTranslateOptions{
+			DefaultTimestampField: source.MetaTSField,
+		})
+		response = TranslateResponse{
+			GeneratedQuery:         result.Query,
+			GeneratedQueryLanguage: models.QueryLanguageLogsQL,
+			Valid:                  result.Valid,
+			Error:                  result.Error,
+			Conditions:             result.Conditions,
+			FieldsUsed:             result.FieldsUsed,
+		}
+	} else {
+		result := logchefql.Translate(req.Query, schema)
+		response = TranslateResponse{
+			SQL:                    result.SQL,
+			GeneratedQuery:         result.SQL,
+			GeneratedQueryLanguage: models.QueryLanguageClickHouseSQL,
+			Valid:                  result.Valid,
+			Error:                  result.Error,
+			Conditions:             result.Conditions,
+			FieldsUsed:             result.FieldsUsed,
+		}
 
-	response := TranslateResponse{
-		SQL:        result.SQL,
-		Valid:      result.Valid,
-		Error:      result.Error,
-		Conditions: result.Conditions,
-		FieldsUsed: result.FieldsUsed,
+		if result.Valid && hasTimeParams {
+			tableName := source.GetFullTableName()
+
+			params := logchefql.QueryBuildParams{
+				LogchefQL:      req.Query,
+				Schema:         schema,
+				TableName:      tableName,
+				TimestampField: source.MetaTSField,
+				StartTime:      req.StartTime,
+				EndTime:        req.EndTime,
+				Timezone:       req.Timezone,
+				Limit:          req.Limit,
+			}
+
+			fullSQL, buildErr := logchefql.BuildFullQuery(params)
+			if buildErr == nil {
+				response.FullSQL = fullSQL
+				response.GeneratedQuery = fullSQL
+			}
+		}
 	}
 
 	// Ensure conditions is never nil
@@ -114,27 +181,6 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 	}
 	if response.FieldsUsed == nil {
 		response.FieldsUsed = []string{}
-	}
-
-	// Build the full SQL only if time params are provided
-	if result.Valid && hasTimeParams {
-		tableName := source.GetFullTableName()
-
-		params := logchefql.QueryBuildParams{
-			LogchefQL:      req.Query,
-			Schema:         schema,
-			TableName:      tableName,
-			TimestampField: source.MetaTSField,
-			StartTime:      req.StartTime,
-			EndTime:        req.EndTime,
-			Timezone:       req.Timezone,
-			Limit:          req.Limit,
-		}
-
-		fullSQL, err := logchefql.BuildFullQuery(params)
-		if err == nil {
-			response.FullSQL = fullSQL
-		}
 	}
 
 	return SendSuccess(c, fiber.StatusOK, response)
@@ -219,21 +265,10 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
 	}
 	if !source.SupportsQueryLanguage(models.QueryLanguageLogchefQL) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is only supported for ClickHouse sources", models.ValidationErrorType)
+		return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
 	}
 
-	// Build schema from source columns
-	var schema *logchefql.Schema
-	if len(source.Columns) > 0 {
-		columns := make([]logchefql.ColumnInfo, len(source.Columns))
-		for i, col := range source.Columns {
-			columns[i] = logchefql.ColumnInfo{
-				Name: col.Name,
-				Type: col.Type,
-			}
-		}
-		schema = &logchefql.Schema{Columns: columns}
-	}
+	schema := buildLogchefQLSchema(source)
 
 	// Substitute variables in the query if provided
 	query := req.Query
@@ -253,22 +288,54 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 		query = substituted
 	}
 
-	// Build the full SQL query
-	tableName := source.GetFullTableName()
-	params := logchefql.QueryBuildParams{
-		LogchefQL:      query,
-		Schema:         schema,
-		TableName:      tableName,
-		TimestampField: source.MetaTSField,
-		StartTime:      req.StartTime,
-		EndTime:        req.EndTime,
-		Timezone:       req.Timezone,
-		Limit:          req.Limit,
-	}
+	var (
+		executableQuery         string
+		executableQueryLanguage models.QueryLanguage
+		queryStartTime          *time.Time
+		queryEndTime            *time.Time
+	)
 
-	sql, err := logchefql.BuildFullQuery(params)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	if source.IsVictoriaLogs() {
+		translated := logchefql.TranslateToLogsQL(query, &logchefql.LogsQLTranslateOptions{
+			DefaultTimestampField: source.MetaTSField,
+		})
+		if !translated.Valid {
+			message := "invalid LogchefQL query"
+			if translated.Error != nil {
+				message = translated.Error.Error()
+			}
+			return SendErrorWithType(c, fiber.StatusBadRequest, message, models.ValidationErrorType)
+		}
+
+		startTime, endTime, err := parseLogchefQLTimeRange(req.StartTime, req.EndTime, req.Timezone)
+		if err != nil {
+			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		}
+
+		executableQuery = translated.Query
+		executableQueryLanguage = models.QueryLanguageLogsQL
+		queryStartTime = startTime
+		queryEndTime = endTime
+	} else {
+		tableName := source.GetFullTableName()
+		params := logchefql.QueryBuildParams{
+			LogchefQL:      query,
+			Schema:         schema,
+			TableName:      tableName,
+			TimestampField: source.MetaTSField,
+			StartTime:      req.StartTime,
+			EndTime:        req.EndTime,
+			Timezone:       req.Timezone,
+			Limit:          req.Limit,
+		}
+
+		sql, err := logchefql.BuildFullQuery(params)
+		if err != nil {
+			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		}
+
+		executableQuery = sql
+		executableQueryLanguage = models.QueryLanguageClickHouseSQL
 	}
 
 	// Get user information for query tracking
@@ -290,12 +357,15 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 	defer cancel() // Ensure cleanup
 
 	// Add query to tracker
-	queryID := queryTracker.AddQuery(user.ID, sourceID, teamID, sql, cancel)
+	queryID := queryTracker.AddQuery(user.ID, sourceID, teamID, executableQuery, cancel)
 	defer queryTracker.RemoveQuery(queryID)
 
 	// Execute via core function
 	queryParams := datasource.QueryRequest{
-		RawQuery:     sql,
+		RawQuery:     executableQuery,
+		StartTime:    queryStartTime,
+		EndTime:      queryEndTime,
+		Timezone:     req.Timezone,
 		Limit:        req.Limit,
 		MaxLimit:     s.config.Query.MaxLimit,
 		QueryTimeout: req.QueryTimeout,
@@ -326,11 +396,13 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 
 	// Add query_id and generated SQL to response
 	responseData := map[string]interface{}{
-		"logs":          result.Logs,
-		"columns":       result.Columns,
-		"stats":         result.Stats,
-		"query_id":      queryID,
-		"generated_sql": sql, // For "Show SQL" feature
+		"logs":                     result.Logs,
+		"columns":                  result.Columns,
+		"stats":                    result.Stats,
+		"query_id":                 queryID,
+		"generated_sql":            executableQuery, // Deprecated legacy field kept for compatibility.
+		"generated_query":          executableQuery,
+		"generated_query_language": executableQueryLanguage,
 	}
 
 	return SendSuccess(c, fiber.StatusOK, responseData)

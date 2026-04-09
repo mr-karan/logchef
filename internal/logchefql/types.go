@@ -118,6 +118,7 @@ const (
 	ErrUnterminatedString     = "UNTERMINATED_STRING"
 	ErrUnexpectedEnd          = "UNEXPECTED_END"
 	ErrUnexpectedToken        = "UNEXPECTED_TOKEN"
+	ErrUnsupportedFeature     = "UNSUPPORTED_FEATURE"
 	ErrExpectedOperator       = "EXPECTED_OPERATOR"
 	ErrExpectedValue          = "EXPECTED_VALUE"
 	ErrExpectedClosingParen   = "EXPECTED_CLOSING_PAREN"

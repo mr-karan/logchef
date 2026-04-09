@@ -77,7 +77,7 @@ export interface ExploreState {
   lastExecutionTimestamp: number | null;
   hasExecutedQuery: boolean;
   selectedTimezoneIdentifier: string | null;
-  generatedDisplaySql: string | null;
+  generatedDisplayQuery: string | null;
   queryTimeout: number;
   currentQueryAbortController: AbortController | null;
   currentQueryId: string | null;
@@ -114,7 +114,7 @@ export const useExploreStore = defineStore("explore", () => {
     activeSavedQueryName: null,
     savedQuerySnapshot: null,
     selectedTimezoneIdentifier: null,
-    generatedDisplaySql: null,
+    generatedDisplayQuery: null,
     queryTimeout: 30,
     currentQueryAbortController: null,
     currentQueryId: null,
@@ -148,6 +148,8 @@ export const useExploreStore = defineStore("explore", () => {
 
   const getCurrentSource = () => sourcesStore.currentSourceDetails ?? null;
   const supportsLogchefQLForSource = (source = getCurrentSource()) => supportsQueryLanguage(source, "logchefql");
+  const supportsClickHouseSQLForSource = (source = getCurrentSource()) =>
+    getNativeQueryLanguageForSource(source) === "clickhouse-sql";
   const getDefaultModeForSource = (source = getCurrentSource()): "logchefql" | "sql" =>
     supportsLogchefQLForSource(source) ? "logchefql" : "sql";
   const normalizeModeForSource = (
@@ -353,7 +355,7 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function onSourceChange(_newSourceId: number) {
-    state.data.value.generatedDisplaySql = null;
+    state.data.value.generatedDisplayQuery = null;
     state.data.value.logs = [];
     state.data.value.columns = [];
     state.data.value.queryStats = DEFAULT_QUERY_STATS;
@@ -620,7 +622,7 @@ export const useExploreStore = defineStore("explore", () => {
 
     const sourceDetails = sourcesStore.currentSourceDetails;
     
-    if (supportsLogchefQLForSource(sourceDetails)) {
+    if (supportsClickHouseSQLForSource(sourceDetails)) {
       let tableName = 'logs.vector_logs';
       if (sourceDetails?.connection?.database && sourceDetails?.connection?.table_name) {
         tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
@@ -649,7 +651,7 @@ export const useExploreStore = defineStore("explore", () => {
     if (state.data.value.timeRange) {
       const sourceDetails = sourcesStore.currentSourceDetails;
       
-      if (supportsLogchefQLForSource(sourceDetails)) {
+      if (supportsClickHouseSQLForSource(sourceDetails)) {
         let tableName = 'logs.vector_logs';
         if (sourceDetails?.connection?.database && sourceDetails?.connection?.table_name) {
           tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
@@ -766,8 +768,9 @@ export const useExploreStore = defineStore("explore", () => {
               state.data.value.currentQueryId = queryResponse.data.query_id;
             }
 
-            if (queryResponse.data.generated_sql) {
-              state.data.value.generatedDisplaySql = queryResponse.data.generated_sql;
+            if (queryResponse.data.generated_query || queryResponse.data.generated_sql) {
+              state.data.value.generatedDisplayQuery =
+                queryResponse.data.generated_query || queryResponse.data.generated_sql || null;
             }
 
             _updateLastExecutedState();
@@ -840,7 +843,7 @@ export const useExploreStore = defineStore("explore", () => {
       };
 
       if (!sql || !sql.trim()) {
-        if (supportsLogchefQLForSource(sourceDetails)) {
+        if (supportsClickHouseSQLForSource(sourceDetails)) {
           const tsField = sourceDetails._meta_ts_field || 'timestamp';
 
           let tableName = 'default.logs';
@@ -1054,7 +1057,7 @@ export const useExploreStore = defineStore("explore", () => {
 
     let queryText = "";
     if (state.data.value.activeMode === 'logchefql') {
-      queryText = state.data.value.generatedDisplaySql || "";
+      queryText = state.data.value.generatedDisplayQuery || "";
     } else if (isNativeHistogramSource()) {
       queryText = state.data.value.rawSql?.trim() || "*";
     }
@@ -1171,7 +1174,7 @@ export const useExploreStore = defineStore("explore", () => {
     selectedQueryId: computed(() => state.data.value.selectedQueryId),
     activeSavedQueryName: computed(() => state.data.value.activeSavedQueryName),
     selectedTimezoneIdentifier: computed(() => state.data.value.selectedTimezoneIdentifier),
-    generatedDisplaySql: computed(() => state.data.value.generatedDisplaySql),
+    generatedDisplayQuery: computed(() => state.data.value.generatedDisplayQuery),
 
     // AI state (delegated)
     isGeneratingAISQL: computed(() => aiStore.isGeneratingAISQL),

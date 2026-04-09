@@ -1,5 +1,6 @@
 import { apiClient } from "./apiUtils";
 import type { SavedTeamQuery, Team } from "./types";
+import type { QueryLanguage } from "@/lib/queryMetadata";
 
 export interface ClickHouseConnectionInfo {
   host: string;
@@ -219,6 +220,7 @@ export const sourcesApi = {
     endTime: string,    // ISO8601 format
     timezone?: string,
     limit?: number,
+    queryLanguage?: QueryLanguage,
     query?: string,      // Optional datasource-native query to filter field values
     signal?: AbortSignal // Optional abort signal for request cancellation
   ) => {
@@ -229,6 +231,9 @@ export const sourcesApi = {
       `&end_time=${encodeURIComponent(endTime)}`;
     if (timezone) {
       url += `&timezone=${encodeURIComponent(timezone)}`;
+    }
+    if (queryLanguage) {
+      url += `&query_language=${encodeURIComponent(queryLanguage)}`;
     }
     if (query) {
       url += `&query=${encodeURIComponent(query)}`;
@@ -242,6 +247,7 @@ export const sourcesApi = {
     endTime: string,    // ISO8601 format
     timezone?: string,
     limit?: number,
+    queryLanguage?: QueryLanguage,
     query?: string,      // Optional datasource-native query to filter field values
     signal?: AbortSignal // Optional abort signal for request cancellation
   ) => {
@@ -251,6 +257,9 @@ export const sourcesApi = {
       `&end_time=${encodeURIComponent(endTime)}`;
     if (timezone) {
       url += `&timezone=${encodeURIComponent(timezone)}`;
+    }
+    if (queryLanguage) {
+      url += `&query_language=${encodeURIComponent(queryLanguage)}`;
     }
     if (query) {
       url += `&query=${encodeURIComponent(query)}`;

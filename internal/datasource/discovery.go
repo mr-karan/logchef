@@ -22,6 +22,7 @@ type FieldValuesResult struct {
 type FieldValuesRequest struct {
 	FieldName      string
 	FieldType      string
+	Language       models.QueryLanguage
 	TimestampField string
 	StartTime      time.Time
 	EndTime        time.Time
@@ -32,6 +33,7 @@ type FieldValuesRequest struct {
 }
 
 type AllFieldValuesRequest struct {
+	Language       models.QueryLanguage
 	TimestampField string
 	StartTime      time.Time
 	EndTime        time.Time

@@ -40,7 +40,7 @@ import {
   useFieldValuesLoader,
   isFilterableField as isFilterableFieldType
 } from '@/composables/useFieldValuesLoader'
-import { supportsQueryLanguage } from '@/lib/queryMetadata'
+import { getNativeQueryLanguageForSource, supportsQueryLanguage, type QueryLanguage } from '@/lib/queryMetadata'
 
 // Define field type for auto-completion
 interface FieldInfo {
@@ -80,6 +80,18 @@ const getCurrentFilterQuery = (): string => {
   return ''
 }
 
+const getCurrentFilterQueryLanguage = (): QueryLanguage | undefined => {
+  if (exploreStore.activeMode === 'logchefql') {
+    return 'logchefql'
+  }
+
+  if (!supportsQueryLanguage(sourcesStore.currentSourceDetails, 'logchefql')) {
+    return getNativeQueryLanguageForSource(sourcesStore.currentSourceDetails)
+  }
+
+  return undefined
+}
+
 // Emits
 const emit = defineEmits<{
   (e: 'update:expanded', value: boolean): void
@@ -97,6 +109,7 @@ const loaderOptions = computed(() => ({
   sourceId: props.sourceId,
   getTimeRange: getTimeRangeForApi,
   getFilterQuery: getCurrentFilterQuery,
+  getFilterQueryLanguage: getCurrentFilterQueryLanguage,
   timezone: undefined,
   limit: 10
 }))

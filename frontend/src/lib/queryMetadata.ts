@@ -26,7 +26,7 @@ function getSupportedQueryLanguages(source: SourceDescriptor): QueryLanguage[] {
   }
 
   return getSourceType(source) === "victorialogs"
-    ? ["logsql"]
+    ? ["logchefql", "logsql"]
     : ["logchefql", "clickhouse-sql"];
 }
 

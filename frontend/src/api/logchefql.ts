@@ -8,6 +8,7 @@
  */
 
 import { apiClient } from './apiUtils';
+import type { QueryLanguage } from '@/lib/queryMetadata';
 
 // Types matching backend response structures
 
@@ -38,6 +39,8 @@ export interface TranslateRequest {
 export interface TranslateResponse {
   sql: string;           // WHERE clause conditions only
   full_sql?: string;     // Complete executable SQL (when time params provided)
+  generated_query?: string;
+  generated_query_language?: QueryLanguage;
   select_clause?: string;  // Custom SELECT clause if pipe operator used
   valid: boolean;
   error?: ParseError;
@@ -76,6 +79,8 @@ export interface QueryResponse {
   };
   query_id?: string;
   generated_sql?: string;  // The SQL that was executed (for "Show SQL" feature)
+  generated_query?: string;
+  generated_query_language?: QueryLanguage;
 }
 
 /**
@@ -176,4 +181,3 @@ export async function translateWithCache(
     fields_used: [],
   };
 }
-

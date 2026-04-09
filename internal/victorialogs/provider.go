@@ -47,11 +47,17 @@ func (p *Provider) Capabilities() []datasource.Capability {
 }
 
 func (p *Provider) SupportedQueryLanguages() []models.QueryLanguage {
-	return []models.QueryLanguage{models.QueryLanguageLogsQL}
+	return []models.QueryLanguage{
+		models.QueryLanguageLogchefQL,
+		models.QueryLanguageLogsQL,
+	}
 }
 
 func (p *Provider) SupportedSavedQueryEditorModes() []models.SavedQueryEditorMode {
-	return []models.SavedQueryEditorMode{models.SavedQueryEditorModeNative}
+	return []models.SavedQueryEditorMode{
+		models.SavedQueryEditorModeBuilder,
+		models.SavedQueryEditorModeNative,
+	}
 }
 
 func (p *Provider) SupportedAlertEditorModes() []models.AlertEditorMode {

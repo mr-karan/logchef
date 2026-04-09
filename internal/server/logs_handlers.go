@@ -702,8 +702,12 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 	}
 
 	filterQuery := c.Query("query", "")
+	queryLanguage := models.QueryLanguage(c.Query("query_language", ""))
 	if filterQuery == "" {
 		filterQuery = c.Query("logchefql", "")
+		if queryLanguage == "" && filterQuery != "" {
+			queryLanguage = models.QueryLanguageLogchefQL
+		}
 	}
 
 	// Create timeout context - this propagates to ClickHouse as max_execution_time
@@ -714,6 +718,7 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 	result, err := core.GetFieldValues(ctx, s.datasources, sourceID, core.FieldValuesParams{
 		FieldName: fieldName,
 		FieldType: fieldType,
+		Language:  queryLanguage,
 		StartTime: startTime,
 		EndTime:   endTime,
 		Timezone:  timezone,
@@ -791,8 +796,12 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 	}
 
 	filterQuery := c.Query("query", "")
+	queryLanguage := models.QueryLanguage(c.Query("query_language", ""))
 	if filterQuery == "" {
 		filterQuery = c.Query("logchefql", "")
+		if queryLanguage == "" && filterQuery != "" {
+			queryLanguage = models.QueryLanguageLogchefQL
+		}
 	}
 
 	// Create timeout context - this propagates to ClickHouse as max_execution_time
@@ -801,6 +810,7 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 	defer cancel()
 
 	result, err := core.GetAllFieldValues(ctx, s.datasources, sourceID, core.AllFieldValuesParams{
+		Language:  queryLanguage,
 		StartTime: startTime,
 		EndTime:   endTime,
 		Timezone:  timezone,

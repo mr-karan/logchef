@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -154,6 +155,31 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 	}, nil
 }
 
+func compileQueryForVictoriaLogs(queryText string, language models.QueryLanguage, source *models.Source) (string, error) {
+	normalizedLanguage := models.NormalizeQueryLanguage(language)
+	switch normalizedLanguage {
+	case "", models.QueryLanguageLogsQL:
+		query := strings.TrimSpace(queryText)
+		if query == "" {
+			return "*", nil
+		}
+		return query, nil
+	case models.QueryLanguageLogchefQL:
+		result := logchefql.TranslateToLogsQL(queryText, &logchefql.LogsQLTranslateOptions{
+			DefaultTimestampField: source.MetaTSField,
+		})
+		if !result.Valid {
+			if result.Error != nil {
+				return "", result.Error
+			}
+			return "", fmt.Errorf("invalid LogchefQL query")
+		}
+		return result.Query, nil
+	default:
+		return "", fmt.Errorf("victorialogs does not support query language %q", normalizedLanguage)
+	}
+}
+
 func (p *Provider) GetSourceSchema(ctx context.Context, source *models.Source) ([]models.ColumnInfo, error) {
 	conn, err := p.connectionForSource(source)
 	if err != nil {
@@ -264,9 +290,9 @@ func (p *Provider) GetFieldValues(ctx context.Context, source *models.Source, re
 		return nil, err
 	}
 
-	query := strings.TrimSpace(req.QueryText)
-	if query == "" {
-		query = "*"
+	query, err := compileQueryForVictoriaLogs(req.QueryText, req.Language, source)
+	if err != nil {
+		return nil, err
 	}
 
 	form := url.Values{}
@@ -316,9 +342,9 @@ func (p *Provider) GetAllFieldValues(ctx context.Context, source *models.Source,
 		return nil, err
 	}
 
-	query := strings.TrimSpace(req.QueryText)
-	if query == "" {
-		query = "*"
+	query, err := compileQueryForVictoriaLogs(req.QueryText, req.Language, source)
+	if err != nil {
+		return nil, err
 	}
 
 	form := url.Values{}

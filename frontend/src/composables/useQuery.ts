@@ -129,18 +129,11 @@ export function useQuery() {
   const changeMode = async (newMode: EditorMode, _isModeSwitchOnly: boolean = false) => {
     // Clear any validation errors when changing modes
     queryError.value = '';
-    const sourceType = sourcesStore.currentSourceDetails?.source_type;
-
-    if (sourceType === 'victorialogs' && newMode === 'logchefql') {
-      exploreStore.setActiveMode('sql');
-      return;
-    }
-
     // If switching to SQL mode
-    if (newMode === 'sql' && activeMode.value === 'logchefql' && sourceType !== 'victorialogs') {
+    if (newMode === 'sql' && activeMode.value === 'logchefql') {
       // First, check if we have the actual generated SQL from a previous execution
-      if (exploreStore.generatedDisplaySql) {
-        exploreStore.setRawSql(exploreStore.generatedDisplaySql);
+      if (exploreStore.generatedDisplayQuery) {
+        exploreStore.setRawSql(exploreStore.generatedDisplayQuery);
       } else {
         // No executed query yet - ask backend for full SQL (even if LogchefQL is empty)
         const currentTeamId = teamsStore.currentTeamId;
@@ -178,10 +171,11 @@ export function useQuery() {
               return; // Don't switch modes if validation fails
             }
 
-            if (response.data?.full_sql) {
-              exploreStore.setRawSql(response.data.full_sql);
+            const generatedQuery = response.data?.generated_query || response.data?.full_sql;
+            if (generatedQuery) {
+              exploreStore.setRawSql(generatedQuery);
             } else {
-              console.warn("useQuery: Backend did not return full_sql, response:", response.data);
+              console.warn("useQuery: Backend did not return a generated query, response:", response.data);
             }
           } catch (error: any) {
             console.error("useQuery: Failed to get full SQL from backend:", error);

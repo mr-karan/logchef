@@ -181,10 +181,16 @@ func TestSchemaAndFieldValueDiscovery(t *testing.T) {
 			if got := r.Form.Get("limit"); got != "5" {
 				t.Fatalf("unexpected limit: %q", got)
 			}
+			if got := r.Form.Get("query"); got != `level:="error"` {
+				t.Fatalf("unexpected translated query: %q", got)
+			}
 			_, _ = w.Write([]byte(`{"values":[{"value":"api","hits":8},{"value":"worker","hits":3}]}`))
 		case "/select/logsql/facets":
 			if got := r.Form.Get("keep_const_fields"); got != "1" {
 				t.Fatalf("unexpected keep_const_fields: %q", got)
+			}
+			if got := r.Form.Get("query"); got != `level:="error"` {
+				t.Fatalf("unexpected translated query for facets: %q", got)
 			}
 			_, _ = w.Write([]byte(`{"facets":[{"field_name":"service","values":[{"field_value":"api","hits":8}]}]}`))
 		default:
@@ -217,10 +223,11 @@ func TestSchemaAndFieldValueDiscovery(t *testing.T) {
 	values, err := provider.GetFieldValues(context.Background(), source, datasource.FieldValuesRequest{
 		FieldName: "service",
 		FieldType: "String",
+		Language:  models.QueryLanguageLogchefQL,
 		StartTime: time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC),
 		EndTime:   time.Date(2026, 4, 8, 1, 0, 0, 0, time.UTC),
 		Limit:     5,
-		QueryText: "service:*",
+		QueryText: `level = "error"`,
 	})
 	if err != nil {
 		t.Fatalf("GetFieldValues returned error: %v", err)
@@ -230,10 +237,11 @@ func TestSchemaAndFieldValueDiscovery(t *testing.T) {
 	}
 
 	allValues, err := provider.GetAllFieldValues(context.Background(), source, datasource.AllFieldValuesRequest{
+		Language:  models.QueryLanguageLogchefQL,
 		StartTime: time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC),
 		EndTime:   time.Date(2026, 4, 8, 1, 0, 0, 0, time.UTC),
 		Limit:     5,
-		QueryText: "service:*",
+		QueryText: `level = "error"`,
 	})
 	if err != nil {
 		t.Fatalf("GetAllFieldValues returned error: %v", err)
