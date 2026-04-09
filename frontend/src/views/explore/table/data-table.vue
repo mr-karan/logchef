@@ -15,7 +15,7 @@ import {
     type ColumnSizingState,
     type ColumnResizeMode,
 } from '@tanstack/vue-table'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import { GripVertical, Copy, Equal, EqualNot, ChevronUp, ChevronDown } from 'lucide-vue-next'
@@ -540,26 +540,6 @@ onMounted(() => {
     }
 })
 
-// Add refs for DOM elements
-const tableContainerRef = ref<HTMLElement | null>(null)
-const tableRef = ref<HTMLElement | null>(null)
-
-onMounted(() => {
-    if (!tableContainerRef.value) return
-
-    const resizeObserver = new ResizeObserver(() => {
-        // Track container width for flex-grow calculations
-        // Actual column resizing is handled via CSS flex on the last column
-        // This avoids mutating columnSizing state which would persist unwanted changes
-    })
-
-    resizeObserver.observe(tableContainerRef.value)
-
-    return () => {
-        resizeObserver.disconnect()
-    }
-})
-
 // Add type for column meta
 interface CustomColumnMeta extends ColumnMeta<Record<string, any>, unknown> {
     className?: string;
@@ -680,13 +660,13 @@ const isLastVisibleColumn = (columnId: string): boolean => {
         />
 
         <!-- Table Section with full-height scrolling -->
-        <div class="flex-1 relative overflow-hidden" ref="tableContainerRef"
+        <div class="flex-1 relative overflow-hidden"
             :class="{ 'opacity-60 pointer-events-none': props.isLoading }"> <!-- Dim table during load -->
             <!-- Add v-if="table" here -->
             <div v-if="table && table.getRowModel().rows?.length" class="absolute inset-0">
                 <div
                     class="w-full h-full overflow-auto transition-opacity duration-150" style="scrollbar-width: thin; scrollbar-color: rgba(156, 163, 175, 0.5) transparent;">
-                    <table ref="tableRef" class="table-fixed border-separate border-spacing-0 text-sm shadow-sm"
+                    <table class="table-fixed border-separate border-spacing-0 text-sm shadow-sm"
                         :data-resizing="isResizing">
                         <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
                             <!-- Check table.getHeaderGroups() exists -->

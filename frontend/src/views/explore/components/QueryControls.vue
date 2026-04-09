@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Play, RefreshCw, Share2, Keyboard, Eraser, AlertCircle, Clock, X } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
@@ -60,103 +60,40 @@ const timeoutOptions = [
 
 // Get current timeout or default to 30 seconds - handle as string for Select component
 const selectedTimeout = computed({
-  get: () => {
-    const timeout = exploreStore.queryTimeout || 30;
-    console.log('QueryControls: Getting timeout value:', timeout, 'returning as string:', timeout.toString());
-    return timeout.toString();
-  },
+  get: () => (exploreStore.queryTimeout || 30).toString(),
   set: (value: string) => {
-    const numValue = parseInt(value, 10);
-    console.log('QueryControls: Setting timeout from string:', value, 'to number:', numValue);
-    exploreStore.setQueryTimeout(numValue);
+    exploreStore.setQueryTimeout(parseInt(value, 10))
   }
 })
 
-// Enhanced tooltip content based on why the query is dirty
-// Track when last query was executed and when parameters were last changed
-const lastQueryTime = ref(exploreStore.lastExecutionTimestamp || 0);
-const lastParamChangeTime = ref(0);
+const hasExecutedQuery = computed(() => Boolean(exploreStore.lastExecutedState))
 
-// Update lastQueryTime when execution timestamp changes
-watch(() => exploreStore.lastExecutionTimestamp, (newVal, oldVal) => {
-  if (newVal && newVal !== oldVal) {
-    console.log("QueryControls: lastExecutionTimestamp changed, updating lastQueryTime from:", 
-                lastQueryTime.value, "to:", newVal);
-                
-    // Update the timestamp of when the query was last executed
-    // This should match the time when the query results were returned
-    lastQueryTime.value = newVal;
-  }
-});
-
-// Watch for time range changes to update lastParamChangeTime
-watch(() => exploreStore.timeRange, () => {
-  lastParamChangeTime.value = Date.now();
-  console.log("QueryControls: Time range changed, updating lastParamChangeTime to:", lastParamChangeTime.value);
-}, { deep: true });
-
-// Watch for limit changes to update lastParamChangeTime
-watch(() => exploreStore.limit, () => {
-  lastParamChangeTime.value = Date.now();
-  console.log("QueryControls: Limit changed, updating lastParamChangeTime to:", lastParamChangeTime.value);
-});
-
-// Calculate dirty state based on parameter changes
 const forceDirty = computed(() => {
-  // Only calculate dirty state if we already have executed a query
-  if (!exploreStore.lastExecutedState || !exploreStore.lastExecutionTimestamp) {
-    return false;
-  }
-  
-  // Check current time range and last executed time range
-  const currentTimeRange = JSON.stringify(exploreStore.timeRange || {});
-  const lastTimeRange = exploreStore.lastExecutedState.timeRange || '';
-  
-  // Check if time range changed
-  const timeRangeChanged = currentTimeRange !== lastTimeRange;
-  
-  // Check if limit changed  
-  const limitChanged = exploreStore.limit !== exploreStore.lastExecutedState.limit;
-  
-  // Check if parameters were changed *after* the most recent query execution
-  const paramChangesAfterExecution = lastParamChangeTime.value > lastQueryTime.value;
-  
-  // Log the calculation
-  console.log("QueryControls: Manual dirty calculation - ",
-              "timeRangeChanged:", timeRangeChanged,
-              "limitChanged:", limitChanged,
-              "lastQueryTime:", lastQueryTime.value,
-              "lastParamChangeTime:", lastParamChangeTime.value,
-              "paramChangesAfterExecution:", paramChangesAfterExecution);
-  
-  // Return dirty state: true if parameters changed AND those changes happened after the last execution
-  return (timeRangeChanged || limitChanged || isDirty.value) && paramChangesAfterExecution;
-});
+  return hasExecutedQuery.value && isDirty.value
+})
 
 const dirtyTooltipContent = computed(() => {
-  // Use forceDirty instead of isDirty for the check
   if (!forceDirty.value) return 'Execute query'
-  
-  const reasons = []
-  
-  // Check time range manually
-  const timeRangeJSON = JSON.stringify(exploreStore.timeRange);
-  const lastTimeRangeJSON = exploreStore.lastExecutedState?.timeRange;
-  if (lastTimeRangeJSON && (timeRangeJSON !== lastTimeRangeJSON)) {
+
+  const reasons: string[] = []
+
+  if (dirtyReason.value?.timeRangeChanged) {
     reasons.push('Time range has changed')
   }
-  
-  // Check limit manually
-  if (exploreStore.lastExecutedState && 
-      (exploreStore.limit !== exploreStore.lastExecutedState.limit)) {
+
+  if (dirtyReason.value?.limitChanged) {
     reasons.push('Result limit has changed')
   }
-  
-  // Check other reasons from dirtyReason
-  if (dirtyReason.value?.queryChanged) reasons.push('Query content has changed')
-  if (dirtyReason.value?.modeChanged) reasons.push('Query mode has changed')
-  
-  return reasons.length > 0 
+
+  if (dirtyReason.value?.queryChanged) {
+    reasons.push('Query content has changed')
+  }
+
+  if (dirtyReason.value?.modeChanged) {
+    reasons.push('Query mode has changed')
+  }
+
+  return reasons.length > 0
     ? `Results may be outdated: ${reasons.join(', ')}`
     : 'Query parameters have changed, results may be outdated'
 })
@@ -178,24 +115,6 @@ const copyUrlToClipboard = () => {
 
 // Execute query with a dedicated key to prevent duplicates
 const executeQuery = () => {
-  // Update the lastQueryTime immediately to mark this as "executed"
-  const currentTime = Date.now();
-  lastQueryTime.value = currentTime;
-  
-  // Reset the parameter change time to be before the query execution time
-  // This ensures we don't show the dirty state immediately after execution
-  lastParamChangeTime.value = 0;
-
-  // Add debugging info for both dirty states
-  console.log("QueryControls: Executing query - isDirty:", isDirty.value, 
-              "forceDirty:", forceDirty.value,
-              "dirtyReason:", dirtyReason.value, 
-              "timeRange:", JSON.stringify(exploreStore.timeRange).substring(0, 50) + "...",
-              "lastExecutedState:", exploreStore.lastExecutedState ? 
-                "exists with timeRange: " + exploreStore.lastExecutedState.timeRange.substring(0, 50) + "..." : "null",
-              "setting lastQueryTime to:", lastQueryTime.value,
-              "resetting lastParamChangeTime");
-  
   emit('execute', 'manual-execution')
 }
 

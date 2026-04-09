@@ -14,6 +14,7 @@ import {
 import { valueUpdater } from '@/lib/utils'
 import type { QueryStats } from '@/api/explore'
 import type { Source } from '@/api/sources'
+import { isPrimaryMessageField } from './fieldSemantics'
 
 interface Props {
   columns?: ColumnDef<Record<string, any>>[]
@@ -203,12 +204,17 @@ const formatLogfmtValue = (value: any): string => {
 // Build message from log entry in logfmt format (returns raw text for tooltips/matching)
 const buildMessage = (row: Record<string, any>) => {
   // Try common message fields first
-  const messageFields = ['message', 'msg', 'log', 'text', 'body']
   let primaryMessage = ''
+  let primaryMessageField: string | null = null
   
-  for (const field of messageFields) {
+  for (const field of Object.keys(row)) {
+    if (!isPrimaryMessageField(field)) {
+      continue
+    }
+
     if (row[field] && typeof row[field] === 'string') {
       primaryMessage = row[field]
+      primaryMessageField = field
       break
     }
   }
@@ -219,7 +225,7 @@ const buildMessage = (row: Record<string, any>) => {
     .filter(([key, value]) => {
       // Skip timestamp/severity and already used message field
       if (skipFields.has(key)) return false
-      if (primaryMessage && messageFields.includes(key)) return false
+      if (primaryMessageField && key === primaryMessageField) return false
       return value !== null && value !== undefined
     })
     .map(([key, value]) => `${key}=${formatLogfmtValue(value)}`)

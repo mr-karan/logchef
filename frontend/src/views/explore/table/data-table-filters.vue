@@ -17,6 +17,11 @@ interface Props {
   columns?: { name: string; type: string }[]
 }
 
+interface FilterRow {
+  id: number
+  condition: FilterCondition
+}
+
 const props = withDefaults(defineProps<Props>(), {
   columns: () => []
 })
@@ -39,7 +44,7 @@ const operators = [
 ] as const
 
 // Active filters
-const filters = ref<FilterCondition[]>([])
+const filters = ref<FilterRow[]>([])
 const editingFilter = ref<number | null>(null)
 const showAddFilter = ref(false)
 const newFilter = ref<FilterCondition>({
@@ -47,6 +52,7 @@ const newFilter = ref<FilterCondition>({
   operator: '=',
   value: ''
 })
+let nextFilterId = 1
 
 // Get available columns for filtering
 const columns = computed(() => {
@@ -70,10 +76,12 @@ const getColumnLabel = (field: string) => {
 // Add a new filter
 const addFilter = () => {
   if (newFilter.value.field && newFilter.value.operator && newFilter.value.value) {
-    filters.value.push({ ...newFilter.value })
+    filters.value.push({
+      id: nextFilterId++,
+      condition: { ...newFilter.value }
+    })
     newFilter.value = { field: '', operator: '=', value: '' }
     showAddFilter.value = false
-    applyFilters()
   }
 }
 
@@ -81,7 +89,6 @@ const addFilter = () => {
 const removeFilter = (index: number) => {
   filters.value.splice(index, 1)
   editingFilter.value = null
-  applyFilters()
 }
 
 // Start editing a filter
@@ -93,7 +100,6 @@ const startEditing = (index: number) => {
 const updateFilter = (index: number) => {
   if (editingFilter.value === index) {
     editingFilter.value = null
-    applyFilters()
   }
 }
 
@@ -105,7 +111,9 @@ const cancelEditing = () => {
 // Apply filters to the table
 const applyFilters = () => {
   // Only emit filters that have all fields filled
-  const validFilters = filters.value.filter(f => f.field && f.operator && f.value)
+  const validFilters = filters.value
+    .map(filter => filter.condition)
+    .filter(filter => filter.field && filter.operator && filter.value)
   emit('update:filters', validFilters)
 }
 
@@ -120,14 +128,14 @@ watch(filters, () => {
     <!-- Filters Row -->
     <div class="flex flex-wrap items-center gap-2">
       <!-- Existing Filters -->
-      <template v-for="(filter, idx) in filters" :key="filter.field">
+      <template v-for="(filter, idx) in filters" :key="filter.id">
         <!-- Collapsed View -->
         <Badge v-if="editingFilter !== idx" variant="secondary"
           class="h-7 pl-2 pr-1.5 flex items-center gap-1 hover:bg-muted/50" @click="startEditing(idx)">
           <span class="flex items-center gap-1 text-xs">
-            <span class="font-normal">{{ getColumnLabel(filter.field) }}</span>
-            <span class="text-muted-foreground">{{ getOperatorLabel(filter.operator) }}</span>
-            <span class="font-medium">"{{ filter.value }}"</span>
+            <span class="font-normal">{{ getColumnLabel(filter.condition.field) }}</span>
+            <span class="text-muted-foreground">{{ getOperatorLabel(filter.condition.operator) }}</span>
+            <span class="font-medium">"{{ filter.condition.value }}"</span>
           </span>
           <Button variant="ghost" size="sm" @click.stop="removeFilter(idx)" class="h-4 w-4 p-0 hover:bg-transparent">
             <X class="h-3 w-3" />
@@ -137,7 +145,7 @@ watch(filters, () => {
         <!-- Expanded Edit View -->
         <div v-else class="flex items-center gap-2 w-full">
           <!-- Field Selector -->
-          <Select v-model="filter.field" class="w-[180px]">
+          <Select v-model="filter.condition.field" class="w-[180px]">
             <SelectTrigger class="h-8">
               <SelectValue placeholder="Select field" />
             </SelectTrigger>
@@ -149,7 +157,7 @@ watch(filters, () => {
           </Select>
 
           <!-- Operator Selector -->
-          <Select v-model="filter.operator" class="w-[140px]">
+          <Select v-model="filter.condition.operator" class="w-[140px]">
             <SelectTrigger class="h-8">
               <SelectValue placeholder="Select operator" />
             </SelectTrigger>
@@ -161,7 +169,7 @@ watch(filters, () => {
           </Select>
 
           <!-- Value Input -->
-          <Input v-model="filter.value" placeholder="Enter value" class="h-8 flex-1" />
+          <Input v-model="filter.condition.value" placeholder="Enter value" class="h-8 flex-1" />
 
           <!-- Action Buttons -->
           <div class="flex gap-1">

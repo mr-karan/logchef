@@ -94,7 +94,7 @@ export function useQuery() {
       if (exploreStore.activeMode === 'logchefql') {
         dirtyState.queryChanged = exploreStore.logchefqlCode !== exploreStore.lastExecutedState.logchefqlQuery;
       } else {
-        dirtyState.queryChanged = exploreStore.rawSql !== exploreStore.lastExecutedState.sqlQuery;
+        dirtyState.queryChanged = exploreStore.sqlForExecution !== exploreStore.lastExecutedState.sqlQuery;
       }
     }
 

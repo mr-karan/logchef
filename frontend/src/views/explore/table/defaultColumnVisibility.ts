@@ -1,8 +1,8 @@
 import type { ColumnDef } from '@tanstack/vue-table'
 import type { Source } from '@/api/sources'
+import { MESSAGE_FIELD_ALIASES, normalizeFieldName } from './fieldSemantics'
 
 const VICTORIALOGS_INTERNAL_FIELDS = new Set(['stream', 'streamid'])
-const VICTORIALOGS_MESSAGE_FIELDS = ['msg', 'message', 'log', 'body', 'text', 'content']
 const VICTORIALOGS_CONTEXT_FIELDS = [
   'service',
   'app',
@@ -18,10 +18,6 @@ const VICTORIALOGS_CONTEXT_FIELDS = [
   'container',
 ]
 const MAX_VICTORIALOGS_VISIBLE_COLUMNS = 6
-
-function normalizeFieldName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '')
-}
 
 function getColumnIds(columns: ColumnDef<Record<string, any>>[]): string[] {
   return columns.map(column => column.id).filter((id): id is string => Boolean(id))
@@ -72,7 +68,7 @@ export function getDefaultColumnVisibility(
     visibleColumnIds.add(severityField)
   }
 
-  addFirstMatchingColumn(nonInternalIds, visibleColumnIds, VICTORIALOGS_MESSAGE_FIELDS)
+  addFirstMatchingColumn(nonInternalIds, visibleColumnIds, MESSAGE_FIELD_ALIASES)
 
   if (nonInternalIds.length <= MAX_VICTORIALOGS_VISIBLE_COLUMNS) {
     nonInternalIds.forEach(columnId => visibleColumnIds.add(columnId))
