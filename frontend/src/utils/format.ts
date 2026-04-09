@@ -23,12 +23,26 @@ export function formatDate(
 }
 
 /**
- * Format a source's display name as "database.table_name"
+ * Format a source's display name.
  * @param source - The source object containing connection info
  * @returns Formatted source name string
  */
 export function formatSourceName(source: Source): string {
-  return `${source.connection.database}.${source.connection.table_name}`;
+  const connection = source.connection as Record<string, unknown>;
+  const database = typeof connection.database === "string" ? connection.database : null;
+  const tableName = typeof connection.table_name === "string" ? connection.table_name : null;
+  const baseURL = typeof connection.base_url === "string" ? connection.base_url : null;
+
+  if (source.source_type === "clickhouse" && database && tableName) {
+    return `${database}.${tableName}`;
+  }
+  if (source.name?.trim()) {
+    return source.name;
+  }
+  if (source.source_type === "victorialogs" && baseURL) {
+    return baseURL;
+  }
+  return `Source ${source.id}`;
 }
 
 /**
@@ -42,5 +56,10 @@ export function formatSourceNameWithSchema(
   includeSchema = true
 ): string {
   const baseName = formatSourceName(source);
-  return includeSchema && source.connection.table_name ? `${baseName} (${source.connection.table_name})` : baseName;
+  const connection = source.connection as Record<string, unknown>;
+  const tableName = typeof connection.table_name === "string" ? connection.table_name : null;
+
+  return includeSchema && source.source_type === "clickhouse" && tableName
+    ? `${baseName} (${tableName})`
+    : baseName;
 }

@@ -130,10 +130,6 @@ func validateClickHouseConnection(connFieldPrefix string, requireTable bool, con
 		}
 	}
 
-	if strings.TrimSpace(connUsername) != "" && strings.TrimSpace(connPassword) == "" {
-		return &ValidationError{Field: connFieldPrefix + "password", Message: "password is required when username is provided"}
-	}
-
 	if strings.TrimSpace(connDatabase) == "" {
 		return &ValidationError{Field: connFieldPrefix + "database", Message: "database is required"}
 	}

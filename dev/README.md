@@ -28,16 +28,19 @@ Logchef's local dev environment intentionally keeps this lighter:
 ## Quick Start
 
 ```bash
-# One-time setup (starts docker, creates tables, seeds data)
+# One-time setup (starts docker and creates ClickHouse tables)
 just dev-setup
 
-# Run backend (terminal 1)
+# Run backend (terminal 1) - creates local.db and provisions teams/sources
 just run-backend
+
+# Optional: add a local API user/token after local.db exists
+just dev-seed
 
 # Run frontend (terminal 2)
 just run-frontend
 
-# Ingest sample logs (terminal 3)
+# Ingest sample logs through Vector into ClickHouse and VictoriaLogs (terminal 3)
 just dev-ingest-logs
 ```
 
@@ -65,9 +68,14 @@ The `init-clickhouse.sql` script creates two tables on first startup:
 Running `just dev-seed` creates:
 
 - **User**: `dev@localhost` (admin)
+- **API token**: a stable local development token for CLI or API testing
+- **Team membership**: links `dev@localhost` to "Dev Team" if provisioning has already created it
+
+Backend startup provisioning creates:
+
 - **Team**: "Dev Team"
 - **Sources**: HTTP Access Logs, Syslog Logs, VictoriaLogs Demo (all linked to Dev Team)
-- **VictoriaLogs sample data**: `just dev-ingest-logs` now inserts a small set of demo logs into the local VictoriaLogs instance in addition to the ClickHouse demo streams
+- **VictoriaLogs sample data**: `just dev-ingest-logs` now uses Vector to send demo logs into the local VictoriaLogs instance in addition to the ClickHouse demo streams
 
 ## Services
 
@@ -84,13 +92,13 @@ Running `just dev-seed` creates:
 ## Useful Commands
 
 ```bash
-# Quick reset (truncate logs, recreate SQLite data)
+# Quick reset (truncate ClickHouse logs, wipe VictoriaLogs data, recreate SQLite data)
 just dev-reset
 
 # Full clean (stop docker, remove volumes, delete DB)
 just dev-clean
 
-# Re-seed without full reset
+# Re-create the local API user/token after backend has created local.db
 just dev-seed
 
 # View webhook receiver logs (for testing alerts)
@@ -106,9 +114,10 @@ just dev-test-webhook
 |------|---------|
 | `docker-compose.yml` | Infrastructure services |
 | `init-clickhouse.sql` | Creates ClickHouse tables |
-| `seed.sh` | Creates team, sources, user (idempotent) |
+| `seed.sh` | Creates the local API user/token and optionally links it to the provisioned dev team |
 | `provisioning.toml` | Example datasource-aware provisioning config for dev |
-| `ingest-victorialogs.sh` | Sends sample JSONL logs to the local VictoriaLogs instance |
+| `victorialogs.toml` | Vector config for the local VictoriaLogs demo stream |
+| `ingest-victorialogs.sh` | Fallback helper that sends sample JSONL logs directly to VictoriaLogs |
 | `http.toml` | Vector config for HTTP demo logs |
 | `syslog.toml` | Vector config for syslog demo logs |
 | `dex/config.yaml` | Dex OIDC configuration |
@@ -122,7 +131,7 @@ just dev-init-tables
 ```
 
 **Seed script fails?**
-- Ensure backend is running (`just run-backend`)
+- Ensure backend has started at least once (`just run-backend`)
 - Check the database path matches your config
 - Run with: `LOGCHEF_DB_PATH=./logchef.db ./dev/seed.sh`
 
@@ -131,7 +140,11 @@ just dev-init-tables
 - Check table exists: `curl "http://localhost:8123/?query=SHOW+TABLES"`
 
 **VictoriaLogs source is empty?**
-- Run `just dev-ingest-logs` to send sample JSONL data into VictoriaLogs and demo streams into ClickHouse.
+- Run `just dev-ingest-logs` to send demo logs through Vector into VictoriaLogs and ClickHouse.
 - Validate the service is up with: `curl http://localhost:9428/health`
-- Re-send only the VictoriaLogs sample payload with: `cd dev && ./ingest-victorialogs.sh`
+- Re-send only the VictoriaLogs sample payload without Vector with: `cd dev && ./ingest-victorialogs.sh`
 - If you want the full upstream VictoriaLogs demo stack with VMUI, Grafana, `vmauth`, and `vmalert`, use the official compose files linked above instead of Logchef's trimmed local dev compose.
+
+**VictoriaLogs still has old dev data?**
+- Run `just dev-reset` to clear ClickHouse tables, wipe VictoriaLogs data, and remove `local.db`.
+- Then restart the app with `just run-backend`, optionally `just dev-seed`, and re-ingest with `just dev-ingest-logs`.

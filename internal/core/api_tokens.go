@@ -198,7 +198,7 @@ func AuthenticateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, 
 	// Direct lookup by token hash (very efficient with unique index)
 	sqlcToken, err := db.GetAPITokenByHash(ctx, tokenHash)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) || sqlite.IsNotFoundError(err) {
 			return nil, nil, ErrInvalidToken
 		}
 		return nil, nil, fmt.Errorf("failed to get token: %w", err)

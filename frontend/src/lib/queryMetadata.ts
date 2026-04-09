@@ -144,6 +144,16 @@ export function getQueryLanguageLabel(language: string | null | undefined): stri
   }
 }
 
+export function getSourceTypeLabel(source: SourceDescriptor): string {
+  switch (getSourceType(source)) {
+    case "victorialogs":
+      return "VictoriaLogs";
+    case "clickhouse":
+    default:
+      return "ClickHouse";
+  }
+}
+
 export function getExploreModeForQueryLanguage(language: QueryLanguage): "logchefql" | "sql" {
   return language === "logchefql" ? "logchefql" : "sql";
 }

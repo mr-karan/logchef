@@ -8,6 +8,7 @@ import { useSourcesStore } from '@/stores/sources'
 import { useExploreStore } from '@/stores/explore'
 import { useTimeRange } from '@/composables/useTimeRange'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { DateTimePicker } from '@/components/date-time-picker'
 import { ChevronRight, Share2, Settings, Clock, Terminal } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
@@ -43,7 +44,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { getNativeQueryLanguageForSource } from '@/lib/queryMetadata'
+import { getNativeQueryLanguageForSource, getSourceTypeLabel } from '@/lib/queryMetadata'
 
 const router = useRouter()
 const { toast } = useToast()
@@ -67,6 +68,17 @@ const selectedSourceName = computed(() => {
   const source = availableSources.value.find((s) => s.id === currentSourceId.value)
   return source ? formatSourceName(source) : 'Select source'
 })
+const selectedSource = computed(() => {
+  if (!currentSourceId.value) return null
+  return (
+    sourcesStore.currentSourceDetails ??
+    availableSources.value.find((source) => source.id === currentSourceId.value) ??
+    null
+  )
+})
+const selectedSourceTypeLabel = computed(() =>
+  selectedSource.value ? getSourceTypeLabel(selectedSource.value) : null
+)
 
 // Time range display
 const dateTimePickerRef = ref<InstanceType<typeof DateTimePicker> | null>(null)
@@ -275,6 +287,14 @@ defineExpose({
           </SelectGroup>
         </SelectContent>
       </Select>
+
+      <Badge
+        v-if="selectedSourceTypeLabel"
+        variant="outline"
+        class="h-5 rounded-md px-1.5 text-[10px] font-medium text-muted-foreground"
+      >
+        {{ selectedSourceTypeLabel }}
+      </Badge>
 
       <!-- Divider -->
       <div class="h-5 w-px bg-border" />
