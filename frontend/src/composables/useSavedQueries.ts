@@ -203,7 +203,6 @@ export function useSavedQueries(
         }
 
         // Use the correct store action for updates
-        console.log(`useSavedQueries.handleSaveQuery: Updating query ${queryId} for team ${formData.team_id}, source ${formData.source_id}`);
         response = await savedQueriesStore.updateTeamSourceQuery(
             formData.team_id,
             formData.source_id, // Pass source ID
@@ -217,8 +216,6 @@ export function useSavedQueries(
               query_content: formData.query_content
             }
         );
-        console.log('Updated query via updateTeamSourceQuery:', response);
-
       } else {
         // --- Create or Overwrite Flow ---
         // Ensure source ID is present for create/overwrite
@@ -242,7 +239,6 @@ export function useSavedQueries(
 
           if (confirmOverwrite) {
             // Overwrite existing using updateTeamSourceQuery
-            console.log(`useSavedQueries.handleSaveQuery: Overwriting query ${existingQuery.id} for team ${formData.team_id}, source ${formData.source_id}`);
             response = await savedQueriesStore.updateTeamSourceQuery(
                 formData.team_id,
                 formData.source_id,
@@ -255,14 +251,12 @@ export function useSavedQueries(
                   query_content: formData.query_content
                 }
             );
-            console.log('Overwrote existing query via updateTeamSourceQuery:', response);
           } else {
             // User cancelled the overwrite
             return { success: false, canceled: true }; // Return indication that nothing happened
           }
         } else {
           // Create new query using createSourceQuery
-          console.log(`useSavedQueries.handleSaveQuery: Creating new query for team ${formData.team_id}, source ${formData.source_id}`);
           // The createSourceQuery action internally stringifies the content
           // We need to parse the formData.query_content first if it's a string here
           let parsedContent;
@@ -282,7 +276,6 @@ export function useSavedQueries(
               formData.query_language,
               formData.editor_mode
           );
-          console.log('Created new query via createSourceQuery:', response);
         }
       }
 
@@ -370,13 +363,9 @@ export function useSavedQueries(
       if (content.limit) exploreStore.setLimit(content.limit)
 
       if (content.timeRange === null) {
-        console.log("Saved query has timeRange explicitly set to null, keeping current range");
       } else if (content.timeRange?.relative) {
-        console.log("Setting relative time range from saved query:", content.timeRange.relative);
         exploreStore.setRelativeTimeRange(content.timeRange.relative);
       } else if (content.timeRange?.absolute?.start && content.timeRange?.absolute?.end) {
-        console.log("Setting absolute time range from saved query:", content.timeRange);
-
         try {
           const startDate = new Date(content.timeRange.absolute.start);
           const endDate = new Date(content.timeRange.absolute.end);
@@ -412,8 +401,6 @@ export function useSavedQueries(
         } catch (error) {
           console.error("Error converting timestamps to CalendarDateTime:", error);
         }
-      } else {
-        console.log("Saved query has no time range specified or it's invalid, keeping current range");
       }
 
       // save variable data into store.
@@ -427,7 +414,6 @@ export function useSavedQueries(
             return variable;
           });
           variableStore.setAllVariable(normalizedVariables);
-          console.log("Restored variables from saved query.");
         } catch (e) {
           console.error("Failed to restore variables from saved query:", e);
         }
@@ -514,7 +500,6 @@ export function useSavedQueries(
     try {
       // Deep clone the query to avoid reference issues
       editingQuery.value = JSON.parse(JSON.stringify(query))
-      console.log('Editing query:', editingQuery.value)
       showSaveQueryModal.value = true
     } catch (error) {
       console.error('Error preparing query for edit:', error)
@@ -669,7 +654,6 @@ export function useSavedQueries(
         editor_mode: 'builder' | 'native';
       }
   ) {
-    console.log(`useSavedQueries: Updating query ${queryId} for team ${teamId}, source ${sourceId}`);
     isLoading.value = true;
     try {
       const payload = {
@@ -684,7 +668,6 @@ export function useSavedQueries(
       const result = await savedQueriesStore.updateTeamSourceQuery(teamId, sourceId, queryId, payload);
 
       if (result.success) {
-        console.log(`useSavedQueries: Query ${queryId} updated successfully.`);
         // No need to manually update local 'queries' ref here,
         // as the store action already updates the store's query list.
         // The component using the store should react to the store change.

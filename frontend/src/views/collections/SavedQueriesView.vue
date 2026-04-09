@@ -50,18 +50,14 @@ import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useContextSync } from "@/composables/useContextSync";
 import type { SaveQueryFormData } from "@/views/explore/types";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
-import { useContextStore } from "@/stores/context";
-import { useRoute } from "vue-router";
 import { getQueryLanguageLabel, resolveSavedQueryMetadata } from "@/lib/queryMetadata";
 
 const router = useRouter();
-const route = useRoute();
 const { toast } = useToast();
 
 const sourcesStore = useSourcesStore();
 const teamsStore = useTeamsStore();
 const savedQueriesStore = useSavedQueriesStore();
-const contextStore = useContextStore();
 
 const {
   isReady: contextReady,
@@ -72,7 +68,8 @@ const {
   initialize: initializeContext,
   handleTeamChange: contextHandleTeamChange,
   handleSourceChange: contextHandleSourceChange,
-} = useContextSync({ basePath: '/logs/saved' });
+  clearSourceSelection,
+} = useContextSync({ basePath: '/logs/saved', allowMissingSource: true });
 
 const localTeamQueries = ref<SavedTeamQuery[] | undefined>();
 const isAllTeamsMode = ref(false);
@@ -174,20 +171,8 @@ function getSavedQueryBadge(query: SavedTeamQuery) {
 onMounted(async () => {
   try {
     teamsStore.resetAdminTeams();
-    
-    // Check initial source param before initialization which might auto-select a source
-    const initialSourceParam = route.query.source;
-    
     await initializeContext();
-    
-    // If no source was specified in URL, enforce All Sources mode
-    if (!initialSourceParam && contextStore.sourceId) {
-      contextStore.sourceId = null;
-      const q = { ...route.query };
-      delete q.source;
-      router.replace({ query: q });
-    }
-    
+
     if (contextError.value) {
       toast({
         title: "Error",
@@ -229,8 +214,7 @@ async function handleTeamChange(teamId: string) {
     // Handle "All Teams" selection
     if (teamId === "all") {
       isAllTeamsMode.value = true;
-      // Clear stale team/source context so permission checks don't use the previous team
-      contextStore.sourceId = null;
+      await clearSourceSelection();
       localTeamQueries.value = [];
       const result = await savedQueriesStore.fetchMyCollections();
       if (result.success) {
@@ -243,13 +227,7 @@ async function handleTeamChange(teamId: string) {
     const teamIdNum = parseInt(teamId);
     if (isNaN(teamIdNum)) return;
 
-    await contextHandleTeamChange(teamIdNum);
-
-    // Default to All Sources when switching teams
-    contextStore.sourceId = null;
-    const query = { ...route.query };
-    delete query.source;
-    router.replace({ query });
+    await contextHandleTeamChange(teamIdNum, { clearSource: true });
     
     if (sourcesStore.teamSources.length === 0) {
       localTeamQueries.value = [];
@@ -269,10 +247,7 @@ async function handleSourceChange(sourceId: string) {
   try {
     // Handle All Sources selection
     if (!sourceId || sourceId === "all") {
-      contextStore.sourceId = null;
-      const query = { ...route.query };
-      delete query.source;
-      await router.replace({ query });
+      await clearSourceSelection();
       
       // Manually trigger fetch if needed, though watcher should handle it
       // if sourceId was already null (e.g. clicking All Sources when already there)

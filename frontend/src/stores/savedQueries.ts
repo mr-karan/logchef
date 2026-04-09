@@ -170,7 +170,6 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     const teamSources = teamsStore.getTeamSources(teamId);
     if (teamSources.length > 0 && !teamSources.some(source => source.id === sourceId)) {
        console.warn(`fetchTeamSourceQueries: Source ${sourceId} does not belong to team ${teamId}, returning empty.`);
-       console.log(`Available sources for team ${teamId}:`, teamSources.map(s => s.id));
        state.data.value.queries = [];
        return { success: true, data: [] }; // Mimic successful empty response
     }

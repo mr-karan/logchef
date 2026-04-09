@@ -25,12 +25,10 @@ export const useUsersStore = defineStore("users", () => {
         return { success: true, data: state.data.value.users };
       }
       
-      console.log("Loading users from API...");
       return await state.callApi({
         apiCall: () => usersApi.listUsers(),
         operationKey: 'loadUsers',
         onSuccess: (response) => {
-          console.log("User API response:", response);
           // Store the users array from the response - without trying to access response.data
           // because callApi already extracts the data property from the response
           state.data.value.users = (response as User[]) || [];
@@ -66,7 +64,6 @@ export const useUsersStore = defineStore("users", () => {
       if (result && result.success) {
         // Reload all users from backend to ensure frontend state is in sync
         await loadUsers(true);
-        console.log("Users reloaded after creating new user");
       }
       
       return result;
@@ -92,7 +89,6 @@ export const useUsersStore = defineStore("users", () => {
       if (result && result.success) {
         // Reload all users from backend to ensure frontend state is in sync
         await loadUsers(true);
-        console.log("Users reloaded after updating user");
       }
       
       return result;
@@ -110,7 +106,6 @@ export const useUsersStore = defineStore("users", () => {
       if (result && result.success) {
         // Reload all users from backend to ensure frontend state is in sync
         await loadUsers(true);
-        console.log("Users reloaded after deleting user");
       }
       
       return result;

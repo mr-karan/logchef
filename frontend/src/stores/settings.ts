@@ -41,12 +41,10 @@ export const useSettingsStore = defineStore("settings", () => {
         return { success: true, data: state.data.value.settingsByCategory };
       }
 
-      console.log("Loading settings from API...");
       return await state.callApi({
         apiCall: () => settingsApi.listSettings(),
         operationKey: 'loadSettings',
         onSuccess: (response) => {
-          console.log("Settings API response:", response);
           state.data.value.settingsByCategory = (response as SettingsByCategory[]) || [];
         },
         showToast: false,
@@ -93,7 +91,6 @@ export const useSettingsStore = defineStore("settings", () => {
       if (result && result.success) {
         // Reload settings to ensure frontend state is in sync
         await loadSettings(true);
-        console.log("Settings reloaded after updating setting");
       }
 
       return result;
@@ -112,7 +109,6 @@ export const useSettingsStore = defineStore("settings", () => {
       if (result && result.success) {
         // Reload settings to ensure frontend state is in sync
         await loadSettings(true);
-        console.log("Settings reloaded after deleting setting");
       }
 
       return result;

@@ -242,7 +242,7 @@ onMounted(async () => {
 
   // Also check URL parameters for editing existing query
   if (route.query.id && !props.initialData && !props.editData) {
-    console.log(`Editing query ID ${route.query.id} from URL parameters (if modal state not already set)`);
+    queryId.value = route.query.id.toString();
   }
 });
 
@@ -454,11 +454,9 @@ async function handleSubmit(event: Event) {
 
       if (isEditing.value && queryId.value) {
         // We're updating an existing query
-        console.log(`Updating existing query ID: ${queryId.value}`);
         emit('update', queryId.value, payload);
       } else {
         // We're creating a new query
-        console.log('Creating new query');
         emit('save', payload);
       }
     } catch (contentError) {

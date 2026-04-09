@@ -74,13 +74,11 @@ export const useContextStore = defineStore('context', () => {
   }
 
   function clear() {
-    console.log('ContextStore: Clearing all context')
     teamId.value = null
     sourceId.value = null
   }
 
   function clearStorage() {
-    console.log('ContextStore: Clearing localStorage')
     try {
       localStorage.removeItem(STORAGE_KEY)
     } catch (e) {

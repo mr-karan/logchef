@@ -6,6 +6,7 @@ import { useSourcesStore } from '@/stores/sources';
 import { useContextStore } from '@/stores/context';
 import { savedQueriesApi } from '@/api/savedQueries';
 import { useTeamSourceContext } from '@/composables/useTeamSourceContext';
+import { useTeamSourceRouteSync } from '@/composables/useTeamSourceRouteSync';
 
 export type UrlSyncState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -27,6 +28,7 @@ export function useUrlState(): UrlStateReturn {
   const sourcesStore = useSourcesStore();
   const contextStore = useContextStore();
   const teamSourceContext = useTeamSourceContext();
+  const routeSync = useTeamSourceRouteSync();
 
   const state = ref<UrlSyncState>('idle');
   const error = ref<string | null>(null);
@@ -137,7 +139,7 @@ export function useUrlState(): UrlStateReturn {
     syncPaused = true;
 
     try {
-      return await teamSourceContext.applyContextSelection(teamId, requestedSourceId);
+      return await routeSync.applyContextSelection(teamId, requestedSourceId);
     } finally {
       syncPaused = false;
       if (options.syncUrl) {
@@ -179,11 +181,11 @@ export function useUrlState(): UrlStateReturn {
       }
 
       const params = normalizeQueryParams(getRouteQueryParams() as Record<string, unknown>);
-      const teamId = teamSourceContext.resolveTeamId(teamSourceContext.parseId(params.team));
-      const requestedSourceId = teamSourceContext.parseId(params.source);
+      const routeSelection = await routeSync.applyRouteContext();
+      const teamId = routeSelection.teamId;
+      const resolvedSourceId = routeSelection.sourceId;
 
       if (teamId) {
-        const resolvedSourceId = await applyContextSelection(teamId, requestedSourceId);
         const needsUrlUpdate =
           params.team !== String(teamId) ||
           (resolvedSourceId ? params.source !== String(resolvedSourceId) : Boolean(params.source));

@@ -43,7 +43,6 @@ export const useAuthStore = defineStore("auth", () => {
 
     return await state.withLoading('initialize', async () => {
       try {
-        console.log("Initializing auth store...");
         state.data.value.isInitializing = true;
 
         // Load server meta information first (it's a public endpoint)
@@ -60,17 +59,12 @@ export const useAuthStore = defineStore("auth", () => {
               state.data.value.session = response.session;
               // Mark that we've had a successful session for future reference
               sessionStorage.setItem("hadPreviousSession", "true");
-              console.log("Auth initialized successfully:", {
-                user: user.value,
-                isAuthenticated: isAuthenticated.value,
-              });
             }
           },
           onError: () => {
             // Handle session not found gracefully
             clearState();
             // Log error for diagnostic purposes but don't show to user for initial load
-            console.log("No active session found");
           },
         });
 
