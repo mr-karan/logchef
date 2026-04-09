@@ -104,6 +104,7 @@ func mapSourceRowToModel(row *sqlc.Source) *models.Source {
 			Password:  row.Password,
 			Database:  row.Database,
 			TableName: row.TableName,
+			TLSEnable: row.TlsEnable == 1,
 		},
 		Timestamps: models.Timestamps{
 			CreatedAt: row.CreatedAt,

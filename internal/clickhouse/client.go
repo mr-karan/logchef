@@ -2,10 +2,13 @@ package clickhouse
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math"
+	"os"
 	"reflect"
 	"regexp"
 	"strings"
@@ -43,13 +46,15 @@ type Client struct {
 
 // ClientOptions holds configuration for establishing a new ClickHouse client connection.
 type ClientOptions struct {
-	Host     string                 // Hostname or IP address.
-	Database string                 // Target database name.
-	Username string                 // Username for authentication.
-	Password string                 // Password for authentication.
-	Settings map[string]interface{} // Additional ClickHouse settings (e.g., max_execution_time).
-	SourceID string                 // Source ID for metrics tracking.
-	Source   *models.Source         // Source model for enhanced metrics.
+	Host      string                 // Hostname or IP address.
+	Database  string                 // Target database name.
+	Username  string                 // Username for authentication.
+	Password  string                 // Password for authentication.
+	Settings  map[string]interface{} // Additional ClickHouse settings (e.g., max_execution_time).
+	SourceID  string                 // Source ID for metrics tracking.
+	Source    *models.Source         // Source model for enhanced metrics.
+	TLSEnable bool                   // Enable TLS for the connection.
+	TLSCACert string                 // Optional path to a CA certificate file for TLS verification.
 }
 
 // ExtendedColumnInfo provides detailed column metadata, including nullability,
@@ -80,10 +85,36 @@ type TableInfo struct {
 // It takes connection options and a logger, creates the connection, and returns a Client instance.
 // Note: This does not automatically verify the connection with a ping - callers should do that if needed.
 func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
-	// Ensure host includes the native protocol port (default 9000) if not specified.
+	// Ensure host includes the native protocol port if not specified.
+	// Default to 9440 for TLS connections, 9000 for plaintext.
 	host := opts.Host
 	if !strings.Contains(host, ":") {
-		host += ":9000"
+		if opts.TLSEnable {
+			host += ":9440"
+		} else {
+			host += ":9000"
+		}
+	}
+
+	// Build TLS config if enabled.
+	var tlsCfg *tls.Config
+	if opts.TLSEnable {
+		rootCAs, err := x509.SystemCertPool()
+		if err != nil {
+			rootCAs = x509.NewCertPool()
+		}
+		if opts.TLSCACert != "" {
+			caCert, err := os.ReadFile(opts.TLSCACert)
+			if err != nil {
+				return nil, fmt.Errorf("reading TLS CA certificate: %w", err)
+			}
+			if !rootCAs.AppendCertsFromPEM(caCert) {
+				return nil, fmt.Errorf("failed to append CA certificate from %s", opts.TLSCACert)
+			}
+		}
+		tlsCfg = &tls.Config{
+			RootCAs: rootCAs,
+		}
 	}
 
 	options := &clickhouse.Options{
@@ -102,6 +133,7 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 			Method: clickhouse.CompressionLZ4,
 		},
 		Protocol: clickhouse.Native,
+		TLS:      tlsCfg,
 	}
 
 	// Apply any additional user-provided settings.
@@ -115,6 +147,7 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 		"host", host,
 		"database", opts.Database,
 		"protocol", "native",
+		"tls", opts.TLSEnable,
 	)
 
 	conn, err := clickhouse.Open(options)

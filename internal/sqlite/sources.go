@@ -31,6 +31,7 @@ func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
 		TableName:         source.Connection.TableName,
 		Description:       sql.NullString{String: source.Description, Valid: source.Description != ""},
 		TtlDays:           int64(source.TTLDays),
+		TlsEnable:         boolToInt(source.Connection.TLSEnable),
 	}
 
 	// Execute the generated query.
@@ -149,6 +150,7 @@ func (db *DB) UpdateSource(ctx context.Context, source *models.Source) error {
 		TableName:         source.Connection.TableName,
 		Description:       sql.NullString{String: source.Description, Valid: source.Description != ""},
 		TtlDays:           int64(source.TTLDays),
+		TlsEnable:         boolToInt(source.Connection.TLSEnable),
 		ID:                int64(source.ID),
 	}
 

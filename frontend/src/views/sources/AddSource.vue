@@ -39,6 +39,7 @@ interface ConnectionRequestInfo {
     password: string;
     database: string;
     table_name: string;
+    tls_enable?: boolean;
     timestamp_field?: string;
     severity_field?: string;
 }
@@ -48,6 +49,7 @@ const tableMode = ref<'create' | 'connect'>('create') // 'create' or 'connect'
 const createTable = computed(() => tableMode.value === 'create')
 const sourceName = ref<string | number>('')
 const host = ref<string | number>('')
+const enableTLS = ref(false)
 const enableAuth = ref<boolean>(false)
 const username = ref<string | number>('')
 const password = ref<string | number>('')
@@ -181,6 +183,7 @@ const handleValidateConnection = async () => {
         password: enableAuth.value ? String(password.value) : '',
         database: String(database.value),
         table_name: String(tableName.value),
+        tls_enable: enableTLS.value,
     }
 
     // Add timestamp and severity fields if connecting to existing table
@@ -216,6 +219,9 @@ const prefillFormFromSource = (source: any, isCopy: boolean = false) => {
         username.value = source.connection.username
         password.value = source.connection.password || ''
     }
+
+    // Set TLS field
+    enableTLS.value = !!source.connection.tls_enable
 }
 
 onMounted(async () => {
@@ -314,6 +320,7 @@ const submitForm = async () => {
                 host: String(host.value),
                 database: String(database.value),
                 table_name: String(tableName.value),
+                tls_enable: enableTLS.value,
             }
 
             if (enableAuth.value) {
@@ -346,6 +353,7 @@ const submitForm = async () => {
                     password: enableAuth.value ? String(password.value) : '',
                     database: String(database.value),
                     table_name: String(tableName.value),
+                    tls_enable: enableTLS.value,
                 },
                 description: String(description.value),
                 ttl_days: Number(ttlDays.value),
@@ -435,11 +443,22 @@ const submitForm = async () => {
 
                             <div class="grid gap-2">
                                 <Label for="host" class="required">Host and Port</Label>
-                                <Input id="host" v-model="host" placeholder="localhost:9000" required />
+                                <Input id="host" v-model="host" :placeholder="enableTLS ? 'localhost:9440' : 'localhost:9000'" required />
                                 <p class="text-sm text-muted-foreground">
                                     Enter the ClickHouse server host and port in the format host:port (e.g.,
-                                    localhost:9000). Port 9000 is the default TCP protocol port used by ClickHouse.
+                                    {{ enableTLS ? 'localhost:9440' : 'localhost:9000' }}). Port {{ enableTLS ? '9440 is the default TLS' : '9000 is the default TCP protocol' }} port used by ClickHouse.
                                 </p>
+                            </div>
+
+                            <!-- TLS Toggle -->
+                            <div class="flex items-center justify-between rounded-lg border p-3">
+                                <div class="space-y-0.5">
+                                    <Label for="tls-toggle">Enable TLS</Label>
+                                    <p class="text-sm text-muted-foreground">
+                                        Use TLS encryption for the ClickHouse native protocol connection
+                                    </p>
+                                </div>
+                                <Switch id="tls-toggle" v-model:checked="enableTLS" />
                             </div>
 
                             <!-- Database and Table Name side by side -->

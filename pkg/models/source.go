@@ -12,6 +12,7 @@ type ConnectionInfo struct {
 	Password  string `json:"password"`
 	Database  string `json:"database"`
 	TableName string `json:"table_name"`
+	TLSEnable bool   `json:"tls_enable"`
 }
 
 // Source represents a ClickHouse data source in our system
@@ -44,6 +45,7 @@ type ConnectionInfoResponse struct {
 	Password  string `json:"password,omitempty"`
 	Database  string `json:"database"`
 	TableName string `json:"table_name"`
+	TLSEnable bool   `json:"tls_enable"`
 }
 
 // SourceResponse represents a Source for API responses, with sensitive information removed
@@ -81,6 +83,7 @@ func (s *Source) ToResponse() *SourceResponse {
 			Password:  s.Connection.Password,
 			Database:  s.Connection.Database,
 			TableName: s.Connection.TableName,
+			TLSEnable: s.Connection.TLSEnable,
 		},
 		Description:  s.Description,
 		TTLDays:      s.TTLDays,
@@ -138,12 +141,13 @@ type UpdateSourceRequest struct {
 	Password    *string `json:"password,omitempty"`
 	Database    *string `json:"database,omitempty"`
 	TableName   *string `json:"table_name,omitempty"`
+	TLSEnable   *bool   `json:"tls_enable,omitempty"`
 }
 
 // HasConnectionChanges returns true if any connection-related fields are being updated.
 // When connection changes, re-validation is required.
 func (r *UpdateSourceRequest) HasConnectionChanges() bool {
-	return r.Host != nil || r.Username != nil || r.Password != nil || r.Database != nil || r.TableName != nil
+	return r.Host != nil || r.Username != nil || r.Password != nil || r.Database != nil || r.TableName != nil || r.TLSEnable != nil
 }
 
 // SourceWithTeams represents a source along with the teams that have access to it
