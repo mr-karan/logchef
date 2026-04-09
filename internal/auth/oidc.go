@@ -30,6 +30,41 @@ var (
 	ErrAdminNotFound             = errors.New("admin not found") // May not be needed if admin check moves to core
 )
 
+// OIDCClaims represents the claims extracted from an OIDC ID token.
+// EmailVerified is a *bool to distinguish between a missing/null claim
+// (nil) and an explicit false value. This matters for providers like
+// Cloudflare Access that omit the claim entirely.
+type OIDCClaims struct {
+	Email         string `json:"email"`
+	EmailVerified *bool  `json:"email_verified"`
+	Name          string `json:"name"`
+}
+
+// CheckEmailVerified validates the email_verified claim according to the
+// skip_email_verified_check configuration. The three cases are:
+//   - claim is true: always allowed.
+//   - claim is missing/null (nil): allowed only when skipCheck is true.
+//   - claim is explicitly false: always rejected, even when skipCheck is true.
+func CheckEmailVerified(claims OIDCClaims, skipCheck bool, log *slog.Logger, context string) error {
+	switch {
+	case claims.EmailVerified != nil && *claims.EmailVerified:
+		// Email is verified, nothing to do.
+		return nil
+	case claims.EmailVerified != nil && !*claims.EmailVerified:
+		// Provider explicitly says email is NOT verified — always reject.
+		log.Warn(context+": email_verified is explicitly false", "email", claims.Email)
+		return ErrOIDCEmailNotVerified
+	default:
+		// Claim is missing/null.
+		if skipCheck {
+			log.Warn(context+": email_verified claim is missing, proceeding anyway (skip_email_verified_check=true)", "email", claims.Email)
+			return nil
+		}
+		log.Warn(context+": email_verified claim is missing", "email", claims.Email)
+		return ErrOIDCEmailNotVerified
+	}
+}
+
 // OIDCProvider handles OIDC authentication interactions.
 type OIDCProvider struct {
 	provider  *oidc.Provider
@@ -133,20 +168,15 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db *sqlite.DB, log *s
 	}
 
 	// Extract required claims.
-	var claims struct {
-		Email         string `json:"email"`
-		EmailVerified bool   `json:"email_verified"`
-		Name          string `json:"name"`
-	}
+	var claims OIDCClaims
 	if err := idToken.Claims(&claims); err != nil {
 		p.log.Error("failed to parse ID token claims", "error", err)
 		return nil, nil, fmt.Errorf("%w: failed to parse ID token claims: %v", ErrOIDCInvalidToken, err)
 	}
 
-	// Ensure email is verified by the OIDC provider.
-	if !claims.EmailVerified {
-		p.log.Warn("OIDC login attempt with unverified email", "email", claims.Email)
-		return nil, nil, ErrOIDCEmailNotVerified
+	// Verify email_verified claim.
+	if err := CheckEmailVerified(claims, p.oidcCfg.SkipEmailVerifiedCheck, p.log, "OIDC callback"); err != nil {
+		return nil, nil, err
 	}
 
 	// Look up user in the local database.
