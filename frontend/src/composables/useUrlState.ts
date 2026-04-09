@@ -5,6 +5,7 @@ import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
 import { useContextStore } from '@/stores/context';
 import { savedQueriesApi } from '@/api/savedQueries';
+import { useTeamSourceContext } from '@/composables/useTeamSourceContext';
 
 export type UrlSyncState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -14,6 +15,8 @@ interface UrlStateReturn {
   isReady: Ref<boolean>;
   initialize: () => Promise<void>;
   pushHistoryEntry: () => void;
+  selectTeam: (teamId: number) => Promise<void>;
+  selectSource: (sourceId: number) => Promise<void>;
 }
 
 export function useUrlState(): UrlStateReturn {
@@ -23,6 +26,7 @@ export function useUrlState(): UrlStateReturn {
   const teamsStore = useTeamsStore();
   const sourcesStore = useSourcesStore();
   const contextStore = useContextStore();
+  const teamSourceContext = useTeamSourceContext();
 
   const state = ref<UrlSyncState>('idle');
   const error = ref<string | null>(null);
@@ -31,6 +35,7 @@ export function useUrlState(): UrlStateReturn {
   const pendingQueryResolve = ref(false);
   let skipNextSync = false;
   let pendingRouteSyncKey: string | null = null;
+  let syncPaused = false;
 
   function getRouteQueryParams(): Record<string, string> {
     const fullPath = route.fullPath || '';
@@ -124,6 +129,23 @@ export function useUrlState(): UrlStateReturn {
     return true;
   }
 
+  async function applyContextSelection(
+    teamId: number,
+    requestedSourceId: number | null,
+    options: { syncUrl?: boolean } = {}
+  ): Promise<number | null> {
+    syncPaused = true;
+
+    try {
+      return await teamSourceContext.applyContextSelection(teamId, requestedSourceId);
+    } finally {
+      syncPaused = false;
+      if (options.syncUrl) {
+        syncUrlFromStore();
+      }
+    }
+  }
+
   async function initialize(): Promise<void> {
     if (state.value === 'loading') {
       return;
@@ -157,27 +179,25 @@ export function useUrlState(): UrlStateReturn {
       }
 
       const params = normalizeQueryParams(getRouteQueryParams() as Record<string, unknown>);
-      
-      if (!params.team || !params.source) {
-        const storedDefaults = contextStore.getStoredDefaults();
-        const teamId = params.team 
-          ? parseInt(params.team, 10) 
-          : (storedDefaults.teamId ?? teamsStore.currentTeamId ?? teamsStore.teams?.[0]?.id);
-        
-        let sourceId = params.source ? parseInt(params.source, 10) : null;
-        
-        if (!sourceId && teamId) {
-          sourceId = storedDefaults.sourceId ?? contextStore.getStoredSourceForTeam(teamId);
-          if (!sourceId && sourcesStore.teamSources?.length > 0) {
-            sourceId = sourcesStore.teamSources[0].id;
-          }
-        }
+      const teamId = teamSourceContext.resolveTeamId(teamSourceContext.parseId(params.team));
+      const requestedSourceId = teamSourceContext.parseId(params.source);
 
-        if (teamId && (!params.team || (!params.source && sourceId))) {
+      if (teamId) {
+        const resolvedSourceId = await applyContextSelection(teamId, requestedSourceId);
+        const needsUrlUpdate =
+          params.team !== String(teamId) ||
+          (resolvedSourceId ? params.source !== String(resolvedSourceId) : Boolean(params.source));
+
+        if (needsUrlUpdate) {
           const newQuery: Record<string, string> = { ...route.query as Record<string, string> };
-          if (!params.team) newQuery.team = teamId.toString();
-          if (!params.source && sourceId) newQuery.source = sourceId.toString();
-          
+          newQuery.team = String(teamId);
+
+          if (resolvedSourceId) {
+            newQuery.source = String(resolvedSourceId);
+          } else {
+            delete newQuery.source;
+          }
+
           await router.replace({ query: newQuery });
           params.team = newQuery.team;
           params.source = newQuery.source;
@@ -266,6 +286,10 @@ export function useUrlState(): UrlStateReturn {
       return;
     }
 
+    if (syncPaused) {
+      return;
+    }
+
     if (skipNextSync) {
       skipNextSync = false;
       return;
@@ -303,6 +327,23 @@ export function useUrlState(): UrlStateReturn {
         console.error('useUrlState: Error pushing history:', err);
       }
     });
+  }
+
+  async function selectTeam(teamId: number): Promise<void> {
+    if (!teamsStore.teams.some(team => team.id === teamId)) {
+      return;
+    }
+
+    await applyContextSelection(teamId, null, { syncUrl: true });
+  }
+
+  async function selectSource(sourceId: number): Promise<void> {
+    const currentTeamId = contextStore.teamId;
+    if (!currentTeamId) {
+      return;
+    }
+
+    await applyContextSelection(currentTeamId, sourceId, { syncUrl: true });
   }
 
   watch(
@@ -343,6 +384,13 @@ export function useUrlState(): UrlStateReturn {
         return;
       }
 
+      const teamId = teamSourceContext.resolveTeamId(teamSourceContext.parseId(normalized.team));
+      if (teamId) {
+        const resolvedSourceId = await applyContextSelection(teamId, teamSourceContext.parseId(normalized.source));
+        normalized.team = String(teamId);
+        normalized.source = resolvedSourceId ? String(resolvedSourceId) : undefined;
+      }
+
       if (normalized.id) {
         return;
       }
@@ -366,5 +414,7 @@ export function useUrlState(): UrlStateReturn {
     isReady,
     initialize,
     pushHistoryEntry,
+    selectTeam,
+    selectSource,
   };
 }

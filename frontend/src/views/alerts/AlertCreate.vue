@@ -8,6 +8,8 @@ import TeamSourceSelector from "@/views/explore/components/TeamSourceSelector.vu
 import { useAlertsStore } from "@/stores/alerts";
 import { useContextStore } from "@/stores/context";
 import { useSourcesStore } from "@/stores/sources";
+import { useTeamsStore } from "@/stores/teams";
+import { useContextSync } from "@/composables/useContextSync";
 import type { Alert, CreateAlertRequest } from "@/api/alerts";
 
 const router = useRouter();
@@ -15,9 +17,17 @@ const route = useRoute();
 const alertsStore = useAlertsStore();
 const contextStore = useContextStore();
 const sourcesStore = useSourcesStore();
+const teamsStore = useTeamsStore();
+const {
+  initialize: initializeContext,
+  handleTeamChange,
+  handleSourceChange,
+} = useContextSync();
 
 const currentTeamId = computed(() => contextStore.teamId);
 const currentSourceId = computed(() => contextStore.sourceId);
+const availableTeams = computed(() => teamsStore.teams || []);
+const availableSources = computed(() => sourcesStore.teamSources || []);
 
 // For duplicating an existing alert
 const duplicateAlertId = computed(() => {
@@ -27,15 +37,6 @@ const duplicateAlertId = computed(() => {
 
 const alertToDuplicate = ref<Alert | null>(null);
 const isDuplicating = computed(() => duplicateAlertId.value !== null);
-
-async function ensureSourcesLoaded() {
-  if (!currentTeamId.value) {
-    return;
-  }
-  if (!sourcesStore.teamSources.length) {
-    await sourcesStore.loadTeamSources(currentTeamId.value);
-  }
-}
 
 async function loadAlertForDuplication() {
   if (!duplicateAlertId.value || !currentTeamId.value || !currentSourceId.value) {
@@ -58,12 +59,11 @@ async function loadAlertForDuplication() {
 }
 
 onMounted(async () => {
-  await ensureSourcesLoaded();
+  await initializeContext();
   await loadAlertForDuplication();
 });
 
 watch([currentTeamId, currentSourceId], async () => {
-  await ensureSourcesLoaded();
   await loadAlertForDuplication();
 });
 
@@ -117,7 +117,14 @@ function handleCancel() {
             Alerts run against the selected team and source. Adjust the context here if needed.
           </CardDescription>
         </div>
-        <TeamSourceSelector />
+        <TeamSourceSelector
+          :current-team-id="currentTeamId"
+          :current-source-id="currentSourceId"
+          :available-teams="availableTeams"
+          :available-sources="availableSources"
+          @update:team="handleTeamChange"
+          @update:source="handleSourceChange"
+        />
       </CardHeader>
     </Card>
 

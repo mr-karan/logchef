@@ -46,6 +46,8 @@ import ErrorAlert from "@/components/ui/ErrorAlert.vue";
 import TeamSourceSelector from "@/views/explore/components/TeamSourceSelector.vue";
 import { useAlertsStore } from "@/stores/alerts";
 import { useContextStore } from "@/stores/context";
+import { useTeamsStore } from "@/stores/teams";
+import { useSourcesStore } from "@/stores/sources";
 import { useContextSync } from "@/composables/useContextSync";
 import type { Alert } from "@/api/alerts";
 
@@ -54,8 +56,14 @@ const route = useRoute();
 
 const alertsStore = useAlertsStore();
 const contextStore = useContextStore();
+const teamsStore = useTeamsStore();
+const sourcesStore = useSourcesStore();
 
-const { initialize: initializeContext } = useContextSync({ basePath: '/logs/alerts' });
+const {
+  initialize: initializeContext,
+  handleTeamChange,
+  handleSourceChange,
+} = useContextSync({ basePath: '/logs/alerts' });
 
 const { alerts } = storeToRefs(alertsStore);
 
@@ -65,6 +73,8 @@ const alertToDelete = ref<Alert | null>(null);
 
 const currentTeamId = computed(() => contextStore.teamId);
 const currentSourceId = computed(() => contextStore.sourceId);
+const availableTeams = computed(() => teamsStore.teams || []);
+const availableSources = computed(() => sourcesStore.teamSources || []);
 
 const isLoadingAlerts = computed(() => {
   if (!currentTeamId.value || !currentSourceId.value) return false;
@@ -273,7 +283,14 @@ onMounted(async () => {
             Alerts run against the selected team and source. Switch context from here.
           </CardDescription>
         </div>
-        <TeamSourceSelector />
+        <TeamSourceSelector
+          :current-team-id="currentTeamId"
+          :current-source-id="currentSourceId"
+          :available-teams="availableTeams"
+          :available-sources="availableSources"
+          @update:team="handleTeamChange"
+          @update:source="handleSourceChange"
+        />
       </CardHeader>
       <CardContent>
         <div v-if="loadError" class="mb-4">

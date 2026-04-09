@@ -7,7 +7,7 @@ import {
   nextTick,
 } from "vue";
 import { storeToRefs } from "pinia";
-import { useRouter, useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
@@ -47,8 +47,8 @@ import ExploreTopBar from "./components/ExploreTopBar.vue";
 import ResultsToolbar from "./components/ResultsToolbar.vue";
 
 // Router and stores
-const router = useRouter();
 const route = useRoute();
+const router = useRouter();
 const exploreStore = useExploreStore();
 const teamsStore = useTeamsStore();
 const sourcesStore = useSourcesStore();
@@ -66,13 +66,11 @@ const {
   sqlQuery,
   activeMode,
   queryError,
-  sqlWarnings: _sqlWarnings,
   isExecutingQuery,
   canExecuteQuery,
   changeMode,
   executeQuery,
   handleTimeRangeUpdate,
-  handleLimitUpdate: _handleLimitUpdate,
 } = useQuery();
 
 const { handleHistogramTimeRangeZoom } = useTimeRange();
@@ -86,10 +84,6 @@ const supportsLogchefQL = computed(() => supportsQueryLanguage(sourceDetails.val
 const hasValidSource = computed(() => sourcesStore.hasValidCurrentSource);
 const isLoadingTeamSources = computed(() => sourcesStore.isLoadingTeamSources);
 const isLoadingSourceDetails = computed(() => sourcesStore.isLoadingSourceDetails);
-// Convenience aliases for template compatibility
-const teamSources = availableSources;
-const isProcessingTeamChange = isLoadingTeamSources;
-const isProcessingSourceChange = isLoadingSourceDetails;
 
 // Computed properties for the clean approach
 const currentTeamId = computed(() => contextStore.teamId);
@@ -115,30 +109,12 @@ const isChangingContext = computed(() => {
   return teamLoading || sourceLoading;
 });
 
-// Simple team/source change handlers using router
-function handleTeamChange(teamIdStr: string) {
-  const teamId = parseInt(teamIdStr);
-  if (isNaN(teamId)) return;
-
-  router.replace({
-    query: {
-      ...route.query,
-      team: String(teamId),
-      source: undefined // Clear source when team changes
-    }
-  });
+async function handleTeamChange(teamId: number) {
+  await urlState.selectTeam(teamId);
 }
 
-function handleSourceChange(sourceIdStr: string) {
-  const sourceId = parseInt(sourceIdStr);
-  if (isNaN(sourceId)) return;
-
-  router.replace({
-    query: {
-      ...route.query,
-      source: String(sourceId)
-    }
-  });
+async function handleSourceChange(sourceId: number) {
+  await urlState.selectSource(sourceId);
 }
 
 const {
@@ -146,7 +122,6 @@ const {
   handleSaveQueryClick: openSaveModalFlow,
   handleSaveQuery: processSaveQueryFromComposable,
   loadSavedQuery,
-  updateSavedQuery: _updateSavedQuery,
   loadSourceQueries,
 } = useSavedQueries();
 
@@ -187,9 +162,6 @@ const isHistogramVisible = ref(true);
 // Query execution deduplication
 const executingQueryId = ref<string | null>(null);
 const lastQueryTime = ref<number>(0);
-
-// Display related refs
-const displayTimezone = computed(() => preferences.value.timezone);
 
 // Display mode for table vs compact view (table is default)
 const displayMode = computed({
@@ -447,25 +419,6 @@ watch(
     }
   },
   { immediate: false }
-)
-
-// Keep store selection in sync with URL when team/source query params change
-watch(
-  () => [route.query.team, route.query.source],
-  async ([teamParam, sourceParam]) => {
-    if (isInitializing.value) return;
-    const t = teamParam ? parseInt(teamParam as string) : null;
-    const s = sourceParam ? parseInt(sourceParam as string) : null;
-    if (t && t !== currentTeamId.value) {
-      await handleTeamChange(t.toString());
-      // If URL includes a specific source, switch to it after team change
-      if (s) {
-        await handleSourceChange(s.toString());
-      }
-    } else if (s && s !== currentSourceId.value) {
-      await handleSourceChange(s.toString());
-    }
-  }
 )
 
 // Function to handle drill-down from DataTable to add a filter condition
@@ -1071,11 +1024,13 @@ onMounted(async () => {
         <!-- Header bar for team selection -->
         <div class="border-b py-2 px-4 flex items-center h-12">
           <TeamSourceSelector 
-  :team-sources="teamSources"
-  :is-loading-team-sources="isLoadingTeamSources"
-  :is-processing-team-change="isProcessingTeamChange"
-  :is-processing-source-change="isProcessingSourceChange"
-/>
+            :current-team-id="currentTeamId"
+            :current-source-id="currentSourceId"
+            :available-teams="availableTeams"
+            :available-sources="availableSources"
+            @update:team="handleTeamChange"
+            @update:source="handleSourceChange"
+          />
         </div>
         <!-- Empty state content -->
         <div class="flex flex-col items-center justify-center flex-1 gap-4 text-center">
@@ -1092,11 +1047,13 @@ onMounted(async () => {
         <!-- Filter Bar with Team/Source Selection -->
         <div class="border-b bg-background py-2 px-4 flex items-center h-12 shadow-sm">
           <TeamSourceSelector 
-  :team-sources="teamSources"
-  :is-loading-team-sources="isLoadingTeamSources"
-  :is-processing-team-change="isProcessingTeamChange"
-  :is-processing-source-change="isProcessingSourceChange"
-/>
+            :current-team-id="currentTeamId"
+            :current-source-id="currentSourceId"
+            :available-teams="availableTeams"
+            :available-sources="availableSources"
+            @update:team="handleTeamChange"
+            @update:source="handleSourceChange"
+          />
         </div>
 
         <!-- Source Not Connected Message -->
@@ -1135,7 +1092,16 @@ onMounted(async () => {
       <!-- Main Explorer View -->
       <div v-else class="flex flex-col h-screen overflow-hidden">
         <!-- Streamlined Top Bar -->
-        <ExploreTopBar ref="topBarRef" />
+        <ExploreTopBar
+          ref="topBarRef"
+          :current-team-id="currentTeamId"
+          :current-source-id="currentSourceId"
+          :available-teams="availableTeams"
+          :available-sources="availableSources"
+          :selected-source="sourceDetails"
+          @update:team="handleTeamChange"
+          @update:source="handleSourceChange"
+        />
 
         <!-- Main Content Area -->
         <div class="flex flex-1 min-h-0">
@@ -1337,7 +1303,6 @@ onMounted(async () => {
                     :source="sourceDetails"
                     :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
                     :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field"
-                    :timezone="displayTimezone"
                     :query-fields="queryFields"
                     :regex-highlights="regexHighlights"
                     :active-mode="activeMode"

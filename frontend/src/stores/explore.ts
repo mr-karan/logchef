@@ -430,13 +430,6 @@ export const useExploreStore = defineStore("explore", () => {
     params: Record<string, string | undefined>,
     options?: { updateLastExecutedState?: boolean }
   ): { needsResolve: boolean; queryId?: string; shouldExecute: boolean } {
-    if (params.source) {
-      const parsedSourceId = parseInt(params.source, 10);
-      if (!isNaN(parsedSourceId)) {
-        contextStore.selectSource(parsedSourceId);
-      }
-    }
-
     const queryId = params.id;
     if (queryId) {
       state.data.value.selectedQueryId = queryId;

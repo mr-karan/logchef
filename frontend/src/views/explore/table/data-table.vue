@@ -15,7 +15,7 @@ import {
     type ColumnSizingState,
     type ColumnResizeMode,
 } from '@tanstack/vue-table'
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import { GripVertical, Copy, Equal, EqualNot, ChevronUp, ChevronDown } from 'lucide-vue-next'
@@ -39,7 +39,6 @@ interface Props {
     displayMode?: 'table' | 'compact'
     timestampField?: string
     severityField?: string
-    timezone?: 'local' | 'utc'
     queryFields?: string[] // Fields used in the query for column indicators
     regexHighlights?: Record<string, { pattern: string, isNegated: boolean }> // Column-specific regex patterns
     activeMode?: 'logchefql' | 'clickhouse-sql' | 'sql' // Current query mode
@@ -56,7 +55,6 @@ interface DataTableState {
 const props = withDefaults(defineProps<Props>(), {
     timestampField: 'timestamp',
     severityField: 'severity_text',
-    timezone: 'local',
     queryFields: () => [],
     regexHighlights: () => ({}),
     activeMode: 'logchefql',
@@ -652,7 +650,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
             v-if="table"
             :table="table"
             :stats="stats"
-            :is-loading="props.isLoading"
+            :is-loading="isLoading"
             :show-reset-columns="true"
             @update:timezone="displayTimezone = $event"
             @update:globalFilter="globalFilter = $event"
@@ -661,7 +659,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
 
         <!-- Table Section with full-height scrolling -->
         <div class="flex-1 relative overflow-hidden"
-            :class="{ 'opacity-60 pointer-events-none': props.isLoading }"> <!-- Dim table during load -->
+            :class="{ 'opacity-60 pointer-events-none': isLoading }"> <!-- Dim table during load -->
             <!-- Add v-if="table" here -->
             <div v-if="table && table.getRowModel().rows?.length" class="absolute inset-0">
                 <div

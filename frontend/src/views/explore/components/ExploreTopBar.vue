@@ -1,30 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useRouter } from 'vue-router'
-import { formatSourceName } from '@/utils/format'
-import { useContextStore } from '@/stores/context'
-import { useTeamsStore } from '@/stores/teams'
-import { useSourcesStore } from '@/stores/sources'
+import { computed, ref } from 'vue'
 import { useExploreStore } from '@/stores/explore'
 import { useTimeRange } from '@/composables/useTimeRange'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { DateTimePicker } from '@/components/date-time-picker'
-import { ChevronRight, Share2, Settings, Clock, Terminal } from 'lucide-vue-next'
+import { Share2, Settings, Clock, Terminal } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 import { useLimitOptions } from '@/composables/useLimitOptions'
 import { TOAST_DURATION } from '@/lib/constants'
 import { generateCliCommand } from '@/utils/cliCommand'
-import { ref } from 'vue'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,39 +30,34 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { getNativeQueryLanguageForSource, getSourceTypeLabel } from '@/lib/queryMetadata'
+import TeamSourceSelector from './TeamSourceSelector.vue'
+import type { Source } from '@/api/sources'
+import type { TeamWithMemberCount, UserTeamMembership } from '@/api/teams'
 
-const router = useRouter()
 const { toast } = useToast()
-const contextStore = useContextStore()
-const teamsStore = useTeamsStore()
-const sourcesStore = useSourcesStore()
 const exploreStore = useExploreStore()
 
-const { timeRange, quickRangeLabelToRelativeTime, getHumanReadableTimeRange: _getHumanReadableTimeRange } = useTimeRange()
+type TeamOption = UserTeamMembership | TeamWithMemberCount
+
+interface Props {
+  currentTeamId: number | null
+  currentSourceId: number | null
+  availableTeams: TeamOption[]
+  availableSources: Source[]
+  selectedSource: Source | null
+}
+
+const props = defineProps<Props>()
+
+const emit = defineEmits<{
+  (e: 'update:team', teamId: number): void
+  (e: 'update:source', sourceId: number): void
+}>()
+
+const { timeRange, quickRangeLabelToRelativeTime } = useTimeRange()
 const { limitOptions } = useLimitOptions()
-
-// Team/Source state
-const currentTeamId = computed(() => contextStore.teamId)
-const currentSourceId = computed(() => contextStore.sourceId)
-const availableTeams = computed(() => teamsStore.teams || [])
-const availableSources = computed(() => sourcesStore.teamSources || [])
-
-const selectedTeamName = computed(() => teamsStore.currentTeam?.name || 'Select team')
-const selectedSourceName = computed(() => {
-  if (!currentSourceId.value) return 'Select source'
-  const source = availableSources.value.find((s) => s.id === currentSourceId.value)
-  return source ? formatSourceName(source) : 'Select source'
-})
-const selectedSource = computed(() => {
-  if (!currentSourceId.value) return null
-  return (
-    sourcesStore.currentSourceDetails ??
-    availableSources.value.find((source) => source.id === currentSourceId.value) ??
-    null
-  )
-})
 const selectedSourceTypeLabel = computed(() =>
-  selectedSource.value ? getSourceTypeLabel(selectedSource.value) : null
+  props.selectedSource ? getSourceTypeLabel(props.selectedSource) : null
 )
 
 // Time range display
@@ -98,7 +78,7 @@ const currentLimit = computed(() => exploreStore.limit)
 
 // ClickHouse native SQL owns its own time/LIMIT clauses. VictoriaLogs native mode does not.
 const isNativeSqlMode = computed(() =>
-  exploreStore.activeMode === 'sql' && getNativeQueryLanguageForSource(sourcesStore.currentSourceDetails) === 'clickhouse-sql'
+  exploreStore.activeMode === 'sql' && getNativeQueryLanguageForSource(props.selectedSource) === 'clickhouse-sql'
 )
 
 // Query timeout
@@ -114,25 +94,6 @@ const selectedTimeout = computed({
   get: () => (exploreStore.queryTimeout || 30).toString(),
   set: (value: string) => exploreStore.setQueryTimeout(parseInt(value, 10))
 })
-
-// Handlers
-function updateQuery(partial: Record<string, string | undefined>) {
-  router.replace({
-    query: { ...router.currentRoute.value.query, ...partial },
-  })
-}
-
-function handleTeamChange(teamIdStr: string) {
-  const teamId = parseInt(teamIdStr, 10)
-  if (Number.isNaN(teamId)) return
-  updateQuery({ team: String(teamId), source: undefined })
-}
-
-function handleSourceChange(sourceIdStr: string) {
-  const sourceId = parseInt(sourceIdStr, 10)
-  if (Number.isNaN(sourceId)) return
-  updateQuery({ source: String(sourceId) })
-}
 
 function handleDateRangeChange(value: any) {
   if (dateTimePickerRef.value?.selectedQuickRange) {
@@ -167,7 +128,7 @@ function copyUrlToClipboard() {
 }
 
 function copyCliCommand() {
-  if (!contextStore.teamId || !contextStore.sourceId) {
+  if (!props.currentTeamId || !props.currentSourceId) {
     toast({
       title: "Cannot copy CLI command",
       description: "Team and source must be selected.",
@@ -179,8 +140,8 @@ function copyCliCommand() {
 
   const tr = exploreStore.timeRange
   const command = generateCliCommand({
-    teamId: contextStore.teamId,
-    sourceId: contextStore.sourceId,
+    teamId: props.currentTeamId,
+    sourceId: props.currentSourceId,
     mode: exploreStore.activeMode,
     query:
       exploreStore.activeMode === 'logchefql'
@@ -238,55 +199,15 @@ defineExpose({
   <div class="flex items-center justify-between h-11 px-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
     <!-- Left: Team/Source + Time Range + Limit (all grouped together) -->
     <div class="flex items-center gap-3">
-      <!-- Team Selector -->
-      <Select
-        :model-value="currentTeamId?.toString() ?? ''"
-        @update:model-value="handleTeamChange"
-        :disabled="availableTeams.length === 0"
-      >
-        <SelectTrigger class="h-7 text-sm border-0 bg-transparent hover:bg-muted/50 px-2 min-w-[100px] w-auto focus:ring-0 focus:ring-offset-0">
-          <SelectValue placeholder="Team">
-            <span class="font-medium">{{ selectedTeamName }}</span>
-          </SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          <SelectGroup>
-            <SelectLabel class="text-xs">Teams</SelectLabel>
-            <SelectItem v-for="team in availableTeams" :key="team.id" :value="team.id.toString()">
-              {{ team.name }}
-            </SelectItem>
-          </SelectGroup>
-        </SelectContent>
-      </Select>
-
-      <ChevronRight class="h-3.5 w-3.5 text-muted-foreground/50" />
-
-      <!-- Source Selector -->
-      <Select
-        :model-value="currentSourceId?.toString() ?? ''"
-        @update:model-value="handleSourceChange"
-        :disabled="!currentTeamId || availableSources.length === 0"
-      >
-        <SelectTrigger class="h-7 text-sm border-0 bg-transparent hover:bg-muted/50 px-2 min-w-[120px] w-auto focus:ring-0 focus:ring-offset-0">
-          <SelectValue placeholder="Source">
-            <span class="font-medium">{{ selectedSourceName }}</span>
-          </SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          <SelectGroup>
-            <SelectLabel class="text-xs">Log Sources</SelectLabel>
-            <SelectItem v-if="!currentTeamId" value="no-team" disabled>
-              Select a team first
-            </SelectItem>
-            <SelectItem v-else-if="availableSources.length === 0" value="no-sources" disabled>
-              No sources available
-            </SelectItem>
-            <SelectItem v-for="source in availableSources" :key="source.id" :value="source.id.toString()">
-              {{ formatSourceName(source) }}
-            </SelectItem>
-          </SelectGroup>
-        </SelectContent>
-      </Select>
+      <TeamSourceSelector
+        variant="toolbar"
+        :current-team-id="currentTeamId"
+        :current-source-id="currentSourceId"
+        :available-teams="availableTeams"
+        :available-sources="availableSources"
+        @update:team="emit('update:team', $event)"
+        @update:source="emit('update:source', $event)"
+      />
 
       <Badge
         v-if="selectedSourceTypeLabel"

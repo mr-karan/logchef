@@ -3,6 +3,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useContextStore } from '@/stores/context';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
+import { useTeamSourceContext } from '@/composables/useTeamSourceContext';
 
 export type ContextSyncState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -31,6 +32,7 @@ export function useContextSync(options: UseContextSyncOptions = {}): UseContextS
   const contextStore = useContextStore();
   const teamsStore = useTeamsStore();
   const sourcesStore = useSourcesStore();
+  const teamSourceContext = useTeamSourceContext();
 
   const state = ref<ContextSyncState>('idle');
   const error = ref<string | null>(null);
@@ -39,37 +41,6 @@ export function useContextSync(options: UseContextSyncOptions = {}): UseContextS
 
   const teamId = computed(() => contextStore.teamId);
   const sourceId = computed(() => contextStore.sourceId);
-
-  function parseId(value: unknown): number | null {
-    if (value == null) return null;
-    const parsed = parseInt(String(value), 10);
-    return Number.isNaN(parsed) ? null : parsed;
-  }
-
-  async function waitForSourcesLoaded(timeoutMs = 5000): Promise<void> {
-    if (!sourcesStore.isLoadingTeamSources && contextStore.sourceId) {
-      return;
-    }
-    
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        stopWatch();
-        resolve();
-      }, timeoutMs);
-
-      const stopWatch = watch(
-        () => [sourcesStore.isLoadingTeamSources, contextStore.sourceId] as const,
-        ([loading, srcId]) => {
-          if (!loading && srcId) {
-            clearTimeout(timeout);
-            stopWatch();
-            resolve();
-          }
-        },
-        { immediate: true }
-      );
-    });
-  }
 
   async function initialize(): Promise<void> {
     if (state.value === 'loading') return;
@@ -88,17 +59,9 @@ export function useContextSync(options: UseContextSyncOptions = {}): UseContextS
         return;
       }
 
-      const urlTeam = parseId(route.query.team);
-      const urlSource = parseId(route.query.source);
-      const storedDefaults = contextStore.getStoredDefaults();
-      
-      let targetTeamId = urlTeam;
-      if (!targetTeamId || !teamsStore.teams.some(t => t.id === targetTeamId)) {
-        targetTeamId = storedDefaults.teamId;
-      }
-      if (!targetTeamId || !teamsStore.teams.some(t => t.id === targetTeamId)) {
-        targetTeamId = teamsStore.teams[0]?.id ?? null;
-      }
+      const urlTeam = teamSourceContext.parseId(route.query.team);
+      const urlSource = teamSourceContext.parseId(route.query.source);
+      const targetTeamId = teamSourceContext.resolveTeamId(urlTeam);
 
       if (!targetTeamId) {
         error.value = 'No team available.';
@@ -106,9 +69,7 @@ export function useContextSync(options: UseContextSyncOptions = {}): UseContextS
         return;
       }
 
-      contextStore.setFromRoute(targetTeamId, urlSource);
-      
-      await waitForSourcesLoaded();
+      await teamSourceContext.applyContextSelection(targetTeamId, urlSource);
       
       if (syncUrl) {
         await syncUrlToContext();
@@ -149,9 +110,7 @@ export function useContextSync(options: UseContextSyncOptions = {}): UseContextS
   async function handleTeamChange(newTeamId: number): Promise<void> {
     if (newTeamId === contextStore.teamId) return;
 
-    contextStore.selectTeam(newTeamId);
-    
-    await waitForSourcesLoaded();
+    await teamSourceContext.applyContextSelection(newTeamId, null);
     
     if (syncUrl) {
       await syncUrlToContext();
@@ -167,7 +126,7 @@ export function useContextSync(options: UseContextSyncOptions = {}): UseContextS
       return;
     }
 
-    contextStore.selectSource(newSourceId);
+    await teamSourceContext.applyContextSelection(contextStore.teamId, newSourceId);
 
     if (syncUrl) {
       await syncUrlToContext();
@@ -179,10 +138,10 @@ export function useContextSync(options: UseContextSyncOptions = {}): UseContextS
     async ([urlTeam, urlSource], [prevTeam, prevSource]) => {
       if (state.value !== 'ready') return;
       
-      const newTeam = parseId(urlTeam);
-      const newSource = parseId(urlSource);
-      const prevTeamId = parseId(prevTeam);
-      const prevSourceId = parseId(prevSource);
+      const newTeam = teamSourceContext.parseId(urlTeam);
+      const newSource = teamSourceContext.parseId(urlSource);
+      const prevTeamId = teamSourceContext.parseId(prevTeam);
+      const prevSourceId = teamSourceContext.parseId(prevSource);
 
       if (newTeam === prevTeamId && newSource === prevSourceId) return;
 
