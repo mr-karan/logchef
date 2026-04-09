@@ -84,6 +84,7 @@ type Source struct {
 	UpdatedAt         time.Time      `json:"updated_at"`
 	Managed           int64          `json:"managed"`
 	SecretRef         sql.NullString `json:"secret_ref"`
+	TlsEnable         int64          `json:"tls_enable"`
 }
 
 type SystemSetting struct {

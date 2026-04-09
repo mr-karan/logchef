@@ -245,12 +245,13 @@ func (m *Manager) AddSource(ctx context.Context, source *models.Source) error {
 
 	// Create new client without initial ping validation
 	client, err := NewClient(ClientOptions{
-		Host:     source.Connection.Host,
-		Database: source.Connection.Database,
-		Username: source.Connection.Username,
-		Password: source.Connection.Password,
-		SourceID: strconv.FormatInt(int64(source.ID), 10), // Convert SourceID to string for metrics
-		Source:   source,                                  // Pass source for enhanced metrics
+		Host:      source.Connection.Host,
+		Database:  source.Connection.Database,
+		Username:  source.Connection.Username,
+		Password:  source.Connection.Password,
+		SourceID:  strconv.FormatInt(int64(source.ID), 10), // Convert SourceID to string for metrics
+		Source:    source,                                  // Pass source for enhanced metrics
+		TLSEnable: source.Connection.TLSEnable,
 	}, m.logger)
 
 	if err != nil {
@@ -447,10 +448,11 @@ func (m *Manager) Close() error {
 // The caller is responsible for closing the returned client.
 func (m *Manager) CreateTemporaryClient(ctx context.Context, source *models.Source) (*Client, error) {
 	client, err := NewClient(ClientOptions{
-		Host:     source.Connection.Host,
-		Database: source.Connection.Database,
-		Username: source.Connection.Username,
-		Password: source.Connection.Password,
+		Host:      source.Connection.Host,
+		Database:  source.Connection.Database,
+		Username:  source.Connection.Username,
+		Password:  source.Connection.Password,
+		TLSEnable: source.Connection.TLSEnable,
 	}, m.logger.With("validation", true))
 
 	if err != nil {
