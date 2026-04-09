@@ -88,11 +88,19 @@ redirect_url = "http://localhost:8125/api/v1/auth/callback"
 
 # Required OIDC scopes
 scopes = ["openid", "email", "profile"]
+
+# Keep false unless your OIDC provider omits email_verified while verifying
+# email addresses by other means. Missing/null email_verified is allowed only
+# when this is true; explicit email_verified=false is always rejected.
+skip_email_verified_check = false
 ```
 
 If you plan to use the CLI, create a public OIDC client with loopback redirect URIs
 (`http://127.0.0.1:19876/callback` through `http://127.0.0.1:19878/callback`) and set
 `oidc.cli_client_id` to that client ID.
+
+`oidc.skip_email_verified_check` is useful for providers such as Cloudflare Access that do not emit
+the `email_verified` claim. It does not bypass an explicit `email_verified=false` response.
 
 ### Auth Settings
 

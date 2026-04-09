@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -314,19 +315,14 @@ func (s *Server) handleCLITokenExchange(c *fiber.Ctx) error {
 	}
 
 	// Extract claims from the ID token
-	var claims struct {
-		Email         string `json:"email"`
-		EmailVerified bool   `json:"email_verified"`
-		Name          string `json:"name"`
-	}
+	var claims auth.OIDCClaims
 	if err := idToken.Claims(&claims); err != nil {
 		s.log.Error("CLI token exchange: failed to parse ID token claims", "error", err)
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Failed to parse token claims", models.AuthenticationErrorType)
 	}
 
-	// Ensure email is verified
-	if !claims.EmailVerified {
-		s.log.Warn("CLI token exchange: unverified email", "email", claims.Email)
+	// Verify email_verified claim.
+	if err := auth.CheckEmailVerified(claims, s.config.OIDC.SkipEmailVerifiedCheck, s.log, "CLI token exchange"); err != nil {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Email not verified", models.AuthenticationErrorType)
 	}
 
