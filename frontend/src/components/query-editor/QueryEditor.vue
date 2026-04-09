@@ -13,7 +13,7 @@
 
         <!-- Tabs for Mode Switching -->
         <Tabs :model-value="props.activeMode"
-          @update:model-value="(value: string | number) => $emit('update:activeMode', asEditorMode(value), true)"
+          @update:model-value="(value: string | number) => $emit('update:activeMode', asEditorMode(value), false)"
           class="w-auto">
           <TabsList class="grid grid-cols-2 w-fit">
             <TabsTrigger value="logchefql">
@@ -795,8 +795,24 @@ const handleAiDialogSubmit = (payload: { naturalLanguageQuery: string; currentQu
 };
 
 const handleAiInsert = (sql: string) => {
+  // AI always generates raw SQL — write it directly to the SQL store
+  // before triggering mode switch so translation cannot overwrite it.
+  exploreStore.setRawSql(sql);
   editorContent.value = sql;
-  handleEditorChange(sql);
+
+  emit('change', {
+    query: sql,
+    mode: 'clickhouse-sql',
+    isUserInput: false,
+  });
+
+  // Switch to SQL tab if not already there (mirrors handleLoadQueryFromHistory)
+  if (props.activeMode !== 'clickhouse-sql') {
+    nextTick(() => {
+      emit('update:activeMode', 'clickhouse-sql' as EditorMode, true);
+    });
+  }
+
   showAiDialog.value = false;
   exploreStore.clearAiSqlState();
   nextTick(() => {
