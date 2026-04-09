@@ -1334,6 +1334,7 @@ onMounted(async () => {
                     :is-loading="isExecutingQuery || isInitialQueryPending"
                     :source-id="String(exploreStore.sourceId)"
                     :team-id="teamsStore.currentTeamId"
+                    :source="sourceDetails"
                     :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
                     :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field"
                     :timezone="displayTimezone"

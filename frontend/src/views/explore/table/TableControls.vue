@@ -22,6 +22,7 @@ interface Props {
   stats?: QueryStats
   isLoading?: boolean
   showColumnSelector?: boolean
+  showResetColumns?: boolean
   showExport?: boolean
   showPagination?: boolean
   showSearch?: boolean
@@ -33,6 +34,7 @@ const props = withDefaults(defineProps<Props>(), {
   stats: undefined,
   isLoading: false,
   showColumnSelector: true,
+  showResetColumns: false,
   showExport: true,
   showPagination: true,
   showSearch: true,
@@ -43,6 +45,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'update:timezone': [value: 'local' | 'utc']
   'update:globalFilter': [value: string]
+  'reset-columns': []
 }>()
 
 const preferencesStore = usePreferencesStore()
@@ -64,9 +67,6 @@ const globalFilter = computed({
     emit('update:globalFilter', value)
   }
 })
-
-// Column order state
-const columnOrder = computed(() => props.table.getState().columnOrder)
 
 // Save timezone preference handled via preferences store
 
@@ -177,8 +177,8 @@ const hasRows = computed(() => props.table && props.table.getRowModel().rows?.le
       <DataTableColumnSelector 
         v-if="showColumnSelector && table" 
         :table="table" 
-        :column-order="columnOrder"
-        @update:column-order="table.setColumnOrder($event)" 
+        :show-reset-defaults="showResetColumns"
+        @reset-defaults="emit('reset-columns')"
       />
 
       <!-- Search input - hidden on small screens -->

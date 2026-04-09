@@ -14,9 +14,16 @@ import type { Table } from '@tanstack/vue-table'
 
 interface Props {
   table: Table<Record<string, any>>
+  showResetDefaults?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  showResetDefaults: false,
+})
+
+const emit = defineEmits<{
+  'reset-defaults': []
+}>()
 
 const columns = computed(() => props.table.getAllColumns().filter(column => column.getCanHide()))
 const visibleColumns = computed(() => columns.value.filter(column => column.getIsVisible()))
@@ -49,9 +56,20 @@ const toggleAll = (checked: boolean) => {
           <h4 class="font-medium leading-none">
             Table Columns
           </h4>
-          <p class="text-sm text-muted-foreground">
-            Select columns to display in the table
-          </p>
+          <div class="flex items-start justify-between gap-3">
+            <p class="text-sm text-muted-foreground">
+              Select columns to display in the table
+            </p>
+            <Button
+              v-if="props.showResetDefaults"
+              variant="ghost"
+              size="sm"
+              class="h-7 px-2 text-xs"
+              @click="emit('reset-defaults')"
+            >
+              Reset defaults
+            </Button>
+          </div>
         </div>
         <ScrollArea class="h-[300px] pr-4">
           <div class="grid gap-2">

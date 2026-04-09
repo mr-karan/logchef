@@ -13,6 +13,7 @@ import {
 } from '@tanstack/vue-table'
 import { valueUpdater } from '@/lib/utils'
 import type { QueryStats } from '@/api/explore'
+import type { Source } from '@/api/sources'
 
 interface Props {
   columns?: ColumnDef<Record<string, any>>[]
@@ -21,6 +22,7 @@ interface Props {
   isLoading?: boolean
   sourceId?: string | number
   teamId?: string | number
+  source?: Pick<Source, 'source_type'> | null
   timestampField?: string
   severityField?: string
   timezone?: 'local' | 'utc'

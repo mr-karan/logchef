@@ -24,9 +24,8 @@ import type { QueryStats } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
 import { createColumns } from './columns'
-import { useExploreStore } from '@/stores/explore'
+import { getDefaultColumnVisibility } from './defaultColumnVisibility'
 import type { Source } from '@/api/sources'
-import { useSourcesStore } from '@/stores/sources'
 import TableControls from './TableControls.vue'
 import { usePreferencesStore } from '@/stores/preferences'
 
@@ -36,6 +35,7 @@ interface Props {
     stats: QueryStats
     sourceId: string
     teamId: number | null
+    source?: Pick<Source, 'source_type'> | null
     displayMode?: 'table' | 'compact'
     timestampField?: string
     severityField?: string
@@ -96,6 +96,8 @@ const displayTimezone = computed({
 const columnOrder = ref<string[]>([])
 const draggingColumnId = ref<string | null>(null)
 const dragOverColumnId = ref<string | null>(null)
+const isReadyToPersistState = ref(false)
+const sourceType = computed(() => props.source?.source_type ?? null)
 
 const enforceTimestampFirst = (order: string[]): string[] => {
     const tsField = timestampFieldName.value;
@@ -137,14 +139,15 @@ function saveStateToStorage(state: DataTableState) {
 }
 
 // Initialize state from localStorage or defaults
-function initializeState(columns: ColumnDef<Record<string, any>>[]) {
+function initializeState(columns: ColumnDef<Record<string, any>>[], options?: { ignoreSavedState?: boolean }) {
     const currentColumnIds = columns.map(c => c.id!).filter(Boolean);
     let initialOrder: string[] = [];
     let initialSizing: ColumnSizingState = {};
     let initialVisibility: VisibilityState = {};
 
     // Try to load from storage
-    const savedState = loadStateFromStorage();
+    const savedState = options?.ignoreSavedState ? null : loadStateFromStorage();
+    const hasResolvedSourceType = Boolean(sourceType.value);
 
     if (savedState && savedState.columnOrder && savedState.columnOrder.length > 0) {
         // --- Use Saved State ---
@@ -171,6 +174,7 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
             // Handle visibility (prioritize saved state)
             initialVisibility[id] = savedVisibility[id] !== undefined ? savedVisibility[id] : true;
         });
+        isReadyToPersistState.value = true;
     } else {
         // --- Generate Default State ---
         // Generate default order with timestamp first
@@ -188,8 +192,15 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
         currentColumnIds.forEach(id => {
             const columnDef = columns.find(c => c.id === id);
             initialSizing[id] = columnDef?.size ?? defaultColumn.size;
-            initialVisibility[id] = true; // Default all columns to visible
         });
+
+        initialVisibility = getDefaultColumnVisibility(
+            columns,
+            props.source,
+            timestampFieldName.value,
+            severityFieldName.value
+        );
+        isReadyToPersistState.value = hasResolvedSourceType || currentColumnIds.length === 0;
     }
 
     return { initialOrder, initialSizing, initialVisibility };
@@ -197,7 +208,7 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
 
 // Watch for changes in columns OR search terms to regenerate table columns
 watch(
-    () => [props.columns, displayTimezone.value, props.timestampField], // Also watch timestampField changes
+    () => [props.columns, displayTimezone.value, props.timestampField, sourceType.value], // Also watch timestampField changes
     ([newColumns, newTimezone]) => {
         if (!newColumns || newColumns.length === 0) {
             tableColumns.value = []; // Clear columns if input is empty
@@ -205,6 +216,7 @@ watch(
             columnOrder.value = [];
             columnSizing.value = {};
             columnVisibility.value = {};
+            isReadyToPersistState.value = false;
             return;
         }
 
@@ -237,7 +249,7 @@ watch(
 
 // Save state whenever relevant parts change
 watch([columnOrder, columnSizing, columnVisibility], () => {
-    if (!storageKey.value) return;
+    if (!storageKey.value || !isReadyToPersistState.value) return;
 
     // Make sure we have columns loaded before saving
     if (props.columns && props.columns.length > 0) {
@@ -248,6 +260,25 @@ watch([columnOrder, columnSizing, columnVisibility], () => {
         });
     }
 }, { deep: true });
+
+function resetTableStateToDefaults() {
+    if (storageKey.value) {
+        localStorage.removeItem(storageKey.value);
+    }
+
+    if (!tableColumns.value.length) {
+        return;
+    }
+
+    const { initialOrder, initialSizing, initialVisibility } = initializeState(tableColumns.value, {
+        ignoreSavedState: true,
+    });
+
+    columnOrder.value = initialOrder;
+    columnSizing.value = initialSizing;
+    columnVisibility.value = initialVisibility;
+    isReadyToPersistState.value = true;
+}
 
 // Save timezone preference via preferences store
 
@@ -529,9 +560,6 @@ onMounted(() => {
     }
 })
 
-const exploreStore = useExploreStore()
-const sourcesStore = useSourcesStore()
-
 // Add type for column meta
 interface CustomColumnMeta extends ColumnMeta<Record<string, any>, unknown> {
     className?: string;
@@ -541,31 +569,6 @@ interface CustomColumnMeta extends ColumnMeta<Record<string, any>, unknown> {
 type CustomColumnDef = ColumnDef<Record<string, any>> & {
     meta?: CustomColumnMeta;
 }
-
-// Source details ref
-const sourceDetails = ref<Source | null>(null);
-
-// Use a computed property to get source details from the store instead of making API calls
-const storeSourceDetails = computed(() => sourcesStore.currentSourceDetails);
-
-// Watch for source details changes in the store
-watch(
-    storeSourceDetails,
-    (newSourceDetails) => {
-        sourceDetails.value = newSourceDetails;
-    },
-    { immediate: true }
-)
-
-// Watch for source ID changes and clear details when there's no source
-watch(
-    () => exploreStore.sourceId,
-    (newSourceId) => {
-        if (!newSourceId) {
-            sourceDetails.value = null; // Clear if sourceId is null/0
-        }
-    }
-)
 
 // --- Native Drag and Drop Implementation ---
 
@@ -670,8 +673,10 @@ const isLastVisibleColumn = (columnId: string): boolean => {
             :table="table"
             :stats="stats"
             :is-loading="props.isLoading"
+            :show-reset-columns="true"
             @update:timezone="displayTimezone = $event"
             @update:globalFilter="globalFilter = $event"
+            @reset-columns="resetTableStateToDefaults"
         />
 
         <!-- Table Section with full-height scrolling -->
