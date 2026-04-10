@@ -2,7 +2,7 @@
 
 <p align="center"><img src="LOGCHEF.svg" alt="Logchef Logo" /></p>
 
-<p align="center">A modern, single binary, high-performance log analytics platform</p>
+<p align="center">A modern, single binary, multi-datasource log analytics platform</p>
 
 <p align="center">
   <a href="https://demo.logchef.app"><strong>Try Demo</strong></a> ·

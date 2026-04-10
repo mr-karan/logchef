@@ -2,7 +2,7 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 ---
 
-<BaseLayout title="Logchef — Log Explorer for ClickHouse" activeNav="home">
+<BaseLayout title="Logchef — Multi-Datasource Log Explorer" activeNav="home">
   <style>
     main { max-width: 1200px; margin: 0 auto; overflow: clip; }
 
@@ -365,11 +365,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <img src="/logchef-wordmark.svg" alt="Logchef" />
         </div>
         
-        <h1 class="hero-title">Log Explorer for ClickHouse</h1>
+        <h1 class="hero-title">Multi-datasource log exploration without the control-plane tax</h1>
         
         <p class="hero-desc">
-          Query billions of logs in milliseconds. Single binary, no dependencies.
-          Point it at your ClickHouse cluster and start exploring.
+          Run one binary, connect the log backend you already have, and give teams a clean interface for search, alerts, saved queries, and access control.
+          Today that means ClickHouse and VictoriaLogs, with room to grow.
         </p>
 
         <div class="hero-actions">
@@ -393,8 +393,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         </div>
 
         <div class="hero-highlights">
-          <span>ClickHouse-native</span>
-          <span>SQL + LogchefQL</span>
+          <span>ClickHouse + VictoriaLogs</span>
+          <span>LogchefQL + Native Queries</span>
           <span>Alerting + AI Query</span>
         </div>
       </div>
@@ -443,7 +443,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         </div>
         <div class="showcase-text">
           <h3>Real-time Alerting</h3>
-          <p>Schedule SQL rules and deliver via email or webhooks.</p>
+          <p>Schedule native queries and deliver alerts via email or webhooks.</p>
         </div>
       </article>
 
@@ -454,7 +454,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         </div>
         <div class="showcase-text">
           <h3>AI Query Assistant</h3>
-          <p>Ask in plain English and get SQL instantly.</p>
+          <p>Ask in plain English and generate queries faster for supported sources.</p>
         </div>
       </article>
 
@@ -491,6 +491,12 @@ import BaseLayout from '../layouts/BaseLayout.astro';
             <path d="M21.333 10H24v4h-2.667zM16 1.335h2.667v21.33H16zm-5.333 0h2.666v21.33h-2.666zM0 22.665V1.335h2.667v21.33zm5.333-21.33H8v21.33H5.333z"/>
           </svg>
           ClickHouse
+        </a>
+        <a href="https://victoriametrics.com/products/victorialogs/" target="_blank">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2 3 6.5v11L12 22l9-4.5v-11L12 2zm0 2.2 6.8 3.4L12 11 5.2 7.6 12 4.2zm-7 5.1 6 3v7l-6-3V9.3zm8 10v-7l6-3v7l-6 3z"/>
+          </svg>
+          VictoriaLogs
         </a>
         <a href="https://vector.dev" target="_blank">
           <svg viewBox="0 0 24 24" fill="currentColor">
@@ -537,7 +543,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           </svg>
         </div>
         <h3>Schema Agnostic</h3>
-        <p>Query any ClickHouse table without schema changes.</p>
+        <p>Point Logchef at existing ClickHouse tables or VictoriaLogs datasets without reshaping storage first.</p>
       </div>
 
       <div class="feature">
@@ -547,7 +553,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           </svg>
         </div>
         <h3>AI Query Assistant</h3>
-        <p>Describe the question and get SQL or LogchefQL instantly.</p>
+        <p>Describe the question and generate LogchefQL or backend-native queries faster.</p>
       </div>
 
       <div class="feature">
@@ -571,7 +577,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           </svg>
         </div>
         <h3>Alerting Pipeline</h3>
-        <p>Schedule SQL rules and route notifications via email or webhooks.</p>
+        <p>Schedule source-aware alert queries and route notifications via email or webhooks.</p>
       </div>
 
       <div class="feature">
@@ -602,7 +608,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         <button class="copy-btn">Copy</button>
       </div>
       <div class="code-content" id="code-docker">
-        <pre><span class="code-comment"># Start Logchef with ClickHouse</span>
+        <pre><span class="code-comment"># Start Logchef and connect your log backend</span>
 curl -LO https://raw.githubusercontent.com/mr-karan/logchef/main/deployment/docker/docker-compose.yml
 
 docker compose up -d
