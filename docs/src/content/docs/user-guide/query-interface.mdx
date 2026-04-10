@@ -57,6 +57,8 @@ service:="api" level:="error" | fields _time, _msg, service, level
 
 Switch between modes using the **LogchefQL / SQL** tabs for ClickHouse or the **LogchefQL / LogsQL** tabs for VictoriaLogs.
 
+If you are running VictoriaLogs specifically, see [Using VictoriaLogs with Logchef](/tutorials/victorialogs).
+
 ## Time Controls
 
 - **Quick ranges** — Last 5m, 15m, 1h, 24h, 7d, etc.
@@ -82,7 +84,17 @@ Press **Esc** or click **Cancel** to stop a running query. This cancels the back
 - Click any cell to copy its value
 - Double-click a column header divider to auto-fit width
 - Expand rows with the chevron to see full log details
-- Toggle between standard and compact (terminal-style) view
+- Best when you want explicit columns and field-level scanning
+
+### Compact View
+
+- Dense, terminal-style rendering for fast visual scanning
+- Useful when the log message matters more than the full field set
+
+### JSON View
+
+- Shows the raw structured result payload
+- Useful when you want to inspect the exact event shape without column curation
 
 ### Histogram
 

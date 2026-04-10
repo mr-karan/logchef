@@ -83,6 +83,12 @@ const supportsConditionEditor = computed(() => supportsAlertEditorMode(currentSo
 const nativeQueryLanguage = computed(() => getNativeQueryLanguageForSource(currentSource.value));
 const nativeEditorLabel = computed(() => getQueryLanguageLabel(nativeQueryLanguage.value));
 const nativeQueryLabel = computed(() => `${nativeEditorLabel.value} Query`);
+const generatedQueryLanguageLabel = computed(() => {
+  if (alertMetadata.value.queryLanguage === "logsql") {
+    return "Generated LogsQL";
+  }
+  return "Generated SQL";
+});
 
 // Get current source table name for SQL generation
 const currentTableName = computed(() => {
@@ -153,8 +159,8 @@ const nativeQueryHelpText = computed(() => {
   return "Use a template above to auto-fill with the correct table, timestamp field, and lookback window.";
 });
 
-// Generated SQL from LogchefQL condition
-const generatedSQL = ref("");
+// Generated executable query from LogchefQL condition
+const generatedQuery = ref("");
 const isTranslating = ref(false);
 
 // Team members for recipient selection
@@ -174,16 +180,16 @@ watch(() => props.teamId, (id) => {
 async function translateCondition() {
   if (!supportsConditionEditor.value) {
     conditionError.value = null;
-    generatedSQL.value = "";
+    generatedQuery.value = "";
     return;
   }
   if (form.editor_mode !== "condition" || !form.condition_json.trim()) {
     conditionError.value = null;
-    generatedSQL.value = "";
+    generatedQuery.value = "";
     return;
   }
 
-  const teamId = teamsStore.currentTeamId;
+  const teamId = props.teamId;
   
   if (!teamId || !props.sourceId) {
     conditionError.value = "Team or source not available";
@@ -196,27 +202,35 @@ async function translateCondition() {
     
     if (response.data && response.data.valid) {
       conditionError.value = null;
-      
-      // Build the full SQL query with aggregate function and lookback
-      const aggFunc = form.aggregate_function === "count" ? "count(*)" : `${form.aggregate_function}(value)`;
-      const tableName = currentTableName.value;
-      const tsField = timestampField.value;
-      
-      // Construct WHERE clause: LogChefQL conditions + time filter
-      let whereClause = response.data.sql ? `(${response.data.sql})` : "1=1";
-      whereClause += ` AND \`${tsField}\` >= ${lookbackExpression.value}`;
-      
-      generatedSQL.value = `SELECT ${aggFunc} as value\nFROM ${tableName}\nWHERE ${whereClause}`;
+      const translatedQuery = response.data.generated_query || response.data.sql || "";
+      const translatedLanguage = response.data.generated_query_language || nativeQueryLanguage.value;
+
+      if (translatedLanguage === "logsql") {
+        const filterQuery = translatedQuery.trim() || "*";
+        const statsExpression = form.aggregate_function === "count"
+          ? "count()"
+          : `${form.aggregate_function}(value)`;
+        generatedQuery.value = `${filterQuery} | stats ${statsExpression} as value`;
+      } else {
+        const aggFunc = form.aggregate_function === "count" ? "count(*)" : `${form.aggregate_function}(value)`;
+        const tableName = currentTableName.value;
+        const tsField = timestampField.value;
+
+        let whereClause = response.data.sql ? `(${response.data.sql})` : "1=1";
+        whereClause += ` AND \`${tsField}\` >= ${lookbackExpression.value}`;
+
+        generatedQuery.value = `SELECT ${aggFunc} as value\nFROM ${tableName}\nWHERE ${whereClause}`;
+      }
     } else if (response.data && !response.data.valid) {
       conditionError.value = response.data.error?.message || "Invalid condition";
-      generatedSQL.value = "";
+      generatedQuery.value = "";
     } else {
       conditionError.value = 'status' in response && response.status === 'error' ? response.message : "Translation failed";
-      generatedSQL.value = "";
+      generatedQuery.value = "";
     }
   } catch (error: any) {
     conditionError.value = error.message || "Translation error";
-    generatedSQL.value = "";
+    generatedQuery.value = "";
   } finally {
     isTranslating.value = false;
   }
@@ -236,10 +250,10 @@ watch(
   }
 );
 
-// Sync generated SQL to query field when using condition mode
-watch(generatedSQL, (sql) => {
-  if (form.editor_mode === "condition" && sql) {
-    form.query = sql;
+// Sync generated query to query field when using condition mode
+watch(generatedQuery, (query) => {
+  if (form.editor_mode === "condition" && query) {
+    form.query = query;
   }
 });
 
@@ -382,6 +396,7 @@ function applyConditionTemplate(template: typeof conditionTemplates[0]) {
   testQueryResult.value = null;
   testQueryError.value = null;
   conditionError.value = null;
+  generatedQuery.value = "";
 }
 
 const isSubmitting = computed(() => {
@@ -402,7 +417,7 @@ const isValid = computed(() => {
   // For condition mode, check if condition is valid and generates SQL
   if (form.editor_mode === "condition") {
     return hasName && hasThreshold && hasFrequency && hasLookback && 
-           !!form.condition_json.trim() && !conditionError.value && !!generatedSQL.value;
+           !!form.condition_json.trim() && !conditionError.value && !!generatedQuery.value;
   }
   
   // For SQL mode, just check if query is not empty
@@ -460,6 +475,7 @@ function resetForm(alert: Alert | null) {
   testQueryResult.value = null;
   testQueryError.value = null;
   conditionError.value = null;
+  generatedQuery.value = "";
   newWebhookUrl.value = "";
   
   if (!alert) {
@@ -572,7 +588,7 @@ watch(supportsConditionEditor, () => {
   if (!supportsConditionEditor.value && form.editor_mode === "condition") {
     form.editor_mode = "native";
     conditionError.value = null;
-    generatedSQL.value = "";
+    generatedQuery.value = "";
   }
 });
 
@@ -745,7 +761,7 @@ function handleSubmit() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  :disabled="!generatedSQL || isDisabled || isTestingQuery"
+                  :disabled="!generatedQuery || isDisabled || isTestingQuery"
                   @click="handleTestQuery"
                 >
                   {{ isTestingQuery ? "Testing..." : "Test Query" }}
@@ -766,10 +782,9 @@ function handleSubmit() {
               </p>
             </div>
 
-            <!-- Generated SQL Preview -->
-            <div v-if="generatedSQL" class="space-y-2">
-              <Label class="text-xs text-muted-foreground">Generated SQL (read-only)</Label>
-              <pre class="bg-muted/50 border rounded-md p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap">{{ generatedSQL }}</pre>
+            <div v-if="generatedQuery" class="space-y-2">
+              <Label class="text-xs text-muted-foreground">{{ generatedQueryLanguageLabel }} (read-only)</Label>
+              <pre class="bg-muted/50 border rounded-md p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap">{{ generatedQuery }}</pre>
             </div>
           </template>
 
@@ -1156,7 +1171,7 @@ function handleSubmit() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  :disabled="!generatedSQL || isDisabled || isTestingQuery"
+                  :disabled="!generatedQuery || isDisabled || isTestingQuery"
                   @click="handleTestQuery"
                 >
                   {{ isTestingQuery ? "Testing..." : "Test Query" }}
@@ -1177,10 +1192,9 @@ function handleSubmit() {
               </p>
             </div>
 
-            <!-- Generated SQL Preview -->
-            <div v-if="generatedSQL" class="space-y-2">
-              <Label class="text-xs text-muted-foreground">Generated SQL (read-only)</Label>
-              <pre class="bg-muted/50 border rounded-md p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap">{{ generatedSQL }}</pre>
+            <div v-if="generatedQuery" class="space-y-2">
+              <Label class="text-xs text-muted-foreground">{{ generatedQueryLanguageLabel }} (read-only)</Label>
+              <pre class="bg-muted/50 border rounded-md p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap">{{ generatedQuery }}</pre>
             </div>
           </template>
 

@@ -16,6 +16,8 @@
 
 Logchef is a lightweight log analytics platform for teams that want a strong query and control plane on top of existing log backends. It runs as a single binary and currently supports both ClickHouse and VictoriaLogs as datasource backends, while providing a unified UI for exploration, saved queries, alerting, and access control.
 
+If you are evaluating VictoriaLogs specifically, start with the [VictoriaLogs guide](https://logchef.app/tutorials/victorialogs/).
+
 ## Features
 
 - **Query-first log exploration**: Fast filtering with LogchefQL plus native SQL or LogsQL depending on the source.

@@ -45,6 +45,7 @@ import HistogramVisualization from "./components/HistogramVisualization.vue";
 import EmptyResultsState from "./components/EmptyResultsState.vue";
 import ExploreTopBar from "./components/ExploreTopBar.vue";
 import ResultsToolbar from "./components/ResultsToolbar.vue";
+import ExploreJsonResults from "./components/ExploreJsonResults.vue";
 
 // Router and stores
 const route = useRoute();
@@ -166,7 +167,7 @@ const lastQueryTime = ref<number>(0);
 // Display mode for table vs compact view (table is default)
 const displayMode = computed({
   get: () => preferences.value.display_mode,
-  set: (value: 'table' | 'compact') => {
+  set: (value: 'table' | 'compact' | 'json') => {
     preferencesStore.updatePreferences({ display_mode: value });
   },
 });
@@ -1290,9 +1291,15 @@ onMounted(async () => {
               <div class="flex-1 overflow-hidden relative bg-background">
                 <!-- Results Table -->
                 <template v-if="exploreStore.logs?.length > 0 || isExecutingQuery || isInitialQueryPending">
-                  <!-- Render DataTable or CompactLogList based on display mode -->
+                  <ExploreJsonResults
+                    v-if="displayMode === 'json'"
+                    :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}-${displayMode}`"
+                    :data="exploreStore.logs"
+                    :is-loading="isExecutingQuery || isInitialQueryPending"
+                  />
+
                   <component
-                    v-if="exploreStore.columns?.length > 0"
+                    v-else-if="exploreStore.columns?.length > 0"
                     :is="displayMode === 'table' ? DataTable : CompactLogList"
                     :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}-${displayMode}`"
                     :columns="exploreStore.columns as any"

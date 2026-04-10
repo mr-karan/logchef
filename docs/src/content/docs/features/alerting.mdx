@@ -15,11 +15,11 @@ Logchef evaluates alert queries on a schedule and sends notifications when thres
 5. Add recipients and/or webhook URLs
 6. Save
 
-For ClickHouse sources, Logchef can generate SQL automatically from a LogchefQL condition. For VictoriaLogs sources, alerts currently use native LogsQL only.
+For ClickHouse and VictoriaLogs sources, Logchef can generate the executable alert query automatically from a LogchefQL condition. Native mode remains available when you want to write SQL or LogsQL directly.
 
 ## Query Modes
 
-**Condition mode (ClickHouse)** — Write a LogchefQL filter condition and pick an aggregate function. Logchef generates SQL and adds the time filter automatically.
+**Condition mode** — Write a LogchefQL filter condition and pick an aggregate function. Logchef generates the backend-native executable query and adds the alert window automatically.
 
 ```
 severity_text = "ERROR"
@@ -48,7 +48,7 @@ level:="error" | stats count() as value
 |-------|-------------|
 | Name | Human-readable identifier |
 | Severity | `info`, `warning`, or `critical` |
-| Query | ClickHouse LogchefQL condition, ClickHouse SQL, or VictoriaLogs LogsQL depending on source |
+| Query | LogchefQL condition, ClickHouse SQL, or VictoriaLogs LogsQL depending on source |
 | Threshold | Value + operator (`>`, `>=`, `<`, `<=`, `==`, `!=`) |
 | Frequency | Evaluation interval in seconds |
 | Lookback | Time range for the query |
@@ -126,3 +126,5 @@ smtp_security = "starttls"
 **Alerts not delivered:** Verify SMTP settings, check that recipients or webhook URLs are configured on the alert, review delivery status in alert history.
 
 **False positives:** Increase the threshold, extend the lookback window, or use `avg()` instead of `count()` for smoother signals.
+
+For VictoriaLogs-specific guidance, see [Using VictoriaLogs with Logchef](/tutorials/victorialogs).

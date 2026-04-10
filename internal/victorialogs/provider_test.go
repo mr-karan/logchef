@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,7 +18,7 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-func TestValidateConnectionUsesHealthEndpointHeaders(t *testing.T) {
+func TestValidateConnectionUsesHeadersAcrossHealthAndQueryValidation(t *testing.T) {
 	t.Parallel()
 
 	var gotAuthorization string
@@ -26,15 +27,28 @@ func TestValidateConnectionUsesHealthEndpointHeaders(t *testing.T) {
 	var gotCustom string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/health" {
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		case "/select/logsql/field_names":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			gotAuthorization = r.Header.Get("Authorization")
+			gotAccountID = r.Header.Get("AccountID")
+			gotProjectID = r.Header.Get("ProjectID")
+			gotCustom = r.Header.Get("X-Test-Header")
+			if got := r.Form.Get("query"); got != "*" {
+				t.Fatalf("unexpected query: %q", got)
+			}
+			if got := r.Form.Get("ignore_pipes"); got != "1" {
+				t.Fatalf("unexpected ignore_pipes: %q", got)
+			}
+			_, _ = w.Write([]byte(`{"values":[{"value":"service","hits":1}]}`))
+		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		gotAuthorization = r.Header.Get("Authorization")
-		gotAccountID = r.Header.Get("AccountID")
-		gotProjectID = r.Header.Get("ProjectID")
-		gotCustom = r.Header.Get("X-Test-Header")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
 	}))
 	defer server.Close()
 
@@ -61,7 +75,7 @@ func TestValidateConnectionUsesHealthEndpointHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ValidateConnection returned error: %v", err)
 	}
-	if result == nil || result.Message != "Connection successful" {
+	if result == nil || result.Message != "Connection successful. Credentials, tenant scope, and immutable filters validated." {
 		t.Fatalf("unexpected validation result: %#v", result)
 	}
 	if gotAuthorization != "Bearer secret-token" {
@@ -72,6 +86,62 @@ func TestValidateConnectionUsesHealthEndpointHeaders(t *testing.T) {
 	}
 	if gotCustom != "enabled" {
 		t.Fatalf("unexpected custom header: %q", gotCustom)
+	}
+}
+
+func TestValidateConnectionRejectsIncompleteTenantConfiguration(t *testing.T) {
+	t.Parallel()
+
+	provider := newTestProvider(nil)
+	_, err := provider.ValidateConnection(context.Background(), &models.ValidateConnectionRequest{
+		SourceType: models.SourceTypeVictoriaLogs,
+		Connection: mustJSON(t, models.VictoriaLogsConnectionInfo{
+			BaseURL: "https://logs.example.com",
+			Tenant: models.VictoriaLogsTenant{
+				AccountID: "12",
+			},
+		}),
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "account_id and project_id must be provided together") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestValidateConnectionReturnsHelpfulAuthError(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		case "/select/logsql/field_names":
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := newTestProvider(server)
+	_, err := provider.ValidateConnection(context.Background(), &models.ValidateConnectionRequest{
+		SourceType: models.SourceTypeVictoriaLogs,
+		Connection: mustJSON(t, models.VictoriaLogsConnectionInfo{
+			BaseURL: server.URL,
+			Auth: models.VictoriaLogsAuth{
+				Mode:  "bearer",
+				Token: "bad-token",
+			},
+		}),
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "rejected the provided credentials or token") {
+		t.Fatalf("unexpected validation error: %v", err)
 	}
 }
 
@@ -415,7 +485,9 @@ func TestInspectSourceIncludesSchemaAndActivity(t *testing.T) {
 
 func newTestProvider(server *httptest.Server) *Provider {
 	provider := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	provider.client = server.Client()
+	if server != nil {
+		provider.client = server.Client()
+	}
 	return provider
 }
 

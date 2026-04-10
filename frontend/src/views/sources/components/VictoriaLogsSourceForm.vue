@@ -16,6 +16,7 @@ const props = defineProps<{
   modelValue: VictoriaLogsSourceFormState;
   isEditMode: boolean;
   validationMessage?: string | null;
+  validationError?: string | null;
   isValidated?: boolean;
   isValidating?: boolean;
 }>();
@@ -145,6 +146,9 @@ function updateAuthMode(value: string) {
           />
         </div>
       </div>
+      <p class="text-sm text-muted-foreground">
+        Set both Account ID and Project ID together when validating a multi-tenant VictoriaLogs cluster.
+      </p>
 
       <div class="grid gap-2">
         <Label for="victorialogs_scope_query">Immutable Scope Query</Label>
@@ -156,7 +160,7 @@ function updateAuthMode(value: string) {
           @update:model-value="(value) => updateForm({ scopeQuery: String(value) })"
         />
         <p class="text-sm text-muted-foreground">
-          This scope is prepended server-side to every query for the datasource.
+          This scope is applied server-side to every query for the datasource. Examples: <code>{app="payments"}</code> or <code>kubernetes.namespace:="prod"</code>.
         </p>
       </div>
     </div>
@@ -218,6 +222,13 @@ function updateAuthMode(value: string) {
         class="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800"
       >
         {{ validationMessage }}
+      </div>
+
+      <div
+        v-if="validationError"
+        class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+      >
+        {{ validationError }}
       </div>
     </div>
   </div>

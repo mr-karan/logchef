@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useSourcesStore } from "@/stores/sources";
+import { getErrorMessage } from "@/api/types";
 import type { Source } from "@/api/sources";
 import ClickHouseSourceForm from "./components/ClickHouseSourceForm.vue";
 import VictoriaLogsSourceForm from "./components/VictoriaLogsSourceForm.vue";
@@ -55,6 +56,7 @@ const victoriaLogsTTLDays = ref("0");
 
 const isValidating = ref(false);
 const validationMessage = ref<string | null>(null);
+const validationError = ref<string | null>(null);
 const isValidated = ref(false);
 const originalConnectionSnapshot = ref("");
 
@@ -158,12 +160,14 @@ watch(activeValidationFingerprint, (_next, previous) => {
   }
   isValidated.value = false;
   validationMessage.value = null;
+  validationError.value = null;
 });
 
 watch(sourceType, () => {
   formError.value = null;
   isValidated.value = false;
   validationMessage.value = null;
+  validationError.value = null;
 });
 
 function handleSourceTypeChange(value: string) {
@@ -197,6 +201,7 @@ function prefillFormFromSource(source: Source, isCopy = false) {
   formError.value = null;
   isValidated.value = false;
   validationMessage.value = null;
+  validationError.value = null;
   setOriginalConnectionSnapshot();
 }
 
@@ -204,6 +209,7 @@ async function handleValidateConnection() {
   isValidating.value = true;
   isValidated.value = false;
   validationMessage.value = null;
+  validationError.value = null;
 
   try {
     const request =
@@ -217,7 +223,7 @@ async function handleValidateConnection() {
       isValidated.value = true;
     }
   } catch (error) {
-    console.error("Validation error:", error);
+    validationError.value = getErrorMessage(error);
   } finally {
     isValidating.value = false;
   }
@@ -499,6 +505,7 @@ onMounted(async () => {
               :is-validating="isValidating"
               :is-validated="isValidated"
               :validation-message="validationMessage"
+              :validation-error="validationError"
               @validate="handleValidateConnection"
             />
 
@@ -509,6 +516,7 @@ onMounted(async () => {
               :is-validating="isValidating"
               :is-validated="isValidated"
               :validation-message="validationMessage"
+              :validation-error="validationError"
               @validate="handleValidateConnection"
             />
           </div>

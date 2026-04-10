@@ -51,7 +51,7 @@ function getSupportedAlertEditorModes(source: SourceDescriptor): AlertEditorMode
     );
   }
 
-  return getSourceType(source) === "victorialogs" ? ["native"] : ["condition", "native"];
+  return ["condition", "native"];
 }
 
 export function supportsQueryLanguage(source: SourceDescriptor, language: QueryLanguage): boolean {
@@ -158,7 +158,7 @@ export function resolveAlertMetadata(input: {
   if (explicitLanguage === "clickhouse-sql" || explicitLanguage === "logsql") {
     queryLanguage = explicitLanguage;
   } else if (explicitEditorMode === "condition") {
-    queryLanguage = "clickhouse-sql";
+    queryLanguage = getNativeQueryLanguageForSource(source);
   } else {
     queryLanguage = getNativeQueryLanguageForSource(source);
   }
@@ -174,7 +174,7 @@ export function resolveAlertMetadata(input: {
     editorMode = supportsAlertEditorMode(source, "condition") ? "condition" : "native";
   }
 
-  if (queryLanguage === "logsql" || !supportsAlertEditorMode(source, editorMode)) {
+  if (!supportsAlertEditorMode(source, editorMode)) {
     editorMode = "native";
   }
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
-import { ChevronUp, ChevronDown, Rows4, TerminalSquare, Download } from 'lucide-vue-next'
+import { ChevronUp, ChevronDown, Rows4, TerminalSquare, Download, Braces } from 'lucide-vue-next'
 import { useExploreStore } from '@/stores/explore'
 import GroupBySelector from './GroupBySelector.vue'
 import {
@@ -21,7 +21,7 @@ interface FieldInfo {
 interface Props {
   isHistogramVisible: boolean
   availableFields: FieldInfo[]
-  displayMode: 'table' | 'compact'
+  displayMode: 'table' | 'compact' | 'json'
   logsCount: number
   queryTimeMs?: number
   isLoading?: boolean
@@ -31,7 +31,7 @@ defineProps<Props>()
 
 const emit = defineEmits<{
   (e: 'toggle-histogram'): void
-  (e: 'update:displayMode', mode: 'table' | 'compact'): void
+  (e: 'update:displayMode', mode: 'table' | 'compact' | 'json'): void
   (e: 'export'): void
 }>()
 
@@ -129,6 +129,23 @@ const formattedQueryTime = computed(() => {
             </TooltipTrigger>
             <TooltipContent side="bottom">
               <p class="text-xs">Compact view</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                class="h-6 w-6 rounded flex items-center justify-center transition-colors"
+                :class="displayMode === 'json' ? 'bg-background shadow-sm' : 'hover:bg-background/50'"
+                @click="emit('update:displayMode', 'json')"
+              >
+                <Braces class="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p class="text-xs">JSON view</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>

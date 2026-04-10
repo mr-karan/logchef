@@ -1,0 +1,185 @@
+---
+title: Using VictoriaLogs with Logchef
+description: Connect VictoriaLogs, ingest data, query with LogchefQL or LogsQL, and write alerts that work well.
+---
+
+Logchef supports VictoriaLogs as a first-class datasource. The goal is a shared Logchef experience for everyday workflows, with raw LogsQL available when you want VictoriaLogs-native pipes directly.
+
+## What Works Well
+
+- Add a VictoriaLogs datasource with optional tenant headers and immutable source scope
+- Query in **LogchefQL** for common filtering workflows
+- Drop into **LogsQL** for native VictoriaLogs features
+- Explore histograms, field values, and saved queries
+- Create alerts in either:
+  - **Condition mode** using LogchefQL
+  - **Native mode** using LogsQL
+
+## Ingesting Data
+
+Logchef does not ingest into VictoriaLogs directly. You send logs to VictoriaLogs using your normal shipper, then point Logchef at the VictoriaLogs API.
+
+The local development setup in this repo uses Vector with the VictoriaLogs Elasticsearch-compatible ingestion endpoint:
+
+```toml
+[sinks.victorialogs]
+type = "elasticsearch"
+inputs = ["remap_logs"]
+endpoints = ["http://localhost:9428/insert/elasticsearch/"]
+mode = "bulk"
+api_version = "v8"
+compression = "gzip"
+
+[sinks.victorialogs.request.headers]
+VL-Stream-Fields = "service,host,env"
+VL-Time-Field = "datetime"
+VL-Msg-Field = "message"
+```
+
+See the official VictoriaLogs docs for more ingestion patterns:
+
+- [Vector ingestion](https://docs.victoriametrics.com/victorialogs/data-ingestion/vector/)
+- [LogsQL reference](https://docs.victoriametrics.com/victorialogs/logsql/)
+- [LogsQL examples](https://docs.victoriametrics.com/victorialogs/logsql-examples/)
+
+## Add The Datasource
+
+When adding a VictoriaLogs source in Logchef:
+
+- Set the **Base URL** to the VictoriaLogs API endpoint
+- Choose auth mode:
+  - none
+  - basic auth
+  - bearer token
+- Set **Account ID** and **Project ID** together if you use multi-tenant VictoriaLogs
+- Optionally define an **Immutable Scope Query**
+
+Examples of immutable scope:
+
+```text
+{app="payments"}
+```
+
+```text
+kubernetes.namespace:="prod"
+```
+
+Logchef applies that scope server-side to every query, histogram, field-values lookup, and alert evaluation for that datasource.
+
+## Query Modes
+
+### LogchefQL
+
+Use LogchefQL when you want the same simple filter workflow across backends.
+
+```text
+level = "error"
+service = "api" and status_code >= 500
+_msg ~ "timeout"
+```
+
+For VictoriaLogs sources, Logchef compiles LogchefQL to LogsQL before execution.
+
+Examples:
+
+| LogchefQL | Generated LogsQL |
+|---|---|
+| `level = "error"` | `level:="error"` |
+| `status_code >= 500` | `status_code:>=500` |
+| `_msg ~ "timeout"` | `_msg:~"(?i)timeout"` |
+| `service = "api" and env = "prod"` | `(service:="api") AND (env:="prod")` |
+
+### LogsQL
+
+Use native LogsQL when you want VictoriaLogs-specific pipes and advanced query composition.
+
+```text
+service:="api" level:="error" | fields _time, _msg, service, level
+```
+
+Use native LogsQL when you need:
+
+- `stats`
+- `facets`
+- `fields`
+- `unpack_json`
+- other VictoriaLogs-native pipe flows
+
+## Result Views
+
+Logchef keeps the result experience backend-neutral:
+
+- **Table**
+- **Compact**
+- **JSON**
+
+You do not need a VictoriaLogs-specific result mode for normal exploration. Switch to raw LogsQL when the query itself needs to become VictoriaLogs-specific.
+
+## Alerting
+
+VictoriaLogs alerts in Logchef should return a single numeric value named `value`.
+
+### Condition Mode
+
+Condition mode is the simplest path for common threshold alerts:
+
+```text
+level = "error" and service = "payments"
+```
+
+Logchef compiles that filter to LogsQL and wraps it in a `stats` query for evaluation.
+
+### Native LogsQL Mode
+
+Use native mode when you want full control:
+
+```text
+level:="error" service:="payments" | stats count() as value
+```
+
+```text
+response_time:* service:="api" | stats avg(response_time) as value
+```
+
+Important rules:
+
+- Return a single numeric result
+- Alias it as `value`
+- Let Logchef apply the alert lookback window automatically
+
+## When To Use LogchefQL vs LogsQL
+
+Use **LogchefQL** when:
+
+- you want a shared query experience across ClickHouse and VictoriaLogs
+- you are doing straightforward filter-based exploration
+- you are building threshold alerts from common predicates
+
+Use **LogsQL** when:
+
+- you need VictoriaLogs pipes directly
+- you want stream-aware field shaping
+- you need `stats`, `facets`, or unpacking operators that are outside LogchefQL
+
+## Recommended Field Mapping
+
+For VictoriaLogs sources, good defaults are:
+
+- Timestamp field: `_time`
+- Severity field: `level` or your dataset’s severity field
+- Message field in your dataset: `_msg` if you use `VL-Msg-Field`
+
+For cleaner exploration, prefer stream fields that represent stable source identity, such as:
+
+- `service`
+- `host`
+- `env`
+- `namespace`
+
+Avoid highly-cardinal request-specific fields as stream fields.
+
+## Next Steps
+
+- Review the [Query Interface](/user-guide/query-interface)
+- Review the [Search Syntax](/guide/search-syntax)
+- Review [Alerting](/features/alerting)

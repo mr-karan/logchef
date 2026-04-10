@@ -85,11 +85,10 @@ func ResolveAlertMetadata(language QueryLanguage, mode AlertEditorMode) (QueryLa
 		return "", "", ErrInvalidAlertQueryConfiguration{Value: string(mode)}
 	}
 
-	if normalizedMode == AlertEditorModeCondition && normalizedLanguage != QueryLanguageClickHouseSQL {
+	if normalizedMode == AlertEditorModeCondition &&
+		normalizedLanguage != QueryLanguageClickHouseSQL &&
+		normalizedLanguage != QueryLanguageLogsQL {
 		return "", "", ErrInvalidAlertQueryConfiguration{Value: string(normalizedLanguage)}
-	}
-	if normalizedLanguage == QueryLanguageLogsQL && normalizedMode != AlertEditorModeNative {
-		return "", "", ErrInvalidAlertQueryConfiguration{Value: string(mode)}
 	}
 
 	return normalizedLanguage, normalizedMode, nil

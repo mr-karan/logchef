@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 )
 
 const defaultHealthTimeout = 5 * time.Second
+const defaultValidationTimeout = 8 * time.Second
 
 type Provider struct {
 	client  *http.Client
@@ -62,7 +64,10 @@ func (p *Provider) SupportedSavedQueryEditorModes() []models.SavedQueryEditorMod
 }
 
 func (p *Provider) SupportedAlertEditorModes() []models.AlertEditorMode {
-	return []models.AlertEditorMode{models.AlertEditorModeNative}
+	return []models.AlertEditorMode{
+		models.AlertEditorModeCondition,
+		models.AlertEditorModeNative,
+	}
 }
 
 func (p *Provider) PrepareSource(ctx context.Context, req *models.CreateSourceRequest) (*models.Source, error) {
@@ -78,7 +83,7 @@ func (p *Provider) PrepareSource(ctx context.Context, req *models.CreateSourceRe
 	if err != nil {
 		return nil, err
 	}
-	if err := datasource.ValidateVictoriaLogsConnection("connection.", conn.BaseURL); err != nil {
+	if err := validateVictoriaLogsConnectionConfig("connection.", conn); err != nil {
 		return nil, err
 	}
 
@@ -113,8 +118,8 @@ func (p *Provider) PrepareSource(ctx context.Context, req *models.CreateSourceRe
 		return nil, err
 	}
 
-	if _, err := p.checkHealth(ctx, 0, conn); err != nil {
-		return nil, &datasource.ValidationError{Field: "connection", Message: "Failed to connect to VictoriaLogs", Err: err}
+	if err := p.validateConnectionAccess(ctx, conn); err != nil {
+		return nil, err
 	}
 
 	return source, nil
@@ -129,15 +134,19 @@ func (p *Provider) ValidateConnection(ctx context.Context, req *models.ValidateC
 	if err != nil {
 		return nil, err
 	}
-	if err := datasource.ValidateVictoriaLogsConnection("", conn.BaseURL); err != nil {
+	if err := validateVictoriaLogsConnectionConfig("", conn); err != nil {
 		return nil, err
 	}
 
-	if _, err := p.checkHealth(ctx, 0, conn); err != nil {
-		return nil, &datasource.ValidationError{Field: "connection", Message: "Failed to connect to VictoriaLogs", Err: err}
+	if err := p.validateConnectionAccess(ctx, conn); err != nil {
+		return nil, err
 	}
 
-	return &models.ConnectionValidationResult{Message: "Connection successful"}, nil
+	message := "Connection successful. VictoriaLogs query access is working."
+	if strings.TrimSpace(conn.Tenant.AccountID) != "" || strings.TrimSpace(conn.Scope.Query) != "" {
+		message = "Connection successful. Credentials, tenant scope, and immutable filters validated."
+	}
+	return &models.ConnectionValidationResult{Message: message}, nil
 }
 
 func (p *Provider) UpdateSource(ctx context.Context, source *models.Source, req *models.UpdateSourceRequest) (*datasource.SourceUpdateResult, error) {
@@ -159,11 +168,11 @@ func (p *Provider) UpdateSource(ctx context.Context, source *models.Source, req 
 		if err != nil {
 			return nil, err
 		}
-		if err := datasource.ValidateVictoriaLogsConnection("connection.", conn.BaseURL); err != nil {
+		if err := validateVictoriaLogsConnectionConfig("connection.", conn); err != nil {
 			return nil, err
 		}
-		if _, err := p.checkHealth(ctx, source.ID, conn); err != nil {
-			return nil, &datasource.ValidationError{Field: "connection", Message: "Failed to connect to VictoriaLogs", Err: err}
+		if err := p.validateConnectionAccess(ctx, conn); err != nil {
+			return nil, err
 		}
 
 		source.ConnectionConfig = req.Connection
@@ -323,6 +332,134 @@ func (p *Provider) checkHealth(ctx context.Context, sourceID models.SourceID, co
 	}
 
 	return true, nil
+}
+
+func validateVictoriaLogsConnectionConfig(fieldPrefix string, conn models.VictoriaLogsConnectionInfo) error {
+	if err := datasource.ValidateVictoriaLogsConnection(fieldPrefix, conn.BaseURL); err != nil {
+		return err
+	}
+
+	authMode := strings.ToLower(strings.TrimSpace(conn.Auth.Mode))
+	switch authMode {
+	case "", "none":
+	case "basic":
+		if strings.TrimSpace(conn.Auth.Username) == "" {
+			return &datasource.ValidationError{Field: fieldPrefix + "auth.username", Message: "username is required for basic auth"}
+		}
+		if strings.TrimSpace(conn.Auth.Password) == "" {
+			return &datasource.ValidationError{Field: fieldPrefix + "auth.password", Message: "password is required for basic auth"}
+		}
+	case "bearer":
+		if strings.TrimSpace(conn.Auth.Token) == "" {
+			return &datasource.ValidationError{Field: fieldPrefix + "auth.token", Message: "token is required for bearer auth"}
+		}
+	default:
+		return &datasource.ValidationError{Field: fieldPrefix + "auth.mode", Message: "auth.mode must be one of none, basic, or bearer"}
+	}
+
+	accountID := strings.TrimSpace(conn.Tenant.AccountID)
+	projectID := strings.TrimSpace(conn.Tenant.ProjectID)
+	if (accountID == "") != (projectID == "") {
+		return &datasource.ValidationError{
+			Field:   fieldPrefix + "tenant",
+			Message: "account_id and project_id must be provided together",
+		}
+	}
+
+	return nil
+}
+
+func (p *Provider) validateConnectionAccess(ctx context.Context, conn models.VictoriaLogsConnectionInfo) error {
+	if _, err := p.checkHealth(ctx, 0, conn); err != nil {
+		return &datasource.ValidationError{Field: "connection.base_url", Message: "Failed to reach the VictoriaLogs server", Err: err}
+	}
+	if err := p.validateQueryAccess(ctx, conn); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *Provider) validateQueryAccess(ctx context.Context, conn models.VictoriaLogsConnectionInfo) error {
+	validationCtx := ctx
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		validationCtx, cancel = context.WithTimeout(ctx, defaultValidationTimeout)
+		defer cancel()
+	}
+
+	endpoint, err := joinBaseURL(conn.BaseURL, "/select/logsql/field_names")
+	if err != nil {
+		return &datasource.ValidationError{Field: "connection.base_url", Message: "invalid VictoriaLogs base URL", Err: err}
+	}
+
+	now := time.Now().UTC()
+	form := url.Values{}
+	form.Set("query", "*")
+	form.Set("start", formatAPITime(now.Add(-5*time.Minute)))
+	form.Set("end", formatAPITime(now))
+	form.Set("ignore_pipes", "1")
+	applyScopeFilters(form, conn)
+
+	req, err := http.NewRequestWithContext(validationCtx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return &datasource.ValidationError{Field: "connection.base_url", Message: "failed to create VictoriaLogs validation request", Err: err}
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	applyHeaders(req, conn)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return &datasource.ValidationError{Field: "connection.base_url", Message: "failed to call the VictoriaLogs query API", Err: err}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	detail := sanitizeVictoriaLogsValidationBody(body)
+	switch resp.StatusCode {
+	case http.StatusBadRequest:
+		return &datasource.ValidationError{
+			Field:   "connection.scope",
+			Message: fmt.Sprintf("VictoriaLogs rejected the tenant or immutable scope configuration%s", detail),
+		}
+	case http.StatusUnauthorized:
+		return &datasource.ValidationError{
+			Field:   "connection.auth",
+			Message: fmt.Sprintf("VictoriaLogs rejected the provided credentials or token%s", detail),
+		}
+	case http.StatusForbidden:
+		return &datasource.ValidationError{
+			Field:   "connection.tenant",
+			Message: fmt.Sprintf("VictoriaLogs denied access for the provided tenant or credentials%s", detail),
+		}
+	case http.StatusNotFound:
+		return &datasource.ValidationError{
+			Field:   "connection.base_url",
+			Message: "VictoriaLogs query endpoint was not found. Check the base URL and any path prefix.",
+		}
+	default:
+		return &datasource.ValidationError{
+			Field:   "connection",
+			Message: fmt.Sprintf("VictoriaLogs returned status %d%s", resp.StatusCode, detail),
+		}
+	}
+}
+
+func sanitizeVictoriaLogsValidationBody(body []byte) string {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return ""
+	}
+	trimmed = strings.ReplaceAll(trimmed, "\n", " ")
+	trimmed = strings.ReplaceAll(trimmed, "\t", " ")
+	trimmed = strings.Join(strings.Fields(trimmed), " ")
+	if len(trimmed) > 240 {
+		trimmed = trimmed[:240] + "..."
+	}
+	return ": " + trimmed
 }
 
 func (p *Provider) updateHealth(sourceID models.SourceID, healthy bool, err error) {

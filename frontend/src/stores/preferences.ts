@@ -31,7 +31,12 @@ function normalizePreferences(preferences: UserPreferences): UserPreferences {
   return {
     theme: isThemeMode(preferences.theme) ? preferences.theme : DEFAULT_PREFERENCES.theme,
     timezone: preferences.timezone === "utc" || preferences.timezone === "local" ? preferences.timezone : DEFAULT_PREFERENCES.timezone,
-    display_mode: preferences.display_mode === "compact" || preferences.display_mode === "table" ? preferences.display_mode : DEFAULT_PREFERENCES.display_mode,
+    display_mode:
+      preferences.display_mode === "compact" ||
+      preferences.display_mode === "table" ||
+      preferences.display_mode === "json"
+        ? preferences.display_mode
+        : DEFAULT_PREFERENCES.display_mode,
     fields_panel_open: typeof preferences.fields_panel_open === "boolean" ? preferences.fields_panel_open : DEFAULT_PREFERENCES.fields_panel_open,
   };
 }
@@ -63,7 +68,7 @@ function readStoredPreferences(themeFallback: ThemeMode): UserPreferences {
   }
 
   const legacyDisplayMode = localStorage.getItem(LEGACY_DISPLAY_MODE_KEY);
-  if (legacyDisplayMode === "table" || legacyDisplayMode === "compact") {
+  if (legacyDisplayMode === "table" || legacyDisplayMode === "compact" || legacyDisplayMode === "json") {
     preferences.display_mode = legacyDisplayMode;
   }
 

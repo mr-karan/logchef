@@ -93,7 +93,7 @@ func validateUserPreferencesUpdate(update models.UpdateUserPreferencesRequest) e
 		return &ValidationError{Field: "timezone", Message: "timezone must be one of: local, utc"}
 	}
 	if update.DisplayMode != nil && !isValidDisplayModePreference(*update.DisplayMode) {
-		return &ValidationError{Field: "display_mode", Message: "display_mode must be one of: table, compact"}
+		return &ValidationError{Field: "display_mode", Message: "display_mode must be one of: table, compact, json"}
 	}
 	return nil
 }
@@ -134,7 +134,7 @@ func isValidTimezonePreference(value models.TimezonePreference) bool {
 
 func isValidDisplayModePreference(value models.DisplayModePreference) bool {
 	switch value {
-	case models.DisplayModeTable, models.DisplayModeCompact:
+	case models.DisplayModeTable, models.DisplayModeCompact, models.DisplayModeJSON:
 		return true
 	default:
 		return false

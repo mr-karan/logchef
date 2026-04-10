@@ -136,7 +136,7 @@ const fieldsPanelOpen = computed({
 
         <div class="space-y-3">
           <Label class="text-sm font-medium">Default View Mode</Label>
-          <RadioGroup v-model="displayModePreference" class="grid gap-3 md:grid-cols-2">
+          <RadioGroup v-model="displayModePreference" class="grid gap-3 md:grid-cols-3">
             <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
               <RadioGroupItem value="table" class="mt-1" />
               <div>
@@ -149,6 +149,13 @@ const fieldsPanelOpen = computed({
               <div>
                 <p class="text-sm font-medium">Compact</p>
                 <p class="text-xs text-muted-foreground">Dense, streaming-style logs for quick scans.</p>
+              </div>
+            </Label>
+            <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
+              <RadioGroupItem value="json" class="mt-1" />
+              <div>
+                <p class="text-sm font-medium">JSON</p>
+                <p class="text-xs text-muted-foreground">Inspect raw structured events without table formatting.</p>
               </div>
             </Label>
           </RadioGroup>
