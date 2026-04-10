@@ -46,7 +46,8 @@ type HistogramResult struct {
 }
 
 type AlertQueryRequest struct {
-	Language     models.QueryLanguage
-	Query        string
-	QueryTimeout *int
+	Language        models.QueryLanguage
+	Query           string
+	LookbackSeconds int
+	QueryTimeout    *int
 }

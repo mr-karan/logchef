@@ -48,7 +48,10 @@ enum Commands {
     #[command(about = "Execute a LogchefQL query")]
     Query(query::QueryArgs),
 
-    #[command(about = "Execute a raw SQL query")]
+    #[command(
+        visible_alias = "native",
+        about = "Execute a raw native query (SQL for ClickHouse, LogsQL for VictoriaLogs)"
+    )]
     Sql(sql::SqlArgs),
 
     #[command(about = "List and run saved collections")]

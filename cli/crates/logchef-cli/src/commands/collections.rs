@@ -79,6 +79,10 @@ struct JsonOutput<'a> {
     query_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     generated_sql: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generated_query: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generated_query_language: Option<&'a str>,
     columns: &'a [Column],
 }
 
@@ -186,8 +190,8 @@ pub async fn run(args: CollectionsArgs, global: GlobalArgs) -> Result<()> {
                     let mut cache_entries: Vec<(String, i64)> =
                         sources.iter().map(|s| (s.name.clone(), s.id)).collect();
                     for s in &sources {
-                        if let Some(table_ref) = s.table_ref() {
-                            cache_entries.push((table_ref, s.id));
+                        if let Some(target_ref) = s.target_ref() {
+                            cache_entries.push((target_ref, s.id));
                         }
                     }
                     cache.set_sources(team_id, &cache_entries);
@@ -197,7 +201,7 @@ pub async fn run(args: CollectionsArgs, global: GlobalArgs) -> Result<()> {
                         .find(|s| s.name.eq_ignore_ascii_case(&name))
                         .or_else(|| {
                             sources.iter().find(|s| {
-                                s.table_ref()
+                                s.target_ref()
                                     .map(|r| r.eq_ignore_ascii_case(&name))
                                     .unwrap_or(false)
                             })
@@ -434,6 +438,8 @@ async fn run_collection(
                 stats: &response.stats,
                 query_id: response.query_id.as_deref(),
                 generated_sql: response.generated_sql.as_deref(),
+                generated_query: response.generated_query(),
+                generated_query_language: response.generated_query_language(),
                 columns: &response.columns,
             };
             println!("{}", serde_json::to_string_pretty(&output)?);
@@ -661,10 +667,7 @@ async fn prompt_source_interactive(
         anyhow::bail!("No sources available for this team");
     }
 
-    let options: Vec<String> = sources
-        .iter()
-        .map(|s| format!("{} ({})", s.name, s.table_ref().unwrap_or_default()))
-        .collect();
+    let options: Vec<String> = sources.iter().map(|s| s.display_name()).collect();
     let selection = Select::new("Select source:", options)
         .prompt()
         .context("Failed to select source")?;
@@ -677,8 +680,8 @@ async fn prompt_source_interactive(
     let mut cache_entries: Vec<(String, i64)> =
         sources.iter().map(|s| (s.name.clone(), s.id)).collect();
     for s in &sources {
-        if let Some(table_ref) = s.table_ref() {
-            cache_entries.push((table_ref, s.id));
+        if let Some(target_ref) = s.target_ref() {
+            cache_entries.push((target_ref, s.id));
         }
     }
     cache.set_sources(team_id, &cache_entries);

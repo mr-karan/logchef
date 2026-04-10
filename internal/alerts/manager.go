@@ -134,9 +134,10 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 
 	timeout := models.DefaultQueryTimeoutSeconds
 	result, err := m.datasource.EvaluateAlert(ctx, alert.SourceID, datasource.AlertQueryRequest{
-		Language:     alert.QueryLanguage,
-		Query:        query,
-		QueryTimeout: &timeout,
+		Language:        alert.QueryLanguage,
+		Query:           query,
+		LookbackSeconds: alert.LookbackSeconds,
+		QueryTimeout:    &timeout,
 	})
 	if err != nil {
 		m.recordEvaluationError(ctx, alert, fmt.Errorf("alert query failed: %w", err))

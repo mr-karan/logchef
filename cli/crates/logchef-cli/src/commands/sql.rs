@@ -14,7 +14,7 @@ use crate::cli::GlobalArgs;
 
 #[derive(Args)]
 pub struct SqlArgs {
-    /// Raw SQL query to execute. Use '-' to read from stdin.
+    /// Raw native query to execute. Use SQL for ClickHouse and LogsQL for VictoriaLogs. Use '-' to read from stdin.
     sql: Option<String>,
 
     /// Team ID or name
@@ -167,8 +167,8 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
                     let mut cache_entries: Vec<(String, i64)> =
                         sources.iter().map(|s| (s.name.clone(), s.id)).collect();
                     for s in &sources {
-                        if let Some(table_ref) = s.table_ref() {
-                            cache_entries.push((table_ref, s.id));
+                        if let Some(target_ref) = s.target_ref() {
+                            cache_entries.push((target_ref, s.id));
                         }
                     }
                     cache.set_sources(team_id, &cache_entries);
@@ -178,7 +178,7 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
                         .find(|s| s.name.eq_ignore_ascii_case(&name))
                         .or_else(|| {
                             sources.iter().find(|s| {
-                                s.table_ref()
+                                s.target_ref()
                                     .map(|r| r.eq_ignore_ascii_case(&name))
                                     .unwrap_or(false)
                             })
@@ -205,14 +205,14 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
             Some(s) => s,
             None => {
                 anyhow::bail!(
-                    "SQL query required. Provide as argument or use '-' to read from stdin."
+                    "Raw query required. Provide as argument or use '-' to read from stdin."
                 )
             }
         }
     };
 
     if sql.is_empty() {
-        anyhow::bail!("SQL query cannot be empty");
+        anyhow::bail!("Raw query cannot be empty");
     }
 
     let request = SqlQueryRequest {
@@ -227,7 +227,7 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     let response = client
         .query_sql(team_id, source_id, &request)
         .await
-        .context("SQL query failed")?;
+        .context("Raw query failed")?;
 
     let entries = response.entries();
     let is_tty = std::io::stdout().is_terminal();
@@ -425,10 +425,7 @@ async fn prompt_source_interactive(
         anyhow::bail!("No sources available for this team");
     }
 
-    let options: Vec<String> = sources
-        .iter()
-        .map(|s| format!("{} ({})", s.name, s.table_ref().unwrap_or_default()))
-        .collect();
+    let options: Vec<String> = sources.iter().map(|s| s.display_name()).collect();
     let selection = Select::new("Select source:", options)
         .prompt()
         .context("Failed to select source")?;
@@ -441,8 +438,8 @@ async fn prompt_source_interactive(
     let mut cache_entries: Vec<(String, i64)> =
         sources.iter().map(|s| (s.name.clone(), s.id)).collect();
     for s in &sources {
-        if let Some(table_ref) = s.table_ref() {
-            cache_entries.push((table_ref, s.id));
+        if let Some(target_ref) = s.target_ref() {
+            cache_entries.push((target_ref, s.id));
         }
     }
     cache.set_sources(team_id, &cache_entries);
@@ -451,13 +448,15 @@ async fn prompt_source_interactive(
 }
 
 fn prompt_sql_interactive() -> Result<String> {
-    let sql = Text::new("SQL query:")
-        .with_help_message("Full ClickHouse SQL including time filters")
+    let sql = Text::new("Raw query:")
+        .with_help_message(
+            "Enter a source-native query (SQL for ClickHouse, LogsQL for VictoriaLogs)",
+        )
         .prompt()
-        .context("Failed to read SQL query")?;
+        .context("Failed to read raw query")?;
 
     if sql.trim().is_empty() {
-        anyhow::bail!("SQL query cannot be empty");
+        anyhow::bail!("Raw query cannot be empty");
     }
     Ok(sql)
 }

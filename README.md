@@ -77,8 +77,9 @@ logchef auth --server https://logs.example.com
 # Query logs with LogchefQL
 logchef query "level:error" --since 1h
 
-# Execute raw ClickHouse SQL
+# Execute a raw native query (SQL for ClickHouse, LogsQL for VictoriaLogs)
 logchef sql "SELECT * FROM logs.app WHERE level='error' LIMIT 10"
+logchef sql 'level:="error" | fields _time, _msg, service'
 ```
 
 For full documentation, see the [CLI Guide](https://logchef.app/integration/cli/).

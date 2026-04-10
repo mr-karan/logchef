@@ -32,8 +32,9 @@ enum OutputFormat {
 struct SourceOut {
     id: i64,
     name: String,
+    source_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    table: Option<String>,
+    target: Option<String>,
     connected: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
@@ -120,11 +121,13 @@ pub async fn run(args: SourcesArgs, global: GlobalArgs) -> Result<()> {
     let rows: Vec<SourceOut> = sources
         .into_iter()
         .map(|s| {
-            let table = s.table_ref();
+            let source_type = s.source_type_label().to_string();
+            let target = s.target_ref();
             SourceOut {
                 id: s.id,
                 name: s.name,
-                table,
+                source_type,
+                target,
                 connected: s.is_connected,
                 description: s.description,
             }
@@ -142,21 +145,22 @@ pub async fn run(args: SourcesArgs, global: GlobalArgs) -> Result<()> {
         }
         OutputFormat::Text | OutputFormat::Table => {
             println!(
-                "{:<4} {:<24} {:<26} {:<10} DESCRIPTION",
-                "ID", "NAME", "TABLE", "CONNECTED"
+                "{:<4} {:<24} {:<16} {:<32} {:<10} DESCRIPTION",
+                "ID", "NAME", "TYPE", "TARGET", "CONNECTED"
             );
-            println!("{}", "-".repeat(90));
+            println!("{}", "-".repeat(112));
             for row in &rows {
                 let desc = row.description.as_deref().unwrap_or("");
                 let desc_truncated = truncate_str(desc, 32);
-                let table = row.table.as_deref().unwrap_or("-");
+                let target = row.target.as_deref().unwrap_or("-");
                 let connected = if row.connected { "yes" } else { "no" };
 
                 println!(
-                    "{:<4} {:<24} {:<26} {:<10} {}",
+                    "{:<4} {:<24} {:<16} {:<32} {:<10} {}",
                     row.id,
                     truncate_str(&row.name, 24),
-                    truncate_str(table, 26),
+                    truncate_str(&row.source_type, 16),
+                    truncate_str(target, 32),
                     connected,
                     desc_truncated
                 );

@@ -75,6 +75,8 @@ pub struct Source {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default = "default_source_type")]
+    pub source_type: String,
     #[serde(default)]
     pub connection: Option<SourceConnection>,
     #[serde(default)]
@@ -89,10 +91,12 @@ pub struct SourceConnection {
     pub database: Option<String>,
     #[serde(default)]
     pub table_name: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 impl Source {
-    /// Returns the database.table_name reference if both are available
+    /// Returns the database.table_name reference if both are available.
     pub fn table_ref(&self) -> Option<String> {
         self.connection
             .as_ref()
@@ -101,6 +105,40 @@ impl Source {
                 _ => None,
             })
     }
+
+    pub fn target_ref(&self) -> Option<String> {
+        match self.source_type.as_str() {
+            "victorialogs" => self
+                .connection
+                .as_ref()
+                .and_then(|c| c.base_url.as_ref())
+                .map(|base_url| base_url.to_string()),
+            _ => self.table_ref(),
+        }
+    }
+
+    pub fn source_type_label(&self) -> &'static str {
+        match self.source_type.as_str() {
+            "victorialogs" => "VictoriaLogs",
+            _ => "ClickHouse",
+        }
+    }
+
+    pub fn display_target(&self) -> String {
+        if let Some(target) = self.target_ref() {
+            format!("{} [{}]", target, self.source_type_label())
+        } else {
+            self.source_type_label().to_string()
+        }
+    }
+
+    pub fn display_name(&self) -> String {
+        format!("{} ({})", self.name, self.display_target())
+    }
+}
+
+fn default_source_type() -> String {
+    "clickhouse".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,6 +190,10 @@ pub struct QueryResponse {
     pub query_id: Option<String>,
     #[serde(default)]
     pub generated_sql: Option<String>,
+    #[serde(default)]
+    pub generated_query: Option<String>,
+    #[serde(default)]
+    pub generated_query_language: Option<String>,
 }
 
 impl QueryResponse {
@@ -161,6 +203,18 @@ impl QueryResponse {
         } else {
             &self.data
         }
+    }
+
+    pub fn generated_query(&self) -> Option<&str> {
+        self.generated_query
+            .as_deref()
+            .or(self.generated_sql.as_deref())
+    }
+
+    pub fn generated_query_language(&self) -> Option<&str> {
+        self.generated_query_language
+            .as_deref()
+            .or_else(|| self.generated_sql.as_ref().map(|_| "clickhouse-sql"))
     }
 }
 

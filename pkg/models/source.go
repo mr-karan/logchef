@@ -88,11 +88,13 @@ type Source struct {
 	Schema      string       `db:"-" json:"schema,omitempty"`
 	Columns     []ColumnInfo `db:"-" json:"columns,omitempty"`
 	// Enhanced schema information
-	Engine       string   `db:"-" json:"engine,omitempty"`
-	EngineParams []string `db:"-" json:"engine_params,omitempty"`
-	SortKeys     []string `db:"-" json:"sort_keys,omitempty"`
-	QueryLanguages []QueryLanguage `db:"-" json:"query_languages,omitempty"`
-	Capabilities   []string        `db:"-" json:"capabilities,omitempty"`
+	Engine                string                 `db:"-" json:"engine,omitempty"`
+	EngineParams          []string               `db:"-" json:"engine_params,omitempty"`
+	SortKeys              []string               `db:"-" json:"sort_keys,omitempty"`
+	QueryLanguages        []QueryLanguage        `db:"-" json:"query_languages,omitempty"`
+	SavedQueryEditorModes []SavedQueryEditorMode `db:"-" json:"saved_query_editor_modes,omitempty"`
+	AlertEditorModes      []AlertEditorMode      `db:"-" json:"alert_editor_modes,omitempty"`
+	Capabilities          []string               `db:"-" json:"capabilities,omitempty"`
 	// Provisioning
 	Managed   bool   `db:"managed" json:"managed"`
 	SecretRef string `db:"secret_ref" json:"secret_ref,omitempty"`
@@ -298,36 +300,40 @@ type SourceResponse struct {
 	Schema            string          `json:"schema,omitempty"`
 	Columns           []ColumnInfo    `json:"columns,omitempty"`
 	// Enhanced schema information
-	Engine       string   `json:"engine,omitempty"`
-	EngineParams []string `json:"engine_params,omitempty"`
-	SortKeys     []string `json:"sort_keys,omitempty"`
-	QueryLanguages []QueryLanguage `json:"query_languages,omitempty"`
-	Capabilities   []string        `json:"capabilities,omitempty"`
+	Engine                string                 `json:"engine,omitempty"`
+	EngineParams          []string               `json:"engine_params,omitempty"`
+	SortKeys              []string               `json:"sort_keys,omitempty"`
+	QueryLanguages        []QueryLanguage        `json:"query_languages,omitempty"`
+	SavedQueryEditorModes []SavedQueryEditorMode `json:"saved_query_editor_modes,omitempty"`
+	AlertEditorModes      []AlertEditorMode      `json:"alert_editor_modes,omitempty"`
+	Capabilities          []string               `json:"capabilities,omitempty"`
 }
 
 // ToResponse converts a Source to a SourceResponse, removing sensitive information.
 func (s *Source) ToResponse() *SourceResponse {
 	return &SourceResponse{
-		ID:                s.ID,
-		Name:              s.Name,
-		MetaIsAutoCreated: s.MetaIsAutoCreated,
-		SourceType:        NormalizeSourceType(s.SourceType),
-		MetaTSField:       s.MetaTSField,
-		MetaSeverityField: s.MetaSeverityField,
-		Connection:        s.RedactedConnectionConfig(),
-		IdentityKey:       s.IdentityKey,
-		Description:       s.Description,
-		TTLDays:           s.TTLDays,
-		CreatedAt:         s.CreatedAt,
-		UpdatedAt:         s.UpdatedAt,
-		IsConnected:       s.IsConnected,
-		Schema:            s.Schema,
-		Columns:           s.Columns,
-		Engine:            s.Engine,
-		EngineParams:      s.EngineParams,
-		SortKeys:          s.SortKeys,
-		QueryLanguages:    s.QueryLanguages,
-		Capabilities:      s.Capabilities,
+		ID:                    s.ID,
+		Name:                  s.Name,
+		MetaIsAutoCreated:     s.MetaIsAutoCreated,
+		SourceType:            NormalizeSourceType(s.SourceType),
+		MetaTSField:           s.MetaTSField,
+		MetaSeverityField:     s.MetaSeverityField,
+		Connection:            s.RedactedConnectionConfig(),
+		IdentityKey:           s.IdentityKey,
+		Description:           s.Description,
+		TTLDays:               s.TTLDays,
+		CreatedAt:             s.CreatedAt,
+		UpdatedAt:             s.UpdatedAt,
+		IsConnected:           s.IsConnected,
+		Schema:                s.Schema,
+		Columns:               s.Columns,
+		Engine:                s.Engine,
+		EngineParams:          s.EngineParams,
+		SortKeys:              s.SortKeys,
+		QueryLanguages:        s.QueryLanguages,
+		SavedQueryEditorModes: s.SavedQueryEditorModes,
+		AlertEditorModes:      s.AlertEditorModes,
+		Capabilities:          s.Capabilities,
 	}
 }
 

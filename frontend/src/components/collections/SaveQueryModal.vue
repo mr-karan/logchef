@@ -126,6 +126,7 @@ const resolvedQueryMetadata = computed(() =>
     editor_mode: props.editData?.editor_mode || props.initialData?.editor_mode,
     source_type: currentSourceDescriptor.value?.source_type,
     query_languages: currentSourceDescriptor.value?.query_languages,
+    saved_query_editor_modes: currentSourceDescriptor.value?.saved_query_editor_modes,
   })
 );
 

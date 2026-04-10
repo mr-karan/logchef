@@ -125,8 +125,8 @@ pub async fn run(args: SchemaArgs, global: GlobalArgs) -> Result<()> {
                     let mut cache_entries: Vec<(String, i64)> =
                         sources.iter().map(|s| (s.name.clone(), s.id)).collect();
                     for s in &sources {
-                        if let Some(table_ref) = s.table_ref() {
-                            cache_entries.push((table_ref, s.id));
+                        if let Some(target_ref) = s.target_ref() {
+                            cache_entries.push((target_ref, s.id));
                         }
                     }
                     cache.set_sources(team_id, &cache_entries);
@@ -136,7 +136,7 @@ pub async fn run(args: SchemaArgs, global: GlobalArgs) -> Result<()> {
                         .find(|s| s.name.eq_ignore_ascii_case(&name))
                         .or_else(|| {
                             sources.iter().find(|s| {
-                                s.table_ref()
+                                s.target_ref()
                                     .map(|r| r.eq_ignore_ascii_case(&name))
                                     .unwrap_or(false)
                             })
@@ -247,10 +247,7 @@ async fn prompt_source_interactive(
         anyhow::bail!("No sources available for this team");
     }
 
-    let options: Vec<String> = sources
-        .iter()
-        .map(|s| format!("{} ({})", s.name, s.table_ref().unwrap_or_default()))
-        .collect();
+    let options: Vec<String> = sources.iter().map(|s| s.display_name()).collect();
     let selection = Select::new("Select source:", options)
         .prompt()
         .context("Failed to select source")?;
@@ -263,8 +260,8 @@ async fn prompt_source_interactive(
     let mut cache_entries: Vec<(String, i64)> =
         sources.iter().map(|s| (s.name.clone(), s.id)).collect();
     for s in &sources {
-        if let Some(table_ref) = s.table_ref() {
-            cache_entries.push((table_ref, s.id));
+        if let Some(target_ref) = s.target_ref() {
+            cache_entries.push((target_ref, s.id));
         }
     }
     cache.set_sources(team_id, &cache_entries);

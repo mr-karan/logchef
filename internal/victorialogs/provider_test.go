@@ -255,6 +255,7 @@ func TestHistogramAndEvaluateAlert(t *testing.T) {
 	t.Parallel()
 
 	timeout := 20
+	var gotAlertQuery string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("parse form: %v", err)
@@ -269,6 +270,7 @@ func TestHistogramAndEvaluateAlert(t *testing.T) {
 			if got := r.Form["extra_filters"]; !reflect.DeepEqual(got, []string{"service:=api"}) {
 				t.Fatalf("unexpected alert scope filters: %#v", got)
 			}
+			gotAlertQuery = r.Form.Get("query")
 			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{"service":"api"},"value":[1712570400,"7"]}]}}`))
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
@@ -306,12 +308,16 @@ func TestHistogramAndEvaluateAlert(t *testing.T) {
 	}
 
 	result, err := provider.EvaluateAlert(context.Background(), source, datasource.AlertQueryRequest{
-		Language:     models.QueryLanguageLogsQL,
-		Query:        `count() if (level:error)`,
-		QueryTimeout: &timeout,
+		Language:        models.QueryLanguageLogsQL,
+		Query:           `count() if (level:error)`,
+		LookbackSeconds: 300,
+		QueryTimeout:    &timeout,
 	})
 	if err != nil {
 		t.Fatalf("EvaluateAlert returned error: %v", err)
+	}
+	if gotAlertQuery != "_time:5m count() if (level:error)" {
+		t.Fatalf("unexpected alert query: %q", gotAlertQuery)
 	}
 	if len(result.Logs) != 1 {
 		t.Fatalf("unexpected alert rows: %#v", result.Logs)

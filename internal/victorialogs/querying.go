@@ -415,6 +415,7 @@ func (p *Provider) EvaluateAlert(ctx context.Context, source *models.Source, req
 	if query == "" {
 		return nil, fmt.Errorf("alert query is required")
 	}
+	query = applyAlertLookback(query, req.LookbackSeconds)
 
 	form := url.Values{}
 	form.Set("query", query)
@@ -454,6 +455,41 @@ func (p *Provider) EvaluateAlert(ctx context.Context, source *models.Source, req
 			RowsRead:        len(rows),
 		},
 	}, nil
+}
+
+func applyAlertLookback(query string, lookbackSeconds int) string {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" || lookbackSeconds <= 0 {
+		return trimmed
+	}
+
+	lookbackFilter := fmt.Sprintf("_time:%s", formatLookbackDuration(lookbackSeconds))
+	if strings.HasPrefix(trimmed, "options(") {
+		if end := strings.Index(trimmed, ")"); end >= 0 {
+			prefix := strings.TrimSpace(trimmed[:end+1])
+			rest := strings.TrimSpace(trimmed[end+1:])
+			if rest == "" {
+				return fmt.Sprintf("%s %s", prefix, lookbackFilter)
+			}
+			return fmt.Sprintf("%s %s %s", prefix, lookbackFilter, rest)
+		}
+	}
+
+	return fmt.Sprintf("%s %s", lookbackFilter, trimmed)
+}
+
+func formatLookbackDuration(seconds int) string {
+	duration := time.Duration(seconds) * time.Second
+	if duration%(24*time.Hour) == 0 {
+		return fmt.Sprintf("%dd", int(duration/(24*time.Hour)))
+	}
+	if duration%time.Hour == 0 {
+		return fmt.Sprintf("%dh", int(duration/time.Hour))
+	}
+	if duration%time.Minute == 0 {
+		return fmt.Sprintf("%dm", int(duration/time.Minute))
+	}
+	return fmt.Sprintf("%ds", seconds)
 }
 
 func (p *Provider) decodeJSONRequest(ctx context.Context, conn models.VictoriaLogsConnectionInfo, path string, form url.Values, out interface{}) error {

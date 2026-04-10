@@ -5,7 +5,7 @@ description: Query logs from the terminal.
 
 import { LinkCard } from "@astrojs/starlight/components";
 
-A Rust CLI for querying logs from the terminal. Supports LogchefQL across supported sources, raw ClickHouse SQL, syntax highlighting (via [tailspin](https://github.com/bensadeh/tailspin)), multi-context management (dev/staging/prod), and OIDC PKCE authentication.
+A Rust CLI for querying logs from the terminal. Supports LogchefQL across supported sources, raw native queries (SQL for ClickHouse, LogsQL for VictoriaLogs), syntax highlighting (via [tailspin](https://github.com/bensadeh/tailspin)), multi-context management (dev/staging/prod), and OIDC PKCE authentication.
 
 ## Quick Start
 
@@ -249,12 +249,13 @@ logchef query 'method="GET"' --show-sql
 logchef query "" --from "2026-01-14T00:00:00Z" --to "2026-01-14T12:00:00Z"
 ```
 
-### Raw SQL Queries
+### Raw Native Queries
 
-The `sql` command lets you execute raw ClickHouse SQL directly. Unlike `query`, you have full control over the SQL—including time filters, aggregations, and joins.
+The `sql` command lets you execute the selected source's native query language directly. Use SQL for ClickHouse sources and LogsQL for VictoriaLogs sources. Unlike `query`, you have full control over the backend query.
 
 ```bash
 logchef sql "SELECT * FROM logs.app WHERE level='error' LIMIT 10"
+logchef sql 'level:="error" | fields _time, _msg, service'
 ```
 
 #### Options
@@ -262,7 +263,7 @@ logchef sql "SELECT * FROM logs.app WHERE level='error' LIMIT 10"
 | Option | Shorthand | Description | Default |
 | :--- | :--- | :--- | :--- |
 | `--team` | `-t` | Team name (or ID) | (from config) |
-| `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
+| `--source` | `-S` | Source name, native target (`database.table_name` or VictoriaLogs base URL), or ID | (from config) |
 | `--timeout` | | Query timeout in seconds | 30 |
 | `--output` | | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
 | `--no-highlight` | | Disable syntax highlighting | `false` |
@@ -279,19 +280,22 @@ logchef sql
 # Prompts:
 # ? Select team: [production, staging, dev]
 # ? Select source: [nginx-logs, app-logs, api-logs]
-# ? SQL query: SELECT * FROM logs.app LIMIT 10
+# ? Raw query: SELECT * FROM logs.app LIMIT 10
 ```
 
-#### SQL Examples
+#### Native Query Examples
 
 ```bash
-# Simple query with time filter
+# ClickHouse SQL with time filter
 logchef sql "SELECT * FROM logs.app WHERE _timestamp > now() - INTERVAL 1 HOUR LIMIT 100"
 
-# Aggregation query
+# ClickHouse aggregation query
 logchef sql "SELECT level, count() as cnt FROM logs.app WHERE _timestamp > now() - INTERVAL 1 DAY GROUP BY level"
 
-# Read SQL from stdin (useful for complex queries)
+# VictoriaLogs LogsQL query
+logchef sql 'level:="error" | fields _time, _msg, service'
+
+# Read a native query from stdin
 cat query.sql | logchef sql -
 
 # Or use heredoc
@@ -315,7 +319,7 @@ logchef sql "SELECT host, count() as cnt FROM logs.app GROUP BY host" --output j
 
 :::tip[When to use `sql` vs `query`]
 - Use `query` (LogChefQL) for quick filtering across supported sources with convenient time flags (`--since 1h`)
-- Use `sql` when you need aggregations, joins, CTEs, or full SQL control
+- Use `sql` when you need full control over the source's native query language
 :::
 
 #### Example Output

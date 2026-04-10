@@ -295,6 +295,26 @@ func (s *Service) ApplySourceMetadata(source *models.Source) error {
 		source.QueryLanguages = append(source.QueryLanguages, normalized)
 	}
 
+	savedQueryModes := provider.SupportedSavedQueryEditorModes()
+	source.SavedQueryEditorModes = make([]models.SavedQueryEditorMode, 0, len(savedQueryModes))
+	for _, mode := range savedQueryModes {
+		normalized := models.NormalizeSavedQueryEditorMode(mode)
+		if normalized == "" {
+			continue
+		}
+		source.SavedQueryEditorModes = append(source.SavedQueryEditorModes, normalized)
+	}
+
+	alertModes := provider.SupportedAlertEditorModes()
+	source.AlertEditorModes = make([]models.AlertEditorMode, 0, len(alertModes))
+	for _, mode := range alertModes {
+		normalized := models.NormalizeAlertEditorMode(mode)
+		if normalized == "" {
+			continue
+		}
+		source.AlertEditorModes = append(source.AlertEditorModes, normalized)
+	}
+
 	capabilities := provider.Capabilities()
 	source.Capabilities = make([]string, 0, len(capabilities))
 	for _, capability := range capabilities {

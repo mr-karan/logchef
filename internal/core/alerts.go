@@ -479,9 +479,10 @@ func TestAlertQuery(ctx context.Context, db *sqlite.DB, ds *datasource.Service, 
 	timeout := models.DefaultQueryTimeoutSeconds
 	startTime := time.Now()
 	result, err := ds.EvaluateAlert(ctx, sourceID, datasource.AlertQueryRequest{
-		Language:     tempAlert.QueryLanguage,
-		Query:        tempAlert.Query,
-		QueryTimeout: &timeout,
+		Language:        tempAlert.QueryLanguage,
+		Query:           tempAlert.Query,
+		LookbackSeconds: tempAlert.LookbackSeconds,
+		QueryTimeout:    &timeout,
 	})
 	executionTime := time.Since(startTime)
 

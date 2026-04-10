@@ -46,6 +46,8 @@ export interface Source {
   _meta_is_auto_created: boolean;
   source_type: string;
   query_languages?: string[];
+  saved_query_editor_modes?: string[];
+  alert_editor_modes?: string[];
   capabilities?: string[];
   _meta_ts_field: string;
   _meta_severity_field?: string;

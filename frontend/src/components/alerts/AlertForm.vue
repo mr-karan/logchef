@@ -31,7 +31,12 @@ import { useTeamsStore } from "@/stores/teams";
 import type { Alert, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryResponse } from "@/api/alerts";
 import { X, Plus, User, Bell } from "lucide-vue-next";
 import { Badge } from "@/components/ui/badge";
-import { getNativeQueryLanguageForSource, getQueryLanguageLabel, resolveAlertMetadata, supportsQueryLanguage } from "@/lib/queryMetadata";
+import {
+  getNativeQueryLanguageForSource,
+  getQueryLanguageLabel,
+  resolveAlertMetadata,
+  supportsAlertEditorMode,
+} from "@/lib/queryMetadata";
 
 // Extended types for local usage until API types are updated
 interface ExtendedCreateAlertRequest extends CreateAlertRequest {
@@ -64,13 +69,30 @@ const emit = defineEmits<{
 const alertsStore = useAlertsStore();
 const sourcesStore = useSourcesStore();
 const teamsStore = useTeamsStore();
-const currentSource = computed(() => sourcesStore.currentSourceDetails);
+const currentSource = computed(() => {
+  if (props.sourceId != null) {
+    const teamSource = sourcesStore.teamSources.find((source) => source.id === props.sourceId);
+    if (teamSource) {
+      return teamSource;
+    }
+  }
+  return sourcesStore.currentSourceDetails;
+});
 const sourceType = computed(() => currentSource.value?.source_type || "clickhouse");
-const supportsConditionEditor = computed(() => supportsQueryLanguage(currentSource.value, "logchefql"));
-const nativeEditorLabel = computed(() => getQueryLanguageLabel(getNativeQueryLanguageForSource(currentSource.value)));
+const supportsConditionEditor = computed(() => supportsAlertEditorMode(currentSource.value, "condition"));
+const nativeQueryLanguage = computed(() => getNativeQueryLanguageForSource(currentSource.value));
+const nativeEditorLabel = computed(() => getQueryLanguageLabel(nativeQueryLanguage.value));
+const nativeQueryLabel = computed(() => `${nativeEditorLabel.value} Query`);
 
 // Get current source table name for SQL generation
-const currentTableName = computed(() => sourcesStore.getCurrentSourceTableName || "logs");
+const currentTableName = computed(() => {
+  const database = currentSource.value?.connection?.database;
+  const tableName = currentSource.value?.connection?.table_name;
+  if (database && tableName) {
+    return `${database}.${tableName}`;
+  }
+  return "logs";
+});
 
 const form = reactive({
   name: "",
@@ -98,13 +120,14 @@ const newWebhookUrl = ref("");
 const conditionError = ref<string | null>(null);
 
 // Get source details for schema-aware parsing (same pattern as explore page)
-const sourceDetails = computed(() => sourcesStore.currentSourceDetails);
+const sourceDetails = currentSource;
 const timestampField = computed(() => sourceDetails.value?._meta_ts_field || "timestamp");
 const alertMetadata = computed(() =>
   resolveAlertMetadata({
     editor_mode: form.editor_mode,
     source_type: sourceType.value,
     query_languages: currentSource.value?.query_languages,
+    alert_editor_modes: currentSource.value?.alert_editor_modes,
   })
 );
 
@@ -112,6 +135,22 @@ const alertMetadata = computed(() =>
 const lookbackExpression = computed(() => {
   const seconds = form.lookback_seconds || 300;
   return `now() - toIntervalSecond(${seconds})`;
+});
+
+const nativeQueryPlaceholder = computed(() => {
+  if (sourceType.value === "victorialogs") {
+    return `level:="error" | stats count() as value`;
+  }
+
+  return `SELECT count(*) as value FROM ${currentTableName.value} WHERE severity = 'ERROR' AND \`${timestampField.value}\` >= ${lookbackExpression.value}`;
+});
+
+const nativeQueryHelpText = computed(() => {
+  if (sourceType.value === "victorialogs") {
+    return "Use a template above to start with a valid LogsQL stats query. The alert lookback window is applied automatically.";
+  }
+
+  return "Use a template above to auto-fill with the correct table, timestamp field, and lookback window.";
 });
 
 // Generated SQL from LogchefQL condition
@@ -211,8 +250,14 @@ const testQueryResult = ref<TestAlertQueryResponse | null>(null);
 const isTestingQuery = ref(false);
 const testQueryError = ref<string | null>(null);
 
-// SQL query templates
-function getQueryTemplates() {
+type QueryTemplate = {
+  name: string;
+  description: string;
+  editorMode: "native";
+  query: string;
+};
+
+function getClickHouseQueryTemplates(): QueryTemplate[] {
   const tableName = currentTableName.value;
   const tsField = timestampField.value;
   const lookback = lookbackExpression.value;
@@ -264,7 +309,38 @@ WHERE \`${tsField}\` >= ${lookback}`,
   ];
 }
 
-const queryTemplates = computed(() => getQueryTemplates());
+function getVictoriaLogsQueryTemplates(): QueryTemplate[] {
+  return [
+    {
+      name: "High Error Count",
+      description: "Alert when error logs exceed the threshold in the lookback window",
+      editorMode: "native",
+      query: `level:="ERROR" | stats count() as value`,
+    },
+    {
+      name: "Critical Logs",
+      description: "Alert on any critical severity logs",
+      editorMode: "native",
+      query: `level:="CRITICAL" | stats count() as value`,
+    },
+    {
+      name: "Failed Requests",
+      description: "Alert on HTTP 5xx status codes",
+      editorMode: "native",
+      query: `status_code:>=500 | stats count() as value`,
+    },
+    {
+      name: "High Response Time",
+      description: "Alert when the average response time is high",
+      editorMode: "native",
+      query: `response_time:* | stats avg(response_time) as value`,
+    },
+  ];
+}
+
+const queryTemplates = computed(() =>
+  sourceType.value === "victorialogs" ? getVictoriaLogsQueryTemplates() : getClickHouseQueryTemplates()
+);
 
 // LogChefQL condition templates
 const conditionTemplates = [
@@ -492,7 +568,7 @@ watch(
   { immediate: false }
 );
 
-watch(sourceType, () => {
+watch(supportsConditionEditor, () => {
   if (!supportsConditionEditor.value && form.editor_mode === "condition") {
     form.editor_mode = "native";
     conditionError.value = null;
@@ -613,7 +689,7 @@ function handleSubmit() {
             <!-- Query Type Toggle -->
             <Tabs :model-value="form.editor_mode" @update:model-value="(v: any) => form.editor_mode = v" class="w-auto">
               <TabsList class="h-8">
-                <TabsTrigger v-if="supportsConditionEditor" value="condition" class="text-xs px-3 h-7">LogChefQL</TabsTrigger>
+                <TabsTrigger v-if="supportsConditionEditor" value="condition" class="text-xs px-3 h-7">LogchefQL</TabsTrigger>
                 <TabsTrigger value="native" class="text-xs px-3 h-7">{{ nativeEditorLabel }}</TabsTrigger>
               </TabsList>
             </Tabs>
@@ -697,7 +773,7 @@ function handleSubmit() {
             </div>
           </template>
 
-          <!-- SQL Mode -->
+          <!-- Native Mode -->
           <template v-else>
             <!-- Query Templates -->
             <div class="space-y-2">
@@ -722,7 +798,7 @@ function handleSubmit() {
 
             <div class="space-y-2">
               <div class="flex items-center justify-between">
-                <Label for="alert-query">SQL Query</Label>
+              <Label for="alert-query">{{ nativeQueryLabel }}</Label>
                 <Button
                   type="button"
                   variant="outline"
@@ -736,13 +812,13 @@ function handleSubmit() {
               <Textarea
                 id="alert-query"
                 v-model="form.query"
-                :placeholder="`SELECT count(*) as value FROM ${currentTableName} WHERE severity = 'ERROR' AND \`${timestampField}\` >= ${lookbackExpression}`"
+                :placeholder="nativeQueryPlaceholder"
                 :rows="6"
                 :disabled="isDisabled"
                 class="font-mono text-sm resize-none"
               />
               <p class="text-xs text-muted-foreground">
-                Use a template above to auto-fill with the correct table, timestamp field, and lookback window.
+                {{ nativeQueryHelpText }}
               </p>
             </div>
           </template>
@@ -1024,7 +1100,7 @@ function handleSubmit() {
             <!-- Query Type Toggle -->
             <Tabs :model-value="form.editor_mode" @update:model-value="(v: any) => form.editor_mode = v" class="w-auto">
               <TabsList class="h-8">
-                <TabsTrigger v-if="supportsConditionEditor" value="condition" class="text-xs px-3 h-7">LogChefQL</TabsTrigger>
+                <TabsTrigger v-if="supportsConditionEditor" value="condition" class="text-xs px-3 h-7">LogchefQL</TabsTrigger>
                 <TabsTrigger value="native" class="text-xs px-3 h-7">{{ nativeEditorLabel }}</TabsTrigger>
               </TabsList>
             </Tabs>
@@ -1108,7 +1184,7 @@ function handleSubmit() {
             </div>
           </template>
 
-          <!-- SQL Mode -->
+          <!-- Native Mode -->
           <template v-else>
             <!-- Query Templates -->
             <div class="space-y-2">
@@ -1133,7 +1209,7 @@ function handleSubmit() {
 
             <div class="space-y-2">
               <div class="flex items-center justify-between">
-                <Label for="alert-query-inline">SQL Query</Label>
+                <Label for="alert-query-inline">{{ nativeQueryLabel }}</Label>
                 <Button
                   type="button"
                   variant="outline"
@@ -1147,13 +1223,13 @@ function handleSubmit() {
               <Textarea
                 id="alert-query-inline"
                 v-model="form.query"
-                :placeholder="`SELECT count(*) as value FROM ${currentTableName} WHERE severity = 'ERROR' AND \`${timestampField}\` >= ${lookbackExpression}`"
+                :placeholder="nativeQueryPlaceholder"
                 :rows="6"
                 :disabled="isDisabled"
                 class="font-mono text-sm resize-none"
               />
               <p class="text-xs text-muted-foreground">
-                Use a template above to auto-fill with the correct table, timestamp field, and lookback window.
+                {{ nativeQueryHelpText }}
               </p>
             </div>
           </template>

@@ -342,6 +342,8 @@ export function useSavedQueries(
         query_language: queryData.query_language,
         editor_mode: queryData.editor_mode,
         source_type: _currentSource?.value?.source_type,
+        query_languages: _currentSource?.value?.query_languages,
+        saved_query_editor_modes: _currentSource?.value?.saved_query_editor_modes,
       })
       const isLogchefQL = metadata.queryLanguage === 'logchefql'
       const queryToLoad = content.content || ''

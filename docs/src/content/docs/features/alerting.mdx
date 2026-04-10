@@ -27,7 +27,7 @@ status_code >= 500 and service = "api"
 body ~ "timeout"
 ```
 
-**Native mode** — Write the source's native alert query. The query must return a single numeric column named `value`.
+**Native mode** — Write the source's native alert query. The query must return a single numeric value.
 
 ```sql
 SELECT avg(JSONExtractFloat(log_attributes, 'response_time_ms')) as value
@@ -36,10 +36,10 @@ WHERE service = 'api-gateway'
   AND timestamp >= now() - toIntervalSecond(600)
 ```
 
-For VictoriaLogs sources, native mode uses LogsQL and evaluates through `stats_query`.
+For VictoriaLogs sources, native mode uses LogsQL and evaluates through `stats_query`. Logchef applies the configured lookback window automatically, so the query can stay focused on the filter and stats logic.
 
 ```text
-count() if (level:error)
+level:="error" | stats count() as value
 ```
 
 ## Alert Configuration
