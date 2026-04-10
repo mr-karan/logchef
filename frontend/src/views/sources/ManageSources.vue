@@ -28,6 +28,8 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { useSourcesStore } from '@/stores/sources'
 import SourceSparkline from '@/components/visualizations/SourceSparkline.vue'
+import { getSourceTypeLabel } from '@/lib/queryMetadata'
+import { formatDate, getSourceConnectionDetails } from '@/utils/format'
 
 const router = useRouter()
 // This route is only accessible by admins
@@ -67,7 +69,7 @@ const retryLoading = async () => {
 
 const fetchSourceIngestionStats = async () => {
     await Promise.all(
-        sourcesStore.sources.map((source) => sourcesStore.getSourceStats(source.id))
+        sourcesStore.sources.map((source) => sourcesStore.getSourceInspection(source.id))
     )
 }
 
@@ -97,9 +99,6 @@ onMounted(async () => {
     await loadSources()
     await fetchSourceIngestionStats()
 })
-
-// Import formatDate from utils
-import { formatDate } from '@/utils/format'
 </script>
 
 <template>
@@ -136,10 +135,11 @@ import { formatDate } from '@/utils/format'
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead class="w-[200px]">Source Name</TableHead>
-                                <TableHead class="w-[200px]">Ingestion (24h)</TableHead>
-                                <TableHead class="w-[150px]">Table Auto Created</TableHead>
-                                <TableHead class="w-[150px]">Timestamp Column</TableHead>
+                                <TableHead class="w-[220px]">Source</TableHead>
+                                <TableHead class="w-[120px]">Type</TableHead>
+                                <TableHead class="w-[200px]">Activity (24h)</TableHead>
+                                <TableHead class="w-[150px]">Auto Created</TableHead>
+                                <TableHead class="w-[150px]">Timestamp Field</TableHead>
                                 <TableHead class="w-[300px]">Connection</TableHead>
                                 <TableHead class="w-[100px]">Status</TableHead>
                                 <TableHead class="w-[100px]">Created At</TableHead>
@@ -149,7 +149,7 @@ import { formatDate } from '@/utils/format'
                         <TableBody>
                             <TableRow v-for="source in sourcesStore.sources" :key="source.id">
                                 <TableCell class="font-medium">
-                                    <a @click="router.push({ name: 'SourceStats', query: { sourceId: source.id } })"
+                                    <a @click="router.push({ name: 'SourceInspection', query: { sourceId: source.id } })"
                                         class="hover:underline cursor-pointer">
                                         {{ source.name }}
                                     </a>
@@ -158,14 +158,18 @@ import { formatDate } from '@/utils/format'
                                     </div>
                                 </TableCell>
                                 <TableCell>
+                                    <Badge variant="outline">{{ getSourceTypeLabel(source) }}</Badge>
+                                </TableCell>
+                                <TableCell>
                                     <div class="space-y-1 min-w-[180px]">
                                         <div class="text-xs text-muted-foreground">
-                                            {{ sourcesStore.getSourceStatsById(source.id)?.ingestion_stats?.rows_24h?.toLocaleString() || '0' }} rows
+                                            {{ sourcesStore.getSourceInspectionById(source.id)?.activity?.rows_24h?.toLocaleString() || '0' }} rows
                                         </div>
                                         <SourceSparkline
-                                            v-if="sourcesStore.getSourceStatsById(source.id)?.ingestion_stats"
-                                            :data="sourcesStore.getSourceStatsById(source.id)?.ingestion_stats?.hourly_buckets || []"
+                                            v-if="sourcesStore.getSourceInspectionById(source.id)?.activity"
+                                            :data="sourcesStore.getSourceInspectionById(source.id)?.activity?.hourly_buckets || []"
                                             :height="36"
+                                            bucket-mode="hourly"
                                         />
                                     </div>
                                 </TableCell>
@@ -181,17 +185,15 @@ import { formatDate } from '@/utils/format'
                                 </TableCell>
                                 <TableCell>
                                     <div class="text-sm space-y-1">
-                                        <div class="flex items-center space-x-2">
-                                            <span class="text-muted-foreground">Host</span>
-                                            <span class="font-medium">{{ source.connection.host }}</span>
-                                        </div>
-                                        <div class="flex items-center space-x-2">
-                                            <span class="text-muted-foreground">Database</span>
-                                            <span class="font-medium">{{ source.connection.database }}</span>
-                                        </div>
-                                        <div class="flex items-center space-x-2">
-                                            <span class="text-muted-foreground">Table</span>
-                                            <span class="font-medium">{{ source.connection.table_name }}</span>
+                                        <div
+                                            v-for="detail in getSourceConnectionDetails(source)"
+                                            :key="`${source.id}-${detail.label}`"
+                                            class="flex items-start space-x-2"
+                                        >
+                                            <span class="text-muted-foreground">{{ detail.label }}</span>
+                                            <span :class="detail.monospace ? 'font-mono text-xs break-all' : 'font-medium break-all'">
+                                                {{ detail.value }}
+                                            </span>
                                         </div>
                                     </div>
                                 </TableCell>
@@ -233,10 +235,8 @@ import { formatDate } from '@/utils/format'
                     <AlertDialogDescription class="space-y-2">
                         <p>Are you sure you want to delete source "{{ sourceToDelete?.name }}"?</p>
                         <p class="font-medium text-muted-foreground">
-                            Note: This will only remove the source configuration from LogChef. The actual data in
-                            Clickhouse will not
-                            be deleted -
-                            you'll need to manage the data cleanup in Clickhouse separately.
+                            Note: This only removes the source configuration from LogChef. The underlying data stays
+                            in the configured backend and must be managed there separately.
                         </p>
                     </AlertDialogDescription>
                 </AlertDialogHeader>

@@ -96,10 +96,10 @@ func GetSourceHealth(ctx context.Context, ds *datasource.Service, id models.Sour
 	return health, nil
 }
 
-type SourceStats = datasource.SourceStats
+type SourceInspection = datasource.SourceInspection
 
-func GetSourceStats(ctx context.Context, ds *datasource.Service, sourceID models.SourceID) (*SourceStats, error) {
-	result, err := ds.GetSourceStats(ctx, sourceID)
+func InspectSource(ctx context.Context, ds *datasource.Service, sourceID models.SourceID) (*SourceInspection, error) {
+	result, err := ds.InspectSource(ctx, sourceID)
 	if err != nil {
 		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
 			return nil, ErrSourceNotFound

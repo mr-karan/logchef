@@ -74,14 +74,19 @@ export function hasSourceCapability(source: SourceDescriptor, capability: string
 
   const sourceType = getSourceType(source);
   if (sourceType === "victorialogs") {
-    return capability === "histogram" || capability === "field_values" || capability === "schema_inspection";
+    return (
+      capability === "histogram" ||
+      capability === "field_values" ||
+      capability === "schema_inspection" ||
+      capability === "source_inspection"
+    );
   }
   if (sourceType === "clickhouse" || sourceType == null) {
     return (
       capability === "histogram" ||
       capability === "field_values" ||
       capability === "schema_inspection" ||
-      capability === "source_stats" ||
+      capability === "source_inspection" ||
       capability === "ai_sql_generation"
     );
   }

@@ -154,7 +154,7 @@ func (s *Server) handleValidateSourceConnection(c *fiber.Ctx) error {
 
 // --- User Source Access Handlers ---
 
-// handleGetSourceStats retrieves table and column statistics for a specific source.
+// handleGetSourceStats retrieves provider-neutral inspection data for a specific source.
 // URL: GET /api/v1/sources/:sourceID/stats
 // Requires: User must have access to the source via team membership (checked by requireSourceAccess middleware).
 func (s *Server) handleGetSourceStats(c *fiber.Ctx) error {
@@ -168,39 +168,38 @@ func (s *Server) handleGetSourceStats(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
-	// Get stats using the core function.
-	stats, err := core.GetSourceStats(c.Context(), s.datasources, sourceID)
+	inspection, err := core.InspectSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendError(c, fiber.StatusNotFound, "Source not found when getting stats")
+			return SendError(c, fiber.StatusNotFound, "Source not found when getting inspection")
 		}
 		if errors.Is(err, datasource.ErrOperationNotSupported) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, "Source stats are not supported for this source type yet", models.ValidationErrorType)
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Source inspection is not supported for this source type yet", models.ValidationErrorType)
 		}
-		s.log.Error("failed to get source stats", "error", err, "source_id", sourceID)
-		return SendError(c, fiber.StatusInternalServerError, "Error getting source stats: "+err.Error())
+		s.log.Error("failed to get source inspection", "error", err, "source_id", sourceID)
+		return SendError(c, fiber.StatusInternalServerError, "Error getting source inspection: "+err.Error())
 	}
 
-	return SendSuccess(c, fiber.StatusOK, stats)
+	return SendSuccess(c, fiber.StatusOK, inspection)
 }
 
 // handleGetTeamSourceStats handles GET /teams/:teamID/sources/:sourceID/stats
-// Returns statistics for a specific source in the context of a team
+// Returns inspection data for a specific source in the context of a team
 func (s *Server) handleGetTeamSourceStats(c *fiber.Ctx) error {
 	// We've already verified that:
 	// 1. The user is a member of the team
 	// 2. The team has access to the source
 
-	// Extract source ID which is the only parameter we need for stats
+	// Extract source ID which is the only parameter we need for inspection
 	sourceIDStr := c.Params("sourceID")
 
-	// Simply reuse the existing source stats handler
+	// Simply reuse the existing inspection handler
 	// This is permissible because we've already verified all access controls
 	_, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
 		return SendError(c, fiber.StatusBadRequest, "Invalid source ID: "+err.Error())
 	}
 
-	// Get stats using the current implementation
+	// Get inspection using the current implementation
 	return s.handleGetSourceStats(c)
 }

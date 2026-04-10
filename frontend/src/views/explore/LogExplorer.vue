@@ -1110,6 +1110,7 @@ onMounted(async () => {
             :fields="availableFields"
             :team-id="currentTeamId ?? undefined"
             :source-id="currentSourceId ?? undefined"
+            :source="sourceDetails"
             @add-filter="handleAddFieldFilter"
             @field-click="handleFieldClick"
           />

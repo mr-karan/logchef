@@ -54,10 +54,12 @@
                       "not": {}
                     }
                   ]
-                }
+                },
+                "default": {}
               },
               "content": {
-                "type": "string"
+                "type": "string",
+                "default": ""
               }
             },
             "required": [
@@ -296,10 +298,6 @@
                           "npm",
                           "sourcehut",
                           "substack",
-                          "chrome",
-                          "edge",
-                          "firefox",
-                          "safari",
                           "seti:folder",
                           "seti:bsl",
                           "seti:mdo",
@@ -604,9 +602,6 @@
                   },
                   {
                     "not": {}
-                  },
-                  {
-                    "type": "null"
                   }
                 ]
               },

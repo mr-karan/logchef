@@ -185,7 +185,7 @@ func (s *Server) setupRoutes() {
 	admin.Post("/sources/validate", s.handleValidateSourceConnection)
 	admin.Put("/sources/:sourceID", s.requireSourceNotManaged, s.handleUpdateSource)
 	admin.Delete("/sources/:sourceID", s.requireSourceNotManaged, s.handleDeleteSource)
-	admin.Get("/sources/:sourceID/stats", s.handleGetSourceStats) // Admin-only source stats
+	admin.Get("/sources/:sourceID/stats", s.handleGetSourceStats) // Admin-only source inspection
 
 	// Provisioning Export
 	admin.Get("/provisioning/export", s.handleExportProvisioning)
@@ -232,7 +232,7 @@ func (s *Server) setupRoutes() {
 	{
 		// Get detailed source info including connection status and schema
 		teamSourceOps.Get("/", s.handleGetTeamSource)
-		teamSourceOps.Get("/stats", s.handleGetTeamSourceStats)
+		teamSourceOps.Get("/stats", s.handleGetTeamSourceStats) // Team-scoped source inspection
 
 		// Query and explore logs
 		teamSourceOps.Post("/logs/query", s.handleQueryLogs)

@@ -43,6 +43,7 @@ func (p *Provider) Capabilities() []datasource.Capability {
 		datasource.CapabilitySchemaInspection,
 		datasource.CapabilityHistogram,
 		datasource.CapabilityFieldValues,
+		datasource.CapabilitySourceInspection,
 	}
 }
 

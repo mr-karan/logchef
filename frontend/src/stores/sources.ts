@@ -7,7 +7,7 @@ import type {
   Source,
   CreateSourcePayload,
   UpdateSourcePayload,
-  SourceStats,
+  SourceInspection,
   CreateTeamQueryRequest,
   ValidateConnectionRequestInfo,
 } from "@/api/sources";
@@ -18,7 +18,7 @@ interface SourcesState {
   sources: Source[];
   teamSources: Source[];
   sourceQueries: Record<string, any>;
-  sourceStats: Record<string, SourceStats>;
+  sourceInspections: Record<string, SourceInspection>;
   currentSourceDetails: Source | null;
   // Loading states
   isLoadingTeamSources: boolean;
@@ -36,7 +36,7 @@ export const useSourcesStore = defineStore("sources", () => {
     sources: [],
     teamSources: [],
     sourceQueries: {},
-    sourceStats: {},
+    sourceInspections: {},
     currentSourceDetails: null,
     isLoadingTeamSources: false,
     isLoadingSourceDetails: false,
@@ -48,7 +48,7 @@ export const useSourcesStore = defineStore("sources", () => {
   const sources = computed(() => state.data.value.sources);
   const teamSources = computed(() => state.data.value.teamSources);
   const sourceQueries = computed(() => state.data.value.sourceQueries);
-  const sourceStats = computed(() => state.data.value.sourceStats);
+  const sourceInspections = computed(() => state.data.value.sourceInspections);
   const currentSourceDetails = computed(() => state.data.value.currentSourceDetails);
   
   // Loading state computed properties
@@ -75,8 +75,8 @@ export const useSourcesStore = defineStore("sources", () => {
   );
 
   // Source stats getter
-  const getSourceStatsById = computed(() => (id: number) =>
-    sourceStats.value[id.toString()]
+  const getSourceInspectionById = computed(() => (id: number) =>
+    sourceInspections.value[id.toString()]
   );
 
   // Track validated connections
@@ -361,15 +361,15 @@ export const useSourcesStore = defineStore("sources", () => {
   }
 
   // Get stats for a source (admin-only version)
-  async function getSourceStats(sourceId: number) {
-    return await state.withLoading(`getSourceStats-${sourceId}`, async () => {
+  async function getSourceInspection(sourceId: number) {
+    return await state.withLoading(`getSourceInspection-${sourceId}`, async () => {
       return await state.callApi({
-        apiCall: () => sourcesApi.getAdminSourceStats(sourceId),
-        operationKey: `getSourceStats-${sourceId}`,
+        apiCall: () => sourcesApi.getAdminSourceInspection(sourceId),
+        operationKey: `getSourceInspection-${sourceId}`,
         onSuccess: (data: any) => {
-          state.data.value.sourceStats = {
-            ...state.data.value.sourceStats,
-            [sourceId.toString()]: data as SourceStats,
+          state.data.value.sourceInspections = {
+            ...state.data.value.sourceInspections,
+            [sourceId.toString()]: data as SourceInspection,
           };
         },
         showToast: false,
@@ -377,16 +377,16 @@ export const useSourcesStore = defineStore("sources", () => {
     });
   }
 
-  // Get team-scoped stats for a source
-  async function getTeamSourceStats(teamId: number, sourceId: number) {
-    return await state.withLoading(`getTeamSourceStats-${teamId}-${sourceId}`, async () => {
+  // Get team-scoped inspection data for a source
+  async function getTeamSourceInspection(teamId: number, sourceId: number) {
+    return await state.withLoading(`getTeamSourceInspection-${teamId}-${sourceId}`, async () => {
       return await state.callApi({
-        apiCall: () => sourcesApi.getTeamSourceStats(teamId, sourceId),
-        operationKey: `getTeamSourceStats-${teamId}-${sourceId}`,
+        apiCall: () => sourcesApi.getTeamSourceInspection(teamId, sourceId),
+        operationKey: `getTeamSourceInspection-${teamId}-${sourceId}`,
         onSuccess: (data: any) => {
-          state.data.value.sourceStats = {
-            ...state.data.value.sourceStats,
-            [sourceId.toString()]: data as SourceStats,
+          state.data.value.sourceInspections = {
+            ...state.data.value.sourceInspections,
+            [sourceId.toString()]: data as SourceInspection,
           };
         },
         showToast: false,
@@ -513,7 +513,7 @@ export const useSourcesStore = defineStore("sources", () => {
     );
 
     // Also clear any stats for this source
-    delete state.data.value.sourceStats[sourceId.toString()];
+    delete state.data.value.sourceInspections[sourceId.toString()];
 
     // Clear current source details if it matches this source
     if (state.data.value.currentSourceDetails?.id === sourceId) {
@@ -618,7 +618,7 @@ export const useSourcesStore = defineStore("sources", () => {
     isLoading: state.isLoading,
     error: state.error,
     teamSourcesMap,
-    sourceStats,
+    sourceInspections,
     loadingStates: state.loadingStates,
     validatedConnections,
     currentSourceDetails,
@@ -647,7 +647,7 @@ export const useSourcesStore = defineStore("sources", () => {
     // Getters
     getSourceById,
     getTeamSourceById,
-    getSourceStatsById: (id: number) => getSourceStatsById.value(id),
+    getSourceInspectionById: (id: number) => getSourceInspectionById.value(id),
     isConnectionValidated,
 
     // Actions
@@ -659,8 +659,8 @@ export const useSourcesStore = defineStore("sources", () => {
     updateSource,
     deleteSource,
     getSourcesNotInTeam,
-    getSourceStats,
-    getTeamSourceStats,
+    getSourceInspection,
+    getTeamSourceInspection,
     getSource,
     validateSourceConnection,
     invalidateSourceCache,

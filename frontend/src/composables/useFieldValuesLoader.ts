@@ -2,6 +2,13 @@ import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import { sourcesApi, type FieldValuesResult } from '@/api/sources'
 import { useFieldValuesStore } from '@/stores/exploreFieldValues'
 import type { QueryLanguage } from '@/lib/queryMetadata'
+import {
+  isPriorityField,
+  isClickToLoadField,
+  isFilterableField,
+} from '@/lib/sourceFields'
+
+export { isPriorityField, isClickToLoadField, isFilterableField } from '@/lib/sourceFields'
 
 // Field loading states
 export type FieldStatus = 'idle' | 'loading' | 'loaded' | 'error' | 'click-to-load'
@@ -29,7 +36,7 @@ export interface LoaderOptions {
 
 /**
  * Concurrency queue to limit parallel requests
- * Prevents overwhelming ClickHouse with too many simultaneous queries
+ * Prevents overwhelming the active datasource backend with too many simultaneous queries
  */
 class ConcurrencyQueue {
   private running = 0
@@ -62,70 +69,12 @@ class ConcurrencyQueue {
 }
 
 /**
- * Check if a field type is a complex type that cannot show distinct values
- * Map, Array, Tuple, and JSON types don't support distinct value queries
- */
-const isComplexType = (type: string): boolean => {
-  const lowerType = type.toLowerCase()
-  return lowerType.startsWith('map(') ||
-         lowerType.startsWith('array(') ||
-         lowerType.startsWith('tuple(') ||
-         lowerType === 'json' ||
-         lowerType.startsWith('json(')
-}
-
-/**
- * Check if a field type is a priority field that should auto-load.
- * LowCardinality and Enum are always fast (dictionary-backed).
- * Numeric types (UInt/Int/Float) are fast for GROUP BY even at high cardinality,
- * and the backend has timeout protection.
- */
-export const isPriorityField = (type: string): boolean => {
-  if (isComplexType(type)) {
-    return false
-  }
-  if (type.includes('LowCardinality') || type.startsWith('Enum')) {
-    return true
-  }
-  // Numeric types — fast GROUP BY in ClickHouse
-  const lower = type.toLowerCase()
-    .replace(/lowcardinality\(([^)]+)\)/g, '$1')
-    .replace(/nullable\(([^)]+)\)/g, '$1')
-  return /^u?int\d/.test(lower) || /^float\d/.test(lower) || /^decimal/.test(lower)
-}
-
-/**
- * Check if a field type requires click-to-load.
- * These may be high cardinality and slow, so they only load on user action.
- * Includes String fields and numeric types (e.g., status UInt16 often has low actual cardinality).
- */
-export const isClickToLoadField = (type: string): boolean => {
-  if (isComplexType(type)) {
-    return false
-  }
-  const lower = type.toLowerCase()
-    .replace(/lowcardinality\(([^)]+)\)/g, '$1')
-    .replace(/nullable\(([^)]+)\)/g, '$1')
-  return lower === 'string' ||
-    /^u?int\d/.test(lower) ||
-    /^float\d/.test(lower) ||
-    /^decimal/.test(lower)
-}
-
-/**
- * Check if a field is filterable at all
- */
-export const isFilterableField = (type: string): boolean => {
-  return isPriorityField(type) || isClickToLoadField(type)
-}
-
-/**
  * Composable for progressive per-field value loading
  *
  * Features:
  * - Parallel requests with concurrency limit (max 4)
  * - Per-field AbortController for cancellation
- * - Hybrid loading: auto-load priority fields, click-to-load for String fields
+ * - Hybrid loading: auto-load cheap scalar fields, click-to-load for potentially expensive ones
  * - Progressive updates as each field loads
  */
 export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<LoaderOptions>) {

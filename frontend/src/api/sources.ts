@@ -113,44 +113,56 @@ export interface CreateTeamQueryRequest {
   query_content: string;
 }
 
-export interface SourceStats {
-  table_stats: {
-    database: string;
-    table: string;
-    compressed: string;
-    uncompressed: string;
-    compr_rate: number;
-    rows: number;
-    part_count: number;
-  };
-  column_stats: {
-    database: string;
-    table: string;
-    column: string;
-    compressed: string;
-    uncompressed: string;
-    compr_ratio: number;
-    rows_count: number;
-    avg_row_size: number;
-  }[];
-  ingestion_stats?: {
-    rows_1h: number;
-    rows_24h: number;
-    rows_7d: number;
-    latest_ts?: string | null;
-    hourly_buckets: { bucket: string; rows: number }[];
-    daily_buckets: { bucket: string; rows: number }[];
-  };
-  table_info?: {
-    database: string;
-    name: string;
-    engine: string;
-    engine_params?: string[];
-    columns?: { name: string; type: string }[];
-    sort_keys?: string[];
-    ext_columns?: { name: string; type: string; default_expression?: string; is_nullable?: boolean; is_primary_key?: boolean; comment?: string }[];
-  };
+export interface InspectionDetail {
+  key?: string;
+  label: string;
+  value: string;
+  monospace?: boolean;
+  multiline?: boolean;
+}
+
+export interface InspectionMetric {
+  key?: string;
+  label: string;
+  value: string;
+  hint?: string;
+}
+
+export interface SourceSchemaField {
+  name: string;
+  type: string;
+  is_nullable?: boolean;
+  is_primary_key?: boolean;
+  default_expression?: string;
+  comment?: string;
+  compressed?: string;
+  uncompressed?: string;
+  compression_ratio?: number;
+  avg_row_size?: number;
+  row_count?: number;
+}
+
+export interface SourceSchemaInspection {
+  fields: SourceSchemaField[];
+  sort_keys?: string[];
+  create_query?: string;
   ttl?: string;
+}
+
+export interface SourceActivity {
+  rows_1h: number;
+  rows_24h: number;
+  rows_7d: number;
+  latest_ts?: string | null;
+  hourly_buckets: { bucket: string; rows: number }[];
+  daily_buckets: { bucket: string; rows: number }[];
+}
+
+export interface SourceInspection {
+  details?: InspectionDetail[];
+  storage?: InspectionMetric[];
+  activity?: SourceActivity | null;
+  schema?: SourceSchemaInspection | null;
 }
 
 // Field values types for sidebar exploration
@@ -184,11 +196,11 @@ export const sourcesApi = {
   deleteSource: (id: number) =>
     apiClient.delete<{ message: string }>(`/admin/sources/${id}`),
 
-  // Source stats and schema (admin and team-scoped versions)
-  getAdminSourceStats: (sourceId: number) =>
-    apiClient.get<SourceStats>(`/admin/sources/${sourceId}/stats`),
-  getTeamSourceStats: (teamId: number, sourceId: number) =>
-    apiClient.get<SourceStats>(`/teams/${teamId}/sources/${sourceId}/stats`),
+  // Source inspection and schema (admin and team-scoped versions)
+  getAdminSourceInspection: (sourceId: number) =>
+    apiClient.get<SourceInspection>(`/admin/sources/${sourceId}/stats`),
+  getTeamSourceInspection: (teamId: number, sourceId: number) =>
+    apiClient.get<SourceInspection>(`/teams/${teamId}/sources/${sourceId}/stats`),
   getTeamSourceSchema: (teamId: number, sourceId: number) =>
     apiClient.get<string>(`/teams/${teamId}/sources/${sourceId}/schema`),
 

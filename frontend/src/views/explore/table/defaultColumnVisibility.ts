@@ -1,22 +1,11 @@
 import type { ColumnDef } from '@tanstack/vue-table'
 import type { Source } from '@/api/sources'
-import { MESSAGE_FIELD_ALIASES, normalizeFieldName } from './fieldSemantics'
-
-const VICTORIALOGS_INTERNAL_FIELDS = new Set(['stream', 'streamid'])
-const VICTORIALOGS_CONTEXT_FIELDS = [
-  'service',
-  'app',
-  'application',
-  'env',
-  'environment',
-  'namespace',
-  'kubernetesnamespace',
-  'pipeline',
-  'cluster',
-  'host',
-  'pod',
-  'container',
-]
+import {
+  MESSAGE_FIELD_ALIASES,
+  normalizeFieldName,
+  isContextFieldName,
+  isSystemField,
+} from '@/lib/sourceFields'
 const MAX_VICTORIALOGS_VISIBLE_COLUMNS = 6
 
 function getColumnIds(columns: ColumnDef<Record<string, any>>[]): string[] {
@@ -40,10 +29,6 @@ function addFirstMatchingColumn(
   }
 }
 
-function isVictoriaLogsInternalField(columnId: string): boolean {
-  return VICTORIALOGS_INTERNAL_FIELDS.has(normalizeFieldName(columnId))
-}
-
 export function getDefaultColumnVisibility(
   columns: ColumnDef<Record<string, any>>[],
   source: Pick<Source, 'source_type'> | null | undefined,
@@ -57,7 +42,7 @@ export function getDefaultColumnVisibility(
     return defaultVisibility
   }
 
-  const nonInternalIds = columnIds.filter(columnId => !isVictoriaLogsInternalField(columnId))
+  const nonInternalIds = columnIds.filter(columnId => !isSystemField(source, columnId))
   const visibleColumnIds = new Set<string>()
 
   if (timestampField && nonInternalIds.includes(timestampField)) {
@@ -73,12 +58,12 @@ export function getDefaultColumnVisibility(
   if (nonInternalIds.length <= MAX_VICTORIALOGS_VISIBLE_COLUMNS) {
     nonInternalIds.forEach(columnId => visibleColumnIds.add(columnId))
   } else {
-    for (const alias of VICTORIALOGS_CONTEXT_FIELDS) {
+    const contextIds = nonInternalIds.filter(columnId => isContextFieldName(columnId))
+    for (const columnId of contextIds) {
       if (visibleColumnIds.size >= MAX_VICTORIALOGS_VISIBLE_COLUMNS) {
         break
       }
-
-      addFirstMatchingColumn(nonInternalIds, visibleColumnIds, [alias])
+      visibleColumnIds.add(columnId)
     }
 
     for (const columnId of nonInternalIds) {
@@ -91,6 +76,6 @@ export function getDefaultColumnVisibility(
   }
 
   return Object.fromEntries(
-    columnIds.map(columnId => [columnId, visibleColumnIds.has(columnId) && !isVictoriaLogsInternalField(columnId)]),
+    columnIds.map(columnId => [columnId, visibleColumnIds.has(columnId) && !isSystemField(source, columnId)]),
   )
 }

@@ -34,7 +34,7 @@ func (p *ClickHouseProvider) Capabilities() []Capability {
 		CapabilitySchemaInspection,
 		CapabilityHistogram,
 		CapabilityFieldValues,
-		CapabilitySourceStats,
+		CapabilitySourceInspection,
 		CapabilityAISQLGeneration,
 	}
 }
@@ -486,7 +486,7 @@ func (p *ClickHouseProvider) GetAllFieldValues(ctx context.Context, source *mode
 	return mapped, nil
 }
 
-func (p *ClickHouseProvider) GetSourceStats(ctx context.Context, source *models.Source) (*SourceStats, error) {
+func (p *ClickHouseProvider) InspectSource(ctx context.Context, source *models.Source) (*SourceInspection, error) {
 	if source == nil {
 		return nil, fmt.Errorf("source is required")
 	}
@@ -503,14 +503,12 @@ func (p *ClickHouseProvider) GetSourceStats(ctx context.Context, source *models.
 	tableStats, _ := client.TableStats(ctx, statsDB, statsTable)
 	columnStats, _ := client.ColumnStats(ctx, statsDB, statsTable)
 	ingestionStats, _ := client.IngestionStats(ctx, statsDB, statsTable, source.MetaTSField)
-	columnStats = ensureColumnStats(columnStats, source)
 
-	return &SourceStats{
-		TableStats:  mapTableStat(tableStats),
-		ColumnStats: mapColumnStats(columnStats),
-		TableInfo:   mapTableInfo(tableInfo),
-		Ingestion:   mapIngestionStats(ingestionStats),
-		TTL:         ttlExpr,
+	return &SourceInspection{
+		Details:  buildClickHouseInspectionDetails(source, tableInfo),
+		Storage:  buildClickHouseStorageMetrics(tableStats),
+		Activity: mapActivityStats(ingestionStats),
+		Schema:   mapClickHouseSchemaInspection(tableInfo, source, ttlExpr, columnStats),
 	}, nil
 }
 
@@ -711,89 +709,7 @@ func getStatsTableLocation(source *models.Source, tableInfo *clickhouse.TableInf
 	return source.Connection.Database, source.Connection.TableName
 }
 
-func ensureColumnStats(columnStats []clickhouse.TableColumnStat, source *models.Source) []clickhouse.TableColumnStat {
-	if len(columnStats) > 0 {
-		return columnStats
-	}
-	if len(source.Columns) == 0 {
-		return []clickhouse.TableColumnStat{}
-	}
-
-	stats := make([]clickhouse.TableColumnStat, 0, len(source.Columns))
-	for _, col := range source.Columns {
-		stats = append(stats, clickhouse.TableColumnStat{
-			Database:     source.Connection.Database,
-			Table:        source.Connection.TableName,
-			Column:       col.Name,
-			Compressed:   "N/A",
-			Uncompressed: "N/A",
-		})
-	}
-	return stats
-}
-
-func mapTableInfo(tableInfo *clickhouse.TableInfo) *SourceTableInfo {
-	if tableInfo == nil {
-		return nil
-	}
-
-	extColumns := make([]SourceExtendedColumnInfo, 0, len(tableInfo.ExtColumns))
-	for _, col := range tableInfo.ExtColumns {
-		extColumns = append(extColumns, SourceExtendedColumnInfo{
-			Name:              col.Name,
-			Type:              col.Type,
-			IsNullable:        col.IsNullable,
-			IsPrimaryKey:      col.IsPrimaryKey,
-			DefaultExpression: col.DefaultExpression,
-			Comment:           col.Comment,
-		})
-	}
-
-	return &SourceTableInfo{
-		Database:     tableInfo.Database,
-		Name:         tableInfo.Name,
-		Engine:       tableInfo.Engine,
-		EngineParams: tableInfo.EngineParams,
-		Columns:      tableInfo.Columns,
-		ExtColumns:   extColumns,
-		SortKeys:     tableInfo.SortKeys,
-		CreateQuery:  tableInfo.CreateQuery,
-	}
-}
-
-func mapTableStat(stat *clickhouse.TableStat) *TableStat {
-	if stat == nil {
-		return nil
-	}
-	return &TableStat{
-		Database:     stat.Database,
-		Table:        stat.Table,
-		Compressed:   stat.Compressed,
-		Uncompressed: stat.Uncompressed,
-		ComprRate:    stat.ComprRate,
-		Rows:         stat.Rows,
-		PartCount:    stat.PartCount,
-	}
-}
-
-func mapColumnStats(stats []clickhouse.TableColumnStat) []TableColumnStat {
-	mapped := make([]TableColumnStat, 0, len(stats))
-	for _, stat := range stats {
-		mapped = append(mapped, TableColumnStat{
-			Database:     stat.Database,
-			Table:        stat.Table,
-			Column:       stat.Column,
-			Compressed:   stat.Compressed,
-			Uncompressed: stat.Uncompressed,
-			ComprRatio:   stat.ComprRatio,
-			RowsCount:    stat.RowsCount,
-			AvgRowSize:   stat.AvgRowSize,
-		})
-	}
-	return mapped
-}
-
-func mapIngestionStats(stats *clickhouse.IngestionStats) *IngestionStats {
+func mapActivityStats(stats *clickhouse.IngestionStats) *SourceActivity {
 	if stats == nil {
 		return nil
 	}
@@ -814,7 +730,7 @@ func mapIngestionStats(stats *clickhouse.IngestionStats) *IngestionStats {
 		})
 	}
 
-	return &IngestionStats{
+	return &SourceActivity{
 		Rows1h:        stats.Rows1h,
 		Rows24h:       stats.Rows24h,
 		Rows7d:        stats.Rows7d,
@@ -822,4 +738,116 @@ func mapIngestionStats(stats *clickhouse.IngestionStats) *IngestionStats {
 		HourlyBuckets: hourly,
 		DailyBuckets:  daily,
 	}
+}
+
+func buildClickHouseInspectionDetails(source *models.Source, tableInfo *clickhouse.TableInfo) []InspectionDetail {
+	details := []InspectionDetail{
+		{Key: "backend", Label: "Backend", Value: "ClickHouse"},
+		{Key: "host", Label: "Host", Value: source.Connection.Host, Monospace: true},
+		{Key: "database", Label: "Database", Value: source.Connection.Database, Monospace: true},
+		{Key: "table", Label: "Table", Value: source.Connection.TableName, Monospace: true},
+		{Key: "timestamp_field", Label: "Timestamp Field", Value: source.MetaTSField, Monospace: true},
+	}
+
+	if source.MetaSeverityField != "" {
+		details = append(details, InspectionDetail{
+			Key: "severity_field", Label: "Severity Field", Value: source.MetaSeverityField, Monospace: true,
+		})
+	}
+	if tableInfo != nil && tableInfo.Engine != "" {
+		details = append(details, InspectionDetail{
+			Key: "engine", Label: "Engine", Value: tableInfo.Engine,
+		})
+	}
+	return details
+}
+
+func buildClickHouseStorageMetrics(stat *clickhouse.TableStat) []InspectionMetric {
+	if stat == nil {
+		return nil
+	}
+	return []InspectionMetric{
+		{Key: "rows", Label: "Rows", Value: strconv.FormatUint(stat.Rows, 10)},
+		{Key: "parts", Label: "Parts", Value: strconv.FormatUint(stat.PartCount, 10)},
+		{Key: "compression_ratio", Label: "Compression Ratio", Value: fmt.Sprintf("%.2fx", stat.ComprRate)},
+		{Key: "compressed", Label: "Compressed Size", Value: stat.Compressed},
+		{Key: "uncompressed", Label: "Uncompressed Size", Value: stat.Uncompressed},
+	}
+}
+
+func mapClickHouseSchemaInspection(
+	tableInfo *clickhouse.TableInfo,
+	source *models.Source,
+	ttlExpr string,
+	columnStats []clickhouse.TableColumnStat,
+) *SourceSchemaInspection {
+	if tableInfo == nil && source == nil {
+		return nil
+	}
+
+	schema := &SourceSchemaInspection{
+		TTL: ttlExpr,
+	}
+	columnStatMap := make(map[string]clickhouse.TableColumnStat, len(columnStats))
+	for _, stat := range columnStats {
+		columnStatMap[stat.Column] = stat
+	}
+
+	if tableInfo != nil {
+		schema.SortKeys = append(schema.SortKeys, tableInfo.SortKeys...)
+		schema.CreateQuery = tableInfo.CreateQuery
+		if len(tableInfo.ExtColumns) > 0 {
+			schema.Fields = make([]SourceSchemaField, 0, len(tableInfo.ExtColumns))
+			for _, col := range tableInfo.ExtColumns {
+				stat := columnStatMap[col.Name]
+				schema.Fields = append(schema.Fields, SourceSchemaField{
+					Name:              col.Name,
+					Type:              col.Type,
+					IsNullable:        col.IsNullable,
+					IsPrimaryKey:      col.IsPrimaryKey,
+					DefaultExpression: col.DefaultExpression,
+					Comment:           col.Comment,
+					Compressed:        stat.Compressed,
+					Uncompressed:      stat.Uncompressed,
+					CompressionRatio:  stat.ComprRatio,
+					AvgRowSize:        stat.AvgRowSize,
+					RowCount:          stat.RowsCount,
+				})
+			}
+			return schema
+		}
+
+		schema.Fields = make([]SourceSchemaField, 0, len(tableInfo.Columns))
+		for _, col := range tableInfo.Columns {
+			stat := columnStatMap[col.Name]
+			schema.Fields = append(schema.Fields, SourceSchemaField{
+				Name:             col.Name,
+				Type:             col.Type,
+				Compressed:       stat.Compressed,
+				Uncompressed:     stat.Uncompressed,
+				CompressionRatio: stat.ComprRatio,
+				AvgRowSize:       stat.AvgRowSize,
+				RowCount:         stat.RowsCount,
+			})
+		}
+		return schema
+	}
+
+	if source != nil && len(source.Columns) > 0 {
+		schema.Fields = make([]SourceSchemaField, 0, len(source.Columns))
+		for _, col := range source.Columns {
+			stat := columnStatMap[col.Name]
+			schema.Fields = append(schema.Fields, SourceSchemaField{
+				Name:             col.Name,
+				Type:             col.Type,
+				Compressed:       stat.Compressed,
+				Uncompressed:     stat.Uncompressed,
+				CompressionRatio: stat.ComprRatio,
+				AvgRowSize:       stat.AvgRowSize,
+				RowCount:         stat.RowsCount,
+			})
+		}
+	}
+
+	return schema
 }

@@ -8,7 +8,7 @@ const route = useRoute()
 const tabs = [
     { name: 'Manage Sources', route: { name: 'Sources' } },
     { name: 'Add Source', route: { name: 'NewSource' } },
-    { name: 'Source Stats', route: { name: 'SourceStats' } }
+    { name: 'Source Inspection', route: { name: 'SourceInspection' } }
 ]
 </script>
 

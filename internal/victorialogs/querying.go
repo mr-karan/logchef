@@ -387,19 +387,171 @@ func (p *Provider) GetAllFieldValues(ctx context.Context, source *models.Source,
 	return allValues, nil
 }
 
-func (p *Provider) GetSourceStats(ctx context.Context, source *models.Source) (*datasource.SourceStats, error) {
+func (p *Provider) InspectSource(ctx context.Context, source *models.Source) (*datasource.SourceInspection, error) {
 	columns, err := p.GetSourceSchema(ctx, source)
 	if err != nil {
 		return nil, err
 	}
 
-	return &datasource.SourceStats{
-		TableInfo: &datasource.SourceTableInfo{
-			Name:    source.Name,
-			Engine:  "VictoriaLogs",
-			Columns: columns,
+	return &datasource.SourceInspection{
+		Details:  buildVictoriaLogsInspectionDetails(source),
+		Activity: p.inspectSourceActivity(ctx, source),
+		Schema: &datasource.SourceSchemaInspection{
+			Fields: mapVictoriaLogsSchemaFields(columns),
 		},
 	}, nil
+}
+
+func (p *Provider) inspectSourceActivity(ctx context.Context, source *models.Source) *datasource.SourceActivity {
+	conn, err := p.connectionForSource(source)
+	if err != nil {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	hourlyBuckets, err := p.fetchActivityBuckets(ctx, conn, now.Add(-24*time.Hour), now, "1h")
+	if err != nil {
+		return nil
+	}
+
+	dailyBuckets, err := p.fetchActivityBuckets(ctx, conn, now.Add(-(7 * 24 * time.Hour)), now, "1d")
+	if err != nil {
+		dailyBuckets = nil
+	}
+
+	latestTS, err := p.fetchLatestTimestamp(ctx, conn, source.MetaTSField)
+	if err != nil {
+		latestTS = nil
+	}
+
+	return &datasource.SourceActivity{
+		Rows1h:        sumBucketsSince(hourlyBuckets, now.Add(-time.Hour)),
+		Rows24h:       sumBuckets(hourlyBuckets),
+		Rows7d:        sumBuckets(dailyBuckets),
+		LatestTS:      latestTS,
+		HourlyBuckets: hourlyBuckets,
+		DailyBuckets:  dailyBuckets,
+	}
+}
+
+func (p *Provider) fetchActivityBuckets(
+	ctx context.Context,
+	conn models.VictoriaLogsConnectionInfo,
+	start time.Time,
+	end time.Time,
+	step string,
+) ([]datasource.IngestionBucket, error) {
+	form := url.Values{}
+	form.Set("query", "*")
+	form.Set("start", formatAPITime(start))
+	form.Set("end", formatAPITime(end))
+	form.Set("step", step)
+	form.Set("ignore_pipes", "1")
+	applyScopeFilters(form, conn)
+
+	var result hitsResponse
+	if err := p.decodeJSONRequest(ctx, conn, "/select/logsql/hits", form, &result); err != nil {
+		return nil, err
+	}
+
+	bucketsByTime := make(map[time.Time]uint64)
+	for _, series := range result.Hits {
+		for index, timestampRaw := range series.Timestamps {
+			if index >= len(series.Values) {
+				break
+			}
+			bucket, err := time.Parse(time.RFC3339, timestampRaw)
+			if err != nil {
+				return nil, fmt.Errorf("parse victorialogs activity bucket %q: %w", timestampRaw, err)
+			}
+			bucketsByTime[bucket] += uint64(max(series.Values[index], 0))
+		}
+	}
+
+	buckets := make([]datasource.IngestionBucket, 0, len(bucketsByTime))
+	for bucket, rows := range bucketsByTime {
+		buckets = append(buckets, datasource.IngestionBucket{
+			Bucket: bucket,
+			Rows:   rows,
+		})
+	}
+	slices.SortFunc(buckets, func(a, b datasource.IngestionBucket) int {
+		return a.Bucket.Compare(b.Bucket)
+	})
+
+	return buckets, nil
+}
+
+func (p *Provider) fetchLatestTimestamp(
+	ctx context.Context,
+	conn models.VictoriaLogsConnectionInfo,
+	timestampField string,
+) (*time.Time, error) {
+	fieldName := strings.TrimSpace(timestampField)
+	if fieldName == "" {
+		fieldName = "_time"
+	}
+
+	form := url.Values{}
+	form.Set("query", "*")
+	form.Set("limit", "1")
+	applyScopeFilters(form, conn)
+
+	resp, err := p.doFormRequest(ctx, conn, "/select/logsql/query", form)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	decoder := json.NewDecoder(resp.Body)
+	decoder.UseNumber()
+
+	var row map[string]any
+	if err := decoder.Decode(&row); err != nil {
+		if err == io.EOF {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("decode victorialogs latest timestamp response: %w", err)
+	}
+
+	rawValue, ok := row[fieldName]
+	if !ok {
+		rawValue = row["_time"]
+	}
+	if rawValue == nil {
+		return nil, nil
+	}
+
+	value, ok := rawValue.(string)
+	if !ok || strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return nil, nil
+	}
+
+	return &parsed, nil
+}
+
+func sumBuckets(buckets []datasource.IngestionBucket) uint64 {
+	var total uint64
+	for _, bucket := range buckets {
+		total += bucket.Rows
+	}
+	return total
+}
+
+func sumBucketsSince(buckets []datasource.IngestionBucket, since time.Time) uint64 {
+	var total uint64
+	for _, bucket := range buckets {
+		if bucket.Bucket.Before(since) {
+			continue
+		}
+		total += bucket.Rows
+	}
+	return total
 }
 
 func (p *Provider) EvaluateAlert(ctx context.Context, source *models.Source, req datasource.AlertQueryRequest) (*models.QueryResult, error) {
@@ -553,6 +705,64 @@ func applyScopeFilters(form url.Values, conn models.VictoriaLogsConnectionInfo) 
 		return
 	}
 	form.Add("extra_filters", scopeQuery)
+}
+
+func buildVictoriaLogsInspectionDetails(source *models.Source) []datasource.InspectionDetail {
+	if source == nil {
+		return nil
+	}
+
+	details := []datasource.InspectionDetail{
+		{Key: "backend", Label: "Backend", Value: "VictoriaLogs"},
+		{Key: "timestamp_field", Label: "Timestamp Field", Value: source.MetaTSField, Monospace: true},
+	}
+
+	conn, err := source.VictoriaLogsConnection()
+	if err != nil {
+		return details
+	}
+
+	if conn.BaseURL != "" {
+		details = append(details, datasource.InspectionDetail{
+			Key: "base_url", Label: "Base URL", Value: conn.BaseURL, Monospace: true,
+		})
+	}
+	if source.MetaSeverityField != "" {
+		details = append(details, datasource.InspectionDetail{
+			Key: "severity_field", Label: "Severity Field", Value: source.MetaSeverityField, Monospace: true,
+		})
+	}
+	if conn.Tenant.AccountID != "" || conn.Tenant.ProjectID != "" {
+		tenantValue := fmt.Sprintf("account=%s project=%s", emptyFallback(conn.Tenant.AccountID, "-"), emptyFallback(conn.Tenant.ProjectID, "-"))
+		details = append(details, datasource.InspectionDetail{
+			Key: "tenant", Label: "Tenant", Value: tenantValue, Monospace: true,
+		})
+	}
+	if scope := strings.TrimSpace(conn.Scope.Query); scope != "" {
+		details = append(details, datasource.InspectionDetail{
+			Key: "scope", Label: "Immutable Scope", Value: scope, Monospace: true, Multiline: true,
+		})
+	}
+
+	return details
+}
+
+func mapVictoriaLogsSchemaFields(columns []models.ColumnInfo) []datasource.SourceSchemaField {
+	fields := make([]datasource.SourceSchemaField, 0, len(columns))
+	for _, column := range columns {
+		fields = append(fields, datasource.SourceSchemaField{
+			Name: column.Name,
+			Type: column.Type,
+		})
+	}
+	return fields
+}
+
+func emptyFallback(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func defaultWindow(window string) string {

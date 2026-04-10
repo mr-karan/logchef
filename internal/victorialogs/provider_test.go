@@ -3,6 +3,7 @@ package victorialogs
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -332,6 +333,83 @@ func TestHistogramAndEvaluateAlert(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for unsupported alert language")
+	}
+}
+
+func TestInspectSourceIncludesSchemaAndActivity(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC().Truncate(time.Hour)
+	latest := now.Add(-5 * time.Minute).Format(time.RFC3339)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		switch r.URL.Path {
+		case "/select/logsql/field_names":
+			_, _ = w.Write([]byte(`{"values":[{"value":"service","hits":10},{"value":"_msg","hits":12},{"value":"_stream","hits":12},{"value":"_stream_id","hits":12}]}`))
+		case "/select/logsql/hits":
+			switch r.Form.Get("step") {
+			case "1h":
+				_, _ = w.Write([]byte(fmt.Sprintf(`{"hits":[{"fields":{},"timestamps":["%s"],"values":[8],"total":8}]}`, now.Format(time.RFC3339))))
+			case "1d":
+				dayOne := now.Add(-24 * time.Hour).Format(time.RFC3339)
+				dayTwo := now.Format(time.RFC3339)
+				_, _ = w.Write([]byte(fmt.Sprintf(`{"hits":[{"fields":{},"timestamps":["%s","%s"],"values":[12,20],"total":32}]}`, dayOne, dayTwo)))
+			default:
+				t.Fatalf("unexpected step: %q", r.Form.Get("step"))
+			}
+		case "/select/logsql/query":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"_time":"%s","_msg":"latest row","service":"api"}`, latest)))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := newTestProvider(server)
+	source := mustSource(t, models.VictoriaLogsConnectionInfo{
+		BaseURL: server.URL,
+		Scope: models.VictoriaLogsScope{
+			Query: `{app="payments"}`,
+		},
+	}, "_time", "level")
+
+	inspection, err := provider.InspectSource(context.Background(), source)
+	if err != nil {
+		t.Fatalf("InspectSource returned error: %v", err)
+	}
+	if inspection.Activity == nil {
+		t.Fatalf("expected activity inspection, got nil")
+	}
+	if inspection.Activity.Rows1h != 8 {
+		t.Fatalf("unexpected rows_1h: %d", inspection.Activity.Rows1h)
+	}
+	if inspection.Activity.Rows24h != 8 {
+		t.Fatalf("unexpected rows_24h: %d", inspection.Activity.Rows24h)
+	}
+	if inspection.Activity.Rows7d != 32 {
+		t.Fatalf("unexpected rows_7d: %d", inspection.Activity.Rows7d)
+	}
+	if inspection.Activity.LatestTS == nil || inspection.Activity.LatestTS.Format(time.RFC3339) != latest {
+		t.Fatalf("unexpected latest_ts: %#v", inspection.Activity.LatestTS)
+	}
+	if inspection.Schema == nil || len(inspection.Schema.Fields) == 0 {
+		t.Fatalf("expected schema fields, got %#v", inspection.Schema)
+	}
+	fieldNames := make([]string, 0, len(inspection.Schema.Fields))
+	for _, field := range inspection.Schema.Fields {
+		fieldNames = append(fieldNames, field.Name)
+	}
+	expectedFields := []string{"_time", "level", "_msg", "_stream_id", "_stream", "service"}
+	if !reflect.DeepEqual(fieldNames, expectedFields) {
+		t.Fatalf("unexpected inspection fields: %#v", fieldNames)
+	}
+	if !slices.ContainsFunc(inspection.Details, func(detail datasource.InspectionDetail) bool {
+		return detail.Key == "scope" && detail.Value == `{app="payments"}`
+	}) {
+		t.Fatalf("expected immutable scope detail, got %#v", inspection.Details)
 	}
 }
 

@@ -215,12 +215,12 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: "sources/stats",
-        name: "SourceStats",
+        name: "SourceInspection",
         component: () => import("@/views/sources/SourceStats.vue").catch(err => {
-          error("Router", "Failed to load SourceStats component", err);
+          error("Router", "Failed to load SourceInspection component", err);
           return { default: ComponentLoadError };
         }),
-        meta: { title: "Source Stats", requiresAdmin: true },
+        meta: { title: "Source Inspection", requiresAdmin: true },
       },
       // System Settings (Admin only)
       {

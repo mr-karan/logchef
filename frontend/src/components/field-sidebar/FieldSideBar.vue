@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
+import type { Source } from '@/api/sources'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -32,7 +33,6 @@ import {
   Loader2,
 } from 'lucide-vue-next'
 import { useExploreStore } from '@/stores/explore'
-import { useSourcesStore } from '@/stores/sources'
 import { getLocalTimeZone } from '@internationalized/date'
 import { cn } from '@/lib/utils'
 import { useVariables } from '@/composables/useVariables'
@@ -41,6 +41,7 @@ import {
   isFilterableField as isFilterableFieldType
 } from '@/composables/useFieldValuesLoader'
 import { getNativeQueryLanguageForSource, supportsQueryLanguage, type QueryLanguage } from '@/lib/queryMetadata'
+import { buildSourceFieldGroups, type SourceFieldGroup } from '@/lib/sourceFields'
 
 // Define field type for auto-completion
 interface FieldInfo {
@@ -56,13 +57,14 @@ const props = withDefaults(defineProps<{
   expanded: boolean
   teamId?: number
   sourceId?: number
+  source?: Pick<Source, 'source_type' | '_meta_ts_field' | '_meta_severity_field' | 'query_languages'> | null
 }>(), {
   expanded: false,
+  source: null,
 })
 
 // Get time range and query from explore store
 const exploreStore = useExploreStore()
-const sourcesStore = useSourcesStore()
 const { convertVariables } = useVariables()
 
 // Get the current datasource-native query for filtering field values.
@@ -72,7 +74,7 @@ const getCurrentFilterQuery = (): string => {
     return query ? convertVariables(query) : ''
   }
 
-  if (!supportsQueryLanguage(sourcesStore.currentSourceDetails, 'logchefql')) {
+  if (!supportsQueryLanguage(props.source, 'logchefql')) {
     const query = exploreStore.rawSql || ''
     return query ? convertVariables(query) : ''
   }
@@ -85,8 +87,8 @@ const getCurrentFilterQueryLanguage = (): QueryLanguage | undefined => {
     return 'logchefql'
   }
 
-  if (!supportsQueryLanguage(sourcesStore.currentSourceDetails, 'logchefql')) {
-    return getNativeQueryLanguageForSource(sourcesStore.currentSourceDetails)
+  if (!supportsQueryLanguage(props.source, 'logchefql')) {
+    return getNativeQueryLanguageForSource(props.source)
   }
 
   return undefined
@@ -175,14 +177,24 @@ const filteredFields = computed((): FieldInfo[] => {
   )
 })
 
-// Separate filterable fields (can show distinct values) from other fields
-const filterableFields = computed(() => 
-  filteredFields.value.filter(f => isFilterableField(f.type))
-)
+const fieldGroups = computed((): SourceFieldGroup<FieldInfo>[] => {
+  return buildSourceFieldGroups<FieldInfo>(filteredFields.value, props.source)
+})
 
-const otherFields = computed(() => 
-  filteredFields.value.filter(f => !isFilterableField(f.type))
-)
+const getGroupHeaderIconClass = (groupId: SourceFieldGroup['id']): string => {
+  switch (groupId) {
+    case 'core':
+      return 'text-blue-500'
+    case 'context':
+      return 'text-emerald-500'
+    case 'filterable':
+      return 'text-sky-500'
+    case 'system':
+      return 'text-amber-500'
+    default:
+      return 'text-muted-foreground'
+  }
+}
 
 // Get field type by name from props
 const getFieldType = (fieldName: string): string => {
@@ -225,8 +237,7 @@ const getTimeRangeForApi = () => {
       startTime: startDate.toISOString(),
       endTime: endDate.toISOString()
     }
-  } catch (e) {
-    console.error('Failed to convert time range:', e)
+  } catch {
     return null
   }
 }
@@ -376,21 +387,26 @@ onUnmounted(() => {
       <ScrollArea class="flex-1">
         <div class="p-2 space-y-1">
 
-          <!-- Filterable Fields Section (LowCardinality, String, Enum) -->
-          <template v-if="filterableFields.length > 0">
+          <template v-for="group in fieldGroups" :key="group.id">
             <div class="mb-2">
               <div class="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                <Tag class="h-3 w-3" />
-                <span>Filterable Fields</span>
+                <component
+                  :is="group.id === 'system' || group.id === 'other' ? Database : Tag"
+                  :class="cn('h-3 w-3', getGroupHeaderIconClass(group.id))"
+                />
+                <span>{{ group.label }}</span>
                 <Badge variant="secondary" class="ml-auto text-[9px] h-4 px-1">
-                  {{ filterableFields.length }}
+                  {{ group.fields.length }}
                 </Badge>
               </div>
-              
+              <p class="px-2 pb-1 text-[10px] leading-relaxed text-muted-foreground/80">
+                {{ group.description }}
+              </p>
+
               <div class="space-y-0.5">
                 <Collapsible
-                  v-for="field in filterableFields"
-                  :key="field.name"
+                  v-for="field in group.filterableFields"
+                  :key="`${group.id}-${field.name}`"
                   :open="expandedFields.has(field.name)"
                   @update:open="() => toggleField(field.name)"
                 >
@@ -413,12 +429,10 @@ onUnmounted(() => {
                         >
                           {{ field.name }}
                         </span>
-                        <!-- Per-field loading spinner -->
                         <Loader2
                           v-if="getFieldState(field.name).status === 'loading'"
                           class="h-3 w-3 text-muted-foreground animate-spin flex-shrink-0"
                         />
-                        <!-- Value count badge - shows when collapsed and values loaded -->
                         <Badge
                           v-else-if="!expandedFields.has(field.name) && fieldValues[field.name]?.total_distinct"
                           variant="secondary"
@@ -427,7 +441,6 @@ onUnmounted(() => {
                         >
                           {{ fieldValues[field.name].total_distinct }}
                         </Badge>
-                        <!-- Click to load indicator for String fields -->
                         <Badge
                           v-else-if="getFieldState(field.name).status === 'click-to-load'"
                           variant="outline"
@@ -446,14 +459,12 @@ onUnmounted(() => {
 
                     <CollapsibleContent>
                       <div class="pl-8 pr-2 pb-2">
-                        <!-- Loading state -->
                         <template v-if="getFieldState(field.name).status === 'loading'">
                           <div class="space-y-1">
                             <Skeleton v-for="i in 3" :key="i" class="h-6 w-full" />
                           </div>
                         </template>
 
-                        <!-- Error state with retry -->
                         <template v-else-if="getFieldState(field.name).status === 'error'">
                           <div class="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-500 py-1 px-2">
                             <AlertTriangle class="h-3.5 w-3.5 flex-shrink-0" />
@@ -469,7 +480,6 @@ onUnmounted(() => {
                           </div>
                         </template>
 
-                        <!-- Click-to-load state for String fields -->
                         <template v-else-if="getFieldState(field.name).status === 'click-to-load' || getFieldState(field.name).status === 'idle'">
                           <div class="py-2 px-2">
                             <Button
@@ -487,7 +497,6 @@ onUnmounted(() => {
                           </div>
                         </template>
 
-                        <!-- Loaded values -->
                         <template v-else-if="fieldValues[field.name]?.values?.length">
                           <div class="space-y-0.5">
                             <div
@@ -516,7 +525,6 @@ onUnmounted(() => {
                                 </Tooltip>
                               </TooltipProvider>
 
-                              <!-- Exclude button -->
                               <TooltipProvider>
                                 <Tooltip>
                                   <TooltipTrigger asChild>
@@ -534,7 +542,6 @@ onUnmounted(() => {
                               </TooltipProvider>
                             </div>
 
-                            <!-- Show total if more values exist -->
                             <div
                               v-if="fieldValues[field.name].total_distinct > fieldValues[field.name].values.length"
                               class="text-[10px] text-muted-foreground px-2 pt-1"
@@ -544,7 +551,6 @@ onUnmounted(() => {
                           </div>
                         </template>
 
-                        <!-- Empty state (loaded but no values) -->
                         <template v-else-if="getFieldState(field.name).status === 'loaded'">
                           <div class="text-xs text-muted-foreground italic py-1 px-2">
                             No values found
@@ -554,40 +560,25 @@ onUnmounted(() => {
                     </CollapsibleContent>
                   </div>
                 </Collapsible>
-              </div>
-            </div>
-          </template>
 
-          <!-- Other Fields Section -->
-          <template v-if="otherFields.length > 0">
-            <div>
-              <div class="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                <Database class="h-3 w-3" />
-                <span>Other Fields</span>
-                <Badge variant="secondary" class="ml-auto text-[9px] h-4 px-1">
-                  {{ otherFields.length }}
-                </Badge>
-              </div>
-
-              <div class="space-y-0.5">
                 <div
-                  v-for="field in otherFields"
-                  :key="field.name"
+                  v-for="field in group.plainFields"
+                  :key="`${group.id}-${field.name}`"
                   class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted/50 transition-colors cursor-pointer"
                   @click="handleFieldClick(field.name)"
                 >
-                  <component 
-                    :is="getTypeIcon(field.type)" 
+                  <component
+                    :is="getTypeIcon(field.type)"
                     :class="cn('h-3.5 w-3.5 flex-shrink-0', getTypeColorClass(field))"
                   />
-                  <span 
+                  <span
                     class="text-sm text-foreground truncate flex-1"
                     :title="field.name"
                   >
                     {{ field.name }}
                   </span>
-                  <Badge 
-                    variant="outline" 
+                  <Badge
+                    variant="outline"
                     class="text-[9px] h-4 px-1 font-normal flex-shrink-0 opacity-60"
                   >
                     {{ getCleanType(field.type) }}
@@ -599,7 +590,7 @@ onUnmounted(() => {
 
           <!-- Empty State -->
           <div
-            v-if="filteredFields.length === 0"
+            v-if="fieldGroups.length === 0"
             class="text-center py-8"
           >
             <Database class="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />

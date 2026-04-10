@@ -1,109 +1,55 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
 import ErrorAlert from '@/components/ui/ErrorAlert.vue'
-import { useRoute } from 'vue-router'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Badge } from '@/components/ui/badge'
 import { useSourcesStore } from '@/stores/sources'
-import { storeToRefs } from 'pinia'
-import SourceSparkline from '@/components/visualizations/SourceSparkline.vue'
-import { formatDate } from '@/utils/format'
+import { getSourceTypeLabel } from '@/lib/queryMetadata'
+import SourceInspectionOverview from './components/SourceInspectionOverview.vue'
+import SourceInspectionActivity from './components/SourceInspectionActivity.vue'
+import SourceInspectionSchema from './components/SourceInspectionSchema.vue'
 
+const route = useRoute()
+const router = useRouter()
 const sourcesStore = useSourcesStore()
 const { toast } = useToast()
-const route = useRoute()
-const selectedSourceId = ref<string>('')
-
-// Get reactive state from the store
 const { error: storeError } = storeToRefs(sourcesStore)
 
-// Computed properties to reactively access store state
-const isLoadingStats = computed(() =>
-  sourcesStore.isLoadingOperation(`getSourceStats-${selectedSourceId.value}`)
-)
+const selectedSourceId = ref<string>('')
 
-const statsError = computed(() => {
-  // Only show a fatal error when nothing could be loaded for the selected source
-  const hasAnyStats = !!(
-    stats.value.tableStats ||
-    stats.value.tableInfo ||
-    stats.value.ingestion ||
-    (stats.value.columnStats && stats.value.columnStats.length > 0)
-  )
-
-  if (!isLoadingStats.value && storeError.value && selectedSourceId.value && !hasAnyStats) {
-    return 'Failed to load source statistics. Please try again.';
-  }
-  return null;
-})
-
-// Computed properties for stats data
-const stats = computed(() => {
-  const empty = {
-    tableStats: null as any,
-    columnStats: null as any[] | null,
-    tableInfo: null as any,
-    ttl: null as any,
-    ingestion: null as any
-  }
-
-  if (!selectedSourceId.value) return empty
-
-  const sourceStats = sourcesStore.getSourceStatsById(parseInt(selectedSourceId.value))
-  return {
-    tableStats: sourceStats?.table_stats || null,
-    columnStats: sourceStats?.column_stats || null,
-    tableInfo: sourceStats?.table_info || null,
-    ttl: sourceStats?.ttl || null,
-    ingestion: sourceStats?.ingestion_stats || null
-  }
-})
-
-const ingestionSummary = computed(() => {
-  if (!stats.value.ingestion) {
+const selectedSource = computed(() => {
+  if (!selectedSourceId.value) {
     return null
   }
-
-  const latest = stats.value.ingestion.latest_ts
-    ? formatDate(stats.value.ingestion.latest_ts)
-    : 'Never'
-
-  return {
-    rows1h: stats.value.ingestion.rows_1h ?? 0,
-    rows24h: stats.value.ingestion.rows_24h ?? 0,
-    rows7d: stats.value.ingestion.rows_7d ?? 0,
-    latest,
-  }
+  return sourcesStore.visibleSources.find(source => source.id === Number(selectedSourceId.value)) ?? null
 })
 
-// Fetch all sources on component mount
-onMounted(async () => {
-  // Hydrate the store
-  await sourcesStore.hydrate()
-
-  // Check if sourceId is provided in the URL query parameters
-  const sourceIdFromQuery = route.query.sourceId as string
-  if (sourceIdFromQuery) {
-    selectedSourceId.value = sourceIdFromQuery
-    await fetchSourceStats()
-  }
-})
-
-// Watch for changes in route query parameters
-watch(() => route.query.sourceId, (newSourceId) => {
-  if (newSourceId && newSourceId !== selectedSourceId.value) {
-    selectedSourceId.value = newSourceId as string
-    fetchSourceStats()
-  }
-})
-
-// Fetch source stats
-const fetchSourceStats = async () => {
+const inspection = computed(() => {
   if (!selectedSourceId.value) {
-    // Keep this toast as it's a validation error, not an API error
+    return null
+  }
+  return sourcesStore.getSourceInspectionById(Number(selectedSourceId.value)) ?? null
+})
+
+const isLoadingInspection = computed(() =>
+  sourcesStore.isLoadingOperation(`getSourceInspection-${selectedSourceId.value}`)
+)
+
+const inspectionError = computed(() => {
+  const hasInspection = !!inspection.value
+  if (!isLoadingInspection.value && storeError.value && selectedSourceId.value && !hasInspection) {
+    return 'Failed to load source inspection. Please try again.'
+  }
+  return null
+})
+
+async function fetchSourceInspection() {
+  if (!selectedSourceId.value) {
     toast({
       title: 'Error',
       description: 'Please select a source first',
@@ -112,23 +58,69 @@ const fetchSourceStats = async () => {
     return
   }
 
-  // For the admin view, we don't need a team context (admin route)
-  // This is why this component is only accessible to admins in the router config
-  await sourcesStore.getSourceStats(parseInt(selectedSourceId.value))
+  await sourcesStore.getSourceInspection(Number(selectedSourceId.value))
 }
+
+function syncRouteSelection(sourceId: string) {
+  const nextQuery = { ...route.query }
+  if (sourceId) {
+    nextQuery.sourceId = sourceId
+  } else {
+    delete nextQuery.sourceId
+  }
+  router.replace({ query: nextQuery })
+}
+
+onMounted(async () => {
+  await sourcesStore.hydrate()
+
+  const sourceIdFromQuery = typeof route.query.sourceId === 'string' ? route.query.sourceId : ''
+  if (sourceIdFromQuery) {
+    selectedSourceId.value = sourceIdFromQuery
+    return
+  }
+
+  if (sourcesStore.visibleSources.length > 0) {
+    selectedSourceId.value = String(sourcesStore.visibleSources[0].id)
+  }
+})
+
+watch(
+  () => route.query.sourceId,
+  (newSourceId) => {
+    const nextValue = typeof newSourceId === 'string' ? newSourceId : ''
+    if (!nextValue || nextValue === selectedSourceId.value) {
+      return
+    }
+    selectedSourceId.value = nextValue
+  },
+)
+
+watch(
+  () => selectedSourceId.value,
+  async (newSourceId, oldSourceId) => {
+    if (!newSourceId || newSourceId === oldSourceId) {
+      return
+    }
+    if (route.query.sourceId !== newSourceId) {
+      syncRouteSelection(newSourceId)
+    }
+    await fetchSourceInspection()
+  },
+)
 </script>
 
 <template>
   <div class="space-y-6">
     <Card>
       <CardHeader>
-        <CardTitle>Source Statistics</CardTitle>
+        <CardTitle>Source Inspection</CardTitle>
         <CardDescription>
-          View disk usage and performance metrics for your ClickHouse tables
+          Inspect datasource metadata, storage characteristics, activity, and schema across backends.
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <div class="flex gap-4 mb-6">
+      <CardContent class="space-y-6">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-end">
           <div class="space-y-2 flex-1">
             <label for="source" class="block text-sm font-medium">Select Source</label>
             <Select v-model="selectedSourceId">
@@ -136,238 +128,52 @@ const fetchSourceStats = async () => {
                 <SelectValue placeholder="Select a source" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem v-for="source in sourcesStore.visibleSources" :key="source.id" :value="String(source.id)">
-                  {{ source.connection.database }}.{{ source.connection.table_name }}
+                <SelectItem
+                  v-for="source in sourcesStore.visibleSources"
+                  :key="source.id"
+                  :value="String(source.id)"
+                >
+                  {{ source.name }} - {{ getSourceTypeLabel(source) }}
                 </SelectItem>
               </SelectContent>
             </Select>
           </div>
-          <div class="flex items-end">
-            <Button @click="fetchSourceStats" :disabled="isLoadingStats">
-              <span v-if="isLoadingStats">Loading...</span>
-              <span v-else>Get Stats</span>
+          <div class="flex items-center gap-2">
+            <Badge v-if="selectedSource" variant="outline">
+              {{ getSourceTypeLabel(selectedSource) }}
+            </Badge>
+            <Button @click="fetchSourceInspection" :disabled="isLoadingInspection">
+              <span v-if="isLoadingInspection">Refreshing...</span>
+              <span v-else>Refresh Inspection</span>
             </Button>
           </div>
         </div>
 
-        <!-- Table Info Card -->
-        <Card v-if="stats.tableInfo" class="mb-6">
-          <CardHeader>
-            <CardTitle>Table Schema Information</CardTitle>
-            <CardDescription>
-              {{ stats.tableInfo.database }}.{{ stats.tableInfo.name }}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-              <div class="bg-muted p-3 rounded-md">
-                <div class="text-sm text-muted-foreground">Engine</div>
-                <div class="text-lg font-semibold">{{ stats.tableInfo.engine }}</div>
-                <div v-if="stats.tableInfo.engine_params && stats.tableInfo.engine_params.length > 0" class="text-xs text-muted-foreground mt-1">
-                  {{ stats.tableInfo.engine_params.join(', ') }}
-                </div>
-              </div>
-              <div class="bg-muted p-3 rounded-md">
-                <div class="text-sm text-muted-foreground">Columns</div>
-                <div class="text-lg font-semibold">{{ stats.tableInfo.columns?.length || 0 }}</div>
-              </div>
-              <div v-if="stats.tableInfo.sort_keys && stats.tableInfo.sort_keys.length > 0" class="bg-muted p-3 rounded-md">
-                <div class="text-sm text-muted-foreground">Sort Keys</div>
-                <div class="text-sm font-medium">{{ stats.tableInfo.sort_keys.join(', ') }}</div>
-              </div>
-              <div v-if="stats.ttl" class="bg-muted p-3 rounded-md">
-                <div class="text-sm text-muted-foreground">TTL</div>
-                <div class="text-sm font-medium">{{ stats.ttl }}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <ErrorAlert
+          v-if="inspectionError"
+          :error="inspectionError"
+          title="Failed to load inspection"
+          @retry="fetchSourceInspection"
+        />
 
-        <!-- Table Stats Card -->
-        <Card v-if="stats.tableStats" class="mb-6">
-          <CardHeader>
-            <CardTitle>Table Statistics</CardTitle>
-            <CardDescription>
-              Storage and performance metrics
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div class="bg-muted p-3 rounded-md">
-                <div class="text-sm text-muted-foreground">Rows</div>
-                <div class="text-2xl font-bold">{{ stats.tableStats.rows.toLocaleString() }}</div>
-              </div>
-              <div class="bg-muted p-3 rounded-md">
-                <div class="text-sm text-muted-foreground">Parts</div>
-                <div class="text-2xl font-bold">{{ stats.tableStats.part_count }}</div>
-              </div>
-              <div class="bg-muted p-3 rounded-md">
-                <div class="text-sm text-muted-foreground">Compression Ratio</div>
-                <div class="text-2xl font-bold">{{ stats.tableStats.compr_rate.toFixed(2) }}x</div>
-              </div>
-              <div class="bg-muted p-3 rounded-md">
-                <div class="text-sm text-muted-foreground">Compressed Size</div>
-                <div class="text-2xl font-bold">{{ stats.tableStats.compressed }}</div>
-              </div>
-              <div class="bg-muted p-3 rounded-md">
-                <div class="text-sm text-muted-foreground">Uncompressed Size</div>
-                <div class="text-2xl font-bold">{{ stats.tableStats.uncompressed }}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <!-- Ingestion Stats Card -->
-        <Card v-if="stats.ingestion" class="mb-6">
-          <CardHeader>
-            <CardTitle>Ingestion Activity</CardTitle>
-            <CardDescription>
-              Recent rows ingested and trends
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              <div class="bg-muted p-3 rounded-md">
-                <div class="text-sm text-muted-foreground">Rows last 1h</div>
-                <div class="text-2xl font-bold">{{ ingestionSummary?.rows1h.toLocaleString() }}</div>
-              </div>
-              <div class="bg-muted p-3 rounded-md">
-                <div class="text-sm text-muted-foreground">Rows last 24h</div>
-                <div class="text-2xl font-bold">{{ ingestionSummary?.rows24h.toLocaleString() }}</div>
-              </div>
-              <div class="bg-muted p-3 rounded-md">
-                <div class="text-sm text-muted-foreground">Rows last 7d</div>
-                <div class="text-2xl font-bold">{{ ingestionSummary?.rows7d.toLocaleString() }}</div>
-              </div>
-              <div class="bg-muted p-3 rounded-md">
-                <div class="text-sm text-muted-foreground">Latest ingest</div>
-                <div class="text-sm font-medium">{{ ingestionSummary?.latest }}</div>
-              </div>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div class="space-y-2">
-                <div class="text-sm text-muted-foreground">Last 24 hours (hourly)</div>
-                <SourceSparkline
-                  :data="stats.ingestion.hourly_buckets"
-                  :height="56"
-                />
-              </div>
-              <div class="space-y-2">
-                <div class="text-sm text-muted-foreground">Last 30 days (daily)</div>
-                <SourceSparkline
-                  :data="stats.ingestion.daily_buckets"
-                  :height="56"
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <!-- Column Stats Table -->
-        <Card v-if="stats.columnStats && stats.columnStats.length > 0">
-          <CardHeader>
-            <CardTitle>Column Statistics</CardTitle>
-            <CardDescription>
-              Storage and performance metrics for each column
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Column</TableHead>
-                  <TableHead>Compressed</TableHead>
-                  <TableHead>Uncompressed</TableHead>
-                  <TableHead>Compression Ratio</TableHead>
-                  <TableHead>Avg. Row Size</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow v-for="column in stats.columnStats" :key="column.column">
-                  <TableCell class="font-medium">{{ column.column }}</TableCell>
-                  <TableCell>{{ column.compressed }}</TableCell>
-                  <TableCell>{{ column.uncompressed }}</TableCell>
-                  <TableCell>{{ column.compr_ratio.toFixed(2) }}x</TableCell>
-                  <TableCell>{{ column.avg_row_size.toFixed(2) }} bytes</TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-
-        <!-- Schema Details Table -->
-        <Card v-if="stats.tableInfo && stats.tableInfo.ext_columns && stats.tableInfo.ext_columns.length > 0" class="mb-6">
-          <CardHeader>
-            <CardTitle>Schema Details</CardTitle>
-            <CardDescription>
-              Detailed column schema information
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Column</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Nullable</TableHead>
-                  <TableHead>Primary Key</TableHead>
-                  <TableHead>Default</TableHead>
-                  <TableHead>Comment</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow v-for="column in stats.tableInfo.ext_columns" :key="column.name">
-                  <TableCell class="font-medium">{{ column.name }}</TableCell>
-                  <TableCell>{{ column.type }}</TableCell>
-                  <TableCell>
-                    <span :class="column.is_nullable ? 'text-green-600' : 'text-red-600'">
-                      {{ column.is_nullable ? 'Yes' : 'No' }}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <span v-if="column.is_primary_key" class="text-blue-600 font-semibold">Yes</span>
-                    <span v-else class="text-muted-foreground">No</span>
-                  </TableCell>
-                  <TableCell class="text-sm">{{ column.default_expression || '–' }}</TableCell>
-                  <TableCell class="text-sm">{{ column.comment || '–' }}</TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-
-        <!-- Basic Schema Table (fallback if extended columns not available) -->
-        <Card v-else-if="stats.tableInfo && stats.tableInfo.columns && stats.tableInfo.columns.length > 0" class="mb-6">
-          <CardHeader>
-            <CardTitle>Schema Overview</CardTitle>
-            <CardDescription>
-              Basic column information
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Column</TableHead>
-                  <TableHead>Type</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow v-for="column in stats.tableInfo.columns" :key="column.name">
-                  <TableCell class="font-medium">{{ column.name }}</TableCell>
-                  <TableCell>{{ column.type }}</TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-
-        <ErrorAlert v-if="statsError" :error="statsError" title="Failed to load statistics" @retry="fetchSourceStats"
-          class="mb-6" />
-
-        <div v-if="!stats.tableStats && !isLoadingStats && !statsError" class="text-center py-6 text-muted-foreground">
-          Select a source and click "Get Stats" to view statistics
+        <div
+          v-else-if="!inspection && !isLoadingInspection"
+          class="rounded-lg border border-dashed p-8 text-center text-muted-foreground"
+        >
+          Select a source to inspect its backend metadata and schema.
         </div>
+
+        <template v-else-if="inspection">
+          <SourceInspectionOverview
+            :details="inspection.details"
+            :storage="inspection.storage"
+          />
+          <SourceInspectionActivity :activity="inspection.activity" />
+          <SourceInspectionSchema
+            :source="selectedSource"
+            :schema="inspection.schema"
+          />
+        </template>
       </CardContent>
     </Card>
   </div>

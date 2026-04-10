@@ -24,7 +24,7 @@ type Provider interface {
 	Histogram(context.Context, *models.Source, HistogramRequest) (*HistogramResult, error)
 	GetFieldValues(context.Context, *models.Source, FieldValuesRequest) (*FieldValuesResult, error)
 	GetAllFieldValues(context.Context, *models.Source, AllFieldValuesRequest) (AllFieldValuesResult, error)
-	GetSourceStats(context.Context, *models.Source) (*SourceStats, error)
+	InspectSource(context.Context, *models.Source) (*SourceInspection, error)
 	EvaluateAlert(context.Context, *models.Source, AlertQueryRequest) (*models.QueryResult, error)
 	InitializeSource(context.Context, *models.Source) error
 	RemoveSource(models.SourceID) error
@@ -44,7 +44,7 @@ const (
 	CapabilitySchemaInspection Capability = "schema_inspection"
 	CapabilityHistogram        Capability = "histogram"
 	CapabilityFieldValues      Capability = "field_values"
-	CapabilitySourceStats      Capability = "source_stats"
+	CapabilitySourceInspection Capability = "source_inspection"
 	CapabilityAISQLGeneration  Capability = "ai_sql_generation"
 )
 
@@ -231,12 +231,12 @@ func (s *Service) GetAllFieldValues(ctx context.Context, sourceID models.SourceI
 	return provider.GetAllFieldValues(ctx, source, req)
 }
 
-func (s *Service) GetSourceStats(ctx context.Context, sourceID models.SourceID) (*SourceStats, error) {
+func (s *Service) InspectSource(ctx context.Context, sourceID models.SourceID) (*SourceInspection, error) {
 	source, provider, err := s.sourceAndProvider(ctx, sourceID)
 	if err != nil {
 		return nil, err
 	}
-	return provider.GetSourceStats(ctx, source)
+	return provider.InspectSource(ctx, source)
 }
 
 func (s *Service) RemoveSource(source *models.Source) error {
