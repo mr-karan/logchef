@@ -15,11 +15,11 @@ export default defineConfig({
         src: "./public/logo.svg",
         alt: "Logchef",
       },
-      description: "Log analytics platform for ClickHouse",
+      description: "Log analytics platform for ClickHouse and VictoriaLogs",
       customCss: ["./src/assets/custom.css"],
-      social: [
-        { icon: "github", label: "GitHub", href: "https://github.com/mr-karan/logchef" },
-      ],
+      social: {
+        github: "https://github.com/mr-karan/logchef",
+      },
       head: [
         // Umami Analytics
         {

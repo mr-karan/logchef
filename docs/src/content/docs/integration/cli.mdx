@@ -5,7 +5,7 @@ description: Query logs from the terminal.
 
 import { LinkCard } from "@astrojs/starlight/components";
 
-A Rust CLI for querying logs from the terminal. Supports LogchefQL, raw SQL, syntax highlighting (via [tailspin](https://github.com/bensadeh/tailspin)), multi-context management (dev/staging/prod), and OIDC PKCE authentication.
+A Rust CLI for querying logs from the terminal. Supports LogchefQL across supported sources, raw ClickHouse SQL, syntax highlighting (via [tailspin](https://github.com/bensadeh/tailspin)), multi-context management (dev/staging/prod), and OIDC PKCE authentication.
 
 ## Quick Start
 
@@ -172,6 +172,11 @@ Generate API tokens from the LogChef web UI under your profile settings.
 
 The `query` command allows you to execute LogChefQL queries directly from your terminal.
 
+LogchefQL compiles to the selected source's native query language:
+
+- ClickHouse sources compile to SQL
+- VictoriaLogs sources compile to LogsQL
+
 ```bash
 logchef query 'level="error" and service="api"' --since 1h
 ```
@@ -181,7 +186,7 @@ logchef query 'level="error" and service="api"' --since 1h
 | Option | Shorthand | Description | Default |
 | :--- | :--- | :--- | :--- |
 | `--team` | `-t` | Team name (or ID) | (from config) |
-| `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
+| `--source` | `-S` | Source name, source ID, or ClickHouse `database.table_name` | (from config) |
 | `--since` | `-s` | Time range (e.g., "15m", "1h", "24h") | "15m" |
 | `--from` | | Absolute start time (ISO 8601) | |
 | `--to` | | Absolute end time (ISO 8601) | |
@@ -189,7 +194,7 @@ logchef query 'level="error" and service="api"' --since 1h
 | `--output` | | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
 | `--no-highlight` | | Disable syntax highlighting | `false` |
 | `--no-timestamp` | | Hide timestamp from text output | `false` |
-| `--show-sql` | | Display the generated SQL query | `false` |
+| `--show-sql` | | Display the generated backend query (legacy flag name) | `false` |
 
 #### Interactive Mode
 
@@ -213,7 +218,7 @@ This is useful for quick exploration without remembering exact team/source names
 # Get all logs from the last 15 minutes
 logchef query "" --team "production" --source "nginx-logs"
 
-# Use database.table_name format (copy from UI)
+# Use database.table_name format for ClickHouse sources (copy from UI)
 logchef query "" --team "production" --source "logs.nomad_apps"
 
 # Filter by field value
@@ -237,7 +242,7 @@ logchef query "" --output jsonl | jq '.msg'
 # JSON output is jq-friendly - stats are included in the object
 logchef query "" --output json | jq '{count: .count, time_ms: .stats.execution_time_ms}'
 
-# Show the SQL that will be executed
+# Show the generated backend query
 logchef query 'method="GET"' --show-sql
 
 # Use absolute time range
@@ -309,7 +314,7 @@ logchef sql "SELECT host, count() as cnt FROM logs.app GROUP BY host" --output j
 ```
 
 :::tip[When to use `sql` vs `query`]
-- Use `query` (LogChefQL) for quick filtering with convenient time flags (`--since 1h`)
+- Use `query` (LogChefQL) for quick filtering across supported sources with convenient time flags (`--since 1h`)
 - Use `sql` when you need aggregations, joins, CTEs, or full SQL control
 :::
 

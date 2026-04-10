@@ -7,11 +7,13 @@ Logchef implements a team-based access control system that helps organize and se
 
 ## Sources
 
-A Source in Logchef represents a distinct log stream that maps directly to a table in ClickHouse. Think of Sources as individual channels of log data that you can query independently.
+A Source in Logchef represents a distinct datasource-backed log scope that users can query independently. Depending on the backend, a source may map to a ClickHouse table or to a VictoriaLogs connection plus optional tenant/scope boundaries.
 
 ### Key Aspects of Sources
 
-- Each Source corresponds to a specific ClickHouse table
+- Each Source belongs to a specific datasource backend
+- ClickHouse sources map to a specific `database.table`
+- VictoriaLogs sources map to a base URL plus optional tenant and scope configuration
 - Sources can represent different applications, services, or environments
 - Sources have their own schema and configuration
 - Access to Sources is controlled through Team assignments
@@ -19,9 +21,9 @@ A Source in Logchef represents a distinct log stream that maps directly to a tab
 ### Example Sources
 
 ```
-app-production-logs   → Production application logs
-nginx-access-logs     → Web server access logs
-kubernetes-events     → Kubernetes cluster events
+app-production-logs   → Production application logs in ClickHouse
+nginx-access-logs     → Web server access logs in VictoriaLogs
+kubernetes-events     → Cluster events scoped to a specific source
 ```
 
 ## Teams

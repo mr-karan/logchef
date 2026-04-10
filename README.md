@@ -14,15 +14,15 @@
   <img alt="Logchef Log Explorer" src="docs/public/screenshots/hero-light.png">
 </p>
 
-Logchef is a lightweight, powerful log analytics platform designed for efficient log management and analysis. It operates as a single binary, utilizing ClickHouse for high-performance log storage and querying. Logchef provides an intuitive interface for exploring log data, making it suitable for development teams seeking a robust and scalable solution.
+Logchef is a lightweight log analytics platform for teams that want a strong query and control plane on top of existing log backends. It runs as a single binary and currently supports both ClickHouse and VictoriaLogs as datasource backends, while providing a unified UI for exploration, saved queries, alerting, and access control.
 
 ## Features
 
-- **Query-first log exploration**: Fast filtering with both LogchefQL and ClickHouse SQL.
-- **AI Query Assistant**: Turn natural language into SQL instantly.
+- **Query-first log exploration**: Fast filtering with LogchefQL plus native SQL or LogsQL depending on the source.
+- **AI Query Assistant**: Turn natural language into ClickHouse SQL instantly.
 - **Real-time alerting**: Schedule rules and send email or webhook notifications.
 - **OIDC + RBAC included**: SSO and team-based access out of the box.
-- **Schema-agnostic**: Point at any ClickHouse table without migrations.
+- **Datasource-first**: Connect ClickHouse tables or VictoriaLogs instances without reshaping your storage layer.
 - **Single binary**: One executable, no runtime dependencies.
 - **Comprehensive metrics**: Prometheus metrics for usage and performance.
 - **MCP integration**: Model Context Protocol server for AI assistants ([logchef-mcp](https://github.com/mr-karan/logchef-mcp)).

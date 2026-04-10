@@ -1,24 +1,25 @@
 ---
 title: Alerting
-description: SQL-based alerts with email and webhook notifications.
+description: Scheduled alerts with email and webhook notifications.
 ---
 
-Logchef evaluates SQL queries on a schedule and sends notifications when thresholds are exceeded. Alerts fire via email (SMTP) and webhooks — no external alerting system required.
+Logchef evaluates alert queries on a schedule and sends notifications when thresholds are exceeded. Alerts fire via email (SMTP) and webhooks — no external alerting system required.
 
 ## Quick Start
 
 1. Navigate to your team/source → **Alerts** → **New Alert**
-2. Write a filter condition: `severity_text = "ERROR"`
+2. Choose a query mode supported by the source
+3. Write a filter or native query
 3. Set threshold: greater than 100
 4. Set lookback: 5 minutes, frequency: 60 seconds
 5. Add recipients and/or webhook URLs
 6. Save
 
-Logchef generates the SQL automatically (`SELECT count(*) ... WHERE severity_text = 'ERROR' AND timestamp >= now() - toIntervalSecond(300)`), evaluates it every 60 seconds, and sends notifications when the count exceeds 100.
+For ClickHouse sources, Logchef can generate SQL automatically from a LogchefQL condition. For VictoriaLogs sources, alerts currently use native LogsQL only.
 
 ## Query Modes
 
-**LogchefQL mode** — Write a filter condition, pick an aggregate function. Time filter is added automatically.
+**Condition mode (ClickHouse)** — Write a LogchefQL filter condition and pick an aggregate function. Logchef generates SQL and adds the time filter automatically.
 
 ```
 severity_text = "ERROR"
@@ -26,7 +27,7 @@ status_code >= 500 and service = "api"
 body ~ "timeout"
 ```
 
-**SQL mode** — Full ClickHouse SQL. Must return a single numeric column named `value`.
+**Native mode** — Write the source's native alert query. The query must return a single numeric column named `value`.
 
 ```sql
 SELECT avg(JSONExtractFloat(log_attributes, 'response_time_ms')) as value
@@ -35,13 +36,19 @@ WHERE service = 'api-gateway'
   AND timestamp >= now() - toIntervalSecond(600)
 ```
 
+For VictoriaLogs sources, native mode uses LogsQL and evaluates through `stats_query`.
+
+```text
+count() if (level:error)
+```
+
 ## Alert Configuration
 
 | Field | Description |
 |-------|-------------|
 | Name | Human-readable identifier |
 | Severity | `info`, `warning`, or `critical` |
-| Query | LogchefQL condition or ClickHouse SQL |
+| Query | ClickHouse LogchefQL condition, ClickHouse SQL, or VictoriaLogs LogsQL depending on source |
 | Threshold | Value + operator (`>`, `>=`, `<`, `<=`, `==`, `!=`) |
 | Frequency | Evaluation interval in seconds |
 | Lookback | Time range for the query |
@@ -114,7 +121,7 @@ smtp_security = "starttls"
 
 ## Troubleshooting
 
-**Alerts not firing:** Check the alert is enabled, test the query manually, verify the threshold makes sense for your data volume.
+**Alerts not firing:** Check the alert is enabled, test the query manually, verify the threshold makes sense for your data volume, and confirm the selected query language matches the source type.
 
 **Alerts not delivered:** Verify SMTP settings, check that recipients or webhook URLs are configured on the alert, review delivery status in alert history.
 

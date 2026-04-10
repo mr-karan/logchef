@@ -9,7 +9,7 @@ The Field Values Sidebar provides a Kibana-inspired field exploration panel that
 
 The sidebar appears on the left side of the query interface and shows:
 
-- All queryable fields from your log source
+- Queryable fields discovered from your current source
 - Top 10 unique values for each field with occurrence counts
 - Quick-filter buttons to add or exclude values from your query
 
@@ -35,11 +35,13 @@ The sidebar uses a hybrid loading strategy to balance responsiveness with query 
 
 ### Auto-Loaded Fields
 
-**LowCardinality** and **Enum** columns load their values automatically when you open the sidebar. These column types are optimized for distinct value queries and return quickly.
+For ClickHouse, **LowCardinality** and **Enum** columns load their values automatically when you open the sidebar. These column types are optimized for distinct value queries and return quickly.
 
 ### On-Demand Fields
 
-**String** columns require a click to load their values. This prevents slow queries on high-cardinality fields (like request IDs or timestamps) that could have millions of unique values.
+For ClickHouse, **String** columns require a click to load their values. This prevents slow queries on high-cardinality fields (like request IDs or timestamps) that could have millions of unique values.
+
+For VictoriaLogs, fields are discovered dynamically for the selected time range and values are fetched on demand.
 
 ### Auto-Expand Behavior
 
@@ -75,7 +77,9 @@ The sidebar handles errors gracefully:
 
 ## Supported Field Types
 
-The sidebar works with these ClickHouse column types:
+The sidebar behavior depends on the datasource:
+
+### ClickHouse
 
 | Column Type | Loading | Notes |
 |-------------|---------|-------|
@@ -84,6 +88,12 @@ The sidebar works with these ClickHouse column types:
 | String | On-demand | Click to load (avoids slow high-cardinality queries) |
 
 Complex types like Map, Array, Tuple, and JSON are excluded since they don't have simple distinct values.
+
+### VictoriaLogs
+
+- Fields are discovered dynamically rather than read from a fixed SQL schema
+- Value lookups are time-range-aware
+- Internal fields such as `_stream` and `_stream_id` may exist, but Logchef hides noisy defaults in the main table view
 
 ## Tips
 

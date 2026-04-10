@@ -241,8 +241,8 @@ go build -o logchef-mcp ./cmd/logchef-mcp
 
 | Tool | Description |
 |------|-------------|
-| `query_logs` | Execute raw ClickHouse SQL against a log source (max 100 rows) |
-| `get_source_schema` | Get column names and ClickHouse types for a source |
+| `query_logs` | Execute a source-native raw query against a log source (SQL for ClickHouse, LogsQL for VictoriaLogs; max 100 rows) |
+| `get_source_schema` | Get source schema or discovered fields for a source |
 | `get_log_histogram` | Time-series histogram of log volume with optional grouping |
 | `get_collections` | List saved query collections for a team/source |
 | `get_collection` | Get a specific saved query by ID |
@@ -255,7 +255,7 @@ go build -o logchef-mcp ./cmd/logchef-mcp
 | Tool | Description |
 |------|-------------|
 | `query_logchefql` | Execute a LogchefQL query (max 500 rows) |
-| `translate_logchefql` | Translate LogchefQL to ClickHouse SQL without executing |
+| `translate_logchefql` | Translate LogchefQL to the source's native query language without executing |
 | `validate_logchefql` | Check LogchefQL syntax for errors without executing |
 
 ### Investigation
@@ -306,10 +306,10 @@ go build -o logchef-mcp ./cmd/logchef-mcp
 | `update_user` | Update user info |
 | `delete_user` | Delete a user |
 | `list_all_sources` | List all sources |
-| `create_source` | Create a ClickHouse log source |
-| `validate_source_connection` | Test ClickHouse connectivity |
+| `create_source` | Create a datasource-backed log source |
+| `validate_source_connection` | Test datasource connectivity |
 | `delete_source` | Delete a source |
-| `get_admin_source_stats` | ClickHouse table stats -- row count, sizes, compression |
+| `get_admin_source_stats` | Source stats and provider metadata |
 | `list_api_tokens` | List your API tokens |
 | `create_api_token` | Create a new API token |
 | `delete_api_token` | Delete an API token |
@@ -320,7 +320,7 @@ Resources provide read-only data that AI assistants can access without explicit 
 
 | URI Template | Description |
 |-------------|-------------|
-| `logchef://team/{team_id}/source/{source_id}/schema` | ClickHouse schema for a source |
+| `logchef://team/{team_id}/source/{source_id}/schema` | Schema or discovered fields for a source |
 | `logchef://team/{team_id}/source/{source_id}/collections` | List of saved queries |
 | `logchef://team/{team_id}/source/{source_id}/collection/{collection_id}` | A single saved query |
 
