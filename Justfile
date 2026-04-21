@@ -36,6 +36,7 @@ sqlc-generate:
 build-backend: sqlc-generate
     @echo "Building backend..."
     CGO_ENABLED=0 go build -o {{bin}} -ldflags "{{ldflags}}" ./cmd/server
+    cp {{bin}} bin/logchef
 
 # Build only the frontend
 build-ui:
