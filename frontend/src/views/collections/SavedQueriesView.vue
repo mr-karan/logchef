@@ -22,6 +22,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/composables/useToast";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -38,6 +46,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { TOAST_DURATION } from "@/lib/constants";
 import SaveQueryModal from "@/components/collections/SaveQueryModal.vue";
 import { getErrorMessage } from "@/api/types";
@@ -408,291 +417,321 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
 </script>
 
 <template>
-  <div class="container py-6 space-y-6">
-    <div class="flex justify-between items-center">
-      <h1 class="text-2xl font-bold tracking-tight">Collections</h1>
-      <Button v-if="canManageCollections && !isAllTeamsMode" @click="handleCreateNewQuery">
-        <Plus class="mr-2 h-4 w-4" />
-        Add to Collection
-      </Button>
-    </div>
-
-    <!-- Error Alert -->
-    <div v-if="contextError" class="bg-destructive/15 text-destructive px-4 py-2 rounded-md mb-2 flex items-center">
-      <span class="text-sm">{{ contextError }}</span>
-    </div>
-
-    <!-- Show loading state -->
-    <div v-if="showLoadingState" class="flex flex-col items-center justify-center h-[calc(100vh-12rem)] gap-4">
-      <div class="space-y-4 p-4 animate-pulse">
-        <div class="flex space-x-2">
-          <Skeleton class="h-4 w-32" />
+  <div class="space-y-6">
+    <Card>
+      <CardHeader>
+        <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <CardTitle>Collections</CardTitle>
+            <CardDescription>
+              Saved searches and SQL queries for quick reuse across your sources.
+            </CardDescription>
+          </div>
+          <Button v-if="canManageCollections && !isAllTeamsMode" @click="handleCreateNewQuery">
+            <Plus class="mr-2 h-4 w-4" />
+            Add to Collection
+          </Button>
         </div>
-        <div class="space-y-2">
-          <Skeleton class="h-4 w-48" />
-          <Skeleton class="h-4 w-40" />
-        </div>
-      </div>
-    </div>
+      </CardHeader>
 
-    <!-- Show empty state when no sources are available -->
-    <div v-else-if="showEmptyState" class="flex flex-col h-[calc(100vh-12rem)]">
-      <!-- Team selector bar -->
-      <div class="border-b pb-3 mb-2">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center space-x-2 text-sm">
-            <Select :model-value="contextTeamId ? contextTeamId.toString() : ''" 
-              @update:model-value="handleTeamChange" class="h-8 min-w-[160px]">
-              <SelectTrigger>
-                <SelectValue placeholder="Select a team">{{
-                  selectedTeamName
-                  }}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id.toString()">
-                  {{ team.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+      <CardContent class="space-y-6">
+        <Alert v-if="contextError" variant="destructive">
+          <AlertDescription>{{ contextError }}</AlertDescription>
+        </Alert>
+
+        <div v-if="showLoadingState" class="flex flex-col items-center justify-center py-16 gap-4">
+          <div class="space-y-4 p-4 animate-pulse">
+            <div class="flex space-x-2">
+              <Skeleton class="h-4 w-32" />
+            </div>
+            <div class="space-y-2">
+              <Skeleton class="h-4 w-48" />
+              <Skeleton class="h-4 w-40" />
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Empty state content -->
-      <div class="flex flex-col items-center justify-center flex-1 gap-4">
-        <div class="text-center space-y-2">
-          <h2 class="text-2xl font-semibold tracking-tight">
-            No Sources Found in {{ selectedTeamName }}
-          </h2>
-          <p class="text-muted-foreground">
-            This team doesn't have any log sources configured. You can add a
-            source or switch to another team.
-          </p>
-        </div>
-        <div class="flex gap-3">
-          <Button @click="router.push({ name: 'NewSource' })">
-            <Plus class="mr-2 h-4 w-4" />
-            Add Source
-          </Button>
-          <Button variant="outline" v-if="teamsStore.teams.length > 1">
-            Try switching teams using the selector above
-          </Button>
-        </div>
-      </div>
-    </div>
-
-    <div v-else>
-      <!-- Team and Source selectors -->
-      <div class="border-b pb-3 mb-2">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center space-x-4 text-sm">
-            <div class="flex flex-col space-y-1.5">
-              <label class="text-sm font-medium leading-none">Team</label>
-              <Select :model-value="isAllTeamsMode ? 'all' : (contextTeamId ? contextTeamId.toString() : '')"
-                @update:model-value="handleTeamChange" class="h-8 min-w-[160px]" :disabled="contextLoading">
+        <template v-else-if="showEmptyState">
+          <div class="flex flex-col gap-6">
+            <div class="flex max-w-xs flex-col gap-2">
+              <Label>Team</Label>
+              <Select
+                :model-value="contextTeamId ? contextTeamId.toString() : ''"
+                @update:model-value="handleTeamChange"
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select a team">
-                    <span v-if="contextLoading">Loading...</span>
-                    <span v-else>{{ selectedTeamName }}</span>
+                    {{ selectedTeamName }}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Teams</SelectItem>
-                  <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id.toString()">
+                  <SelectItem
+                    v-for="team in teamsStore.teams"
+                    :key="team.id"
+                    :value="team.id.toString()"
+                  >
                     {{ team.name }}
                   </SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            <span class="text-muted-foreground mt-6">→</span>
+            <div class="rounded-lg border p-6 text-center">
+              <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-muted">
+                <Plus class="h-6 w-6" />
+              </div>
+              <div class="space-y-2">
+                <h2 class="text-lg font-semibold tracking-tight">
+                  No Sources Found in {{ selectedTeamName }}
+                </h2>
+                <p class="text-muted-foreground">
+                  This team does not have any log sources configured yet.
+                </p>
+              </div>
 
-            <div class="flex flex-col space-y-1.5">
-              <label class="text-sm font-medium leading-none">Source</label>
-              <Select :model-value="selectedSourceId" @update:model-value="handleSourceChange" :disabled="isAllTeamsMode || contextLoading ||
-                !contextTeamId ||
-                ((sourcesStore.teamSources || []).length === 0 && !isAllSourcesMode)
-                " class="h-8 min-w-[200px]">
-                <SelectTrigger>
-                  <span v-if="contextLoading">Loading...</span>
-                  <span v-else>{{ selectedSourceName }}</span>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Sources</SelectItem>
-                  <SelectItem v-for="source in sourcesStore.teamSources || []" :key="source.id"
-                    :value="String(source.id)">
-                    {{ formatSourceName(source) }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+              <div class="mt-6 flex flex-wrap items-center justify-center gap-3">
+                <Button @click="router.push({ name: 'NewSource' })">
+                  <Plus class="mr-2 h-4 w-4" />
+                  Add Source
+                </Button>
+                <Button variant="outline" v-if="teamsStore.teams.length > 1">
+                  Try another team
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        </template>
 
-      <!-- Search box -->
-      <div class="my-4">
-        <div class="relative">
-          <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input v-model="searchQuery" type="search" placeholder="Search collection by name or description..."
-            class="pl-8" />
-          <Button v-if="searchQuery" variant="outline" size="sm" class="absolute right-2 top-1.5" @click="clearSearch">
-            Clear
-          </Button>
-        </div>
-      </div>
-
-      <!-- Loading state -->
-      <div v-if="isLoading" class="flex justify-center items-center py-8">
-        <Loader2 class="h-8 w-8 animate-spin text-primary" />
-        <p class="ml-2 text-muted-foreground">Loading collection...</p>
-      </div>
-
-      <!-- Empty state - no queries -->
-      <div v-else-if="!hasQueries" class="flex flex-col justify-center items-center py-12 space-y-4">
-        <div class="rounded-full bg-muted p-3">
-          <Search class="h-6 w-6 text-muted-foreground" />
-        </div>
-        <p class="text-xl text-muted-foreground">Collection is empty</p>
-        <p class="text-muted-foreground">{{ emptyStateMessage }}</p>
-        <div class="flex gap-3">
-          <Button v-if="searchQuery" variant="outline" @click="clearSearch">
-            Clear Search
-          </Button>
-          <Button v-if="canManageCollections && !searchQuery && !isAllTeamsMode" @click="handleCreateNewQuery">
-            Add to Collection
-          </Button>
-        </div>
-      </div>
-
-      <!-- Queries table -->
-      <div v-else>
-        <div class="text-sm text-muted-foreground mb-2">
-          {{ totalQueryCount }}
-          {{ totalQueryCount === 1 ? "query" : "queries" }} in collection
-        </div>
-
-        <Table class="font-sans">
-          <TableHeader>
-            <TableRow>
-              <TableHead class="w-[50px] font-sans"></TableHead>
-              <TableHead class="w-[250px] font-sans">Name</TableHead>
-              <TableHead v-if="isAllTeamsMode" class="w-[120px] font-sans">Team</TableHead>
-              <TableHead v-if="isAllSourcesMode" class="w-[150px] font-sans">Source</TableHead>
-              <TableHead class="font-sans">Description</TableHead>
-              <TableHead class="w-[100px] font-sans">Type</TableHead>
-              <TableHead class="w-[150px] font-sans">Created</TableHead>
-              <TableHead class="w-[150px] font-sans">Updated</TableHead>
-              <TableHead class="w-[100px] text-right font-sans">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            <TableRow 
-              v-for="query in filteredQueries" 
-              :key="query.id"
-              :class="{ 'bg-muted/50': openingQueryId === query.id }"
-            >
-              <TableCell class="w-[50px]">
-                <button
-                  v-if="canManageCollections"
-                  @click.stop="handleToggleBookmark(query)"
-                  class="p-1 rounded hover:bg-muted transition-colors"
-                  :title="query.is_bookmarked ? 'Remove bookmark' : 'Add bookmark'"
+        <template v-else>
+          <div class="space-y-4">
+            <div class="grid gap-4 xl:grid-cols-[minmax(0,220px)_minmax(0,260px)_minmax(0,1fr)] xl:items-end">
+              <div class="space-y-2">
+                <Label>Team</Label>
+                <Select
+                  :model-value="isAllTeamsMode ? 'all' : (contextTeamId ? contextTeamId.toString() : '')"
+                  @update:model-value="handleTeamChange"
+                  :disabled="contextLoading"
                 >
-                  <Star
-                    class="h-4 w-4 transition-transform hover:scale-110"
-                    :class="query.is_bookmarked ? 'text-amber-500 fill-amber-500' : 'text-muted-foreground'"
-                  />
-                </button>
-                <Star
-                  v-else
-                  class="h-4 w-4"
-                  :class="query.is_bookmarked ? 'text-amber-500 fill-amber-500' : 'text-muted-foreground'"
-                />
-              </TableCell>
-              <TableCell class="font-medium font-sans">
-                <a 
-                  @click.prevent="openingQueryId === null && openQuery(query)" 
-                  :href="getQueryUrl(query)"
-                  class="inline-flex items-center gap-2"
-                  :class="[
-                    openingQueryId === null 
-                      ? 'text-foreground hover:underline cursor-pointer' 
-                      : openingQueryId === query.id 
-                        ? 'text-foreground cursor-wait' 
-                        : 'text-muted-foreground cursor-not-allowed'
-                  ]"
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a team">
+                      <span v-if="contextLoading">Loading...</span>
+                      <span v-else>{{ selectedTeamName }}</span>
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Teams</SelectItem>
+                    <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id.toString()">
+                      {{ team.name }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div class="space-y-2">
+                <Label>Source</Label>
+                <Select
+                  :model-value="selectedSourceId"
+                  @update:model-value="handleSourceChange"
+                  :disabled="isAllTeamsMode || contextLoading || !contextTeamId || ((sourcesStore.teamSources || []).length === 0 && !isAllSourcesMode)"
                 >
-                  <Loader2 
-                    v-if="openingQueryId === query.id" 
-                    class="h-4 w-4 animate-spin" 
-                  />
-                  {{ query.name }}
-                </a>
-              </TableCell>
-              <TableCell v-if="isAllTeamsMode">{{ query.team_name || `Team ${query.team_id}` }}</TableCell>
-              <TableCell v-if="isAllSourcesMode">{{ query.source_name || getSourceName(query.source_id) }}</TableCell>
-              <TableCell>{{ query.description || "-" }}</TableCell>
-              <TableCell>
-                <Badge :class="[
-                  'px-2.5 py-0.5 text-xs font-medium rounded-full',
-                  query.query_type === 'logchefql'
-                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                    : query.query_type === 'sql'
-                      ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                      : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-                ]">
-                  {{
-                    query.query_type === "logchefql"
-                      ? "Search"
-                      : query.query_type === "sql"
-                        ? "SQL"
-                        : query.query_type
-                  }}
-                </Badge>
-              </TableCell>
-              <TableCell>{{ formatTime(query.created_at) }}</TableCell>
-              <TableCell>{{ formatTime(query.updated_at) }}</TableCell>
-              <TableCell class="text-right">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon">
-                      <ChevronDown class="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem 
-                      @click="openingQueryId === null && openQuery(query)"
-                      :disabled="openingQueryId !== null"
+                  <SelectTrigger>
+                    <span v-if="contextLoading">Loading...</span>
+                    <span v-else>{{ selectedSourceName }}</span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Sources</SelectItem>
+                    <SelectItem
+                      v-for="source in sourcesStore.teamSources || []"
+                      :key="source.id"
+                      :value="String(source.id)"
                     >
-                      <Loader2 v-if="openingQueryId === query.id" class="mr-2 h-4 w-4 animate-spin" />
-                      <Eye v-else class="mr-2 h-4 w-4" />
-                      {{ openingQueryId === query.id ? 'Opening...' : 'Open' }}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem @click="copyCollectionUrl(query)">
-                      <Link class="mr-2 h-4 w-4" />
-                      Copy Link
-                    </DropdownMenuItem>
-                    <DropdownMenuItem v-if="canManageCollections" @click="editQuery(query)">
-                      <Pencil class="mr-2 h-4 w-4" />
-                      Edit
-                    </DropdownMenuItem>
-                    <DropdownMenuItem v-if="canManageCollections" @click="handleDeleteQuery(query)"
-                      class="text-destructive">
-                      <Trash2 class="mr-2 h-4 w-4" />
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
-      </div>
+                      {{ formatSourceName(source) }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-      <!-- Edit query modal -->
-      <SaveQueryModal v-if="showSaveQueryModal && editingQuery" :is-open="showSaveQueryModal"
-        :initial-data="editingQuery" :is-edit-mode="true" @close="showSaveQueryModal = false" @save="handleSaveQuery" @update="handleUpdateQuery" />
-    </div>
+              <div class="space-y-2">
+                <Label>Search</Label>
+                <div class="relative w-full">
+                  <Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    v-model="searchQuery"
+                    type="search"
+                    placeholder="Search collections by name or description..."
+                    class="pl-9 pr-16"
+                  />
+                  <Button
+                    v-if="searchQuery"
+                    variant="ghost"
+                    size="sm"
+                    class="absolute right-1 top-1.5 h-7 px-2 text-xs"
+                    @click="clearSearch"
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="isLoading" class="flex items-center justify-center py-10">
+            <Loader2 class="h-8 w-8 animate-spin text-primary" />
+            <p class="ml-2 text-muted-foreground">Loading collections...</p>
+          </div>
+
+          <div v-else-if="!hasQueries" class="rounded-lg border p-6 text-center">
+            <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted/50">
+              <Search class="h-5 w-5 text-muted-foreground" />
+            </div>
+            <h3 class="text-lg font-semibold mb-1">Collection is empty</h3>
+            <p class="text-muted-foreground">{{ emptyStateMessage }}</p>
+            <div class="mt-6 flex items-center justify-center gap-3">
+              <Button v-if="searchQuery" variant="outline" @click="clearSearch">
+                Clear Search
+              </Button>
+              <Button
+                v-if="canManageCollections && !searchQuery && !isAllTeamsMode"
+                @click="handleCreateNewQuery"
+              >
+                Add to Collection
+              </Button>
+            </div>
+          </div>
+
+          <div v-else class="space-y-3">
+            <div class="text-sm text-muted-foreground">
+              Showing {{ totalQueryCount }}
+              {{ totalQueryCount === 1 ? "query" : "queries" }}
+            </div>
+
+            <div class="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead class="w-[50px]"></TableHead>
+                    <TableHead class="w-[250px]">Name</TableHead>
+                    <TableHead v-if="isAllTeamsMode" class="w-[120px]">Team</TableHead>
+                    <TableHead v-if="isAllSourcesMode" class="w-[150px]">Source</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead class="w-[100px]">Type</TableHead>
+                    <TableHead class="w-[150px]">Created</TableHead>
+                    <TableHead class="w-[150px]">Updated</TableHead>
+                    <TableHead class="w-[100px] text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow
+                    v-for="query in filteredQueries"
+                    :key="query.id"
+                    :class="{ 'bg-muted/50': openingQueryId === query.id }"
+                  >
+                    <TableCell class="w-[50px]">
+                      <button
+                        v-if="canManageCollections"
+                        @click.stop="handleToggleBookmark(query)"
+                        class="rounded p-1 transition-colors hover:bg-muted"
+                        :title="query.is_bookmarked ? 'Remove bookmark' : 'Add bookmark'"
+                      >
+                        <Star
+                          class="h-4 w-4 transition-transform hover:scale-110"
+                          :class="query.is_bookmarked ? 'text-amber-500 fill-amber-500' : 'text-muted-foreground'"
+                        />
+                      </button>
+                      <Star
+                        v-else
+                        class="h-4 w-4"
+                        :class="query.is_bookmarked ? 'text-amber-500 fill-amber-500' : 'text-muted-foreground'"
+                      />
+                    </TableCell>
+                    <TableCell class="font-medium">
+                      <a
+                        @click.prevent="openingQueryId === null && openQuery(query)"
+                        :href="getQueryUrl(query)"
+                        class="inline-flex items-center gap-2"
+                        :class="[
+                          openingQueryId === null
+                            ? 'text-foreground hover:underline cursor-pointer'
+                            : openingQueryId === query.id
+                              ? 'text-foreground cursor-wait'
+                              : 'text-muted-foreground cursor-not-allowed'
+                        ]"
+                      >
+                        <Loader2
+                          v-if="openingQueryId === query.id"
+                          class="h-4 w-4 animate-spin"
+                        />
+                        {{ query.name }}
+                      </a>
+                    </TableCell>
+                    <TableCell v-if="isAllTeamsMode">{{ query.team_name || `Team ${query.team_id}` }}</TableCell>
+                    <TableCell v-if="isAllSourcesMode">{{ query.source_name || getSourceName(query.source_id) }}</TableCell>
+                    <TableCell>{{ query.description || "-" }}</TableCell>
+                    <TableCell>
+                      <Badge :variant="query.query_type === 'logchefql' ? 'outline' : 'secondary'">
+                        {{
+                          query.query_type === "logchefql"
+                            ? "Search"
+                            : query.query_type === "sql"
+                              ? "SQL"
+                              : query.query_type
+                        }}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{{ formatTime(query.created_at) }}</TableCell>
+                    <TableCell>{{ formatTime(query.updated_at) }}</TableCell>
+                    <TableCell class="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon">
+                            <ChevronDown class="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            @click="openingQueryId === null && openQuery(query)"
+                            :disabled="openingQueryId !== null"
+                          >
+                            <Loader2 v-if="openingQueryId === query.id" class="mr-2 h-4 w-4 animate-spin" />
+                            <Eye v-else class="mr-2 h-4 w-4" />
+                            {{ openingQueryId === query.id ? 'Opening...' : 'Open' }}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem @click="copyCollectionUrl(query)">
+                            <Link class="mr-2 h-4 w-4" />
+                            Copy Link
+                          </DropdownMenuItem>
+                          <DropdownMenuItem v-if="canManageCollections" @click="editQuery(query)">
+                            <Pencil class="mr-2 h-4 w-4" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            v-if="canManageCollections"
+                            @click="handleDeleteQuery(query)"
+                            class="text-destructive"
+                          >
+                            <Trash2 class="mr-2 h-4 w-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <SaveQueryModal
+            v-if="showSaveQueryModal && editingQuery"
+            :is-open="showSaveQueryModal"
+            :initial-data="editingQuery"
+            :is-edit-mode="true"
+            @close="showSaveQueryModal = false"
+            @save="handleSaveQuery"
+            @update="handleUpdateQuery"
+          />
+        </template>
+      </CardContent>
+    </Card>
   </div>
 </template>

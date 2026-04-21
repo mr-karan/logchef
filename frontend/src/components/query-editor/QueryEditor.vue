@@ -406,6 +406,7 @@ import {
 import { logchefqlApi } from "@/api/logchefql";
 import { storeToRefs } from 'pinia';
 import { useExploreStore } from "@/stores/explore";
+import { useMetaStore } from "@/stores/meta";
 import { useTeamsStore } from "@/stores/teams";
 import { useVariableStore } from '@/stores/variables';
 import { useVariables, extractVariablesWithOptional, extractVariableNames } from "@/composables/useVariables.ts";
@@ -477,6 +478,7 @@ const emit = defineEmits<{
 
 const isDark = useDark();
 const exploreStore = useExploreStore();
+const metaStore = useMetaStore();
 const variableStore = useVariableStore();
 const teamsStore = useTeamsStore();
 const { convertVariables } = useVariables();
@@ -500,14 +502,37 @@ const generatedSql = computed(() => exploreStore.generatedAiSql);
 
 const theme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
 const isEditorEmpty = computed(() => !editorContent.value?.trim());
-const timeoutOptions = [
+const baseTimeoutOptions = [
   { label: "10s", value: 10 },
   { label: "30s", value: 30 },
   { label: "1m", value: 60 },
   { label: "2m", value: 120 },
   { label: "5m", value: 300 },
 ];
-const selectedTimeout = computed(() => String(props.queryTimeout || 30));
+const maxQueryTimeoutSeconds = computed(() => metaStore.maxQueryTimeoutSeconds || 120);
+
+function formatTimeoutLabel(seconds: number): string {
+  if (seconds % 60 === 0) {
+    return `${seconds / 60}m`;
+  }
+  return `${seconds}s`;
+}
+
+const timeoutOptions = computed(() => {
+  const maxTimeout = Math.max(maxQueryTimeoutSeconds.value, 10);
+  const options = baseTimeoutOptions.filter((option) => option.value <= maxTimeout);
+
+  if (options.length === 0 || options[options.length - 1]?.value !== maxTimeout) {
+    options.push({ label: formatTimeoutLabel(maxTimeout), value: maxTimeout });
+  }
+
+  return options;
+});
+
+const selectedTimeout = computed(() => {
+  const requestedTimeout = props.queryTimeout || 30;
+  return String(Math.min(requestedTimeout, maxQueryTimeoutSeconds.value));
+});
 
 const currentPlaceholder = computed(() => {
   if (props.placeholder) return props.placeholder;
@@ -534,6 +559,19 @@ const handleTimeoutChange = (value: string) => {
     emit("update:query-timeout", parsed);
   }
 };
+
+watch(
+  () => [props.queryTimeout, maxQueryTimeoutSeconds.value] as const,
+  ([queryTimeout, maxTimeout]) => {
+    const requestedTimeout = queryTimeout || 30;
+    const clampedTimeout = Math.min(requestedTimeout, maxTimeout);
+
+    if (requestedTimeout !== clampedTimeout) {
+      emit("update:query-timeout", clampedTimeout);
+    }
+  },
+  { immediate: true }
+);
 
 const handleEditorChange = (value: string | undefined) => {
   const currentQuery = value ?? "";

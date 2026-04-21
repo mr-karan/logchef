@@ -160,7 +160,7 @@ const (
 
 	defaultServerPort         = 8125
 	defaultServerHost         = "0.0.0.0"
-	defaultHTTPServerTimeout  = 30 * time.Second
+	defaultHTTPServerTimeout  = 15 * time.Minute
 	defaultServerSecureCookie = true
 	defaultSQLitePath         = "local.db"
 	defaultLoggingLevel       = "info"
@@ -184,7 +184,7 @@ const (
 	defaultQueryMaxPreviewLimit      = 100000
 	defaultQueryMaxResponseBytes     = 64 * 1024 * 1024
 	defaultQueryDefaultTimeoutSecs   = 30
-	defaultQueryMaxTimeoutSecs       = 120
+	defaultQueryMaxTimeoutSecs       = 300
 	defaultQueryMaxConcurrentPerUser = 3
 	defaultQueryMaxConcurrentGlobal  = 30
 
