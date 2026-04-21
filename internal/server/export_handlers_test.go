@@ -1,6 +1,12 @@
 package server
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/mr-karan/logchef/pkg/models"
+)
 
 func TestNormalizeExplicitExportFormat(t *testing.T) {
 	t.Parallel()
@@ -56,5 +62,38 @@ func TestInferExportFormatFromAccept(t *testing.T) {
 				t.Fatalf("inferExportFormatFromAccept(%q) = %q, want %q", tc.accept, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestExportJobURLsAreRelativePaths(t *testing.T) {
+	t.Parallel()
+
+	job := &models.ExportJob{
+		ID:        "export-123",
+		TeamID:    5,
+		SourceID:  9,
+		Status:    models.ExportJobStatusComplete,
+		Format:    "csv",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+
+	resp := exportJobResponse(job)
+
+	wantStatus := "/api/v1/teams/5/sources/9/exports/export-123"
+	if resp.StatusURL != wantStatus {
+		t.Fatalf("StatusURL = %q, want %q", resp.StatusURL, wantStatus)
+	}
+	if strings.Contains(resp.StatusURL, "://") {
+		t.Fatalf("StatusURL should be a relative path, got %q", resp.StatusURL)
+	}
+
+	wantDownload := "/api/v1/teams/5/sources/9/exports/export-123/download"
+	if resp.DownloadURL != wantDownload {
+		t.Fatalf("DownloadURL = %q, want %q", resp.DownloadURL, wantDownload)
+	}
+	if strings.Contains(resp.DownloadURL, "://") {
+		t.Fatalf("DownloadURL should be a relative path, got %q", resp.DownloadURL)
 	}
 }

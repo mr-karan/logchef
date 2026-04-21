@@ -104,7 +104,7 @@ func (s *Server) handleCreateExportJob(c *fiber.Ctx) error {
 	}
 	go s.runExportJob(job.ID, teamID, sourceID, user.ID, user.Email, runReq)
 
-	return SendSuccess(c, fiber.StatusAccepted, exportJobResponse(c, job))
+	return SendSuccess(c, fiber.StatusAccepted, exportJobResponse(job))
 }
 
 func (s *Server) handleGetExportJob(c *fiber.Ctx) error {
@@ -115,7 +115,7 @@ func (s *Server) handleGetExportJob(c *fiber.Ctx) error {
 	if time.Now().UTC().After(job.ExpiresAt) {
 		return SendErrorWithType(c, fiber.StatusGone, "Export has expired", models.NotFoundErrorType)
 	}
-	return SendSuccess(c, fiber.StatusOK, exportJobResponse(c, job))
+	return SendSuccess(c, fiber.StatusOK, exportJobResponse(job))
 }
 
 func (s *Server) handleDownloadExportJob(c *fiber.Ctx) error {
@@ -346,7 +346,7 @@ func exportFailureMessage(err error) string {
 	return err.Error()
 }
 
-func exportJobResponse(c *fiber.Ctx, job *models.ExportJob) models.ExportJobResponse {
+func exportJobResponse(job *models.ExportJob) models.ExportJobResponse {
 	return models.ExportJobResponse{
 		ID:           job.ID,
 		Status:       job.Status,
@@ -359,27 +359,17 @@ func exportJobResponse(c *fiber.Ctx, job *models.ExportJob) models.ExportJobResp
 		CompletedAt:  job.CompletedAt,
 		CreatedAt:    job.CreatedAt,
 		UpdatedAt:    job.UpdatedAt,
-		StatusURL:    buildExportJobStatusURL(c, job),
-		DownloadURL:  buildExportJobDownloadURL(c, job),
+		StatusURL:    buildExportJobStatusURL(job),
+		DownloadURL:  buildExportJobDownloadURL(job),
 	}
 }
 
-func buildExportJobStatusURL(c *fiber.Ctx, job *models.ExportJob) string {
-	base := strings.TrimRight(c.BaseURL(), "/")
-	path := fmt.Sprintf("/api/v1/teams/%d/sources/%d/exports/%s", job.TeamID, job.SourceID, job.ID)
-	if base == "" {
-		return path
-	}
-	return base + path
+func buildExportJobStatusURL(job *models.ExportJob) string {
+	return fmt.Sprintf("/api/v1/teams/%d/sources/%d/exports/%s", job.TeamID, job.SourceID, job.ID)
 }
 
-func buildExportJobDownloadURL(c *fiber.Ctx, job *models.ExportJob) string {
-	base := strings.TrimRight(c.BaseURL(), "/")
-	path := fmt.Sprintf("/api/v1/teams/%d/sources/%d/exports/%s/download", job.TeamID, job.SourceID, job.ID)
-	if base == "" {
-		return path
-	}
-	return base + path
+func buildExportJobDownloadURL(job *models.ExportJob) string {
+	return fmt.Sprintf("/api/v1/teams/%d/sources/%d/exports/%s/download", job.TeamID, job.SourceID, job.ID)
 }
 
 func (s *Server) startBackgroundCleanup() {
