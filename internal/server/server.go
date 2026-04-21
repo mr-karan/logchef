@@ -121,6 +121,7 @@ func New(opts ServerOptions) *Server {
 
 	// Register all application routes.
 	s.setupRoutes()
+	s.startBackgroundCleanup()
 
 	return s
 }
@@ -153,6 +154,11 @@ func (s *Server) setupRoutes() {
 	api.Get("/me/collections", s.requireAuth, s.handleListCurrentUserCollections)
 	api.Get("/me/preferences", s.requireAuth, s.handleGetUserPreferences)
 	api.Put("/me/preferences", s.requireAuth, s.handleUpdateUserPreferences)
+
+	// Share links for ad hoc queries. Share payload access is still scoped by
+	// team membership and source linkage in the handler.
+	api.Get("/query-shares/:token", s.requireAuth, s.handleGetQueryShare)
+	api.Delete("/query-shares/:token", s.requireAuth, s.handleDeleteQueryShare)
 
 	// API Token Management for current user
 	api.Get("/me/tokens", s.requireAuth, s.handleListAPITokens)
@@ -236,11 +242,16 @@ func (s *Server) setupRoutes() {
 
 		// Query and explore logs
 		teamSourceOps.Post("/logs/query", s.handleQueryLogs)
+		teamSourceOps.Post("/logs/export", s.handleExportLogs)
 		teamSourceOps.Post("/logs/query/:queryID/cancel", s.handleCancelQuery)
+		teamSourceOps.Post("/exports", s.handleCreateExportJob)
+		teamSourceOps.Get("/exports/:exportID", s.handleGetExportJob)
+		teamSourceOps.Get("/exports/:exportID/download", s.handleDownloadExportJob)
 		teamSourceOps.Get("/schema", s.handleGetSourceSchema)
 		teamSourceOps.Post("/logs/histogram", s.handleGetHistogram)
 		teamSourceOps.Post("/logs/context", s.handleGetLogContext)
 		teamSourceOps.Post("/generate-sql", s.handleGenerateAISQL)
+		teamSourceOps.Post("/query-shares", s.handleCreateQueryShare)
 
 		// LogchefQL endpoints - query language parsing and translation
 		teamSourceOps.Post("/logchefql/translate", s.handleLogchefQLTranslate) // Translate LogchefQL to SQL

@@ -20,19 +20,21 @@ import { FieldSideBar } from "@/components/field-sidebar";
 import { getErrorMessage } from "@/api/types";
 import DataTable from "./table/data-table.vue";
 import CompactLogList from "./table/CompactLogListSimple.vue";
-import { exportRawDataToCSV } from "./table/export";
 import SaveQueryModal from "@/components/collections/SaveQueryModal.vue";
 import QueryEditor from "@/components/query-editor/QueryEditor.vue";
 import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useUrlState } from "@/composables/useUrlState";
 import { useQuery } from "@/composables/useQuery";
 import { useTimeRange } from "@/composables/useTimeRange";
+import { useVariables } from "@/composables/useVariables";
 
 import { useContextStore } from "@/stores/context";
+import { exploreApi } from "@/api/explore";
 import type { ComponentPublicInstance } from "vue";
 import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedTeamQuery } from "@/api/savedQueries";
 import { logchefqlApi, type FilterCondition } from "@/api/logchefql";
+import { generateCliCommand } from "@/utils/cliCommand";
 
 // Type alias for backwards compatibility
 type QueryCondition = FilterCondition;
@@ -55,6 +57,7 @@ const savedQueriesStore = useSavedQueriesStore();
 const preferencesStore = usePreferencesStore();
 const { preferences } = storeToRefs(preferencesStore);
 const { toast } = useToast();
+const { getVariablesForApi } = useVariables();
 
 const urlState = useUrlState();
 const isInitializing = computed(() => urlState.state.value !== 'ready');
@@ -112,6 +115,32 @@ const isChangingContext = computed(() => {
   const sourceLoading = sourcesStore.isLoadingSourceDetails;
   return teamLoading || sourceLoading;
 });
+const isExporting = ref(false);
+
+const getQueryParamValue = (key: string) => {
+  const value = route.query[key];
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  return typeof value === "string" ? value : undefined;
+};
+
+const buildExploreNavigationQuery = (
+  overrides: Partial<Record<"team" | "source" | "t" | "start" | "end" | "limit" | "mode", string | undefined>> = {}
+) => {
+  const query: Record<string, string> = {};
+
+  for (const key of ["team", "source", "t", "start", "end", "limit", "mode"] as const) {
+    const value = Object.prototype.hasOwnProperty.call(overrides, key)
+      ? overrides[key]
+      : getQueryParamValue(key);
+    if (value) {
+      query[key] = value;
+    }
+  }
+
+  return query;
+};
 
 // Simple team/source change handlers using router
 function handleTeamChange(teamIdStr: string) {
@@ -119,11 +148,10 @@ function handleTeamChange(teamIdStr: string) {
   if (isNaN(teamId)) return;
 
   router.replace({
-    query: {
-      ...route.query,
+    query: buildExploreNavigationQuery({
       team: String(teamId),
-      source: undefined // Clear source when team changes
-    }
+      source: undefined,
+    }),
   });
 }
 
@@ -132,10 +160,9 @@ function handleSourceChange(sourceIdStr: string) {
   if (isNaN(sourceId)) return;
 
   router.replace({
-    query: {
-      ...route.query,
-      source: String(sourceId)
-    }
+    query: buildExploreNavigationQuery({
+      source: String(sourceId),
+    }),
   });
 }
 
@@ -403,7 +430,7 @@ const handleQueryExecution = async (debouncingKey = "") => {
     }
 
     if (result && result.success && !isInitializing.value) {
-      urlState.pushHistoryEntry();
+      await urlState.pushHistoryEntry();
 
       if (activeMode.value === 'sql') {
         handleTimeRangeUpdate();
@@ -661,16 +688,202 @@ const openDatePicker = () => {
   }
 };
 
-const handleExport = () => {
-  const logs = exploreStore.logs;
-  const columns = exploreStore.columns;
-  if (!logs?.length || !columns?.length) return;
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-  const sourceName = selectedSourceName.value || 'logs';
-  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
-  exportRawDataToCSV(logs, columns, {
-    fileName: `${sourceName}-export-${timestamp}`,
-  });
+const triggerBrowserDownload = (downloadUrl: string, fileName?: string) => {
+  const link = document.createElement("a");
+  link.href = downloadUrl;
+  if (fileName) {
+    link.download = fileName;
+  }
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+};
+
+const waitForExportCompletion = async (exportId: string, timeoutSeconds: number) => {
+  if (!currentTeamId.value || !currentSourceId.value) {
+    throw new Error("Team and source are required for export");
+  }
+
+  const deadline = Date.now() + (timeoutSeconds + 60) * 1000;
+  while (Date.now() < deadline) {
+    const response = await exploreApi.getExportJob(currentSourceId.value, exportId, currentTeamId.value);
+    const job = response.data;
+    if (!job) {
+      throw new Error("Export status is unavailable");
+    }
+    if (job.status === "complete") {
+      return job;
+    }
+    if (job.status === "failed") {
+      throw new Error(job.error_message || "Export failed");
+    }
+    await sleep(1000);
+  }
+
+  throw new Error("Export is taking longer than expected. Please try again.");
+};
+
+const handleExport = async () => {
+  if (!currentTeamId.value || !currentSourceId.value) return;
+
+  const sql = exploreStore.lastExecutedState?.sqlQuery ||
+    (exploreStore.activeMode === "sql" ? exploreStore.sqlForExecution : "");
+  if (!sql?.trim()) {
+    toast({
+      title: "Cannot Export",
+      description: "Run the query before downloading results.",
+      variant: "destructive",
+      duration: TOAST_DURATION.WARNING,
+    });
+    return;
+  }
+
+  try {
+    isExporting.value = true;
+    const queryTimeout = Math.max(exploreStore.queryTimeout, 120);
+    const response = await exploreApi.createExportJob(currentSourceId.value, {
+      raw_sql: sql,
+      format: "csv",
+      query_timeout: queryTimeout,
+      variables: getVariablesForApi(),
+    }, currentTeamId.value);
+    const job = response.data;
+    if (!job?.id) {
+      throw new Error("Export job was not created");
+    }
+
+    const completedJob = await waitForExportCompletion(job.id, queryTimeout);
+    if (!completedJob.download_url) {
+      throw new Error("Export download is unavailable");
+    }
+
+    triggerBrowserDownload(completedJob.download_url, completedJob.file_name);
+  } catch (error: any) {
+    toast({
+      title: "Export Failed",
+      description: getErrorMessage(error),
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR,
+    });
+  } finally {
+    isExporting.value = false;
+  }
+};
+
+const calendarDatePartToDate = (value: any) => {
+  if (!value) return undefined;
+
+  return new Date(
+    value.year,
+    value.month - 1,
+    value.day,
+    "hour" in value ? value.hour : 0,
+    "minute" in value ? value.minute : 0,
+    "second" in value ? value.second : 0
+  );
+};
+
+const copyTextWithFallback = async (text: string) => {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (error) {
+      console.warn("Clipboard API failed, falling back to execCommand:", error);
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+
+  if (!copied) {
+    throw new Error("Failed to copy share link");
+  }
+};
+
+const handleCopyCliCommand = async () => {
+  if (!currentTeamId.value || !currentSourceId.value) {
+    toast({
+      title: "Cannot copy CLI command",
+      description: "Team and source must be selected.",
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR,
+    });
+    return;
+  }
+
+  try {
+    const timeRange = exploreStore.timeRange;
+    const command = generateCliCommand({
+      teamId: currentTeamId.value,
+      sourceId: currentSourceId.value,
+      mode: exploreStore.activeMode,
+      query:
+        exploreStore.activeMode === "logchefql"
+          ? exploreStore.logchefqlCode
+          : exploreStore.rawSql,
+      relativeTime: exploreStore.selectedRelativeTime || undefined,
+      absoluteStart: calendarDatePartToDate(timeRange?.start),
+      absoluteEnd: calendarDatePartToDate(timeRange?.end),
+      limit: exploreStore.limit,
+      timeout: exploreStore.queryTimeout,
+    });
+
+    await copyTextWithFallback(command);
+    toast({
+      title: "CLI Command Copied",
+      description: "Paste in your terminal to run the same query.",
+      duration: TOAST_DURATION.SUCCESS,
+    });
+  } catch (error: any) {
+    toast({
+      title: "Copy Failed",
+      description: error?.message || "Failed to copy CLI command.",
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR,
+    });
+  }
+};
+
+const handleShare = async () => {
+  try {
+    const share = await exploreStore.createQueryShare();
+    if (!share?.share_url) return;
+
+    const currentQuery = {
+      team: String(currentTeamId.value ?? ""),
+      source: String(currentSourceId.value ?? ""),
+      share: share.token,
+    };
+
+    await router.replace({ query: currentQuery });
+    await copyTextWithFallback(share.share_url);
+
+    toast({
+      title: "Share Link Copied",
+      description: "URL updated to the share link and copied to clipboard.",
+      duration: TOAST_DURATION.SUCCESS,
+    });
+  } catch (error: any) {
+    toast({
+      title: "Share Failed",
+      description: error?.message || getErrorMessage(error),
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR,
+    });
+  }
 };
 
 // Function to generate example query based on sort keys
@@ -1144,12 +1357,14 @@ onMounted(async () => {
                     :canExecute="canExecuteQuery"
                     :showRunButton="true"
                     :isCancelling="exploreStore.isCancellingQuery"
+                    :queryTimeout="exploreStore.queryTimeout"
                     @change="(event) => event.mode === 'logchefql'
                       ? updateLogchefqlValue(event.query, event.isUserInput)
                       : updateSqlValue(event.query, event.isUserInput)"
                     @submit="() => handleQueryExecution('editor-submit')" 
                     @execute="() => handleQueryExecution('editor-run-button')"
                     @cancel-query="handleCancelQuery"
+                    @update:query-timeout="exploreStore.setQueryTimeout($event)"
                     @update:activeMode="(mode, isModeSwitchOnly) =>
                       changeMode(mode === 'logchefql' ? 'logchefql' : 'sql', isModeSwitchOnly)"
                     @toggle-fields="showFieldsPanel = !showFieldsPanel" 
@@ -1243,9 +1458,12 @@ onMounted(async () => {
                 :displayMode="displayMode"
                 :logsCount="exploreStore.logs?.length || 0"
                 :isLoading="isExecutingQuery || isInitialQueryPending"
+                :isExporting="isExporting"
                 @toggle-histogram="toggleHistogramVisibility"
                 @update:displayMode="displayMode = $event"
                 @export="handleExport"
+                @share="handleShare"
+                @copy-cli="handleCopyCliCommand"
               />
 
               <!-- Histogram visualization -->

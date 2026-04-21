@@ -6,18 +6,13 @@ Thank you for your interest in contributing to Logchef! We welcome contributions
 
 ### Development Setup
 
-The easiest way to get started is using our Nix flake:
-
 ```bash
 # Clone the repository
 git clone https://github.com/mr-karan/logchef.git
 cd logchef
-
-# Enter the development environment
-nix develop
 ```
 
-For detailed setup instructions including manual installation options, see our [Development Setup Guide](https://logchef.app/contributing/setup).
+For detailed setup instructions, see our [Development Setup Guide](https://logchef.app/contributing/setup).
 
 ### Quick Start
 
@@ -121,7 +116,7 @@ Examples:
 ```
 feat: add AI-powered query suggestions
 fix: resolve race condition in connection pooling
-docs: update Nix setup instructions
+docs: update development setup instructions
 refactor: simplify user authentication flow
 ```
 

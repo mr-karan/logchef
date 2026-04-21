@@ -27,18 +27,33 @@ const (
 
 // QueryBuilder assists in building and validating ClickHouse SQL queries.
 type QueryBuilder struct {
-	tableName string
-	mode      QueryMode
-	maxLimit  int
+	tableName    string
+	mode         QueryMode
+	defaultLimit int
+	maxLimit     int
+}
+
+// QueryBuildResult describes the SQL produced by the query builder and the
+// limit policy decisions that were applied.
+type QueryBuildResult struct {
+	SQL              string
+	RequestedLimit   int
+	OriginalLimit    int
+	AppliedLimit     int
+	LimitAdded       bool
+	LimitCapped      bool
+	ExplicitLimit    bool
+	UnparseableLimit bool
 }
 
 // NewQueryBuilder creates a new QueryBuilder for restricted mode.
 // This validates that queries target the specified table and blocks JOINs/subqueries.
 func NewQueryBuilder(tableName string, maxLimit int) *QueryBuilder {
 	return &QueryBuilder{
-		tableName: tableName,
-		mode:      RestrictedMode,
-		maxLimit:  maxLimit,
+		tableName:    tableName,
+		mode:         RestrictedMode,
+		defaultLimit: legacyDefaultLimit(maxLimit),
+		maxLimit:     maxLimit,
 	}
 }
 
@@ -47,14 +62,26 @@ func NewQueryBuilder(tableName string, maxLimit int) *QueryBuilder {
 // The ClickHouse connection permissions are the real security boundary.
 func NewExtendedQueryBuilder(tableName string, maxLimit int) *QueryBuilder {
 	return &QueryBuilder{
-		tableName: tableName,
-		mode:      ExtendedMode,
-		maxLimit:  maxLimit,
+		tableName:    tableName,
+		mode:         ExtendedMode,
+		defaultLimit: legacyDefaultLimit(maxLimit),
+		maxLimit:     maxLimit,
 	}
 }
 
 // BuildRawQuery parses, validates, and adds LIMIT to a SQL query.
 func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) {
+	result, err := qb.BuildRawQueryWithLimitPolicy(rawSQL, limit, qb.defaultLimit, qb.maxLimit)
+	if err != nil {
+		return "", err
+	}
+	return result.SQL, nil
+}
+
+// BuildRawQueryWithLimitPolicy parses, validates, and applies an explicit
+// default/max limit policy. The default limit is used for SQL without LIMIT;
+// the max limit is only a ceiling.
+func (qb *QueryBuilder) BuildRawQueryWithLimitPolicy(rawSQL string, requestedLimit, defaultLimit, maxLimit int) (QueryBuildResult, error) {
 	// Handle escaped quotes
 	const placeholder = "___ESCAPED_QUOTE___"
 	processedSQL := strings.ReplaceAll(rawSQL, "''", placeholder)
@@ -62,20 +89,20 @@ func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) 
 	parser := clickhouseparser.NewParser(processedSQL)
 	stmts, err := parser.ParseStmts()
 	if err != nil {
-		return "", fmt.Errorf("invalid SQL syntax: %w", err)
+		return QueryBuildResult{}, fmt.Errorf("invalid SQL syntax: %w", err)
 	}
 
 	if len(stmts) == 0 {
-		return "", fmt.Errorf("no SQL statements found")
+		return QueryBuildResult{}, fmt.Errorf("no SQL statements found")
 	}
 	if len(stmts) > 1 {
-		return "", fmt.Errorf("multiple SQL statements are not supported")
+		return QueryBuildResult{}, fmt.Errorf("multiple SQL statements are not supported")
 	}
 
 	stmt := stmts[0]
 	selectQuery, ok := stmt.(*clickhouseparser.SelectQuery)
 	if !ok {
-		return "", fmt.Errorf("only SELECT queries are supported: %w", ErrInvalidQuery)
+		return QueryBuildResult{}, fmt.Errorf("only SELECT queries are supported: %w", ErrInvalidQuery)
 	}
 
 	// Mode-specific validation
@@ -84,10 +111,10 @@ func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) 
 		// Restricted mode: validate single table, block JOINs
 		if qb.tableName != "" {
 			if err := qb.validateTableReference(selectQuery); err != nil {
-				return "", err
+				return QueryBuildResult{}, err
 			}
 			if err := qb.checkDangerousOperations(selectQuery); err != nil {
-				return "", err
+				return QueryBuildResult{}, err
 			}
 		}
 	case ExtendedMode:
@@ -96,10 +123,14 @@ func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) 
 		// No additional validation needed.
 	}
 
-	qb.ensureLimit(selectQuery, limit)
+	result := QueryBuildResult{RequestedLimit: requestedLimit}
+	qb.ensureLimitWithPolicy(selectQuery, requestedLimit, defaultLimit, maxLimit, &result)
+	if result.UnparseableLimit {
+		return QueryBuildResult{}, fmt.Errorf("LIMIT must be a numeric literal")
+	}
 
-	result := stmt.String()
-	result = strings.ReplaceAll(result, placeholder, "''")
+	result.SQL = stmt.String()
+	result.SQL = strings.ReplaceAll(result.SQL, placeholder, "''")
 
 	return result, nil
 }
@@ -186,15 +217,24 @@ func (qb *QueryBuilder) checkDangerousOperations(stmt *clickhouseparser.SelectQu
 	return nil
 }
 
-// ensureLimit handles LIMIT clause based on query mode:
-// - If requestedLimit > 0 (LogchefQL): apply it, capped at maxLimit
-// - If requestedLimit == 0 (SQL mode): respect user's SQL LIMIT (capped), or add maxLimit
+// ensureLimit handles LIMIT clause based on legacy query builder behavior.
 func (qb *QueryBuilder) ensureLimit(stmt *clickhouseparser.SelectQuery, requestedLimit int) {
+	result := QueryBuildResult{}
+	qb.ensureLimitWithPolicy(stmt, requestedLimit, qb.defaultLimit, qb.maxLimit, &result)
+}
+
+// ensureLimitWithPolicy handles LIMIT clauses:
+// - requestedLimit > 0: force requested limit, capped at maxLimit.
+// - requestedLimit == 0 and SQL has LIMIT: respect it, capped at maxLimit.
+// - requestedLimit == 0 and SQL has no LIMIT: add defaultLimit.
+func (qb *QueryBuilder) ensureLimitWithPolicy(stmt *clickhouseparser.SelectQuery, requestedLimit, defaultLimit, maxLimit int, result *QueryBuildResult) {
 	if requestedLimit > 0 {
 		limit := requestedLimit
-		if qb.maxLimit > 0 && limit > qb.maxLimit {
-			limit = qb.maxLimit
+		if maxLimit > 0 && limit > maxLimit {
+			limit = maxLimit
+			result.LimitCapped = true
 		}
+		result.AppliedLimit = limit
 		stmt.Limit = &clickhouseparser.LimitClause{
 			Limit: &clickhouseparser.NumberLiteral{Literal: fmt.Sprintf("%d", limit)},
 		}
@@ -204,25 +244,43 @@ func (qb *QueryBuilder) ensureLimit(stmt *clickhouseparser.SelectQuery, requeste
 	if stmt.Limit != nil && stmt.Limit.Limit != nil {
 		existing, err := strconv.Atoi(stmt.Limit.Limit.String())
 		if err != nil {
+			result.UnparseableLimit = true
 			return
 		}
+		result.ExplicitLimit = true
+		result.OriginalLimit = existing
 		if existing == 0 {
 			return
 		}
-		if qb.maxLimit > 0 && existing > qb.maxLimit {
-			stmt.Limit.Limit = &clickhouseparser.NumberLiteral{Literal: fmt.Sprintf("%d", qb.maxLimit)}
+		result.AppliedLimit = existing
+		if maxLimit > 0 && existing > maxLimit {
+			result.AppliedLimit = maxLimit
+			result.LimitCapped = true
+			stmt.Limit.Limit = &clickhouseparser.NumberLiteral{Literal: fmt.Sprintf("%d", maxLimit)}
 		}
 		return
 	}
 
-	defaultLimit := qb.maxLimit
 	if defaultLimit <= 0 {
 		defaultLimit = DefaultLimit
 	}
+	if maxLimit > 0 && defaultLimit > maxLimit {
+		defaultLimit = maxLimit
+		result.LimitCapped = true
+	}
 
+	result.AppliedLimit = defaultLimit
+	result.LimitAdded = true
 	stmt.Limit = &clickhouseparser.LimitClause{
 		Limit: &clickhouseparser.NumberLiteral{Literal: fmt.Sprintf("%d", defaultLimit)},
 	}
+}
+
+func legacyDefaultLimit(maxLimit int) int {
+	if maxLimit > 0 {
+		return maxLimit
+	}
+	return DefaultLimit
 }
 
 // RemoveLimitClause parses the SQL and removes any LIMIT clause.

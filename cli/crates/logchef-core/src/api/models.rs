@@ -138,6 +138,34 @@ pub struct SqlQueryRequest {
     pub query_timeout: Option<u32>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ExportSqlRequest {
+    pub raw_sql: String,
+    pub format: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query_timeout: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ExportJobResponse {
+    pub id: String,
+    pub status: String,
+    #[serde(default)]
+    pub format: Option<String>,
+    #[serde(default)]
+    pub file_name: Option<String>,
+    #[serde(default)]
+    pub error_message: Option<String>,
+    #[serde(default)]
+    pub rows_exported: Option<i64>,
+    #[serde(default)]
+    pub bytes_written: Option<i64>,
+    #[serde(default)]
+    pub download_url: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct QueryResponse {
     #[serde(default)]

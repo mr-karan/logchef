@@ -65,10 +65,21 @@ type QueryStats struct {
 	ExecutionTimeMs float64 `json:"execution_time_ms"`
 	RowsRead        int     `json:"rows_read"`
 	BytesRead       int     `json:"bytes_read,omitempty"`
+	RowsReturned    int     `json:"rows_returned,omitempty"`
+	BytesReturned   int     `json:"bytes_returned,omitempty"`
+	LimitApplied    int     `json:"limit_applied,omitempty"`
+	Truncated       bool    `json:"truncated,omitempty"`
+	TruncatedReason string  `json:"truncated_reason,omitempty"`
 }
 
 // ColumnInfo represents column metadata from ClickHouse
 type ColumnInfo struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
+}
+
+// QueryWarning represents a non-fatal query execution warning.
+type QueryWarning struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }

@@ -2,6 +2,7 @@ package clickhouse
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -27,6 +28,23 @@ const (
 	// MaxQueryTimeout is the maximum allowed timeout to prevent resource abuse
 	MaxQueryTimeout = 300 // 5 minutes
 )
+
+// QueryOptions controls ClickHouse execution and LogChef-side result handling.
+type QueryOptions struct {
+	TimeoutSeconds   *int
+	Settings         map[string]interface{}
+	LimitApplied     int
+	MaxRows          int
+	MaxResponseBytes int
+	Warnings         []models.QueryWarning
+}
+
+// RowStreamWriter receives rows as they are read from ClickHouse.
+type RowStreamWriter interface {
+	Begin(columns []models.ColumnInfo) error
+	WriteRow(row map[string]interface{}) error
+	Finish(stats models.QueryStats) error
+}
 
 // Client represents a connection to a ClickHouse database using the native protocol.
 // It provides methods for executing queries and retrieving metadata.
@@ -187,6 +205,12 @@ func (c *Client) Query(ctx context.Context, query string /* params LogQueryParam
 // QueryWithTimeout executes a SELECT query with a timeout setting.
 // The timeoutSeconds parameter is required and will always be applied.
 func (c *Client) QueryWithTimeout(ctx context.Context, query string, timeoutSeconds *int) (*models.QueryResult, error) {
+	return c.QueryWithOptions(ctx, query, QueryOptions{TimeoutSeconds: timeoutSeconds})
+}
+
+// QueryWithOptions executes a SELECT query and buffers a bounded result for
+// browser preview style responses.
+func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryOptions) (*models.QueryResult, error) {
 	start := time.Now()          // Used for calculating total duration including hook overhead.
 	queryStartTime := time.Now() // Separate timer for actual DB execution
 	var queryDuration time.Duration
@@ -199,37 +223,36 @@ func (c *Client) QueryWithTimeout(ctx context.Context, query string, timeoutSeco
 	}
 
 	// Ensure timeout is provided (should always be the case now)
-	if timeoutSeconds == nil {
+	if opts.TimeoutSeconds == nil {
 		defaultTimeout := DefaultQueryTimeout
-		timeoutSeconds = &defaultTimeout
+		opts.TimeoutSeconds = &defaultTimeout
 	}
 
 	defer func() {
 		c.logger.Debug("query processing complete",
 			"duration_ms", time.Since(start).Milliseconds(),
 			"query", query,
-			"timeout_seconds", *timeoutSeconds,
+			"timeout_seconds", *opts.TimeoutSeconds,
 		)
 	}()
 
 	// Delegate DDL statements (CREATE, ALTER, DROP, etc.) to execDDL.
 	if isDDLStatement(query) {
-		return c.execDDLWithTimeout(ctx, query, timeoutSeconds)
+		return c.execDDLWithTimeout(ctx, query, opts.TimeoutSeconds)
 	}
 
 	var rows driver.Rows
 	var resultData []map[string]interface{}
 	var columnsInfo []models.ColumnInfo
+	var bytesReturned int
+	truncatedReason := ""
 
 	// Execute the core query logic within the hook wrapper.
 	err := c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
 		var queryErr error
 		queryStartTime = time.Now() // Reset timer before execution
 
-		// Always apply timeout setting
-		hookCtx = clickhouse.Context(hookCtx, clickhouse.WithSettings(clickhouse.Settings{
-			"max_execution_time": *timeoutSeconds,
-		}))
+		hookCtx = c.contextWithQuerySettings(hookCtx, opts)
 
 		rows, queryErr = c.conn.Query(hookCtx, query)
 		if queryErr != nil {
@@ -243,30 +266,31 @@ func (c *Client) QueryWithTimeout(ctx context.Context, query string, timeoutSeco
 			}
 		}()
 
-		// Get column names and types.
-		columnTypes := rows.ColumnTypes()
-		columnsInfo = make([]models.ColumnInfo, len(columnTypes)) // Use new name
-		scanDest := make([]interface{}, len(columnTypes))         // Prepare scan destinations.
-		for i, ct := range columnTypes {
-			columnsInfo[i] = models.ColumnInfo{
-				Name: ct.Name(),
-				Type: ct.DatabaseTypeName(),
-			}
-			// Use reflection to create pointers of the correct underlying type for Scan.
-			scanDest[i] = reflect.New(ct.ScanType()).Interface()
-		}
+		columnsInfo, scanDest := prepareRowScan(rows)
 
 		// Process rows.
 		resultData = make([]map[string]interface{}, 0) // Initialize slice.
 		for rows.Next() {
+			if opts.MaxRows > 0 && len(resultData) >= opts.MaxRows {
+				truncatedReason = "row_limit"
+				break
+			}
+
 			if err := rows.Scan(scanDest...); err != nil {
 				return fmt.Errorf("scanning row: %w", err)
 			}
 
-			rowMap := make(map[string]interface{})
-			for i, col := range columnsInfo { // Use new name
-				// Dereference the pointer to get the actual scanned value.
-				rowMap[col.Name] = reflect.ValueOf(scanDest[i]).Elem().Interface()
+			rowMap := scanRowMap(scanDest, columnsInfo)
+			if opts.MaxResponseBytes > 0 {
+				encoded, err := json.Marshal(rowMap)
+				if err != nil {
+					return fmt.Errorf("estimating row size: %w", err)
+				}
+				if bytesReturned+len(encoded) > opts.MaxResponseBytes {
+					truncatedReason = "byte_limit"
+					break
+				}
+				bytesReturned += len(encoded)
 			}
 			resultData = append(resultData, rowMap)
 		}
@@ -295,16 +319,127 @@ func (c *Client) QueryWithTimeout(ctx context.Context, query string, timeoutSeco
 
 	// Construct the final result.
 	queryResult := &models.QueryResult{
-		Logs:    resultData,
-		Columns: columnsInfo,
+		Logs:     resultData,
+		Columns:  columnsInfo,
+		Warnings: opts.Warnings,
 		Stats: models.QueryStats{
 			RowsRead:        len(resultData), // Use length of returned data as approximation
 			BytesRead:       0,               // Cannot reliably get BytesRead currently
+			RowsReturned:    len(resultData),
+			BytesReturned:   bytesReturned,
+			LimitApplied:    opts.LimitApplied,
+			Truncated:       truncatedReason != "",
+			TruncatedReason: truncatedReason,
 			ExecutionTimeMs: float64(queryDuration.Milliseconds()),
 		},
 	}
 
 	return queryResult, nil
+}
+
+// QueryStream executes a SELECT query and streams rows into writer without
+// retaining the full result set in memory.
+func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOptions, writer RowStreamWriter) (models.QueryStats, error) {
+	start := time.Now()
+	if opts.TimeoutSeconds == nil {
+		defaultTimeout := DefaultQueryTimeout
+		opts.TimeoutSeconds = &defaultTimeout
+	}
+
+	if isDDLStatement(query) {
+		return models.QueryStats{}, fmt.Errorf("streaming DDL statements is not supported")
+	}
+
+	var stats models.QueryStats
+	var rowsReturned int
+	err := c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
+		hookCtx = c.contextWithQuerySettings(hookCtx, opts)
+
+		rows, err := c.conn.Query(hookCtx, query)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		columnsInfo, scanDest := prepareRowScan(rows)
+		if err := writer.Begin(columnsInfo); err != nil {
+			return err
+		}
+
+		for rows.Next() {
+			if opts.MaxRows > 0 && rowsReturned >= opts.MaxRows {
+				stats.Truncated = true
+				stats.TruncatedReason = "row_limit"
+				break
+			}
+
+			if err := rows.Scan(scanDest...); err != nil {
+				return fmt.Errorf("scanning row: %w", err)
+			}
+			rowMap := scanRowMap(scanDest, columnsInfo)
+			if err := writer.WriteRow(rowMap); err != nil {
+				return err
+			}
+			rowsReturned++
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		stats.RowsRead = rowsReturned
+		stats.RowsReturned = rowsReturned
+		stats.LimitApplied = opts.LimitApplied
+		stats.ExecutionTimeMs = float64(time.Since(start).Milliseconds())
+		return writer.Finish(stats)
+	})
+	if err != nil {
+		return stats, fmt.Errorf("streaming query results: %w", err)
+	}
+
+	stats.ExecutionTimeMs = float64(time.Since(start).Milliseconds())
+	return stats, nil
+}
+
+func (c *Client) contextWithQuerySettings(ctx context.Context, opts QueryOptions) context.Context {
+	settings := clickhouse.Settings{
+		"max_execution_time": *opts.TimeoutSeconds,
+	}
+	for k, v := range opts.Settings {
+		settings[k] = v
+	}
+	return clickhouse.Context(ctx, clickhouse.WithSettings(settings))
+}
+
+func prepareRowScan(rows driver.Rows) ([]models.ColumnInfo, []interface{}) {
+	columnTypes := rows.ColumnTypes()
+	columnsInfo := make([]models.ColumnInfo, len(columnTypes))
+	scanDest := make([]interface{}, len(columnTypes))
+	for i, ct := range columnTypes {
+		columnsInfo[i] = models.ColumnInfo{
+			Name: ct.Name(),
+			Type: ct.DatabaseTypeName(),
+		}
+		scanDest[i] = reflect.New(ct.ScanType()).Interface()
+	}
+	return columnsInfo, scanDest
+}
+
+func scanRowMap(scanDest []interface{}, columnsInfo []models.ColumnInfo) map[string]interface{} {
+	rowMap := make(map[string]interface{}, len(columnsInfo))
+	for i, col := range columnsInfo {
+		value := reflect.ValueOf(scanDest[i])
+		if !value.IsValid() || (value.Kind() == reflect.Ptr && value.IsNil()) {
+			rowMap[col.Name] = nil
+			continue
+		}
+		elem := value.Elem()
+		if !elem.IsValid() {
+			rowMap[col.Name] = nil
+			continue
+		}
+		rowMap[col.Name] = elem.Interface()
+	}
+	return rowMap
 }
 
 // execDDLWithTimeout executes a DDL statement with a timeout setting.

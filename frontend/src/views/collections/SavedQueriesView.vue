@@ -617,9 +617,9 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
                   class="inline-flex items-center gap-2"
                   :class="[
                     openingQueryId === null 
-                      ? 'text-primary hover:underline cursor-pointer' 
+                      ? 'text-foreground hover:underline cursor-pointer' 
                       : openingQueryId === query.id 
-                        ? 'text-primary cursor-wait' 
+                        ? 'text-foreground cursor-wait' 
                         : 'text-muted-foreground cursor-not-allowed'
                   ]"
                 >
