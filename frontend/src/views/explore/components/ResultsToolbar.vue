@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
-import { ChevronUp, ChevronDown, Rows4, Terminal, TerminalSquare, Download, Share2 } from 'lucide-vue-next'
+import { ChevronUp, ChevronDown, Rows4, Terminal, TerminalSquare, Share2 } from 'lucide-vue-next'
 import { useExploreStore } from '@/stores/explore'
 import GroupBySelector from './GroupBySelector.vue'
 import {
@@ -25,7 +25,6 @@ interface Props {
   logsCount: number
   queryTimeMs?: number
   isLoading?: boolean
-  isExporting?: boolean
 }
 
 defineProps<Props>()
@@ -33,7 +32,6 @@ defineProps<Props>()
 const emit = defineEmits<{
   (e: 'toggle-histogram'): void
   (e: 'update:displayMode', mode: 'table' | 'compact'): void
-  (e: 'export'): void
   (e: 'share'): void
   (e: 'copy-cli'): void
 }>()
@@ -104,7 +102,7 @@ const warningText = computed(() => {
       <GroupBySelector :available-fields="availableFields" />
     </div>
 
-    <!-- Right: Share + Export + View Toggles -->
+    <!-- Right: Share + View Toggles -->
     <div class="flex items-center gap-1">
       <!-- Share Button -->
       <TooltipProvider>
@@ -142,26 +140,6 @@ const warningText = computed(() => {
           </TooltipTrigger>
           <TooltipContent side="bottom">
             <p class="text-xs">Copy CLI command</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-
-      <!-- Export Button -->
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              class="h-7 w-7 p-0"
-              @click="emit('export')"
-              :disabled="logsCount === 0 || isLoading || isExporting"
-            >
-              <Download class="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p class="text-xs">{{ isExporting ? 'Preparing export' : 'Export results' }}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>

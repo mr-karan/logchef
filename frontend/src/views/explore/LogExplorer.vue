@@ -26,10 +26,8 @@ import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useUrlState } from "@/composables/useUrlState";
 import { useQuery } from "@/composables/useQuery";
 import { useTimeRange } from "@/composables/useTimeRange";
-import { useVariables } from "@/composables/useVariables";
 
 import { useContextStore } from "@/stores/context";
-import { exploreApi } from "@/api/explore";
 import type { ComponentPublicInstance } from "vue";
 import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedTeamQuery } from "@/api/savedQueries";
@@ -57,7 +55,6 @@ const savedQueriesStore = useSavedQueriesStore();
 const preferencesStore = usePreferencesStore();
 const { preferences } = storeToRefs(preferencesStore);
 const { toast } = useToast();
-const { getVariablesForApi } = useVariables();
 
 const urlState = useUrlState();
 const isInitializing = computed(() => urlState.state.value !== 'ready');
@@ -115,7 +112,6 @@ const isChangingContext = computed(() => {
   const sourceLoading = sourcesStore.isLoadingSourceDetails;
   return teamLoading || sourceLoading;
 });
-const isExporting = ref(false);
 
 const getQueryParamValue = (key: string) => {
   const value = route.query[key];
@@ -685,90 +681,6 @@ const onHistogramTimeRangeZoom = (range: { start: Date; end: Date }) => {
 const openDatePicker = () => {
   if (topBarRef.value) {
     topBarRef.value.openDatePicker();
-  }
-};
-
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-const triggerBrowserDownload = (downloadUrl: string, fileName?: string) => {
-  const link = document.createElement("a");
-  link.href = downloadUrl;
-  if (fileName) {
-    link.download = fileName;
-  }
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-};
-
-const waitForExportCompletion = async (exportId: string, timeoutSeconds: number) => {
-  if (!currentTeamId.value || !currentSourceId.value) {
-    throw new Error("Team and source are required for export");
-  }
-
-  const deadline = Date.now() + (timeoutSeconds + 60) * 1000;
-  while (Date.now() < deadline) {
-    const response = await exploreApi.getExportJob(currentSourceId.value, exportId, currentTeamId.value);
-    const job = response.data;
-    if (!job) {
-      throw new Error("Export status is unavailable");
-    }
-    if (job.status === "complete") {
-      return job;
-    }
-    if (job.status === "failed") {
-      throw new Error(job.error_message || "Export failed");
-    }
-    await sleep(1000);
-  }
-
-  throw new Error("Export is taking longer than expected. Please try again.");
-};
-
-const handleExport = async () => {
-  if (!currentTeamId.value || !currentSourceId.value) return;
-
-  const sql = exploreStore.lastExecutedState?.sqlQuery ||
-    (exploreStore.activeMode === "sql" ? exploreStore.sqlForExecution : "");
-  if (!sql?.trim()) {
-    toast({
-      title: "Cannot Export",
-      description: "Run the query before downloading results.",
-      variant: "destructive",
-      duration: TOAST_DURATION.WARNING,
-    });
-    return;
-  }
-
-  try {
-    isExporting.value = true;
-    const queryTimeout = Math.max(exploreStore.queryTimeout, 120);
-    const response = await exploreApi.createExportJob(currentSourceId.value, {
-      raw_sql: sql,
-      format: "csv",
-      query_timeout: queryTimeout,
-      variables: getVariablesForApi(),
-    }, currentTeamId.value);
-    const job = response.data;
-    if (!job?.id) {
-      throw new Error("Export job was not created");
-    }
-
-    const completedJob = await waitForExportCompletion(job.id, queryTimeout);
-    if (!completedJob.download_url) {
-      throw new Error("Export download is unavailable");
-    }
-
-    triggerBrowserDownload(completedJob.download_url, completedJob.file_name);
-  } catch (error: any) {
-    toast({
-      title: "Export Failed",
-      description: getErrorMessage(error),
-      variant: "destructive",
-      duration: TOAST_DURATION.ERROR,
-    });
-  } finally {
-    isExporting.value = false;
   }
 };
 
@@ -1458,10 +1370,8 @@ onMounted(async () => {
                 :displayMode="displayMode"
                 :logsCount="exploreStore.logs?.length || 0"
                 :isLoading="isExecutingQuery || isInitialQueryPending"
-                :isExporting="isExporting"
                 @toggle-histogram="toggleHistogramVisibility"
                 @update:displayMode="displayMode = $event"
-                @export="handleExport"
                 @share="handleShare"
                 @copy-cli="handleCopyCliCommand"
               />
