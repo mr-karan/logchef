@@ -60,4 +60,4 @@ docs/node_modules/*
 dist/*
 .DS_Store
 .claude/
-_docs/
+.plans/
