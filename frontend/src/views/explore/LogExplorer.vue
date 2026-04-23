@@ -732,7 +732,7 @@ const handleExport = async () => {
     (exploreStore.activeMode === "sql" ? exploreStore.sqlForExecution : "");
   if (!sql?.trim()) {
     toast({
-      title: "Cannot Export",
+      title: "Cannot Download",
       description: "Run the query before downloading results.",
       variant: "destructive",
       duration: TOAST_DURATION.WARNING,
@@ -762,7 +762,7 @@ const handleExport = async () => {
     triggerBrowserDownload(completedJob.download_url, completedJob.file_name);
   } catch (error: any) {
     toast({
-      title: "Export Failed",
+      title: "Download Failed",
       description: getErrorMessage(error),
       variant: "destructive",
       duration: TOAST_DURATION.ERROR,

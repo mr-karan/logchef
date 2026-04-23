@@ -146,7 +146,7 @@ const warningText = computed(() => {
         </Tooltip>
       </TooltipProvider>
 
-      <!-- Export Button -->
+      <!-- Download Button -->
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -161,7 +161,7 @@ const warningText = computed(() => {
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <p class="text-xs">{{ isExporting ? 'Preparing export' : 'Export results' }}</p>
+            <p class="text-xs">{{ isExporting ? 'Preparing download…' : 'Download results' }}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
