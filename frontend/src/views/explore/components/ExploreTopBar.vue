@@ -224,9 +224,8 @@ defineExpose({
       </TooltipProvider>
       <DropdownMenu v-else>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" class="h-7 text-xs px-2 gap-1">
-            <span class="text-muted-foreground">Limit:</span>
-            <span class="font-medium">{{ currentLimit.toLocaleString() }}</span>
+          <Button variant="ghost" size="sm" class="h-7 text-xs px-2 bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-normal" title="Result limit">
+            {{ currentLimit.toLocaleString() }} rows
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" class="w-32">
@@ -244,14 +243,5 @@ defineExpose({
       </DropdownMenu>
     </div>
 
-    <!-- Right: Execution context -->
-    <div class="flex items-center gap-2">
-      <div v-if="exploreStore.lastExecutionTimestamp" class="text-xs text-muted-foreground hidden sm:block">
-        {{ new Date(exploreStore.lastExecutionTimestamp).toLocaleTimeString() }}
-      </div>
-      <div v-else class="hidden sm:block text-xs text-muted-foreground">
-        Not run yet
-      </div>
-    </div>
   </div>
 </template>

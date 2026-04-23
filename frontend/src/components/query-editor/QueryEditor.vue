@@ -538,8 +538,8 @@ const currentPlaceholder = computed(() => {
   if (props.placeholder) return props.placeholder;
 
   return props.activeMode === "logchefql"
-    ? 'Enter search criteria (e.g., lvl="ERROR" and namespace~"sys")'
-    : `Enter ClickHouse SQL query (e.g., SELECT * FROM ${props.tableName || "your_table"} WHERE ...)`;
+    ? 'Filter logs… e.g. method="GET" and status>=500'
+    : `SELECT * FROM ${props.tableName || "your_table"} WHERE …`;
 });
 
 const editorHeight = computed(() => {
@@ -547,7 +547,7 @@ const editorHeight = computed(() => {
   const lines = (content.match(/\n/g) || []).length + 1;
   const baseLineHeight = 20; // Must match Monaco lineHeight
   const padding = 16; // Monaco top+bottom padding (8+8)
-  const minHeight = props.activeMode === "logchefql" ? 52 : 90;
+  const minHeight = props.activeMode === "logchefql" ? 56 : 90;
   const maxHeight = 300;
   const calculatedHeight = padding + lines * baseLineHeight + (lines > 1 ? 0 : 4);
   return Math.min(maxHeight, Math.max(minHeight, calculatedHeight));

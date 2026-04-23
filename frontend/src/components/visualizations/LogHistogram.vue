@@ -368,7 +368,26 @@ function formatXAxisTick(value: number | Date) {
 }
 
 .log-histogram__chart {
-  padding: 0.25rem 0.5rem 0.5rem;
+  padding: 0.5rem 0.5rem 0.5rem;
+}
+
+/* Histogram contrast overrides — bars slightly desaturated, grid visible, axis readable */
+.log-histogram :deep(.vis-stacked-bar-bar) {
+  opacity: 0.85;
+  transition: opacity 0.15s ease;
+}
+
+.log-histogram :deep(.vis-stacked-bar-bar:hover) {
+  opacity: 1;
+}
+
+.log-histogram :deep(.vis-axis-grid-line) {
+  stroke: hsl(var(--border) / 0.5);
+}
+
+.log-histogram :deep(.vis-axis-tick-label) {
+  font-size: 11px;
+  fill: hsl(var(--muted-foreground));
 }
 
 .chart-wrapper {
