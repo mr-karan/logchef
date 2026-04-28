@@ -885,6 +885,7 @@ const handleAiInsert = (sql: string) => {
   // AI always generates raw SQL — write it directly to the SQL store
   // before triggering mode switch so translation cannot overwrite it.
   exploreStore.setRawSql(sql);
+  exploreStore.clearActiveSavedQuerySelection();
   editorContent.value = sql;
 
   emit('change', {

@@ -367,6 +367,12 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.activeShareSnapshot = null;
   }
 
+  function clearActiveSavedQuerySelection() {
+    state.data.value.selectedQueryId = null;
+    state.data.value.activeSavedQueryName = null;
+    state.data.value.savedQuerySnapshot = null;
+  }
+
   function clearShareSelectionIfDirty() {
     if (!state.data.value.activeShareToken || !state.data.value.activeShareSnapshot) {
       return;
@@ -1588,6 +1594,7 @@ export const useExploreStore = defineStore("explore", () => {
     setRawSql,
     setActiveMode,
     setLogchefqlCode,
+    clearActiveSavedQuerySelection,
     setSelectedQueryId,
     setActiveSavedQueryName,
     setRelativeTimeRange,
