@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
-import { ChevronUp, ChevronDown, Rows4, TerminalSquare, Download } from 'lucide-vue-next'
+import { ChevronUp, ChevronDown, Rows4, Terminal, TerminalSquare, Download, Share2 } from 'lucide-vue-next'
 import { useExploreStore } from '@/stores/explore'
 import GroupBySelector from './GroupBySelector.vue'
 import {
@@ -25,6 +25,7 @@ interface Props {
   logsCount: number
   queryTimeMs?: number
   isLoading?: boolean
+  isExporting?: boolean
 }
 
 defineProps<Props>()
@@ -33,11 +34,14 @@ const emit = defineEmits<{
   (e: 'toggle-histogram'): void
   (e: 'update:displayMode', mode: 'table' | 'compact'): void
   (e: 'export'): void
+  (e: 'share'): void
+  (e: 'copy-cli'): void
 }>()
 
 const exploreStore = useExploreStore()
 
 const queryStats = computed(() => exploreStore.queryStats)
+const queryWarnings = computed(() => exploreStore.queryWarnings)
 
 const formattedQueryTime = computed(() => {
   const executionTimeMs = queryStats.value?.execution_time_ms
@@ -48,6 +52,15 @@ const formattedQueryTime = computed(() => {
     return `${Math.round(executionTimeMs)}ms`
   }
   return `${(executionTimeMs / 1000).toFixed(2)}s`
+})
+
+const warningText = computed(() => {
+  if (queryStats.value?.truncated) {
+    return queryStats.value.truncated_reason === 'byte_limit'
+      ? 'Response size capped'
+      : 'Result capped'
+  }
+  return queryWarnings.value?.[0]?.message || null
 })
 </script>
 
@@ -78,6 +91,10 @@ const formattedQueryTime = computed(() => {
             <span class="text-muted-foreground/50">•</span>
             <span>{{ formattedQueryTime }}</span>
           </template>
+          <template v-if="warningText">
+            <span class="text-muted-foreground/50">•</span>
+            <span class="text-amber-600 dark:text-amber-400">{{ warningText }}</span>
+          </template>
         </template>
       </div>
     </div>
@@ -87,9 +104,49 @@ const formattedQueryTime = computed(() => {
       <GroupBySelector :available-fields="availableFields" />
     </div>
 
-    <!-- Right: View Toggles + Export -->
+    <!-- Right: Share + Export + View Toggles -->
     <div class="flex items-center gap-1">
-      <!-- Export Button -->
+      <!-- Share Button -->
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="h-7 w-7 p-0"
+              @click="emit('share')"
+              :disabled="isLoading"
+            >
+              <Share2 class="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p class="text-xs">Share query</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+
+      <!-- CLI Button -->
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="h-7 w-7 p-0"
+              @click="emit('copy-cli')"
+              :disabled="isLoading"
+            >
+              <Terminal class="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p class="text-xs">Copy CLI command</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+
+      <!-- Download Button -->
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -98,13 +155,13 @@ const formattedQueryTime = computed(() => {
               size="sm"
               class="h-7 w-7 p-0"
               @click="emit('export')"
-              :disabled="logsCount === 0"
+              :disabled="logsCount === 0 || isLoading || isExporting"
             >
               <Download class="h-3.5 w-3.5" />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <p class="text-xs">Export results</p>
+            <p class="text-xs">{{ isExporting ? 'Preparing download…' : 'Download results' }}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
@@ -150,4 +207,3 @@ const formattedQueryTime = computed(() => {
     </div>
   </div>
 </template>
-

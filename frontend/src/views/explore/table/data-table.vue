@@ -1136,15 +1136,18 @@ td>.flex>.cell-content :deep(.timestamp-separator) {
 /* Base HTTP Method Tag Style */
 :deep(.http-method) {
     display: inline-block;
+    min-width: 52px;
+    text-align: center;
     padding: 1px 6px;
     border-radius: 4px;
-    font-weight: 400;
+    font-weight: 500;
     font-size: 0.6875rem;
     /* 11px */
     line-height: 1.4;
     margin: 0 2px;
     border: 1px solid transparent;
     white-space: nowrap;
+    font-variant-numeric: tabular-nums;
 }
 
 /* Utility HTTP Methods (PATCH, OPTIONS) */
@@ -1398,12 +1401,6 @@ td>.flex>.cell-content :deep(.timestamp-separator) {
 }
 
 /* HTTP Method Colors */
-:deep(.http-method) {
-    padding: 1px 4px;
-    border-radius: 3px;
-    font-weight: 500;
-}
-
 :deep(.http-method-utility) {
     background-color: #f3f4f6;
     /* gray-100 */

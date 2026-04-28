@@ -5,6 +5,7 @@ import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
 import { useContextStore } from '@/stores/context';
 import { savedQueriesApi } from '@/api/savedQueries';
+import { exploreApi } from '@/api/explore';
 
 export type UrlSyncState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -13,7 +14,7 @@ interface UrlStateReturn {
   error: Ref<string | null>;
   isReady: Ref<boolean>;
   initialize: () => Promise<void>;
-  pushHistoryEntry: () => void;
+  pushHistoryEntry: () => Promise<void>;
 }
 
 export function useUrlState(): UrlStateReturn {
@@ -90,6 +91,9 @@ export function useUrlState(): UrlStateReturn {
     const id = getValue('id');
     if (id) normalized.id = id;
 
+    const share = getValue('share');
+    if (share) normalized.share = share;
+
     return normalized;
   }
 
@@ -157,8 +161,34 @@ export function useUrlState(): UrlStateReturn {
       }
 
       const params = normalizeQueryParams(getRouteQueryParams() as Record<string, unknown>);
-      
-      if (!params.team || !params.source) {
+
+      if (params.share) {
+        pendingQueryResolve.value = true;
+        try {
+          const response = await exploreApi.getQueryShare(params.share);
+          if (response.data) {
+            const shareTeam = response.data.team_id.toString();
+            const shareSource = response.data.source_id.toString();
+            params.team = shareTeam;
+            params.source = shareSource;
+            contextStore.selectTeam(response.data.team_id);
+            exploreStore.suppressNextSourceReset(response.data.source_id);
+            contextStore.selectSource(response.data.source_id);
+
+            const newQuery: Record<string, string> = {
+              team: shareTeam,
+              source: shareSource,
+              share: params.share,
+            };
+            await router.replace({ query: newQuery });
+
+            const hydrateResult = exploreStore.hydrateFromQueryShare(response.data);
+            shouldExecute = hydrateResult.shouldExecute;
+          }
+        } finally {
+          pendingQueryResolve.value = false;
+        }
+      } else if (!params.team || !params.source) {
         const storedDefaults = contextStore.getStoredDefaults();
         const teamId = params.team 
           ? parseInt(params.team, 10) 
@@ -184,33 +214,36 @@ export function useUrlState(): UrlStateReturn {
         }
       }
 
-      const result = exploreStore.initializeFromUrl(params);
-      shouldExecute = result.shouldExecute;
+      if (!params.share) {
+        const result = exploreStore.initializeFromUrl(params);
+        shouldExecute = result.shouldExecute;
 
-      if (result.needsResolve && result.queryId) {
-        pendingQueryResolve.value = true;
+        if (result.needsResolve && result.queryId) {
+          pendingQueryResolve.value = true;
 
-        try {
-          // Use team/source from URL params, not from store state
-          // The stores might not be updated yet or might have different values
-          const teamId = params.team ? parseInt(params.team, 10) : teamsStore.currentTeamId;
-          const sourceId = params.source ? parseInt(params.source, 10) : exploreStore.sourceId;
+          try {
+            // Use team/source from URL params, not from store state
+            // The stores might not be updated yet or might have different values
+            const teamId = params.team ? parseInt(params.team, 10) : teamsStore.currentTeamId;
+            const sourceId = params.source ? parseInt(params.source, 10) : exploreStore.sourceId;
 
-          if (teamId && sourceId) {
-            const response = await savedQueriesApi.resolveQuery(
-              teamId,
-              sourceId,
-              parseInt(result.queryId)
-            );
+            if (teamId && sourceId) {
+              const response = await savedQueriesApi.resolveQuery(
+                teamId,
+                sourceId,
+                parseInt(result.queryId)
+              );
 
-            if (response.data) {
-              const hydrateResult = exploreStore.hydrateFromResolvedQuery(response.data);
-              shouldExecute = hydrateResult.shouldExecute;
+              if (response.data) {
+                const hydrateResult = exploreStore.hydrateFromResolvedQuery(response.data);
+                shouldExecute = hydrateResult.shouldExecute;
+              }
             }
+          } finally {
+            pendingQueryResolve.value = false;
           }
-        } finally {
-          pendingQueryResolve.value = false;
         }
+
       }
 
       await waitForReadiness();
@@ -288,7 +321,7 @@ export function useUrlState(): UrlStateReturn {
     }
   }
 
-  function pushHistoryEntry(): void {
+  async function pushHistoryEntry(): Promise<void> {
     if (state.value !== 'ready') {
       return;
     }
@@ -297,12 +330,15 @@ export function useUrlState(): UrlStateReturn {
     const query = normalizeQueryParams(exploreStore.urlQueryParameters as Record<string, unknown>);
     pendingRouteSyncKey = buildQueryKey(query);
 
-    router.push({ query }).catch(err => {
+    try {
+      await router.push({ query });
+    } catch (err: any) {
+      skipNextSync = false;
       pendingRouteSyncKey = null;
       if (err.name !== 'NavigationDuplicated') {
         console.error('useUrlState: Error pushing history:', err);
       }
-    });
+    }
   }
 
   watch(
@@ -314,6 +350,7 @@ export function useUrlState(): UrlStateReturn {
       () => exploreStore.selectedRelativeTime,
       () => exploreStore.activeMode,
       () => exploreStore.selectedQueryId,
+      () => exploreStore.activeShareToken,
     ],
     () => {
       syncUrlFromStore();
@@ -344,6 +381,11 @@ export function useUrlState(): UrlStateReturn {
       }
 
       if (normalized.id) {
+        return;
+      }
+
+      if (normalized.share) {
+        await initialize();
         return;
       }
 

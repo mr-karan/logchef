@@ -122,18 +122,37 @@ level = "info"
 
 ### Query Settings
 
-Control query execution limits. Useful for environments where large data exports are needed.
+Control interactive query limits separately from streaming downloads.
 
 ```toml
 [query]
-# Maximum rows per query result. Default: 1000000 (1 million).
-# Increase if your ClickHouse cluster can handle larger exports.
-max_limit = 1000000
+# Browser Run defaults to small previews and caps large responses.
+default_preview_limit = 1000
+max_preview_limit = 100000
+max_response_bytes = 67108864
+default_timeout_seconds = 30
+max_timeout_seconds = 120
+max_concurrent_per_user = 3
+max_concurrent_global = 30
+
+[export]
+# Download jobs use this separate, higher cap and keep completed artifacts briefly.
+max_rows = 1000000
+default_timeout_seconds = 120
+max_timeout_seconds = 600
+max_concurrent_per_user = 1
+max_concurrent_global = 5
+artifact_ttl = "24h"
+formats = ["csv", "ndjson"]
+
+[shares]
+default_ttl = "720h"
+max_query_text_bytes = 1048576
 ```
 
-The UI will show limit options up to this value (100, 500, 1K, 2K, 5K, 10K, 50K, 100K, 200K, 500K, 1M).
+The UI uses preview limits for Run and export limits for Download.
 
-**Environment variable:** `LOGCHEF_QUERY__MAX_LIMIT=500000`
+**Environment variables:** `LOGCHEF_QUERY__MAX_PREVIEW_LIMIT=100000`, `LOGCHEF_EXPORT__MAX_ROWS=1000000`
 
 ## Runtime Configuration (Admin Settings UI)
 

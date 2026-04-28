@@ -8,11 +8,15 @@ import (
 
 // MetaResponse represents the server metadata response
 type MetaResponse struct {
-	Version           string `json:"version"`
-	HTTPServerTimeout string `json:"http_server_timeout"`
-	OIDCIssuer        string `json:"oidc_issuer,omitempty"`
-	CLIClientID       string `json:"cli_client_id,omitempty"`
-	MaxQueryLimit     int    `json:"max_query_limit"`
+	Version             string `json:"version"`
+	HTTPServerTimeout   string `json:"http_server_timeout"`
+	OIDCIssuer          string `json:"oidc_issuer,omitempty"`
+	CLIClientID         string `json:"cli_client_id,omitempty"`
+	MaxQueryLimit       int    `json:"max_query_limit"`
+	MaxQueryTimeoutSecs int    `json:"max_query_timeout_seconds"`
+	DefaultPreviewLimit int    `json:"default_preview_limit"`
+	MaxPreviewLimit     int    `json:"max_preview_limit"`
+	MaxExportRows       int    `json:"max_export_rows"`
 }
 
 // handleGetMeta returns server metadata including version and configuration
@@ -27,9 +31,13 @@ type MetaResponse struct {
 // @Router /meta [get]
 func (s *Server) handleGetMeta(c *fiber.Ctx) error {
 	meta := MetaResponse{
-		Version:           s.version,
-		HTTPServerTimeout: s.config.Server.HTTPServerTimeout.String(),
-		MaxQueryLimit:     s.config.Query.MaxLimit,
+		Version:             s.version,
+		HTTPServerTimeout:   s.config.Server.HTTPServerTimeout.String(),
+		MaxQueryLimit:       s.config.Query.MaxPreviewLimit,
+		MaxQueryTimeoutSecs: s.config.Query.MaxTimeoutSeconds,
+		DefaultPreviewLimit: s.config.Query.DefaultPreviewLimit,
+		MaxPreviewLimit:     s.config.Query.MaxPreviewLimit,
+		MaxExportRows:       s.config.Export.MaxRows,
 	}
 
 	if s.oidcProvider != nil {

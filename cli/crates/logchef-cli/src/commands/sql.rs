@@ -2,15 +2,19 @@ use anyhow::{Context, Result};
 use clap::Args;
 use inquire::{Select, Text};
 use logchef_core::Config;
-use logchef_core::api::{Client, Column, QueryStats, SqlQueryRequest};
+use logchef_core::api::{Client, Column, ExportSqlRequest, QueryStats, SqlQueryRequest};
 use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::highlight::{
     FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
 };
 use serde::Serialize;
-use std::io::{IsTerminal, Read};
+use std::io::{IsTerminal, Read, Write};
+use tokio::time::{Duration, sleep};
 
 use crate::cli::GlobalArgs;
+
+const STREAMING_SQL_MIN_TIMEOUT_SECS: u32 = 120;
+const SQL_HTTP_TIMEOUT_HEADROOM_SECS: u64 = 60;
 
 #[derive(Args)]
 pub struct SqlArgs {
@@ -28,6 +32,14 @@ pub struct SqlArgs {
     /// Query timeout in seconds
     #[arg(long, default_value = "30")]
     timeout: u32,
+
+    /// Stream results directly from the server instead of buffering a preview response
+    #[arg(long)]
+    stream: bool,
+
+    /// Result row limit. In stream mode this caps the download; otherwise it caps the preview.
+    #[arg(long)]
+    limit: Option<u32>,
 
     /// Output format
     #[arg(long, default_value = "text")]
@@ -55,6 +67,7 @@ enum OutputFormat {
     Text,
     Json,
     Jsonl,
+    Csv,
     Table,
 }
 
@@ -79,10 +92,15 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
             ResolvedContext::Ephemeral(ctx) => (ctx, "(ephemeral)".to_string(), true),
         };
 
+    let effective_query_timeout_secs =
+        effective_query_timeout_secs(args.timeout, &args.output, args.stream);
+    let client_timeout_secs =
+        sql_transport_timeout_secs(ctx.timeout_secs, effective_query_timeout_secs);
+
     let client = if let Some(token) = &global.token {
-        Client::from_context(ctx)?.with_token(token.clone())
+        Client::from_context_with_timeout(ctx, client_timeout_secs)?.with_token(token.clone())
     } else {
-        Client::from_context(ctx)?
+        Client::from_context_with_timeout(ctx, client_timeout_secs)?
     };
 
     if !ctx.is_authenticated() && global.token.is_none() {
@@ -215,9 +233,113 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
         anyhow::bail!("SQL query cannot be empty");
     }
 
+    if matches!(args.output, OutputFormat::Csv) {
+        let request = ExportSqlRequest {
+            raw_sql: sql,
+            format: "csv".to_string(),
+            limit: args.limit,
+            query_timeout: Some(effective_query_timeout_secs),
+        };
+
+        let job = client
+            .create_export_job(team_id, source_id, &request)
+            .await
+            .context("Failed to create CSV export")?;
+        let export_id = job.id.clone();
+
+        let deadline = std::time::Instant::now()
+            + Duration::from_secs(u64::from(effective_query_timeout_secs) + 60);
+        loop {
+            let current = client
+                .get_export_job(team_id, source_id, &export_id)
+                .await
+                .context("Failed to check CSV export status")?;
+
+            match current.status.as_str() {
+                "complete" => {
+                    let mut response = client
+                        .download_export_job(team_id, source_id, &export_id)
+                        .await
+                        .context("Failed to download CSV export")?;
+
+                    let mut stdout = std::io::stdout().lock();
+                    while let Some(chunk) = response
+                        .chunk()
+                        .await
+                        .context("Failed to read CSV export")?
+                    {
+                        stdout
+                            .write_all(&chunk)
+                            .context("Failed to write CSV export to stdout")?;
+                    }
+                    stdout.flush().context("Failed to flush stdout")?;
+                    return Ok(());
+                }
+                "failed" => {
+                    anyhow::bail!(
+                        "{}",
+                        current
+                            .error_message
+                            .unwrap_or_else(|| "CSV export failed".to_string())
+                    );
+                }
+                "pending" | "running" => {
+                    if std::time::Instant::now() >= deadline {
+                        anyhow::bail!("CSV export is taking longer than expected");
+                    }
+                    sleep(Duration::from_secs(1)).await;
+                }
+                other => anyhow::bail!("CSV export entered unknown state '{}'", other),
+            }
+        }
+    }
+
+    if args.stream {
+        let format = match args.output {
+            OutputFormat::Jsonl => "ndjson",
+            OutputFormat::Json => {
+                anyhow::bail!(
+                    "--stream does not support --output json. Use --output jsonl for streamed JSON or drop --stream for buffered JSON output."
+                );
+            }
+            OutputFormat::Text => {
+                anyhow::bail!(
+                    "--stream does not support --output text. Use --stream --output jsonl for live streaming or --output csv for a completed-file export."
+                );
+            }
+            OutputFormat::Table => {
+                anyhow::bail!(
+                    "--stream does not support --output table. Use --stream --output jsonl for live streaming or --output csv for a completed-file export."
+                );
+            }
+            OutputFormat::Csv => unreachable!("CSV output is handled by export jobs"),
+        };
+
+        let request = ExportSqlRequest {
+            raw_sql: sql,
+            format: format.to_string(),
+            limit: args.limit,
+            query_timeout: Some(effective_query_timeout_secs),
+        };
+
+        let mut response = client
+            .export_sql(team_id, source_id, &request)
+            .await
+            .context("SQL stream failed")?;
+
+        let mut stdout = std::io::stdout().lock();
+        while let Some(chunk) = response.chunk().await.context("Failed to read stream")? {
+            stdout
+                .write_all(&chunk)
+                .context("Failed to write stream to stdout")?;
+        }
+        stdout.flush().context("Failed to flush stdout")?;
+        return Ok(());
+    }
+
     let request = SqlQueryRequest {
         raw_sql: sql,
-        limit: None, // User controls via SQL LIMIT clause
+        limit: args.limit,
         timezone: ctx.defaults.timezone.clone(),
         start_time: None,
         end_time: None,
@@ -267,6 +389,9 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
                 );
             }
         }
+        OutputFormat::Csv => {
+            anyhow::bail!("Use --stream --output csv for CSV output");
+        }
         OutputFormat::Text => {
             let highlighter = if args.no_highlight {
                 None
@@ -302,6 +427,57 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn effective_query_timeout_secs(
+    requested_timeout_secs: u32,
+    output: &OutputFormat,
+    stream: bool,
+) -> u32 {
+    if stream || matches!(output, OutputFormat::Csv) {
+        requested_timeout_secs.max(STREAMING_SQL_MIN_TIMEOUT_SECS)
+    } else {
+        requested_timeout_secs
+    }
+}
+
+fn sql_transport_timeout_secs(context_timeout_secs: u64, query_timeout_secs: u32) -> u64 {
+    context_timeout_secs.max(u64::from(query_timeout_secs) + SQL_HTTP_TIMEOUT_HEADROOM_SECS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn effective_timeout_keeps_preview_timeout_for_buffered_queries() {
+        assert_eq!(
+            effective_query_timeout_secs(45, &OutputFormat::Json, false),
+            45
+        );
+    }
+
+    #[test]
+    fn effective_timeout_enforces_streaming_minimum() {
+        assert_eq!(
+            effective_query_timeout_secs(30, &OutputFormat::Jsonl, true),
+            120
+        );
+    }
+
+    #[test]
+    fn effective_timeout_enforces_csv_export_minimum() {
+        assert_eq!(
+            effective_query_timeout_secs(30, &OutputFormat::Csv, false),
+            120
+        );
+    }
+
+    #[test]
+    fn transport_timeout_never_undercuts_query_timeout() {
+        assert_eq!(sql_transport_timeout_secs(30, 120), 180);
+        assert_eq!(sql_transport_timeout_secs(300, 120), 300);
+    }
 }
 
 enum ResolvedContext<'a> {
