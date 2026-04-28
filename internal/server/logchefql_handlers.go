@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -191,19 +192,27 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 
 	// Apply defaults
 	if req.Limit <= 0 {
-		req.Limit = 100
+		req.Limit = s.config.Query.DefaultPreviewLimit
+	}
+	if req.Limit > s.config.Query.MaxPreviewLimit {
+		req.Limit = s.config.Query.MaxPreviewLimit
 	}
 	if req.Timezone == "" {
 		req.Timezone = "UTC"
 	}
 	if req.QueryTimeout == nil {
-		defaultTimeout := models.DefaultQueryTimeoutSeconds
+		defaultTimeout := s.config.Query.DefaultTimeoutSeconds
 		req.QueryTimeout = &defaultTimeout
 	}
 
 	// Validate timeout
 	if err := models.ValidateQueryTimeout(req.QueryTimeout); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
+	if s.config.Query.MaxTimeoutSeconds > 0 && *req.QueryTimeout > s.config.Query.MaxTimeoutSeconds {
+		return SendErrorWithType(c, fiber.StatusBadRequest,
+			fmt.Sprintf("Query timeout cannot exceed %d seconds for Run", s.config.Query.MaxTimeoutSeconds),
+			models.ValidationErrorType)
 	}
 
 	// Get source information
@@ -283,16 +292,34 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 	queryCtx, cancel := context.WithCancel(c.Context())
 	defer cancel() // Ensure cleanup
 
-	// Add query to tracker
-	queryID := queryTracker.AddQuery(user.ID, sourceID, teamID, sql, cancel)
+	// Add query to tracker atomically with admission control.
+	queryID, err := queryTracker.StartQuery(
+		QueryClassPreview,
+		user.ID,
+		sourceID,
+		teamID,
+		sql,
+		cancel,
+		s.config.Query.MaxConcurrentPerUser,
+		s.config.Query.MaxConcurrentGlobal,
+	)
+	if err != nil {
+		var admissionErr *QueryAdmissionError
+		if errors.As(err, &admissionErr) {
+			return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
+		}
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track query", models.GeneralErrorType)
+	}
 	defer queryTracker.RemoveQuery(queryID)
 
 	// Execute via core function
 	queryParams := clickhouse.LogQueryParams{
-		RawSQL:       sql,
-		Limit:        req.Limit,
-		MaxLimit:     s.config.Query.MaxLimit,
-		QueryTimeout: req.QueryTimeout,
+		RawSQL:           sql,
+		Limit:            req.Limit,
+		DefaultLimit:     s.config.Query.DefaultPreviewLimit,
+		MaxLimit:         s.config.Query.MaxPreviewLimit,
+		MaxResponseBytes: s.config.Query.MaxResponseBytes,
+		QueryTimeout:     req.QueryTimeout,
 	}
 	result, err := core.QueryLogs(queryCtx, s.sqlite, s.clickhouse, s.log, sourceID, queryParams)
 	if err != nil {
@@ -311,17 +338,21 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 			"query_id", queryID,
 			"rows", len(result.Logs),
 			"duration_ms", result.Stats.ExecutionTimeMs,
-			"limit", req.Limit,
+			"limit_requested", req.Limit,
+			"limit_applied", result.Stats.LimitApplied,
+			"truncated", result.Stats.Truncated,
 		)
 	}
 
 	// Add query_id and generated SQL to response
+	columns := normalizeResultColumns(source, result)
 	responseData := map[string]interface{}{
 		"logs":          result.Logs,
-		"columns":       result.Columns,
+		"columns":       columns,
 		"stats":         result.Stats,
 		"query_id":      queryID,
 		"generated_sql": sql, // For "Show SQL" feature
+		"warnings":      result.Warnings,
 	}
 
 	return SendSuccess(c, fiber.StatusOK, responseData)

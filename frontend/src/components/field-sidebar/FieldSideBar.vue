@@ -362,9 +362,9 @@ onUnmounted(() => {
               <div class="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                 <Tag class="h-3 w-3" />
                 <span>Filterable Fields</span>
-                <Badge variant="secondary" class="ml-auto text-[9px] h-4 px-1">
+                <span class="ml-auto text-xs text-muted-foreground/70 font-normal normal-case tracking-normal">
                   {{ filterableFields.length }}
-                </Badge>
+                </span>
               </div>
               
               <div class="space-y-0.5">
@@ -417,7 +417,7 @@ onUnmounted(() => {
                         </Badge>
                         <Badge
                           variant="outline"
-                          class="text-[9px] h-4 px-1 font-normal flex-shrink-0 opacity-60 group-hover:opacity-100"
+                          class="text-[9px] h-4 px-1 font-normal flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
                         >
                           {{ getCleanType(field.type) }}
                         </Badge>
@@ -475,26 +475,18 @@ onUnmounted(() => {
                               :key="valueInfo.value"
                               class="flex items-center gap-1 group/value"
                             >
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <button
-                                      class="flex-1 flex items-center gap-2 px-2 py-1 rounded text-left hover:bg-primary/10 transition-colors min-w-0"
-                                      @click="addFilter(field.name, valueInfo.value, '=')"
-                                    >
-                                      <span class="text-xs text-foreground truncate flex-1" :title="valueInfo.value">
-                                        {{ valueInfo.value || '(empty)' }}
-                                      </span>
-                                      <span class="text-[10px] text-muted-foreground flex-shrink-0">
-                                        {{ formatCount(valueInfo.count) }}
-                                      </span>
-                                    </button>
-                                  </TooltipTrigger>
-                                  <TooltipContent side="right" class="text-xs">
-                                    <p>Click to filter: {{ field.name }}="{{ valueInfo.value }}"</p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
+                              <button
+                                class="flex-1 flex items-center gap-2 px-2 py-1 rounded text-left hover:bg-primary/10 transition-colors min-w-0"
+                                @click="addFilter(field.name, valueInfo.value, '=')"
+                                :title="`${field.name}=&quot;${valueInfo.value}&quot;`"
+                              >
+                                <span class="text-xs text-foreground truncate flex-1">
+                                  {{ valueInfo.value || '(empty)' }}
+                                </span>
+                                <span class="text-[10px] text-muted-foreground flex-shrink-0">
+                                  {{ formatCount(valueInfo.count) }}
+                                </span>
+                              </button>
 
                               <!-- Exclude button -->
                               <TooltipProvider>
@@ -540,35 +532,35 @@ onUnmounted(() => {
 
           <!-- Other Fields Section -->
           <template v-if="otherFields.length > 0">
-            <div>
+            <div class="mt-3">
               <div class="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                 <Database class="h-3 w-3" />
                 <span>Other Fields</span>
-                <Badge variant="secondary" class="ml-auto text-[9px] h-4 px-1">
+                <span class="ml-auto text-xs text-muted-foreground/70 font-normal normal-case tracking-normal">
                   {{ otherFields.length }}
-                </Badge>
+                </span>
               </div>
 
               <div class="space-y-0.5">
                 <div
                   v-for="field in otherFields"
                   :key="field.name"
-                  class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted/50 transition-colors cursor-pointer"
+                  class="group flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted/50 transition-colors cursor-pointer"
                   @click="handleFieldClick(field.name)"
                 >
-                  <component 
-                    :is="getTypeIcon(field.type)" 
+                  <component
+                    :is="getTypeIcon(field.type)"
                     :class="cn('h-3.5 w-3.5 flex-shrink-0', getTypeColorClass(field))"
                   />
-                  <span 
+                  <span
                     class="text-sm text-foreground truncate flex-1"
                     :title="field.name"
                   >
                     {{ field.name }}
                   </span>
-                  <Badge 
-                    variant="outline" 
-                    class="text-[9px] h-4 px-1 font-normal flex-shrink-0 opacity-60"
+                  <Badge
+                    variant="outline"
+                    class="text-[9px] h-4 px-1 font-normal flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     {{ getCleanType(field.type) }}
                   </Badge>

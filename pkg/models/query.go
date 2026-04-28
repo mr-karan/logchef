@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Timeout constants for query execution
 const (
@@ -70,9 +73,10 @@ type APIHistogramRequest struct {
 
 // LogQueryResult represents the result of a log query
 type LogQueryResult struct {
-	Data    []map[string]interface{} `json:"data"`
-	Stats   QueryStats               `json:"stats"`
-	Columns []ColumnInfo             `json:"columns"`
+	Data     []map[string]interface{} `json:"data"`
+	Stats    QueryStats               `json:"stats"`
+	Columns  []ColumnInfo             `json:"columns"`
+	Warnings []QueryWarning           `json:"warnings,omitempty"`
 }
 
 // LogContextRequest represents a request to get temporal context around a log
@@ -210,4 +214,102 @@ type GenerateSQLRequest struct {
 // GenerateSQLResponse defines the successful response for SQL generation.
 type GenerateSQLResponse struct {
 	SQLQuery string `json:"sql_query"`
+}
+
+// QueryShare stores an ad hoc query payload behind a short token.
+type QueryShare struct {
+	Token          string          `json:"token" db:"token"`
+	TeamID         TeamID          `json:"team_id" db:"team_id"`
+	SourceID       SourceID        `json:"source_id" db:"source_id"`
+	CreatedBy      UserID          `json:"created_by" db:"created_by"`
+	Payload        json.RawMessage `json:"payload" db:"payload_json"`
+	ExpiresAt      time.Time       `json:"expires_at" db:"expires_at"`
+	LastAccessedAt *time.Time      `json:"last_accessed_at,omitempty" db:"last_accessed_at"`
+	CreatedAt      time.Time       `json:"created_at" db:"created_at"`
+	CreatedByEmail string          `json:"created_by_email,omitempty"`
+	CreatedByName  string          `json:"created_by_name,omitempty"`
+}
+
+// QuerySharePayload is the client-owned, durable state for a shared ad hoc query.
+type QuerySharePayload struct {
+	Version   int                  `json:"version"`
+	Mode      string               `json:"mode"`
+	Query     string               `json:"query"`
+	Limit     int                  `json:"limit"`
+	TimeRange SavedQueryTimeRange  `json:"time_range"`
+	Timezone  string               `json:"timezone,omitempty"`
+	Variables []SavedQueryVariable `json:"variables,omitempty"`
+}
+
+// CreateQueryShareRequest creates a short share token for a query payload.
+type CreateQueryShareRequest struct {
+	Payload          json.RawMessage `json:"payload"`
+	ExpiresInSeconds int             `json:"expires_in_seconds,omitempty"`
+}
+
+// QueryShareResponse is returned for create and read operations.
+type QueryShareResponse struct {
+	Token     string          `json:"token"`
+	ShareURL  string          `json:"share_url,omitempty"`
+	TeamID    TeamID          `json:"team_id"`
+	SourceID  SourceID        `json:"source_id"`
+	Payload   json.RawMessage `json:"payload"`
+	ExpiresAt time.Time       `json:"expires_at"`
+	CreatedAt time.Time       `json:"created_at"`
+	CreatedBy UserID          `json:"created_by"`
+}
+
+type ExportJobStatus string
+
+const (
+	ExportJobStatusPending  ExportJobStatus = "pending"
+	ExportJobStatusRunning  ExportJobStatus = "running"
+	ExportJobStatusComplete ExportJobStatus = "complete"
+	ExportJobStatusFailed   ExportJobStatus = "failed"
+)
+
+// CreateExportJobRequest creates an async export job that produces a completed artifact.
+type CreateExportJobRequest struct {
+	RawSQL       string             `json:"raw_sql"`
+	Format       string             `json:"format"`
+	Limit        int                `json:"limit,omitempty"`
+	QueryTimeout *int               `json:"query_timeout,omitempty"`
+	Variables    []TemplateVariable `json:"variables,omitempty"`
+}
+
+// ExportJob stores an async export request and its eventual artifact metadata.
+type ExportJob struct {
+	ID             string          `json:"id" db:"id"`
+	TeamID         TeamID          `json:"team_id" db:"team_id"`
+	SourceID       SourceID        `json:"source_id" db:"source_id"`
+	CreatedBy      UserID          `json:"created_by" db:"created_by"`
+	Status         ExportJobStatus `json:"status" db:"status"`
+	Format         string          `json:"format" db:"format"`
+	RequestPayload json.RawMessage `json:"request_payload" db:"request_json"`
+	FileName       string          `json:"file_name,omitempty" db:"file_name"`
+	FilePath       string          `json:"-" db:"file_path"`
+	ErrorMessage   string          `json:"error_message,omitempty" db:"error_message"`
+	RowsExported   int             `json:"rows_exported,omitempty" db:"rows_exported"`
+	BytesWritten   int64           `json:"bytes_written,omitempty" db:"bytes_written"`
+	ExpiresAt      time.Time       `json:"expires_at" db:"expires_at"`
+	CompletedAt    *time.Time      `json:"completed_at,omitempty" db:"completed_at"`
+	CreatedAt      time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at" db:"updated_at"`
+}
+
+// ExportJobResponse is returned for create/status operations.
+type ExportJobResponse struct {
+	ID           string          `json:"id"`
+	Status       ExportJobStatus `json:"status"`
+	Format       string          `json:"format"`
+	FileName     string          `json:"file_name,omitempty"`
+	ErrorMessage string          `json:"error_message,omitempty"`
+	RowsExported int             `json:"rows_exported,omitempty"`
+	BytesWritten int64           `json:"bytes_written,omitempty"`
+	ExpiresAt    time.Time       `json:"expires_at"`
+	CompletedAt  *time.Time      `json:"completed_at,omitempty"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+	StatusURL    string          `json:"status_url,omitempty"`
+	DownloadURL  string          `json:"download_url,omitempty"`
 }

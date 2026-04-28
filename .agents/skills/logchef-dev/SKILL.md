@@ -11,8 +11,8 @@ Set up and run the LogChef development environment. LogChef is a Go (Fiber) back
 
 - Docker (for ClickHouse, Dex OIDC, Mailpit, webhook receiver)
 - `just` task runner
-- `nix develop` shell (provides Go, bun, sqlite3, and build tools)
-- `vector` for log ingestion (available via `nix-shell -p vector`)
+- Go 1.24+, bun, sqlite3, and build tools on PATH
+- `vector` on PATH for log ingestion
 
 ## Quick Start (Full Setup)
 
@@ -41,7 +41,7 @@ just dev-init-tables
 ### 3. Build the app
 
 ```bash
-nix develop -c bash -c "just build"
+just build
 ```
 
 ### 4. Start backend (creates SQLite DB on first run)
@@ -49,7 +49,7 @@ nix develop -c bash -c "just build"
 Use tmux for persistent sessions:
 ```bash
 tmux new-session -d -s logchef-dev -n backend
-tmux send-keys -t logchef-dev:backend "cd /home/karan/Code/Personal/logchef && nix develop -c bash -c 'just run-backend'" Enter
+tmux send-keys -t logchef-dev:backend "cd /home/karan/Code/Personal/logchef && just run-backend" Enter
 ```
 
 Wait for the backend to be ready:
@@ -72,22 +72,21 @@ The dev config uses provisioning (`dev/provisioning.toml`) to automatically crea
 
 ```bash
 cd /home/karan/Code/Personal/logchef
-LOGCHEF_DB_PATH=./local.db nix develop -c bash -c "./dev/seed.sh"
+LOGCHEF_DB_PATH=./local.db ./dev/seed.sh
 ```
 
 ### 7. Ingest sample logs
 
-Vector is not in the nix flake, use `nix-shell`:
 ```bash
 cd /home/karan/Code/Personal/logchef/dev
-nix-shell -p vector --run "vector -c http.toml & vector -c syslog.toml & sleep 60; kill %1 %2 2>/dev/null; wait"
+vector -c http.toml & vector -c syslog.toml & sleep 60; kill %1 %2 2>/dev/null; wait
 ```
 
 Or for continuous ingestion in background:
 ```bash
 cd /home/karan/Code/Personal/logchef/dev
-nix-shell -p vector --run "vector -c http.toml" &
-nix-shell -p vector --run "vector -c syslog.toml" &
+vector -c http.toml &
+vector -c syslog.toml &
 ```
 
 Alternatively, insert sample data directly:
@@ -158,13 +157,13 @@ just dev-setup    # Fresh start (docker + tables + seed)
 ### Rebuild after code changes
 ```bash
 # Backend only
-nix develop -c bash -c "just run-backend"
+just run-backend
 
 # Frontend only (hot-reload, usually automatic)
 cd frontend && bun run dev
 
 # Full rebuild
-nix develop -c bash -c "just build"
+just build
 ```
 
 ### Check ClickHouse data
@@ -175,7 +174,7 @@ docker exec dev-clickhouse-local-1 clickhouse-client --query "SELECT count() FRO
 
 ### Run checks before committing
 ```bash
-nix develop -c bash -c "just check"
+just check
 ```
 
 ### Frontend type check / build
@@ -201,8 +200,8 @@ ss -tlnp | grep 8125 | grep -oP 'pid=\K[0-9]+' | xargs -r kill -9
 - Restart backend to trigger provisioning reconciliation
 
 ### sqlite3 not found (during seed.sh)
-- Run inside nix shell: `nix develop -c bash -c "./dev/seed.sh"`
-- Or set DB path: `LOGCHEF_DB_PATH=./local.db nix develop -c bash -c "./dev/seed.sh"`
+- Install `sqlite` via your package manager (e.g. `yay -S sqlite`)
+- Or set DB path: `LOGCHEF_DB_PATH=./local.db ./dev/seed.sh`
 
 ### No logs in explorer
 - Check ClickHouse has data: `docker exec dev-clickhouse-local-1 clickhouse-client --query "SELECT count() FROM default.http"`

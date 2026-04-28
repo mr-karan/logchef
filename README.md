@@ -91,9 +91,8 @@ For comprehensive documentation, including setup guides, configuration options, 
 
 We welcome contributions! To get started:
 
-1. **Development Setup**: See our [Development Setup Guide](https://logchef.app/contributing/setup) or use the Nix flake:
+1. **Development Setup**: See our [Development Setup Guide](https://logchef.app/contributing/setup):
    ```bash
-   nix develop
    just sqlc-generate
    just dev-docker
    just build

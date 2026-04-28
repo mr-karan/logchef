@@ -68,7 +68,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -ldflags="-s -w -X 'main.buildString=${APP_VERSION}'" \
-    -o bin/logchef.bin \
+    -o bin/logchef \
     ./cmd/server
 
 # Use a minimal base image for the final stage
@@ -80,7 +80,7 @@ RUN apk --no-cache add ca-certificates tzdata
 WORKDIR /app
 
 # Copy the built binary from the builder stage
-COPY --from=builder /app/bin/logchef.bin .
+COPY --from=builder /app/bin/logchef .
 
 # Install the default config at the same path Dockerfile.goreleaser uses so
 # both image variants can be substituted for one another in deployments.
@@ -91,5 +91,5 @@ COPY config.toml /etc/logchef/config.toml
 EXPOSE 8125
 
 # Run the binary
-ENTRYPOINT ["/app/logchef.bin"]
+ENTRYPOINT ["/app/logchef"]
 CMD ["-config", "/etc/logchef/config.toml"]

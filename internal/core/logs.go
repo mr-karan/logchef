@@ -48,7 +48,7 @@ func QueryLogs(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log
 
 	// TODO: Refine query building based on LogQueryParams structure
 	// Example: If params.RawSQL is provided and validated:
-	builtQuery, err := qb.BuildRawQuery(params.RawSQL, params.Limit)
+	buildResult, err := qb.BuildRawQueryWithLimitPolicy(params.RawSQL, params.Limit, params.DefaultLimit, params.MaxLimit)
 	if err != nil {
 		log.Error("failed to build raw SQL query", "source_id", sourceID, "raw_sql", params.RawSQL, "error", err)
 		// Return a user-friendly error indicating invalid query syntax
@@ -59,7 +59,19 @@ func QueryLogs(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log
 	// query := qb.BuildSelectQuery(params.StartTime, params.EndTime, params.Filter, params.Limit)
 
 	// 4. Execute the query via the ClickHouse client with timeout (always applied)
-	queryResult, err := client.QueryWithTimeout(ctx, builtQuery, params.QueryTimeout)
+	warnings := queryWarningsForBuildResult(buildResult)
+	queryResult, err := client.QueryWithOptions(ctx, buildResult.SQL, clickhouse.QueryOptions{
+		TimeoutSeconds: params.QueryTimeout,
+		Settings: map[string]interface{}{
+			"max_execution_time":   *params.QueryTimeout,
+			"max_result_rows":      buildResult.AppliedLimit,
+			"result_overflow_mode": "break",
+		},
+		LimitApplied:     buildResult.AppliedLimit,
+		MaxRows:          buildResult.AppliedLimit,
+		MaxResponseBytes: params.MaxResponseBytes,
+		Warnings:         warnings,
+	})
 	if err != nil {
 		log.Error("failed to execute clickhouse query", "source_id", sourceID, "error", err)
 		// Consider parsing CH error for user-friendliness
@@ -67,6 +79,23 @@ func QueryLogs(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log
 	}
 
 	return queryResult, nil
+}
+
+func queryWarningsForBuildResult(result clickhouse.QueryBuildResult) []models.QueryWarning {
+	warnings := make([]models.QueryWarning, 0, 2)
+	if result.LimitAdded {
+		warnings = append(warnings, models.QueryWarning{
+			Code:    "LIMIT_APPLIED",
+			Message: fmt.Sprintf("Showing first %d rows. Use download for larger results.", result.AppliedLimit),
+		})
+	}
+	if result.LimitCapped {
+		warnings = append(warnings, models.QueryWarning{
+			Code:    "LIMIT_CAPPED",
+			Message: fmt.Sprintf("Result limit capped at %d rows.", result.AppliedLimit),
+		})
+	}
+	return warnings
 }
 
 // GetSourceSchema retrieves the schema (column information) for a specific source from ClickHouse.

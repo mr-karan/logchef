@@ -8,9 +8,12 @@ import type {
   QueryStats,
   FilterCondition,
   QueryParams,
+  QuerySharePayload,
+  QueryShareResponse,
   LogContextRequest,
   LogContextResponse,
   QuerySuccessResponse,
+  QueryWarning,
 } from "@/api/explore";
 import type { SavedQueryContent } from "@/api/savedQueries";
 import type { DateValue } from "@internationalized/date";
@@ -26,7 +29,7 @@ import { parseRelativeTimeString, timestampToCalendarDateTime, calendarDateTimeT
 import { SqlManager } from '@/services/SqlManager';
 import { type TimeRange } from '@/types/query';
 import { useVariables } from "@/composables/useVariables";
-import { useVariableStore } from "@/stores/variables";
+import { useVariableStore, type VariableState } from "@/stores/variables";
 import { queryHistoryService } from "@/services/QueryHistoryService";
 import { createTimeRangeCondition } from '@/utils/time-utils';
 
@@ -38,10 +41,24 @@ interface SavedQuerySnapshot {
   absoluteEnd: number | null;
 }
 
+interface ExploreDraft {
+  version: number;
+  mode: "logchefql" | "sql";
+  rawSql: string;
+  logchefqlCode: string;
+  limit: number;
+  relativeTime: string | null;
+  absoluteStart: number | null;
+  absoluteEnd: number | null;
+  timezone: string | null;
+  variables: VariableState[];
+}
+
 export interface ExploreState {
   logs: Record<string, any>[];
   columns: ColumnInfo[];
   queryStats: QueryStats;
+  queryWarnings: QueryWarning[];
   limit: number;
   timeRange: {
     start: DateValue;
@@ -59,6 +76,8 @@ export interface ExploreState {
   error?: string | null;
   queryId?: string | null;
   selectedQueryId: string | null;
+  activeShareToken: string | null;
+  activeShareSnapshot: string | null;
   activeSavedQueryName: string | null;
   savedQuerySnapshot: SavedQuerySnapshot | null;
   stats?: any;
@@ -86,6 +105,76 @@ const DEFAULT_QUERY_STATS: QueryStats = {
   bytes_read: 0,
 };
 
+const DRAFT_STORAGE_PREFIX = "logchef.explore.draft";
+
+function inferColumnType(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "String";
+  }
+
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? "Int64" : "Float64";
+  }
+
+  if (typeof value === "boolean") {
+    return "Bool";
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed !== "" && !Number.isNaN(Date.parse(trimmed))) {
+      return "DateTime64";
+    }
+    return "String";
+  }
+
+  if (Array.isArray(value)) {
+    return "Array";
+  }
+
+  return "JSON";
+}
+
+function normalizeQueryColumns(
+  columns: ColumnInfo[] | null | undefined,
+  rows: Record<string, any>[] | null | undefined
+): ColumnInfo[] {
+  if (Array.isArray(columns) && columns.length > 0) {
+    return columns;
+  }
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return [];
+  }
+
+  const sampledRows = rows.slice(0, 25);
+  const inferredTypes = new Map<string, string>();
+
+  for (const row of sampledRows) {
+    for (const [key, value] of Object.entries(row)) {
+      if (!inferredTypes.has(key) && value !== null && value !== undefined) {
+        inferredTypes.set(key, inferColumnType(value));
+      }
+    }
+  }
+
+  return Object.keys(rows[0]).map((name) => ({
+    name,
+    type: inferredTypes.get(name) || "String",
+  }));
+}
+
+function cloneVariables(variables: VariableState[]): VariableState[] {
+  return variables.map((variable) => ({
+    ...variable,
+    value: Array.isArray(variable.value) ? [...variable.value] : variable.value,
+    defaultValue: Array.isArray(variable.defaultValue)
+      ? [...variable.defaultValue]
+      : variable.defaultValue,
+    options: variable.options?.map((option) => ({ ...option })),
+  }));
+}
+
 export const useExploreStore = defineStore("explore", () => {
   const contextStore = useContextStore();
   const preferencesStore = usePreferencesStore();
@@ -96,6 +185,7 @@ export const useExploreStore = defineStore("explore", () => {
     logs: [],
     columns: [],
     queryStats: DEFAULT_QUERY_STATS,
+    queryWarnings: [],
     limit: 100,
     timeRange: null,
     selectedRelativeTime: null,
@@ -106,6 +196,8 @@ export const useExploreStore = defineStore("explore", () => {
     lastExecutionTimestamp: null,
     hasExecutedQuery: false,
     selectedQueryId: null,
+    activeShareToken: null,
+    activeShareSnapshot: null,
     activeSavedQueryName: null,
     savedQuerySnapshot: null,
     selectedTimezoneIdentifier: null,
@@ -116,10 +208,17 @@ export const useExploreStore = defineStore("explore", () => {
     isCancellingQuery: false,
   });
 
+  let suppressedSourceResetId: number | null = null;
+
   watch(
     () => contextStore.sourceId,
     (newSourceId, oldSourceId) => {
       if (newSourceId !== oldSourceId) {
+        if (suppressedSourceResetId !== null && newSourceId === suppressedSourceResetId) {
+          suppressedSourceResetId = null;
+          return;
+        }
+        suppressedSourceResetId = null;
         onSourceChange(newSourceId || 0);
       }
     }
@@ -144,6 +243,145 @@ export const useExploreStore = defineStore("explore", () => {
   const isHistogramEligible = computed(() => {
     return state.data.value.activeMode === 'logchefql';
   });
+  const variableStore = useVariableStore();
+  let suppressSharedVariableTracking = false;
+
+  function currentDraftKey(): string | null {
+    const teamId = useTeamsStore().currentTeamId;
+    if (!teamId || !sourceId.value) {
+      return null;
+    }
+    return `${DRAFT_STORAGE_PREFIX}.${teamId}.${sourceId.value}`;
+  }
+
+  function persistDraft() {
+    const key = currentDraftKey();
+    if (!key) {
+      return;
+    }
+
+    const { activeMode, rawSql, logchefqlCode, limit, selectedRelativeTime, timeRange, selectedTimezoneIdentifier } = state.data.value;
+    let absoluteStart: number | null = null;
+    let absoluteEnd: number | null = null;
+
+    if (!selectedRelativeTime && timeRange) {
+      absoluteStart = calendarDateTimeToTimestamp(timeRange.start);
+      absoluteEnd = calendarDateTimeToTimestamp(timeRange.end);
+    }
+
+    const draft: ExploreDraft = {
+      version: 1,
+      mode: activeMode,
+      rawSql,
+      logchefqlCode,
+      limit,
+      relativeTime: selectedRelativeTime,
+      absoluteStart,
+      absoluteEnd,
+      timezone: selectedTimezoneIdentifier,
+      variables: cloneVariables(variableStore.allVariables),
+    };
+
+    try {
+      localStorage.setItem(key, JSON.stringify(draft));
+    } catch (error) {
+      console.warn("Failed to persist query draft:", error);
+    }
+  }
+
+  function restoreDraftForCurrentContext(): boolean {
+    const key = currentDraftKey();
+    if (!key) {
+      return false;
+    }
+
+    try {
+      const rawDraft = localStorage.getItem(key);
+      if (!rawDraft) {
+        return false;
+      }
+
+      const draft = JSON.parse(rawDraft) as ExploreDraft;
+      if (draft.version !== 1) {
+        return false;
+      }
+
+      state.data.value.activeMode = draft.mode === "sql" ? "sql" : "logchefql";
+      state.data.value.rawSql = draft.rawSql || "";
+      state.data.value.logchefqlCode = draft.logchefqlCode || "";
+      if (draft.limit > 0) {
+        state.data.value.limit = draft.limit;
+      }
+      state.data.value.selectedTimezoneIdentifier = draft.timezone || null;
+
+      if (draft.relativeTime) {
+        const { start, end } = parseRelativeTimeString(draft.relativeTime);
+        state.data.value.selectedRelativeTime = draft.relativeTime;
+        state.data.value.timeRange = { start, end };
+      } else if (draft.absoluteStart && draft.absoluteEnd) {
+        state.data.value.timeRange = {
+          start: timestampToCalendarDateTime(draft.absoluteStart),
+          end: timestampToCalendarDateTime(draft.absoluteEnd),
+        };
+        state.data.value.selectedRelativeTime = null;
+      }
+
+      if (Array.isArray(draft.variables)) {
+        variableStore.setAllVariable(draft.variables);
+      } else {
+        const { ensureVariablesFromSql } = useVariables();
+        ensureVariablesFromSql(state.data.value.activeMode === "sql" ? state.data.value.rawSql : state.data.value.logchefqlCode);
+      }
+      return true;
+    } catch (error) {
+      console.warn("Failed to restore query draft:", error);
+      return false;
+    }
+  }
+
+  function buildCurrentShareSnapshot(): string {
+    const { activeMode, rawSql, logchefqlCode, limit, selectedRelativeTime, timeRange, selectedTimezoneIdentifier } = state.data.value;
+    let absoluteStart: number | null = null;
+    let absoluteEnd: number | null = null;
+
+    if (!selectedRelativeTime && timeRange) {
+      absoluteStart = calendarDateTimeToTimestamp(timeRange.start);
+      absoluteEnd = calendarDateTimeToTimestamp(timeRange.end);
+    }
+
+    return JSON.stringify({
+      sourceId: sourceId.value,
+      mode: activeMode,
+      query: activeMode === "sql" ? rawSql : logchefqlCode,
+      limit,
+      relativeTime: selectedRelativeTime,
+      absoluteStart,
+      absoluteEnd,
+      timezone: selectedTimezoneIdentifier,
+      variables: cloneVariables(variableStore.allVariables),
+    });
+  }
+
+  function clearActiveShareSelection() {
+    state.data.value.activeShareToken = null;
+    state.data.value.activeShareSnapshot = null;
+  }
+
+  function clearActiveSavedQuerySelection() {
+    state.data.value.selectedQueryId = null;
+    state.data.value.activeSavedQueryName = null;
+    state.data.value.savedQuerySnapshot = null;
+  }
+
+  function clearShareSelectionIfDirty() {
+    if (!state.data.value.activeShareToken || !state.data.value.activeShareSnapshot) {
+      return;
+    }
+
+    if (buildCurrentShareSnapshot() !== state.data.value.activeShareSnapshot) {
+      clearActiveShareSelection();
+    }
+  }
 
   const _buildDisplaySql = () => {
     const { logchefqlCode, timeRange, limit, selectedTimezoneIdentifier } = state.data.value;
@@ -268,7 +506,14 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   const urlQueryParameters = computed(() => {
-    const { timeRange, limit, activeMode, logchefqlCode, rawSql, selectedRelativeTime, selectedQueryId } = state.data.value;
+    const {
+      timeRange,
+      limit,
+      activeMode,
+      selectedRelativeTime,
+      selectedQueryId,
+      activeShareToken,
+    } = state.data.value;
     const teamsStore = useTeamsStore();
 
     const params: Record<string, string> = {};
@@ -283,6 +528,11 @@ export const useExploreStore = defineStore("explore", () => {
 
     if (selectedQueryId && !hasDivergedFromSavedQuery.value) {
       params.id = selectedQueryId;
+      return params;
+    }
+
+    if (activeShareToken) {
+      params.share = activeShareToken;
       return params;
     }
 
@@ -313,13 +563,8 @@ export const useExploreStore = defineStore("explore", () => {
 
     params.limit = limit.toString();
 
-    if (activeMode === 'logchefql' && logchefqlCode) {
-      params.q = logchefqlCode;
-    } else if (activeMode === 'sql') {
+    if (activeMode === 'sql') {
       params.mode = 'sql';
-      if (rawSql) {
-        params.sql = rawSql;
-      }
     }
 
     return params;
@@ -332,6 +577,8 @@ export const useExploreStore = defineStore("explore", () => {
 
   function setTimezoneIdentifier(timezone: string) {
     state.data.value.selectedTimezoneIdentifier = timezone;
+    clearShareSelectionIfDirty();
+    persistDraft();
   }
 
   function onSourceChange(_newSourceId: number) {
@@ -339,6 +586,8 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.logs = [];
     state.data.value.columns = [];
     state.data.value.queryStats = DEFAULT_QUERY_STATS;
+    state.data.value.queryWarnings = [];
+    clearActiveShareSelection();
     
     histogramStore.clearHistogramData();
     histogramStore.setGroupByField(null);
@@ -360,6 +609,10 @@ export const useExploreStore = defineStore("explore", () => {
     }
   }
 
+  function suppressNextSourceReset(sourceId: number) {
+    suppressedSourceResetId = sourceId;
+  }
+
   function setTimeConfiguration(config: { absoluteRange?: { start: DateValue; end: DateValue }, relativeTime?: string }) {
     if (config.relativeTime) {
       setRelativeTimeRange(config.relativeTime);
@@ -367,6 +620,8 @@ export const useExploreStore = defineStore("explore", () => {
       state.data.value.timeRange = config.absoluteRange;
       state.data.value.selectedRelativeTime = null;
       clearSavedQueryIfDirty();
+      clearShareSelectionIfDirty();
+      persistDraft();
     }
   }
 
@@ -374,6 +629,8 @@ export const useExploreStore = defineStore("explore", () => {
     if (newLimit > 0) {
       state.data.value.limit = newLimit;
       clearSavedQueryIfDirty();
+      clearShareSelectionIfDirty();
+      persistDraft();
     }
   }
 
@@ -386,26 +643,36 @@ export const useExploreStore = defineStore("explore", () => {
   function setLogchefqlCode(code: string) {
     state.data.value.logchefqlCode = code;
     clearSavedQueryIfDirty();
+    clearShareSelectionIfDirty();
+    persistDraft();
   }
 
   function setRawSql(sql: string) {
     state.data.value.rawSql = sql;
     clearSavedQueryIfDirty();
+    clearShareSelectionIfDirty();
+    persistDraft();
   }
 
   function setActiveMode(mode: 'logchefql' | 'sql') {
     const currentMode = state.data.value.activeMode;
     if (mode === currentMode) return;
     state.data.value.activeMode = mode;
+    clearShareSelectionIfDirty();
+    persistDraft();
   }
 
   function _updateLastExecutedState() {
+    const executedSql = state.data.value.activeMode === 'logchefql'
+      ? (state.data.value.generatedDisplaySql || sqlForExecution.value)
+      : sqlForExecution.value;
+
     state.data.value.lastExecutedState = {
       timeRange: JSON.stringify(state.data.value.timeRange),
       limit: state.data.value.limit,
       mode: state.data.value.activeMode,
       logchefqlQuery: state.data.value.logchefqlCode,
-      sqlQuery: sqlForExecution.value,
+      sqlQuery: executedSql,
       sourceId: sourceId.value
     };
     state.data.value.lastExecutionTimestamp = Date.now();
@@ -414,12 +681,27 @@ export const useExploreStore = defineStore("explore", () => {
   function initializeFromUrl(
     params: Record<string, string | undefined>,
     options?: { updateLastExecutedState?: boolean }
-  ): { needsResolve: boolean; queryId?: string; shouldExecute: boolean } {
+  ): { needsResolve: boolean; queryId?: string; needsShareResolve?: boolean; shareToken?: string; shouldExecute: boolean } {
     if (params.source) {
       const parsedSourceId = parseInt(params.source, 10);
       if (!isNaN(parsedSourceId)) {
         contextStore.selectSource(parsedSourceId);
       }
+    }
+
+    if (!params.share) {
+      clearActiveShareSelection();
+    }
+
+    if (!params.id) {
+      state.data.value.selectedQueryId = null;
+      state.data.value.activeSavedQueryName = null;
+      state.data.value.savedQuerySnapshot = null;
+    }
+
+    if (params.share) {
+      state.data.value.activeShareToken = params.share;
+      return { needsResolve: false, needsShareResolve: true, shareToken: params.share, shouldExecute: false };
     }
 
     const queryId = params.id;
@@ -479,8 +761,13 @@ export const useExploreStore = defineStore("explore", () => {
       }
     }
 
-    // Ensure variables from SQL are initialized in the variable store
-    // This handles page reload where the variable store is empty but SQL has placeholders
+    const hasLegacyUrlQuery = !!(params.q || params.sql);
+    if (!hasLegacyUrlQuery && !queryId && !state.data.value.activeShareToken) {
+      restoreDraftForCurrentContext();
+    }
+
+    // Ensure variables from SQL are initialized in the variable store.
+    // This handles page reload where the variable store is empty but SQL has placeholders.
     const { ensureVariablesFromSql } = useVariables();
     const sqlToCheck = state.data.value.activeMode === 'sql'
       ? state.data.value.rawSql
@@ -552,7 +839,6 @@ export const useExploreStore = defineStore("explore", () => {
       };
 
       // Ensure variables from the query content are initialized in the variable store
-      const variableStore = useVariableStore();
       if (Array.isArray(content.variables)) {
         const normalizedVariables = (content.variables as NonNullable<SavedQueryContent['variables']>).map((variable) => {
           const hasValue = variable.value !== '' && variable.value !== null && variable.value !== undefined;
@@ -576,11 +862,76 @@ export const useExploreStore = defineStore("explore", () => {
     }
   }
 
+  function hydrateFromQueryShare(data: QueryShareResponse): { shouldExecute: boolean } {
+    try {
+      const payload = data.payload;
+
+      state.data.value.activeShareToken = data.token;
+      state.data.value.selectedQueryId = null;
+      state.data.value.activeSavedQueryName = null;
+      state.data.value.savedQuerySnapshot = null;
+      state.data.value.activeMode = payload.mode === "sql" ? "sql" : "logchefql";
+
+      if (state.data.value.activeMode === "sql") {
+        state.data.value.rawSql = payload.query || "";
+        state.data.value.logchefqlCode = "";
+      } else {
+        state.data.value.logchefqlCode = payload.query || "";
+        state.data.value.rawSql = "";
+      }
+
+      if (payload.limit > 0) {
+        state.data.value.limit = payload.limit;
+      }
+      state.data.value.selectedTimezoneIdentifier = payload.timezone || null;
+
+      const relative = payload.time_range?.relative;
+      const absolute = payload.time_range?.absolute;
+      if (relative) {
+        const { start, end } = parseRelativeTimeString(relative);
+        state.data.value.selectedRelativeTime = relative;
+        state.data.value.timeRange = { start, end };
+      } else if (absolute?.start && absolute?.end) {
+        state.data.value.timeRange = {
+          start: timestampToCalendarDateTime(absolute.start),
+          end: timestampToCalendarDateTime(absolute.end),
+        };
+        state.data.value.selectedRelativeTime = null;
+      } else if (!state.data.value.timeRange) {
+        const { start, end } = parseRelativeTimeString("15m");
+        state.data.value.selectedRelativeTime = "15m";
+        state.data.value.timeRange = { start, end };
+      }
+
+      suppressSharedVariableTracking = true;
+      try {
+        if (Array.isArray(payload.variables)) {
+          variableStore.setAllVariable(payload.variables as VariableState[]);
+        } else {
+          const { ensureVariablesFromSql } = useVariables();
+          ensureVariablesFromSql(payload.query || "");
+        }
+      } finally {
+        suppressSharedVariableTracking = false;
+      }
+
+      _updateLastExecutedState();
+      state.data.value.activeShareSnapshot = buildCurrentShareSnapshot();
+      persistDraft();
+
+      return { shouldExecute: !!(sourceId.value && state.data.value.timeRange) };
+    } catch (error) {
+      console.error("Failed to hydrate query share:", error);
+      return { shouldExecute: false };
+    }
+  }
+
   function _clearQueryContent() {
     state.data.value.logchefqlCode = '';
     state.data.value.rawSql = '';
     state.data.value.activeMode = 'logchefql';
     state.data.value.selectedQueryId = null;
+    clearActiveShareSelection();
     state.data.value.activeSavedQueryName = null;
     state.data.value.savedQuerySnapshot = null;
     state.data.value.hasExecutedQuery = false;
@@ -743,9 +1094,11 @@ export const useExploreStore = defineStore("explore", () => {
           }, { signal: abortController.signal, timeout: queryTimeout });
 
           if (queryResponse.data) {
-            state.data.value.logs = queryResponse.data.logs || [];
-            state.data.value.columns = queryResponse.data.columns || [];
+            const logs = queryResponse.data.logs || [];
+            state.data.value.logs = logs;
+            state.data.value.columns = normalizeQueryColumns(queryResponse.data.columns, logs);
             state.data.value.queryStats = queryResponse.data.stats || DEFAULT_QUERY_STATS;
+            state.data.value.queryWarnings = queryResponse.data.warnings || [];
 
             if (queryResponse.data.query_id) {
               state.data.value.currentQueryId = queryResponse.data.query_id;
@@ -756,6 +1109,7 @@ export const useExploreStore = defineStore("explore", () => {
             }
 
             _updateLastExecutedState();
+            persistDraft();
 
             try {
               if (currentTeamId && sourceId.value) {
@@ -855,9 +1209,11 @@ export const useExploreStore = defineStore("explore", () => {
           showToast: false, // Errors shown inline via QueryError component
           onSuccess: (data: QuerySuccessResponse | null) => {
             if (data && (data.data || data.logs)) {
-              state.data.value.logs = data.data || data.logs || [];
-              state.data.value.columns = data.columns || [];
+              const logs = data.data || data.logs || [];
+              state.data.value.logs = logs;
+              state.data.value.columns = normalizeQueryColumns(data.columns, logs);
               state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
+              state.data.value.queryWarnings = data.warnings || [];
               if (data.params && typeof data.params === 'object' && "query_id" in data.params) {
                 state.data.value.queryId = data.params.query_id as string;
               } else {
@@ -867,6 +1223,7 @@ export const useExploreStore = defineStore("explore", () => {
               state.data.value.logs = [];
               state.data.value.columns = [];
               state.data.value.queryStats = DEFAULT_QUERY_STATS;
+              state.data.value.queryWarnings = [];
               state.data.value.queryId = null;
             }
             
@@ -875,6 +1232,7 @@ export const useExploreStore = defineStore("explore", () => {
             }
 
             _updateLastExecutedState();
+            persistDraft();
 
             try {
               const teamsStore = useTeamsStore();
@@ -964,6 +1322,8 @@ export const useExploreStore = defineStore("explore", () => {
     if (!relativeTimeString) {
       state.data.value.selectedRelativeTime = null;
       clearSavedQueryIfDirty();
+      clearShareSelectionIfDirty();
+      persistDraft();
       return;
     }
 
@@ -972,6 +1332,8 @@ export const useExploreStore = defineStore("explore", () => {
       state.data.value.selectedRelativeTime = relativeTimeString;
       state.data.value.timeRange = { start, end };
       clearSavedQueryIfDirty();
+      clearShareSelectionIfDirty();
+      persistDraft();
     } catch (error) {
       console.error('Failed to parse relative time string:', error);
     }
@@ -1019,6 +1381,57 @@ export const useExploreStore = defineStore("explore", () => {
         showToast: false,
       });
     });
+  }
+
+  function buildQuerySharePayload(): QuerySharePayload {
+    const { activeMode, rawSql, logchefqlCode, limit, selectedRelativeTime, timeRange, selectedTimezoneIdentifier } = state.data.value;
+    const payload: QuerySharePayload = {
+      version: 1,
+      mode: activeMode,
+      query: activeMode === "sql" ? rawSql : logchefqlCode,
+      limit,
+      timezone: selectedTimezoneIdentifier || getTimezoneIdentifier(),
+      variables: variableStore.allVariables as unknown as QuerySharePayload["variables"],
+    };
+
+    if (selectedRelativeTime) {
+      payload.time_range = { relative: selectedRelativeTime };
+    } else if (timeRange) {
+      payload.time_range = {
+        absolute: {
+          start: calendarDateTimeToTimestamp(timeRange.start),
+          end: calendarDateTimeToTimestamp(timeRange.end),
+        },
+      };
+    }
+
+    return payload;
+  }
+
+  async function createQueryShare(options?: { persistActiveToken?: boolean }) {
+    const currentTeamId = useTeamsStore().currentTeamId;
+    if (!currentTeamId || !sourceId.value) {
+      throw new Error("Team and source are required to share a query");
+    }
+
+    const payload = buildQuerySharePayload();
+    if (payload.mode === "sql" && !payload.query.trim()) {
+      throw new Error("Query is required to create a share link");
+    }
+
+    const response = await exploreApi.createQueryShare(sourceId.value, payload, currentTeamId);
+    if (response.data && options?.persistActiveToken !== false) {
+      state.data.value.activeShareToken = response.data.token;
+      state.data.value.activeShareSnapshot = buildCurrentShareSnapshot();
+    }
+    return response.data;
+  }
+
+  function setActiveShareToken(token: string | null) {
+    state.data.value.activeShareToken = token;
+    if (!token) {
+      state.data.value.activeShareSnapshot = null;
+    }
   }
 
   function clearError() {
@@ -1078,6 +1491,19 @@ export const useExploreStore = defineStore("explore", () => {
       lastAutoExecKey = null;
     }
   );
+
+  watch(
+    () => variableStore.allVariables,
+    () => {
+      if (suppressSharedVariableTracking || !state.data.value.activeShareToken) {
+        return;
+      }
+
+      clearShareSelectionIfDirty();
+      persistDraft();
+    },
+    { deep: true }
+  );
   
   watch(
     () => [sourcesStore.currentSourceDetails, state.data.value.timeRange] as const,
@@ -1115,6 +1541,7 @@ export const useExploreStore = defineStore("explore", () => {
     logs: computed(() => state.data.value.logs),
     columns: computed(() => state.data.value.columns),
     queryStats: computed(() => state.data.value.queryStats),
+    queryWarnings: computed(() => state.data.value.queryWarnings),
     sourceId,
     limit: computed(() => state.data.value.limit),
     queryTimeout: computed(() => state.data.value.queryTimeout),
@@ -1130,6 +1557,7 @@ export const useExploreStore = defineStore("explore", () => {
     lastExecutionTimestamp: computed(() => state.data.value.lastExecutionTimestamp),
     hasExecutedQuery: computed(() => state.data.value.hasExecutedQuery),
     selectedQueryId: computed(() => state.data.value.selectedQueryId),
+    activeShareToken: computed(() => state.data.value.activeShareToken),
     activeSavedQueryName: computed(() => state.data.value.activeSavedQueryName),
     selectedTimezoneIdentifier: computed(() => state.data.value.selectedTimezoneIdentifier),
     generatedDisplaySql: computed(() => state.data.value.generatedDisplaySql),
@@ -1158,6 +1586,7 @@ export const useExploreStore = defineStore("explore", () => {
 
     // Actions
     setSource,
+    suppressNextSourceReset,
     setTimeConfiguration,
     setLimit,
     setQueryTimeout,
@@ -1165,6 +1594,7 @@ export const useExploreStore = defineStore("explore", () => {
     setRawSql,
     setActiveMode,
     setLogchefqlCode,
+    clearActiveSavedQuerySelection,
     setSelectedQueryId,
     setActiveSavedQueryName,
     setRelativeTimeRange,
@@ -1172,9 +1602,12 @@ export const useExploreStore = defineStore("explore", () => {
     resetQueryContentForSourceChange,
     initializeFromUrl,
     hydrateFromResolvedQuery,
+    hydrateFromQueryShare,
     executeQuery,
     cancelQuery,
     getLogContext,
+    createQueryShare,
+    setActiveShareToken,
     clearError,
     setGroupByField,
     setTimezoneIdentifier,

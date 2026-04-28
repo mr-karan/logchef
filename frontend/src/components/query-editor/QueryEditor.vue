@@ -13,7 +13,7 @@
 
         <!-- Tabs for Mode Switching -->
         <Tabs :model-value="props.activeMode"
-          @update:model-value="(value: string | number) => $emit('update:activeMode', asEditorMode(value), true)"
+          @update:model-value="(value: string | number) => $emit('update:activeMode', asEditorMode(value), false)"
           class="w-auto">
           <TabsList class="grid grid-cols-2 w-fit">
             <TabsTrigger value="logchefql">
@@ -102,6 +102,29 @@
         <SavedQueriesDropdown :selected-source-id="props.sourceId" :selected-team-id="props.teamId"
           @select-saved-query="(query: SavedTeamQuery) => $emit('select-saved-query', query)"
           @save="$emit('save-query')" class="h-8" />
+
+        <Select
+          v-if="props.showRunButton"
+          :model-value="selectedTimeout"
+          :disabled="props.isExecuting"
+          @update:model-value="handleTimeoutChange"
+        >
+          <SelectTrigger class="h-7 w-[92px] gap-1.5 text-xs">
+            <div class="flex items-center gap-1.5">
+              <Clock3 class="h-3.5 w-3.5 text-muted-foreground" />
+              <SelectValue />
+            </div>
+          </SelectTrigger>
+          <SelectContent align="end">
+            <SelectItem
+              v-for="option in timeoutOptions"
+              :key="option.value"
+              :value="option.value.toString()"
+            >
+              {{ option.label }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
 
         <!-- Run Query Button - Integrated -->
         <TooltipProvider v-if="props.showRunButton && !props.isExecuting">
@@ -349,6 +372,7 @@ import {
   EyeOff,
   Wand2,
   Play,
+  Clock3,
   RefreshCw,
   Square,
 } from "lucide-vue-next";
@@ -372,9 +396,17 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { logchefqlApi } from "@/api/logchefql";
 import { storeToRefs } from 'pinia';
 import { useExploreStore } from "@/stores/explore";
+import { useMetaStore } from "@/stores/meta";
 import { useTeamsStore } from "@/stores/teams";
 import { useVariableStore } from '@/stores/variables';
 import { useVariables, extractVariablesWithOptional, extractVariableNames } from "@/composables/useVariables.ts";
@@ -409,6 +441,7 @@ interface QueryEditorProps {
   canExecute?: boolean
   showRunButton?: boolean
   isCancelling?: boolean
+  queryTimeout?: number
 }
 
 const props = withDefaults(defineProps<QueryEditorProps>(), {
@@ -422,6 +455,7 @@ const props = withDefaults(defineProps<QueryEditorProps>(), {
   canExecute: true,
   showRunButton: true,
   isCancelling: false,
+  queryTimeout: 30,
 });
 
 const emit = defineEmits<{
@@ -439,10 +473,12 @@ const emit = defineEmits<{
   (e: "execute"): void;
   // Cancel button
   (e: "cancel-query"): void;
+  (e: "update:query-timeout", value: number): void;
 }>();
 
 const isDark = useDark();
 const exploreStore = useExploreStore();
+const metaStore = useMetaStore();
 const variableStore = useVariableStore();
 const teamsStore = useTeamsStore();
 const { convertVariables } = useVariables();
@@ -466,13 +502,44 @@ const generatedSql = computed(() => exploreStore.generatedAiSql);
 
 const theme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
 const isEditorEmpty = computed(() => !editorContent.value?.trim());
+const baseTimeoutOptions = [
+  { label: "10s", value: 10 },
+  { label: "30s", value: 30 },
+  { label: "1m", value: 60 },
+  { label: "2m", value: 120 },
+  { label: "5m", value: 300 },
+];
+const maxQueryTimeoutSeconds = computed(() => metaStore.maxQueryTimeoutSeconds || 120);
+
+function formatTimeoutLabel(seconds: number): string {
+  if (seconds % 60 === 0) {
+    return `${seconds / 60}m`;
+  }
+  return `${seconds}s`;
+}
+
+const timeoutOptions = computed(() => {
+  const maxTimeout = Math.max(maxQueryTimeoutSeconds.value, 10);
+  const options = baseTimeoutOptions.filter((option) => option.value <= maxTimeout);
+
+  if (options.length === 0 || options[options.length - 1]?.value !== maxTimeout) {
+    options.push({ label: formatTimeoutLabel(maxTimeout), value: maxTimeout });
+  }
+
+  return options;
+});
+
+const selectedTimeout = computed(() => {
+  const requestedTimeout = props.queryTimeout || 30;
+  return String(Math.min(requestedTimeout, maxQueryTimeoutSeconds.value));
+});
 
 const currentPlaceholder = computed(() => {
   if (props.placeholder) return props.placeholder;
 
   return props.activeMode === "logchefql"
-    ? 'Enter search criteria (e.g., lvl="ERROR" and namespace~"sys")'
-    : `Enter ClickHouse SQL query (e.g., SELECT * FROM ${props.tableName || "your_table"} WHERE ...)`;
+    ? 'Filter logs… e.g. method="GET" and status>=500'
+    : `SELECT * FROM ${props.tableName || "your_table"} WHERE …`;
 });
 
 const editorHeight = computed(() => {
@@ -480,11 +547,31 @@ const editorHeight = computed(() => {
   const lines = (content.match(/\n/g) || []).length + 1;
   const baseLineHeight = 20; // Must match Monaco lineHeight
   const padding = 16; // Monaco top+bottom padding (8+8)
-  const minHeight = props.activeMode === "logchefql" ? 52 : 90;
+  const minHeight = props.activeMode === "logchefql" ? 56 : 90;
   const maxHeight = 300;
   const calculatedHeight = padding + lines * baseLineHeight + (lines > 1 ? 0 : 4);
   return Math.min(maxHeight, Math.max(minHeight, calculatedHeight));
 });
+
+const handleTimeoutChange = (value: string) => {
+  const parsed = parseInt(value, 10);
+  if (!Number.isNaN(parsed)) {
+    emit("update:query-timeout", parsed);
+  }
+};
+
+watch(
+  () => [props.queryTimeout, maxQueryTimeoutSeconds.value] as const,
+  ([queryTimeout, maxTimeout]) => {
+    const requestedTimeout = queryTimeout || 30;
+    const clampedTimeout = Math.min(requestedTimeout, maxTimeout);
+
+    if (requestedTimeout !== clampedTimeout) {
+      emit("update:query-timeout", clampedTimeout);
+    }
+  },
+  { immediate: true }
+);
 
 const handleEditorChange = (value: string | undefined) => {
   const currentQuery = value ?? "";
@@ -795,8 +882,25 @@ const handleAiDialogSubmit = (payload: { naturalLanguageQuery: string; currentQu
 };
 
 const handleAiInsert = (sql: string) => {
+  // AI always generates raw SQL — write it directly to the SQL store
+  // before triggering mode switch so translation cannot overwrite it.
+  exploreStore.setRawSql(sql);
+  exploreStore.clearActiveSavedQuerySelection();
   editorContent.value = sql;
-  handleEditorChange(sql);
+
+  emit('change', {
+    query: sql,
+    mode: 'clickhouse-sql',
+    isUserInput: false,
+  });
+
+  // Switch to SQL tab if not already there (mirrors handleLoadQueryFromHistory)
+  if (props.activeMode !== 'clickhouse-sql') {
+    nextTick(() => {
+      emit('update:activeMode', 'clickhouse-sql' as EditorMode, true);
+    });
+  }
+
   showAiDialog.value = false;
   exploreStore.clearAiSqlState();
   nextTick(() => {

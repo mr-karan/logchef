@@ -12,7 +12,7 @@ build_info := version + '-commit-' + last_commit + '-build-' + build_time
 ldflags := "-s -w -X 'main.buildString=" + build_info + "' -X 'main.versionString=" + version + "'"
 
 # Binary output
-bin := "bin/logchef.bin"
+bin := "bin/logchef"
 
 # Config file - can be overridden with 'just CONFIG=other.toml target'
 config := env_var_or_default('CONFIG', 'config.toml')

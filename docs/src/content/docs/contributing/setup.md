@@ -18,64 +18,9 @@ Logchef requires:
 - **just** - Command runner for development tasks
 - **sqlc** - SQL code generation
 
-## Setup Options
+## Installation
 
-### Option 1: Nix/NixOS (Recommended)
-
-The easiest way to get started is using the provided Nix flake, which automatically installs all dependencies.
-
-#### Using nix develop
-
-```bash
-# Clone the repository
-git clone https://github.com/mr-karan/logchef.git
-cd logchef
-
-# Enter the development shell
-nix develop
-
-# You should see: "👉 Ready to build Logchef. Try: just build or just dev-docker"
-```
-
-#### Using direnv (Automatic activation)
-
-For automatic environment activation when you enter the project directory:
-
-1. Install direnv:
-   ```bash
-   # NixOS: Add to configuration.nix
-   environment.systemPackages = [ pkgs.direnv ];
-
-   # Other systems
-   nix-env -i direnv
-   ```
-
-2. Hook direnv into your shell (`~/.bashrc` or `~/.zshrc`):
-   ```bash
-   eval "$(direnv hook bash)"  # or zsh
-   ```
-
-3. Create `.envrc` in the project root:
-   ```bash
-   echo "use flake" > .envrc
-   direnv allow
-   ```
-
-The development environment will now activate automatically!
-
-#### What's Included
-
-The Nix flake provides:
-- Go 1.24 with gopls, golangci-lint
-- Node.js 22 with pnpm
-- Rust toolchain for CLI development
-- Development tools: just, sqlc, git
-- Infrastructure: docker, docker-compose, vector
-- Isolated Go/Node/Rust environments with proper caching
-
-### Option 2: Manual Installation
-
-If you prefer not to use Nix, install dependencies manually:
+Install dependencies using your system's package manager (or the methods below).
 
 #### Go Installation
 
@@ -115,7 +60,7 @@ go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 
 ## Initial Setup
 
-After installing dependencies (via Nix or manually):
+After installing dependencies:
 
 ### 1. Generate Database Code
 
@@ -252,11 +197,6 @@ docker compose -f deployment/docker/docker-compose.yml up
 Ensure sqlc is installed and in your PATH:
 ```bash
 sqlc version
-```
-
-If using Nix, make sure you're in the dev shell:
-```bash
-nix develop
 ```
 
 ### Frontend Build Errors

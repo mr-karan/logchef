@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { formatSourceName } from '@/utils/format'
 import { useContextStore } from '@/stores/context'
@@ -9,12 +9,8 @@ import { useExploreStore } from '@/stores/explore'
 import { useTimeRange } from '@/composables/useTimeRange'
 import { Button } from '@/components/ui/button'
 import { DateTimePicker } from '@/components/date-time-picker'
-import { ChevronRight, Share2, Settings, Clock, Terminal } from 'lucide-vue-next'
-import { useToast } from '@/composables/useToast'
+import { ChevronRight } from 'lucide-vue-next'
 import { useLimitOptions } from '@/composables/useLimitOptions'
-import { TOAST_DURATION } from '@/lib/constants'
-import { generateCliCommand } from '@/utils/cliCommand'
-import { ref } from 'vue'
 import {
   Select,
   SelectContent,
@@ -33,11 +29,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
-import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -45,7 +36,6 @@ import {
 } from '@/components/ui/tooltip'
 
 const router = useRouter()
-const { toast } = useToast()
 const contextStore = useContextStore()
 const teamsStore = useTeamsStore()
 const sourcesStore = useSourcesStore()
@@ -87,20 +77,6 @@ const currentLimit = computed(() => exploreStore.limit)
 // In SQL mode, time/limit controls are disabled - user controls these in their query
 const isSqlMode = computed(() => exploreStore.activeMode === 'sql')
 
-// Query timeout
-const timeoutOptions = [
-  { label: '10s', value: 10 },
-  { label: '30s', value: 30 },
-  { label: '1m', value: 60 },
-  { label: '2m', value: 120 },
-  { label: '5m', value: 300 },
-]
-
-const selectedTimeout = computed({
-  get: () => (exploreStore.queryTimeout || 30).toString(),
-  set: (value: string) => exploreStore.setQueryTimeout(parseInt(value, 10))
-})
-
 // Handlers
 function updateQuery(partial: Record<string, string | undefined>) {
   router.replace({
@@ -137,81 +113,6 @@ function handleTimezoneChange(timezoneId: string) {
 
 function handleLimitChange(limit: number) {
   exploreStore.setLimit(limit)
-}
-
-function copyUrlToClipboard() {
-  try {
-    navigator.clipboard.writeText(window.location.href)
-  } catch (error) {
-    toast({
-      title: "Copy Failed",
-      description: "Failed to copy URL.",
-      variant: "destructive",
-      duration: TOAST_DURATION.ERROR
-    })
-  }
-}
-
-function copyCliCommand() {
-  if (!contextStore.teamId || !contextStore.sourceId) {
-    toast({
-      title: "Cannot copy CLI command",
-      description: "Team and source must be selected.",
-      variant: "destructive",
-      duration: TOAST_DURATION.ERROR
-    })
-    return
-  }
-
-  const tr = exploreStore.timeRange
-  const command = generateCliCommand({
-    teamId: contextStore.teamId,
-    sourceId: contextStore.sourceId,
-    mode: exploreStore.activeMode,
-    query:
-      exploreStore.activeMode === 'logchefql'
-        ? exploreStore.logchefqlCode
-        : exploreStore.rawSql,
-    relativeTime: exploreStore.selectedRelativeTime || undefined,
-    absoluteStart: tr?.start
-      ? new Date(
-          tr.start.year,
-          tr.start.month - 1,
-          tr.start.day,
-          'hour' in tr.start ? tr.start.hour : 0,
-          'minute' in tr.start ? tr.start.minute : 0,
-          'second' in tr.start ? tr.start.second : 0
-        )
-      : undefined,
-    absoluteEnd: tr?.end
-      ? new Date(
-          tr.end.year,
-          tr.end.month - 1,
-          tr.end.day,
-          'hour' in tr.end ? tr.end.hour : 0,
-          'minute' in tr.end ? tr.end.minute : 0,
-          'second' in tr.end ? tr.end.second : 0
-        )
-      : undefined,
-    limit: exploreStore.limit,
-    timeout: exploreStore.queryTimeout,
-  })
-
-  try {
-    navigator.clipboard.writeText(command)
-    toast({
-      title: "CLI command copied",
-      description: "Paste in your terminal to run the same query.",
-      duration: TOAST_DURATION.SUCCESS
-    })
-  } catch {
-    toast({
-      title: "Copy Failed",
-      description: "Failed to copy CLI command.",
-      variant: "destructive",
-      duration: TOAST_DURATION.ERROR
-    })
-  }
 }
 
 // Expose method to parent
@@ -323,9 +224,8 @@ defineExpose({
       </TooltipProvider>
       <DropdownMenu v-else>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" class="h-7 text-xs px-2 gap-1">
-            <span class="text-muted-foreground">Limit:</span>
-            <span class="font-medium">{{ currentLimit.toLocaleString() }}</span>
+          <Button variant="ghost" size="sm" class="h-7 text-xs px-2 bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-normal" title="Result limit">
+            {{ currentLimit.toLocaleString() }} rows
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" class="w-32">
@@ -343,70 +243,5 @@ defineExpose({
       </DropdownMenu>
     </div>
 
-    <!-- Right: Actions -->
-    <div class="flex items-center gap-1">
-      <!-- Last run indicator -->
-      <div v-if="exploreStore.lastExecutionTimestamp" class="text-xs text-muted-foreground mr-2 hidden sm:block">
-        {{ new Date(exploreStore.lastExecutionTimestamp).toLocaleTimeString() }}
-      </div>
-
-      <!-- Copy CLI Command Button -->
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="copyCliCommand">
-              <Terminal class="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p class="text-xs">Copy CLI command</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-
-      <!-- Share Button -->
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="copyUrlToClipboard">
-              <Share2 class="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p class="text-xs">Copy shareable link</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-
-      <!-- Settings Dropdown -->
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant="ghost" size="sm" class="h-7 w-7 p-0">
-            <Settings class="h-3.5 w-3.5" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent class="w-48 p-2" align="end">
-          <div class="space-y-3">
-            <div class="space-y-1.5">
-              <label class="text-xs font-medium text-muted-foreground">Query Timeout</label>
-              <Select v-model="selectedTimeout">
-                <SelectTrigger class="h-8 text-xs">
-                  <div class="flex items-center gap-1.5">
-                    <Clock class="h-3 w-3" />
-                    <SelectValue />
-                  </div>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="option in timeoutOptions" :key="option.value" :value="option.value.toString()">
-                    {{ option.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </PopoverContent>
-      </Popover>
-    </div>
   </div>
 </template>
-

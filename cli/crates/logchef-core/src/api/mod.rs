@@ -41,6 +41,12 @@ impl Client {
         Ok(client)
     }
 
+    pub fn from_context_with_timeout(ctx: &Context, timeout_secs: u64) -> Result<Self> {
+        let mut client = Self::new(&ctx.server_url, timeout_secs)?;
+        client.token = ctx.token.clone();
+        Ok(client)
+    }
+
     pub fn with_token(mut self, token: String) -> Self {
         self.token = Some(token);
         self
@@ -176,6 +182,105 @@ impl Client {
             )
             .await?;
         Ok(response.data)
+    }
+
+    pub async fn export_sql(
+        &self,
+        team_id: i64,
+        source_id: i64,
+        request: &ExportSqlRequest,
+    ) -> Result<reqwest::Response> {
+        let url = format!(
+            "{}/api/v1/teams/{}/sources/{}/logs/export",
+            self.base_url, team_id, source_id
+        );
+        debug!(url = %url, "POST stream request");
+
+        let response = self
+            .http
+            .post(&url)
+            .headers(self.headers())
+            .json(request)
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let status_code = status.as_u16();
+            let body = response.text().await.unwrap_or_default();
+
+            if let Ok(api_error) = serde_json::from_str::<ApiErrorResponse>(&body) {
+                return Err(Error::api(Some(status_code), api_error.message));
+            }
+
+            return Err(Error::api(
+                Some(status_code),
+                format!("HTTP {}: {}", status_code, body),
+            ));
+        }
+
+        Ok(response)
+    }
+
+    pub async fn create_export_job(
+        &self,
+        team_id: i64,
+        source_id: i64,
+        request: &ExportSqlRequest,
+    ) -> Result<ExportJobResponse> {
+        let response: ApiResponse<ExportJobResponse> = self
+            .post(
+                &format!("/api/v1/teams/{}/sources/{}/exports", team_id, source_id),
+                request,
+            )
+            .await?;
+        Ok(response.data)
+    }
+
+    pub async fn get_export_job(
+        &self,
+        team_id: i64,
+        source_id: i64,
+        export_id: &str,
+    ) -> Result<ExportJobResponse> {
+        let response: ApiResponse<ExportJobResponse> = self
+            .get(&format!(
+                "/api/v1/teams/{}/sources/{}/exports/{}",
+                team_id, source_id, export_id
+            ))
+            .await?;
+        Ok(response.data)
+    }
+
+    pub async fn download_export_job(
+        &self,
+        team_id: i64,
+        source_id: i64,
+        export_id: &str,
+    ) -> Result<reqwest::Response> {
+        let url = format!(
+            "{}/api/v1/teams/{}/sources/{}/exports/{}/download",
+            self.base_url, team_id, source_id, export_id
+        );
+        debug!(url = %url, "GET export download request");
+
+        let response = self.http.get(&url).headers(self.headers()).send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            let status_code = status.as_u16();
+            let body = response.text().await.unwrap_or_default();
+
+            if let Ok(api_error) = serde_json::from_str::<ApiErrorResponse>(&body) {
+                return Err(Error::api(Some(status_code), api_error.message));
+            }
+
+            return Err(Error::api(
+                Some(status_code),
+                format!("HTTP {}: {}", status_code, body),
+            ));
+        }
+
+        Ok(response)
     }
 
     pub async fn exchange_token(&self, oidc_token: &str) -> Result<TokenExchangeData> {
