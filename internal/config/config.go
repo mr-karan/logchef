@@ -113,6 +113,13 @@ type OIDCConfig struct {
 	Scopes       []string `koanf:"scopes"`
 
 	CLIClientID string `koanf:"cli_client_id"`
+
+	// SkipEmailVerifiedCheck disables the email_verified claim check during
+	// OIDC authentication. Set to true only if your OIDC provider does not
+	// include the email_verified claim but the email address is verified by
+	// other means (e.g. Cloudflare Access, corporate SSO).
+	// Default: false
+	SkipEmailVerifiedCheck bool `koanf:"skip_email_verified_check"`
 }
 
 // AuthConfig contains authentication settings
