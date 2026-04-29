@@ -483,6 +483,10 @@ func applySourceConnectionUpdates(source *models.Source, req *models.UpdateSourc
 		newConn.TableName = *req.TableName
 		changed = true
 	}
+	if req.TLSEnable != nil && *req.TLSEnable != source.Connection.TLSEnable {
+		newConn.TLSEnable = *req.TLSEnable
+		changed = true
+	}
 
 	return newConn, changed
 }
