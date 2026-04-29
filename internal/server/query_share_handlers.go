@@ -70,9 +70,12 @@ func (s *Server) handleCreateQueryShare(c *fiber.Ctx) error {
 	ttl := s.config.Shares.DefaultTTL
 	if req.ExpiresInSeconds > 0 {
 		requested := time.Duration(req.ExpiresInSeconds) * time.Second
-		if requested < ttl {
-			ttl = requested
+		if requested > s.config.Shares.DefaultTTL {
+			return SendErrorWithType(c, fiber.StatusBadRequest,
+				fmt.Sprintf("expires_in_seconds cannot exceed %d", int(s.config.Shares.DefaultTTL.Seconds())),
+				models.ValidationErrorType)
 		}
+		ttl = requested
 	}
 
 	token, err := newShareToken()

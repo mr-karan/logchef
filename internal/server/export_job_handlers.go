@@ -53,7 +53,7 @@ func (s *Server) handleCreateExportJob(c *fiber.Ctx) error {
 		}
 		format = normalized
 	}
-	if format == "" || !isExportFormatAllowed(format, s.config.Export.Formats) {
+	if !isExportFormatAllowed(format, s.config.Export.Formats) {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Unsupported export format. Use csv or ndjson.", models.ValidationErrorType)
 	}
 
@@ -90,7 +90,31 @@ func (s *Server) handleCreateExportJob(c *fiber.Ctx) error {
 		UpdatedAt:      now,
 	}
 
+	// Admit synchronously so a saturated cap returns 429 to the client
+	// instead of accepting the job and async-failing it.
+	queryCtx, cancel := context.WithCancel(context.Background())
+	if err := queryTracker.StartQueryWithID(
+		job.ID,
+		QueryClassExport,
+		user.ID,
+		sourceID,
+		teamID,
+		req.RawSQL,
+		cancel,
+		s.config.Export.MaxConcurrentPerUser,
+		s.config.Export.MaxConcurrentGlobal,
+	); err != nil {
+		cancel()
+		var admissionErr *QueryAdmissionError
+		if errors.As(err, &admissionErr) {
+			return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
+		}
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track export query", models.GeneralErrorType)
+	}
+
 	if err := s.sqlite.CreateExportJob(c.Context(), job); err != nil {
+		queryTracker.RemoveQuery(job.ID)
+		cancel()
 		s.log.Error("failed to persist export job", "error", err, "job_id", job.ID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create export job", models.GeneralErrorType)
 	}
@@ -102,7 +126,7 @@ func (s *Server) handleCreateExportJob(c *fiber.Ctx) error {
 		QueryTimeout: req.QueryTimeout,
 		Variables:    req.Variables,
 	}
-	go s.runExportJob(job.ID, teamID, sourceID, user.ID, user.Email, runReq)
+	go s.runExportJob(job.ID, queryCtx, cancel, teamID, sourceID, user.Email, runReq)
 
 	return SendSuccess(c, fiber.StatusAccepted, exportJobResponse(job))
 }
@@ -147,6 +171,7 @@ func (s *Server) handleDownloadExportJob(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Export artifact is unavailable", models.GeneralErrorType)
 	}
 	if _, err := os.Stat(job.FilePath); err != nil {
+		s.log.Error("failed to stat export artifact", "error", err, "job_id", job.ID, "path", job.FilePath)
 		if errors.Is(err, os.ErrNotExist) {
 			_ = s.sqlite.FailExportJob(c.Context(), job.ID, "export artifact is unavailable", time.Now().UTC())
 		}
@@ -191,34 +216,18 @@ func (s *Server) authorizeExportJob(c *fiber.Ctx) (*models.ExportJob, error) {
 	return job, nil
 }
 
-func (s *Server) runExportJob(jobID string, teamID models.TeamID, sourceID models.SourceID, userID models.UserID, userEmail string, req exportLogsRequest) {
+// runExportJob runs the export pipeline. The caller must have already
+// reserved an admission slot via queryTracker.StartQueryWithID — this
+// function takes ownership and releases it on exit.
+func (s *Server) runExportJob(jobID string, queryCtx context.Context, cancel context.CancelFunc, teamID models.TeamID, sourceID models.SourceID, userEmail string, req exportLogsRequest) {
+	defer cancel()
+	defer queryTracker.RemoveQuery(jobID)
+
 	now := time.Now().UTC()
 	if err := s.sqlite.UpdateExportJobRunning(context.Background(), jobID, now); err != nil {
 		s.log.Error("failed to mark export job running", "error", err, "job_id", jobID)
 		return
 	}
-
-	queryCtx, cancel := context.WithCancel(context.Background())
-	if err := queryTracker.StartQueryWithID(
-		jobID,
-		QueryClassExport,
-		userID,
-		sourceID,
-		teamID,
-		req.RawSQL,
-		cancel,
-		s.config.Export.MaxConcurrentPerUser,
-		s.config.Export.MaxConcurrentGlobal,
-	); err != nil {
-		cancel()
-		message := exportFailureMessage(err)
-		if failErr := s.sqlite.FailExportJob(context.Background(), jobID, message, time.Now().UTC()); failErr != nil {
-			s.log.Error("failed to mark export job failed", "error", failErr, "job_id", jobID)
-		}
-		return
-	}
-	defer cancel()
-	defer queryTracker.RemoveQuery(jobID)
 
 	processedSQL := req.RawSQL
 	if len(req.Variables) > 0 {
@@ -394,14 +403,20 @@ func (s *Server) cleanupExpiredBackgroundState() {
 		s.log.Warn("failed to prune expired query shares", "error", err)
 	}
 
-	paths, err := s.sqlite.PruneExpiredExportJobs(ctx, now)
+	// Unlink files first, then delete rows. If the process dies between
+	// the two steps, the next cycle re-lists the same rows and ignores
+	// already-removed files (ErrNotExist), so no artifact is orphaned.
+	paths, err := s.sqlite.ListExpiredExportJobPaths(ctx, now)
 	if err != nil {
-		s.log.Warn("failed to prune expired export jobs", "error", err)
+		s.log.Warn("failed to list expired export jobs", "error", err)
 		return
 	}
 	for _, path := range paths {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			s.log.Warn("failed to remove expired export artifact", "error", err, "path", path)
 		}
+	}
+	if err := s.sqlite.DeleteExpiredExportJobs(ctx, now); err != nil {
+		s.log.Warn("failed to delete expired export job rows", "error", err)
 	}
 }

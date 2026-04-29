@@ -4,6 +4,8 @@ import { useExploreStore } from '@/stores/explore';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
 import { useContextStore } from '@/stores/context';
+import { useToast } from '@/composables/useToast';
+import { TOAST_DURATION } from '@/lib/constants';
 import { savedQueriesApi } from '@/api/savedQueries';
 import { exploreApi } from '@/api/explore';
 
@@ -24,6 +26,7 @@ export function useUrlState(): UrlStateReturn {
   const teamsStore = useTeamsStore();
   const sourcesStore = useSourcesStore();
   const contextStore = useContextStore();
+  const { toast } = useToast();
 
   const state = ref<UrlSyncState>('idle');
   const error = ref<string | null>(null);
@@ -262,16 +265,21 @@ export function useUrlState(): UrlStateReturn {
     }
   }
 
-  function waitForReadiness(maxWaitMs = 5000): Promise<void> {
+  function waitForReadiness(maxWaitMs = 5000): Promise<boolean> {
     if (checkReadiness()) {
-      return Promise.resolve();
+      return Promise.resolve(true);
     }
 
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
         stopWatch();
         console.warn('useUrlState: Readiness timeout, proceeding anyway');
-        resolve();
+        toast({
+          title: "Loading is taking longer than expected",
+          description: "Some teams or sources may not be ready yet — results could be incomplete.",
+          duration: TOAST_DURATION.WARNING,
+        });
+        resolve(false);
       }, maxWaitMs);
 
       const stopWatch = watch(
@@ -286,7 +294,7 @@ export function useUrlState(): UrlStateReturn {
           if (checkReadiness()) {
             clearTimeout(timeout);
             stopWatch();
-            resolve();
+            resolve(true);
           }
         },
         { immediate: true }

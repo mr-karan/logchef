@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"os"
 	"reflect"
 	"regexp"
 	"strings"
@@ -72,7 +71,6 @@ type ClientOptions struct {
 	SourceID  string                 // Source ID for metrics tracking.
 	Source    *models.Source         // Source model for enhanced metrics.
 	TLSEnable bool                   // Enable TLS for the connection.
-	TLSCACert string                 // Optional path to a CA certificate file for TLS verification.
 }
 
 // ExtendedColumnInfo provides detailed column metadata, including nullability,
@@ -114,21 +112,14 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 		}
 	}
 
-	// Build TLS config if enabled.
+	// Build TLS config if enabled. Uses the system root CA pool; operators
+	// who need a custom CA bundle should install it into the OS trust store.
 	var tlsCfg *tls.Config
 	if opts.TLSEnable {
 		rootCAs, err := x509.SystemCertPool()
 		if err != nil {
+			logger.Warn("failed to load system cert pool, falling back to empty pool", "error", err)
 			rootCAs = x509.NewCertPool()
-		}
-		if opts.TLSCACert != "" {
-			caCert, err := os.ReadFile(opts.TLSCACert)
-			if err != nil {
-				return nil, fmt.Errorf("reading TLS CA certificate: %w", err)
-			}
-			if !rootCAs.AppendCertsFromPEM(caCert) {
-				return nil, fmt.Errorf("failed to append CA certificate from %s", opts.TLSCACert)
-			}
 		}
 		tlsCfg = &tls.Config{
 			RootCAs:    rootCAs,

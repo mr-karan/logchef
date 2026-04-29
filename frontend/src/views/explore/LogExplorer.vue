@@ -4,6 +4,7 @@ import {
   computed,
   watch,
   onMounted,
+  onBeforeUnmount,
   nextTick,
 } from "vue";
 import { storeToRefs } from "pinia";
@@ -116,6 +117,7 @@ const isChangingContext = computed(() => {
   return teamLoading || sourceLoading;
 });
 const isExporting = ref(false);
+let exportAbortController: AbortController | null = null;
 
 const getQueryParamValue = (key: string) => {
   const value = route.query[key];
@@ -701,14 +703,23 @@ const triggerBrowserDownload = (downloadUrl: string, fileName?: string) => {
   link.remove();
 };
 
-const waitForExportCompletion = async (exportId: string, timeoutSeconds: number) => {
+class ExportAbortedError extends Error {
+  constructor() {
+    super("Export polling aborted");
+    this.name = "ExportAbortedError";
+  }
+}
+
+const waitForExportCompletion = async (exportId: string, timeoutSeconds: number, signal: AbortSignal) => {
   if (!currentTeamId.value || !currentSourceId.value) {
     throw new Error("Team and source are required for export");
   }
 
   const deadline = Date.now() + (timeoutSeconds + 60) * 1000;
   while (Date.now() < deadline) {
+    if (signal.aborted) throw new ExportAbortedError();
     const response = await exploreApi.getExportJob(currentSourceId.value, exportId, currentTeamId.value);
+    if (signal.aborted) throw new ExportAbortedError();
     const job = response.data;
     if (!job) {
       throw new Error("Export status is unavailable");
@@ -740,6 +751,10 @@ const handleExport = async () => {
     return;
   }
 
+  exportAbortController?.abort();
+  exportAbortController = new AbortController();
+  const signal = exportAbortController.signal;
+
   try {
     isExporting.value = true;
     const queryTimeout = Math.max(exploreStore.queryTimeout, 120);
@@ -754,13 +769,14 @@ const handleExport = async () => {
       throw new Error("Export job was not created");
     }
 
-    const completedJob = await waitForExportCompletion(job.id, queryTimeout);
+    const completedJob = await waitForExportCompletion(job.id, queryTimeout, signal);
     if (!completedJob.download_url) {
       throw new Error("Export download is unavailable");
     }
 
     triggerBrowserDownload(completedJob.download_url, completedJob.file_name);
   } catch (error: any) {
+    if (error instanceof ExportAbortedError) return;
     toast({
       title: "Download Failed",
       description: getErrorMessage(error),
@@ -768,9 +784,17 @@ const handleExport = async () => {
       duration: TOAST_DURATION.ERROR,
     });
   } finally {
+    if (exportAbortController?.signal === signal) {
+      exportAbortController = null;
+    }
     isExporting.value = false;
   }
 };
+
+onBeforeUnmount(() => {
+  exportAbortController?.abort();
+  exportAbortController = null;
+});
 
 const calendarDatePartToDate = (value: any) => {
   if (!value) return undefined;
@@ -1487,7 +1511,7 @@ onMounted(async () => {
                   <component
                     v-if="exploreStore.columns?.length > 0"
                     :is="displayMode === 'table' ? DataTable : CompactLogList"
-                    :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}-${displayMode}`"
+                    :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId ?? 'noquery'}-${displayMode}`"
                     :columns="exploreStore.columns as any"
                     :data="exploreStore.logs"
                     :stats="exploreStore.queryStats"

@@ -120,6 +120,10 @@ func NewOIDCProvider(ctx context.Context, oidcCfg *config.OIDCConfig, log *slog.
 		SkipIssuerCheck: true,
 	})
 
+	if oidcCfg.SkipEmailVerifiedCheck {
+		log.Warn("OIDC skip_email_verified_check is enabled — logins will succeed when the email_verified claim is missing")
+	}
+
 	return &OIDCProvider{
 		provider:  provider,
 		verifier:  verifier,

@@ -61,7 +61,7 @@ func (s *Server) handleExportLogs(c *fiber.Ctx) error {
 		}
 		format = normalized
 	}
-	if format == "" || !isExportFormatAllowed(format, s.config.Export.Formats) {
+	if !isExportFormatAllowed(format, s.config.Export.Formats) {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Unsupported export format. Use csv or ndjson.", models.ValidationErrorType)
 	}
 	if format == "csv" {

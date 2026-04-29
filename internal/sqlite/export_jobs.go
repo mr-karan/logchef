@@ -215,14 +215,12 @@ func (db *DB) FailExportJob(ctx context.Context, id, errorMessage string, update
 	return nil
 }
 
-func (db *DB) PruneExpiredExportJobs(ctx context.Context, before time.Time) ([]string, error) {
-	tx, err := db.writeDB.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("error starting export job prune transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	rows, err := tx.QueryContext(ctx, selectExpiredExportJobPathsSQL, before)
+// ListExpiredExportJobPaths returns artifact paths for jobs whose
+// expires_at is before the given time, without deleting anything.
+// Callers should unlink the files first, then call DeleteExpiredExportJobs —
+// that ordering keeps the DB authoritative if the process dies mid-prune.
+func (db *DB) ListExpiredExportJobPaths(ctx context.Context, before time.Time) ([]string, error) {
+	rows, err := db.readDB.QueryContext(ctx, selectExpiredExportJobPathsSQL, before)
 	if err != nil {
 		db.log.Error("failed to list expired export job paths", "error", err)
 		return nil, fmt.Errorf("error listing expired export job paths: %w", err)
@@ -242,14 +240,14 @@ func (db *DB) PruneExpiredExportJobs(ctx context.Context, before time.Time) ([]s
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating expired export job paths: %w", err)
 	}
-
-	if _, err := tx.ExecContext(ctx, pruneExpiredExportJobsSQL, before); err != nil {
-		db.log.Error("failed to prune expired export jobs", "error", err)
-		return nil, fmt.Errorf("error pruning expired export jobs: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("error committing export job prune transaction: %w", err)
-	}
-
 	return paths, nil
+}
+
+// DeleteExpiredExportJobs removes rows whose expires_at is before the given time.
+func (db *DB) DeleteExpiredExportJobs(ctx context.Context, before time.Time) error {
+	if _, err := db.writeDB.ExecContext(ctx, pruneExpiredExportJobsSQL, before); err != nil {
+		db.log.Error("failed to prune expired export jobs", "error", err)
+		return fmt.Errorf("error pruning expired export jobs: %w", err)
+	}
+	return nil
 }

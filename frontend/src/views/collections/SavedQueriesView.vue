@@ -166,7 +166,7 @@ onMounted(async () => {
     
     // If no source was specified in URL, enforce All Sources mode
     if (!initialSourceParam && contextStore.sourceId) {
-      contextStore.sourceId = null;
+      contextStore.clearSource();
       const q = { ...route.query };
       delete q.source;
       router.replace({ query: q });
@@ -214,7 +214,7 @@ async function handleTeamChange(teamId: string) {
     if (teamId === "all") {
       isAllTeamsMode.value = true;
       // Clear stale team/source context so permission checks don't use the previous team
-      contextStore.sourceId = null;
+      contextStore.clearSource();
       localTeamQueries.value = [];
       const result = await savedQueriesStore.fetchMyCollections();
       if (result.success) {
@@ -230,7 +230,7 @@ async function handleTeamChange(teamId: string) {
     await contextHandleTeamChange(teamIdNum);
 
     // Default to All Sources when switching teams
-    contextStore.sourceId = null;
+    contextStore.clearSource();
     const query = { ...route.query };
     delete query.source;
     router.replace({ query });
@@ -253,7 +253,7 @@ async function handleSourceChange(sourceId: string) {
   try {
     // Handle All Sources selection
     if (!sourceId || sourceId === "all") {
-      contextStore.sourceId = null;
+      contextStore.clearSource();
       const query = { ...route.query };
       delete query.source;
       await router.replace({ query });

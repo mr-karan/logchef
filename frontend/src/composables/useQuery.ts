@@ -177,10 +177,13 @@ export function useQuery() {
             if (response.data?.full_sql) {
               exploreStore.setRawSql(response.data.full_sql);
             } else {
-              console.warn("useQuery: Backend did not return full_sql, response:", response.data);
+              queryError.value = "Could not generate SQL from your query. Please refine and try again.";
+              return;
             }
           } catch (error: any) {
             console.error("useQuery: Failed to get full SQL from backend:", error);
+            queryError.value = error?.message || "Failed to translate query to SQL. Please try again.";
+            return;
           }
         }
       }

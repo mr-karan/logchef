@@ -73,6 +73,10 @@ export const useContextStore = defineStore('context', () => {
     saveToStorage(persisted)
   }
 
+  function clearSource() {
+    sourceId.value = null
+  }
+
   function clear() {
     console.log('ContextStore: Clearing all context')
     teamId.value = null
@@ -127,6 +131,7 @@ export const useContextStore = defineStore('context', () => {
     hasValidContext,
     selectTeam,
     selectSource,
+    clearSource,
     clear,
     clearStorage,
     setFromRoute,
