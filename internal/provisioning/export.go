@@ -39,6 +39,7 @@ func ExportConfig(ctx context.Context, db *sqlite.DB) (*config.ProvisioningConfi
 			SecretRef:         secretRef,
 			Database:          src.Connection.Database,
 			TableName:         src.Connection.TableName,
+			TLSEnable:         src.Connection.TLSEnable,
 			Description:       src.Description,
 			TTLDays:           src.TTLDays,
 			MetaTSField:       src.MetaTSField,
@@ -96,4 +97,3 @@ func sanitizeEnvName(name string) string {
 	}
 	return string(result)
 }
-

@@ -13,6 +13,9 @@ sql:
       - "internal/sqlite/migrations/000009_add_user_preferences.up.sql"
       - "internal/sqlite/migrations/000010_improve_bookmark_index.up.sql"
       - "internal/sqlite/migrations/000011_add_managed_column.up.sql"
+      - "internal/sqlite/migrations/000012_add_query_shares.up.sql"
+      - "internal/sqlite/migrations/000013_add_export_jobs.up.sql"
+      - "internal/sqlite/migrations/000014_add_tls_enable.up.sql"
     gen:
       go:
         package: "sqlc"

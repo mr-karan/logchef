@@ -45,11 +45,12 @@ type ProvisionSource struct {
 	Name string `koanf:"name"`
 
 	// ClickHouse connection details.
-	Host     string `koanf:"host"`
-	Username string `koanf:"username"`
-	Password string `koanf:"password"`
-	Database string `koanf:"database"`
+	Host      string `koanf:"host"`
+	Username  string `koanf:"username"`
+	Password  string `koanf:"password"`
+	Database  string `koanf:"database"`
 	TableName string `koanf:"table_name"`
+	TLSEnable bool   `koanf:"tls_enable"`
 
 	// SecretRef stores the environment variable or file path that provided the password.
 	// Used by the export command to generate round-trippable config (passwords are never exported).

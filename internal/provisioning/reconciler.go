@@ -159,6 +159,7 @@ func reconcileSources(ctx context.Context, qtx *sqlc.Queries, cfg *config.Provis
 					Password:  cfgSrc.Password,
 					Database:  cfgSrc.Database,
 					TableName: cfgSrc.TableName,
+					TLSEnable: cfgSrc.TLSEnable,
 				},
 			})
 		} else {
@@ -469,6 +470,7 @@ func validateSourceConnection(ctx context.Context, chMgr *clickhouse.Manager, sr
 			Password:  src.Password,
 			Database:  src.Database,
 			TableName: src.TableName,
+			TLSEnable: src.TLSEnable,
 		},
 	}
 
@@ -498,6 +500,7 @@ func buildCreateSourceParams(src config.ProvisionSource) sqlc.CreateSourceParams
 		TableName:         src.TableName,
 		Description:       sql.NullString{String: src.Description, Valid: src.Description != ""},
 		TtlDays:           int64(src.TTLDays),
+		TlsEnable:         boolToInt(src.TLSEnable),
 	}
 }
 
@@ -511,6 +514,7 @@ func updateSourceFromConfig(ctx context.Context, qtx *sqlc.Queries, sourceID int
 		TableName:         src.TableName,
 		Description:       sql.NullString{String: src.Description, Valid: src.Description != ""},
 		TtlDays:           int64(src.TTLDays),
+		TlsEnable:         boolToInt(src.TLSEnable),
 		MetaTsField:       src.MetaTSField,
 		MetaSeverityField: sql.NullString{String: src.MetaSeverityField, Valid: src.MetaSeverityField != ""},
 		ID:                sourceID,
@@ -523,8 +527,16 @@ func sourceNeedsUpdate(existing sqlc.Source, desired config.ProvisionSource) boo
 		existing.Password != desired.Password ||
 		existing.Database != desired.Database ||
 		existing.TableName != desired.TableName ||
+		(existing.TlsEnable == 1) != desired.TLSEnable ||
 		existing.Description.String != desired.Description ||
 		int(existing.TtlDays) != desired.TTLDays ||
 		existing.MetaTsField != desired.MetaTSField ||
 		existing.MetaSeverityField.String != desired.MetaSeverityField
+}
+
+func boolToInt(value bool) int64 {
+	if value {
+		return 1
+	}
+	return 0
 }

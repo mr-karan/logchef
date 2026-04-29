@@ -60,6 +60,36 @@ type ApiToken struct {
 	UpdatedAt  time.Time    `json:"updated_at"`
 }
 
+type ExportJob struct {
+	ID           string         `json:"id"`
+	TeamID       int64          `json:"team_id"`
+	SourceID     int64          `json:"source_id"`
+	CreatedBy    int64          `json:"created_by"`
+	Status       string         `json:"status"`
+	Format       string         `json:"format"`
+	RequestJson  string         `json:"request_json"`
+	FileName     sql.NullString `json:"file_name"`
+	FilePath     sql.NullString `json:"file_path"`
+	ErrorMessage sql.NullString `json:"error_message"`
+	RowsExported int64          `json:"rows_exported"`
+	BytesWritten int64          `json:"bytes_written"`
+	ExpiresAt    time.Time      `json:"expires_at"`
+	CompletedAt  sql.NullTime   `json:"completed_at"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+}
+
+type QueryShare struct {
+	Token          string       `json:"token"`
+	TeamID         int64        `json:"team_id"`
+	SourceID       int64        `json:"source_id"`
+	CreatedBy      int64        `json:"created_by"`
+	PayloadJson    string       `json:"payload_json"`
+	ExpiresAt      time.Time    `json:"expires_at"`
+	LastAccessedAt sql.NullTime `json:"last_accessed_at"`
+	CreatedAt      time.Time    `json:"created_at"`
+}
+
 type Session struct {
 	ID        string    `json:"id"`
 	UserID    int64     `json:"user_id"`
@@ -84,6 +114,7 @@ type Source struct {
 	UpdatedAt         time.Time      `json:"updated_at"`
 	Managed           int64          `json:"managed"`
 	SecretRef         sql.NullString `json:"secret_ref"`
+	TlsEnable         int64          `json:"tls_enable"`
 }
 
 type SystemSetting struct {
