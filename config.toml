@@ -50,6 +50,10 @@ cli_client_id = "logchef-cli"
 redirect_url = "http://localhost:8125/api/v1/auth/callback"
 # OIDC scopes to request.
 scopes = ["openid", "email", "profile"]
+# Keep false unless your OIDC provider omits email_verified while verifying
+# email addresses by other means. Missing/null email_verified is allowed only
+# when this is true; explicit email_verified=false is always rejected.
+skip_email_verified_check = false
 
 # -----------------------------------------------------------------------------
 # Authentication (required)
