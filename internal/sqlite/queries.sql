@@ -291,6 +291,263 @@ JOIN sources s ON s.id = tq.source_id
 WHERE tm.user_id = ?
 ORDER BY tq.is_bookmarked DESC, tq.updated_at DESC;
 
+-- Query Folders
+
+-- name: ListQueryFolders :many
+-- List all folders for a team with saved query counts
+SELECT
+    qf.id,
+    qf.team_id,
+    qf.name,
+    qf.description,
+    qf.color,
+    qf.sort_order,
+    qf.created_by,
+    COUNT(qfi.query_id) AS query_count,
+    qf.created_at,
+    qf.updated_at
+FROM query_folders qf
+LEFT JOIN query_folder_items qfi ON qfi.folder_id = qf.id
+WHERE qf.team_id = ?
+GROUP BY qf.id
+ORDER BY qf.sort_order ASC, qf.name ASC;
+
+-- name: CreateQueryFolder :one
+-- Create a query folder for a team
+INSERT INTO query_folders (team_id, name, description, color, sort_order, created_by)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id, created_at, updated_at;
+
+-- name: GetQueryFolder :one
+-- Get one query folder scoped to a team
+SELECT
+    qf.id,
+    qf.team_id,
+    qf.name,
+    qf.description,
+    qf.color,
+    qf.sort_order,
+    qf.created_by,
+    COUNT(qfi.query_id) AS query_count,
+    qf.created_at,
+    qf.updated_at
+FROM query_folders qf
+LEFT JOIN query_folder_items qfi ON qfi.folder_id = qf.id
+WHERE qf.team_id = ? AND qf.id = ?
+GROUP BY qf.id;
+
+-- name: UpdateQueryFolder :one
+-- Update a query folder and return its ID
+UPDATE query_folders
+SET name = ?,
+    description = ?,
+    color = ?,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE team_id = ? AND id = ?
+RETURNING id;
+
+-- name: DeleteQueryFolder :one
+-- Delete a query folder and return its ID
+DELETE FROM query_folders
+WHERE team_id = ? AND id = ?
+RETURNING id;
+
+-- name: ListQueriesByFolder :many
+-- List saved queries in a folder
+SELECT
+    tq.id,
+    tq.team_id,
+    tq.source_id,
+    tq.name,
+    tq.description,
+    tq.query_type,
+    tq.query_content,
+    tq.created_at,
+    tq.updated_at,
+    tq.is_bookmarked
+FROM team_queries tq
+JOIN query_folder_items qfi ON qfi.query_id = tq.id
+WHERE tq.team_id = ? AND qfi.folder_id = ?
+ORDER BY tq.is_bookmarked DESC, tq.updated_at DESC;
+
+-- name: CountQueryFolderForTeam :one
+-- Check whether a folder belongs to a team
+SELECT COUNT(*) FROM query_folders
+WHERE team_id = ? AND id = ?;
+
+-- name: CountTeamQueryForTeam :one
+-- Check whether a saved query belongs to a team
+SELECT COUNT(*) FROM team_queries
+WHERE team_id = ? AND id = ?;
+
+-- name: DeleteQueryFolderItemsByQuery :exec
+-- Remove all folder memberships for a saved query
+DELETE FROM query_folder_items
+WHERE query_id = ?;
+
+-- name: CreateQueryFolderItem :exec
+-- Add a saved query to a folder
+INSERT INTO query_folder_items (folder_id, query_id, added_by)
+VALUES (?, ?, ?);
+
+-- name: CreateQueryFolderItemIgnore :exec
+-- Add a saved query to a folder if not already present
+INSERT OR IGNORE INTO query_folder_items (folder_id, query_id, added_by)
+VALUES (?, ?, ?);
+
+-- name: RemoveQueryFromFolder :exec
+-- Remove a saved query from a folder
+DELETE FROM query_folder_items
+WHERE folder_id = ? AND query_id = ?;
+
+-- name: ListQueryFoldersByQueryIDs :many
+-- List folder summaries for a set of saved query IDs
+SELECT
+    qfi.query_id,
+    qf.id,
+    qf.name,
+    qf.color
+FROM query_folder_items qfi
+JOIN query_folders qf ON qf.id = qfi.folder_id
+WHERE qfi.query_id IN (sqlc.slice('query_ids'))
+ORDER BY qf.sort_order ASC, qf.name ASC;
+
+-- Query Shares
+
+-- name: CreateQueryShare :exec
+-- Persist an ad hoc query share token
+INSERT INTO query_shares (
+    token,
+    team_id,
+    source_id,
+    created_by,
+    payload_json,
+    expires_at
+) VALUES (?, ?, ?, ?, ?, ?);
+
+-- name: GetQueryShare :one
+-- Retrieve an ad hoc query share by token with creator details
+SELECT
+    qs.token,
+    qs.team_id,
+    qs.source_id,
+    qs.created_by,
+    qs.payload_json,
+    qs.expires_at,
+    qs.last_accessed_at,
+    qs.created_at,
+    u.email,
+    u.full_name
+FROM query_shares qs
+JOIN users u ON u.id = qs.created_by
+WHERE qs.token = ?;
+
+-- name: TouchQueryShare :exec
+-- Update a query share's last access time
+UPDATE query_shares
+SET last_accessed_at = ?
+WHERE token = ?;
+
+-- name: DeleteQueryShare :one
+-- Delete a query share and return its token
+DELETE FROM query_shares
+WHERE token = ?
+RETURNING token;
+
+-- name: PruneExpiredQueryShares :exec
+-- Delete expired query shares
+DELETE FROM query_shares
+WHERE expires_at < ?;
+
+-- Export Jobs
+
+-- name: CreateExportJob :exec
+-- Persist an async export job
+INSERT INTO export_jobs (
+    id,
+    team_id,
+    source_id,
+    created_by,
+    status,
+    format,
+    request_json,
+    expires_at,
+    created_at,
+    updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: GetExportJob :one
+-- Retrieve an export job by ID
+SELECT
+    id,
+    team_id,
+    source_id,
+    created_by,
+    status,
+    format,
+    request_json,
+    file_name,
+    file_path,
+    error_message,
+    rows_exported,
+    bytes_written,
+    expires_at,
+    completed_at,
+    created_at,
+    updated_at
+FROM export_jobs
+WHERE id = ?;
+
+-- name: UpdateExportJobRunning :one
+-- Mark an export job as running and return its ID
+UPDATE export_jobs
+SET
+    status = ?,
+    error_message = NULL,
+    updated_at = ?
+WHERE id = ?
+RETURNING id;
+
+-- name: CompleteExportJob :one
+-- Mark an export job as complete and return its ID
+UPDATE export_jobs
+SET
+    status = ?,
+    file_name = ?,
+    file_path = ?,
+    error_message = NULL,
+    rows_exported = ?,
+    bytes_written = ?,
+    completed_at = ?,
+    updated_at = ?
+WHERE id = ?
+RETURNING id;
+
+-- name: FailExportJob :one
+-- Mark an export job as failed and return its ID
+UPDATE export_jobs
+SET
+    status = ?,
+    file_name = NULL,
+    file_path = NULL,
+    error_message = ?,
+    completed_at = NULL,
+    updated_at = ?
+WHERE id = ?
+RETURNING id;
+
+-- name: ListExpiredExportJobPaths :many
+-- List artifact paths for expired export jobs
+SELECT file_path
+FROM export_jobs
+WHERE expires_at < ?
+  AND file_path IS NOT NULL;
+
+-- name: DeleteExpiredExportJobs :exec
+-- Delete expired export jobs
+DELETE FROM export_jobs
+WHERE expires_at < ?;
+
 -- Additional queries for user-source and team-source access
 
 -- name: TeamHasSource :one
@@ -394,7 +651,7 @@ INSERT INTO alerts (
     is_active
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id;
+RETURNING *;
 
 -- name: GetAlert :one
 SELECT * FROM alerts WHERE id = ?;
@@ -405,9 +662,9 @@ SELECT * FROM alerts WHERE id = ? AND team_id = ? AND source_id = ?;
 -- name: ListAlertsByTeamAndSource :many
 SELECT * FROM alerts
 WHERE team_id = ? AND source_id = ?
-ORDER BY created_at DESC;
+ORDER BY updated_at DESC, created_at DESC;
 
--- name: UpdateAlert :exec
+-- name: UpdateAlert :one
 UPDATE alerts
 SET name = ?,
     description = ?,
@@ -426,10 +683,12 @@ SET name = ?,
     generator_url = ?,
     is_active = ?,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ?;
+WHERE id = ?
+RETURNING id;
 
--- name: DeleteAlert :exec
-DELETE FROM alerts WHERE id = ?;
+-- name: DeleteAlert :one
+DELETE FROM alerts WHERE id = ?
+RETURNING id;
 
 -- name: MarkAlertEvaluated :exec
 UPDATE alerts
@@ -465,31 +724,44 @@ INSERT INTO alert_history (
     payload_json
 )
 VALUES (?, ?, ?, ?, ?)
-RETURNING id;
+RETURNING *;
 
--- name: ResolveAlertHistory :exec
+-- name: ResolveAlertHistory :one
 UPDATE alert_history
 SET status = 'resolved',
     resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
     message = ?
-WHERE id = ?;
+WHERE id = ?
+RETURNING id;
 
--- name: UpdateAlertHistoryPayload :exec
+-- name: UpdateAlertHistoryPayload :one
 UPDATE alert_history
 SET payload_json = ?
-WHERE id = ?;
+WHERE id = ?
+RETURNING id;
 
 -- name: GetLatestUnresolvedAlertHistory :one
 SELECT * FROM alert_history
 WHERE alert_id = ? AND status = 'triggered'
-ORDER BY triggered_at DESC
+ORDER BY triggered_at DESC, id DESC
 LIMIT 1;
 
 -- name: ListAlertHistory :many
 SELECT * FROM alert_history
 WHERE alert_id = ?
-ORDER BY triggered_at DESC
+ORDER BY triggered_at DESC, id DESC
 LIMIT ?;
+
+-- name: PruneAlertHistory :exec
+DELETE FROM alert_history AS target
+WHERE target.alert_id = ?
+  AND target.id NOT IN (
+    SELECT keep.id
+    FROM alert_history AS keep
+    WHERE keep.alert_id = ?
+    ORDER BY keep.triggered_at DESC, keep.id DESC
+    LIMIT ?
+ );
 
 -- System Settings Queries
 

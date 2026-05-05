@@ -224,6 +224,18 @@ func (s *Server) setupRoutes() {
 	// Team-level collections (all sources)
 	api.Get("/teams/:teamID/collections", s.requireAuth, s.requireTeamMember, s.handleListTeamCollections)
 
+	// Team-level query folders
+	folders := api.Group("/teams/:teamID/folders", s.requireAuth, s.requireTeamMember)
+	folders.Get("/", s.handleListQueryFolders)
+	folders.Get("/:folderID", s.handleGetQueryFolder)
+	folders.Get("/:folderID/collections", s.handleListQueryFolderCollections)
+	folders.Post("/", s.requireCollectionManagement, s.handleCreateQueryFolder)
+	folders.Put("/:folderID", s.requireCollectionManagement, s.handleUpdateQueryFolder)
+	folders.Delete("/:folderID", s.requireCollectionManagement, s.handleDeleteQueryFolder)
+	folders.Post("/:folderID/collections/bulk", s.requireCollectionManagement, s.handleBulkUpdateQueryFolderCollections)
+	folders.Post("/:folderID/collections/:collectionID", s.requireCollectionManagement, s.handleAddQueryToFolder)
+	folders.Delete("/:folderID/collections/:collectionID", s.requireCollectionManagement, s.handleRemoveQueryFromFolder)
+
 	// Team Source Management (linking/unlinking)
 	teamSources := api.Group("/teams/:teamID/sources", s.requireAuth, s.requireTeamMember)
 	teamSources.Get("/", s.handleListTeamSources)

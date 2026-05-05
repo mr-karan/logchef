@@ -6,6 +6,8 @@ package sqlc
 
 import (
 	"context"
+	"database/sql"
+	"time"
 )
 
 type Querier interface {
@@ -15,15 +17,33 @@ type Querier interface {
 	// Team Sources
 	// Add a data source to a team
 	AddTeamSource(ctx context.Context, arg AddTeamSourceParams) error
+	// Mark an export job as complete and return its ID
+	CompleteExportJob(ctx context.Context, arg CompleteExportJobParams) (string, error)
 	// Count active admin users
 	CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error)
+	// Check whether a folder belongs to a team
+	CountQueryFolderForTeam(ctx context.Context, arg CountQueryFolderForTeamParams) (int64, error)
+	// Check whether a saved query belongs to a team
+	CountTeamQueryForTeam(ctx context.Context, arg CountTeamQueryForTeamParams) (int64, error)
 	// Count active sessions for a user
 	CountUserSessions(ctx context.Context, arg CountUserSessionsParams) (int64, error)
 	// API Tokens
 	// Create a new API token
 	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (int64, error)
 	// Alerts
-	CreateAlert(ctx context.Context, arg CreateAlertParams) (int64, error)
+	CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert, error)
+	// Export Jobs
+	// Persist an async export job
+	CreateExportJob(ctx context.Context, arg CreateExportJobParams) error
+	// Create a query folder for a team
+	CreateQueryFolder(ctx context.Context, arg CreateQueryFolderParams) (CreateQueryFolderRow, error)
+	// Add a saved query to a folder
+	CreateQueryFolderItem(ctx context.Context, arg CreateQueryFolderItemParams) error
+	// Add a saved query to a folder if not already present
+	CreateQueryFolderItemIgnore(ctx context.Context, arg CreateQueryFolderItemIgnoreParams) error
+	// Query Shares
+	// Persist an ad hoc query share token
+	CreateQueryShare(ctx context.Context, arg CreateQueryShareParams) error
 	// Sessions
 	// Create a new session
 	CreateSession(ctx context.Context, arg CreateSessionParams) error
@@ -41,9 +61,17 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (int64, error)
 	// Delete an API token by ID and user ID (ensure user owns the token)
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) error
-	DeleteAlert(ctx context.Context, id int64) error
+	DeleteAlert(ctx context.Context, id int64) (int64, error)
 	// Delete all expired API tokens
 	DeleteExpiredAPITokens(ctx context.Context) error
+	// Delete expired export jobs
+	DeleteExpiredExportJobs(ctx context.Context, expiresAt time.Time) error
+	// Delete a query folder and return its ID
+	DeleteQueryFolder(ctx context.Context, arg DeleteQueryFolderParams) (int64, error)
+	// Remove all folder memberships for a saved query
+	DeleteQueryFolderItemsByQuery(ctx context.Context, queryID int64) error
+	// Delete a query share and return its token
+	DeleteQueryShare(ctx context.Context, token string) (string, error)
 	// Delete a session by ID
 	DeleteSession(ctx context.Context, id string) error
 	// Delete a source by ID
@@ -57,15 +85,23 @@ type Querier interface {
 	DeleteUser(ctx context.Context, id int64) error
 	// Delete all sessions for a user
 	DeleteUserSessions(ctx context.Context, userID int64) error
+	// Mark an export job as failed and return its ID
+	FailExportJob(ctx context.Context, arg FailExportJobParams) (string, error)
 	// Get an API token by ID
 	GetAPIToken(ctx context.Context, id int64) (ApiToken, error)
 	// Get an API token by its hash (for authentication)
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiToken, error)
 	GetAlert(ctx context.Context, id int64) (Alert, error)
 	GetAlertForTeamSource(ctx context.Context, arg GetAlertForTeamSourceParams) (Alert, error)
+	// Retrieve an export job by ID
+	GetExportJob(ctx context.Context, id string) (ExportJob, error)
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID int64) (AlertHistory, error)
 	// Get the current bookmark status of a query
 	GetQueryBookmarkStatus(ctx context.Context, arg GetQueryBookmarkStatusParams) (bool, error)
+	// Get one query folder scoped to a team
+	GetQueryFolder(ctx context.Context, arg GetQueryFolderParams) (GetQueryFolderRow, error)
+	// Retrieve an ad hoc query share by token with creator details
+	GetQueryShare(ctx context.Context, token string) (GetQueryShareRow, error)
 	// Get a session by ID
 	GetSession(ctx context.Context, id string) (Session, error)
 	// Get a single source by ID
@@ -92,7 +128,7 @@ type Querier interface {
 	// Get user preferences by user ID
 	GetUserPreferences(ctx context.Context, userID int64) (UserPreference, error)
 	// Alert history queries
-	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (int64, error)
+	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
 	// Check if a source is managed
 	IsSourceManaged(ctx context.Context, id int64) (int64, error)
 	// Check if a team is managed
@@ -104,6 +140,8 @@ type Querier interface {
 	ListActiveAlertsDue(ctx context.Context) ([]Alert, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
 	ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsByTeamAndSourceParams) ([]Alert, error)
+	// List artifact paths for expired export jobs
+	ListExpiredExportJobPaths(ctx context.Context, expiresAt time.Time) ([]sql.NullString, error)
 	// Provisioning Queries
 	// Get all sources managed by provisioning config
 	ListManagedSources(ctx context.Context) ([]Source, error)
@@ -111,12 +149,19 @@ type Querier interface {
 	ListManagedTeams(ctx context.Context) ([]Team, error)
 	// Get all users managed by provisioning config
 	ListManagedUsers(ctx context.Context) ([]User, error)
+	// List saved queries in a folder
+	ListQueriesByFolder(ctx context.Context, arg ListQueriesByFolderParams) ([]TeamQuery, error)
 	// List all queries for a specific team across all sources (bookmarked first, then by updated_at)
 	ListQueriesByTeam(ctx context.Context, teamID int64) ([]TeamQuery, error)
 	// List all queries for a specific team and source (bookmarked first, then by updated_at)
 	ListQueriesByTeamAndSource(ctx context.Context, arg ListQueriesByTeamAndSourceParams) ([]TeamQuery, error)
 	// List all saved queries across all teams a user belongs to, with team and source names
 	ListQueriesForUser(ctx context.Context, userID int64) ([]ListQueriesForUserRow, error)
+	// Query Folders
+	// List all folders for a team with saved query counts
+	ListQueryFolders(ctx context.Context, teamID int64) ([]ListQueryFoldersRow, error)
+	// List folder summaries for a set of saved query IDs
+	ListQueryFoldersByQueryIDs(ctx context.Context, queryIds []int64) ([]ListQueryFoldersByQueryIDsRow, error)
 	// List all teams a data source is a member of
 	ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, error)
 	// Get all sources ordered by creation date
@@ -141,11 +186,16 @@ type Querier interface {
 	ListUsers(ctx context.Context) ([]User, error)
 	MarkAlertEvaluated(ctx context.Context, id int64) error
 	MarkAlertTriggered(ctx context.Context, id int64) error
+	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error
+	// Delete expired query shares
+	PruneExpiredQueryShares(ctx context.Context, expiresAt time.Time) error
+	// Remove a saved query from a folder
+	RemoveQueryFromFolder(ctx context.Context, arg RemoveQueryFromFolderParams) error
 	// Remove a member from a team
 	RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error
 	// Remove a data source from a team
 	RemoveTeamSource(ctx context.Context, arg RemoveTeamSourceParams) error
-	ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) error
+	ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) (int64, error)
 	// Mark a source as managed/unmanaged and set secret_ref
 	SetSourceManaged(ctx context.Context, arg SetSourceManagedParams) error
 	// Mark a team as managed/unmanaged
@@ -157,10 +207,16 @@ type Querier interface {
 	TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (int64, error)
 	// Toggle the bookmark status of a query
 	ToggleQueryBookmark(ctx context.Context, arg ToggleQueryBookmarkParams) error
+	// Update a query share's last access time
+	TouchQueryShare(ctx context.Context, arg TouchQueryShareParams) error
 	// Update the last used timestamp for an API token
 	UpdateAPITokenLastUsed(ctx context.Context, id int64) error
-	UpdateAlert(ctx context.Context, arg UpdateAlertParams) error
-	UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlertHistoryPayloadParams) error
+	UpdateAlert(ctx context.Context, arg UpdateAlertParams) (int64, error)
+	UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlertHistoryPayloadParams) (int64, error)
+	// Mark an export job as running and return its ID
+	UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error)
+	// Update a query folder and return its ID
+	UpdateQueryFolder(ctx context.Context, arg UpdateQueryFolderParams) (int64, error)
 	// Update an existing source
 	UpdateSource(ctx context.Context, arg UpdateSourceParams) error
 	// Update a team

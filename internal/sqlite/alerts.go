@@ -5,161 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strings"
-	"time"
 
+	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
-)
-
-const (
-	insertAlertQuery = `INSERT INTO alerts (
-    team_id,
-    source_id,
-    name,
-    description,
-    query_type,
-    query,
-    condition_json,
-    lookback_seconds,
-    threshold_operator,
-    threshold_value,
-    frequency_seconds,
-    severity,
-    labels_json,
-    annotations_json,
-    recipient_user_ids_json,
-    webhook_urls_json,
-    generator_url,
-    is_active
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, created_at, updated_at, last_state, last_evaluated_at, last_triggered_at`
-
-	selectAlertBase = `SELECT
-    id,
-    team_id,
-    source_id,
-    name,
-    description,
-    query_type,
-    query,
-    condition_json,
-    lookback_seconds,
-    threshold_operator,
-    threshold_value,
-    frequency_seconds,
-    severity,
-    labels_json,
-    annotations_json,
-    recipient_user_ids_json,
-    webhook_urls_json,
-    generator_url,
-    is_active,
-    last_state,
-    last_evaluated_at,
-    last_triggered_at,
-    created_at,
-    updated_at
-FROM alerts`
-
-	listAlertsByTeamSourceQuery = selectAlertBase + `
-WHERE team_id = ? AND source_id = ?
-ORDER BY updated_at DESC, created_at DESC`
-
-	getAlertByIDQuery = selectAlertBase + `
-WHERE id = ?`
-
-	getAlertForTeamSourceQuery = selectAlertBase + `
-WHERE id = ? AND team_id = ? AND source_id = ?`
-
-	listActiveAlertsDueQuery = selectAlertBase + `
-WHERE is_active = 1
-  AND (
-        last_evaluated_at IS NULL
-        OR last_evaluated_at <= datetime('now', '-' || frequency_seconds || ' seconds')
-      )`
-
-	updateAlertEvaluatedQuery = `UPDATE alerts
-SET last_state = 'resolved',
-    last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ?`
-
-	updateAlertTriggeredQuery = `UPDATE alerts
-SET last_state = 'firing',
-    last_triggered_at = CASE WHEN last_state = 'firing' THEN last_triggered_at ELSE strftime('%Y-%m-%dT%H:%M:%SZ', 'now') END,
-    last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ?`
-
-	updateAlertQuery = `UPDATE alerts
-SET name = ?,
-    description = ?,
-    query_type = ?,
-    query = ?,
-    condition_json = ?,
-    lookback_seconds = ?,
-    threshold_operator = ?,
-    threshold_value = ?,
-    frequency_seconds = ?,
-    severity = ?,
-    labels_json = ?,
-    annotations_json = ?,
-    recipient_user_ids_json = ?,
-    webhook_urls_json = ?,
-    generator_url = ?,
-    is_active = ?,
-    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ?`
-
-	deleteAlertQuery = `DELETE FROM alerts WHERE id = ?`
-
-	insertAlertHistoryQuery = `INSERT INTO alert_history (
-    alert_id,
-    status,
-    value,
-    message,
-    payload_json
-) VALUES (?, ?, ?, ?, ?)
-RETURNING id, triggered_at, resolved_at, created_at`
-
-	selectAlertHistoryBase = `SELECT
-    id,
-    alert_id,
-    status,
-    triggered_at,
-    resolved_at,
-    value,
-    message,
-    payload_json,
-    created_at
-FROM alert_history`
-
-	getLatestUnresolvedHistoryQuery = selectAlertHistoryBase + `
-WHERE alert_id = ? AND status = 'triggered'
-ORDER BY triggered_at DESC, id DESC
-LIMIT 1`
-
-	resolveAlertHistoryQuery = `UPDATE alert_history
-SET status = 'resolved',
-    resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-    message = ?
-WHERE id = ?`
-
-	updateAlertHistoryPayloadQuery = `UPDATE alert_history
-SET payload_json = ?
-WHERE id = ?`
-
-	pruneAlertHistoryQuery = `WITH ranked AS (
-    SELECT id,
-           ROW_NUMBER() OVER (ORDER BY triggered_at DESC, id DESC) AS rn
-    FROM alert_history
-    WHERE alert_id = ?
-)
-DELETE FROM alert_history
-WHERE alert_id = ?
-  AND id IN (
-    SELECT id FROM ranked WHERE rn > ?
- )`
 )
 
 func marshalStringMap(m map[string]string) (string, error) {
@@ -245,67 +93,20 @@ func (db *DB) CreateAlert(ctx context.Context, alert *models.Alert) error {
 		return fmt.Errorf("alert payload is required")
 	}
 
-	labelsJSON, err := marshalStringMap(alert.Labels)
+	params, err := alertCreateParams(alert)
 	if err != nil {
-		return fmt.Errorf("failed to marshal labels: %w", err)
+		return err
 	}
-	annotationsJSON, err := marshalStringMap(alert.Annotations)
+	row, err := db.writeQueries.CreateAlert(ctx, params)
 	if err != nil {
-		return fmt.Errorf("failed to marshal annotations: %w", err)
-	}
-	recipientUserIDsJSON, err := marshalUserIDs(alert.RecipientUserIDs)
-	if err != nil {
-		return fmt.Errorf("failed to marshal recipient user IDs: %w", err)
-	}
-	webhookURLsJSON, err := marshalStringSlice(alert.WebhookURLs)
-	if err != nil {
-		return fmt.Errorf("failed to marshal webhook URLs: %w", err)
-	}
-
-	row := db.writeDB.QueryRowContext(ctx, insertAlertQuery,
-		int64(alert.TeamID),
-		int64(alert.SourceID),
-		alert.Name,
-		nullableString(alert.Description),
-		string(alert.QueryType),
-		nullableString(alert.Query),
-		nullableString(alert.ConditionJSON),
-		alert.LookbackSeconds,
-		string(alert.ThresholdOperator),
-		alert.ThresholdValue,
-		alert.FrequencySeconds,
-		string(alert.Severity),
-		nullableString(labelsJSON),
-		nullableString(annotationsJSON),
-		nullableString(recipientUserIDsJSON),
-		nullableString(webhookURLsJSON),
-		nullableString(alert.GeneratorURL),
-		boolToInt(alert.IsActive),
-	)
-
-	var (
-		id              int64
-		createdAt       time.Time
-		updatedAt       time.Time
-		lastState       string
-		lastEvaluatedAt sql.NullTime
-		lastTriggeredAt sql.NullTime
-	)
-
-	if err := row.Scan(&id, &createdAt, &updatedAt, &lastState, &lastEvaluatedAt, &lastTriggeredAt); err != nil {
 		return fmt.Errorf("failed to insert alert: %w", err)
 	}
 
-	alert.ID = models.AlertID(id)
-	alert.CreatedAt = createdAt
-	alert.UpdatedAt = updatedAt
-	alert.LastState = models.AlertState(lastState)
-	if lastEvaluatedAt.Valid {
-		alert.LastEvaluatedAt = &lastEvaluatedAt.Time
+	created, err := alertFromSQLC(row)
+	if err != nil {
+		return fmt.Errorf("failed to decode created alert: %w", err)
 	}
-	if lastTriggeredAt.Valid {
-		alert.LastTriggeredAt = &lastTriggeredAt.Time
-	}
+	*alert = *created
 	return nil
 }
 
@@ -315,242 +116,82 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 		return fmt.Errorf("alert payload is required")
 	}
 
-	labelsJSON, err := marshalStringMap(alert.Labels)
+	params, err := alertUpdateParams(alert)
 	if err != nil {
-		return fmt.Errorf("failed to marshal labels: %w", err)
+		return err
 	}
-	annotationsJSON, err := marshalStringMap(alert.Annotations)
-	if err != nil {
-		return fmt.Errorf("failed to marshal annotations: %w", err)
-	}
-	recipientUserIDsJSON, err := marshalUserIDs(alert.RecipientUserIDs)
-	if err != nil {
-		return fmt.Errorf("failed to marshal recipient user IDs: %w", err)
-	}
-	webhookURLsJSON, err := marshalStringSlice(alert.WebhookURLs)
-	if err != nil {
-		return fmt.Errorf("failed to marshal webhook URLs: %w", err)
-	}
-
-	res, err := db.writeDB.ExecContext(ctx, updateAlertQuery,
-		alert.Name,
-		nullableString(alert.Description),
-		string(alert.QueryType),
-		nullableString(alert.Query),
-		nullableString(alert.ConditionJSON),
-		alert.LookbackSeconds,
-		string(alert.ThresholdOperator),
-		alert.ThresholdValue,
-		alert.FrequencySeconds,
-		string(alert.Severity),
-		nullableString(labelsJSON),
-		nullableString(annotationsJSON),
-		nullableString(recipientUserIDsJSON),
-		nullableString(webhookURLsJSON),
-		nullableString(alert.GeneratorURL),
-		boolToInt(alert.IsActive),
-		int64(alert.ID),
-	)
-	if err != nil {
+	if _, err := db.writeQueries.UpdateAlert(ctx, params); err != nil {
+		if err == sql.ErrNoRows {
+			return err
+		}
 		return fmt.Errorf("failed to update alert: %w", err)
-	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
-		return sql.ErrNoRows
 	}
 	return nil
 }
 
 // DeleteAlert removes an alert definition.
 func (db *DB) DeleteAlert(ctx context.Context, alertID models.AlertID) error {
-	res, err := db.writeDB.ExecContext(ctx, deleteAlertQuery, int64(alertID))
-	if err != nil {
+	if _, err := db.writeQueries.DeleteAlert(ctx, int64(alertID)); err != nil {
+		if err == sql.ErrNoRows {
+			return err
+		}
 		return fmt.Errorf("failed to delete alert: %w", err)
-	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
-		return sql.ErrNoRows
 	}
 	return nil
 }
 
-func scanAlert(scanner interface {
-	Scan(dest ...any) error
-}) (*models.Alert, error) {
-	var (
-		id, teamID, sourceID             int64
-		name                             string
-		description                      sql.NullString
-		queryType                        string
-		query                            sql.NullString
-		conditionJSON                    sql.NullString
-		lookbackSeconds                  int
-		thresholdOperator                string
-		thresholdValue                   float64
-		frequencySeconds                 int
-		severity                         string
-		labelsJSON                       sql.NullString
-		annotationsJSON                  sql.NullString
-		recipientUserIDsJSON             sql.NullString
-		webhookURLsJSON                  sql.NullString
-		generatorURL                     sql.NullString
-		isActive                         int
-		lastState                        string
-		lastEvaluatedAt, lastTriggeredAt sql.NullTime
-		createdAt, updatedAt             time.Time
-	)
-
-	if err := scanner.Scan(
-		&id,
-		&teamID,
-		&sourceID,
-		&name,
-		&description,
-		&queryType,
-		&query,
-		&conditionJSON,
-		&lookbackSeconds,
-		&thresholdOperator,
-		&thresholdValue,
-		&frequencySeconds,
-		&severity,
-		&labelsJSON,
-		&annotationsJSON,
-		&recipientUserIDsJSON,
-		&webhookURLsJSON,
-		&generatorURL,
-		&isActive,
-		&lastState,
-		&lastEvaluatedAt,
-		&lastTriggeredAt,
-		&createdAt,
-		&updatedAt,
-	); err != nil {
-		return nil, err
-	}
-
-	labels, err := unmarshalStringMap(labelsJSON)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode labels: %w", err)
-	}
-	annotations, err := unmarshalStringMap(annotationsJSON)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode annotations: %w", err)
-	}
-	recipientUserIDs, err := unmarshalUserIDs(recipientUserIDsJSON)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode recipient user IDs: %w", err)
-	}
-	webhookURLs, err := unmarshalStringSlice(webhookURLsJSON)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode webhook URLs: %w", err)
-	}
-
-	alert := &models.Alert{
-		ID:                models.AlertID(id),
-		TeamID:            models.TeamID(teamID),
-		SourceID:          models.SourceID(sourceID),
-		Name:              name,
-		Description:       description.String,
-		QueryType:         models.AlertQueryType(queryType),
-		Query:             query.String,
-		ConditionJSON:     conditionJSON.String,
-		LookbackSeconds:   lookbackSeconds,
-		ThresholdOperator: models.AlertThresholdOperator(thresholdOperator),
-		ThresholdValue:    thresholdValue,
-		FrequencySeconds:  frequencySeconds,
-		Severity:          models.AlertSeverity(severity),
-		Labels:            labels,
-		Annotations:       annotations,
-		RecipientUserIDs:  recipientUserIDs,
-		WebhookURLs:       webhookURLs,
-		GeneratorURL:      generatorURL.String,
-		IsActive:          isActive == 1,
-		LastState:         models.AlertState(lastState),
-		CreatedAt:         createdAt,
-		UpdatedAt:         updatedAt,
-	}
-	if lastEvaluatedAt.Valid {
-		alert.LastEvaluatedAt = &lastEvaluatedAt.Time
-	}
-	if lastTriggeredAt.Valid {
-		alert.LastTriggeredAt = &lastTriggeredAt.Time
-	}
-	return alert, nil
-}
-
 // GetAlert retrieves an alert by ID.
 func (db *DB) GetAlert(ctx context.Context, alertID models.AlertID) (*models.Alert, error) {
-	row := db.readDB.QueryRowContext(ctx, getAlertByIDQuery, int64(alertID))
-	alert, err := scanAlert(row)
+	row, err := db.readQueries.GetAlert(ctx, int64(alertID))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("failed to scan alert: %w", err)
+		return nil, fmt.Errorf("failed to get alert: %w", err)
 	}
-	return alert, nil
+	return alertFromSQLC(row)
 }
 
 // GetAlertForTeamSource retrieves an alert by ID ensuring it belongs to the specified team/source.
 func (db *DB) GetAlertForTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, alertID models.AlertID) (*models.Alert, error) {
-	row := db.readDB.QueryRowContext(ctx, getAlertForTeamSourceQuery, int64(alertID), int64(teamID), int64(sourceID))
-	alert, err := scanAlert(row)
+	row, err := db.readQueries.GetAlertForTeamSource(ctx, sqlc.GetAlertForTeamSourceParams{
+		ID:       int64(alertID),
+		TeamID:   int64(teamID),
+		SourceID: int64(sourceID),
+	})
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("failed to scan alert: %w", err)
+		return nil, fmt.Errorf("failed to get alert: %w", err)
 	}
-	return alert, nil
+	return alertFromSQLC(row)
 }
 
 // ListAlertsByTeamAndSource returns alerts for the given team/source.
 func (db *DB) ListAlertsByTeamAndSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) ([]*models.Alert, error) {
-	rows, err := db.readDB.QueryContext(ctx, listAlertsByTeamSourceQuery, int64(teamID), int64(sourceID))
+	rows, err := db.readQueries.ListAlertsByTeamAndSource(ctx, sqlc.ListAlertsByTeamAndSourceParams{
+		TeamID:   int64(teamID),
+		SourceID: int64(sourceID),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alerts: %w", err)
 	}
-	defer rows.Close()
-
-	var alerts []*models.Alert
-	for rows.Next() {
-		alert, err := scanAlert(rows)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan alert: %w", err)
-		}
-		alerts = append(alerts, alert)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating alerts: %w", err)
-	}
-	return alerts, nil
+	return alertsFromSQLC(rows)
 }
 
 // ListActiveAlertsDue returns alerts that need evaluation.
 func (db *DB) ListActiveAlertsDue(ctx context.Context) ([]*models.Alert, error) {
-	rows, err := db.readDB.QueryContext(ctx, listActiveAlertsDueQuery)
+	rows, err := db.readQueries.ListActiveAlertsDue(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active alerts: %w", err)
 	}
-	defer rows.Close()
-
-	var alerts []*models.Alert
-	for rows.Next() {
-		alert, err := scanAlert(rows)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan alert: %w", err)
-		}
-		alerts = append(alerts, alert)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating alerts: %w", err)
-	}
-	return alerts, nil
+	return alertsFromSQLC(rows)
 }
 
 // MarkAlertEvaluated updates state after evaluation finishes without triggering.
 func (db *DB) MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) error {
-	_, err := db.writeDB.ExecContext(ctx, updateAlertEvaluatedQuery, int64(alertID))
-	if err != nil {
+	if err := db.writeQueries.MarkAlertEvaluated(ctx, int64(alertID)); err != nil {
 		return fmt.Errorf("failed to mark alert evaluated: %w", err)
 	}
 	return nil
@@ -558,8 +199,7 @@ func (db *DB) MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) er
 
 // MarkAlertTriggered updates state when an alert fires.
 func (db *DB) MarkAlertTriggered(ctx context.Context, alertID models.AlertID) error {
-	_, err := db.writeDB.ExecContext(ctx, updateAlertTriggeredQuery, int64(alertID))
-	if err != nil {
+	if err := db.writeQueries.MarkAlertTriggered(ctx, int64(alertID)); err != nil {
 		return fmt.Errorf("failed to mark alert triggered: %w", err)
 	}
 	return nil
@@ -567,132 +207,86 @@ func (db *DB) MarkAlertTriggered(ctx context.Context, alertID models.AlertID) er
 
 // InsertAlertHistory records a history entry and returns the hydrated entry.
 func (db *DB) InsertAlertHistory(ctx context.Context, alertID models.AlertID, status models.AlertStatus, value *float64, message string, payload map[string]any) (*models.AlertHistoryEntry, error) {
-	var valuePtr any
-	if value != nil {
-		valuePtr = *value
-	} else {
-		valuePtr = nil
-	}
-	var payloadJSON string
-	if len(payload) > 0 {
-		buf, err := json.Marshal(payload)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal history payload: %w", err)
-		}
-		payloadJSON = string(buf)
+	payloadJSON, err := marshalPayload(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal history payload: %w", err)
 	}
 
-	row := db.writeDB.QueryRowContext(ctx, insertAlertHistoryQuery,
-		int64(alertID),
-		string(status),
-		valuePtr,
-		nullableString(message),
-		nullableString(payloadJSON),
-	)
-
-	var (
-		id          int64
-		triggeredAt time.Time
-		resolvedAt  sql.NullTime
-		createdAt   time.Time
-	)
-
-	if err := row.Scan(&id, &triggeredAt, &resolvedAt, &createdAt); err != nil {
+	row, err := db.writeQueries.InsertAlertHistory(ctx, sqlc.InsertAlertHistoryParams{
+		AlertID:     int64(alertID),
+		Status:      string(status),
+		Value:       nullFloat64(value),
+		Message:     nullString(message),
+		PayloadJson: nullString(payloadJSON),
+	})
+	if err != nil {
 		return nil, fmt.Errorf("failed to insert alert history: %w", err)
 	}
-
-	entry := &models.AlertHistoryEntry{
-		ID:          id,
-		AlertID:     alertID,
-		Status:      status,
-		TriggeredAt: triggeredAt,
-		CreatedAt:   createdAt,
-		Message:     message,
-	}
-	if value != nil {
-		entry.Value = value
-	}
-	if resolvedAt.Valid {
-		entry.ResolvedAt = &resolvedAt.Time
-	}
-	if len(payloadJSON) > 0 {
-		payloadMap := make(map[string]any)
-		if err := json.Unmarshal([]byte(payloadJSON), &payloadMap); err == nil {
-			entry.Payload = payloadMap
-		}
-	}
-	return entry, nil
+	return alertHistoryFromSQLC(row)
 }
 
 // GetLatestUnresolvedAlertHistory fetches the newest unresolved history entry.
 func (db *DB) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID models.AlertID) (*models.AlertHistoryEntry, error) {
-	row := db.readDB.QueryRowContext(ctx, getLatestUnresolvedHistoryQuery, int64(alertID))
-	entry, err := scanAlertHistory(row)
+	row, err := db.readQueries.GetLatestUnresolvedAlertHistory(ctx, int64(alertID))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("failed to scan alert history: %w", err)
+		return nil, fmt.Errorf("failed to get alert history: %w", err)
 	}
-	return entry, nil
+	return alertHistoryFromSQLC(row)
 }
 
 // ResolveAlertHistory marks a history entry as resolved with an optional message.
 func (db *DB) ResolveAlertHistory(ctx context.Context, historyID int64, message string) error {
-	res, err := db.writeDB.ExecContext(ctx, resolveAlertHistoryQuery, nullableString(message), historyID)
-	if err != nil {
+	if _, err := db.writeQueries.ResolveAlertHistory(ctx, sqlc.ResolveAlertHistoryParams{
+		Message: nullString(message),
+		ID:      historyID,
+	}); err != nil {
+		if err == sql.ErrNoRows {
+			return err
+		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
-	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
-		return sql.ErrNoRows
 	}
 	return nil
 }
 
 // UpdateAlertHistoryPayload updates the payload of an existing alert history entry.
 func (db *DB) UpdateAlertHistoryPayload(ctx context.Context, historyID int64, payload map[string]any) error {
-	var payloadJSON string
-	if len(payload) > 0 {
-		buf, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("failed to marshal history payload: %w", err)
-		}
-		payloadJSON = string(buf)
+	payloadJSON, err := marshalPayload(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal history payload: %w", err)
 	}
 
-	res, err := db.writeDB.ExecContext(ctx, updateAlertHistoryPayloadQuery, nullableString(payloadJSON), historyID)
-	if err != nil {
+	if _, err := db.writeQueries.UpdateAlertHistoryPayload(ctx, sqlc.UpdateAlertHistoryPayloadParams{
+		PayloadJson: nullString(payloadJSON),
+		ID:          historyID,
+	}); err != nil {
+		if err == sql.ErrNoRows {
+			return err
+		}
 		return fmt.Errorf("failed to update alert history payload: %w", err)
-	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
-		return sql.ErrNoRows
 	}
 	return nil
 }
 
 // ListAlertHistory returns recent history entries for an alert.
 func (db *DB) ListAlertHistory(ctx context.Context, alertID models.AlertID, limit int) ([]*models.AlertHistoryEntry, error) {
-	query := selectAlertHistoryBase + `
-WHERE alert_id = ?
-ORDER BY triggered_at DESC, id DESC
-LIMIT ?`
-
-	rows, err := db.readDB.QueryContext(ctx, query, int64(alertID), limit)
+	rows, err := db.readQueries.ListAlertHistory(ctx, sqlc.ListAlertHistoryParams{
+		AlertID: int64(alertID),
+		Limit:   int64(limit),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alert history: %w", err)
 	}
-	defer rows.Close()
 
-	var history []*models.AlertHistoryEntry
-	for rows.Next() {
-		entry, err := scanAlertHistory(rows)
+	history := make([]*models.AlertHistoryEntry, 0, len(rows))
+	for _, row := range rows {
+		entry, err := alertHistoryFromSQLC(row)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan alert history: %w", err)
+			return nil, fmt.Errorf("failed to decode alert history: %w", err)
 		}
 		history = append(history, entry)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating alert history: %w", err)
 	}
 	return history, nil
 }
@@ -702,67 +296,184 @@ func (db *DB) PruneAlertHistory(ctx context.Context, alertID models.AlertID, kee
 	if keep <= 0 {
 		return nil
 	}
-	if _, err := db.writeDB.ExecContext(ctx, pruneAlertHistoryQuery, int64(alertID), int64(alertID), keep); err != nil {
+	if err := db.writeQueries.PruneAlertHistory(ctx, sqlc.PruneAlertHistoryParams{
+		AlertID:   int64(alertID),
+		AlertID_2: int64(alertID),
+		Limit:     int64(keep),
+	}); err != nil {
 		return fmt.Errorf("failed to prune alert history: %w", err)
 	}
 	return nil
 }
 
-func scanAlertHistory(scanner interface {
-	Scan(dest ...any) error
-}) (*models.AlertHistoryEntry, error) {
-	var (
-		id, alertID int64
-		status      string
-		triggeredAt time.Time
-		resolvedAt  sql.NullTime
-		value       sql.NullFloat64
-		message     sql.NullString
-		payload     sql.NullString
-		createdAt   time.Time
-	)
-
-	if err := scanner.Scan(
-		&id,
-		&alertID,
-		&status,
-		&triggeredAt,
-		&resolvedAt,
-		&value,
-		&message,
-		&payload,
-		&createdAt,
-	); err != nil {
-		return nil, err
+func alertCreateParams(alert *models.Alert) (sqlc.CreateAlertParams, error) {
+	labelsJSON, err := marshalStringMap(alert.Labels)
+	if err != nil {
+		return sqlc.CreateAlertParams{}, fmt.Errorf("failed to marshal labels: %w", err)
+	}
+	annotationsJSON, err := marshalStringMap(alert.Annotations)
+	if err != nil {
+		return sqlc.CreateAlertParams{}, fmt.Errorf("failed to marshal annotations: %w", err)
+	}
+	recipientUserIDsJSON, err := marshalUserIDs(alert.RecipientUserIDs)
+	if err != nil {
+		return sqlc.CreateAlertParams{}, fmt.Errorf("failed to marshal recipient user IDs: %w", err)
+	}
+	webhookURLsJSON, err := marshalStringSlice(alert.WebhookURLs)
+	if err != nil {
+		return sqlc.CreateAlertParams{}, fmt.Errorf("failed to marshal webhook URLs: %w", err)
 	}
 
-	payloadMap, err := unmarshalPayload(payload)
+	return sqlc.CreateAlertParams{
+		TeamID:               int64(alert.TeamID),
+		SourceID:             int64(alert.SourceID),
+		Name:                 alert.Name,
+		Description:          nullString(alert.Description),
+		QueryType:            string(alert.QueryType),
+		Query:                nullString(alert.Query),
+		ConditionJson:        nullString(alert.ConditionJSON),
+		LookbackSeconds:      int64(alert.LookbackSeconds),
+		ThresholdOperator:    string(alert.ThresholdOperator),
+		ThresholdValue:       alert.ThresholdValue,
+		FrequencySeconds:     int64(alert.FrequencySeconds),
+		Severity:             string(alert.Severity),
+		LabelsJson:           nullString(labelsJSON),
+		AnnotationsJson:      nullString(annotationsJSON),
+		RecipientUserIdsJson: nullString(recipientUserIDsJSON),
+		WebhookUrlsJson:      nullString(webhookURLsJSON),
+		GeneratorUrl:         nullString(alert.GeneratorURL),
+		IsActive:             boolToInt(alert.IsActive),
+	}, nil
+}
+
+func alertUpdateParams(alert *models.Alert) (sqlc.UpdateAlertParams, error) {
+	createParams, err := alertCreateParams(alert)
+	if err != nil {
+		return sqlc.UpdateAlertParams{}, err
+	}
+	return sqlc.UpdateAlertParams{
+		Name:                 createParams.Name,
+		Description:          createParams.Description,
+		QueryType:            createParams.QueryType,
+		Query:                createParams.Query,
+		ConditionJson:        createParams.ConditionJson,
+		LookbackSeconds:      createParams.LookbackSeconds,
+		ThresholdOperator:    createParams.ThresholdOperator,
+		ThresholdValue:       createParams.ThresholdValue,
+		FrequencySeconds:     createParams.FrequencySeconds,
+		Severity:             createParams.Severity,
+		LabelsJson:           createParams.LabelsJson,
+		AnnotationsJson:      createParams.AnnotationsJson,
+		RecipientUserIdsJson: createParams.RecipientUserIdsJson,
+		WebhookUrlsJson:      createParams.WebhookUrlsJson,
+		GeneratorUrl:         createParams.GeneratorUrl,
+		IsActive:             createParams.IsActive,
+		ID:                   int64(alert.ID),
+	}, nil
+}
+
+func alertsFromSQLC(rows []sqlc.Alert) ([]*models.Alert, error) {
+	alerts := make([]*models.Alert, 0, len(rows))
+	for _, row := range rows {
+		alert, err := alertFromSQLC(row)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode alert: %w", err)
+		}
+		alerts = append(alerts, alert)
+	}
+	return alerts, nil
+}
+
+func alertFromSQLC(row sqlc.Alert) (*models.Alert, error) {
+	labels, err := unmarshalStringMap(row.LabelsJson)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode labels: %w", err)
+	}
+	annotations, err := unmarshalStringMap(row.AnnotationsJson)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode annotations: %w", err)
+	}
+	recipientUserIDs, err := unmarshalUserIDs(row.RecipientUserIdsJson)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode recipient user IDs: %w", err)
+	}
+	webhookURLs, err := unmarshalStringSlice(row.WebhookUrlsJson)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode webhook URLs: %w", err)
+	}
+
+	alert := &models.Alert{
+		ID:                models.AlertID(row.ID),
+		TeamID:            models.TeamID(row.TeamID),
+		SourceID:          models.SourceID(row.SourceID),
+		Name:              row.Name,
+		Description:       row.Description.String,
+		QueryType:         models.AlertQueryType(row.QueryType),
+		Query:             row.Query.String,
+		ConditionJSON:     row.ConditionJson.String,
+		LookbackSeconds:   int(row.LookbackSeconds),
+		ThresholdOperator: models.AlertThresholdOperator(row.ThresholdOperator),
+		ThresholdValue:    row.ThresholdValue,
+		FrequencySeconds:  int(row.FrequencySeconds),
+		Severity:          models.AlertSeverity(row.Severity),
+		Labels:            labels,
+		Annotations:       annotations,
+		RecipientUserIDs:  recipientUserIDs,
+		WebhookURLs:       webhookURLs,
+		GeneratorURL:      row.GeneratorUrl.String,
+		IsActive:          row.IsActive == 1,
+		LastState:         models.AlertState(row.LastState),
+		CreatedAt:         row.CreatedAt,
+		UpdatedAt:         row.UpdatedAt,
+	}
+	if row.LastEvaluatedAt.Valid {
+		alert.LastEvaluatedAt = &row.LastEvaluatedAt.Time
+	}
+	if row.LastTriggeredAt.Valid {
+		alert.LastTriggeredAt = &row.LastTriggeredAt.Time
+	}
+	return alert, nil
+}
+
+func alertHistoryFromSQLC(row sqlc.AlertHistory) (*models.AlertHistoryEntry, error) {
+	payloadMap, err := unmarshalPayload(row.PayloadJson)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode history payload: %w", err)
 	}
 
 	entry := &models.AlertHistoryEntry{
-		ID:          id,
-		AlertID:     models.AlertID(alertID),
-		Status:      models.AlertStatus(status),
-		TriggeredAt: triggeredAt,
-		Message:     message.String,
+		ID:          row.ID,
+		AlertID:     models.AlertID(row.AlertID),
+		Status:      models.AlertStatus(row.Status),
+		TriggeredAt: row.TriggeredAt,
+		Message:     row.Message.String,
 		Payload:     payloadMap,
-		CreatedAt:   createdAt,
+		CreatedAt:   row.CreatedAt,
 	}
-	if resolvedAt.Valid {
-		entry.ResolvedAt = &resolvedAt.Time
+	if row.ResolvedAt.Valid {
+		entry.ResolvedAt = &row.ResolvedAt.Time
 	}
-	if value.Valid {
-		val := value.Float64
+	if row.Value.Valid {
+		val := row.Value.Float64
 		entry.Value = &val
 	}
 	return entry, nil
 }
 
-func nullableString(val string) any {
-	if strings.TrimSpace(val) == "" {
-		return nil
+func marshalPayload(payload map[string]any) (string, error) {
+	if len(payload) == 0 {
+		return "", nil
 	}
-	return val
+	buf, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(buf), nil
+}
+
+func nullFloat64(value *float64) sql.NullFloat64 {
+	if value == nil {
+		return sql.NullFloat64{}
+	}
+	return sql.NullFloat64{Float64: *value, Valid: true}
 }

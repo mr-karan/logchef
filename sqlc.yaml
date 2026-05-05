@@ -16,6 +16,7 @@ sql:
       - "internal/sqlite/migrations/000012_add_query_shares.up.sql"
       - "internal/sqlite/migrations/000013_add_export_jobs.up.sql"
       - "internal/sqlite/migrations/000014_add_tls_enable.up.sql"
+      - "internal/sqlite/migrations/000015_add_query_folders.up.sql"
     gen:
       go:
         package: "sqlc"

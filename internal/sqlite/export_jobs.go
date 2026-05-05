@@ -6,107 +6,23 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-const createExportJobSQL = `
-INSERT INTO export_jobs (
-    id,
-    team_id,
-    source_id,
-    created_by,
-    status,
-    format,
-    request_json,
-    expires_at,
-    created_at,
-    updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`
-
-const getExportJobSQL = `
-SELECT
-    id,
-    team_id,
-    source_id,
-    created_by,
-    status,
-    format,
-    request_json,
-    file_name,
-    file_path,
-    error_message,
-    rows_exported,
-    bytes_written,
-    expires_at,
-    completed_at,
-    created_at,
-    updated_at
-FROM export_jobs
-WHERE id = ?
-`
-
-const updateExportJobRunningSQL = `
-UPDATE export_jobs
-SET
-    status = ?,
-    error_message = NULL,
-    updated_at = ?
-WHERE id = ?
-`
-
-const completeExportJobSQL = `
-UPDATE export_jobs
-SET
-    status = ?,
-    file_name = ?,
-    file_path = ?,
-    error_message = NULL,
-    rows_exported = ?,
-    bytes_written = ?,
-    completed_at = ?,
-    updated_at = ?
-WHERE id = ?
-`
-
-const failExportJobSQL = `
-UPDATE export_jobs
-SET
-    status = ?,
-    file_name = NULL,
-    file_path = NULL,
-    error_message = ?,
-    completed_at = NULL,
-    updated_at = ?
-WHERE id = ?
-`
-
-const selectExpiredExportJobPathsSQL = `
-SELECT file_path
-FROM export_jobs
-WHERE expires_at < ?
-  AND file_path IS NOT NULL
-`
-
-const pruneExpiredExportJobsSQL = `
-DELETE FROM export_jobs
-WHERE expires_at < ?
-`
-
 func (db *DB) CreateExportJob(ctx context.Context, job *models.ExportJob) error {
-	_, err := db.writeDB.ExecContext(ctx,
-		createExportJobSQL,
-		job.ID,
-		int64(job.TeamID),
-		int64(job.SourceID),
-		int64(job.CreatedBy),
-		string(job.Status),
-		job.Format,
-		string(job.RequestPayload),
-		job.ExpiresAt,
-		job.CreatedAt,
-		job.UpdatedAt,
-	)
+	err := db.writeQueries.CreateExportJob(ctx, sqlc.CreateExportJobParams{
+		ID:          job.ID,
+		TeamID:      int64(job.TeamID),
+		SourceID:    int64(job.SourceID),
+		CreatedBy:   int64(job.CreatedBy),
+		Status:      string(job.Status),
+		Format:      job.Format,
+		RequestJson: string(job.RequestPayload),
+		ExpiresAt:   job.ExpiresAt,
+		CreatedAt:   job.CreatedAt,
+		UpdatedAt:   job.UpdatedAt,
+	})
 	if err != nil {
 		db.log.Error("failed to create export job", "error", err, "job_id", job.ID, "team_id", job.TeamID, "source_id", job.SourceID)
 		return fmt.Errorf("error creating export job: %w", err)
@@ -115,34 +31,7 @@ func (db *DB) CreateExportJob(ctx context.Context, job *models.ExportJob) error 
 }
 
 func (db *DB) GetExportJob(ctx context.Context, id string) (*models.ExportJob, error) {
-	var (
-		job          models.ExportJob
-		status       string
-		requestJSON  string
-		fileName     sql.NullString
-		filePath     sql.NullString
-		errorMessage sql.NullString
-		completedAt  sql.NullTime
-	)
-
-	err := db.readDB.QueryRowContext(ctx, getExportJobSQL, id).Scan(
-		&job.ID,
-		&job.TeamID,
-		&job.SourceID,
-		&job.CreatedBy,
-		&status,
-		&job.Format,
-		&requestJSON,
-		&fileName,
-		&filePath,
-		&errorMessage,
-		&job.RowsExported,
-		&job.BytesWritten,
-		&job.ExpiresAt,
-		&completedAt,
-		&job.CreatedAt,
-		&job.UpdatedAt,
-	)
+	row, err := db.readQueries.GetExportJob(ctx, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, err
@@ -150,104 +39,117 @@ func (db *DB) GetExportJob(ctx context.Context, id string) (*models.ExportJob, e
 		db.log.Error("failed to get export job", "error", err, "job_id", id)
 		return nil, fmt.Errorf("error getting export job: %w", err)
 	}
-
-	job.Status = models.ExportJobStatus(status)
-	job.RequestPayload = []byte(requestJSON)
-	if fileName.Valid {
-		job.FileName = fileName.String
-	}
-	if filePath.Valid {
-		job.FilePath = filePath.String
-	}
-	if errorMessage.Valid {
-		job.ErrorMessage = errorMessage.String
-	}
-	if completedAt.Valid {
-		job.CompletedAt = &completedAt.Time
-	}
-
-	return &job, nil
+	return exportJobFromSQLC(row), nil
 }
 
 func (db *DB) UpdateExportJobRunning(ctx context.Context, id string, updatedAt time.Time) error {
-	res, err := db.writeDB.ExecContext(ctx, updateExportJobRunningSQL, string(models.ExportJobStatusRunning), updatedAt, id)
+	_, err := db.writeQueries.UpdateExportJobRunning(ctx, sqlc.UpdateExportJobRunningParams{
+		Status:    string(models.ExportJobStatusRunning),
+		UpdatedAt: updatedAt,
+		ID:        id,
+	})
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return err
+		}
 		db.log.Error("failed to mark export job running", "error", err, "job_id", id)
 		return fmt.Errorf("error updating export job status: %w", err)
-	}
-	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
-		return sql.ErrNoRows
 	}
 	return nil
 }
 
 func (db *DB) CompleteExportJob(ctx context.Context, id, fileName, filePath string, rowsExported int, bytesWritten int64, completedAt time.Time) error {
-	res, err := db.writeDB.ExecContext(ctx,
-		completeExportJobSQL,
-		string(models.ExportJobStatusComplete),
-		fileName,
-		filePath,
-		rowsExported,
-		bytesWritten,
-		completedAt,
-		completedAt,
-		id,
-	)
+	_, err := db.writeQueries.CompleteExportJob(ctx, sqlc.CompleteExportJobParams{
+		Status:       string(models.ExportJobStatusComplete),
+		FileName:     nullString(fileName),
+		FilePath:     nullString(filePath),
+		RowsExported: int64(rowsExported),
+		BytesWritten: bytesWritten,
+		CompletedAt:  sql.NullTime{Time: completedAt, Valid: true},
+		UpdatedAt:    completedAt,
+		ID:           id,
+	})
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return err
+		}
 		db.log.Error("failed to complete export job", "error", err, "job_id", id)
 		return fmt.Errorf("error completing export job: %w", err)
-	}
-	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
-		return sql.ErrNoRows
 	}
 	return nil
 }
 
 func (db *DB) FailExportJob(ctx context.Context, id, errorMessage string, updatedAt time.Time) error {
-	res, err := db.writeDB.ExecContext(ctx, failExportJobSQL, string(models.ExportJobStatusFailed), errorMessage, updatedAt, id)
+	_, err := db.writeQueries.FailExportJob(ctx, sqlc.FailExportJobParams{
+		Status:       string(models.ExportJobStatusFailed),
+		ErrorMessage: nullString(errorMessage),
+		UpdatedAt:    updatedAt,
+		ID:           id,
+	})
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return err
+		}
 		db.log.Error("failed to mark export job failed", "error", err, "job_id", id)
 		return fmt.Errorf("error failing export job: %w", err)
-	}
-	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
-		return sql.ErrNoRows
 	}
 	return nil
 }
 
 // ListExpiredExportJobPaths returns artifact paths for jobs whose
 // expires_at is before the given time, without deleting anything.
-// Callers should unlink the files first, then call DeleteExpiredExportJobs —
-// that ordering keeps the DB authoritative if the process dies mid-prune.
+// Callers should unlink the files first, then call DeleteExpiredExportJobs.
 func (db *DB) ListExpiredExportJobPaths(ctx context.Context, before time.Time) ([]string, error) {
-	rows, err := db.readDB.QueryContext(ctx, selectExpiredExportJobPathsSQL, before)
+	rows, err := db.readQueries.ListExpiredExportJobPaths(ctx, before)
 	if err != nil {
 		db.log.Error("failed to list expired export job paths", "error", err)
 		return nil, fmt.Errorf("error listing expired export job paths: %w", err)
 	}
-	defer rows.Close()
 
-	paths := make([]string, 0)
-	for rows.Next() {
-		var path string
-		if err := rows.Scan(&path); err != nil {
-			return nil, fmt.Errorf("error scanning expired export job path: %w", err)
+	paths := make([]string, 0, len(rows))
+	for _, path := range rows {
+		if path.Valid && path.String != "" {
+			paths = append(paths, path.String)
 		}
-		if path != "" {
-			paths = append(paths, path)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating expired export job paths: %w", err)
 	}
 	return paths, nil
 }
 
 // DeleteExpiredExportJobs removes rows whose expires_at is before the given time.
 func (db *DB) DeleteExpiredExportJobs(ctx context.Context, before time.Time) error {
-	if _, err := db.writeDB.ExecContext(ctx, pruneExpiredExportJobsSQL, before); err != nil {
+	if err := db.writeQueries.DeleteExpiredExportJobs(ctx, before); err != nil {
 		db.log.Error("failed to prune expired export jobs", "error", err)
 		return fmt.Errorf("error pruning expired export jobs: %w", err)
 	}
 	return nil
+}
+
+func exportJobFromSQLC(row sqlc.ExportJob) *models.ExportJob {
+	job := &models.ExportJob{
+		ID:             row.ID,
+		TeamID:         models.TeamID(row.TeamID),
+		SourceID:       models.SourceID(row.SourceID),
+		CreatedBy:      models.UserID(row.CreatedBy),
+		Status:         models.ExportJobStatus(row.Status),
+		Format:         row.Format,
+		RequestPayload: []byte(row.RequestJson),
+		RowsExported:   int(row.RowsExported),
+		BytesWritten:   row.BytesWritten,
+		ExpiresAt:      row.ExpiresAt,
+		CreatedAt:      row.CreatedAt,
+		UpdatedAt:      row.UpdatedAt,
+	}
+	if row.FileName.Valid {
+		job.FileName = row.FileName.String
+	}
+	if row.FilePath.Valid {
+		job.FilePath = row.FilePath.String
+	}
+	if row.ErrorMessage.Valid {
+		job.ErrorMessage = row.ErrorMessage.String
+	}
+	if row.CompletedAt.Valid {
+		job.CompletedAt = &row.CompletedAt.Time
+	}
+	return job
 }

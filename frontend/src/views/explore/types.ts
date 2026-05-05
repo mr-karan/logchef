@@ -21,6 +21,7 @@ export interface SaveQueryFormData {
   source_id: number;
   query_type: 'logchefql' | 'sql';
   query_content: string;
+  folder_ids?: number[];
 }
 
 // Editor modes

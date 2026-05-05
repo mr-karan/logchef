@@ -218,7 +218,8 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     name: string,
     description: string,
     queryContent: SavedQueryContent,
-    queryType: string
+    queryType: string,
+    folderIds?: number[]
   ) {
     return await state.withLoading(`createSourceQuery-${teamId}-${sourceId}`, async () => {
       // Make a clean copy of the queryContent without any query_type field
@@ -230,6 +231,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         description,
         query_type: queryType, // Use the explicitly provided queryType parameter
         query_content: JSON.stringify(apiQueryContent),
+        folder_ids: folderIds,
       };
 
       return await state.callApi<SavedTeamQuery>({
@@ -263,7 +265,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     teamId: number,
     sourceId: number,
     queryId: string,
-    query: Partial<Omit<SavedTeamQuery, "id" | "team_id" | "source_id" | "created_at" | "updated_at">>
+    query: Partial<Omit<SavedTeamQuery, "id" | "team_id" | "source_id" | "created_at" | "updated_at">> & { folder_ids?: number[] }
   ) {
     return await state.withLoading(`updateTeamSourceQuery-${teamId}-${sourceId}-${queryId}`, async () => {
       return await state.callApi<SavedTeamQuery>({ // Specify expected type

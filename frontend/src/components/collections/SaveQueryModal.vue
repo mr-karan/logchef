@@ -19,10 +19,13 @@ import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
 import { useExploreStore } from '@/stores/explore';
 import { useVariableStore } from '@/stores/variables';
+import { useQueryFoldersStore } from '@/stores/queryFolders';
 import { useRoute } from 'vue-router';
 import { TOAST_DURATION } from '@/lib/constants';
 import { useToast } from '@/composables/useToast';
-import {storeToRefs} from "pinia";
+import { storeToRefs } from "pinia";
+import FolderPicker from '@/components/collections/FolderPicker.vue';
+import type { QueryFolderColor } from '@/api/queryFolders';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -46,6 +49,7 @@ const teamsStore = useTeamsStore();
 const sourcesStore = useSourcesStore();
 const exploreStore = useExploreStore();
 const variableStore = useVariableStore();
+const queryFoldersStore = useQueryFoldersStore();
 const { toast } = useToast();
 
 // Form state
@@ -55,7 +59,15 @@ const saveTimestamp = ref(true);
 const isSubmitting = ref(false);
 const isEditing = computed(() => !!props.editData || (!!props.initialData && props.isEditMode));
 const queryId = ref('');
+const selectedFolderIds = ref<number[]>([]);
 const { allVariables } = storeToRefs(variableStore);
+const { folders } = storeToRefs(queryFoldersStore);
+
+const currentTeamId = computed(() => {
+  if (props.editData?.team_id) return Number(props.editData.team_id);
+  if (props.initialData?.team_id) return Number(props.initialData.team_id);
+  return teamsStore.currentTeamId;
+});
 
 // Get the current source ID
 const currentSourceId = computed(() => {
@@ -93,9 +105,9 @@ const currentSourceId = computed(() => {
 
 // Get current team name
 const currentTeamName = computed(() => {
-  if (!teamsStore.currentTeamId) return '';
+  if (!currentTeamId.value) return '';
 
-  const team = teamsStore.teams.find(t => t.id === teamsStore.currentTeamId);
+  const team = teamsStore.teams.find(t => t.id === currentTeamId.value);
   return team ? team.name : '';
 });
 
@@ -190,9 +202,13 @@ onMounted(async () => {
     }
 
     // Then load sources for the current team
-    if (teamsStore.currentTeamId) {
-      promises.push(sourcesStore.loadTeamSources(teamsStore.currentTeamId));
+    if (currentTeamId.value) {
+      promises.push(sourcesStore.loadTeamSources(currentTeamId.value));
     }
+  }
+
+  if (currentTeamId.value) {
+    promises.push(queryFoldersStore.fetchFolders(currentTeamId.value));
   }
 
   if (promises.length > 0) {
@@ -205,6 +221,9 @@ onMounted(async () => {
     name.value = props.editData.name || '';
     description.value = props.editData.description || '';
     queryId.value = props.editData.id?.toString() || '';
+    selectedFolderIds.value = Array.isArray(props.editData.folders)
+      ? props.editData.folders.map((folder: { id: number }) => folder.id)
+      : [];
 
     try {
       const content = JSON.parse(props.editData.query_content);
@@ -220,6 +239,9 @@ onMounted(async () => {
     description.value = props.initialData.description || '';
     // Set queryId if editing (isEditMode is true and initialData has an id)
     queryId.value = props.isEditMode ? (props.initialData.id?.toString() || '') : '';
+    selectedFolderIds.value = Array.isArray(props.initialData.folders)
+      ? props.initialData.folders.map((folder: { id: number }) => folder.id)
+      : [];
 
     try {
       const content = JSON.parse(props.initialData.query_content);
@@ -244,6 +266,9 @@ watch([() => props.initialData, () => props.editData], ([newInitialData, newEdit
     name.value = newEditData.name || '';
     description.value = newEditData.description || '';
     queryId.value = newEditData.id?.toString() || '';
+    selectedFolderIds.value = Array.isArray(newEditData.folders)
+      ? newEditData.folders.map((folder: { id: number }) => folder.id)
+      : [];
 
     try {
       const content = JSON.parse(newEditData.query_content);
@@ -259,6 +284,9 @@ watch([() => props.initialData, () => props.editData], ([newInitialData, newEdit
     description.value = newInitialData.description || '';
     // Set queryId if editing (isEditMode is true and initialData has an id)
     queryId.value = props.isEditMode ? (newInitialData.id?.toString() || '') : '';
+    selectedFolderIds.value = Array.isArray(newInitialData.folders)
+      ? newInitialData.folders.map((folder: { id: number }) => folder.id)
+      : [];
 
     try {
       const content = JSON.parse(newInitialData.query_content);
@@ -433,13 +461,14 @@ async function handleSubmit(event: Event) {
 
       // Create the base payload
       const payload = {
-        team_id: teamsStore.currentTeamId?.toString() || '',
+        team_id: currentTeamId.value?.toString() || '',
         source_id: currentSourceId.value,
         name: name.value,
         description: description.value,
         query_content: preparedContent,
         query_type: queryType,
-        save_timestamp: saveTimestamp.value
+        save_timestamp: saveTimestamp.value,
+        folder_ids: selectedFolderIds.value,
       };
 
 
@@ -473,6 +502,20 @@ async function handleSubmit(event: Event) {
 // Close the modal
 function handleClose() {
   emit('close');
+}
+
+async function handleCreateFolder(payload: { name: string; color: QueryFolderColor }) {
+  if (!currentTeamId.value) return;
+
+  const result = await queryFoldersStore.createFolder(currentTeamId.value, {
+    name: payload.name,
+    description: '',
+    color: payload.color,
+  });
+
+  if (result.success && result.data) {
+    selectedFolderIds.value = [...selectedFolderIds.value, result.data.id];
+  }
 }
 
 // Add computed properties for the descriptions
@@ -544,6 +587,14 @@ const saveDescription = 'Save your current query to your collection for future u
             Briefly describe the purpose of this query.
           </p>
         </div>
+
+        <FolderPicker
+          v-model="selectedFolderIds"
+          :folders="folders"
+          :can-manage="true"
+          :is-creating="queryFoldersStore.isLoadingOperation(`createQueryFolder-${currentTeamId}`)"
+          @create-folder="handleCreateFolder"
+        />
 
         <!-- Save Timestamp Checkbox -->
         <div class="flex items-start space-x-3 space-y-0 rounded-md border p-4">

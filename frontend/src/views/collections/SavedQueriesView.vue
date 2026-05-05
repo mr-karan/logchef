@@ -11,6 +11,7 @@ import {
   Search,
   Star,
   Link,
+  FolderPlus,
 } from "lucide-vue-next";
 import { formatDate } from "@/utils/format";
 import {
@@ -59,8 +60,14 @@ import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useContextSync } from "@/composables/useContextSync";
 import type { SaveQueryFormData } from "@/views/explore/types";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
+import { useQueryFoldersStore } from "@/stores/queryFolders";
 import { useContextStore } from "@/stores/context";
 import { useRoute } from "vue-router";
+import FolderNav, { type FolderSystemView } from "@/components/collections/FolderNav.vue";
+import FolderDialog from "@/components/collections/FolderDialog.vue";
+import AddQueriesToFolderDialog from "@/components/collections/AddQueriesToFolderDialog.vue";
+import type { QueryFolder, QueryFolderPayload } from "@/api/queryFolders";
+import { folderDotClass } from "@/components/collections/folderColors";
 
 const router = useRouter();
 const route = useRoute();
@@ -69,6 +76,7 @@ const { toast } = useToast();
 const sourcesStore = useSourcesStore();
 const teamsStore = useTeamsStore();
 const savedQueriesStore = useSavedQueriesStore();
+const queryFoldersStore = useQueryFoldersStore();
 const contextStore = useContextStore();
 
 const {
@@ -84,6 +92,11 @@ const {
 
 const localTeamQueries = ref<SavedTeamQuery[] | undefined>();
 const isAllTeamsMode = ref(false);
+const activeFolderView = ref<FolderSystemView | "folder">("all");
+const activeFolderId = ref<number | null>(null);
+const showFolderDialog = ref(false);
+const editingFolder = ref<QueryFolder | null>(null);
+const showAddQueriesDialog = ref(false);
 const isAllSourcesMode = computed(() => isAllTeamsMode.value || !contextSourceId.value);
 
 const currentSelectedSource = computed(() => {
@@ -102,9 +115,7 @@ const {
   editingQuery,
   isLoading,
   openingQueryId,
-  filteredQueries,
-  hasQueries,
-  totalQueryCount,
+  filteredQueries: searchedQueries,
   searchQuery,
   getQueryUrl,
   openQuery,
@@ -117,6 +128,37 @@ const {
   updateSavedQuery,
   canManageCollections,
 } = useSavedQueries(localTeamQueries, currentSelectedSource);
+
+const folders = computed(() => queryFoldersStore.folders);
+const selectedFolder = computed(() => {
+  if (activeFolderView.value !== "folder" || !activeFolderId.value) return null;
+  return folders.value.find((folder) => folder.id === activeFolderId.value) ?? null;
+});
+
+const bookmarkedCount = computed(() =>
+  (localTeamQueries.value ?? []).filter((query) => query.is_bookmarked).length
+);
+
+const unfiledCount = computed(() =>
+  (localTeamQueries.value ?? []).filter((query) => !(query.folders ?? []).length).length
+);
+
+const visibleQueries = computed(() => {
+  const queries = searchedQueries.value ?? [];
+  if (activeFolderView.value === "bookmarked") {
+    return queries.filter((query) => query.is_bookmarked);
+  }
+  if (activeFolderView.value === "unfiled") {
+    return queries.filter((query) => !(query.folders ?? []).length);
+  }
+  if (activeFolderView.value === "folder" && activeFolderId.value) {
+    return queries.filter((query) => (query.folders ?? []).some((folder) => folder.id === activeFolderId.value));
+  }
+  return queries;
+});
+
+const hasQueries = computed(() => visibleQueries.value.length > 0);
+const totalQueryCount = computed(() => visibleQueries.value.length);
 
 const selectedSourceId = computed(() => 
   contextSourceId.value ? String(contextSourceId.value) : "all"
@@ -152,7 +194,11 @@ const selectedSourceName = computed(() => {
 const emptyStateMessage = computed(() =>
   searchQuery.value
     ? "No queries match your search."
-    : "Create a query in the Explorer and save it to your collection."
+    : activeFolderView.value === "folder"
+      ? "This folder has no saved queries yet."
+      : activeFolderView.value === "unfiled"
+        ? "Every saved query in this team is already in a folder."
+        : "Create a query in the Explorer and save it to your collection."
 );
 
 onMounted(async () => {
@@ -197,11 +243,12 @@ watch(
     if (!isReady) return;
     if (!teamId) return;
     
-    const [wasReady, , oldSourceId] = oldValue ?? [false, null, null];
+    const [wasReady, oldTeamId, oldSourceId] = oldValue ?? [false, null, null];
     // Fetch queries when:
     // 1. Context just became ready (initial load)
-    // 2. Source ID changed (user switched source)
-    if (!wasReady || sourceId !== oldSourceId) {
+    // 2. Team ID changed (user switched team)
+    // 3. Source ID changed (user switched source)
+    if (!wasReady || teamId !== oldTeamId || sourceId !== oldSourceId) {
       await fetchQueries();
     }
   },
@@ -220,6 +267,9 @@ async function handleTeamChange(teamId: string) {
       if (result.success) {
         localTeamQueries.value = result.data ?? [];
       }
+      queryFoldersStore.resetFolders();
+      activeFolderView.value = "all";
+      activeFolderId.value = null;
       return;
     }
 
@@ -298,6 +348,7 @@ async function fetchQueries() {
     } else {
       localTeamQueries.value = [];
     }
+    await queryFoldersStore.fetchFolders(contextTeamId.value);
     return;
   }
 
@@ -316,6 +367,7 @@ async function fetchQueries() {
   }
 
   await loadSourceQueries(contextTeamId.value, contextSourceId.value);
+  await queryFoldersStore.fetchFolders(contextTeamId.value);
 }
 
 // Format time using the formatDate utility
@@ -350,6 +402,7 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
         description: formData.description,
         query_content: formData.query_content,
         query_type: formData.query_type as 'logchefql' | 'sql',
+        folder_ids: formData.folder_ids,
       }
     );
 
@@ -387,6 +440,67 @@ async function handleToggleBookmark(query: SavedTeamQuery) {
         localTeamQueries.value[index].is_bookmarked = result.data.is_bookmarked;
       }
     }
+  }
+}
+
+function selectSystemView(view: FolderSystemView) {
+  activeFolderView.value = view;
+  activeFolderId.value = null;
+}
+
+function selectFolder(folderId: number) {
+  activeFolderView.value = "folder";
+  activeFolderId.value = folderId;
+}
+
+function openCreateFolderDialog() {
+  editingFolder.value = null;
+  showFolderDialog.value = true;
+}
+
+function openEditFolderDialog(folder: QueryFolder) {
+  editingFolder.value = folder;
+  showFolderDialog.value = true;
+}
+
+async function handleFolderSubmit(payload: QueryFolderPayload) {
+  if (!contextTeamId.value) return;
+
+  const result = editingFolder.value
+    ? await queryFoldersStore.updateFolder(contextTeamId.value, editingFolder.value.id, payload)
+    : await queryFoldersStore.createFolder(contextTeamId.value, payload);
+
+  if (result.success) {
+    showFolderDialog.value = false;
+    editingFolder.value = null;
+    await queryFoldersStore.fetchFolders(contextTeamId.value);
+  }
+}
+
+async function handleDeleteFolder(folder: QueryFolder) {
+  if (!contextTeamId.value) return;
+  const confirmed = window.confirm(`Delete folder "${folder.name}"? Saved queries will not be deleted.`);
+  if (!confirmed) return;
+
+  const result = await queryFoldersStore.deleteFolder(contextTeamId.value, folder.id);
+  if (result.success) {
+    if (activeFolderView.value === "folder" && activeFolderId.value === folder.id) {
+      selectSystemView("all");
+    }
+    await fetchQueries();
+  }
+}
+
+async function handleAddQueriesToFolder(queryIds: number[]) {
+  if (!contextTeamId.value || !selectedFolder.value || queryIds.length === 0) return;
+
+  const result = await queryFoldersStore.bulkUpdateCollections(contextTeamId.value, selectedFolder.value.id, {
+    add: queryIds,
+  });
+
+  if (result.success) {
+    showAddQueriesDialog.value = false;
+    await fetchQueries();
   }
 }
 
@@ -575,57 +689,100 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
             </div>
           </div>
 
-          <div v-if="isLoading" class="flex items-center justify-center py-10">
-            <Loader2 class="h-8 w-8 animate-spin text-primary" />
-            <p class="ml-2 text-muted-foreground">Loading collections...</p>
-          </div>
+          <div class="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+            <FolderNav
+              v-if="!isAllTeamsMode"
+              :folders="folders"
+              :active-view="activeFolderView"
+              :active-folder-id="activeFolderId"
+              :can-manage="canManageCollections"
+              :all-count="(localTeamQueries ?? []).length"
+              :bookmarked-count="bookmarkedCount"
+              :unfiled-count="unfiledCount"
+              @select-system="selectSystemView"
+              @select-folder="selectFolder"
+              @create-folder="openCreateFolderDialog"
+              @edit-folder="openEditFolderDialog"
+              @delete-folder="handleDeleteFolder"
+            />
 
-          <div v-else-if="!hasQueries" class="rounded-lg border p-6 text-center">
-            <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted/50">
-              <Search class="h-5 w-5 text-muted-foreground" />
-            </div>
-            <h3 class="text-lg font-semibold mb-1">Collection is empty</h3>
-            <p class="text-muted-foreground">{{ emptyStateMessage }}</p>
-            <div class="mt-6 flex items-center justify-center gap-3">
-              <Button v-if="searchQuery" variant="outline" @click="clearSearch">
-                Clear Search
-              </Button>
-              <Button
-                v-if="canManageCollections && !searchQuery && !isAllTeamsMode"
-                @click="handleCreateNewQuery"
-              >
-                Add to Collection
-              </Button>
-            </div>
-          </div>
+            <div class="min-w-0 space-y-3">
+              <div class="flex flex-col gap-3 rounded-md border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 class="font-medium">
+                    <template v-if="activeFolderView === 'folder'">{{ selectedFolder?.name || 'Folder' }}</template>
+                    <template v-else-if="activeFolderView === 'bookmarked'">Bookmarked</template>
+                    <template v-else-if="activeFolderView === 'unfiled'">Unfiled</template>
+                    <template v-else>All Collections</template>
+                  </h3>
+                  <p class="text-sm text-muted-foreground">
+                    Showing {{ totalQueryCount }}
+                    {{ totalQueryCount === 1 ? "query" : "queries" }}
+                  </p>
+                </div>
+                <Button
+                  v-if="canManageCollections && activeFolderView === 'folder'"
+                  variant="outline"
+                  size="sm"
+                  @click="showAddQueriesDialog = true"
+                >
+                  <FolderPlus class="mr-2 h-4 w-4" />
+                  Add Existing
+                </Button>
+              </div>
 
-          <div v-else class="space-y-3">
-            <div class="text-sm text-muted-foreground">
-              Showing {{ totalQueryCount }}
-              {{ totalQueryCount === 1 ? "query" : "queries" }}
-            </div>
+              <div v-if="isLoading" class="flex items-center justify-center py-10">
+                <Loader2 class="h-8 w-8 animate-spin text-primary" />
+                <p class="ml-2 text-muted-foreground">Loading collections...</p>
+              </div>
 
-            <div class="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead class="w-[50px]"></TableHead>
-                    <TableHead class="w-[250px]">Name</TableHead>
-                    <TableHead v-if="isAllTeamsMode" class="w-[120px]">Team</TableHead>
-                    <TableHead v-if="isAllSourcesMode" class="w-[150px]">Source</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead class="w-[100px]">Type</TableHead>
-                    <TableHead class="w-[150px]">Created</TableHead>
-                    <TableHead class="w-[150px]">Updated</TableHead>
-                    <TableHead class="w-[100px] text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow
-                    v-for="query in filteredQueries"
-                    :key="query.id"
-                    :class="{ 'bg-muted/50': openingQueryId === query.id }"
+              <div v-else-if="!hasQueries" class="rounded-lg border p-6 text-center">
+                <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted/50">
+                  <Search class="h-5 w-5 text-muted-foreground" />
+                </div>
+                <h3 class="text-lg font-semibold mb-1">Collection is empty</h3>
+                <p class="text-muted-foreground">{{ emptyStateMessage }}</p>
+                <div class="mt-6 flex items-center justify-center gap-3">
+                  <Button v-if="searchQuery" variant="outline" @click="clearSearch">
+                    Clear Search
+                  </Button>
+                  <Button
+                    v-if="canManageCollections && !searchQuery && activeFolderView === 'folder'"
+                    variant="outline"
+                    @click="showAddQueriesDialog = true"
                   >
+                    Add Existing
+                  </Button>
+                  <Button
+                    v-if="canManageCollections && !searchQuery && !isAllTeamsMode"
+                    @click="handleCreateNewQuery"
+                  >
+                    Add to Collection
+                  </Button>
+                </div>
+              </div>
+
+              <div v-else class="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead class="w-[50px]"></TableHead>
+                      <TableHead class="w-[240px]">Name</TableHead>
+                      <TableHead v-if="isAllTeamsMode" class="w-[120px]">Team</TableHead>
+                      <TableHead v-if="isAllSourcesMode" class="w-[150px]">Source</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead class="w-[180px]">Folders</TableHead>
+                      <TableHead class="w-[100px]">Type</TableHead>
+                      <TableHead class="w-[150px]">Updated</TableHead>
+                      <TableHead class="w-[100px] text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow
+                      v-for="query in visibleQueries"
+                      :key="query.id"
+                      :class="{ 'bg-muted/50': openingQueryId === query.id }"
+                    >
                     <TableCell class="w-[50px]">
                       <button
                         v-if="canManageCollections"
@@ -668,6 +825,20 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
                     <TableCell v-if="isAllSourcesMode">{{ query.source_name || getSourceName(query.source_id) }}</TableCell>
                     <TableCell>{{ query.description || "-" }}</TableCell>
                     <TableCell>
+                      <div v-if="query.folders?.length" class="flex flex-wrap gap-1">
+                        <Badge
+                          v-for="folder in query.folders"
+                          :key="folder.id"
+                          variant="secondary"
+                          class="gap-1"
+                        >
+                          <span class="h-2 w-2 rounded-full" :class="folderDotClass[folder.color]" />
+                          {{ folder.name }}
+                        </Badge>
+                      </div>
+                      <span v-else class="text-sm text-muted-foreground">Unfiled</span>
+                    </TableCell>
+                    <TableCell>
                       <Badge :variant="query.query_type === 'logchefql' ? 'outline' : 'secondary'">
                         {{
                           query.query_type === "logchefql"
@@ -678,7 +849,6 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
                         }}
                       </Badge>
                     </TableCell>
-                    <TableCell>{{ formatTime(query.created_at) }}</TableCell>
                     <TableCell>{{ formatTime(query.updated_at) }}</TableCell>
                     <TableCell class="text-right">
                       <DropdownMenu>
@@ -715,9 +885,10 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           </div>
 
@@ -729,6 +900,19 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
             @close="showSaveQueryModal = false"
             @save="handleSaveQuery"
             @update="handleUpdateQuery"
+          />
+
+          <FolderDialog
+            v-model:open="showFolderDialog"
+            :folder="editingFolder"
+            @submit="handleFolderSubmit"
+          />
+
+          <AddQueriesToFolderDialog
+            v-model:open="showAddQueriesDialog"
+            :folder="selectedFolder"
+            :queries="localTeamQueries ?? []"
+            @submit="handleAddQueriesToFolder"
           />
         </template>
       </CardContent>

@@ -79,6 +79,26 @@ type ExportJob struct {
 	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
+type QueryFolder struct {
+	ID          int64          `json:"id"`
+	TeamID      int64          `json:"team_id"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	Color       string         `json:"color"`
+	SortOrder   int64          `json:"sort_order"`
+	CreatedBy   sql.NullInt64  `json:"created_by"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
+type QueryFolderItem struct {
+	FolderID  int64         `json:"folder_id"`
+	QueryID   int64         `json:"query_id"`
+	SortOrder int64         `json:"sort_order"`
+	AddedBy   sql.NullInt64 `json:"added_by"`
+	CreatedAt time.Time     `json:"created_at"`
+}
+
 type QueryShare struct {
 	Token          string       `json:"token"`
 	TeamID         int64        `json:"team_id"`

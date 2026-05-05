@@ -85,6 +85,7 @@ func (s *Server) handleCreateTeamSourceCollection(c *fiber.Ctx) error {
 		Description  string `json:"description"`
 		QueryType    string `json:"query_type"`
 		QueryContent string `json:"query_content"`
+		FolderIDs    []int  `json:"folder_ids"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
@@ -125,6 +126,23 @@ func (s *Server) handleCreateTeamSourceCollection(c *fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create collection", models.GeneralErrorType)
+	}
+
+	if req.FolderIDs != nil {
+		user := c.Locals("user").(*models.User)
+		if err := s.sqlite.SetQueryFolders(c.Context(), teamID, createdQuery.ID, req.FolderIDs, &user.ID); err != nil {
+			if rollbackErr := s.sqlite.DeleteTeamSourceQuery(c.Context(), teamID, sourceID, createdQuery.ID); rollbackErr != nil {
+				s.log.Error("failed to roll back collection after folder assignment failure", "error", rollbackErr, "collection_id", createdQuery.ID)
+			}
+			if errors.Is(err, sql.ErrNoRows) {
+				return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid folder_ids for this team", models.ValidationErrorType)
+			}
+			s.log.Error("failed to assign collection folders", "error", err, "collection_id", createdQuery.ID)
+			return SendErrorWithType(c, fiber.StatusInternalServerError, "Collection created but folder assignment failed", models.GeneralErrorType)
+		}
+	}
+	if refreshedQuery, err := s.sqlite.GetTeamSourceQuery(c.Context(), teamID, sourceID, createdQuery.ID); err == nil {
+		createdQuery = refreshedQuery
 	}
 
 	return SendSuccess(c, fiber.StatusCreated, createdQuery)
@@ -197,6 +215,7 @@ func (s *Server) handleUpdateTeamSourceCollection(c *fiber.Ctx) error {
 		Description  *string `json:"description"`
 		QueryType    *string `json:"query_type"`
 		QueryContent *string `json:"query_content"`
+		FolderIDs    []int   `json:"folder_ids"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
@@ -246,6 +265,17 @@ func (s *Server) handleUpdateTeamSourceCollection(c *fiber.Ctx) error {
 		}
 		s.log.Error("failed to update collection", "error", err, "collection_id", collectionID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update collection", models.GeneralErrorType)
+	}
+
+	if req.FolderIDs != nil {
+		user := c.Locals("user").(*models.User)
+		if err := s.sqlite.SetQueryFolders(c.Context(), teamID, collectionID, req.FolderIDs, &user.ID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid folder_ids for this team", models.ValidationErrorType)
+			}
+			s.log.Error("failed to update collection folders", "error", err, "collection_id", collectionID)
+			return SendErrorWithType(c, fiber.StatusInternalServerError, "Collection updated but folder assignment failed", models.GeneralErrorType)
+		}
 	}
 
 	// Fetch and return updated query.
@@ -344,6 +374,7 @@ func (s *Server) handleResolveQuery(c *fiber.Ctx) error {
 		"is_bookmarked": query.IsBookmarked,
 		"created_at":    query.CreatedAt,
 		"updated_at":    query.UpdatedAt,
+		"folders":       query.Folders,
 	})
 }
 

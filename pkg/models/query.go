@@ -158,20 +158,42 @@ type SavedQueryContent struct {
 	Variables []SavedQueryVariable `json:"variables"`
 }
 
+// QueryFolder represents a team-level folder for saved queries.
+type QueryFolder struct {
+	ID          int       `json:"id" db:"id"`
+	TeamID      TeamID    `json:"team_id" db:"team_id"`
+	Name        string    `json:"name" db:"name"`
+	Description string    `json:"description" db:"description"`
+	Color       string    `json:"color" db:"color"`
+	SortOrder   int       `json:"sort_order" db:"sort_order"`
+	CreatedBy   *UserID   `json:"created_by,omitempty" db:"created_by"`
+	QueryCount  int       `json:"query_count" db:"query_count"`
+	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// QueryFolderSummary is embedded in saved-query responses.
+type QueryFolderSummary struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
 // SavedTeamQuery represents a saved query associated with a team
 type SavedTeamQuery struct {
-	ID           int            `json:"id" db:"id"`
-	TeamID       TeamID         `json:"team_id" db:"team_id"`
-	SourceID     SourceID       `json:"source_id" db:"source_id"`
-	Name         string         `json:"name" db:"name"`
-	Description  string         `json:"description" db:"description"`
-	QueryType    SavedQueryType `json:"query_type" db:"query_type"`
-	QueryContent string         `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
-	IsBookmarked bool           `json:"is_bookmarked" db:"is_bookmarked"`
-	CreatedAt    time.Time      `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at" db:"updated_at"`
-	TeamName     string         `json:"team_name,omitempty"`
-	SourceName   string         `json:"source_name,omitempty"`
+	ID           int                  `json:"id" db:"id"`
+	TeamID       TeamID               `json:"team_id" db:"team_id"`
+	SourceID     SourceID             `json:"source_id" db:"source_id"`
+	Name         string               `json:"name" db:"name"`
+	Description  string               `json:"description" db:"description"`
+	QueryType    SavedQueryType       `json:"query_type" db:"query_type"`
+	QueryContent string               `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
+	IsBookmarked bool                 `json:"is_bookmarked" db:"is_bookmarked"`
+	CreatedAt    time.Time            `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time            `json:"updated_at" db:"updated_at"`
+	TeamName     string               `json:"team_name,omitempty"`
+	SourceName   string               `json:"source_name,omitempty"`
+	Folders      []QueryFolderSummary `json:"folders,omitempty"`
 }
 
 // CreateTeamQueryRequest represents a request to create a team query
@@ -181,6 +203,7 @@ type CreateTeamQueryRequest struct {
 	SourceID     SourceID       `json:"source_id" validate:"required"`
 	QueryType    SavedQueryType `json:"query_type" validate:"required"`
 	QueryContent string         `json:"query_content" validate:"required"`
+	FolderIDs    []int          `json:"folder_ids,omitempty"`
 }
 
 // UpdateTeamQueryRequest represents a request to update a team query
@@ -190,6 +213,7 @@ type UpdateTeamQueryRequest struct {
 	SourceID     SourceID       `json:"source_id"`
 	QueryType    SavedQueryType `json:"query_type"`
 	QueryContent string         `json:"query_content"`
+	FolderIDs    []int          `json:"folder_ids,omitempty"`
 }
 
 // SavedQuery represents a generic saved query

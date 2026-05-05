@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -48,6 +49,49 @@ func (q *Queries) AddTeamSource(ctx context.Context, arg AddTeamSourceParams) er
 	return err
 }
 
+const completeExportJob = `-- name: CompleteExportJob :one
+UPDATE export_jobs
+SET
+    status = ?,
+    file_name = ?,
+    file_path = ?,
+    error_message = NULL,
+    rows_exported = ?,
+    bytes_written = ?,
+    completed_at = ?,
+    updated_at = ?
+WHERE id = ?
+RETURNING id
+`
+
+type CompleteExportJobParams struct {
+	Status       string         `json:"status"`
+	FileName     sql.NullString `json:"file_name"`
+	FilePath     sql.NullString `json:"file_path"`
+	RowsExported int64          `json:"rows_exported"`
+	BytesWritten int64          `json:"bytes_written"`
+	CompletedAt  sql.NullTime   `json:"completed_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	ID           string         `json:"id"`
+}
+
+// Mark an export job as complete and return its ID
+func (q *Queries) CompleteExportJob(ctx context.Context, arg CompleteExportJobParams) (string, error) {
+	row := q.queryRow(ctx, q.completeExportJobStmt, completeExportJob,
+		arg.Status,
+		arg.FileName,
+		arg.FilePath,
+		arg.RowsExported,
+		arg.BytesWritten,
+		arg.CompletedAt,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const countAdminUsers = `-- name: CountAdminUsers :one
 SELECT COUNT(*) FROM users WHERE role = ? AND status = ?
 `
@@ -60,6 +104,42 @@ type CountAdminUsersParams struct {
 // Count active admin users
 func (q *Queries) CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error) {
 	row := q.queryRow(ctx, q.countAdminUsersStmt, countAdminUsers, arg.Role, arg.Status)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countQueryFolderForTeam = `-- name: CountQueryFolderForTeam :one
+SELECT COUNT(*) FROM query_folders
+WHERE team_id = ? AND id = ?
+`
+
+type CountQueryFolderForTeamParams struct {
+	TeamID int64 `json:"team_id"`
+	ID     int64 `json:"id"`
+}
+
+// Check whether a folder belongs to a team
+func (q *Queries) CountQueryFolderForTeam(ctx context.Context, arg CountQueryFolderForTeamParams) (int64, error) {
+	row := q.queryRow(ctx, q.countQueryFolderForTeamStmt, countQueryFolderForTeam, arg.TeamID, arg.ID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTeamQueryForTeam = `-- name: CountTeamQueryForTeam :one
+SELECT COUNT(*) FROM team_queries
+WHERE team_id = ? AND id = ?
+`
+
+type CountTeamQueryForTeamParams struct {
+	TeamID int64 `json:"team_id"`
+	ID     int64 `json:"id"`
+}
+
+// Check whether a saved query belongs to a team
+func (q *Queries) CountTeamQueryForTeam(ctx context.Context, arg CountTeamQueryForTeamParams) (int64, error) {
+	row := q.queryRow(ctx, q.countTeamQueryForTeamStmt, countTeamQueryForTeam, arg.TeamID, arg.ID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -135,7 +215,7 @@ INSERT INTO alerts (
     is_active
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id
+RETURNING id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json
 `
 
 type CreateAlertParams struct {
@@ -160,7 +240,7 @@ type CreateAlertParams struct {
 }
 
 // Alerts
-func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (int64, error) {
+func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert, error) {
 	row := q.queryRow(ctx, q.createAlertStmt, createAlert,
 		arg.TeamID,
 		arg.SourceID,
@@ -181,9 +261,186 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (int64
 		arg.GeneratorUrl,
 		arg.IsActive,
 	)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+	var i Alert
+	err := row.Scan(
+		&i.ID,
+		&i.TeamID,
+		&i.SourceID,
+		&i.Name,
+		&i.Description,
+		&i.QueryType,
+		&i.Query,
+		&i.ConditionJson,
+		&i.LookbackSeconds,
+		&i.ThresholdOperator,
+		&i.ThresholdValue,
+		&i.FrequencySeconds,
+		&i.Severity,
+		&i.LabelsJson,
+		&i.AnnotationsJson,
+		&i.GeneratorUrl,
+		&i.IsActive,
+		&i.LastState,
+		&i.LastEvaluatedAt,
+		&i.LastTriggeredAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RecipientUserIdsJson,
+		&i.WebhookUrlsJson,
+	)
+	return i, err
+}
+
+const createExportJob = `-- name: CreateExportJob :exec
+
+INSERT INTO export_jobs (
+    id,
+    team_id,
+    source_id,
+    created_by,
+    status,
+    format,
+    request_json,
+    expires_at,
+    created_at,
+    updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateExportJobParams struct {
+	ID          string    `json:"id"`
+	TeamID      int64     `json:"team_id"`
+	SourceID    int64     `json:"source_id"`
+	CreatedBy   int64     `json:"created_by"`
+	Status      string    `json:"status"`
+	Format      string    `json:"format"`
+	RequestJson string    `json:"request_json"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// Export Jobs
+// Persist an async export job
+func (q *Queries) CreateExportJob(ctx context.Context, arg CreateExportJobParams) error {
+	_, err := q.exec(ctx, q.createExportJobStmt, createExportJob,
+		arg.ID,
+		arg.TeamID,
+		arg.SourceID,
+		arg.CreatedBy,
+		arg.Status,
+		arg.Format,
+		arg.RequestJson,
+		arg.ExpiresAt,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const createQueryFolder = `-- name: CreateQueryFolder :one
+INSERT INTO query_folders (team_id, name, description, color, sort_order, created_by)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id, created_at, updated_at
+`
+
+type CreateQueryFolderParams struct {
+	TeamID      int64          `json:"team_id"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	Color       string         `json:"color"`
+	SortOrder   int64          `json:"sort_order"`
+	CreatedBy   sql.NullInt64  `json:"created_by"`
+}
+
+type CreateQueryFolderRow struct {
+	ID        int64     `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Create a query folder for a team
+func (q *Queries) CreateQueryFolder(ctx context.Context, arg CreateQueryFolderParams) (CreateQueryFolderRow, error) {
+	row := q.queryRow(ctx, q.createQueryFolderStmt, createQueryFolder,
+		arg.TeamID,
+		arg.Name,
+		arg.Description,
+		arg.Color,
+		arg.SortOrder,
+		arg.CreatedBy,
+	)
+	var i CreateQueryFolderRow
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
+	return i, err
+}
+
+const createQueryFolderItem = `-- name: CreateQueryFolderItem :exec
+INSERT INTO query_folder_items (folder_id, query_id, added_by)
+VALUES (?, ?, ?)
+`
+
+type CreateQueryFolderItemParams struct {
+	FolderID int64         `json:"folder_id"`
+	QueryID  int64         `json:"query_id"`
+	AddedBy  sql.NullInt64 `json:"added_by"`
+}
+
+// Add a saved query to a folder
+func (q *Queries) CreateQueryFolderItem(ctx context.Context, arg CreateQueryFolderItemParams) error {
+	_, err := q.exec(ctx, q.createQueryFolderItemStmt, createQueryFolderItem, arg.FolderID, arg.QueryID, arg.AddedBy)
+	return err
+}
+
+const createQueryFolderItemIgnore = `-- name: CreateQueryFolderItemIgnore :exec
+INSERT OR IGNORE INTO query_folder_items (folder_id, query_id, added_by)
+VALUES (?, ?, ?)
+`
+
+type CreateQueryFolderItemIgnoreParams struct {
+	FolderID int64         `json:"folder_id"`
+	QueryID  int64         `json:"query_id"`
+	AddedBy  sql.NullInt64 `json:"added_by"`
+}
+
+// Add a saved query to a folder if not already present
+func (q *Queries) CreateQueryFolderItemIgnore(ctx context.Context, arg CreateQueryFolderItemIgnoreParams) error {
+	_, err := q.exec(ctx, q.createQueryFolderItemIgnoreStmt, createQueryFolderItemIgnore, arg.FolderID, arg.QueryID, arg.AddedBy)
+	return err
+}
+
+const createQueryShare = `-- name: CreateQueryShare :exec
+
+INSERT INTO query_shares (
+    token,
+    team_id,
+    source_id,
+    created_by,
+    payload_json,
+    expires_at
+) VALUES (?, ?, ?, ?, ?, ?)
+`
+
+type CreateQueryShareParams struct {
+	Token       string    `json:"token"`
+	TeamID      int64     `json:"team_id"`
+	SourceID    int64     `json:"source_id"`
+	CreatedBy   int64     `json:"created_by"`
+	PayloadJson string    `json:"payload_json"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
+// Query Shares
+// Persist an ad hoc query share token
+func (q *Queries) CreateQueryShare(ctx context.Context, arg CreateQueryShareParams) error {
+	_, err := q.exec(ctx, q.createQueryShareStmt, createQueryShare,
+		arg.Token,
+		arg.TeamID,
+		arg.SourceID,
+		arg.CreatedBy,
+		arg.PayloadJson,
+		arg.ExpiresAt,
+	)
+	return err
 }
 
 const createSession = `-- name: CreateSession :exec
@@ -354,13 +611,15 @@ func (q *Queries) DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) 
 	return err
 }
 
-const deleteAlert = `-- name: DeleteAlert :exec
+const deleteAlert = `-- name: DeleteAlert :one
 DELETE FROM alerts WHERE id = ?
+RETURNING id
 `
 
-func (q *Queries) DeleteAlert(ctx context.Context, id int64) error {
-	_, err := q.exec(ctx, q.deleteAlertStmt, deleteAlert, id)
-	return err
+func (q *Queries) DeleteAlert(ctx context.Context, id int64) (int64, error) {
+	row := q.queryRow(ctx, q.deleteAlertStmt, deleteAlert, id)
+	err := row.Scan(&id)
+	return id, err
 }
 
 const deleteExpiredAPITokens = `-- name: DeleteExpiredAPITokens :exec
@@ -371,6 +630,60 @@ DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at < strftime('%
 func (q *Queries) DeleteExpiredAPITokens(ctx context.Context) error {
 	_, err := q.exec(ctx, q.deleteExpiredAPITokensStmt, deleteExpiredAPITokens)
 	return err
+}
+
+const deleteExpiredExportJobs = `-- name: DeleteExpiredExportJobs :exec
+DELETE FROM export_jobs
+WHERE expires_at < ?
+`
+
+// Delete expired export jobs
+func (q *Queries) DeleteExpiredExportJobs(ctx context.Context, expiresAt time.Time) error {
+	_, err := q.exec(ctx, q.deleteExpiredExportJobsStmt, deleteExpiredExportJobs, expiresAt)
+	return err
+}
+
+const deleteQueryFolder = `-- name: DeleteQueryFolder :one
+DELETE FROM query_folders
+WHERE team_id = ? AND id = ?
+RETURNING id
+`
+
+type DeleteQueryFolderParams struct {
+	TeamID int64 `json:"team_id"`
+	ID     int64 `json:"id"`
+}
+
+// Delete a query folder and return its ID
+func (q *Queries) DeleteQueryFolder(ctx context.Context, arg DeleteQueryFolderParams) (int64, error) {
+	row := q.queryRow(ctx, q.deleteQueryFolderStmt, deleteQueryFolder, arg.TeamID, arg.ID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const deleteQueryFolderItemsByQuery = `-- name: DeleteQueryFolderItemsByQuery :exec
+DELETE FROM query_folder_items
+WHERE query_id = ?
+`
+
+// Remove all folder memberships for a saved query
+func (q *Queries) DeleteQueryFolderItemsByQuery(ctx context.Context, queryID int64) error {
+	_, err := q.exec(ctx, q.deleteQueryFolderItemsByQueryStmt, deleteQueryFolderItemsByQuery, queryID)
+	return err
+}
+
+const deleteQueryShare = `-- name: DeleteQueryShare :one
+DELETE FROM query_shares
+WHERE token = ?
+RETURNING token
+`
+
+// Delete a query share and return its token
+func (q *Queries) DeleteQueryShare(ctx context.Context, token string) (string, error) {
+	row := q.queryRow(ctx, q.deleteQueryShareStmt, deleteQueryShare, token)
+	err := row.Scan(&token)
+	return token, err
 }
 
 const deleteSession = `-- name: DeleteSession :exec
@@ -448,6 +761,39 @@ DELETE FROM sessions WHERE user_id = ?
 func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) error {
 	_, err := q.exec(ctx, q.deleteUserSessionsStmt, deleteUserSessions, userID)
 	return err
+}
+
+const failExportJob = `-- name: FailExportJob :one
+UPDATE export_jobs
+SET
+    status = ?,
+    file_name = NULL,
+    file_path = NULL,
+    error_message = ?,
+    completed_at = NULL,
+    updated_at = ?
+WHERE id = ?
+RETURNING id
+`
+
+type FailExportJobParams struct {
+	Status       string         `json:"status"`
+	ErrorMessage sql.NullString `json:"error_message"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	ID           string         `json:"id"`
+}
+
+// Mark an export job as failed and return its ID
+func (q *Queries) FailExportJob(ctx context.Context, arg FailExportJobParams) (string, error) {
+	row := q.queryRow(ctx, q.failExportJobStmt, failExportJob,
+		arg.Status,
+		arg.ErrorMessage,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const getAPIToken = `-- name: GetAPIToken :one
@@ -572,10 +918,57 @@ func (q *Queries) GetAlertForTeamSource(ctx context.Context, arg GetAlertForTeam
 	return i, err
 }
 
+const getExportJob = `-- name: GetExportJob :one
+SELECT
+    id,
+    team_id,
+    source_id,
+    created_by,
+    status,
+    format,
+    request_json,
+    file_name,
+    file_path,
+    error_message,
+    rows_exported,
+    bytes_written,
+    expires_at,
+    completed_at,
+    created_at,
+    updated_at
+FROM export_jobs
+WHERE id = ?
+`
+
+// Retrieve an export job by ID
+func (q *Queries) GetExportJob(ctx context.Context, id string) (ExportJob, error) {
+	row := q.queryRow(ctx, q.getExportJobStmt, getExportJob, id)
+	var i ExportJob
+	err := row.Scan(
+		&i.ID,
+		&i.TeamID,
+		&i.SourceID,
+		&i.CreatedBy,
+		&i.Status,
+		&i.Format,
+		&i.RequestJson,
+		&i.FileName,
+		&i.FilePath,
+		&i.ErrorMessage,
+		&i.RowsExported,
+		&i.BytesWritten,
+		&i.ExpiresAt,
+		&i.CompletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getLatestUnresolvedAlertHistory = `-- name: GetLatestUnresolvedAlertHistory :one
 SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at FROM alert_history
 WHERE alert_id = ? AND status = 'triggered'
-ORDER BY triggered_at DESC
+ORDER BY triggered_at DESC, id DESC
 LIMIT 1
 `
 
@@ -612,6 +1005,110 @@ func (q *Queries) GetQueryBookmarkStatus(ctx context.Context, arg GetQueryBookma
 	var is_bookmarked bool
 	err := row.Scan(&is_bookmarked)
 	return is_bookmarked, err
+}
+
+const getQueryFolder = `-- name: GetQueryFolder :one
+SELECT
+    qf.id,
+    qf.team_id,
+    qf.name,
+    qf.description,
+    qf.color,
+    qf.sort_order,
+    qf.created_by,
+    COUNT(qfi.query_id) AS query_count,
+    qf.created_at,
+    qf.updated_at
+FROM query_folders qf
+LEFT JOIN query_folder_items qfi ON qfi.folder_id = qf.id
+WHERE qf.team_id = ? AND qf.id = ?
+GROUP BY qf.id
+`
+
+type GetQueryFolderParams struct {
+	TeamID int64 `json:"team_id"`
+	ID     int64 `json:"id"`
+}
+
+type GetQueryFolderRow struct {
+	ID          int64          `json:"id"`
+	TeamID      int64          `json:"team_id"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	Color       string         `json:"color"`
+	SortOrder   int64          `json:"sort_order"`
+	CreatedBy   sql.NullInt64  `json:"created_by"`
+	QueryCount  int64          `json:"query_count"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
+// Get one query folder scoped to a team
+func (q *Queries) GetQueryFolder(ctx context.Context, arg GetQueryFolderParams) (GetQueryFolderRow, error) {
+	row := q.queryRow(ctx, q.getQueryFolderStmt, getQueryFolder, arg.TeamID, arg.ID)
+	var i GetQueryFolderRow
+	err := row.Scan(
+		&i.ID,
+		&i.TeamID,
+		&i.Name,
+		&i.Description,
+		&i.Color,
+		&i.SortOrder,
+		&i.CreatedBy,
+		&i.QueryCount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getQueryShare = `-- name: GetQueryShare :one
+SELECT
+    qs.token,
+    qs.team_id,
+    qs.source_id,
+    qs.created_by,
+    qs.payload_json,
+    qs.expires_at,
+    qs.last_accessed_at,
+    qs.created_at,
+    u.email,
+    u.full_name
+FROM query_shares qs
+JOIN users u ON u.id = qs.created_by
+WHERE qs.token = ?
+`
+
+type GetQueryShareRow struct {
+	Token          string       `json:"token"`
+	TeamID         int64        `json:"team_id"`
+	SourceID       int64        `json:"source_id"`
+	CreatedBy      int64        `json:"created_by"`
+	PayloadJson    string       `json:"payload_json"`
+	ExpiresAt      time.Time    `json:"expires_at"`
+	LastAccessedAt sql.NullTime `json:"last_accessed_at"`
+	CreatedAt      time.Time    `json:"created_at"`
+	Email          string       `json:"email"`
+	FullName       string       `json:"full_name"`
+}
+
+// Retrieve an ad hoc query share by token with creator details
+func (q *Queries) GetQueryShare(ctx context.Context, token string) (GetQueryShareRow, error) {
+	row := q.queryRow(ctx, q.getQueryShareStmt, getQueryShare, token)
+	var i GetQueryShareRow
+	err := row.Scan(
+		&i.Token,
+		&i.TeamID,
+		&i.SourceID,
+		&i.CreatedBy,
+		&i.PayloadJson,
+		&i.ExpiresAt,
+		&i.LastAccessedAt,
+		&i.CreatedAt,
+		&i.Email,
+		&i.FullName,
+	)
+	return i, err
 }
 
 const getSession = `-- name: GetSession :one
@@ -914,7 +1411,7 @@ INSERT INTO alert_history (
     payload_json
 )
 VALUES (?, ?, ?, ?, ?)
-RETURNING id
+RETURNING id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at
 `
 
 type InsertAlertHistoryParams struct {
@@ -926,7 +1423,7 @@ type InsertAlertHistoryParams struct {
 }
 
 // Alert history queries
-func (q *Queries) InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (int64, error) {
+func (q *Queries) InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error) {
 	row := q.queryRow(ctx, q.insertAlertHistoryStmt, insertAlertHistory,
 		arg.AlertID,
 		arg.Status,
@@ -934,9 +1431,19 @@ func (q *Queries) InsertAlertHistory(ctx context.Context, arg InsertAlertHistory
 		arg.Message,
 		arg.PayloadJson,
 	)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+	var i AlertHistory
+	err := row.Scan(
+		&i.ID,
+		&i.AlertID,
+		&i.Status,
+		&i.TriggeredAt,
+		&i.ResolvedAt,
+		&i.Value,
+		&i.Message,
+		&i.PayloadJson,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const isSourceManaged = `-- name: IsSourceManaged :one
@@ -1073,7 +1580,7 @@ func (q *Queries) ListActiveAlertsDue(ctx context.Context) ([]Alert, error) {
 const listAlertHistory = `-- name: ListAlertHistory :many
 SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at FROM alert_history
 WHERE alert_id = ?
-ORDER BY triggered_at DESC
+ORDER BY triggered_at DESC, id DESC
 LIMIT ?
 `
 
@@ -1118,7 +1625,7 @@ func (q *Queries) ListAlertHistory(ctx context.Context, arg ListAlertHistoryPara
 const listAlertsByTeamAndSource = `-- name: ListAlertsByTeamAndSource :many
 SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json FROM alerts
 WHERE team_id = ? AND source_id = ?
-ORDER BY created_at DESC
+ORDER BY updated_at DESC, created_at DESC
 `
 
 type ListAlertsByTeamAndSourceParams struct {
@@ -1164,6 +1671,37 @@ func (q *Queries) ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsB
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExpiredExportJobPaths = `-- name: ListExpiredExportJobPaths :many
+SELECT file_path
+FROM export_jobs
+WHERE expires_at < ?
+  AND file_path IS NOT NULL
+`
+
+// List artifact paths for expired export jobs
+func (q *Queries) ListExpiredExportJobPaths(ctx context.Context, expiresAt time.Time) ([]sql.NullString, error) {
+	rows, err := q.query(ctx, q.listExpiredExportJobPathsStmt, listExpiredExportJobPaths, expiresAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []sql.NullString{}
+	for rows.Next() {
+		var file_path sql.NullString
+		if err := rows.Scan(&file_path); err != nil {
+			return nil, err
+		}
+		items = append(items, file_path)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -1282,6 +1820,64 @@ func (q *Queries) ListManagedUsers(ctx context.Context) ([]User, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Managed,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQueriesByFolder = `-- name: ListQueriesByFolder :many
+SELECT
+    tq.id,
+    tq.team_id,
+    tq.source_id,
+    tq.name,
+    tq.description,
+    tq.query_type,
+    tq.query_content,
+    tq.created_at,
+    tq.updated_at,
+    tq.is_bookmarked
+FROM team_queries tq
+JOIN query_folder_items qfi ON qfi.query_id = tq.id
+WHERE tq.team_id = ? AND qfi.folder_id = ?
+ORDER BY tq.is_bookmarked DESC, tq.updated_at DESC
+`
+
+type ListQueriesByFolderParams struct {
+	TeamID   int64 `json:"team_id"`
+	FolderID int64 `json:"folder_id"`
+}
+
+// List saved queries in a folder
+func (q *Queries) ListQueriesByFolder(ctx context.Context, arg ListQueriesByFolderParams) ([]TeamQuery, error) {
+	rows, err := q.query(ctx, q.listQueriesByFolderStmt, listQueriesByFolder, arg.TeamID, arg.FolderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TeamQuery{}
+	for rows.Next() {
+		var i TeamQuery
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.SourceID,
+			&i.Name,
+			&i.Description,
+			&i.QueryType,
+			&i.QueryContent,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.IsBookmarked,
 		); err != nil {
 			return nil, err
 		}
@@ -1439,6 +2035,133 @@ func (q *Queries) ListQueriesForUser(ctx context.Context, userID int64) ([]ListQ
 			&i.IsBookmarked,
 			&i.TeamName,
 			&i.SourceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQueryFolders = `-- name: ListQueryFolders :many
+
+SELECT
+    qf.id,
+    qf.team_id,
+    qf.name,
+    qf.description,
+    qf.color,
+    qf.sort_order,
+    qf.created_by,
+    COUNT(qfi.query_id) AS query_count,
+    qf.created_at,
+    qf.updated_at
+FROM query_folders qf
+LEFT JOIN query_folder_items qfi ON qfi.folder_id = qf.id
+WHERE qf.team_id = ?
+GROUP BY qf.id
+ORDER BY qf.sort_order ASC, qf.name ASC
+`
+
+type ListQueryFoldersRow struct {
+	ID          int64          `json:"id"`
+	TeamID      int64          `json:"team_id"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	Color       string         `json:"color"`
+	SortOrder   int64          `json:"sort_order"`
+	CreatedBy   sql.NullInt64  `json:"created_by"`
+	QueryCount  int64          `json:"query_count"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
+// Query Folders
+// List all folders for a team with saved query counts
+func (q *Queries) ListQueryFolders(ctx context.Context, teamID int64) ([]ListQueryFoldersRow, error) {
+	rows, err := q.query(ctx, q.listQueryFoldersStmt, listQueryFolders, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListQueryFoldersRow{}
+	for rows.Next() {
+		var i ListQueryFoldersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.Name,
+			&i.Description,
+			&i.Color,
+			&i.SortOrder,
+			&i.CreatedBy,
+			&i.QueryCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQueryFoldersByQueryIDs = `-- name: ListQueryFoldersByQueryIDs :many
+SELECT
+    qfi.query_id,
+    qf.id,
+    qf.name,
+    qf.color
+FROM query_folder_items qfi
+JOIN query_folders qf ON qf.id = qfi.folder_id
+WHERE qfi.query_id IN (/*SLICE:query_ids*/?)
+ORDER BY qf.sort_order ASC, qf.name ASC
+`
+
+type ListQueryFoldersByQueryIDsRow struct {
+	QueryID int64  `json:"query_id"`
+	ID      int64  `json:"id"`
+	Name    string `json:"name"`
+	Color   string `json:"color"`
+}
+
+// List folder summaries for a set of saved query IDs
+func (q *Queries) ListQueryFoldersByQueryIDs(ctx context.Context, queryIds []int64) ([]ListQueryFoldersByQueryIDsRow, error) {
+	query := listQueryFoldersByQueryIDs
+	var queryParams []interface{}
+	if len(queryIds) > 0 {
+		for _, v := range queryIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:query_ids*/?", strings.Repeat(",?", len(queryIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:query_ids*/?", "NULL", 1)
+	}
+	rows, err := q.query(ctx, nil, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListQueryFoldersByQueryIDsRow{}
+	for rows.Next() {
+		var i ListQueryFoldersByQueryIDsRow
+		if err := rows.Scan(
+			&i.QueryID,
+			&i.ID,
+			&i.Name,
+			&i.Color,
 		); err != nil {
 			return nil, err
 		}
@@ -2013,6 +2736,56 @@ func (q *Queries) MarkAlertTriggered(ctx context.Context, id int64) error {
 	return err
 }
 
+const pruneAlertHistory = `-- name: PruneAlertHistory :exec
+DELETE FROM alert_history AS target
+WHERE target.alert_id = ?
+  AND target.id NOT IN (
+    SELECT keep.id
+    FROM alert_history AS keep
+    WHERE keep.alert_id = ?
+    ORDER BY keep.triggered_at DESC, keep.id DESC
+    LIMIT ?
+ )
+`
+
+type PruneAlertHistoryParams struct {
+	AlertID   int64 `json:"alert_id"`
+	AlertID_2 int64 `json:"alert_id_2"`
+	Limit     int64 `json:"limit"`
+}
+
+func (q *Queries) PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error {
+	_, err := q.exec(ctx, q.pruneAlertHistoryStmt, pruneAlertHistory, arg.AlertID, arg.AlertID_2, arg.Limit)
+	return err
+}
+
+const pruneExpiredQueryShares = `-- name: PruneExpiredQueryShares :exec
+DELETE FROM query_shares
+WHERE expires_at < ?
+`
+
+// Delete expired query shares
+func (q *Queries) PruneExpiredQueryShares(ctx context.Context, expiresAt time.Time) error {
+	_, err := q.exec(ctx, q.pruneExpiredQuerySharesStmt, pruneExpiredQueryShares, expiresAt)
+	return err
+}
+
+const removeQueryFromFolder = `-- name: RemoveQueryFromFolder :exec
+DELETE FROM query_folder_items
+WHERE folder_id = ? AND query_id = ?
+`
+
+type RemoveQueryFromFolderParams struct {
+	FolderID int64 `json:"folder_id"`
+	QueryID  int64 `json:"query_id"`
+}
+
+// Remove a saved query from a folder
+func (q *Queries) RemoveQueryFromFolder(ctx context.Context, arg RemoveQueryFromFolderParams) error {
+	_, err := q.exec(ctx, q.removeQueryFromFolderStmt, removeQueryFromFolder, arg.FolderID, arg.QueryID)
+	return err
+}
+
 const removeTeamMember = `-- name: RemoveTeamMember :exec
 DELETE FROM team_members
 WHERE team_id = ? AND user_id = ?
@@ -2044,12 +2817,13 @@ func (q *Queries) RemoveTeamSource(ctx context.Context, arg RemoveTeamSourcePara
 	return err
 }
 
-const resolveAlertHistory = `-- name: ResolveAlertHistory :exec
+const resolveAlertHistory = `-- name: ResolveAlertHistory :one
 UPDATE alert_history
 SET status = 'resolved',
     resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
     message = ?
 WHERE id = ?
+RETURNING id
 `
 
 type ResolveAlertHistoryParams struct {
@@ -2057,9 +2831,11 @@ type ResolveAlertHistoryParams struct {
 	ID      int64          `json:"id"`
 }
 
-func (q *Queries) ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) error {
-	_, err := q.exec(ctx, q.resolveAlertHistoryStmt, resolveAlertHistory, arg.Message, arg.ID)
-	return err
+func (q *Queries) ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) (int64, error) {
+	row := q.queryRow(ctx, q.resolveAlertHistoryStmt, resolveAlertHistory, arg.Message, arg.ID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const setSourceManaged = `-- name: SetSourceManaged :exec
@@ -2147,6 +2923,23 @@ func (q *Queries) ToggleQueryBookmark(ctx context.Context, arg ToggleQueryBookma
 	return err
 }
 
+const touchQueryShare = `-- name: TouchQueryShare :exec
+UPDATE query_shares
+SET last_accessed_at = ?
+WHERE token = ?
+`
+
+type TouchQueryShareParams struct {
+	LastAccessedAt sql.NullTime `json:"last_accessed_at"`
+	Token          string       `json:"token"`
+}
+
+// Update a query share's last access time
+func (q *Queries) TouchQueryShare(ctx context.Context, arg TouchQueryShareParams) error {
+	_, err := q.exec(ctx, q.touchQueryShareStmt, touchQueryShare, arg.LastAccessedAt, arg.Token)
+	return err
+}
+
 const updateAPITokenLastUsed = `-- name: UpdateAPITokenLastUsed :exec
 UPDATE api_tokens
 SET last_used_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
@@ -2160,7 +2953,7 @@ func (q *Queries) UpdateAPITokenLastUsed(ctx context.Context, id int64) error {
 	return err
 }
 
-const updateAlert = `-- name: UpdateAlert :exec
+const updateAlert = `-- name: UpdateAlert :one
 UPDATE alerts
 SET name = ?,
     description = ?,
@@ -2180,6 +2973,7 @@ SET name = ?,
     is_active = ?,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?
+RETURNING id
 `
 
 type UpdateAlertParams struct {
@@ -2202,8 +2996,8 @@ type UpdateAlertParams struct {
 	ID                   int64          `json:"id"`
 }
 
-func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) error {
-	_, err := q.exec(ctx, q.updateAlertStmt, updateAlert,
+func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) (int64, error) {
+	row := q.queryRow(ctx, q.updateAlertStmt, updateAlert,
 		arg.Name,
 		arg.Description,
 		arg.QueryType,
@@ -2222,13 +3016,16 @@ func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) error 
 		arg.IsActive,
 		arg.ID,
 	)
-	return err
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
-const updateAlertHistoryPayload = `-- name: UpdateAlertHistoryPayload :exec
+const updateAlertHistoryPayload = `-- name: UpdateAlertHistoryPayload :one
 UPDATE alert_history
 SET payload_json = ?
 WHERE id = ?
+RETURNING id
 `
 
 type UpdateAlertHistoryPayloadParams struct {
@@ -2236,9 +3033,67 @@ type UpdateAlertHistoryPayloadParams struct {
 	ID          int64          `json:"id"`
 }
 
-func (q *Queries) UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlertHistoryPayloadParams) error {
-	_, err := q.exec(ctx, q.updateAlertHistoryPayloadStmt, updateAlertHistoryPayload, arg.PayloadJson, arg.ID)
-	return err
+func (q *Queries) UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlertHistoryPayloadParams) (int64, error) {
+	row := q.queryRow(ctx, q.updateAlertHistoryPayloadStmt, updateAlertHistoryPayload, arg.PayloadJson, arg.ID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const updateExportJobRunning = `-- name: UpdateExportJobRunning :one
+UPDATE export_jobs
+SET
+    status = ?,
+    error_message = NULL,
+    updated_at = ?
+WHERE id = ?
+RETURNING id
+`
+
+type UpdateExportJobRunningParams struct {
+	Status    string    `json:"status"`
+	UpdatedAt time.Time `json:"updated_at"`
+	ID        string    `json:"id"`
+}
+
+// Mark an export job as running and return its ID
+func (q *Queries) UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error) {
+	row := q.queryRow(ctx, q.updateExportJobRunningStmt, updateExportJobRunning, arg.Status, arg.UpdatedAt, arg.ID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
+const updateQueryFolder = `-- name: UpdateQueryFolder :one
+UPDATE query_folders
+SET name = ?,
+    description = ?,
+    color = ?,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE team_id = ? AND id = ?
+RETURNING id
+`
+
+type UpdateQueryFolderParams struct {
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	Color       string         `json:"color"`
+	TeamID      int64          `json:"team_id"`
+	ID          int64          `json:"id"`
+}
+
+// Update a query folder and return its ID
+func (q *Queries) UpdateQueryFolder(ctx context.Context, arg UpdateQueryFolderParams) (int64, error) {
+	row := q.queryRow(ctx, q.updateQueryFolderStmt, updateQueryFolder,
+		arg.Name,
+		arg.Description,
+		arg.Color,
+		arg.TeamID,
+		arg.ID,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateSource = `-- name: UpdateSource :exec
