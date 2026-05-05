@@ -151,7 +151,6 @@ func (s *Server) setupRoutes() {
 	// --- Current User ("Me") Routes ---
 	api.Get("/me", s.requireAuth, s.handleGetCurrentUser)
 	api.Get("/me/teams", s.requireAuth, s.handleListCurrentUserTeams)
-	api.Get("/me/collections", s.requireAuth, s.handleListCurrentUserCollections)
 	api.Get("/me/preferences", s.requireAuth, s.handleGetUserPreferences)
 	api.Put("/me/preferences", s.requireAuth, s.handleUpdateUserPreferences)
 
@@ -221,8 +220,17 @@ func (s *Server) setupRoutes() {
 	// Team settings — managed guard only on structural changes (rename/description)
 	api.Put("/teams/:teamID", s.requireAuth, s.requireTeamNotManaged, s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeam)
 
-	// Team-level collections (all sources)
-	api.Get("/teams/:teamID/collections", s.requireAuth, s.requireTeamMember, s.handleListTeamCollections)
+	// Saved Queries (cross-team, source-scoped). Visibility: any user with source
+	// access via any team. Edit/delete: creator + global admin (legacy queries
+	// without created_by are global-admin-only).
+	savedQueries := api.Group("/saved-queries", s.requireAuth)
+	savedQueries.Get("/", s.handleListSavedQueries)
+	savedQueries.Post("/", s.handleCreateSavedQuery)
+	savedQueries.Get("/:queryID", s.handleGetSavedQuery)
+	savedQueries.Put("/:queryID", s.handleUpdateSavedQuery)
+	savedQueries.Delete("/:queryID", s.handleDeleteSavedQuery)
+	savedQueries.Patch("/:queryID/bookmark", s.handleToggleSavedQueryBookmark)
+	savedQueries.Get("/:queryID/resolve", s.handleResolveSavedQuery)
 
 	// Team Source Management (linking/unlinking)
 	teamSources := api.Group("/teams/:teamID/sources", s.requireAuth, s.requireTeamMember)
@@ -261,19 +269,6 @@ func (s *Server) setupRoutes() {
 		// Field value exploration for sidebar
 		teamSourceOps.Get("/fields/values", s.handleGetAllFieldValues)         // Get all LowCardinality field values
 		teamSourceOps.Get("/fields/:fieldName/values", s.handleGetFieldValues) // Get values for a specific field
-
-		// Collections (Saved Queries) scoped to Team & Source
-		// Regular team members can view and use collections
-		collections := teamSourceOps.Group("/collections")
-		collections.Get("/", s.handleListTeamSourceCollections)
-		collections.Get("/:collectionID", s.handleGetTeamSourceCollection)
-		collections.Get("/:collectionID/resolve", s.handleResolveQuery)
-
-		// Only team editors, team admins, or global admins can manage collections
-		collections.Post("/", s.requireCollectionManagement, s.handleCreateTeamSourceCollection)
-		collections.Put("/:collectionID", s.requireCollectionManagement, s.handleUpdateTeamSourceCollection)
-		collections.Delete("/:collectionID", s.requireCollectionManagement, s.handleDeleteTeamSourceCollection)
-		collections.Patch("/:collectionID/bookmark", s.requireCollectionManagement, s.handleToggleQueryBookmark)
 
 		alertRoutes := teamSourceOps.Group("/alerts")
 		alertRoutes.Get("/", s.handleListAlerts)

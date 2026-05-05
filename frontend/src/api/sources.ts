@@ -1,5 +1,5 @@
 import { apiClient } from "./apiUtils";
-import type { SavedTeamQuery, Team } from "./types";
+import type { Team } from "./types";
 
 interface ConnectionInfo {
   host: string;
@@ -49,12 +49,6 @@ export interface SourceWithTeams extends Source {
   teams: Team[];
 }
 
-export interface TeamGroupedQuery {
-  team_id: number;
-  team_name: string;
-  queries: SavedTeamQuery[];
-}
-
 export interface CreateSourcePayload {
   name: string;
   meta_is_auto_created: boolean;
@@ -64,13 +58,6 @@ export interface CreateSourcePayload {
   description?: string;
   ttl_days: number;
   schema?: string;
-}
-
-export interface CreateTeamQueryRequest {
-  team_id: number;
-  name: string;
-  description?: string;
-  query_content: string;
 }
 
 export interface SourceStats {
@@ -151,15 +138,6 @@ export const sourcesApi = {
     apiClient.get<SourceStats>(`/teams/${teamId}/sources/${sourceId}/stats`),
   getTeamSourceSchema: (teamId: number, sourceId: number) =>
     apiClient.get<string>(`/teams/${teamId}/sources/${sourceId}/schema`),
-
-  // Team-scoped source queries
-  listTeamSourceQueries: (teamId: number, sourceId: number) =>
-    apiClient.get<SavedTeamQuery[]>(`/teams/${teamId}/sources/${sourceId}/queries`),
-  createTeamSourceQuery: (teamId: number, sourceId: number, payload: Omit<CreateTeamQueryRequest, "team_id">) =>
-    apiClient.post<SavedTeamQuery>(
-      `/teams/${teamId}/sources/${sourceId}/queries`,
-      { ...payload, team_id: teamId }
-    ),
 
   // Validation
   validateSourceConnection: (connectionInfo: ConnectionRequestInfo & {

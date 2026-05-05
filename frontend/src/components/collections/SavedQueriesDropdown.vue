@@ -16,7 +16,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/composables/useToast';
 import { TOAST_DURATION } from '@/lib/constants';
-import { type SavedTeamQuery } from '@/api/savedQueries';
+import { type SavedQuery } from '@/api/savedQueries';
 import { useSavedQueriesStore } from '@/stores/savedQueries';
 import { useExploreStore } from '@/stores/explore';
 import { useAuthStore } from '@/stores/auth';
@@ -30,7 +30,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'save'): void;
-  (e: 'select-saved-query', query: SavedTeamQuery): void;
+  (e: 'select-saved-query', query: SavedQuery): void;
   (e: 'save-as-new'): void;
 }>();
 
@@ -75,7 +75,7 @@ watch(
   () => [props.selectedTeamId, props.selectedSourceId],
   async ([teamId, sourceId]) => {
     if (teamId && sourceId) {
-      await loadQueries(teamId, sourceId);
+      await loadQueries(teamId, sourceId as number);
     }
   },
   { immediate: true }
@@ -83,7 +83,7 @@ watch(
 
 // Load queries when dropdown opens
 watch(isOpen, async (open) => {
-  if (open && props.selectedTeamId && props.selectedSourceId && !queries.value.length) {
+  if (open && props.selectedSourceId && !queries.value.length) {
     await loadQueries(props.selectedTeamId, props.selectedSourceId);
   }
 
@@ -93,13 +93,14 @@ watch(isOpen, async (open) => {
   }
 });
 
-// Function to load queries using the store
-async function loadQueries(teamId: number, sourceId: number) {
-  if (!teamId || !sourceId) return;
+// Load queries for a source via the saved-queries store. teamId is no longer
+// needed for the API call but is kept in the prop signature for callers that
+// still pass it.
+async function loadQueries(_teamId: number | undefined, sourceId: number) {
+  if (!sourceId) return;
 
   try {
-    await savedQueriesStore.fetchTeamSourceQueries(teamId, sourceId);
-
+    await savedQueriesStore.list(sourceId);
   } catch (error) {
     console.error('Error triggering query load from store:', error);
     toast({
@@ -112,7 +113,7 @@ async function loadQueries(teamId: number, sourceId: number) {
 }
 
 // Handle query selection
-function selectQuery(query: SavedTeamQuery) {
+function selectQuery(query: SavedQuery) {
   try {
     emit('select-saved-query', query);
     isOpen.value = false;
@@ -155,29 +156,15 @@ const navigateToCollectionsView = () => {
 };
 
 // Toggle bookmark status for a query
-async function handleToggleBookmark(event: Event, query: SavedTeamQuery) {
-  event.stopPropagation(); // Prevent triggering query selection
-
-  if (!props.selectedTeamId || !props.selectedSourceId) {
-    return;
-  }
-
-  await savedQueriesStore.toggleBookmark(
-    props.selectedTeamId,
-    props.selectedSourceId,
-    query.id
-  );
+async function handleToggleBookmark(event: Event, query: SavedQuery) {
+  event.stopPropagation();
+  await savedQueriesStore.toggleBookmark(query.id);
 }
 
-// Copy shareable collection URL to clipboard
-async function copyCollectionUrl(event: Event, query: SavedTeamQuery) {
-  event.stopPropagation(); // Prevent triggering query selection
-
-  if (!props.selectedTeamId || !props.selectedSourceId) {
-    return;
-  }
-
-  const url = `${window.location.origin}/logs/collection/${props.selectedTeamId}/${props.selectedSourceId}/${query.id}`;
+// Copy shareable saved-query URL to clipboard
+async function copyCollectionUrl(event: Event, query: SavedQuery) {
+  event.stopPropagation();
+  const url = `${window.location.origin}/logs/saved/${query.id}`;
 
   try {
     await navigator.clipboard.writeText(url);

@@ -79,26 +79,6 @@ type ExportJob struct {
 	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
-type QueryFolder struct {
-	ID          int64          `json:"id"`
-	TeamID      int64          `json:"team_id"`
-	Name        string         `json:"name"`
-	Description sql.NullString `json:"description"`
-	Color       string         `json:"color"`
-	SortOrder   int64          `json:"sort_order"`
-	CreatedBy   sql.NullInt64  `json:"created_by"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-}
-
-type QueryFolderItem struct {
-	FolderID  int64         `json:"folder_id"`
-	QueryID   int64         `json:"query_id"`
-	SortOrder int64         `json:"sort_order"`
-	AddedBy   sql.NullInt64 `json:"added_by"`
-	CreatedAt time.Time     `json:"created_at"`
-}
-
 type QueryShare struct {
 	Token          string       `json:"token"`
 	TeamID         int64        `json:"team_id"`
@@ -108,6 +88,19 @@ type QueryShare struct {
 	ExpiresAt      time.Time    `json:"expires_at"`
 	LastAccessedAt sql.NullTime `json:"last_accessed_at"`
 	CreatedAt      time.Time    `json:"created_at"`
+}
+
+type SavedQuery struct {
+	ID           int64          `json:"id"`
+	SourceID     int64          `json:"source_id"`
+	Name         string         `json:"name"`
+	Description  sql.NullString `json:"description"`
+	QueryType    string         `json:"query_type"`
+	QueryContent string         `json:"query_content"`
+	IsBookmarked bool           `json:"is_bookmarked"`
+	CreatedBy    sql.NullInt64  `json:"created_by"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
 type Session struct {
@@ -162,19 +155,6 @@ type TeamMember struct {
 	UserID    int64     `json:"user_id"`
 	Role      string    `json:"role"`
 	CreatedAt time.Time `json:"created_at"`
-}
-
-type TeamQuery struct {
-	ID           int64          `json:"id"`
-	TeamID       int64          `json:"team_id"`
-	SourceID     int64          `json:"source_id"`
-	Name         string         `json:"name"`
-	Description  sql.NullString `json:"description"`
-	QueryType    string         `json:"query_type"`
-	QueryContent string         `json:"query_content"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	IsBookmarked bool           `json:"is_bookmarked"`
 }
 
 type TeamSource struct {

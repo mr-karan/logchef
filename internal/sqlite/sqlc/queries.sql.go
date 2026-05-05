@@ -336,6 +336,38 @@ func (q *Queries) CreateQueryShare(ctx context.Context, arg CreateQuerySharePara
 	return err
 }
 
+const createSavedQuery = `-- name: CreateSavedQuery :one
+
+INSERT INTO saved_queries (source_id, name, description, query_type, query_content, created_by)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id
+`
+
+type CreateSavedQueryParams struct {
+	SourceID     int64          `json:"source_id"`
+	Name         string         `json:"name"`
+	Description  sql.NullString `json:"description"`
+	QueryType    string         `json:"query_type"`
+	QueryContent string         `json:"query_content"`
+	CreatedBy    sql.NullInt64  `json:"created_by"`
+}
+
+// Saved Queries (cross-team, source-scoped)
+// Insert a new saved query and return its id
+func (q *Queries) CreateSavedQuery(ctx context.Context, arg CreateSavedQueryParams) (int64, error) {
+	row := q.queryRow(ctx, q.createSavedQueryStmt, createSavedQuery,
+		arg.SourceID,
+		arg.Name,
+		arg.Description,
+		arg.QueryType,
+		arg.QueryContent,
+		arg.CreatedBy,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createSession = `-- name: CreateSession :exec
 
 INSERT INTO sessions (id, user_id, expires_at, created_at)
@@ -422,38 +454,6 @@ type CreateTeamParams struct {
 // Create a new team
 func (q *Queries) CreateTeam(ctx context.Context, arg CreateTeamParams) (int64, error) {
 	row := q.queryRow(ctx, q.createTeamStmt, createTeam, arg.Name, arg.Description)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
-}
-
-const createTeamSourceQuery = `-- name: CreateTeamSourceQuery :one
-
-INSERT INTO team_queries (team_id, source_id, name, description, query_type, query_content)
-VALUES (?, ?, ?, ?, ?, ?)
-RETURNING id
-`
-
-type CreateTeamSourceQueryParams struct {
-	TeamID       int64          `json:"team_id"`
-	SourceID     int64          `json:"source_id"`
-	Name         string         `json:"name"`
-	Description  sql.NullString `json:"description"`
-	QueryType    string         `json:"query_type"`
-	QueryContent string         `json:"query_content"`
-}
-
-// Team Queries
-// Create a new query for a team and source
-func (q *Queries) CreateTeamSourceQuery(ctx context.Context, arg CreateTeamSourceQueryParams) (int64, error) {
-	row := q.queryRow(ctx, q.createTeamSourceQueryStmt, createTeamSourceQuery,
-		arg.TeamID,
-		arg.SourceID,
-		arg.Name,
-		arg.Description,
-		arg.QueryType,
-		arg.QueryContent,
-	)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
@@ -549,6 +549,16 @@ func (q *Queries) DeleteQueryShare(ctx context.Context, token string) (string, e
 	return token, err
 }
 
+const deleteSavedQuery = `-- name: DeleteSavedQuery :exec
+DELETE FROM saved_queries WHERE id = ?
+`
+
+// Delete a saved query
+func (q *Queries) DeleteSavedQuery(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.deleteSavedQueryStmt, deleteSavedQuery, id)
+	return err
+}
+
 const deleteSession = `-- name: DeleteSession :exec
 DELETE FROM sessions WHERE id = ?
 `
@@ -586,23 +596,6 @@ DELETE FROM teams WHERE id = ?
 // Delete a team by ID
 func (q *Queries) DeleteTeam(ctx context.Context, id int64) error {
 	_, err := q.exec(ctx, q.deleteTeamStmt, deleteTeam, id)
-	return err
-}
-
-const deleteTeamSourceQuery = `-- name: DeleteTeamSourceQuery :exec
-DELETE FROM team_queries
-WHERE id = ? AND team_id = ? AND source_id = ?
-`
-
-type DeleteTeamSourceQueryParams struct {
-	ID       int64 `json:"id"`
-	TeamID   int64 `json:"team_id"`
-	SourceID int64 `json:"source_id"`
-}
-
-// Delete a query by ID for a specific team and source
-func (q *Queries) DeleteTeamSourceQuery(ctx context.Context, arg DeleteTeamSourceQueryParams) error {
-	_, err := q.exec(ctx, q.deleteTeamSourceQueryStmt, deleteTeamSourceQuery, arg.ID, arg.TeamID, arg.SourceID)
 	return err
 }
 
@@ -852,24 +845,6 @@ func (q *Queries) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID i
 	return i, err
 }
 
-const getQueryBookmarkStatus = `-- name: GetQueryBookmarkStatus :one
-SELECT is_bookmarked FROM team_queries WHERE id = ? AND team_id = ? AND source_id = ?
-`
-
-type GetQueryBookmarkStatusParams struct {
-	ID       int64 `json:"id"`
-	TeamID   int64 `json:"team_id"`
-	SourceID int64 `json:"source_id"`
-}
-
-// Get the current bookmark status of a query
-func (q *Queries) GetQueryBookmarkStatus(ctx context.Context, arg GetQueryBookmarkStatusParams) (bool, error) {
-	row := q.queryRow(ctx, q.getQueryBookmarkStatusStmt, getQueryBookmarkStatus, arg.ID, arg.TeamID, arg.SourceID)
-	var is_bookmarked bool
-	err := row.Scan(&is_bookmarked)
-	return is_bookmarked, err
-}
-
 const getQueryShare = `-- name: GetQueryShare :one
 SELECT
     qs.token,
@@ -917,6 +892,41 @@ func (q *Queries) GetQueryShare(ctx context.Context, token string) (GetQueryShar
 		&i.FullName,
 	)
 	return i, err
+}
+
+const getSavedQuery = `-- name: GetSavedQuery :one
+SELECT id, source_id, name, description, query_type, query_content, is_bookmarked, created_by, created_at, updated_at FROM saved_queries WHERE id = ?
+`
+
+// Look up one saved query by id
+func (q *Queries) GetSavedQuery(ctx context.Context, id int64) (SavedQuery, error) {
+	row := q.queryRow(ctx, q.getSavedQueryStmt, getSavedQuery, id)
+	var i SavedQuery
+	err := row.Scan(
+		&i.ID,
+		&i.SourceID,
+		&i.Name,
+		&i.Description,
+		&i.QueryType,
+		&i.QueryContent,
+		&i.IsBookmarked,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getSavedQueryBookmarkStatus = `-- name: GetSavedQueryBookmarkStatus :one
+SELECT is_bookmarked FROM saved_queries WHERE id = ?
+`
+
+// Read the current bookmark flag
+func (q *Queries) GetSavedQueryBookmarkStatus(ctx context.Context, id int64) (bool, error) {
+	row := q.queryRow(ctx, q.getSavedQueryBookmarkStatusStmt, getSavedQueryBookmarkStatus, id)
+	var is_bookmarked bool
+	err := row.Scan(&is_bookmarked)
+	return is_bookmarked, err
 }
 
 const getSession = `-- name: GetSession :one
@@ -1110,36 +1120,6 @@ func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (T
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const getTeamSourceQuery = `-- name: GetTeamSourceQuery :one
-SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at, is_bookmarked FROM team_queries
-WHERE id = ? AND team_id = ? AND source_id = ?
-`
-
-type GetTeamSourceQueryParams struct {
-	ID       int64 `json:"id"`
-	TeamID   int64 `json:"team_id"`
-	SourceID int64 `json:"source_id"`
-}
-
-// Get a query by ID for a specific team and source
-func (q *Queries) GetTeamSourceQuery(ctx context.Context, arg GetTeamSourceQueryParams) (TeamQuery, error) {
-	row := q.queryRow(ctx, q.getTeamSourceQueryStmt, getTeamSourceQuery, arg.ID, arg.TeamID, arg.SourceID)
-	var i TeamQuery
-	err := row.Scan(
-		&i.ID,
-		&i.TeamID,
-		&i.SourceID,
-		&i.Name,
-		&i.Description,
-		&i.QueryType,
-		&i.QueryContent,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.IsBookmarked,
 	)
 	return i, err
 }
@@ -1642,114 +1622,32 @@ func (q *Queries) ListManagedUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
-const listQueriesByTeam = `-- name: ListQueriesByTeam :many
-SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at, is_bookmarked FROM team_queries WHERE team_id = ? ORDER BY is_bookmarked DESC, updated_at DESC
-`
-
-// List all queries for a specific team across all sources (bookmarked first, then by updated_at)
-func (q *Queries) ListQueriesByTeam(ctx context.Context, teamID int64) ([]TeamQuery, error) {
-	rows, err := q.query(ctx, q.listQueriesByTeamStmt, listQueriesByTeam, teamID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []TeamQuery{}
-	for rows.Next() {
-		var i TeamQuery
-		if err := rows.Scan(
-			&i.ID,
-			&i.TeamID,
-			&i.SourceID,
-			&i.Name,
-			&i.Description,
-			&i.QueryType,
-			&i.QueryContent,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.IsBookmarked,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listQueriesByTeamAndSource = `-- name: ListQueriesByTeamAndSource :many
-SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at, is_bookmarked FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY is_bookmarked DESC, updated_at DESC
-`
-
-type ListQueriesByTeamAndSourceParams struct {
-	TeamID   int64 `json:"team_id"`
-	SourceID int64 `json:"source_id"`
-}
-
-// List all queries for a specific team and source (bookmarked first, then by updated_at)
-func (q *Queries) ListQueriesByTeamAndSource(ctx context.Context, arg ListQueriesByTeamAndSourceParams) ([]TeamQuery, error) {
-	rows, err := q.query(ctx, q.listQueriesByTeamAndSourceStmt, listQueriesByTeamAndSource, arg.TeamID, arg.SourceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []TeamQuery{}
-	for rows.Next() {
-		var i TeamQuery
-		if err := rows.Scan(
-			&i.ID,
-			&i.TeamID,
-			&i.SourceID,
-			&i.Name,
-			&i.Description,
-			&i.QueryType,
-			&i.QueryContent,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.IsBookmarked,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listQueriesForUser = `-- name: ListQueriesForUser :many
+const listSavedQueriesForUser = `-- name: ListSavedQueriesForUser :many
 SELECT
-    tq.id,
-    tq.team_id,
-    tq.source_id,
-    tq.name,
-    tq.description,
-    tq.query_type,
-    tq.query_content,
-    tq.created_at,
-    tq.updated_at,
-    tq.is_bookmarked,
-    t.name AS team_name,
+    sq.id,
+    sq.source_id,
+    sq.name,
+    sq.description,
+    sq.query_type,
+    sq.query_content,
+    sq.created_at,
+    sq.updated_at,
+    sq.is_bookmarked,
+    sq.created_by,
     s.name AS source_name
-FROM team_queries tq
-JOIN team_members tm ON tm.team_id = tq.team_id
-JOIN teams t ON t.id = tq.team_id
-JOIN sources s ON s.id = tq.source_id
-WHERE tm.user_id = ?
-ORDER BY tq.is_bookmarked DESC, tq.updated_at DESC
+FROM saved_queries sq
+JOIN sources s ON s.id = sq.source_id
+WHERE sq.source_id IN (
+    SELECT DISTINCT ts.source_id
+    FROM team_sources ts
+    JOIN team_members tm ON tm.team_id = ts.team_id
+    WHERE tm.user_id = ?
+)
+ORDER BY sq.is_bookmarked DESC, sq.updated_at DESC
 `
 
-type ListQueriesForUserRow struct {
+type ListSavedQueriesForUserRow struct {
 	ID           int64          `json:"id"`
-	TeamID       int64          `json:"team_id"`
 	SourceID     int64          `json:"source_id"`
 	Name         string         `json:"name"`
 	Description  sql.NullString `json:"description"`
@@ -1758,23 +1656,22 @@ type ListQueriesForUserRow struct {
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	IsBookmarked bool           `json:"is_bookmarked"`
-	TeamName     string         `json:"team_name"`
+	CreatedBy    sql.NullInt64  `json:"created_by"`
 	SourceName   string         `json:"source_name"`
 }
 
-// List all saved queries across all teams a user belongs to, with team and source names
-func (q *Queries) ListQueriesForUser(ctx context.Context, userID int64) ([]ListQueriesForUserRow, error) {
-	rows, err := q.query(ctx, q.listQueriesForUserStmt, listQueriesForUser, userID)
+// List every saved query the user can see (any source attached to any of their teams)
+func (q *Queries) ListSavedQueriesForUser(ctx context.Context, userID int64) ([]ListSavedQueriesForUserRow, error) {
+	rows, err := q.query(ctx, q.listSavedQueriesForUserStmt, listSavedQueriesForUser, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListQueriesForUserRow{}
+	items := []ListSavedQueriesForUserRow{}
 	for rows.Next() {
-		var i ListQueriesForUserRow
+		var i ListSavedQueriesForUserRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.TeamID,
 			&i.SourceID,
 			&i.Name,
 			&i.Description,
@@ -1783,7 +1680,86 @@ func (q *Queries) ListQueriesForUser(ctx context.Context, userID int64) ([]ListQ
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.IsBookmarked,
-			&i.TeamName,
+			&i.CreatedBy,
+			&i.SourceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSavedQueriesForUserBySource = `-- name: ListSavedQueriesForUserBySource :many
+SELECT
+    sq.id,
+    sq.source_id,
+    sq.name,
+    sq.description,
+    sq.query_type,
+    sq.query_content,
+    sq.created_at,
+    sq.updated_at,
+    sq.is_bookmarked,
+    sq.created_by,
+    s.name AS source_name
+FROM saved_queries sq
+JOIN sources s ON s.id = sq.source_id
+WHERE sq.source_id = ?
+  AND EXISTS (
+    SELECT 1 FROM team_sources ts
+    JOIN team_members tm ON tm.team_id = ts.team_id
+    WHERE ts.source_id = sq.source_id AND tm.user_id = ?
+  )
+ORDER BY sq.is_bookmarked DESC, sq.updated_at DESC
+`
+
+type ListSavedQueriesForUserBySourceParams struct {
+	SourceID int64 `json:"source_id"`
+	UserID   int64 `json:"user_id"`
+}
+
+type ListSavedQueriesForUserBySourceRow struct {
+	ID           int64          `json:"id"`
+	SourceID     int64          `json:"source_id"`
+	Name         string         `json:"name"`
+	Description  sql.NullString `json:"description"`
+	QueryType    string         `json:"query_type"`
+	QueryContent string         `json:"query_content"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	IsBookmarked bool           `json:"is_bookmarked"`
+	CreatedBy    sql.NullInt64  `json:"created_by"`
+	SourceName   string         `json:"source_name"`
+}
+
+// List saved queries for a specific source, scoped to a user that has access to it
+func (q *Queries) ListSavedQueriesForUserBySource(ctx context.Context, arg ListSavedQueriesForUserBySourceParams) ([]ListSavedQueriesForUserBySourceRow, error) {
+	rows, err := q.query(ctx, q.listSavedQueriesForUserBySourceStmt, listSavedQueriesForUserBySource, arg.SourceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSavedQueriesForUserBySourceRow{}
+	for rows.Next() {
+		var i ListSavedQueriesForUserBySourceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SourceID,
+			&i.Name,
+			&i.Description,
+			&i.QueryType,
+			&i.QueryContent,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.IsBookmarked,
+			&i.CreatedBy,
 			&i.SourceName,
 		); err != nil {
 			return nil, err
@@ -2511,22 +2487,16 @@ func (q *Queries) TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (i
 	return count, err
 }
 
-const toggleQueryBookmark = `-- name: ToggleQueryBookmark :exec
-UPDATE team_queries
+const toggleSavedQueryBookmark = `-- name: ToggleSavedQueryBookmark :exec
+UPDATE saved_queries
 SET is_bookmarked = NOT is_bookmarked,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ? AND team_id = ? AND source_id = ?
+WHERE id = ?
 `
 
-type ToggleQueryBookmarkParams struct {
-	ID       int64 `json:"id"`
-	TeamID   int64 `json:"team_id"`
-	SourceID int64 `json:"source_id"`
-}
-
-// Toggle the bookmark status of a query
-func (q *Queries) ToggleQueryBookmark(ctx context.Context, arg ToggleQueryBookmarkParams) error {
-	_, err := q.exec(ctx, q.toggleQueryBookmarkStmt, toggleQueryBookmark, arg.ID, arg.TeamID, arg.SourceID)
+// Flip the bookmark flag and bump updated_at
+func (q *Queries) ToggleSavedQueryBookmark(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.toggleSavedQueryBookmarkStmt, toggleSavedQueryBookmark, id)
 	return err
 }
 
@@ -2671,6 +2641,36 @@ func (q *Queries) UpdateExportJobRunning(ctx context.Context, arg UpdateExportJo
 	return id, err
 }
 
+const updateSavedQuery = `-- name: UpdateSavedQuery :exec
+UPDATE saved_queries
+SET name = ?,
+    description = ?,
+    query_type = ?,
+    query_content = ?,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = ?
+`
+
+type UpdateSavedQueryParams struct {
+	Name         string         `json:"name"`
+	Description  sql.NullString `json:"description"`
+	QueryType    string         `json:"query_type"`
+	QueryContent string         `json:"query_content"`
+	ID           int64          `json:"id"`
+}
+
+// Update a saved query's mutable fields
+func (q *Queries) UpdateSavedQuery(ctx context.Context, arg UpdateSavedQueryParams) error {
+	_, err := q.exec(ctx, q.updateSavedQueryStmt, updateSavedQuery,
+		arg.Name,
+		arg.Description,
+		arg.QueryType,
+		arg.QueryContent,
+		arg.ID,
+	)
+	return err
+}
+
 const updateSource = `-- name: UpdateSource :exec
 UPDATE sources
 SET name = ?,
@@ -2766,40 +2766,6 @@ type UpdateTeamMemberRoleParams struct {
 // Update a team member's role
 func (q *Queries) UpdateTeamMemberRole(ctx context.Context, arg UpdateTeamMemberRoleParams) error {
 	_, err := q.exec(ctx, q.updateTeamMemberRoleStmt, updateTeamMemberRole, arg.Role, arg.TeamID, arg.UserID)
-	return err
-}
-
-const updateTeamSourceQuery = `-- name: UpdateTeamSourceQuery :exec
-UPDATE team_queries
-SET name = ?,
-    description = ?,
-    query_type = ?,
-    query_content = ?,
-    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ? AND team_id = ? AND source_id = ?
-`
-
-type UpdateTeamSourceQueryParams struct {
-	Name         string         `json:"name"`
-	Description  sql.NullString `json:"description"`
-	QueryType    string         `json:"query_type"`
-	QueryContent string         `json:"query_content"`
-	ID           int64          `json:"id"`
-	TeamID       int64          `json:"team_id"`
-	SourceID     int64          `json:"source_id"`
-}
-
-// Update a query for a team and source
-func (q *Queries) UpdateTeamSourceQuery(ctx context.Context, arg UpdateTeamSourceQueryParams) error {
-	_, err := q.exec(ctx, q.updateTeamSourceQueryStmt, updateTeamSourceQuery,
-		arg.Name,
-		arg.Description,
-		arg.QueryType,
-		arg.QueryContent,
-		arg.ID,
-		arg.TeamID,
-		arg.SourceID,
-	)
 	return err
 }
 

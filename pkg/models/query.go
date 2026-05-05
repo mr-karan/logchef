@@ -158,24 +158,26 @@ type SavedQueryContent struct {
 	Variables []SavedQueryVariable `json:"variables"`
 }
 
-// SavedTeamQuery represents a saved query associated with a team
-type SavedTeamQuery struct {
+// SavedQuery represents a cross-team saved query bound to a single source.
+// Visibility is "any user with access to the source via any team they belong to".
+// Edit access is "creator + global admin"; rows with NULL CreatedBy are legacy
+// queries that pre-date created_by tracking and can only be edited by global admins.
+type SavedQuery struct {
 	ID           int            `json:"id" db:"id"`
-	TeamID       TeamID         `json:"team_id" db:"team_id"`
 	SourceID     SourceID       `json:"source_id" db:"source_id"`
 	Name         string         `json:"name" db:"name"`
 	Description  string         `json:"description" db:"description"`
 	QueryType    SavedQueryType `json:"query_type" db:"query_type"`
 	QueryContent string         `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
 	IsBookmarked bool           `json:"is_bookmarked" db:"is_bookmarked"`
+	CreatedBy    *UserID        `json:"created_by,omitempty" db:"created_by"`
 	CreatedAt    time.Time      `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at" db:"updated_at"`
-	TeamName     string         `json:"team_name,omitempty"`
 	SourceName   string         `json:"source_name,omitempty"`
 }
 
-// CreateTeamQueryRequest represents a request to create a team query
-type CreateTeamQueryRequest struct {
+// CreateSavedQueryRequest is the JSON body for POST /api/v1/saved-queries.
+type CreateSavedQueryRequest struct {
 	Name         string         `json:"name" validate:"required"`
 	Description  string         `json:"description"`
 	SourceID     SourceID       `json:"source_id" validate:"required"`
@@ -183,26 +185,14 @@ type CreateTeamQueryRequest struct {
 	QueryContent string         `json:"query_content" validate:"required"`
 }
 
-// UpdateTeamQueryRequest represents a request to update a team query
-type UpdateTeamQueryRequest struct {
+// UpdateSavedQueryRequest is the JSON body for PUT /api/v1/saved-queries/:id.
+// SourceID is intentionally not updatable — re-targeting a query to a new source
+// is equivalent to creating a new one.
+type UpdateSavedQueryRequest struct {
 	Name         string         `json:"name"`
 	Description  string         `json:"description"`
-	SourceID     SourceID       `json:"source_id"`
 	QueryType    SavedQueryType `json:"query_type"`
 	QueryContent string         `json:"query_content"`
-}
-
-// SavedQuery represents a generic saved query
-type SavedQuery struct {
-	ID          int       `json:"id" db:"id"`
-	TeamID      string    `json:"team_id" db:"team_id"`
-	SourceID    string    `json:"source_id" db:"source_id"`
-	Name        string    `json:"name" db:"name"`
-	Description string    `json:"description" db:"description"`
-	QuerySQL    string    `json:"query_sql" db:"query_sql"`
-	CreatedBy   UserID    `json:"created_by" db:"created_by"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // GenerateSQLRequest defines the request body for SQL generation from natural language.

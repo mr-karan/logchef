@@ -7,7 +7,6 @@ import type {
   Source,
   CreateSourcePayload,
   SourceStats,
-  CreateTeamQueryRequest,
 } from "@/api/sources";
 import type { APIErrorResponse } from "@/api/types";
 import { useBaseStore } from "./base";
@@ -15,7 +14,6 @@ import { useBaseStore } from "./base";
 interface SourcesState {
   sources: Source[];
   teamSources: Source[];
-  sourceQueries: Record<string, any>;
   sourceStats: Record<string, SourceStats>;
   currentSourceDetails: Source | null;
   // Loading states
@@ -33,7 +31,6 @@ export const useSourcesStore = defineStore("sources", () => {
   const state = useBaseStore<SourcesState>({
     sources: [],
     teamSources: [],
-    sourceQueries: {},
     sourceStats: {},
     currentSourceDetails: null,
     isLoadingTeamSources: false,
@@ -45,7 +42,6 @@ export const useSourcesStore = defineStore("sources", () => {
   // Computed properties
   const sources = computed(() => state.data.value.sources);
   const teamSources = computed(() => state.data.value.teamSources);
-  const sourceQueries = computed(() => state.data.value.sourceQueries);
   const sourceStats = computed(() => state.data.value.sourceStats);
   const currentSourceDetails = computed(() => state.data.value.currentSourceDetails);
   
@@ -268,43 +264,6 @@ export const useSourcesStore = defineStore("sources", () => {
         },
         defaultData: [],
         showToast: false,
-      });
-    });
-  }
-
-  // Function to load source queries
-  async function loadTeamSourceQueries(teamId: number, sourceId: number) {
-    return await state.withLoading(`loadTeamSourceQueries-${sourceId}`, async () => {
-      return await state.callApi({
-        apiCall: () => sourcesApi.listTeamSourceQueries(teamId, sourceId),
-        operationKey: `loadTeamSourceQueries-${sourceId}`,
-        onSuccess: (data) => {
-          state.data.value.sourceQueries = {
-            ...state.data.value.sourceQueries,
-            [sourceId]: data
-          };
-        },
-        showToast: false,
-      });
-    });
-  }
-
-  // Create a new query for a team's source
-  async function createTeamSourceQuery(teamId: number, sourceId: number, queryData: Omit<CreateTeamQueryRequest, "team_id">) {
-    return await state.withLoading(`createTeamSourceQuery-${sourceId}`, async () => {
-      return await state.callApi({
-        apiCall: () => sourcesApi.createTeamSourceQuery(teamId, sourceId, queryData),
-        operationKey: `createTeamSourceQuery-${sourceId}`,
-        successMessage: "Query saved successfully",
-        onSuccess: (data) => {
-          // Add to existing queries if we have them loaded
-          if (state.data.value.sourceQueries[sourceId]) {
-            state.data.value.sourceQueries = {
-              ...state.data.value.sourceQueries,
-              [sourceId]: [...state.data.value.sourceQueries[sourceId], data]
-            };
-          }
-        }
       });
     });
   }
@@ -620,7 +579,6 @@ export const useSourcesStore = defineStore("sources", () => {
     // State
     sources,
     teamSources,
-    sourceQueries,
     isLoading: state.isLoading,
     error: state.error,
     teamSourcesMap,
@@ -659,8 +617,6 @@ export const useSourcesStore = defineStore("sources", () => {
     // Actions
     loadSources,
     loadTeamSources,
-    loadTeamSourceQueries,
-    createTeamSourceQuery,
     createSource,
     updateSource,
     deleteSource,

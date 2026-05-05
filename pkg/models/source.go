@@ -156,13 +156,6 @@ type SourceWithTeams struct {
 	Teams  []*Team         `json:"teams"`
 }
 
-// TeamGroupedQuery represents a query grouped by team
-type TeamGroupedQuery struct {
-	TeamID   TeamID            `json:"team_id"`
-	TeamName string            `json:"team_name"`
-	Queries  []*SavedTeamQuery `json:"queries"`
-}
-
 // ConnectionValidationResult represents the result of a connection validation
 type ConnectionValidationResult struct {
 	Message string `json:"message"`

@@ -26,6 +26,7 @@ var (
 	ErrQueryTypeRequired   = fmt.Errorf("query type is required")
 	ErrInvalidQueryType    = fmt.Errorf("invalid query type: must be 'logchefql' or 'sql'")
 	ErrInvalidQueryContent = fmt.Errorf("invalid query content format or values")
+	ErrSavedQueryForbidden = fmt.Errorf("not allowed to access this saved query")
 )
 
 // --- Saved Query Content Validation ---
@@ -33,8 +34,7 @@ var (
 // ValidateSavedQueryContent validates the JSON structure and basic rules of the query content.
 func ValidateSavedQueryContent(contentJSON string) error {
 	if contentJSON == "" {
-		// Allow empty content for potential future use cases or if validation is conditional
-		return nil // Or return an error if content is always required
+		return nil
 	}
 
 	var queryContent models.SavedQueryContent
@@ -42,7 +42,6 @@ func ValidateSavedQueryContent(contentJSON string) error {
 		return fmt.Errorf("%w: failed to parse JSON: %v", ErrInvalidQueryContent, err)
 	}
 
-	// Validate required fields and values
 	if queryContent.Version <= 0 {
 		return fmt.Errorf("%w: version must be positive", ErrInvalidQueryContent)
 	}
@@ -60,10 +59,8 @@ func ValidateSavedQueryContent(contentJSON string) error {
 		return fmt.Errorf("%w: cannot specify both relative and absolute time range", ErrInvalidQueryContent)
 	}
 
-	if hasRelativeTime {
-		if !isValidRelativeTimeFormat(queryContent.TimeRange.Relative) {
-			return fmt.Errorf("%w: invalid relative time format (expected e.g. '15m', '1h', '7d')", ErrInvalidQueryContent)
-		}
+	if hasRelativeTime && !isValidRelativeTimeFormat(queryContent.TimeRange.Relative) {
+		return fmt.Errorf("%w: invalid relative time format (expected e.g. '15m', '1h', '7d')", ErrInvalidQueryContent)
 	}
 
 	if hasAbsoluteTime {
@@ -78,162 +75,131 @@ func ValidateSavedQueryContent(contentJSON string) error {
 		}
 	}
 
-	// Add more specific content validation based on queryContent.Version if needed
-
 	return nil
 }
 
-// --- Saved Query Management Functions ---
-
-// ListQueriesForTeamAndSource retrieves all saved queries associated with a specific team and source.
-func ListQueriesForTeamAndSource(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) ([]*models.SavedTeamQuery, error) {
-
-	// Optional: Validate team and source existence first?
-	// _, err := GetTeam(ctx, db, teamID) ...
-	// _, err := GetSource(ctx, db, chDB, log, sourceID) ...
-
-	queries, err := db.ListQueriesByTeamAndSource(ctx, teamID, sourceID)
-	if err != nil {
-		log.Error("failed to list saved queries from db", "error", err, "team_id", teamID, "source_id", sourceID)
-		return nil, fmt.Errorf("error listing saved queries: %w", err)
+// validateSavedQueryFields runs the shared type+content checks used by create and update.
+func validateSavedQueryFields(queryType, queryContentJSON string, requireType bool) error {
+	if requireType && queryType == "" {
+		return ErrQueryTypeRequired
 	}
-
-	return queries, nil
+	if queryType != "" {
+		t := models.SavedQueryType(queryType)
+		if t != models.SavedQueryTypeLogchefQL && t != models.SavedQueryTypeSQL {
+			return ErrInvalidQueryType
+		}
+	}
+	if queryContentJSON != "" {
+		if err := ValidateSavedQueryContent(queryContentJSON); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// CreateTeamSourceQuery creates a new saved query for a team and source.
-func CreateTeamSourceQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, name, description, queryContentJSON, queryType string /*, createdBy models.UserID */) (*models.SavedTeamQuery, error) {
-
-	// Validate Query Type
-	if queryType == "" {
-		return nil, ErrQueryTypeRequired
-	}
-	if models.SavedQueryType(queryType) != models.SavedQueryTypeLogchefQL && models.SavedQueryType(queryType) != models.SavedQueryTypeSQL {
-		return nil, ErrInvalidQueryType
+// CreateSavedQuery persists a new saved query owned by the supplied creator.
+func CreateSavedQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, sourceID models.SourceID, name, description, queryContentJSON, queryType string, createdBy models.UserID) (*models.SavedQuery, error) {
+	if err := validateSavedQueryFields(queryType, queryContentJSON, true); err != nil {
+		log.Warn("invalid saved query create payload", "error", err, "source_id", sourceID, "name", name)
+		return nil, err
 	}
 
-	// Validate Query Content JSON
-	if err := ValidateSavedQueryContent(queryContentJSON); err != nil {
-		log.Warn("invalid saved query content provided", "error", err, "team_id", teamID, "source_id", sourceID, "name", name)
-		return nil, err // Return the specific validation error
-	}
-
-	// Optional: Validate team and source existence?
-
-	// Create TeamQuery model for DB interaction
-	// Note: The DB layer takes a models.TeamQuery which might differ slightly
-	// from models.SavedTeamQuery (e.g., CreatedBy might be handled differently).
-	dbQuery := &models.TeamQuery{
-		TeamID:       teamID,
-		SourceID:     sourceID,
-		Name:         name,
-		Description:  description,
-		QueryContent: queryContentJSON, // Store the raw JSON
-		QueryType:    models.SavedQueryType(queryType),
-		// CreatedBy: createdBy, // Pass if DB layer expects it
-	}
-
-	// Create in database
-	if err := db.CreateTeamSourceQuery(ctx, dbQuery); err != nil {
-		log.Error("failed to create saved query in db", "error", err, "team_id", teamID, "source_id", sourceID, "name", name)
-		// TODO: Check for specific DB errors (e.g., constraints)?
+	owner := createdBy
+	created, err := db.CreateSavedQuery(ctx, sourceID, name, description, queryType, queryContentJSON, &owner)
+	if err != nil {
+		log.Error("failed to create saved query", "error", err, "source_id", sourceID, "name", name)
 		return nil, fmt.Errorf("error creating saved query: %w", err)
 	}
 
-	// Convert the result back to SavedTeamQuery for the caller
-	// The dbQuery object should now have the ID and timestamps populated.
-	createdQuery := &models.SavedTeamQuery{
-		ID:           dbQuery.ID,
-		TeamID:       teamID,
-		SourceID:     sourceID,
-		Name:         name,
-		Description:  description,
-		QueryType:    models.SavedQueryType(queryType),
-		QueryContent: queryContentJSON,
-		CreatedAt:    dbQuery.CreatedAt,
-		UpdatedAt:    dbQuery.UpdatedAt,
-		// CreatedByUserID: createdBy, // Map if needed
-	}
-
-	log.Debug("saved query created", "query_id", createdQuery.ID, "team_id", teamID, "source_id", sourceID)
-	return createdQuery, nil
+	log.Debug("saved query created", "query_id", created.ID, "source_id", sourceID, "created_by", createdBy)
+	return created, nil
 }
 
-// GetTeamSourceQuery retrieves a specific saved query by its ID, team ID, and source ID.
-func GetTeamSourceQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, queryID int) (*models.SavedTeamQuery, error) {
-
-	query, err := db.GetTeamSourceQuery(ctx, teamID, sourceID, queryID)
+// GetSavedQuery retrieves a saved query by id.
+func GetSavedQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, queryID int) (*models.SavedQuery, error) {
+	q, err := db.GetSavedQuery(ctx, queryID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			log.Warn("saved query not found", "query_id", queryID, "team_id", teamID, "source_id", sourceID)
+		if errors.Is(err, sql.ErrNoRows) || sqlite.IsNotFoundError(err) {
 			return nil, ErrQueryNotFound
 		}
-		log.Error("failed to get saved query from db", "error", err, "query_id", queryID, "team_id", teamID, "source_id", sourceID)
-		return nil, fmt.Errorf("failed to get query: %w", err)
+		log.Error("failed to get saved query", "error", err, "query_id", queryID)
+		return nil, fmt.Errorf("error getting saved query: %w", err)
 	}
-
-	return query, nil
+	return q, nil
 }
 
-// UpdateTeamSourceQuery updates an existing saved query.
-func UpdateTeamSourceQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, queryID int, name, description, queryContentJSON, queryType string) (*models.SavedTeamQuery, error) {
-
-	// Validate Query Type if provided
-	if queryType != "" && models.SavedQueryType(queryType) != models.SavedQueryTypeLogchefQL && models.SavedQueryType(queryType) != models.SavedQueryTypeSQL {
-		return nil, ErrInvalidQueryType
+// UpdateSavedQuery applies new field values to an existing saved query.
+func UpdateSavedQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, queryID int, name, description, queryContentJSON, queryType string) (*models.SavedQuery, error) {
+	if err := validateSavedQueryFields(queryType, queryContentJSON, false); err != nil {
+		log.Warn("invalid saved query update payload", "error", err, "query_id", queryID)
+		return nil, err
 	}
 
-	// Validate Query Content JSON if provided
-	if queryContentJSON != "" {
-		if err := ValidateSavedQueryContent(queryContentJSON); err != nil {
-			log.Warn("invalid saved query content provided for update", "error", err, "query_id", queryID)
-			return nil, err // Return the specific validation error
-		}
-	}
-
-	// Call the database update method
-	// The DB layer should handle partial updates based on provided fields
-	err := db.UpdateTeamSourceQuery(ctx, teamID, sourceID, queryID, name, description, queryType, queryContentJSON)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			log.Warn("saved query not found for update", "query_id", queryID, "team_id", teamID, "source_id", sourceID)
+	if err := db.UpdateSavedQuery(ctx, queryID, name, description, queryType, queryContentJSON); err != nil {
+		if errors.Is(err, sql.ErrNoRows) || sqlite.IsNotFoundError(err) {
 			return nil, ErrQueryNotFound
 		}
-		log.Error("failed to update saved query in db", "error", err, "query_id", queryID, "team_id", teamID, "source_id", sourceID)
-		return nil, fmt.Errorf("failed to update query: %w", err)
+		log.Error("failed to update saved query", "error", err, "query_id", queryID)
+		return nil, fmt.Errorf("error updating saved query: %w", err)
 	}
 
-	// After successful update, fetch and return the updated query
-	updatedQuery, err := GetTeamSourceQuery(ctx, db, log, teamID, sourceID, queryID)
+	updated, err := GetSavedQuery(ctx, db, log, queryID)
 	if err != nil {
-		// Log error but potentially still signal success if update went through
-		log.Error("failed to fetch updated saved query after update", "error", err, "query_id", queryID)
-		// Return nil, nil or a marker error? For now, propagate fetch error.
 		return nil, fmt.Errorf("query updated but failed to fetch result: %w", err)
 	}
-
-	log.Debug("saved query updated", "query_id", queryID)
-	return updatedQuery, nil
+	return updated, nil
 }
 
-// DeleteTeamSourceQuery deletes a specific saved query.
-func DeleteTeamSourceQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, queryID int) error {
-
-	// Optional: Check if query exists first?
-	// _, err := GetTeamSourceQuery(ctx, db, log, teamID, sourceID, queryID)
-	// if err != nil { return err } // Handle ErrQueryNotFound appropriately
-
-	err := db.DeleteTeamSourceQuery(ctx, teamID, sourceID, queryID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			// Depending on desired behavior, this might not be an error
-			log.Warn("saved query not found for deletion", "query_id", queryID, "team_id", teamID, "source_id", sourceID)
-			return ErrQueryNotFound // Or return nil if idempotent delete is ok
-		}
-		log.Error("failed to delete saved query from db", "error", err, "query_id", queryID, "team_id", teamID, "source_id", sourceID)
-		return fmt.Errorf("failed to delete query: %w", err)
+// DeleteSavedQuery removes a saved query.
+func DeleteSavedQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, queryID int) error {
+	if err := db.DeleteSavedQuery(ctx, queryID); err != nil {
+		log.Error("failed to delete saved query", "error", err, "query_id", queryID)
+		return fmt.Errorf("error deleting saved query: %w", err)
 	}
-
-	log.Debug("saved query deleted", "query_id", queryID)
 	return nil
+}
+
+// ListSavedQueriesForUser returns every saved query the user can see (cross-team, source-mediated).
+func ListSavedQueriesForUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID models.UserID) ([]*models.SavedQuery, error) {
+	queries, err := db.ListSavedQueriesForUser(ctx, userID)
+	if err != nil {
+		log.Error("failed to list saved queries for user", "error", err, "user_id", userID)
+		return nil, fmt.Errorf("error listing saved queries: %w", err)
+	}
+	return queries, nil
+}
+
+// ListSavedQueriesForUserBySource returns saved queries for one source, gated by user access.
+func ListSavedQueriesForUserBySource(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID models.UserID, sourceID models.SourceID) ([]*models.SavedQuery, error) {
+	queries, err := db.ListSavedQueriesForUserBySource(ctx, userID, sourceID)
+	if err != nil {
+		log.Error("failed to list saved queries for user+source", "error", err, "user_id", userID, "source_id", sourceID)
+		return nil, fmt.Errorf("error listing saved queries: %w", err)
+	}
+	return queries, nil
+}
+
+// ToggleSavedQueryBookmark flips the bookmark flag and returns the new value.
+func ToggleSavedQueryBookmark(ctx context.Context, db *sqlite.DB, log *slog.Logger, queryID int) (bool, error) {
+	status, err := db.ToggleSavedQueryBookmark(ctx, queryID)
+	if err != nil {
+		log.Error("failed to toggle saved query bookmark", "error", err, "query_id", queryID)
+		return false, fmt.Errorf("error toggling saved query bookmark: %w", err)
+	}
+	return status, nil
+}
+
+// UserCanEditSavedQuery returns true if the user is the creator or a global admin.
+// Legacy queries (CreatedBy == nil) are editable only by global admins.
+func UserCanEditSavedQuery(query *models.SavedQuery, user *models.User) bool {
+	if user == nil || query == nil {
+		return false
+	}
+	if user.Role == models.UserRoleAdmin {
+		return true
+	}
+	if query.CreatedBy != nil && *query.CreatedBy == user.ID {
+		return true
+	}
+	return false
 }

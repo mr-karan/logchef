@@ -222,74 +222,90 @@ JOIN team_sources ts ON t.id = ts.team_id
 WHERE ts.source_id = ?
 ORDER BY t.name;
 
--- Team Queries
+-- Saved Queries (cross-team, source-scoped)
 
--- name: CreateTeamSourceQuery :one
--- Create a new query for a team and source
-INSERT INTO team_queries (team_id, source_id, name, description, query_type, query_content)
+-- name: CreateSavedQuery :one
+-- Insert a new saved query and return its id
+INSERT INTO saved_queries (source_id, name, description, query_type, query_content, created_by)
 VALUES (?, ?, ?, ?, ?, ?)
 RETURNING id;
 
--- name: GetTeamSourceQuery :one
--- Get a query by ID for a specific team and source
-SELECT * FROM team_queries
-WHERE id = ? AND team_id = ? AND source_id = ?;
+-- name: GetSavedQuery :one
+-- Look up one saved query by id
+SELECT * FROM saved_queries WHERE id = ?;
 
--- name: UpdateTeamSourceQuery :exec
--- Update a query for a team and source
-UPDATE team_queries
+-- name: UpdateSavedQuery :exec
+-- Update a saved query's mutable fields
+UPDATE saved_queries
 SET name = ?,
     description = ?,
     query_type = ?,
     query_content = ?,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ? AND team_id = ? AND source_id = ?;
+WHERE id = ?;
 
--- name: DeleteTeamSourceQuery :exec
--- Delete a query by ID for a specific team and source
-DELETE FROM team_queries
-WHERE id = ? AND team_id = ? AND source_id = ?;
+-- name: DeleteSavedQuery :exec
+-- Delete a saved query
+DELETE FROM saved_queries WHERE id = ?;
 
--- name: ListQueriesByTeamAndSource :many
--- List all queries for a specific team and source (bookmarked first, then by updated_at)
-SELECT * FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY is_bookmarked DESC, updated_at DESC;
-
--- name: ListQueriesByTeam :many
--- List all queries for a specific team across all sources (bookmarked first, then by updated_at)
-SELECT * FROM team_queries WHERE team_id = ? ORDER BY is_bookmarked DESC, updated_at DESC;
-
--- name: ToggleQueryBookmark :exec
--- Toggle the bookmark status of a query
-UPDATE team_queries
+-- name: ToggleSavedQueryBookmark :exec
+-- Flip the bookmark flag and bump updated_at
+UPDATE saved_queries
 SET is_bookmarked = NOT is_bookmarked,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ? AND team_id = ? AND source_id = ?;
+WHERE id = ?;
 
--- name: GetQueryBookmarkStatus :one
--- Get the current bookmark status of a query
-SELECT is_bookmarked FROM team_queries WHERE id = ? AND team_id = ? AND source_id = ?;
+-- name: GetSavedQueryBookmarkStatus :one
+-- Read the current bookmark flag
+SELECT is_bookmarked FROM saved_queries WHERE id = ?;
 
--- name: ListQueriesForUser :many
--- List all saved queries across all teams a user belongs to, with team and source names
+-- name: ListSavedQueriesForUser :many
+-- List every saved query the user can see (any source attached to any of their teams)
 SELECT
-    tq.id,
-    tq.team_id,
-    tq.source_id,
-    tq.name,
-    tq.description,
-    tq.query_type,
-    tq.query_content,
-    tq.created_at,
-    tq.updated_at,
-    tq.is_bookmarked,
-    t.name AS team_name,
+    sq.id,
+    sq.source_id,
+    sq.name,
+    sq.description,
+    sq.query_type,
+    sq.query_content,
+    sq.created_at,
+    sq.updated_at,
+    sq.is_bookmarked,
+    sq.created_by,
     s.name AS source_name
-FROM team_queries tq
-JOIN team_members tm ON tm.team_id = tq.team_id
-JOIN teams t ON t.id = tq.team_id
-JOIN sources s ON s.id = tq.source_id
-WHERE tm.user_id = ?
-ORDER BY tq.is_bookmarked DESC, tq.updated_at DESC;
+FROM saved_queries sq
+JOIN sources s ON s.id = sq.source_id
+WHERE sq.source_id IN (
+    SELECT DISTINCT ts.source_id
+    FROM team_sources ts
+    JOIN team_members tm ON tm.team_id = ts.team_id
+    WHERE tm.user_id = ?
+)
+ORDER BY sq.is_bookmarked DESC, sq.updated_at DESC;
+
+-- name: ListSavedQueriesForUserBySource :many
+-- List saved queries for a specific source, scoped to a user that has access to it
+SELECT
+    sq.id,
+    sq.source_id,
+    sq.name,
+    sq.description,
+    sq.query_type,
+    sq.query_content,
+    sq.created_at,
+    sq.updated_at,
+    sq.is_bookmarked,
+    sq.created_by,
+    s.name AS source_name
+FROM saved_queries sq
+JOIN sources s ON s.id = sq.source_id
+WHERE sq.source_id = ?
+  AND EXISTS (
+    SELECT 1 FROM team_sources ts
+    JOIN team_members tm ON tm.team_id = ts.team_id
+    WHERE ts.source_id = sq.source_id AND tm.user_id = ?
+  )
+ORDER BY sq.is_bookmarked DESC, sq.updated_at DESC;
 
 -- Query Shares
 

@@ -52,7 +52,7 @@ import SaveQueryModal from "@/components/collections/SaveQueryModal.vue";
 import { getErrorMessage } from "@/api/types";
 import { useSourcesStore } from "@/stores/sources";
 import { formatSourceName } from "@/utils/format";
-import type { SavedTeamQuery } from "@/api/savedQueries";
+import type { SavedQuery } from "@/api/savedQueries";
 import { useTeamsStore } from "@/stores/teams";
 import { Badge } from "@/components/ui/badge";
 import { useSavedQueries } from "@/composables/useSavedQueries";
@@ -82,7 +82,7 @@ const {
   handleSourceChange: contextHandleSourceChange,
 } = useContextSync({ basePath: '/logs/saved' });
 
-const localTeamQueries = ref<SavedTeamQuery[] | undefined>();
+const localTeamQueries = ref<SavedQuery[] | undefined>();
 const isAllTeamsMode = ref(false);
 const isAllSourcesMode = computed(() => isAllTeamsMode.value || !contextSourceId.value);
 
@@ -212,7 +212,7 @@ async function handleTeamChange(teamId: string) {
       isAllTeamsMode.value = true;
       contextStore.clearSource();
       localTeamQueries.value = [];
-      const result = await savedQueriesStore.fetchMyCollections();
+      const result = await savedQueriesStore.list();
       if (result.success) {
         localTeamQueries.value = result.data ?? [];
       }
@@ -282,7 +282,8 @@ async function fetchQueries() {
   }
 
   if (isAllSourcesMode.value) {
-    const result = await savedQueriesStore.fetchTeamCollections(contextTeamId.value);
+    // Saved queries are no longer team-scoped — list all queries the user can see.
+    const result = await savedQueriesStore.list();
     localTeamQueries.value = result.success ? (result.data ?? []) : [];
     return;
   }
@@ -300,14 +301,14 @@ async function fetchQueries() {
     return;
   }
 
-  await loadSourceQueries(contextTeamId.value, contextSourceId.value);
+  await loadSourceQueries(contextSourceId.value);
 }
 
 function formatTime(dateStr: string): string {
   return formatDate(dateStr);
 }
 
-async function handleDeleteQuery(query: SavedTeamQuery) {
+async function handleDeleteQuery(query: SavedQuery) {
   const result = await deleteQuery(query);
   if (result.success && contextSourceId.value) {
     await fetchQueries();
@@ -319,12 +320,10 @@ async function handleSaveQuery(formData: SaveQueryFormData) {
 }
 
 async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
-  if (!contextTeamId.value || !contextSourceId.value) return;
-
   try {
     const result = await updateSavedQuery(
-      contextTeamId.value!,
-      contextSourceId.value!,
+      undefined,
+      undefined,
       queryId,
       {
         name: formData.name,
@@ -348,33 +347,18 @@ function handleCreateNewQuery() {
   createNewQuery(contextSourceId.value ?? undefined);
 }
 
-async function handleToggleBookmark(query: SavedTeamQuery) {
-  const teamId = query.team_id || contextTeamId.value;
-  const sourceId = query.source_id || contextSourceId.value;
-  if (!teamId || !sourceId) return;
-
-  const result = await savedQueriesStore.toggleBookmark(
-    teamId,
-    sourceId,
-    query.id
-  );
-
-  if (result.success && result.data) {
-    if (localTeamQueries.value) {
-      const index = localTeamQueries.value.findIndex((q) => q.id === query.id);
-      if (index >= 0) {
-        localTeamQueries.value[index].is_bookmarked = result.data.is_bookmarked;
-      }
+async function handleToggleBookmark(query: SavedQuery) {
+  const result = await savedQueriesStore.toggleBookmark(query.id);
+  if (result.success && result.data && localTeamQueries.value) {
+    const index = localTeamQueries.value.findIndex((q) => q.id === query.id);
+    if (index >= 0) {
+      localTeamQueries.value[index].is_bookmarked = result.data.is_bookmarked;
     }
   }
 }
 
-async function copyCollectionUrl(query: SavedTeamQuery) {
-  const teamId = query.team_id || contextTeamId.value;
-  const sourceId = query.source_id || contextSourceId.value;
-  if (!teamId || !sourceId) return;
-
-  const url = `${window.location.origin}/logs/collection/${teamId}/${sourceId}/${query.id}`;
+async function copyCollectionUrl(query: SavedQuery) {
+  const url = `${window.location.origin}/logs/saved/${query.id}`;
 
   try {
     await navigator.clipboard.writeText(url);
@@ -595,7 +579,6 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
                   <TableRow>
                     <TableHead class="w-[50px]"></TableHead>
                     <TableHead class="w-[240px]">Name</TableHead>
-                    <TableHead v-if="isAllTeamsMode" class="w-[120px]">Team</TableHead>
                     <TableHead v-if="isAllSourcesMode" class="w-[150px]">Source</TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead class="w-[100px]">Type</TableHead>
@@ -647,7 +630,6 @@ async function copyCollectionUrl(query: SavedTeamQuery) {
                         {{ query.name }}
                       </a>
                     </TableCell>
-                    <TableCell v-if="isAllTeamsMode">{{ query.team_name || `Team ${query.team_id}` }}</TableCell>
                     <TableCell v-if="isAllSourcesMode">{{ query.source_name || getSourceName(query.source_id) }}</TableCell>
                     <TableCell>{{ query.description || "-" }}</TableCell>
                     <TableCell>

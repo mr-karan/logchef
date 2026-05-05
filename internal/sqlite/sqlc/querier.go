@@ -34,6 +34,9 @@ type Querier interface {
 	// Query Shares
 	// Persist an ad hoc query share token
 	CreateQueryShare(ctx context.Context, arg CreateQueryShareParams) error
+	// Saved Queries (cross-team, source-scoped)
+	// Insert a new saved query and return its id
+	CreateSavedQuery(ctx context.Context, arg CreateSavedQueryParams) (int64, error)
 	// Sessions
 	// Create a new session
 	CreateSession(ctx context.Context, arg CreateSessionParams) error
@@ -43,9 +46,6 @@ type Querier interface {
 	// Teams
 	// Create a new team
 	CreateTeam(ctx context.Context, arg CreateTeamParams) (int64, error)
-	// Team Queries
-	// Create a new query for a team and source
-	CreateTeamSourceQuery(ctx context.Context, arg CreateTeamSourceQueryParams) (int64, error)
 	// Users
 	// Create a new user
 	CreateUser(ctx context.Context, arg CreateUserParams) (int64, error)
@@ -58,6 +58,8 @@ type Querier interface {
 	DeleteExpiredExportJobs(ctx context.Context, expiresAt time.Time) error
 	// Delete a query share and return its token
 	DeleteQueryShare(ctx context.Context, token string) (string, error)
+	// Delete a saved query
+	DeleteSavedQuery(ctx context.Context, id int64) error
 	// Delete a session by ID
 	DeleteSession(ctx context.Context, id string) error
 	// Delete a source by ID
@@ -65,8 +67,6 @@ type Querier interface {
 	DeleteSystemSetting(ctx context.Context, key string) error
 	// Delete a team by ID
 	DeleteTeam(ctx context.Context, id int64) error
-	// Delete a query by ID for a specific team and source
-	DeleteTeamSourceQuery(ctx context.Context, arg DeleteTeamSourceQueryParams) error
 	// Delete a user by ID
 	DeleteUser(ctx context.Context, id int64) error
 	// Delete all sessions for a user
@@ -82,10 +82,12 @@ type Querier interface {
 	// Retrieve an export job by ID
 	GetExportJob(ctx context.Context, id string) (ExportJob, error)
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID int64) (AlertHistory, error)
-	// Get the current bookmark status of a query
-	GetQueryBookmarkStatus(ctx context.Context, arg GetQueryBookmarkStatusParams) (bool, error)
 	// Retrieve an ad hoc query share by token with creator details
 	GetQueryShare(ctx context.Context, token string) (GetQueryShareRow, error)
+	// Look up one saved query by id
+	GetSavedQuery(ctx context.Context, id int64) (SavedQuery, error)
+	// Read the current bookmark flag
+	GetSavedQueryBookmarkStatus(ctx context.Context, id int64) (bool, error)
 	// Get a session by ID
 	GetSession(ctx context.Context, id string) (Session, error)
 	// Get a single source by ID
@@ -102,8 +104,6 @@ type Querier interface {
 	GetTeamByName(ctx context.Context, name string) (Team, error)
 	// Get a team member
 	GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (TeamMember, error)
-	// Get a query by ID for a specific team and source
-	GetTeamSourceQuery(ctx context.Context, arg GetTeamSourceQueryParams) (TeamQuery, error)
 	// Get a user by ID
 	GetUser(ctx context.Context, id int64) (User, error)
 	// Get a user by email
@@ -133,12 +133,10 @@ type Querier interface {
 	ListManagedTeams(ctx context.Context) ([]Team, error)
 	// Get all users managed by provisioning config
 	ListManagedUsers(ctx context.Context) ([]User, error)
-	// List all queries for a specific team across all sources (bookmarked first, then by updated_at)
-	ListQueriesByTeam(ctx context.Context, teamID int64) ([]TeamQuery, error)
-	// List all queries for a specific team and source (bookmarked first, then by updated_at)
-	ListQueriesByTeamAndSource(ctx context.Context, arg ListQueriesByTeamAndSourceParams) ([]TeamQuery, error)
-	// List all saved queries across all teams a user belongs to, with team and source names
-	ListQueriesForUser(ctx context.Context, userID int64) ([]ListQueriesForUserRow, error)
+	// List every saved query the user can see (any source attached to any of their teams)
+	ListSavedQueriesForUser(ctx context.Context, userID int64) ([]ListSavedQueriesForUserRow, error)
+	// List saved queries for a specific source, scoped to a user that has access to it
+	ListSavedQueriesForUserBySource(ctx context.Context, arg ListSavedQueriesForUserBySourceParams) ([]ListSavedQueriesForUserBySourceRow, error)
 	// List all teams a data source is a member of
 	ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, error)
 	// Get all sources ordered by creation date
@@ -180,8 +178,8 @@ type Querier interface {
 	// Additional queries for user-source and team-source access
 	// Check if a team has access to a source
 	TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (int64, error)
-	// Toggle the bookmark status of a query
-	ToggleQueryBookmark(ctx context.Context, arg ToggleQueryBookmarkParams) error
+	// Flip the bookmark flag and bump updated_at
+	ToggleSavedQueryBookmark(ctx context.Context, id int64) error
 	// Update a query share's last access time
 	TouchQueryShare(ctx context.Context, arg TouchQueryShareParams) error
 	// Update the last used timestamp for an API token
@@ -190,14 +188,14 @@ type Querier interface {
 	UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlertHistoryPayloadParams) (int64, error)
 	// Mark an export job as running and return its ID
 	UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error)
+	// Update a saved query's mutable fields
+	UpdateSavedQuery(ctx context.Context, arg UpdateSavedQueryParams) error
 	// Update an existing source
 	UpdateSource(ctx context.Context, arg UpdateSourceParams) error
 	// Update a team
 	UpdateTeam(ctx context.Context, arg UpdateTeamParams) error
 	// Update a team member's role
 	UpdateTeamMemberRole(ctx context.Context, arg UpdateTeamMemberRoleParams) error
-	// Update a query for a team and source
-	UpdateTeamSourceQuery(ctx context.Context, arg UpdateTeamSourceQueryParams) error
 	// Update a user
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
 	UpsertSystemSetting(ctx context.Context, arg UpsertSystemSettingParams) error

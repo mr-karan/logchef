@@ -225,22 +225,10 @@ export function useUrlState(): UrlStateReturn {
           pendingQueryResolve.value = true;
 
           try {
-            // Use team/source from URL params, not from store state
-            // The stores might not be updated yet or might have different values
-            const teamId = params.team ? parseInt(params.team, 10) : teamsStore.currentTeamId;
-            const sourceId = params.source ? parseInt(params.source, 10) : exploreStore.sourceId;
-
-            if (teamId && sourceId) {
-              const response = await savedQueriesApi.resolveQuery(
-                teamId,
-                sourceId,
-                parseInt(result.queryId)
-              );
-
-              if (response.data) {
-                const hydrateResult = exploreStore.hydrateFromResolvedQuery(response.data);
-                shouldExecute = hydrateResult.shouldExecute;
-              }
+            const response = await savedQueriesApi.resolve(parseInt(result.queryId));
+            if (response.data) {
+              const hydrateResult = exploreStore.hydrateFromResolvedQuery(response.data);
+              shouldExecute = hydrateResult.shouldExecute;
             }
           } finally {
             pendingQueryResolve.value = false;

@@ -115,13 +115,13 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "Alert Detail" },
       },
       {
-        path: "collection/:teamId/:sourceId/:collectionId",
-        name: "CollectionRedirect",
+        path: "saved/:queryId",
+        name: "SavedQueryRedirect",
         component: () => import("@/views/collections/CollectionRedirect.vue").catch(err => {
-          error("Router", "Failed to load CollectionRedirect component", err);
+          error("Router", "Failed to load SavedQueryRedirect component", err);
           return { default: ComponentLoadError };
         }),
-        meta: { title: "Loading Collection..." },
+        meta: { title: "Loading Saved Query..." },
       },
 
     ],
