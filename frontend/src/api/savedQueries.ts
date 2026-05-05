@@ -1,6 +1,5 @@
 import { apiClient } from "./apiUtils";
 import type { VariableState } from "@/stores/variables";
-import type { QueryFolderColor } from "./queryFolders";
 
 export interface SavedQueryContent {
   version: number;
@@ -15,12 +14,6 @@ export interface SavedQueryContent {
   limit: number;
   content: string;
   variables?: VariableState[];
-}
-
-export interface QueryFolderSummary {
-  id: number;
-  name: string;
-  color: QueryFolderColor;
 }
 
 /**
@@ -39,7 +32,6 @@ export interface SavedTeamQuery {
   updated_at: string;
   team_name?: string;
   source_name?: string;
-  folders?: QueryFolderSummary[];
 }
 
 /**
@@ -86,14 +78,13 @@ export const savedQueriesApi = {
     description: string;
     query_type: string;
     query_content: string;
-    folder_ids?: number[];
   }) => apiClient.post<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections`, query),
 
   updateTeamSourceQuery: (
     teamId: number,
     sourceId: number,
     collectionId: string,
-    query: Partial<Omit<SavedTeamQuery, "id" | "team_id" | "source_id" | "created_at" | "updated_at">> & { folder_ids?: number[] }
+    query: Partial<Omit<SavedTeamQuery, "id" | "team_id" | "source_id" | "created_at" | "updated_at">>
   ) =>
     apiClient.put<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}`, query),
 

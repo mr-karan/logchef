@@ -67,9 +67,6 @@ func (db *DB) GetTeamSourceQuery(ctx context.Context, teamID models.TeamID, sour
 		UpdatedAt:    sqlcQuery.UpdatedAt,
 		// CreatedByUserID is not present in the sqlc model/query.
 	}
-	if err := db.AttachFoldersToQueries(ctx, []*models.SavedTeamQuery{query}); err != nil {
-		return nil, err
-	}
 	return query, nil
 }
 
@@ -142,9 +139,6 @@ func (db *DB) ListQueriesByTeam(ctx context.Context, teamID models.TeamID) ([]*m
 			UpdatedAt:    sqlcQueries[i].UpdatedAt,
 		})
 	}
-	if err := db.AttachFoldersToQueries(ctx, queries); err != nil {
-		return nil, err
-	}
 
 	return queries, nil
 }
@@ -177,9 +171,6 @@ func (db *DB) ListQueriesByTeamAndSource(ctx context.Context, teamID models.Team
 			CreatedAt:    sqlcQueries[i].CreatedAt,
 			UpdatedAt:    sqlcQueries[i].UpdatedAt,
 		})
-	}
-	if err := db.AttachFoldersToQueries(ctx, queries); err != nil {
-		return nil, err
 	}
 
 	return queries, nil
@@ -240,9 +231,6 @@ func (db *DB) ListQueriesForUser(ctx context.Context, userID models.UserID) ([]*
 			TeamName:     sqlcQueries[i].TeamName,
 			SourceName:   sqlcQueries[i].SourceName,
 		})
-	}
-	if err := db.AttachFoldersToQueries(ctx, queries); err != nil {
-		return nil, err
 	}
 
 	return queries, nil

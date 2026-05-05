@@ -36,12 +36,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.countAdminUsersStmt, err = db.PrepareContext(ctx, countAdminUsers); err != nil {
 		return nil, fmt.Errorf("error preparing query CountAdminUsers: %w", err)
 	}
-	if q.countQueryFolderForTeamStmt, err = db.PrepareContext(ctx, countQueryFolderForTeam); err != nil {
-		return nil, fmt.Errorf("error preparing query CountQueryFolderForTeam: %w", err)
-	}
-	if q.countTeamQueryForTeamStmt, err = db.PrepareContext(ctx, countTeamQueryForTeam); err != nil {
-		return nil, fmt.Errorf("error preparing query CountTeamQueryForTeam: %w", err)
-	}
 	if q.countUserSessionsStmt, err = db.PrepareContext(ctx, countUserSessions); err != nil {
 		return nil, fmt.Errorf("error preparing query CountUserSessions: %w", err)
 	}
@@ -53,15 +47,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.createExportJobStmt, err = db.PrepareContext(ctx, createExportJob); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateExportJob: %w", err)
-	}
-	if q.createQueryFolderStmt, err = db.PrepareContext(ctx, createQueryFolder); err != nil {
-		return nil, fmt.Errorf("error preparing query CreateQueryFolder: %w", err)
-	}
-	if q.createQueryFolderItemStmt, err = db.PrepareContext(ctx, createQueryFolderItem); err != nil {
-		return nil, fmt.Errorf("error preparing query CreateQueryFolderItem: %w", err)
-	}
-	if q.createQueryFolderItemIgnoreStmt, err = db.PrepareContext(ctx, createQueryFolderItemIgnore); err != nil {
-		return nil, fmt.Errorf("error preparing query CreateQueryFolderItemIgnore: %w", err)
 	}
 	if q.createQueryShareStmt, err = db.PrepareContext(ctx, createQueryShare); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateQueryShare: %w", err)
@@ -92,12 +77,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.deleteExpiredExportJobsStmt, err = db.PrepareContext(ctx, deleteExpiredExportJobs); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteExpiredExportJobs: %w", err)
-	}
-	if q.deleteQueryFolderStmt, err = db.PrepareContext(ctx, deleteQueryFolder); err != nil {
-		return nil, fmt.Errorf("error preparing query DeleteQueryFolder: %w", err)
-	}
-	if q.deleteQueryFolderItemsByQueryStmt, err = db.PrepareContext(ctx, deleteQueryFolderItemsByQuery); err != nil {
-		return nil, fmt.Errorf("error preparing query DeleteQueryFolderItemsByQuery: %w", err)
 	}
 	if q.deleteQueryShareStmt, err = db.PrepareContext(ctx, deleteQueryShare); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteQueryShare: %w", err)
@@ -146,9 +125,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getQueryBookmarkStatusStmt, err = db.PrepareContext(ctx, getQueryBookmarkStatus); err != nil {
 		return nil, fmt.Errorf("error preparing query GetQueryBookmarkStatus: %w", err)
-	}
-	if q.getQueryFolderStmt, err = db.PrepareContext(ctx, getQueryFolder); err != nil {
-		return nil, fmt.Errorf("error preparing query GetQueryFolder: %w", err)
 	}
 	if q.getQueryShareStmt, err = db.PrepareContext(ctx, getQueryShare); err != nil {
 		return nil, fmt.Errorf("error preparing query GetQueryShare: %w", err)
@@ -225,9 +201,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listManagedUsersStmt, err = db.PrepareContext(ctx, listManagedUsers); err != nil {
 		return nil, fmt.Errorf("error preparing query ListManagedUsers: %w", err)
 	}
-	if q.listQueriesByFolderStmt, err = db.PrepareContext(ctx, listQueriesByFolder); err != nil {
-		return nil, fmt.Errorf("error preparing query ListQueriesByFolder: %w", err)
-	}
 	if q.listQueriesByTeamStmt, err = db.PrepareContext(ctx, listQueriesByTeam); err != nil {
 		return nil, fmt.Errorf("error preparing query ListQueriesByTeam: %w", err)
 	}
@@ -236,12 +209,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listQueriesForUserStmt, err = db.PrepareContext(ctx, listQueriesForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListQueriesForUser: %w", err)
-	}
-	if q.listQueryFoldersStmt, err = db.PrepareContext(ctx, listQueryFolders); err != nil {
-		return nil, fmt.Errorf("error preparing query ListQueryFolders: %w", err)
-	}
-	if q.listQueryFoldersByQueryIDsStmt, err = db.PrepareContext(ctx, listQueryFoldersByQueryIDs); err != nil {
-		return nil, fmt.Errorf("error preparing query ListQueryFoldersByQueryIDs: %w", err)
 	}
 	if q.listSourceTeamsStmt, err = db.PrepareContext(ctx, listSourceTeams); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSourceTeams: %w", err)
@@ -291,9 +258,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.pruneExpiredQuerySharesStmt, err = db.PrepareContext(ctx, pruneExpiredQueryShares); err != nil {
 		return nil, fmt.Errorf("error preparing query PruneExpiredQueryShares: %w", err)
 	}
-	if q.removeQueryFromFolderStmt, err = db.PrepareContext(ctx, removeQueryFromFolder); err != nil {
-		return nil, fmt.Errorf("error preparing query RemoveQueryFromFolder: %w", err)
-	}
 	if q.removeTeamMemberStmt, err = db.PrepareContext(ctx, removeTeamMember); err != nil {
 		return nil, fmt.Errorf("error preparing query RemoveTeamMember: %w", err)
 	}
@@ -332,9 +296,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.updateExportJobRunningStmt, err = db.PrepareContext(ctx, updateExportJobRunning); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateExportJobRunning: %w", err)
-	}
-	if q.updateQueryFolderStmt, err = db.PrepareContext(ctx, updateQueryFolder); err != nil {
-		return nil, fmt.Errorf("error preparing query UpdateQueryFolder: %w", err)
 	}
 	if q.updateSourceStmt, err = db.PrepareContext(ctx, updateSource); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSource: %w", err)
@@ -385,16 +346,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing countAdminUsersStmt: %w", cerr)
 		}
 	}
-	if q.countQueryFolderForTeamStmt != nil {
-		if cerr := q.countQueryFolderForTeamStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing countQueryFolderForTeamStmt: %w", cerr)
-		}
-	}
-	if q.countTeamQueryForTeamStmt != nil {
-		if cerr := q.countTeamQueryForTeamStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing countTeamQueryForTeamStmt: %w", cerr)
-		}
-	}
 	if q.countUserSessionsStmt != nil {
 		if cerr := q.countUserSessionsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing countUserSessionsStmt: %w", cerr)
@@ -413,21 +364,6 @@ func (q *Queries) Close() error {
 	if q.createExportJobStmt != nil {
 		if cerr := q.createExportJobStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createExportJobStmt: %w", cerr)
-		}
-	}
-	if q.createQueryFolderStmt != nil {
-		if cerr := q.createQueryFolderStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing createQueryFolderStmt: %w", cerr)
-		}
-	}
-	if q.createQueryFolderItemStmt != nil {
-		if cerr := q.createQueryFolderItemStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing createQueryFolderItemStmt: %w", cerr)
-		}
-	}
-	if q.createQueryFolderItemIgnoreStmt != nil {
-		if cerr := q.createQueryFolderItemIgnoreStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing createQueryFolderItemIgnoreStmt: %w", cerr)
 		}
 	}
 	if q.createQueryShareStmt != nil {
@@ -478,16 +414,6 @@ func (q *Queries) Close() error {
 	if q.deleteExpiredExportJobsStmt != nil {
 		if cerr := q.deleteExpiredExportJobsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteExpiredExportJobsStmt: %w", cerr)
-		}
-	}
-	if q.deleteQueryFolderStmt != nil {
-		if cerr := q.deleteQueryFolderStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing deleteQueryFolderStmt: %w", cerr)
-		}
-	}
-	if q.deleteQueryFolderItemsByQueryStmt != nil {
-		if cerr := q.deleteQueryFolderItemsByQueryStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing deleteQueryFolderItemsByQueryStmt: %w", cerr)
 		}
 	}
 	if q.deleteQueryShareStmt != nil {
@@ -568,11 +494,6 @@ func (q *Queries) Close() error {
 	if q.getQueryBookmarkStatusStmt != nil {
 		if cerr := q.getQueryBookmarkStatusStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getQueryBookmarkStatusStmt: %w", cerr)
-		}
-	}
-	if q.getQueryFolderStmt != nil {
-		if cerr := q.getQueryFolderStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing getQueryFolderStmt: %w", cerr)
 		}
 	}
 	if q.getQueryShareStmt != nil {
@@ -700,11 +621,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listManagedUsersStmt: %w", cerr)
 		}
 	}
-	if q.listQueriesByFolderStmt != nil {
-		if cerr := q.listQueriesByFolderStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listQueriesByFolderStmt: %w", cerr)
-		}
-	}
 	if q.listQueriesByTeamStmt != nil {
 		if cerr := q.listQueriesByTeamStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listQueriesByTeamStmt: %w", cerr)
@@ -718,16 +634,6 @@ func (q *Queries) Close() error {
 	if q.listQueriesForUserStmt != nil {
 		if cerr := q.listQueriesForUserStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listQueriesForUserStmt: %w", cerr)
-		}
-	}
-	if q.listQueryFoldersStmt != nil {
-		if cerr := q.listQueryFoldersStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listQueryFoldersStmt: %w", cerr)
-		}
-	}
-	if q.listQueryFoldersByQueryIDsStmt != nil {
-		if cerr := q.listQueryFoldersByQueryIDsStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listQueryFoldersByQueryIDsStmt: %w", cerr)
 		}
 	}
 	if q.listSourceTeamsStmt != nil {
@@ -810,11 +716,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing pruneExpiredQuerySharesStmt: %w", cerr)
 		}
 	}
-	if q.removeQueryFromFolderStmt != nil {
-		if cerr := q.removeQueryFromFolderStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing removeQueryFromFolderStmt: %w", cerr)
-		}
-	}
 	if q.removeTeamMemberStmt != nil {
 		if cerr := q.removeTeamMemberStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing removeTeamMemberStmt: %w", cerr)
@@ -878,11 +779,6 @@ func (q *Queries) Close() error {
 	if q.updateExportJobRunningStmt != nil {
 		if cerr := q.updateExportJobRunningStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateExportJobRunningStmt: %w", cerr)
-		}
-	}
-	if q.updateQueryFolderStmt != nil {
-		if cerr := q.updateQueryFolderStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing updateQueryFolderStmt: %w", cerr)
 		}
 	}
 	if q.updateSourceStmt != nil {
@@ -968,15 +864,10 @@ type Queries struct {
 	addTeamSourceStmt                   *sql.Stmt
 	completeExportJobStmt               *sql.Stmt
 	countAdminUsersStmt                 *sql.Stmt
-	countQueryFolderForTeamStmt         *sql.Stmt
-	countTeamQueryForTeamStmt           *sql.Stmt
 	countUserSessionsStmt               *sql.Stmt
 	createAPITokenStmt                  *sql.Stmt
 	createAlertStmt                     *sql.Stmt
 	createExportJobStmt                 *sql.Stmt
-	createQueryFolderStmt               *sql.Stmt
-	createQueryFolderItemStmt           *sql.Stmt
-	createQueryFolderItemIgnoreStmt     *sql.Stmt
 	createQueryShareStmt                *sql.Stmt
 	createSessionStmt                   *sql.Stmt
 	createSourceStmt                    *sql.Stmt
@@ -987,8 +878,6 @@ type Queries struct {
 	deleteAlertStmt                     *sql.Stmt
 	deleteExpiredAPITokensStmt          *sql.Stmt
 	deleteExpiredExportJobsStmt         *sql.Stmt
-	deleteQueryFolderStmt               *sql.Stmt
-	deleteQueryFolderItemsByQueryStmt   *sql.Stmt
 	deleteQueryShareStmt                *sql.Stmt
 	deleteSessionStmt                   *sql.Stmt
 	deleteSourceStmt                    *sql.Stmt
@@ -1005,7 +894,6 @@ type Queries struct {
 	getExportJobStmt                    *sql.Stmt
 	getLatestUnresolvedAlertHistoryStmt *sql.Stmt
 	getQueryBookmarkStatusStmt          *sql.Stmt
-	getQueryFolderStmt                  *sql.Stmt
 	getQueryShareStmt                   *sql.Stmt
 	getSessionStmt                      *sql.Stmt
 	getSourceStmt                       *sql.Stmt
@@ -1031,12 +919,9 @@ type Queries struct {
 	listManagedSourcesStmt              *sql.Stmt
 	listManagedTeamsStmt                *sql.Stmt
 	listManagedUsersStmt                *sql.Stmt
-	listQueriesByFolderStmt             *sql.Stmt
 	listQueriesByTeamStmt               *sql.Stmt
 	listQueriesByTeamAndSourceStmt      *sql.Stmt
 	listQueriesForUserStmt              *sql.Stmt
-	listQueryFoldersStmt                *sql.Stmt
-	listQueryFoldersByQueryIDsStmt      *sql.Stmt
 	listSourceTeamsStmt                 *sql.Stmt
 	listSourcesStmt                     *sql.Stmt
 	listSourcesForUserStmt              *sql.Stmt
@@ -1053,7 +938,6 @@ type Queries struct {
 	markAlertTriggeredStmt              *sql.Stmt
 	pruneAlertHistoryStmt               *sql.Stmt
 	pruneExpiredQuerySharesStmt         *sql.Stmt
-	removeQueryFromFolderStmt           *sql.Stmt
 	removeTeamMemberStmt                *sql.Stmt
 	removeTeamSourceStmt                *sql.Stmt
 	resolveAlertHistoryStmt             *sql.Stmt
@@ -1067,7 +951,6 @@ type Queries struct {
 	updateAlertStmt                     *sql.Stmt
 	updateAlertHistoryPayloadStmt       *sql.Stmt
 	updateExportJobRunningStmt          *sql.Stmt
-	updateQueryFolderStmt               *sql.Stmt
 	updateSourceStmt                    *sql.Stmt
 	updateTeamStmt                      *sql.Stmt
 	updateTeamMemberRoleStmt            *sql.Stmt
@@ -1086,15 +969,10 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		addTeamSourceStmt:                   q.addTeamSourceStmt,
 		completeExportJobStmt:               q.completeExportJobStmt,
 		countAdminUsersStmt:                 q.countAdminUsersStmt,
-		countQueryFolderForTeamStmt:         q.countQueryFolderForTeamStmt,
-		countTeamQueryForTeamStmt:           q.countTeamQueryForTeamStmt,
 		countUserSessionsStmt:               q.countUserSessionsStmt,
 		createAPITokenStmt:                  q.createAPITokenStmt,
 		createAlertStmt:                     q.createAlertStmt,
 		createExportJobStmt:                 q.createExportJobStmt,
-		createQueryFolderStmt:               q.createQueryFolderStmt,
-		createQueryFolderItemStmt:           q.createQueryFolderItemStmt,
-		createQueryFolderItemIgnoreStmt:     q.createQueryFolderItemIgnoreStmt,
 		createQueryShareStmt:                q.createQueryShareStmt,
 		createSessionStmt:                   q.createSessionStmt,
 		createSourceStmt:                    q.createSourceStmt,
@@ -1105,8 +983,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteAlertStmt:                     q.deleteAlertStmt,
 		deleteExpiredAPITokensStmt:          q.deleteExpiredAPITokensStmt,
 		deleteExpiredExportJobsStmt:         q.deleteExpiredExportJobsStmt,
-		deleteQueryFolderStmt:               q.deleteQueryFolderStmt,
-		deleteQueryFolderItemsByQueryStmt:   q.deleteQueryFolderItemsByQueryStmt,
 		deleteQueryShareStmt:                q.deleteQueryShareStmt,
 		deleteSessionStmt:                   q.deleteSessionStmt,
 		deleteSourceStmt:                    q.deleteSourceStmt,
@@ -1123,7 +999,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getExportJobStmt:                    q.getExportJobStmt,
 		getLatestUnresolvedAlertHistoryStmt: q.getLatestUnresolvedAlertHistoryStmt,
 		getQueryBookmarkStatusStmt:          q.getQueryBookmarkStatusStmt,
-		getQueryFolderStmt:                  q.getQueryFolderStmt,
 		getQueryShareStmt:                   q.getQueryShareStmt,
 		getSessionStmt:                      q.getSessionStmt,
 		getSourceStmt:                       q.getSourceStmt,
@@ -1149,12 +1024,9 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listManagedSourcesStmt:              q.listManagedSourcesStmt,
 		listManagedTeamsStmt:                q.listManagedTeamsStmt,
 		listManagedUsersStmt:                q.listManagedUsersStmt,
-		listQueriesByFolderStmt:             q.listQueriesByFolderStmt,
 		listQueriesByTeamStmt:               q.listQueriesByTeamStmt,
 		listQueriesByTeamAndSourceStmt:      q.listQueriesByTeamAndSourceStmt,
 		listQueriesForUserStmt:              q.listQueriesForUserStmt,
-		listQueryFoldersStmt:                q.listQueryFoldersStmt,
-		listQueryFoldersByQueryIDsStmt:      q.listQueryFoldersByQueryIDsStmt,
 		listSourceTeamsStmt:                 q.listSourceTeamsStmt,
 		listSourcesStmt:                     q.listSourcesStmt,
 		listSourcesForUserStmt:              q.listSourcesForUserStmt,
@@ -1171,7 +1043,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		markAlertTriggeredStmt:              q.markAlertTriggeredStmt,
 		pruneAlertHistoryStmt:               q.pruneAlertHistoryStmt,
 		pruneExpiredQuerySharesStmt:         q.pruneExpiredQuerySharesStmt,
-		removeQueryFromFolderStmt:           q.removeQueryFromFolderStmt,
 		removeTeamMemberStmt:                q.removeTeamMemberStmt,
 		removeTeamSourceStmt:                q.removeTeamSourceStmt,
 		resolveAlertHistoryStmt:             q.resolveAlertHistoryStmt,
@@ -1185,7 +1056,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateAlertStmt:                     q.updateAlertStmt,
 		updateAlertHistoryPayloadStmt:       q.updateAlertHistoryPayloadStmt,
 		updateExportJobRunningStmt:          q.updateExportJobRunningStmt,
-		updateQueryFolderStmt:               q.updateQueryFolderStmt,
 		updateSourceStmt:                    q.updateSourceStmt,
 		updateTeamStmt:                      q.updateTeamStmt,
 		updateTeamMemberRoleStmt:            q.updateTeamMemberRoleStmt,

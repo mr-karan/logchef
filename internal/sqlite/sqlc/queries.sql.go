@@ -8,7 +8,6 @@ package sqlc
 import (
 	"context"
 	"database/sql"
-	"strings"
 	"time"
 )
 
@@ -104,42 +103,6 @@ type CountAdminUsersParams struct {
 // Count active admin users
 func (q *Queries) CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error) {
 	row := q.queryRow(ctx, q.countAdminUsersStmt, countAdminUsers, arg.Role, arg.Status)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countQueryFolderForTeam = `-- name: CountQueryFolderForTeam :one
-SELECT COUNT(*) FROM query_folders
-WHERE team_id = ? AND id = ?
-`
-
-type CountQueryFolderForTeamParams struct {
-	TeamID int64 `json:"team_id"`
-	ID     int64 `json:"id"`
-}
-
-// Check whether a folder belongs to a team
-func (q *Queries) CountQueryFolderForTeam(ctx context.Context, arg CountQueryFolderForTeamParams) (int64, error) {
-	row := q.queryRow(ctx, q.countQueryFolderForTeamStmt, countQueryFolderForTeam, arg.TeamID, arg.ID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countTeamQueryForTeam = `-- name: CountTeamQueryForTeam :one
-SELECT COUNT(*) FROM team_queries
-WHERE team_id = ? AND id = ?
-`
-
-type CountTeamQueryForTeamParams struct {
-	TeamID int64 `json:"team_id"`
-	ID     int64 `json:"id"`
-}
-
-// Check whether a saved query belongs to a team
-func (q *Queries) CountTeamQueryForTeam(ctx context.Context, arg CountTeamQueryForTeamParams) (int64, error) {
-	row := q.queryRow(ctx, q.countTeamQueryForTeamStmt, countTeamQueryForTeam, arg.TeamID, arg.ID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -335,76 +298,6 @@ func (q *Queries) CreateExportJob(ctx context.Context, arg CreateExportJobParams
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
-	return err
-}
-
-const createQueryFolder = `-- name: CreateQueryFolder :one
-INSERT INTO query_folders (team_id, name, description, color, sort_order, created_by)
-VALUES (?, ?, ?, ?, ?, ?)
-RETURNING id, created_at, updated_at
-`
-
-type CreateQueryFolderParams struct {
-	TeamID      int64          `json:"team_id"`
-	Name        string         `json:"name"`
-	Description sql.NullString `json:"description"`
-	Color       string         `json:"color"`
-	SortOrder   int64          `json:"sort_order"`
-	CreatedBy   sql.NullInt64  `json:"created_by"`
-}
-
-type CreateQueryFolderRow struct {
-	ID        int64     `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-// Create a query folder for a team
-func (q *Queries) CreateQueryFolder(ctx context.Context, arg CreateQueryFolderParams) (CreateQueryFolderRow, error) {
-	row := q.queryRow(ctx, q.createQueryFolderStmt, createQueryFolder,
-		arg.TeamID,
-		arg.Name,
-		arg.Description,
-		arg.Color,
-		arg.SortOrder,
-		arg.CreatedBy,
-	)
-	var i CreateQueryFolderRow
-	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
-	return i, err
-}
-
-const createQueryFolderItem = `-- name: CreateQueryFolderItem :exec
-INSERT INTO query_folder_items (folder_id, query_id, added_by)
-VALUES (?, ?, ?)
-`
-
-type CreateQueryFolderItemParams struct {
-	FolderID int64         `json:"folder_id"`
-	QueryID  int64         `json:"query_id"`
-	AddedBy  sql.NullInt64 `json:"added_by"`
-}
-
-// Add a saved query to a folder
-func (q *Queries) CreateQueryFolderItem(ctx context.Context, arg CreateQueryFolderItemParams) error {
-	_, err := q.exec(ctx, q.createQueryFolderItemStmt, createQueryFolderItem, arg.FolderID, arg.QueryID, arg.AddedBy)
-	return err
-}
-
-const createQueryFolderItemIgnore = `-- name: CreateQueryFolderItemIgnore :exec
-INSERT OR IGNORE INTO query_folder_items (folder_id, query_id, added_by)
-VALUES (?, ?, ?)
-`
-
-type CreateQueryFolderItemIgnoreParams struct {
-	FolderID int64         `json:"folder_id"`
-	QueryID  int64         `json:"query_id"`
-	AddedBy  sql.NullInt64 `json:"added_by"`
-}
-
-// Add a saved query to a folder if not already present
-func (q *Queries) CreateQueryFolderItemIgnore(ctx context.Context, arg CreateQueryFolderItemIgnoreParams) error {
-	_, err := q.exec(ctx, q.createQueryFolderItemIgnoreStmt, createQueryFolderItemIgnore, arg.FolderID, arg.QueryID, arg.AddedBy)
 	return err
 }
 
@@ -640,36 +533,6 @@ WHERE expires_at < ?
 // Delete expired export jobs
 func (q *Queries) DeleteExpiredExportJobs(ctx context.Context, expiresAt time.Time) error {
 	_, err := q.exec(ctx, q.deleteExpiredExportJobsStmt, deleteExpiredExportJobs, expiresAt)
-	return err
-}
-
-const deleteQueryFolder = `-- name: DeleteQueryFolder :one
-DELETE FROM query_folders
-WHERE team_id = ? AND id = ?
-RETURNING id
-`
-
-type DeleteQueryFolderParams struct {
-	TeamID int64 `json:"team_id"`
-	ID     int64 `json:"id"`
-}
-
-// Delete a query folder and return its ID
-func (q *Queries) DeleteQueryFolder(ctx context.Context, arg DeleteQueryFolderParams) (int64, error) {
-	row := q.queryRow(ctx, q.deleteQueryFolderStmt, deleteQueryFolder, arg.TeamID, arg.ID)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
-}
-
-const deleteQueryFolderItemsByQuery = `-- name: DeleteQueryFolderItemsByQuery :exec
-DELETE FROM query_folder_items
-WHERE query_id = ?
-`
-
-// Remove all folder memberships for a saved query
-func (q *Queries) DeleteQueryFolderItemsByQuery(ctx context.Context, queryID int64) error {
-	_, err := q.exec(ctx, q.deleteQueryFolderItemsByQueryStmt, deleteQueryFolderItemsByQuery, queryID)
 	return err
 }
 
@@ -1005,61 +868,6 @@ func (q *Queries) GetQueryBookmarkStatus(ctx context.Context, arg GetQueryBookma
 	var is_bookmarked bool
 	err := row.Scan(&is_bookmarked)
 	return is_bookmarked, err
-}
-
-const getQueryFolder = `-- name: GetQueryFolder :one
-SELECT
-    qf.id,
-    qf.team_id,
-    qf.name,
-    qf.description,
-    qf.color,
-    qf.sort_order,
-    qf.created_by,
-    COUNT(qfi.query_id) AS query_count,
-    qf.created_at,
-    qf.updated_at
-FROM query_folders qf
-LEFT JOIN query_folder_items qfi ON qfi.folder_id = qf.id
-WHERE qf.team_id = ? AND qf.id = ?
-GROUP BY qf.id
-`
-
-type GetQueryFolderParams struct {
-	TeamID int64 `json:"team_id"`
-	ID     int64 `json:"id"`
-}
-
-type GetQueryFolderRow struct {
-	ID          int64          `json:"id"`
-	TeamID      int64          `json:"team_id"`
-	Name        string         `json:"name"`
-	Description sql.NullString `json:"description"`
-	Color       string         `json:"color"`
-	SortOrder   int64          `json:"sort_order"`
-	CreatedBy   sql.NullInt64  `json:"created_by"`
-	QueryCount  int64          `json:"query_count"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-}
-
-// Get one query folder scoped to a team
-func (q *Queries) GetQueryFolder(ctx context.Context, arg GetQueryFolderParams) (GetQueryFolderRow, error) {
-	row := q.queryRow(ctx, q.getQueryFolderStmt, getQueryFolder, arg.TeamID, arg.ID)
-	var i GetQueryFolderRow
-	err := row.Scan(
-		&i.ID,
-		&i.TeamID,
-		&i.Name,
-		&i.Description,
-		&i.Color,
-		&i.SortOrder,
-		&i.CreatedBy,
-		&i.QueryCount,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
 }
 
 const getQueryShare = `-- name: GetQueryShare :one
@@ -1834,64 +1642,6 @@ func (q *Queries) ListManagedUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
-const listQueriesByFolder = `-- name: ListQueriesByFolder :many
-SELECT
-    tq.id,
-    tq.team_id,
-    tq.source_id,
-    tq.name,
-    tq.description,
-    tq.query_type,
-    tq.query_content,
-    tq.created_at,
-    tq.updated_at,
-    tq.is_bookmarked
-FROM team_queries tq
-JOIN query_folder_items qfi ON qfi.query_id = tq.id
-WHERE tq.team_id = ? AND qfi.folder_id = ?
-ORDER BY tq.is_bookmarked DESC, tq.updated_at DESC
-`
-
-type ListQueriesByFolderParams struct {
-	TeamID   int64 `json:"team_id"`
-	FolderID int64 `json:"folder_id"`
-}
-
-// List saved queries in a folder
-func (q *Queries) ListQueriesByFolder(ctx context.Context, arg ListQueriesByFolderParams) ([]TeamQuery, error) {
-	rows, err := q.query(ctx, q.listQueriesByFolderStmt, listQueriesByFolder, arg.TeamID, arg.FolderID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []TeamQuery{}
-	for rows.Next() {
-		var i TeamQuery
-		if err := rows.Scan(
-			&i.ID,
-			&i.TeamID,
-			&i.SourceID,
-			&i.Name,
-			&i.Description,
-			&i.QueryType,
-			&i.QueryContent,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.IsBookmarked,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listQueriesByTeam = `-- name: ListQueriesByTeam :many
 SELECT id, team_id, source_id, name, description, query_type, query_content, created_at, updated_at, is_bookmarked FROM team_queries WHERE team_id = ? ORDER BY is_bookmarked DESC, updated_at DESC
 `
@@ -2035,133 +1785,6 @@ func (q *Queries) ListQueriesForUser(ctx context.Context, userID int64) ([]ListQ
 			&i.IsBookmarked,
 			&i.TeamName,
 			&i.SourceName,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listQueryFolders = `-- name: ListQueryFolders :many
-
-SELECT
-    qf.id,
-    qf.team_id,
-    qf.name,
-    qf.description,
-    qf.color,
-    qf.sort_order,
-    qf.created_by,
-    COUNT(qfi.query_id) AS query_count,
-    qf.created_at,
-    qf.updated_at
-FROM query_folders qf
-LEFT JOIN query_folder_items qfi ON qfi.folder_id = qf.id
-WHERE qf.team_id = ?
-GROUP BY qf.id
-ORDER BY qf.sort_order ASC, qf.name ASC
-`
-
-type ListQueryFoldersRow struct {
-	ID          int64          `json:"id"`
-	TeamID      int64          `json:"team_id"`
-	Name        string         `json:"name"`
-	Description sql.NullString `json:"description"`
-	Color       string         `json:"color"`
-	SortOrder   int64          `json:"sort_order"`
-	CreatedBy   sql.NullInt64  `json:"created_by"`
-	QueryCount  int64          `json:"query_count"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-}
-
-// Query Folders
-// List all folders for a team with saved query counts
-func (q *Queries) ListQueryFolders(ctx context.Context, teamID int64) ([]ListQueryFoldersRow, error) {
-	rows, err := q.query(ctx, q.listQueryFoldersStmt, listQueryFolders, teamID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListQueryFoldersRow{}
-	for rows.Next() {
-		var i ListQueryFoldersRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.TeamID,
-			&i.Name,
-			&i.Description,
-			&i.Color,
-			&i.SortOrder,
-			&i.CreatedBy,
-			&i.QueryCount,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listQueryFoldersByQueryIDs = `-- name: ListQueryFoldersByQueryIDs :many
-SELECT
-    qfi.query_id,
-    qf.id,
-    qf.name,
-    qf.color
-FROM query_folder_items qfi
-JOIN query_folders qf ON qf.id = qfi.folder_id
-WHERE qfi.query_id IN (/*SLICE:query_ids*/?)
-ORDER BY qf.sort_order ASC, qf.name ASC
-`
-
-type ListQueryFoldersByQueryIDsRow struct {
-	QueryID int64  `json:"query_id"`
-	ID      int64  `json:"id"`
-	Name    string `json:"name"`
-	Color   string `json:"color"`
-}
-
-// List folder summaries for a set of saved query IDs
-func (q *Queries) ListQueryFoldersByQueryIDs(ctx context.Context, queryIds []int64) ([]ListQueryFoldersByQueryIDsRow, error) {
-	query := listQueryFoldersByQueryIDs
-	var queryParams []interface{}
-	if len(queryIds) > 0 {
-		for _, v := range queryIds {
-			queryParams = append(queryParams, v)
-		}
-		query = strings.Replace(query, "/*SLICE:query_ids*/?", strings.Repeat(",?", len(queryIds))[1:], 1)
-	} else {
-		query = strings.Replace(query, "/*SLICE:query_ids*/?", "NULL", 1)
-	}
-	rows, err := q.query(ctx, nil, query, queryParams...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListQueryFoldersByQueryIDsRow{}
-	for rows.Next() {
-		var i ListQueryFoldersByQueryIDsRow
-		if err := rows.Scan(
-			&i.QueryID,
-			&i.ID,
-			&i.Name,
-			&i.Color,
 		); err != nil {
 			return nil, err
 		}
@@ -2770,22 +2393,6 @@ func (q *Queries) PruneExpiredQueryShares(ctx context.Context, expiresAt time.Ti
 	return err
 }
 
-const removeQueryFromFolder = `-- name: RemoveQueryFromFolder :exec
-DELETE FROM query_folder_items
-WHERE folder_id = ? AND query_id = ?
-`
-
-type RemoveQueryFromFolderParams struct {
-	FolderID int64 `json:"folder_id"`
-	QueryID  int64 `json:"query_id"`
-}
-
-// Remove a saved query from a folder
-func (q *Queries) RemoveQueryFromFolder(ctx context.Context, arg RemoveQueryFromFolderParams) error {
-	_, err := q.exec(ctx, q.removeQueryFromFolderStmt, removeQueryFromFolder, arg.FolderID, arg.QueryID)
-	return err
-}
-
 const removeTeamMember = `-- name: RemoveTeamMember :exec
 DELETE FROM team_members
 WHERE team_id = ? AND user_id = ?
@@ -3060,38 +2667,6 @@ type UpdateExportJobRunningParams struct {
 func (q *Queries) UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error) {
 	row := q.queryRow(ctx, q.updateExportJobRunningStmt, updateExportJobRunning, arg.Status, arg.UpdatedAt, arg.ID)
 	var id string
-	err := row.Scan(&id)
-	return id, err
-}
-
-const updateQueryFolder = `-- name: UpdateQueryFolder :one
-UPDATE query_folders
-SET name = ?,
-    description = ?,
-    color = ?,
-    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE team_id = ? AND id = ?
-RETURNING id
-`
-
-type UpdateQueryFolderParams struct {
-	Name        string         `json:"name"`
-	Description sql.NullString `json:"description"`
-	Color       string         `json:"color"`
-	TeamID      int64          `json:"team_id"`
-	ID          int64          `json:"id"`
-}
-
-// Update a query folder and return its ID
-func (q *Queries) UpdateQueryFolder(ctx context.Context, arg UpdateQueryFolderParams) (int64, error) {
-	row := q.queryRow(ctx, q.updateQueryFolderStmt, updateQueryFolder,
-		arg.Name,
-		arg.Description,
-		arg.Color,
-		arg.TeamID,
-		arg.ID,
-	)
-	var id int64
 	err := row.Scan(&id)
 	return id, err
 }

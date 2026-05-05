@@ -213,7 +213,6 @@ export function useSavedQueries(
               description: formData.description,
               query_type: formData.query_type,
               query_content: formData.query_content,
-              folder_ids: formData.folder_ids,
             }
         );
         console.log('Updated query via updateTeamSourceQuery:', response);
@@ -251,7 +250,6 @@ export function useSavedQueries(
                   description: formData.description,
                   query_type: formData.query_type,
                   query_content: formData.query_content,
-                  folder_ids: formData.folder_ids,
                 }
             );
             console.log('Overwrote existing query via updateTeamSourceQuery:', response);
@@ -278,8 +276,7 @@ export function useSavedQueries(
               formData.name,
               formData.description,
               parsedContent, // Pass the parsed content object
-              formData.query_type, // Add the query_type parameter
-              formData.folder_ids
+              formData.query_type
           );
           console.log('Created new query via createSourceQuery:', response);
         }
@@ -660,7 +657,6 @@ export function useSavedQueries(
         description?: string;
         query_content: string; // Content is required for update here
         query_type: 'logchefql' | 'sql'; // Type is required
-        folder_ids?: number[];
       }
   ) {
     console.log(`useSavedQueries: Updating query ${queryId} for team ${teamId}, source ${sourceId}`);
@@ -671,7 +667,6 @@ export function useSavedQueries(
         description: updateData.description, // Pass along if provided
         query_content: updateData.query_content,
         query_type: updateData.query_type,
-        folder_ids: updateData.folder_ids,
       };
 
       // Call the specific store action for updating a team-source query

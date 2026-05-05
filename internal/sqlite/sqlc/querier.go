@@ -21,10 +21,6 @@ type Querier interface {
 	CompleteExportJob(ctx context.Context, arg CompleteExportJobParams) (string, error)
 	// Count active admin users
 	CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error)
-	// Check whether a folder belongs to a team
-	CountQueryFolderForTeam(ctx context.Context, arg CountQueryFolderForTeamParams) (int64, error)
-	// Check whether a saved query belongs to a team
-	CountTeamQueryForTeam(ctx context.Context, arg CountTeamQueryForTeamParams) (int64, error)
 	// Count active sessions for a user
 	CountUserSessions(ctx context.Context, arg CountUserSessionsParams) (int64, error)
 	// API Tokens
@@ -35,12 +31,6 @@ type Querier interface {
 	// Export Jobs
 	// Persist an async export job
 	CreateExportJob(ctx context.Context, arg CreateExportJobParams) error
-	// Create a query folder for a team
-	CreateQueryFolder(ctx context.Context, arg CreateQueryFolderParams) (CreateQueryFolderRow, error)
-	// Add a saved query to a folder
-	CreateQueryFolderItem(ctx context.Context, arg CreateQueryFolderItemParams) error
-	// Add a saved query to a folder if not already present
-	CreateQueryFolderItemIgnore(ctx context.Context, arg CreateQueryFolderItemIgnoreParams) error
 	// Query Shares
 	// Persist an ad hoc query share token
 	CreateQueryShare(ctx context.Context, arg CreateQueryShareParams) error
@@ -66,10 +56,6 @@ type Querier interface {
 	DeleteExpiredAPITokens(ctx context.Context) error
 	// Delete expired export jobs
 	DeleteExpiredExportJobs(ctx context.Context, expiresAt time.Time) error
-	// Delete a query folder and return its ID
-	DeleteQueryFolder(ctx context.Context, arg DeleteQueryFolderParams) (int64, error)
-	// Remove all folder memberships for a saved query
-	DeleteQueryFolderItemsByQuery(ctx context.Context, queryID int64) error
 	// Delete a query share and return its token
 	DeleteQueryShare(ctx context.Context, token string) (string, error)
 	// Delete a session by ID
@@ -98,8 +84,6 @@ type Querier interface {
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID int64) (AlertHistory, error)
 	// Get the current bookmark status of a query
 	GetQueryBookmarkStatus(ctx context.Context, arg GetQueryBookmarkStatusParams) (bool, error)
-	// Get one query folder scoped to a team
-	GetQueryFolder(ctx context.Context, arg GetQueryFolderParams) (GetQueryFolderRow, error)
 	// Retrieve an ad hoc query share by token with creator details
 	GetQueryShare(ctx context.Context, token string) (GetQueryShareRow, error)
 	// Get a session by ID
@@ -149,19 +133,12 @@ type Querier interface {
 	ListManagedTeams(ctx context.Context) ([]Team, error)
 	// Get all users managed by provisioning config
 	ListManagedUsers(ctx context.Context) ([]User, error)
-	// List saved queries in a folder
-	ListQueriesByFolder(ctx context.Context, arg ListQueriesByFolderParams) ([]TeamQuery, error)
 	// List all queries for a specific team across all sources (bookmarked first, then by updated_at)
 	ListQueriesByTeam(ctx context.Context, teamID int64) ([]TeamQuery, error)
 	// List all queries for a specific team and source (bookmarked first, then by updated_at)
 	ListQueriesByTeamAndSource(ctx context.Context, arg ListQueriesByTeamAndSourceParams) ([]TeamQuery, error)
 	// List all saved queries across all teams a user belongs to, with team and source names
 	ListQueriesForUser(ctx context.Context, userID int64) ([]ListQueriesForUserRow, error)
-	// Query Folders
-	// List all folders for a team with saved query counts
-	ListQueryFolders(ctx context.Context, teamID int64) ([]ListQueryFoldersRow, error)
-	// List folder summaries for a set of saved query IDs
-	ListQueryFoldersByQueryIDs(ctx context.Context, queryIds []int64) ([]ListQueryFoldersByQueryIDsRow, error)
 	// List all teams a data source is a member of
 	ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, error)
 	// Get all sources ordered by creation date
@@ -189,8 +166,6 @@ type Querier interface {
 	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error
 	// Delete expired query shares
 	PruneExpiredQueryShares(ctx context.Context, expiresAt time.Time) error
-	// Remove a saved query from a folder
-	RemoveQueryFromFolder(ctx context.Context, arg RemoveQueryFromFolderParams) error
 	// Remove a member from a team
 	RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error
 	// Remove a data source from a team
@@ -215,8 +190,6 @@ type Querier interface {
 	UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlertHistoryPayloadParams) (int64, error)
 	// Mark an export job as running and return its ID
 	UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error)
-	// Update a query folder and return its ID
-	UpdateQueryFolder(ctx context.Context, arg UpdateQueryFolderParams) (int64, error)
 	// Update an existing source
 	UpdateSource(ctx context.Context, arg UpdateSourceParams) error
 	// Update a team
