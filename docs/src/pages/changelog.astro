@@ -82,6 +82,62 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     <!-- Unreleased -->
     <article class="version">
       <div class="version-header">
+        <span class="version-tag unreleased">Unreleased</span>
+        <span class="version-date">In development</span>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Query Folders</strong> &mdash; Organize saved queries into team-level, color-coded folders. A query can live in multiple folders. Collections gains folder navigation, system views (<code>All</code>, <code>Bookmarked</code>, <code>Unfiled</code>), and an add-existing-query flow. Save Query modal supports folder assignment and inline folder creation.</li>
+          <li><strong>Shareable saved-query links</strong> &mdash; Generate time-limited share links for saved queries with a configurable TTL.</li>
+          <li><strong>Result downloads</strong> &mdash; Backend-streamed CSV/JSON exports with synchronous admission control. Returns 429 at create-time when over the active-job limit instead of accepting and async-failing.</li>
+          <li><strong>Calendar drill-down</strong> &mdash; Click the month heading in the date picker to surface a 12-month grid; click the year heading to surface a 10-year grid (decade boundaries match Grafana). Replaces the native-select dropdowns.</li>
+          <li><strong>OIDC <code>skip_email_verified_check</code></strong> &mdash; Optionally bypass the <code>email_verified</code> claim for IdPs that don't set it. Logs a startup warning when enabled so the bypass is visible.</li>
+          <li><strong>Native ClickHouse TLS</strong> &mdash; TLS support for ClickHouse native-protocol connections.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Improved
+        </div>
+        <ul class="change-list">
+          <li><strong>Explore UI polish</strong> &mdash; Quieter top bar (Limit and timezone as muted pills), concrete query placeholders, calmer fields sidebar, tighter histogram styling, and a regrouped action bar with a Local|UTC segmented timezone control. Tabular-nums on timestamps; method chips get a stable width for vertical scanning.</li>
+          <li><strong>Export &rarr; Download</strong> &mdash; Toolbar button renamed; the backend-streamed pipe is now the single download path. Removed the older frontend CSV dropdown.</li>
+          <li><strong>AI SQL insert</strong> &mdash; Inserting an AI-generated query now clears any loaded saved query and explicitly switches to SQL mode, so previously-loaded saved-query state can't leak into the new SQL.</li>
+          <li><strong>Mode-switch content preserved</strong> &mdash; Switching modes after AI insert or saved-query load no longer overwrites your raw SQL with a stale translation.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>Query result limits</strong> &mdash; Introduced <code>max_limit</code> (default 100k rows) to prevent the SQL&rarr;buffer path from materializing huge result sets in memory. Preview/export limits and timeout handling are now aligned across modes.</li>
+          <li><strong>URL state for raw SQL</strong> &mdash; Round-tripping large SQL via URL state no longer overflows the request header limit on the way back.</li>
+          <li><strong>Crash-safe export pruner</strong> &mdash; Unlinks files before deleting DB rows, so an interrupted prune leaves no orphaned artifacts.</li>
+          <li><strong>Query share TTL validation</strong> &mdash; TTL above the configured max returns HTTP 400 instead of silently clamping.</li>
+          <li><strong>Translate API errors surface</strong> &mdash; LogchefQL&rarr;SQL translation failures are no longer swallowed.</li>
+          <li><strong>Export polling cleanup</strong> &mdash; Aborts in-flight polls on unmount; navigating away no longer leaks polling.</li>
+          <li><strong>Relative export URLs</strong> &mdash; Backend returns relative download paths so reverse-proxy / warpgate deployments produce correct links.</li>
+        </ul>
+      </div>
+
+      <div class="contributors">
+        <strong>Contributors:</strong> <a href="https://github.com/m0nikasingh" target="_blank">@m0nikasingh</a> &mdash; OIDC email verification skip (<a href="https://github.com/mr-karan/logchef/pull/86" target="_blank">#86</a>), native ClickHouse TLS (<a href="https://github.com/mr-karan/logchef/pull/88" target="_blank">#88</a>), AI SQL insert mode fix (<a href="https://github.com/mr-karan/logchef/pull/89" target="_blank">#89</a>)
+      </div>
+    </article>
+
+    <!-- v1.5.0 -->
+    <article class="version">
+      <div class="version-header">
         <span class="version-tag">v1.5.0</span>
         <span class="version-date">Apr 8, 2026</span>
         <span class="version-badge">Latest</span>

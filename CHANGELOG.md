@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Query Folders** — Team-level, color-coded folders for organizing saved queries. A query may belong to multiple folders (no nesting). Collections view gains folder navigation, system views (`All`, `Bookmarked`, `Unfiled`), folder chips, and an add-existing-query flow. Save Query modal supports folder assignment and inline folder creation. New migration adds `query_folders` and `query_folder_items` tables; folder CRUD + membership APIs under `/api/v1/teams/:teamID/folders`.
+- **Shareable saved-query links** — Generate time-limited share links for saved queries with a configurable TTL.
+- **Backend-streamed result downloads** — New export-job workflow streams CSV/JSON downloads from the server with synchronous admission control (returns HTTP 429 at create-time when over the active-job limit instead of accepting then async-failing). Replaces the prior frontend JS-based CSV export.
+- **Calendar month/year drill-down** — Click the month heading to surface a 12-month grid; click the year heading to surface a 10-year grid (decade boundaries match Grafana, e.g. 2021–2030). Replaces the native-select dropdowns in the calendar header.
+- **OIDC `skip_email_verified_check`** config option — Optionally bypass the `email_verified` claim check for IdPs that don't set it. Logs a startup warning when enabled so the bypass is visible in boot logs. ([#85](https://github.com/mr-karan/logchef/issues/85), [#86](https://github.com/mr-karan/logchef/pull/86))
+- **Native ClickHouse TLS** — TLS support for ClickHouse native-protocol connections. ([#88](https://github.com/mr-karan/logchef/pull/88))
+
+### Changed
+- **Explore UI polish pass** — Top bar drops the last-execution clock and restyles Limit/timezone as muted pills. Query editor placeholders rewritten as concrete, scannable examples for both modes. Fields sidebar fades type badges to opacity-0 until row hover; section counts become muted spans. Histogram tightens default bar opacity (0.85→1.0 on hover), grid-line stroke, and axis tick styling. Secondary action bar regroups into stats · timezone · pagination zones with a Local|UTC segmented timezone control. Timestamps use tabular-nums; method chips get a fixed `min-width: 52px`.
+- **Export → Download** in the UI — Toolbar button renamed and the backend-streamed pipe is the single canonical download path. Frontend CSV export dropdown and helpers (`export.ts`, `export-compact.ts`) removed.
+- **AI SQL insert switches to SQL mode** — Inserting an AI-generated query clears any loaded saved query and emits an explicit mode switch, so previously-loaded saved-query state can't leak into the new SQL. ([#87](https://github.com/mr-karan/logchef/issues/87), [#89](https://github.com/mr-karan/logchef/pull/89))
+- **`changeMode()` honors `isModeSwitchOnly`** — Skips the LogchefQL→SQL translation call when the caller has already set `rawSql` (AI insert, saved-query load). Tab clicks still trigger translation as before.
+- **Single backend artifact name** — Build pipeline produces a consistent artifact name across CI and deploy paths.
+
+### Fixed
+- **Unbounded query result OOM mitigated** — Introduced `max_limit` (default 100k rows) for the SQL→buffer path that previously could materialize ~1M rows in memory. Preview/export limits and timeout handling are now aligned across modes.
+- **Raw SQL in URL no longer overflows headers** — Round-tripping large SQL via URL state previously tripped fasthttp's default URL/header limit; addressed alongside the limits work.
+- **Export pruner is crash-safe** — Unlinks files before deleting DB rows; an interrupted prune now leaves no orphaned artifacts on disk.
+- **Query share TTL validation** — A TTL above the configured max now returns HTTP 400 instead of silently clamping.
+- **Translate API errors surface** — `useQuery` no longer swallows LogchefQL→SQL translate failures and proceeds to SQL mode with stale `rawSql`.
+- **Export polling cleanup** — `LogExplorer` cancels the export-job poll via `AbortController` on unmount; navigating away no longer leaks polling.
+- **`handleDownloadExportJob` logs stat errors** — Non-`ErrNotExist` `os.Stat` errors are surfaced instead of swallowed.
+- **Relative export URLs** — Backend returns relative download paths so reverse-proxy and warpgate-fronted deployments produce correct links.
+- **`useUrlState` readiness timeout** — Shows a non-blocking toast and returns a boolean instead of blocking the page.
+- **`clearSource()` action** added to the context store; replaces four direct `contextStore.sourceId = null` mutations in `SavedQueriesView`.
+- **DataTable `:key` stability** — Fallback for undefined `queryId` keeps the component key stable across query lifecycle transitions.
+- **SQLC migration** — Moved ad-hoc SQLite queries in `alerts.go`, `export_jobs.go`, and `query_shares.go` into `queries.sql` so they go through generated, type-safe SQLC code.
+
+### Removed
+- **Dead `TLSCACert` field** — System-roots TLS only for now; custom CA / `skip_verify` is a follow-up.
+
+### Contributors
+- [@m0nikasingh](https://github.com/m0nikasingh) — OIDC email verification skip ([#86](https://github.com/mr-karan/logchef/pull/86)), native ClickHouse TLS ([#88](https://github.com/mr-karan/logchef/pull/88)), AI SQL insert mode fix ([#89](https://github.com/mr-karan/logchef/pull/89))
+
 ## [1.5.0] - 2026-04-08
 
 ### Added
