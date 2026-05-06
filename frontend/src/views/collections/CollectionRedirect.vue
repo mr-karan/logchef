@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Loader2, AlertCircle } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
@@ -15,17 +15,21 @@ const router = useRouter();
 
 const error = ref<string | null>(null);
 const isLoading = ref(true);
+let loadToken = 0;
 
-onMounted(async () => {
-  const queryIdParam = route.params.queryId as string | undefined;
+async function resolveSavedQuery(queryIdParam: string | string[] | undefined) {
+  const token = ++loadToken;
+  const rawQueryId = Array.isArray(queryIdParam) ? queryIdParam[0] : queryIdParam;
+  error.value = null;
+  isLoading.value = true;
 
-  if (!queryIdParam) {
+  if (!rawQueryId) {
     error.value = 'Invalid saved-query URL. Missing query id.';
     isLoading.value = false;
     return;
   }
 
-  const queryIdNum = parseInt(queryIdParam, 10);
+  const queryIdNum = parseInt(rawQueryId, 10);
   if (isNaN(queryIdNum) || queryIdNum <= 0) {
     error.value = 'Invalid saved-query URL. Query id must be numeric.';
     isLoading.value = false;
@@ -35,6 +39,9 @@ onMounted(async () => {
   try {
     const preferredTeam = typeof route.query.team === 'string' ? route.query.team : undefined;
     const response = await savedQueriesApi.resolve(queryIdNum, preferredTeam);
+    if (token !== loadToken) {
+      return;
+    }
     if (!response.data) {
       throw new Error('Saved query not found.');
     }
@@ -48,11 +55,22 @@ onMounted(async () => {
       },
     });
   } catch (err) {
+    if (token !== loadToken) {
+      return;
+    }
     console.error('Failed to load saved query:', err);
     error.value = getErrorMessage(err) || 'Failed to load saved query. It may have been deleted or you may not have access.';
     isLoading.value = false;
   }
-});
+}
+
+watch(
+  () => route.params.queryId,
+  (queryId) => {
+    resolveSavedQuery(queryId as string | string[] | undefined);
+  },
+  { immediate: true }
+);
 
 function goToCollections() {
   router.push('/logs/saved');

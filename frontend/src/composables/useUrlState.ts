@@ -128,6 +128,13 @@ export function useUrlState(): UrlStateReturn {
       return false;
     }
 
+    if (
+      contextStore.sourceId &&
+      sourcesStore.currentSourceDetails?.id !== contextStore.sourceId
+    ) {
+      return false;
+    }
+
     if (pendingQueryResolve.value) {
       return false;
     }
@@ -315,6 +322,8 @@ export function useUrlState(): UrlStateReturn {
         [
           () => teamsStore.teams,
           () => teamsStore.currentTeamId,
+          () => contextStore.sourceId,
+          () => sourcesStore.currentSourceDetails?.id,
           () => sourcesStore.isLoadingTeamSources,
           () => sourcesStore.isLoadingSourceDetails,
           () => pendingQueryResolve.value,
