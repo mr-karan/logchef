@@ -220,6 +220,22 @@ func (s *Server) setupRoutes() {
 	// Team settings — managed guard only on structural changes (rename/description)
 	api.Put("/teams/:teamID", s.requireAuth, s.requireTeamNotManaged, s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeam)
 
+	// Collections (cross-team curation lists). Each user gets an auto-created
+	// personal collection on first GET /api/v1/collections. Other collections
+	// are invite-only with two roles: owner (full control) and member (read).
+	collections := api.Group("/collections", s.requireAuth)
+	collections.Get("/", s.handleListCollections)
+	collections.Post("/", s.handleCreateCollection)
+	collections.Get("/:collectionID", s.handleGetCollection)
+	collections.Put("/:collectionID", s.handleUpdateCollection)
+	collections.Delete("/:collectionID", s.handleDeleteCollection)
+	collections.Get("/:collectionID/members", s.handleListCollectionMembers)
+	collections.Post("/:collectionID/members", s.handleAddCollectionMember)
+	collections.Delete("/:collectionID/members/:userID", s.handleRemoveCollectionMember)
+	collections.Get("/:collectionID/items", s.handleListCollectionItems)
+	collections.Post("/:collectionID/items", s.handleAddCollectionItem)
+	collections.Delete("/:collectionID/items/:queryID", s.handleRemoveCollectionItem)
+
 	// Saved Queries (cross-team, source-scoped). Visibility: any user with source
 	// access via any team. Edit/delete: creator + global admin (legacy queries
 	// without created_by are global-admin-only).

@@ -60,6 +60,32 @@ type ApiToken struct {
 	UpdatedAt  time.Time    `json:"updated_at"`
 }
 
+type Collection struct {
+	ID          int64          `json:"id"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	IsPersonal  int64          `json:"is_personal"`
+	CreatedBy   int64          `json:"created_by"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
+type CollectionItem struct {
+	CollectionID int64         `json:"collection_id"`
+	SavedQueryID int64         `json:"saved_query_id"`
+	SortOrder    int64         `json:"sort_order"`
+	AddedBy      sql.NullInt64 `json:"added_by"`
+	CreatedAt    time.Time     `json:"created_at"`
+}
+
+type CollectionMember struct {
+	CollectionID int64         `json:"collection_id"`
+	UserID       int64         `json:"user_id"`
+	Role         string        `json:"role"`
+	AddedBy      sql.NullInt64 `json:"added_by"`
+	CreatedAt    time.Time     `json:"created_at"`
+}
+
 type ExportJob struct {
 	ID           string         `json:"id"`
 	SourceID     int64          `json:"source_id"`

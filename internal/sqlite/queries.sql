@@ -733,3 +733,108 @@ SELECT managed FROM users WHERE id = ?;
 -- name: GetSourceByNameForProvisioning :one
 -- Get source by name for provisioning lookup
 SELECT * FROM sources WHERE name = ?;
+
+
+-- Collections (cross-team curation lists for saved queries)
+
+-- name: CreateCollection :one
+-- Insert a new collection (personal or shared)
+INSERT INTO collections (name, description, is_personal, created_by)
+VALUES (?, ?, ?, ?)
+RETURNING id, created_at, updated_at;
+
+-- name: GetCollection :one
+-- Look up a collection by id
+SELECT * FROM collections WHERE id = ?;
+
+-- name: GetPersonalCollection :one
+-- Find the caller's personal collection if it exists
+SELECT * FROM collections WHERE created_by = ? AND is_personal = 1;
+
+-- name: UpdateCollection :exec
+-- Update name/description (owner only — enforced in app code)
+UPDATE collections
+SET name = ?,
+    description = ?,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = ?;
+
+-- name: DeleteCollection :exec
+-- Delete a collection. Personal collections cannot be deleted (enforced in app code).
+DELETE FROM collections WHERE id = ?;
+
+-- name: ListCollectionsForUser :many
+-- List collections the user owns or is a member of, with member count and item count
+SELECT
+    c.id,
+    c.name,
+    c.description,
+    c.is_personal,
+    c.created_by,
+    c.created_at,
+    c.updated_at,
+    cm.role AS caller_role,
+    (SELECT COUNT(*) FROM collection_members WHERE collection_id = c.id) AS member_count,
+    (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) AS item_count
+FROM collections c
+JOIN collection_members cm ON cm.collection_id = c.id
+WHERE cm.user_id = ?
+ORDER BY c.is_personal DESC, c.updated_at DESC;
+
+-- name: AddCollectionMember :exec
+-- Add a member (owner or member role)
+INSERT OR IGNORE INTO collection_members (collection_id, user_id, role, added_by)
+VALUES (?, ?, ?, ?);
+
+-- name: GetCollectionMember :one
+-- Look up a single membership row
+SELECT collection_id, user_id, role, added_by, created_at
+FROM collection_members
+WHERE collection_id = ? AND user_id = ?;
+
+-- name: ListCollectionMembers :many
+-- List members of a collection with user details
+SELECT cm.collection_id, cm.user_id, cm.role, cm.added_by, cm.created_at,
+       u.email, u.full_name
+FROM collection_members cm
+JOIN users u ON u.id = cm.user_id
+WHERE cm.collection_id = ?
+ORDER BY cm.role DESC, u.email ASC;
+
+-- name: RemoveCollectionMember :exec
+-- Remove a member from a collection
+DELETE FROM collection_members WHERE collection_id = ? AND user_id = ?;
+
+-- name: AddCollectionItem :exec
+-- Add a saved query to a collection (idempotent)
+INSERT OR IGNORE INTO collection_items (collection_id, saved_query_id, sort_order, added_by)
+VALUES (?, ?, ?, ?);
+
+-- name: RemoveCollectionItem :exec
+-- Remove an item from a collection
+DELETE FROM collection_items WHERE collection_id = ? AND saved_query_id = ?;
+
+-- name: ListCollectionItems :many
+-- List items in a collection with saved-query details
+SELECT
+    ci.collection_id,
+    ci.saved_query_id,
+    ci.sort_order,
+    ci.added_by,
+    ci.created_at AS item_added_at,
+    sq.id AS query_id,
+    sq.source_id,
+    sq.name AS query_name,
+    sq.description AS query_description,
+    sq.query_type,
+    sq.query_content,
+    sq.is_bookmarked,
+    sq.created_by AS query_created_by,
+    sq.created_at AS query_created_at,
+    sq.updated_at AS query_updated_at,
+    s.name AS source_name
+FROM collection_items ci
+JOIN saved_queries sq ON sq.id = ci.saved_query_id
+JOIN sources s ON s.id = sq.source_id
+WHERE ci.collection_id = ?
+ORDER BY ci.sort_order ASC, ci.created_at ASC;

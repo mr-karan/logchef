@@ -11,6 +11,56 @@ import (
 	"time"
 )
 
+const addCollectionItem = `-- name: AddCollectionItem :exec
+?;
+
+INSERT OR IGNORE INTO collection_items (collection_id, saved_query_id, sort_order, added_by)
+VALUES (?, ?, ?,
+`
+
+type AddCollectionItemParams struct {
+	CollectionID int64         `json:"collection_id"`
+	SavedQueryID int64         `json:"saved_query_id"`
+	SortOrder    int64         `json:"sort_order"`
+	AddedBy      sql.NullInt64 `json:"added_by"`
+}
+
+// Add a saved query to a collection (idempotent)
+func (q *Queries) AddCollectionItem(ctx context.Context, arg AddCollectionItemParams) error {
+	_, err := q.exec(ctx, q.addCollectionItemStmt, addCollectionItem,
+		arg.CollectionID,
+		arg.SavedQueryID,
+		arg.SortOrder,
+		arg.AddedBy,
+	)
+	return err
+}
+
+const addCollectionMember = `-- name: AddCollectionMember :exec
+C;
+
+INSERT OR IGNORE INTO collection_members (collection_id, user_id, role, added_by)
+VALUES (?, ?, ?,
+`
+
+type AddCollectionMemberParams struct {
+	CollectionID int64         `json:"collection_id"`
+	UserID       int64         `json:"user_id"`
+	Role         string        `json:"role"`
+	AddedBy      sql.NullInt64 `json:"added_by"`
+}
+
+// Add a member (owner or member role)
+func (q *Queries) AddCollectionMember(ctx context.Context, arg AddCollectionMemberParams) error {
+	_, err := q.exec(ctx, q.addCollectionMemberStmt, addCollectionMember,
+		arg.CollectionID,
+		arg.UserID,
+		arg.Role,
+		arg.AddedBy,
+	)
+	return err
+}
+
 const addTeamMember = `-- name: AddTeamMember :exec
 
 INSERT INTO team_members (team_id, user_id, role)
@@ -251,6 +301,40 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
+	return i, err
+}
+
+const createCollection = `-- name: CreateCollection :one
+
+INSERT INTO collections (name, description, is_personal, created_by)
+VALUES (?, ?, ?, ?)
+RETURNING id, created_at, updated_at
+`
+
+type CreateCollectionParams struct {
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	IsPersonal  int64          `json:"is_personal"`
+	CreatedBy   int64          `json:"created_by"`
+}
+
+type CreateCollectionRow struct {
+	ID        int64     `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Collections (cross-team curation lists for saved queries)
+// Insert a new collection (personal or shared)
+func (q *Queries) CreateCollection(ctx context.Context, arg CreateCollectionParams) (CreateCollectionRow, error) {
+	row := q.queryRow(ctx, q.createCollectionStmt, createCollection,
+		arg.Name,
+		arg.Description,
+		arg.IsPersonal,
+		arg.CreatedBy,
+	)
+	var i CreateCollectionRow
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
 	return i, err
 }
 
@@ -509,6 +593,18 @@ func (q *Queries) DeleteAlert(ctx context.Context, id int64) (int64, error) {
 	return id, err
 }
 
+const deleteCollection = `-- name: DeleteCollection :exec
+?;
+
+DELETE FROM collections WHERE id =
+`
+
+// Delete a collection. Personal collections cannot be deleted (enforced in app code).
+func (q *Queries) DeleteCollection(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.deleteCollectionStmt, deleteCollection, id)
+	return err
+}
+
 const deleteExpiredAPITokens = `-- name: DeleteExpiredAPITokens :exec
 DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 `
@@ -726,6 +822,53 @@ func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
 	return i, err
 }
 
+const getCollection = `-- name: GetCollection :one
+SELECT id, name, description, is_personal, created_by, created_at, updated_at FROM collections WHERE id = ?
+`
+
+// Look up a collection by id
+func (q *Queries) GetCollection(ctx context.Context, id int64) (Collection, error) {
+	row := q.queryRow(ctx, q.getCollectionStmt, getCollection, id)
+	var i Collection
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.IsPersonal,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getCollectionMember = `-- name: GetCollectionMember :one
+);
+
+SELECT collection_id, user_id, role, added_by, created_at
+FROM collection_members
+WHERE collection_id = ? AND user_id =
+`
+
+type GetCollectionMemberParams struct {
+	CollectionID int64 `json:"collection_id"`
+	UserID       int64 `json:"user_id"`
+}
+
+// Look up a single membership row
+func (q *Queries) GetCollectionMember(ctx context.Context, arg GetCollectionMemberParams) (CollectionMember, error) {
+	row := q.queryRow(ctx, q.getCollectionMemberStmt, getCollectionMember, arg.CollectionID, arg.UserID)
+	var i CollectionMember
+	err := row.Scan(
+		&i.CollectionID,
+		&i.UserID,
+		&i.Role,
+		&i.AddedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getExportJob = `-- name: GetExportJob :one
 SELECT
     id,
@@ -791,6 +934,26 @@ func (q *Queries) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID i
 		&i.Message,
 		&i.PayloadJson,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getPersonalCollection = `-- name: GetPersonalCollection :one
+SELECT id, name, description, is_personal, created_by, created_at, updated_at FROM collections WHERE created_by = ? AND is_personal = 1
+`
+
+// Find the caller's personal collection if it exists
+func (q *Queries) GetPersonalCollection(ctx context.Context, createdBy int64) (Collection, error) {
+	row := q.queryRow(ctx, q.getPersonalCollectionStmt, getPersonalCollection, createdBy)
+	var i Collection
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.IsPersonal,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1458,6 +1621,214 @@ func (q *Queries) ListAlertsForUser(ctx context.Context, userID int64) ([]Alert,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCollectionItems = `-- name: ListCollectionItems :many
+?;
+
+SELECT
+    ci.collection_id,
+    ci.saved_query_id,
+    ci.sort_order,
+    ci.added_by,
+    ci.created_at AS item_added_at,
+    sq.id AS query_id,
+    sq.source_id,
+    sq.name AS query_name,
+    sq.description AS query_description,
+    sq.query_type,
+    sq.query_content,
+    sq.is_bookmarked,
+    sq.created_by AS query_created_by,
+    sq.created_at AS query_created_at,
+    sq.updated_at AS query_updated_at,
+    s.name AS source_name
+FROM collection_items ci
+JOIN saved_queries sq ON sq.id = ci.saved_query_id
+JOIN sources s ON s.id = sq.source_id
+WHERE ci.collection_id = ?
+ORDER BY ci.sort_order ASC, ci.created_at A
+`
+
+type ListCollectionItemsRow struct {
+	CollectionID     int64          `json:"collection_id"`
+	SavedQueryID     int64          `json:"saved_query_id"`
+	SortOrder        int64          `json:"sort_order"`
+	AddedBy          sql.NullInt64  `json:"added_by"`
+	ItemAddedAt      time.Time      `json:"item_added_at"`
+	QueryID          int64          `json:"query_id"`
+	SourceID         int64          `json:"source_id"`
+	QueryName        string         `json:"query_name"`
+	QueryDescription sql.NullString `json:"query_description"`
+	QueryType        string         `json:"query_type"`
+	QueryContent     string         `json:"query_content"`
+	IsBookmarked     bool           `json:"is_bookmarked"`
+	QueryCreatedBy   sql.NullInt64  `json:"query_created_by"`
+	QueryCreatedAt   time.Time      `json:"query_created_at"`
+	QueryUpdatedAt   time.Time      `json:"query_updated_at"`
+	SourceName       string         `json:"source_name"`
+}
+
+// List items in a collection with saved-query details
+func (q *Queries) ListCollectionItems(ctx context.Context, collectionID int64) ([]ListCollectionItemsRow, error) {
+	rows, err := q.query(ctx, q.listCollectionItemsStmt, listCollectionItems, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCollectionItemsRow{}
+	for rows.Next() {
+		var i ListCollectionItemsRow
+		if err := rows.Scan(
+			&i.CollectionID,
+			&i.SavedQueryID,
+			&i.SortOrder,
+			&i.AddedBy,
+			&i.ItemAddedAt,
+			&i.QueryID,
+			&i.SourceID,
+			&i.QueryName,
+			&i.QueryDescription,
+			&i.QueryType,
+			&i.QueryContent,
+			&i.IsBookmarked,
+			&i.QueryCreatedBy,
+			&i.QueryCreatedAt,
+			&i.QueryUpdatedAt,
+			&i.SourceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCollectionMembers = `-- name: ListCollectionMembers :many
+?;
+
+SELECT cm.collection_id, cm.user_id, cm.role, cm.added_by, cm.created_at,
+       u.email, u.full_name
+FROM collection_members cm
+JOIN users u ON u.id = cm.user_id
+WHERE cm.collection_id = ?
+ORDER BY cm.role DESC, u.email A
+`
+
+type ListCollectionMembersRow struct {
+	CollectionID int64         `json:"collection_id"`
+	UserID       int64         `json:"user_id"`
+	Role         string        `json:"role"`
+	AddedBy      sql.NullInt64 `json:"added_by"`
+	CreatedAt    time.Time     `json:"created_at"`
+	Email        string        `json:"email"`
+	FullName     string        `json:"full_name"`
+}
+
+// List members of a collection with user details
+func (q *Queries) ListCollectionMembers(ctx context.Context, collectionID int64) ([]ListCollectionMembersRow, error) {
+	rows, err := q.query(ctx, q.listCollectionMembersStmt, listCollectionMembers, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCollectionMembersRow{}
+	for rows.Next() {
+		var i ListCollectionMembersRow
+		if err := rows.Scan(
+			&i.CollectionID,
+			&i.UserID,
+			&i.Role,
+			&i.AddedBy,
+			&i.CreatedAt,
+			&i.Email,
+			&i.FullName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCollectionsForUser = `-- name: ListCollectionsForUser :many
+?;
+
+SELECT
+    c.id,
+    c.name,
+    c.description,
+    c.is_personal,
+    c.created_by,
+    c.created_at,
+    c.updated_at,
+    cm.role AS caller_role,
+    (SELECT COUNT(*) FROM collection_members WHERE collection_id = c.id) AS member_count,
+    (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) AS item_count
+FROM collections c
+JOIN collection_members cm ON cm.collection_id = c.id
+WHERE cm.user_id = ?
+ORDER BY c.is_personal DESC, c.updated_at DE
+`
+
+type ListCollectionsForUserRow struct {
+	ID          int64          `json:"id"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	IsPersonal  int64          `json:"is_personal"`
+	CreatedBy   int64          `json:"created_by"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	CallerRole  string         `json:"caller_role"`
+	MemberCount int64          `json:"member_count"`
+	ItemCount   int64          `json:"item_count"`
+}
+
+// List collections the user owns or is a member of, with member count and item count
+func (q *Queries) ListCollectionsForUser(ctx context.Context, userID int64) ([]ListCollectionsForUserRow, error) {
+	rows, err := q.query(ctx, q.listCollectionsForUserStmt, listCollectionsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCollectionsForUserRow{}
+	for rows.Next() {
+		var i ListCollectionsForUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.IsPersonal,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CallerRole,
+			&i.MemberCount,
+			&i.ItemCount,
 		); err != nil {
 			return nil, err
 		}
@@ -2372,6 +2743,40 @@ func (q *Queries) PruneExpiredQueryShares(ctx context.Context, expiresAt time.Ti
 	return err
 }
 
+const removeCollectionItem = `-- name: RemoveCollectionItem :exec
+);
+
+DELETE FROM collection_items WHERE collection_id = ? AND saved_query_id =
+`
+
+type RemoveCollectionItemParams struct {
+	CollectionID int64 `json:"collection_id"`
+	SavedQueryID int64 `json:"saved_query_id"`
+}
+
+// Remove an item from a collection
+func (q *Queries) RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) error {
+	_, err := q.exec(ctx, q.removeCollectionItemStmt, removeCollectionItem, arg.CollectionID, arg.SavedQueryID)
+	return err
+}
+
+const removeCollectionMember = `-- name: RemoveCollectionMember :exec
+C;
+
+DELETE FROM collection_members WHERE collection_id = ? AND user_id =
+`
+
+type RemoveCollectionMemberParams struct {
+	CollectionID int64 `json:"collection_id"`
+	UserID       int64 `json:"user_id"`
+}
+
+// Remove a member from a collection
+func (q *Queries) RemoveCollectionMember(ctx context.Context, arg RemoveCollectionMemberParams) error {
+	_, err := q.exec(ctx, q.removeCollectionMemberStmt, removeCollectionMember, arg.CollectionID, arg.UserID)
+	return err
+}
+
 const removeTeamMember = `-- name: RemoveTeamMember :exec
 DELETE FROM team_members
 WHERE team_id = ? AND user_id = ?
@@ -2618,6 +3023,26 @@ func (q *Queries) UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlert
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const updateCollection = `-- name: UpdateCollection :exec
+UPDATE collections
+SET name = ?,
+    description = ?,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id =
+`
+
+type UpdateCollectionParams struct {
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	ID          int64          `json:"id"`
+}
+
+// Update name/description (owner only — enforced in app code)
+func (q *Queries) UpdateCollection(ctx context.Context, arg UpdateCollectionParams) error {
+	_, err := q.exec(ctx, q.updateCollectionStmt, updateCollection, arg.Name, arg.Description, arg.ID)
+	return err
 }
 
 const updateExportJobRunning = `-- name: UpdateExportJobRunning :one

@@ -24,6 +24,12 @@ func New(db DBTX) *Queries {
 func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	q := Queries{db: db}
 	var err error
+	if q.addCollectionItemStmt, err = db.PrepareContext(ctx, addCollectionItem); err != nil {
+		return nil, fmt.Errorf("error preparing query AddCollectionItem: %w", err)
+	}
+	if q.addCollectionMemberStmt, err = db.PrepareContext(ctx, addCollectionMember); err != nil {
+		return nil, fmt.Errorf("error preparing query AddCollectionMember: %w", err)
+	}
 	if q.addTeamMemberStmt, err = db.PrepareContext(ctx, addTeamMember); err != nil {
 		return nil, fmt.Errorf("error preparing query AddTeamMember: %w", err)
 	}
@@ -44,6 +50,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.createAlertStmt, err = db.PrepareContext(ctx, createAlert); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateAlert: %w", err)
+	}
+	if q.createCollectionStmt, err = db.PrepareContext(ctx, createCollection); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateCollection: %w", err)
 	}
 	if q.createExportJobStmt, err = db.PrepareContext(ctx, createExportJob); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateExportJob: %w", err)
@@ -71,6 +80,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.deleteAlertStmt, err = db.PrepareContext(ctx, deleteAlert); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteAlert: %w", err)
+	}
+	if q.deleteCollectionStmt, err = db.PrepareContext(ctx, deleteCollection); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteCollection: %w", err)
 	}
 	if q.deleteExpiredAPITokensStmt, err = db.PrepareContext(ctx, deleteExpiredAPITokens); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteExpiredAPITokens: %w", err)
@@ -114,11 +126,20 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getAlertStmt, err = db.PrepareContext(ctx, getAlert); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAlert: %w", err)
 	}
+	if q.getCollectionStmt, err = db.PrepareContext(ctx, getCollection); err != nil {
+		return nil, fmt.Errorf("error preparing query GetCollection: %w", err)
+	}
+	if q.getCollectionMemberStmt, err = db.PrepareContext(ctx, getCollectionMember); err != nil {
+		return nil, fmt.Errorf("error preparing query GetCollectionMember: %w", err)
+	}
 	if q.getExportJobStmt, err = db.PrepareContext(ctx, getExportJob); err != nil {
 		return nil, fmt.Errorf("error preparing query GetExportJob: %w", err)
 	}
 	if q.getLatestUnresolvedAlertHistoryStmt, err = db.PrepareContext(ctx, getLatestUnresolvedAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query GetLatestUnresolvedAlertHistory: %w", err)
+	}
+	if q.getPersonalCollectionStmt, err = db.PrepareContext(ctx, getPersonalCollection); err != nil {
+		return nil, fmt.Errorf("error preparing query GetPersonalCollection: %w", err)
 	}
 	if q.getQueryShareStmt, err = db.PrepareContext(ctx, getQueryShare); err != nil {
 		return nil, fmt.Errorf("error preparing query GetQueryShare: %w", err)
@@ -189,6 +210,15 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAlertsForUserStmt, err = db.PrepareContext(ctx, listAlertsForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAlertsForUser: %w", err)
 	}
+	if q.listCollectionItemsStmt, err = db.PrepareContext(ctx, listCollectionItems); err != nil {
+		return nil, fmt.Errorf("error preparing query ListCollectionItems: %w", err)
+	}
+	if q.listCollectionMembersStmt, err = db.PrepareContext(ctx, listCollectionMembers); err != nil {
+		return nil, fmt.Errorf("error preparing query ListCollectionMembers: %w", err)
+	}
+	if q.listCollectionsForUserStmt, err = db.PrepareContext(ctx, listCollectionsForUser); err != nil {
+		return nil, fmt.Errorf("error preparing query ListCollectionsForUser: %w", err)
+	}
 	if q.listExpiredExportJobPathsStmt, err = db.PrepareContext(ctx, listExpiredExportJobPaths); err != nil {
 		return nil, fmt.Errorf("error preparing query ListExpiredExportJobPaths: %w", err)
 	}
@@ -255,6 +285,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.pruneExpiredQuerySharesStmt, err = db.PrepareContext(ctx, pruneExpiredQueryShares); err != nil {
 		return nil, fmt.Errorf("error preparing query PruneExpiredQueryShares: %w", err)
 	}
+	if q.removeCollectionItemStmt, err = db.PrepareContext(ctx, removeCollectionItem); err != nil {
+		return nil, fmt.Errorf("error preparing query RemoveCollectionItem: %w", err)
+	}
+	if q.removeCollectionMemberStmt, err = db.PrepareContext(ctx, removeCollectionMember); err != nil {
+		return nil, fmt.Errorf("error preparing query RemoveCollectionMember: %w", err)
+	}
 	if q.removeTeamMemberStmt, err = db.PrepareContext(ctx, removeTeamMember); err != nil {
 		return nil, fmt.Errorf("error preparing query RemoveTeamMember: %w", err)
 	}
@@ -291,6 +327,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateAlertHistoryPayloadStmt, err = db.PrepareContext(ctx, updateAlertHistoryPayload); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateAlertHistoryPayload: %w", err)
 	}
+	if q.updateCollectionStmt, err = db.PrepareContext(ctx, updateCollection); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateCollection: %w", err)
+	}
 	if q.updateExportJobRunningStmt, err = db.PrepareContext(ctx, updateExportJobRunning); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateExportJobRunning: %w", err)
 	}
@@ -323,6 +362,16 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 
 func (q *Queries) Close() error {
 	var err error
+	if q.addCollectionItemStmt != nil {
+		if cerr := q.addCollectionItemStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing addCollectionItemStmt: %w", cerr)
+		}
+	}
+	if q.addCollectionMemberStmt != nil {
+		if cerr := q.addCollectionMemberStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing addCollectionMemberStmt: %w", cerr)
+		}
+	}
 	if q.addTeamMemberStmt != nil {
 		if cerr := q.addTeamMemberStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing addTeamMemberStmt: %w", cerr)
@@ -356,6 +405,11 @@ func (q *Queries) Close() error {
 	if q.createAlertStmt != nil {
 		if cerr := q.createAlertStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createAlertStmt: %w", cerr)
+		}
+	}
+	if q.createCollectionStmt != nil {
+		if cerr := q.createCollectionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createCollectionStmt: %w", cerr)
 		}
 	}
 	if q.createExportJobStmt != nil {
@@ -401,6 +455,11 @@ func (q *Queries) Close() error {
 	if q.deleteAlertStmt != nil {
 		if cerr := q.deleteAlertStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteAlertStmt: %w", cerr)
+		}
+	}
+	if q.deleteCollectionStmt != nil {
+		if cerr := q.deleteCollectionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteCollectionStmt: %w", cerr)
 		}
 	}
 	if q.deleteExpiredAPITokensStmt != nil {
@@ -473,6 +532,16 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getAlertStmt: %w", cerr)
 		}
 	}
+	if q.getCollectionStmt != nil {
+		if cerr := q.getCollectionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getCollectionStmt: %w", cerr)
+		}
+	}
+	if q.getCollectionMemberStmt != nil {
+		if cerr := q.getCollectionMemberStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getCollectionMemberStmt: %w", cerr)
+		}
+	}
 	if q.getExportJobStmt != nil {
 		if cerr := q.getExportJobStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getExportJobStmt: %w", cerr)
@@ -481,6 +550,11 @@ func (q *Queries) Close() error {
 	if q.getLatestUnresolvedAlertHistoryStmt != nil {
 		if cerr := q.getLatestUnresolvedAlertHistoryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getLatestUnresolvedAlertHistoryStmt: %w", cerr)
+		}
+	}
+	if q.getPersonalCollectionStmt != nil {
+		if cerr := q.getPersonalCollectionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getPersonalCollectionStmt: %w", cerr)
 		}
 	}
 	if q.getQueryShareStmt != nil {
@@ -598,6 +672,21 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAlertsForUserStmt: %w", cerr)
 		}
 	}
+	if q.listCollectionItemsStmt != nil {
+		if cerr := q.listCollectionItemsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listCollectionItemsStmt: %w", cerr)
+		}
+	}
+	if q.listCollectionMembersStmt != nil {
+		if cerr := q.listCollectionMembersStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listCollectionMembersStmt: %w", cerr)
+		}
+	}
+	if q.listCollectionsForUserStmt != nil {
+		if cerr := q.listCollectionsForUserStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listCollectionsForUserStmt: %w", cerr)
+		}
+	}
 	if q.listExpiredExportJobPathsStmt != nil {
 		if cerr := q.listExpiredExportJobPathsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listExpiredExportJobPathsStmt: %w", cerr)
@@ -708,6 +797,16 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing pruneExpiredQuerySharesStmt: %w", cerr)
 		}
 	}
+	if q.removeCollectionItemStmt != nil {
+		if cerr := q.removeCollectionItemStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing removeCollectionItemStmt: %w", cerr)
+		}
+	}
+	if q.removeCollectionMemberStmt != nil {
+		if cerr := q.removeCollectionMemberStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing removeCollectionMemberStmt: %w", cerr)
+		}
+	}
 	if q.removeTeamMemberStmt != nil {
 		if cerr := q.removeTeamMemberStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing removeTeamMemberStmt: %w", cerr)
@@ -766,6 +865,11 @@ func (q *Queries) Close() error {
 	if q.updateAlertHistoryPayloadStmt != nil {
 		if cerr := q.updateAlertHistoryPayloadStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateAlertHistoryPayloadStmt: %w", cerr)
+		}
+	}
+	if q.updateCollectionStmt != nil {
+		if cerr := q.updateCollectionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateCollectionStmt: %w", cerr)
 		}
 	}
 	if q.updateExportJobRunningStmt != nil {
@@ -852,6 +956,8 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 type Queries struct {
 	db                                  DBTX
 	tx                                  *sql.Tx
+	addCollectionItemStmt               *sql.Stmt
+	addCollectionMemberStmt             *sql.Stmt
 	addTeamMemberStmt                   *sql.Stmt
 	addTeamSourceStmt                   *sql.Stmt
 	completeExportJobStmt               *sql.Stmt
@@ -859,6 +965,7 @@ type Queries struct {
 	countUserSessionsStmt               *sql.Stmt
 	createAPITokenStmt                  *sql.Stmt
 	createAlertStmt                     *sql.Stmt
+	createCollectionStmt                *sql.Stmt
 	createExportJobStmt                 *sql.Stmt
 	createQueryShareStmt                *sql.Stmt
 	createSavedQueryStmt                *sql.Stmt
@@ -868,6 +975,7 @@ type Queries struct {
 	createUserStmt                      *sql.Stmt
 	deleteAPITokenStmt                  *sql.Stmt
 	deleteAlertStmt                     *sql.Stmt
+	deleteCollectionStmt                *sql.Stmt
 	deleteExpiredAPITokensStmt          *sql.Stmt
 	deleteExpiredExportJobsStmt         *sql.Stmt
 	deleteQueryShareStmt                *sql.Stmt
@@ -882,8 +990,11 @@ type Queries struct {
 	getAPITokenStmt                     *sql.Stmt
 	getAPITokenByHashStmt               *sql.Stmt
 	getAlertStmt                        *sql.Stmt
+	getCollectionStmt                   *sql.Stmt
+	getCollectionMemberStmt             *sql.Stmt
 	getExportJobStmt                    *sql.Stmt
 	getLatestUnresolvedAlertHistoryStmt *sql.Stmt
+	getPersonalCollectionStmt           *sql.Stmt
 	getQueryShareStmt                   *sql.Stmt
 	getSavedQueryStmt                   *sql.Stmt
 	getSavedQueryBookmarkStatusStmt     *sql.Stmt
@@ -907,6 +1018,9 @@ type Queries struct {
 	listAlertHistoryStmt                *sql.Stmt
 	listAlertsBySourceStmt              *sql.Stmt
 	listAlertsForUserStmt               *sql.Stmt
+	listCollectionItemsStmt             *sql.Stmt
+	listCollectionMembersStmt           *sql.Stmt
+	listCollectionsForUserStmt          *sql.Stmt
 	listExpiredExportJobPathsStmt       *sql.Stmt
 	listManagedSourcesStmt              *sql.Stmt
 	listManagedTeamsStmt                *sql.Stmt
@@ -929,6 +1043,8 @@ type Queries struct {
 	markAlertTriggeredStmt              *sql.Stmt
 	pruneAlertHistoryStmt               *sql.Stmt
 	pruneExpiredQuerySharesStmt         *sql.Stmt
+	removeCollectionItemStmt            *sql.Stmt
+	removeCollectionMemberStmt          *sql.Stmt
 	removeTeamMemberStmt                *sql.Stmt
 	removeTeamSourceStmt                *sql.Stmt
 	resolveAlertHistoryStmt             *sql.Stmt
@@ -941,6 +1057,7 @@ type Queries struct {
 	updateAPITokenLastUsedStmt          *sql.Stmt
 	updateAlertStmt                     *sql.Stmt
 	updateAlertHistoryPayloadStmt       *sql.Stmt
+	updateCollectionStmt                *sql.Stmt
 	updateExportJobRunningStmt          *sql.Stmt
 	updateSavedQueryStmt                *sql.Stmt
 	updateSourceStmt                    *sql.Stmt
@@ -956,6 +1073,8 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
 		db:                                  tx,
 		tx:                                  tx,
+		addCollectionItemStmt:               q.addCollectionItemStmt,
+		addCollectionMemberStmt:             q.addCollectionMemberStmt,
 		addTeamMemberStmt:                   q.addTeamMemberStmt,
 		addTeamSourceStmt:                   q.addTeamSourceStmt,
 		completeExportJobStmt:               q.completeExportJobStmt,
@@ -963,6 +1082,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		countUserSessionsStmt:               q.countUserSessionsStmt,
 		createAPITokenStmt:                  q.createAPITokenStmt,
 		createAlertStmt:                     q.createAlertStmt,
+		createCollectionStmt:                q.createCollectionStmt,
 		createExportJobStmt:                 q.createExportJobStmt,
 		createQueryShareStmt:                q.createQueryShareStmt,
 		createSavedQueryStmt:                q.createSavedQueryStmt,
@@ -972,6 +1092,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		createUserStmt:                      q.createUserStmt,
 		deleteAPITokenStmt:                  q.deleteAPITokenStmt,
 		deleteAlertStmt:                     q.deleteAlertStmt,
+		deleteCollectionStmt:                q.deleteCollectionStmt,
 		deleteExpiredAPITokensStmt:          q.deleteExpiredAPITokensStmt,
 		deleteExpiredExportJobsStmt:         q.deleteExpiredExportJobsStmt,
 		deleteQueryShareStmt:                q.deleteQueryShareStmt,
@@ -986,8 +1107,11 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getAPITokenStmt:                     q.getAPITokenStmt,
 		getAPITokenByHashStmt:               q.getAPITokenByHashStmt,
 		getAlertStmt:                        q.getAlertStmt,
+		getCollectionStmt:                   q.getCollectionStmt,
+		getCollectionMemberStmt:             q.getCollectionMemberStmt,
 		getExportJobStmt:                    q.getExportJobStmt,
 		getLatestUnresolvedAlertHistoryStmt: q.getLatestUnresolvedAlertHistoryStmt,
+		getPersonalCollectionStmt:           q.getPersonalCollectionStmt,
 		getQueryShareStmt:                   q.getQueryShareStmt,
 		getSavedQueryStmt:                   q.getSavedQueryStmt,
 		getSavedQueryBookmarkStatusStmt:     q.getSavedQueryBookmarkStatusStmt,
@@ -1011,6 +1135,9 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listAlertHistoryStmt:                q.listAlertHistoryStmt,
 		listAlertsBySourceStmt:              q.listAlertsBySourceStmt,
 		listAlertsForUserStmt:               q.listAlertsForUserStmt,
+		listCollectionItemsStmt:             q.listCollectionItemsStmt,
+		listCollectionMembersStmt:           q.listCollectionMembersStmt,
+		listCollectionsForUserStmt:          q.listCollectionsForUserStmt,
 		listExpiredExportJobPathsStmt:       q.listExpiredExportJobPathsStmt,
 		listManagedSourcesStmt:              q.listManagedSourcesStmt,
 		listManagedTeamsStmt:                q.listManagedTeamsStmt,
@@ -1033,6 +1160,8 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		markAlertTriggeredStmt:              q.markAlertTriggeredStmt,
 		pruneAlertHistoryStmt:               q.pruneAlertHistoryStmt,
 		pruneExpiredQuerySharesStmt:         q.pruneExpiredQuerySharesStmt,
+		removeCollectionItemStmt:            q.removeCollectionItemStmt,
+		removeCollectionMemberStmt:          q.removeCollectionMemberStmt,
 		removeTeamMemberStmt:                q.removeTeamMemberStmt,
 		removeTeamSourceStmt:                q.removeTeamSourceStmt,
 		resolveAlertHistoryStmt:             q.resolveAlertHistoryStmt,
@@ -1045,6 +1174,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateAPITokenLastUsedStmt:          q.updateAPITokenLastUsedStmt,
 		updateAlertStmt:                     q.updateAlertStmt,
 		updateAlertHistoryPayloadStmt:       q.updateAlertHistoryPayloadStmt,
+		updateCollectionStmt:                q.updateCollectionStmt,
 		updateExportJobRunningStmt:          q.updateExportJobRunningStmt,
 		updateSavedQueryStmt:                q.updateSavedQueryStmt,
 		updateSourceStmt:                    q.updateSourceStmt,
