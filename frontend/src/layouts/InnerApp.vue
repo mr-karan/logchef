@@ -51,7 +51,6 @@ import {
   Monitor,
   Bell,
   Wrench,
-  FolderHeart,
 } from "lucide-vue-next";
 
 import { useAuthStore } from "@/stores/auth";
@@ -192,11 +191,6 @@ const mainNavItems: NavItem[] = [
     title: "Saved Queries",
     icon: ClipboardList,
     url: "/logs/saved",
-  },
-  {
-    title: "Collections",
-    icon: FolderHeart,
-    url: "/logs/collections",
   },
   {
     title: "Alerts",
