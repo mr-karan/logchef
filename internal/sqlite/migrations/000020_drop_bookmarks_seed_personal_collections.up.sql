@@ -2,20 +2,11 @@
 -- every existing user gets a personal collection back-filled with the queries
 -- they had bookmarked (best-effort, only for queries with a known creator).
 
--- 1a. Rename legacy hardcoded "My Collection" rows from the v1.6.0-dev preview
---     to the new "<full_name>'s Collection" template. Only touches the default
---     name; user-renamed personal collections are left alone.
-UPDATE collections
-SET name = (
-        SELECT COALESCE(NULLIF(TRIM(u.full_name), ''), u.email) || '''s Collection'
-        FROM users u WHERE u.id = collections.created_by
-    ),
-    updated_at = datetime('now')
-WHERE is_personal = 1 AND name = 'My Collection';
-
--- 1b. Create a personal collection for every user that does not have one yet.
---     Name follows "<full_name>'s Collection" and falls back to the email if
---     the full name is empty.
+-- 1. Create a personal collection for every user that does not have one yet.
+--    Name follows "<full_name>'s Collection" and falls back to the email if
+--    the full name is empty. Existing personal collections (including the
+--    "My Collection" name from the v1.6.0-dev preview) are left untouched —
+--    that name may have been intentional or already user-customized.
 INSERT INTO collections (name, description, is_personal, created_by, created_at, updated_at)
 SELECT
     COALESCE(NULLIF(TRIM(u.full_name), ''), u.email) || '''s Collection',
