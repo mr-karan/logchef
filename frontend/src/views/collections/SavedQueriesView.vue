@@ -10,6 +10,7 @@ import {
   Plus,
   Search,
   Link,
+  FolderPlus,
 } from "lucide-vue-next";
 import { formatDate } from "@/utils/format";
 import {
@@ -60,6 +61,7 @@ import type { SaveQueryFormData } from "@/views/explore/types";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
 import { useContextStore } from "@/stores/context";
 import { useRoute } from "vue-router";
+import AddToCollectionDrawer from "@/components/collections/AddToCollectionDrawer.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -84,6 +86,17 @@ const {
 const localTeamQueries = ref<SavedQuery[] | undefined>();
 const isAllTeamsMode = ref(false);
 const isAllSourcesMode = computed(() => isAllTeamsMode.value || !contextSourceId.value);
+
+// "Add to Collection" drawer state
+const showCollectionDrawer = ref(false);
+const drawerQueryId = ref(0);
+const drawerQueryName = ref("");
+
+function openCollectionDrawer(query: SavedQuery) {
+  drawerQueryId.value = query.id;
+  drawerQueryName.value = query.name;
+  showCollectionDrawer.value = true;
+}
 
 const currentSelectedSource = computed(() => {
   if (!contextSourceId.value) return undefined;
@@ -625,6 +638,10 @@ async function copyCollectionUrl(query: SavedQuery) {
                             <Eye v-else class="mr-2 h-4 w-4" />
                             {{ openingQueryId === query.id ? 'Opening...' : 'Open' }}
                           </DropdownMenuItem>
+                          <DropdownMenuItem @click="openCollectionDrawer(query)">
+                            <FolderPlus class="mr-2 h-4 w-4" />
+                            Add to Collection
+                          </DropdownMenuItem>
                           <DropdownMenuItem @click="copyCollectionUrl(query)">
                             <Link class="mr-2 h-4 w-4" />
                             Copy Link
@@ -662,5 +679,12 @@ async function copyCollectionUrl(query: SavedQuery) {
         </template>
       </CardContent>
     </Card>
+
+    <AddToCollectionDrawer
+      :open="showCollectionDrawer"
+      :query-id="drawerQueryId"
+      :query-name="drawerQueryName"
+      @update:open="showCollectionDrawer = $event"
+    />
   </div>
 </template>
