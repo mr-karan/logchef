@@ -9,186 +9,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.6.0] - 2026-05-06
 
-LogChef 1.6 narrows the **Team** abstraction to its real job — access control —
-and adds **Collections**, a cross-team curation primitive that replaces the
-short-lived "Query Folders" experiment from the v1.6.0-dev preview build.
+LogChef 1.6 narrows the **Team** abstraction to access control only and adds
+**Collections** — cross-team curation lists for saved queries. The unified
+Saved Queries view replaces the old team-scoped collections page with a flat,
+searchable table and a collection-picker dropdown.
 
-If you are upgrading from a v1.6.0-dev deployment, migrations 000016 → 000019
-reshape `team_queries` → `saved_queries`, drop `team_id` from `alerts` /
-`query_shares` / `export_jobs`, and create `collections` /
-`collection_members` / `collection_items`. The `query_folders` and
-`query_folder_items` tables are dropped without data migration — fold any
-folder-shaped state into Collections after upgrading.
-
-### API & URL changes (heads-up for integrators)
-- **Saved queries de-teamed.** The legacy `team_queries` table is rebuilt as
-  `saved_queries(source_id, name, …, created_by)`. Visibility is "any user
-  with source access via any team they belong to"; edit access is "creator
-  + global admin" (rows with `created_by IS NULL` are global-admin-only).
-- **Alerts de-teamed.** `alerts.team_id` is dropped; `alerts.created_by` is
-  added (nullable); auth moves to the creator/admin model.
-- **`query_shares` and `export_jobs` lose `team_id`.** Both already had
-  `created_by`, so the column drop is invisible to the API surface beyond
-  `team_id` disappearing from response payloads.
-- **API endpoints:**
-  - New `/api/v1/saved-queries` replaces every
-    `/api/v1/teams/:teamID/sources/:sourceID/collections/*` endpoint and
-    `/api/v1/me/collections`.
-  - New `/api/v1/alerts` replaces
-    `/api/v1/teams/:teamID/sources/:sourceID/alerts/*`.
-  - New `/api/v1/collections` adds collection / member / item management.
-  - Old paths return 404 — no shims, no redirects.
-- **Frontend URL:** `/logs/saved/:queryId` is the new canonical share link.
-  The legacy `/logs/collection/:teamId/:sourceId/:collectionId` URL is gone.
-- **CLI compatibility:** `logchef collections` continues to work — the
-  internal `Client::list_collections` method now hits
-  `/api/v1/saved-queries` directly. Older CLI binaries against a 1.6
-  backend will hit 404s; upgrade alongside.
+### API & URL changes
+- **Saved queries are source-scoped, not team-scoped.** `team_queries` is
+  rebuilt as `saved_queries(source_id, created_from_team_id, created_by, …)`.
+  Visibility: any user with source access via any team. Edit: creator +
+  global admin.
+- **`/api/v1/saved-queries/:id/resolve`** returns a transient
+  `resolved_team_id` computed from the user's access paths — no team
+  ownership stored on the query itself.
+- **Alerts de-teamed.** New `/api/v1/alerts` route group; `alerts.team_id`
+  dropped, `alerts.created_by` added.
+- **`query_shares` and `export_jobs` lose `team_id`.**
+- **New `/api/v1/collections`** — CRUD for collections + members + items.
+- **Old team-scoped paths return 404.** No shims, no redirects.
+- **Frontend URL:** `/logs/saved/:queryId` is the canonical share link.
 
 ### Added
-- **Collections** — Cross-team curation lists for saved queries. Each user
-  gets an auto-created personal collection (one per user, enforced by a
-  unique partial index) on first call to `GET /api/v1/collections`. Shared
-  collections are invite-only with two roles: `owner` (full control) and
-  `member` (read + run items they have source access to). Items the
-  requester cannot run still surface in the UI with a lock icon, so
-  curators can pin queries that span sources their members may not all
-  reach. New routes: `/logs/collections` (list) and
-  `/logs/collections/:collectionID` (detail with members + items).
-  Backend: migration 000019, `pkg/models/collections.go`, full CRUD plus
-  members and items subresources.
-- **Forward-only saved-query links** — `/logs/saved/:queryId` resolves the
-  query, infers its source, and redirects into `/logs/explore` with the
-  right context.
-- **Shareable saved-query links** — Generate time-limited share links for
-  saved queries with a configurable TTL (carried forward from the v1.6
-  preview).
-- **Backend-streamed result downloads** — Export-job workflow streams
-  CSV/JSON downloads from the server with synchronous admission control
-  (HTTP 429 at create-time when the active-job cap is hit, instead of
-  accepting then async-failing). Replaces the old frontend JS-based CSV
-  export.
-- **Calendar month/year drill-down** — Click the month heading to surface
-  a 12-month grid; click the year heading to surface a 10-year grid
-  (decade boundaries match common dashboard tooling, e.g. 2021–2030).
-- **OIDC `skip_email_verified_check`** config option — Optionally bypass
-  the `email_verified` claim check for IdPs that don't set it. Logs a
-  startup warning when enabled so the bypass is visible in boot logs.
+- **Collections** — Cross-team curation lists. Personal collection
+  auto-created per user ("My Collection"). Shared collections are
+  invite-only with `owner` + `member` roles. Items a member can't run
+  show with a `runnable: false` flag (lock icon in UI).
+- **Unified Saved Queries view** — Single page at `/logs/saved` with a
+  collection-picker dropdown (All Queries / My Collection / shared
+  collections), inline search, and a Metabase-style flat table.
+- **"Add to Collection" drawer** — Per-row action on saved queries.
+  Slide-out panel shows all collections as checkboxes for quick
+  pin/unpin. Create new collections inline.
+- **"Remove from collection" action** — When viewing a specific
+  collection, each row's menu gains a destructive remove action.
+- **Saved query resolve with `resolved_team_id`** — The `/resolve`
+  endpoint deterministically picks the correct team for execution using
+  priority: explicit `?team_id` hint → `created_from_team_id` →
+  first accessible team fallback.
+- **`created_from_team_id`** on saved queries — nullable metadata
+  recording which team context the query was saved from. Used as a
+  preference hint during resolve; not an ACL gate.
+- **Invite members by email** — Collection member invite uses an email
+  dropdown (same UX as team member management), not a raw user ID.
+- **Shareable saved-query links** with configurable TTL.
+- **Backend-streamed result downloads** with synchronous admission
+  control (HTTP 429 at capacity).
+- **Calendar month/year drill-down** in the date picker.
+- **OIDC `skip_email_verified_check`** option.
   ([#85](https://github.com/mr-karan/logchef/issues/85),
   [#86](https://github.com/mr-karan/logchef/pull/86))
-- **Native ClickHouse TLS** — TLS support for ClickHouse native-protocol
-  connections.
+- **Native ClickHouse TLS.**
   ([#88](https://github.com/mr-karan/logchef/pull/88))
 
 ### Changed
-- **Sidebar splits Collections from Saved Queries.** "Saved Queries"
-  remains the flat list of all queries you can see; "Collections" is the
-  new curated-list surface.
-- **AlertNotification / webhook payload / email body** drop `team_id` and
-  `team_name` fields. Recipients resolve to users directly instead of
-  being filtered through team membership, so any user (not just
-  teammates) can be a recipient.
-- **Generator URL** drops the `&team=` query parameter. Alert links are
-  now `/logs/alerts/:alertID?source=…`.
-- **Explore UI polish pass** — Top bar drops the last-execution clock and
-  restyles Limit/timezone as muted pills. Query editor placeholders
-  rewritten as concrete, scannable examples for both modes. Fields
-  sidebar fades type badges to opacity-0 until row hover; section counts
-  become muted spans. Histogram tightens default bar opacity (0.85→1.0
-  on hover), grid-line stroke, and axis tick styling. Secondary action
-  bar regroups into stats · timezone · pagination zones with a Local|UTC
-  segmented timezone control. Timestamps use tabular-nums; method chips
-  get a fixed `min-width: 52px`.
-- **Export → Download** in the UI — Toolbar button renamed and the
-  backend-streamed pipe is the single canonical download path. Frontend
-  CSV export dropdown and helpers (`export.ts`, `export-compact.ts`)
-  removed.
-- **AI SQL insert switches to SQL mode** — Inserting an AI-generated
-  query clears any loaded saved query and emits an explicit mode switch,
-  so previously-loaded saved-query state can't leak into the new SQL.
-  ([#87](https://github.com/mr-karan/logchef/issues/87),
-  [#89](https://github.com/mr-karan/logchef/pull/89))
-- **`changeMode()` honors `isModeSwitchOnly`** — Skips the
-  LogchefQL→SQL translation call when the caller has already set
-  `rawSql` (AI insert, saved-query load). Tab clicks still trigger
-  translation as before.
-- **Single backend artifact name** — Build pipeline produces a consistent
-  artifact name across CI and deploy paths.
+- **Saved Queries view is now the unified entry point.** The old two-page
+  layout (separate /logs/saved + /logs/collections list) is replaced by
+  a single flat table with the collection picker. `/logs/collections`
+  is a standalone management page (create, delete, navigate to detail).
+- **Alert notifications** drop `team_id` / `team_name` fields.
+  Recipients resolve to users directly.
+- **Explore UI polish** — quieter top bar, concrete query placeholders,
+  tighter histogram styling, Local|UTC segmented timezone control.
+- **Export → Download** rename; backend-streamed pipe is the only path.
+- **AI SQL insert** clears saved-query state and switches to SQL mode.
 
 ### Fixed
-- **Unbounded query result OOM mitigated** — Introduced `max_limit`
-  (default 100k rows) for the SQL→buffer path that previously could
-  materialize ~1M rows in memory. Preview/export limits and timeout
-  handling are now aligned across modes.
-- **Raw SQL in URL no longer overflows headers** — Round-tripping large
-  SQL via URL state previously tripped the framework's default URL/header
-  limit; addressed alongside the limits work.
-- **Export pruner is crash-safe** — Unlinks files before deleting DB
-  rows; an interrupted prune now leaves no orphaned artifacts on disk.
-- **Query share TTL validation** — A TTL above the configured max now
-  returns HTTP 400 instead of silently clamping.
-- **Translate API errors surface** — `useQuery` no longer swallows
-  LogchefQL→SQL translate failures and proceeds to SQL mode with stale
-  `rawSql`.
-- **Export polling cleanup** — `LogExplorer` cancels the export-job poll
-  via `AbortController` on unmount; navigating away no longer leaks
-  polling.
-- **`handleDownloadExportJob` logs stat errors** — Non-`ErrNotExist`
-  `os.Stat` errors are surfaced instead of swallowed.
-- **Relative export URLs** — Backend returns relative download paths so
-  reverse-proxy and bastion-fronted deployments produce correct links.
-- **`useUrlState` readiness timeout** — Shows a non-blocking toast and
-  returns a boolean instead of blocking the page.
-- **`clearSource()` action** added to the context store; replaces direct
-  `contextStore.sourceId = null` mutations.
-- **DataTable `:key` stability** — Fallback for undefined `queryId`
-  keeps the component key stable across query lifecycle transitions.
-- **SQLC migration** — Moved ad-hoc SQLite queries in `alerts.go`,
-  `export_jobs.go`, and `query_shares.go` into `queries.sql` so they go
-  through generated, type-safe SQLC code.
+- **Saved query loads wrong source** — resolved query's `source_id` now
+  overrides stale URL `?source=` param; URL updates via `router.replace`.
+- **"No source selected" race** — explorer waits for
+  `currentSourceDetails.id === contextStore.sourceId` before executing.
+- **Redirect spinner stuck on param reuse** — `CollectionRedirect`
+  watches `route.params.queryId` reactively instead of `onMounted` only.
+- **Stale-request guard** in `sourcesStore.loadSourceDetails` prevents
+  a fast source switch from being overwritten by an older response.
+- **Collection item counts update live** after pin/unpin in the drawer.
+- **Migration cascade-delete prevention** — `PRAGMA foreign_keys = OFF`
+  around table rebuilds in 000018 and 000020 to preserve `alert_history`
+  and `collection_items`.
+- **Unbounded query result OOM** — `max_limit` (default 100k rows).
+- **Raw SQL in URL overflow**, crash-safe export pruner, query share TTL
+  validation, translate API error surfacing, relative export URLs.
 
 ### Removed
-- **Query Folders.** The team-scoped folder feature briefly carried in
-  v1.6.0-dev (`/api/v1/teams/:teamID/folders`, `query_folders` and
-  `query_folder_items` tables, the FolderNav / FolderDialog /
-  FolderPicker / AddQueriesToFolderDialog Vue components, the
-  `useQueryFoldersStore` Pinia store, and folder columns on the saved-
-  queries list view) is gone. Folders were team-scoped, which couldn't
-  serve the actual user need: cross-team curation. Collections take their
-  place. No data migration — fold any folder-shaped state into
-  Collections after upgrading.
-- **`SavedTeamQuery.team_id` and `SavedTeamQuery.team_name`** fields are
-  dropped from the API response and the SavedQuery TypeScript type. The
-  saved-queries list view's Team column is removed.
-- **`AlertNotification.team_id` / `team_name`**, plus the matching
-  webhook payload fields, are dropped.
-- **Dead `TLSCACert` field** — System-roots TLS only for now; custom CA
-  / `skip_verify` is a follow-up.
-- **Dead `loadTeamSourceQueries` / `createTeamSourceQuery`** code paths
-  on the frontend `sources` store, plus the corresponding
-  `sourcesApi.listTeamSourceQueries` / `createTeamSourceQuery` clients.
+- **Query Folders** (the team-scoped experiment from v1.6.0-dev).
+- **Bookmarks** (`is_bookmarked` column) — replaced by personal
+  collections.
+- **`team_id` on saved queries, alerts, query shares, export jobs.**
+- Dead frontend code paths (`loadTeamSourceQueries`,
+  `createTeamSourceQuery`, `useQueryFoldersStore`, etc.).
 
-### Migration notes
-- `000016_drop_query_folders` — drops the folders tables. Down recreates
-  empty tables (data is gone).
-- `000017_de_team_saved_queries` — rebuilds `team_queries` as
-  `saved_queries`, drops `team_id`, adds nullable `created_by` FK to
-  `users(id) ON DELETE SET NULL`. Down restores `team_id NOT NULL` via
-  best-effort `team_sources` join (smallest team_id linked to each
-  query's source).
-- `000018_drop_residual_team_coupling` — drops `team_id` from `alerts`,
-  `query_shares`, `export_jobs`. Adds nullable `alerts.created_by`. Down
-  restores all three best-effort.
-- `000019_add_collections` — creates `collections`, `collection_members`,
-  `collection_items` with the unique partial index that enforces "one
-  personal collection per user".
+### Migration notes (000016 → 000021)
+| Migration | What it does |
+|-----------|-------------|
+| 000016 | Drops `query_folders` + `query_folder_items` |
+| 000017 | Rebuilds `team_queries` → `saved_queries`, drops `team_id`, adds `created_by` |
+| 000018 | Drops `team_id` from `alerts`, `query_shares`, `export_jobs`; adds `alerts.created_by` |
+| 000019 | Creates `collections`, `collection_members`, `collection_items` |
+| 000020 | Drops `is_bookmarked`; seeds personal collections; migrates bookmarks to collection items |
+| 000021 | Adds `created_from_team_id` to `saved_queries`; backfills from `team_sources` |
 
 ### Follow-ups
-- `logchef-mcp` (separate repo) is not yet updated; it will return 404s
-  against a 1.6 backend until its tooling is rewired to
-  `/api/v1/saved-queries`.
-- Provisionable collections (declaring shared collections + memberships
-  in the provisioning config) are out of scope for 1.6.
+- `logchef-mcp` (separate repo) needs rewiring to `/api/v1/saved-queries`.
+- Provisionable collections out of scope for 1.6.
 
 ### Contributors
 - [@m0nikasingh](https://github.com/m0nikasingh) — OIDC email
