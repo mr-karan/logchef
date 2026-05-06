@@ -41,7 +41,7 @@ func mapCollectionError(c *fiber.Ctx, err error) error {
 // handleListCollections returns the caller's collections (auto-creates personal).
 func (s *Server) handleListCollections(c *fiber.Ctx) error {
 	user := c.Locals("user").(*models.User)
-	collections, err := core.ListCollectionsForUser(c.Context(), s.sqlite, s.log, user.ID)
+	collections, err := core.ListCollectionsForUser(c.Context(), s.sqlite, s.log, user)
 	if err != nil {
 		s.log.Error("failed to list collections", "error", err, "user_id", user.ID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list collections", models.GeneralErrorType)

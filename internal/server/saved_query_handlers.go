@@ -194,26 +194,6 @@ func (s *Server) handleDeleteSavedQuery(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Saved query deleted successfully"})
 }
 
-// handleToggleSavedQueryBookmark flips the bookmark flag (creator + global admin only).
-func (s *Server) handleToggleSavedQueryBookmark(c *fiber.Ctx) error {
-	query, user, err := s.loadSavedQueryWithVisibility(c)
-	if err != nil {
-		return err
-	}
-	if !core.UserCanEditSavedQuery(query, user) {
-		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or a global admin can bookmark this query", models.AuthorizationErrorType)
-	}
-
-	newStatus, toggleErr := core.ToggleSavedQueryBookmark(c.Context(), s.sqlite, s.log, query.ID)
-	if toggleErr != nil {
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to toggle bookmark", models.GeneralErrorType)
-	}
-	return SendSuccess(c, fiber.StatusOK, fiber.Map{
-		"is_bookmarked": newStatus,
-		"message":       "Bookmark status toggled successfully",
-	})
-}
-
 // handleResolveSavedQuery returns the query plus enough metadata for the explorer
 // to hydrate without round-tripping through URL params.
 func (s *Server) handleResolveSavedQuery(c *fiber.Ctx) error {
@@ -228,7 +208,6 @@ func (s *Server) handleResolveSavedQuery(c *fiber.Ctx) error {
 		"description":   query.Description,
 		"query_type":    query.QueryType,
 		"query_content": query.QueryContent,
-		"is_bookmarked": query.IsBookmarked,
 		"created_by":    query.CreatedBy,
 		"created_at":    query.CreatedAt,
 		"updated_at":    query.UpdatedAt,

@@ -25,26 +25,51 @@ var (
 	ErrInvalidCollectionRole = errors.New("invalid collection role")
 )
 
-const personalCollectionName = "My Collection"
+// personalCollectionNameFor returns the auto-generated name for a user's
+// personal collection. We prefer the full name and fall back to the email
+// local-part so the label is always stable and human-readable.
+func personalCollectionNameFor(user *models.User) string {
+	if user == nil {
+		return "Personal Collection"
+	}
+	label := strings.TrimSpace(user.FullName)
+	if label == "" {
+		label = strings.TrimSpace(user.Email)
+	}
+	if label == "" {
+		return "Personal Collection"
+	}
+	return label + "'s Collection"
+}
 
 // EnsurePersonalCollection returns the user's personal collection, creating it
-// (and the owner-membership row) on first call.
-func EnsurePersonalCollection(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID models.UserID) (*models.Collection, error) {
-	personal, err := db.GetPersonalCollection(ctx, userID)
+// (and the owner-membership row) on first call. Self-heals: if the collection
+// already exists but the owner-membership row is missing — possible from older
+// half-broken state — it re-adds the membership row idempotently.
+func EnsurePersonalCollection(ctx context.Context, db *sqlite.DB, log *slog.Logger, user *models.User) (*models.Collection, error) {
+	if user == nil {
+		return nil, fmt.Errorf("user is required to ensure personal collection")
+	}
+	personal, err := db.GetPersonalCollection(ctx, user.ID)
 	if err == nil {
+		// Idempotent owner-membership write so we recover from old broken state.
+		if memberErr := db.AddCollectionMember(ctx, personal.ID, user.ID, models.CollectionRoleOwner, &user.ID); memberErr != nil {
+			log.Warn("failed to ensure owner-membership row on existing personal collection",
+				"error", memberErr, "user_id", user.ID, "collection_id", personal.ID)
+		}
 		return personal, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("error fetching personal collection: %w", err)
 	}
 
-	created, err := db.CreateCollection(ctx, personalCollectionName, "", true, userID)
+	name := personalCollectionNameFor(user)
+	created, err := db.CreateCollection(ctx, name, "", true, user.ID)
 	if err != nil {
 		return nil, err
 	}
-	if err := db.AddCollectionMember(ctx, created.ID, userID, models.CollectionRoleOwner, &userID); err != nil {
-		log.Error("failed to add owner to personal collection", "error", err, "user_id", userID, "collection_id", created.ID)
-		// Best-effort cleanup so we don't leak an orphaned collection row.
+	if err := db.AddCollectionMember(ctx, created.ID, user.ID, models.CollectionRoleOwner, &user.ID); err != nil {
+		log.Error("failed to add owner to personal collection", "error", err, "user_id", user.ID, "collection_id", created.ID)
 		_ = db.DeleteCollection(ctx, created.ID)
 		return nil, fmt.Errorf("error initializing personal collection: %w", err)
 	}
@@ -54,11 +79,11 @@ func EnsurePersonalCollection(ctx context.Context, db *sqlite.DB, log *slog.Logg
 }
 
 // ListCollectionsForUser returns the user's collections (auto-creating personal).
-func ListCollectionsForUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID models.UserID) ([]*models.Collection, error) {
-	if _, err := EnsurePersonalCollection(ctx, db, log, userID); err != nil {
+func ListCollectionsForUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, user *models.User) ([]*models.Collection, error) {
+	if _, err := EnsurePersonalCollection(ctx, db, log, user); err != nil {
 		return nil, err
 	}
-	collections, err := db.ListCollectionsForUser(ctx, userID)
+	collections, err := db.ListCollectionsForUser(ctx, user.ID)
 	if err != nil {
 		return nil, err
 	}

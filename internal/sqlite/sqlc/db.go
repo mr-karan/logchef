@@ -147,9 +147,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getSavedQueryStmt, err = db.PrepareContext(ctx, getSavedQuery); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSavedQuery: %w", err)
 	}
-	if q.getSavedQueryBookmarkStatusStmt, err = db.PrepareContext(ctx, getSavedQueryBookmarkStatus); err != nil {
-		return nil, fmt.Errorf("error preparing query GetSavedQueryBookmarkStatus: %w", err)
-	}
 	if q.getSessionStmt, err = db.PrepareContext(ctx, getSession); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSession: %w", err)
 	}
@@ -311,9 +308,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.teamHasSourceStmt, err = db.PrepareContext(ctx, teamHasSource); err != nil {
 		return nil, fmt.Errorf("error preparing query TeamHasSource: %w", err)
-	}
-	if q.toggleSavedQueryBookmarkStmt, err = db.PrepareContext(ctx, toggleSavedQueryBookmark); err != nil {
-		return nil, fmt.Errorf("error preparing query ToggleSavedQueryBookmark: %w", err)
 	}
 	if q.touchQueryShareStmt, err = db.PrepareContext(ctx, touchQueryShare); err != nil {
 		return nil, fmt.Errorf("error preparing query TouchQueryShare: %w", err)
@@ -565,11 +559,6 @@ func (q *Queries) Close() error {
 	if q.getSavedQueryStmt != nil {
 		if cerr := q.getSavedQueryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getSavedQueryStmt: %w", cerr)
-		}
-	}
-	if q.getSavedQueryBookmarkStatusStmt != nil {
-		if cerr := q.getSavedQueryBookmarkStatusStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing getSavedQueryBookmarkStatusStmt: %w", cerr)
 		}
 	}
 	if q.getSessionStmt != nil {
@@ -842,11 +831,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing teamHasSourceStmt: %w", cerr)
 		}
 	}
-	if q.toggleSavedQueryBookmarkStmt != nil {
-		if cerr := q.toggleSavedQueryBookmarkStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing toggleSavedQueryBookmarkStmt: %w", cerr)
-		}
-	}
 	if q.touchQueryShareStmt != nil {
 		if cerr := q.touchQueryShareStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing touchQueryShareStmt: %w", cerr)
@@ -997,7 +981,6 @@ type Queries struct {
 	getPersonalCollectionStmt           *sql.Stmt
 	getQueryShareStmt                   *sql.Stmt
 	getSavedQueryStmt                   *sql.Stmt
-	getSavedQueryBookmarkStatusStmt     *sql.Stmt
 	getSessionStmt                      *sql.Stmt
 	getSourceStmt                       *sql.Stmt
 	getSourceByNameStmt                 *sql.Stmt
@@ -1052,7 +1035,6 @@ type Queries struct {
 	setTeamManagedStmt                  *sql.Stmt
 	setUserManagedStmt                  *sql.Stmt
 	teamHasSourceStmt                   *sql.Stmt
-	toggleSavedQueryBookmarkStmt        *sql.Stmt
 	touchQueryShareStmt                 *sql.Stmt
 	updateAPITokenLastUsedStmt          *sql.Stmt
 	updateAlertStmt                     *sql.Stmt
@@ -1114,7 +1096,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getPersonalCollectionStmt:           q.getPersonalCollectionStmt,
 		getQueryShareStmt:                   q.getQueryShareStmt,
 		getSavedQueryStmt:                   q.getSavedQueryStmt,
-		getSavedQueryBookmarkStatusStmt:     q.getSavedQueryBookmarkStatusStmt,
 		getSessionStmt:                      q.getSessionStmt,
 		getSourceStmt:                       q.getSourceStmt,
 		getSourceByNameStmt:                 q.getSourceByNameStmt,
@@ -1169,7 +1150,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		setTeamManagedStmt:                  q.setTeamManagedStmt,
 		setUserManagedStmt:                  q.setUserManagedStmt,
 		teamHasSourceStmt:                   q.teamHasSourceStmt,
-		toggleSavedQueryBookmarkStmt:        q.toggleSavedQueryBookmarkStmt,
 		touchQueryShareStmt:                 q.touchQueryShareStmt,
 		updateAPITokenLastUsedStmt:          q.updateAPITokenLastUsedStmt,
 		updateAlertStmt:                     q.updateAlertStmt,

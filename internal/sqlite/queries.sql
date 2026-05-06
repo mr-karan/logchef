@@ -248,17 +248,6 @@ WHERE id = ?;
 -- Delete a saved query
 DELETE FROM saved_queries WHERE id = ?;
 
--- name: ToggleSavedQueryBookmark :exec
--- Flip the bookmark flag and bump updated_at
-UPDATE saved_queries
-SET is_bookmarked = NOT is_bookmarked,
-    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ?;
-
--- name: GetSavedQueryBookmarkStatus :one
--- Read the current bookmark flag
-SELECT is_bookmarked FROM saved_queries WHERE id = ?;
-
 -- name: ListSavedQueriesForUser :many
 -- List every saved query the user can see (any source attached to any of their teams)
 SELECT
@@ -270,7 +259,6 @@ SELECT
     sq.query_content,
     sq.created_at,
     sq.updated_at,
-    sq.is_bookmarked,
     sq.created_by,
     s.name AS source_name
 FROM saved_queries sq
@@ -281,7 +269,7 @@ WHERE sq.source_id IN (
     JOIN team_members tm ON tm.team_id = ts.team_id
     WHERE tm.user_id = ?
 )
-ORDER BY sq.is_bookmarked DESC, sq.updated_at DESC;
+ORDER BY sq.updated_at DESC;
 
 -- name: ListSavedQueriesForUserBySource :many
 -- List saved queries for a specific source, scoped to a user that has access to it
@@ -294,7 +282,6 @@ SELECT
     sq.query_content,
     sq.created_at,
     sq.updated_at,
-    sq.is_bookmarked,
     sq.created_by,
     s.name AS source_name
 FROM saved_queries sq
@@ -305,7 +292,7 @@ WHERE sq.source_id = ?
     JOIN team_members tm ON tm.team_id = ts.team_id
     WHERE ts.source_id = sq.source_id AND tm.user_id = ?
   )
-ORDER BY sq.is_bookmarked DESC, sq.updated_at DESC;
+ORDER BY sq.updated_at DESC;
 
 -- Query Shares
 
@@ -752,7 +739,7 @@ SELECT * FROM collections WHERE id = ?;
 SELECT * FROM collections WHERE created_by = ? AND is_personal = 1;
 
 -- name: UpdateCollection :exec
--- Update name/description (owner only — enforced in app code)
+-- Update name/description (owner only - enforced in app code)
 UPDATE collections
 SET name = ?,
     description = ?,
@@ -782,8 +769,10 @@ WHERE cm.user_id = ?
 ORDER BY c.is_personal DESC, c.updated_at DESC;
 
 -- name: AddCollectionMember :exec
--- Add a member (owner or member role)
-INSERT OR IGNORE INTO collection_members (collection_id, user_id, role, added_by)
+-- Add a member; the application layer dedupes via the unique constraint on
+-- (collection_id, user_id). sqlc 1.30 has a parser bug with ON CONFLICT on
+-- SQLite, so we keep the statement plain.
+INSERT INTO collection_members (collection_id, user_id, role, added_by)
 VALUES (?, ?, ?, ?);
 
 -- name: GetCollectionMember :one
@@ -806,8 +795,9 @@ ORDER BY cm.role DESC, u.email ASC;
 DELETE FROM collection_members WHERE collection_id = ? AND user_id = ?;
 
 -- name: AddCollectionItem :exec
--- Add a saved query to a collection (idempotent)
-INSERT OR IGNORE INTO collection_items (collection_id, saved_query_id, sort_order, added_by)
+-- Add a saved query to a collection; the application layer treats unique
+-- constraint violations as no-ops (sqlc 1.30 mangles ON CONFLICT on SQLite).
+INSERT INTO collection_items (collection_id, saved_query_id, sort_order, added_by)
 VALUES (?, ?, ?, ?);
 
 -- name: RemoveCollectionItem :exec
@@ -828,7 +818,6 @@ SELECT
     sq.description AS query_description,
     sq.query_type,
     sq.query_content,
-    sq.is_bookmarked,
     sq.created_by AS query_created_by,
     sq.created_at AS query_created_at,
     sq.updated_at AS query_updated_at,

@@ -179,16 +179,6 @@ func ListSavedQueriesForUserBySource(ctx context.Context, db *sqlite.DB, log *sl
 	return queries, nil
 }
 
-// ToggleSavedQueryBookmark flips the bookmark flag and returns the new value.
-func ToggleSavedQueryBookmark(ctx context.Context, db *sqlite.DB, log *slog.Logger, queryID int) (bool, error) {
-	status, err := db.ToggleSavedQueryBookmark(ctx, queryID)
-	if err != nil {
-		log.Error("failed to toggle saved query bookmark", "error", err, "query_id", queryID)
-		return false, fmt.Errorf("error toggling saved query bookmark: %w", err)
-	}
-	return status, nil
-}
-
 // UserCanEditSavedQuery returns true if the user is the creator or a global admin.
 // Legacy queries (CreatedBy == nil) are editable only by global admins.
 func UserCanEditSavedQuery(query *models.SavedQuery, user *models.User) bool {

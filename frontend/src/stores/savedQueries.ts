@@ -214,36 +214,6 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     });
   }
 
-  async function toggleBookmark(queryId: number) {
-    const key = `toggleBookmark-${queryId}`;
-    return await state.withLoading(key, async () => {
-      return await state.callApi<{ is_bookmarked: boolean; message: string }>({
-        apiCall: () => savedQueriesApi.toggleBookmark(queryId),
-        operationKey: key,
-        onSuccess: (response) => {
-          if (response) {
-            const index = state.data.value.queries.findIndex(
-              (q) => q.id === queryId
-            );
-            if (index >= 0) {
-              state.data.value.queries[index].is_bookmarked = response.is_bookmarked;
-              state.data.value.queries[index].updated_at = new Date().toISOString();
-              state.data.value.queries.sort((a, b) => {
-                if (a.is_bookmarked !== b.is_bookmarked) {
-                  return a.is_bookmarked ? -1 : 1;
-                }
-                return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-              });
-            }
-            if (state.data.value.selectedQuery?.id === queryId) {
-              state.data.value.selectedQuery.is_bookmarked = response.is_bookmarked;
-            }
-          }
-        },
-        showToast: false,
-      });
-    });
-  }
 
   function resetState() {
     state.data.value = {
@@ -275,7 +245,6 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     create,
     update,
     remove,
-    toggleBookmark,
     resetState,
 
     isLoadingOperation: state.isLoadingOperation,

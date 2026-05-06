@@ -162,6 +162,10 @@ type SavedQueryContent struct {
 // Visibility is "any user with access to the source via any team they belong to".
 // Edit access is "creator + global admin"; rows with NULL CreatedBy are legacy
 // queries that pre-date created_by tracking and can only be edited by global admins.
+//
+// The legacy is_bookmarked flag is gone; users curate queries via Collections
+// (each user has an auto-created personal collection that takes the role
+// bookmarks used to play).
 type SavedQuery struct {
 	ID           int            `json:"id" db:"id"`
 	SourceID     SourceID       `json:"source_id" db:"source_id"`
@@ -169,7 +173,6 @@ type SavedQuery struct {
 	Description  string         `json:"description" db:"description"`
 	QueryType    SavedQueryType `json:"query_type" db:"query_type"`
 	QueryContent string         `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
-	IsBookmarked bool           `json:"is_bookmarked" db:"is_bookmarked"`
 	CreatedBy    *UserID        `json:"created_by,omitempty" db:"created_by"`
 	CreatedAt    time.Time      `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at" db:"updated_at"`

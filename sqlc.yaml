@@ -21,6 +21,7 @@ sql:
       - "internal/sqlite/migrations/000017_de_team_saved_queries.up.sql"
       - "internal/sqlite/migrations/000018_drop_residual_team_coupling.up.sql"
       - "internal/sqlite/migrations/000019_add_collections.up.sql"
+      - "internal/sqlite/migrations/000020_drop_bookmarks_seed_personal_collections.up.sql"
     gen:
       go:
         package: "sqlc"

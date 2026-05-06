@@ -19,6 +19,9 @@ export interface SavedQueryContent {
 /**
  * Saved query representation. Cross-team — visibility is via source access
  * through any team membership; edit access is creator + global admin.
+ *
+ * The legacy is_bookmarked flag is gone in v1.6 — users curate queries via
+ * Collections (every user has an auto-created personal collection).
  */
 export interface SavedQuery {
   id: number;
@@ -27,19 +30,10 @@ export interface SavedQuery {
   description: string;
   query_type: string;
   query_content: string; // JSON string of SavedQueryContent
-  is_bookmarked: boolean;
   created_by?: number | null;
   created_at: string;
   updated_at: string;
   source_name?: string;
-}
-
-/**
- * Toggle bookmark response
- */
-export interface ToggleBookmarkResponse {
-  is_bookmarked: boolean;
-  message: string;
 }
 
 /**
@@ -81,9 +75,6 @@ export const savedQueriesApi = {
 
   delete: (queryId: number | string) =>
     apiClient.delete<{ message: string }>(`/saved-queries/${queryId}`),
-
-  toggleBookmark: (queryId: number | string) =>
-    apiClient.patch<ToggleBookmarkResponse>(`/saved-queries/${queryId}/bookmark`),
 
   resolve: (queryId: number | string) =>
     apiClient.get<SavedQuery>(`/saved-queries/${queryId}/resolve`),

@@ -11,9 +11,12 @@ import (
 )
 
 type Querier interface {
-	// Add a saved query to a collection (idempotent)
+	// Add a saved query to a collection; the application layer treats unique
+	// constraint violations as no-ops (sqlc 1.30 mangles ON CONFLICT on SQLite).
 	AddCollectionItem(ctx context.Context, arg AddCollectionItemParams) error
-	// Add a member (owner or member role)
+	// Add a member; the application layer dedupes via the unique constraint on
+	// (collection_id, user_id). sqlc 1.30 has a parser bug with ON CONFLICT on
+	// SQLite, so we keep the statement plain.
 	AddCollectionMember(ctx context.Context, arg AddCollectionMemberParams) error
 	// Team Members
 	// Add a member to a team
@@ -100,8 +103,6 @@ type Querier interface {
 	GetQueryShare(ctx context.Context, token string) (GetQueryShareRow, error)
 	// Look up one saved query by id
 	GetSavedQuery(ctx context.Context, id int64) (SavedQuery, error)
-	// Read the current bookmark flag
-	GetSavedQueryBookmarkStatus(ctx context.Context, id int64) (bool, error)
 	// Get a session by ID
 	GetSession(ctx context.Context, id string) (Session, error)
 	// Get a single source by ID
@@ -205,15 +206,13 @@ type Querier interface {
 	// Additional queries for user-source and team-source access
 	// Check if a team has access to a source
 	TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (int64, error)
-	// Flip the bookmark flag and bump updated_at
-	ToggleSavedQueryBookmark(ctx context.Context, id int64) error
 	// Update a query share's last access time
 	TouchQueryShare(ctx context.Context, arg TouchQueryShareParams) error
 	// Update the last used timestamp for an API token
 	UpdateAPITokenLastUsed(ctx context.Context, id int64) error
 	UpdateAlert(ctx context.Context, arg UpdateAlertParams) (int64, error)
 	UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlertHistoryPayloadParams) (int64, error)
-	// Update name/description (owner only — enforced in app code)
+	// Update name/description (owner only - enforced in app code)
 	UpdateCollection(ctx context.Context, arg UpdateCollectionParams) error
 	// Mark an export job as running and return its ID
 	UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error)

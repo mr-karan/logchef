@@ -121,7 +121,6 @@ type SavedQuery struct {
 	Description  sql.NullString `json:"description"`
 	QueryType    string         `json:"query_type"`
 	QueryContent string         `json:"query_content"`
-	IsBookmarked bool           `json:"is_bookmarked"`
 	CreatedBy    sql.NullInt64  `json:"created_by"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`

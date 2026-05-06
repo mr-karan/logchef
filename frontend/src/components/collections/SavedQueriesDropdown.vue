@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { ChevronDown, Save, PlusCircle, ListTree, BookMarked, Star, Link } from 'lucide-vue-next';
+import { ChevronDown, Save, PlusCircle, ListTree, BookMarked, Link } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import {
   DropdownMenu,
@@ -155,12 +155,6 @@ const navigateToCollectionsView = () => {
   isOpen.value = false;
 };
 
-// Toggle bookmark status for a query
-async function handleToggleBookmark(event: Event, query: SavedQuery) {
-  event.stopPropagation();
-  await savedQueriesStore.toggleBookmark(query.id);
-}
-
 // Copy shareable saved-query URL to clipboard
 async function copyCollectionUrl(event: Event, query: SavedQuery) {
   event.stopPropagation();
@@ -223,21 +217,6 @@ async function copyCollectionUrl(event: Event, query: SavedQuery) {
             class="flex items-center justify-between gap-2"
           >
             <div class="flex items-center gap-2 flex-1 min-w-0">
-              <button
-                v-if="canManageCollections"
-                @click="(e) => handleToggleBookmark(e, query)"
-                class="p-0.5 rounded hover:bg-muted transition-colors flex-shrink-0"
-                :title="query.is_bookmarked ? 'Remove bookmark' : 'Add bookmark'"
-              >
-                <Star
-                  class="h-3.5 w-3.5 transition-transform hover:scale-110"
-                  :class="query.is_bookmarked ? 'text-amber-500 fill-amber-500' : 'text-muted-foreground'"
-                />
-              </button>
-              <Star
-                v-else-if="query.is_bookmarked"
-                class="h-3.5 w-3.5 text-amber-500 fill-amber-500 flex-shrink-0"
-              />
               <span class="truncate" :title="query.name">{{ query.name }}</span>
             </div>
             <button

@@ -12,10 +12,8 @@ import (
 )
 
 const addCollectionItem = `-- name: AddCollectionItem :exec
-?;
-
-INSERT OR IGNORE INTO collection_items (collection_id, saved_query_id, sort_order, added_by)
-VALUES (?, ?, ?,
+INSERT INTO collection_items (collection_id, saved_query_id, sort_order, added_by)
+VALUES (?, ?, ?, ?)
 `
 
 type AddCollectionItemParams struct {
@@ -25,7 +23,8 @@ type AddCollectionItemParams struct {
 	AddedBy      sql.NullInt64 `json:"added_by"`
 }
 
-// Add a saved query to a collection (idempotent)
+// Add a saved query to a collection; the application layer treats unique
+// constraint violations as no-ops (sqlc 1.30 mangles ON CONFLICT on SQLite).
 func (q *Queries) AddCollectionItem(ctx context.Context, arg AddCollectionItemParams) error {
 	_, err := q.exec(ctx, q.addCollectionItemStmt, addCollectionItem,
 		arg.CollectionID,
@@ -37,10 +36,8 @@ func (q *Queries) AddCollectionItem(ctx context.Context, arg AddCollectionItemPa
 }
 
 const addCollectionMember = `-- name: AddCollectionMember :exec
-C;
-
-INSERT OR IGNORE INTO collection_members (collection_id, user_id, role, added_by)
-VALUES (?, ?, ?,
+INSERT INTO collection_members (collection_id, user_id, role, added_by)
+VALUES (?, ?, ?, ?)
 `
 
 type AddCollectionMemberParams struct {
@@ -50,7 +47,9 @@ type AddCollectionMemberParams struct {
 	AddedBy      sql.NullInt64 `json:"added_by"`
 }
 
-// Add a member (owner or member role)
+// Add a member; the application layer dedupes via the unique constraint on
+// (collection_id, user_id). sqlc 1.30 has a parser bug with ON CONFLICT on
+// SQLite, so we keep the statement plain.
 func (q *Queries) AddCollectionMember(ctx context.Context, arg AddCollectionMemberParams) error {
 	_, err := q.exec(ctx, q.addCollectionMemberStmt, addCollectionMember,
 		arg.CollectionID,
@@ -594,9 +593,7 @@ func (q *Queries) DeleteAlert(ctx context.Context, id int64) (int64, error) {
 }
 
 const deleteCollection = `-- name: DeleteCollection :exec
-?;
-
-DELETE FROM collections WHERE id =
+DELETE FROM collections WHERE id = ?
 `
 
 // Delete a collection. Personal collections cannot be deleted (enforced in app code).
@@ -843,11 +840,9 @@ func (q *Queries) GetCollection(ctx context.Context, id int64) (Collection, erro
 }
 
 const getCollectionMember = `-- name: GetCollectionMember :one
-);
-
 SELECT collection_id, user_id, role, added_by, created_at
 FROM collection_members
-WHERE collection_id = ? AND user_id =
+WHERE collection_id = ? AND user_id = ?
 `
 
 type GetCollectionMemberParams struct {
@@ -1005,7 +1000,7 @@ func (q *Queries) GetQueryShare(ctx context.Context, token string) (GetQueryShar
 }
 
 const getSavedQuery = `-- name: GetSavedQuery :one
-SELECT id, source_id, name, description, query_type, query_content, is_bookmarked, created_by, created_at, updated_at FROM saved_queries WHERE id = ?
+SELECT id, source_id, name, description, query_type, query_content, created_by, created_at, updated_at FROM saved_queries WHERE id = ?
 `
 
 // Look up one saved query by id
@@ -1019,24 +1014,11 @@ func (q *Queries) GetSavedQuery(ctx context.Context, id int64) (SavedQuery, erro
 		&i.Description,
 		&i.QueryType,
 		&i.QueryContent,
-		&i.IsBookmarked,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const getSavedQueryBookmarkStatus = `-- name: GetSavedQueryBookmarkStatus :one
-SELECT is_bookmarked FROM saved_queries WHERE id = ?
-`
-
-// Read the current bookmark flag
-func (q *Queries) GetSavedQueryBookmarkStatus(ctx context.Context, id int64) (bool, error) {
-	row := q.queryRow(ctx, q.getSavedQueryBookmarkStatusStmt, getSavedQueryBookmarkStatus, id)
-	var is_bookmarked bool
-	err := row.Scan(&is_bookmarked)
-	return is_bookmarked, err
 }
 
 const getSession = `-- name: GetSession :one
@@ -1636,8 +1618,6 @@ func (q *Queries) ListAlertsForUser(ctx context.Context, userID int64) ([]Alert,
 }
 
 const listCollectionItems = `-- name: ListCollectionItems :many
-?;
-
 SELECT
     ci.collection_id,
     ci.saved_query_id,
@@ -1650,7 +1630,6 @@ SELECT
     sq.description AS query_description,
     sq.query_type,
     sq.query_content,
-    sq.is_bookmarked,
     sq.created_by AS query_created_by,
     sq.created_at AS query_created_at,
     sq.updated_at AS query_updated_at,
@@ -1659,7 +1638,7 @@ FROM collection_items ci
 JOIN saved_queries sq ON sq.id = ci.saved_query_id
 JOIN sources s ON s.id = sq.source_id
 WHERE ci.collection_id = ?
-ORDER BY ci.sort_order ASC, ci.created_at A
+ORDER BY ci.sort_order ASC, ci.created_at ASC
 `
 
 type ListCollectionItemsRow struct {
@@ -1674,7 +1653,6 @@ type ListCollectionItemsRow struct {
 	QueryDescription sql.NullString `json:"query_description"`
 	QueryType        string         `json:"query_type"`
 	QueryContent     string         `json:"query_content"`
-	IsBookmarked     bool           `json:"is_bookmarked"`
 	QueryCreatedBy   sql.NullInt64  `json:"query_created_by"`
 	QueryCreatedAt   time.Time      `json:"query_created_at"`
 	QueryUpdatedAt   time.Time      `json:"query_updated_at"`
@@ -1703,7 +1681,6 @@ func (q *Queries) ListCollectionItems(ctx context.Context, collectionID int64) (
 			&i.QueryDescription,
 			&i.QueryType,
 			&i.QueryContent,
-			&i.IsBookmarked,
 			&i.QueryCreatedBy,
 			&i.QueryCreatedAt,
 			&i.QueryUpdatedAt,
@@ -1723,14 +1700,12 @@ func (q *Queries) ListCollectionItems(ctx context.Context, collectionID int64) (
 }
 
 const listCollectionMembers = `-- name: ListCollectionMembers :many
-?;
-
 SELECT cm.collection_id, cm.user_id, cm.role, cm.added_by, cm.created_at,
        u.email, u.full_name
 FROM collection_members cm
 JOIN users u ON u.id = cm.user_id
 WHERE cm.collection_id = ?
-ORDER BY cm.role DESC, u.email A
+ORDER BY cm.role DESC, u.email ASC
 `
 
 type ListCollectionMembersRow struct {
@@ -1776,8 +1751,6 @@ func (q *Queries) ListCollectionMembers(ctx context.Context, collectionID int64)
 }
 
 const listCollectionsForUser = `-- name: ListCollectionsForUser :many
-?;
-
 SELECT
     c.id,
     c.name,
@@ -1792,7 +1765,7 @@ SELECT
 FROM collections c
 JOIN collection_members cm ON cm.collection_id = c.id
 WHERE cm.user_id = ?
-ORDER BY c.is_personal DESC, c.updated_at DE
+ORDER BY c.is_personal DESC, c.updated_at DESC
 `
 
 type ListCollectionsForUserRow struct {
@@ -2006,7 +1979,6 @@ SELECT
     sq.query_content,
     sq.created_at,
     sq.updated_at,
-    sq.is_bookmarked,
     sq.created_by,
     s.name AS source_name
 FROM saved_queries sq
@@ -2017,7 +1989,7 @@ WHERE sq.source_id IN (
     JOIN team_members tm ON tm.team_id = ts.team_id
     WHERE tm.user_id = ?
 )
-ORDER BY sq.is_bookmarked DESC, sq.updated_at DESC
+ORDER BY sq.updated_at DESC
 `
 
 type ListSavedQueriesForUserRow struct {
@@ -2029,7 +2001,6 @@ type ListSavedQueriesForUserRow struct {
 	QueryContent string         `json:"query_content"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
-	IsBookmarked bool           `json:"is_bookmarked"`
 	CreatedBy    sql.NullInt64  `json:"created_by"`
 	SourceName   string         `json:"source_name"`
 }
@@ -2053,7 +2024,6 @@ func (q *Queries) ListSavedQueriesForUser(ctx context.Context, userID int64) ([]
 			&i.QueryContent,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.IsBookmarked,
 			&i.CreatedBy,
 			&i.SourceName,
 		); err != nil {
@@ -2080,7 +2050,6 @@ SELECT
     sq.query_content,
     sq.created_at,
     sq.updated_at,
-    sq.is_bookmarked,
     sq.created_by,
     s.name AS source_name
 FROM saved_queries sq
@@ -2091,7 +2060,7 @@ WHERE sq.source_id = ?
     JOIN team_members tm ON tm.team_id = ts.team_id
     WHERE ts.source_id = sq.source_id AND tm.user_id = ?
   )
-ORDER BY sq.is_bookmarked DESC, sq.updated_at DESC
+ORDER BY sq.updated_at DESC
 `
 
 type ListSavedQueriesForUserBySourceParams struct {
@@ -2108,7 +2077,6 @@ type ListSavedQueriesForUserBySourceRow struct {
 	QueryContent string         `json:"query_content"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
-	IsBookmarked bool           `json:"is_bookmarked"`
 	CreatedBy    sql.NullInt64  `json:"created_by"`
 	SourceName   string         `json:"source_name"`
 }
@@ -2132,7 +2100,6 @@ func (q *Queries) ListSavedQueriesForUserBySource(ctx context.Context, arg ListS
 			&i.QueryContent,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.IsBookmarked,
 			&i.CreatedBy,
 			&i.SourceName,
 		); err != nil {
@@ -2744,9 +2711,7 @@ func (q *Queries) PruneExpiredQueryShares(ctx context.Context, expiresAt time.Ti
 }
 
 const removeCollectionItem = `-- name: RemoveCollectionItem :exec
-);
-
-DELETE FROM collection_items WHERE collection_id = ? AND saved_query_id =
+DELETE FROM collection_items WHERE collection_id = ? AND saved_query_id = ?
 `
 
 type RemoveCollectionItemParams struct {
@@ -2761,9 +2726,7 @@ func (q *Queries) RemoveCollectionItem(ctx context.Context, arg RemoveCollection
 }
 
 const removeCollectionMember = `-- name: RemoveCollectionMember :exec
-C;
-
-DELETE FROM collection_members WHERE collection_id = ? AND user_id =
+DELETE FROM collection_members WHERE collection_id = ? AND user_id = ?
 `
 
 type RemoveCollectionMemberParams struct {
@@ -2895,19 +2858,6 @@ func (q *Queries) TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (i
 	return count, err
 }
 
-const toggleSavedQueryBookmark = `-- name: ToggleSavedQueryBookmark :exec
-UPDATE saved_queries
-SET is_bookmarked = NOT is_bookmarked,
-    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ?
-`
-
-// Flip the bookmark flag and bump updated_at
-func (q *Queries) ToggleSavedQueryBookmark(ctx context.Context, id int64) error {
-	_, err := q.exec(ctx, q.toggleSavedQueryBookmarkStmt, toggleSavedQueryBookmark, id)
-	return err
-}
-
 const touchQueryShare = `-- name: TouchQueryShare :exec
 UPDATE query_shares
 SET last_accessed_at = ?
@@ -3030,7 +2980,7 @@ UPDATE collections
 SET name = ?,
     description = ?,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id =
+WHERE id = ?
 `
 
 type UpdateCollectionParams struct {
@@ -3039,7 +2989,7 @@ type UpdateCollectionParams struct {
 	ID          int64          `json:"id"`
 }
 
-// Update name/description (owner only — enforced in app code)
+// Update name/description (owner only - enforced in app code)
 func (q *Queries) UpdateCollection(ctx context.Context, arg UpdateCollectionParams) error {
 	_, err := q.exec(ctx, q.updateCollectionStmt, updateCollection, arg.Name, arg.Description, arg.ID)
 	return err

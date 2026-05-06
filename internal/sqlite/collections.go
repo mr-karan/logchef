@@ -111,6 +111,10 @@ func (db *DB) AddCollectionMember(ctx context.Context, collectionID int, userID 
 		params.AddedBy = sql.NullInt64{Int64: int64(*addedBy), Valid: true}
 	}
 	if err := db.writeQueries.AddCollectionMember(ctx, params); err != nil {
+		if isUniqueConstraintSQLiteError(err, "", "") {
+			// User is already a member — treat as a no-op for idempotency.
+			return nil
+		}
 		db.log.Error("failed to add collection member", "error", err, "collection_id", collectionID, "user_id", userID)
 		return fmt.Errorf("error adding collection member: %w", err)
 	}
@@ -186,6 +190,10 @@ func (db *DB) AddCollectionItem(ctx context.Context, collectionID, savedQueryID,
 		params.AddedBy = sql.NullInt64{Int64: int64(*addedBy), Valid: true}
 	}
 	if err := db.writeQueries.AddCollectionItem(ctx, params); err != nil {
+		if isUniqueConstraintSQLiteError(err, "", "") {
+			// Saved query is already in the collection — treat as a no-op.
+			return nil
+		}
 		return fmt.Errorf("error adding collection item: %w", err)
 	}
 	return nil
@@ -219,7 +227,6 @@ func (db *DB) ListCollectionItems(ctx context.Context, collectionID int) ([]*mod
 			Description:  r.QueryDescription.String,
 			QueryType:    models.SavedQueryType(r.QueryType),
 			QueryContent: r.QueryContent,
-			IsBookmarked: r.IsBookmarked,
 			CreatedAt:    r.QueryCreatedAt,
 			UpdatedAt:    r.QueryUpdatedAt,
 			SourceName:   r.SourceName,

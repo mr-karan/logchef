@@ -9,7 +9,6 @@ import {
   Loader2,
   Plus,
   Search,
-  Star,
   Link,
 } from "lucide-vue-next";
 import { formatDate } from "@/utils/format";
@@ -347,16 +346,6 @@ function handleCreateNewQuery() {
   createNewQuery(contextSourceId.value ?? undefined);
 }
 
-async function handleToggleBookmark(query: SavedQuery) {
-  const result = await savedQueriesStore.toggleBookmark(query.id);
-  if (result.success && result.data && localTeamQueries.value) {
-    const index = localTeamQueries.value.findIndex((q) => q.id === query.id);
-    if (index >= 0) {
-      localTeamQueries.value[index].is_bookmarked = result.data.is_bookmarked;
-    }
-  }
-}
-
 async function copyCollectionUrl(query: SavedQuery) {
   const url = `${window.location.origin}/logs/saved/${query.id}`;
 
@@ -577,7 +566,6 @@ async function copyCollectionUrl(query: SavedQuery) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead class="w-[50px]"></TableHead>
                     <TableHead class="w-[240px]">Name</TableHead>
                     <TableHead v-if="isAllSourcesMode" class="w-[150px]">Source</TableHead>
                     <TableHead>Description</TableHead>
@@ -592,24 +580,6 @@ async function copyCollectionUrl(query: SavedQuery) {
                     :key="query.id"
                     :class="{ 'bg-muted/50': openingQueryId === query.id }"
                   >
-                    <TableCell class="w-[50px]">
-                      <button
-                        v-if="canManageCollections"
-                        @click.stop="handleToggleBookmark(query)"
-                        class="rounded p-1 transition-colors hover:bg-muted"
-                        :title="query.is_bookmarked ? 'Remove bookmark' : 'Add bookmark'"
-                      >
-                        <Star
-                          class="h-4 w-4 transition-transform hover:scale-110"
-                          :class="query.is_bookmarked ? 'text-amber-500 fill-amber-500' : 'text-muted-foreground'"
-                        />
-                      </button>
-                      <Star
-                        v-else
-                        class="h-4 w-4"
-                        :class="query.is_bookmarked ? 'text-amber-500 fill-amber-500' : 'text-muted-foreground'"
-                      />
-                    </TableCell>
                     <TableCell class="font-medium">
                       <a
                         @click.prevent="openingQueryId === null && openQuery(query)"

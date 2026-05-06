@@ -245,7 +245,6 @@ func (s *Server) setupRoutes() {
 	savedQueries.Get("/:queryID", s.handleGetSavedQuery)
 	savedQueries.Put("/:queryID", s.handleUpdateSavedQuery)
 	savedQueries.Delete("/:queryID", s.handleDeleteSavedQuery)
-	savedQueries.Patch("/:queryID/bookmark", s.handleToggleSavedQueryBookmark)
 	savedQueries.Get("/:queryID/resolve", s.handleResolveSavedQuery)
 
 	// Team Source Management (linking/unlinking)

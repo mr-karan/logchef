@@ -18,7 +18,6 @@ func mapSavedQueryRow(row sqlc.SavedQuery) *models.SavedQuery {
 		Description:  row.Description.String,
 		QueryType:    models.SavedQueryType(row.QueryType),
 		QueryContent: row.QueryContent,
-		IsBookmarked: row.IsBookmarked,
 		CreatedAt:    row.CreatedAt,
 		UpdatedAt:    row.UpdatedAt,
 	}
@@ -85,19 +84,6 @@ func (db *DB) DeleteSavedQuery(ctx context.Context, queryID int) error {
 	return nil
 }
 
-// ToggleSavedQueryBookmark flips the bookmark flag and returns the new value.
-func (db *DB) ToggleSavedQueryBookmark(ctx context.Context, queryID int) (bool, error) {
-	if err := db.writeQueries.ToggleSavedQueryBookmark(ctx, int64(queryID)); err != nil {
-		db.log.Error("failed to toggle saved query bookmark", "error", err, "query_id", queryID)
-		return false, fmt.Errorf("error toggling saved query bookmark: %w", err)
-	}
-	status, err := db.readQueries.GetSavedQueryBookmarkStatus(ctx, int64(queryID))
-	if err != nil {
-		return false, fmt.Errorf("error reading saved query bookmark: %w", err)
-	}
-	return status, nil
-}
-
 // ListSavedQueriesForUser returns every saved query the user can see via any of their teams.
 func (db *DB) ListSavedQueriesForUser(ctx context.Context, userID models.UserID) ([]*models.SavedQuery, error) {
 	rows, err := db.readQueries.ListSavedQueriesForUser(ctx, int64(userID))
@@ -115,7 +101,6 @@ func (db *DB) ListSavedQueriesForUser(ctx context.Context, userID models.UserID)
 			Description:  r.Description.String,
 			QueryType:    models.SavedQueryType(r.QueryType),
 			QueryContent: r.QueryContent,
-			IsBookmarked: r.IsBookmarked,
 			CreatedAt:    r.CreatedAt,
 			UpdatedAt:    r.UpdatedAt,
 			SourceName:   r.SourceName,
@@ -149,7 +134,6 @@ func (db *DB) ListSavedQueriesForUserBySource(ctx context.Context, userID models
 			Description:  r.Description.String,
 			QueryType:    models.SavedQueryType(r.QueryType),
 			QueryContent: r.QueryContent,
-			IsBookmarked: r.IsBookmarked,
 			CreatedAt:    r.CreatedAt,
 			UpdatedAt:    r.UpdatedAt,
 			SourceName:   r.SourceName,
