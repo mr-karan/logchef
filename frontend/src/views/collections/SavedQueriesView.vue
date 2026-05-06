@@ -160,7 +160,7 @@ function copyShareUrl(query: SavedQuery) {
 
 function manageCollection() {
   if (selectedCollection.value !== "all") {
-    router.push(`/logs/collections/${selectedCollection.value}`);
+    router.push({ path: `/logs/collections/${selectedCollection.value}`, query: {} });
   }
 }
 </script>

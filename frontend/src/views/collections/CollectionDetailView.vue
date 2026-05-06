@@ -29,6 +29,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useCollectionsStore } from "@/stores/collections";
@@ -55,6 +65,8 @@ const newMemberRole = ref<"owner" | "member">("member");
 const showRename = ref(false);
 const renameName = ref("");
 const renameDescription = ref("");
+
+const showDeleteDialog = ref(false);
 
 // Confirm-dialog state — populated by handleRemove* and consumed by the
 // ConfirmDialog instance at the bottom of the template.
@@ -127,12 +139,19 @@ async function confirmItemRemoval() {
 function openQuery(queryId: number) {
   router.push(`/logs/saved/${queryId}`);
 }
+
+async function handleDeleteCollection() {
+  if (!collection.value) return;
+  await store.deleteCollection(collection.value.id);
+  showDeleteDialog.value = false;
+  router.push({ path: '/logs/collections', query: {} });
+}
 </script>
 
 <template>
   <div class="space-y-6">
     <div class="flex items-center gap-2">
-      <Button variant="ghost" size="sm" @click="router.push('/logs/collections')">
+      <Button variant="ghost" size="sm" @click="router.push({ path: '/logs/collections', query: {} })">
         <ArrowLeft class="mr-2 h-4 w-4" />
         Back to Collections
       </Button>
@@ -165,6 +184,10 @@ function openQuery(queryId: number) {
               <Button v-if="isOwner && !collection.is_personal" variant="outline" size="sm" @click="showAddMember = true">
                 <UserPlus class="mr-2 h-4 w-4" />
                 Invite member
+              </Button>
+              <Button v-if="isOwner && !collection.is_personal" variant="destructive" size="sm" @click="showDeleteDialog = true">
+                <Trash2 class="mr-2 h-4 w-4" />
+                Delete
               </Button>
             </div>
           </div>
@@ -328,5 +351,18 @@ function openQuery(queryId: number) {
       @update:open="(v) => { if (!v) pendingItemRemoval = null }"
       @confirm="confirmItemRemoval"
     />
+
+    <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = $event">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete "{{ collection?.name }}"?</AlertDialogTitle>
+          <AlertDialogDescription>This will remove the collection and all membership data. Saved queries inside are not deleted.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel @click="showDeleteDialog = false">Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" @click="handleDeleteCollection">Delete</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>

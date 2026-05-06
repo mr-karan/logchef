@@ -125,7 +125,12 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: "collections",
-        redirect: "/logs/saved",
+        name: "CollectionsList",
+        component: () => import("@/views/collections/CollectionsListView.vue").catch(err => {
+          error("Router", "Failed to load CollectionsListView component", err);
+          return { default: ComponentLoadError };
+        }),
+        meta: { title: "Collections" },
       },
       {
         path: "collections/:collectionID",

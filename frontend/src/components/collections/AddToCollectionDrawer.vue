@@ -115,7 +115,7 @@ async function handleCreate() {
 
 function navigateToCollection(collectionId: number) {
   emit("update:open", false);
-  router.push(`/logs/collections/${collectionId}`);
+  router.push({ path: `/logs/collections/${collectionId}`, query: {} });
 }
 </script>
 

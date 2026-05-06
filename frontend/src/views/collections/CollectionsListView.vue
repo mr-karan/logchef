@@ -95,7 +95,7 @@ function cancelDelete() {
 }
 
 function viewCollection(collection: Collection) {
-  router.push(`/logs/collections/${collection.id}`);
+  router.push({ path: `/logs/collections/${collection.id}`, query: {} });
 }
 </script>
 
