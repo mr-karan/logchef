@@ -11,7 +11,6 @@ import (
 
 type Alert struct {
 	ID                   int64          `json:"id"`
-	TeamID               int64          `json:"team_id"`
 	SourceID             int64          `json:"source_id"`
 	Name                 string         `json:"name"`
 	Description          sql.NullString `json:"description"`
@@ -30,10 +29,11 @@ type Alert struct {
 	LastState            string         `json:"last_state"`
 	LastEvaluatedAt      sql.NullTime   `json:"last_evaluated_at"`
 	LastTriggeredAt      sql.NullTime   `json:"last_triggered_at"`
-	CreatedAt            time.Time      `json:"created_at"`
-	UpdatedAt            time.Time      `json:"updated_at"`
 	RecipientUserIdsJson sql.NullString `json:"recipient_user_ids_json"`
 	WebhookUrlsJson      sql.NullString `json:"webhook_urls_json"`
+	CreatedBy            sql.NullInt64  `json:"created_by"`
+	CreatedAt            time.Time      `json:"created_at"`
+	UpdatedAt            time.Time      `json:"updated_at"`
 }
 
 type AlertHistory struct {
@@ -62,7 +62,6 @@ type ApiToken struct {
 
 type ExportJob struct {
 	ID           string         `json:"id"`
-	TeamID       int64          `json:"team_id"`
 	SourceID     int64          `json:"source_id"`
 	CreatedBy    int64          `json:"created_by"`
 	Status       string         `json:"status"`
@@ -81,7 +80,6 @@ type ExportJob struct {
 
 type QueryShare struct {
 	Token          string       `json:"token"`
-	TeamID         int64        `json:"team_id"`
 	SourceID       int64        `json:"source_id"`
 	CreatedBy      int64        `json:"created_by"`
 	PayloadJson    string       `json:"payload_json"`

@@ -5,7 +5,6 @@ export type AlertSeverity = "info" | "warning" | "critical";
 export type AlertQueryType = "sql" | "condition";
 export interface Alert {
   id: number;
-  team_id: number;
   source_id: number;
   name: string;
   description?: string;
@@ -26,6 +25,7 @@ export interface Alert {
   last_state: "firing" | "resolved";
   last_evaluated_at?: string | null;
   last_triggered_at?: string | null;
+  created_by?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -43,6 +43,7 @@ export interface AlertHistoryEntry {
 }
 
 export interface CreateAlertRequest {
+  source_id: number;
   name: string;
   description?: string;
   query_type: AlertQueryType;
@@ -85,6 +86,7 @@ export interface ResolveAlertRequest {
 }
 
 export interface TestAlertQueryRequest {
+  source_id: number;
   query: string;
   query_type: AlertQueryType;
   condition_json?: string;
@@ -102,24 +104,27 @@ export interface TestAlertQueryResponse {
 }
 
 export const alertsApi = {
-  listAlerts: (teamId: number, sourceId: number) =>
-    apiClient.get<Alert[]>(`/teams/${teamId}/sources/${sourceId}/alerts`),
-  getAlert: (teamId: number, sourceId: number, alertId: number) =>
-    apiClient.get<Alert>(`/teams/${teamId}/sources/${sourceId}/alerts/${alertId}`),
-  createAlert: (teamId: number, sourceId: number, payload: CreateAlertRequest) =>
-    apiClient.post<Alert>(`/teams/${teamId}/sources/${sourceId}/alerts`, payload),
-  updateAlert: (teamId: number, sourceId: number, alertId: number, payload: UpdateAlertRequest) =>
-    apiClient.put<Alert>(`/teams/${teamId}/sources/${sourceId}/alerts/${alertId}`, payload),
-  deleteAlert: (teamId: number, sourceId: number, alertId: number) =>
-    apiClient.delete<{ message: string }>(`/teams/${teamId}/sources/${sourceId}/alerts/${alertId}`),
-  resolveAlert: (teamId: number, sourceId: number, alertId: number, payload: ResolveAlertRequest) =>
-    apiClient.post<{ message: string }>(`/teams/${teamId}/sources/${sourceId}/alerts/${alertId}/resolve`, payload),
-  listAlertHistory: (teamId: number, sourceId: number, alertId: number, limit?: number) => {
-    const search = limit ? `?limit=${encodeURIComponent(limit)}` : "";
-    return apiClient.get<AlertHistoryEntry[]>(
-      `/teams/${teamId}/sources/${sourceId}/alerts/${alertId}/history${search}`
-    );
+  list: (sourceId?: number) => {
+    const url =
+      sourceId !== undefined && sourceId !== null
+        ? `/alerts?source_id=${sourceId}`
+        : "/alerts";
+    return apiClient.get<Alert[]>(url);
   },
-  testAlertQuery: (teamId: number, sourceId: number, payload: TestAlertQueryRequest) =>
-    apiClient.post<TestAlertQueryResponse>(`/teams/${teamId}/sources/${sourceId}/alerts/test`, payload),
+  get: (alertId: number) =>
+    apiClient.get<Alert>(`/alerts/${alertId}`),
+  create: (payload: CreateAlertRequest) =>
+    apiClient.post<Alert>("/alerts", payload),
+  update: (alertId: number, payload: UpdateAlertRequest) =>
+    apiClient.put<Alert>(`/alerts/${alertId}`, payload),
+  delete: (alertId: number) =>
+    apiClient.delete<{ message: string }>(`/alerts/${alertId}`),
+  resolve: (alertId: number, payload: ResolveAlertRequest) =>
+    apiClient.post<{ message: string }>(`/alerts/${alertId}/resolve`, payload),
+  history: (alertId: number, limit?: number) => {
+    const search = limit ? `?limit=${encodeURIComponent(limit)}` : "";
+    return apiClient.get<AlertHistoryEntry[]>(`/alerts/${alertId}/history${search}`);
+  },
+  testQuery: (payload: TestAlertQueryRequest) =>
+    apiClient.post<TestAlertQueryResponse>("/alerts/test", payload),
 };

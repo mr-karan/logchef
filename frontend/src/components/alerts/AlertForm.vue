@@ -429,7 +429,8 @@ async function handleTestQuery() {
   testQueryResult.value = null;
 
   try {
-    const result = await alertsApi.testAlertQuery(props.teamId, props.sourceId, {
+    const result = await alertsApi.testQuery({
+      source_id: props.sourceId,
       query_type: form.query_type,
       query: form.query.trim(),
       lookback_seconds: form.lookback_seconds,

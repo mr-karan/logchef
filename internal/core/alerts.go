@@ -107,21 +107,15 @@ func sanitizeWebhookURLs(in []string) []string {
 	return out
 }
 
-func validateRecipientUserIDs(ctx context.Context, db *sqlite.DB, teamID models.TeamID, recipientIDs []models.UserID) error {
+func validateRecipientUserIDs(ctx context.Context, db *sqlite.DB, recipientIDs []models.UserID) error {
 	if len(recipientIDs) == 0 {
 		return nil
 	}
-	members, err := db.ListTeamMembers(ctx, teamID)
-	if err != nil {
-		return fmt.Errorf("failed to load team members: %w", err)
-	}
-	memberIDs := make(map[models.UserID]struct{}, len(members))
-	for _, member := range members {
-		memberIDs[member.UserID] = struct{}{}
-	}
+	// Recipients are users, not team members. Make sure each id resolves.
 	for _, id := range recipientIDs {
-		if _, ok := memberIDs[id]; !ok {
-			return fmt.Errorf("user %d is not a member of the team", id)
+		user, err := db.GetUser(ctx, id)
+		if err != nil || user == nil {
+			return fmt.Errorf("user %d not found", id)
 		}
 	}
 	return nil
@@ -176,8 +170,8 @@ func validateAlertRequest(req *models.CreateAlertRequest) error {
 	return nil
 }
 
-// CreateAlert creates a new alert rule for the specified team and source.
-func CreateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, req *models.CreateAlertRequest) (*models.Alert, error) {
+// CreateAlert creates a new alert rule for the specified source, owned by createdBy.
+func CreateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, sourceID models.SourceID, createdBy models.UserID, req *models.CreateAlertRequest) (*models.Alert, error) {
 	if req == nil {
 		return nil, ErrInvalidAlertConfiguration
 	}
@@ -190,15 +184,15 @@ func CreateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mo
 		queryType = models.AlertQueryTypeSQL
 	}
 	recipientUserIDs := sanitizeUserIDs(req.RecipientUserIDs)
-	if err := validateRecipientUserIDs(ctx, db, teamID, recipientUserIDs); err != nil {
+	if err := validateRecipientUserIDs(ctx, db, recipientUserIDs); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
 	}
 	webhookURLs := sanitizeWebhookURLs(req.WebhookURLs)
 	if err := validateWebhookURLs(webhookURLs); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
 	}
+	owner := createdBy
 	alert := &models.Alert{
-		TeamID:            teamID,
 		SourceID:          sourceID,
 		Name:              strings.TrimSpace(req.Name),
 		Description:       strings.TrimSpace(req.Description),
@@ -216,13 +210,14 @@ func CreateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mo
 		WebhookURLs:       webhookURLs,
 		GeneratorURL:      strings.TrimSpace(req.GeneratorURL),
 		IsActive:          req.IsActive,
+		CreatedBy:         &owner,
 	}
 
 	if err := db.CreateAlert(ctx, alert); err != nil {
-		log.Error("failed to create alert", "team_id", teamID, "source_id", sourceID, "error", err)
+		log.Error("failed to create alert", "source_id", sourceID, "error", err)
 		return nil, fmt.Errorf("failed to create alert: %w", err)
 	}
-	log.Info("alert created", "alert_id", alert.ID, "team_id", teamID, "source_id", sourceID)
+	log.Info("alert created", "alert_id", alert.ID, "source_id", sourceID, "created_by", createdBy)
 	return alert, nil
 }
 
@@ -240,12 +235,12 @@ func GetAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID mode
 }
 
 // UpdateAlert updates an existing alert rule.
-func UpdateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, alertID models.AlertID, req *models.UpdateAlertRequest) (*models.Alert, error) {
+func UpdateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID models.AlertID, req *models.UpdateAlertRequest) (*models.Alert, error) {
 	if req == nil {
 		return nil, ErrInvalidAlertConfiguration
 	}
 
-	existing, err := db.GetAlertForTeamSource(ctx, teamID, sourceID, alertID)
+	existing, err := db.GetAlert(ctx, alertID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
 			return nil, ErrAlertNotFound
@@ -258,7 +253,7 @@ func UpdateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mo
 		return nil, err
 	}
 	if req.RecipientUserIDs != nil {
-		if err := validateRecipientUserIDs(ctx, db, teamID, existing.RecipientUserIDs); err != nil {
+		if err := validateRecipientUserIDs(ctx, db, existing.RecipientUserIDs); err != nil {
 			return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
 		}
 	}
@@ -276,7 +271,7 @@ func UpdateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mo
 		return nil, fmt.Errorf("failed to update alert: %w", err)
 	}
 
-	updated, err := db.GetAlertForTeamSource(ctx, teamID, sourceID, alertID)
+	updated, err := db.GetAlert(ctx, alertID)
 	if err != nil {
 		log.Warn("alert updated but fetching updated record failed", "alert_id", alertID, "error", err)
 		return existing, nil
@@ -385,13 +380,7 @@ func applyMetadataUpdates(alert *models.Alert, req *models.UpdateAlertRequest) {
 }
 
 // DeleteAlert removes an alert rule.
-func DeleteAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, alertID models.AlertID) error {
-	if _, err := db.GetAlertForTeamSource(ctx, teamID, sourceID, alertID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
-			return ErrAlertNotFound
-		}
-		return fmt.Errorf("failed to validate alert ownership: %w", err)
-	}
+func DeleteAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID models.AlertID) error {
 	if err := db.DeleteAlert(ctx, alertID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
 			return ErrAlertNotFound
@@ -399,17 +388,38 @@ func DeleteAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mo
 		log.Error("failed to delete alert", "alert_id", alertID, "error", err)
 		return fmt.Errorf("failed to delete alert: %w", err)
 	}
-	log.Info("alert deleted", "alert_id", alertID, "team_id", teamID, "source_id", sourceID)
+	log.Info("alert deleted", "alert_id", alertID)
 	return nil
 }
 
-// ListAlertsByTeamSource returns all alerts for a team/source pair.
-func ListAlertsByTeamSource(ctx context.Context, db *sqlite.DB, teamID models.TeamID, sourceID models.SourceID) ([]*models.Alert, error) {
-	alerts, err := db.ListAlertsByTeamAndSource(ctx, teamID, sourceID)
+// ListAlertsBySource returns all alerts for a source.
+func ListAlertsBySource(ctx context.Context, db *sqlite.DB, sourceID models.SourceID) ([]*models.Alert, error) {
+	alerts, err := db.ListAlertsBySource(ctx, sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alerts: %w", err)
 	}
 	return alerts, nil
+}
+
+// ListAlertsForUser returns alerts the user can see (cross-source).
+func ListAlertsForUser(ctx context.Context, db *sqlite.DB, userID models.UserID) ([]*models.Alert, error) {
+	alerts, err := db.ListAlertsForUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list alerts: %w", err)
+	}
+	return alerts, nil
+}
+
+// UserCanEditAlert returns true if the user is the creator or a global admin.
+// Legacy alerts (CreatedBy == nil) are editable only by global admins.
+func UserCanEditAlert(alert *models.Alert, user *models.User) bool {
+	if alert == nil || user == nil {
+		return false
+	}
+	if user.Role == models.UserRoleAdmin {
+		return true
+	}
+	return alert.CreatedBy != nil && *alert.CreatedBy == user.ID
 }
 
 // ListAlertHistory retrieves a limited set of alert history entries.
@@ -444,7 +454,7 @@ func ResolveAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID 
 }
 
 // TestAlertQuery executes a test query to validate alert configuration and show performance metrics.
-func TestAlertQuery(ctx context.Context, db *sqlite.DB, ch *clickhouse.Manager, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, req *models.TestAlertQueryRequest) (*models.TestAlertQueryResponse, error) {
+func TestAlertQuery(ctx context.Context, db *sqlite.DB, ch *clickhouse.Manager, log *slog.Logger, sourceID models.SourceID, req *models.TestAlertQueryRequest) (*models.TestAlertQueryResponse, error) {
 	if req == nil {
 		return nil, fmt.Errorf("test query request is required")
 	}

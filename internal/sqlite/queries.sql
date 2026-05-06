@@ -313,18 +313,16 @@ ORDER BY sq.is_bookmarked DESC, sq.updated_at DESC;
 -- Persist an ad hoc query share token
 INSERT INTO query_shares (
     token,
-    team_id,
     source_id,
     created_by,
     payload_json,
     expires_at
-) VALUES (?, ?, ?, ?, ?, ?);
+) VALUES (?, ?, ?, ?, ?);
 
 -- name: GetQueryShare :one
 -- Retrieve an ad hoc query share by token with creator details
 SELECT
     qs.token,
-    qs.team_id,
     qs.source_id,
     qs.created_by,
     qs.payload_json,
@@ -360,7 +358,6 @@ WHERE expires_at < ?;
 -- Persist an async export job
 INSERT INTO export_jobs (
     id,
-    team_id,
     source_id,
     created_by,
     status,
@@ -369,13 +366,12 @@ INSERT INTO export_jobs (
     expires_at,
     created_at,
     updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetExportJob :one
 -- Retrieve an export job by ID
 SELECT
     id,
-    team_id,
     source_id,
     created_by,
     status,
@@ -526,7 +522,6 @@ DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at < strftime('%
 
 -- name: CreateAlert :one
 INSERT INTO alerts (
-    team_id,
     source_id,
     name,
     description,
@@ -543,7 +538,8 @@ INSERT INTO alerts (
     recipient_user_ids_json,
     webhook_urls_json,
     generator_url,
-    is_active
+    is_active,
+    created_by
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
@@ -551,13 +547,22 @@ RETURNING *;
 -- name: GetAlert :one
 SELECT * FROM alerts WHERE id = ?;
 
--- name: GetAlertForTeamSource :one
-SELECT * FROM alerts WHERE id = ? AND team_id = ? AND source_id = ?;
-
--- name: ListAlertsByTeamAndSource :many
+-- name: ListAlertsBySource :many
+-- List alerts for one source
 SELECT * FROM alerts
-WHERE team_id = ? AND source_id = ?
+WHERE source_id = ?
 ORDER BY updated_at DESC, created_at DESC;
+
+-- name: ListAlertsForUser :many
+-- List every alert the user can see (any source attached to any of their teams)
+SELECT a.* FROM alerts a
+WHERE a.source_id IN (
+    SELECT DISTINCT ts.source_id
+    FROM team_sources ts
+    JOIN team_members tm ON tm.team_id = ts.team_id
+    WHERE tm.user_id = ?
+)
+ORDER BY a.updated_at DESC, a.created_at DESC;
 
 -- name: UpdateAlert :one
 UPDATE alerts

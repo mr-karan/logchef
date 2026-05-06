@@ -270,16 +270,20 @@ func (s *Server) setupRoutes() {
 		teamSourceOps.Get("/fields/values", s.handleGetAllFieldValues)         // Get all LowCardinality field values
 		teamSourceOps.Get("/fields/:fieldName/values", s.handleGetFieldValues) // Get values for a specific field
 
-		alertRoutes := teamSourceOps.Group("/alerts")
-		alertRoutes.Get("/", s.handleListAlerts)
-		alertRoutes.Get("/:alertID", s.handleGetAlert)
-		alertRoutes.Get("/:alertID/history", s.handleListAlertHistory)
-		alertRoutes.Post("/test", s.handleTestAlertQuery) // Test query endpoint (accessible to all team members)
-		alertRoutes.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleCreateAlert)
-		alertRoutes.Put("/:alertID", s.requireTeamAdminOrGlobalAdmin, s.handleUpdateAlert)
-		alertRoutes.Delete("/:alertID", s.requireTeamAdminOrGlobalAdmin, s.handleDeleteAlert)
-		alertRoutes.Post("/:alertID/resolve", s.requireTeamAdminOrGlobalAdmin, s.handleResolveAlert)
 	}
+
+	// Alerts (cross-team, source-scoped). Visibility: any user with source
+	// access via any team. Edit/delete/resolve: creator + global admin
+	// (legacy alerts without created_by are global-admin-only).
+	alertRoutes := api.Group("/alerts", s.requireAuth)
+	alertRoutes.Get("/", s.handleListAlerts)
+	alertRoutes.Post("/", s.handleCreateAlert)
+	alertRoutes.Post("/test", s.handleTestAlertQuery)
+	alertRoutes.Get("/:alertID", s.handleGetAlert)
+	alertRoutes.Put("/:alertID", s.handleUpdateAlert)
+	alertRoutes.Delete("/:alertID", s.handleDeleteAlert)
+	alertRoutes.Get("/:alertID/history", s.handleListAlertHistory)
+	alertRoutes.Post("/:alertID/resolve", s.handleResolveAlert)
 
 	// --- Static Asset and SPA Handling ---
 	s.app.Use("/api/*", s.notFoundHandler) // Catch-all for API 404s

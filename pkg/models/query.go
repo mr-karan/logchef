@@ -209,7 +209,6 @@ type GenerateSQLResponse struct {
 // QueryShare stores an ad hoc query payload behind a short token.
 type QueryShare struct {
 	Token          string          `json:"token" db:"token"`
-	TeamID         TeamID          `json:"team_id" db:"team_id"`
 	SourceID       SourceID        `json:"source_id" db:"source_id"`
 	CreatedBy      UserID          `json:"created_by" db:"created_by"`
 	Payload        json.RawMessage `json:"payload" db:"payload_json"`
@@ -241,7 +240,6 @@ type CreateQueryShareRequest struct {
 type QueryShareResponse struct {
 	Token     string          `json:"token"`
 	ShareURL  string          `json:"share_url,omitempty"`
-	TeamID    TeamID          `json:"team_id"`
 	SourceID  SourceID        `json:"source_id"`
 	Payload   json.RawMessage `json:"payload"`
 	ExpiresAt time.Time       `json:"expires_at"`
@@ -270,7 +268,6 @@ type CreateExportJobRequest struct {
 // ExportJob stores an async export request and its eventual artifact metadata.
 type ExportJob struct {
 	ID             string          `json:"id" db:"id"`
-	TeamID         TeamID          `json:"team_id" db:"team_id"`
 	SourceID       SourceID        `json:"source_id" db:"source_id"`
 	CreatedBy      UserID          `json:"created_by" db:"created_by"`
 	Status         ExportJobStatus `json:"status" db:"status"`

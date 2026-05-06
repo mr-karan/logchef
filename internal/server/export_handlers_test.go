@@ -70,7 +70,6 @@ func TestExportJobURLsAreRelativePaths(t *testing.T) {
 
 	job := &models.ExportJob{
 		ID:        "export-123",
-		TeamID:    5,
 		SourceID:  9,
 		Status:    models.ExportJobStatusComplete,
 		Format:    "csv",
@@ -79,7 +78,7 @@ func TestExportJobURLsAreRelativePaths(t *testing.T) {
 		UpdatedAt: time.Now().UTC(),
 	}
 
-	resp := exportJobResponse(job)
+	resp := exportJobResponse(models.TeamID(5), job)
 
 	wantStatus := "/api/v1/teams/5/sources/9/exports/export-123"
 	if resp.StatusURL != wantStatus {

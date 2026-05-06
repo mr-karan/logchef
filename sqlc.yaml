@@ -19,6 +19,7 @@ sql:
       - "internal/sqlite/migrations/000015_add_query_folders.up.sql"
       - "internal/sqlite/migrations/000016_drop_query_folders.up.sql"
       - "internal/sqlite/migrations/000017_de_team_saved_queries.up.sql"
+      - "internal/sqlite/migrations/000018_drop_residual_team_coupling.up.sql"
     gen:
       go:
         package: "sqlc"

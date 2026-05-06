@@ -47,11 +47,11 @@ export const useAlertsStore = defineStore("alerts", () => {
     state.data.value.selectedAlertId = null;
   }
 
-  async function fetchAlerts(teamId: number, sourceId: number) {
-    return await state.withLoading(`fetchAlerts-${teamId}-${sourceId}`, async () => {
+  async function fetchAlerts(_teamId: number | undefined, sourceId: number) {
+    return await state.withLoading(`fetchAlerts-${sourceId}`, async () => {
       return await state.callApi<Alert[]>({
-        apiCall: () => alertsApi.listAlerts(teamId, sourceId),
-        operationKey: `fetchAlerts-${teamId}-${sourceId}`,
+        apiCall: () => alertsApi.list(sourceId),
+        operationKey: `fetchAlerts-${sourceId}`,
         onSuccess: (response) => {
           state.data.value.alerts = (response ?? []).slice().sort(sortAlerts);
           // Clear selected alert if it no longer exists in the new list.
@@ -86,10 +86,10 @@ export const useAlertsStore = defineStore("alerts", () => {
     }
   }
 
-  async function createAlert(teamId: number, sourceId: number, payload: CreateAlertRequest) {
+  async function createAlert(_teamId: number | undefined, sourceId: number, payload: Omit<CreateAlertRequest, "source_id">) {
     return await state.withLoading("createAlert", async () => {
       return await state.callApi<Alert>({
-        apiCall: () => alertsApi.createAlert(teamId, sourceId, payload),
+        apiCall: () => alertsApi.create({ ...payload, source_id: sourceId }),
         operationKey: "createAlert",
         successMessage: "Alert created successfully",
         onSuccess: (response) => {
@@ -102,10 +102,10 @@ export const useAlertsStore = defineStore("alerts", () => {
     });
   }
 
-  async function updateAlert(teamId: number, sourceId: number, alertId: number, payload: UpdateAlertRequest) {
+  async function updateAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number, payload: UpdateAlertRequest) {
     return await state.withLoading(`updateAlert-${alertId}`, async () => {
       return await state.callApi<Alert>({
-        apiCall: () => alertsApi.updateAlert(teamId, sourceId, alertId, payload),
+        apiCall: () => alertsApi.update(alertId, payload),
         operationKey: `updateAlert-${alertId}`,
         successMessage: "Alert updated successfully",
         onSuccess: (response) => {
@@ -117,10 +117,10 @@ export const useAlertsStore = defineStore("alerts", () => {
     });
   }
 
-  async function deleteAlert(teamId: number, sourceId: number, alertId: number) {
+  async function deleteAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number) {
     return await state.withLoading(`deleteAlert-${alertId}`, async () => {
       return await state.callApi<{ message: string }>({
-        apiCall: () => alertsApi.deleteAlert(teamId, sourceId, alertId),
+        apiCall: () => alertsApi.delete(alertId),
         operationKey: `deleteAlert-${alertId}`,
         successMessage: "Alert deleted",
         onSuccess: () => {
@@ -130,10 +130,10 @@ export const useAlertsStore = defineStore("alerts", () => {
     });
   }
 
-  async function refreshAlert(teamId: number, sourceId: number, alertId: number) {
+  async function refreshAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number) {
     return await state.withLoading(`refreshAlert-${alertId}`, async () => {
       return await state.callApi<Alert>({
-        apiCall: () => alertsApi.getAlert(teamId, sourceId, alertId),
+        apiCall: () => alertsApi.get(alertId),
         operationKey: `refreshAlert-${alertId}`,
         onSuccess: (response) => {
           if (response) {

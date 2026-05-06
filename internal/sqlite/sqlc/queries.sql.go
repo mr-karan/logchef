@@ -158,7 +158,6 @@ func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) 
 const createAlert = `-- name: CreateAlert :one
 
 INSERT INTO alerts (
-    team_id,
     source_id,
     name,
     description,
@@ -175,14 +174,14 @@ INSERT INTO alerts (
     recipient_user_ids_json,
     webhook_urls_json,
     generator_url,
-    is_active
+    is_active,
+    created_by
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json
+RETURNING id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at
 `
 
 type CreateAlertParams struct {
-	TeamID               int64          `json:"team_id"`
 	SourceID             int64          `json:"source_id"`
 	Name                 string         `json:"name"`
 	Description          sql.NullString `json:"description"`
@@ -200,12 +199,12 @@ type CreateAlertParams struct {
 	WebhookUrlsJson      sql.NullString `json:"webhook_urls_json"`
 	GeneratorUrl         sql.NullString `json:"generator_url"`
 	IsActive             int64          `json:"is_active"`
+	CreatedBy            sql.NullInt64  `json:"created_by"`
 }
 
 // Alerts
 func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert, error) {
 	row := q.queryRow(ctx, q.createAlertStmt, createAlert,
-		arg.TeamID,
 		arg.SourceID,
 		arg.Name,
 		arg.Description,
@@ -223,11 +222,11 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert
 		arg.WebhookUrlsJson,
 		arg.GeneratorUrl,
 		arg.IsActive,
+		arg.CreatedBy,
 	)
 	var i Alert
 	err := row.Scan(
 		&i.ID,
-		&i.TeamID,
 		&i.SourceID,
 		&i.Name,
 		&i.Description,
@@ -246,10 +245,11 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert
 		&i.LastState,
 		&i.LastEvaluatedAt,
 		&i.LastTriggeredAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.RecipientUserIdsJson,
 		&i.WebhookUrlsJson,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -258,7 +258,6 @@ const createExportJob = `-- name: CreateExportJob :exec
 
 INSERT INTO export_jobs (
     id,
-    team_id,
     source_id,
     created_by,
     status,
@@ -267,12 +266,11 @@ INSERT INTO export_jobs (
     expires_at,
     created_at,
     updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateExportJobParams struct {
 	ID          string    `json:"id"`
-	TeamID      int64     `json:"team_id"`
 	SourceID    int64     `json:"source_id"`
 	CreatedBy   int64     `json:"created_by"`
 	Status      string    `json:"status"`
@@ -288,7 +286,6 @@ type CreateExportJobParams struct {
 func (q *Queries) CreateExportJob(ctx context.Context, arg CreateExportJobParams) error {
 	_, err := q.exec(ctx, q.createExportJobStmt, createExportJob,
 		arg.ID,
-		arg.TeamID,
 		arg.SourceID,
 		arg.CreatedBy,
 		arg.Status,
@@ -305,17 +302,15 @@ const createQueryShare = `-- name: CreateQueryShare :exec
 
 INSERT INTO query_shares (
     token,
-    team_id,
     source_id,
     created_by,
     payload_json,
     expires_at
-) VALUES (?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?)
 `
 
 type CreateQueryShareParams struct {
 	Token       string    `json:"token"`
-	TeamID      int64     `json:"team_id"`
 	SourceID    int64     `json:"source_id"`
 	CreatedBy   int64     `json:"created_by"`
 	PayloadJson string    `json:"payload_json"`
@@ -327,7 +322,6 @@ type CreateQueryShareParams struct {
 func (q *Queries) CreateQueryShare(ctx context.Context, arg CreateQueryShareParams) error {
 	_, err := q.exec(ctx, q.createQueryShareStmt, createQueryShare,
 		arg.Token,
-		arg.TeamID,
 		arg.SourceID,
 		arg.CreatedBy,
 		arg.PayloadJson,
@@ -697,7 +691,7 @@ func (q *Queries) GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiT
 }
 
 const getAlert = `-- name: GetAlert :one
-SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json FROM alerts WHERE id = ?
+SELECT id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at FROM alerts WHERE id = ?
 `
 
 func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
@@ -705,7 +699,6 @@ func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
 	var i Alert
 	err := row.Scan(
 		&i.ID,
-		&i.TeamID,
 		&i.SourceID,
 		&i.Name,
 		&i.Description,
@@ -724,52 +717,11 @@ func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
 		&i.LastState,
 		&i.LastEvaluatedAt,
 		&i.LastTriggeredAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.RecipientUserIdsJson,
 		&i.WebhookUrlsJson,
-	)
-	return i, err
-}
-
-const getAlertForTeamSource = `-- name: GetAlertForTeamSource :one
-SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json FROM alerts WHERE id = ? AND team_id = ? AND source_id = ?
-`
-
-type GetAlertForTeamSourceParams struct {
-	ID       int64 `json:"id"`
-	TeamID   int64 `json:"team_id"`
-	SourceID int64 `json:"source_id"`
-}
-
-func (q *Queries) GetAlertForTeamSource(ctx context.Context, arg GetAlertForTeamSourceParams) (Alert, error) {
-	row := q.queryRow(ctx, q.getAlertForTeamSourceStmt, getAlertForTeamSource, arg.ID, arg.TeamID, arg.SourceID)
-	var i Alert
-	err := row.Scan(
-		&i.ID,
-		&i.TeamID,
-		&i.SourceID,
-		&i.Name,
-		&i.Description,
-		&i.QueryType,
-		&i.Query,
-		&i.ConditionJson,
-		&i.LookbackSeconds,
-		&i.ThresholdOperator,
-		&i.ThresholdValue,
-		&i.FrequencySeconds,
-		&i.Severity,
-		&i.LabelsJson,
-		&i.AnnotationsJson,
-		&i.GeneratorUrl,
-		&i.IsActive,
-		&i.LastState,
-		&i.LastEvaluatedAt,
-		&i.LastTriggeredAt,
+		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.RecipientUserIdsJson,
-		&i.WebhookUrlsJson,
 	)
 	return i, err
 }
@@ -777,7 +729,6 @@ func (q *Queries) GetAlertForTeamSource(ctx context.Context, arg GetAlertForTeam
 const getExportJob = `-- name: GetExportJob :one
 SELECT
     id,
-    team_id,
     source_id,
     created_by,
     status,
@@ -802,7 +753,6 @@ func (q *Queries) GetExportJob(ctx context.Context, id string) (ExportJob, error
 	var i ExportJob
 	err := row.Scan(
 		&i.ID,
-		&i.TeamID,
 		&i.SourceID,
 		&i.CreatedBy,
 		&i.Status,
@@ -848,7 +798,6 @@ func (q *Queries) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID i
 const getQueryShare = `-- name: GetQueryShare :one
 SELECT
     qs.token,
-    qs.team_id,
     qs.source_id,
     qs.created_by,
     qs.payload_json,
@@ -864,7 +813,6 @@ WHERE qs.token = ?
 
 type GetQueryShareRow struct {
 	Token          string       `json:"token"`
-	TeamID         int64        `json:"team_id"`
 	SourceID       int64        `json:"source_id"`
 	CreatedBy      int64        `json:"created_by"`
 	PayloadJson    string       `json:"payload_json"`
@@ -881,7 +829,6 @@ func (q *Queries) GetQueryShare(ctx context.Context, token string) (GetQueryShar
 	var i GetQueryShareRow
 	err := row.Scan(
 		&i.Token,
-		&i.TeamID,
 		&i.SourceID,
 		&i.CreatedBy,
 		&i.PayloadJson,
@@ -1309,7 +1256,7 @@ func (q *Queries) ListAPITokensForUser(ctx context.Context, userID int64) ([]Api
 }
 
 const listActiveAlertsDue = `-- name: ListActiveAlertsDue :many
-SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json FROM alerts
+SELECT id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at FROM alerts
 WHERE is_active = 1
   AND (
         last_evaluated_at IS NULL
@@ -1328,7 +1275,6 @@ func (q *Queries) ListActiveAlertsDue(ctx context.Context) ([]Alert, error) {
 		var i Alert
 		if err := rows.Scan(
 			&i.ID,
-			&i.TeamID,
 			&i.SourceID,
 			&i.Name,
 			&i.Description,
@@ -1347,10 +1293,11 @@ func (q *Queries) ListActiveAlertsDue(ctx context.Context) ([]Alert, error) {
 			&i.LastState,
 			&i.LastEvaluatedAt,
 			&i.LastTriggeredAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
 			&i.RecipientUserIdsJson,
 			&i.WebhookUrlsJson,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1410,19 +1357,15 @@ func (q *Queries) ListAlertHistory(ctx context.Context, arg ListAlertHistoryPara
 	return items, nil
 }
 
-const listAlertsByTeamAndSource = `-- name: ListAlertsByTeamAndSource :many
-SELECT id, team_id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_at, updated_at, recipient_user_ids_json, webhook_urls_json FROM alerts
-WHERE team_id = ? AND source_id = ?
+const listAlertsBySource = `-- name: ListAlertsBySource :many
+SELECT id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at FROM alerts
+WHERE source_id = ?
 ORDER BY updated_at DESC, created_at DESC
 `
 
-type ListAlertsByTeamAndSourceParams struct {
-	TeamID   int64 `json:"team_id"`
-	SourceID int64 `json:"source_id"`
-}
-
-func (q *Queries) ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsByTeamAndSourceParams) ([]Alert, error) {
-	rows, err := q.query(ctx, q.listAlertsByTeamAndSourceStmt, listAlertsByTeamAndSource, arg.TeamID, arg.SourceID)
+// List alerts for one source
+func (q *Queries) ListAlertsBySource(ctx context.Context, sourceID int64) ([]Alert, error) {
+	rows, err := q.query(ctx, q.listAlertsBySourceStmt, listAlertsBySource, sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -1432,7 +1375,6 @@ func (q *Queries) ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsB
 		var i Alert
 		if err := rows.Scan(
 			&i.ID,
-			&i.TeamID,
 			&i.SourceID,
 			&i.Name,
 			&i.Description,
@@ -1451,10 +1393,71 @@ func (q *Queries) ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsB
 			&i.LastState,
 			&i.LastEvaluatedAt,
 			&i.LastTriggeredAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
 			&i.RecipientUserIdsJson,
 			&i.WebhookUrlsJson,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlertsForUser = `-- name: ListAlertsForUser :many
+SELECT a.id, a.source_id, a.name, a.description, a.query_type, a."query", a.condition_json, a.lookback_seconds, a.threshold_operator, a.threshold_value, a.frequency_seconds, a.severity, a.labels_json, a.annotations_json, a.generator_url, a.is_active, a.last_state, a.last_evaluated_at, a.last_triggered_at, a.recipient_user_ids_json, a.webhook_urls_json, a.created_by, a.created_at, a.updated_at FROM alerts a
+WHERE a.source_id IN (
+    SELECT DISTINCT ts.source_id
+    FROM team_sources ts
+    JOIN team_members tm ON tm.team_id = ts.team_id
+    WHERE tm.user_id = ?
+)
+ORDER BY a.updated_at DESC, a.created_at DESC
+`
+
+// List every alert the user can see (any source attached to any of their teams)
+func (q *Queries) ListAlertsForUser(ctx context.Context, userID int64) ([]Alert, error) {
+	rows, err := q.query(ctx, q.listAlertsForUserStmt, listAlertsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Alert{}
+	for rows.Next() {
+		var i Alert
+		if err := rows.Scan(
+			&i.ID,
+			&i.SourceID,
+			&i.Name,
+			&i.Description,
+			&i.QueryType,
+			&i.Query,
+			&i.ConditionJson,
+			&i.LookbackSeconds,
+			&i.ThresholdOperator,
+			&i.ThresholdValue,
+			&i.FrequencySeconds,
+			&i.Severity,
+			&i.LabelsJson,
+			&i.AnnotationsJson,
+			&i.GeneratorUrl,
+			&i.IsActive,
+			&i.LastState,
+			&i.LastEvaluatedAt,
+			&i.LastTriggeredAt,
+			&i.RecipientUserIdsJson,
+			&i.WebhookUrlsJson,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

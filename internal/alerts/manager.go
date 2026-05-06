@@ -346,14 +346,6 @@ func (m *Manager) buildAlertMetadata(ctx context.Context, alert *models.Alert, s
 	labels["alert_id"] = strconv.FormatInt(int64(alert.ID), 10)
 	labels["severity"] = string(alert.Severity)
 
-	if team, err := m.db.GetTeam(ctx, alert.TeamID); err == nil && team != nil {
-		labels["team"] = team.Name
-		labels["team_id"] = strconv.FormatInt(int64(alert.TeamID), 10)
-	} else {
-		labels["team_id"] = strconv.FormatInt(int64(alert.TeamID), 10)
-		m.log.Warn("failed to fetch team name for alert metadata", "team_id", alert.TeamID, "error", err)
-	}
-
 	if source, err := m.db.GetSource(ctx, alert.SourceID); err == nil && source != nil {
 		labels["source"] = source.Name
 		labels["source_id"] = strconv.FormatInt(int64(alert.SourceID), 10)
@@ -397,7 +389,6 @@ func (m *Manager) sendNotification(ctx context.Context, alert *models.Alert, his
 
 func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus, value float64) AlertNotification {
 	recipientEmails, missingRecipients, resolutionErr := m.resolveRecipientEmails(ctx, alert)
-	teamName := labels["team"]
 	sourceName := labels["source"]
 
 	return AlertNotification{
@@ -406,8 +397,6 @@ func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, hi
 		Description:             strings.TrimSpace(alert.Description),
 		Status:                  status,
 		Severity:                alert.Severity,
-		TeamID:                  alert.TeamID,
-		TeamName:                teamName,
 		SourceID:                alert.SourceID,
 		SourceName:              sourceName,
 		Value:                   value,
@@ -436,25 +425,17 @@ func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Aler
 		return nil, nil, ""
 	}
 
-	members, err := m.db.ListTeamMembersWithDetails(ctx, alert.TeamID)
-	if err != nil {
-		return nil, append([]models.UserID(nil), alert.RecipientUserIDs...), err.Error()
-	}
-
-	emailsByID := make(map[models.UserID]string, len(members))
-	for _, member := range members {
-		email := strings.TrimSpace(member.Email)
-		if email == "" {
-			continue
-		}
-		emailsByID[member.UserID] = email
-	}
-
+	// Recipients are users (not team-scoped). Resolve each by id directly.
 	seen := make(map[string]struct{}, len(alert.RecipientUserIDs))
 	emails := make([]string, 0, len(alert.RecipientUserIDs))
 	missing := make([]models.UserID, 0)
 	for _, userID := range alert.RecipientUserIDs {
-		email := emailsByID[userID]
+		user, err := m.db.GetUser(ctx, userID)
+		if err != nil || user == nil {
+			missing = append(missing, userID)
+			continue
+		}
+		email := strings.TrimSpace(user.Email)
 		if email == "" {
 			missing = append(missing, userID)
 			continue
@@ -483,7 +464,7 @@ func (m *Manager) generatorURL(ctx context.Context, alert *models.Alert) string 
 	}
 
 	base = strings.TrimSuffix(base, "/")
-	return fmt.Sprintf("%s/logs/alerts/%d?team=%d&source=%d", base, alert.ID, alert.TeamID, alert.SourceID)
+	return fmt.Sprintf("%s/logs/alerts/%d?source=%d", base, alert.ID, alert.SourceID)
 }
 
 type noopSender struct{}

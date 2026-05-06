@@ -114,9 +114,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getAlertStmt, err = db.PrepareContext(ctx, getAlert); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAlert: %w", err)
 	}
-	if q.getAlertForTeamSourceStmt, err = db.PrepareContext(ctx, getAlertForTeamSource); err != nil {
-		return nil, fmt.Errorf("error preparing query GetAlertForTeamSource: %w", err)
-	}
 	if q.getExportJobStmt, err = db.PrepareContext(ctx, getExportJob); err != nil {
 		return nil, fmt.Errorf("error preparing query GetExportJob: %w", err)
 	}
@@ -186,8 +183,11 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAlertHistoryStmt, err = db.PrepareContext(ctx, listAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAlertHistory: %w", err)
 	}
-	if q.listAlertsByTeamAndSourceStmt, err = db.PrepareContext(ctx, listAlertsByTeamAndSource); err != nil {
-		return nil, fmt.Errorf("error preparing query ListAlertsByTeamAndSource: %w", err)
+	if q.listAlertsBySourceStmt, err = db.PrepareContext(ctx, listAlertsBySource); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAlertsBySource: %w", err)
+	}
+	if q.listAlertsForUserStmt, err = db.PrepareContext(ctx, listAlertsForUser); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAlertsForUser: %w", err)
 	}
 	if q.listExpiredExportJobPathsStmt, err = db.PrepareContext(ctx, listExpiredExportJobPaths); err != nil {
 		return nil, fmt.Errorf("error preparing query ListExpiredExportJobPaths: %w", err)
@@ -473,11 +473,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getAlertStmt: %w", cerr)
 		}
 	}
-	if q.getAlertForTeamSourceStmt != nil {
-		if cerr := q.getAlertForTeamSourceStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing getAlertForTeamSourceStmt: %w", cerr)
-		}
-	}
 	if q.getExportJobStmt != nil {
 		if cerr := q.getExportJobStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getExportJobStmt: %w", cerr)
@@ -593,9 +588,14 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAlertHistoryStmt: %w", cerr)
 		}
 	}
-	if q.listAlertsByTeamAndSourceStmt != nil {
-		if cerr := q.listAlertsByTeamAndSourceStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listAlertsByTeamAndSourceStmt: %w", cerr)
+	if q.listAlertsBySourceStmt != nil {
+		if cerr := q.listAlertsBySourceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAlertsBySourceStmt: %w", cerr)
+		}
+	}
+	if q.listAlertsForUserStmt != nil {
+		if cerr := q.listAlertsForUserStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAlertsForUserStmt: %w", cerr)
 		}
 	}
 	if q.listExpiredExportJobPathsStmt != nil {
@@ -882,7 +882,6 @@ type Queries struct {
 	getAPITokenStmt                     *sql.Stmt
 	getAPITokenByHashStmt               *sql.Stmt
 	getAlertStmt                        *sql.Stmt
-	getAlertForTeamSourceStmt           *sql.Stmt
 	getExportJobStmt                    *sql.Stmt
 	getLatestUnresolvedAlertHistoryStmt *sql.Stmt
 	getQueryShareStmt                   *sql.Stmt
@@ -906,7 +905,8 @@ type Queries struct {
 	listAPITokensForUserStmt            *sql.Stmt
 	listActiveAlertsDueStmt             *sql.Stmt
 	listAlertHistoryStmt                *sql.Stmt
-	listAlertsByTeamAndSourceStmt       *sql.Stmt
+	listAlertsBySourceStmt              *sql.Stmt
+	listAlertsForUserStmt               *sql.Stmt
 	listExpiredExportJobPathsStmt       *sql.Stmt
 	listManagedSourcesStmt              *sql.Stmt
 	listManagedTeamsStmt                *sql.Stmt
@@ -986,7 +986,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getAPITokenStmt:                     q.getAPITokenStmt,
 		getAPITokenByHashStmt:               q.getAPITokenByHashStmt,
 		getAlertStmt:                        q.getAlertStmt,
-		getAlertForTeamSourceStmt:           q.getAlertForTeamSourceStmt,
 		getExportJobStmt:                    q.getExportJobStmt,
 		getLatestUnresolvedAlertHistoryStmt: q.getLatestUnresolvedAlertHistoryStmt,
 		getQueryShareStmt:                   q.getQueryShareStmt,
@@ -1010,7 +1009,8 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listAPITokensForUserStmt:            q.listAPITokensForUserStmt,
 		listActiveAlertsDueStmt:             q.listActiveAlertsDueStmt,
 		listAlertHistoryStmt:                q.listAlertHistoryStmt,
-		listAlertsByTeamAndSourceStmt:       q.listAlertsByTeamAndSourceStmt,
+		listAlertsBySourceStmt:              q.listAlertsBySourceStmt,
+		listAlertsForUserStmt:               q.listAlertsForUserStmt,
 		listExpiredExportJobPathsStmt:       q.listExpiredExportJobPathsStmt,
 		listManagedSourcesStmt:              q.listManagedSourcesStmt,
 		listManagedTeamsStmt:                q.listManagedTeamsStmt,

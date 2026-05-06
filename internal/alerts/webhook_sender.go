@@ -31,8 +31,6 @@ type webhookPayload struct {
 	Description       string            `json:"description,omitempty"`
 	Status            string            `json:"status"`
 	Severity          string            `json:"severity"`
-	TeamID            int               `json:"team_id"`
-	TeamName          string            `json:"team_name,omitempty"`
 	SourceID          int               `json:"source_id"`
 	SourceName        string            `json:"source_name,omitempty"`
 	Value             float64           `json:"value"`
@@ -78,8 +76,6 @@ func (s *WebhookSender) Send(ctx context.Context, notification AlertNotification
 		Description:       notification.Description,
 		Status:            string(notification.Status),
 		Severity:          string(notification.Severity),
-		TeamID:            int(notification.TeamID),
-		TeamName:          notification.TeamName,
 		SourceID:          int(notification.SourceID),
 		SourceName:        notification.SourceName,
 		Value:             notification.Value,

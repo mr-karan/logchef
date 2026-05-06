@@ -35,22 +35,12 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     state.data.value.limit = limit > 0 ? limit : state.data.value.limit;
   }
 
-  async function loadHistory(alertId: number, teamId?: number | null, sourceId?: number | null, limit?: number) {
-    const effectiveTeamId = teamId ?? contextStore.teamId;
-    const effectiveSourceId = sourceId ?? contextStore.sourceId;
-    if (!effectiveTeamId || !effectiveSourceId) {
-      const error: APIErrorResponse = {
-        status: "error",
-        message: "Missing team or source context",
-        error_type: "ValidationError",
-      };
-      return { success: false, error };
-    }
+  async function loadHistory(alertId: number, _teamId?: number | null, _sourceId?: number | null, limit?: number) {
     setCurrentContext(alertId);
     const effectiveLimit = limit ?? state.data.value.limit;
     return await state.withLoading(`loadHistory-${alertId}`, async () => {
       return await state.callApi<AlertHistoryEntry[]>({
-        apiCall: () => alertsApi.listAlertHistory(effectiveTeamId, effectiveSourceId, alertId, effectiveLimit),
+        apiCall: () => alertsApi.history(alertId, effectiveLimit),
         operationKey: `loadHistory-${alertId}`,
         onSuccess: (response) => {
           state.data.value.entries = response ?? [];
@@ -62,10 +52,8 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
   }
 
   async function resolveCurrentAlert(message?: string) {
-    const teamId = contextStore.teamId;
-    const sourceId = contextStore.sourceId;
     const alertId = state.data.value.currentAlertId;
-    if (!teamId || !sourceId || !alertId) {
+    if (!alertId) {
       const error: APIErrorResponse = {
         status: "error",
         message: "Missing alert context",
@@ -73,13 +61,13 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
       };
       return { success: false, error };
     }
-    return resolveAlert(teamId, sourceId, alertId, { message });
+    return resolveAlert(undefined, undefined, alertId, { message });
   }
 
-  async function resolveAlert(teamId: number, sourceId: number, alertId: number, payload: ResolveAlertRequest) {
+  async function resolveAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number, payload: ResolveAlertRequest) {
     return await state.withLoading(`resolveAlert-${alertId}`, async () => {
       return await state.callApi<{ message: string }>({
-        apiCall: () => alertsApi.resolveAlert(teamId, sourceId, alertId, payload),
+        apiCall: () => alertsApi.resolve(alertId, payload),
         operationKey: `resolveAlert-${alertId}`,
         successMessage: "Alert resolved",
         onSuccess: () => {

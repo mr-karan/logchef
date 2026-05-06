@@ -78,7 +78,6 @@ type Querier interface {
 	// Get an API token by its hash (for authentication)
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiToken, error)
 	GetAlert(ctx context.Context, id int64) (Alert, error)
-	GetAlertForTeamSource(ctx context.Context, arg GetAlertForTeamSourceParams) (Alert, error)
 	// Retrieve an export job by ID
 	GetExportJob(ctx context.Context, id string) (ExportJob, error)
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID int64) (AlertHistory, error)
@@ -123,7 +122,10 @@ type Querier interface {
 	ListAPITokensForUser(ctx context.Context, userID int64) ([]ApiToken, error)
 	ListActiveAlertsDue(ctx context.Context) ([]Alert, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
-	ListAlertsByTeamAndSource(ctx context.Context, arg ListAlertsByTeamAndSourceParams) ([]Alert, error)
+	// List alerts for one source
+	ListAlertsBySource(ctx context.Context, sourceID int64) ([]Alert, error)
+	// List every alert the user can see (any source attached to any of their teams)
+	ListAlertsForUser(ctx context.Context, userID int64) ([]Alert, error)
 	// List artifact paths for expired export jobs
 	ListExpiredExportJobPaths(ctx context.Context, expiresAt time.Time) ([]sql.NullString, error)
 	// Provisioning Queries

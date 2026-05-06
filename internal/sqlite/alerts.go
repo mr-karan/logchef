@@ -152,30 +152,20 @@ func (db *DB) GetAlert(ctx context.Context, alertID models.AlertID) (*models.Ale
 	return alertFromSQLC(row)
 }
 
-// GetAlertForTeamSource retrieves an alert by ID ensuring it belongs to the specified team/source.
-func (db *DB) GetAlertForTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID, alertID models.AlertID) (*models.Alert, error) {
-	row, err := db.readQueries.GetAlertForTeamSource(ctx, sqlc.GetAlertForTeamSourceParams{
-		ID:       int64(alertID),
-		TeamID:   int64(teamID),
-		SourceID: int64(sourceID),
-	})
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, ErrNotFound
-		}
-		return nil, fmt.Errorf("failed to get alert: %w", err)
-	}
-	return alertFromSQLC(row)
-}
-
-// ListAlertsByTeamAndSource returns alerts for the given team/source.
-func (db *DB) ListAlertsByTeamAndSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) ([]*models.Alert, error) {
-	rows, err := db.readQueries.ListAlertsByTeamAndSource(ctx, sqlc.ListAlertsByTeamAndSourceParams{
-		TeamID:   int64(teamID),
-		SourceID: int64(sourceID),
-	})
+// ListAlertsBySource returns alerts for one source.
+func (db *DB) ListAlertsBySource(ctx context.Context, sourceID models.SourceID) ([]*models.Alert, error) {
+	rows, err := db.readQueries.ListAlertsBySource(ctx, int64(sourceID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alerts: %w", err)
+	}
+	return alertsFromSQLC(rows)
+}
+
+// ListAlertsForUser returns alerts the user can see (cross-source via team membership).
+func (db *DB) ListAlertsForUser(ctx context.Context, userID models.UserID) ([]*models.Alert, error) {
+	rows, err := db.readQueries.ListAlertsForUser(ctx, int64(userID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list alerts for user: %w", err)
 	}
 	return alertsFromSQLC(rows)
 }
@@ -324,8 +314,7 @@ func alertCreateParams(alert *models.Alert) (sqlc.CreateAlertParams, error) {
 		return sqlc.CreateAlertParams{}, fmt.Errorf("failed to marshal webhook URLs: %w", err)
 	}
 
-	return sqlc.CreateAlertParams{
-		TeamID:               int64(alert.TeamID),
+	params := sqlc.CreateAlertParams{
 		SourceID:             int64(alert.SourceID),
 		Name:                 alert.Name,
 		Description:          nullString(alert.Description),
@@ -343,7 +332,11 @@ func alertCreateParams(alert *models.Alert) (sqlc.CreateAlertParams, error) {
 		WebhookUrlsJson:      nullString(webhookURLsJSON),
 		GeneratorUrl:         nullString(alert.GeneratorURL),
 		IsActive:             boolToInt(alert.IsActive),
-	}, nil
+	}
+	if alert.CreatedBy != nil {
+		params.CreatedBy = sql.NullInt64{Int64: int64(*alert.CreatedBy), Valid: true}
+	}
+	return params, nil
 }
 
 func alertUpdateParams(alert *models.Alert) (sqlc.UpdateAlertParams, error) {
@@ -404,7 +397,6 @@ func alertFromSQLC(row sqlc.Alert) (*models.Alert, error) {
 
 	alert := &models.Alert{
 		ID:                models.AlertID(row.ID),
-		TeamID:            models.TeamID(row.TeamID),
 		SourceID:          models.SourceID(row.SourceID),
 		Name:              row.Name,
 		Description:       row.Description.String,
@@ -431,6 +423,10 @@ func alertFromSQLC(row sqlc.Alert) (*models.Alert, error) {
 	}
 	if row.LastTriggeredAt.Valid {
 		alert.LastTriggeredAt = &row.LastTriggeredAt.Time
+	}
+	if row.CreatedBy.Valid {
+		uid := models.UserID(row.CreatedBy.Int64)
+		alert.CreatedBy = &uid
 	}
 	return alert, nil
 }
